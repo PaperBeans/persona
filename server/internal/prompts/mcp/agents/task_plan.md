@@ -99,6 +99,10 @@ Hand the user a plan of one or more tasks for agents on their computers, instead
             "minimum": 0,
             "description": "about how long the task should take, in minutes; a task with no progress for 1.5× that (at least 20 minutes) counts as stuck"
           },
+          "project": {
+            "type": "string",
+            "description": "optional: the knowledge-base project it belongs to: the slug or name of an existing project, usually a long-term one for an area of the user's work (kb_list projects). Set it when the area is clear; never make up a near-duplicate of an existing project"
+          },
           "todo_id": {
             "type": "string",
             "description": "optional: the todo this task runs on instead of a new one, when this conversation opened it and no agent is on it yet (the id the Lark-topic message gave you); at most one task per todo; leave it out for a task with no such todo"

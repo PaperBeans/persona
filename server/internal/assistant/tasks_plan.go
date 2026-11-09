@@ -81,6 +81,9 @@ func (s *Service) toolTaskPlanFrom(ctx context.Context, machine, sessionID strin
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
 		t.Attachments, t.Mentioned, t.AttachFrom = atts, s.mentionedAttachments(ctx, machine, sessionID, t.Prompt, atts), ""
+		if t.Project, err = s.todoProject(ctx, t.Project); err != nil {
+			return "", fmt.Errorf("task %d: %w", i+1, err)
+		}
 		if len(t.Attachments)+len(t.Mentioned) > 0 {
 			t.AttachFrom = machine
 		}

@@ -149,6 +149,8 @@
   "priority_normal": "普通",
   "priority_low": "低",
   "priority_label": "優先度",
+  "project_label": "プロジェクト",
+  "project_none": "なし",
   "due_label": "期限",
   "due_time": "期限の時刻",
   "remind_label": "リマインド",

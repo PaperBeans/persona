@@ -52,6 +52,7 @@ import { StatusMark } from "../ui/StatusMark";
 import { Icon } from "../ui/icons";
 import { formatDate, t } from "../i18n";
 import { groupTodosByProject, treeStateLabel, type TodoProjectGroup, type TreeState } from "../lib/todo-tree";
+import { projectChoices, projectNames, useTodoProjects } from "../lib/todo-projects";
 import { useFolded } from "../lib/use-folded";
 import { answeredLookup } from "./assistant/answered-lookup";
 import { Empty } from "./assistant/parts";
@@ -123,8 +124,13 @@ export function TodosView({
 
   const filteredUncompleted = useMemo(() => steadyUncompleted.filter(filterTodo), [steadyUncompleted, search]);
   const filteredCompleted = useMemo(() => steadyCompleted.filter(filterTodo), [steadyCompleted, search]);
-  // open todos under the project their agents work in (#2526)
-  const projectGroups = useSteady(useMemo(() => groupTodosByProject(filteredUncompleted, lookup), [filteredUncompleted, lookup]), steadyGroups);
+  // open todos under the knowledge-base project they are in (#2581), else the one their agents work in (#2526)
+  const kbProjects = useTodoProjects();
+  const projectName = useMemo(() => projectNames(kbProjects), [kbProjects]);
+  const projectGroups = useSteady(
+    useMemo(() => groupTodosByProject(filteredUncompleted, lookup, Date.now(), projectName), [filteredUncompleted, lookup, projectName]),
+    steadyGroups,
+  );
   // each section gets only its own rows' views, so one row's change re-renders that row's section alone
   const sectionViews = useSteady(
     useMemo((): ReadonlyMap<string, TodoRowView[]> => new Map(projectGroups.map((g) => [g.key, g.todos.map((td) => views.get(td.id)!)])), [projectGroups, views]),
@@ -486,13 +492,15 @@ const TodoProjectSection = memo(function TodoProjectSection({
   const holds = group.todos.some((td) => td.id === selectedId);
   const [folded, toggle] = useFolded(group.key, group.folded, { follow: true, holds });
   return (
-    <div className="mt-1 first:mt-0">
+    <div className="mt-1 first:mt-0" data-testid="todo-group" data-group={group.key}>
       <button type="button" aria-expanded={!folded} onClick={toggle} className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-control px-2 text-left text-[12px] text-ink-2 hover:bg-hover">
         <Icon name="chevron" size={10} stroke={2.4} className="shrink-0 opacity-60 transition-transform" style={{ transform: folded ? "rotate(-90deg)" : "none" }} />
         <Icon name="folder" size={12} stroke={2} className="shrink-0 text-ink-3" />
         <span className="min-w-0 flex-1 truncate font-semibold">{group.name}</span>
         <span className="shrink-0 text-[11px] text-ink-3 tabular-nums">{group.todos.length}</span>
-        <span className={cx("shrink-0 text-[11px] font-semibold whitespace-nowrap", TREE_TONE[group.state])}>{treeStateLabel(group.state)}</span>
+        {!(group.area && group.state === "done") && (
+          <span className={cx("shrink-0 text-[11px] font-semibold whitespace-nowrap", TREE_TONE[group.state])}>{treeStateLabel(group.state)}</span>
+        )}
       </button>
       {!folded && (
         <div className="flex flex-col gap-1 pl-2 pt-0.5">
@@ -707,9 +715,10 @@ function localParts(ms: number): { day: string; time: string } {
   return { day: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, time: `${p(d.getHours())}:${p(d.getMinutes())}` };
 }
 
-/** The detail's due date (a day, with a time when one is set), reminder and priority; each change is saved at once. */
+/** The detail's due date (a day, with a time when one is set), reminder, priority and project; each change is saved at once. */
 function TodoPlanEditor({ todo }: { todo: Todo }) {
   const [busy, setBusy] = useState(false);
+  const projects = projectChoices(useTodoProjects(), todo.project);
   const save = async (patch: TodoPatch) => {
     setBusy(true);
     try {
@@ -782,6 +791,25 @@ function TodoPlanEditor({ todo }: { todo: Todo }) {
           <option value="high">{t("todos.priority_option_high")}</option>
           <option value="">{t("todos.priority_normal")}</option>
           <option value="low">{t("todos.priority_low")}</option>
+        </select>
+      </span>
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        <Icon name="folder" size={13} stroke={2} />
+        <span className="whitespace-nowrap">{t("todos.project_label")}</span>
+        <select
+          aria-label={t("todos.project_label")}
+          value={todo.project ?? ""}
+          disabled={busy}
+          onChange={(e) => void save({ project: e.target.value })}
+          className={cx(PLAN_FIELD, "max-w-56 truncate")}
+          data-testid="todo-plan-project"
+        >
+          <option value="">{t("todos.project_none")}</option>
+          {projects.map((p) => (
+            <option key={p.slug} value={p.slug}>
+              {p.name}
+            </option>
+          ))}
         </select>
       </span>
     </div>

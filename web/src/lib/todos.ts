@@ -48,6 +48,8 @@ export interface Todo {
   reminded_at?: string | null;
   /** "high" or "low"; unset or "" is normal. */
   priority?: string;
+  /** The slug of the knowledge-base project it belongs to (#2581, docs/assistant/todos.md "Project"); unset for none. */
+  project?: string;
   done_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -580,6 +582,8 @@ export interface TodoPatch {
   due_date?: string | null;
   remind_at?: string | null;
   priority?: string;
+  /** A knowledge-base project's slug; "" takes it out of its project. */
+  project?: string;
 }
 
 export async function updateTodo(id: string, patch: TodoPatch): Promise<Todo> {

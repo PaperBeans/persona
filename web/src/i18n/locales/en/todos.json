@@ -149,6 +149,8 @@
   "priority_normal": "Normal",
   "priority_low": "Low",
   "priority_label": "Priority",
+  "project_label": "Project",
+  "project_none": "None",
   "due_label": "Due",
   "due_time": "Due time",
   "remind_label": "Remind me",

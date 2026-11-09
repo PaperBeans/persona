@@ -1,5 +1,7 @@
 # Lessons: testing and validation
 
+- A second failed start inside the automatic launcher-health throttle does not schedule another probe (#2600). A retry fixture that models recovery must invoke the supported explicit health check and observe its passing record; polling the record alone cannot create recovery. Keep the production throttle, terminal-only failure rules, and retry assertions unchanged.
+
 - On Linux, replacing a running executable requires a new file and rename; direct writes fail with `ETXTBSY`. Use a ready handshake and reap the fixture process to test the real overlap.
 
 - Run standalone release-worker tests on the oldest supported Python, including receipt verification and verified-artifact retries (#1077). Python 3.9 has no `hashlib.file_digest`; bounded reads into `hashlib.sha256` keep hashing portable without loading an APK into memory. Cover empty files and binary inputs spanning multiple chunks.
@@ -759,5 +761,7 @@ To check that a failure is this, move `dev.json` aside in the app's data contain
 - Real WebSocket nudge tests need observable ordering (#2297): wait until all input audio frames arrive and the answer reaches the app before sending a late caption. Answer text/result frames on receipt rather than after an arbitrary delay. A negative nudge assertion still needs its full observation window; watch incoming frames and fail immediately on an unexpected count, then check the count at the deadline. Do not replace a sleep with an unconditional timer wait or use `synctest.Wait` around real sockets.
 
 - Tests that isolate the runtime home must clear both supported environment names through `compat.EnvNames`; child environments use `compat.ReservedEnv` to filter the reserved prefixes. Reuse the compatibility boundary rather than copying legacy literals into new test carriers (#2347).
+
+- Manager hello also runs on Hub instances without an updater, including the mesh harness. Withhold node deployment until the policy reader is available; do not make hello initialize an updater or assume a startup opt-in overrides an unread persisted choice (#2616).
 
 - In the mock hub's request handler, a local binding can shadow a module helper even in a route that never runs: delayed closures capture the local cell and fail before publishing. Name inbox records explicitly so the transcript item factory remains callable, and retain subprocess stderr when diagnosing missing asynchronous pushes (#2523).
