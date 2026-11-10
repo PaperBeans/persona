@@ -223,6 +223,9 @@ func (r *Runner) StartLogin(ctx context.Context) (*LoginProcess, error) {
 				return
 			default:
 				_ = osproc.StopGroup(pid, true)
+				// A child forked while that signal goes out can miss it (macOS) and live on, adopted by launchd, holding
+				// stdout open so the login reports done only once it exits: sweep until the group is empty (#4004).
+				osproc.SweepGroup(pid, time.Second)
 			}
 		case <-finished:
 		}
