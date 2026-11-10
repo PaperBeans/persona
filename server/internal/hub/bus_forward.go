@@ -14,6 +14,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/memtrim"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -132,6 +133,7 @@ func (h *Hub) relayHTTP(w http.ResponseWriter, r *http.Request, id string, send,
 		writeBodyErr(w, err, err)
 		return
 	}
+	defer memtrim.AfterLarge(len(body)) // a large upload's buffers go back to the system after it
 	req := assistantwire.HTTPRequest{Method: r.Method, Path: r.URL.EscapedPath(), Query: r.URL.RawQuery, Header: map[string][]string{}, Body: body}
 	for k, v := range r.Header {
 		if !hopHeaders[k] && k != "Authorization" && k != "Cookie" { // the hub's credentials stay with the hub
