@@ -213,8 +213,16 @@ func (s *Service) loadDelegated(ctx context.Context) {
 	}
 }
 
-// delegate shows ix as delegating and has the assistant decide on it, in the background; forget is delegable's.
+// delegate shows ix as delegating and has the assistant decide on it, in the background; forget is delegable's. That
+// the assistant decides on it is kept (delegate_start), so a manager restarting meanwhile goes on with it
+// (resumeDelegations).
 func (s *Service) delegate(ix proto.Interaction, forget func()) {
+	s.delegateMark(ix, "delegate_start")
+	s.delegateSince(ix, forget, time.Now())
+}
+
+// delegateSince is delegate for a decision that started at since: now, or before the manager restarted.
+func (s *Service) delegateSince(ix proto.Interaction, forget func(), since time.Time) {
 	s.fleet.mu.Lock()
 	if p := s.fleet.interactions[ix.ID]; p != nil {
 		p.ix.Delegating = true
@@ -223,12 +231,13 @@ func (s *Service) delegate(ix proto.Interaction, forget func()) {
 	shown := ix
 	shown.Delegating = true
 	s.show(shown)
-	go s.delegateNow(ix, forget)
+	go s.delegateNow(ix, forget, since)
 }
 
-// delegateNow waits for the assistant's call on ix (agents.delegate's timeout at most), then answers it or tells the
-// user. A call that comes too late is dropped. forget takes back delegable's note unless the answer went.
-func (s *Service) delegateNow(ix proto.Interaction, forget func()) {
+// delegateNow waits for the assistant's call on ix (until agents.delegate's timeout after since at most), then answers
+// it or tells the user. A call that comes too late is dropped. forget takes back delegable's note unless the answer
+// went.
+func (s *Service) delegateNow(ix proto.Interaction, forget func(), since time.Time) {
 	answered := false
 	defer func() {
 		if !answered {
@@ -238,7 +247,7 @@ func (s *Service) delegateNow(ix proto.Interaction, forget func()) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	timeout := s.hello(ctx).Agents.Delegate.Timeout()
 	cancel()
-	ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	ctx, cancel = context.WithDeadline(context.Background(), since.Add(timeout))
 	defer cancel()
 	type decided struct {
 		res DelegateResult
@@ -266,13 +275,96 @@ func (s *Service) delegateNow(ix proto.Interaction, forget func()) {
 			s.rememberDelegated(ix)
 		}
 		if ok || err == nil {
+			s.delegateMark(ix, "delegate_end")
 			return // answered, or no longer pending (the user answered it meanwhile)
 		}
 		s.logf("delegate %s: answer: %v; asking the user", ix.ID, err)
 	default:
 		ix.Delegate = d.res.Ask
 	}
+	s.delegateMark(ix, "delegate_end") // before the user is told: a restart after this does not tell them twice
 	s.escalate(ix)
+}
+
+// ---- a manager restart while the assistant decides (#2587) ----
+
+// delegateMark keeps in session_work_events that the assistant started (delegate_start) or stopped (delegate_end)
+// deciding on ix: the pending card it is about comes back after a restart without its delegating mark, and the
+// decision going on in the background does not come back at all.
+func (s *Service) delegateMark(ix proto.Interaction, kind string) {
+	s.workEvent(ix.MachineID, ix.SessionID, kind, map[string]any{"id": ix.ID})
+}
+
+// openDelegations are the cards the assistant had started deciding on and not stopped (delegateMark), by id, with when
+// it started, as the events of the last delegateRepeatFor have them.
+func (s *Service) openDelegations(ctx context.Context) map[string]time.Time {
+	st := s.workDB()
+	if st == nil {
+		return nil
+	}
+	events, err := st.WorkEvents(ctx, time.Now().Add(-delegateRepeatFor))
+	if err != nil {
+		s.logf("delegate: read back the questions being decided: %v", err)
+		return nil
+	}
+	open := map[string]time.Time{}
+	for _, e := range events { // oldest first: the latest mark of a card decides
+		id, _ := e.Detail["id"].(string)
+		switch {
+		case id == "":
+		case e.Kind == "delegate_start":
+			open[id] = e.At
+		case e.Kind == "delegate_end":
+			delete(open, id)
+		}
+	}
+	return open
+}
+
+// resumeDelegations goes on, after a restart, with the restored cards (pending here, not on their way to a supervisor:
+// restoreRoute) that the last manager had left with the assistant (openDelegations). Within agents.delegate's timeout
+// of when it started, the assistant decides on one again for the time left; past it (delegate_failed, reason
+// restart), or when the assistant may not take it now (delegating turned off, the same question answered before), the
+// user is told of it as escalate tells them. The other restored cards were the user's before the restart and were told
+// then: they are not told again. It reports whether it took any of the cards on.
+func (s *Service) resumeDelegations(ctx context.Context, restored ...proto.Interaction) bool {
+	if len(restored) == 0 {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, historyTimeout) // the hub, or the hook, waits for it
+	defer cancel()
+	open := s.openDelegations(ctx)
+	if len(open) == 0 {
+		return false
+	}
+	timeout := s.hello(ctx).Agents.Delegate.Timeout()
+	took := false
+	for _, ix := range restored {
+		since, ok := open[ix.ID]
+		if !ok {
+			continue
+		}
+		s.fleet.mu.Lock()
+		p := s.fleet.interactions[ix.ID]
+		still := p != nil && !p.claimed && !p.told && !p.ix.Delegating && p.ix.CreatedAt.Equal(ix.CreatedAt)
+		s.fleet.mu.Unlock()
+		if !still {
+			s.delegateMark(ix, "delegate_end") // answered, told or routed meanwhile: the assistant is not on it
+			continue
+		}
+		took = true
+		if time.Since(since) < timeout {
+			if forget := s.delegable(ix); forget != nil {
+				s.delegateSince(ix, forget, since)
+				continue
+			}
+		} else {
+			s.workEvent(ix.MachineID, ix.SessionID, "delegate_failed", map[string]any{"id": ix.ID, "reason": "restart"})
+		}
+		s.delegateMark(ix, "delegate_end") // before the user is told, as delegateNow
+		go s.escalate(ix)
+	}
+	return took
 }
 
 // delegateCall is Delegate, or what a test has in its place.

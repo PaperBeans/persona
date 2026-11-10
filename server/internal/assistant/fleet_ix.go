@@ -246,8 +246,9 @@ func (s *Service) waitInteraction(ctx context.Context, ix proto.Interaction) (pr
 	if again {
 		// A card the history has as pending and this manager does not hold was left by a manager that restarted: its
 		// node may claim it before the hub's handshake restores the others (restoreInteractions), so it finds its route
-		// here too (restoreRoute). One no task supervises any more is only shown again, as before.
-		if !s.restoreRoute(ctx, ix) {
+		// here too (restoreRoute), or the assistant goes on deciding on it (resumeDelegations). Any other is only shown
+		// again, as before.
+		if !s.restoreRoute(ctx, ix) && !s.resumeDelegations(ctx, ix) {
 			s.show(ix)
 		}
 	} else {
@@ -886,7 +887,8 @@ func (s *Service) cancelMachineInteractions(machineID string) {
 
 // restoreInteractions takes back, as the manager starts, the resumable cards the last one left pending: their hooks
 // reconnect through the next node and claim them again (waitInteraction), without a second push; the others it left
-// are over (cancelled in the history). A card that was on its way up to the user finds its route again (restoreRoute).
+// are over (cancelled in the history). A card that was on its way up to the user finds its route again (restoreRoute);
+// one the assistant was deciding on goes on (resumeDelegations). Both before the hub gets the full list (FleetUp).
 func (s *Service) restoreInteractions(ctx context.Context) {
 	st, ok := s.store().(interface {
 		ExpireStaleInteractions(ctx context.Context) ([]proto.Interaction, error)
@@ -913,9 +915,13 @@ func (s *Service) restoreInteractions(ctx context.Context) {
 		}
 	}
 	s.fleet.mu.Unlock()
+	var unrouted []proto.Interaction
 	for _, ix := range back {
-		s.restoreRoute(ctx, ix)
+		if !s.restoreRoute(ctx, ix) {
+			unrouted = append(unrouted, ix)
+		}
 	}
+	s.resumeDelegations(ctx, unrouted...)
 }
 
 // restoreRoute puts card ix, restored after a restart, back on its way to the supervisor of the task it belongs to:
