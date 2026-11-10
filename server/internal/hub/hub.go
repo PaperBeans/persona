@@ -85,6 +85,9 @@ type Hub struct {
 	mu      sync.Mutex
 	clients map[*client]struct{}
 	events  *eventLog // what was broadcast lately, numbered (eventlog.go); guarded by mu
+	// rings: the notify events kept for the devices without a push route while they have no ws_notify socket
+	// (notifyring.go); guarded by mu.
+	rings notifyRings
 
 	// linkDesktops: the computers whose Persona Link says the user is at them (desktops.go); guarded by mu.
 	linkDesktops linkDesktops
