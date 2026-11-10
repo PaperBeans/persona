@@ -140,7 +140,10 @@ func withFakeHub(t *testing.T, n *Node) *fakeHub {
 	ctx, cancel := context.WithCancel(context.Background())
 	n2hR, n2hW := io.Pipe()
 	h2nR, h2nW := io.Pipe()
-	n.peer = rpc.New("n", n2hW)
+	// The goroutine below serves this peer, not whatever n.peer holds when it runs: a test may put its own hub in
+	// front afterwards (TestCodexRemoteTurnBegunBeforeJoining), and reading the field there would race that write.
+	peer := rpc.New("n", n2hW)
+	n.peer = peer
 	hub := rpc.New("h", h2nW)
 	fh := &fakeHub{answer: func(proto.Interaction) proto.Resolution { yes := true; return proto.Resolution{Allow: &yes} }}
 	hub.OnRequest = func(ctx context.Context, method string, params json.RawMessage) (any, error) {
@@ -214,7 +217,7 @@ func withFakeHub(t *testing.T, n *Node) *fakeHub {
 		fh.mu.Unlock()
 	}
 	go func() { _ = hub.Serve(ctx, n2hR) }()
-	go func() { _ = n.peer.Serve(ctx, h2nR) }()
+	go func() { _ = peer.Serve(ctx, h2nR) }()
 	t.Cleanup(func() { cancel(); _ = n2hW.Close(); _ = h2nW.Close() })
 	return fh
 }

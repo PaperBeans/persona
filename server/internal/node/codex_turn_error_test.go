@@ -126,7 +126,9 @@ func TestCodexRemoteTurnBegunBeforeJoining(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	n2hR, n2hW := io.Pipe()
 	h2nR, h2nW := io.Pipe()
-	n.peer = rpc.New("n", n2hW)
+	// This hub replaces the one daemonPane's withFakeHub connected; each Serve goroutine serves its own peer.
+	peer := rpc.New("n", n2hW)
+	n.peer = peer
 	hub := rpc.New("h", h2nW)
 	var mu sync.Mutex
 	var deltas []string
@@ -142,7 +144,7 @@ func TestCodexRemoteTurnBegunBeforeJoining(t *testing.T) {
 		}
 	}
 	go func() { _ = hub.Serve(ctx, n2hR) }()
-	go func() { _ = n.peer.Serve(ctx, h2nR) }()
+	go func() { _ = peer.Serve(ctx, h2nR) }()
 	t.Cleanup(func() { cancel(); _ = n2hW.Close(); _ = h2nW.Close() })
 	last := func() (string, int) {
 		mu.Lock()
