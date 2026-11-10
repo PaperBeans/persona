@@ -3,6 +3,7 @@ package hub
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -99,6 +100,32 @@ func readRelayed(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	}
 }
 
+// httpParams is req as http.request's params, its body appended in base64 straight into the request's line. As a
+// value, json.Marshal encodes the body into a buffer of its own and copies it out, and the line's encoder copies it
+// once more: three copies of a 22 MB upload, of 30 MB each, and the encoder's buffer kept for the next. The bytes are
+// json.Marshal's for req: the body is its last field, and base64 has nothing to escape.
+func httpParams(req assistantwire.HTTPRequest) any {
+	body := req.Body
+	if len(body) == 0 {
+		return req
+	}
+	req.Body = nil
+	head, err := json.Marshal(req)
+	if err != nil {
+		req.Body = body
+		return req
+	}
+	head = head[:len(head)-1] // its closing brace; method and path are always there before the body
+	const mid, tail = `,"body":"`, `"}`
+	return rpc.Appended{
+		Size: len(head) + len(mid) + base64.StdEncoding.EncodedLen(len(body)) + len(tail),
+		Append: func(b []byte) []byte {
+			b = append(append(b, head...), mid...)
+			return append(base64.StdEncoding.AppendEncode(b, body), tail...)
+		},
+	}
+}
+
 func (h *Hub) relayHTTP(w http.ResponseWriter, r *http.Request, id string, send, admin bool) {
 	body, err := readRelayed(w, r)
 	if err != nil {
@@ -138,7 +165,7 @@ func (h *Hub) relayHTTP(w http.ResponseWriter, r *http.Request, id string, send,
 		h.inboxAnswers.changed(id)
 	}
 	var res assistantwire.HTTPResponse
-	err = h.callBus(ctx, id, assistantwire.MethodHTTP, req, &res)
+	err = h.callBus(ctx, id, assistantwire.MethodHTTP, httpParams(req), &res)
 	if changes {
 		h.inboxAnswers.changed(id)
 	}
