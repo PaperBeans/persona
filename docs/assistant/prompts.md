@@ -173,6 +173,7 @@ Descriptions live in iOS `apple/Persona/PhoneTools/*Tool.swift` (collected by `P
 3. After confirming, update goldens: `UPDATE_GOLDEN=1 go test ./internal/hub ./internal/assistant ./internal/kb ./internal/node ./internal/voice -run Golden`, and commit the `testdata/prompts/*.golden` diffs too.
    `TestGoldenAssistantContextMain` requires Postgres (runs only in `scripts/test/test-server.sh`). To update it, run on the hub machine with `UPDATE_GOLDEN=1`
    (`GOCMD='env UPDATE_GOLDEN=1 go test -count=1 -run TestGoldenAssistantContextMain' ./scripts/test/test-server.sh ./internal/hub`), then copy the two files back.
+4. A judge's prompt (task done, delegation, triage): run its live check before and after the edit and put both tables in the PR ("Behaviour checks" below).
 
 Note that `scheduleHeader` in `assistant/schedule.go` recognizes copied-back old headers by the first few lines of `assistant/task_run.md`: changing those lines requires updating it too.
 
@@ -194,10 +195,17 @@ When assistant business logic moved to `server/internal/assistant` on 2026-11-04
 
 ## Behaviour checks
 
-Goldens pin the text a prompt renders to, not what a model decides on it. The judges that make one model call (the done judge in `assistant/done.go` today; delegation and triage to follow, #2586) also have written-out cases with the verdict the hub should end with:
+Goldens pin the text a prompt renders to, not what a model decides on it. The judges that make one model call also have written-out cases with what the hub should end with, and a check that asks a real model about them (#2586):
 
-- `assistant/testdata/judge/task_done.json`: synthetic tasks (title, the prompt it was handed out with, `done_when`, the agents' last replies, whether delivery is judged) and the verdicts that pass, plus the delivery state where it matters. No real conversations: every case is made up and public.
-- `TestTaskDoneScenariosAreWellFormed` runs with the other tests and needs no model. It checks that the cases are consistent: decided-without-a-model cases really are, the others are not, and a model answering as a case expects leaves the hub with that verdict after its own rules (undelivered, the agent's delivery line, a PR named without a deploy).
-- `TestTaskDoneJudgeLive` asks a real model and prints one row per case. It runs only with `PERSONA_LIVE_AI='{"base_url":"…","api_key_file":"…","model":"…"}' go test -run TaskDoneJudgeLive -v ./internal/assistant`, never in CI. A case the model gets wrong fails.
+| Judge | Prompts | The model call and the hub's rules after it | Purpose | Cases | Tests |
+| --- | --- | --- | --- | --- | --- |
+| Task done | `assistant/task_done.md`, `task_done_input.md` | `judgeTaskDoneWith` (`assistant/done.go`) | `inbox.judge` | `assistant/testdata/judge/task_done.json`: the verdicts that pass, plus the delivery state where it matters | `TestTaskDoneScenariosAreWellFormed`, `TestTaskDoneJudgeLive` |
+| Delegation | `agents/delegate.md`, `delegate_input.md` | `judgeDelegateWith` (`assistant/delegate.go`) | `agent.delegate` | `assistant/testdata/judge/delegate.json`: answer or ask, the options that pass when it answers, and options the hub refuses on its own (red-line words) | `TestDelegateScenariosAreWellFormed`, `TestDelegateJudgeLive` |
+| Triage | `agents/triage.md`, `triage_input.md` | `judgeTriageWith` (`assistant/agents_triage.go`) | `agent.triage` | `assistant/testdata/judge/triage.json`: done, unsure or blocked on the user / an agent / something external, plus the request, link or agent the card must carry | `TestTriageScenariosAreWellFormed`, `TestTriageJudgeLive` |
 
-When you change `task_done.md`, `task_done_input.md`, the hub's rules after the model (`judgeTaskDoneWith`) or the model behind the done judge's purpose (`inbox.judge`), run the live check before and after, and put both tables in the PR. A real case the judge got wrong goes in as a new synthetic case, rewritten so it names no real person, project or message.
+- Every case is synthetic and public: no real conversation, person, project or message.
+- `Test…ScenariosAreWellFormed` runs with the other tests and needs no model. It checks that the cases are consistent with the hub: the values are ones the hub gives, and a model answering as a case expects leaves the hub with that result after its own rules (for example a done task held at a PR is undelivered, a red-line option is left to the user, a question the reply does not contain is dropped).
+- `Test…JudgeLive` asks a real model and prints one row per case (expected × got). It runs only with `PERSONA_LIVE_AI='{"base_url":"…","api_key_file":"…","model":"…"}' go test -run 'TaskDoneJudgeLive|DelegateJudgeLive|TriageJudgeLive' -v ./internal/assistant`, never in CI. A case the model gets wrong fails.
+- A case the hub is known to get wrong today carries `known` (why): the live check prints it as `KNOWN` and does not fail on it, so a run fails only on a regression. When a fix lands and the case passes, drop `known` in the same PR.
+
+When you change one of these prompts, the hub's rules after the model, or the model behind the purpose, run that judge's live check before and after, and put both tables in the PR. A real case a judge got wrong goes in as a new synthetic case, rewritten so it names no real person, project or message.
