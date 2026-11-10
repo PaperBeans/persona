@@ -1207,6 +1207,10 @@ func (s *Service) setTodoRow(id string, row db.TodoRow, guard func(*Todo) bool) 
 	t.Notes = row.Notes
 	becameDone := t.DoneAt == nil && row.DoneAt != nil
 	reopened := t.DoneAt != nil && row.DoneAt == nil
+	var reopenedEvent map[string]any
+	if reopened {
+		reopenedEvent = reopenedDetail(t, row) // before t changes: who had closed it, and when
+	}
 	t.DoneAt = row.DoneAt
 	t.StartError = row.StartError
 	t.DoneBy, t.DoneReason, t.ReopenedAt = row.DoneBy, row.DoneReason, row.ReopenedAt
@@ -1235,6 +1239,7 @@ func (s *Service) setTodoRow(id string, row db.TodoRow, guard func(*Todo) bool) 
 	if reopened {
 		s.dropSourcePlan(id) // what was planned to be told may not be what it comes to now (todo_source.go)
 		s.dropReopenedCheck(id)
+		s.workEvent("", "", todoReopenedEvent, reopenedEvent) // a wrong "done" in the work stats (agents_work_wrong_done.go)
 	}
 	if closing != nil {
 		s.threadPost(id, *closing) // after the lock: it looks the todo up again

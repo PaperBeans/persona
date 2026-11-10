@@ -127,9 +127,11 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		return "", fmt.Errorf("task %s is not supervised: send what is missing to its agent with agent_send, or ask the user in your answer", t.ID)
 	}
 	over, refused := false, false
+	judgedDone := false // it was waiting for review: the judge had found it done
 	var v Supervision
 	if ledger {
 		v, _, err = s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
+			judgedDone = v.State == reviewPending
 			if isMain && !s.isLeader(ctx, v.Supervisor) && !s.isLeaderRef(v.Supervisor) {
 				v.Supervisor = self // the main conversation takes over an old main conversation's task, not a leader's
 			} else if v.Supervisor == "" {
@@ -164,6 +166,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	}
 	if refused {
 		return "", reworkOverError(t.ID)
+	}
+	if a.Verdict == reviewRework { // after the judge's done, a wrong "done" in the work stats (agents_work_wrong_done.go)
+		s.workEvent("", "", reviewReworkEvent, map[string]any{"todo": t.ID, "judged_done": judgedDone})
 	}
 	if verdict == reviewRework || verdict == reviewNeedsUser || a.UserCheck || a.Outcome == outcomeCannot {
 		s.setTaskStageKind(ctx, t.ID, "unverified", "", "", false)

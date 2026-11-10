@@ -124,6 +124,9 @@ type workStats struct {
 	// OwnerCannotAnswer: the decisions the owner answered "I can't answer this" (decision.go, #3804), by the supervisor
 	// conversation that asked and then by answer (decide_yourself, not_what_i_asked, explain_first).
 	OwnerCannotAnswer map[string]map[string]int `json:"owner_cannot_answer"`
+	// WrongDone: cheap labels for a wrong "done" (#2586): to-dos the hub's judge closed that were reopened within 24
+	// hours, and supervised tasks the judge found done that task_review sent back; each to-do counted once.
+	WrongDone wrongDoneStats `json:"wrong_done"`
 }
 
 type sampleStats struct {
@@ -145,6 +148,8 @@ func summarizeWork(hours int, events []db.WorkEvent) workStats {
 		Waits: map[string]waitStats{}}
 	waits := map[string][]float64{}
 	firstLook := map[string]bool{} // machine/session/turn handled already
+	// The to-dos of a wrong "done" (agents_work_wrong_done.go).
+	reopened, rework := map[string]bool{}, map[string]bool{}
 	var unread, needs []int
 	for _, e := range events {
 		str := func(k string) string { v, _ := e.Detail[k].(string); return v }
@@ -186,8 +191,17 @@ func summarizeWork(hours int, events []db.WorkEvent) workStats {
 			u, _ := e.Detail[proto.StateUnread].(float64)
 			n, _ := e.Detail[proto.StateNeedsYou].(float64)
 			unread, needs = append(unread, int(u)), append(needs, int(n))
+		case todoReopenedEvent:
+			if judge, _ := e.Detail["judge"].(bool); judge && num("after") <= wrongDoneWithin.Seconds() {
+				reopened[str("todo")] = true
+			}
+		case reviewReworkEvent:
+			if judged, _ := e.Detail["judged_done"].(bool); judged {
+				rework[str("todo")] = true
+			}
 		}
 	}
+	s.WrongDone = wrongDoneStats{Reopened: len(reopened), Rework: len(rework)}
 	s.Unread, s.NeedsYou = samples(unread), samples(needs)
 	s.OwnerCannotAnswer = ownerCannotStats(events)
 	for k, v := range waits {
