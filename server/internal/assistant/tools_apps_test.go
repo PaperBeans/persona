@@ -415,3 +415,73 @@ func TestInboxDraftRules(t *testing.T) {
 		t.Fatalf("a change the item does not offer: %v", err)
 	}
 }
+
+// An answer that writes out exactly one option, its label then that option's own description ("label：description" as
+// the delegation input lists it, or ":", a dash, the description in brackets, with quotes or padding), is that option's
+// label (#3929). Anything else stays refused: another description or the model's own words after the label, a
+// description alone, two options, a separator with nothing after it, or text that fits two options at once.
+func TestInteractionAnswersTakeAnOptionWrittenOut(t *testing.T) {
+	style := proto.Question{Question: "测试用哪种写法？", Options: []proto.QuestionOption{
+		{Label: "表驱动", Description: "和这个包现有的测试一致"},
+		{Label: "每个用例一个函数", Description: "失败时更好定位"},
+		{Label: "不写"}}}
+	twoReadings := proto.Question{Question: "哪个？", Options: []proto.QuestionOption{
+		{Label: "A", Description: "B：C"}, {Label: "A：B", Description: "C"}}}
+	commas := proto.Question{Question: "缓存策略？", Options: []proto.QuestionOption{
+		{Label: "LRU", Description: "简单, 够用"}, {Label: "TTL"}}}
+	pick := proto.Question{Question: "改哪些？", MultiSelect: true, Options: []proto.QuestionOption{
+		{Label: "iOS", Description: "先修崩溃"}, {Label: "Android", Description: "再修列表"}, {Label: "Web"}}}
+	ask := func(q proto.Question) proto.Interaction {
+		return proto.Interaction{Kind: proto.IxQuestion, Questions: []proto.Question{q}}
+	}
+	for _, tc := range []struct {
+		q    proto.Question
+		in   any
+		want string // "": refused
+	}{
+		{style, "表驱动", "表驱动"},
+		{style, "表驱动：和这个包现有的测试一致", "表驱动"},
+		{style, "表驱动: 和这个包现有的测试一致", "表驱动"},
+		{style, "表驱动:和这个包现有的测试一致", "表驱动"},
+		{style, "表驱动 - 和这个包现有的测试一致", "表驱动"},
+		{style, "表驱动 —— 和这个包现有的测试一致", "表驱动"},
+		{style, "表驱动 — 和这个包现有的测试一致", "表驱动"},
+		{style, "表驱动（和这个包现有的测试一致）", "表驱动"},
+		{style, "表驱动 (和这个包现有的测试一致)", "表驱动"},
+		{style, "  表驱动：和这个包现有的测试一致\n", "表驱动"},
+		{style, "表驱动：和这个包现有的测试一致。", "表驱动"},
+		{style, "「表驱动」：和这个包现有的测试一致", "表驱动"},
+		{style, `"表驱动": 和这个包现有的测试一致`, "表驱动"},
+		{style, "“表驱动：和这个包现有的测试一致”", "表驱动"},
+		{style, " 「表驱动」 ", "表驱动"},
+		{style, "每个用例一个函数：失败时更好定位", "每个用例一个函数"},
+		{commas, "LRU：简单, 够用", "LRU"},
+		{pick, []string{"iOS：先修崩溃", "Web"}, "iOS, Web"},
+		{pick, "Android（再修列表）", "Android"},
+
+		{style, "表驱动：更好维护", ""},
+		{style, "表驱动：失败时更好定位", ""},
+		{style, "表驱动和这个包现有的测试一致", ""},
+		{style, "表驱动：", ""},
+		{style, "不写：", ""},
+		{style, "不写：没必要", ""},
+		{style, "和这个包现有的测试一致", ""},
+		{style, "表驱", ""},
+		{style, "表驱动：和这个包现有的测试一致；每个用例一个函数：失败时更好定位", ""},
+		{style, "表驱动（和这个包现有的测试一致", ""},
+		{twoReadings, "A：B：C", ""},
+		{pick, []string{"iOS：先修崩溃", "Web：顺手"}, ""},
+	} {
+		raw, _ := json.Marshal(map[string]any{tc.q.Question: tc.in})
+		got, err := interactionAnswers(ask(tc.q), raw)
+		if tc.want == "" {
+			if err == nil {
+				t.Errorf("%q: answered %q, want it refused", tc.in, got[tc.q.Question])
+			}
+			continue
+		}
+		if err != nil || got[tc.q.Question] != tc.want {
+			t.Errorf("%q: got %q %v, want %q", tc.in, got[tc.q.Question], err, tc.want)
+		}
+	}
+}
