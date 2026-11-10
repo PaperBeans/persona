@@ -166,17 +166,25 @@ func (f *sdkFixture) proc(id string) *assistantProc {
 	return f.n.procs[id]
 }
 
+// idle waits for the end of the turn as the node publishes it (assistantSessions): an idle process and no model
+// recovery still holding the turn. busy alone is not enough: a recovery that moves to the next model registers the
+// replacement process before it marks it busy and sends it the retry, and that gap is still the same turn (#3815).
 func (f *sdkFixture) idle(t *testing.T, id string) {
 	t.Helper()
-	sdkWait(t, "the turn's result", func() bool {
-		p := f.proc(id)
-		if p == nil {
-			return false
-		}
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		return !p.busy
-	})
+	sdkWait(t, "the turn's result", func() bool { return f.turnOver(id) })
+}
+
+// turnOver: conversation id has a registered process that is not busy, and no recovery holds its turn.
+func (f *sdkFixture) turnOver(id string) bool {
+	f.n.mu.Lock()
+	p, recovering := f.n.procs[id], f.n.recoveries[id] != nil
+	f.n.mu.Unlock()
+	if p == nil || recovering {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return !p.busy
 }
 
 func (f *sdkFixture) session(t *testing.T, id string) proto.Session {
