@@ -424,7 +424,7 @@ func TestCIWatchOldResultCannotWakeNewTurn(t *testing.T) {
 		f.sessions["box"] = []proto.Session{c}
 		f.mu.Unlock()
 	}
-	s.hub = h
+	setHub(s, h)
 	s.ext = fakeCIExtensions{call: func(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error) {
 		armed = true
 		return github.PRCheckSnapshot{Count: 1, Fingerprint: "old", Failures: []string{"old failure"}}, time.Time{}, true, nil
@@ -465,7 +465,7 @@ func TestCIWatchGuardCannotOverwriteNewTurn(t *testing.T) {
 		s.work.entries[[2]string{"box", "ci"}] = &next
 		s.work.mu.Unlock()
 	}
-	s.hub = h
+	setHub(s, h)
 	s.workWake(ctx, s.newWorkView(ctx), [2]string{"box", "ci"}, at)
 	got := entryOf(t, s, "ci")
 	if !swapped || got.Work.CI == nil || got.Work.CI.Number != 13 || !got.TurnAt.Equal(turnEnd.Add(time.Minute)) {
@@ -627,7 +627,7 @@ func TestCIWatchDisabledGuardCannotOverwriteNewTurn(t *testing.T) {
 		s.work.switches.Wake = false
 		s.work.mu.Unlock()
 	}
-	s.hub = h
+	setHub(s, h)
 	s.workWake(ctx, s.newWorkView(ctx), [2]string{"box", "ci"}, at)
 	got := entryOf(t, s, "ci")
 	if !swapped || got.Work.CI == nil || got.Work.CI.Number != 13 || !got.TurnAt.Equal(turnEnd.Add(time.Minute)) {
@@ -698,7 +698,7 @@ func TestCIWatchTriageDoesNotReviveAfterTurnStarts(t *testing.T) {
 			}
 		}
 	}
-	s.hub = h
+	setHub(s, h)
 	triage(t, s, "ci")
 	if calls < 2 {
 		t.Fatalf("only %d transcript reads", calls)
@@ -864,7 +864,7 @@ func TestCIWatchRetiredWhileTranscriptReadIsBlocked(t *testing.T) {
 					}
 				}
 			}
-			s.hub = h
+			setHub(s, h)
 			go func() { defer close(done); s.triageTurn(ctx, s.newWorkView(ctx), "box", c) }()
 			select {
 			case <-entered:
@@ -1517,7 +1517,7 @@ func TestNonCIWaitStillRejectsActivityDuringTriage(t *testing.T) {
 			}
 		}
 	}
-	s.hub = h
+	setHub(s, h)
 	triage(t, s, "ci")
 	if gets != 2 {
 		t.Fatalf("session reads %d", gets)

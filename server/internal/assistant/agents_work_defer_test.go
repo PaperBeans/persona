@@ -213,9 +213,9 @@ func TestWorkCardTickCannotRestoreConcurrentlyCancelledCard(t *testing.T) {
 	s.work.mu.Lock()
 	delete(s.work.cards, ix.ID)
 	s.work.mu.Unlock()
-	s.hub = &workCardReadHookHub{fakeHub: f, beforeSessionRead: func() {
+	setHub(s, &workCardReadHookHub{fakeHub: f, beforeSessionRead: func() {
 		answerCard(t, s, ix.ID, proto.Resolution{Cancel: true})
-	}}
+	}})
 	s.cardTick(context.Background(), s.newWorkView(context.Background()), [2]string{"box", "s1"}, time.Now())
 	if len(s.workCards()) != 0 || entryOf(t, s, "s1").InteractionID != "" {
 		t.Fatal("an in-flight recovery restored the cancelled card")

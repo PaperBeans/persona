@@ -432,7 +432,7 @@ func TestLateTaskDecisionDoesNotSendAfterCompletion(t *testing.T) {
 				reviewTask(t, s, todo.ID, map[string]any{"verdict": "needs_user", "reason": "Choose a rollout", "recommend": "Use staged rollout"})
 				a := askOf(s, todo.ID)
 				h := &conclusionLookupHub{fakeHub: f, entered: make(chan struct{}), release: make(chan struct{})}
-				s.hub = h
+				setHub(s, h)
 				var release sync.Once
 				defer release.Do(func() { close(h.release) })
 				ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), conclusionLookupKey{}, true), 5*time.Second)

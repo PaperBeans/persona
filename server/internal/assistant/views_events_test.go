@@ -31,7 +31,7 @@ func (f *viewEventHub) Broadcast(ctx context.Context, b Broadcast) {
 func TestViewNotificationsCoalesceLatestVersion(t *testing.T) {
 	s, f, _ := newViewService(t)
 	hub := &viewEventHub{fakeHub: f, views: make(chan wire.AssistantView, 4)}
-	s.hub = hub
+	setHub(s, hub)
 	for _, version := range []int64{1, 3, 2} {
 		s.viewChanged(wire.AssistantView{ID: "view_example", Conversation: "conversation-a", Version: version})
 	}

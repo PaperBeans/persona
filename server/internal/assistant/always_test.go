@@ -70,7 +70,7 @@ func TestAlwaysGrantRoutes(t *testing.T) {
 			st := &grantTestStore{fleetMem: ft.st}
 			ft.s.store = func() Store { return st }
 			resets := 0
-			ft.s.hub = &grantTestHub{fakeHub: ft.f, reset: func(p DeviceCall) (json.RawMessage, error) {
+			setHub(ft.s, &grantTestHub{fakeHub: ft.f, reset: func(p DeviceCall) (json.RawMessage, error) {
 				resets++
 				if ok, _ := st.AlwaysAllowed(context.Background(), "conv", []string{"tool:Bash"}); ok {
 					t.Fatal("reset before deletion")
@@ -86,7 +86,7 @@ func TestAlwaysGrantRoutes(t *testing.T) {
 					return nil, errors.New("offline")
 				}
 				return json.RawMessage(result), nil
-			}}
+			}})
 			ctx := context.Background()
 			_ = st.AllowAlways(ctx, "conv", "Bash", []string{"tool:Bash", "tool:Edit"})
 			_ = st.AllowAlways(ctx, "other", "Bash", []string{"tool:Bash"})

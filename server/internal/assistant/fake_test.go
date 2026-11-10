@@ -72,6 +72,7 @@ type fakeHub struct {
 	slowSnapshots time.Duration // the connectors' live states come this late (nothing: there are none)
 	liveStates    []any         // the connectors' live states (connectors.snapshots), when they come at once
 	snapshotAsks  int           // connectors.snapshots calls
+	hungChannel   string        // the channel whose program never answers a send (hangChannel)
 	replies       []string      // the model's answers, in turn (the last one again when they run out)
 	answers       []fakeAnswer  // how each of those answers comes, in turn (none: at once and whole)
 	modelDown     bool          // the model's gateway answers 502 to the calls replies would answer: asked, never answering
@@ -472,6 +473,9 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 }
 
 func (f *fakeHub) AppCall(ctx context.Context, p AppCall) (json.RawMessage, error) {
+	if err := f.hungAppCall(ctx, p); err != nil {
+		return nil, err
+	}
 	if f.inbox != nil { // outside the lock: a round calls back into the assistant
 		if out, ok, err := f.inbox.answer(ctx, p); ok {
 			return out, err

@@ -58,7 +58,7 @@ func TestAssistantStartAuthorizesRuntimeDiscovery(t *testing.T) {
 			f.setSessions("other")
 			assertStartingAssistantTools(t, s, "other", "", false)
 			started := 0
-			s.hub = &startingPrivacyHub{Hub: f, onStart: func(p DeviceCall) error {
+			setHub(s, &startingPrivacyHub{Hub: f, onStart: func(p DeviceCall) error {
 				started++
 				if p.Device != "other" {
 					t.Fatalf("started on %s", p.Device)
@@ -69,7 +69,7 @@ func TestAssistantStartAuthorizesRuntimeDiscovery(t *testing.T) {
 				assertStartingAssistantTools(t, s, "other", "proc-starting", true)
 				assertStartingAssistantTools(t, s, "work", "proc-starting", false)
 				return nil
-			}}
+			}})
 			var session proto.Session
 			var err error
 			if origin == OriginInbox {
@@ -111,11 +111,11 @@ func TestAssistantFailedStartRevokesRuntimeDiscovery(t *testing.T) {
 	f.setSessions("other")
 	refused := errors.New("runtime refused to start")
 	started := 0
-	s.hub = &startingPrivacyHub{Hub: f, onStart: func(p DeviceCall) error {
+	setHub(s, &startingPrivacyHub{Hub: f, onStart: func(p DeviceCall) error {
 		started++
 		assertStartingAssistantTools(t, s, "other", "", true)
 		return refused
-	}}
+	}})
 	if _, err := s.Start(context.Background(), StartParams{MachineID: "other", Text: "Private request", Untitled: true}); !errors.Is(err, refused) {
 		t.Fatalf("start error=%v", err)
 	}

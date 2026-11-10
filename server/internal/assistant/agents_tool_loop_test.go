@@ -339,7 +339,7 @@ func TestToolLoopConcurrentAnswersInterruptOnce(t *testing.T) {
 	ix := s.workCards()[0]
 	r := proto.Resolution{Answers: map[string]string{ix.Questions[0].Question: ix.Questions[0].Options[0].Label}}
 	h := &blockingInterruptHub{Hub: s.hub, started: make(chan struct{}), release: make(chan struct{})}
-	s.hub = h
+	setHub(s, h)
 	done := make(chan error, 1)
 	go func() { _, err := s.toolLoopAnswer(context.Background(), ix.ID, r); done <- err }()
 	select {
