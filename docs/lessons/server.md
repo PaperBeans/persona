@@ -1706,3 +1706,8 @@ On TestFlight 224 an extension's **Review** spun for two minutes and then failed
 - Bound trickles by size, not by a constant: the stall rule catches a dead link, and the total budget is 30 minutes or the time 16 KiB/s needs. Tell our own budget from the caller's with `context.WithTimeoutCause` and a sentinel cause, or a caller's deadline reads as "too slow".
 - When the client of a synchronous call leaves, the operation it started should say so in words (`client_left`), not `context canceled`.
 - Progress is reported at most every 200 ms: a test that waits for an exact byte count can wait forever; wait for "some bytes" and prove there was no restart by counting requests.
+
+## macOS `ps` prints `nobody` as UID -2 (2026-11-10, #3687)
+
+- `uid_t` is unsigned, but macOS `ps -o uid` prints it signed: `nobody` (4294967294) shows as `-2`. Linux prints 65534, so hosted CI (Ubuntu) never sees a negative owner. `parseProcessTable` treated one as a corrupt row and failed the whole table, so `personad manager maintenance prepare|observe` broke on any Mac running a `nobody` process (`dhcp6d`, the DHCPv6 client, once a network uses DHCPv6).
+- When a check covers every row of a system table, validate the format (a number), not a range taken from one platform; keep the real constraint (the target is the current user's) on the row it is about.

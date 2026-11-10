@@ -52,8 +52,9 @@ func parseProcessTable(data string, pid int) (Process, error) {
 		if err != nil || rowPID <= 0 {
 			return Process{}, errors.New("invalid process table PID")
 		}
+		// Negative is a real owner: macOS ps prints uid_t signed, so nobody (4294967294) is -2 there (#3687).
 		uid, err := strconv.Atoi(fields[1])
-		if err != nil || uid < 0 {
+		if err != nil {
 			return Process{}, errors.New("invalid process table owner")
 		}
 		if rowPID != pid {
