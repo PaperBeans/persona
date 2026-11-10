@@ -58,8 +58,49 @@ func (h *Hub) forwardSend(w http.ResponseWriter, r *http.Request, id string) {
 // errSendInDoubt is what forwardSend answers when it can't tell whether the request was done.
 var errSendInDoubt = i18n.Err("hub-bus_forward.send_in_doubt")
 
+// readRelayed reads r's body for the bus with io.ReadAll's results: the bytes to its end, or the error that stopped
+// the read (an *http.MaxBytesError past busHTTPLimit). A body whose Content-Length is known and within the limit is read
+// into one buffer of that size, where io.ReadAll grows buffers and copies them into one more (49 MB for a 22 MB
+// upload). Bytes past the Content-Length are read on as io.ReadAll reads them; a body that ends early is what it was.
+func readRelayed(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	body := http.MaxBytesReader(w, r.Body, busHTTPLimit)
+	size := r.ContentLength
+	if size < 0 || size > busHTTPLimit {
+		return io.ReadAll(body)
+	}
+	b := make([]byte, size)
+	for n := 0; n < len(b); {
+		m, err := body.Read(b[n:])
+		n += m
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+			return b[:n], err
+		}
+	}
+	var one [1]byte
+	for {
+		m, err := body.Read(one[:])
+		if m > 0 {
+			b = append(b, one[0])
+			if err == nil {
+				var rest []byte
+				rest, err = io.ReadAll(body)
+				b = append(b, rest...)
+			}
+		}
+		if err != nil || m > 0 {
+			if err == io.EOF {
+				err = nil
+			}
+			return b, err
+		}
+	}
+}
+
 func (h *Hub) relayHTTP(w http.ResponseWriter, r *http.Request, id string, send, admin bool) {
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, busHTTPLimit))
+	body, err := readRelayed(w, r)
 	if err != nil {
 		writeBodyErr(w, err, err)
 		return

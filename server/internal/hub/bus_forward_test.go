@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
@@ -248,6 +250,53 @@ func TestBusForwardRefusesAnImpossibleStatus(t *testing.T) {
 			}
 			if resp.StatusCode != c[1] || body != want || resp.Header.Get("X-Manager") != "1" {
 				t.Fatalf("got %d %v %q, want %d %q", resp.StatusCode, resp.Header, body, c[1], want)
+			}
+		})
+	}
+}
+
+// A relayed body is read as io.ReadAll read it, whatever its Content-Length says: the same bytes, or the same error
+// (413 too_large past the limit, 400 for one that broke off).
+func TestReadRelayedIsReadAll(t *testing.T) {
+	body := `{"prompt":"<a long message>"}`
+	broken := func() io.Reader {
+		return io.MultiReader(strings.NewReader(body[:9]), iotest.ErrReader(io.ErrUnexpectedEOF))
+	}
+	for _, c := range []struct {
+		name string
+		size int64
+		body func() io.Reader
+	}{
+		{"its length", int64(len(body)), nil},
+		{"longer than said", int64(len(body)) - 7, nil},
+		{"shorter than said", int64(len(body)) + 7, nil},
+		{"said empty", 0, nil},
+		{"empty", 0, func() io.Reader { return http.NoBody }},
+		{"unknown length", -1, nil},
+		{"over the limit", busHTTPLimit + 1, func() io.Reader { return &endlessBody{} }},
+		{"over the limit, said within", int64(len(body)), func() io.Reader { return &endlessBody{} }},
+		{"broken", int64(len(body)), broken},
+		{"broken, unknown length", -1, broken},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			read := func(relayed bool) ([]byte, string) {
+				r := httptest.NewRequest(http.MethodPost, "/api/v1/assistant/conversations", nil)
+				r.Body, r.ContentLength = io.NopCloser(strings.NewReader(body)), c.size
+				if c.body != nil {
+					r.Body = io.NopCloser(c.body())
+				}
+				w := httptest.NewRecorder()
+				if relayed {
+					b, err := readRelayed(w, r)
+					return b, fmt.Sprintf("%T %v", err, err)
+				}
+				b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, busHTTPLimit))
+				return b, fmt.Sprintf("%T %v", err, err)
+			}
+			got, gerr := read(true)
+			want, werr := read(false)
+			if gerr != werr || (werr == "<nil> <nil>" && !bytes.Equal(got, want)) {
+				t.Fatalf("read %d bytes, %s; io.ReadAll read %d, %s", len(got), gerr, len(want), werr)
 			}
 		})
 	}
