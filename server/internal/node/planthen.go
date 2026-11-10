@@ -61,10 +61,13 @@ func (n *Node) planThenAfterTerminal(id string) (stop func()) {
 	if want == "" {
 		return func() {}
 	}
+	// Both read here, not in the goroutine: a test shortens them (fastPlanThen) and puts them back when it ends, which
+	// can come before a watch it stopped at once has even started (#3942).
 	ctx, cancel := context.WithTimeout(context.Background(), planThenWatch)
+	every := planThenEvery
 	go func() {
 		defer cancel()
-		t := time.NewTicker(planThenEvery)
+		t := time.NewTicker(every)
 		defer t.Stop()
 		for {
 			select {

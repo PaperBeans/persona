@@ -26,7 +26,9 @@ func withPullHub(t *testing.T, n *Node, h *pullHub) {
 	ctx, cancel := context.WithCancel(context.Background())
 	n2hR, n2hW := io.Pipe()
 	h2nR, h2nW := io.Pipe()
-	n.peer = rpc.New("n", n2hW)
+	// The Serve goroutine below serves this peer, not whatever n.peer holds when it runs (#3938's pattern).
+	peer := rpc.New("n", n2hW)
+	n.peer = peer
 	hub := rpc.New("h", h2nW)
 	hub.OnRequest = func(_ context.Context, method string, params json.RawMessage) (any, error) {
 		if method != "launchers.pull" {
@@ -41,7 +43,7 @@ func withPullHub(t *testing.T, n *Node, h *pullHub) {
 		return h.answer(name)
 	}
 	go func() { _ = hub.Serve(ctx, n2hR) }()
-	go func() { _ = n.peer.Serve(ctx, h2nR) }()
+	go func() { _ = peer.Serve(ctx, h2nR) }()
 	t.Cleanup(func() { cancel(); _ = n2hW.Close(); _ = h2nW.Close() })
 }
 
@@ -99,16 +101,21 @@ func TestCatalogProviderIsPulledOnceAndKept(t *testing.T) {
 }
 
 // The manager's refusal reaches personad launch as it said it; with no manager, the words say how to keep a copy.
+// Each node has its hub, or none, before setCatalog: the entry is pushed (no Delivery), so setCatalog prefetches it
+// in a goroutine that reads n.peer, and a hub connected afterwards would race that read (#3942).
 func TestCatalogPullRefusedOrAway(t *testing.T) {
-	n := &Node{bin: "/usr/local/bin/personad"}
-	n.setCatalog([]proto.ManagedLauncher{{Name: "box", Model: "m1", Withheld: true, Rev: "r1"}})
-	if e := n.launcherEnv("box")["error"]; e == nil || !strings.Contains(e.(string), "Keep a copy") {
+	catalog := []proto.ManagedLauncher{{Name: "box", Model: "m1", Withheld: true, Rev: "r1"}}
+	away := &Node{bin: "/usr/local/bin/personad"}
+	away.setCatalog(catalog)
+	if e := away.launcherEnv("box")["error"]; e == nil || !strings.Contains(e.(string), "Keep a copy") {
 		t.Fatalf("no manager: %v", e)
 	}
+	n := &Node{bin: "/usr/local/bin/personad"}
 	h := &pullHub{answer: func(string) (any, error) {
 		return nil, &rpc.Error{Code: proto.CodeLauncherOutOfScope, Message: "box is not set up for mac"}
 	}}
 	withPullHub(t, n, h)
+	n.setCatalog(catalog)
 	if e := n.launcherEnv("box")["error"]; e == nil || !strings.Contains(e.(string), "not set up for mac") {
 		t.Fatalf("refused: %v", e)
 	}

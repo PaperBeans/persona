@@ -1121,6 +1121,7 @@ and add that directory to image workflow PR paths.
 
 - `-race` always flagged devices and connector: tests only `defer cancel()` without waiting for `Machine.run` / `watchOne`, so the next test changed `reconnectGrace` / `watchBackoffFirst` while old goroutines read them (even already-finished reads race without synchronization). devices tests use `runMachine(t, m)` (Cleanup cancels, then waits with timeout for `run`); connector `Start` reads backoff parameters once and passes them to watchers.
 - Waiting for `run` exposed another bug: a tailcat connection stuck writing in `configureNode` (peer not reading) outlived ctx, while `watchTailcat` exited without closing it; `run` never returned and hub `workers.Wait()` hung at shutdown. `serve` now closes tailcat on ctx end (`context.AfterFunc`). Cancel-without-wait tests hid the hang.
+- A goroutine stopped before it starts still reads what it reads when it does start (2026-11-11, #3942). `TestPlanThenWatchStopsWhenTheCardAnswers` cancels the plan-then watch at once, and the goroutine read `planThenEvery` after `fastPlanThen`'s cleanup had put it back; `planThenAfterTerminal` now reads it before `go`. The same holds for fields: `setCatalog` prefetches a pushed entry in a goroutine that reads `n.peer`, so a test gives the node its hub before `setCatalog`, never after.
 
 
 ## Knowledge corrections and extension permissions (#1908)
