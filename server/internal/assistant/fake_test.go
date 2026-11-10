@@ -634,6 +634,14 @@ func (f *fakeHub) pushed() []Notification {
 	return append([]Notification(nil), f.pushes...)
 }
 
+// started is a copy of the session.start parameters so far: a task starts its agent on a goroutine of its own, which
+// appends to f.starts under f.mu.
+func (f *fakeHub) started() []map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.starts)
+}
+
 // pushedBy is pushed once there is a push, or at deadline: a watcher records a run before it pushes it, so a test
 // that saw the run recorded waits for the push instead of reading it at once.
 func (f *fakeHub) pushedBy(deadline time.Time) []Notification {

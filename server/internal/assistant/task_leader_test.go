@@ -115,6 +115,21 @@ func sendsTo(f *fakeHub, machine, session string) []string {
 	return out
 }
 
+// deliveredTo are the texts session.send put into session and the fake hub took (sendsTo also has those it refused
+// with f.failSend).
+func deliveredTo(f *fakeHub, session string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, a := range f.agentSent {
+		if a["session_id"] == session {
+			text, _ := a["text"].(string)
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
 func leaderToolNames(tools []proto.Tool) []string {
 	var out []string
 	for _, tl := range tools {
@@ -203,14 +218,15 @@ func TestTaskLeaderTaskPlanCallEnforcement(t *testing.T) {
 	if res.IsError || !strings.Contains(res.Content[0].Text, "beneath your task "+todo.ID) {
 		t.Fatalf("the leader's worker: %+v", res)
 	}
-	waitFor(t, "the worker's start", func() bool { return len(f.starts) == 2 })
-	if cwd, _ := f.starts[1]["cwd"].(string); cwd != "/code/app" {
-		t.Fatalf("the worker's directory: %v", f.starts[1])
+	var starts []map[string]any
+	waitFor(t, "the worker's start", func() bool { starts = f.started(); return len(starts) == 2 })
+	if cwd, _ := starts[1]["cwd"].(string); cwd != "/code/app" {
+		t.Fatalf("the worker's directory: %v", starts[1])
 	}
-	if mode, _ := f.starts[1]["permission_mode"].(string); mode != "bypassPermissions" {
-		t.Fatalf("the worker's permission: %v", f.starts[1])
+	if mode, _ := starts[1]["permission_mode"].(string); mode != "bypassPermissions" {
+		t.Fatalf("the worker's permission: %v", starts[1])
 	}
-	if prompt, _ := f.starts[1]["prompt"].(string); !strings.Contains(prompt, "handed to you by the leader") {
+	if prompt, _ := starts[1]["prompt"].(string); !strings.Contains(prompt, "handed to you by the leader") {
 		t.Fatalf("the worker is not told who handed it the task: %s", prompt)
 	}
 	waitFor(t, "the worker's link", func() bool {
@@ -1053,10 +1069,8 @@ func TestLeaderlessWorkerWithNobodyAboveIsCancelled(t *testing.T) {
 // leader could not be reached, and (here with nobody above) the message is tried again on the leader's own context,
 // not a cancelled one, until the leader takes it.
 func TestLeaderResumeFailureEscalatesAndRetries(t *testing.T) {
-	old := leaderResumeWait
-	leaderResumeWait = 40 * time.Millisecond
-	t.Cleanup(func() { leaderResumeWait = old })
 	s, f := newQuietService(t)
+	s.leaderResume = 40 * time.Millisecond
 	ctx := context.Background()
 	startTaskLeader(t, s, f)
 	w := planWorker(t, s, f, nil)
@@ -1081,15 +1095,13 @@ func TestLeaderResumeFailureEscalatesAndRetries(t *testing.T) {
 	f.mu.Lock()
 	f.failSend = nil
 	f.mu.Unlock()
-	waitFor(t, "the retry to reach the leader", func() bool { return len(sendsTo(f, "box", "s1")) >= 1 })
+	waitFor(t, "the retry to reach the leader", func() bool { return slices.Contains(deliveredTo(f, "s1"), text) })
 }
 
 // With nobody above the leader nothing is lost either: no conversation to tell, so the leader itself is retried.
 func TestUndeliveredMessageWithNobodyAboveIsRetried(t *testing.T) {
-	old := leaderResumeWait
-	leaderResumeWait = 30 * time.Millisecond
-	t.Cleanup(func() { leaderResumeWait = old })
 	s, f := newQuietService(t)
+	s.leaderResume = 30 * time.Millisecond
 	ctx := context.Background()
 	todo := startTaskLeader(t, s, f)
 	w := planWorker(t, s, f, nil)
@@ -1103,12 +1115,13 @@ func TestUndeliveredMessageWithNobodyAboveIsRetried(t *testing.T) {
 	f.failSend = context.DeadlineExceeded
 	f.mu.Unlock()
 	kept := []superviseSignal{{Todo: w.ID, Kind: sigReview, Key: "review@1", Detail: "做完了"}}
-	if err := s.sendToLeader(ctx, lead, "Persona · supervision: undelivered", kept); err != nil {
+	const text = "Persona · supervision: undelivered"
+	if err := s.sendToLeader(ctx, lead, text, kept); err != nil {
 		t.Fatal(err)
 	}
 	time.AfterFunc(150*time.Millisecond, func() { f.mu.Lock(); f.failSend = nil; f.mu.Unlock() })
 	waitFor(t, "the undelivered message to reach the leader after a few tries", func() bool {
-		return len(sendsTo(f, "box", "s1")) >= 1
+		return slices.Contains(deliveredTo(f, "s1"), text)
 	})
 	if got := f.notices(); len(got) != 0 {
 		t.Fatalf("with nobody above, something was told to the main conversation: %q", got)
