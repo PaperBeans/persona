@@ -639,6 +639,9 @@ func serveHTTP(ctx context.Context, s http.Handler, p assistantwire.HTTPRequest,
 		r.Header = http.Header{}
 	}
 	r.ContentLength = int64(len(p.Body))
+	if len(p.Body) > 0 { // in memory already: the large routes decode it where it is (decodeLargeBody)
+		r.Body = newRelayedBody(p.Body)
+	}
 	r = withRequestLang(r) // what the routes write for people reads in it too (i18n.From)
 	w := &recorder{header: http.Header{}, lang: func() i18n.Lang {
 		if l := i18n.FromRequest(r); l != "" {
