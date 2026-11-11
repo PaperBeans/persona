@@ -39,6 +39,8 @@
     <string name="chat_chrome_status_unconfirmed">要確認</string>
     <string name="chat_chrome_status_needs_you">対応待ち</string>
     <string name="chat_chrome_status_stopping">中断中</string>
+    <string name="chat_chrome_worked_minutes">%1$d分</string>
+    <string name="chat_chrome_worked_hours">%1$d時間%2$d分</string>
     <string name="chat_chrome_more">その他の操作</string>
     <string name="chat_chrome_actions_title">セッションの操作</string>
     <string name="chat_chrome_todo">ToDo · %1$s</string>

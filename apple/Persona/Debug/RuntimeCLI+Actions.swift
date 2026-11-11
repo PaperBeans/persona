@@ -31,11 +31,26 @@ extension RuntimeCLI {
         return ["changeCount": UIPasteboard.general.changeCount, "hasImages": UIPasteboard.general.hasImages]
     }
 
-    /// The system's share sheet for `text` (and `url`, when given), from the key window: where Share › Persona
-    /// (`PersonaShare`) is listed, without a share button to find on the page.
+    /// The system's share sheet for `text` (and `url`, `images` solid pictures and `files` small PDFs, when given), from
+    /// the key window: where Share › Persona (`PersonaShare`) is listed, without a share button to find on the page.
     private static func share(_ a: Args) -> Reply {
         var items: [Any] = [a["text"] as? String ?? "Persona"]
         if let u = (a["url"] as? String).flatMap(URL.init(string:)) { items.append(u) }
+        let colors: [UIColor] = [.systemTeal, .systemOrange, .systemIndigo, .systemPink]
+        for i in 0..<min(colors.count, max(0, a["images"] as? Int ?? 0)) {
+            let size = CGSize(width: 800, height: 600)
+            let format = UIGraphicsImageRendererFormat.default()
+            format.scale = 1
+            items.append(UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+                colors[i].setFill()
+                ctx.fill(CGRect(origin: .zero, size: size))
+            })
+        }
+        for i in 0..<min(4, max(0, a["files"] as? Int ?? 0)) {
+            let url = FileManager.default.temporaryDirectory.appending(path: i == 0 ? "Quarterly report.pdf" : "Notes \(i + 1).pdf")
+            try? Data("%PDF-1.4\n%Persona share test\n%%EOF\n".utf8).write(to: url)
+            items.append(url)
+        }
         guard var top = windows.first(where: \.isKeyWindow)?.rootViewController ?? windows.first?.rootViewController else {
             return fail("no window")
         }

@@ -810,12 +810,13 @@ fun ReadinessScreen(
         }
     }
     if (onLater == null) {
-        JListPage(title, onBack = onBack, largeTitle = showTitle && onBack == null, content = checklist)
+        JListPage(title, onBack = onBack, largeTitle = showTitle && onBack == null,
+            scrollUnderBottom = notificationsOnly, content = checklist)
     } else CompositionLocalProvider(
         LocalRootBack provides null, LocalRootLeading provides pairingTitleInset, LocalHomeChrome provides null,
     ) {
         JListPage(title, largeTitle = false, actions = { JTextButton(stringResource(R.string.settings_ready_set_up_later), onLater) },
-            content = checklist)
+            scrollUnderBottom = false, content = checklist)
     }
     mainHelp?.let { help ->
         ReadinessHelpDialog(help, main?.machine?.name, onDismiss = { mainHelp = null }, onAction = { action ->

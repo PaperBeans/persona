@@ -45,6 +45,8 @@ internal data class TreeGroupEntry(val group: AgentListGroup, val space: Boolean
 internal data class TreeRowEntry(
     val row: AgentSession, val depth: Int, val first: Boolean, val last: Boolean, val located: Boolean,
     val launcher: Boolean = false, val branch: Boolean = false, val nested: Boolean = false,
+    /** Under a By Status section that names its state, so the row leaves the word out (iOS `inStateSection`); Muted mixes states. */
+    val inStateSection: Boolean = false,
 ) : AgentTreeEntry {
     override val key: String get() = "session:${row.id}"
 }
@@ -92,12 +94,13 @@ internal fun agentTreeEntries(
             val tab = row.session.tabKey?.let(byTab::get)
             if (tab == null) lines += row else if (placed.add(tab.key)) lines += tab
         }
+        val inStateSection = group.id.startsWith("state/") && group.id != "state/muted"
         var shown = 0
         lines.forEachIndexed { index, line ->
             val firstLine = index == 0
             val lastLine = index == lines.lastIndex
             when (line) {
-                is AgentSession -> { shown++; entries += TreeRowEntry(line, depth, firstLine, lastLine, located = !space) }
+                is AgentSession -> { shown++; entries += TreeRowEntry(line, depth, firstLine, lastLine, located = !space, inStateSection = inStateSection) }
                 is AgentTab -> {
                     val folded = line.foldKey in foldedTabs
                     shown += line.members.size
@@ -185,6 +188,23 @@ internal fun MachineFilterRow(machines: List<MachineCount>, total: Int, selected
 
 internal val AgentMachineGroup.headingCounts: List<Pair<Status, Int>>
     get() = listOf(AgentState.NeedsYou, AgentState.Working, AgentState.Unread).map { it.designStatus to (stateCounts[it] ?: 0) }
+
+/**
+ * A By Status section's one count, in its state's color (iOS `SectionHeader` with the section's tone): Awaiting reply
+ * takes Unread's, Waiting in the background Working's, Muted and Seen the idle one. Null for every other group.
+ */
+internal val AgentListGroup.stateSectionCounts: List<Pair<Status, Int>>?
+    get() {
+        val status = when (id.takeIf { it.startsWith("state/") }?.removePrefix("state/")) {
+            "needs" -> Status.NeedsYou
+            "unread", "awaiting" -> Status.Unread
+            "working", "background" -> Status.Working
+            "waiting" -> Status.Waiting
+            "muted", "idle" -> Status.Idle
+            else -> return null
+        }
+        return listOf(status to (totalCount ?: rows.count { !it.isNestedSubtask }))
+    }
 
 internal val AgentListGroup.headingCounts: List<Pair<Status, Int>>
     get() = listOf(AgentState.NeedsYou, AgentState.Working, AgentState.Unread).map { state ->

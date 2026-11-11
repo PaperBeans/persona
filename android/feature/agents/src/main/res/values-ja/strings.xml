@@ -69,6 +69,7 @@
     <string name="agents_range_all">すべて</string>
     <string name="agents_range_history">履歴</string>
     <string name="agents_grouping_current">グループ化：%1$s</string>
+    <string name="agents_group_by">グループ</string>
     <string name="agents_only_machine">%1$sのみ表示</string>
     <string name="agents_only_machine_hint">すべてのマシンを表示</string>
     <string name="agents_grouping_repo">リポジトリ別</string>

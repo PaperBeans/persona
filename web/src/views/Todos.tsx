@@ -1,7 +1,8 @@
 // Beautiful UI Todos View: left list (sorted by status & created_at), right detail, handover dialog.
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, credentialOwner, enc, errorText, subscribeCredentialOwner } from "../lib/api";
-import { ago, clock, shortPath, stateOf, tabLabel, uuid } from "../lib/format";
+import { ago, clock, sessionCan, shortPath, stateOf, tabLabel, uuid } from "../lib/format";
+import { byTime } from "../lib/times";
 import { launchAgent } from "../lib/new-agent";
 import { initialLauncher, launcherBlock, usableFirst } from "../lib/launcher-health";
 import { defaultLabel, machineLaunchers, type LauncherDefault } from "../lib/launcher-models";
@@ -11,7 +12,7 @@ import { interactionAsk } from "../lib/inbox";
 import { usageLimitLabel } from "../lib/usage-limit";
 import { plainMarkdown } from "../lib/plain-markdown";
 import { composing } from "../lib/send-history";
-import { useAgentSessions } from "../lib/sessions";
+import { useAgentSessions, useFullAgentSessions } from "../lib/sessions";
 import { useScoped } from "../lib/current-assistant";
 import { dropTodo, refresh, refreshTodos, useStore, withTaskRows } from "../lib/store";
 import {
@@ -2437,11 +2438,16 @@ export function HandoverDialog({
   const [launcher, setLauncher] = useState("");
 
   // For "existing":
-  const allSessions = useAgentSessions();
-  const liveSessions = useMemo(() => {
-    return allSessions.filter((s) => !s.assistant && stateOf(s) !== "offline");
-  }, [allSessions]);
-  const [selectedSid, setSelectedSid] = useState(() => liveSessions[0]?.session_id ?? "");
+  const { sessions: allSessions } = useFullAgentSessions(open);
+  const eligibleSessions = useMemo(() => {
+    const online = new Set(onlineMachines.map((m) => m.id));
+    const linked = new Set((todo.agents ?? []).filter((a) => !a.released_at).map((a) => `${a.machine_id}/${a.session_id}`));
+    return allSessions.filter((s) => !s.assistant && online.has(s.machine_id) && sessionCan(s, "send")).sort((a, b) =>
+      Number(linked.has(`${b.machine_id}/${b.session_id}`)) - Number(linked.has(`${a.machine_id}/${a.session_id}`))
+      || byTime(b.updated_at, a.updated_at)
+      || a.machine_id.localeCompare(b.machine_id) || a.session_id.localeCompare(b.session_id));
+  }, [allSessions, onlineMachines, todo.agents]);
+  const [selectedKey, setSelectedKey] = useState("");
 
   // The form starts over when the dialog opens. While it is open the lists change with every push of a session or a
   // machine: what is typed stays, and the picked agent / computer changes only once it is gone from its list.
@@ -2454,9 +2460,11 @@ export function HandoverDialog({
     if (onlineMachines[0] && (!mid || !onlineMachines.some((m) => m.id === mid))) {
       setMid(onlineMachines[0].id);
     }
-    const first = liveSessions[0]?.session_id;
-    if (first) setSelectedSid((sid) => (opening || !liveSessions.some((s) => s.session_id === sid) ? first : sid));
-  }, [open, onlineMachines, liveSessions]);
+    const first = eligibleSessions[0];
+    setSelectedKey((key) => opening || !eligibleSessions.some((s) => `${s.machine_id}/${s.session_id}` === key)
+      ? first ? `${first.machine_id}/${first.session_id}` : ""
+      : key);
+  }, [open, onlineMachines, eligibleSessions]);
 
   useEffect(() => {
     if (!open || !mid) return;
@@ -2509,7 +2517,7 @@ export function HandoverDialog({
   };
 
   const submitExisting = async () => {
-    const s = liveSessions.find((x) => x.session_id === selectedSid);
+    const s = eligibleSessions.find((x) => `${x.machine_id}/${x.session_id}` === selectedKey);
     if (!s) return;
     setBusy(true);
     try {
@@ -2639,28 +2647,36 @@ export function HandoverDialog({
         {tab === "existing" && (
           <div>
             <label className="mb-1 block text-[12px] font-medium text-ink-2">{t("todos.pick_agent")}</label>
-            {liveSessions.length === 0 ? (
+            {eligibleSessions.length === 0 ? (
               <div className="py-6 text-center text-[12.5px] text-ink-3">{t("todos.no_live_agents")}</div>
             ) : (
               <div className="max-h-44 overflow-y-auto rounded-control border border-line p-1">
-                {liveSessions.map((s) => {
-                  const isSel = s.session_id === selectedSid;
+                {eligibleSessions.map((s) => {
+                  const key = `${s.machine_id}/${s.session_id}`;
+                  const isSel = key === selectedKey;
                   const st = stateOf(s);
                   return (
                     <div
-                      key={s.session_id}
-                      onClick={() => setSelectedSid(s.session_id)}
+                      key={key}
+                      onClick={() => setSelectedKey(key)}
                       className={cx(
                         "flex cursor-pointer items-center justify-between gap-2 rounded px-2.5 py-1.5 text-[12.5px] transition-colors",
                         isSel ? "bg-accent text-white" : "hover:bg-hover text-ink",
                       )}
                     >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <StatusMark state={st} size="sm" />
-                        <span className="truncate font-medium">{s.title || s.cwd || t("todos.unnamed")}</span>
-                        <span className={cx("text-[11px]", isSel ? "text-white/80" : "text-ink-3")}>
-                          {s.space_name || s.machine_id}
-                        </span>
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <StatusMark state={st} size="sm" />
+                          <span className="truncate font-medium">{s.title || s.cwd || t("todos.unnamed")}</span>
+                          <span className={cx("text-[11px]", isSel ? "text-white/80" : "text-ink-3")}>
+                            {s.space_name || s.machine_id}
+                          </span>
+                        </div>
+                        {st === "offline" && (
+                          <div className={cx("text-[11px]", isSel ? "text-white/80" : "text-ink-3")}>
+                            {t("todos.closed_resume")}
+                          </div>
+                        )}
                       </div>
                       {isSel && <Icon name="check" size={13} stroke={2.5} />}
                     </div>
@@ -2710,7 +2726,7 @@ export function HandoverDialog({
             <Button
               tone="accent"
               onClick={submitExisting}
-              disabled={!selectedSid || busy || liveSessions.length === 0}
+              disabled={!selectedKey || busy || eligibleSessions.length === 0}
               busy={busy}
             >
               {t("todos.send_and_hand")}

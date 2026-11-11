@@ -39,6 +39,8 @@
     <string name="chat_chrome_status_unconfirmed">待核对</string>
     <string name="chat_chrome_status_needs_you">等你处理</string>
     <string name="chat_chrome_status_stopping">中断中</string>
+    <string name="chat_chrome_worked_minutes">%1$d 分</string>
+    <string name="chat_chrome_worked_hours">%1$d 小时 %2$d 分</string>
     <string name="chat_chrome_more">更多操作</string>
     <string name="chat_chrome_actions_title">会话操作</string>
     <string name="chat_chrome_todo">待办 · %1$s</string>

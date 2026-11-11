@@ -116,19 +116,29 @@ data class AgentMachineGroup(
 }
 
 /**
- * State First's order, the index into By Status's sections (iOS `AgentListOrder.rank`): Needs You → Unread → Awaiting Reply → Working →
- * Waiting → Muted → Seen. Muted agents that are working, finished-unread or waiting rank as Muted; a muted one that only
- * waits for the user's reply is just Seen ([AgentSession.awaitsReply]); one that needs you stays first.
+ * State First's order, the index into By Status's sections ([AgentStateSections], iOS `AgentListOrder.rank`): Needs You →
+ * Unread → Awaiting Reply → Working → Waiting in the background ([AgentSession.waitsInBackground]) → Waiting → Muted → Seen.
+ * Muted agents that are working, finished-unread or waiting rank as Muted; a muted one that only waits for the user's
+ * reply is just Seen ([AgentSession.awaitsReply]); one that needs you stays first.
  */
 fun agentRank(session: AgentSession, mutes: AgentPreferences = AgentPreferences()): Int = when {
     session.state == AgentState.NeedsYou -> 0
-    (session.state == AgentState.Working || session.state == AgentState.Unread || session.isWaiting) && mutes.mutes(session) -> 5
+    (session.state == AgentState.Working || session.state == AgentState.Unread || session.isWaiting) && mutes.mutes(session) -> 6
     session.state == AgentState.Unread -> 1
     session.awaitsReply(mutes) -> 2
-    session.state == AgentState.Working -> 3
-    session.isWaiting -> 4
-    else -> 6
+    session.state == AgentState.Working -> if (session.waitsInBackground) 4 else 3
+    session.isWaiting -> 5
+    else -> 7
 }
+
+/** By Status's sections in rank order ([agentRank]): each one's key (its group is `state/<key>`) and title (iOS `stateTitles`). */
+val AgentStateSections: List<Pair<String, CoreText.Key>> = listOf("needs" to CoreText.Key.StateNeedsYou, "unread" to CoreText.Key.StateUnread,
+    "awaiting" to CoreText.Key.StateAwaitingReply, "working" to CoreText.Key.StateWorking, "background" to CoreText.Key.StateBackgroundWaiting,
+    "waiting" to CoreText.Key.StateWaiting, "muted" to CoreText.Key.StateMuted, "idle" to CoreText.Key.StateIdle)
+
+/** By Status's Seen, the long tail: it starts folded, and its id is kept in the folds once it is opened (iOS `foldedByDefault`). */
+const val StateSeenGroup = "state/idle"
+const val StateSeenOpened = "!state/idle"
 
 /**
  * The list's own filter before the quick filter and the botmux switch: not the assistant, the machine, the search. The
@@ -264,13 +274,15 @@ fun buildFlatAgentList(
                 machines = machineGroups)
         }
         AgentGrouping.State -> {
-            val titles = listOf("needs" to Key.StateNeedsYou, "unread" to Key.StateUnread, "awaiting" to Key.StateAwaitingReply,
-                "working" to Key.StateWorking, "waiting" to Key.StateWaiting, "muted" to Key.StateMuted, "idle" to Key.StateIdle).map { (key, title) -> key to CoreText.of(title) }
+            // A section per rank, each folded from its header; Seen starts folded and its header is its one fold, with no
+            // "N more idle" row inside (iOS `stateSections`). A search opens them all.
             val byRank = live.groupBy { agentRank(it, mutes) }
-            titles.forEachIndexed { rank, (key, title) ->
+            AgentStateSections.forEachIndexed { rank, (key, title) ->
                 val rows = ordered(byRank[rank].orEmpty())
-                if (rows.isNotEmpty()) result += group("state/$key", title, rows,
-                    if (key == "idle" && !showIdle("state-idle")) emptyList() else rows)
+                val id = "state/$key"
+                val folded = settings.query.isEmpty() &&
+                    (id in settings.folded || id == StateSeenGroup && StateSeenOpened !in settings.folded)
+                if (rows.isNotEmpty()) result += AgentListGroup(id, CoreText.of(title), rows, if (folded) emptyList() else rows, folded)
             }
         }
         AgentGrouping.Todo -> {

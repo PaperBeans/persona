@@ -1621,6 +1621,7 @@ DEBUG 的代码可能在 `Persona.debug.dylib` 中，40 KiB 的 `Persona` 只是
 
 - **What went wrong**: the open chat's catch-up ignored an `updated_at` within `staleSlack` (1 s) of its newest line's `ts`, as "the same write" (the file's mtime and the line's own clock compare loosely). An agent writes in bursts: a tool call, its result and the words after it within a second. When the last line's push was lost, `updated_at` stayed within the slack of the line before, which the chat held, and the chat never asked, until the agent wrote again. Found by the web's end-to-end sync run against the mock (two replies 0.3 s apart, the second push dropped: nothing in 20 s).
 - **Now**: `AgentSync` notes when each session's `rev` changes (the full list or the `revs` event; the first one heard is no change), and `AgentSyncPacing.catchUpAt` also asks when the rev moved after the chat's last items came, once it has been quiet for `staleQuiet` since both. The node reports revs on its next tick, mostly after the items they belong to, so a rev that moved for lines that did come costs one empty `after_seq` read once the chat goes quiet; that read is an arrival and ends the question. The time rule stays for sessions whose rev does not move. UI test: `ChatCatchUpTests.testALostLastLineOfABurstCatchesUp` (the mock with `MOCK_SYNC_REVS=1`, whose lines are written now; without it their times are old and `updated_at` alone tells). It writes both lines before looking at the screen: waiting for the first one on screen spaced them more than a second apart, and the old rule passed it too.
+- **A push cannot settle a rev either (2026-11-10, #3191)**: asking when the rev moved after the chat's last items came missed two orders. The list comes from the node's poll and the push from its transcript watch, so a list with the rev for a whole burst can come before the push for an earlier line; that push was the newest arrival, the last line's push was lost, and nothing asked. And a catch-up read that comes back after a move counted as an arrival though the node may have read the file before the move's line was written. Now `AgentSyncPacing.RevReads` counts the moves and what each read covers: a subscription (also after a reconnect) covers the moves heard when it is sent, a catch-up read the moves heard when it was sent, once it comes back, a push nothing. The web's `RevWatch` does the same (#3195). Shared cases: `burst_list_before_push_pulls`, `rev_moves_during_catch_up_pulls_again`.
 
 ## A switch with words under it inside a menu (2026-11-07, #1307)
 
@@ -1775,6 +1776,14 @@ When the segment writer opens a new file, record the tap callback's host time an
 
 The watch only prunes by age. Segments the phone has not confirmed stay up to `undeliveredHours`; bookmarked ones stay `keptDays` so the phone can still mark them kept.
 
+## A queue drained through a continuation must end on cancellation (2026-11-10, #3067)
+
+- `RFBClient` runs its reader and its sender in one `withThrowingTaskGroup`. When the reader throws (the Mac hangs up),
+  leaving the group still waits for the sender. An `AsyncStream` iterator returns nil on cancellation, so the old
+  sender ended; a hand-written queue whose `next()` parks a `CheckedContinuation` does not, and the client never
+  reported the end (found by replaying a recording that ran out). `RFBOutbox.next()` wraps the wait in
+  `withTaskCancellationHandler` and resumes the parked continuation with nil, with a flag for a cancel that comes
+  before the continuation is stored (`RFBFrameTests.outboxHandsOverInOrderAndEndsOnFinishOrCancel`).
 ## Simulator arguments and screenshot settling (#1872)
 
 - On Xcode 27.2, a direct `simctl launch` can drop leading DEBUG arguments before they reach `UserDefaults`; put `--` before them. Verify the App actually adopted the mock pairings—an old real-hub cache on screen is a launch-environment failure, not the target RED. UI launch helpers can carry the same separator without changing the assertions.
@@ -1789,3 +1798,19 @@ The watch only prunes by age. Segments the phone has not confirmed stay up to `u
 - An `accessibilityIdentifier` on a container covers the identifiers of the buttons laid out directly in it (the drawer's
   `assistant-sidebar` over its header, a popover's list over its actions); a scroll view or list in between keeps its rows'.
   Put a container's identifier on the part that holds rows, and let UI tests also accept the covering one.
+
+## The link card's pooled web views share one script handler table (2026-11-10, #150)
+
+`WebViewPool`'s web views are made from one `WKWebViewConfiguration`, so they share its `WKUserContentController`: a script
+message handler added for one page answers for every page in the pool, and adding a second one under the same name throws.
+The preview's element picking (`ElementPicker`, `docs/web/preview.md` "iPhone") removes any handler of its name, adds its own
+(held weakly) when picking starts, checks that a message came from its own view's main frame, and removes the handler when
+picking ends or the card goes away. The pick script runs in the page's own world, not an isolated one: what React, Vue and
+Svelte dev builds leave on an element (the component, its source) is only visible there.
+
+A preview page also changes documents under the picker: a reload or a link drops the injected listeners, so picking ends when
+the page starts loading rather than leaving a banner that no longer does anything.
+
+Handing the composer something while the card is up has its own trap: the composer focused its field when a picture arrived
+in `composerInbox`, and focusing a field under a sheet closes the sheet. A preview screenshot closed the card it was taken
+from. The chat now tells its composer the card covers it (`composerCovered`), and the picture lands without the keyboard.

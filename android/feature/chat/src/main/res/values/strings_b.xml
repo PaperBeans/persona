@@ -42,6 +42,8 @@
     <string name="chat_chrome_status_unconfirmed">Needs checking</string>
     <string name="chat_chrome_status_needs_you">Waiting for you</string>
     <string name="chat_chrome_status_stopping">Interrupting</string>
+    <string name="chat_chrome_worked_minutes">%1$d min</string>
+    <string name="chat_chrome_worked_hours">%1$d hr %2$d min</string>
     <string name="chat_chrome_more">More actions</string>
     <string name="chat_chrome_actions_title">Session actions</string>
     <string name="chat_chrome_todo">To-do · %1$s</string>

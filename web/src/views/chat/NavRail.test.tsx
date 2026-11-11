@@ -108,7 +108,9 @@ describe("NavRail", () => {
     const button = host.querySelector('[data-tick="1"]')!;
     act(() => button.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })));
     expect(marks()[1].style.width).toBe(`${M.hoverWidth}px`);
-    expect(marks()[0].style.width).toBe(`${M.currentWidth}px`);
+    expect(parseFloat(marks()[0].style.width)).toBeCloseTo(M.tickWidth + (M.hoverWidth - M.tickWidth) * Math.exp(-0.5));
+    expect(marks()[0].classList.contains("bg-ink")).toBe(true);
+    expect(host.querySelector('[data-tick="0"]')?.getAttribute("aria-current")).toBe("true");
     act(() => button.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));
     expect(host.querySelector("[data-nav-preview]")).toBeNull();
     short();

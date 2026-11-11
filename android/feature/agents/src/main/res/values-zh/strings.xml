@@ -69,6 +69,7 @@
     <string name="agents_range_all">全部</string>
     <string name="agents_range_history">历史</string>
     <string name="agents_grouping_current">分组：%1$s</string>
+    <string name="agents_group_by">分组方式</string>
     <string name="agents_only_machine">只看 %1$s</string>
     <string name="agents_only_machine_hint">显示全部机器</string>
     <string name="agents_grouping_repo">按仓库</string>

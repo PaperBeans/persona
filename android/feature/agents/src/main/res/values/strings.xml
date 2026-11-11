@@ -80,6 +80,7 @@
     <string name="agents_range_all">All</string>
     <string name="agents_range_history">History</string>
     <string name="agents_grouping_current">Grouping: %1$s</string>
+    <string name="agents_group_by">Group By</string>
     <string name="agents_only_machine">Only %1$s</string>
     <string name="agents_only_machine_hint">Shows all machines</string>
     <string name="agents_grouping_repo">By repository</string>
