@@ -6,6 +6,7 @@ import { t } from "../i18n";
 import { api } from "./api";
 import { isEnabled, isSignedIn, listConnectors, otherConnectors, signsInHere, storesData, type HubConnector } from "./connectors";
 import { loadMailAccounts } from "./mail";
+import { ownedSub } from "./manager-choice";
 import { larkOn, useStore } from "./store";
 
 /** A source to connect from the empty inbox, and the settings page that does it. */
@@ -24,7 +25,7 @@ export interface SourcesInput {
 
 const MAX_CONNECTOR_OFFERS = 3;
 
-const connectorsHref = (id?: string) => `/settings?tab=connectors${id ? `&connector=${encodeURIComponent(id)}` : ""}`;
+const connectorsHref = (id?: string, manager?: string) => `/settings?tab=connectors${id ? `&connector=${encodeURIComponent(ownedSub(id, manager))}` : ""}`;
 
 /** A connector that brings items in and is switched on and signed in feeds the inbox (its `inbox` switch, when it has one). */
 function feeds(c: HubConnector): boolean {
@@ -39,7 +40,7 @@ export function inboxSources(input: SourcesInput): { connected: boolean; offers:
   const offers: SourceOffer[] = [{ id: "mail", name: t("lib-inbox-sources.mail"), href: connectorsHref() }];
   if (input.lark === false) offers.push({ id: "lark", name: t("lib-inbox-sources.lark"), href: connectorsHref() });
   const signIns = others.filter((c) => signsInHere(c) && storesData(c) && !isSignedIn(c)).slice(0, MAX_CONNECTOR_OFFERS);
-  for (const c of signIns) offers.push({ id: c.id, name: c.name, href: connectorsHref(c.id) });
+  for (const c of signIns) offers.push({ id: c.id, name: c.name, href: connectorsHref(c.id, c.manager) });
   return { connected, offers };
 }
 

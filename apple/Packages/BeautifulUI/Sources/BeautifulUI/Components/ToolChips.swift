@@ -458,11 +458,13 @@ struct ToolChipLabel: View {
             }
             .frame(width: 16, height: 16)
             .foregroundStyle(theme.colors.ink3)
+            // Whole when it fits, before the chip; a label wider than the row (an MCP tool's "Server · Tool") ends in "…"
+            // instead of pushing the row off the screen.
             Text(call.label)
                 .buiFont(BUITextStyle(size: 12.5, weight: .medium))
                 .foregroundStyle(theme.colors.ink)
                 .lineLimit(1)
-                .fixedSize()
+                .layoutPriority(1)
             if boxed {
                 chip
                     .padding(.horizontal, 6)

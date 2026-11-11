@@ -34,9 +34,8 @@ internal object CoreTextFallback {
             CoreText.Key.CompactCount -> {
                 val count = (text.args.first() as Number).toLong()
                 val unit = strings["designsystem_core_compact_unit"]?.toLongOrNull() ?: 10_000
-                if (count < unit) count.toString() else String.format(strings.getValue("designsystem_core_compact_count"),
-                    java.math.BigDecimal(count).divide(java.math.BigDecimal(unit)).setScale(1, java.math.RoundingMode.HALF_UP)
-                        .stripTrailingZeros().toPlainString())
+                compactCount(count, unit, { String.format(strings.getValue("designsystem_core_compact_count"), it) },
+                    strings["designsystem_core_compact_millions"]?.let { millions -> { units: String -> String.format(millions, units) } })
             }
             else -> {
                 val name = "designsystem_core_" + text.key.name.replace(Regex("(?<!^)(?=[A-Z])"), "_").lowercase()

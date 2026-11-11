@@ -1,0 +1,23 @@
+{
+  "default_at": "{time} まで返答がなければおすすめを採用",
+  "default_never": "自動では採用されません",
+  "cost": "待つ場合の影響：{cost}",
+  "separator": " · ",
+  "leads": "{option}：{leads}",
+  "leads_to": "：{leads}",
+  "choose": "「{title}」で「{option}」を選ぶ",
+  "choose_recommended": "「{title}」でおすすめの「{option}」を選ぶ",
+  "another": "その他…",
+  "another_row": "「{title}」を開いて別の方法で答える",
+  "more": "ほかの答え",
+  "decide_yourself": "任せます",
+  "decide_yourself_detail": "Persona が決め、前提を記録します。",
+  "not_what_i_asked": "頼んだことと違います",
+  "not_what_i_asked_detail": "Persona が依頼と照らし合わせるまで作業を止めます。",
+  "explain_first": "先に背景を教えて",
+  "explain_first_detail": "Persona が内容と理由を添えてもう一度尋ねます。",
+  "chosen": "回答済み：{option}",
+  "responded": "Persona に戻しました",
+  "failed": "回答を送信できませんでした。{error}",
+  "confirm": "確認：{option}"
+}

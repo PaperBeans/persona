@@ -95,7 +95,8 @@ class GroupRuntime internal constructor(
         } ?: false
         val connection = OkHttpHubConnection(
             HubConnectionConfig(credentials.hubId.takeUnless { it.startsWith("legacy-") }, credentials.fp,
-                credentials.deviceToken, pairingEndpoints(credentials), settings.version, deviceId = credentials.deviceId,
+                credentials.deviceToken, pairingEndpoints(credentials), settings.version, systemOrigins = credentials.systemOrigins.toSet(),
+                deviceId = credentials.deviceId,
                 clientFeatures = setOf("lock_test", "extension_operations", "extension_auth", "managers"), build = settings.build, os = settings.os,
                 heartbeatPolicy = settings.heartbeatPolicy, members = members, center = isCenter, centerHubId = group.centerHubId,
                 tunnels = tunnels),

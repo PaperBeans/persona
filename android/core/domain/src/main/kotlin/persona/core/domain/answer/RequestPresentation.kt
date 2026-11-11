@@ -19,10 +19,11 @@ fun Interaction.requestSourceLabel(): CoreText? = listOfNotNull(
 ).takeIf { it.isNotEmpty() }?.let { CoreText.joined("\n", it) }
 
 /**
- * "Always allow" for this card: Claude's offers it ("Always allow this session"); another agent's card (Codex, a compatible CLI, a runtime's)
- * only when its TUI names what it would allow ([Interaction.alwaysLabel]), as on iOS.
+ * "Always allow" for this card: as the manager says where it does ([Interaction.alwaysHonored], #3590); else Claude's
+ * offers it ("Always allow this session"), and another agent's card (Codex, a compatible CLI, a runtime's) only when
+ * its TUI names what it would allow ([Interaction.alwaysLabel]), as on iOS and the web.
  */
-val Interaction.offersAlways: Boolean get() = agentDisplayName == null || !alwaysLabel.isNullOrBlank()
+val Interaction.offersAlways: Boolean get() = alwaysHonored ?: (agentDisplayName == null || !alwaysLabel.isNullOrBlank())
 
 /**
  * A permission card that needs its fields filled in (a password) before it can be allowed, so no quick answer

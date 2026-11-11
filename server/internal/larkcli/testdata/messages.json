@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "data": {
+    "messages": [
+      {
+        "message_id": "om_example_newer",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:01:00Z",
+        "sender": {"id": "ou_example_user", "id_type": "open_id", "sender_type": "user", "name": "Example User"},
+        "content": "{\"text\":\"Newer example message\"}",
+        "chat_id": "oc_example_group",
+        "thread_id": "omt_example_thread",
+        "mentions": [{"id": "ou_example_user", "id_type": "open_id", "key": "@_user_1", "name": "Example User"}],
+        "deleted": false,
+        "updated": false
+      },
+      {
+        "message_id": "om_example_older",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:00:00Z",
+        "sender": {"id": "ou_example_peer", "id_type": "open_id", "sender_type": "user", "name": "Example User"},
+        "content": "{\"text\":\"Earlier example message\"}",
+        "chat_id": "oc_example_group",
+        "deleted": false,
+        "updated": false
+      }
+    ],
+    "total": 2,
+    "has_more": true,
+    "page_token": "example_page_token"
+  }
+}

@@ -51,7 +51,7 @@ func TestDefaultLauncherTheComputerLacksIsSwappedAndSaid(t *testing.T) {
 	ctx := context.Background()
 	// The first try, before this fix, failed in the terminal: a record that would hold the default there.
 	s.recordHealth(ctx, "l4", "gateway", healthResult{err: "zsh:1: command not found: gateway", source: healthSourceStart, kind: errKindNotInTerminal})
-	res, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"Ping","prompt":"Reply with pong","machine":"l4","cwd":"~/code/app","why":"A quick check"}]}`))
+	res, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"Ping","permission":"bypassPermissions","prompt":"Reply with pong","machine":"l4","cwd":"~/code/app","why":"A quick check"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestTierLauncherTheComputerLacksIsSwapped(t *testing.T) {
 func TestNamedLauncherTheComputerLacksIsRefused(t *testing.T) {
 	s, f := launcherFitHub(t)
 	ctx := context.Background()
-	_, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"Ping","prompt":"Reply with pong","machine":"l4","cwd":"~/code/app","launcher":"gateway"}]}`))
+	_, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"Ping","permission":"bypassPermissions","prompt":"Reply with pong","machine":"l4","cwd":"~/code/app","launcher":"gateway"}]}`))
 	if err == nil || !strings.Contains(err.Error(), "task 1: ") || !strings.Contains(err.Error(), "gateway") || !strings.Contains(err.Error(), "claude, other") {
 		t.Fatalf("task_plan: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestNamedLauncherTheComputerLacksIsRefused(t *testing.T) {
 		t.Fatalf("claude: %v %v", params, err)
 	}
 	// A plan the card moves to a computer that lacks the launcher it names fails that task, without a tab.
-	res, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"Ping","prompt":"Reply with pong","machine":"box","cwd":"~/code/app","launcher":"gateway"}]}`))
+	res, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"Ping","permission":"bypassPermissions","prompt":"Reply with pong","machine":"box","cwd":"~/code/app","launcher":"gateway"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestNamedLauncherTheComputerLacksIsRefused(t *testing.T) {
 func TestUnreadableLauncherListDoesNotBlock(t *testing.T) {
 	s, f := launcherFitHub(t)
 	ctx := context.Background()
-	res, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"Ping","prompt":"Reply with pong","machine":"server","cwd":"~/code/app","why":"A quick check"}]}`))
+	res, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"Ping","permission":"bypassPermissions","prompt":"Reply with pong","machine":"server","cwd":"~/code/app","why":"A quick check"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestDispatchSwapsWhenThePreviewCouldNotTell(t *testing.T) {
 	f.mu.Lock()
 	delete(f.zshrc, "l4") // no list from l4 while the plan is made
 	f.mu.Unlock()
-	res, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"Ping","prompt":"Reply with pong","machine":"l4","cwd":"~/code/app"}]}`))
+	res, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"Ping","permission":"bypassPermissions","prompt":"Reply with pong","machine":"l4","cwd":"~/code/app"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

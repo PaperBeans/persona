@@ -40,17 +40,22 @@ internal open class FakeOperations(var stepped: Boolean = true) : ExtensionApiSt
     override suspend fun install(preview: ExtensionPreview): ExtensionDetail { calls += "install"; return ExtensionDetail(HubExtension("example-notes", "Example Notes", "ui", "running")) }
     /** Enabled extensions depend on it: the older hub refuses a removal without cascade (409 has_dependents). */
     var dependents = emptyList<ExtensionDependent>()
-    override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean) {
-        calls += if (cascade) "uninstall cascade" else "uninstall"
+    /** What a removal at once answers, or how a pack's stopped part way (#1154). */
+    var removal = ExtensionRemoval()
+    var partial: ExtensionPartialUninstall? = null
+    override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean, members: Boolean): ExtensionRemoval {
+        calls += (if (cascade) "uninstall cascade" else "uninstall") + if (members) " members" else ""
         if (dependents.isNotEmpty() && !cascade) throw ExtensionHasDependents(dependents, "B depends on it")
+        partial?.let { throw it }
+        return removal
     }
     override suspend fun startFromMarket(market: String, extension: String): ExtensionOperation { calls += "start $market/$extension"; return started }
     override suspend fun agree(preview: ExtensionPreview, upgradeOf: String?): ExtensionOperation {
         calls += "agree ${preview.previewId} $upgradeOf"
         return op("running", "install", 6, "download" to "done", "consent" to "done", "install" to "running")
     }
-    override suspend fun startUninstall(id: String, keepData: Boolean, cascade: Boolean): ExtensionOperation {
-        calls += "uninstall-async $id keep=$keepData" + if (cascade) " cascade" else ""
+    override suspend fun startUninstall(id: String, keepData: Boolean, cascade: Boolean, members: Boolean): ExtensionOperation {
+        calls += "uninstall-async $id keep=$keepData" + (if (cascade) " cascade" else "") + if (members) " members" else ""
         return op("running", "stop", 1, "stop" to "running", "remove" to "pending", kind = "uninstall", id = if (cascade) "op3" else "op2")
     }
     override suspend fun operations(): List<ExtensionOperation> { calls += "list"; return listed }
@@ -269,6 +274,49 @@ class ExtensionOperationStateTest {
             assertTrue(model.confirmCascade())
             assertEquals(listOf("uninstall", "uninstall cascade"), older.calls)
         }
+    }
+
+    /** #1154: a pack with its members, in steps; the dependents question keeps the choice and the notice says the members went. */
+    @Test fun removingAPackWithItsMembersKeepsTheChoice() {
+        val api = FakeOperations()
+        watching(api) { model, notices ->
+            assertFalse(model.uninstall(keepData = true, members = true))
+            assertEquals("uninstall-async example-notes keep=true members", api.calls.last())
+            api.pushes.emit(op("failed", "stop", 2, "stop" to "failed", "remove" to "pending", kind = "uninstall", id = "op2",
+                error = "B depends on it", retryable = true).copy(errorCode = "has_dependents"))
+            until { model.state.value.cascade != null }
+            assertEquals(ExtensionCascade(emptyList(), keepData = true, members = true), model.state.value.cascade)
+            // Retry asks again, the choice kept.
+            model.dismissCascade()
+            assertFalse(model.retry())
+            assertEquals(ExtensionCascade(emptyList(), keepData = true, members = true), model.state.value.cascade)
+            assertFalse(model.confirmCascade())
+            assertEquals("uninstall-async example-notes keep=true cascade members", api.calls.last())
+            api.pushes.emit(op("succeeded", "nodes", 9, kind = "uninstall", id = "op3"))
+            until { notices.isNotEmpty() }
+            assertEquals("已卸载 Example Notes 及其成员", notices.single())
+        }
+        // At once (an older hub): the hub counts the members; a removal that stopped part way is said, the pack still there.
+        val older = FakeOperations(stepped = false).apply { removal = ExtensionRemoval(listOf("example-ui", "example-mail")) }
+        watching(older) { model, _ ->
+            assertTrue(model.uninstall(keepData = true, members = true))
+            assertEquals("uninstall members", older.calls.last())
+            assertEquals("已卸载 Example Notes，并卸载了 2 个成员", ExtensionText.uninstalled(res, "Example Notes", members = true, removal = model.removal))
+            older.partial = ExtensionPartialUninstall(listOf("example-ui"), listOf(ExtensionFailedMember("example-mail", "仍在运行")), listOf("example-docs"), "没卸载完")
+            assertFalse(model.uninstall(keepData = true, members = true))
+            val partial = model.state.value.partial!!
+            assertNull(model.state.value.actionError)
+            assertEquals("Example Pack 还在。已经卸载的成员不会恢复，可以再试一次。\n\n已卸载：example-ui\n\n未能卸载：example-mail（仍在运行）\n\n未处理，仍已安装：example-docs",
+                ExtensionText.partial(res, partial, "Example Pack"))
+            // By name where the installed list has one.
+            assertEquals("Example Pack 还在。已经卸载的成员不会恢复，可以再试一次。\n\n已卸载：Example UI\n\n未能卸载：example-mail（仍在运行）\n\n未处理，仍已安装：Example Docs",
+                ExtensionText.partial(res, partial, "Example Pack", mapOf("example-ui" to "Example UI", "example-docs" to "Example Docs")))
+            model.dismissPartial()
+            assertNull(model.state.value.partial)
+        }
+        // The notices: without members as before; a hub that doesn't list them says so.
+        assertEquals("已卸载 Example Notes", ExtensionText.uninstalled(res, "Example Notes", members = false, removal = ExtensionRemoval(listOf("x"))))
+        assertEquals("已卸载 Example Notes，成员结果未返回", ExtensionText.uninstalled(res, "Example Notes", members = true, removal = ExtensionRemoval()))
     }
 
     @Test fun retryingARefusedRemovalAsksAgain() {

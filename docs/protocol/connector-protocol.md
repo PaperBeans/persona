@@ -56,7 +56,7 @@ Manifest fields:
 
 | Method | Parameters → result | Notes |
 | --- | --- | --- |
-| `status` | `{}` → `{state, account?, via?, error?, guide?, last_sync?, last_event?}` | Memory-only, no network; hub polls every 30 seconds. State ok / `not_configured` / `not_signed_in` / `no_permission` / `rate_limited` / error |
+| `status` | `{}` → `{state, account?, via?, error?, guide?, guide_url?, missing_scopes?, last_sync?, last_event?}` | Memory-only, no network; hub polls every 30 seconds. `guide_url` is an optional page the App may open for a fix (for example an Open Platform permission page); `missing_scopes` names permissions when the connector can identify them. State ok / `not_configured` / `not_signed_in` / `no_permission` / `rate_limited` / error |
 | `catalog.list` | `{}` → `{sources: [...]}` | Optional `catalog`: source/tool metadata and recipes; validated without executing tools ("Source catalog" below) |
 | `catalog.call` | `{source, tool, args?}` → `{text}` | Current catalog only; non-read-only or missing tools answer `not_read_only`; args is an object, default `{}` |
 | `tools.list` | `{}` → `{tools: [{name, description, input_schema}]}` | Read-only tools, names prefixed `<id>_` |
@@ -272,7 +272,7 @@ Without Go implementation to compare, `conformance.CheckProgram(t, manifest, run
 | Method | Decode type | Additional requirements |
 | --- | --- | --- |
 | initialize | `plugin.InitializeResult` | ID / version match; connector contributions field-identical to manifest except capability order |
-| status | `connector.Status` | Known state; ok has no error; other states except `not_configured` require error / guide |
+| status | `connector.Status` | Known state; ok has no error; other states except `not_configured` require error / guide. `guide_url`, when present, is an HTTPS fix page and carries no secret |
 | `tools.list`, `actions.list` | `serve.ToolsResult` | Unique <id>_-prefixed names, descriptions, `type: object` `input_schema`; tools / actions names distinct |
 | `tools.call` | `serve.CallResult` | Each read tool with empty args returns result or explanatory rejection |
 | `actions.describe` | `serve.DescribeResult` | Each write with empty args rejects or returns summary / `action.visible` |

@@ -10,7 +10,7 @@ import { fileName, toolFile } from "../../lib/files";
 import { openPanel } from "../../lib/panel";
 import { getSession } from "../../lib/store";
 import { taskBadge } from "../../lib/tasks";
-import { personaToolVerb, toolChip, toolDisplayName, toolLabel } from "../../lib/turns";
+import { ownEntry, personaToolVerb, SUBJECT_KEYS, toolChip, toolDisplayName, toolLabel } from "../../lib/turns";
 import type { Item } from "../../lib/types";
 import type { ToolStep } from "../../lib/work-groups";
 import { cx, Dialog, EASE, IconButton, Spinner } from "../../ui/atoms";
@@ -31,7 +31,7 @@ const ROW = "group flex w-full min-w-0 items-center gap-1.5 rounded-[8px] px-2 p
 export const CHEVRON_SLOT = "ml-auto flex size-[18px] shrink-0 items-center justify-center rounded-[8px] text-tool-ink transition-colors duration-150 group-hover:bg-hover-2 motion-reduce:transition-none";
 export const STATUS_SLOT = "inline-flex h-[18px] w-4 shrink-0 items-center justify-center text-tool-ink";
 
-const COMMAND_TOOLS = new Set(["Bash", "exec_command", "shell"]);
+const COMMAND_TOOLS = new Set(["Bash", "exec_command", "shell", "PowerShell"]);
 const FILE_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"]);
 export const DIFF_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
 
@@ -51,6 +51,39 @@ const VERB: Record<string, string> = {
   LS: t("chat-actionrow.verb_list"),
   WebFetch: t("chat-actionrow.verb_visit"),
   WebSearch: t("chat-actionrow.verb_visit"),
+};
+
+/** Claude Code's newer tools (iOS ToolPresentation.knownVerb, #2986): what each did, then what it was about. */
+const DONE: Record<string, string> = {
+  TaskCreate: t("chat-actionrow.verb_task_create"),
+  TaskUpdate: t("chat-actionrow.verb_task_update"),
+  TaskList: t("chat-actionrow.verb_task_list"),
+  TaskGet: t("chat-actionrow.verb_task_get"),
+  TaskStop: t("chat-actionrow.verb_task_stop"),
+  KillShell: t("chat-actionrow.verb_task_stop"),
+  KillBash: t("chat-actionrow.verb_task_stop"),
+  TaskOutput: t("chat-actionrow.verb_task_output"),
+  BashOutput: t("chat-actionrow.verb_task_output"),
+  SendMessage: t("chat-actionrow.verb_send_message"),
+  ListAgents: t("chat-actionrow.verb_list_agents"),
+  ScheduleWakeup: t("chat-actionrow.verb_schedule_wakeup"),
+  CronCreate: t("chat-actionrow.verb_cron_create"),
+  CronList: t("chat-actionrow.verb_cron_list"),
+  CronDelete: t("chat-actionrow.verb_cron_delete"),
+  RemoteTrigger: t("chat-actionrow.verb_remote_trigger"),
+  Monitor: t("chat-actionrow.verb_monitor"),
+  LSP: t("chat-actionrow.verb_lsp"),
+  EnterWorktree: t("chat-actionrow.verb_enter_worktree"),
+  ExitWorktree: t("chat-actionrow.verb_exit_worktree"),
+  SendUserFile: t("chat-actionrow.verb_send_file"),
+  Artifact: t("chat-actionrow.verb_artifact"),
+  PushNotification: t("chat-actionrow.verb_push_notification"),
+  ReportFindings: t("chat-actionrow.verb_report_findings"),
+  ToolSearch: t("chat-actionrow.verb_load_tools"),
+  WaitForMcpServers: t("chat-actionrow.verb_wait_mcp"),
+  ListMcpResourcesTool: t("chat-actionrow.verb_list_mcp_resources"),
+  ReadMcpResourceTool: t("chat-actionrow.verb_read_mcp_resource"),
+  Skill: t("chat-actionrow.verb_skill"),
 };
 
 const PARAM_MAX = 60;
@@ -99,10 +132,14 @@ export function presentAction(use: Item): ActionPresentation {
       const what = [own.what, toolChip(use)].filter(Boolean).join(" · ");
       return { verb: own.verb, ...(what ? { param: { text: truncateParam(what), title: name } } : {}) };
     }
-    return { verb: t("chat-actionrow.verb_call"), param: { text: truncateParam(toolDisplayName(name)), title: name } };
+    // another server's tool in words ("GitHub · Create issue"), then what it was given
+    const what = [toolDisplayName(name), toolChip(use)].filter(Boolean).join(" · ");
+    return { verb: t("chat-actionrow.verb_call"), param: { text: truncateParam(what), title: name } };
   }
   const chip = toolChip(use);
-  return { verb: VERB[name] ?? t("chat-actionrow.verb_call"), param: { text: truncateParam(chip ? `${toolLabel(name)} · ${chip}` : toolLabel(name)), title: chip || undefined } };
+  const done = ownEntry(DONE, name);
+  if (done) return { verb: done, ...(chip ? { param: { text: truncateParam(chip), title: chip } } : {}) };
+  return { verb: ownEntry(VERB, name) ?? t("chat-actionrow.verb_call"), param: { text: truncateParam(chip ? `${toolLabel(name)} · ${chip}` : toolLabel(name)), title: chip || undefined } };
 }
 
 // ── diffs ──
@@ -152,7 +189,22 @@ export function inlineInput(use: Item): string {
   if (name === "Glob") return str(inp.path) ? `${str(inp.pattern)}\nin: ${str(inp.path)}` : str(inp.pattern);
   if (name === "WebFetch") return [str(inp.url), str(inp.prompt)].filter(Boolean).join("\n");
   if (name === "WebSearch") return str(inp.query);
-  return Object.keys(inp).length ? JSON.stringify(inp, null, 2) : "";
+  if (name === "Monitor") return str(inp.command) || str((inp.ws as Record<string, unknown> | undefined)?.url);
+  return argumentLines(inp);
+}
+
+/** Any other call's input as `key: value` lines, not a JSON dump (iOS ToolArgumentsDetail, #2986): the telling fields
+ *  first, then the rest by name; text as written, lists of words joined, anything nested as one line of JSON. */
+export function argumentLines(inp: Record<string, unknown>): string {
+  const keys = [...SUBJECT_KEYS.filter((k) => Object.hasOwn(inp, k)), ...Object.keys(inp).filter((k) => !SUBJECT_KEYS.includes(k)).sort()];
+  const shown = (v: unknown): string => {
+    if (typeof v === "string") return v.trim();
+    if (v === null) return "null";
+    if (Array.isArray(v) && v.every((x) => x === null || typeof x !== "object")) return v.map(String).join(", ");
+    if (typeof v === "object") return Object.keys(v as object).length ? JSON.stringify(v) : "";
+    return String(v);
+  };
+  return keys.flatMap((k) => (shown(inp[k]) ? [`${k}: ${shown(inp[k])}`] : [])).join("\n");
 }
 
 export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trace }: { step: ToolStep; running?: boolean; mid: string; sid: string; trace?: boolean }) {

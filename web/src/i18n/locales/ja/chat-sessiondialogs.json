@@ -74,5 +74,10 @@
   "speed_fast": "Fast",
   "speed_unknown": "不明",
   "speed_standard_detail": "通常の速度と使用量で実行。",
-  "speed_paid_detail": "応答を高速化。使用量や料金が増えます。"
+  "speed_paid_detail": "応答を高速化。使用量や料金が増えます。",
+  "header_mode": "権限モード：{mode}",
+  "mode_unknown": "不明",
+  "leave_bypass_confirm": "{mode}に切り替え",
+  "leave_bypass_detail": "このエージェントはすべて許可で起動していないため、切り替えるとここからは戻せません。",
+  "modes_locked": "実行中ではありません。モードは実行中に変更できます"
 }

@@ -35,6 +35,11 @@ func (s *Service) askAcceptanceRound(t Todo, machine, session, reply string, aga
 		!(again && !old.AskedAt.IsZero() && !old.AcceptedAt.IsZero()) {
 		b.mu.Unlock()
 		return
+	} else if old != nil && decisionOpen(old, t) {
+		// A decision waits for the owner: a turn that says "deployed" meanwhile does not take its place (#3804). Once it
+		// is settled, the next deployed turn asks.
+		b.mu.Unlock()
+		return
 	} else if old != nil {
 		// asked before the task's latest reopen, or a conclusion (conclusion.go): the new round gets its own card, the old
 		// ones stay dead
@@ -77,15 +82,25 @@ func (s *Service) assistantAccepts(ctx context.Context, t Todo, a acceptAsk) {
 	b.mu.Lock()
 	if c := b.asks[t.ID]; c != nil && c.AskedAt.IsZero() {
 		a.Earlier = c.Earlier
+	} else if c != nil && decisionOpen(c, t) {
+		b.mu.Unlock() // a decision was asked while this one was being written: it stands (#3804)
+		return
 	}
+	// Accepted as it is kept, in one write: a decision asked a moment later must not be what a second look at the book
+	// accepts (acceptTry takes a decision's recommendation).
+	a.AcceptedAt = time.Now().UTC()
 	b.asks[t.ID] = &a
-	s.saveAcceptLocked(ctx)
-	b.mu.Unlock()
-	if ok, err := s.acceptTry(ctx, t.ID, ""); err != nil || !ok {
-		s.logf("task %s: accepted by the assistant: %v %v", t.ID, ok, err)
+	if err := s.saveAcceptErrLocked(ctx); err != nil {
+		a.AcceptedAt = time.Time{} // kept only in memory it would wait again after a restart: not accepted
+		b.mu.Unlock()
+		s.logf("task %s: accepted by the assistant: %v", t.ID, err)
 		s.askChanged(ctx)
 		return
 	}
+	cp := a
+	b.mu.Unlock()
+	s.askChanged(ctx)
+	s.taskVerified(ctx, t.ID, cp)
 	s.logf("task %s: deployed, accepted by the supervising assistant (not a big feature: the owner is not asked)", t.ID)
 }
 
@@ -110,12 +125,24 @@ func (s *Service) postAsk(ctx context.Context, t Todo, a acceptAsk) bool {
 		a.NoCard = true
 	}
 	posted := a.MessageID != "" // read before a is shared: a retry may set its card once the book has it
+	// The ask is kept whether or not the caller still waits: a tool call given up on while the bot's status was read
+	// must not leave it in memory only, gone with the next restart (#3804).
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
 	b.mu.Lock()
 	if c := b.asks[t.ID]; c != nil && c.AskedAt.IsZero() {
 		a.Earlier = c.Earlier // the claim's: it also has a card of the round before that a retry posted meanwhile
+	} else if c != nil && !a.Conclusion && decisionOpen(c, t) {
+		// A decision was asked while this "Please verify" was being written: it stands, and this card is dead (#3804).
+		if a.MessageID != "" {
+			c.Earlier = lastOf(append(slices.Clone(c.Earlier), a.MessageID), acceptEarlierMost)
+			s.saveAcceptLocked(sctx)
+		}
+		b.mu.Unlock()
+		return false
 	}
 	b.asks[t.ID] = &a
-	s.saveAcceptLocked(ctx)
+	s.saveAcceptLocked(sctx)
 	b.mu.Unlock()
 	s.askChanged(ctx) // it waits for the owner now: the apps and the board
 	return posted

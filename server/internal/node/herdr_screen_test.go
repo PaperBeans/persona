@@ -375,7 +375,19 @@ func TestHerdrScreenBefore(t *testing.T) {
 	if got = before([]string{"c"}, 5, 1, true); got["text"] != "a\nb" {
 		t.Fatalf("misaligned ansi %q", got["text"])
 	}
-	assertTrace(t, f.trace(), []string{recent, recentANSI, recent, recentANSI})
+	// The same count of rows, shifted (a full scrollback that dropped its oldest row as output arrived, or a host that
+	// trimmed a colored blank last row only in one read): the rows' text differs, so the plain page stands.
+	f.setScreens("w1:p1", "a\nb\nc\n", "\x1b[1mb\x1b[0m\r\nc\r\nd\r\n")
+	if got = before([]string{"c"}, 5, 1, true); got["text"] != "a\nb" {
+		t.Fatalf("shifted ansi %q", got["text"])
+	}
+	// Trailing white space herdr's plain read drops (the no-break space after an empty box's prompt mark, an
+	// ideographic space) does not make aligned rows look shifted: the colors stay.
+	f.setScreens("w1:p1", "a\n❯\nc\n", "\x1b[1ma　\x1b[0m\r\n\x1b[2m❯ \x1b[0m\r\nc\r\n")
+	if got = before([]string{"c"}, 5, 1, true); got["text"] != "\x1b[1ma　\x1b[0m\n\x1b[2m❯ \x1b[0m" {
+		t.Fatalf("trailing unicode space ansi %q", got["text"])
+	}
+	assertTrace(t, f.trace(), []string{recent, recentANSI, recent, recentANSI, recent, recentANSI, recent, recentANSI})
 
 	// A session herdr does not have: looked for once, refused.
 	f.reset()

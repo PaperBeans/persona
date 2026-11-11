@@ -61,7 +61,7 @@ data class FeedItem(
     val id: String,
     val conversation: String = "",
     @WireTime val at: String? = null,
-    @WireEnum("plan", "task", "answered", "receipt", "review", "report", "routed", "today", "message", "view", "unknown")
+    @WireEnum("plan", "task", "answered", "receipt", "review", "report", "routed", "today", "brief", "message", "view", "unknown")
     val kind: String = "unknown",
     val ref: String? = null,
     val body: JsonElement? = null,
@@ -85,8 +85,11 @@ data class FeedItem(
      */
     val filedAt: String? get() = if (sent != null) null else field("filed_at")?.takeIf(String::isNotEmpty)
 
-    /** `message`: the card still offers its draft to send (neither sent nor filed elsewhere). */
-    val canSend: Boolean get() = sent == null && filedAt == null
+    /** `message`: this particular draft was dismissed without sending or closing its task. */
+    val dismissedAt: String? get() = field("dismissed_at")?.takeIf(String::isNotEmpty)
+
+    /** `message`: the card still offers its draft to send. */
+    val canSend: Boolean get() = sent == null && filedAt == null && dismissedAt == null
 
     /**
      * `answered`: every question of the card with the user's answer in full, newlines kept (#1231). A record from
@@ -196,6 +199,21 @@ data class Todo(
     /** Open, and its due moment has passed. */
     fun isOverdue(now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): Boolean =
         !isDone && (dueBy(zone)?.isBefore(now) ?: false)
+
+    /** Its due date as a write sets it: its moment, else its day; null without either. */
+    val due: TodoDue? get() = parseTime(dueAt)?.let { TodoDue.At(it) } ?: dueDay?.let { TodoDue.Day(it) }
+
+    /** The to-do due at [due] instead, as the hub keeps it: a moment or a day, one replacing the other (#2045). */
+    fun withDue(due: TodoDue): Todo = when (due) {
+        is TodoDue.At -> copy(dueAt = due.at.toString(), dueDate = null)
+        is TodoDue.Day -> copy(dueAt = null, dueDate = due.day.toString())
+    }
+}
+
+/** A to-do's due date as `PATCH /api/v1/todos/{id}` sets it: a moment (`due_at`) or a day in the user's time zone (`due_date`). */
+sealed interface TodoDue {
+    data class At(val at: Instant) : TodoDue
+    data class Day(val day: LocalDate) : TodoDue
 }
 
 @Serializable
@@ -406,6 +424,8 @@ data class FeedResponse(
     @SerialName("view_blocks") val viewBlocks: List<String> = emptyList(),
     /** Null on older hubs or a failed projection read; an empty incremental page removes nothing. */
     @SerialName("task_cards") val taskCards: List<AssistantTaskCard>? = null,
+    /** Stable pagination: null on older hubs, empty at EOF, otherwise an opaque continuation cursor. */
+    @SerialName("next_cursor") val nextCursor: String? = null,
 )
 
 /** The todos changed: pull them again. */
@@ -415,7 +435,7 @@ class TodosEvent : ServerEvent
 
 @KeepGeneratedSerializer
 @Serializable(with = AssistantFeedEventSerializer::class)
-data class AssistantFeedEvent(val conversation: String = "", val item: FeedItem) : ServerEvent
+data class AssistantFeedEvent(val conversation: String = "", val item: FeedItem, val manager: String? = null) : ServerEvent
 
 @KeepGeneratedSerializer
 @Serializable(with = TaskPlanEventSerializer::class)

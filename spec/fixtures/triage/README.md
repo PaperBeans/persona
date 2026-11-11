@@ -9,7 +9,7 @@ hub (`TestTriageFollowsTheSharedCases`, `TestTriageTodosFollowsTheSharedCases`,
 | File | Rule | Cases |
 | --- | --- | --- |
 | `triage.json` | The decision table, first rule that holds wins; the last activity | every case of `triage` in `web/src/lib/todo-triage.test.ts`, one assertion a case; `derived` ones cover the agent states that table reads (failed start, interrupted, usage limit, waiting in the background, released, a session without `state`, a session not listed) |
-| `groups.json` | Related to-dos share a row led by the most urgent; closed and open never share one; the header's counts; quiet tasks for the badge | `triageTodos` in the same test file |
+| `groups.json` | Related to-dos share a row led by the most urgent; closed and open never share one; the header's counts; quiet tasks for the badge; a failed start whose row's work finished (rule 1a, #3713) | `triageTodos` in the same test file |
 | `related.json` | The keys that relate two to-dos | `relatedKeys` |
 
 - Structure: `{"version": 1, "cases": [...]}`. `input.now` is the moment the case is read at; `input.sessions` are

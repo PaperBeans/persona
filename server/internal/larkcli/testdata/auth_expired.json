@@ -1,0 +1,16 @@
+{
+  "appId": "cli_example",
+  "identities": {
+    "user": {
+      "status": "ready",
+      "available": true,
+      "openId": "ou_example_user",
+      "userName": "Example User",
+      "tokenStatus": "expired",
+      "scope": "im:chat:read",
+      "expiresAt": "2029-12-31T12:00:00Z",
+      "refreshExpiresAt": "2030-01-15T12:00:00Z"
+    }
+  },
+  "identity": "user"
+}

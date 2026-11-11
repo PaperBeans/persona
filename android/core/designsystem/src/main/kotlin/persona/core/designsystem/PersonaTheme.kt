@@ -131,7 +131,8 @@ private fun PersonaPalette.materialScheme(style: AppStyle): ColorScheme {
     val base = if (dark) darkColorScheme() else lightColorScheme()
     return base.copy(
         primary = primary, onPrimary = onPrimary, primaryContainer = accentSoft, onPrimaryContainer = ink,
-        inversePrimary = accent,
+        // A snackbar's button ("Undo") on its inverse ground: brief's accent is its ink, the ground's own color (#2045).
+        inversePrimary = if (style == AppStyle.Brief) background else accent,
         secondary = ink2, onSecondary = background, secondaryContainer = surfaceStrong.compositeOn(surfaceOpaque), onSecondaryContainer = ink,
         tertiary = needsYou.dot, onTertiary = needsYou.onDot, tertiaryContainer = needsYou.tint.compositeOn(surfaceOpaque), onTertiaryContainer = ink,
         background = background, onBackground = ink,

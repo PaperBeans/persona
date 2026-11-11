@@ -12,8 +12,10 @@ Usage as a CLI for quick reads:
   python3 scripts/release/asc.py GET /v1/apps
 """
 import base64
+import http.client
 import json
 import os
+import ssl
 import subprocess
 import sys
 import time
@@ -87,24 +89,67 @@ class APIError(Exception):
         self.status, self.body = status, body
 
 
+class NetworkError(APIError):
+    """No answer from App Store Connect: the connection failed or broke on every try (status 0). An APIError, so the
+    callers that let an API failure pass (the external group after a release) let this pass too."""
+    def __init__(self, method: str, path: str, err: BaseException, tries: int, note: str = ""):
+        Exception.__init__(self, f"{method} {path.split('?')[0]}: no answer from App Store Connect after "
+                                 f"{tries} {'try' if tries == 1 else 'tries'} ({err}){note}")
+        self.status, self.body = 0, str(err)
+
+
+# One try and five more; the waits between them double from 2 s up to 30 s, about a minute in all.
+TRIES = 6
+MAX_DELAY = 30
+
+# A connection that fails or breaks for a moment (#4034): App Store Connect now and then ends the TLS handshake early
+# (URLError of "[SSL: UNEXPECTED_EOF_WHILE_READING]"), resets the connection or doesn't answer in time.
+TRANSIENT = (urllib.error.URLError, ConnectionError, TimeoutError, ssl.SSLError, http.client.IncompleteRead,
+             http.client.BadStatusLine)
+
+
+def _delay(attempt: int) -> int:
+    return min(2 ** attempt, MAX_DELAY)
+
+
+def _transient(err: BaseException) -> bool:
+    reason = getattr(err, "reason", err)
+    return not isinstance(reason, ssl.SSLCertVerificationError)  # a certificate that fails is no hiccup
+
+
 def request(method: str, path: str, body=None, params=None):
+    """One API call. HTTP 429 and 5xx, and a connection that fails or breaks, are tried again with growing waits; any
+    other answer raises APIError at once (a 4xx is the caller's to handle). A POST is tried again after a network
+    error only when urllib says it never got out (URLError: while connecting or sending), because a POST repeated
+    after App Store Connect took it can make a second resource (two beta groups of one name, #945)."""
     url = path if path.startswith("http") else API + path
     if params:
         url += ("&" if "?" in url else "?") + urllib.parse.urlencode(params, safe=",[]")
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={
         "Authorization": f"Bearer {token()}", "Content-Type": "application/json"})
-    for attempt in range(5):
+    last = None
+    for attempt in range(1, TRIES + 1):
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 raw = resp.read()
                 return json.loads(raw) if raw else None
-        except urllib.error.HTTPError as e:
-            if e.code == 429 or e.code >= 500:
-                time.sleep(2 ** attempt)
-                continue
-            raise APIError(e.code, e.read().decode()) from None
-    raise APIError(429, "retries exhausted")
+        except urllib.error.HTTPError as e:  # an answer (HTTPError is also a URLError, so it comes first)
+            if e.code != 429 and e.code < 500:
+                raise APIError(e.code, e.read().decode()) from None
+            last = APIError(e.code, e.read().decode(errors="replace"))
+        except TRANSIENT as e:
+            if not _transient(e):
+                raise NetworkError(method, path, e, attempt) from None
+            if method == "POST" and not isinstance(e, urllib.error.URLError):
+                raise NetworkError(method, path, e, attempt,
+                                   "; not tried again, since App Store Connect may have taken it") from None
+            last = NetworkError(method, path, e, attempt)
+        if attempt < TRIES:
+            print(f"{method} {path.split('?')[0]}: {last.body.strip()[:200]}; trying again in {_delay(attempt)} s",
+                  file=sys.stderr)
+            time.sleep(_delay(attempt))
+    raise last
 
 
 def get_all(path: str, params=None):

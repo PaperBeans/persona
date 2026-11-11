@@ -419,3 +419,27 @@ fun DecisionButtons(primary: JAction, modifier: Modifier = Modifier, secondary: 
         }
     }
 }
+
+/** A reply draft has one primary Send and two reversible secondary choices. Stack at large text or narrow widths. */
+@Composable
+fun DraftDecisionButtons(send: JAction, later: JAction, dismiss: JAction, modifier: Modifier = Modifier,
+    busy: Boolean = false, sendModifier: Modifier = Modifier, laterModifier: Modifier = Modifier, dismissModifier: Modifier = Modifier) {
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val stacked = LocalDensity.current.fontScale >= 1.3f || maxWidth < 320.dp
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+            JButton(send.label, send.onClick, sendModifier.fillMaxWidth(), kind = JButtonKind.Primary,
+                size = JButtonSize.Large, enabled = send.enabled && !busy, loading = busy)
+            if (stacked) {
+                JButton(later.label, later.onClick, laterModifier.fillMaxWidth(), kind = JButtonKind.Secondary,
+                    size = JButtonSize.Large, enabled = later.enabled && !busy)
+                JButton(dismiss.label, dismiss.onClick, dismissModifier.fillMaxWidth(), kind = JButtonKind.Secondary,
+                    size = JButtonSize.Large, enabled = dismiss.enabled && !busy)
+            } else Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                JButton(later.label, later.onClick, laterModifier.weight(1f), kind = JButtonKind.Secondary,
+                    size = JButtonSize.Large, enabled = later.enabled && !busy)
+                JButton(dismiss.label, dismiss.onClick, dismissModifier.weight(1f), kind = JButtonKind.Secondary,
+                    size = JButtonSize.Large, enabled = dismiss.enabled && !busy)
+            }
+        }
+    }
+}

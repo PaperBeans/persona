@@ -28,16 +28,6 @@ class ManagerRosterTest {
         // An installing manager is not one yet: one installed is not multi.
         val one = ManagerRoster(listOf(HubManager("assistant", online = true, isDefault = true), HubManager("m-4", installing = "x")), "assistant")
         assertFalse(one.isMulti)
-        assertNull(one.groups(listOf("a")) { null })
-    }
-
-    @Test fun groupsFollowTheRosterLeaveEmptyOnesOutAndUnstampedAreTheDefaults() {
-        val items = listOf("a" to "assistant", "b" to null, "c" to "m-3", "d" to "gone", "e" to "m-2")
-        val groups = requireNotNull(roster.groups(items) { it.second })
-        assertEquals(listOf("m-2", "assistant", "m-3", "gone"), groups.map { it.id })
-        assertEquals(listOf("b", "e"), groups.first().items.map { it.first })
-        assertNull(groups.last().manager)
-        assertEquals(listOf("m-2", "m-3"), requireNotNull(roster.groups(listOf("x" to "m-3", "y" to null)) { it.second }).map { it.id })
     }
 
     @Test fun theChoiceNamesItsManagerAndOwnsItsItems() {

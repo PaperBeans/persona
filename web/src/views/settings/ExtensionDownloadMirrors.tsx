@@ -8,7 +8,7 @@ import { Group, Row, settingsInputClass } from "./SettingsParts";
 
 /** Independent of the hub's updater: older hubs and failed update reads must not hide download settings. */
 export function ExtensionDownloadMirrors() {
-  return <ConfigurationManager title={t("settings-hubsettings.mirror_manager")} rowLabel={t("settings-hubsettings.mirror_manager_row")} hint={t("settings-hubsettings.mirror_manager_hint")} hideSingle>
+  return <ConfigurationManager pick title={t("settings-hubsettings.mirror_manager")} rowLabel={t("settings-hubsettings.mirror_manager_row")} hint={t("settings-hubsettings.mirror_manager_hint")} hideSingle>
     {(manager) => <MirrorEditor manager={manager} />}
   </ConfigurationManager>;
 }

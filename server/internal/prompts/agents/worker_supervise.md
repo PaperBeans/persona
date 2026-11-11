@@ -1,0 +1,15 @@
+Persona · supervision: {{len .Entries}} of the worker tasks you handed out with task_plan need you. This message is not from the user.
+{{range $i, $e := .Entries}}
+{{inc $i}}. "{{$e.Title}}" ({{$e.ID}}): {{if eq $e.Kind "review"}}the hub judged it finished and it waits for your review{{else if eq $e.Kind "idle"}}the worker stopped, but the work is not finished{{else if eq $e.Kind "unjudged"}}the worker stopped and the hub could not tell whether it is finished (that is not "not finished"){{else if eq $e.Kind "needs_you"}}the worker waits for an answer{{with $e.Minutes}}, for {{.}} minutes{{end}}{{else if eq $e.Kind "stalled"}}no progress for {{$e.Minutes}} minutes{{else if eq $e.Kind "interrupted"}}the model service cut its turn off{{else if eq $e.Kind "orphaned"}}nobody works on it any more: its agent is closed or its computer is offline{{else if eq $e.Kind "failed"}}its agent did not start{{else if eq $e.Kind "started"}}its agent started after a retry{{else if eq $e.Kind "report"}}the worker reports {{if eq $e.Report "question"}}a question for you{{else if eq $e.Report "blocked"}}that it is blocked{{else if eq $e.Report "done"}}that it is done{{else}}progress{{end}}{{with $e.Step}} (step {{.}}{{with $e.Steps}} of {{.}}{{end}}){{end}}{{end}}{{with $e.Detail}} ({{.}}){{end}}{{with $e.Machine}}; on {{.}}{{end}}{{if $e.Round}}; sent back {{$e.Round}} time(s){{end}}
+   Done when: {{with $e.DoneWhen}}{{range $j, $c := .}}{{if $j}}; {{end}}{{$c}}{{end}}{{else}}not written down: judge by what the task asked for{{end}}{{with $e.Said}}
+   It said:
+{{chomp (indent "   " .)}}{{end}}{{with $e.Evidence}}
+   Its evidence:{{range .}}
+   - {{.}}{{end}}{{end}}{{with $e.Last}}
+   Its last reply:
+{{chomp (indent "   " .)}}{{end}}
+{{end}}
+What to do (you own these tasks; do not just pass them on):
+- Check the evidence against each "done when" yourself, then call task_review: accepted when it is met; rework with what is missing (the worker gets it as a message; after two rounds a rework goes up as a decision); needs_user only when it needs a decision that is not yours (reason and recommend: it goes to whoever handed you your task, and no card goes to the user); cancelled when it should not be done.
+- You can review your own workers only. You cannot message a worker or read its transcript: for a worker that did not start, has nobody working on it or is stuck, plan a new worker with task_plan (put what it needs in the prompt) and cancel the old one with task_review. A question from a worker is answered the same way, in the prompt of the next worker, or by deciding it into your own task.
+- Progress reports need nothing from you.

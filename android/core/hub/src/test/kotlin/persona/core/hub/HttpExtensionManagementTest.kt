@@ -335,6 +335,19 @@ class HttpExtensionManagementTest {
         assertFalse(context.locale.isNullOrEmpty())
     }
 
+    // The locale's language is the app's (what Accept-Language says), not the phone's; the region stays the phone's.
+    @Test fun theDeviceContextLocaleFollowsTheAppLanguage() {
+        val before = java.util.Locale.getDefault()
+        try {
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("en-US"))
+            persona.core.contracts.ClientLanguage.current = persona.core.contracts.AppLanguage.Ja
+            assertEquals("ja-US", HttpExtensionManagement.deviceContext().locale)
+        } finally {
+            java.util.Locale.setDefault(before)
+            persona.core.contracts.ClientLanguage.current = persona.core.contracts.AppLanguage.En
+        }
+    }
+
     // UI version 2's items read; one this app cannot even decode (a newer hub's, a field of another type) is left out
     // and the rest of the view stays: never a blank page.
     @Test fun readsTheNewItemsAndSkipsWhatItCannotRead() = withHub { server, api ->

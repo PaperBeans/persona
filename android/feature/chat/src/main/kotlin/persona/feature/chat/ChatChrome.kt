@@ -54,7 +54,8 @@ internal fun ChatHeader(
     // Renaming changes the terminal tab and Claude's /rename: a session without a terminal has neither.
     val canRename = state.canRename && online && machine?.online != false && !readOnly && session != null && session.canTerminal
     LaunchedEffect(session?.key, menu) { if (session != null && menu) state.loadMute(session) }
-    LaunchedEffect(menu, dialog, sharing) { onOverlay(menu || dialog != null || sharing != null) }
+    var modeOverlay by remember { mutableStateOf(false) }
+    LaunchedEffect(menu, dialog, sharing, modeOverlay) { onOverlay(menu || dialog != null || sharing != null || modeOverlay) }
     DisposableEffect(Unit) { onDispose { onOverlay(false) } }
     val line = resolveStatusLine(statusState)
     val status = line?.status ?: Status.entries.firstOrNull { it.name == session?.agentState?.name } ?: Status.Unknown
@@ -80,6 +81,8 @@ internal fun ChatHeader(
         agentMark = session?.agentMark,
     ) {
         actions()
+        // The permission mode, always in view and changed here (#3957, iOS #3719).
+        if (session != null && SessionModes.showsInHeader(session)) HeaderModeButton(session, state, online && !readOnly) { modeOverlay = it }
         JIconButton(PhIcons.DotsThree, stringResource(R.string.chat_chrome_more), { menu = true })
     }
     val resumeCopied = stringResource(R.string.chat_chrome_resume_copied)

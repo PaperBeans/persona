@@ -47,9 +47,9 @@ import java.io.File
 import java.time.Instant
 
 /**
- * The assistant page with several managers (docs/assistant/managers.md step 4): the switcher under the top bar (the default
- * first), an offline manager chosen (greyed, its composer off and saying 最后同步于, nothing sent), an online one, and
- * one manager (no switcher), in every style, light and dark. Written to `build/managers-shots/assistant-*.png`.
+ * The assistant page with several assistants: selection belongs to the sidebar, an offline current assistant is
+ * read-only and says when it last synced, and an online one can send. With one installed assistant the product
+ * header stays unchanged in every style, light and dark. Written to `build/managers-shots/assistant-*.png`.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -144,10 +144,16 @@ class AssistantManagersShotsTest {
         rule.waitForIdle()
         assertNull(AssistantManagerChoice.current.value.manager)
         assertNull(AssistantManagerChoice.header("hub"))
-        // One manager: the page as before.
-        shown = one
+        // One installed assistant keeps the product title and no personal identity in every style.
+        shown = one.copy(managers = listOf(one.managers.first().copy(name = "Personal assistant name")))
         rule.waitForIdle()
-        capture("single-glass-light")
+        for (s in AppStyle.entries) for (d in listOf(false, true)) {
+            rule.runOnIdle { style = s; dark = d }
+            assertTrue(rule.onAllNodesWithText("Persona").fetchSemanticsNodes().isNotEmpty())
+            assertEquals(0, rule.onAllNodesWithText("Personal assistant name").fetchSemanticsNodes().size)
+            assertEquals(0, rule.onAllNodes(hasText("工作") and hasClickAction()).fetchSemanticsNodes().size)
+            capture("single-${s.key}-${if (d) "dark" else "light"}")
+        }
     }
 
     @Test fun whatThePageKnowsOfItsManager() {

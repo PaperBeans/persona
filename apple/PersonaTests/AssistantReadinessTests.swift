@@ -59,7 +59,7 @@ struct AssistantReadinessTests {
         let limited = steps([("computer", "ok", nil), ("claude", "ok", nil), ("model", "problem", "rate_limited")], mode: "full")
         #expect(limited.blockingStep == nil && limited.cardStep?.code == "rate_limited")
         let zero = steps([("computer", "todo", "no_machine"), ("claude", "unknown", nil), ("model", "unknown", nil)], mode: "setup")
-        #expect(zero.blockingStep?.id == "computer" && zero.stepsLeft == 3)
+        #expect(zero.blockingStep?.id == "computer" && zero.stepsLeft == 1)
         #expect(ReadinessRoute.sendTitle(zero.blockingStep!) == "先添加电脑")
         #expect(ReadinessRoute.sendTitle(.init(id: "computer", state: "problem", code: "node_unreachable")) == "先唤醒电脑")
         #expect(ReadinessRoute.sendTitle(.init(id: "computer", state: "problem", code: "machine_pending")) == "先确认电脑")

@@ -118,8 +118,10 @@ func TestRunCheck(t *testing.T) {
 	if s := r.Check(Look{Now: t0.Add(5 * time.Hour), Exists: true}); s.Do != Finish || !strings.Contains(s.Note, "先不等了") {
 		t.Fatalf("too long: %+v", s)
 	}
+	// A held run ends with a word as well: its progress card went back with its message, so an ending without a note
+	// would be a quiet one and nothing would be said anywhere.
 	held := &Run{Started: t0, Held: true}
-	if s := held.Check(Look{Now: t0.Add(3 * time.Hour), Exists: true}); s.Do != Finish || s.Note != "" || s.End != EndGaveUp {
+	if s := held.Check(Look{Now: t0.Add(3 * time.Hour), Exists: true}); s.Do != Finish || !strings.Contains(s.Note, "先不等了") || s.End != EndGaveUp {
 		t.Fatalf("held too long: %+v", s)
 	}
 }
@@ -156,6 +158,40 @@ func TestRunDecide(t *testing.T) {
 	}
 	if res := fresh.Decide(Reading{Found: true}, Look{Now: t0.Add(3 * time.Minute)}); res == nil || res.Answer != "" || res.Quiet {
 		t.Fatalf("no words at all: %+v", res)
+	}
+}
+
+// A held run's background wait can also end badly: the turn its background work started was interrupted or cut off by a
+// model API error, or its computer went offline. Its quiet ending (nothing more to say) still carries that outcome, so
+// the channel is not told the work finished when it did not (#4228).
+func TestRunDecideHeldQuietEndKeepsOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rd   Reading
+		look Look
+		want End
+	}{
+		{"done", Reading{Found: true, Last: 21}, Look{}, EndDone},
+		{"stopped", Reading{Found: true, Last: 21, Stopped: transcript.InterruptedNotice}, Look{}, EndStopped},
+		{"api error", Reading{Found: true, Last: 21, Stopped: transcript.APIErrorPrefix + "overloaded"}, Look{}, EndError},
+		{"failed turn", Reading{Found: true, Last: 21}, Look{Failed: true}, EndError},
+		{"offline", Reading{Found: true, Last: 21}, Look{Offline: true}, EndOffline},
+	} {
+		look := tc.look
+		look.Now = t0.Add(HeldIdleMost + time.Minute)
+		res := (&Run{Started: t0, Held: true}).Decide(tc.rd, look)
+		if res == nil || !res.Quiet || res.End != tc.want {
+			t.Fatalf("%s: %+v", tc.name, res)
+		}
+		if res.Held {
+			t.Fatalf("%s: a quiet ending is final: %+v", tc.name, res)
+		}
+	}
+	// Why the turn ended comes along, as on an end without words that is not quiet.
+	res := (&Run{Started: t0, Held: true}).Decide(Reading{Found: true, Last: 21, Stopped: transcript.InterruptedNotice},
+		Look{Now: t0.Add(HeldIdleMost + time.Minute)})
+	if res.Stopped != transcript.InterruptedNotice {
+		t.Fatalf("stopped: %+v", res)
 	}
 }
 

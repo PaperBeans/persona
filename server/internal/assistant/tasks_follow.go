@@ -412,6 +412,21 @@ func (s *Service) routeToTask(ctx context.Context, conversation, todoID, text st
 // routeToTaskChecked lets automatic decisions recheck their task after slow session/device lookups.
 // Direct user messages retain routeToTask's ability to reuse a completed task's agent.
 func (s *Service) routeToTaskChecked(ctx context.Context, conversation, todoID, text string, guard func(Todo) bool) (FeedItem, error) {
+	return s.routeToTaskAs(ctx, conversation, todoID, text, "", guard)
+}
+
+// routedRelay marks a routed item the hub wrote for the owner (`relay`): an answer of theirs it put into words for the
+// task's agent (a recommendation taken, an option chosen, a reply to a card), as opposed to what they typed to the
+// task themselves. The apps draw both as the owner's; where a task came from reads only the latter (decision.go).
+const routedRelay = "answer"
+
+// relayToTask is routeToTaskChecked for what the hub words on the owner's behalf (routedRelay).
+func (s *Service) relayToTask(ctx context.Context, conversation, todoID, text string, guard func(Todo) bool) (FeedItem, error) {
+	return s.routeToTaskAs(ctx, conversation, todoID, text, routedRelay, guard)
+}
+
+// routeToTaskAs is routeToTaskChecked; relay marks the routed item it leaves ("": the owner's own words).
+func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text, relay string, guard func(Todo) bool) (FeedItem, error) {
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return FeedItem{}, err
 	}
@@ -450,5 +465,9 @@ func (s *Service) routeToTaskChecked(ctx context.Context, conversation, todoID, 
 	if err := s.call(sctx, c.MachineID, DeviceSessionSend, map[string]any{"session_id": c.SessionID, "text": text}, nil); err != nil {
 		return FeedItem{}, err
 	}
-	return s.appendFeed(sctx, conversation, feedRouted, todoID, map[string]string{"text": text})
+	body := map[string]string{"text": text}
+	if relay != "" {
+		body["relay"] = relay
+	}
+	return s.appendFeed(sctx, conversation, feedRouted, todoID, body)
 }

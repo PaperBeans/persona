@@ -28,6 +28,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation3.runtime.NavKey
 import persona.core.contracts.api.BindPrompt
 import persona.core.contracts.api.ChannelDetail
@@ -125,6 +126,8 @@ internal fun ChannelPage(channels: ChannelManagement?, channelId: String, onBack
         return
     }
     val res = LocalResources.current
+    // The page is the current assistant's (its Settings' first group): what it links to is that one's too.
+    val owner = currentAssistant().takeIf { it.roster != null }?.id
     val model = remember(channels, channelId) { ChannelModel(channels, channelId) }
     val state by model.state.collectAsState()
     val assistant by remember(channels) { channels.conversations }.collectAsState(emptyList())
@@ -133,9 +136,15 @@ internal fun ChannelPage(channels: ChannelManagement?, channelId: String, onBack
     var picking by remember { mutableStateOf(false) }
     var unbinding by remember { mutableStateOf(false) }
     LaunchedEffect(model) { model.load() }
-    // A code on screen: ask the hub again on its own until it is scanned or sent (and the page is open).
+    // A code on screen: ask the hub again on its own until it is scanned or sent, while the page is shown and for a
+    // while after (the user scans with another app); back in front, ask at once (`pollWhileShown`).
     val polled = state.bind.prompt?.takeIf { state.bind.polled }
-    LaunchedEffect(model, polled?.step, polled?.kind, polled?.userCode, polled?.url) { if (polled != null) model.poll() }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // When the page left, once per sign-in: a new code (the effect below starting again) keeps it.
+    val away = remember(model, polled != null) { SignInAway() }
+    LaunchedEffect(model, lifecycle, away, polled?.step, polled?.kind, polled?.userCode, polled?.url) {
+        if (polled != null) pollWhileShown(lifecycle.startedFlow(), away, catchUp = { model.catchUp() }, poll = { model.poll() })
+    }
     LaunchedEffect(state.boundAs) {
         val who = state.boundAs ?: return@LaunchedEffect
         feedback?.notice(if (who.isBlank()) res.getString(R.string.settings_src_channel_bound) else res.getString(R.string.settings_src_channel_bound_as, who))
@@ -169,7 +178,7 @@ internal fun ChannelPage(channels: ChannelManagement?, channelId: String, onBack
                     ChannelNote(stringResource(R.string.settings_src_channel_test_note))
                 }
             }
-            val more = ChannelText.settingsDestination(detail.settingsUrl)
+            val more = ChannelText.settingsDestination(detail.settingsUrl, owner)
             if (more != null && onOpen != null) item("more") {
                 Column {
                     JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.l)) {

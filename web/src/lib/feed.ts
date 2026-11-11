@@ -11,7 +11,7 @@ import type { AssistantView, ViewAction } from "./extension-wire";
 import { isResumed } from "./reconnect";
 import { deleteTodo, type Todo, type TodoAsk } from "./todos";
 import { getInbox, itemPath } from "./inbox";
-import { conversationManager, itemHeaders } from "./manager-choice";
+import { BUILTIN_MANAGER, conversationManager, defaultManager, itemHeaders, MANAGER_HEADER, managerHeaderFor, routedConversationManager } from "./manager-choice";
 import { closePanel, getPanel } from "./panel";
 import type { ChatLine } from "./turns";
 import type { Item } from "./types";
@@ -334,6 +334,11 @@ interface FeedState {
 }
 
 let st: FeedState = { feeds: {}, plans: {}, taskCards: {}, routes: {}, busy: {}, later: {} };
+let feedRevision = 0;
+const itemRevisions = new Map<string, number>();
+const draftOwners = new WeakMap<FeedItem, string>();
+const feedKey = (item: FeedItem) => `${item.conversation}/${item.id}`;
+const currentCard = (card: FeedItem) => st.feeds[card.conversation]?.find((it) => it.id === card.id) ?? card;
 const listeners = new Set<() => void>();
 function set(patch: Partial<FeedState>) {
   st = { ...st, ...patch };
@@ -380,6 +385,13 @@ export function cardFiled(it: FeedItem): { at: string } | undefined {
   return at && !field(it, "sent_at") ? { at } : undefined;
 }
 
+/** The user dismissed this exact draft, without sending it or completing its task. */
+export function cardDismissed(it: FeedItem): { at: string; id: string } | undefined {
+  const at = field(it, "dismissed_at");
+  const id = field(it, "dismissal_id");
+  return at && !cardSent(it) ? { at, id: id ?? "" } : undefined;
+}
+
 /** A blank a draft leaves to fill in (a phrase in full-width lenticular brackets, {{link}}): it would go out as it is. */
 export function draftPlaceholder(text: string): string | undefined {
   return /【[^】\n]*】|\{\{[^}\n]*\}\}/.exec(text)?.[0];
@@ -390,6 +402,12 @@ function received(items: FeedItem[], plans?: Record<string, TaskPlan>) {
   // one merge per conversation: merging item by item re-sorted the whole feed once per item of a 500-item page
   const byConversation = new Map<string, Map<string, FeedItem>>();
   for (const it of items) {
+    if (it.kind === "message") {
+      const before = feeds[it.conversation]?.find((old) => old.id === it.id);
+      const owner = draftOwners.get(it);
+      if (before && owner) draftOwners.set(before, owner);
+      if (!before || JSON.stringify(before.body) !== JSON.stringify(it.body)) itemRevisions.set(feedKey(it), ++feedRevision);
+    }
     const group = byConversation.get(it.conversation) ?? new Map<string, FeedItem>();
     group.set(it.id, it); // a later copy of an id wins, as merging one by one did
     byConversation.set(it.conversation, group);
@@ -430,21 +448,37 @@ export async function loadFeed(conversation: string) {
   }
 }
 
-/** One pass of loadFeed: the pages since the newest item the feed has now. */
+/** One bounded feed traversal. New hubs return a snapshot cursor; older hubs retain the timestamp fallback. */
 async function readFeedPages(conversation: string) {
   let last = st.feeds[conversation]?.at(-1)?.at;
+  let cursor: string | undefined;
+  const endpoint = `/assistant/conversations/${enc(conversation)}/feed`;
+  // Capture an authoritative owner, when known, for the whole traversal. An unknown conversation can still be
+  // routed by the hub itself; never stamp a guessed default onto cards arriving before their session metadata.
+  const owner = conversationManager(conversation)
+    ?? Object.values(getState().sessions).flat().find((s) => s.session_id === conversation)?.manager
+    ?? managerHeaderFor(endpoint);
+  // the default's conversation names none (itemHeaders): one manager gets the requests it always did
+  const headers = itemHeaders(owner);
   for (let n = 0; n < FEED_PAGES; n++) {
-    const res = await api<{ items: FeedItem[]; plans?: Record<string, TaskPlan>; task_cards?: TaskCardMetadata[] | null; views?: Record<string, AssistantView>; view_actions?: Record<string, ViewAction>; view_blocks?: string[] }>(
-      `/assistant/conversations/${enc(conversation)}/feed${last ? `?since=${encodeURIComponent(last)}` : ""}`,
-    );
+    const readingAt = feedRevision;
+    const query = cursor ? `?cursor=${enc(cursor)}` : `?paginate=1${last ? `&since=${enc(last)}` : ""}`;
+    const res = await api<{ items: FeedItem[]; next_cursor?: string; plans?: Record<string, TaskPlan>; task_cards?: TaskCardMetadata[] | null; views?: Record<string, AssistantView>; view_actions?: Record<string, ViewAction>; view_blocks?: string[] }>(endpoint + query, { headers });
     if (!st.feeds[conversation]) set({ feeds: { ...st.feeds, [conversation]: [] } });
     const items = res.items ?? [];
-    received(items, res.plans ?? undefined);
+    if (owner) for (const it of items) draftOwners.set(it, owner);
+    // A write or push accepted after this read started wins over the captured response.
+    received(items.filter((it) => (itemRevisions.get(feedKey(it)) ?? 0) <= readingAt), res.plans ?? undefined);
     if (res.task_cards?.length) set({ taskCards: { ...st.taskCards, [conversation]: upsertTaskCards(st.taskCards[conversation] ?? [], res.task_cards) } });
     // the cards' snapshot comes whole with every page: what an event missed comes back here
     applySnapshot(conversation, res);
+    if (typeof res.next_cursor === "string") {
+      if (!res.next_cursor || res.next_cursor === cursor || !items.length) break;
+      cursor = res.next_cursor;
+      continue;
+    }
     const newest = items.at(-1)?.at;
-    // the next page starts after this one's newest; one that did not move on would come back the same
+    // Compatibility: a hub without cursors advances by its last original timestamp.
     if (items.length < FEED_PAGE || !newest || (last && Date.parse(newest) <= Date.parse(last))) break;
     last = newest;
   }
@@ -465,7 +499,10 @@ export async function loadToday(conversation: string) {
 
 onHubEvent("assistant_feed", (m) => {
   const it = m.item as FeedItem | undefined;
-  if (it) received([it]);
+  if (it) {
+    draftOwners.set(it, typeof m.manager === "string" ? m.manager : BUILTIN_MANAGER);
+    received([it]);
+  }
 });
 // A connection that did not resume missed events: the conversations open here read their feed (and cards) again.
 onHubEvent("hello", (m) => {
@@ -539,7 +576,7 @@ export function planUltracodeToSend(plan: TaskPlan, ultracode: readonly boolean[
  * The header naming the manager of conversation, for what its feed offers (a plan, a briefing's question): the routes
  * name no conversation, so the hub would take them to the default manager (docs/protocol/protocol.md "Per-manager
  * routing"), whichever assistant the conversation is (another made current, or another's conversation opened here).
- * The manager a page noted for it, else the one the hub's sessions list has it under; none for the default's.
+ * The manager a page noted for it, else the one the hub's sessions list has it under, else the one its address named; none for the default's.
  */
 export function conversationHeaders(conversation: string): Record<string, string> | undefined {
   const noted = conversationManager(conversation);
@@ -548,7 +585,8 @@ export function conversationHeaders(conversation: string): Record<string, string
     const s = list.find((x) => x.session_id === conversation);
     if (s) return itemHeaders(s.manager);
   }
-  return undefined;
+  const routed = routedConversationManager(conversation);
+  return routed ? itemHeaders(routed) : undefined;
 }
 
 export async function startPlan(plan: TaskPlan, remember: boolean, edits?: Partial<PlanTask>[]) {
@@ -596,11 +634,16 @@ export async function retryTask(todo: Todo) {
   }
 }
 
+/** How a decision is answered other than by taking its recommendation (#3804): one of its options by its label, or one
+ *  of the fixed responses that say the owner cannot answer it as asked. */
+export type AskAnswer = { option: string } | { response: string };
+
 /** The Accept button of a `brief` item's task to verify: "accepted", or "handled" when the hub says that round is over
- *  (asked again since, or already verified). Any other failure throws. */
-export async function acceptBrief(todoId: string, askedAt: string): Promise<"accepted" | "handled"> {
+ *  (asked again since, or already verified). Any other failure throws. `answer`: a decision's option or fixed response
+ *  instead of its recommendation. */
+export async function acceptBrief(todoId: string, askedAt: string, answer?: AskAnswer): Promise<"accepted" | "handled"> {
   try {
-    await api(`/todos/${enc(todoId)}/accept`, { method: "POST", json: { asked_at: askedAt } });
+    await api(`/todos/${enc(todoId)}/accept`, { method: "POST", json: { asked_at: askedAt, ...answer } });
   } catch (e) {
     if (e instanceof ApiError && e.status === 409) return "handled";
     throw e;
@@ -680,7 +723,7 @@ export async function sendMessage(card: FeedItem, text: string) {
   const itemId = card.ref;
   const latest = () => st.feeds[card.conversation]?.find((i) => i.id === card.id) ?? card;
   // Handled elsewhere (#5095): the hub would refuse it, so nothing goes out.
-  if (!itemId || st.busy[card.id] || cardSent(latest()) || cardFiled(latest())) return;
+  if (!itemId || st.busy[card.id] || cardSent(latest()) || cardFiled(latest()) || cardDismissed(latest())) return;
   const blank = draftPlaceholder(text);
   if (blank) throw new Error(t("lib-feed.draft_blank", { blank }));
   set({ busy: { ...st.busy, [card.id]: true } });
@@ -689,10 +732,60 @@ export async function sendMessage(card: FeedItem, text: string) {
     // whose list has that id (docs/assistant/managers.md "Clients"); none: the default's
     const listed = getInbox().items.filter((it) => it.id === itemId);
     const manager = conversationManager(card.conversation) ?? (listed.length === 1 ? listed[0].manager : undefined);
-    await api(`${itemPath(itemId)}/reply`, { method: "POST", json: { text, card: card.id }, headers: itemHeaders(manager) });
+    await api(`${itemPath(itemId)}/reply`, { method: "POST", json: { text, card: card.id }, headers: draftHeaders(card, manager) });
     // The hub's assistant_feed event brings the card as it recorded it; this draws it sent without waiting.
     const now = latest();
     if (!cardSent(now)) received([{ ...now, body: { ...now.body, sent_at: new Date().toISOString(), sent: text } }]);
+    return true;
+  } finally {
+    set({ busy: { ...st.busy, [card.id]: false } });
+  }
+}
+
+function draftHeaders(card: FeedItem, fallback?: string): Record<string, string> {
+  const owner = draftOwners.get(currentCard(card)) ?? draftOwners.get(card) ?? conversationManager(card.conversation)
+    ?? Object.values(getState().sessions).flat().find((s) => s.session_id === card.conversation)?.manager ?? fallback ?? defaultManager();
+  // Include the default explicitly: otherwise api() inserts a later assistant selection.
+  return { [MANAGER_HEADER]: owner };
+}
+
+function applyDraftReceipt(card: FeedItem, beforeBody: string | undefined, item: FeedItem, owner: string) {
+  if (JSON.stringify(currentCard(card).body) !== beforeBody) return;
+  draftOwners.set(item, owner);
+  received([item]);
+}
+
+/** Resolve only this draft on the hub. Send and dismiss share a synchronous admission guard. */
+export async function dismissMessage(card: FeedItem): Promise<string | undefined> {
+  const latest = st.feeds[card.conversation]?.find((it) => it.id === card.id) ?? card;
+  if (card.kind !== "message" || st.busy[card.id] || cardSent(latest) || cardFiled(latest) || cardDismissed(latest)) return;
+  const headers = draftHeaders(card);
+  const beforeBody = JSON.stringify(currentCard(card).body);
+  set({ busy: { ...st.busy, [card.id]: true } });
+  try {
+    const result = await api<{ item: FeedItem; dismissal_id: string }>(`/assistant/feed/${enc(card.id)}/dismiss`, {
+      method: "POST", json: { draft: field(card, "draft") ?? "" }, headers,
+    });
+    applyDraftReceipt(card, beforeBody, result.item, headers[MANAGER_HEADER]);
+    return result.dismissal_id;
+  } finally {
+    set({ busy: { ...st.busy, [card.id]: false } });
+  }
+}
+
+/** Undo names the dismissal receipt, so a newer draft or decision cannot be overwritten. */
+export async function undoDismissMessage(card: FeedItem, dismissalId: string): Promise<boolean> {
+  if (!dismissalId || st.busy[card.id]) return false;
+  const headers = draftHeaders(card);
+  const beforeBody = JSON.stringify(currentCard(card).body);
+  set({ busy: { ...st.busy, [card.id]: true } });
+  try {
+    const result = await api<{ item: FeedItem }>(`/assistant/feed/${enc(card.id)}/undo-dismiss`, {
+      method: "POST", json: { dismissal_id: dismissalId }, headers,
+    });
+    applyDraftReceipt(card, beforeBody, result.item, headers[MANAGER_HEADER]);
+    const now = currentCard(card);
+    return !cardDismissed(now) && !cardSent(now) && !cardFiled(now);
   } finally {
     set({ busy: { ...st.busy, [card.id]: false } });
   }

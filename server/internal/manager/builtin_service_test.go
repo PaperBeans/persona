@@ -286,6 +286,14 @@ const goodBinary = "#!/bin/sh\necho personad test\n"
 // times the manager ran, and RunBuiltin's error.
 func runBuiltin(t *testing.T, idle assistant.Idle, during func(run int), done <-chan struct{}) (string, int, error) {
 	t.Helper()
+	var out syncBuffer
+	runs, err := runBuiltinTo(t, &out, idle, during, done)
+	return out.String(), runs, err
+}
+
+// runBuiltinTo is runBuiltin writing to out, for a test that waits on a line while RunBuiltin runs.
+func runBuiltinTo(t *testing.T, out *syncBuffer, idle assistant.Idle, during func(run int), done <-chan struct{}) (int, error) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cancelAfterRestart = cancel
@@ -318,9 +326,8 @@ func runBuiltin(t *testing.T, idle assistant.Idle, during func(run int), done <-
 		<-run.Done()
 		return nil
 	}
-	var out syncBuffer
-	err := RunBuiltin(ctx, update.Build{}, &out)
-	return out.String(), int(runs.Load()), err
+	err := RunBuiltin(ctx, update.Build{}, out)
+	return int(runs.Load()), err
 }
 
 // syncBuffer is a strings.Builder for writers on several goroutines.
@@ -470,13 +477,16 @@ func TestBuiltinBinaryAtStartNotTried(t *testing.T) {
 func TestBuiltinStopsWhileWaitingForIdle(t *testing.T) {
 	_, write, restarts := newBinaryEnv(t, nil)
 	release := make(chan struct{})
-	out, _, err := runBuiltin(t, func(context.Context) (bool, string) { return false, "busy" }, func(int) {
+	var out syncBuffer
+	waiting := func() bool { return strings.Contains(out.String(), "waiting to start again") }
+	_, err := runBuiltinTo(t, &out, func(context.Context) (bool, string) { return false, "busy" }, func(int) {
 		write(goodBinary+"# new\n", 0o755)
-		time.Sleep(100 * time.Millisecond)
+		// Said only once the new binary passed its check, which can take a while (a Mac's first exec of a new file).
+		waitFor(t, "the manager to say it waits for idle", waiting)
 		close(release)
 	}, release)
-	if err != nil || restarts.Load() != 0 || !strings.Contains(out, "waiting to start again") {
-		t.Fatalf("err %v, restarts %d\n%s", err, restarts.Load(), out)
+	if err != nil || restarts.Load() != 0 || !waiting() {
+		t.Fatalf("err %v, restarts %d\n%s", err, restarts.Load(), out.String())
 	}
 }
 

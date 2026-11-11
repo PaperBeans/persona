@@ -161,6 +161,49 @@ class TaskAcceptanceTest {
         assertTrue(api.patches.isEmpty())
     }
 
+    @Test fun briefCompletionUsesTheCurrentRoundAndSurvivesAFailedRefresh() = runTest {
+        val api = Api(listOf(decision))
+        var cached = listOf(decision)
+        val cache = object : TodoCache {
+            override suspend fun read() = cached
+            override suspend fun write(todos: List<Todo>) { cached = todos }
+        }
+        val store = TasksStore(api, Connection(), backgroundScope, cache)
+        store.reloadTodos(); runCurrent()
+        store.setRoute("main", decision.id)
+
+        // A brief for an older round must never complete the newer ask under the same todo id.
+        store.finishBrief(decision.id, "2026-10-31T09:00:00Z", { throw it }); runCurrent()
+        assertTrue(api.patches.isEmpty())
+        assertEquals(BriefOutcome.AlreadyHandled,
+            store.briefOutcomes.value[briefAcceptOutcomeKey(decision.id, "2026-10-31T09:00:00Z")])
+
+        api.readFailure = IllegalStateException("synthetic refresh failure")
+        store.finishBrief(decision.id, decision.ask!!.askedAt, { throw it }); runCurrent()
+        assertEquals(listOf(decision.id to true), api.patches)
+        assertTrue(store.todos.value.single().isDone)
+        assertNull(store.todos.value.single().ask)
+        assertNull(store.routes.value["main"])
+        assertTrue(cached.single().isDone)
+        assertNull(cached.single().ask)
+        assertEquals(BriefOutcome.Completed,
+            store.briefOutcomes.value[briefAcceptOutcomeKey(decision.id, decision.ask!!.askedAt)])
+    }
+
+    @Test fun briefCompletionBeforeTodosLoadWaitsForTheCurrentRound() = runTest {
+        val api = Api(listOf(decision))
+        val store = TasksStore(api, Connection(), backgroundScope)
+        store.finishBrief(decision.id, decision.ask!!.askedAt, { throw it }); runCurrent()
+        assertTrue(api.patches.isEmpty())
+        assertNull(store.briefOutcomes.value[briefAcceptOutcomeKey(decision.id, decision.ask!!.askedAt)])
+        assertEquals(decision, store.todos.value.single())
+
+        store.finishBrief(decision.id, decision.ask!!.askedAt, { throw it }); runCurrent()
+        assertEquals(listOf(decision.id to true), api.patches)
+        assertEquals(BriefOutcome.Completed,
+            store.briefOutcomes.value[briefAcceptOutcomeKey(decision.id, decision.ask!!.askedAt)])
+    }
+
     @Test fun acceptedRoundCannotResurrectFromDelayedReadButANewAskSurvives() = runTest {
         val original = Todo("task", origin = "main", ask = TodoAsk(verdict = "Check the deployed page", askedAt = "2026-11-01T09:00:00Z"))
         val api = Api(listOf(original))

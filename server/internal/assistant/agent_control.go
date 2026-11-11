@@ -344,6 +344,7 @@ func (h *handedTask) sent(ctx context.Context, s *Service, text string) string {
 		s.taskCard(ctx, h.self, h.todo.ID)
 	} else {
 		doneWhen, expect := cleanDoneWhen(h.task.DoneWhen), max(0, min(h.task.ExpectMinutes, 24*60))
+		s.releaseHold(ctx, h.todo.ID)                                            // the supervisor sent its agent on: follow-ups go again (decision.go)
 		v, err := s.rescope(ctx, h.todo, h.self, "agent_send", doneWhen, expect) // through the brief's log, as task_scope
 		if err != nil {
 			s.logf("task %s: supervision: %v", h.todo.ID, err)
@@ -570,6 +571,17 @@ func (s *Service) reportToSupervisor(ctx context.Context, machine, session strin
 	if !ok {
 		return "Nobody receives this: your work is not a task Persona supervises. Ask the user what you need the usual way.", errNoSupervisor
 	}
+	if s.agentSupervised(t) {
+		// A leader whose task closed leaves the worker to the conversation above it: rehome it now, so this report is
+		// told to that conversation instead of being lost until the next watch (task_leader.go). With nobody above, the
+		// worker is cancelled and says so.
+		if lead, _, _ := s.leaderAbove(t); lead.ID == "" || !s.leaderOpen(lead) {
+			var cancelled bool
+			if t, cancelled = s.rehomeWorker(ctx, t); cancelled {
+				return "Your task leader is gone and nobody is above it, so this task was cancelled. Stop here; the user is not asked.", errNoSupervisor
+			}
+		}
+	}
 	if !s.upReports.allow(machine, session, now) {
 		return "", fmt.Errorf("too many reports: at most %d in %d minutes; put what is left into one report later", reportLimit, int(reportWindow.Minutes()))
 	}
@@ -584,7 +596,8 @@ func (s *Service) reportToSupervisor(ctx context.Context, machine, session strin
 	if steps > 0 {
 		step = min(step, steps)
 	}
-	notUrgent := a.Urgent != nil && !*a.Urgent
+	// A task leader's worker has no owner briefing to wait for: its report goes to the leader at once, urgent or not.
+	notUrgent := a.Urgent != nil && !*a.Urgent && !s.agentSupervised(t)
 	if notUrgent && a.Kind == upReportQuestion {
 		answer, queued := s.reportLater(ctx, t, machine, session, text, evidence, now)
 		if queued {

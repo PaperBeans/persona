@@ -128,7 +128,7 @@ const (
 // minEvery: an interval task runs at most this often (each run is a whole claude turn).
 const minEvery = 5
 
-// A leader with open supervised todos gets a follow-up every 10 minutes, whatever longer interval the task has.
+// A leader with active supervised agents gets a follow-up every 10 minutes, whatever longer interval the task has.
 const (
 	leaderOpenEveryMinutes = 10
 	leaderOpenEvery        = leaderOpenEveryMinutes * time.Minute
@@ -177,7 +177,7 @@ func (t Task) next(after time.Time, loc *time.Location) time.Time {
 	return t.At
 }
 
-// shortForLeader reports whether open supervised work shortens this interval follow-up to 10 minutes.
+// shortForLeader reports whether active supervised work shortens this interval follow-up to 10 minutes.
 func shortForLeader(t Task, open map[string]bool) bool {
 	return t.Enabled && t.Repeat == repeatInterval && t.SessionID != "" && t.EveryMinutes > leaderOpenEveryMinutes && open[t.SessionID]
 }
@@ -206,8 +206,8 @@ func (t Task) nextWithLeaderCadence(now time.Time, loc *time.Location, open map[
 	return next
 }
 
-// leaderOpenWork returns current leaders with at least one open todo they supervise. Callers take this
-// snapshot before schedule.mu: it reads settings and todos, which must not be read under the schedule lock.
+// leaderOpenWork returns leaders with an open supervised todo whose agents are working or waiting automatically.
+// Read agent sessions outside todos.mu, and take this snapshot before schedule.mu.
 func (s *Service) leaderOpenWork(ctx context.Context) map[string]bool {
 	cfg := s.settings(ctx)
 	leaders := map[string]bool{}
@@ -222,17 +222,26 @@ func (s *Service) leaderOpenWork(ctx context.Context) map[string]bool {
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return nil // a read failure leaves the task's own interval in place for this pass
 	}
-	var open map[string]bool
+	var todos []Todo
 	s.todos.mu.RLock()
-	defer s.todos.mu.RUnlock()
 	for _, t := range s.todos.todos {
 		if t.DoneAt != nil || t.Supervision == nil || !leaders[t.Supervision.Supervisor] {
 			continue
 		}
-		if open == nil {
-			open = map[string]bool{}
+		todos = append(todos, copyTodoLocked(t))
+	}
+	s.todos.mu.RUnlock()
+	open := map[string]bool{}
+	for _, t := range todos {
+		if open[t.Supervision.Supervisor] {
+			continue
 		}
-		open[t.Supervision.Supervisor] = true
+		for _, c := range s.taskAgents(ctx, t) {
+			if c.State == proto.StateWorking || c.Work != nil && managerWaits(c.Work) {
+				open[t.Supervision.Supervisor] = true
+				break
+			}
+		}
 	}
 	return open
 }

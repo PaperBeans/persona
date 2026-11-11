@@ -9,6 +9,7 @@ import { RecordingMinutes } from "./RecordingMinutes";
 import { RecordingAsks } from "./RecordingAsks";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { Relationships } from "./Relationships";
+import { TopicPoints } from "./TopicPoints";
 import { ago, sessionPreview, sessionTitle, shortPath, stateOf, tabLabel } from "../../lib/format";
 import {
   agentPreset,
@@ -179,7 +180,8 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
   const facts = d ? factsOf(d.kind, d.meta) : null;
   const rec = d ? recordingView(d.kind, d.meta, d.segments) : null;
   const log = timeline(d?.log);
-  const prof = profile(d?.summary, e.one_line, e.name);
+  // A topic's summary is its points as Markdown (for search and Persona): the page shows the points themselves.
+  const prof = d?.kind === "topics" ? "" : profile(d?.summary, e.one_line, e.name);
   const dirs = dirsOf(d?.meta);
   const recent = d?.kind === "chats" ? parseRecent(d.recent) : [];
   const into = typeof d?.meta?.merged_into === "string" ? d.meta.merged_into : "";
@@ -340,6 +342,8 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
                 refresh={load}
                 onSaved={onSaved}
               />}
+
+              {d.kind === "topics" && <TopicPoints detail={d} onOpen={onOpen} />}
 
               {prof && (
                 <section>
@@ -618,7 +622,8 @@ function Transcript({ rec, query, highlighted }: { rec: RecordingView; query?: s
     <section>
       <SectionTitle title={t("knowledge-kbdetail.transcript")} count={rec.lines.filter((l) => !l.bookmark).length} />
       <Card>
-        {!rec.lines.length && <p className="px-4 py-2.5 text-[12.5px] text-ink-3">{t("knowledge-kbdetail.transcript_empty")}</p>}
+        {/* Trimmed: the bookmarks (in its metadata) are all that is left of it. */}
+        {(rec.trimmedAt || !rec.lines.length) && <p className="px-4 py-2.5 text-[12.5px] text-ink-3">{t(rec.trimmedAt ? "knowledge-kbdetail.transcript_expired" : "knowledge-kbdetail.transcript_empty")}</p>}
         <ol className="px-4 py-1.5">
           {rec.lines.map((l, i) => (
             <li key={i} id={transcriptLineId(l.seconds, l.bookmark)} tabIndex={-1} className={cx("flex gap-3 rounded-control py-1.5 text-[13px] leading-relaxed transition-colors", highlighted === transcriptLineId(l.seconds, l.bookmark) && "bg-accent-tint")}>

@@ -67,12 +67,37 @@ func conclusionServiceOn(t *testing.T, st Store, onlyConclusions bool) (s *Servi
 func reviewTask(t *testing.T, s *Service, todo string, args map[string]any) string {
 	t.Helper()
 	args["todo_id"] = todo
+	asDecision(args)
 	raw, _ := json.Marshal(args)
 	res, err := s.runTool(context.Background(), "server", "conv1", "task_review", raw)
 	if err != nil {
 		t.Fatalf("task_review %v: %v", args, err)
 	}
 	return res
+}
+
+// asDecision fills in what a needs_user review must carry to be a decision (#3804, decision_test.go tests each part)
+// where a test about something else left it out: why only the owner decides (one that cannot be undone, so nothing is
+// taken by default unless the test sets a reversible deadline), two options with the recommended first, and what
+// waiting costs. What the test gave is kept; a review without reason or recommend is still refused.
+func asDecision(args map[string]any) {
+	if args["verdict"] != "needs_user" {
+		return
+	}
+	if _, ok := args["why_owner"]; !ok {
+		args["why_owner"] = whyIrreversible
+		if rev, _ := args["reversible"].(bool); rev {
+			args["why_owner"] = whyPriority
+		}
+	}
+	if _, ok := args["options"]; !ok {
+		if rec, _ := args["recommend"].(string); rec != "" {
+			args["options"] = []map[string]string{{"label": rec, "leads_to": "照推荐的做"}, {"label": "先不动", "leads_to": "任务停在这里"}}
+		}
+	}
+	if _, ok := args["cost_of_waiting"]; !ok {
+		args["cost_of_waiting"] = "任务停着等你"
+	}
 }
 
 // waitsForReview has the task's agent finish a turn with reply until the judge's "done" puts the task up for review.
@@ -205,21 +230,37 @@ func TestDeployedWorkKeepsPleaseVerifyWithTheVerdictOnTop(t *testing.T) {
 	}
 }
 
-// A task sent back twice and still short goes to the owner: the card asks how to go on, not with the rework the agent
-// was told.
+// A task sent back twice and still short goes to the owner only as a decision they can answer (#3804): a third rework
+// that states none is refused and changes nothing, so the supervisor states one; with one, the card asks that, not
+// with the rework the agent was told.
 func TestReworkOverAsksTheOwnerHowToGoOn(t *testing.T) {
 	s, f, todo, posts, _ := conclusionService(t, false)
 	waitsForReview(t, s, f, todo.ID, "补了一部分")
 	if _, _, err := s.updateSupervision(context.Background(), todo.ID, func(v *Supervision) bool { v.Round = maxReworkRounds; return true }); err != nil {
 		t.Fatal(err)
 	}
-	res := reviewTask(t, s, todo.ID, map[string]any{"verdict": "rework", "note": "把深色截图补上，再跑一遍 CI"})
+	raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "verdict": "rework", "note": "把深色截图补上，再跑一遍 CI"})
+	_, err := s.runTool(context.Background(), "server", "conv1", "task_review", raw)
+	if err == nil || !strings.Contains(err.Error(), "sent back 2 times") || !strings.Contains(err.Error(), "why_owner") {
+		t.Fatalf("a third rework with no decision: %v", err)
+	}
+	if v := todoNow(s, todo.ID).Supervision; v.State != reviewPending || len(v.Reviews) != 0 || askOf(s, todo.ID) != nil {
+		t.Fatalf("the refused rework changed the task: %+v, ask %+v", v, askOf(s, todo.ID))
+	}
+	res := reviewTask(t, s, todo.ID, map[string]any{"verdict": "rework", "note": "把深色截图补上，再跑一遍 CI",
+		"why_owner": "priority", "reason": "返工了 2 轮还没做完，接下来怎么办", "recommend": "再返工一轮",
+		"options":         []map[string]string{{"label": "就这样收下", "leads_to": "缺深色截图，直接合并"}, {"label": "再返工一轮", "leads_to": "再等大约半小时"}},
+		"cost_of_waiting": "PR 一直开着"})
 	if !strings.Contains(res, "sent back 2 times") || !strings.Contains(res, "went to them in Lark") {
 		t.Fatalf("answer: %s", res)
 	}
 	cards := cardsWith(posts(), "结论：")
-	if len(cards) != 1 || !strings.Contains(cards[0], "🤔 要你拍板：返工了 2 轮还没做完，接下来怎么办？") || strings.Contains(cards[0], "深色截图") {
+	if len(cards) != 1 || !strings.Contains(cards[0], "🤔 要你拍板：返工了 2 轮还没做完，接下来怎么办") || strings.Contains(cards[0], "深色截图补上") {
 		t.Fatalf("cards %q", cards)
+	}
+	// The recommended option is listed first whatever order the review gave them in.
+	if a := askOf(s, todo.ID); a == nil || len(a.Options) != 2 || a.Options[0].Label != "再返工一轮" || todoNow(s, todo.ID).Supervision.State != reviewNeedsUser {
+		t.Fatalf("ask %+v", a)
 	}
 }
 

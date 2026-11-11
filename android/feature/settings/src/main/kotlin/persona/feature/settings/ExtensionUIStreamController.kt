@@ -18,7 +18,7 @@ class ExtensionUIStreamController(
     contribution: String,
     initialState: String = "",
     context: ExtensionUIContext = ExtensionUIContext(uiVersion = 7, platform = "android",
-        locale = java.util.Locale.getDefault().toLanguageTag(), tz = java.util.TimeZone.getDefault().id,
+        locale = ClientLanguage.localeTag(), tz = java.util.TimeZone.getDefault().id,
         stream = ExtensionUIStreamCapability(protocol = 1, components = NativeExtensionStreamAdapter.Components.toList())),
     dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
     private val responseDeadlineMillis: Long = 30000,

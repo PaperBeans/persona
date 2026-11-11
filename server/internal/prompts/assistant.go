@@ -404,6 +404,8 @@ type BriefTask struct {
 	Status          string
 	Decide, Overdue bool
 	Cancelled       bool
+	// Parked: it is parked waiting for the owner's priority call, and this is the reason in one sentence ("" otherwise).
+	Parked          string
 	Scope, AlsoDone []string
 	Result          []BriefCriterion
 }
@@ -519,10 +521,15 @@ type Supervise struct {
 	LeaderStuck bool
 	// Overdue: an entry is a task past its brief's clock (#3822).
 	Overdue bool
+	// ParkedDue: an entry is a parked task whose time came (#3804).
+	ParkedDue bool
 	// Asked: an entry is an agent's cards that came to this conversation before the user (ask); AskMinutes how long
 	// they wait here before going up a rung.
 	Asked      bool
 	AskMinutes int
+	// Decisions: an entry is about a decision the owner cannot answer as it is (recheck, undecidable,
+	// owner_cannot_answer; #3804).
+	Decisions bool
 }
 
 // SuperviseEntry is one task in it, with what happened (Kind: review, idle, needs_you, stalled, interrupted, failed,
@@ -533,6 +540,7 @@ type SuperviseEntry struct {
 	Minutes         int                // how long it has waited (needs_you) or not moved (stalled)
 	Ask             string             // needs_you: what it asks
 	Recommend       string             // escalated: the option the leader recommends
+	LeaderGone      bool               // decide: its task leader agent cannot be reached, so the supervisor takes the task over
 	DoneWhen        []string           // what done means
 	Round           int                // reworks so far
 	Machine         string             // where its agent runs (a name)
@@ -557,12 +565,40 @@ type SuperviseEntry struct {
 	// cards a leader gave the user.
 	Asks      []SuperviseAsk
 	Decisions string
+	// recheck and owner_cannot_answer: the decision as it was asked; owner_cannot_answer: the owner's answer
+	// (decide_yourself, not_what_i_asked, explain_first).
+	Decision *SuperviseDecision
+	Response string
+	// parked_due: what the task was parked for.
+	Parked *SuperviseParked
 	// From the task's brief (#3822): Asked is the owner's message that led to the work (clipped) and AskedAt its day;
 	// Started says who started it when it was not the owner; Dropped are the criteria scope changes took out.
 	// (assistant, leader, routine, hub) and StartedWhy the reason given.
 	Asked, AskedAt, Started, StartedWhy string
 	Dropped                             []string
 }
+
+// SuperviseParked is what a task was parked for (task_review parked), as its parked_due entry repeats it: the reason,
+// what kind of thing it waits on, until when (local), how many times in a row it was parked with no agent turn in
+// between, and how many more times it can be.
+type SuperviseParked struct {
+	Reason, WaitingOn, Until string
+	Count, Left              int
+}
+
+// SuperviseDecision is a decision a task's supervisor put to the owner (task_review needs_user), as a supervision
+// entry repeats it: why only the owner can decide, the question, the options with what each leads to, the one
+// recommended, what waiting costs, and whether it is never taken by default.
+type SuperviseDecision struct {
+	WhyOwner, Question, Recommend, Cost string
+	Options                             []SuperviseOption
+	NeverDefault                        bool
+	// Background: where the task came from and where it stood, as the hub told the owner.
+	Background string
+}
+
+// SuperviseOption is one option of a SuperviseDecision.
+type SuperviseOption struct{ Label, LeadsTo string }
 
 // SuperviseAsk is one card of a task's agent on its way to the user: its interaction id, kind (question, permission,
 // plan), the agent's machine (a name) and short session id, what it asks, and whether the rung below did not handle it in time.

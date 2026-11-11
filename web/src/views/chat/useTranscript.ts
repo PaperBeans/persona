@@ -315,7 +315,12 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
       rev: (r) => {
         if (!dead) revs.heard(r, Date.now());
       },
-      reconnected: subscribe,
+      // Every hello (the first one too) resubscribes from what the chat has. Before the first page is in that is
+      // nothing: a subscribe without since_seq has the hub read and send that whole page again, while the read
+      // below is on its way (a page load opens the socket and reads at once). The read subscribes when it is done.
+      reconnected: () => {
+        if (ready) subscribe();
+      },
     });
 
     (async () => {

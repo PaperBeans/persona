@@ -27,5 +27,5 @@ internal abstract class ExtensionApiStub : ExtensionManagement {
     override suspend fun previewFromMarket(market: String, extension: String): ExtensionPreview = unused()
     override suspend fun install(preview: ExtensionPreview): ExtensionDetail = unused()
     override suspend fun upgrade(id: String, preview: ExtensionPreview): ExtensionDetail = unused()
-    override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean): Unit = unused()
+    override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean, members: Boolean): ExtensionRemoval = unused()
 }

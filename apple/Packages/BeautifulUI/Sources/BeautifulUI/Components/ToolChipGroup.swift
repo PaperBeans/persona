@@ -15,6 +15,8 @@ public struct ToolChipGroup: View {
         public var additions: Int?
         public var deletions: Int?
         public var isError: Bool
+        /// Words give way at their end; a path or a name in its middle, where its start and its end both say which.
+        public var truncatesTail: Bool
 
         public init(
             symbol: String,
@@ -23,7 +25,8 @@ public struct ToolChipGroup: View {
             monospacedDetail: Bool = false,
             additions: Int? = nil,
             deletions: Int? = nil,
-            isError: Bool = false
+            isError: Bool = false,
+            truncatesTail: Bool = false
         ) {
             self.symbol = symbol
             self.label = label
@@ -32,6 +35,7 @@ public struct ToolChipGroup: View {
             self.additions = additions
             self.deletions = deletions
             self.isError = isError
+            self.truncatesTail = truncatesTail
         }
     }
 
@@ -79,7 +83,7 @@ public struct ToolChipGroup: View {
         let shape = RoundedRectangle(cornerRadius: theme.radii.chip, style: .continuous)
         return text(chip, size: size)
             .lineLimit(1)
-            .truncationMode(.middle)
+            .truncationMode(chip.truncatesTail ? .tail : .middle)
             .padding(.horizontal, 6)
             .padding(.vertical, pad)
             .background(chip.isError ? theme.colors.redTint : theme.colors.field, in: shape)

@@ -222,6 +222,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		if seen[s.SessionID] {
 			continue
 		}
+		n.decorateState(s)
 		if n.runtimeAssistant(s.SessionID) { // the assistant keeps its mode (assistant_runtime.go)
 			if m := n.assistantModeOf(s.SessionID); m != "" {
 				s.PermissionMode = m
@@ -334,15 +335,8 @@ func (n *Node) decorateIn(s *proto.Session, pass *codexListPass) {
 	if s.PaneID != "" && s.Host == "" {
 		s.Host = host.ParsePane(s.PaneID).Kind // the host it runs in (#2576)
 	}
-	if st, ok := n.state.get(s.SessionID); ok {
-		s.StartedByPersona = true
-		s.Launcher = st.Launcher
+	if st, ok := n.decorateState(s); ok {
 		s.Compaction = st.Compaction
-		// A row without a pane is listed where its record says it started, when that is an assistant or health
-		// directory: not where a `cd` in its transcript left it (#2368). A pane's directory is its host's.
-		if s.Cwd == "" || s.PaneID == "" && identity.IsAssistantDir(st.Cwd) {
-			s.Cwd = st.Cwd
-		}
 	}
 	if s.Launcher == "" {
 		s.Launcher = n.inferLauncher(s.SessionID)
@@ -352,6 +346,21 @@ func (n *Node) decorateIn(s *proto.Session, pass *codexListPass) {
 	}
 	s.BypassAvailable = n.hooks.canBypass(s.SessionID) // modes.go claudeCanBypass
 	n.ultracodeRow(s, pass)
+}
+
+// decorateState restores metadata recorded when Persona started the session.
+func (n *Node) decorateState(s *proto.Session) (sessionState, bool) {
+	st, ok := n.state.get(s.SessionID)
+	if ok {
+		s.StartedByPersona = true
+		s.Launcher = st.Launcher
+		// A row without a pane is listed where its record says it started, when that is an assistant or health
+		// directory: not where a `cd` in its transcript left it (#2368). A pane's directory is its host's.
+		if s.Cwd == "" || s.PaneID == "" && identity.IsAssistantDir(st.Cwd) {
+			s.Cwd = st.Cwd
+		}
+	}
+	return st, ok
 }
 
 func snippet(s string) string {

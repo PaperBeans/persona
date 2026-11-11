@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { categoryState, FROM_LIST, itemState, NAV_GROUPS, openedFromList, redirectLegacySettings, searchSettings, settingsAt, settingsHref, stepsToList, TAB_INFO, TABS } from "./nav";
+import { t } from "../../i18n";
+import { ASSISTANT_TABS, categoryState, FROM_LIST, itemState, NAV_GROUPS, openedFromList, redirectLegacySettings, searchSettings, settingsAt, settingsHref, stepsToList, TAB_INFO, TABS } from "./nav";
 
 describe("settings location", () => {
   it("names no category on plain /settings: the phone's list (通用 on a wide screen)", () => {
@@ -76,19 +77,27 @@ describe("settings location", () => {
   });
   it("gives every category a one-line hint, and no group shares a name with one of its rows (#3636)", () => {
     for (const k of TABS) expect(TAB_INFO[k].hint.trim()).not.toBe("");
-    for (const g of NAV_GROUPS) for (const k of g.tabs) expect(TAB_INFO[k].label).not.toBe(g.title);
+    const titles = [t("settings-nav.group_assistant", { name: "助手" }), t("settings-nav.group_device"), t("settings-nav.group_hub")];
+    for (const k of TABS) expect(titles).not.toContain(TAB_INFO[k].label);
   });
 });
 
 describe("settings sidebar groups", () => {
-  it("has the four sections in order", () => {
-    expect(NAV_GROUPS).toHaveLength(4);
+  it("has the current assistant's, this device's and the hub's, in that order, every category in one of them", () => {
+    expect(NAV_GROUPS.map((g) => g.key)).toEqual(["assistant", "device", "hub"]);
     expect(NAV_GROUPS.map((g) => g.tabs)).toEqual([
+      ["models", "persona", "channels", "connectors", "extensions", "knowledge", "agents"],
       ["general", "notifications", "shortcuts"],
-      ["persona", "models", "agents", "knowledge"],
-      ["channels", "connectors", "extensions"],
-      ["devices", "hub", "managers"],
+      ["hub", "managers", "avatar", "devices"],
     ]);
+    expect(NAV_GROUPS.flatMap((g) => g.tabs).sort()).toEqual([...TABS].sort());
+    expect([...ASSISTANT_TABS]).toEqual(NAV_GROUPS[0].tabs);
+  });
+
+  it("names the assistant's profile and the assistant list apart: no row is called like a group (#3365)", () => {
+    expect(TAB_INFO.persona.label).toBe("助手资料");
+    expect(TAB_INFO.managers.label).toBe("助手");
+    expect(t("settings-nav.group_assistant", { name: "工作" })).toBe("工作 的设置");
   });
 });
 

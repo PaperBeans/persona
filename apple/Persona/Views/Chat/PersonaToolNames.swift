@@ -26,8 +26,8 @@ enum PersonaToolNames {
         guard isPersona(name) else { return nil }
         let n = ToolPresentation.baseName(name)
         if let own = verbs(n) { return own }
-        // Already named by the generic table: its bare name comes back as something other than itself.
-        if ToolPresentation.verb(n) != n { return nil }
+        // Already named by the generic table, or one of the phone and mail families `ToolPresentation.verb` names.
+        if ToolPresentation.knownVerb(n) != nil || n.hasPrefix("phone_") || n.hasPrefix("mail_") { return nil }
         return fallback(n)
     }
 

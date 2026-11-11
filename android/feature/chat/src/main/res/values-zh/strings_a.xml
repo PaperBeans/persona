@@ -240,7 +240,9 @@
     <plurals name="chat_content_show_all_lines">
         <item quantity="other">展开全部（%1$d 行）</item>
     </plurals>
-    <string name="chat_todos_progress">%1$d/%2$d 项待办已完成</string>
+    <plurals name="chat_todos_progress">
+        <item quantity="other">%1$d/%2$d 项待办已完成</item>
+    </plurals>
     <string name="chat_todos_progress_failed">%1$s，更新失败</string>
     <string name="chat_todos_done">已完成</string>
     <string name="chat_todos_in_progress">进行中</string>

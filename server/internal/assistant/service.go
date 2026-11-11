@@ -51,8 +51,12 @@ type Service struct {
 	nodeAnswering atomic.Int64
 	// taskStarting counts queued and running task starts through linking or failure bookkeeping (idle.go).
 	taskStarting atomic.Int64
+	// leaderStarts counts task leaders being started: until one is linked its agent is no leader to the hub (task_leader.go).
+	leaderStarts atomic.Int64
 	// ext is the extensions' tools in this process (extensions.go SetExtensions); nil: none (tests).
 	ext ExtensionTools
+	// refs is the provider extensions' values for launcher keys that are references (launcher_secrets.go); nil: none.
+	refs launcherSecrets
 
 	hub   Hub
 	store func() Store

@@ -52,6 +52,16 @@ internal suspend fun handOffDefaults(store: AgentCreationStore?, scope: String, 
 }
 
 /**
+ * The running agent "Hand off to an existing one" sends to: the one [picked] while it still runs, else the first (#4167).
+ * The list is rebuilt and re-sorted as agents work, so the pick is held by its key, not by its row.
+ */
+internal fun handOffTarget(running: List<Session>, picked: SessionKey?): SessionKey? =
+    running.firstOrNull { it.key == picked }?.key ?: running.firstOrNull()?.key
+
+/** The pick kept after [shown] is drawn: an empty list for a moment (a refresh, a reconnect) keeps the old one. */
+internal fun handOffPick(picked: SessionKey?, shown: SessionKey?): SessionKey? = shown ?: picked
+
+/**
  * [store] and [scope] are New Agent's memory on this hub: a new Agent starts from it (the last machine, its folder,
  * launcher and mode) rather than from `~`, claude and the default mode each time.
  */
@@ -106,7 +116,11 @@ internal fun TodoHandOffSheet(
         sessions.filter { !it.assistant && it.isLive }
             .sortedWith(compareByDescending<Session> { it.updated }.thenBy { it.sessionId })
     }
-    var selectedTarget by remember(runningAgents) { mutableStateOf(runningAgents.firstOrNull()?.key) }
+    // Picked once, and again only when the picked agent leaves the list (keyed on the list, any agent's output put the
+    // pick back on the top row).
+    var pickedTarget by remember { mutableStateOf<SessionKey?>(null) }
+    val selectedTarget = handOffTarget(runningAgents, pickedTarget)
+    SideEffect { pickedTarget = handOffPick(pickedTarget, selectedTarget) }
 
     JSheet(onDismiss = onDismiss, title = stringResource(R.string.agents_todo_hand_to_agent)) {
         Column(
@@ -223,7 +237,7 @@ internal fun TodoHandOffSheet(
                                     },
                                     trailing = if (selected) ({ JIcon(PhIcons.CheckCircle, null, selected = true) }) else null,
                                     chevron = false,
-                                    onClick = { selectedTarget = session.key }
+                                    onClick = { pickedTarget = session.key }
                                 )
                             }
                         }

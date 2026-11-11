@@ -9,5 +9,6 @@
   "unknown_action": "この議事録に ToDo {id} はありません。",
   "no_minutes": "この録音にはまだ議事録がありません。",
   "todo_notes": "議事録「{meeting}」（{when}）の {clock} の発言から。",
-  "todo_by": "発言にあった期限：{by}"
+  "todo_by": "発言にあった期限：{by}",
+  "transcript_expired": "この録音の文字起こしは保存期間を過ぎました。議事録だけが残っているため、作り直せません。"
 }

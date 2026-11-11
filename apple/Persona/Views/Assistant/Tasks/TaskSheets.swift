@@ -18,7 +18,10 @@ struct TaskDetailSheet: View {
     @Environment(\.detailPushed) private var pushed
     private var store: TasksStore { .shared }
 
-    init(todoID: String) { self.todoID = todoID }
+    init(todoID: String, initialAgent: SessionKey? = nil) {
+        self.todoID = todoID
+        _picked = State(initialValue: initialAgent)
+    }
     init(agent: SessionKey) { agentKey = agent }
 
     /// What an agent no task stands for says about itself (in ⋯, and the header while it has no page).
@@ -48,7 +51,7 @@ struct TaskDetailSheet: View {
 
     @ViewBuilder private func content(_ todo: TodoItem) -> some View {
         let sessions = store.sessions(todo)
-        let key = picked.flatMap { p in sessions.first { $0.key == p }?.key } ?? store.leadSession(todo)?.key
+        let key = DispatchedTasks.selectedAgent(picked, available: sessions.map(\.key), lead: store.leadSession(todo)?.key)
         let state = store.state(todo)
         // Top-aligned: when the agent's page asks for more than the sheet has (several tall cards waiting), what gives
         // is its bottom, never the header with its close.

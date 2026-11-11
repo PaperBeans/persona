@@ -98,5 +98,7 @@
   "discard": "ローカルの記録を削除",
   "check_found": "送信済み",
   "check_missing": "最新のメッセージに見つかりません。送信されていない可能性があります",
-  "thread_placeholder": "スレッドに返信…"
+  "thread_placeholder": "スレッドに返信…",
+  "unavailable_title": "このチャットは利用できません",
+  "unavailable_detail": "グループが解散したか、Larkアプリがアクセスできなくなった可能性があります。"
 }

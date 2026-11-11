@@ -61,6 +61,21 @@ type acceptAsk struct {
 	ByDefault  bool      `json:"by_default,omitempty"`
 	// ByAssistant: a deployed task the supervising assistant accepted itself, not a big feature (ownerVerifies, #3205).
 	ByAssistant bool `json:"by_assistant,omitempty"`
+	// A decision's own (#3804, decision.go). WhyOwner: why only the owner can decide; Options: what they choose from, the
+	// recommended first, each with what it leads to; CostOfWaiting: what waiting costs. From and Stands are the hub's:
+	// where the task came from and where it stood when the decision was asked. RecheckAt: when it went back to its
+	// supervisor for having waited long; RaisedAt: when one never taken by default was last raised to the owner again;
+	// Response: the fixed answer the owner gave instead of an option (ownerResponses).
+	WhyOwner      string           `json:"why_owner,omitempty"`
+	Options       []DecisionOption `json:"options,omitempty"`
+	CostOfWaiting string           `json:"cost_of_waiting,omitempty"`
+	From          *askFrom         `json:"from,omitempty"`
+	Stands        string           `json:"stands,omitempty"`
+	RecheckAt     time.Time        `json:"recheck_at,omitzero"`
+	RaisedAt      time.Time        `json:"raised_at,omitzero"`
+	Response      string           `json:"response,omitempty"`
+	// Chosen: the option the owner chose when it was not the recommended one.
+	Chosen string `json:"chosen,omitempty"`
 }
 
 // acceptPostWindow is how long after an ask its card that did not go out (the bot's status could not be read, the send
@@ -205,6 +220,13 @@ func acceptAskEnded(a *acceptAsk, t Todo) bool {
 		return a.Outcome == outcomeDecide && (t.DoneAt != nil || t.Supervision.state(t) != reviewNeedsUser)
 	}
 	return t.DoneAt != nil && t.DoneBy != db.DoneByAuto && !(t.DoneBy == db.DoneByReview && t.Supervision.state(t) == reviewAccepted)
+}
+
+// decisionOpen says a is a decision still waiting for the owner on task t as the caller read it: asked, not answered,
+// not from before the to-do's latest reopen. t may be a moment old (its review state is not asked: the decision's
+// review is what made it needs_user).
+func decisionOpen(a *acceptAsk, t Todo) bool {
+	return decideAsk(a) && !a.AskedAt.IsZero() && a.AcceptedAt.IsZero() && t.DoneAt == nil && !acceptAskStale(a, t)
 }
 
 // acceptAskStale says an ask belongs to an earlier round: the todo was reopened (PATCH done:false, change feedback

@@ -18,6 +18,7 @@ import {
   kindOf,
   linkGroups,
   markParts,
+  minutesKeptUntil,
   parseLogLine,
   recordingView,
   recordingClock,
@@ -398,4 +399,25 @@ describe("recordingView", () => {
     expect(v.attendance).toBe(attendance);
     expect(v.attendingSession).toEqual(attendingSession);
   });
+  it.each([
+    [{ trimmed_at: "2026-11-25T02:00:00Z" }, "2026-11-25T02:00:00Z"],
+    [{ trimmed_at: "soon" }, undefined],
+    [{ trimmed_at: 1 }, undefined],
+    [{}, undefined],
+  ])("reads trimmed_at of %j", (meta, trimmedAt) => {
+    expect(recordingView("recordings", meta, [])!.trimmedAt).toBe(trimmedAt);
+  });
+});
+
+describe("minutesKeptUntil", () => {
+  it("is the start plus the minutes' days, as a date", () => {
+    const start = new Date(2026, 10, 5, 9, 0, 0);
+    expect(minutesKeptUntil(start.toISOString(), 30)).toBe(minutesKeptUntil(new Date(start.getTime() + 29 * 86_400_000).toISOString(), 1));
+    expect(minutesKeptUntil(start.toISOString(), 30)).not.toBe(minutesKeptUntil(start.toISOString(), 29));
+    expect(minutesKeptUntil(start.toISOString(), 365)).toContain("2027");
+  });
+  it.each([[undefined, 30], ["not a time", 30], ["2026-11-05T09:00:00Z", 0], ["2026-11-05T09:00:00Z", 1.5], ["2026-11-05T09:00:00Z", "30"], ["2026-11-05T09:00:00Z", undefined]])(
+    "is unknown for %j and %j", (start, days) => {
+      expect(minutesKeptUntil(start, days)).toBeUndefined();
+    });
 });

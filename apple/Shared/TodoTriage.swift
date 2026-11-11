@@ -45,7 +45,7 @@ nonisolated enum TodoBucket: String, Sendable {
 
 /// Which SOP rule placed a to-do; the section follows from it.
 nonisolated enum TodoTriageRule: String, Sendable {
-    case failedStart = "failed_start", agentAsks = "agent_asks", ownerDecides = "owner_decides", agentRunning = "agent_running"
+    case failedStart = "failed_start", superseded, agentAsks = "agent_asks", ownerDecides = "owner_decides", agentRunning = "agent_running"
     case closed, accepted, deployed, finishedUnseen = "finished_unseen", prOpen = "pr_open", stale, rest
 }
 
@@ -158,7 +158,8 @@ nonisolated enum TodoTriageLogic {
 
     /// A to-do's section by the SOP's decision table, first match wins:
     ///
-    ///  1. failedStart    the task's agent never started                    → Waiting on you, Done after 48 h
+    ///  1. failedStart    the task's agent never started                    → Waiting on you, Done after 48 h;
+    ///     superseded     … and a related to-do (its row) really finished   → Just finished (24 h), then Done (#3713)
     ///  2. agentAsks      an agent asks (question, approval) or was cut off → Waiting on you
     ///  3. ownerDecides   review says needs_user, or a decision / "cannot" ask → Waiting on you
     ///  4. agentRunning   an agent is working or starting                   → Working
@@ -170,7 +171,7 @@ nonisolated enum TodoTriageLogic {
     /// 10. stale          a task with no activity for 48 h                  → Shelved
     /// 11. rest           anything else                                     → Other open
     static func triage(_ todo: TodoItem, lookup: TodosLogic.SessionLookup?, now: Date, restoredAt: Date? = nil,
-                       calendar: Calendar = .current) -> TodoTriage {
+                       superseded: Bool = false, calendar: Calendar = .current) -> TodoTriage {
         let last = lastActivity(todo, lookup: lookup, restoredAt: restoredAt)
         let status = agentsStatus(todo, lookup: lookup)
         let recent = { (at: Date) in now.timeIntervalSince(at) < justDone }
@@ -178,7 +179,11 @@ nonisolated enum TodoTriageLogic {
         let review = todo.reviewState
         func at(_ s: TodoSection, _ r: TodoTriageRule) -> TodoTriage { TodoTriage(section: s, rule: r, last: last) }
 
-        if status == .failed { return at(now.timeIntervalSince(last) < shelveAfter ? .waiting : .done, .failedStart) }
+        if status == .failed {
+            // the same piece of work finished in a related to-do (`supersededFailedStarts`): history, nothing to retry
+            if superseded { return at(recent(todo.doneAt ?? last) ? .justDone : .done, .superseded) }
+            return at(now.timeIntervalSince(last) < shelveAfter ? .waiting : .done, .failedStart)
+        }
         if status == .needsYou || status == .interrupted { return at(.waiting, .agentAsks) }
         if todo.doneAt == nil, review == .needsUser || ask?.outcome == "decide" || ask?.outcome == "cannot" {
             return at(.waiting, .ownerDecides)
@@ -206,10 +211,20 @@ nonisolated enum TodoTriageLogic {
         return t.rule != .accepted && t.rule != .deployed
     }
 
+    /// Whether a to-do's checkbox shows it open (the web's `checksAsOpen`): not closed, or a failed start still waiting
+    /// on the owner (rule 1), which the hub closed itself and the page counts as open (#3713). Ticking an open one closes
+    /// it (done: for a failed start the hub clears its start error, so it moves to Just finished); unticking a closed
+    /// one reopens it.
+    static func checksAsOpen(_ todo: TodoItem, _ t: TodoTriage?) -> Bool {
+        if todo.doneAt == nil { return true }
+        return todo.failedToStart && t?.rule == .failedStart && t?.section == .waiting
+    }
+
     /// Where a to-do stands for every count of open work (#3331): the To-dos page's "Not done" and the assistant's
     /// Progress entry read this one rule, so the two numbers agree (the web's `todoBucket`).
-    static func bucket(_ todo: TodoItem, lookup: TodosLogic.SessionLookup?, now: Date, restoredAt: Date? = nil) -> TodoBucket {
-        let t = triage(todo, lookup: lookup, now: now, restoredAt: restoredAt)
+    static func bucket(_ todo: TodoItem, lookup: TodosLogic.SessionLookup?, now: Date, restoredAt: Date? = nil,
+                       superseded: Bool = false) -> TodoBucket {
+        let t = triage(todo, lookup: lookup, now: now, restoredAt: restoredAt, superseded: superseded)
         if countsAsOpen(todo, t) { return .open }
         return t.section == .shelved ? .shelved : .closed
     }
@@ -257,17 +272,8 @@ nonisolated enum TodoTriageLogic {
         return keys
     }
 
-    /// Every to-do placed in its section, related ones merged into one row (union of shared keys). Closed to-dos are
-    /// not merged into open ones' rows. A row takes its most urgent member's section; rows in a section go most
-    /// recently active first. `quiet: false` leaves quiet tasks (#1731) out, as badges do; the page lists them.
-    static func triageTodos(_ todos: [TodoItem], lookup: TodosLogic.SessionLookup?, now: Date,
-                            restored: [String: Date] = [:], quiet: Bool = true,
-                            calendar: Calendar = .current) -> TodoTriageResult {
-        let list = quiet ? todos : todos.filter { !$0.quiet }
-        var placed: [String: TodoTriage] = [:]
-        for td in list { placed[td.id] = triage(td, lookup: lookup, now: now, restoredAt: restored[td.id], calendar: calendar) }
-
-        // union–find over shared keys, open and closed kept apart
+    /// The row each to-do is in: the root of its related to-dos (union of shared keys), open and closed kept apart.
+    static func relatedRoots(_ list: [TodoItem]) -> [String: String] {
         var parent: [String: String] = Dictionary(list.map { ($0.id, $0.id) }, uniquingKeysWith: { a, _ in a })
         func find(_ id: String) -> String {
             var r = id
@@ -288,10 +294,39 @@ nonisolated enum TodoTriageLogic {
                 }
             }
         }
+        var roots: [String: String] = [:]
+        for td in list { roots[td.id] = find(td.id) }
+        return roots
+    }
+
+    /// Failed starts (rule 1) whose row has a to-do that really finished: closed without a start error (#3713). The
+    /// work got done another way; the failed start goes to Just finished / Done and counts as closed, on the page, the
+    /// badge and the assistant's entries alike (the web's `supersededFailedStarts`).
+    static func supersededFailedStarts(_ todos: [TodoItem]) -> Set<String> {
+        let root = relatedRoots(todos)
+        let finished = Set(todos.filter { $0.doneAt != nil && !$0.failedToStart }.compactMap { root[$0.id] })
+        return Set(todos.filter { $0.failedToStart && root[$0.id].map(finished.contains) == true }.map(\.id))
+    }
+
+    /// Every to-do placed in its section, related ones merged into one row (union of shared keys). Closed to-dos are
+    /// not merged into open ones' rows. A row takes its most urgent member's section (a superseded failed start never
+    /// leads); rows in a section go most recently active first. `quiet: false` leaves quiet tasks (#1731) out, as
+    /// badges do; the page lists them.
+    static func triageTodos(_ todos: [TodoItem], lookup: TodosLogic.SessionLookup?, now: Date,
+                            restored: [String: Date] = [:], quiet: Bool = true,
+                            calendar: Calendar = .current) -> TodoTriageResult {
+        let list = quiet ? todos : todos.filter { !$0.quiet }
+        let superseded = supersededFailedStarts(list)
+        var placed: [String: TodoTriage] = [:]
+        for td in list {
+            placed[td.id] = triage(td, lookup: lookup, now: now, restoredAt: restored[td.id], superseded: superseded.contains(td.id),
+                                   calendar: calendar)
+        }
+        let roots = relatedRoots(list)
         var byRoot: [String: [TodoItem]] = [:]
         var rootOrder: [String] = []
         for td in list {
-            let r = find(td.id)
+            let r = roots[td.id] ?? td.id
             if byRoot[r] == nil { rootOrder.append(r) }
             byRoot[r, default: []].append(td)
         }
@@ -310,6 +345,7 @@ nonisolated enum TodoTriageLogic {
             let members = byRoot[r]!.sorted { a, b in
                 let ta = placed[a.id]!, tb = placed[b.id]!
                 if ta.section != tb.section { return order[ta.section]! < order[tb.section]! }
+                if (ta.rule == .superseded) != (tb.rule == .superseded) { return tb.rule == .superseded }
                 if ta.last != tb.last { return ta.last > tb.last }
                 return a.id < b.id
             }

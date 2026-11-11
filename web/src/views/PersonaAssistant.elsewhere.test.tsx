@@ -11,7 +11,7 @@ import { setRoster } from "../lib/managers";
 import { adoptConversation } from "../lib/outbox";
 import { getState, reset } from "../lib/store";
 import type { Session } from "../lib/types";
-import { PersonaAssistant, elsewhere } from "./PersonaAssistant";
+import { PersonaAssistant, conversationHome } from "./PersonaAssistant";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 vi.hoisted(() => {
@@ -90,8 +90,8 @@ it("keeps the current assistant's own conversations on its computer", () => {
   adoptConversation(undefined, "mine", "elsewhere");
   render("mine");
   expect(chat()?.getAttribute("data-chat")).toBe("hub/mine");
-  // listed as the current one's, or adopted for it: here
-  expect(elsewhere("mine", "assistant", getState().assistant, {})).toBe("");
-  expect(elsewhere("unknown", "assistant", getState().assistant, {})).toBe("");
-  expect(elsewhere("x", "assistant", null, { mac: [conversation("mac", "x", "assistant")] })).toBe("");
+  // listed as the current one's: here; nothing known of it: the current one's too
+  expect(conversationHome("mine", "assistant", getState().assistant, {})).toBeNull();
+  expect(conversationHome("unknown", "assistant", getState().assistant, {})).toBeNull();
+  expect(conversationHome("x", "assistant", null, { mac: [conversation("mac", "x", "assistant")] })).toEqual({ machine: "mac", other: false });
 });

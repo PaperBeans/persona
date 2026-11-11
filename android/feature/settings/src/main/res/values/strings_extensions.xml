@@ -324,6 +324,20 @@
     <!-- Removing from the extension's own page -->
     <string name="settings_ext_market_installed_note">This extension came from a market. After removing it, you can install it again from the market.</string>
     <string name="settings_ext_keep_data_hint">Pick up where you left off if you reinstall.</string>
+    <string name="settings_ext_uninstall_members">Also remove the pack\'s members</string>
+    <string name="settings_ext_uninstall_members_hint">%1$s. Left unchecked, they stay installed.</string>
+    <string name="settings_ext_uninstalled_with_members">Removed %1$s and its members</string>
+    <string name="settings_ext_uninstalled_members_unknown">Removed %1$s; no result came back for its members</string>
+    <string name="settings_ext_partial_title">Pack partly removed</string>
+    <string name="settings_ext_partial_text">%1$s is still installed. Members already removed stay removed; nothing was put back. You can try again.</string>
+    <string name="settings_ext_partial_removed">Removed: %1$s</string>
+    <string name="settings_ext_partial_failed">Not removed: %1$s</string>
+    <string name="settings_ext_partial_failed_item">%1$s (%2$s)</string>
+    <string name="settings_ext_partial_remaining">Not tried, still installed: %1$s</string>
+    <plurals name="settings_ext_uninstalled_members">
+        <item quantity="one">Removed %1$s, along with %2$d member</item>
+        <item quantity="other">Removed %1$s, along with %2$d members</item>
+    </plurals>
     <!-- A list of machines (format machine) -->
     <string name="settings_ext_machine_online">Online</string>
     <string name="settings_ext_machine_offline">Offline</string>

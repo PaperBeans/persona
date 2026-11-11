@@ -104,7 +104,7 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 			s.logf("task %s: acceptance reopen: %v", id, err)
 		}
 	}
-	if _, err := s.routeToTask(ctx, t.Origin, id, msg); err != nil {
+	if _, err := s.relayToTask(ctx, t.Origin, id, msg, nil); err != nil {
 		s.logf("task %s: acceptance to agent: %v", id, err)
 		s.botNote(ctx, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_not_sent", i18n.Args{"error": clip(oneLine(err.Error()), 120)}), media))
 		return true

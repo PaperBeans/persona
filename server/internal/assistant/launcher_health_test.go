@@ -263,7 +263,7 @@ func TestLauncherHealthMovesPlannedTasks(t *testing.T) {
 	f.checks["server/work"] = proto.LauncherCheck{Error: "90 秒内没有回答"}
 	ctx := context.Background()
 	s.healthRound(ctx, true)
-	res, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"修 CI","prompt":"修 CI","machine":"l4","cwd":"~/code/app","launcher":"work",
+	res, err := s.toolTaskPlan(ctx, "conv9", json.RawMessage(`{"tasks":[{"title":"修 CI","permission":"bypassPermissions","prompt":"修 CI","machine":"l4","cwd":"~/code/app","launcher":"work",
 		"readonly":false,"user_requested":false,"machine_policy":"flexible","why":"代码在那"}]}`))
 	if err != nil {
 		t.Fatal(err)
@@ -516,7 +516,7 @@ func TestLauncherHealthIgnoresRefusedStarts(t *testing.T) {
 	f.mu.Lock()
 	f.failStart = &rpc.Error{Message: "directory /home/me/nope does not exist"}
 	f.mu.Unlock()
-	s.startPlanTask("plan_x", "conv1", 0, PlanTask{Title: "修 CI", Prompt: "修 CI", Machine: "l4", Cwd: "/home/me/nope", Launcher: "work"}, false)
+	s.startPlanTask("plan_x", "conv1", 0, PlanTask{Title: "修 CI", Prompt: "修 CI", Machine: "l4", Cwd: "/home/me/nope", Launcher: "work", Permission: "bypassPermissions"}, false)
 	f.mu.Lock()
 	starts := append([]map[string]any(nil), f.starts...)
 	checked := len(f.checked)

@@ -47,7 +47,7 @@ nonisolated enum LarkChatLayout {
         guard let d else { return "" }
         let c = cal.dateComponents([.hour, .minute], from: d)
         let time = String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
-        let style = Date.FormatStyle(locale: .current, calendar: cal, timeZone: cal.timeZone)
+        let style = Date.FormatStyle(locale: .interface, calendar: cal, timeZone: cal.timeZone)
         return switch LarkTime.tier(of: d, now: now, calendar: cal) {
         case .today: time
         case .yesterday: String(localized: "Yesterday \(time)")

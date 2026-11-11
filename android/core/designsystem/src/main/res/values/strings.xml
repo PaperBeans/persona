@@ -359,4 +359,5 @@
     <string name="designsystem_candle_volume">Vol %1$s</string>
     <string name="designsystem_stepper_minus">Decrease</string>
     <string name="designsystem_stepper_plus">Increase</string>
+    <string name="designsystem_copy_too_large">Text too large to copy; use Share instead</string>
 </resources>

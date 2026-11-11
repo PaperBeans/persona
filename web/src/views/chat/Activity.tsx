@@ -12,7 +12,9 @@ import { WorkflowCard } from "./WorkflowCard";
 import { Button, copyText, cx, Dialog, useNow } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 
-/** "⟳ 11:57" and "Background 2" in the chat's header (on a phone one icon: ⟳, or ⚙ 2); a click opens them.
+/** "⟳ 11:57" and "Background 2" in the chat's header (on a phone one icon: ⟳, or ⚙ 2); a click opens them. The background
+ *  work is a count by a neutral gear (#3956, iOS #3719): whether it works or only waits is the agent's state, which the
+ *  title's line says once; a workflow's runs keep their mark.
  *  `onJumpToCall`: a workflow card's "Show in chat" brings the call that launched it into view. */
 export function ActivityChips({ session, onStopLoop, onJumpToCall }: { session: Session; onStopLoop: () => void; onJumpToCall?: (call: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -44,7 +46,7 @@ export function ActivityChips({ session, onStopLoop, onJumpToCall }: { session: 
           </span>
         )}
         {hasBg && (
-          <span className={cx("flex h-5.5 items-center gap-1 rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap", aboutRuns ? "bg-ai-tint text-ai" : "bg-orange-tint text-orange", loop && "@max-[640px]:hidden")} data-background-chip={aboutRuns ? "workflow" : "tasks"}>
+          <span className={cx("flex h-5.5 items-center gap-1 rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap", aboutRuns ? "bg-ai-tint text-ai" : "bg-field text-ink-2", loop && "@max-[640px]:hidden")} data-background-chip={aboutRuns ? "workflow" : "tasks"}>
             <Icon name={aboutRuns ? "workflow" : "gear"} size={12} stroke={2.2} />
             <span className="hidden @min-[640px]:inline">{t("chat-activity.background_chip")}</span> {count > 0 && count}
           </span>

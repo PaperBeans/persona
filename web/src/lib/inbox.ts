@@ -6,7 +6,7 @@
 // The pure parts (filters, sections, labels, the "Hand to AI" message, Feishu message parts) are plain functions so the
 // tests can run them without a DOM.
 
-import { itemHeaders, otherManager, sameManager, stampedHeaders } from "./manager-choice";
+import { chosenManager, itemHeaders, otherManager, sameManager, stampedHeaders } from "./manager-choice";
 import { scoped, useScope } from "./current-assistant";
 import { formatDate, t } from "../i18n";
 import { useEffect, useRef, useSyncExternalStore } from "react";
@@ -17,6 +17,7 @@ import { connectorOpenTitle } from "./connectors";
 import { contextBody } from "./context-body";
 import { larkPath } from "./lark-accounts";
 import { baseName } from "./format";
+import { conversationPage } from "./conversation-page";
 import type { Route } from "./router";
 import { isResumed } from "./reconnect";
 import { sameValue } from "./stable-lines";
@@ -574,11 +575,14 @@ export function waitingAgents(interactions: Interaction[], sessions: Record<stri
     .sort((a, b) => byTime(a.created_at, b.created_at) || a.id.localeCompare(b.id));
 }
 
-/** A conversation's page: the assistant's are in Persona (/persona/<sid>), an agent's is /s/<machine>/<sid>. */
-export function conversationRoute(mid: string, sid: string, sessions: Record<string, Session[]>, assistant: AssistantInfo | null): Route {
+/** A conversation's page: the assistant's are in Persona (/persona/<sid>, naming its computer and manager with several
+ *  assistants: lib/conversation-page.ts), an agent's is /s/<machine>/<sid>. `manager`: whose it is when the row doesn't
+ *  say (an inbox item's). */
+export function conversationRoute(mid: string, sid: string, sessions: Record<string, Session[]>, assistant: AssistantInfo | null, manager?: string): Route {
   const s = (sessions[mid] ?? []).find((x) => x.session_id === sid);
-  const isAssistant = s?.assistant || (assistant?.machine_id === mid && assistant.conversations.some((c) => c.session_id === sid));
-  return isAssistant ? { name: "persona", sid } : { name: "session", mid, sid };
+  const own = assistant?.machine_id === mid && assistant.conversations.some((c) => c.session_id === sid);
+  // the current assistant's own list has it: the current one's
+  return s?.assistant || own ? conversationPage(sid, mid, s?.manager ?? manager ?? (own ? chosenManager() ?? undefined : undefined)) : { name: "session", mid, sid };
 }
 
 // ── Hand to AI ───────────────────────────────────────────
@@ -651,7 +655,7 @@ export interface LarkMessage {
   is_read?: boolean;
   badge_count?: number;
   parts?: LarkPart[];
-  reply_to?: { id?: string; sender_name?: string; text?: string; recalled?: boolean; retained?: boolean };
+  reply_to?: { id?: string; sender_name?: string; text?: string; parts?: LarkPart[]; recalled?: boolean; retained?: boolean };
   sending?: boolean;
   failed?: boolean;
   client_id?: string;

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Session } from "./types";
 import { makeSessionLookup, todoStatus, todoStatusLabel, type Todo } from "./todos";
 import { checkCount, checklist, reviewBadge, type Supervision } from "./supervision";
-import { lastActivity, relatedKeys, SHELVE_AFTER_MS, triage, triageTodos } from "./todo-triage";
+import { lastActivity, relatedKeys, SHELVE_AFTER_MS, supersededFailedStarts, todoBucket, triage, triageTodos } from "./todo-triage";
 import { resetRestoredCache, restoreTodo } from "./todo-restore";
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");
@@ -171,6 +171,26 @@ describe("triageTodos", () => {
     const r = triageTodos([todo("f", { start_error: "no launcher", done_at: hoursAgo(1) })], lookup, NOW);
     expect(r.sections.waiting.map((g) => g.lead.id)).toEqual(["f"]);
     expect(r.open).toBe(1);
+  });
+
+  it("moves a failed start out of Waiting on you once its row's work really finished (#3713)", () => {
+    const failed = todo("f", { title: "Deploy the panel", plan_id: "p", start_error: "no launcher", done_at: hoursAgo(1) });
+    const done = todo("d", { title: "Verify the panel", plan_id: "p", done_at: hoursAgo(2), done_by: "review" });
+    const other = todo("g", { title: "Rotate keys", start_error: "no launcher", done_at: hoursAgo(3) });
+    const twin = todo("h", { title: "Rotate keys", start_error: "no launcher", done_at: hoursAgo(4) });
+    const list = [failed, done, other, twin];
+    // another failed start is not finished work: those two still wait on the owner
+    expect([...supersededFailedStarts(list)]).toEqual(["f"]);
+    const r = triageTodos(list, lookup, NOW);
+    expect(r.sections.just_done.map((g) => g.members.map((m) => m.id))).toEqual([["d", "f"]]);
+    expect(r.sections.waiting.map((g) => g.members.map((m) => m.id))).toEqual([["g", "h"]]);
+    expect(r.open).toBe(2);
+    expect(r.sections.just_done[0].triage.get("f")?.rule).toBe("superseded");
+    // every count of open work reads it the same way (Progress, #3331)
+    expect(todoBucket(failed, lookup, NOW, 0, true)).toBe("closed");
+    expect(todoBucket(failed, lookup, NOW)).toBe("open");
+    // like the work it went with: Just finished for 24 hours, then Done
+    expect(triage(failed, lookup, NOW + 30 * 3600_000, 0, true).section).toBe("done");
   });
 
   it("lists quiet tasks on the page, leaves them out for the sidebar", () => {

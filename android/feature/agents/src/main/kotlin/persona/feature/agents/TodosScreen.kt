@@ -19,6 +19,8 @@ import persona.core.domain.tasks.Triage
 import persona.core.domain.tasks.TriageRule
 import persona.core.domain.tasks.TriageSection
 import persona.core.domain.tasks.acceptedAtRest
+import persona.core.domain.tasks.checksAsOpen
+import persona.core.domain.tasks.supersededFailedStarts
 import persona.core.domain.tasks.triageTodos
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
@@ -29,9 +31,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import persona.core.domain.tasks.moveTo
+import persona.core.domain.tasks.TodoListFilter
+import persona.core.domain.tasks.TodoListSort
+import persona.core.domain.tasks.filterCounts
+import persona.core.domain.tasks.hiddenWaiting
+import persona.core.domain.tasks.listed
+import persona.core.domain.tasks.matches
+import persona.core.domain.tasks.sortedRows
+import persona.core.domain.tasks.weekStart
 import persona.core.contracts.*
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
@@ -44,6 +61,7 @@ import android.text.format.DateFormat
 import androidx.compose.ui.platform.LocalConfiguration
 import java.time.Instant
 import java.time.ZoneId
+import java.util.Locale
 import java.time.format.DateTimeFormatter
 
 data class TodoMostUrgent(
@@ -94,6 +112,8 @@ fun TodosScreen(
     pending: List<Interaction> = emptyList(),
     /** The launcher's "New to-do": each request brings the sheet up, also on a list kept from an earlier use (#5718). */
     newTodoRequests: NewTodoRequests? = null,
+    /** The assistant whose to-dos [todos] are: while it is offline its list is out of reach, not empty (JAssistantOffline). */
+    assistant: persona.core.contracts.api.CurrentAssistant? = null,
 ) {
     val cards = remember(pending) { pending.firstBySession() }
     var query by rememberSaveable { mutableStateOf("") }
@@ -111,6 +131,31 @@ fun TodosScreen(
     val calendarPrefs = remember(context) { TodoCalendarPrefs(context) }
     var view by remember(calendarPrefs) { mutableStateOf(calendarPrefs.view) }
     var showDone by remember(calendarPrefs) { mutableStateOf(calendarPrefs.showDone) }
+    // The list's filter and sort (#3740), kept on this device.
+    val listPrefs = remember(context) { TodoListPrefs(context) }
+    var listFilter by remember(listPrefs) { mutableStateOf(listPrefs.filter) }
+    var listSort by remember(listPrefs) { mutableStateOf(listPrefs.sort) }
+    val setFilter = { f: TodoListFilter -> listFilter = f; listPrefs.filter = f }
+    val setSort = { o: TodoListSort -> listSort = o; listPrefs.sort = o }
+    val zone = ZoneId.systemDefault()
+    // The week is the calendar's ([weekStart], the region of the app's language).
+    val appLocale = LocalConfiguration.current.locales[0]
+    val firstDay = remember(appLocale) { weekStart(appLocale) }
+
+    val sessionMap = remember(sessions) { sessions.associateBy { it.key } }
+    val sessionLookup: (SessionKey) -> Session? = remember(sessionMap) { { key: SessionKey -> sessionMap[key] } }
+
+    val searched = remember(todos, query) {
+        if (query.isBlank()) todos
+        else {
+            val q = query.trim()
+            todos.filter { it.title.contains(q, ignoreCase = true) || it.notes.contains(q, ignoreCase = true) }
+        }
+    }
+    // A search, then the filter, pick the to-dos; the sections place what is left (#3740), so their counts follow.
+    val filtered = remember(searched, listFilter, now, firstDay) { searched.filter { it.matches(listFilter, now, zone, firstDay) } }
+    // what each filter would show, under it in the menu
+    val counts = remember(searched, now, firstDay) { filterCounts(searched, now, zone, firstDay) }
     val viewBar: @Composable (Modifier) -> Unit = { modifier ->
         TodosViewBar(
             view = view,
@@ -118,31 +163,31 @@ fun TodosScreen(
             showDone = showDone,
             onShowDone = { showDone = it; calendarPrefs.showDone = it },
             modifier = modifier,
+            listControls = { TodoListControls(listFilter, listSort, counts, setFilter, setSort) },
         )
-    }
-
-    val sessionMap = remember(sessions) { sessions.associateBy { it.key } }
-    val sessionLookup: (SessionKey) -> Session? = remember(sessionMap) { { key: SessionKey -> sessionMap[key] } }
-
-    val filtered = remember(todos, query) {
-        if (query.isBlank()) todos
-        else {
-            val q = query.trim()
-            todos.filter { it.title.contains(q, ignoreCase = true) || it.notes.contains(q, ignoreCase = true) }
-        }
     }
 
     // Status sections (#3206, docs/assistant/todo-status-sop.md), the web's rules: related to-dos share a row.
     val restores = remember(context) { TodoRestores(context) }
     var restored by remember(restores) { mutableStateOf(restores.read()) }
     val nowMs = now.toEpochMilli()
-    val triaged = remember(filtered, sessionMap, restored, nowMs) { triageTodos(filtered, sessionLookup, nowMs, restored) }
+    // Whether a failed start was superseded by finished work (#3713) is decided on every to-do: a search or a filter that
+    // leaves the finished one out must not put it back in Needs you.
+    val superseded = remember(todos) { supersededFailedStarts(todos) }
+    val triaged = remember(filtered, sessionMap, restored, nowMs, superseded) {
+        triageTodos(filtered, sessionLookup, nowMs, restored, known = superseded)
+    }
+    // With a filter, Needs you is filtered too: the line over the list says how many it leaves out.
+    val hidden = remember(searched, filtered, sessionMap, restored, nowMs, listFilter, superseded) {
+        if (listFilter == TodoListFilter.All) 0 else hiddenWaiting(searched, filtered, sessionLookup, nowMs, restored, superseded = superseded)
+    }
     // Which sections the user folded or unfolded: Other open, Shelved and Done start folded.
     var toggled by rememberSaveable { mutableStateOf(emptyList<String>()) }
     // Other open starts unfolded when the open sections above it are empty, so the list never opens on nothing.
     val quietAbove = listOf(TriageSection.Waiting, TriageSection.Working, TriageSection.JustDone, TriageSection.Pr).all { triaged.rows(it).isEmpty() }
     fun isFolded(section: TriageSection): Boolean {
-        val byDefault = section.folded && !(section == TriageSection.Other && quietAbove)
+        // a filter narrows, so what it leaves in Other open shows (as iOS); Shelved and Done stay folded
+        val byDefault = section.folded && !(section == TriageSection.Other && (quietAbove || listFilter != TodoListFilter.All))
         return byDefault != (section.name in toggled)
     }
     var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
@@ -152,6 +197,39 @@ fun TodosScreen(
                 tasks?.setTodoDone(todo, done)
             } catch (e: Exception) {
                 onError(res.getString(if (done) R.string.agents_todo_done_failed else R.string.agents_todo_reopen_failed, e.message.orEmpty()))
+            }
+        }
+    }
+    // A to-do moved on the calendar (#2045, iOS TodoCalendarMove): drawn there at once; once the hub has it, a success
+    // buzz and "Moved to …" with Undo (which moves it back, without a second notice); a failed save is put back and said
+    // as the shell says failures (an error buzz, a nudge while offline).
+    val feedback = LocalAppFeedback.current
+    val haptics = rememberHaptics()
+    val locale = LocalConfiguration.current.locales[0]
+    fun moveFailed(e: Exception) {
+        if (feedback?.failure(e) != true) onError(res.getString(R.string.agents_todo_calendar_move_failed, e.message.orEmpty()))
+    }
+    val moveTodo: (String, TodoDue) -> Unit = move@{ id, due ->
+        val store = tasks ?: return@move
+        val todo = todos.firstOrNull { it.id == id } ?: return@move
+        val back = todo.due ?: return@move
+        val to = todo.moveTo(due) ?: return@move
+        scope.launch {
+            try {
+                store.setTodoDue(id, to)
+                haptics(Haptic.Success)
+                val undo = FeedbackAction(res.getString(R.string.agents_todo_calendar_undo)) {
+                    scope.launch {
+                        try { store.setTodoDue(id, back) }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { moveFailed(e) }
+                    }
+                }
+                feedback?.notice(res.getString(R.string.agents_todo_calendar_moved, dueWords(to, locale, ZoneId.systemDefault(), now)), undo)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                moveFailed(e)
             }
         }
     }
@@ -242,6 +320,7 @@ fun TodosScreen(
                     onOpenTodo = onOpenTodo,
                     bottomPadding = padding.calculateBottomPadding(),
                     modifier = Modifier.weight(1f),
+                    onMove = if (tasks != null) moveTodo else null,
                 )
             }
             return@JPage
@@ -261,8 +340,33 @@ fun TodosScreen(
                 JSearchField(query, { query = it }, placeholder = stringResource(R.string.agents_todos_search))
             }
 
-            if (filtered.isEmpty()) {
-                item(key = "empty") {
+            if (hidden > 0) {
+                item(key = "hidden-waiting") {
+                    JNotice(
+                        stringResource(R.string.agents_todos_filter_hidden_waiting, hidden, listFilter.title),
+                        Modifier.testTag("todos-hidden-waiting"),
+                        status = Status.NeedsYou,
+                        icon = PhIcons.WarningCircle,
+                        actionLabel = stringResource(R.string.agents_todos_filter_show_all),
+                        onAction = { setFilter(TodoListFilter.All) },
+                        inlineAction = true,
+                    )
+                }
+            }
+            if (filtered.isEmpty() && searched.isNotEmpty() && listFilter != TodoListFilter.All) {
+                item(key = "empty-filter") {
+                    JEmptyState(
+                        title = listFilter.emptyTitle,
+                        description = stringResource(R.string.agents_todos_filter_empty_hint),
+                        icon = PhIcons.FunnelSimple,
+                        action = { JButton(stringResource(R.string.agents_todos_filter_show_all), { setFilter(TodoListFilter.All) }) },
+                    )
+                }
+            } else if (filtered.isEmpty()) {
+                // The hub's list leaves out an assistant that is offline: its to-dos are out of reach, not none (a search that
+                // finds nothing among kept ones is "no match").
+                if (assistant?.offline != null && todos.isEmpty()) item(key = "offline") { JAssistantOffline(assistant) }
+                else item(key = "empty") {
                     JEmptyState(
                         title = stringResource(if (query.isBlank()) R.string.agents_todos_empty else R.string.agents_todos_no_match),
                         description = stringResource(if (query.isBlank()) R.string.agents_todos_empty_hint else R.string.agents_todos_no_match_hint),
@@ -273,26 +377,20 @@ fun TodosScreen(
                     )
                 }
             } else {
-                item(key = "summary") {
-                    Text(
-                        stringResource(R.string.agents_todos_summary, triaged.open, triaged.shelved, triaged.finished),
-                        style = PersonaTheme.type.caption,
-                        color = PersonaTheme.palette.ink3,
-                        maxLines = 1,
-                        modifier = Modifier.testTag("todos-summary"),
-                    )
-                }
+                // No "N open · N shelved · N done" line: each section title carries its count (#3712).
                 for (section in TriageSection.entries) {
-                    val rows = triaged.rows(section)
+                    val rows = sortedRows(triaged.rows(section), listSort, zone)
                     if (rows.isEmpty()) continue
                     val folded = isFolded(section)
                     item(key = "section:${section.name}") {
                         JSectionHeader(
                             section.label,
-                            count = triaged.todoCounts[section],
+                            count = triaged.listed(section),
                             status = section.status,
+                            countTone = section.status ?: Status.Idle,
                             onClick = { toggled = if (section.name in toggled) toggled - section.name else toggled + section.name },
                             sub = false,
+                            open = !folded,
                             action = { JIcon(if (folded) PhIcons.CaretDown else PhIcons.CaretUp, null, size = Tokens.Space.l, tint = PersonaTheme.palette.ink3) },
                         )
                     }
@@ -388,7 +486,8 @@ private fun TodoTriageRow(
     onRestore: () -> Unit,
 ) {
     val res = agentResources()
-    val finished = todo.isDone && triage.rule != TriageRule.FailedStart
+    // a failed start waiting on the owner reads open, says why in red, and its checkbox closes it (#3713)
+    val finished = !todo.checksAsOpen(triage)
     val state = todo.state(sessionLookup)
     val accepted = triage.rule == TriageRule.Accepted || todo.acceptedAtRest(sessionLookup)
     val urgent = mostUrgentAgent(todo, sessionLookup)
@@ -401,8 +500,17 @@ private fun TodoTriageRow(
         JCard(modifier = Modifier.fillMaxWidth(), onClick = onOpen) {
             Column(Modifier.padding(Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                    // TalkBack reads the tick as a "Done" checkbox whose checked state says whether it is done, and the
+                    // double-tap hint says what a tap does: Done or Reopen (#4077)
+                    val tickName = stringResource(R.string.agents_todo_done_action)
+                    val tickLabel = stringResource(if (finished) R.string.agents_todo_reopen else R.string.agents_todo_done_action)
                     Box(
-                        Modifier.size(Tokens.Space.xxl).clip(CircleShape).clickable { onDone(todo, !finished) },
+                        Modifier.size(Tokens.Space.xxl).clip(CircleShape)
+                            .clickable(onClickLabel = tickLabel, role = Role.Checkbox) { onDone(todo, !finished) }
+                            .semantics {
+                                contentDescription = tickName
+                                toggleableState = ToggleableState(finished)
+                            },
                         contentAlignment = Alignment.Center,
                     ) {
                         if (finished) {
@@ -425,6 +533,8 @@ private fun TodoTriageRow(
                             JTag(stringResource(R.string.agents_todo_state_accepted), Tone.Positive)
                         finished && todo.doneBy == "auto" -> JTag(stringResource(R.string.agents_todo_auto_done))
                         finished -> {}
+                        // the hub closed it, yet it waits on the owner: not Done (#3713)
+                        !todo.startError.isNullOrEmpty() -> JTag(stringResource(R.string.agents_todo_state_didnt_start), Tone.Danger)
                         else -> JTag(state.label)
                     }
                 }
@@ -436,7 +546,7 @@ private fun TodoTriageRow(
                 } else {
                     // One line of what is going on (iOS TodoRow): why it finished on its own, the most urgent
                     // agent's latest (red while it waits for you), the notes, or that no agent has it yet.
-                    TodoActivityLine(todo, urgent, urgent?.let { cards[it.agent.key] })
+                    TodoActivityLine(todo, urgent, urgent?.let { cards[it.agent.key] }, startFailed = todo.startError?.takeIf { it.isNotEmpty() })
                     // Done as asked but not live yet (#3306): where it is held, while its agents are not at it again.
                     todo.hold?.takeIf { state != TodoState.Working && state != TodoState.NeedsYou }?.let {
                         TodoHoldLine(it, Modifier.padding(start = Tokens.Space.xxxl))
@@ -514,6 +624,17 @@ internal fun TodoHoldLine(hold: TodoHold, modifier: Modifier = Modifier) {
     )
 }
 
+/** A due date in words, as a to-do's line says it: "Thu, Nov 12, 18:00", or the day alone; the year only when not [now]'s. */
+internal fun dueWords(due: TodoDue, locale: Locale, zone: ZoneId, now: Instant): String {
+    val year = now.atZone(zone).year
+    fun format(skeleton: String, of: Int) =
+        DateTimeFormatter.ofPattern(DateFormat.getBestDateTimePattern(locale, if (of == year) skeleton else "y$skeleton"), locale)
+    return when (due) {
+        is TodoDue.At -> due.at.atZone(zone).let { format("EEEMMMdHHmm", it.year).format(it) }
+        is TodoDue.Day -> format("EEEMMMd", due.day.year).format(due.day)
+    }
+}
+
 /** A to-do's due date ("Due Thu, Nov 12, 18:00", red once past), high priority and a reminder still to push, in a line
  * (iOS `TodoPlanLine`, #1683); nothing without them. */
 @Composable
@@ -522,14 +643,10 @@ internal fun TodoPlanLine(todo: Todo, modifier: Modifier = Modifier) {
     val locale = LocalConfiguration.current.locales[0]
     val now = Instant.now()
     val sameYear = { i: Instant -> i.atZone(zone).year == now.atZone(zone).year }
-    val dateOnly = { i: Instant ->
-        DateTimeFormatter.ofPattern(DateFormat.getBestDateTimePattern(locale, if (sameYear(i)) "EEEMMMd" else "yEEEMMMd"), locale)
-    }
     val withTime = { i: Instant ->
         DateTimeFormatter.ofPattern(DateFormat.getBestDateTimePattern(locale, if (sameYear(i)) "EEEMMMdHHmm" else "yEEEMMMdHHmm"), locale)
     }
-    val dueText = parseTime(todo.dueAt)?.let { withTime(it).format(it.atZone(zone)) }
-        ?: todo.dueDay?.let { d -> dateOnly(d.atStartOfDay(zone).toInstant()).format(d) }
+    val dueText = todo.due?.let { dueWords(it, locale, zone, now) }
     val remind = todo.remind?.takeIf { todo.remindedAt == null && !todo.isDone }
     val high = todo.priority == "high" && !todo.isDone
     if (dueText == null && remind == null && !high) return
@@ -580,10 +697,11 @@ internal fun mostUrgentSummary(urgent: TodoMostUrgent?, card: Interaction? = nul
 
 /** The open row's line under the title: the auto-done reason, the most urgent agent, the notes, or "Not handed to an agent yet". */
 @Composable
-private fun TodoActivityLine(todo: Todo, urgent: TodoMostUrgent?, card: Interaction?) {
+private fun TodoActivityLine(todo: Todo, urgent: TodoMostUrgent?, card: Interaction?, startFailed: String? = null) {
     val palette = PersonaTheme.palette
     val reason = todo.autoDoneReason
-    val summary = when (val line = mostUrgentSummary(urgent, card)) {
+    // a failed start waiting on the owner: why it did not start, in red (DESIGN_SYSTEM 5.6)
+    val summary = if (startFailed != null) stringResource(R.string.agents_todo_start_failed, startFailed) else when (val line = mostUrgentSummary(urgent, card)) {
         is TodoUrgentSummary.StartFailed -> stringResource(R.string.agents_todo_start_failed, line.error)
         is TodoUrgentSummary.Words -> line.text
         is TodoUrgentSummary.Asks -> line.text.text()
@@ -608,7 +726,11 @@ private fun TodoActivityLine(todo: Todo, urgent: TodoMostUrgent?, card: Interact
         Text(
             text,
             style = PersonaTheme.type.caption,
-            color = if (waiting) palette.needsYou.text else palette.ink2,
+            color = when {
+                startFailed != null && reason == null -> palette.danger.text
+                waiting -> palette.needsYou.text
+                else -> palette.ink2
+            },
             maxLines = if (notes != null && text == notes) 1 else 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)

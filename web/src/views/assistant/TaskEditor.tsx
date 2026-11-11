@@ -4,6 +4,8 @@
 // "Save" and deleted after an inline confirmation.
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError, enc, errorText } from "../../lib/api";
+import { conversationPage } from "../../lib/conversation-page";
+import { shownManager } from "../../lib/manager-choice";
 import { navigate } from "../../lib/router";
 import {
   BYPASS, DAY_NAMES, everyLabel, fromLocalInput, INTERVALS, lastRunText, MAX_EVERY, MIN_EVERY, momentLabel, nextRun, normalizeDays,
@@ -111,7 +113,7 @@ export function TaskEditor({
       const r = await api<{ session_id: string; machine_id: string }>(`/assistant/tasks/${enc(task.id)}/run`, { method: "POST", json: {} });
       toast(t("assistant-taskeditor.run_started", { title: taskTitle(task) }), "ok");
       onClose();
-      navigate({ name: "persona", sid: r.session_id });
+      navigate(conversationPage(r.session_id, r.machine_id, shownManager()));
     } catch (e) {
       toast(e instanceof ApiError && e.status === 409 ? e.message || t("assistant-taskeditor.still_running") : errorText(e), "error");
     } finally {
@@ -150,7 +152,7 @@ export function TaskEditor({
 
   const open = (sid: string) => {
     onClose();
-    navigate({ name: "persona", sid });
+    navigate(conversationPage(sid, undefined, shownManager()));
   };
 
   const close = () => {

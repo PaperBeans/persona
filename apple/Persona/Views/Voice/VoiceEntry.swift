@@ -20,7 +20,7 @@ extension VoiceSupport {
     /// its own conversations.
     static func label(_ session: Session?, model: AppModel) -> String {
         guard let session else { return "Claude" }
-        return session.assistant ? model.persona.name : session.agentLabel
+        return session.assistant ? model.assistantDisplayName : session.agentLabel
     }
 
     /// Starts a call bound to `key` where the page offers one; otherwise what to say about it.

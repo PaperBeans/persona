@@ -2,8 +2,6 @@ package persona.core.domain.lines
 
 import persona.core.contracts.CoreText.Key
 import persona.core.contracts.CoreText
-import java.math.BigDecimal
-import java.math.RoundingMode
 
 /**
  * A compaction as the chat shows it (docs/assistant/assistant.md "Manual compaction"): one divider where the context was compacted, with
@@ -26,14 +24,11 @@ const val ContinuedNotice = "已从压缩的上下文继续" // i18n-ignore: the
 const val CompactCommandNotice = "压缩上下文" // i18n-ignore: the node's notice it matches
 
 /**
- * 181000 → "18.1" ten-thousands (181K), 150000 → "15" ten-thousands; under the language's unit the number itself. The unit (ten thousand
- * in Chinese and Japanese, a thousand in English) is the language's: [CoreText.Key.CompactCount] carries the count.
+ * 181000 → 18.1 ten-thousands in Chinese and Japanese, "181K" in English, 1200000 → "1.2M" in English; under the language's unit the number itself. The unit
+ * (ten thousand in Chinese and Japanese, a thousand in English) is the language's: [CoreText.Key.CompactCount] carries the count
+ * ([persona.core.contracts.compactCount]).
  */
 fun tokenCount(tokens: Long): CoreText = CoreText.of(Key.CompactCount, tokens)
-
-/** [tokens] in units of [unit], one decimal at most: 181000 / 10000 → "18.1". */
-fun compactUnits(tokens: Long, unit: Long): String =
-    BigDecimal(tokens).divide(BigDecimal(unit)).setScale(1, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
 
 private fun LineItem.isNotice(text: String) =
     kind == "notice" && task == null && item.task == null && item.wake != true && this.text == text

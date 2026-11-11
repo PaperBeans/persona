@@ -273,6 +273,15 @@ enum ExtensionMarketText {
         return c.url!
     }()
 
+    /// Under a market's delete confirmation: what removing it does to the extensions installed from it.
+    static func removalReason(_ count: Int?) -> String {
+        guard let count else {
+            return String(localized: "The hub stops reading this market. Extensions installed from it stay, but stop upgrading until the market is added again with the same address.")
+        }
+        if count == 0 { return String(localized: "The hub stops reading this market. No installed extension came from it.") }
+        return String(localized: "The hub stops reading this market. \(count) extensions installed from it stay, but stop upgrading until the market is added again with the same address.")
+    }
+
     /// A market's line: how many plugins, when it was read.
     static func marketSummary(_ m: ExtensionMarket) -> String {
         var parts = [String(localized: "\(m.plugins ?? 0) extensions")]
@@ -288,7 +297,11 @@ enum ExtensionMarketText {
         var api: () -> APIClient?
         /// The app's own (its installs go through `ExtensionOperations.shared`); a test's has a store of its own.
         var live = false
-        static var live: Deps { .init(api: { AppModel.shared.api }, live: true) }
+        /// The current roster resolves the default manager; without it, explicit ownership stamps are not guessed.
+        var roster: () -> ManagerRoster? = { nil }
+        static var live: Deps {
+            .init(api: { AppModel.shared.api }, live: true, roster: { AppModel.shared.managerRoster })
+        }
     }
 
     private(set) var items: [ExtensionCatalogItem]?
@@ -302,6 +315,10 @@ enum ExtensionMarketText {
     var market: String?
     /// A market being refreshed or removed (its spinner), by id.
     private(set) var busyMarket: String?
+    /// The removal confirmation's market and affected count (nil count: still reading, unavailable, or an older hub).
+    private(set) var removalMarket: String?
+    private(set) var removalCount: Int?
+    @ObservationIgnored private var removalRequest = 0
     /// Whether plugins from the markets upgrade themselves (nil: a hub without auto-upgrade, or not read yet).
     private(set) var autoUpgrade: Bool?
     @ObservationIgnored private let deps: Deps
@@ -368,9 +385,47 @@ enum ExtensionMarketText {
         }
     }
 
+    /// Reads the default manager's installed extensions for the confirmation. A failed or ambiguous read stays unknown.
+    /// False when a newer market's preparation superseded this one, so its stale confirmation does not open.
+    @discardableResult
+    func prepareRemoval(of id: String) async -> Bool {
+        removalRequest += 1
+        let request = removalRequest
+        removalMarket = id
+        removalCount = nil
+        let count: Int?
+        do {
+            let listed = try await api().plugins()
+            let own: [HubExtension]?
+            if let roster = deps.roster() {
+                own = listed.filter { roster.owner($0.manager) == roster.defaultID }
+            } else {
+                // An explicit manager stamp needs the roster: the built-in assistant is not necessarily the default.
+                let ownershipUnknown = listed.contains {
+                    $0.manager != nil && ($0.market == id || ($0.autoUpgrade != nil && $0.market == nil))
+                }
+                own = ownershipUnknown ? nil : listed.filter { $0.manager == nil }
+            }
+            if let own {
+                // A hub from before `market` can report auto_upgrade without saying which market it came from.
+                count = own.contains(where: { $0.autoUpgrade != nil && $0.market == nil }) ? nil : own.filter { $0.market == id }.count
+            } else {
+                count = nil
+            }
+        } catch {
+            count = nil
+        }
+        guard request == removalRequest else { return false }
+        removalCount = count
+        return true
+    }
+
     func removeMarket(_ id: String) async {
         await busy(id) {
             try await $0.deleteExtensionMarket(id)
+            self.removalRequest += 1
+            self.removalMarket = nil
+            self.removalCount = nil
             self.markets.removeAll { $0.id == id }
             if self.market == id { self.market = nil }
         }

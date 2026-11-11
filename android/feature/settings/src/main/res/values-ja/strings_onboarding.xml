@@ -10,7 +10,7 @@
     <string name="settings_onb_key_paste">API キーを貼り付け</string>
     <string name="settings_onb_key_hint_with">%1$s ハブに暗号化して保存され、二度と表示されません。</string>
     <string name="settings_onb_where_key">キーの入手先</string>
-    <string name="settings_onb_assign_label">メインの会話と新しい Agent で使う</string>
+    <string name="settings_onb_assign_label">メインの会話と新しいエージェントで使う</string>
     <string name="settings_onb_assign_hint">まだモデルが設定されていない用途だけを変更します。すでに選んだモデルは変わりません。</string>
     <string name="settings_onb_assign_hint_works">メインの会話は %1$s の Claude Code ですでに動いているため、既定ではオフです。オンにするとこのキーに切り替えます（まだ誰も選んでいない用途だけ）。</string>
     <string name="settings_onb_assign_hint_works_here">メインの会話はコンピューターの Claude Code ですでに動いているため、既定ではオフです。オンにするとこのキーに切り替えます（まだ誰も選んでいない用途だけ）。</string>
@@ -26,7 +26,7 @@
     <string name="settings_onb_key_test_failed">テストに失敗しました</string>
     <string name="settings_onb_retest">再テスト</string>
     <string name="settings_onb_done_title">%1$sを接続しました</string>
-    <string name="settings_onb_done_pick_later">メインの会話や Agent で使うには「モデル設定」で選んでください。</string>
+    <string name="settings_onb_done_pick_later">メインの会話やエージェントで使うには「モデル設定」で選んでください。</string>
     <string name="settings_onb_direct_note">メインチャットとエージェントでは使えません。情報処理や仕分けなど、モデルを選んでいない用途ではこれが使われることがあります。変更は「モデル設定」で。</string>
     <string name="settings_onb_done_no_claude">キーを保存しました。メインの会話で使うには、%1$s に Claude Code をインストールする必要があります。</string>
     <string name="settings_onb_done_no_claude_any">キーを保存しました。メインの会話で使うには、コンピューターに Claude Code をインストールする必要があります。</string>
@@ -34,7 +34,7 @@
     <string name="settings_onb_done_no_claude_kept_any">キーを保存しました。このキーで動かすには、コンピューターに Claude Code をインストールする必要があります。</string>
     <string name="settings_onb_how_install">インストール方法</string>
     <string name="settings_onb_purpose_assistant">メインの会話</string>
-    <string name="settings_onb_purpose_agent_new">新しい Agent</string>
+    <string name="settings_onb_purpose_agent_new">新しいエージェント</string>
     <string name="settings_onb_assigned">%1$sで使います。</string>
     <string name="settings_onb_assigned_both">%1$sと%2$sで使います。</string>
     <string name="settings_onb_kept">%1$sは変更していません：%2$s</string>

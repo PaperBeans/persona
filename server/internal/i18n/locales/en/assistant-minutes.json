@@ -9,5 +9,6 @@
   "unknown_action": "These minutes have no action item {id}.",
   "no_minutes": "This recording has no minutes yet.",
   "todo_notes": "From the minutes of “{meeting}” ({when}), said at {clock}.",
-  "todo_by": "Deadline as said: {by}"
+  "todo_by": "Deadline as said: {by}",
+  "transcript_expired": "This recording’s transcript has expired; only its minutes are kept, so they can’t be made again."
 }

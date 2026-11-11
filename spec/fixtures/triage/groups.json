@@ -268,6 +268,105 @@
       "from_test": "web/src/lib/todo-triage.test.ts > triageTodos > counts a failed start waiting on the owner as open, though the hub set done_at"
     },
     {
+      "name": "failed_start_superseded_by_finished_work",
+      "description": "没开起来的那条，同一行里已经有真正做完的（同一计划）：跟着去「刚完成」，不算开着，排在做完的那条后面；同一行里只有别的没开起来的：照旧等你重试。",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Decision table\"",
+        "web/src/lib/todo-triage.ts supersededFailedStarts"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [
+          {
+            "machine_id": "m",
+            "session_id": "run",
+            "state": "working",
+            "status": "working",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "old",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-06T08:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "old2",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-05T12:00:00.000Z"
+          }
+        ],
+        "todos": [
+          {
+            "id": "f1",
+            "title": "Deploy the self-hosted panel",
+            "created_at": "2026-11-09T00:00:00.000Z",
+            "updated_at": "2026-11-10T11:00:00.000Z",
+            "done_at": "2026-11-10T11:00:00.000Z",
+            "agents": [],
+            "origin": "conv",
+            "plan_id": "p1",
+            "start_error": "no launcher"
+          },
+          {
+            "id": "done1",
+            "title": "Panel: verify it on the hub",
+            "created_at": "2026-11-09T00:00:00.000Z",
+            "updated_at": "2026-11-10T10:00:00.000Z",
+            "done_at": "2026-11-10T10:00:00.000Z",
+            "agents": [],
+            "origin": "conv",
+            "plan_id": "p1",
+            "done_by": "review"
+          },
+          {
+            "id": "f2",
+            "title": "Rotate the backup keys",
+            "created_at": "2026-11-09T00:00:00.000Z",
+            "updated_at": "2026-11-10T09:00:00.000Z",
+            "done_at": "2026-11-10T09:00:00.000Z",
+            "agents": [],
+            "origin": "conv",
+            "plan_id": "p2",
+            "start_error": "no launcher"
+          },
+          {
+            "id": "f3",
+            "title": "Rotate the backup keys",
+            "created_at": "2026-11-09T00:00:00.000Z",
+            "updated_at": "2026-11-10T08:00:00.000Z",
+            "done_at": "2026-11-10T08:00:00.000Z",
+            "agents": [],
+            "origin": "conv",
+            "start_error": "no launcher"
+          }
+        ],
+        "include_quiet": true
+      },
+      "expected": {
+        "sections": {
+          "waiting": [
+            [
+              "f2",
+              "f3"
+            ]
+          ],
+          "just_done": [
+            [
+              "done1",
+              "f1"
+            ]
+          ]
+        },
+        "open": 2,
+        "shelved": 0,
+        "finished": 2
+      }
+    },
+    {
       "name": "quiet_listed_on_page",
       "description": "安静任务在待办页列出、计数。",
       "source": [

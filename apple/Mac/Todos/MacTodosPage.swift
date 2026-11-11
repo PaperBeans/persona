@@ -27,7 +27,7 @@ struct MacTodosPage: View {
     @Environment(\.tabIsActive) private var inFront
 
     private var allTodos: [TodoItem] {
-        let lookup = TodosLogic.makeSessionLookup(AppModel.shared.allSessions(inFront: inFront))
+        let lookup = TodosLogic.makeSessionLookup(AppModel.shared.sessionsNow)
         return TodosLogic.sortTodos(store.todos, lookup: lookup)
     }
 

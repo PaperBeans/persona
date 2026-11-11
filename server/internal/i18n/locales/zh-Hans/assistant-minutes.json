@@ -9,5 +9,6 @@
   "unknown_action": "这份纪要里没有待办 {id}。",
   "no_minutes": "这条录音还没有纪要。",
   "todo_notes": "来自会议纪要「{meeting}」（{when}），原话在 {clock}。",
-  "todo_by": "原话里的期限：{by}"
+  "todo_by": "原话里的期限：{by}",
+  "transcript_expired": "这条录音的转写已过保留期，只留下了纪要，无法重新生成。"
 }

@@ -16,9 +16,10 @@ import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.Todo
 import persona.core.contracts.TodoAgent
+import persona.core.contracts.TodoDue
 import persona.core.contracts.TodoState
 
-// The month's rules (#2046), the cases of web/src/lib/todo-calendar.test.ts that the month needs.
+// The month's rules (#2046) and a drop on it (#2045), the cases of web/src/lib/todo-calendar.test.ts that the month needs.
 class TodoCalendarTest {
     private val zone = ZoneId.of("Asia/Shanghai")
     private val now = Instant.parse("2026-11-05T09:30:00Z") // 17:30 on Nov 5 in zone
@@ -121,5 +122,65 @@ class TodoCalendarTest {
         assertEquals(DayOfWeek.SUNDAY, weekStart(Locale.forLanguageTag("ja")))
         assertEquals(DayOfWeek.MONDAY, weekStart(Locale.forLanguageTag("de-DE")))
         assertEquals(DayOfWeek.SATURDAY, weekStart(Locale.forLanguageTag("ar-EG")))
+    }
+
+    // #2045, as the web's dropOnDay / dropPatch
+    @Test fun aDropOnAnotherDayKeepsTheTimeAndAllDayStaysAllDay() {
+        // 18:00 on Nov 12 here
+        val at = Todo("a", title = "A", dueAt = "2026-11-12T10:00:00Z")
+        val moved = entry(at)!!.dropOnDay(LocalDate.of(2026, 11, 19), zone)
+        assertEquals(TodoDue.At(Instant.parse("2026-11-19T10:00:00Z")), moved)
+        assertEquals(moved, at.moveTo(moved))
+        // seconds kept, as the web keeps them
+        val odd = Todo("b", dueAt = "2026-11-12T10:00:30Z")
+        assertEquals(TodoDue.At(Instant.parse("2026-11-03T10:00:30Z")), entry(odd)!!.dropOnDay(LocalDate.of(2026, 11, 3), zone))
+        val day = Todo("c", dueDate = "2026-11-12")
+        assertEquals(TodoDue.Day(LocalDate.of(2026, 12, 1)), entry(day)!!.dropOnDay(LocalDate.of(2026, 12, 1), zone))
+        // done ones move too
+        val done = Todo("d", dueDate = "2026-11-12", doneAt = "2026-11-04T10:00:00Z")
+        assertEquals(TodoDue.Day(LocalDate.of(2026, 11, 13)), done.moveTo(entry(done)!!.dropOnDay(LocalDate.of(2026, 11, 13), zone)))
+    }
+
+    @Test fun aDropWhereItIsSendsNothing() {
+        val at = Todo("a", dueAt = "2026-11-12T10:00:00Z")
+        assertNull(at.moveTo(entry(at)!!.dropOnDay(LocalDate.of(2026, 11, 12), zone)))
+        val day = Todo("b", dueDate = "2026-11-12")
+        assertNull(day.moveTo(entry(day)!!.dropOnDay(LocalDate.of(2026, 11, 12), zone)))
+        // the same day, but all day instead of at a time, is a change
+        assertEquals(TodoDue.Day(LocalDate.of(2026, 11, 12)), at.moveTo(TodoDue.Day(LocalDate.of(2026, 11, 12))))
+    }
+
+    @Test fun aMovedTodoIsDueByTheOneFieldItWasMovedTo() {
+        val at = Todo("a", dueDate = "2026-11-12").withDue(TodoDue.At(Instant.parse("2026-11-19T10:00:00Z")))
+        assertEquals("2026-11-19T10:00:00Z", at.dueAt)
+        assertNull(at.dueDate)
+        val day = Todo("b", dueAt = "2026-11-12T10:00:00Z").withDue(TodoDue.Day(LocalDate.of(2026, 11, 19)))
+        assertNull(day.dueAt)
+        assertEquals("2026-11-19", day.dueDate)
+        assertEquals(TodoDue.Day(LocalDate.of(2026, 11, 19)), day.due)
+        assertNull(Todo("c").due)
+    }
+
+    @Test fun theDayUnderAPointOfTheMonth() {
+        // 700 wide (100 a day), rows 90 high, six of them
+        assertEquals(0, monthDropIndex(0f, 0f, 700f, 90f, 6))
+        assertEquals(6, monthDropIndex(699f, 89f, 700f, 90f, 6))
+        assertEquals(7 + 3, monthDropIndex(350f, 100f, 700f, 90f, 6))
+        assertEquals(35 + 6, monthDropIndex(650f, 539f, 700f, 90f, 6))
+        // right to left, the first day is at the right
+        assertEquals(6, monthDropIndex(0f, 0f, 700f, 90f, 6, rtl = true))
+        // off the grid
+        assertNull(monthDropIndex(-1f, 10f, 700f, 90f, 6))
+        assertNull(monthDropIndex(700f, 10f, 700f, 90f, 6))
+        assertNull(monthDropIndex(10f, -1f, 700f, 90f, 6))
+        assertNull(monthDropIndex(10f, 540f, 700f, 90f, 6))
+    }
+
+    @Test fun theMonthScrollsNearItsEdgesWhileDragging() {
+        assertEquals(-1, edgeScroll(10f, 500f, 40f))
+        assertEquals(0, edgeScroll(250f, 500f, 40f))
+        assertEquals(1, edgeScroll(470f, 500f, 40f))
+        // below the part in sight it keeps going down
+        assertEquals(1, edgeScroll(600f, 500f, 40f))
     }
 }

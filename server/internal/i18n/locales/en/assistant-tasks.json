@@ -1,4 +1,9 @@
 {
+  "draft_changed": "This draft has changed or is no longer pending. Refresh before trying again.",
+  "draft_dismissed": "You chose not to handle this draft. Undo that decision before sending it.",
+  "draft_decision_question": "Reply drafted from the task’s progress",
+  "draft_decision_ignore": "Do not handle this draft; do not send a reply. Keep the task and agent open.",
+  "draft_decision_undo": "Undo the decision not to handle this draft; return it to pending without sending a reply.",
   "plan_waiting": "{n} things are waiting for you to start",
   "plan_waiting_single": "Something is waiting for you to start",
   "list_sep": ", ",

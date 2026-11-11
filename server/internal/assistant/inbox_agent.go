@@ -573,7 +573,7 @@ func messageCardOf(it *InboxItem) *MessageCard {
 		return nil
 	}
 	return &MessageCard{TodoID: it.Agent.TodoID, Source: it.Source, Account: it.AccountName, Chat: it.Title, Sender: it.Sender,
-		Text: clip(strings.TrimSpace(it.Preview), 400), Draft: it.Agent.Draft}
+		Text: clip(strings.TrimSpace(it.Preview), 400), Draft: it.Agent.Draft, MessageVersion: it.Last}
 }
 
 // inboxRepliedAt is when those of the inbox items ids the user replied to were replied to (the message cards say

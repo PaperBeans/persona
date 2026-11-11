@@ -90,6 +90,8 @@ fun PairingScreen(
     var accessSecret by remember { mutableStateOf("") }
     var accessOpen by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<PairingFailure?>(null) }
+    /** The address a failure names ([PairingException.address], #2622). */
+    var failureAddress by remember { mutableStateOf<String?>(null) }
     var running by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf(listOf<PairingProgress>()) }
     var confirm by remember { mutableStateOf<PairingRequest?>(null) }
@@ -191,6 +193,7 @@ fun PairingScreen(
                 android.util.Log.w("PersonaPairing", generateSequence(error as Throwable) { it.cause }.take(4)
                     .joinToString(" <- ") { e -> e.javaClass.name + " @ " + e.stackTrace.take(3).joinToString(", ") })
                 failure = pairingFailure(error)
+                failureAddress = pairingFailureAddress(error)
                 tries++
                 if (failure == PairingFailure.Timeout && PairingLocalNetwork.needsPermission(context, request)) {
                     failure = PairingFailure.LocalPermission
@@ -291,7 +294,7 @@ fun PairingScreen(
                 // the second way. Certificate and https problems, and anything from a link, still lead with scanning.
                 val retype = typed && (reason == PairingFailure.InvalidCode || reason == PairingFailure.Expired)
                 item { PairingHeading(stringResource(R.string.settings_pairing_failed_title), stringResource(R.string.settings_pairing_failed_body)) }
-                item { JNotice(stringResource(reason.explanation()), status = Status.NeedsYou) }
+                item { JNotice(pairingExplanation(reason, failureAddress), status = Status.NeedsYou) }
                 if (tries >= 2) item {
                     SettingsCaption(pluralStringResource(R.plurals.settings_pairing_tried_again, tries, tries), Modifier.padding(top = Tokens.Space.s))
                 }

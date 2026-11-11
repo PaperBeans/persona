@@ -76,7 +76,7 @@ describe("the workflow board switch", () => {
 
     const open = [...host.querySelectorAll("button")].find((b) => b.textContent === "去设置打开")!;
     act(() => open.click());
-    expect(location.pathname + location.search).toBe("/settings?tab=general");
+    expect(location.pathname + location.search).toBe("/settings?tab=hub");
   });
 
   it("shows the sidebar entry once 设置 › 通用 › Agent turns it on, and keeps the switch on the hub", async () => {

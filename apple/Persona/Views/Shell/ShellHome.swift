@@ -39,7 +39,7 @@ struct ShellHome: View {
     var body: some View {
         ScrollView {
             if let pending {
-                FirstMessagePending(pending: pending, name: model.persona.name, shell: true, resend: resend, delete: delete)
+                FirstMessagePending(pending: pending, name: model.assistantDisplayName, shell: true, resend: resend, delete: delete)
                     // The page's height inside its margins, the message at its bottom (a long one runs up out of it, as the
                     // chat shows its newest end).
                     .containerRelativeFrame(.vertical, alignment: .bottom)
@@ -106,7 +106,7 @@ struct ShellHome: View {
             .background(Theme.pageBackground.ignoresSafeArea(edges: .bottom))
         }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { room.pageAtRest($0) }
-        .navigationTitle(model.persona.name)
+        .navigationTitle(model.assistantDisplayName)
         .task(id: launcher) { if pending == nil { await model.warmAssistant(launcher: launcher) } }
         .modifier(ReadinessRefresh())
         .readinessSheets($route)

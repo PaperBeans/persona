@@ -6,7 +6,7 @@
 // play here, a card's buttons press, my messages show who read them, reactions can be put on, an avatar opens the
 // person's card, a group's box can @ people, and what is typed stays as the chat's draft.
 import { ItemManager, ownerHeaders, useItemManager, withManager } from "../../lib/manager-choice";
-import { createContext, memo, use, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, use, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api, ApiError, enc, errorText, getToken } from "../../lib/api";
 import { startConversation } from "../../lib/assistant-start";
 import { clock } from "../../lib/format";
@@ -21,7 +21,7 @@ import {
   cardButtons, chatImages, draftKey, isVoice, loadDraft, mergeAround, reactionsOf, readMark, ReadReceipts, readStates, react,
   statusOf, toggledReactions, type ReadState,
 } from "../../lib/lark-chat";
-import { quoteSummary, showsBody, showsHistory, useLarkDisplay, useLarkDisplayState } from "../../lib/lark-display";
+import { quoteSummary, showsBody, showsHistory, useLarkDisplay, useLarkDisplayState, type LarkMessageDisplay } from "../../lib/lark-display";
 import { keepSameMessages, keepSameStates } from "../../lib/lark-reuse";
 import type { LarkPerson } from "../../lib/lark-people";
 import { canAddPin, changeChatPin, needsRecheck, pinProblemText, type ChatPinTarget } from "../../lib/lark-pins";
@@ -30,6 +30,7 @@ import { initialCursor, LarkReadTracker } from "../../lib/lark-read";
 import { clickLink, linkHref, prefetchLink } from "../../lib/links";
 import { isResumed } from "../../lib/reconnect";
 import { adoptConversation } from "../../lib/outbox";
+import { conversationPage } from "../../lib/conversation-page";
 import { navigate } from "../../lib/router";
 import { getState, onHubEvent, useStore } from "../../lib/store";
 import { isForeignCached, translatesChat, useTranslatePrefs, useTranslation } from "../../lib/translate";
@@ -118,6 +119,35 @@ const Today = createContext("");
 
 type LarkThreadProps = { chat: LarkChatRef; pinsOpen?: boolean; onPinsOpen?: (open: boolean) => void };
 
+/** Connector codes that say the chat itself can never be opened again: it was disbanded, or the signed-in account is
+ * no longer a member. Upstream outages keep their own codes and stay retryable. */
+const TERMINAL_CONVERSATION_CODES = new Set(["CONVERSATION_NOT_FOUND", "CONVERSATION_NOT_MEMBER"]);
+
+/** Whether the first page's failure means the conversation is permanently unavailable (a disbanded group, an app
+ * whose access was removed), as opposed to a transient gateway failure the reader can retry. The extension answers
+ * 404/403 with a terminal code; a bare 404/410 without a business code is treated as a gone resource too, while a
+ * hub-level `not_found` (an old route) keeps the ordinary error text. */
+export function conversationUnavailable(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return false;
+  const code = (e.code ?? "").toUpperCase();
+  if (TERMINAL_CONVERSATION_CODES.has(code)) return true;
+  return (e.status === 404 || e.status === 410) && !code;
+}
+
+/** The empty state for a chat that can no longer be opened: an explicit explanation instead of a blank pane or a
+ * raw gateway error that only says "unavailable". */
+function ThreadUnavailable() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+      <span className="flex size-10 items-center justify-center rounded-full bg-field text-ink-3">
+        <Icon name="chat" size={18} />
+      </span>
+      <p className="text-[13.5px] font-medium text-ink">{t("inbox-larkthread.unavailable_title")}</p>
+      <p className="max-w-[320px] text-[12.5px] text-ink-3">{t("inbox-larkthread.unavailable_detail")}</p>
+    </div>
+  );
+}
+
 export function LarkThread(props: LarkThreadProps) {
   // whose Lark the chat is (an inbox item's manager; a chat opened from it is the same one's): every request below names it
   const outer = useItemManager();
@@ -138,6 +168,8 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
   const focus = chat.focus;
   const [page, setPage] = useState<LarkPage | null>(null);
   const [error, setError] = useState("");
+  // The connector says the chat itself is gone (disbanded, access removed): ThreadUnavailable replaces the thread.
+  const [unavailable, setUnavailable] = useState(false);
   const [newerBusy, setNewerBusy] = useState(false);
   // The draft's quote comes back with the chat (lib/lark-chat.ts drafts); set while drawing, so the box never keeps
   // another chat's quote for a frame.
@@ -187,6 +219,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
     tracker.current = null;
     setPage(null);
     setError("");
+    setUnavailable(false);
     setFlash(null);
     setPinThread(null);
     setOpenTopic(null);
@@ -203,7 +236,11 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
         tracker.current = new LarkReadTracker(initialCursor(focus, messages, topic || Boolean(r.topic)));
         setPage({ ...r, messages });
       })
-      .catch((e) => live && setError(errorText(e)));
+      .catch((e) => {
+        if (!live) return;
+        if (conversationUnavailable(e)) setUnavailable(true);
+        else setError(errorText(e));
+      });
     return () => {
       live = false;
     };
@@ -464,7 +501,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
       const r = await startConversation({ prompt }, ownerHeaders(manager));
       // its requests (feed, stop…) go to that manager whatever the page shows later; the current assistant stays
       adoptConversation(manager, r.session.session_id, r.session.machine_id);
-      navigate({ name: "persona", sid: r.session.session_id });
+      navigate(conversationPage(r.session.session_id, r.session.machine_id, manager));
     } catch (e) {
       toast(t("inbox-larkthread.summary_failed", { error: errorText(e) }), "error");
     } finally {
@@ -533,6 +570,7 @@ function LarkThreadBody({ chat, pinsOpen = false, onPinsOpen }: LarkThreadProps)
   }), [feed, chat.group, refreshAround]);
 
   if (!page) {
+    if (unavailable) return <ThreadUnavailable />;
     return <div className="p-5">{error ? <p className="text-[12.5px] text-red">{error}</p> : <Loading label={t("inbox-larkthread.loading")} />}</div>;
   }
   const firstNew = focus ? page.messages.find((m) => comparePosition(m.position, focus) >= 0)?.id : undefined;
@@ -987,17 +1025,30 @@ function TranslationLine({ m, target }: { m: LarkMessage; target: string }) {
   );
 }
 
+/** A reply's quoted strip: the one-line summary, plus a thumbnail when the quoted message is a picture (its parts
+ * carry the URL), so the quote shows the picture instead of only an "[Image]" placeholder. */
+function QuoteLine({ m, display, className = "" }: { m: LarkMessage; display: LarkMessageDisplay; className?: string }) {
+  const q = m.reply_to;
+  const manager = useItemManager();
+  if (!q) return null;
+  const src = safeURL(q.parts?.find((p) => p.kind === "image")?.url, manager);
+  return (
+    <p className={`flex items-center gap-1.5 border-l-2 border-line-strong pl-2 text-[12px] text-ink-3 ${className}`}>
+      <span className="min-w-0 flex-1 truncate">
+        {q.sender_name ? t("inbox-larkthread.quoted_sender", { name: q.sender_name }) : ""}{quoteSummary(display, q)}
+      </span>
+      {src && <img src={src} alt="" decoding="async" className="size-5 shrink-0 rounded-[6px] object-cover" />}
+    </p>
+  );
+}
+
 /** A topic's own content on its card: what a chat row holds under its header. */
 function MessageBody({ m, translateTo }: { m: LarkMessage; translateTo?: string }) {
   const display = useLarkDisplay(useContext(ChatAccount));
   const shown = showsBody(display, m);
   return (
     <>
-      {m.reply_to && (
-        <p className="mb-1 truncate border-l-2 border-line-strong pl-2 text-[12px] text-ink-3">
-          {m.reply_to.sender_name ? t("inbox-larkthread.quoted_sender", { name: m.reply_to.sender_name }) : ""}{quoteSummary(display, m.reply_to)}
-        </p>
-      )}
+      {m.reply_to && <QuoteLine m={m} display={display} className="mb-1" />}
       {shown ? <Parts parts={m.parts?.length ? m.parts : [{ kind: "text", text: m.text ?? "" }]} /> : <p className="text-[13px] text-ink-3 italic">{t("inbox-larkthread.recalled")}</p>}
       {shown && m.recalled && <p className="mt-0.5 text-[11px] text-ink-3">{t("inbox-larkthread.recalled_mark")}</p>}
       {translateTo && <TranslationLine m={m} target={translateTo} />}
@@ -1151,11 +1202,7 @@ const Message = memo(function Message({
             )}
           </p>
         )}
-        {m.reply_to && (
-          <p className="mt-0.5 truncate border-l-2 border-line-strong pl-2 text-[12px] text-ink-3">
-            {m.reply_to.sender_name ? t("inbox-larkthread.quoted_sender", { name: m.reply_to.sender_name }) : ""}{quoteSummary(display, m.reply_to)}
-          </p>
-        )}
+        {m.reply_to && <QuoteLine m={m} display={display} className="mt-0.5" />}
         {shown ? <Parts mid={m.id} parts={m.parts?.length ? m.parts : [{ kind: "text", text: m.text ?? "" }]} /> : <p className="text-[13px] text-ink-3 italic">{t("inbox-larkthread.recalled")}</p>}
         {((shown && m.recalled) || (compact && m.edited)) && (
           <p className="mt-0.5 flex items-center gap-2 text-[11px] text-ink-3">
@@ -1350,6 +1397,21 @@ function Inline({ p }: { p: LarkPart }) {
   }
 }
 
+// The largest a chat picture is drawn (the img's max-width / max-height classes below): the reported size is scaled
+// into this box so the place reserved before load matches the loaded picture.
+const PICTURE_MAX_W = 280;
+const PICTURE_MAX_H = 256;
+
+/** The box a picture reserves from its reported size, so it has layout before it loads. A boxless img never starts
+ * loading in some browsers (a zero-size lazy request is skipped), which left group pictures permanently blank. */
+function pictureBox(meta: Record<string, unknown>): CSSProperties | undefined {
+  const w = Number(meta.width);
+  const h = Number(meta.height);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return undefined;
+  const scale = Math.min(PICTURE_MAX_W / w, PICTURE_MAX_H / h, 1);
+  return { width: Math.round(w * scale), height: Math.round(h * scale) };
+}
+
 function Block({ p, mid }: { p: LarkPart; mid?: string }) {
   const meta = p.metadata ?? {};
   const tools = useContext(Tools);
@@ -1361,13 +1423,13 @@ function Block({ p, mid }: { p: LarkPart; mid?: string }) {
       const src = p.url?.startsWith("blob:") ? p.url : safeURL(p.url, manager);
       return src ? (
         <button type="button" onClick={() => (tools ? tools.openImage(src) : openMedia(src))} aria-label={t("inbox-larkthread.open_image")} className="w-fit">
-          <img src={src} alt={t("inbox-larkthread.image")} loading="lazy" className="max-h-64 max-w-[min(280px,100%)] rounded-[8px] object-contain shadow-hairline" />
+          <img src={src} alt={t("inbox-larkthread.image")} decoding="async" style={pictureBox(meta)} className="max-h-64 max-w-[min(280px,100%)] rounded-[8px] object-contain shadow-hairline" />
         </button>
       ) : <span className="text-ink-3">{t("inbox-larkthread.image_placeholder")}</span>;
     }
     case "emotion": {
       const src = safeURL(p.url, manager);
-      return src ? <img src={src} alt={p.text || t("inbox-larkthread.sticker")} loading="lazy" className="size-20 object-contain" /> : <span>{emojiLabel(p.refId ?? "", p.text)}</span>;
+      return src ? <img src={src} alt={p.text || t("inbox-larkthread.sticker")} decoding="async" className="size-20 object-contain" /> : <span>{emojiLabel(p.refId ?? "", p.text)}</span>;
     }
     case "file":
       return <FilePart p={p} />;

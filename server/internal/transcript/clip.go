@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -96,7 +97,7 @@ func clipJSON(raw json.RawMessage) json.RawMessage {
 	if json.Unmarshal(raw, &m) != nil {
 		return raw
 	}
-	b, _ := json.Marshal(mapStrings(m, func(s string) string { return clipTo(s, maxInputLen/2) }))
+	b := marshalPlain(mapStrings(m, func(s string) string { return clipTo(s, maxInputLen/2) }))
 	if len(b) <= maxInputLen {
 		return b
 	}
@@ -104,7 +105,7 @@ func clipJSON(raw json.RawMessage) json.RawMessage {
 	// strings, keys and other values are never cut, and a share is never under minInputShare, so an input made mostly of
 	// those (thousands of short array items) or of a great many long strings still goes over maxInputLen.
 	long, kept := 0, 0
-	rest, _ := json.Marshal(mapStrings(m, func(s string) string {
+	rest := marshalPlain(mapStrings(m, func(s string) string {
 		if len(s) <= minInputShare {
 			return s
 		}
@@ -117,15 +118,25 @@ func clipJSON(raw json.RawMessage) json.RawMessage {
 	// JSON escapes make a kept byte cost more than one: scale the share by what the first pass's strings cost.
 	share := (maxInputLen - len(rest)) * kept / (len(b) - len(rest)) / long
 	share = min(max(share-clipNoteRoom, minInputShare), maxInputLen/2)
-	b, _ = json.Marshal(mapStrings(m, func(s string) string { return clipIfShorter(s, share) }))
-	return b
+	return marshalPlain(mapStrings(m, func(s string) string { return clipIfShorter(s, share) }))
+}
+
+// marshalPlain is v as JSON with < > & as they are, as the input came: json.Marshal writes each as six bytes, and every
+// page and push carried them so, 160 KB for a 61 KB input of HTML (#2907). U+2028 and U+2029 are still escaped, as
+// encoding/json does without HTML escaping. A decoded JSON value always encodes.
+func marshalPlain(v any) []byte {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n"))
 }
 
 // clipIfShorter is clipTo(s, n) if that is shorter as JSON, which is what a tool input carries, and s if not. A string
 // more than clipNoteRoom over n always is: every byte cut costs at least one byte of JSON and the note at most
 // clipNoteRoom. An unescaped ASCII string stays whole up to the note's JSON content length beyond n (37 bytes with
-// a three-digit original size). Escapes change that threshold: json.Marshal writes < > & as six bytes each, so an
-// HTML tail of the same raw length may cost more than the note.
+// a three-digit original size). Escapes change that threshold: quotes and backslashes cost two bytes each, control
+// characters up to six, so such a tail of the same raw length may cost more than the note.
 func clipIfShorter(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -142,10 +153,9 @@ func clipIfShorter(s string, n int) string {
 	return s
 }
 
-// jsonLen is the length of s written as a JSON string.
+// jsonLen is the length of s written as a JSON string, as clipJSON writes it.
 func jsonLen(s string) int {
-	b, _ := json.Marshal(s)
-	return len(b)
+	return len(marshalPlain(s))
 }
 
 // mapStrings is a copy of v, a decoded JSON value, with f applied to every string in it (object keys are kept).

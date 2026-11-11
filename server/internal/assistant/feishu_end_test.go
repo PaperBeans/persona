@@ -3,12 +3,15 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 // endHub is the Feishu fake with a run that already shows its progress card, and the fake hub to set its
@@ -96,7 +99,8 @@ func TestFeishuCheckEndFailed(t *testing.T) {
 	}
 }
 
-// A held run whose background work never reported back gives up quietly: its progress card still ends, as timed out.
+// A held run whose background work never reported back ends as timed out in the card it still has: the card is
+// rewritten with the note, not left saying it is working.
 func TestFeishuHeldRunGivesUpOnTheCard(t *testing.T) {
 	s, f, r, posts := endHub(t)
 	s.chans.mu.Lock()
@@ -114,4 +118,273 @@ func (s *Service) setRunSeen(r *channel.Run) {
 	s.chans.mu.Lock()
 	r.Seen = true
 	s.chans.mu.Unlock()
+}
+
+// A run held after answering has no progress card any more (its card went back with the message). When the background
+// work it waits for never reports back, the wait runs out — and the chat has to hear about it: the ending posts a card
+// of its own, rather than saying nothing and leaving the owner to wonder.
+func TestFeishuHeldRunGivesUpWithoutItsCard(t *testing.T) {
+	s, f, r, posts := endHub(t)
+	s.finishChannelRun(r, &channel.Result{Answer: "先答一部分", Held: true})
+	s.chans.mu.Lock()
+	left := r.Ext["card"]
+	r.Started = time.Now().Add(-channel.HeldMost - time.Minute)
+	s.chans.mu.Unlock()
+	if left != "" {
+		t.Fatalf("the held run kept its card: %q", left)
+	}
+	*posts = nil
+	sess := proto.Session{Status: proto.StatusDone, State: proto.StateIdle, MachineID: "server", SessionID: "c1"}
+	f.setSessions("server", sess)
+	f.setItems()
+	s.checkChannelRun(r.ID)
+	if run, _ := s.channelRunByID(r.ID); run != nil {
+		t.Fatalf("the run did not end")
+	}
+	if len(*posts) != 1 {
+		t.Fatalf("the run ended without telling the owner: %v", *posts)
+	}
+	card, _ := (*posts)[0]["card"].(string)
+	if (*posts)[0]["update"] == true || !strings.Contains(card, "已超时，去 App 里看") || !strings.Contains(card, "先不等了") {
+		t.Fatalf("card %v", (*posts)[0])
+	}
+}
+
+// A held run's ending can also be quiet: its background work reported back in a turn that said nothing. The run has no
+// card left to rewrite, but the chat was told it would answer again — so its ending line goes out as a card of its own,
+// rather than nowhere.
+func TestFeishuHeldRunQuietEndWithoutItsCard(t *testing.T) {
+	s, f, r, posts := endHub(t)
+	s.finishChannelRun(r, &channel.Result{Answer: "先答一部分", Held: true})
+	s.chans.mu.Lock()
+	left := r.Ext["card"]
+	r.Started = time.Now().Add(-channel.HeldIdleMost - time.Minute)
+	s.chans.mu.Unlock()
+	if left != "" {
+		t.Fatalf("the held run kept its card: %q", left)
+	}
+	*posts = nil
+	sess := proto.Session{Status: proto.StatusDone, State: proto.StateIdle, MachineID: "server", SessionID: "c1"}
+	f.setSessions("server", sess)
+	f.setItems()
+	s.checkChannelRun(r.ID)
+	if run, _ := s.channelRunByID(r.ID); run != nil {
+		t.Fatalf("the run did not end")
+	}
+	if len(*posts) != 1 {
+		t.Fatalf("the run ended without telling the owner: %v", *posts)
+	}
+	post := (*posts)[0]
+	card, _ := post["card"].(string)
+	if post["update"] == true || post["reply_to"] != "om_m1" || !strings.Contains(card, "完成 · Persona · 用时") ||
+		strings.Contains(card, "处理中") || cardFooters(t, card) != 1 {
+		t.Fatalf("post %v", post)
+	}
+}
+
+// heldRunWithoutCard is a run answered once (held) whose card went back with its message, and whose background wait is
+// older than HeldIdleMost: its next end is a quiet one.
+func heldRunWithoutCard(t *testing.T) (*Service, *fakeHub, *channel.Run, *[]map[string]any) {
+	t.Helper()
+	s, f, r, posts := endHub(t)
+	s.finishChannelRun(r, &channel.Result{Answer: "先答一部分", Held: true})
+	s.chans.mu.Lock()
+	left := r.Ext["card"]
+	r.Started = time.Now().Add(-channel.HeldIdleMost - time.Minute)
+	s.chans.mu.Unlock()
+	if left != "" {
+		t.Fatalf("the held run kept its card: %q", left)
+	}
+	*posts = nil
+	return s, f, r, posts
+}
+
+// A held run's quiet ending says how it ended. Its background work's turn can be interrupted, hit a model API error or
+// lose its computer: the chat hears that instead of "Done", as a card of its own (the run has none left) (#4228).
+func TestFeishuHeldRunQuietEndSaysHowItEnded(t *testing.T) {
+	interrupted := []proto.Item{{Seq: 5, Kind: proto.KindNotice, Role: "system", Text: transcript.InterruptedNotice}}
+	for _, tc := range []struct {
+		name  string
+		sess  proto.Session
+		items []proto.Item
+		want  string
+	}{
+		{"stopped", proto.Session{Status: proto.StatusDone, State: proto.StateIdle}, interrupted, "已中断"},
+		{"failed", proto.Session{Status: proto.StatusDone, State: proto.StateIdle, TurnError: "unexpected status 503"}, nil, "出错了"},
+		{"offline", proto.Session{Status: proto.StatusOffline, State: proto.StateIdle}, nil, "电脑离线"},
+	} {
+		s, f, r, posts := heldRunWithoutCard(t)
+		sess := tc.sess
+		sess.MachineID, sess.SessionID = "server", "c1"
+		f.setSessions("server", sess)
+		f.setItems(tc.items...)
+		s.checkChannelRun(r.ID)
+		if run, _ := s.channelRunByID(r.ID); run != nil {
+			t.Fatalf("%s: the run did not end", tc.name)
+		}
+		if len(*posts) != 1 {
+			t.Fatalf("%s: the run ended without telling the owner: %v", tc.name, *posts)
+		}
+		post := (*posts)[0]
+		card, _ := post["card"].(string)
+		if post["update"] == true || !strings.Contains(card, tc.want) || !strings.Contains(card, "· Persona · 用时") ||
+			strings.Contains(card, "完成 ·") {
+			t.Fatalf("%s: post %v", tc.name, post)
+		}
+	}
+}
+
+// cardFooters is how many of a card's body elements carry its ending line. Its chat-list summary repeats the line by
+// design, so the whole JSON has it twice even when the card shows it once.
+func cardFooters(t *testing.T, card string) int {
+	t.Helper()
+	var got struct {
+		Body struct {
+			Elements []struct {
+				Content string
+				Text    struct{ Content string }
+			}
+		}
+	}
+	if err := json.Unmarshal([]byte(card), &got); err != nil {
+		t.Fatalf("card: %v", err)
+	}
+	n := 0
+	for _, e := range got.Body.Elements {
+		if strings.Contains(e.Content+e.Text.Content, "完成 · Persona · 用时") {
+			n++
+		}
+	}
+	return n
+}
+
+// A quiet ending is not always one to report: a message the owner recalled says nothing, with a card or without one.
+func TestFeishuRecalledEndWithoutItsCardSaysNothing(t *testing.T) {
+	s, _, r, posts := endHub(t)
+	s.chans.mu.Lock()
+	delete(r.Ext, "card") // recalled before its first progress card
+	r.Recalled = true
+	s.chans.mu.Unlock()
+	*posts = nil
+	s.finishChannelRun(r, recalledResult())
+	if len(*posts) != 0 {
+		t.Fatalf("a recalled message said something: %v", *posts)
+	}
+}
+
+// A recalled message whose progress card cannot be written any more says nothing too: the ending is not posted as a
+// card of its own.
+func TestFeishuRecalledEndWithARefusedCardSaysNothing(t *testing.T) {
+	s, f, r, posts := endHub(t)
+	f.answerApp(AppFeishu, FeishuUpdateCard, func(json.RawMessage) (any, error) {
+		return nil, errors.New("feishu update card: 230025 card is not a card")
+	})
+	*posts = nil
+	s.finishChannelRun(r, recalledResult())
+	if len(*posts) != 0 {
+		t.Fatalf("a recalled message said something: %v", *posts)
+	}
+}
+
+// A quiet ending's progress card can be refused for good (recalled, no longer a card): the ending still has to reach
+// the owner, so it goes out as a card of its own, as a normal answer does — and, like the card it replaces, it says how
+// the wait ended (#4228) rather than always "Done".
+func TestFeishuQuietEndPostsWhenItsCardIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		res  channel.Result
+		want string
+	}{
+		{"done", channel.Result{Quiet: true}, "完成 · Persona · 用时"},
+		{"failed", channel.Result{Quiet: true, End: channel.EndError, Stopped: "API 错误：overloaded"}, "出错了"},
+	} {
+		s, f, r, posts := endHub(t)
+		f.answerApp(AppFeishu, FeishuUpdateCard, func(json.RawMessage) (any, error) {
+			return nil, errors.New("feishu update card: 230025 card is not a card")
+		})
+		*posts = nil
+		res := tc.res
+		s.finishChannelRun(r, &res)
+		if run, _ := s.channelRunByID(r.ID); run != nil {
+			t.Fatalf("%s: the run did not end", tc.name)
+		}
+		if len(*posts) != 1 {
+			t.Fatalf("%s: the run ended without telling the owner: %v", tc.name, *posts)
+		}
+		post := (*posts)[0]
+		card, _ := post["card"].(string)
+		if post["update"] == true || post["reply_to"] != "om_m1" || !strings.Contains(card, tc.want) {
+			t.Fatalf("%s: post %v", tc.name, post)
+		}
+	}
+}
+
+// A quiet ending that never got out because the hub could not be reached is not an ending: the run is kept and tried
+// again, and the retry posts it under the same key, so one that did arrive lands once.
+func TestFeishuQuietEndTriesAgainWhenUnreachable(t *testing.T) {
+	s, f, r, posts := endHub(t)
+	s.finishChannelRun(r, &channel.Result{Answer: "先答一部分", Held: true}) // it gave its card back
+	*posts = nil
+	tries := 0
+	keys := []string{}
+	f.answerApp(AppFeishu, FeishuPost, func(p json.RawMessage) (any, error) {
+		tries++
+		var m map[string]any
+		_ = json.Unmarshal(p, &m)
+		key, _ := m["uuid"].(string)
+		keys = append(keys, key)
+		if tries == 1 {
+			return nil, bus.ErrOffline
+		}
+		*posts = append(*posts, m)
+		return map[string]any{"message_id": "om_card"}, nil
+	})
+	s.finishChannelRun(r, &channel.Result{Quiet: true})
+	if run, _ := s.channelRunByID(r.ID); run == nil {
+		t.Fatal("the run was marked finished although nothing got out")
+	}
+	s.finishChannelRun(r, &channel.Result{Quiet: true})
+	if run, _ := s.channelRunByID(r.ID); run != nil {
+		t.Fatal("the run did not end after the retry")
+	}
+	if tries != 2 || len(*posts) != 1 {
+		t.Fatalf("tries %d, posts %v", tries, *posts)
+	}
+	if keys[0] == "" || keys[0] != keys[1] {
+		t.Fatalf("the ending went out under keys %q, want one key both times", keys)
+	}
+	if card, _ := (*posts)[0]["card"].(string); !strings.Contains(card, "完成 · Persona · 用时") {
+		t.Fatalf("card %s", card)
+	}
+}
+
+// The same retry applies when the progress card was refused and the card of its own is what could not reach the hub.
+func TestFeishuQuietEndTriesAgainWhenItsFallbackIsUnreachable(t *testing.T) {
+	s, f, r, posts := endHub(t)
+	f.answerApp(AppFeishu, FeishuUpdateCard, func(json.RawMessage) (any, error) {
+		return nil, errors.New("feishu update card: 230025 card is not a card")
+	})
+	*posts = nil
+	tries := 0
+	f.answerApp(AppFeishu, FeishuPost, func(p json.RawMessage) (any, error) {
+		tries++
+		if tries == 1 {
+			return nil, bus.ErrOffline
+		}
+		var m map[string]any
+		_ = json.Unmarshal(p, &m)
+		*posts = append(*posts, m)
+		return map[string]any{"message_id": "om_card"}, nil
+	})
+	s.finishChannelRun(r, &channel.Result{Quiet: true})
+	if run, _ := s.channelRunByID(r.ID); run == nil {
+		t.Fatal("the run was marked finished although nothing got out")
+	}
+	s.finishChannelRun(r, &channel.Result{Quiet: true})
+	if run, _ := s.channelRunByID(r.ID); run != nil {
+		t.Fatal("the run did not end after the retry")
+	}
+	if tries != 2 || len(*posts) != 1 {
+		t.Fatalf("tries %d, posts %v", tries, *posts)
+	}
 }

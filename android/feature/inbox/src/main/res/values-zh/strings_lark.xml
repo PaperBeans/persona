@@ -29,6 +29,8 @@
     <string name="inbox_lark_file_failed">文件没打开。再试一次，或者装一个能打开它的应用</string>
     <string name="inbox_lark_video">视频</string>
     <string name="inbox_lark_audio">语音</string>
+    <string name="inbox_lark_media_play">播放</string>
+    <string name="inbox_lark_media_pause">暂停</string>
     <string name="inbox_lark_card">卡片</string>
     <string name="inbox_lark_cannot_open">无法打开飞书，请确认已安装飞书</string>
     <string name="inbox_lark_conversation">飞书会话</string>

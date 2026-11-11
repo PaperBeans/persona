@@ -1,5 +1,19 @@
 # Lessons: testing and validation
 
+- Bulk Postgres fixtures need physical isolation, not just row deletion (#3743). Deleting 500 feed rows left a larger
+  unsent B-tree than the sent index; a controlled statistics refresh then changed a later index-choice assertion even
+  though no fixture rows remained. Use the existing migrated-database clone for bulk fixtures so table, index and
+  catalog state stay private. Preserve the original planner assertion; an isolated passing test alone does not prove
+  that the complete package is unaffected. The controlled reproducer shows the mechanism, not which background
+  statistics event happened in a particular failed run.
+
+- An index-choice assertion needs a table of its own, shaped like production (#4191). On the few rows earlier tests
+  leave behind, with `enable_seqscan = off`, two indexes cost about the same, and the leftovers decide which one wins:
+  `TestMarkFeedSentUsesUnsentIndex` passed alone and failed from the third `-count=10` iteration on, before and after
+  #3787. Check the plan in a migrated clone, on a few thousand synthetic rows, after `ANALYZE` and at default costs.
+  Check the generic plan too (`PREPARE` + `EXPLAIN EXECUTE` under `plan_cache_mode`), since cached statements can
+  switch to it. Then prove the test by mutation: drop the index, or the query's matching predicate, and it must fail.
+
 - Bound cold simulator compilation separately from test execution (#2671). A combined `xcodebuild test` can spend
   most of its deadline compiling before the first test starts. Build for testing, then test without building against
   the same derived data and suite selection; preserve failure propagation, integration exclusions and result-bundle
@@ -78,6 +92,7 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 
 - Waiting for one effect does not wait for another made on a different goroutine (2026-11-09, #2152). A source page's tree changes first and its frame is sent later by the delivery goroutine (`ui_page_delivery.go`), so `TestPageNativeFiniteLoadStillStartsWithLoading`, which waited for the tree to say `loaded` and then counted delivered frames, failed only on busy CI. Wait for each effect you assert on (`pageAwait` for the frames too). To reproduce such a gap, slow the receiving side in a scratch copy (a fake `Notify` that sleeps 20 ms failed 10 of 10 runs), or run `go test -cpu 1 -count=60` with every core busy (4 of 60 failed); an idle machine passed 40 of 40.
 - A cancel on a fixed deadline counted from the start races the fake's own startup (2026-11-10, #2674). `TestToolCheckTimeoutStopsItsHelpers` gave the call 300 ms, but its fake had to start a shell and write its helper's pid first; on a busy machine the cancel came before there was a helper, and the test failed (1 of 30 runs with every core busy) without checking what it was about. Cancel once the fake shows it started (the pid file), and time the return from the cancel. Do not lengthen the deadline instead: it only makes the race rarer.
+- A recovering assistant conversation's `busy` alone does not mark the end of its turn (2026-11-10, #3815). When recovery moves to the next model, `assistantSend` registers the replacement process (`spawnAssistant`) before it marks it busy and sends the retry, with the context snapshot and the mode sync in between. `sdkFixture.idle` waited for the registered process's `!busy`, so `TestAssistantRecoveryStopsAfterBothModelsAndTheirRetries` counted 2 of its 4 requests (9 of 400 runs on a busy Mac). The node publishes that gap as working (`busy || recovering` in `assistantSessions`); a wait for the end of a turn must use the same rule. To find such a gap, log the internal state at the moment the wait returns in a scratch test: slowing the fake CLI's `initialize`, the first guess, did not widen it.
 
 - Fixtures must use real response shapes (2026-11-06, #2938 / #2017). Assistant-feed `view_actions` is an object indexed by card key, empty as `{}` too. When both web and acceptance drivers mistook it for an array, array fixtures kept unit tests green while the real model lost answered state after reload. Use protocol objects covering empty objects, answered snapshots, and pagination; in a real browser also reload and check latest version, answered state, and no repeat sends.
 
@@ -644,6 +659,32 @@ Pin the visual style, not an alternate navigation tree. A shared launch helper t
 - **Fake extensions installed through `dir:` in e2e are sandboxed by default** (bwrap, writes only to own data/runtime directories). A fake channel plugin writing received messages to a test directory throws and exits;
   hub restarts it, replayed input is deduplicated, and it looks like lost messages. Store files in `extension.data_dir` from `initialize` (tests read `~/.persona/extensions/data/<id>/`), retaining sandboxing.
 
+## XCUITest cannot tap while a list glides (2026-11-10, #3027)
+
+- **Every XCUITest gesture waits for the app to be idle, before and after**, and a scroll view gliding after a flick
+  is not idle. `press(forDuration:thenDragTo:…)` returns only once the glide has stopped, and a tap after it, even
+  through SpringBoard's coordinates, came 2 s later on a stopped list: a "tap ↓ during the glide" test passed without
+  testing anything.
+- **One synthesized record of the flick and the tap** (`XCSynthesizedEventRecord` with two `XCPointerEventPath`s, the
+  classes XCUITest's gestures are made of) did not keep its timing: the moves came in a burst, the finger sat still,
+  the list never glided.
+- **What works** (`apple/PersonaUITests/TouchScript.swift`): the flick stays XCUITest's own, and the tap is a
+  one-path record played through `XCUIDevice.shared`'s `eventSynthesizer` from a background queue while the main thread
+  waits the glide out. These are not public API: the helper throws `XCTSkip` if this Xcode lacks them.
+- **Time the tap from the app**: when the flick starts depends on XCUITest's wait for the app to be idle, which a running
+  turn (a step a second) stretches. A fixed delay after the drag call came before the flick (↓ not up yet) or into it
+  (the synthesizer refuses: "only one gesture can be performed at a time"). Polling the synthesizer with empty records
+  does not work either: its answers do not come while XCUITest's gesture call waits. The chat posts a Darwin
+  notification as a user's flick starts to glide (`ChatView.glideNote`, `notify_post`, DEBUG with `-probes YES`); the
+  helper waits for it with `notify_register_dispatch` on its own queue and taps 0.1 s later.
+- **Retry while the daemon still holds the flick**: XCTest's daemon counts the flick as its gesture for about 0.2 s after
+  the finger lifts, and refuses any tap until then (`XCTDaemonErrorDomain` 21). Played once, the tap never reached the
+  app. The helper plays it again every 20 ms while the answer is 21 (for up to 3 s), and logs each try. On iOS 27.0 it
+  was taken 0.19–0.22 s into a glide of about 3 s.
+- **Prove the timing in the app, not the test**: a test cannot read the list during the glide without waiting for it.
+  The app counts ↓ taps made while its scroll view `isDecelerating` (probe `glideTaps`), and the test asserts the count
+  went up; `-scrollTrace YES` shows the frames.
+
 ## Local port discovery probes fake model servers in tests (2026-11-04)
 
 `TestInboxTriageWaitsOutAnExhaustedQuota` occasionally reports "20 items used 21 requests". The extra request is `GET /`, `User-Agent: persona-ports`,
@@ -707,6 +748,10 @@ On test hangs, send `kill -QUIT` to the test process first, identify the test an
 When a built-in extension's `runtime.command` is `personad`, the manager launches `os.Executable()` with manifest `args`; inside `go test`, that is the test binary (`extmgr.test voice`).
 The test binary does not recognize `voice`, reruns the whole package recursively, and times out. `extmgr` `TestMain` therefore checks `os.Args[1]`: if `voice`, run as `personad voice`
 (`voice.Run`). Future built-in executable extensions (not declarations only) need the same `TestMain` dispatch, so tests actually run them through hub forwarding.
+
+## Stop test programs before their temporary directories go (2026-11-11, #4104)
+
+`t.TempDir` removes all of a test's temporary directories in one cleanup, added at its first call, and cleanups run last added, first called. A test that first calls it after starting extension programs (`extensionTestHub` adds the cleanup that stops them) has its directories removed while the programs still run. A program the test's last change restarted (a provider switched back on restarts the extensions holding its references) then writes into a directory being removed, and the run fails with only `TempDir RemoveAll cleanup: … directory not empty`, about one run in three. `startTestExtensions` therefore calls `t.TempDir` before adding its cleanup. Anything else that starts processes writing into a test's directories must also add its stop cleanup after the first `t.TempDir` call.
 
 ## Web screenshots on Linux unsupported by Playwright (2026-11-06, #3140)
 

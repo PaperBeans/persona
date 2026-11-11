@@ -85,13 +85,15 @@ func (s *Service) readMachineKeys(ctx context.Context) ([]machineKey, error) {
 	return list, nil
 }
 
-// withKeyMachines fills the managed views' key_machines: the computers with a key of their own (a failed read: none).
-// Only Settings › Model providers shows them; Model configuration does not read the setting.
+// withKeyMachines fills the managed views' key_machines: the computers with a key of their own (a failed read: none),
+// and the keys that are references (withKeyReferences). Only Settings › Model providers shows them; Model
+// configuration does not read the setting.
 func (s *Service) withKeyMachines(ctx context.Context, views []LauncherView) []LauncherView {
 	var list []machineKey
 	if st := s.store(); st != nil {
 		_, _ = memoSetting(ctx, st, launchersMachineKeysKey, &list)
 	}
+	s.withKeyReferences(ctx, views, list)
 	for i := range views {
 		if views[i].Source != "persona" {
 			continue
@@ -265,21 +267,27 @@ func (s *Service) usableOn(ctx context.Context, l storedLauncher, machine string
 // ---- what the nodes get ----
 
 // openFor is the provider with its secrets for machine: that computer's own key over the provider's.
-func (s *Service) openFor(l storedLauncher, keys []machineKey, machine string) (proto.ManagedLauncher, error) {
+func (s *Service) openFor(ctx context.Context, l storedLauncher, keys []machineKey, machine string) (proto.ManagedLauncher, error) {
 	m, err := s.openStoredLauncher(l)
 	if err != nil {
 		return m, err
 	}
-	for _, k := range keys {
-		if k.Launcher == l.Name && (k.Machine == machine || s.sameMachine(k.Machine, machine)) && k.KeySealed != "" {
-			if m.APIKey, err = s.openKey(k.KeySealed); err != nil {
-				return m, i18n.Err("assistant-models.err_key_decrypt")
-			}
-			break
-		}
+	// A reference resolves here, for this computer (launcher_secrets.go); one that does not refuses with its words.
+	if m.APIKey, err = s.openLauncherKey(ctx, s.keySealedFor(l, keys, machine), l.Name, machine); err != nil {
+		return m, err
 	}
 	m.Rev = l.rev()
 	return m, nil
+}
+
+// keySealedFor is the key of l that machine uses: its own when it has one, else the provider's.
+func (s *Service) keySealedFor(l storedLauncher, keys []machineKey, machine string) string {
+	for _, k := range keys {
+		if k.Launcher == l.Name && (k.Machine == machine || s.sameMachine(k.Machine, machine)) && k.KeySealed != "" {
+			return k.KeySealed
+		}
+	}
+	return l.KeySealed
 }
 
 // nodeLaunchersFor is what machine is told: the providers in its scope without their secrets (catalog), and, for a
@@ -302,7 +310,12 @@ func (s *Service) nodeLaunchersFor(ctx context.Context, stored []storedLauncher,
 				continue
 			}
 		}
-		full, e := s.openFor(l, keys, machine)
+		if _, ok := s.keyReference(s.keySealedFor(l, keys, machine)); ok {
+			// A node from before the catalog would be handed the value at every connection, used or not: a key that
+			// is a reference goes only to a node that pulls it.
+			continue
+		}
+		full, e := s.openFor(ctx, l, keys, machine)
 		if e != nil {
 			err = e
 			continue
@@ -375,7 +388,10 @@ func (s *Service) pullLauncher(ctx context.Context, machine string, params json.
 	if err != nil {
 		return nil, err
 	}
-	full, err := s.openFor(l, keys, machine)
+	full, err := s.openFor(ctx, l, keys, machine)
+	if _, ref := s.keyReference(s.keySealedFor(l, keys, machine)); err != nil && ref {
+		return nil, &rpc.Error{Code: proto.CodeLauncherKeyUnresolved, Message: i18n.Localize(err, lang)}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -391,6 +407,8 @@ type scopeInput struct {
 	Delivery      *string            `json:"delivery"`
 	OwnService    *string            `json:"own_service"`
 	MachineKeys   map[string]*string `json:"machine_keys"` // machine → key; "" (or null) removes it
+	// MachineKeyReferences: machine → a reference in place of its key (launcher_secrets.go); "" (or null) removes it.
+	MachineKeyReferences map[string]*string `json:"machine_key_references"`
 }
 
 var errScopeEmpty = i18n.Err("assistant-models_launchers.err_scope_empty")
@@ -411,6 +429,9 @@ func (s *Service) checkScope(ctx context.Context, in scopeInput) error {
 		named = append(named, *in.ScopeMachines...)
 	}
 	for m := range in.MachineKeys {
+		named = append(named, m)
+	}
+	for m := range in.MachineKeyReferences {
 		named = append(named, m)
 	}
 	if len(named) == 0 {
@@ -466,15 +487,22 @@ func (in scopeInput) applyScope(l *storedLauncher, isNew, assigned bool) error {
 	return nil
 }
 
-// withMachineKeys is keys with provider name's changes from in sealed in (nil when there are none).
-func (s *Service) withMachineKeys(keys []machineKey, name string, in map[string]*string) ([]machineKey, bool, error) {
-	if len(in) == 0 {
+// withMachineKeys is keys with provider name's changes from in sealed in (nil when there are none): keys, and
+// references (refs, checked and sealed in sealedRefs by sealKeyReferences).
+func (s *Service) withMachineKeys(keys []machineKey, name string, in, refs map[string]*string, sealedRefs map[string]string) ([]machineKey, bool, error) {
+	if len(in) == 0 && len(refs) == 0 {
 		return keys, false, nil
 	}
 	out := slices.Clone(keys)
-	for machine, v := range in {
+	drop := func(machine string) {
 		out = slices.DeleteFunc(out, func(k machineKey) bool { return k.Launcher == name && k.Machine == machine })
-		if v == nil || strings.TrimSpace(*v) == "" {
+	}
+	for machine, v := range in {
+		if !keyGiven(v) && keyGiven(refs[machine]) {
+			continue // the reference below takes its place
+		}
+		drop(machine)
+		if !keyGiven(v) {
 			continue
 		}
 		sealed, err := s.sealKey(strings.TrimSpace(*v))
@@ -482,6 +510,15 @@ func (s *Service) withMachineKeys(keys []machineKey, name string, in map[string]
 			return nil, false, err
 		}
 		out = append(out, machineKey{Launcher: name, Machine: machine, KeySealed: sealed})
+	}
+	for machine, v := range refs {
+		if keyGiven(in[machine]) {
+			continue // check() refused both; a key given wins
+		}
+		drop(machine)
+		if sealed := sealedRefs[machine]; keyGiven(v) && sealed != "" {
+			out = append(out, machineKey{Launcher: name, Machine: machine, KeySealed: sealed})
+		}
 	}
 	return out, true, nil
 }

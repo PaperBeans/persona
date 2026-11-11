@@ -89,5 +89,20 @@
   "leader_plan_waiting": "開始を待っている計画：{tasks}",
   "progress_reached": "達成：{text}",
   "progress_doing": "進行中：{text}",
-  "progress_needs_you": "あなたにお願い：{text}"
+  "progress_needs_you": "あなたにお願い：{text}",
+  "decision_where_main": "メインの会話",
+  "decision_where_named": "会話「{title}」",
+  "decision_where_other": "Persona との会話",
+  "decision_from_owner": "{where}より、{date}：「{message}」",
+  "decision_from_assistant": "アシスタントが {date} に{where}で開始",
+  "decision_stands": "現状：{stands}",
+  "decision_option": "{n}. {label}：{leads_to}",
+  "decision_cost": "待つ場合のコスト：{cost}",
+  "decision_never_default": "自動では実行されません：あなたの判断を待ちます",
+  "decision_chosen_to_agent": "ユーザーはこの選択肢を選びました：\n{option}\n（結果：{leads_to}）\n\nこのとおり進めてください。",
+  "decision_response_decide_yourself": "任せます",
+  "decision_response_not_what_i_asked": "頼んだことと違います",
+  "decision_response_explain_first": "先に背景を教えてください",
+  "decision_response_noted": "「{response}」と回答しました：担当の会話に渡しました。何も実行していません",
+  "decision_chosen_noted": "選択：{option}。ToDo の決定に記録し、エージェントに送りました"
 }

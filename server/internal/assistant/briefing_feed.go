@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
@@ -159,20 +160,45 @@ func (s *Service) briefRoutes() {
 	// POST /api/v1/todos/{id}/accept {"asked_at"}: the Accept button of a `brief` item. It verifies the task when asked_at is
 	// the round that waits now; a button of an earlier round, or a task already verified, is 409. A decision whose
 	// recommendation could not be sent to the task's agent is 502, and asks that cannot be read or an acceptance that
-	// cannot be saved is 503; either way nothing was taken (conclusion.go, errAcceptStore).
+	// cannot be saved is 503; either way nothing was taken (conclusion.go, errAcceptStore). A decision also takes
+	// {"option"}: the label of the option chosen (the recommended one is what the plain press takes; no such option is
+	// 400), or {"response"}: decide_yourself, not_what_i_asked or explain_first, which takes nothing and goes to the
+	// task's supervisor (decision.go; any other value is 400).
 	s.handle("POST /api/v1/todos/{id}/accept", func(w http.ResponseWriter, r *http.Request) {
 		if !fullRole(r) {
 			apierr.Write(w, http.StatusForbidden, errors.New("read-only role cannot change todos"))
 			return
 		}
 		var in struct {
-			AskedAt string `json:"asked_at"`
+			AskedAt  string `json:"asked_at"`
+			Option   string `json:"option"`
+			Response string `json:"response"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.AskedAt == "" {
 			apierr.Write(w, http.StatusBadRequest, errors.New("asked_at is required"))
 			return
 		}
-		ok, err := s.acceptTryFromBrief(r.Context(), r.PathValue("id"), in.AskedAt)
+		var ok bool
+		var err error
+		switch {
+		case in.Response != "" && in.Option != "":
+			apierr.Write(w, http.StatusBadRequest, errors.New("give option or response, not both"))
+			return
+		case in.Response != "":
+			if !slices.Contains(ownerResponses, in.Response) {
+				apierr.Write(w, http.StatusBadRequest, errors.New("response must be decide_yourself, not_what_i_asked or explain_first"))
+				return
+			}
+			ok, err = s.ownerCannotAnswer(r.Context(), r.PathValue("id"), in.AskedAt, in.Response)
+		case in.Option != "":
+			ok, err = s.chooseOption(r.Context(), r.PathValue("id"), in.AskedAt, in.Option)
+		default:
+			ok, err = s.acceptTryFromBrief(r.Context(), r.PathValue("id"), in.AskedAt)
+		}
+		if errors.Is(err, errDecisionOption) {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
 		if errors.Is(err, errAcceptStore) { // nothing accepted: the button works again once the store answers
 			apierr.Write(w, http.StatusServiceUnavailable, i18n.Err("http-status.unavailable"))
 			return

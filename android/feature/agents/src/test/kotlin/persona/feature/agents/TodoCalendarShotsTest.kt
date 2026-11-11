@@ -1,6 +1,41 @@
 package persona.feature.agents
 
 import android.graphics.Bitmap
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.foundation.layout.padding
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import persona.core.contracts.FeedItem
+import persona.core.contracts.FeedResponse
+import persona.core.contracts.Hello
+import persona.core.contracts.ServerEvent
+import persona.core.contracts.TaskPlan
+import persona.core.contracts.TodoDue
+import persona.core.contracts.api.ConnectionState
+import persona.core.contracts.api.HubConnection
+import persona.core.contracts.api.TasksApi
+import persona.core.designsystem.AppFeedback
+import persona.core.designsystem.CalendarTokens
+import persona.core.designsystem.FeedbackAction
+import persona.core.designsystem.LocalAppFeedback
+import persona.core.designsystem.Tokens
+import persona.core.domain.tasks.TasksStore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
@@ -41,6 +76,10 @@ import java.util.TimeZone
  * day's to-dos in their state colors (overdue red, done faded and struck through), "+3" on a day of five, the days of
  * October and December faded, "2 without a due date" (whose "See list" goes back to the list); and a day's to-dos in the
  * sheet a tap brings up, one of which opens. Every style, light and dark; the list with the switch above it.
+ *
+ * Moving one (#2045): the month before, 体检预约 (09:00 on the 6th) carried to the 11th with where it would land, and
+ * after it is let go there with the shell's "Moved to … Undo" (drawn here as Root.kt draws it, kept up for the shot);
+ * and TalkBack's "Change Due Date…" sheet.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -81,6 +120,109 @@ class TodoCalendarShotsTest {
         Todo("t17", title = "读那篇论文"),
     )
 
+    private class Api(var rows: List<Todo>) : TasksApi {
+        val sent = mutableListOf<Pair<String, TodoDue>>()
+        override suspend fun todos() = rows
+        override suspend fun setTodoDue(id: String, due: TodoDue): Todo =
+            rows.first { it.id == id }.withDue(due).also { moved -> sent += id to due; rows = rows.map { if (it.id == id) moved else it } }
+        override suspend fun feed(conversation: String, since: String?) = FeedResponse(emptyList(), emptyMap())
+        override suspend fun startPlan(id: String, remember: Boolean): TaskPlan = error("unused")
+        override suspend fun dismissPlan(id: String): TaskPlan = error("unused")
+        override suspend fun retryTask(todoId: String): Todo = error("unused")
+        override suspend fun removeTask(todoId: String) = Unit
+        override suspend fun route(conversation: String, todoId: String, text: String): FeedItem = error("unused")
+        override suspend fun today(conversation: String): FeedItem = error("unused")
+        override suspend fun mainConversation(): String? = null
+        override suspend fun inboxReply(itemId: String, text: String, card: String?) = Unit
+    }
+
+    private class Connection : HubConnection {
+        override val state = MutableStateFlow(ConnectionState.Online)
+        override val events = MutableSharedFlow<ServerEvent>()
+        override val lastHello: Hello get() = Hello(serverVersion = "1.0.0", protocol = 1)
+        override fun reconnect() = Unit
+        override fun send(message: JsonObject) = true
+    }
+
+    /** The shell's notices, to the snackbar the test draws where Root.kt draws it. */
+    private class Shell : AppFeedback {
+        val shown = MutableSharedFlow<Pair<String, FeedbackAction?>>(extraBufferCapacity = 4)
+        override fun failure(error: Throwable, operation: Boolean) = shown.tryEmit((error.message ?: "") to null)
+        override fun notice(message: String) = shown.tryEmit(message to null)
+        override fun notice(message: String, action: FeedbackAction) = shown.tryEmit(message to action)
+    }
+
+    /** Moving 体检预约 (#2045): "before" (the month), "drag" (carried to the 11th), "moved" (let go there), "reschedule" (TalkBack's sheet). */
+    private fun move(scene: String, style: AppStyle, dark: Boolean) {
+        val api = Api(todos)
+        val store = TasksStore(api, Connection(), CoroutineScope(Dispatchers.Unconfined))
+        store.reloadTodos()
+        val shell = Shell()
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                val snackbar = remember { SnackbarHostState() }
+                LaunchedEffect(shell) {
+                    shell.shown.collect { (message, action) ->
+                        launch {
+                            // the shell's is Short; kept up here for the shot
+                            val result = snackbar.showSnackbar(message, actionLabel = action?.label, duration = SnackbarDuration.Indefinite)
+                            if (result == SnackbarResult.ActionPerformed) action?.run?.invoke()
+                        }
+                    }
+                }
+                CompositionLocalProvider(LocalAppFeedback provides shell) {
+                    val shown by store.todos.collectAsState()
+                    Box(Modifier.testTag("shot").width(400.dp).height(860.dp).background(PersonaTheme.palette.background)) {
+                        TodosScreen(shown, sessions, store, onBack = {}, onOpenTodo = {}, now = now)
+                        SnackbarHost(snackbar, Modifier.align(Alignment.TopCenter).padding(12.dp))
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithText("日历").performClick()
+        rule.waitForIdle()
+        fun has(text: String) = rule.onAllNodesWithText(text, substring = true, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        fun save(name: String, node: androidx.compose.ui.test.SemanticsNodeInteraction = rule.onNodeWithTag("shot")) {
+            val bitmap = node.captureToImage().asAndroidBitmap()
+            File(out(), "todo-calendar-$name-${style.name.lowercase()}-${if (dark) "dark" else "light"}.png").outputStream()
+                .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        val from = rule.onNodeWithTag("todo-calendar-day-2026-11-06")
+        when (scene) {
+            "before" -> save("before")
+            "reschedule" -> {
+                val action = from.fetchSemanticsNode().config[SemanticsActions.CustomActions].single()
+                assertEquals("改截止时间：体检预约…", action.label)
+                rule.runOnIdle { action.action() }
+                rule.waitForIdle()
+                assertTrue("reschedule: no time", has("09:00"))
+                save("reschedule", rule.onNode(isDialog()))
+            }
+            else -> {
+                val start = from.fetchSemanticsNode().boundsInRoot
+                val end = rule.onNodeWithTag("todo-calendar-day-2026-11-11").fetchSemanticsNode().boundsInRoot
+                from.performTouchInput {
+                    val chip = Offset(centerX, (Tokens.Space.xs + CalendarTokens.dayMark + Tokens.Space.xxs + 6.dp).toPx())
+                    down(chip)
+                    move(delayMillis = viewConfiguration.longPressTimeoutMillis + 100)
+                    // a little off the middle of the 11th, as a finger would be
+                    val target = Offset(end.center.x - start.left + 10.dp.toPx(), end.center.y - start.top + 8.dp.toPx())
+                    for (i in 1..6) moveTo(chip + (target - chip) * (i / 6f), delayMillis = 30)
+                }
+                rule.waitForIdle()
+                assertTrue("drag: no landing", has("11月11日周三 09:00"))
+                rule.onNodeWithTag("todo-calendar-dragging").assertExists()
+                if (scene == "drag") save("drag")
+                from.performTouchInput { up() }
+                rule.waitForIdle()
+                assertEquals(listOf("t5" to TodoDue.At(Instant.parse("2026-11-11T01:00:00Z"))), api.sent)
+                assertTrue("moved: no notice", has("已移到 11月11日周三 09:00"))
+                if (scene == "moved") save("moved")
+            }
+        }
+    }
+
     private fun shot(scene: String, style: AppStyle, dark: Boolean) {
         var opened: String? = null
         rule.setContent {
@@ -118,7 +260,7 @@ class TodoCalendarShotsTest {
             // "See list" goes back to the list
             rule.onNodeWithText("看列表").performClick()
             rule.waitForIdle()
-            assertTrue("month: See list did not show the list", rule.onAllNodesWithTag("todos-summary").fetchSemanticsNodes().isNotEmpty())
+            assertTrue("month: See list did not show the list", rule.onAllNodesWithTag("todos-filter").fetchSemanticsNodes().isNotEmpty())
         }
     }
 
@@ -135,6 +277,32 @@ class TodoCalendarShotsTest {
     @Test fun dayBriefDark() = shot("day", AppStyle.Brief, true)
     @Test fun dayBoard() = shot("day", AppStyle.Board, false)
     @Test fun dayBoardDark() = shot("day", AppStyle.Board, true)
+
+    // Moving one (#2045)
+    @Test fun beforeGlass() = move("before", AppStyle.Glass, false)
+    @Test fun beforeGlassDark() = move("before", AppStyle.Glass, true)
+    @Test fun beforeBrief() = move("before", AppStyle.Brief, false)
+    @Test fun beforeBriefDark() = move("before", AppStyle.Brief, true)
+    @Test fun beforeBoard() = move("before", AppStyle.Board, false)
+    @Test fun beforeBoardDark() = move("before", AppStyle.Board, true)
+    @Test fun dragGlass() = move("drag", AppStyle.Glass, false)
+    @Test fun dragGlassDark() = move("drag", AppStyle.Glass, true)
+    @Test fun dragBrief() = move("drag", AppStyle.Brief, false)
+    @Test fun dragBriefDark() = move("drag", AppStyle.Brief, true)
+    @Test fun dragBoard() = move("drag", AppStyle.Board, false)
+    @Test fun dragBoardDark() = move("drag", AppStyle.Board, true)
+    @Test fun movedGlass() = move("moved", AppStyle.Glass, false)
+    @Test fun movedGlassDark() = move("moved", AppStyle.Glass, true)
+    @Test fun movedBrief() = move("moved", AppStyle.Brief, false)
+    @Test fun movedBriefDark() = move("moved", AppStyle.Brief, true)
+    @Test fun movedBoard() = move("moved", AppStyle.Board, false)
+    @Test fun movedBoardDark() = move("moved", AppStyle.Board, true)
+    @Test fun rescheduleGlass() = move("reschedule", AppStyle.Glass, false)
+    @Test fun rescheduleGlassDark() = move("reschedule", AppStyle.Glass, true)
+    @Test fun rescheduleBrief() = move("reschedule", AppStyle.Brief, false)
+    @Test fun rescheduleBriefDark() = move("reschedule", AppStyle.Brief, true)
+    @Test fun rescheduleBoard() = move("reschedule", AppStyle.Board, false)
+    @Test fun rescheduleBoardDark() = move("reschedule", AppStyle.Board, true)
 
     // The list with List | Calendar above it
     @Test fun listGlass() = shot("list", AppStyle.Glass, false)

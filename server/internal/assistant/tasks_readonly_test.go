@@ -3,11 +3,13 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -16,7 +18,15 @@ import (
 
 func readonlyTaskArgs(t *testing.T, tasks ...PlanTask) json.RawMessage {
 	t.Helper()
-	raw, err := json.Marshal(map[string]any{"tasks": tasks})
+	type input struct {
+		PlanTask
+		TodoID string `json:"todo_id,omitempty"`
+	}
+	inputs := make([]input, 0, len(tasks))
+	for _, task := range tasks {
+		inputs = append(inputs, input{PlanTask: task, TodoID: task.ReuseTodo})
+	}
+	raw, err := json.Marshal(map[string]any{"tasks": inputs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +106,7 @@ func TestReadonlyTaskWaitingPlanEdits(t *testing.T) {
 					setSettings(t, s, func(v *Settings) { v.Main, v.MachineID = "main", "box" })
 					f.setSessions("box", proto.Session{SessionID: conversation, Space: SpaceHealth})
 				} else {
-					edit := readonlyTestTask("acceptEdits")
+					edit := readonlyTestTask("bypassPermissions")
 					edit.Title, edit.Prompt, edit.Readonly = "Fix login", "Fix the login flow and add tests.", false
 					tasks = append(tasks, edit)
 				}
@@ -124,7 +134,7 @@ func TestReadonlyTaskWaitingPlanEdits(t *testing.T) {
 					want := "plan"
 					// Dispatch order is independent of the plan's order; identify the task by its prompt.
 					if strings.Contains(start["prompt"].(string), "Fix the login flow and add tests.") {
-						want = "acceptEdits"
+						want = "bypassPermissions"
 					}
 					if start["permission_mode"] != want {
 						t.Fatalf("start = %v, want permission %q", start, want)
@@ -244,7 +254,7 @@ func TestReadonlyTaskPlanPersistsAcrossRestart(t *testing.T) {
 	t.Cleanup(database.Close)
 	s, _ := newTaskServiceOn(t, database)
 	read := readonlyTestTask("bypassPermissions")
-	edit := readonlyTestTask("acceptEdits")
+	edit := readonlyTestTask("bypassPermissions")
 	edit.Readonly = false
 	if _, err := s.toolTaskPlan(ctx, "readonly-chat", readonlyTaskArgs(t, read, edit)); err != nil {
 		t.Fatal(err)
@@ -252,7 +262,329 @@ func TestReadonlyTaskPlanPersistsAcrossRestart(t *testing.T) {
 	p := readonlyFeedPlan(t, s, "readonly-chat")
 	restarted, _ := newTaskServiceOn(t, database)
 	saved, err := restarted.loadPlan(ctx, p.ID)
-	if err != nil || saved.State != planOpen || saved.Tasks[0].Permission != "plan" || saved.Tasks[1].Permission != "acceptEdits" {
+	if err != nil || saved.State != planOpen || saved.Tasks[0].Permission != "plan" || saved.Tasks[1].Permission != "bypassPermissions" {
 		t.Fatalf("persisted plan = %+v, error = %v", saved, err)
+	}
+}
+
+func TestReadonlyTaskExitPlanModeDoesNotAskUser(t *testing.T) {
+	for _, reuse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reuse=%v", reuse), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s, f := readonlyTaskService(t)
+				task := readonlyTestTask("")
+				if reuse {
+					todo, err := s.createTodo(context.Background(), "Inspect", "", "readonly-chat", "")
+					if err != nil {
+						t.Fatal(err)
+					}
+					task.ReuseTodo = todo.ID
+				}
+				if _, err := s.toolTaskPlan(context.Background(), "readonly-chat", readonlyTaskArgs(t, task)); err != nil {
+					t.Fatal(err)
+				}
+				synctest.Wait()
+				todo := onlyTodo(s)
+				if len(todo.Agents) != 1 {
+					t.Fatalf("task not dispatched: %+v", todo)
+				}
+				if reuse && (todo.ID != task.ReuseTodo || todo.PlanID != "") {
+					t.Fatalf("expected the original reused to-do, got %+v", todo)
+				}
+				agent := todo.Agents[0]
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				for _, resumable := range []bool{false, true} {
+					r, err := s.nodeInteraction(ctx, proto.Interaction{ID: "readonly-exit", MachineID: agent.MachineID,
+						SessionID: agent.SessionID, Kind: proto.IxPlan, ToolName: "ExitPlanMode", Plan: "Inspection complete.", Resumable: resumable})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if r.Approve == nil || *r.Approve || r.Dismiss || r.Mode != "" || !strings.Contains(r.Feedback, "read-only") {
+						t.Fatalf("read-only plan exit must be denied with completion guidance, got %+v", r)
+					}
+				}
+				if cards := s.workCards(); len(cards) != 0 {
+					t.Fatalf("pending cards: %+v", cards)
+				}
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				for _, event := range f.told {
+					if event.event == assistantwire.EventFleetInteraction {
+						t.Fatal("read-only completion created a user approval card")
+					}
+				}
+			})
+		})
+	}
+}
+
+func TestReadonlyPlanExitDoesNotSuppressOtherApprovals(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		readonly            bool
+		machine, kind, tool string
+	}{
+		{"writable plan", false, "box", proto.IxPlan, "ExitPlanMode"},
+		{"other machine", true, "other", proto.IxPlan, "ExitPlanMode"},
+		{"tool permission", true, "box", proto.IxPermission, "Bash"},
+		{"other plan tool", true, "box", proto.IxPlan, "OtherPlanTool"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s, _ := readonlyTaskService(t)
+				task := readonlyTestTask("bypassPermissions")
+				task.Readonly = tc.readonly
+				if _, err := s.toolTaskPlan(context.Background(), "readonly-chat", readonlyTaskArgs(t, task)); err != nil {
+					t.Fatal(err)
+				}
+				synctest.Wait()
+				if !tc.readonly {
+					plan := readonlyFeedPlan(t, s, "readonly-chat")
+					if _, err := s.startPlan(context.Background(), plan.ID, nil, false); err != nil {
+						t.Fatal(err)
+					}
+					synctest.Wait()
+				}
+				todo := onlyTodo(s)
+				if len(todo.Agents) != 1 {
+					t.Fatalf("task not dispatched: %+v", todo)
+				}
+				ix := proto.Interaction{ID: "approval", MachineID: tc.machine, SessionID: todo.Agents[0].SessionID,
+					Kind: tc.kind, ToolName: tc.tool}
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				done := make(chan proto.Resolution, 1)
+				go func() { r, _ := s.nodeInteraction(ctx, ix); done <- r }()
+				synctest.Wait()
+				select {
+				case r := <-done:
+					t.Fatalf("approval was suppressed: %+v", r)
+				default:
+				}
+				s.fleet.mu.Lock()
+				_, pending := s.fleet.interactions[ix.ID]
+				s.fleet.mu.Unlock()
+				if !pending {
+					t.Fatal("ordinary approval card was not registered")
+				}
+				approve := true
+				if err := s.resolve(ix.ID, proto.Resolution{Approve: &approve}); err != nil {
+					t.Fatal(err)
+				}
+				if r := <-done; r.Approve == nil || !*r.Approve {
+					t.Fatalf("user approval lost: %+v", r)
+				}
+			})
+		})
+	}
+}
+
+func TestReadonlyTaskExitPlanModeAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(ctx, newDatabase(t), db.ManagerSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(database.Close)
+	for _, reuse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reuse=%v", reuse), func(t *testing.T) {
+			s, _ := newTaskServiceOn(t, database)
+			task := readonlyTestTask("")
+			conversation := fmt.Sprintf("readonly-restart-%v", reuse)
+			if reuse {
+				todo, err := s.createTodo(ctx, "Inspect", "", conversation, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				task.ReuseTodo = todo.ID
+			}
+			if _, err := s.toolTaskPlan(ctx, conversation, readonlyTaskArgs(t, task)); err != nil {
+				t.Fatal(err)
+			}
+			plan := readonlyFeedPlan(t, s, conversation)
+			var todo Todo
+			waitFor(t, "read-only agent", func() bool {
+				saved, err := s.loadPlan(ctx, plan.ID)
+				if err != nil || saved.Tasks[0].TodoID == "" {
+					return false
+				}
+				todo, _ = s.todoNow(saved.Tasks[0].TodoID)
+				return len(todo.Agents) == 1
+			})
+			if reuse && (todo.ID != task.ReuseTodo || todo.PlanID != "") {
+				t.Fatalf("expected the original reused to-do, got %+v", todo)
+			}
+			restarted, f := newTaskServiceOn(t, database)
+			callCtx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			r, err := restarted.nodeInteraction(callCtx, proto.Interaction{ID: "restart-exit", MachineID: todo.Agents[0].MachineID,
+				SessionID: todo.Agents[0].SessionID, Kind: proto.IxPlan, ToolName: "ExitPlanMode", Resumable: true})
+			if err != nil || r.Approve == nil || *r.Approve || r.Dismiss || r.Mode != "" {
+				t.Fatalf("persisted read-only plan exit = %+v, error = %v", r, err)
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			for _, event := range f.told {
+				if event.event == assistantwire.EventFleetInteraction {
+					t.Fatal("restart created an approval card")
+				}
+			}
+		})
+	}
+}
+
+// A topic can outlive several plans; only its current task may control plan approval.
+func TestReusedWritableTaskExitPlanModeKeepsApproval(t *testing.T) {
+	testReusedWritableTaskKeepsApproval(t, false)
+}
+
+func TestReusedWritableTaskReportKeepsApproval(t *testing.T) {
+	testReusedWritableTaskKeepsApproval(t, true)
+}
+
+func testReusedWritableTaskKeepsApproval(t *testing.T, report bool) {
+	for _, backend := range []string{"memory", "database", "restart"} {
+		for _, retired := range []string{"released", "dismissed"} {
+			t.Run(backend+"/"+retired, func(t *testing.T) {
+				ctx := context.Background()
+				var store Store
+				if backend != "memory" {
+					store = taskRecoveryDatabase(t)
+				}
+				s, f := newTaskServiceOn(t, store)
+				f.ownModels = true
+				setSettings(t, s, func(v *Settings) { v.Main = "reuse-chat" })
+				e := &todoEnv{t: t, s: s, f: f}
+				todo, err := s.createTodo(ctx, "Inspect and then fix", "", "reuse-chat", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				task := readonlyTestTask("")
+				task.ReuseTodo = todo.ID
+				if _, err := s.toolTaskPlan(ctx, "reuse-chat", readonlyTaskArgs(t, task)); err != nil {
+					t.Fatal(err)
+				}
+				oldPlan := readonlyFeedPlan(t, s, "reuse-chat")
+				waitFor(t, "readonly task dispatch", func() bool {
+					cur, _ := s.todoNow(todo.ID)
+					s.tasks.mu.Lock()
+					defer s.tasks.mu.Unlock()
+					return len(cur.Agents) == 1 && !s.tasks.reusing[todo.ID]
+				})
+				cur, _ := s.todoNow(todo.ID)
+				oldAgent := cur.Agents[0]
+				if retired == "dismissed" {
+					e.must("DELETE", "/api/v1/todos/"+todo.ID+"/agents/"+oldAgent.MachineID+"/"+oldAgent.SessionID, "")
+				} else {
+					other := e.create("Another task")
+					e.must("PUT", "/api/v1/todos/"+other.ID+"/agents/"+oldAgent.MachineID+"/"+oldAgent.SessionID, "")
+				}
+				task.Readonly, task.Permission = false, "bypassPermissions"
+				result, err := s.toolTaskPlan(ctx, "reuse-chat", readonlyTaskArgs(t, task))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.startPlan(ctx, planIDRe.FindString(result), nil, false); err != nil {
+					t.Fatal(err)
+				}
+				var agent TodoAgent
+				waitFor(t, "writable task dispatch", func() bool {
+					cur, _ := s.todoNow(todo.ID)
+					for _, a := range cur.Agents {
+						if a.active() && a.SessionID != oldAgent.SessionID {
+							agent = a
+							return true
+						}
+					}
+					return false
+				})
+				cur, _ = s.todoNow(todo.ID)
+				if cur.PlanID != "" {
+					t.Fatalf("expected a reused topic to-do without PlanID, got %+v", cur)
+				}
+				if _, err := s.loadPlan(ctx, oldPlan.ID); err != nil {
+					t.Fatalf("historical plan was lost: %v", err)
+				}
+				if backend == "restart" {
+					s, _ = newTaskServiceOn(t, store)
+				}
+				callCtx, cancel := context.WithCancel(ctx)
+				defer cancel()
+				ix := proto.Interaction{ID: "reused-writable-exit", MachineID: agent.MachineID,
+					SessionID: agent.SessionID, Kind: proto.IxPlan, ToolName: "ExitPlanMode", Resumable: true}
+				if report {
+					ix.Kind, ix.ToolName = proto.IxPermission, "mcp__persona__report_to_supervisor"
+				}
+				done := make(chan proto.Resolution, 1)
+				go func() {
+					r, err := s.nodeInteraction(callCtx, ix)
+					if err != nil {
+						t.Error(err)
+					}
+					done <- r
+				}()
+				waitFor(t, "writable plan approval card", func() bool {
+					select {
+					case r := <-done:
+						t.Fatalf("writable reused session was auto-resolved: %+v", r)
+					default:
+					}
+					s.fleet.mu.Lock()
+					defer s.fleet.mu.Unlock()
+					return s.fleet.interactions[ix.ID] != nil
+				})
+				approve := true
+				resolution := proto.Resolution{Approve: &approve}
+				if report {
+					resolution = proto.Resolution{Allow: &approve}
+				}
+				if err := s.resolve(ix.ID, resolution); err != nil {
+					t.Fatal(err)
+				}
+				r := <-done
+				got, _ := json.Marshal(r)
+				want, _ := json.Marshal(resolution)
+				if string(got) != string(want) {
+					t.Fatalf("writable user approval was lost: %+v", r)
+				}
+				// A subsequent read-only takeover keeps its own completion behavior without a card.
+				e.s = s
+				e.must("DELETE", "/api/v1/todos/"+todo.ID+"/agents/"+agent.MachineID+"/"+agent.SessionID, "")
+				task.Readonly = true
+				if _, err := s.toolTaskPlan(ctx, "reuse-chat", readonlyTaskArgs(t, task)); err != nil {
+					t.Fatal(err)
+				}
+				writableSession := agent.SessionID
+				waitFor(t, "new readonly task dispatch", func() bool {
+					cur, _ := s.todoNow(todo.ID)
+					for _, a := range cur.Agents {
+						if a.active() && a.SessionID != writableSession {
+							agent = a
+							return true
+						}
+					}
+					return false
+				})
+				if backend == "restart" {
+					s, _ = newTaskServiceOn(t, store)
+				}
+				denyCtx, stop := context.WithTimeout(ctx, time.Second)
+				defer stop()
+				ix.ID, ix.MachineID, ix.SessionID = "reused-readonly-exit", agent.MachineID, agent.SessionID
+				r, err = s.nodeInteraction(denyCtx, ix)
+				if report {
+					raw, _ := json.Marshal(r)
+					if err != nil || string(raw) != `{"allow":true}` {
+						t.Fatalf("current readonly report was not allowed once: %s, error = %v", raw, err)
+					}
+				} else if err != nil || r.Approve == nil || *r.Approve || !strings.Contains(r.Feedback, "read-only") || r.Mode != "" {
+					t.Fatalf("current readonly task lost its restriction: %+v, error = %v", r, err)
+				}
+				if cards := s.workCards(); len(cards) != 0 {
+					t.Fatalf("current readonly task created approval cards: %+v", cards)
+				}
+			})
+		}
 	}
 }

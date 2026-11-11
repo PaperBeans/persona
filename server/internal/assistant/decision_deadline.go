@@ -82,6 +82,7 @@ func defaultReason(l i18n.Lang, loc *time.Location, deadline time.Time) string {
 func (s *Service) sweepDecisionDeadlines(now time.Time) {
 	s.sweepTaskDeadlines(now)
 	s.sweepAskDeadlines(now)
+	s.sweepDecisionAges(now) // after the deadlines: a decision taken by default is not rechecked (decision.go)
 }
 
 // goSweepDecisionDeadlines runs sweepDecisionDeadlines off acceptLoop (a send to an agent being resumed can take

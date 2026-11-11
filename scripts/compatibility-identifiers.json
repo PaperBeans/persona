@@ -1044,6 +1044,14 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "web/src/lib/assistant-chat.test.ts": {
+      "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
+      "tokens": [
+        "jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "web/src/lib/compatibility.live.test.ts": {
       "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
       "tokens": [
@@ -1117,6 +1125,14 @@
         "jarvis.tokenId",
         "jarvis_settings",
         "started_by_jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "web/src/views/assistant/launcher-mainchat.test.tsx": {
+      "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
+      "tokens": [
+        "jarvis"
       ],
       "path_tokens": [],
       "external_refs": []

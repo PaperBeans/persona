@@ -264,6 +264,13 @@
     <string name="chat_modes_auto_detail">自己判断风险，安全的直接做</string>
     <string name="chat_modes_bypass">全部放行</string>
     <string name="chat_modes_bypass_detail">什么都不问；只能在新开时选</string>
+    <string name="chat_modes_header">权限模式：%1$s</string>
+    <string name="chat_modes_unknown">未知</string>
+    <string name="chat_modes_bypass_detail_running">改文件、跑命令都不问你</string>
+    <string name="chat_modes_confirm_bypass_title">全部放行？</string>
+    <string name="chat_modes_confirm_leave_title">离开全部放行？</string>
+    <string name="chat_modes_confirm_leave_action">切到 %1$s</string>
+    <string name="chat_modes_confirm_leave_text">这个 Agent 不是以全部放行启动的，切走后在这里切不回来。</string>
     <string name="chat_modes_effort_minimal">极低</string>
     <string name="chat_modes_effort_low">低</string>
     <string name="chat_modes_effort_medium">中</string>

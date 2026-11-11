@@ -24,6 +24,21 @@ The Go SDK's `wire.CheckConnectorCatalogJSON` validates the original wire result
 
 Without `catalog`, `connector.ReadCatalog` derives one source from the connector's declared `ReadTools`: its id and name are the connector's, and a tool's `<connector id>_` prefix is removed from the short name. `connector.CallCatalog` calls the existing read tool with its full name through `tools.call`. It never falls back to `actions.do`. A name present in both the read and write lists is refused.
 
+A built-in connector of this kind can also implement `connector.ReadJSON` (found by type assertion, declaring nothing). `CallCatalog` then asks `CallJSON` first, so subscriptions and recipe drafting get a JSON answer they can follow item by item, while the models keep the text `tools.call` gives them. A tool without a JSON answer still answers text. The built-in ones answer an object with one top-level list, so `items_path` can be left empty. Each item carries the names the setup form's pickers guess (`id`, `title`, `time` in RFC 3339, `sender` or `author`, `body`, `link`, `thread` where the source has one). The summary line becomes fields (`total`, `more`, paging cursors):
+
+| Connector | Tool | List | Item id |
+| --- | --- | --- | --- |
+| `github` | `search` | `items`: issues and pull requests (`kind: "code"`: files) | `owner/name#number` (code: `owner/name:path`) |
+| `github` | `read` | `comments`: the newest comments and reviews, beside `issue` and `pull` | `comment:<id>`, `review:<id>`; `thread` is the issue's id |
+| `github` | `diff` | `files` (with `path`: that file and its patch, no list) | the path |
+| `github` | `checks` | `checks`: the check runs, a failed Actions job's log end as `body` | the run's id |
+| `imessage` | `chats` | `chats`: one item per chat's latest message | the chat's id and that message's time; `thread` is the chat |
+| `imessage` | `read`, `search` | `messages`, `hits` | the message's id; `thread` is the chat |
+| `mail` | `accounts` | `accounts` | the account's id |
+| `mail` | `search` | `messages` | the Message-ID, else `account:mailbox:uid` |
+
+`mail` `read` stays text: one message has no list to follow. The answers are pinned in each connector's `testdata/readjson`, and `server/internal/subscriptions/builtin_test.go` dry-runs them item by item. A snapshot subscription already made on one of these tools keeps working; its state is now the JSON.
+
 An absent or undeclared catalog does not expose an implementation merely because it has a similarly named method. Existing Inbox/archive capabilities, feed switches, and `poll_seconds` keep their meaning. An older hub filters the unknown `catalog` capability at extension registration and keeps the connector's other capabilities; it can still use its ordinary tools.
 
 ## Recipe format

@@ -102,7 +102,9 @@ func TestLeaderSupervisesItsTasks(t *testing.T) {
 	waitFor(t, "the leader's second message", func() bool { return len(f.noticesTo("lead1")) == 2 })
 
 	// What the user has to decide goes up to the main conversation too, with the leader's recommendation.
-	res, err = review("lead1", "needs_user", "", map[string]any{"reason": "要不要顺手改 iPhone 横屏", "recommend": "先只修 iPad"})
+	res, err = review("lead1", "needs_user", "", map[string]any{"reason": "要不要顺手改 iPhone 横屏", "recommend": "先只修 iPad",
+		"why_owner": "priority", "cost_of_waiting": "iPad 的修复晚一天发",
+		"options": []map[string]string{{"label": "先只修 iPad", "leads_to": "今天就能发"}, {"label": "一起改 iPhone", "leads_to": "多花一天"}}})
 	if err != nil || !strings.Contains(res, "waits for the user") {
 		t.Fatalf("the leader's needs_user: %s %v", res, err)
 	}

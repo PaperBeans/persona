@@ -426,7 +426,9 @@
     <string name="designsystem_core_workflow_failed">失败</string>
     <string name="designsystem_core_workflow_killed">已停止</string>
     <string name="designsystem_core_workflow_stalled">没动静了</string>
-    <string name="designsystem_core_workflow_agents_done">%1$d/%2$d 个 agent 完成</string>
+    <plurals name="designsystem_core_workflow_agents_done">
+        <item quantity="other">%2$d/%1$d 个 agent 完成</item>
+    </plurals>
     <string name="designsystem_core_always_scope_commands">这段对话里的所有命令</string>
     <string name="designsystem_core_always_scope_read_directory">这段对话中，这个目录里的所有读取操作</string>
     <string name="designsystem_core_always_scope_edit_directory">这段对话中，这个目录里的所有文件编辑</string>

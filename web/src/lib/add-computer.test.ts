@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  addBody, addErrorText, addStage, canAddComputer, canConfirmComputer, confirmStage, linuxCommand, machineErrorText, neverConnected, pairCommand, pendingToConfirm, windowsCommand,
+  addBody, addedUnder, addErrorText, addStage, canAddComputer, canConfirmComputer, confirmStage, linuxCommand, machineErrorText, neverConnected, pairCommand, pendingToConfirm, windowsCommand,
 } from "./add-computer";
 import { ApiError } from "./api";
 import type { Machine } from "./types";
@@ -19,6 +19,32 @@ describe("canAddComputer", () => {
 describe("addBody", () => {
   it("sends the name as typed, trimmed, and the system", () => {
     expect(addBody("  小林的 MacBook ", "mac")).toEqual({ add: { name: "小林的 MacBook", os: "mac" } });
+  });
+
+  it("names the assistant the computer is for, the default's real id too; none leaves it to the hub", () => {
+    expect(addBody("Work Mac", "mac", "m-work")).toEqual({ add: { name: "Work Mac", os: "mac", manager: "m-work" } });
+    expect(addBody("Home Mac", "mac", "assistant")).toEqual({ add: { name: "Home Mac", os: "mac", manager: "assistant" } });
+    expect(addBody("Mac", "mac", undefined)).toEqual({ add: { name: "Mac", os: "mac" } });
+  });
+});
+
+describe("addedUnder", () => {
+  it("says nothing when the computer went where it was asked, or nothing was asked", () => {
+    expect(addedUnder("m-work", { manager: "m-work", added: true })).toBeNull();
+    expect(addedUnder(undefined, { manager: "m-work", added: true })).toBeNull();
+    expect(addedUnder(undefined, { added: true })).toBeNull();
+  });
+
+  it("names the manager the reply says when it is another", () => {
+    expect(addedUnder("m-work", { manager: "assistant", added: false })).toBe("assistant");
+  });
+
+  it("takes a hub without add.manager's new computer as its own assistant's, a reused one as where the list has it", () => {
+    expect(addedUnder("m-work", { added: true })).toBe("assistant");
+    expect(addedUnder("assistant", { added: true })).toBeNull();
+    expect(addedUnder("m-work", {}, "m-home")).toBe("m-home");
+    expect(addedUnder("m-work", {}, "m-work")).toBeNull();
+    expect(addedUnder("m-work", {})).toBe("assistant");
   });
 });
 
@@ -75,6 +101,17 @@ describe("words", () => {
     expect(addErrorText(err("mesh_member"))).toContain("中心 hub");
     expect(addErrorText(err("too_many_pending"))).toContain("3 台");
     expect(addErrorText(err("exists", "这个 id 已经有了"))).toBe("这个 id 已经有了");
+  });
+
+  it("shows the hub's own words for add.manager's refusals, not the generic words for the status", () => {
+    const refused = (status: number, code: string, error: string) => new ApiError(status, error, { code, error });
+    expect(addErrorText(refused(404, "no_manager", "That assistant isn't on this hub"))).toBe("That assistant isn't on this hub");
+    expect(addErrorText(refused(409, "installing", "That assistant is still being installed"))).toBe("That assistant is still being installed");
+    expect(addErrorText(refused(503, "assistant_offline", "The computer's assistant is offline"))).toBe("The computer's assistant is offline");
+    expect(addErrorText(refused(503, "owners_unknown", "Try again in a moment"))).toBe("Try again in a moment");
+    // no words from the hub: the generic ones
+    expect(addErrorText(new ApiError(503, "HTTP 503", { code: "owners_unknown" }))).not.toBe("");
+    expect(addErrorText(new ApiError(503, "HTTP 503", { code: "owners_unknown" }))).not.toBe("HTTP 503");
   });
 });
 

@@ -61,5 +61,7 @@
   "rule_docs_authored": "Authored by you",
   "rule_docs_viewed": "Viewed by you",
   "invalid_fields": "Days must be whole numbers from 1 to 36500, or blank. Context must be a whole number from 0 to 200, or blank.",
-  "store_all_doc": "Store all content. Blank days follows document rules and creates no default deletion deadline."
+  "store_all_doc": "Store all content. Blank days follows document rules and creates no default deletion deadline.",
+  "topics_title": "Knowledge points",
+  "topics_switch": "Organize knowledge points by topic"
 }

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, enc, errorText } from "../../lib/api";
 import { ago, stateOf } from "../../lib/format";
 import { plainMarkdown } from "../../lib/plain-markdown";
+import { conversationPage } from "../../lib/conversation-page";
 import { href, navigate, onLinkClick, type Route } from "../../lib/router";
 import { refreshAssistant, useStore } from "../../lib/store";
 import type { AssistantInfo, Session } from "../../lib/types";
@@ -241,7 +242,7 @@ function ConvChannel({ ids }: { ids?: string[] }) {
 
 function ConvRow({ s, main, now, onRename, onArchive }: { s: Conversation; main?: boolean; now: number; onRename: (s: Conversation) => void; onArchive: (s: Conversation, on: boolean) => void }) {
   const menu = useMenu();
-  const route: Route = { name: "persona", sid: s.session_id };
+  const route: Route = conversationPage(s.session_id, s.machine_id, s.manager);
   const title = conversationTitle(s, main);
   const split = splitTitle(title);
   const st = stateOf(s);

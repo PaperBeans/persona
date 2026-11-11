@@ -17,13 +17,15 @@ import org.junit.Test
 @Config(sdk = [35])
 class SessionModesTest {
     private val res = ApplicationProvider.getApplicationContext<Context>().resources
+    private fun claude(mode: String?) = Session(sessionId = "s", agent = "claude", permissionMode = mode)
+
     @Test fun runningSessionsCannotPickBypassButShowItWhenOn() {
-        assertEquals(listOf("default", "acceptEdits", "plan", "auto"), SessionModes.switchable("default").map { it.id })
-        assertEquals(listOf("default", "acceptEdits", "plan", "auto"), SessionModes.switchable(null).map { it.id })
-        assertEquals("bypassPermissions", SessionModes.switchable("bypassPermissions").last().id)
-        assertEquals("全部放行", SessionModes.switchable("bypassPermissions").last().title(res))
+        assertEquals(listOf("default", "acceptEdits", "plan", "auto"), SessionModes.switchable(claude("default")).map { it.id })
+        assertEquals(listOf("default", "acceptEdits", "plan", "auto"), SessionModes.switchable(claude(null)).map { it.id })
+        assertEquals("bypassPermissions", SessionModes.switchable(claude("bypassPermissions")).last().id)
+        assertEquals("全部放行", SessionModes.switchable(claude("bypassPermissions")).last().title(res))
         // A newer Claude Code's mode is listed by its raw name, so the current one still shows as picked.
-        assertEquals("future", SessionModes.switchable("future").last().title(res))
+        assertEquals("future", SessionModes.switchable(claude("future")).last().title(res))
         assertEquals("手动确认", SessionModes.modeLabel("default", res))
         assertEquals("很高", SessionModes.effortLabel("xhigh", res))
         assertEquals("future", SessionModes.modeLabel("future", res))

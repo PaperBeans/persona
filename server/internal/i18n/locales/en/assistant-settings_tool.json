@@ -2,6 +2,7 @@
   "title_notes": "About me",
   "title_main_tasks_quiet": "Notify tasks from the main chat only in the main chat",
   "title_start_requested_tasks": "Start what I asked for in the chat right away",
+  "title_kb_topics": "Organize knowledge points by topic",
   "title_launcher": "Persona’s launcher",
   "none": "(none)",
   "on": "On",
@@ -9,6 +10,7 @@
   "change_notes": "Change “About me”: {before} → {after}",
   "change_main_tasks_quiet": "“Notify tasks from the main chat only in the main chat”: {before} → {after}",
   "change_start_requested_tasks": "“Start what I asked for in the chat right away”: {before} → {after}",
+  "change_kb_topics": "“Organize knowledge points by topic”: {before} → {after}",
   "change_launcher": "Persona’s default launcher: {before} → {after}",
   "title_recording_days": "Keep recordings in the knowledge base",
   "change_recording_days": "Keep recordings in the knowledge base: {before} → {after} days",
@@ -28,5 +30,12 @@
   "change_meeting_attendance_default": "Persona in recorded meetings: {before} → {after}",
   "meeting_role_off": "Off",
   "meeting_role_listener": "Listener",
-  "meeting_role_participant": "Participant"
+  "meeting_role_participant": "Participant",
+  "title_minutes_days": "Keep meeting minutes",
+  "change_minutes_days": "Keep meeting minutes: {before} → {after}",
+  "change_minutes_days_saved": "Keep meeting minutes: save {previous} → {saved}; kept for {after} for now (never fewer than recordings are kept)",
+  "minutes_forever": "Forever",
+  "minutes_days_value": "{days} days",
+  "minutes_unchanged": "Meeting minutes retention is unchanged: {saved} is saved; {after} is in effect.",
+  "minutes_applied": "Meeting minutes retention is saved as {saved}; {after} is in effect. Transcripts still follow the recording retention."
 }

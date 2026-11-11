@@ -219,10 +219,10 @@ func (r *Run) Check(l Look) Step {
 	if l.Offline || !l.Exists && !l.Online {
 		gaveUp = EndOffline
 	}
-	if r.Held && age > HeldMost {
-		return Step{Do: Finish, End: gaveUp}
-	}
-	if age > RunMost {
+	// Both limits end with a word. A held run has no progress card left (it gave the card back with its message), so an
+	// ending without a note would be a quiet one: nothing would be said anywhere, and the owner would never hear that
+	// the wait is over.
+	if (r.Held && age > HeldMost) || age > RunMost {
 		return Step{Do: Finish, End: gaveUp, Note: i18n.T(l.Lang, "channel-turns.gave_up", i18n.Args{"took": Duration(l.Lang, age)})}
 	}
 	if !l.Exists {
@@ -284,7 +284,10 @@ func (r *Run) Decide(rd Reading, l Look) *Result {
 		case r.Held && age < HeldIdleMost:
 			return nil
 		case r.Held:
-			return &Result{Quiet: true, Last: rd.Last} // its background work ended without more to say
+			// Its background work ended without more to say: a quiet end, which still says how that turn ended (it may
+			// have been interrupted or failed, or its computer gone offline), so a bad ending is not reported as done
+			// (#4228).
+			return &Result{Quiet: true, Last: rd.Last, Stopped: rd.Stopped, End: endOf(rd, l)}
 		case !r.Seen && l.Now.Sub(r.waitFrom()) < EmptyGrace:
 			return nil // not started yet (queued behind another message, a slow start)
 		}
@@ -293,17 +296,26 @@ func (r *Run) Decide(rd Reading, l Look) *Result {
 	if strings.TrimSpace(rd.Answer) == "" {
 		res.Stopped = rd.Stopped
 	}
-	switch {
-	case held:
+	if held {
 		res.Note = i18n.T(l.Lang, "channel-turns.background", i18n.Args{"count": l.Background})
-	case rd.Stopped == transcript.InterruptedNotice:
-		res.End = EndStopped
-	case strings.HasPrefix(rd.Stopped, transcript.APIErrorPrefix) || l.Failed:
-		res.End = EndError
-	case l.Offline:
-		res.End = EndOffline // cut off by its machine going offline, words or not
+	} else {
+		res.End = endOf(rd, l)
 	}
 	return res
+}
+
+// endOf is how a run ended, from the signals both an end without words and a quiet one have: the turn's last notice
+// (an interruption, a model API error), the conversation's failed turn, and its machine going offline.
+func endOf(rd Reading, l Look) End {
+	switch {
+	case rd.Stopped == transcript.InterruptedNotice:
+		return EndStopped
+	case strings.HasPrefix(rd.Stopped, transcript.APIErrorPrefix) || l.Failed:
+		return EndError
+	case l.Offline:
+		return EndOffline // cut off by its machine going offline, words or not
+	}
+	return EndDone
 }
 
 // Hold makes r wait for the turn its background work starts, from last on: answered once already.

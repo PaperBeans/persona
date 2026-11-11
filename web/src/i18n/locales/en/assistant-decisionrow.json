@@ -1,0 +1,23 @@
+{
+  "default_at": "Taken by default at {time}",
+  "default_never": "Never taken by default",
+  "cost": "If it waits: {cost}",
+  "separator": " · ",
+  "leads": "{option}: {leads}",
+  "leads_to": ": {leads}",
+  "choose": "Choose {option} for {title}",
+  "choose_recommended": "Choose {option}, the recommended option, for {title}",
+  "another": "Other…",
+  "another_row": "Open {title} to answer another way",
+  "more": "More answers",
+  "decide_yourself": "You decide",
+  "decide_yourself_detail": "Persona decides and records what it assumed.",
+  "not_what_i_asked": "This isn't what I asked for",
+  "not_what_i_asked_detail": "The work pauses until Persona checks it against your request.",
+  "explain_first": "Tell me the background first",
+  "explain_first_detail": "Persona asks again with what this is and why.",
+  "chosen": "Answered: {option}",
+  "responded": "Sent back to Persona",
+  "failed": "Couldn't send your answer. {error}",
+  "confirm": "Confirm: {option}"
+}

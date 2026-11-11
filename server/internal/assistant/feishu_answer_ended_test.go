@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -96,6 +97,98 @@ func TestFailedAnswerRestoresOnlyAPendingCard(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A press whose answer comes back after cardAnswerWait (its toast already said "Working on it…") still says what became
+// of it: one that failed posts a note under the card, which waits again for another press; one that lost to another
+// surface closes the card as handled instead of leaving its buttons live (#4123).
+func TestLatePressOutcomeIsSaidInTheChat(t *testing.T) {
+	defer func(w time.Duration) { cardAnswerWait = w }(cardAnswerWait)
+	cardAnswerWait = 10 * time.Millisecond
+	waits := func(s *Service, id string) bool {
+		s.fbot.mu.Lock()
+		defer s.fbot.mu.Unlock()
+		_, ok := s.fbot.cards[id]
+		return ok
+	}
+	// record replaces the fake hub's handler of app/method with one that keeps what it was called with: the answer is
+	// posted from a goroutine after the callback returned, so the test reads it under mu, never as it is written.
+	record := func(f *fakeHub, app, method string) (read func() []map[string]any) {
+		var mu sync.Mutex
+		var calls []map[string]any
+		f.answerApp(app, method, func(p json.RawMessage) (any, error) {
+			var m map[string]any
+			_ = json.Unmarshal(p, &m)
+			mu.Lock()
+			calls = append(calls, m)
+			mu.Unlock()
+			return map[string]any{}, nil
+		})
+		return func() []map[string]any {
+			deadline := time.Now().Add(2 * time.Second)
+			for {
+				mu.Lock()
+				got := append([]map[string]any(nil), calls...)
+				mu.Unlock()
+				if len(got) > 0 || time.Now().After(deadline) {
+					return got
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+	}
+
+	t.Run("fails", func(t *testing.T) {
+		ix := qCard("ix_q", false, "北京", "上海")
+		s, f, _, _, _ := textAnswerBot(t, func(json.RawMessage) (any, error) {
+			time.Sleep(100 * time.Millisecond)
+			return nil, errors.New("hub restarted")
+		}, ix)
+		endingQueue(f, ix, new(atomic.Bool), "resolved")
+		notes := record(f, AppFeishu, FeishuText)
+		seedCard(s, ix)
+		r := s.botCardAction(context.Background(), ixPress(ix.ID, "上海"), "oa_1")
+		if r == nil || r.Toast == nil || r.Toast.Content != "正在处理…" {
+			t.Fatalf("toast %+v", r)
+		}
+		var text string
+		for _, n := range notes() {
+			text += n["text"].(string)
+		}
+		if !strings.Contains(text, "没交上去") || !strings.Contains(text, "hub restarted") {
+			t.Fatalf("note %q: the failed press was not said", text)
+		}
+		if !waits(s, ix.ID) {
+			t.Fatal("the card must wait again for another press")
+		}
+	})
+
+	t.Run("already handled", func(t *testing.T) {
+		ix := qCard("ix_q", false, "北京", "上海")
+		var ended atomic.Bool
+		s, f, _, _, _ := textAnswerBot(t, func(json.RawMessage) (any, error) {
+			time.Sleep(100 * time.Millisecond)
+			ended.Store(true) // another surface answered it while this press was out
+			return map[string]any{"ok": false}, nil
+		}, ix)
+		endingQueue(f, ix, &ended, "resolved")
+		closed := record(f, AppFeishu, FeishuUpdateCard)
+		seedCard(s, ix)
+		r := s.botCardAction(context.Background(), ixPress(ix.ID, "上海"), "oa_1")
+		if r == nil || r.Toast == nil || r.Toast.Content != "正在处理…" {
+			t.Fatalf("toast %+v", r)
+		}
+		got := closed()
+		if len(got) != 1 {
+			t.Fatalf("the card was not closed: %v", got)
+		}
+		if b, _ := json.Marshal(got[0]); !strings.Contains(string(b), "已处理") {
+			t.Fatalf("the card was not closed as handled: %s", b)
+		}
+		if waits(s, ix.ID) {
+			t.Fatal("a card answered elsewhere must not wait again")
+		}
+	})
 }
 
 // A press or typed answer on a card the hub no longer has pending says why: it expired, it was withdrawn, or (answered,

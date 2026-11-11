@@ -43,7 +43,20 @@ func (s *Service) botCardAction(ctx context.Context, a *feishubot.CardAction, ac
 		// The hub checked the owner pressed it; marking a task verified approves nothing.
 		ok, err := false, error(nil)
 		ask, _ := s.askCopy(a.Str("id"))
-		if at := a.Str("asked_at"); at != "" { // a button of a briefing card: it accepts the round it was asked in (briefing.go)
+		if resp := a.Str("resp"); resp != "" { // "I can't answer this": to its supervisor, nothing taken (decision.go)
+			if s.askCardNow(a.Str("id"), a.Context.MessageID) {
+				ok, err = s.ownerCannotAnswer(ctx, a.Str("id"), "", resp)
+			}
+			ask.Response = resp
+		} else if opt := a.Str("opt"); opt != "" { // an option of the decision other than the recommended one
+			if s.askCardNow(a.Str("id"), a.Context.MessageID) {
+				ok, err = s.chooseOption(ctx, a.Str("id"), "", opt)
+			}
+			ask.Chosen = opt
+			if opt == ask.Recommend {
+				ask.Chosen = "" // the recommended one: taken as OK takes it
+			}
+		} else if at := a.Str("asked_at"); at != "" { // a button of a briefing card: it accepts the round it was asked in (briefing.go)
 			ok, err = s.acceptTryFromBrief(ctx, a.Str("id"), at)
 		} else {
 			ok, err = s.acceptTry(ctx, a.Str("id"), a.Context.MessageID)
@@ -262,10 +275,11 @@ func (s *Service) answerFromCard(ctx context.Context, a *feishubot.CardAction, a
 	card, had := b.cards[id]
 	s.keepBotCardLocked(id, nil)
 	b.mu.Unlock()
-	restore := func(ctx context.Context) {
+	restore := func(ctx context.Context) bool {
 		if had {
-			s.botRestoreCard(ctx, id, card)
+			return s.botRestoreCard(ctx, id, card)
 		}
+		return false
 	}
 	how := resolutionText(l, ix, r)
 	type outcome struct {
@@ -294,19 +308,36 @@ func (s *Service) answerFromCard(ctx context.Context, a *feishubot.CardAction, a
 		msg := a.Context.MessageID
 		go func() {
 			o := <-done
-			if o.err != nil || !o.ok {
-				if o.err != nil {
-					s.logf("bots: answer %s: %v", id, o.err)
+			if o.err != nil {
+				s.logf("bots: answer %s: %v", id, o.err)
+			}
+			if o.err == nil && o.ok {
+				if msg != "" {
+					cctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					defer cancel()
+					s.botCardDone(cctx, msg, ix, how)
 				}
-				rctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				defer cancel()
-				restore(rctx)
 				return
 			}
-			if msg != "" {
-				cctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				defer cancel()
-				s.botCardDone(cctx, msg, ix, how)
+			// Not answered: the card waits again (botRestoreCard leaves out one that ended meanwhile), and the chat is
+			// told what became of the press — its toast said "Working on it…" long ago, and nothing else would say
+			// that the press failed or lost to another surface (#4123).
+			rctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			back := restore(rctx)
+			cancel()
+			if msg == "" {
+				return
+			}
+			// The restore may have used up rctx: the note gets a budget of its own.
+			nctx, ncancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer ncancel()
+			switch {
+			case o.err != nil:
+				s.botNote(nctx, msg, i18n.T(l, "assistant-feishu_cards.press_not_sent", i18n.Args{"error": clip(oneLine(o.err.Error()), 200)}))
+			case !back:
+				// Answered elsewhere while this press was out, and its own ended update found no card to close it:
+				// close it here as handled, as the typed answer does.
+				s.botCardDone(nctx, msg, ix, i18n.T(l, "assistant-feishu_cards.handled"))
 			}
 		}()
 		return toast("info", i18n.T(l, "assistant-feishu_cards.working_on_it"))
@@ -316,18 +347,19 @@ func (s *Service) answerFromCard(ctx context.Context, a *feishubot.CardAction, a
 // botRestoreCard puts back the card of interaction id, closed optimistically for an answer that did not go through,
 // unless the hub says it is no longer pending: it ended while the answer was out, and its interaction.ended found no
 // card to close, so putting it back would leave a card waiting that nothing answers (#5012). When that cannot be
-// asked either, the card is put back, as before.
-func (s *Service) botRestoreCard(ctx context.Context, id string, card botCard) {
+// asked either, the card is put back, as before. It reports whether the card waits again.
+func (s *Service) botRestoreCard(ctx context.Context, id string, card botCard) bool {
 	var got struct {
 		OK bool `json:"ok"`
 	}
 	if err := s.appCall(ctx, AppInteractions, InteractionsGet, map[string]any{"interaction_id": id}, &got); err == nil && !got.OK {
-		return
+		return false
 	}
 	b := &s.fbot
 	b.mu.Lock()
 	s.keepBotCardLocked(id, &card)
 	b.mu.Unlock()
+	return true
 }
 
 // botStartCardWindow is how long a repeat press of the same /start card is ignored: a double tap, Feishu's 3 s

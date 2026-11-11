@@ -1017,7 +1017,7 @@
   },
   {
     "name": "kb_search",
-    "description": "Search the knowledge base: summaries and metadata of chats, people, projects, docs, meetings, events, recordings (with their minutes and full transcripts), project timelines, the notes directories the user added (hits with an absolute path) and, with messages=true, the full message archive (newest days first). All words must match. Hits come in the order the files are read, not by relevance, so a broad search can fill the limit with chats: give kind to search one kind only, the entries whose name matches first, then as kb_list ranks them. A past meeting (its decisions, what is still open, who does what) is kind=recordings: found by its title, the calendar event's title or what was said; then kb_get it.",
+    "description": "Search the knowledge base: summaries and metadata of chats, people, projects, docs, meetings, events, recordings (with their minutes and any transcript still retained), topics (curated knowledge points: how something works, what was decided and why, the steps and pitfalls), project timelines, the notes directories the user added (hits with an absolute path) and, with messages=true, the full message archive (newest days first). All words must match. Hits come in the order the files are read, not by relevance, so a broad search can fill the limit with chats: give kind to search one kind only, the entries whose name matches first, then as kb_list ranks them. A past meeting (its decisions, what is still open, who does what) is kind=recordings: found by its title, the calendar event's title, its minutes or any transcript still retained; then kb_get it. Transcripts expire before minutes; do not promise the full transcript of a trimmed recording.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1036,7 +1036,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ],
           "description": "only this kind's entries (no notes directories; the message archive only with chats)"
         },
@@ -1053,7 +1054,7 @@
   },
   {
     "name": "kb_list",
-    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (transcripts of the user's phone / watch recordings, kept a few days; newest first, saying which have meeting minutes). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.",
+    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes and which transcripts have expired), topics (knowledge points curated by subject out of the timelines and chats: concepts, decisions with their reasons, practices, pitfalls, facts, open questions; the biggest first). Transcripts are kept for recording_days (14 days by default); meetings' minutes are kept longer under minutes_days (forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1069,7 +1070,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ]
         },
         "tag": {
@@ -1084,7 +1086,7 @@
   },
   {
     "name": "kb_get",
-    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes with where each action item stands (a suggestion, or its to-do: open, done, cancelled, deleted) and its full timestamped transcript (recordings: the user's phone / watch recordings of the last days, text only), a meeting's or event's recordings. id from kb_list / kb_search (a project also by name).",
+    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes with where each action item stands (a suggestion, or its to-do: open, done, cancelled, deleted) and its timestamped transcript while still retained (recordings: the user's phone / watch recordings, text only), a meeting's or event's recordings, a topic's knowledge points by subtopic (each with its kind, reason and the entries it came from). Transcripts expire after recording_days (14 days by default); meetings then keep only their minutes under minutes_days (forever by default). id from kb_list / kb_search (a project also by name).",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1101,7 +1103,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ]
         },
         "id": {
@@ -1112,7 +1115,7 @@
   },
   {
     "name": "kb_update",
-    "description": "Write to the knowledge base: create or change a project (name, project_kind short|long, status, goal, my_role, aliases, link chats / people, code dirs as \"\u003cmachine\u003e:\u003cpath\u003e\" so Agents there belong to it, append a timeline `log` line, replace its summary), or tag / annotate a chat, person, doc, meeting, event, recording (a recording's content is the phone's: only its tags, pinned and projects; importance P0–P3, relevance 0–100, tags, note, link projects). Tags set here are kept over the automatic ones. Use it whenever a conversation settles something about a project or person. Two projects that are the same work under two names: `merge_into`; two that were merged but are not: `unmerge` on the one merged away.",
+    "description": "Write to the knowledge base: create or change a project (name, project_kind short|long, status, goal, my_role, aliases, link chats / people, code dirs as \"\u003cmachine\u003e:\u003cpath\u003e\" so Agents there belong to it, append a timeline `log` line, replace its summary), or tag / annotate a chat, person, doc, meeting, event, recording (a recording's content is the phone's: only its tags, pinned and projects; importance P0–P3, relevance 0–100, tags, note, link projects), or a topic (its points are curated: only its name, note, aliases and tags). Tags set here are kept over the automatic ones. Use it whenever a conversation settles something about a project or person. Two projects that are the same work under two names: `merge_into`; two that were merged but are not: `unmerge` on the one merged away.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1129,7 +1132,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ]
         },
         "id": {
@@ -1618,7 +1622,7 @@
   },
   {
     "name": "task_plan",
-    "description": "Hand the user a plan of one or more tasks for agents on their computers, instead of starting agents yourself. Use it for any work that takes an agent (code, research in a repo, anything longer than a few tool calls); one task per independent piece of work. Check machines_list for current machine resources and availability before choosing a machine. Fill in every field from what you know (the knowledge base, agents_list: which machine works in which directory, the user's habits); the user sees each choice as a chip they can change, with your one-line reason. Read-only tasks, tasks the user asked for themselves (user_requested), and kinds the user told you to start without asking, start at once; the rest wait as a card for the user's 开始. Either way this returns at once: don't wait, carry on. Each queued task is a todo (todo id) whose progress shows in your context snapshot; send to a task's agent with agent_send. Quick things you can do with a tool yourself (a reminder, an event) are not tasks. A task stays on its requested machine by default (machine_policy=fixed), including retries. An unavailable launcher fails there; do not reroute machine-local work. Use machine_policy=flexible only when the task may run on another computer: a failed health check can then move it, and its why says so. The response confirms queued dispatch, not a successful Agent start; inspect the task outcome. From the main conversation or a leader conversation (assistant.leaders) you supervise what you hand out; you get a 督办 message when one needs you, and you close it with task_review, not by repeating its agent's words. The answer lists work already going on that looks like the same task: check it before you let both go on. A todo this conversation opened that has no agent yet (one opened from a Lark topic: the message that handed it to you names its id) is the task's own: give that id as the task's todo_id and the agent works on it, instead of a new todo being made; any other todo_id is refused with why. From the main conversation, supervisor hands the whole plan to a leader conversation (one of assistant.leaders): its tasks are that leader's to supervise and review, as if it had handed them out; leave it out to supervise them yourself. Every task gets a brief, kept from the moment it starts and never rewritten: the hub records the owner's message that led to it (their words, from this conversation; work you start on your own after a 督办 message, a notice or a routine is recorded as yours, with started_why), and you supply the goal, done_when, expect_minutes and out_of_bounds. A writable task (readonly false) without done_when (at least one result that can be checked) and expect_minutes is refused, and so is a read-only task without goal and expect_minutes; the refusal says what is missing. The card shows the brief, so the owner's 开始 confirms it. A task that takes over from an earlier one (a retry on another computer, a rework round, a new agent after the first failed, a part split off) gives continues (that task's todo id) and continues_why: it keeps that task's brief (the owner's request, the criteria as they stand, the clock) while its prompt is its own, and the earlier task is linked as superseded; do not restate the request in a new brief. After a task started, done_when changes only with task_scope.",
+    "description": "Hand the user a plan of one or more tasks for agents on their computers, instead of starting agents yourself. Use it for any work that takes an agent (code, research in a repo, anything longer than a few tool calls); one task per independent piece of work. Check machines_list for current machine resources and availability before choosing a machine. Fill in every field from what you know (the knowledge base, agents_list: which machine works in which directory, the user's habits); the user sees each choice as a chip they can change, with your one-line reason. Read-only tasks, tasks the user asked for themselves (user_requested), and kinds the user told you to start without asking, start at once; the rest wait as a card for the user's 开始. Either way this returns at once: don't wait, carry on. Each queued task is a todo (todo id) whose progress shows in your context snapshot; send to a task's agent with agent_send. Quick things you can do with a tool yourself (a reminder, an event) are not tasks. A task stays on its requested machine by default (machine_policy=fixed), including retries. An unavailable launcher fails there; do not reroute machine-local work. Use machine_policy=flexible only when the task may run on another computer: a failed health check can then move it, and its why says so. The response confirms queued dispatch, not a successful Agent start; inspect the task outcome. From the main conversation or a leader conversation (assistant.leaders) you supervise what you hand out; you get a 督办 message when one needs you, and you close it with task_review, not by repeating its agent's words. The answer lists work already going on that looks like the same task: check it before you let both go on. A todo this conversation opened that has no agent yet (one opened from a Lark topic: the message that handed it to you names its id) is the task's own: give that id as the task's todo_id and the agent works on it, instead of a new todo being made; any other todo_id is refused with why. From the main conversation, supervisor hands the whole plan to a leader conversation (one of assistant.leaders): its tasks are that leader's to supervise and review, as if it had handed them out; leave it out to supervise them yourself. Every task gets a brief, kept from the moment it starts and never rewritten: the hub records the owner's message that led to it (their words, from this conversation; work you start on your own after a 督办 message, a notice or a routine is recorded as yours, with started_why), and you supply the goal, done_when, expect_minutes and out_of_bounds. A writable task (readonly false) without done_when (at least one result that can be checked) and expect_minutes is refused, and so is a read-only task without goal and expect_minutes; the refusal says what is missing. The card shows the brief, so the owner's 开始 confirms it. A task that takes over from an earlier one (a retry on another computer, a rework round, a new agent after the first failed, a part split off) gives continues (that task's todo id) and continues_why: it keeps that task's brief (the owner's request, the criteria as they stand, the clock) while its prompt is its own, and the earlier task is linked as superseded; do not restate the request in a new brief. After a task started, done_when changes only with task_scope. A task that changes files (readonly false) must set permission \"bypassPermissions\" explicitly; any other value, or none, is refused before anything is planned. A task that only reads (readonly true) is not affected. role \"leader\" makes the task's agent a task leader, which can hand direct workers to its own task through its own restricted task_plan and task_review and receives their supervision messages; use it only for a task that splits into several agents' work. Depth stops there: the leader's workers cannot hand tasks on.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1686,7 +1690,14 @@
                   "auto",
                   "bypassPermissions"
                 ],
-                "description": "permission mode; empty: the default for writable tasks (the user's default permission mode, else Claude Code's default mode on that computer). readonly=true always uses plan, overriding this field"
+                "description": "permission mode. Required, and only \"bypassPermissions\" is accepted, when readonly is false. readonly=true always uses plan, overriding this field"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "leader"
+                ],
+                "description": "optional: leader makes this task's agent a task leader that may hand direct workers to its own task (only from the main conversation or a leader conversation); leave it out for an ordinary worker task"
               },
               "ultracode": {
                 "type": "boolean",
@@ -1773,7 +1784,7 @@
   },
   {
     "name": "task_review",
-    "description": "Review a task you handed out from this conversation (its todo id), after you checked its work yourself: each done_when criterion with its evidence (a PR link and that it merged, CI, a screenshot, what the live system answers) or what is missing. accepted closes the task (its agent is closed once it stays still); rework sends what is missing back to the same agent (resumed if it was closed) — at most 2 rounds, a third goes to the user instead; needs_user marks it waiting for the user's decision (its conclusion card asks them; without one, ask them yourself: ask_user, or notify_user if they are away, as the answer says); cancelled ends it (a duplicate, no longer wanted): its agents are closed and archived, and their waiting cards end. A leader conversation's needs_user also goes to the main conversation. From a conversation other than the main one, on a task it does not supervise, only accepted and cancelled apply: send what is missing to its agent with agent_send. The criteria are the task's brief's as they stand after its logged scope changes (the 督办 message lists them), not what a later hand-over prompt says: write one check per criterion in the same words, and the completion report lists each as met, not met or dropped (with the scope change that dropped it), then also_done. Use it on every task a 督办 message says waits for review; don't accept on the agent's word alone. On a supervised task, accepted and needs_user send the user one conclusion card in Lark: the verdict (done, cannot be done, or needs your decision), reason (one sentence), link (one), and for needs_user your recommend, which the user takes by answering \"OK\"; so give outcome, reason and link with accepted, and reason and recommend with needs_user, and don't push the same result again. A deployed task already has a \"Please verify\" card from when its work went live: your accepted passes it for the user (marked verified by you), so they are not asked to press \"Pass\"; set user_check only when the user should still look at the result themselves (a UI change someone has to see), and then that card, or a new one, waits for them. A needs_user decision may carry a deadline: when it passes unanswered, a reversible one takes your recommend by default (recorded on the to-do as taken at the deadline), and one that cannot be undone is only reminded again; without a deadline it waits as before.",
+    "description": "Review a task you handed out from this conversation (its todo id), after you checked its work yourself: each done_when criterion with its evidence (a PR link and that it merged, CI, a screenshot, what the live system answers) or what is missing. accepted closes the task (its agent is closed once it stays still); rework sends what is missing back to the same agent (resumed if it was closed) — at most 2 rounds; a third is refused unless it carries a decision for the user (the needs_user fields below), and otherwise you accept or cancel; needs_user puts a decision to the user, and only a decision they can answer: it is refused unless it has why_owner (why only they can decide), reason (one sentence: what is to be decided), recommend, options (2 to 4, the recommended first, each with what choosing it leads_to) and cost_of_waiting. When nothing needs the user, don't use it: decide it yourself and send the agent on, send the work back, or close the task; a task that only waits for something is no decision either. The hub adds where the task came from and where it stands, and the decision is listed on the to-do with its options (its conclusion card asks them too; without a card, ask them yourself: ask_user, or notify_user if they are away, as the answer says); cancelled ends it (a duplicate, no longer wanted): its agents are closed and archived, and their waiting cards end. A leader conversation's needs_user also goes to the main conversation. From a conversation other than the main one, on a task it does not supervise, only accepted and cancelled apply: send what is missing to its agent with agent_send. The criteria are the task's brief's as they stand after its logged scope changes (the 督办 message lists them), not what a later hand-over prompt says: write one check per criterion in the same words, and the completion report lists each as met, not met or dropped (with the scope change that dropped it), then also_done. Use it on every task a 督办 message says waits for review; don't accept on the agent's word alone. On a supervised task, accepted and needs_user send the user one conclusion card in Lark: the verdict (done, cannot be done, or needs your decision), reason (one sentence), link (one), and for needs_user your recommend, which the user takes by answering \"OK\"; so give outcome, reason and link with accepted, and reason and recommend with needs_user, and don't push the same result again. A deployed task already has a \"Please verify\" card from when its work went live: your accepted passes it for the user (marked verified by you), so they are not asked to press \"Pass\"; set user_check only when the user should still look at the result themselves (a UI change someone has to see), and then that card, or a new one, waits for them. A needs_user decision has a default and a date: unless why_owner is irreversible or visible_to_others, it takes your recommend by default after 24 hours unanswered (recorded on the to-do as taken at the deadline), or at the deadline you give; irreversible and visible_to_others are never taken by default and are raised to the user again once a day. A decision that waited a day comes back to you once to confirm its facts still hold. Besides the options the user can answer \"You decide\", \"This isn't what I asked for\" or \"Tell me the background first\": that comes back to you in a 督办 message, and nothing is taken.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1832,7 +1843,7 @@
         },
         "reason": {
           "type": "string",
-          "description": "accepted and needs_user: the conclusion card's one sentence of why (what the user is to decide, for needs_user), in the user's language; default the note's first line"
+          "description": "accepted: the conclusion card's one sentence of why, in the user's language; default the note's first line. needs_user (required): one sentence saying what is to be decided, in the user's language"
         },
         "link": {
           "type": "string",
@@ -1840,11 +1851,49 @@
         },
         "recommend": {
           "type": "string",
-          "description": "needs_user: the option you recommend, in a line; the user's \"OK\" takes it and it goes to the task's agent"
+          "description": "needs_user (required): the option you recommend, the label of the first of options; the user's \"OK\" takes it and it goes to the task's agent"
+        },
+        "why_owner": {
+          "type": "string",
+          "enum": [
+            "irreversible",
+            "visible_to_others",
+            "priority",
+            "acceptance",
+            "only_owner_knows"
+          ],
+          "description": "needs_user (required): why only the user can decide. irreversible: a step that cannot be undone (deleting, a production release or write, spending money); visible_to_others: something other people will see (a message, a comment, a review request); priority: whether to do it or what comes first; acceptance: a result they have to judge by eye; only_owner_knows: a fact only they have. Anything else is yours to decide"
+        },
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": [
+              "label",
+              "leads_to"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "the option in a few words, as a button says it"
+              },
+              "leads_to": {
+                "type": "string",
+                "description": "one sentence: what choosing it leads to"
+              }
+            }
+          },
+          "description": "needs_user (required): 2 to 4 options the user chooses from, the recommended one first"
+        },
+        "cost_of_waiting": {
+          "type": "string",
+          "description": "needs_user (required): one sentence saying what it costs if the user does not answer soon"
         },
         "deadline": {
           "type": "string",
-          "description": "needs_user, optional: until when the decision waits, a duration (\"4h\", \"90m\") or an RFC 3339 time, 1 minute to 30 days ahead; needs recommend and reversible"
+          "description": "needs_user, optional: until when the decision waits, a duration (\"4h\", \"90m\") or an RFC 3339 time, 1 minute to 30 days ahead; needs reversible. Default: 24h and reversible, except for why_owner irreversible and visible_to_others, which have none"
         },
         "also_done": {
           "type": "array",
@@ -1860,7 +1909,7 @@
         },
         "reversible": {
           "type": "boolean",
-          "description": "with deadline: whether taking recommend can be undone later. false for deleting, sending anything to other people, spending money or changing production: those are never taken by default"
+          "description": "with deadline: whether taking recommend can be undone later. false for deleting, sending anything to other people, spending money or changing production: those are never taken by default (why_owner irreversible and visible_to_others must say false)"
         }
       }
     }

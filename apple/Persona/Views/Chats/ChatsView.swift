@@ -603,7 +603,8 @@ private struct AgentsList: View {
     static let emptyNoComputerMessage = String(localized: "Add one and Persona can work on it for you.")
     @Environment(AppModel.self) private var model
     @Environment(\.shell) private var shell
-    /// Regular width (iPhone Duo open): the list is the sidebar column of a split.
+    /// The list's own column: regular beside the iPad's split; on a phone's split (iPhone Duo open) the sidebar column
+    /// reads compact while the page is regular (#1971). `covered` goes by `ownsTop` instead (#3680).
     @Environment(\.horizontalSizeClass) private var widthClass
     @Binding var path: NavigationPath
     @Binding var spaceAt: [Int: String]
@@ -690,11 +691,16 @@ private struct AgentsList: View {
     @State private var herdr = HerdrWatch()
 
     /// A page pushed over it (beside it in the split it is in sight), the other page of the shell or another tab (the
-    /// shell's slide between the pages shows it again).
+    /// shell's slide between the pages shows it again). Whether a page is pushed over it goes by the page's layout
+    /// (`ownsTop`), not this column's width class: the split's sidebar column reads compact on a phone (#1971), and on
+    /// iPhone Duo open the list beside a chat opened in code (the one remembered at launch, a card, New Session, a
+    /// worktree line) was held as out of sight: its last lines, order and new agents stopped coming in (#3680).
     private var covered: Bool {
-        if widthClass != .regular && !path.isEmpty { return true }
         #if os(iOS) || os(visionOS)
+        if ownsTop && !path.isEmpty { return true }
         if model.selectedTab != .chats && shell?.pager.moving != true { return true }
+        #else
+        if widthClass != .regular && !path.isEmpty { return true }
         #endif
         return false
     }

@@ -1,0 +1,29 @@
+{
+  "chat": {
+    "id": "imessage-000000000001",
+    "name": "张三",
+    "members": []
+  },
+  "more": false,
+  "messages": [
+    {
+      "id": "20",
+      "thread": "imessage-000000000001",
+      "title": "张三",
+      "kind": "message",
+      "from_me": true,
+      "time": "2026-10-30T07:58:00Z",
+      "body": "在吗"
+    },
+    {
+      "id": "21",
+      "thread": "imessage-000000000001",
+      "title": "张三",
+      "kind": "message",
+      "sender": "张三",
+      "handle": "+15550100",
+      "time": "2026-10-30T07:59:00Z",
+      "body": "示例：验证码 •••• 别告诉别人"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { storeValue } from "../lib/compatibility";
+import { api, errorText } from "../lib/api";
 // The Persona tab: the headless assistant on the hub's machine (docs/assistant/assistant.md). `/` (and the old `/persona`) is the main
 // conversation, `/persona/<id>` one of them, `/persona/new` a new one-off conversation. With no main conversation yet, the first
 // message on `/` starts it.
@@ -9,6 +10,7 @@ import { feedCacheScope, readFeedCache } from "../lib/feed-cache";
 import { startOfDay } from "../lib/feed";
 import { ago, uuid } from "../lib/format";
 import { codedFailure, helpTopic, passesBySelf, refreshReadiness, type CodedFailure } from "../lib/readiness";
+import { conversationPage } from "../lib/conversation-page";
 import { navigate } from "../lib/router";
 import { refreshAssistant, useStore } from "../lib/store";
 import { effectiveLauncher, NEW_CONVERSATION, pickedLauncher, pickLauncher } from "../lib/assistant-chat";
@@ -26,7 +28,7 @@ import { ShellHeaderSlots, ShellSwitch } from "./ShellSwitch";
 import { conversationTitle } from "./assistant/conversations";
 import { formatList, t } from "../i18n";
 import { useAssistantTitle, useShownOffline } from "./ManagerParts";
-import { chosenManager, noteConversation, ownerHeaders, sameManager, shownManager, useShownManager } from "../lib/manager-choice";
+import { chosenManager, noteConversation, noteRoutedConversation, ownerHeaders, sameManager, shownManager, useShownManager } from "../lib/manager-choice";
 import { useScopedMachines } from "../lib/current-assistant";
 import type { AssistantInfo, Session } from "../lib/types";
 
@@ -45,31 +47,96 @@ const noop = () => {};
 // @ in a new conversation: other sessions as context; no chat yet, so no files it touched (typed / and ~ paths still browse)
 const NEW_MENTION: MentionSource = { self: "persona-new", files: () => [], workspaces: true };
 
-/** The computer conversation sid runs on when it is another assistant's than the current one (opened from an inbox
- *  item's hand-off, a link, the palette): the hub's list of sessions has it under that manager, or a page here started
- *  it for that manager (lib/outbox.ts adoptConversation). "": the current assistant's (or not known to be another's). */
-export function elsewhere(sid: string, shown: string, assistant: AssistantInfo | null, sessions: Record<string, Session[]>): string {
-  if (assistant && (assistant.main === sid || assistant.conversations.some((c) => c.session_id === sid))) return "";
-  for (const list of Object.values(sessions)) {
-    const s = list.find((x) => x.session_id === sid);
-    if (s) return s.assistant && !sameManager(s.manager, shown) ? s.machine_id : "";
-  }
-  const adopted = adoptedConversation(sid);
-  return adopted && !sameManager(adopted.manager, shown) ? adopted.machine : "";
+/** What a conversation's address says of it (lib/conversation-page.ts): the computer it runs on, its manager when
+ *  another than the default. */
+export interface RoutedConversation {
+  mid?: string;
+  manager?: string;
 }
 
-export function PersonaAssistant({ sid, fresh, onToggleSidebar }: { sid?: string; fresh?: boolean; onToggleSidebar: () => void }) {
+/** Where a conversation runs that is not (known to be) the current assistant's own: `machine` "" when only its manager
+ *  is known (its assistant's computer is read then), `other` whether it is another assistant's than the current one. */
+export interface ConversationHome {
+  machine: string;
+  other: boolean;
+}
+
+/**
+ * Where conversation sid runs (opened from an inbox item's hand-off, a link, the palette, a to-do's origin, or a reload of
+ * any of these), or null for the current assistant's own, on its computer: its own list has it, or nothing says
+ * otherwise. Else the row the hub gave for it (the exact lookup ChatView makes puts it in the store; a hub with the
+ * paged list pushes no rows), a hand-off this tab made (lib/outbox.ts adoptConversation), and last what its address
+ * names (`?machine=`, `?manager=`): what this tab noted is gone after a reload or in a new tab, the address is not.
+ */
+export function conversationHome(sid: string, shown: string, assistant: AssistantInfo | null, sessions: Record<string, Session[]>, routed: RoutedConversation = {}): ConversationHome | null {
+  if (assistant && (assistant.main === sid || assistant.conversations.some((c) => c.session_id === sid))) return null;
+  for (const list of Object.values(sessions)) {
+    const s = list.find((x) => x.session_id === sid);
+    if (s) return { machine: s.machine_id, other: !sameManager(s.manager, shown) };
+  }
+  const adopted = adoptedConversation(sid);
+  if (adopted) return { machine: adopted.machine, other: !sameManager(adopted.manager, shown) };
+  if (routed.mid) return { machine: routed.mid, other: !sameManager(routed.manager, shown) };
+  if (routed.manager && !sameManager(routed.manager, shown)) return { machine: "", other: true };
+  return null;
+}
+
+// The computer each manager's assistant runs on, read for a conversation whose address names its manager only (a
+// to-do's origin): its conversations run there. A failed read is not kept.
+const assistantMachines = new Map<string, Promise<string>>();
+
+function assistantMachineOf(manager: string): Promise<string> {
+  let read = assistantMachines.get(manager);
+  if (!read) {
+    read = api<AssistantInfo>("/assistant", { headers: ownerHeaders(manager) }).then((a) => a.machine_id || Promise.reject(new Error(t("chat-chatview.session_gone"))));
+    read.catch(() => assistantMachines.delete(manager));
+    assistantMachines.set(manager, read);
+  }
+  return read;
+}
+
+/** manager's assistant computer once read ("" meanwhile, or with none to read), or why it could not be read. */
+function useAssistantMachine(manager: string | undefined): { machine: string; error: string } {
+  const [state, setState] = useState<{ manager: string; machine: string; error: string }>({ manager: "", machine: "", error: "" });
+  useEffect(() => {
+    if (!manager) return;
+    let live = true;
+    assistantMachineOf(manager).then(
+      (machine) => live && setState({ manager, machine, error: "" }),
+      (e) => live && setState({ manager, machine: "", error: errorText(e) }),
+    );
+    return () => void (live = false);
+  }, [manager]);
+  return manager && state.manager === manager ? state : { machine: "", error: "" };
+}
+
+export function PersonaAssistant({ sid, fresh, routed, onToggleSidebar }: { sid?: string; fresh?: boolean; routed?: RoutedConversation; onToggleSidebar: () => void }) {
   const assistant = useStore((s) => s.assistant);
   const assistantError = useStore((s) => s.assistantError);
   const loaded = useStore((s) => s.loaded);
   // another assistant's conversation opens as itself, on its own computer, and the current assistant stays
   // (docs/assistant/managers.md "Clients")
   const shown = useShownManager();
-  const away = useStore((s) => (sid && !fresh ? elsewhere(sid, shown, s.assistant, s.sessions) : ""));
+  const routedMid = routed?.mid;
+  const routedManager = routed?.manager;
+  // the address's manager, for the plan and briefing requests when no row says better (conversationHeaders)
+  useEffect(() => {
+    if (!sid || !routedManager) return;
+    noteRoutedConversation(sid, routedManager);
+    return () => noteRoutedConversation(sid, undefined);
+  }, [sid, routedManager]);
+  const home = useStore((s) => {
+    const h = sid && !fresh ? conversationHome(sid, shown, s.assistant, s.sessions, { mid: routedMid, manager: routedManager }) : null;
+    return h ? `${h.other ? 1 : 0}${h.machine}` : "";
+  });
+  const homeOther = home.startsWith("1");
+  const homeMachine = home.slice(1);
+  // named by its manager only: that manager's assistant computer
+  const read = useAssistantMachine(home && !homeMachine ? routedManager : undefined);
   // the shown manager offline (with several, ManagerParts): its history stays, nothing goes; another's conversation
   // says its own (ChatView, by the session's manager)
   const shownOffline = useShownOffline();
-  const offline = away ? null : shownOffline;
+  const offline = homeOther ? null : shownOffline;
   const scope = feedCacheScope();
   const manager = chosenManager() ?? "";
   // A reloaded conversation link needs its machine before the socket reconnects, so its saved outbox can appear.
@@ -82,10 +149,14 @@ export function PersonaAssistant({ sid, fresh, onToggleSidebar }: { sid?: string
     return page && (page.manager ?? "") === manager ? page : null;
   }, [scope, manager, sid, fresh, assistant]);
   const main = assistant?.main ?? cached?.sessionID;
-  const machine = away || (assistant?.machine_id ?? cached?.machineID);
+  const machine = home ? homeMachine || read.machine : (assistant?.machine_id ?? cached?.machineID);
   if (fresh) return <Starter onToggleSidebar={onToggleSidebar} />;
   const id = sid ?? main;
   if (id) {
+    if (home && !machine) {
+      // another assistant's, its computer being read
+      return <Centered>{read.error ? <p className="px-6 text-center text-[13px] text-ink-2">{read.error}</p> : <Loading />}</Centered>;
+    }
     if (!machine) {
       // an offline manager's read fails as expected: its page says so (Starter) rather than offering Retry
       if (assistantError && !offline) return <AssistantLoadFailed error={assistantError} onToggleSidebar={onToggleSidebar} />;
@@ -206,7 +277,7 @@ function Starter({ main, onToggleSidebar }: { main?: boolean; onToggleSidebar: (
         noteSent(r.session.machine_id, r.session.session_id, out);
         if (launcher) pickLauncher(NEW_CONVERSATION, undefined);
         void refreshAssistant().catch(() => {});
-        navigate({ name: "persona", sid: r.session.session_id });
+        navigate(conversationPage(r.session.session_id, r.session.machine_id, from));
         return true;
       } catch (e) {
         // the assistant restarting: a few seconds, tried again without a word (docs/assistant/onboarding.md 4.6)

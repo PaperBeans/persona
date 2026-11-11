@@ -93,6 +93,7 @@ import Testing
         for i in 0..<4 {
             lib.addSegment(entry.id, RecordingSegment(index: i, start: Double(i) * 60, duration: 60,
                                                       startedAt: base.addingTimeInterval(Double(i) * 60)))
+            try Data([0]).write(to: lib.audio(entry.id, i))
         }
         // Segments 1 and 2 only.
         let range = base.addingTimeInterval(70)...base.addingTimeInterval(170)

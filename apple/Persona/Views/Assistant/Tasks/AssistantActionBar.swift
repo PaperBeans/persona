@@ -178,6 +178,8 @@ nonisolated enum AssistantEntries {
         var folded = Set<String>()
         var asking: [(row: Row, first: Date?)] = []
         var deciding: [Ranked] = [], open: [Ranked] = [], shelved: [Ranked] = []
+        // failed starts whose work finished in a related to-do: closed, as the To-dos page has them (#3713)
+        let superseded = TodoTriageLogic.supersededFailedStarts(todos)
         for todo in todos {
             guard let when = at[todo.id] else { continue }
             let status = status(todo, lookup: lookup, plans: plans)
@@ -185,7 +187,8 @@ nonisolated enum AssistantEntries {
             let asks = active.flatMap { asksOf[pair($0.machineID, $0.sessionID)] ?? [] }
             let row = Row.task(id: todo.id, status: status, agents: active.count)
             let listed = { folded.formUnion(active.map { pair($0.machineID, $0.sessionID) }) }
-            let bucket = TodoTriageLogic.bucket(todo, lookup: lookup, now: now, restoredAt: restored[todo.id])
+            let bucket = TodoTriageLogic.bucket(todo, lookup: lookup, now: now, restoredAt: restored[todo.id],
+                                                superseded: superseded.contains(todo.id))
             // a failed start carries done_at (the hub ends it), yet it is the user's to retry while its bucket says open
             let waits = status == .failed ? bucket == .open : todo.doneAt == nil && (status == .needsYou || status == .interrupted)
             if !asks.isEmpty { asking.append((row, asks.map { $0.createdAt ?? .distantPast }.min())); listed() }
@@ -358,7 +361,7 @@ struct AssistantActionBar: View {
             feed: store.feed(conversation), restored: TodoRestores.load(), going: model.goingAgents,
             // the hub's fields, the inbox's word on the item, and Later
             messageWaits: { item in
-                guard item.kind == .message, let id = item.ref, !store.laterMessages.contains(id) else { return false }
+                guard item.kind == .message, let id = item.ref, !store.laterMessages.contains(item.id) else { return false }
                 return store.messageState(item, itemID: id) == .open
             })
         let asks = (key.map { model.interactions(for: $0) } ?? []).sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }

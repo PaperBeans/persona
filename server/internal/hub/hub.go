@@ -85,6 +85,9 @@ type Hub struct {
 	mu      sync.Mutex
 	clients map[*client]struct{}
 	events  *eventLog // what was broadcast lately, numbered (eventlog.go); guarded by mu
+	// rings: the notify events kept for the devices without a push route while they have no ws_notify socket
+	// (notifyring.go); guarded by mu.
+	rings notifyRings
 
 	// linkDesktops: the computers whose Persona Link says the user is at them (desktops.go); guarded by mu.
 	linkDesktops linkDesktops
@@ -446,6 +449,9 @@ func (h *Hub) callPhone(ctx context.Context, name string, args json.RawMessage) 
 	if c == nil && queue {
 		return h.enqueuePhoneWrite(ctx, name, args)
 	}
+	if c == nil && phoneOnScreenTools[name] {
+		return proto.TextResult(phoneNotOnScreen, true)
+	}
 	if c == nil {
 		c = h.wakePhone(ctx, name)
 	}
@@ -514,6 +520,20 @@ var phoneConfirmedTools = map[string]bool{
 	"phone_contacts_create":       true, // #2286
 	"phone_contacts_update":       true,
 }
+
+// phoneOnScreenTools work only while Persona is the app on the phone's screen (docs/apple/phone-tools.md
+// "Foreground restrictions"): iOS gives an app in the background no clipboard, so a silent push would wake Persona for a
+// call it can only refuse (#4192). With no phone connected that offers one, the hub answers at once instead, as it
+// already does for an Android phone, which stops offering them when Persona leaves the screen (and is never woken by
+// push). A phone connected in the background still gets the call and refuses it itself.
+var phoneOnScreenTools = map[string]bool{
+	"phone_clipboard_get": true,
+	"phone_clipboard_set": true,
+}
+
+// phoneNotOnScreen is the answer to a phoneOnScreenTools call no connected phone can take.
+const phoneNotOnScreen = "Persona is not open on the user's phone, and the phone lets only the app on screen use the " +
+	"clipboard: ask the user to open Persona, then retry."
 
 // requestPhoneWake selects a provider and asks iOS to wake it without waiting for a connection.
 // It reports whether a provider can be woken, including when a recent request throttles this push.

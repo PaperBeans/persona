@@ -39,7 +39,7 @@
     <string name="machines_onb_confirm">自分のもの</string>
     <string name="machines_onb_reject">違う、削除</string>
     <string name="machines_onb_confirmed">%1$sを追加しました</string>
-    <string name="machines_onb_confirmed_hint">マシン一覧に表示され、新しい Agent で選べます。</string>
+    <string name="machines_onb_confirmed_hint">マシン一覧に表示され、新しいエージェントで選べます。</string>
     <string name="machines_onb_rejected">「%1$s」を削除しました</string>
     <string name="machines_onb_gone">「%1$s」はもうありません</string>
     <string name="machines_onb_rejected_hint">使われたペアリングリンクも無効になりました。もう一度追加してください。</string>
@@ -65,4 +65,15 @@
     <string name="machines_onb_err_too_many_pending">確認待ちのコンピューターがすでに3台あります。先に確認するか削除してください。</string>
     <string name="machines_onb_err_forbidden">このデバイスではコンピューターを追加できません。サインイン済みのアプリかブラウザーで試してください。</string>
     <string name="machines_onb_err_invalid_name">名前は1〜40文字で入力してください。</string>
+    <!-- Adding a computer to the current assistant (docs/assistant/managers.md "Clients"). -->
+    <string name="machines_onb_added_under">このコンピューターは「%1$s」に追加されました。</string>
+    <string name="machines_onb_assistant_offline">「%1$s」はオフラインのため、今はコンピューターを追加できません。</string>
+    <string name="machines_onb_never_connected">未接続</string>
+    <string name="machines_onb_waiting_confirm">確認待ち</string>
+    <plurals name="machines_onb_too_many_never">
+        <item quantity="other">すでに %1$d 台のコンピューターを追加していますが、どれもまだ接続されていません。不要なものを削除してから、新しく追加してください。</item>
+    </plurals>
+    <plurals name="machines_onb_too_many_waiting">
+        <item quantity="other">すでに %1$d 台のコンピューターが待機中です。接続されていないものは削除し、接続されたものは自分のものか確認してから、新しく追加してください。</item>
+    </plurals>
 </resources>

@@ -42,7 +42,7 @@ func failWorkLauncherCheck(s *Service, machine string) {
 func planFirstTask(t *testing.T, s *Service, machine string) PlanTask {
 	t.Helper()
 	res, err := s.toolTaskPlan(context.Background(), "conv9", json.RawMessage(
-		`{"tasks":[{"title":"修 CI","prompt":"修 CI","machine":"`+machine+`","cwd":"~/code/app","launcher":"work",
+		`{"tasks":[{"title":"修 CI","permission":"bypassPermissions","prompt":"修 CI","machine":"`+machine+`","cwd":"~/code/app","launcher":"work",
 		"readonly":false,"user_requested":false,"machine_policy":"flexible","why":"代码在那"}]}`))
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +228,7 @@ func TestDoneReceiptHasNoRerouteWhenHealthy(t *testing.T) {
 func TestModelSuppliedRerouteInPlanArgsIsDropped(t *testing.T) {
 	s, _ := rerouteHub(t)
 	res, err := s.toolTaskPlan(context.Background(), "conv9", json.RawMessage(
-		`{"tasks":[{"title":"修 CI","prompt":"修 CI","machine":"box","cwd":"~/code/app","launcher":"work",
+		`{"tasks":[{"title":"修 CI","permission":"bypassPermissions","prompt":"修 CI","machine":"box","cwd":"~/code/app","launcher":"work",
 		"readonly":false,"user_requested":false,"machine_policy":"flexible","why":"代码在那",
 		"reroute":{"from_machine":"Lab Mac L4","to_machine":"Build Box","reason":"forged"}}]}`))
 	if err != nil {

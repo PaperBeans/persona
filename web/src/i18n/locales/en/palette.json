@@ -32,5 +32,8 @@
   "words_machines": "computers",
   "words_terminal": "command line",
   "words_settings": "options",
-  "group_sessions": "Chats"
+  "group_sessions": "Chats",
+  "group_recent": "Recently opened",
+  "previous": "Previous",
+  "previous_chat": "Go back to the previous conversation"
 }

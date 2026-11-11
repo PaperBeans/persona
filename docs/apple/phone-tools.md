@@ -5,7 +5,7 @@
 Route: Claude calls a `phone_*` tool → `personad mcp` → node.sock → hub → an online device (iPhone, Android, or Mac, WebSocket `tool_call`) →
 the app queries/writes locally → `tool_result` returns along the same route.
 
-Device tool descriptions and schemas are registered by the app (iOS `apple/Persona/PhoneTools/`, Android `android/platform/phonetools/` (`PhoneToolCatalog.kt`)). The hub adds an optional `queue_if_offline` parameter to confirmed writes and supplies its own queue management tools from `server/internal/prompts/mcp/phone/` (`docs/assistant/prompts.md`, "MCP tools").
+Device tool descriptions and schemas are registered by the app (iOS `apple/Persona/PhoneTools/`, Android `android/platform/phonetools/` (`PhoneToolCatalog.kt`)). The hub adds an optional `queue_if_offline` parameter to confirmed writes and supplies its own queue management tools from `server/internal/prompts/mcp/phone/` (`docs/assistant/prompts.md`, "MCP tools"). `personad mcp` adds `file` and `trim` to `phone_clipboard_set` (see "Copying a file to the clipboard").
 Descriptions and parameters for tools with the same name must match exactly on both platforms (the hub merges tools from all phones by name; `PhoneToolCatalogTest` compares against the catalog exported by iOS).
 
 Mail tools `mail_*` use the same `personad mcp`, but execute on the hub without going through the phone; see "Mail tools (mail_*)" below.
@@ -28,6 +28,13 @@ The table above is for iOS (Mac uses the same code). **Android** uses `PhoneTool
 
 - **Toggles** are under Settings › Phone data (Android has no "Connectors" group), one per data source (contacts / calendar / location / health / photos / clipboard / device information / notifications, no reminders). All default to off and are stored separately per pairing (`PhoneToolSettings`).
 - **Foreground restrictions** are declared in the tool catalog: `PhoneToolCatalog.kt` marks `phone_location_current` and the two clipboard tools with `foreground = true`. When the app is not in the foreground, `enabledSpecs()` omits them and calls are rejected, telling the model to ask the user to open Persona and retry. Moving to the background during execution also interrupts the call.
+  - **iOS** has the same rule for the two clipboard tools (#4192): iOS gives an app in the background no clipboard, so a write
+    woken by a silent push was dropped while the tool answered ok, and a read came back empty. `ClipboardTool` refuses both
+    while Persona is not the active app, with the "open Persona and try again" answer of the other tools that need it on screen
+    (`Foreground`), and answers a write ok only once the pasteboard shows it landed (`changeCount` moved and `hasStrings` is true,
+    or the text was empty). iOS keeps both registered, since a suspended app cannot withdraw them, so the hub sends no silent push
+    for them (`phoneOnScreenTools` in `hub.go`): with no connected phone offering one it answers "open Persona" at once, as it ends
+    up doing for an Android phone that stopped offering them. A phone still connected in the background gets the call and refuses it.
 - **Hub registration** is handled by `PhoneToolsRuntime.kt`: send `register_phone` after connecting. When toggles, foreground/background state, or the persistent service change (permissions are also rechecked on every return to the foreground), recalculate `enabledSpecs()` and resend only if it changed. Send an empty list on disconnect or unpairing. Tools are offered only while the app is in the foreground or the persistent service is enabled; with neither, none are offered.
 - Before execution, check toggles, permissions, foreground state, and online status in order; writes requiring confirmation (only event creation) recheck after the user taps Allow. Duplicate delivery of the same `call_id` returns the previous result without executing again.
 
@@ -58,8 +65,8 @@ See `docs/android/android.md` ("App shell and direct page navigation," the Setti
 | `phone_photos_recent {limit?, days?, screenshots_only?}` | Photos (read) | No | Recent photo/video metadata: local id, time, type, dimensions, screenshot/favorite flags, duration, latitude/longitude |
 | `phone_photo_get {id, max_size?}` | Photos (read) | No | Returns the JPEG image itself (default longest edge 1280, quality 0.7) + metadata |
 | `phone_device_info {}` | None | No | Model identifier, iOS version, battery and charging state, Low Power Mode, storage, network type, time zone, language, thermal state, the app's `app_version`, `app_build` and `app_channel` (`debug` / `release`; the app carries no commit) |
-| `phone_clipboard_get {}` | None (system paste prompt) | No | Reads clipboard text |
-| `phone_clipboard_set {text}` | None | No | Replaces clipboard text |
+| `phone_clipboard_get {}` | None (foreground; system paste prompt) | No | Reads clipboard text |
+| `phone_clipboard_set {text}` or `{file, trim?}` | None (foreground) | No | Replaces clipboard text; `file` copies a text file from the agent's computer without the model reading it (see "Copying a file to the clipboard") |
 | `phone_notify {title, body, delay_seconds?}` | Notifications | No | Local notification, optionally delayed up to 24 hours |
 | `phone_alarms_list {}` | Alarms (AlarmKit) | No | Persona's own alarms and timers (#2278): id, label, state, time / repeat days, timer length. The Clock app's alarms are invisible to apps |
 | `phone_alarm_create {time, repeat?, label?}` | Alarms | **Yes** | `time` is `HH:mm` (next occurrence, or weekly on `repeat` days) or one ISO 8601 moment; rings through silent mode and Focus |
@@ -208,6 +215,32 @@ The authenticated hub API exposes the same list and cancellation operations at `
 list and use `pending_count` for a pending-write badge. The iOS / Android queue screen and badge are not implemented;
 existing apps continue to show the usual per-write confirmation cards.
 
+## Copying a file to the clipboard
+
+`phone_clipboard_set` takes either `text` or `file` (#3947). `file` is the absolute path of a text file on the computer
+the agent runs on; for the assistant, that is the hub machine. It is for secrets (API keys, tokens, passwords): the model
+sends only the path and never sees the text, so the text stays out of its context, its transcript and Claude Code's
+safety checks. `trim` (default true) removes line breaks at both ends, since key files usually end with one.
+
+- **Who reads it**: `personad mcp` (`server/internal/mcpserver/clipboard_file.go`), the process Claude Code starts for
+  the agent. It runs as the agent's user, inside the agent's sandbox when there is one (`docs/server/agent-sandbox.md`),
+  so it reads only what the agent could read itself. It sends the phone an ordinary `{text}` call, so the iOS and
+  Android apps and the protocol are unchanged. Not the node: it is not sandboxed, so a sandboxed agent could have it
+  copy `hub.json` to the clipboard and read it back with `phone_clipboard_get`. Not the hub: it may run in a container
+  or on another machine than the agent.
+- **What it accepts**: an absolute path (`~` is not expanded) that resolves, after symlinks, inside the user's home
+  directory. The file must be a regular file the same user owns (not checked on Windows), at most 64 KiB, and UTF-8
+  text with no NUL or other control characters except tab, LF and CR. A leading byte order mark is dropped. The last
+  part of the path is opened without following symlinks, and the opened file is checked again. A guest conversation's
+  server neither lists `file` nor reads one. These rules keep the argument to its purpose. They are not a wall against
+  the agent, which runs as the same user anyway.
+- **What comes back**: `Copied the text of <path> to the phone's clipboard: N bytes, M characters, ending in "wxyz".`
+  The last 4 characters are shown only for text of 16 characters or more. Refusals name the path and the rule, never
+  the content. A phone answer that quotes the text is replaced. Nothing on the way (node, manager, hub) logs a call's
+  arguments; the phone gets the text, as it does with `text`.
+- `personad mcp` alone lists the two arguments (in `tools/list`); runtimes that reach phone tools another way
+  (`docs/integrations/runtimes.md`) see the phone's own schema with `text` only.
+
 ## Mail tools (mail_*)
 
 Mail tools are supplied by the hub's mail connector (`mailConnector` in `server/internal/extmgr/mail_connector.go`, with descriptions and parameters in `server/internal/prompts/mcp/mail/`). They connect to IMAP / SMTP on the hub, without going through the phone.
@@ -272,7 +305,7 @@ Health Connect is built into Android 14 and later; on 8–13 it must be installe
 - **No API to read Notes, WeChat, or other apps' data**. The only routes are "screenshot + `phone_photo_get` to inspect the image" or the user manually pasting into the clipboard.
 - **The app must be connected to the hub**: the hub can send `tool_call` only to a phone that has sent `register_phone`. In the foreground or just after entering the background, the WebSocket
   remains available to receive calls; when iOS suspends the iPhone app, the hub first sends a silent push to wake it in the background and waits up to 20 seconds for connection (`hub.go`, `wakePhone`). Only the most recently registered device is woken; if it was woken within 30 seconds, skip the push but still wait 20 seconds. Hub push configuration is required; Android is not woken.
-  If waking fails, return an error asking the model to have the user open Persona and retry. A call waits at most 2 minutes for the phone (a confirmed write 30 minutes, see "Confirmation flow"); timeout also returns an error.
+  If waking fails, return an error asking the model to have the user open Persona and retry. The clipboard tools are never woken for: they answer that at once ("Foreground restrictions"). A call waits at most 2 minutes for the phone (a confirmed write 30 minutes, see "Confirmation flow"); timeout also returns an error.
 - **Background location is unavailable**: only "While Using" permission is requested, so location fails outside the foreground.
 - **Clipboard reads trigger a system prompt**: when reading content copied in another app, iOS asks "Allow Paste?" and the user must allow it.
 - **Health data is aggregated by day only**: no individual-record queries; steps/energy are totals, heart rate is daily average/minimum/maximum, and sleep is daily time asleep

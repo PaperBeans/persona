@@ -309,8 +309,8 @@ func (s *Service) judgeTaskDone(ctx context.Context, t Todo) (taskDoneCheck, err
 	return judgeTaskDoneWith(ctx, s.purposeModel("inbox.judge"), in)
 }
 
-// jsonModel is the one call the done judge makes: a system and a user text in, a JSON answer decoded into out.
-// *ai.Client is the real one; tests and behaviour checks give their own.
+// jsonModel is the one call each single-call judge makes (done, delegation, triage): a system and a user text in, a
+// JSON answer decoded into out. *ai.Client is the real one; tests and behaviour checks give their own.
 type jsonModel interface {
 	JSON(ctx context.Context, system, user string, out any) error
 }

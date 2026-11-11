@@ -236,7 +236,7 @@ const reportStagesKey = "assistant.todo_stages"
 
 // taskReport notes a change of task t for the next card. ix: what it asks (needs).
 func (s *Service) taskReport(t Todo, state, machine string, session [2]string, text string, ix *proto.Interaction) {
-	if t.Origin == "" {
+	if t.Origin == "" || s.isLeaderRef(t.Origin) { // a task leader's worker is no task of the owner's chat (task_leader.go)
 		return
 	}
 	b := &s.reports
@@ -729,7 +729,9 @@ func (s *Service) reportItemView(l i18n.Lang, web string, stages map[string]todo
 		md.WriteString("\n" + stageBar(l, stage))
 	}
 	if text := strings.TrimSpace(it.text); text != "" {
-		md.WriteString("\n" + feishubot.CardMarkdown(clipMarkdown(text, 300)))
+		// Charts become numbers first, as the bot's answers and the briefing card do: clipMarkdown drops a persona-card
+		// block it cannot draw down to its title, so a chart in the answer would reach the owner without its numbers.
+		md.WriteString("\n" + feishubot.CardMarkdown(clipMarkdown(feishubot.PersonaCards(text), 300)))
 	}
 	if it.state == reportNeeds {
 		md.WriteString("\n" + i18n.T(l, "assistant-reports.answer_below"))

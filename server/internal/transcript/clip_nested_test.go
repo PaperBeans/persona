@@ -159,13 +159,13 @@ func TestStringsJustOverTheShareStayWhole(t *testing.T) {
 	}
 }
 
-// Whether a cut pays is decided by the JSON it leaves, not by raw bytes: json.Marshal writes < > & as six bytes each, so the
-// tail of an HTML string a little over the share costs more than the note that replaces it, and that string is cut.
+// Whether a cut pays is decided by the JSON it leaves, not by raw bytes: quotes and backslashes cost two bytes each, so
+// the tail of such a string a little over the share costs more than the note that replaces it, and that string is cut.
 func TestEscapedStringsJustOverTheShareAreCut(t *testing.T) {
-	html := strings.Repeat(`<a href="x">&lt;</a>`, 15)[:minInputShare+30] // 286 raw bytes, about 670 as JSON
+	quoted := strings.Repeat(`say "\d+" `, 30)[:minInputShare+30] // 286 raw bytes, about 400 as JSON
 	items := make([]map[string]string, 200)
 	for i := range items {
-		items[i] = map[string]string{"text": html}
+		items[i] = map[string]string{"text": quoted}
 	}
 	in, _ := json.Marshal(map[string]any{"items": items})
 	out := clipJSON(in)
@@ -176,12 +176,35 @@ func TestEscapedStringsJustOverTheShareAreCut(t *testing.T) {
 		t.Fatalf("lost its shape: %v", err)
 	}
 	for i, it := range got.Items {
-		if !strings.HasPrefix(it["text"], html[:minInputShare]) || !strings.Contains(it["text"], "已截断") {
+		if !strings.HasPrefix(it["text"], quoted[:minInputShare]) || !strings.Contains(it["text"], "已截断") {
 			t.Fatalf("items[%d] = %d bytes, want the first %d bytes and a note", i, len(it["text"]), minInputShare)
 		}
 	}
 	if len(out) >= len(in) {
 		t.Errorf("clipped input is %d bytes, not shorter than the %d it came from", len(out), len(in))
+	}
+}
+
+// A clipped input of HTML keeps < > & as they are, as Claude wrote them: json.Marshal wrote each as six bytes, so every
+// page and push carried 160,011 bytes for 200 snippets of 61,011, their tails cut where a note cost less than the
+// escapes (#2907). Strings just over the share now stay whole, and a long one is cut to the budget in raw bytes.
+func TestClippedHTMLIsNotEscaped(t *testing.T) {
+	rows := make([]string, 200)
+	for i := range rows {
+		rows[i] = `{"text":"` + strings.Repeat("<b>&amp;</b> ", 22) + `<p></p>"}`
+	}
+	snippets := `{"items":[` + strings.Join(rows, ",") + `]}` // 61,011 bytes
+	if out := clipJSON(json.RawMessage(snippets)); string(out) != snippets {
+		t.Errorf("strings just over the share were cut or escaped: %d bytes from %d: %.80s", len(out), len(snippets), out)
+	}
+	long := `{"html":"` + strings.Repeat("<li>a &amp; b</li>", 6000) + `"}`
+	out := clipJSON(json.RawMessage(long))
+	var got struct{ HTML string }
+	if err := json.Unmarshal(out, &got); err != nil || len(out) > maxInputLen {
+		t.Fatalf("a long HTML string was clipped to %d bytes (%v), want valid JSON of at most %d", len(out), err, maxInputLen)
+	}
+	if !strings.HasPrefix(string(out), `{"html":"<li>a &amp; b</li>`) || !strings.Contains(got.HTML, "已截断") {
+		t.Errorf("want the HTML as it was, cut with a note: %.80s", out)
 	}
 }
 

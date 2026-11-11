@@ -52,7 +52,7 @@ class ConnectionRuntime @Inject constructor(application: Application) : HubConne
     private val scope = app.scope
     private val version = app.packageManager.getPackageInfo(app.packageName, 0).versionName.orEmpty()
     private val os by lazy {
-        val system = detectedPhoneSystem()
+        val system = detectedPhoneSystem(app)
         buildJsonObject { put("name", system.name); put("version", system.version); put("sdk", Build.VERSION.SDK_INT) }
     }
     private val heartbeatPolicy by lazy {

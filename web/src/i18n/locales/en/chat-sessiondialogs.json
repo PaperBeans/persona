@@ -77,5 +77,10 @@
   "speed_fast": "Fast",
   "speed_unknown": "Unknown",
   "speed_standard_detail": "Use standard speed and usage.",
-  "speed_paid_detail": "Faster responses with increased usage or cost."
+  "speed_paid_detail": "Faster responses with increased usage or cost.",
+  "header_mode": "Permission mode: {mode}",
+  "mode_unknown": "Unknown",
+  "leave_bypass_confirm": "Switch to {mode}",
+  "leave_bypass_detail": "This agent wasn't started with Allow all, so it can't be switched back to it from here.",
+  "modes_locked": "Not running: the mode changes while it runs"
 }

@@ -13,7 +13,7 @@ vi.mock("./Skills", () => ({ SkillsGroup: () => null }));
 vi.mock("../../lib/store", () => ({ useStore: () => [], refreshAssistant: vi.fn(() => Promise.resolve()) }));
 vi.mock("../../ui/atoms", async (original) => ({ ...await original<typeof import("../../ui/atoms")>(), toast: vi.fn() }));
 import { initI18n, t } from "../../i18n";
-import { resetManagerChoice, setRosterDefault } from "../../lib/manager-choice";
+import { chooseManager, resetManagerChoice, setRosterDefault } from "../../lib/manager-choice";
 import { handleUnauthorized, setToken } from "../../lib/api";
 import { toast } from "../../ui/atoms";
 import { AssistantSettings } from "./AssistantSettings";
@@ -38,8 +38,9 @@ async function type(value: string) {
 async function save() { act(() => button("common.save").click()); await flush(); }
 async function render(strict = false) { await act(async () => root.render(strict ? <StrictMode><AssistantSettings /></StrictMode> : <AssistantSettings />)); await flush(); }
 async function leave() { await act(async () => root.render(null)); await flush(); }
+// another assistant made current: the editor follows it (Settings › "<name>'s settings" has no picker of its own)
 async function choose(manager: string) {
-  act(() => { const select = host.querySelector<HTMLSelectElement>(`select[aria-label="${t("settings-assistantsettings.configuration_target")}"]`)!; select.value = manager; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  act(() => chooseManager(manager));
   await flush();
 }
 async function complete(index: number, fail = false) { act(() => fail ? writes[index].fail() : writes[index].succeed()); await flush(); }

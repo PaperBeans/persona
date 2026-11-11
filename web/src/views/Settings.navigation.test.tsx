@@ -71,11 +71,11 @@ const popped = (go: () => void) => act(async () => {
 const category = (label: string) => [...nav().querySelectorAll("button")].find((button) => button.textContent?.startsWith(label))!;
 
 describe("Settings category navigation", () => {
-  it("opens knowledge selection and retains its explicit configuration manager", async () => {
+  it("opens knowledge selection as the current assistant's, with no manager in the address", async () => {
     await mount("/settings?tab=models&manager=remote");
     await act(async () => category(t("settings-nav.tab_knowledge")).click());
     expect(host.querySelector('[data-page="knowledge-selection"]')).not.toBeNull();
-    expect(location.search).toBe("?tab=knowledge&manager=remote");
+    expect(location.search).toBe("?tab=knowledge");
     expect(category(t("settings-nav.tab_knowledge")).getAttribute("aria-current")).toBe("page");
   });
   it("places desktop navigation beside a separately focusable, named content region", async () => {
@@ -88,7 +88,8 @@ describe("Settings category navigation", () => {
     expect(region.classList.contains("overflow-y-auto")).toBe(true);
     expect(region.getAttribute("tabindex")).toBe("0");
     expect(region.getAttribute("aria-label")).toBe(t("settings-nav.tab_shortcuts"));
-    for (const button of nav().querySelectorAll("button")) {
+    // every category controls the region (the current assistant's Switch opens its list of assistants instead)
+    for (const button of nav().querySelectorAll<HTMLButtonElement>("button:not([data-settings-switch])")) {
       expect(button.type).toBe("button");
       expect(button.getAttribute("aria-controls")).toBe(region.id);
       expect(button.tabIndex).toBe(0);
@@ -111,13 +112,13 @@ describe("Settings category navigation", () => {
     expect(category(t("settings-nav.tab_notifications")).getAttribute("aria-current")).toBe("page");
   });
 
-  it("keeps deep-linked configuration purpose and manager when choosing its category again", async () => {
+  it("keeps a deep-linked configuration purpose, and the current assistant's page drops a manager from the address", async () => {
     await mount("/settings?tab=model-config&purpose=agent.triage&manager=example");
     expect(location.search).toBe("?tab=models&purpose=agent.triage&manager=example");
     expect(location.hash).toBe("#settings-model-config");
     expect(host.querySelector('[data-page="model-config"]')?.getAttribute("data-open")).toBe("agent.triage");
     await act(async () => category(t("settings-nav.tab_models")).click());
-    expect(location.search).toBe("?tab=models&manager=example");
+    expect(location.search).toBe("?tab=models");
   });
 
   it("redirects old agent, translation, and assistant links to their new categories", async () => {
@@ -138,7 +139,7 @@ describe("Settings category navigation", () => {
 
   it("starts with every agent open, and a heading folds just that one", async () => {
     await mount("/settings?tab=agents");
-    const rows = [...host.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")];
+    const rows = [...host.querySelectorAll<HTMLButtonElement>("button[aria-expanded]:not([data-settings-switch])")];
     expect(rows.map((b) => b.textContent)).toEqual(["Claude Code", "Codex", "Antigravity", "omp"]);
     expect(rows.map((b) => b.getAttribute("aria-expanded"))).toEqual(["true", "true", "true", "true"]);
     await act(async () => rows[1].click());

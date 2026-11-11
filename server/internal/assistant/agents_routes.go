@@ -121,6 +121,9 @@ type workStats struct {
 	NeedsYou sampleStats    `json:"needs_you"`
 	// Waits: how long a triaged turn waited for the user's first look or reply (seconds), by what it was.
 	Waits map[string]waitStats `json:"waits"`
+	// OwnerCannotAnswer: the decisions the owner answered "I can't answer this" (decision.go, #3804), by the supervisor
+	// conversation that asked and then by answer (decide_yourself, not_what_i_asked, explain_first).
+	OwnerCannotAnswer map[string]map[string]int `json:"owner_cannot_answer"`
 }
 
 type sampleStats struct {
@@ -186,6 +189,7 @@ func summarizeWork(hours int, events []db.WorkEvent) workStats {
 		}
 	}
 	s.Unread, s.NeedsYou = samples(unread), samples(needs)
+	s.OwnerCannotAnswer = ownerCannotStats(events)
 	for k, v := range waits {
 		slices.Sort(v)
 		s.Waits[k] = waitStats{N: len(v), Median: v[len(v)/2], P90: v[min(len(v)-1, len(v)*9/10)]}

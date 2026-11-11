@@ -20,6 +20,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -193,17 +194,18 @@ class ChannelsShotsTest {
         // With a navigation host, the removed introduction row used to be present.
         rule.onAllNodesWithText("助手").assertCountEquals(0)
         // The brand card is Persona too; only a separate legacy navigation entry is forbidden.
-        rule.onAllNodes(hasText("Persona") and !hasTestTag("settings-hub-card")).assertCountEquals(0)
+        // (Without a roster the first group's heading says Persona: a heading, not an entry.)
+        rule.onAllNodes(hasText("Persona") and !hasTestTag("settings-hub-card") and !hasAnyAncestor(hasTestTag("settings-assistant-head"))).assertCountEquals(0)
         rule.onAllNodesWithText("认识 Persona").assertCountEquals(0)
-        rule.onNode(hasText("连接器") and hasClickAction()).performScrollTo()
-        rule.onAllNodesWithText("渠道").assertCountEquals(2) // Its own section header and its one clickable row.
-        val computer = rule.onNode(hasText("Claude Code 设置") and hasClickAction()).fetchSemanticsNode().boundsInRoot
-        val channelHeader = rule.onNode(hasText("渠道") and !hasClickAction()).fetchSemanticsNode().boundsInRoot
+        // One row, in the current assistant's group (docs/assistant/managers.md "Clients"): after Connectors (and
+        // Extensions), before the computers' Claude Code settings; no section of its own.
+        rule.onNode(hasText("渠道") and hasClickAction()).performScrollTo()
+        rule.onAllNodesWithText("渠道").assertCountEquals(1)
+        val connectors = rule.onNode(hasText("连接器") and hasClickAction()).fetchSemanticsNode().boundsInRoot
         val channelRow = rule.onNode(hasText("渠道") and hasClickAction()).fetchSemanticsNode().boundsInRoot
-        val connectors = rule.onNode(hasText("连接器") and !hasClickAction()).fetchSemanticsNode().boundsInRoot
-        assertTrue(computer.bottom <= channelHeader.top)
-        assertTrue(channelHeader.bottom <= channelRow.top)
-        assertTrue(channelRow.bottom <= connectors.top)
+        val computer = rule.onNode(hasText("Claude Code 设置") and hasClickAction()).fetchSemanticsNode().boundsInRoot
+        assertTrue(connectors.bottom <= channelRow.top)
+        assertTrue(channelRow.bottom <= computer.top)
     }
 
     @Test fun channelEntryWorksWithoutExtensionsAndTracksCapabilityChanges() {
@@ -243,7 +245,7 @@ class ChannelsShotsTest {
             }
         }
         rule.onAllNodesWithText("渠道").assertCountEquals(0)
-        rule.onAllNodesWithText("扩展").assertCountEquals(2)
+        rule.onAllNodesWithText("扩展").assertCountEquals(1)
         rule.onNode(hasText("扩展") and hasClickAction()).performScrollTo().performClick()
         assertEquals(SettingsPage.Extensions, opened)
     }

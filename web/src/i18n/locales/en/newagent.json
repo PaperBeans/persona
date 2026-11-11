@@ -27,7 +27,7 @@
   "attach_hint": "Paste or drop images and files · sent in the background after start",
   "open_folder": "Open {name}",
   "permission_mode": "Permission mode",
-  "permission_mode_hint": "You can change the mode in the conversation later; Allow everything can only be picked when starting.",
+  "permission_mode_hint": "You can change the mode in the conversation later; Allow all can only be picked when starting.",
   "no_computer_title": "No computers yet",
   "no_computer_body": "An agent runs on one of your computers, so there is nothing to pick here yet. Add one first.",
   "worktree": "In a new worktree",

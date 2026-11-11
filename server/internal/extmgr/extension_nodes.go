@@ -290,7 +290,7 @@ func putNodePackage(ctx context.Context, m *Machine, prog proto.PluginNodeProgra
 // nodeInit is the initialize p's program on a computer gets: the configuration, and only the secrets its manifest
 // sends to computers (node.secrets); no hub token (no hub_api on computers, plan "Decisions").
 func (ps *extensions) nodeInit(ctx context.Context, p *extension.Extension) (json.RawMessage, error) {
-	all, err := ps.reg.Secrets(ctx, p.Record.ID)
+	all, err := ps.programSecrets(ctx, p.Record.ID)
 	if err != nil {
 		return nil, err
 	}

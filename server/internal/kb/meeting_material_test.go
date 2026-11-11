@@ -153,6 +153,13 @@ func TestMeetingMaterialOnlyMeetingMaterial(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Until a per-meeting private mark exists (#3862), production reads none of the earlier meetings,
+	// their projects or action-item to-do IDs. This meeting's own material stays available.
+	current, err := e.MeetingMaterial(recID, "What did we decide about the export cap?")
+	if err != nil || current.EarlierAvailable || len(current.Earlier) != 0 || len(current.Lines) != 2 || len(current.Asks) != 1 || current.Calendar == nil {
+		t.Fatalf("default material: %+v, %v", current, err)
+	}
+	e.EarlierMeetingsInAnswers = true
 	mat, err := e.MeetingMaterial(strings.ToUpper(recID), "What did we decide about the export cap?")
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +179,7 @@ func TestMeetingMaterialOnlyMeetingMaterial(t *testing.T) {
 	if len(mat.Asks) != 1 || mat.Asks[0].Answer != "We kept the cap." {
 		t.Errorf("asks %+v", mat.Asks)
 	}
-	if len(mat.Earlier) != 2 || mat.Earlier[0].ID != earlier || mat.Earlier[1].ID != asked {
+	if !mat.EarlierAvailable || len(mat.Earlier) != 2 || mat.Earlier[0].ID != earlier || mat.Earlier[1].ID != asked {
 		t.Fatalf("earlier %+v", mat.Earlier)
 	}
 	first := mat.Earlier[0]
@@ -212,6 +219,7 @@ func TestMeetingMaterialOnlyMeetingMaterial(t *testing.T) {
 // recent first among equals; at most materialMaxEarlier.
 func TestMeetingMaterialRanking(t *testing.T) {
 	e := goldenEngine(t, nil)
+	e.EarlierMeetingsInAnswers = true
 	now := time.Date(2026, 11, 10, 14, 0, 0, 0, goldenZone)
 	u := attendedUpload(1, now, AttendanceListener)
 	u.Title = "Platform weekly"

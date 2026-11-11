@@ -14,7 +14,9 @@
     <string name="settings_background_restricted">受限制</string>
     <string name="settings_background_not_restricted">此系统设置未限制</string>
     <string name="settings_background_history">最近主进程退出</string>
-    <string name="settings_background_history_count">%1$d 条系统记录</string>
+    <plurals name="settings_background_history_count">
+        <item quantity="other">%1$d 条系统记录</item>
+    </plurals>
     <string name="settings_background_no_history">未获取：系统最近记录中没有主进程退出</string>
     <string name="settings_background_unavailable">未获取：无法读取</string>
     <string name="settings_background_exit">退出记录 %1$d</string>

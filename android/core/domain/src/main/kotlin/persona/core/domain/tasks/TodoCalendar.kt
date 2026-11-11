@@ -3,6 +3,7 @@ package persona.core.domain.tasks
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.Todo
+import persona.core.contracts.TodoDue
 import persona.core.contracts.TodoState
 import persona.core.contracts.parseTime
 import persona.core.contracts.state
@@ -16,7 +17,7 @@ import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 // The to-dos' month (#2046, docs/assistant/todos.md "Calendar"): which to-dos a day shows and in what order, the weeks
-// a month touches and the weekday they start on. The rules of iOS apple/Shared/TodoCalendar.swift and the web's
+// a month touches and the weekday they start on; where a to-do dragged onto another day lands (#2045). The rules of iOS apple/Shared/TodoCalendar.swift and the web's
 // web/src/lib/todo-calendar.ts; Android draws the month only, for now.
 
 /** A to-do on the calendar: on [day], at [time] there, or all day when [time] is null. */
@@ -83,6 +84,36 @@ fun <T> fitDay(entries: List<T>, lines: Int): DayFit<T> {
     if (entries.size <= lines || lines <= 0) return DayFit(entries, 0)
     val shown = entries.take(lines - 1)
     return DayFit(shown, entries.size - shown.size)
+}
+
+/** The time an all-day to-do takes when it is given one ("Change Due Date…" with All day off), as iOS `TodoPlanDraft`. */
+val DefaultDueTime: LocalTime = LocalTime.of(18, 0)
+
+/** A to-do dropped on [day] of the month (#2045): at the same time there in [zone]; an all-day one stays all day. */
+fun CalendarEntry.dropOnDay(day: LocalDate, zone: ZoneId): TodoDue =
+    time?.let { TodoDue.At(day.atTime(it).atZone(zone).toInstant()) } ?: TodoDue.Day(day)
+
+/** The due date a drop sends: null when it lands where the to-do already is (nothing is sent). */
+fun Todo.moveTo(due: TodoDue): TodoDue? = due.takeIf { it != this.due }
+
+/**
+ * The day of the month grid under a point, as an index into its days (0 is the first shown): [x] across the grid's
+ * [width] (seven days a row, from the right when [rtl]), [y] down its rows of [rowHeight] (the scrolled-away part
+ * counted); null off the grid.
+ */
+fun monthDropIndex(x: Float, y: Float, width: Float, rowHeight: Float, rows: Int, rtl: Boolean = false): Int? {
+    if (width <= 0f || rowHeight <= 0f || x < 0f || x >= width || y < 0f) return null
+    val row = (y / rowHeight).toInt()
+    if (row >= rows) return null
+    val column = (x / (width / 7)).toInt().coerceIn(0, 6)
+    return row * 7 + if (rtl) 6 - column else column
+}
+
+/** Which way a month taller than its space scrolls while a dragged to-do is within [edge] of the top or bottom of the [height] in sight: -1 up, 1 down, 0 not. */
+fun edgeScroll(y: Float, height: Float, edge: Float): Int = when {
+    y < edge -> -1
+    y > height - edge -> 1
+    else -> 0
 }
 
 /** The days the month grid shows: the whole weeks [month] touches, weeks starting on [first]. */

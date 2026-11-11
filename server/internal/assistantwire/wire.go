@@ -246,6 +246,11 @@ type NotifyTodo struct {
 	ID        string    `json:"id"`
 	AskedAt   time.Time `json:"asked_at"`
 	Recommend string    `json:"recommend"`
+	// Options are the labels of the decision's options, the recommended first, and Responses the fixed answers it takes
+	// besides them (decide_yourself, not_what_i_asked, explain_first); the accept route takes either as `option` or
+	// `response`. Left out by a hub from before them.
+	Options   []string `json:"options,omitempty"`
+	Responses []string `json:"responses,omitempty"`
 }
 
 // NotifyPush is the kind of the assistant's pushes.

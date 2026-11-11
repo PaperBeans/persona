@@ -199,7 +199,7 @@ func (s *Service) leaderReportsSync(ctx context.Context, now time.Time, stuckToo
 		if a, ok := asks[t.ID]; ok {
 			lt.Ask = &a
 		}
-		tr := triageTodo(lt, look, now, time.Time{}, loc)
+		tr := triageTodo(lt, look, now, time.Time{}, loc, false) // a failed start is closed: never stuck
 		stuck := !tr.Last.IsZero() && now.Sub(tr.Last) >= leaderStuckAfter && t.DoneAt == nil &&
 			slices.Contains([]string{triageWaiting, triagePR, triageOther, triageShelved}, tr.Section)
 		if last, ok := told.Stuck[t.ID]; stuck && (!ok || now.Sub(last) >= leaderStuckAfter) {

@@ -1,0 +1,23 @@
+{
+  "default_at": "{time} 没回复就按推荐办",
+  "default_never": "不会默认执行，等你回复",
+  "cost": "等下去的代价：{cost}",
+  "separator": " · ",
+  "leads": "{option}：{leads}",
+  "leads_to": "：{leads}",
+  "choose": "为「{title}」选「{option}」",
+  "choose_recommended": "为「{title}」选推荐的「{option}」",
+  "another": "其他…",
+  "another_row": "打开「{title}」用别的方式回答",
+  "more": "更多回答",
+  "decide_yourself": "你来定",
+  "decide_yourself_detail": "Persona 自己决定，并记下它的假设。",
+  "not_what_i_asked": "这不是我要的",
+  "not_what_i_asked_detail": "先暂停，等 Persona 对照你的要求核对。",
+  "explain_first": "先告诉我背景",
+  "explain_first_detail": "Persona 补上这是什么、为什么做，再问一次。",
+  "chosen": "已回答：{option}",
+  "responded": "已交回 Persona",
+  "failed": "回答没发出去。{error}",
+  "confirm": "确认：{option}"
+}

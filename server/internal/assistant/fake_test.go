@@ -40,6 +40,7 @@ type fakeHub struct {
 	zshrc         map[string][]proto.Launcher        // a machine\'s own launchers.list (over launcherList)
 	rcFiles       map[string]string                  // a machine's launchers.list rc_file (its shell follows: bash or zsh)
 	slowLaunchers map[string]bool                    // a machine whose launchers.list answers only when the call gives up
+	launcherGate  chan struct{}                      // when set, every launchers.list answer waits for this gate
 	agentModels   map[string][]proto.AgentModel      // the nodes' launchers.models, by launcher
 	modelsLocked  map[string]string                  // launchers.models's locked, by launcher
 	managed       map[string][]proto.ManagedLauncher // what each node was given (launchers.managed)
@@ -303,6 +304,17 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		name, _ := a["name"].(string)
 		return json.Marshal(map[string]any{"agent": launcherAgent(name)})
 	case DeviceLaunchersList:
+		if f.launcherGate != nil {
+			gate := f.launcherGate
+			f.mu.Unlock()
+			select {
+			case <-gate:
+			case <-ctx.Done():
+				f.mu.Lock()
+				return nil, ctx.Err()
+			}
+			f.mu.Lock()
+		}
 		if f.slowLaunchers[p.Device] {
 			f.mu.Unlock()
 			<-ctx.Done()

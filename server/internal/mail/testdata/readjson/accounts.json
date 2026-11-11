@@ -1,0 +1,10 @@
+{
+  "accounts": [
+    {
+      "id": "acc_test",
+      "name": "Test",
+      "provider": "imap",
+      "email": "me@example.com"
+    }
+  ]
+}

@@ -178,7 +178,9 @@ func (s *Service) askedTaskPostsInto(ctx context.Context, session string) bool {
 // quietTurnItems: a turn's items (the node's last turn, from the input that started it) say its answer is only the
 // asked scheduled run's. The turn's input is its last user text that is neither queued nor a wake, and the run has
 // answered after it (a patrol input written but not yet answered leaves the answer above it, the previous turn's).
-// After the input:
+// Answered is text after the input, or tool calls after it followed by the turn's end (turn_duration): a patrol that
+// only calls tools, notify_user among them, ends on its own work (#3934). A turn with no output at all is still
+// pushed, as an empty turn may be a failure. After the input:
 //   - user input absorbed mid-turn (queued text or image without a scheduled source) makes the answer the user's too;
 //   - a wake by a background task this turn did not start (one the user started earlier, a loop, a peer) is
 //     the user's result, not the patrol's. A wake by a task the turn launched stays the patrol's.
@@ -193,7 +195,7 @@ func quietTurnItems(items []proto.Item) bool {
 	if start < 0 || !askedScheduledSource(prompts.ItemSource(items[start])) {
 		return false
 	}
-	answered := false
+	answered, worked := false, false
 	for i := start + 1; i < len(items); i++ {
 		it := items[i]
 		switch {
@@ -207,10 +209,18 @@ func quietTurnItems(items []proto.Item) bool {
 			}
 		case it.Role == "assistant" && it.Kind == proto.KindText && strings.TrimSpace(it.Text) != "":
 			answered = true
+		case it.Role == "assistant" && it.Kind == proto.KindToolUse:
+			worked = true
+		case it.Kind == turnDurationKind && worked:
+			answered = true
 		}
 	}
 	return answered
 }
+
+// turnDurationKind is the item kind of a turn's end as the transcript readers write it (transcript.go and codex.go:
+// Claude Code's system/turn_duration line, Codex's completed turn).
+const turnDurationKind = "turn_duration"
 
 // askedScheduledSource: source is a scheduled run's that pushes only what it sends.
 func askedScheduledSource(source *proto.MessageSource) bool {

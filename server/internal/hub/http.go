@@ -399,6 +399,30 @@ func requestID(client string) string {
 
 func writeJSON(w http.ResponseWriter, v any) { apierr.WriteJSON(w, v) }
 
+// marshalItems is v, a page or push of transcript items, as JSON with < > & as they are. Escaped, each costs six
+// bytes, and a tool input or text of HTML or code went to the apps at up to three times its size (#2907). Escapes the
+// node already wrote stay as they are, and U+2028 and U+2029 are still escaped, as encoding/json does without HTML
+// escaping.
+func marshalItems(v any) ([]byte, error) {
+	var b bytes.Buffer
+	if err := itemsEncoder(&b).Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
+}
+
+// writeItemsJSON is writeJSON for a body of transcript items (marshalItems).
+func writeItemsJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = itemsEncoder(w).Encode(v)
+}
+
+func itemsEncoder(w io.Writer) *json.Encoder {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	return enc
+}
+
 func atoi(s string) int {
 	n := 0
 	for _, c := range s {
@@ -511,7 +535,7 @@ func (h *Hub) sessionItems(w http.ResponseWriter, r *http.Request, m *Machine) {
 	if q.Get("lazy_images") == "1" {
 		res.Items = proto.WithoutImageData(res.Items)
 	}
-	writeJSON(w, res)
+	writeItemsJSON(w, res)
 }
 
 // sessionItemFull serves one item whole: pages cut long text (the item says full_size), the app fetches the rest when
@@ -527,7 +551,7 @@ func (h *Hub) sessionItemFull(w http.ResponseWriter, r *http.Request, m *Machine
 	// The whole item for the channels that follow the conversation, or show its view (the manager's, fleet_follow.go).
 	h.asstOf(h.sessionOwner(m.cfg.ID, r.PathValue("sid"))).notify(assistantwire.EventSessionItems, assistantwire.SessionItems{MachineID: m.cfg.ID, SessionID: r.PathValue("sid"),
 		Items: []proto.Item{it}})
-	writeJSON(w, cardCompatItems(h.requestLang(r), h.requestWants(r, featureCardRing), localizedItems(h.requestLang(r), h.withInjected([]proto.Item{it})))[0])
+	writeItemsJSON(w, cardCompatItems(h.requestLang(r), h.requestWants(r, featureCardRing), localizedItems(h.requestLang(r), h.withInjected([]proto.Item{it})))[0])
 }
 
 // sessionImage serves one item's image as raw bytes. An item's image never changes, so the app may cache it forever.
@@ -1090,7 +1114,7 @@ func (h *Hub) itemsToSubscribers(machineID, sessionID string, items []proto.Item
 		if moreAfter {
 			out["more_after"] = true
 		}
-		b, _ := json.Marshal(out)
+		b, _ := marshalItems(out)
 		return b
 	}
 	// One message per language and image mode: the node's Chinese lines read in each connection's (transcript_text.go).
@@ -1498,7 +1522,9 @@ func (h *Hub) sendBacklog(ctx context.Context, c *client, m *Machine, sid string
 			out["more_after"] = true
 			more = false
 		}
-		c.sendJSON(out)
+		if b, err := marshalItems(out); err == nil {
+			c.queue(b)
+		}
 		if !more {
 			h.sendLiveText(c, m.cfg.ID, sid)
 			return

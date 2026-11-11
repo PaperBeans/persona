@@ -124,6 +124,19 @@ extension View {
     /// Glass buttons in the glass styles, bordered ones in Lark, soft raised pills in Clay / Island. Picks the system
     /// style directly: wrapping `Button(configuration)` in a PrimitiveButtonStyle that re-styles it recursed until the
     /// stack overflowed (crash on opening a chat in the glass styles).
+    /// Primary and secondary decisions on a pending draft use large targets, not compact utility buttons.
+    @ViewBuilder func draftDecisionButton(prominent: Bool = false) -> some View {
+        #if os(macOS)
+        if StyleSpec.current.buttons == .glass {
+            buttonStyle(MacCapsuleButton(prominent: prominent, minimumHeight: Theme.Size.tapTarget)).controlSize(.large)
+        } else {
+            themedButton(prominent: prominent).controlSize(.large)
+        }
+        #else
+        themedButton(prominent: prominent).controlSize(.large)
+        #endif
+    }
+
     @ViewBuilder func themedButton(prominent: Bool = false) -> some View {
         switch StyleSpec.current.buttons {
         case .glass:

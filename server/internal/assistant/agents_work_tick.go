@@ -136,6 +136,12 @@ func (s *Service) workGuard(v *workView, e db.SessionWork, ownCard bool) (proto.
 	if closed {
 		return c, "task done"
 	}
+	if !ownCard && s.followUpsHeld(e.MachineID, e.SessionID) {
+		return c, "held: the owner said this task is not what they asked" // until its supervisor looks (decision.go)
+	}
+	if !ownCard && s.parkedSession(e.MachineID, e.SessionID) {
+		return c, "held: its task is parked" // a turn of its agent would end the parking (parked.go)
+	}
 	switch {
 	case !ok:
 		return c, "gone"

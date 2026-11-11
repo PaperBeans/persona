@@ -63,6 +63,7 @@
   "fill_in_app": "这一步要在 App 里填写",
   "write_text_first": "先写上要输入的",
   "unknown_action": "看不懂这个操作",
+  "press_not_sent": "这次操作没交上去：{error}\n直接再按一次卡片就行。",
   "working_on_it": "正在处理…",
   "no_such_machine": "没有这台电脑。",
   "cannot_start": "开不了：{error}",

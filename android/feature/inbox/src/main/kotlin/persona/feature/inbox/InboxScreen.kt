@@ -364,7 +364,9 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
         JListPage(
             title = if (selecting) androidx.compose.ui.res.pluralStringResource(R.plurals.inbox_selected_count, picked.size, picked.size)
                 else stringResource(R.string.inbox_title),
-            summary = if (selecting) null else inboxSummary(res, overall, ::working),
+            // An offline assistant's nothing is not "all caught up": the empty state says it is offline instead.
+            summary = if (selecting || assistant.offline != null && snapshot.records.isEmpty() && snapshot.interactions.isEmpty()) null
+                else inboxSummary(res, overall, ::working),
             subtitle = if (selecting) foldedPicked.takeIf { it > 0 }?.let { androidx.compose.ui.res.pluralStringResource(R.plurals.inbox_picked_folded, picked.size, picked.size, it) }
                 else inboxTitle(shownConnection).takeIf { shownConnection != ConnectionState.Online },
             titleBusy = !selecting && shownConnection in setOf(ConnectionState.Connecting, ConnectionState.Updating),
@@ -435,6 +437,9 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
             if (groups.isEmpty() && !loadingFirst) item("empty") {
                 val filtered = query.isNotEmpty() || source.isNotEmpty() || kind.isNotEmpty() || section.isNotEmpty()
                 when {
+                    // The hub's list leaves out an assistant that is offline: its inbox is not empty, it is out of reach.
+                    // With items kept, a search or filter that finds none is "no match", not offline.
+                    assistant.offline != null && snapshot.records.isEmpty() && snapshot.interactions.isEmpty() -> JAssistantOffline(assistant)
                     !filtered && failedEmpty -> JEmptyState(stringResource(R.string.inbox_empty_failed_title), stringResource(R.string.inbox_empty_failed_text), action = {
                         JButton(stringResource(R.string.inbox_retry), { refresh() }, enabled = !refreshing, kind = JButtonKind.Secondary)
                     })
@@ -490,6 +495,7 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
                         count = if (group.id == "done") doneTotal(group, manager) else group.count,
                         status = when (group.id) { "action" -> Status.NeedsYou; "working" -> Status.Working; else -> null },
                         trailing = if (group.id == "working") null else if (group.folded) stringResource(R.string.inbox_expand) else stringResource(R.string.inbox_collapse),
+                        open = !group.folded, trailingIsFoldAction = true,
                         onClick = if (group.id == "working") null else ({
                             filter(currentFilters.copy(section = if (section == group.id) "" else section,
                                 expanded = if (group.id in expanded) expanded - group.id else expanded + group.id))

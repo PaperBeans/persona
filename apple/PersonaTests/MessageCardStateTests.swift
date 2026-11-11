@@ -57,6 +57,14 @@ struct MessageCardStateTests {
         #expect(state(card(), refused: true) == .filed)
     }
 
+    @Test func draftUndoMatchesTheWebWithoutChangingOtherToasts() {
+        let action = Toast.Action(title: "Undo") {}
+        #expect(ToastCapsule.shown(Toast("Dismissed", action: action, duration: Theme.Motion.draftUndo)) == .seconds(6))
+        #expect(ToastCapsule.shown(Toast("Other undo", action: action)) == .seconds(5))
+        #expect(ToastCapsule.shown(Toast("Error", style: .error)) == .seconds(4))
+        #expect(ToastCapsule.shown(Toast("Info")) == .seconds(2.5))
+    }
+
     /// Send names its card, so the hub sends once per card and refuses an item handled since (409 inbox_item_done).
     @Test func sendFromACardNamesTheCard() async throws {
         let hub = FakeHub()

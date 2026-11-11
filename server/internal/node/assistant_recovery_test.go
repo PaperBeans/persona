@@ -328,6 +328,35 @@ done
 	}
 }
 
+// The model switch registers its replacement before it marks it busy and sends it the retry. The fixture's wait for
+// the end of a turn must not take that gap for it, as the node does not (#3815): waiting on busy alone counted the
+// requests while the fallback model had not been asked yet.
+func TestSDKFixtureIdleWaitsOutTheModelSwitch(t *testing.T) {
+	n := assistantNode(t)
+	f := &sdkFixture{n: n}
+	const id = "11111111-2222-3333-4444-555555555555"
+	replacement := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "fallback-model"}, tasksObserved: true}
+	n.procs[id] = replacement
+	n.recoveries = map[string]*assistantTurnRecovery{id: {
+		retried: map[string]bool{"primary-model": true},
+		used:    map[string]bool{"primary-model": true, "fallback-model": true},
+		proc:    replacement,
+		running: true,
+	}}
+	if f.turnOver(id) {
+		t.Fatal("the registered replacement, not yet busy, ended a turn its recovery still holds")
+	}
+	if sessions := n.assistantSessions(); len(sessions) != 1 || sessions[0].Status != proto.StatusWorking {
+		t.Fatalf("the node publishes the model switch as %+v, want working", sessions)
+	}
+	n.mu.Lock()
+	delete(n.recoveries, id) // finishAssistantRecovery ends the recovery before it clears busy
+	n.mu.Unlock()
+	if !f.turnOver(id) {
+		t.Fatal("an idle process with no recovery did not end the turn")
+	}
+}
+
 func TestAssistantStartupRetryKeepsItsRecovery(t *testing.T) {
 	fakeClaudeHome(t, "read line\necho '{\"type\":\"system\",\"subtype\":\"init\"}'\nsleep 30\n")
 	shortStartRetries(t, 300*time.Millisecond)

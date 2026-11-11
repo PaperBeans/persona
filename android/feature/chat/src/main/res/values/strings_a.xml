@@ -251,7 +251,10 @@
         <item quantity="one">Show all (%1$d line)</item>
         <item quantity="other">Show all (%1$d lines)</item>
     </plurals>
-    <string name="chat_todos_progress">%1$d/%2$d to-dos done</string>
+    <plurals name="chat_todos_progress">
+        <item quantity="one">%1$d/%2$d to-do done</item>
+        <item quantity="other">%1$d/%2$d to-dos done</item>
+    </plurals>
     <string name="chat_todos_progress_failed">%1$s, update failed</string>
     <string name="chat_todos_done">Done</string>
     <string name="chat_todos_in_progress">In progress</string>

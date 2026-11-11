@@ -4,6 +4,8 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import persona.core.contracts.SessionKey
+import java.io.File
 
 class CacheBudgetTest {
     @get:Rule val temporary = TemporaryFolder()
@@ -30,6 +32,47 @@ class CacheBudgetTest {
         cache.put("last", ByteArray(8))
         assertFalse(first.exists())
         assertEquals(8L, directory.listFiles()!!.sumOf { it.length() })
+    }
+
+    /** A hit moves the file to the front without walking the directory; the next write or trim catches up (#4047). */
+    @Test fun aReadHitTouchesTheFileAndLeavesTrimmingToWrites() {
+        val directory = temporary.newFolder()
+        val cache = BudgetFileCache(directory, 8)
+        val old = cache.put("old", ByteArray(4)).apply { setLastModified(1_000) }
+        val read = cache.put("read", ByteArray(4)).apply { setLastModified(2_000) }
+        // Left over budget by a file that was in use when the last write trimmed.
+        File(directory, "extra").apply { writeBytes(ByteArray(4)); setLastModified(3_000) }
+        assertEquals(read, cache.read("read"))
+        assertTrue(read.lastModified() > 3_000)
+        assertNull(cache.read("missing"))
+        assertEquals(setOf("old", "read", "extra"), directory.list()!!.toSet())
+        cache.trim()
+        assertFalse(old.exists())
+        assertEquals(setOf("read", "extra"), directory.list()!!.toSet())
+    }
+
+    /** A visible session's images stay; its digest is worked out once per set of visible sessions (#4047). */
+    @Test fun visibleSessionsKeepTheirImagesAndTheirPrefixesFollowTheVisibleSet() {
+        val directory = temporary.newFolder()
+        val (a, b, c) = listOf("a", "b", "c").map { SessionKey("m", it) }
+        var visible = setOf(a)
+        // A new set on every call, as SessionItemsCache.activeSessions() returns.
+        val cache = DisplayImageCache(directory, 8) { visible.toSet() }
+        val first = cache.store(a, "image", 10, 10, ByteArray(4)).apply { setLastModified(1_000) }
+        val second = cache.store(b, "image", 10, 10, ByteArray(4)).apply { setLastModified(2_000) }
+        val prefixes = cache.activePrefixes()
+        assertEquals(listOf(cacheDigest(a.path) + "-"), prefixes)
+        assertSame(prefixes, cache.activePrefixes())
+        // Over budget: a is the oldest but visible, so b goes.
+        cache.store(c, "image", 10, 10, ByteArray(4))
+        assertTrue(first.exists())
+        assertFalse(second.exists())
+        // No longer visible: the next write over budget lets a's image go.
+        visible = emptySet()
+        assertEquals(emptyList<String>(), cache.activePrefixes())
+        cache.store(b, "later", 10, 10, ByteArray(4))
+        assertFalse(first.exists())
+        assertEquals(4L, cache.read(c, "image", 10, 10)?.length())
     }
 
     @Test fun activeItemsSurviveOverBudgetUntilReleaseAndImagesFitWithoutUpscaling() {

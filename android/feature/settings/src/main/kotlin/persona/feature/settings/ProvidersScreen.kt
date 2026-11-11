@@ -109,7 +109,7 @@ internal fun ProvidersPage(
                     item("hidden") {
                         JSectionHeader(stringResource(R.string.settings_providers_hidden), count = groups.hidden.size,
                             trailing = stringResource(if (open) R.string.settings_providers_fold else R.string.settings_providers_unfold),
-                            onClick = if (query.isBlank()) ({ showHidden = !showHidden }) else null)
+                            onClick = if (query.isBlank()) ({ showHidden = !showHidden }) else null, open = open, trailingIsFoldAction = true)
                     }
                     if (open) {
                         launcherRows("hidden", groups.hidden, name, selected, onOpen) { menu = it }
@@ -350,7 +350,9 @@ internal fun ProviderImportPage(providers: ProviderSetup, machines: List<Machine
     val model = remember(providers) { ProviderImportModel(providers) }
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
-    val online = machines.filter { it.online }
+    // The current assistant's computers alone: the hub reads another assistant's through that one, not this one.
+    val assistant = currentAssistant()
+    val online = machines.filter { it.online && assistant.ownsOn(it.id, it.manager) }
     LaunchedEffect(online.map { it.id }) {
         if (state.machine.isBlank()) (online.firstOrNull { it.kind == "local" } ?: online.firstOrNull())?.let { model.choose(GroupKeys.raw(it.id)) }
     }

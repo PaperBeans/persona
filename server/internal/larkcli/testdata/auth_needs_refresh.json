@@ -1,0 +1,27 @@
+{
+  "appId": "cli_example",
+  "brand": "feishu",
+  "credentialSource": "local",
+  "defaultAs": "auto",
+  "dpopMode": "preferred",
+  "identity": "user",
+  "identities": {
+    "bot": {
+      "status": "ready",
+      "available": true,
+      "message": "Bot identity: ready"
+    },
+    "user": {
+      "status": "ready",
+      "available": true,
+      "message": "User identity needs refresh and will be refreshed automatically on the next user API call.",
+      "openId": "ou_example",
+      "userName": "Example User",
+      "tokenStatus": "needs_refresh",
+      "scope": "auth:user.id:read docs:document.comment:read docs:document.content:read drive:drive.metadata:readonly wiki:wiki:readonly offline_access",
+      "expiresAt": "2026-11-10T05:51:52+08:00",
+      "refreshExpiresAt": "2026-11-17T03:51:52+08:00",
+      "grantedAt": "2026-11-02T11:08:27+08:00"
+    }
+  }
+}

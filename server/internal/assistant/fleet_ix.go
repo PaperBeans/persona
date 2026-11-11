@@ -11,6 +11,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -102,7 +103,7 @@ func (s *Service) elicitationReachable(ix proto.Interaction) bool {
 // card goes to its supervisor first when leaders are configured (ask_route.go); a question the assistant may answer for
 // the user goes to it first (fleet_delegate.go).
 func (s *Service) announce(ix proto.Interaction) {
-	if s.routeAsk(ix) {
+	if !s.agentSupervisedSession(ix.MachineID, ix.SessionID) && s.routeAsk(ix) { // a worker's card stays the user's (task_leader.go)
 		return
 	}
 	if forget := s.delegable(ix); forget != nil {
@@ -177,6 +178,35 @@ func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (pr
 	if ix.Kind == proto.IxQuestion && proto.HasDuplicateQuestionText(ix.Questions) {
 		return proto.Resolution{}, i18n.Err("hub-hub.duplicate_question")
 	}
+	// Plan mode enforces a read-only task's launch constraint. Its supervisor report may run once,
+	// but exiting plan mode must still be denied. Neither path registers a card or grants permissions.
+	report := ix.Kind == proto.IxPermission && ix.ToolName == "mcp__persona__report_to_supervisor"
+	if ix.Kind == proto.IxPlan && ix.ToolName == "ExitPlanMode" || report {
+		if todo, ok := s.taskOf(ctx, ix.MachineID, ix.SessionID); ok {
+			plans, err := s.conversationPlans(ctx, todo.Origin)
+			if err != nil {
+				return proto.Resolution{}, err
+			}
+			for _, plan := range plans {
+				if plan.State != planStarted {
+					continue
+				}
+				for _, task := range plan.Tasks {
+					if task.TodoID == todo.ID && task.Readonly {
+						if report {
+							if todo.Supervision == nil || todo.Supervision.Supervisor == "" {
+								continue
+							}
+							allow := true
+							return proto.Resolution{Allow: &allow}, nil
+						}
+						approve := false
+						return proto.Resolution{Approve: &approve, Feedback: prompts.RenderReadonlyTaskPlanExit()}, nil
+					}
+				}
+			}
+		}
+	}
 	ix = nodeCard(ix, s.fleetStore() != nil, s.ixInHealth(ctx, ix))
 	if r, ok := s.alwaysAllowed(ctx, ix); ok {
 		if ix.Resumable { // its hook's earlier attempt left the card pending: it is answered too
@@ -247,8 +277,9 @@ func (s *Service) waitInteraction(ctx context.Context, ix proto.Interaction) (pr
 	if again {
 		// A card the history has as pending and this manager does not hold was left by a manager that restarted: its
 		// node may claim it before the hub's handshake restores the others (restoreInteractions), so it finds its route
-		// here too (restoreRoute). One no task supervises any more is only shown again, as before.
-		if !s.restoreRoute(ctx, ix) {
+		// here too (restoreRoute), or the assistant goes on deciding on it (resumeDelegations). Any other is only shown
+		// again, as before.
+		if !s.restoreRoute(ctx, ix) && !s.resumeDelegations(ctx, ix) {
 			s.show(ix)
 		}
 	} else {
@@ -939,7 +970,8 @@ func (s *Service) cancelMachineInteractions(machineID string) {
 
 // restoreInteractions takes back, as the manager starts, the resumable cards the last one left pending: their hooks
 // reconnect through the next node and claim them again (waitInteraction), without a second push; the others it left
-// are over (cancelled in the history). A card that was on its way up to the user finds its route again (restoreRoute).
+// are over (cancelled in the history). A card that was on its way up to the user finds its route again (restoreRoute);
+// one the assistant was deciding on goes on (resumeDelegations). Both before the hub gets the full list (FleetUp).
 func (s *Service) restoreInteractions(ctx context.Context) {
 	st, ok := s.store().(interface {
 		ExpireStaleInteractions(ctx context.Context) ([]proto.Interaction, error)
@@ -966,9 +998,13 @@ func (s *Service) restoreInteractions(ctx context.Context) {
 		}
 	}
 	s.fleet.mu.Unlock()
+	var unrouted []proto.Interaction
 	for _, ix := range back {
-		s.restoreRoute(ctx, ix)
+		if !s.restoreRoute(ctx, ix) {
+			unrouted = append(unrouted, ix)
+		}
 	}
+	s.resumeDelegations(ctx, unrouted...)
 }
 
 // restoreRoute puts card ix, restored after a restart, back on its way to the supervisor of the task it belongs to:

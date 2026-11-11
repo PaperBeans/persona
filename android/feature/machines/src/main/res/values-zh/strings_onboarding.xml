@@ -65,4 +65,15 @@
     <string name="machines_onb_err_too_many_pending">已经有 3 台电脑在等你确认。先确认或删掉它们，再添加。</string>
     <string name="machines_onb_err_forbidden">这个设备不能添加电脑。用已经登录好的 App 或网页再试。</string>
     <string name="machines_onb_err_invalid_name">名字不能为空，最多 40 个字。</string>
+    <!-- Adding a computer to the current assistant (docs/assistant/managers.md "Clients"). -->
+    <string name="machines_onb_added_under">这台电脑加到了「%1$s」名下。</string>
+    <string name="machines_onb_assistant_offline">「%1$s」离线，暂时不能给它添加电脑。</string>
+    <string name="machines_onb_never_connected">还没连上来过</string>
+    <string name="machines_onb_waiting_confirm">等你确认</string>
+    <plurals name="machines_onb_too_many_never">
+        <item quantity="other">已经加了 %1$d 台电脑，它们都还没连上来过。删掉用不上的，再添加新的。</item>
+    </plurals>
+    <plurals name="machines_onb_too_many_waiting">
+        <item quantity="other">已经有 %1$d 台电脑在等着：没连上来的可以删掉，连上来的先确认是不是你的，再添加新的。</item>
+    </plurals>
 </resources>

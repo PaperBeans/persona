@@ -198,6 +198,28 @@ struct TodoTriageTests {
         #expect(r.groups(.justDone).count == 1)
     }
 
+    /// The same case as `failed_start_superseded_by_finished_work` in spec/fixtures/triage/groups.json (#3713): a failed
+    /// start whose row's work really finished goes with it to Just finished, behind it, not counted open; failed starts
+    /// with nothing finished beside them still wait on the owner. The checkbox reads them so.
+    @Test func failedStartSupersededByFinishedWorkLeavesWaitingOnYou() {
+        let failed = todo("f1", title: "Deploy the self-hosted panel", done: 1) { $0.planID = "p1"; $0.startError = "no launcher" }
+        let done = todo("done1", title: "Panel: verify it on the hub", done: 2) { $0.planID = "p1"; $0.doneBy = "review" }
+        let other = todo("f2", title: "Rotate the backup keys", done: 3) { $0.planID = "p2"; $0.startError = "no launcher" }
+        let twin = todo("f3", title: "Rotate the backup keys", done: 4) { $0.startError = "no launcher" }
+        let list = [failed, done, other, twin]
+        #expect(TodoTriageLogic.supersededFailedStarts(list) == ["f1"])
+        let r = TodoTriageLogic.triageTodos(list, lookup: lookup, now: now)
+        #expect(r.groups(.justDone).map { $0.members.map(\.id) } == [["done1", "f1"]])
+        #expect(r.groups(.waiting).map { $0.members.map(\.id) } == [["f2", "f3"]])
+        #expect(r.open == 2 && r.finished == 2)
+        #expect(TodoTriageLogic.bucket(failed, lookup: lookup, now: now, superseded: true) == .closed)
+        #expect(TodoTriageLogic.bucket(failed, lookup: lookup, now: now) == .open)
+        // the checkbox: open while it waits on the owner, done once superseded
+        #expect(TodoTriageLogic.checksAsOpen(other, r.groups(.waiting)[0].triage["f2"]))
+        #expect(!TodoTriageLogic.checksAsOpen(failed, r.groups(.justDone)[0].triage["f1"]))
+        #expect(!TodoTriageLogic.checksAsOpen(done, r.groups(.justDone)[0].triage["done1"]))
+    }
+
     @Test func failedStartWaitingOnTheOwnerCountsAsOpen() {
         let r = TodoTriageLogic.triageTodos([todo("f", done: 1) { $0.startError = "no launcher" }], lookup: lookup, now: now)
         #expect(r.groups(.waiting).map(\.lead.id) == ["f"])

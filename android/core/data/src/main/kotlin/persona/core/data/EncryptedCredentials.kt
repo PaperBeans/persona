@@ -33,6 +33,11 @@ data class HubCredentials(
     val candidateAddresses: List<String>,
     val deviceToken: String,
     val deviceId: String? = null,
+    /**
+     * The link's proxied origins ("host:port"), checked with system trust instead of [fp] (#2622,
+     * HubPairingClient.systemTrustedOrigin). Empty in a pairing saved before it, which stays pinned throughout.
+     */
+    val systemOrigins: List<String> = emptyList(),
 ) {
     override fun toString(): String = "HubCredentials(<redacted>)"
 }

@@ -124,6 +124,22 @@ func TestProcessTableRejectsPartialDuplicateAndChangedIdentity(t *testing.T) {
 	}
 }
 
+// macOS ps prints uid_t signed: a process running as nobody shows UID -2, and the rest of the table still reads (#3687).
+func TestProcessTableReadsMacOSNobody(t *testing.T) {
+	table := "1 0 Sun Nov 8 11:00:00 2026 /sbin/launchd\n" +
+		"70 -2 Sun Nov 8 11:30:00 2026 /usr/libexec/dhcp6d\n" +
+		"42 1000 Sun Nov 8 12:00:00 2026 /opt/runtime\n"
+	if p, err := parseProcessTable(table, 42); err != nil || p.UID != 1000 || p.Identity == "" {
+		t.Fatalf("target beside a nobody process: %+v %v", p, err)
+	}
+	if p, err := parseProcessTable(table, 70); err != nil || p.UID != -2 || p.Identity == "" {
+		t.Fatalf("nobody process itself: %+v %v", p, err)
+	}
+	if _, err := parseProcessTable(strings.Replace(table, " -2 ", " nobody ", 1), 42); err == nil {
+		t.Fatal("accepted a row without a numeric owner")
+	}
+}
+
 func TestRealReadOnlyProcessObservation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

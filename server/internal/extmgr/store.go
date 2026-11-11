@@ -45,6 +45,8 @@ type Mail interface {
 	Call(ctx context.Context, name string, args json.RawMessage, approve func(ctx context.Context, summary string, input json.RawMessage) bool) proto.ToolResult
 	// CallRef is Call that also says the Message-ID of the mail mail_send handed to the transport ("" for anything else).
 	CallRef(ctx context.Context, name string, args json.RawMessage, approve func(ctx context.Context, summary string, input json.RawMessage) bool) (proto.ToolResult, string)
+	// CallJSON is a read tool's answer as JSON for subscriptions (connector.ReadJSON); ok is false for a tool without one.
+	CallJSON(ctx context.Context, name string, args json.RawMessage) (out json.RawMessage, ok bool, err error)
 	ListAccounts() ([]mail.MailAccount, error)
 	ListMessages(ctx context.Context, opts mail.ListOptions) (*mail.ListResult, error)
 	GetMessage(ctx context.Context, accountID string, uid uint32, mailbox string) (*mail.MailMessage, error)

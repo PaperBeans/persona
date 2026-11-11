@@ -53,7 +53,7 @@ internal data class BackgroundDiagnostics(
             resources.getString(R.string.settings_background_history) to when {
                 exits == null -> unavailable
                 exits.isEmpty() -> resources.getString(R.string.settings_background_no_history)
-                else -> resources.getString(R.string.settings_background_history_count, exits.size)
+                else -> resources.getQuantityString(R.plurals.settings_background_history_count, exits.size, exits.size)
             },
         ) + exits.orEmpty().mapIndexed { index, exit ->
             resources.getString(R.string.settings_background_exit, index + 1) to exit.text(resources)

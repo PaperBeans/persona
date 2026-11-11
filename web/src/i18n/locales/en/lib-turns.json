@@ -1,5 +1,7 @@
 {
   "update_todos": "Update to-dos",
+  "findings_one": "{count} finding",
+  "findings_other": "{count} findings",
   "tool": "Tool",
   "tool_run": "Run",
   "tool_read": "Read",

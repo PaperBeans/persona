@@ -153,7 +153,11 @@ func TestDirectCompletionEndsDecisionWithoutSending(t *testing.T) {
 					t.Fatal(err)
 				}
 				e.s.superviseTodo(ctx, todo.ID, "conv1", nil, 0)
-				reviewTask(t, e.s, todo.ID, map[string]any{"verdict": "needs_user", "reason": "Choose a rollout", "recommend": tc.recommend})
+				if tc.recommend != "" {
+					reviewTask(t, e.s, todo.ID, map[string]any{"verdict": "needs_user", "reason": "Choose a rollout", "recommend": tc.recommend})
+				} else {
+					legacyDecision(t, e.s, todo.ID, "Choose a rollout")
+				}
 				ask := listedAsk(t, e.s, todo.ID)
 				if ask == nil || ask["outcome"] != outcomeDecide {
 					t.Fatalf("no decision waiting: %v", ask)
@@ -304,11 +308,29 @@ func TestDecisionPushCarriesTheTodoAndItsRound(t *testing.T) {
 	}
 }
 
-// A decision without a recommended option gets no decide push: there is nothing for OK to take.
+// legacyDecision leaves task id as a hub from before #3804 could: waiting for the owner (needs_user) on a decision that
+// recommends nothing. task_review refuses to make one now; the ones in the store are still listed and can be ended.
+func legacyDecision(t *testing.T, s *Service, id, reason string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, _, err := s.updateSupervision(ctx, id, func(v *Supervision) bool {
+		v.State = reviewNeedsUser
+		v.Reviews = append(v.Reviews, TaskReview{At: time.Now().UTC(), Verdict: reviewNeedsUser, Note: reason})
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.askConclusion(ctx, todoNow(s, id), conclusionInput{Outcome: outcomeDecide, Reason: reason})
+}
+
+// A decision without a recommended option (one from before #3804) gets no decide push: there is nothing for OK to take.
 func TestDecisionWithoutRecommendationIsNotPushedForOK(t *testing.T) {
 	s, f, todo, _, _ := conclusionService(t, false)
 	waitsForReview(t, s, f, todo.ID, "两种走法：A 先灰度，B 直接全量。")
-	reviewTask(t, s, todo.ID, map[string]any{"verdict": "needs_user", "reason": "先灰度还是直接全量"})
+	legacyDecision(t, s, todo.ID, "先灰度还是直接全量")
+	if s.pushDecision(context.Background(), todo.ID) {
+		t.Fatal("a decision that recommends nothing was pushed")
+	}
 	if pushes := decidePushes(t, f); len(pushes) != 0 {
 		t.Fatalf("decide pushes %v", pushes)
 	}

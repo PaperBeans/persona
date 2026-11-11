@@ -393,6 +393,7 @@ data class ExtensionContributes(
     val tunnels: List<ExtensionTunnelItem>? = null,
     @SerialName("error_reports") val errorReports: List<ExtensionErrorReportsItem>? = null,
     @SerialName("auth_relay") val authRelay: List<ExtensionAuthRelayItem>? = null,
+    @SerialName("secret_providers") val secretProviders: List<ExtensionSecretProviderItem>? = null,
     val messaging: List<ExtensionMessagingItem>? = null,
     /** Extra keys stay at this object's level on the wire; declared fields always win. */
     val additionalProperties: Map<String, JsonElement> = emptyMap(),
@@ -424,12 +425,13 @@ private data class ExtensionContributesKnown(
     val tunnels: List<ExtensionTunnelItem>? = null,
     @SerialName("error_reports") val errorReports: List<ExtensionErrorReportsItem>? = null,
     @SerialName("auth_relay") val authRelay: List<ExtensionAuthRelayItem>? = null,
+    @SerialName("secret_providers") val secretProviders: List<ExtensionSecretProviderItem>? = null,
     val messaging: List<ExtensionMessagingItem>? = null,
 )
 
 object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
     private val known = ExtensionContributesKnown.serializer()
-    private val keys = setOf<String>("connectors", "voice", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "messaging")
+    private val keys = setOf<String>("connectors", "voice", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "messaging")
     override val descriptor: SerialDescriptor = known.descriptor
 
     override fun deserialize(decoder: Decoder): ExtensionContributes {
@@ -462,6 +464,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             tunnels = fields.tunnels,
             errorReports = fields.errorReports,
             authRelay = fields.authRelay,
+            secretProviders = fields.secretProviders,
             messaging = fields.messaging,
             additionalProperties = obj.filterKeys { it !in keys },
         )
@@ -494,6 +497,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             tunnels = value.tunnels,
             errorReports = value.errorReports,
             authRelay = value.authRelay,
+            secretProviders = value.secretProviders,
             messaging = value.messaging,
         )
         val obj = output.json.encodeToJsonElement(known, fields) as JsonObject
@@ -746,6 +750,24 @@ data class ExtensionAuthRelayItem(
      * The pages' exact paths (a trailing / is ignored).
      */
     val paths: List<String> = emptyList(),
+)
+
+/**
+ * Secret values it supplies for references of its schemes (op://vault/item/field): the manager calls secrets.describe
+ * and secrets.resolve when a setting holds such a reference or the user approves handing one to an Agent run. Needs
+ * the program to speak the protocol. A scheme another installed extension claims fails the install.
+ */
+@Serializable
+data class ExtensionSecretProviderItem(
+    val id: String = "",
+    /**
+     * Whose secrets these are, in a few words (1Password): the settings say From <name>.
+     */
+    val name: String = "",
+    /**
+     * The reference schemes it resolves, without :// (op).
+     */
+    val schemes: List<String> = emptyList(),
 )
 
 /**
@@ -1735,6 +1757,72 @@ data class ExtensionAuthRelayResult(
      */
     val app: String? = null,
     val reason: String? = null,
+)
+
+/**
+ * What a secret value is resolved for: kind extension (an extension's secret, id its id), launcher (a launcher's or
+ * model provider's key, id its name, machine the computer it goes to) or agent_run (handed to one Agent run after the
+ * user approved it on the phone, id the variable's name, machine and session the Agent's).
+ */
+@Serializable
+data class ExtensionSecretPurpose(
+    val kind: String = "",
+    val id: String = "",
+    val machine: String? = null,
+    val session: String? = null,
+)
+
+/**
+ * secrets.describe's parameters: a reference of one of the contribution's schemes.
+ */
+@Serializable
+data class ExtensionSecretsDescribeParams(
+    val contribution: String = "",
+    val reference: String = "",
+)
+
+/**
+ * What secrets.describe answers: words for people (the item and field), never a value.
+ */
+@Serializable
+data class ExtensionSecretsDescribeResult(
+    val title: String = "",
+    val detail: String? = null,
+)
+
+/**
+ * secrets.resolve's parameters: the reference and what it is resolved for. Only the manager calls it.
+ */
+@Serializable
+data class ExtensionSecretsResolveParams(
+    val contribution: String = "",
+    val reference: String = "",
+    val purpose: ExtensionSecretPurpose = ExtensionSecretPurpose(),
+)
+
+/**
+ * What secrets.resolve answers: the value, at most 16 KB. Errors: not_found, not_signed_in, rate_limited
+ * (data.retry_after), refused.
+ */
+@Serializable
+data class ExtensionSecretsResolveResult(
+    val value: String = "",
+)
+
+/**
+ * secrets.used (an event to the provider, no answer): a reference it resolved was used, for the usage record its own
+ * page shows. Never the value.
+ */
+@Serializable
+data class ExtensionSecretsUsedEvent(
+    val contribution: String = "",
+    val reference: String = "",
+    val purpose: ExtensionSecretPurpose = ExtensionSecretPurpose(),
+    val at: String = "",
+    /**
+     * settings (a reference saved in Settings), rule (an Always rule) or the approving device's id.
+     */
+    @SerialName("approved_by") val approvedBy: String? = null,
 )
 
 /**

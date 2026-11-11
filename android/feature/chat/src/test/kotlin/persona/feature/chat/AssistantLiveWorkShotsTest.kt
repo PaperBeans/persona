@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.performScrollTo
 import persona.core.chatlist.*
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,6 +36,11 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import coil3.ImageLoader
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -103,32 +109,44 @@ class AssistantLiveWorkShotsTest {
         var updates by mutableStateOf(emptyMap<String, ChatTextUpdate>())
         val latestId = latest.last { it.kind == "text" && it.role == "assistant" }.id
         fun lines() = ChatTimeline().lines(items, live, state.open).lines // Fresh history projection on every update.
+        val parses = TestCoroutineScheduler()
+        val parserScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(parses))
+        val cache = ChatMarkdownCache(scope = parserScope)
         rule.mainClock.autoAdvance = false
         rule.setContent {
-            PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
-                val context = LocalContext.current
-                val loader = remember { ImageLoader.Builder(context).build() }
-                DisposableEffect(loader) { onDispose { loader.shutdown() } }
-                val lines = remember(items, live, state) { lines() }
-                val runningIds = liveWorkIds(lines)
-                var previousLive by remember { mutableStateOf(emptySet<String>()) }
-                LaunchedEffect(runningIds) {
-                    state = state.copy(open = settleWorkOpen(state.open, runningIds, previousLive))
-                    previousLive = runningIds
-                }
-                val groups = lines.filterIsInstance<ChatLine.Work>().associateBy { it.id }
-                Column(Modifier.testTag("shot").width(400.dp).background(PersonaTheme.palette.background).padding(Tokens.Space.l)) {
-                    for (line in lines) key(line.contentKey) {
-                        ChatLineContent(line, SessionKey("computer", "conversation"), loader, recordedDuration = 9,
-                            onToggle = { id -> state = toggleWork(state, id).first }, onFold = {}, folding = emptySet(),
-                            foldErrors = emptyMap(), onFullText = {}, style = renderStyle, textUpdates = updates,
-                            workRunning = (line as? ChatLine.Step)?.let { groups[it.groupId]?.live } == true,
-                            lastWorkStep = (line as? ChatLine.Step)?.let { groups[it.groupId]?.steps?.lastOrNull()?.id == it.step.id } == true)
+            DisposableEffect(parserScope) { onDispose { parserScope.cancel() } }
+            CompositionLocalProvider(LocalChatMarkdownCache provides cache) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                    val context = LocalContext.current
+                    val loader = remember { ImageLoader.Builder(context).build() }
+                    DisposableEffect(loader) { onDispose { loader.shutdown() } }
+                    val lines = remember(items, live, state) { lines() }
+                    val runningIds = liveWorkIds(lines)
+                    var previousLive by remember { mutableStateOf(emptySet<String>()) }
+                    LaunchedEffect(runningIds) {
+                        state = state.copy(open = settleWorkOpen(state.open, runningIds, previousLive))
+                        previousLive = runningIds
+                    }
+                    val groups = lines.filterIsInstance<ChatLine.Work>().associateBy { it.id }
+                    Column(Modifier.testTag("shot").width(400.dp).background(PersonaTheme.palette.background).padding(Tokens.Space.l)) {
+                        for (line in lines) key(line.contentKey) {
+                            ChatLineContent(line, SessionKey("computer", "conversation"), loader, recordedDuration = 9,
+                                onToggle = { id -> state = toggleWork(state, id).first }, onFold = {}, folding = emptySet(),
+                                foldErrors = emptyMap(), onFullText = {}, style = renderStyle, textUpdates = updates,
+                                workRunning = (line as? ChatLine.Step)?.let { groups[it.groupId]?.live } == true,
+                                lastWorkStep = (line as? ChatLine.Step)?.let { groups[it.groupId]?.steps?.lastOrNull()?.id == it.step.id } == true)
+                        }
                     }
                 }
             }
         }
-        fun settle() { Snapshot.sendApplyNotifications(); repeat(3) { rule.mainClock.advanceTimeByFrame() } }
+        fun settle() {
+            Snapshot.sendApplyNotifications()
+            repeat(3) { rule.mainClock.advanceTimeByFrame() }
+            // A delta retains the last rendered Markdown until its asynchronous parse completes.
+            parses.runCurrent()
+            repeat(3) { rule.mainClock.advanceTimeByFrame() }
+        }
         fun summary() = rule.onNode(hasClickAction() and (hasContentDescription("，已展开", substring = true) or
             hasContentDescription("，已收起", substring = true)))
         fun expanded(expected: Boolean) = summary().assert(hasContentDescription(if (expected) "，已展开" else "，已收起", substring = true))

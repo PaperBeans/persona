@@ -31,6 +31,8 @@ import java.io.File
 @Config(sdk = [35], qualifiers = "en-w400dp-h1200dp-xhdpi")
 class ModelManagerScopeShotsTest {
     @get:Rule val rule = createComposeRule()
+    @org.junit.Before fun start() = AssistantManagerChoice.choose("hub", null, "assistant")
+    @org.junit.After fun reset() = AssistantManagerChoice.reset()
 
     @Test fun bothProviderEntryPointsKeepTheVisibleModelOwner() {
         var style by mutableStateOf(AppStyle.Glass)
@@ -64,7 +66,7 @@ class ModelManagerScopeShotsTest {
             }
         }
         rule.waitForIdle()
-        rule.onAllNodesWithText("Work").onLast().performClick()
+        rule.runOnIdle { AssistantManagerChoice.pick("work") } // the sidebar's switcher picks Work
         rule.onNodeWithContentDescription("New model provider").performClick()
         rule.waitForIdle()
         assertEquals(listOf("work"), owners)
@@ -128,7 +130,7 @@ class ModelManagerScopeShotsTest {
         for (look in AppStyle.entries) for (night in listOf(false, true)) {
             style = look; dark = night
             Snapshot.sendApplyNotifications(); rule.waitForIdle()
-            rule.onAllNodesWithText("Work").onLast().performClick()
+            rule.runOnIdle { AssistantManagerChoice.pick("work") } // the sidebar's switcher picks Work
             rule.waitForIdle()
             capture("catalog")
             rule.onNodeWithText("Agents").performClick()
@@ -139,7 +141,7 @@ class ModelManagerScopeShotsTest {
             rule.waitForIdle()
             assertEquals("save" to "work", calls.last { it.first == "save" })
         }
-        assertTrue(calls.contains("catalog" to "assistant"))
+        assertTrue(calls.contains("catalog" to null)) // the default's names none
         assertTrue(calls.contains("catalog" to "work"))
         assertTrue(calls.filter { it.first == "purpose" || it.first == "save" }.all { it.second == "work" })
     }
