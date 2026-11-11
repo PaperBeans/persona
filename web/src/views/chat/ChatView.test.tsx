@@ -5,7 +5,7 @@ import type { Item, Session } from "../../lib/types";
 import { getFeedState, setRoute } from "../../lib/feed";
 import { toast } from "../../ui/atoms";
 import { t } from "../../i18n";
-import { ChatView, footerRows } from "./ChatView";
+import { ChatView, ComposerFooter, footerRows } from "./ChatView";
 
 const captured = vi.hoisted(() => ({
   onSend: undefined as ((out: Outgoing) => Promise<boolean>) | undefined,
@@ -192,15 +192,25 @@ it("keeps a remembered Agent chat on screen when its refresh fails", () => {
 });
 
 describe("composer footer rows (#3533)", () => {
-  it("lists launcher, model and folder in full, each labelled", () => {
+  it("lists the folder in full, labelled; the launcher and model are the model pill's (#5032)", () => {
     const s = { machine_id: "m", session_id: "s", launcher: "claude", model: "anthropic/claude-opus-5-5", cwd: "/Users/me/code/weather" } as Session;
-    expect(footerRows(s).map((r) => [r.key, r.label, r.hint])).toEqual([
-      ["launcher", "claude", t("chat-sessiondialogs.launcher")],
-      ["model", "claude-opus-5-5", t("chat-sessiondialogs.model")],
-      ["folder", "~/code/weather", t("chat-sessiondialogs.folder")],
-    ]);
+    expect(footerRows(s).map((r) => [r.key, r.label, r.hint])).toEqual([["folder", "~/code/weather", t("chat-sessiondialogs.folder")]]);
   });
-  it("leaves out what is missing and, in a Persona conversation, the launcher and model", () => {
+  it("an Agent's footer keeps the permission chip and the folder, without the launcher, the model or an effort chip (#5032)", () => {
+    const s = { machine_id: "m", session_id: "s", status: "idle", agent: "claude", launcher: "gateway-cc", model: "claude-opus-5-5", effort: "high", permission_mode: "plan", cwd: "/Users/me/code/weather" } as Session;
+    const html = renderToStaticMarkup(<ComposerFooter session={s} />);
+    expect(html).toContain(`title="${t("chat-sessiondialogs.permission_mode")}"`);
+    expect(html).not.toContain(`title="${t("chat-sessiondialogs.effort")}"`);
+    expect(html).toContain("~/code/weather");
+    expect(html).not.toContain("gateway-cc");
+    expect(html).not.toContain("opus");
+    // a Codex thread (effort only): its effort is on the pill, the footer has no chip at all
+    const codex = renderToStaticMarkup(<ComposerFooter session={{ ...s, agent: "codex", source_kind: "codex_app_server", capabilities: { send: true }, efforts: ["low", "high"] } as Session} />);
+    expect(codex).not.toContain("<button type=\"button\" title=");
+    // a Persona conversation keeps its effort chip
+    expect(renderToStaticMarkup(<ComposerFooter session={{ ...s, assistant: true }} assistant />)).toContain(`title="${t("chat-sessiondialogs.effort")}"`);
+  });
+  it("leaves out what is missing, and in a Persona conversation the folder too", () => {
     const s = { machine_id: "m", session_id: "s", launcher: "claude", model: "opus", cwd: "/code" } as Session;
     expect(footerRows(s, true)).toEqual([]);
     expect(footerRows(s).every((r) => r.wrap)).toBe(true);

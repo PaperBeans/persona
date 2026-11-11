@@ -43,6 +43,10 @@ func wireSamples(t *testing.T, ty reflect.Type) []reflect.Value {
 	var out []reflect.Value
 	add := func(v any) { out = append(out, reflect.ValueOf(v).Convert(ty)) }
 	switch {
+	case ty == reflect.TypeFor[TitleSource]():
+		for _, source := range []TitleSource{TitleSourceUnknown, TitleSourceManual, TitleSourceAuto, TitleSourcePrompt, TitleSourceRuntime, 255} {
+			add(source)
+		}
 	case ty == timeType:
 		for _, tm := range wireTimes {
 			add(tm)

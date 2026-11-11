@@ -42,6 +42,12 @@ func listKeySized(list []proto.Session, size int) string {
 		w.quote(s.Branch, '/')
 		w.quote(s.SpaceID, '/')
 		w.quote(s.SpaceKind, '\n')
+		if s.TitleSource != proto.TitleSourceUnknown || s.TitleManual || s.OutputTokens != 0 {
+			w.b.WriteString("naming:")
+			w.quote(s.TitleSource.String(), '/')
+			w.str(strconv.FormatBool(s.TitleManual), '/')
+			w.int(int64(s.OutputTokens), '\n')
+		}
 		writeUltracodeKey(&w, s)
 		if s.ServiceTier != "" || len(s.ServiceTiers) > 0 {
 			fmt.Fprintf(&w.b, "speed:%q/%v\n", s.ServiceTier, s.ServiceTiers)

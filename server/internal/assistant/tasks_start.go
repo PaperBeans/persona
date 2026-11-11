@@ -61,6 +61,9 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		}
 	}
 	p.State = planStarted
+	for i := range p.Tasks {
+		p.Tasks[i].OwnerStarted = ownerStarts(ctx)
+	}
 	ok, err := s.movePlan(ctx, p, planOpen)
 	if err != nil {
 		return nil, err

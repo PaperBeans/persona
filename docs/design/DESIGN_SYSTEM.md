@@ -259,7 +259,7 @@ The Glass style relies on Liquid Glass and has no shadow. The vendored Beautiful
 | `state` / `standard` | snappy 0.25 s (`:613`) | a state change snaps |
 | `layout` | smooth 0.3 s (`:614`) | a layout change glides |
 | `expand` | smooth 0.4 s (`:620`) | |
-| `reveal` / `conceal` | easeOut 0.28 s / easeIn 0.2 s (`:635`) | |
+| `reveal` / `conceal` | easeOut 0.28 s / easeIn 0.2 s (`:635`) | `reveal`: what opens in the chat fades in over all its space (`.unfolding`); `conceal`: a menu or an inbox event fading away. What closes in the chat goes at once, its space with it (#3005) |
 | `drawer(velocity:)` | interpolating spring 0.32 s, no bounce (`:650`) | drawer and pager |
 | `springBack` | spring 0.3 s, bounce 0.25 (`:654`) | |
 | `keyboard` | interpolating spring (`:662`) | |
@@ -328,6 +328,10 @@ For every component: use the design-system one, not a lookalike. Counts are appr
 - Accessibility: every control labelled; hold-to-talk has a hint and a tap action (`apple/Persona/DesignSystem/ComposerHoldMic.swift:105-110`). Reduce Motion read in the bar.
 - Source: `apple/Persona/DesignSystem/ShellComposerBar.swift:11`, `apple/Persona/DesignSystem/ComposerButtons.swift`.
 - Platforms: web composer (14 px radius, 28 px buttons, `web/src/views/chat/Composer.tsx:648`); Android `ComposerFrame` (radius 32 in Glass).
+- Web bottom row (#5032): `[+][@][/] [permission chip · source · folder] … [model pill][voice][stop/send]`. The model pill
+  sits in the composer's `trailing` slot, right before voice / Stop / Send, in an Agent chat (a Persona chat keeps its
+  effort and launcher chips until #5033). The card is the `composer` container whose width sets the pill's modes ("Model
+  pill and unified model panel" in 3.8).
 - Editing state (web, #4503): editing the last message puts its words and quotes back into the box under a one-line bar at the box's top, above the context chips and quote bars. The bar has an accent pencil, **Editing last message** (`ink-2`, medium), a truncating hint (`ink-3`, precise pointers only) and a × with the quote bar's 24 px look. It is the only sign of the state, and the text field stays the same field. The irreversible step (the rewind) waits for an explicit send, which the bar's hint names. Esc or × leaves with nothing changed (`docs/web/web.md` "Pages", **Edit last message**).
 - Duplicates: four composer implementations exist (DS-19).
 
@@ -439,7 +443,7 @@ Android's `JMenu` takes a choice list in groups: an action can open a group with
 
 ### 3.6 Sheets
 
-- **Live recording sheet** (#4240, `RecordingLiveSheet`): a large-detent sheet with its own navigation stack for something that keeps running when it is dismissed. It opens by itself when the activity starts, **Hide** or a swipe leaves it, and a one-row card on the page is the way back. After the activity ends the same sheet cross-fades to a wrap-up of what happens next, so the user is not dropped on a list. Reason: a recording is the one task whose controls must stay under the thumb while the user looks at what is being heard, and whose end needs visible follow-through (saved, transcribed, synced, minutes) instead of a word in a list row.
+- **Live recording sheet** (#4240, `RecordingLiveSheet`): a large-detent sheet with its own navigation stack for something that keeps running when it is dismissed. It opens by itself when the activity starts, **Hide** or a swipe leaves it, and a one-row card on the page is the way back. After the activity ends the same sheet cross-fades to a wrap-up of what happens next, so the user is not dropped on a list. Reason: a recording is the one task whose controls must stay under the thumb while the user looks at what is being heard, and whose end needs visible follow-through (saved, transcribed, synced, minutes) instead of a word in a list row. A room meeting's sheet (#3862, a phone meeting recording started while the hub listed `meeting_conversation`) shows the meeting page in place of the live view, and after Stop the same page goes on as the meeting's thread in place of the wrap-up ("Meeting page (#3862)" below); ordinary recordings and #3746 meetings keep this sheet's look.
 - System `.sheet` with detents for most things (43 detent sites). Settings is a near-full sheet with a close button.
 - Link card: detents 0.6 and large, background stays interactive down to 0.6 (`apple/Persona/Views/Link/LinkSheet.swift:142-146`).
 - Edit sheets: `sheetCancel` asks to discard on Mac only; on iOS it discards at once (`apple/Persona/DesignSystem/SheetActions.swift:44`).
@@ -469,6 +473,15 @@ The web Recordings retention setting (#3780 / #3862) reuses the settings select 
 **Forever** by default, or a finite duration with editable days. The finite option names the duration it will save;
 returning to Forever sends `0`. Only the hub-confirmed value is shown after a save, and transcript days stay separate.
 This is a requested default and interaction change, not a new style or component.
+
+The web Agent naming settings (#4812) reuse Settings › Assistant's Agents group, `Row`, `Switch`, the numeric
+settings input and `SettingsHint`. The default corrects only recognizable placeholder or instruction-template
+names, once per Agent; periodic updates default off. The per-Agent limit counts successful name changes, including
+periodic refreshes. The periodic switch reveals hours (24 when first enabled) and a plain note that refresh needs
+new output and remains subject to that limit; a limit of one shows why another refresh cannot happen. Turning off
+automatic naming hides the advanced controls without losing their values. Saves use the selected assistant and
+show only confirmed values. Native custom titles and manual renames are protected; task names and tab labels are
+separate objects and unchanged. This is a requested feature, with no new visual style, component or motion.
 
 ### 3.8 Chips, badges, avatars, marks
 
@@ -515,6 +528,32 @@ It uses the same neutral text in both places and reveals the full line on hover,
 The summary describes the observed harness and execution environment. The new conversation's launcher remains a
 separate composer setting. A missing execution report, a proxy node and the last known location each have distinct
 copy; none is presented as the current location.
+
+**Model pill and unified model panel** (web, #5032; `docs/web/web.md` "Model pill and model panel"). This part follows
+Cindy's model selector at the user's request (2026-11-12): where an earlier rule here differs, this entry wins for the
+pill and panel, built from Persona's tokens. Who it serves: people working with coding Agents; a Persona chat moves to it
+in #5033.
+
+- Pill (`web/src/views/chat/ModelPill.tsx`): 30 px tall capsule, 10 px side padding, 4 px gaps, 13 px text
+  (`ink`), no frame at rest; hover and open draw a 1 px `--line-strong` border on `--hover`. Contents in order: the
+  provider's letter tile (15 px, 4 px radius, 1 px border in the text colour, 10 px semibold, `ink-2`, 6 px before the
+  name), the model name (truncates), the engine's `AgentMark` at 12 px (the separator: no "·"), the effort label without a
+  tier colour (English "Extra" for "Very high"; the full name on hover), a filled bolt for Fast and the workflow
+  `UltraMark` (`ink-2`), a 14 px chevron (`ink-2`). Widths by the composer card (`@container/composer`): ≥ 600 px 72–320 px;
+  < 600 px 148 px (name ≤ 108 px and truncating first, the effort only once the name has no room); < 520 px 12 px text, marks a step smaller; < 420 px 64 px, the
+  tile and chevron only. States: loading (a 13 px `Spinner` and "Loading model…"), failed (the `warning` icon in `--red`),
+  pending (a 12 px clock first, the target engine's name in `ink-3`, a two-line tooltip), disabled (50% opacity, no
+  pointer), and a label (not a button) where nothing can be switched. The click keeps the caret in the message box.
+- Panel (`web/src/ui/model-panel/`): opens above the pill, right edges aligned, 6 px gap, 8 px from the window's edges;
+  300–460 px wide, a 428 px body (a 48 px rail of Recent, Favorites, All and one cell per provider beside the model list),
+  search on top, "Configure models" at the bottom; two-line rows with hover-revealed Favorite and Customize; the model that
+  runs has a static selected fill, no check. Customize opens a 264 px flyout to the panel's left: the effort slider, Fast,
+  the engine, and a footer that says whether the setup is the recommended one, customized or saved.
+- Tokens: the effort levels have one colour each in both themes (`--effort-low` / `--effort-minimal` #2AAE5B,
+  `--effort-medium` #14B8A6, `--effort-high` #3B82F6, `--effort-xhigh` #4F46E5, `--effort-max` #8B5CF6, Codex's ultra on
+  max) and `--fast` (#3B9EFF), used inside the flyout only: the pill never colours its effort or its bolt.
+- Deviations from Cindy: letter tiles instead of vendor logos; no price or quota data; ↑↓ also move between rows; providers
+  and engines that can't be switched to yet are listed with their rows off and the reason.
 
 ### 3.9 Empty states
 
@@ -626,9 +665,11 @@ Severity ladder to adopt:
 3. Needs extra choices (keep or remove the worktree): a content-height sheet.
 4. `.alert` for short prompts and text entry, except where the text needs what the alert would cover (below).
 
-In-meeting typed questions (#4486) are the exception to rung 4: they use an inline input row in the live recording sheet's bottom bar (`apple/Persona/Recording/RecordingLiveBar.swift`), not a system text-entry alert. The question usually refers to what was just said, and a modal alert hid the live lines and the earlier answers while the user typed. It also allowed only one line and no reference back. The keyboard button beside Ask Persona opens the row (at accessibility sizes, More › Type a Question opens it). The row shows a hint, then a field and send button that reuse the composer's `ComposerSurface` and `ComposerRoundButton` (3.1). The field grows to `Theme.Recording.askLines` lines (`askLinesLargeType` at accessibility sizes, where the hint also steps aside while the keyboard is up and the field's spoken hint carries it). Send stays in place but is dimmed and disabled until there is non-whitespace text, and Return sends too. While the row is open, the keyboard button becomes Cancel, which drops the draft as the alert's Cancel did. While the field has the keyboard, Pause, Stop and Bookmark step aside so the timeline keeps the room. Sending goes through the same `MeetingAsk.ask(_:text:)`, then clears the field and closes the row. It is not a fifth composer (DS-19): it has no attachments, dictation (the microphone is recording), model menu or full-page editor.
+In-meeting typed questions (#4486) are the exception to rung 4: they use an inline input row in the live recording sheet's bottom bar (`apple/Persona/Recording/RecordingLiveBar.swift`), not a system text-entry alert. The question usually refers to what was just said, and a modal alert hid the live lines and the earlier answers while the user typed. It also allowed only one line and no reference back. The keyboard button beside Ask Persona opens the row (at accessibility sizes, More › Type a Question opens it). The row shows a hint, then a field and send button that reuse the composer's `ComposerSurface` and `ComposerRoundButton` (3.1); the two are one view, `MeetingQuestionField` (`apple/Persona/Recording/MeetingQuestionField.swift`), which the meeting page's composer reuses ("Meeting page (#3862)" below), so the two stay alike. The field grows to `Theme.Recording.askLines` lines (`askLinesLargeType` at accessibility sizes, where the hint also steps aside while the keyboard is up and the field's spoken hint carries it). Send stays in place but is dimmed and disabled until there is non-whitespace text, and Return sends too. While the row is open, the keyboard button becomes Cancel, which drops the draft as the alert's Cancel did. While the field has the keyboard, Pause, Stop and Bookmark step aside so the timeline keeps the room. Sending goes through the same `MeetingAsk.ask(_:text:)`, then clears the field and closes the row. It is not a fifth composer (DS-19): it has no attachments, dictation (the microphone is recording), model menu or full-page editor.
 
 The web Agent close action uses `capabilities.close`, with terminal-only closing retained for older nodes. A runtime that can close a conversation uses the existing close confirmation even when it has no terminal controls. The confirmation checks the current row before sending, so an already offline session simply dismisses it.
+
+Clearing the main chat's context (**Clear context** in its ⋯ menu and `/clear`, #5095; the web first, iOS and Android in #5100) is on the reversible rung without an Undo toast, a user-requested alignment with Cindy's `/clear`: it runs at once from the menu or the command, and its only feedback is the chat emptying in place (the same top bar, an empty middle, the composer still at the bottom; no jump to the centered new-chat page). Nothing is deleted: the old chat is archived as "Old main chat · until <date>" and comes back when it is sent to. Failure is a toast with the reason, and the `/clear` goes back into the box. **New main chat…** keeps its sheet, since it has a choice to make (carry a summary).
 
 A blocked terminal card on the web offers **Close Agent**, including when no choices can be parsed from the screen.
 Its footer reuses `Button`, explains that the pending confirmation is cancelled and the conversation kept, and
@@ -666,7 +707,7 @@ A computer's dev server opened from a chat (a forwarded port, `docs/web/preview.
 
 ### 4.7 Tool execution collapsed (super rule 2)
 
-Tool execution is one summary line, never opens by itself, shows the latest text segment while running and the result when done, and expands by hand. iOS complies: `isOpen` ignores `live` (`apple/Persona/Views/Chat/ChatLines.swift:293`) and tool rows use `autoExpand: false`. The "latest segment only" half was not confirmed from code reading and needs a screenshot test.
+Tool execution is one summary line, never opens by itself, shows the latest text segment while running and the result when done, and expands by hand. Opened by hand, a step (and the summary itself) changes in place: the tapped row stays under the finger, what opens fades in, what closes goes at once, and the list holds still while the turn goes on (new steps, the answer, the next turn, the footer under the list changing) until the user scrolls, taps ↓ or sends (`toggleInPlace`, `ChatFollow.toggledRow`, #3005). iOS complies: `isOpen` ignores `live` (`apple/Persona/Views/Chat/ChatLines.swift:293`) and tool rows use `autoExpand: false`. The "latest segment only" half was not confirmed from code reading and needs a screenshot test.
 
 Subagent launch receipts, interim reports and final results belong under their launching tool, not in independent
 parent-chat message bubbles (#3378). Empty completion pointers update status without creating another report. The
@@ -1004,8 +1045,9 @@ style or motion.
 
 ## Codex speed controls (#3865)
 
-The web composer reuses its effort chip and radio menu. A Speed submenu reveals native model speed choices and their
-current value, including Unknown before native settings arrive. Its Fast choice explains increased usage or cost.
+An Agent's Codex thread sets its speed with Fast in the model panel's flyout of the model it runs (#5032, the model pill
+and unified model panel in 3.8); a Persona chat running Codex keeps its effort chip and radio menu. A Speed submenu there
+reveals native model speed choices and their current value, including Unknown before native settings arrive. Its Fast choice explains increased usage or cost.
 Selection waits for native acknowledgment and the session push. Standard is the reversible choice. This requested
 control reuses Menu typography, spacing, focus behavior and light/dark tokens. Settings > Agents > Codex uses the
 existing agent-settings row for the native default. No account or session is automatically switched to Fast.
@@ -1025,6 +1067,100 @@ remaining available for self-signed deployments. This changes connection feature
 speed, persona, style or theme color. Android reuses PairingHeading, JCard, JTextField, JButton and SettingsCaption;
 Apple reuses the pairing Form, Section, Picker, toolbar and Theme tokens.
 
+## Meeting page (#3862)
+
+The live recording sheet's page for a room meeting (a phone meeting recording started while the hub listed
+`meeting_conversation`; contract: `docs/assistant/meeting-minutes.md`, "Meeting conversation (#3862)"; the phone's side:
+`docs/apple/recording.md`, "The meeting conversation (#3862)"). It is `MeetingPage`, shown by `RecordingLiveSheet`: live
+while the meeting records, and after Stop the same page in its after mode, continuing as the meeting's thread; a past
+meeting's recording page pushes the after mode (row **Meeting Conversation**). Ordinary recordings and #3746 meetings keep
+the live view and the wrap-up unchanged. Reason: the meeting is one conversation from its start to its follow-up, so the
+page the user watches during the meeting is the page they keep writing in after it.
+
+- **Structure, live**: a header (title in `Theme.Font.title`, the page menu, **Hide**), a state line (the recording dot,
+  the system-ticked clock, the state word), a subtitle (the role, "On this iPhone", "Private" when marked), a problem as a
+  caution `NoticeBanner` when the room can't take part, the **Live** box, the thread's section header, the thread, and the
+  bar pinned through `safeAreaInset`. While the field has the keyboard the top of the page steps aside as the bar's
+  controls do: the subtitle hides and the Live box keeps only its newest line, so the thread keeps its height (the
+  structure stays the same, so the thread's scroll position holds). At accessibility sizes a one-line header (dot, time,
+  menu, Hide) stays fixed, the rest scrolls as one, and the bar stays pinned.
+- **Structure, after**: **Done** when it is in the sheet, a status card (title, start–end, the minutes' state with
+  **Open Minutes** / **Open Recording** as a plain themed button, since the composer is the page's primary action) kept
+  above the thread rather than scrolled away with it (the thread follows its end), the room's thread, the **After the
+  Meeting** divider, the follow-up's thread, and the composer alone in the bar. At accessibility sizes and while the
+  keyboard is up the card is one fixed line (the minutes' state, Open as an icon with its name as the label), and the
+  title scrolls with the thread. While the hub would still answer `409 meeting_running` the composer is disabled with a
+  caption that says why: the end still on its way ("in a moment"), the end refused or the sync paused (the sync's own
+  problem; the hub ends such a meeting 12 hours after its last stored upload), or an older manager without the follow-up.
+  When pushed it has the navigation bar's back and no Open button (the recording's page is behind it).
+- **One composer, #4486's field**: the in-meeting typed question's `MeetingQuestionField` (section 4, "In-meeting typed
+  questions (#4486)"): the field (`ComposerSurface`, a vertical `TextField` that grows to `Theme.Recording.askLines`
+  lines, `askLinesLargeType` at accessibility sizes) and the round send button (`ComposerRoundButton`, dimmed with
+  `Theme.Recording.askSendIdle` while there is nothing to send), with a `[+]` menu before them built as
+  `ShellComposerBar`'s, with its plain [+] face (the row's one solid button is send). Return sends; the keyboard goes down
+  after a send. It writes to the room (an ask), to Just me, or after the meeting to the follow-up. Words over the
+  contract's 8000 characters (Just me, and the follow-up's first message, which goes through `…/followup`) keep Send off
+  with a caption saying so; nothing is cut. Why not `ShellComposerBar` itself: its dictation button would take the
+  microphone the recording holds, and its model and attachment rows don't apply. The page has no second composer.
+- **Control row** (live only): Pause / Continue, Bookmark and Stop, with the live bar's looks, identifiers, Stop
+  confirmation and announcements; hidden while the field has focus. At accessibility sizes the bar is at most two rows,
+  the field and one row of icons: Pause or Continue, Stop, a More menu (Bookmark, the Just Me switch, **What Was Just
+  Said**) and send. Why the field takes no words then shows at the end of what scrolls (a neutral `NoticeBanner`) and as
+  the field's spoken hint, not in the bar.
+- **When Persona can't take part**: an older manager took the room meeting with Persona off (the last upload's `200` had
+  no `room`): the subtitle and the thread's header say "Persona can't take part right now", the field asks nothing of the
+  room and [+] goes, with a caption that says so; Just me stays. The same rule (`MeetingAsk.canAsk`) decides the asks
+  themselves and the Live Activity.
+- **Live box**: a `.surface` card with the radius `Theme.Radius.card`: "Live" and, on the right, how far the transcript
+  is behind ("About N s behind", or "Listening…" before any line), then the last `Theme.Recording.liveLines` sentences
+  (time in monospaced digits, secondary; two lines of text at most) and **Full Transcript**, which pushes the whole
+  timeline.
+- **The thread**: rows read as one element each. The room's first message is a quiet centered line ("Persona joined the
+  meeting"); each batch of live lines is a collapsed capsule ("N lines from the meeting") that expands to its `[m:ss]`
+  lines; a heard question is a capsule "What was just said (m:ss)"; the owner's questions are labelled **You**, answers
+  **Persona** in `Theme.ai`, plain text in the room and Markdown in the follow-up; the end is a quiet "The meeting ended";
+  the follow-up's seed is a collapsed capsule "The meeting's material", another context block one named "Context", its
+  title heading what opens. A capsule is a button, so its words stay on one line: shorter at accessibility sizes ("N
+  lines", "What was just said"), spoken whole. After the meeting, asks answered from the meeting's material stand where
+  they were asked (by the hub's order of asks), before the meeting's end. A reply being written shows as a pending answer,
+  a row of its own that alone redraws as the reply streams.
+  The thread follows its end unless the reader scrolled up, then **Jump to Latest** shows with the count of unseen
+  entries. Asks the room's thread doesn't hold (still asking, failed, answered from material) keep the existing
+  `MeetingExchangeRow` look.
+- **The After the Meeting divider**: a centered caption between two hairlines, the look of the chat's `CompactDivider`,
+  between the room's thread and the follow-up's.
+- **Just me**: a switch row in the bar (live only) with its caption ("Only you see it, in the main chat"). With it on the
+  section header reads **Just Me** ("Only on this screen, never said aloud"), the field's placeholder "Ask privately…",
+  and the thread shows only the owner's private questions and the main chat's answers to them, in the same You / Persona
+  rows, with Sending…, a failure's words and **Retry** under a question. An answer is its turn's: the next user text in
+  the main chat, the owner's or one the hub puts in (a task's notice, a scheduled run), ends it, and the main chat's live
+  text shows only while the question's turn is the chat's newest, so nothing of another turn reaches a screen that may
+  face the room. Its answers are never spoken, announced to VoiceOver, put in the Live Activity or pushed; a card the turn
+  raises (one raised since its question, while its turn is the newest) is answered in the main chat, which the thread
+  says in one line.
+- **Page menu**: the **Persona** role picker and the **Private Meeting** switch (`PUT …/private`; a refusal shows its
+  words, "Couldn't change Private Meeting. Try again." when the hub names no reason). The mark shows as the hub has it
+  once it said anything (absent: private); the start's choice stands in only until then. The start shows the same switch
+  under the role, off by default, and no Who Attends. VoiceOver names the three menus apart: the page menu "Meeting
+  options", [+] "Add to the conversation", the control row's "More".
+- **On a hub without the room** (the #3746 start and live sheet): Who Attends never pre-selects the main chat. With
+  nobody chosen the role shows Off; Listen or Take Part shows "Who Attends: Choose" with a caption under it in the same
+  row ("Choose who attends. Until then Persona stays out of the meeting."), and the strip's Turn on Persona or role menu
+  pushes the attendee picker first, turning on once someone is picked. The main chat stays an ordinary row of the picker.
+- Haptics: only `tap`, on send, Pause and Bookmark, while the microphone is open (section 4.3); new room answers are
+  announced to VoiceOver as the live view's are.
+- Identifiers for tests: `meeting-page-menu`, `meeting-role`, `meeting-private`, `meeting-page-subtitle`,
+  `meeting-room-problem`, `meeting-live`, `meeting-transcript`, `meeting-thread-header`, `meeting-thread-earlier`,
+  one `meeting-thread-<kind>` per row kind (`lines`, `heard`, `question`, `answer` and the others),
+  `meeting-just-me`, `meeting-just-me-retry`, `meeting-plus`, `meeting-heard`, `meeting-ask-field`, `meeting-ask-send`
+  (the two shared with the live bar's typed question), `meeting-ask-caption`, `meeting-ask-notice`, `recording-more`,
+  `meeting-page-stop-speaking`, `meeting-after-status`, `meeting-after-divider`, `meeting-followup-retry`; at the start
+  `meeting-private-start`; on the recording's page `recording-private` and `recording-meeting-conversation`; the sheet's
+  shared ones (`recording-now-title`, `recording-live-timer`, `recording-live-hide`, `recording-pause`,
+  `recording-bookmark`, `recording-stop`, `recording-wrapup-title`, `recording-wrapup-open`, `recording-wrapup-done`)
+  keep their names. UI tests: `MeetingConversationUITests`.
+- Platforms: the web shows the same thread on the recording detail (**Conversation**); Android has no meeting page yet.
+
 ## Checking typed credentials by themselves (#4881)
 
 Where a form exists to connect to something with an address or key the user types (the web provider wizard's preset
@@ -1042,3 +1178,21 @@ pressing one counts as the check. Once the check found what the next step needs,
 action (section 3.7). Reason: the user's next question after pasting a key is whether it works, and the preset path
 already answered it this way; two paths in one dialog should not differ. This reuses the existing Button, Spinner and
 status-line styles and adds no setting.
+
+## Provider display names (#5029)
+
+Wherever the web names a model provider or launcher (New Agent's choices and presets, the model settings, the
+profile's Agent presets, the work-session and to-do launcher menus, task and schedule cards, a computer's launcher
+list, toasts and dialog titles), it leads with the provider's display name in the element's normal text style and shows
+the startup ID as secondary text: small monospace in `--ink-3` where a row has room, the `title` tooltip on chips and
+buttons, "Title (id)" in a native `<option>`. A launcher with no display name (an rc alias, plain `claude`, a provider
+from an older hub) shows its ID in monospace as before. One module decides it, `web/src/lib/provider-names.ts`; a page
+that holds only an ID looks the title up there, and a row that shows the ID beside the name draws both with
+`ProviderName` (`web/src/ui/ProviderName.tsx`). The provider wizard asks for the display name first (any language, at
+most 64 characters; left empty, the hub takes the address's host) and keeps the startup ID under More options, where
+the hub makes one up when it is left empty and its format is checked only once something is typed. A saved provider can
+be renamed; its ID can't change, and the edit page says why (launches, Agent presets and the model settings refer to
+it). Reason: the ID is an engineering detail that a person should not have to invent or read (principle 2), and one
+rule for every place keeps a provider recognizable wherever it is picked (principle 4). This reuses the wizard's
+fields and More options disclosure and the existing row and chip styles; it adds no setting, style or motion. The chat
+page's composer chip and model panel adopt the same module in their own change; iOS and Android have not caught up yet.

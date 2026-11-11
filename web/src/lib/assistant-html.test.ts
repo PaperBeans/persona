@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { hasHtml, htmlDecision, htmlRequest, judge, mounted, newBridge, prompted, PROMPTS_MOST, REFUSED_QUIET_MS, unmounted, WEB_HTML_RUNTIME_VERIFIED, type HtmlInstance } from "./assistant-html";
+import { hasHtml, htmlDecision, WEB_HTML_RUNTIME_VERIFIED } from "./assistant-html";
+import { htmlRequest, judge, mounted, newBridge, prompted, PROMPTS_MOST, REFUSED_QUIET_MS, unmounted, type HtmlInstance } from "./html-bridge";
 
 const EXAMPLE = Object.values(import.meta.glob("../../../schema/extension/examples/assistant/html.json", { query: "?raw", import: "default", eager: true }) as Record<string, string>)[0];
 const inst: HtmlInstance = { nonce: "n1", conversation: "c1", key: "view_1", componentKey: "guide", page: "", version: 3 };

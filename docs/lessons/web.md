@@ -983,3 +983,11 @@ first page. A list 300 rows deep became 50, the scroller clamped its offset, and
 every time they reached the bottom. Recover by reading a fresh view as deep as the reader has scrolled plus one page,
 keeping the old rows on screen until it arrives (web `SessionList.reread`, #4431; iOS `SessionListModel.rebaseline`); any
 recovery that publishes fewer rows than are on screen moves the reader.
+
+## Running an assistant's HTML card (2026-11-12, #4215)
+
+- **WebKit runs no listener in a frame without `allow-scripts`, the parent's included**: a listener the page adds to a sandboxed `srcdoc` frame's document never fires in Safari ("Blocked script execution in 'about:srcdoc'"), while Chromium runs it. To hear what the user does in such a frame, the frame needs a script of its own: `sandbox="allow-scripts"` without `allow-same-origin` (an opaque origin), a CSP whose `script-src` is a per-frame nonce, and only that script in it. It must sit at the end of the body: from the head, `document.body` is still null.
+- **QuickJS lets a script redefine a non-configurable data property of the global object** (`Object.defineProperty(globalThis, "x", { value: 1 })` succeeds where a browser throws), but not a non-configurable accessor. Lock a global with a getter.
+- **CSP doesn't stop a `<meta http-equiv="refresh">` in a sandboxed `allow-scripts` frame**: the frame navigates itself (one request). Only never drawing a `meta` (or any HTML from the card) stops it. Chromium also opens a connection, without a request, for an `<iframe src>` its CSP refuses. A check of the frame by itself shows both (`web/e2e/html-runtime-security.mjs`, raw mode).
+- **A sync bridge needs its "asking" slot taken synchronously**: a card that calls `persona.reply` 200 times in one turn gets all 200 through a check on React state set in the same tick. Take the slot in the call, not in the render.
+

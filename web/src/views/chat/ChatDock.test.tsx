@@ -326,7 +326,7 @@ describe("QueueStrip", () => {
     expect(relayedOnly).toContain("Nova 忙完会依次处理");
     // the relayed one says it arrives when the turn ends; the user's own don't
     expect(html.match(/data-queue-note/g)).toHaveLength(1);
-    expect(html).toContain('aria-label="排队的第 2 条：来自「日报」：今天的汇总 · 本轮结束后送达"');
+    expect(html).toContain('aria-label="排队的第 2 条：来自「日报」：今天的汇总 · 对话空闲后送达"');
   });
 
   it("marks the photos a Persona chat's queued message went with when this browser sent it (#4342)", () => {

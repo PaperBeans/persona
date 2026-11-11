@@ -471,6 +471,11 @@ presented as a fresh user click. The grant itself is managed through the main co
 and the list/delete API in [Unified entry](unified-entry.md#standing-authorizations); established task decisions keep
 their provenance even after that grant is revoked.
 
+The owner's own decisions (`source` `card`, and the `manual` ones made by choosing a decision's option) are also what
+a suggested rule is counted from: after the same go-ahead three times in 14 days, the next decision offers to make it a
+standing authorization
+([Unified entry](unified-entry.md#a-rule-after-the-same-answer-three-times-4929)).
+
 
 The costliest long-task mistake is an Agent forgetting a decision already made: asking again or silently overturning it (#1618). Decisions scattered across Agent chats disappear when switching Agents or compacting, so collect them by to-do:
 
@@ -507,6 +512,7 @@ Something the owner raises in the main conversation and wants an answer to is a 
 - **Closed without a decision**: closing it (`PATCH done: true`, or **Handled** on its "Can wait" row) or deleting it tells the asking conversation once that the question was dropped (the same prompt, its "dropped" form). Reopening and closing it again says nothing more; a decision recorded after a reopen still goes back once.
 - **The Lark card** of the expired question closes saying "Moved to to-dos" instead of "Ended".
 - **Restart**: an `ask_user` waiting while the manager restarts is still cancelled (it lives in memory, #26): it makes no to-do.
+- **Asked without waiting** (`wait: false`, #4928; `docs/assistant/assistant.md`, "Asking without holding the turn"): its card's expiry makes the same to-do with the same record, deadline handling and briefing row. Since no tool call is waiting to hear it, the asking conversation is told in a message that the question is now this to-do (or that its recommended options were taken by default); the owner's later decision, or closing the to-do, then reaches the conversation as above. Such a card survives a manager restart, and one whose time ran out while no manager ran becomes the to-do when the next one starts. One exception: when the owner wrote in the asking conversation while the card was up, its expiry makes no to-do and takes no default, since what they wrote may have been the answer; the conversation is told and asks again if it still needs one.
 
 ## Waiting for the owner
 
