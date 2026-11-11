@@ -1888,3 +1888,12 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
 - CPU time per minute moved by a factor of two with what else the machine did (an Apple Silicon Mac moves a busy
   process between fast and slow cores); bytes allocated per minute stayed within 1%. Keep the machine quiet during a
   soak, compare medians, and read the CPU profile's shares beside the totals.
+- The largest share was not in the event path at all: `liveLoop` builds the fleet again up to ten times a second
+  while it changes, and each round took a new copy of every machine's list to decorate, 54% of what the manager
+  allocated. A loop that reads the same lists again and again keeps its arrays: `Devices.AppendSessions` copies a
+  machine's rows over the list the last round kept (`fleetInputsInto`), 78 KB a round where new copies were 886 KB.
+  What makes that safe is stated in the code and pinned by tests: every row is overwritten whole before it is
+  decorated, so no decoration carries over; rows a shorter list leaves behind are cleared; one goroutine owns the
+  arrays; and nothing built from a round keeps a row (`TestLiveRoundsOverKeptListsAreFreshRounds` runs every round
+  both ways and marshals each round's results again after the arrays were rewritten). Give the arrays back on the
+  slow tick, or a fleet gone quiet holds a second copy of its lists for good.
