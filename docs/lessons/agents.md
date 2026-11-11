@@ -2,7 +2,14 @@
 
 Pitfalls, odd behavior, and the trade-offs made at the time (formerly in `CLAUDE.md`, index in `docs/lessons/README.md`). Add new lessons to the matching section; create a section if none fits.
 
-## A queued AGY turn cannot own the executing prompt's text (#4564)
+- An Agent SDK guest must register its session id and tools before the node starts: its bridge lists tools before
+  `assistant.send` returns. A later `guestSet` makes the first list empty, and a connected MCP server with no tools
+  does not fail by itself. On SDK 0.3.318 / Claude Code 2.1.322, use `tools: []` for no built-ins and register the
+  declared stdio MCP tools through an in-process SDK server. `--tools ""` suppresses MCP tools too, so don't reuse
+  the CLI flag here. Keep user setting sources and unrelated plugins out. Verify `system/init.tools` and a real
+  `tools/call`, not just bridge options, a server saying `connected`, or the model claiming a tool exists.
+
+- A queued AGY turn cannot own the executing prompt's text (#4564)
 
 The pending-turn record can change before the previous ACP prompt finishes. Keep the executing prompt's stream
 owner separately, clear its text at completion, and publish an empty boundary before the next prompt starts. Text
@@ -155,6 +162,21 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   The apps take only block lines starting with `/` or `~` as photos; reading `path:` lines as photos would show each picture twice next to the transcript's image item.
   The `path:` lines and the block's tags make a message with words more than the two line breaks Claude shows inline (2.1.316 folds a paste with more into `[Pasted text #n +k lines]`, or one over 800 characters),
   so its box shows `[Image #1][Pasted text #2 +3 lines]`: the stuck-prompt check (`ensureSubmitted`) takes that placeholder after image chips as the message (`pastePlaceholder`, `longPaste`).
+- Startup submission needs the same placeholder recognition as ordinary sends (#4794, Claude Code 2.1.322):
+  `stillPrompted` removes `[Image #n]` and `[Pasted text #n +k lines]`; a chip-only draft has no visible words left,
+  so using it alone both skips recovery Enter and reports the owned draft as someone else's. Use `pendingPrompt`
+  under the startup typing lock, pin the placeholder IDs before recovery (the lock cannot stop a person editing
+  the terminal), and retry only Enter with a grace between attempts. Fresh sessions expect the text chip after
+  their image chips; changed IDs or appended words are not the owned paste. Once recovery Enter was attempted,
+  an empty box without a transcript receipt is ambiguous,
+  not permission to paste again. A later follow-up's timestamp can show it was queued after work began; do not
+  attribute the original submission to that follow-up without a terminal-key receipt.
+- Never confirm a first image prompt from quick metadata alone (#4794): its head stops at 256 KB and tail at
+  384 KB, so a multi-megabyte user row can be absent from both. A real disposable Agent's normal start recorded
+  the same image prompt three times while confirmation believed it had been dropped. Capture a full incremental
+  `promptWatch` before typing; attach lazily with a timestamp filter when the file appears late, and recheck it
+  after readiness waits before re-pasting. The normal and swallowed-Enter real tests must both record exactly
+  one image prompt.
 - An image message once remained unsent in Claude's input box (2026-10-31, Claude Code 2.1.206: `[Image #1]` and text in the box, Agent `done`, Enter on the computer sent it).
   Forty-two later attempts in a separate herdr session (small PNG, 1.8 MB JPEG, saturated CPU) didn't reproduce it; cause unknown. On 11-01 a phone photo did it again. node fallback (`ensureSubmitted`): 2 seconds after sending,
   read the input box once; if it's still the just-sent text (strip `[Image #n]` / `[Pasted text #n]`, compare the first few words), press Enter once more. If empty or different, press nothing.
@@ -235,6 +257,12 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
   (`~/.config/herdr/herdr.sock`) can't see each other. If "sessions opened locally through App remote aren't found", check herdr-core `terminal.list` first, not only the classic socket.
   When using both on a computer, select engine `herdr-both`: node refreshes both hosts in parallel, isolates events per host (`watcherSignals`), and always creates / resumes sessions through classic herdr
   (`docs/integrations/engines.md` ("Host sets"), `docs/plans/plan-orca-support.md` ("Combined engine")). Don't return to "refresh asks every host sequentially": a 2-second herdr-core delay slows herdr too.
+
+## `ANTHROPIC_BASE_URL` is the gateway root: Claude Code adds `/v1/messages` (2026-11-12, #4886)
+
+- **A tolerant probe hides a wrong address**: measured with Claude Code 2.1.322 against a fake gateway, `ANTHROPIC_BASE_URL=http://host/v1` sends `POST /v1/v1/messages?beta=true` (`/prefix/v1` → `/prefix/v1/v1/messages`). The manager's connection test and its own direct calls accepted a base with or without `/v1`, so a provider pasted as `https://gw/v1` passed Test connection and then failed every Agent with 404. Whatever turns an address into a request must be the same function on the test path and the launch path; here it is `proto.MessagesBaseURL`.
+- **A normalizer applied twice must be idempotent**: the hub stores its result and the node applies it again at launch. Dropping only one `/v1` made `https://gw/v1/v1` test as `/v1/v1/messages` and launch as `/v1/messages`; the function drops a whole run.
+- **Not every base is an `ANTHROPIC_BASE_URL`**: Responses / Chat Completions bases and Codex's `OPENAI_BASE_URL` include `/v1` by convention (`https://api.openai.com/v1`), and the web sends `api: "messages"` for every launcher, Codex ones included. What is stored, delivered to nodes and launched is decided by the agent and protocol together (`ManagedLauncher.LaunchBaseURL`), never by `api` alone; only the connection test, which sends a Messages request whenever `api` says so, goes by the protocol.
 
 ## Claude Code writes into its transcript as it exits: delete it after the process (2026-11-11, #4665)
 
@@ -581,7 +609,7 @@ Claude Code launches hook commands with `detached: true` on Linux / macOS, so `p
 Don't assume "hook disconnected = Agent no longer waiting": while waiting, node checks every 2 seconds whether claude still exists using hook-supplied `agent_pid` / `agent_start` (`watchAgent`); withdraw only after two consecutive missing checks. A killed but unreaped claude is a zombie: `/proc/<pid>/stat` and its unchanged start time remain; inspect state `Z` to detect that it is gone (`procGone`).
 - "Closed its finished agent" with the tab still there (2026-11-06): herdr's own log (`~/.config/herdr/herdr-server.log`, UTC) showed every `tab.close` from `session.retire` succeeding on the tab the Agent ran in then. The leftover tabs were others:
   the assistant had sent `/exit` with `agent_send`, which exits claude and leaves the shell, and once even to an Agent already closed, which resumed it in a new tab only to quit (that tab stayed).
-  Before blaming a close, match the pane ids in herdr's log (`pane child spawned … pane_id=<n>`, `tab renamed … tab_id=…`) against the tabs that are left. `/exit` and `/quit` now close the Agent like **Close**, and Persona tabs left with a bare shell are swept (`docs/assistant/todos.md` ("Close Agents for completed tasks")).
+  Before blaming a close, match the pane ids in herdr's log (`pane child spawned … pane_id=<n>`, `tab renamed … tab_id=…`) against the tabs that are left. `/exit` and `/quit` stop the Agent and keep its tab, and since #4754 nothing closes a Persona tab left with a bare shell (`docs/assistant/todos.md` ("Stop Agents of completed tasks")).
 
 ## Closing a question is a runtime operation (#5700)
 

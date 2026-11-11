@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -56,21 +58,22 @@ func resumeFile(f *fakeHerdr, cwd string) func() codexStartFile {
 	return func() codexStartFile { mu.Lock(); defer mu.Unlock(); return file }
 }
 
-// A Codex history row nothing has open is sendable, and a message to it resumes it in a new tab of its directory
-// with plain codex (the hub's "New Agent" launcher is Claude's), the message as the resume's prompt; afterwards it is
-// Persona's, with what it was resumed with. While a process holds its rollout it stays view only.
-func TestCodexHistoryResumesOnAMessage(t *testing.T) {
-	n, f, cwd := codexHistoryNode(t)
+// A Codex history row nothing has open is a stopped agent (#4754): read-only, with its terminal page offered for
+// Resume, and a message to it is refused with nothing opened. While a process holds its rollout it stays view only, as
+// before.
+func TestCodexHistoryIsReadOnlyWhenStopped(t *testing.T) {
+	n, f, _ := codexHistoryNode(t)
 	s, ok := byID(listSessions(t, n))[startThread]
-	if !ok || s.SourceKind != "codex_history" || s.Capabilities == nil || !s.Capabilities.Send || s.ReadOnlyReason != "" {
+	if !ok || s.SourceKind != "codex_history" || s.Capabilities == nil || s.Capabilities.Send || !s.Capabilities.Terminal ||
+		s.ReadOnlyReason != stoppedReason {
 		t.Fatalf("history row = %+v (%+v)", s, s.Capabilities)
 	}
 
 	n.codices.mu.Lock()
 	n.codices.liveRollouts = map[string]string{startThread: codexHolderCLI}
 	n.codices.mu.Unlock()
-	if s := byID(listSessions(t, n))[startThread]; s.Capabilities.Send {
-		t.Errorf("held open by a Codex CLI, still sendable: %+v", s)
+	if s := byID(listSessions(t, n))[startThread]; s.Capabilities.Send || s.ReadOnlyReason == stoppedReason {
+		t.Errorf("held open by a Codex CLI: %+v", s)
 	}
 	_, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on", "launcher": "claude"})
 	if code, _ := refusalOf(t, err); code != "codex_read_only" {
@@ -81,18 +84,12 @@ func TestCodexHistoryResumesOnAMessage(t *testing.T) {
 	n.codices.mu.Unlock()
 
 	f.reset()
-	got := resumeFile(f, cwd)
-	if _, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on", "launcher": "claude"}); err != nil {
-		t.Fatal(err)
+	_, err = request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on", "launcher": "claude"})
+	if code, _ := refusalOf(t, err); code != agentStopped {
+		t.Fatalf("a message to a stopped Codex: %v", err)
 	}
-	if file := got(); strings.Join(file.Argv, " ") != "codex resume "+startThread || file.Prompt != "go on" || file.Agent != "codex" {
-		t.Errorf("ran %q with %q (HERDR_AGENT %q)", file.Argv, file.Prompt, file.Agent)
-	}
-	if st, _ := n.state.get(startThread); st.Launcher != "codex" || st.Cwd != cwd || st.Pane != "w1:p2" {
-		t.Errorf("state = %+v", st)
-	}
-	if a, ok := n.agent(startThread); !ok || a.PaneID != "w1:p2" {
-		t.Errorf("the resumed Codex is not its session: %+v %v", a, ok)
+	if got := f.trace("tab.create", "pane.send_input"); len(got) != 0 {
+		t.Errorf("resumed it: %q", got)
 	}
 }
 
@@ -142,7 +139,7 @@ func TestCodexDesktopThreadIsNotResumedInATerminal(t *testing.T) {
 	}
 }
 
-// The holders the list shows are up to 30 seconds old: a resume checks the processes again first, and a Codex opened
+// The holders the list shows are up to 30 seconds old: a resume (the user's Resume) checks the processes again first, and a Codex opened
 // on the computer since keeps it from starting a second writer.
 func TestCodexResumeChecksHoldersAgain(t *testing.T) {
 	n, f, _ := codexHistoryNode(t)
@@ -158,7 +155,7 @@ func TestCodexResumeChecksHoldersAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	_, err = request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on"})
+	_, err = request(t, n, "session.start", map[string]any{"resume_session_id": startThread})
 	if code, _ := refusalOf(t, err); code != codexResumeRefused {
 		t.Fatalf("resumed a thread held open right now: %v", err)
 	}
@@ -167,7 +164,7 @@ func TestCodexResumeChecksHoldersAgain(t *testing.T) {
 	}
 }
 
-// A resume whose Codex did not show in its tab in time may still come up: the next message does not start another
+// A resume whose Codex did not show in its tab in time may still come up: the next Resume does not start another
 // for a while, and what it was resumed with is kept.
 func TestCodexUnconfirmedResumeIsNotStartedAgain(t *testing.T) {
 	n, f, cwd := codexHistoryNode(t)
@@ -179,15 +176,15 @@ func TestCodexUnconfirmedResumeIsNotStartedAgain(t *testing.T) {
 	f.reply("workspace.list", map[string]any{"workspaces": []any{map[string]any{"workspace_id": "w1", "label": "proj"}}})
 	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
 	f.reply("tab.create", map[string]any{"tab": map[string]any{"tab_id": "w1:t2"}, "root_pane": map[string]any{"pane_id": "w1:p2"}})
-	if _, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on"}); err == nil {
+	if _, err := request(t, n, "session.start", map[string]any{"resume_session_id": startThread}); err == nil {
 		t.Fatal("a Codex that never showed was confirmed")
 	}
 	if st, _ := n.state.get(startThread); st.Launcher != "codex" || st.Cwd != cwd || st.Pane != "w1:p2" {
 		t.Errorf("state after an unconfirmed resume = %+v", st)
 	}
-	_, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "again"})
+	_, err := request(t, n, "session.start", map[string]any{"resume_session_id": startThread})
 	if code, _ := refusalOf(t, err); code != codexResumeRefused {
-		t.Fatalf("second send: %v", err)
+		t.Fatalf("second resume: %v", err)
 	}
 	if got := f.trace("tab.create"); len(got) != 1 {
 		t.Errorf("tabs opened: %d", len(got))
@@ -215,11 +212,91 @@ func TestCodexResumeRefusedWhenProcessesCannotBeListed(t *testing.T) {
 	n.codices.checked = func() ([]codexProcess, bool) { return nil, false }
 	n.codices.mu.Unlock()
 	f.reset()
-	_, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on"})
+	_, err := request(t, n, "session.start", map[string]any{"resume_session_id": startThread})
 	if code, _ := refusalOf(t, err); code != codexResumeRefused {
 		t.Fatalf("resumed without knowing who holds it: %v", err)
 	}
 	if got := f.trace("tab.create"); len(got) != 0 {
 		t.Errorf("opened a tab: %q", got)
+	}
+}
+
+// An explicit resume host must reach both session.start's guard and the locked resume guard.
+func TestCodexResumeUsesRequestedHost(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		entry := "session.start"
+		if direct {
+			entry = "resumeCodexSession"
+		}
+		t.Run(entry, func(t *testing.T) {
+			for _, tc := range []struct {
+				name, pane, def, explicit string
+				orca, wantResume          bool
+			}{
+				{"orca_explicit_herdr", "orca:tab1:leaf1", "herdr", "herdr", true, true},
+				{"disabled_host_explicit_herdr", "orca:tab1:leaf1", "paseo", "herdr", false, true},
+				{"orca_without_explicit_host", "orca:tab1:leaf1", "herdr", "", true, false},
+				{"disabled_host_without_explicit_host", "orca:tab1:leaf1", "paseo", "", false, false},
+				{"remembered_herdr_without_explicit_host", "w1:p1", "paseo", "", false, true},
+				{"explicit_paseo", "w1:p1", "herdr", "paseo", false, false},
+			} {
+				if tc.explicit == "paseo" && !direct {
+					continue
+				}
+				t.Run(tc.name, func(t *testing.T) {
+					withCodexLaunchers(t, map[string][]string{"cx": {"codex", "-m", "gpt-6"}})
+					n, f, cwd := codexHistoryNode(t)
+					listSessions(t, n)
+					choice := proto.EngineChoice{Hosts: []string{proto.EngineHerdr, proto.EnginePaseo}, Default: tc.def}
+					if tc.orca {
+						choice.Hosts = append(choice.Hosts, proto.EngineOrca)
+						n.hosts = host.NewRegistry(n.hosts.Get(host.Herdr), &launchHost{setHost: newSetHost(host.Orca)})
+					}
+					n.eng.name, n.eng.set = proto.LegacyEngine(choice), &choice
+					n.state.put(startThread, sessionState{Pane: tc.pane})
+					f.reset()
+					got := resumeFile(f, cwd)
+					var err error
+					if direct {
+						var session *proto.Session
+						session, err = n.resumeCodexSession(withStartHost(context.Background(), tc.explicit), startThread, "cx", "", "")
+						if err == nil && (session == nil || session.SessionID != startThread || session.PaneID != "w1:p2") {
+							t.Fatalf("resumed session = %+v", session)
+						}
+					} else {
+						var res map[string]any
+						res, err = request(t, n, "session.start", map[string]any{"resume_session_id": startThread, "launcher": "cx", "host": tc.explicit})
+						if err == nil {
+							session, _ := res["session"].(map[string]any)
+							if session["session_id"] != startThread || session["pane_id"] != "w1:p2" {
+								t.Fatalf("resumed session = %v", session)
+							}
+						}
+					}
+					if !tc.wantResume {
+						want := "codex_read_only"
+						if direct {
+							want = codexResumeRefused
+						}
+						if code, _ := refusalOf(t, err); code != want {
+							t.Fatalf("refusal = %v, want %s", err, want)
+						}
+						if calls := f.trace("tab.create", "pane.send_input"); len(calls) != 0 {
+							t.Fatalf("refused resume touched terminal: %v", calls)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					if file := got(); strings.Join(file.Argv, " ") != "codex -m gpt-6 resume "+startThread || file.Prompt != "" {
+						t.Fatalf("ran %q with %q", file.Argv, file.Prompt)
+					}
+					if st, _ := n.state.get(startThread); st.Pane != "w1:p2" || st.Launcher != "cx" || st.Cwd != cwd {
+						t.Fatalf("state = %+v", st)
+					}
+				})
+			}
+		})
 	}
 }

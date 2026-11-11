@@ -7,6 +7,7 @@
   "chat_off": "The Lark bot's chat is off (app Settings › Connectors › Lark bot).",
   "agent_not_found": "Can't find this agent ({id}). Send /agents to pick again",
   "agent_read_only": "This agent is view-only: {reason}",
+  "agent_stopped": "This agent has stopped: its conversation and terminal stay, but it takes no messages. Resume it from its terminal page in Persona, or start a new agent.",
   "no_assistant_machine": "The assistant's machine isn't set up",
   "new_chat": "New chat",
   "main_chat": "Main chat",

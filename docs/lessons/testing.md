@@ -208,6 +208,9 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 - `xcrun simctl launch` only foregrounds an already-running app; new launch arguments do not apply. Use `--terminate-running-process` before screenshots.
 - `MOCK_EXTENSIONS=1` keeps plugin settings, secrets, and switches in process memory (2026-11-04, #1711). After light-mode `ExtensionSettingsTests`, "Example Notes" is configured;
   an immediate dark run fails at the start of `testSetUpAnExtension` because "Needs setup" is absent, looking like broken code. Restart the mock by port between modes/reruns (like `MOCK_WECHAT`).
+- Resetting a mock does not reset the app's outbox or drafts (2026-11-12, #4475). `/mock/reset` is a **GET**; a POST can return a generic success without restoring the fixture.
+  Use the GET and `-openDraftsFresh YES`, and make messages whose pending copy is matched run-unique: a previous test's same-text outbox otherwise supplies its photo count or sending bubble again.
+  A pristine screenshot after such mutations needs a fresh app container, not just another mock reset. An empty XCUI composer can also return its placeholder as `value`; when checking that automatic stand-in words were not restored, assert their absence (or the model's empty draft), not `value == ""`.
 - All UI tests launch with `app.launchPinned()` (`UITestStyle`). The app remembers prior test styles; BeautifulUI looks different, so unspecified tests inherit someone else's appearance
   (LongSessionTests failed after BeautifulStyleTests). Default is Liquid Glass; `TEST_RUNNER_PERSONA_UI_STYLE=beautiful` runs the whole suite in BeautifulUI.
   Style-specific tests pass `-ui.style` themselves. It launches through `launchPersona()`, which only performs a clean Demo Mode start and never overrides navigation. `UITestStyleTests` scans source (`launch()` and `launchPersona()` both count as omissions).
@@ -346,6 +349,10 @@ The `scripts/ci/` lanes are written for the hosted runners; on a Mac developer m
 - `TRUNCATE` gives every table it names new files, whether it had a row or not, so clearing two dozen mostly empty tables before each test cost more than many of the tests. Check the tables the cascade reaches in one statement and truncate only those with a row (`db.truncateNonEmpty`). Don't replace it with `DELETE`: it does not cascade, and `devices` has a `BEFORE DELETE` trigger (`devices_guarded_delete`, hub 0435) that refuses an unguarded delete with "push retirement requires a guarded writer".
 - A database copied with `CREATE DATABASE ... TEMPLATE` keeps none of its template's `ALTER DATABASE ... SET` settings: set `synchronous_commit` on every copy (`dbtest.create`). Nothing may be connected to the template; Postgres waits up to 5 s on its own for backends that are closing, so no sleep after `Close` is needed. Use `STRATEGY wal_log`: `file_copy` checkpoints the whole server twice.
 - Since Postgres 15, every `DROP DATABASE` forces a checkpoint of the whole server, which writes whatever other tests left dirty. On a loaded machine, one drop took 0.07-3.8 s. Count that before giving more tests a database of their own.
+
+## The mock hub does not enforce device roles (2026-11-12, #4869)
+
+`scripts/mock/mock_hub.py` answers every request whatever the credential, so a watch feature checked only in a simulator against it can be refused on a real hub. The watch's Milk Frog shipped that way: its art requests got 403 from `allowed()` (the watch's `answer` token reads only `answerReads`), and the frog never appeared on a real watch. A new request from the watch (or any `answer`, `link` or extension credential) needs its path in the hub's allowlist, a case in `TestAnswerRoleOnlyWhatTheWatchDoes`, and one end-to-end call with a real token through `h.routes()` (`TestDeviceTokens`).
 
 ## Live-only Go tests need their own compile pass (2026-11-11, #4654)
 
@@ -513,6 +520,10 @@ Ordinary `go test` and CI do not include `//go:build herdrlive`, so a node helpe
   Since 2026-11-02 the invisible layer is absent from the tree, leaving only the onscreen Back (`ChatHeaderTests`). The collapsed strip stays below the status bar in both styles;
   "title bar is in the status bar" was actually the invisible Back frame.
   In BeautifulUI's new shell, use `probe.chat` (page `agents`) to detect open chats, not Back.
+- A list row scrolled up under the navigation bar's blur still reports `isHittable`, and a tap on it lands on the bar (2026-11-11, #4062):
+  `MeetingRecordingUITests` scrolled "until Regenerate is hittable", did no swipe because it already was, and its tap never reached the hub
+  (the mock's log had no `POST …/minutes`). Check that the element's frame is below `app.navigationBars.firstMatch.frame.maxY` and above the
+  window's bottom before tapping (`onScreen` in that test), and assert it, so a missed tap fails where it happens, not ten seconds later.
 - Chat-content UI tests always use `-openChatsFresh YES` (clear disk chat caches). Every mock reset starts chats at the same seq; prior churn-generated steps
   stay cached at this round's `/mock/say` seq, hiding new replies as "already present", leaving previous "Tool 21 · Reply 5" onscreen.
   On 2026-11-02 `ChatFollowTests.testPersonaChatFollows` failed after `ScrollUnderPushTests` / `ScreenTruthTests`, resembling missing Persona replies in the new shell but actually environmental. Real hub seq positions in transcripts increase without reuse.
@@ -904,3 +915,18 @@ To check that a failure is this, move `dev.json` aside in the app's data contain
 ## Warm allocation measurements need one processor (2026-11-10, #3390)
 
 - Disabling GC preserves `sync.Pool` contents but does not keep a goroutine on the processor whose private pool was warmed. A switch during a byte-allocation measurement can charge a cold JSON encoder's buffer growth to the operation. Measure an explicitly warmed steady state with `GOMAXPROCS(1)` during the window and restore it afterward, as `testing.AllocsPerRun` does. Check warm-up errors and retain the original byte limit; a historical extra-copy implementation measured by the same helper must still fail that limit. This isolates the measurement from processor migration, not from unrelated allocating goroutines: do not run these process-wide measurements in parallel.
+
+## Measuring latency on the shared Mac (2026-11-10, #3067)
+
+- The Mac other lanes build on runs at a load average of 100–260 on 20 cores. The same path's small-message round
+  trip moved between 6 and 47 ms (p50) within minutes, and a hub redeploy by another lane can land mid-run (check the
+  hub processes' `etime`). Compare by interleaving the variants, several rounds, medians, with the load average logged.
+- A result from a loaded machine can reverse once it is quiet: at a load of ~400, asking for VNC updates early looked
+  239 ms faster for typing (3 of 6 pairs); at 25–80 it was slower in all 5 pairs (median +81 ms). Decide on runs made at
+  a low load, interleaved (ABBA), and say the load next to the numbers.
+- Driving the real desktop (`server/cmd/vncbench run`): other lanes' windows and dialogs open on top of yours at any
+  time. Send a click, a wheel notch or a drag only where your own page is seen on the screen (vncbench's target
+  checker), type only while your page says it has the keyboard, and bring your browser forward with `open -a`, never
+  by clicking. A window's rounded corner clips a marker drawn in it: keep markers inset.
+- An agent's shell is not the login session: the login keychain is locked there and `security … -w` exits 36 (no user
+  interaction allowed). A secret the user stored in the keychain can't be read; use a 0600 file outside the repository.

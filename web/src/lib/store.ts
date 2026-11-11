@@ -7,7 +7,7 @@ import { BASE } from "./base";
 import { mainConversationMachine, clearMemoryPages, discardFeedCache, feedCacheScope, readFeedCache } from "./feed-cache";
 import { useRef, useSyncExternalStore } from "react";
 import { agentsChanged, refreshAgentPrefs, refreshAgentSessions, resetAgents, setAgentListMode } from "./agents";
-import { onRuntimeChanges, runtimeIdentity, runtimeRemoval, runtimeSessions, SESSIONS_LOOKUP_FEATURE } from "./runtime-list";
+import { onRuntimeChanges, runtimeIdentity, runtimeRemoval, runtimeSessions, SESSIONS_LOOKUP_FEATURE, SESSIONS_PAGE_COUNTS_FEATURE, setRuntimePageCounts } from "./runtime-list";
 import { sameValue } from "./stable-lines";
 import { SESSIONS_LIST_FEATURE, type ListCounts } from "./session-list";
 import { applySessionDelta, SESSIONS_DELTA_FEATURE, sessionRefreshed, sessionSnapshot } from "./sessions-delta";
@@ -30,6 +30,7 @@ import type { OutboxEntry } from "./outbox";
 import { NO_LINK, RESTARTING_MS, type ConnLink } from "./connection";
 import { setOfflineProbe } from "./feedback";
 import { readDirectionTree } from "./direction-names";
+import { directionTreeAwaitsHello } from "./direction-tree";
 import { afterEvent, afterHello, graceUntil, isResumed, NO_CURSOR, RESTART_FAST_MS, retryDelay, shownConn, wsQuery, type Drop, type EventCursor } from "./reconnect";
 
 export type Conn = "connecting" | "online" | "offline";
@@ -540,12 +541,14 @@ export function connect() {
   socketChanged(false);
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   socketToken = getToken();
+  directionTreeAwaitsHello(true); // its hello reads the direction tree: the screens wait for that read
   const sock = new WebSocket(`${proto}//${location.host}${BASE}/api/v1/ws?${wsQuery(socketToken, cursor, [SESSIONS_LIST_FEATURE, SESSIONS_DELTA_FEATURE, SESSION_LIVE_FEATURE, "extension_ui_stream_v1", "persona_contracts_v1"])}`);
   ws = sock;
   restartNotice = false;
   // an attempt does not move offline back to connecting: the pill stays on one phase while the hub is down instead of
   // flipping at every backoff tick (the app's ConnectionTitle); shownConn decides it when the attempt fails
   sock.onopen = () => {
+    socketOpenedAt = Date.now(); // a direction tree read since then serves this hello (lib/direction-tree.ts)
     // the interface language: this connection's text, and the user's language for pushes and the assistant (docs/protocol/i18n.md)
     // and what it can render: MCP forms and links come only to a socket that says so
     sock.send(JSON.stringify({ type: "client_hello", platform: CLIENT_PLATFORM, version: CLIENT_VERSION, features: CLIENT_FEATURES, locale: currentLanguage(), heartbeat: { pong_timeout: CLIENT_PONG_TIMEOUT } }));
@@ -577,6 +580,7 @@ export function connect() {
     }
   };
   sock.onclose = (ev) => {
+    if (ws === sock) directionTreeAwaitsHello(false); // no hello: whoever waited for the tree reads it now
     if (ws !== sock) return;
     const wasLive = authenticatedSocket === sock;
     ws = null;
@@ -680,9 +684,12 @@ if (typeof window !== "undefined") {
 }
 
 /** The tree read again: its leaders become the assistant's (a new one not listed yet: the assistant is read again). */
-async function followDirections() {
+/** When the socket last opened. */
+let socketOpenedAt = 0;
+
+async function followDirections(changed = false) {
   if (pageOf() !== "") return; // the tree is the default assistant's (docs/protocol/protocol.md)
-  const ids = await readDirectionTree();
+  const ids = await readDirectionTree(changed, changed ? undefined : socketOpenedAt);
   const a = state.assistant;
   if (!ids || !a) return;
   const known = new Set(a.conversations.map((c) => c.session_id));
@@ -719,6 +726,7 @@ function onMessage(msg: Record<string, unknown>) {
       const summaryMode = state.features.includes(SESSIONS_LOOKUP_FEATURE);
       if (runtimeSessions.isSummary() !== summaryMode) listedFull.clear();
       runtimeSessions.setSummary(summaryMode);
+      setRuntimePageCounts(state.features.includes(SESSIONS_PAGE_COUNTS_FEATURE));
       setAgentListMode(state.features.includes(SESSIONS_LIST_FEATURE));
       taskRowsAsked.clear();
       void lookUpTaskAgents();
@@ -733,12 +741,13 @@ function onMessage(msg: Record<string, unknown>) {
         void refreshAgentSessions();
         void refreshAgentPrefs();
       }
+      directionTreeAwaitsHello(false); // after followDirections started its read: those waiting share it
       break;
     }
     case "directions":
       // the direction tree changed (#4352): a leader made or ended anywhere, a name, a task's state. The sidebar's 常驻
-      // follow at once (#4331: a sixth leader stayed hidden until a reload)
-      void followDirections();
+      // follow at once (#4331: a sixth leader stayed hidden until a reload); a read already out may predate the change
+      void followDirections(true);
       break;
     case "hub_restarting":
       restartNotice = true; // the close that follows is a restart: retry at once, stay quiet longer

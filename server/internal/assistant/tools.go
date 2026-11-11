@@ -178,6 +178,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		s.push(ctx, Notification{Subtitle: "Persona", DeviceID: machine, SessionID: self, Title: a.Title, Body: a.Body, Asked: true})
 		// The Feishu bot and the channels with pushes on (channels_handler.go).
 		s.channelsPushed(machine, self, a.Title, a.Body)
+		s.recordNotify(ctx, machine, self) // an interruption (north_star.go)
 		s.promoteSupervision(self)
 		return "Notification sent.", nil
 	case "conversations_list":
@@ -262,6 +263,15 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if strings.TrimSpace(a.Text) == "" {
 			return "", fmt.Errorf("text is empty")
 		}
+		if stoppedAgent(c) { // read-only (#4754): nothing here starts it again
+			if exitText(a.Text) {
+				return fmt.Sprintf("%s has already stopped: nothing was sent.", agentLabel(c)), nil
+			}
+			return "", fmt.Errorf("%s has stopped and is read-only: its conversation and terminal stay, it takes no messages, "+
+				"and nothing here starts it again. Read it with agent_read; to go on, start a new agent with agent_start in its "+
+				"directory (with the task when it worked on one) and give it what it needs. Only the user can resume it, with "+
+				"Resume on its terminal page. Nothing was sent", agentLabel(c))
+		}
 		atts, err := cleanAttachments(a.Attachments)
 		if err == nil {
 			atts, err = s.checkAttachments(ctx, machine, self, atts)
@@ -319,8 +329,9 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			}
 			return fmt.Sprintf("Sent to %s on %s.", agentLabel(c), am.Name) + handed.said() + task.sent(ctx, s, a.Text), nil
 		}
-		// Not running (a finished task's agent is closed: hub tasks_close.go): its node resumes it first, which can
-		// take minutes and goes on if this call stops waiting.
+		// Not running and not read-only: a branch nothing has started yet (node fork.go), or a node from before #4754
+		// that still resumes a stopped agent. Its node starts it first, which can take minutes and goes on if this call
+		// stops waiting.
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
 		if err := s.call(sctx, am.ID, DeviceSessionSend, params, nil); err != nil {
@@ -348,8 +359,14 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			Ultracode bool `json:"ultracode"`
 			// Attachments: the user's pictures and files, by their paths on this conversation's computer (#2437).
 			Attachments []string `json:"attachments"`
+			// SecretEnv: environment variables the Agent gets from secret providers, by reference, after the user
+			// approves on the phone (secret_handoff.go).
+			SecretEnv map[string]string `json:"secret_env"`
 		}
 		_ = json.Unmarshal(args, &a)
+		if err := checkSecretEnvArg(args); err != nil {
+			return "", fmt.Errorf("%w; no agent was started", err)
+		}
 		am, ok := s.machineByName(ctx, a.Machine)
 		if !ok {
 			return "", fmt.Errorf("unknown machine %q (machines: %s)", a.Machine, s.machineIDs(ctx))
@@ -419,7 +436,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if a.Ultracode {
 			where += " · ultracode"
 		}
-		if ok, err := s.confirmOutbound(ctx, machine, self, name, where+"\n\n"+a.Prompt, args); err != nil {
+		if ok, err := s.confirmOutbound(ctx, machine, self, name, where+"\n\n"+a.Prompt, withoutSecretEnv(args)); err != nil {
 			return "", err
 		} else if !ok {
 			return "The user declined on the phone: no agent was started.", nil
@@ -452,6 +469,24 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if note != "" {
 			note = " Note: " + note + "."
 		}
+		// Secrets for this run (secret_handoff.go): checked, then asked on the card, for the computer and launcher it
+		// starts with; resolved and staged right before the start.
+		var hand *secretHandoff
+		approvedBy := ""
+		if len(a.SecretEnv) > 0 {
+			if hand, err = s.handoffPrepare(ctx, am.ID, am.Name, params, a.SecretEnv); err != nil {
+				return "", fmt.Errorf("%w; no agent was started", err)
+			}
+			tab, _ := params["tab_name"].(string)
+			by, answer, err := s.handoffApprove(ctx, machine, self, hand, tab, a.Cwd, a.Prompt)
+			if err != nil {
+				return "", err
+			}
+			if by == "" {
+				return answer, nil
+			}
+			approvedBy = by
+		}
 		if runs != "" {
 			note = " Preset " + tier + ": runs on " + runs + "." + note
 		}
@@ -481,12 +516,36 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		knownIDs := s.knownSessionIDs(lctx, am.ID)
 		lcancel()
 		s.setPlanThen(ctx, am.ID, params)
+		var values *handoffValues
+		if hand != nil {
+			var answer string
+			if values, answer = s.handoffResolve(sctx, hand, approvedBy); values == nil {
+				return answer, nil
+			}
+			defer values.wipe()
+			if params["secret_ticket"], err = values.stage(sctx); err != nil {
+				return "", fmt.Errorf("the secrets could not be staged on %s: %v; no agent was started", am.Name, err)
+			}
+			if params["ultracode"] != true {
+				values.wipe() // no retry can need them again
+			}
+			note += hand.granted(approvedBy)
+		}
 		err = s.call(sctx, am.ID, DeviceSessionStart, params, &res)
 		if reason, refused := s.ultracodeRefusal(ctx, err, params); refused {
 			delete(params, "ultracode")                                  // an extra the agent it landed on cannot have: it starts without it (#3596)
 			note += " Note: started without ultracode (" + reason + ")." // an answer lost on the way still says so
 			err = s.call(sctx, am.ID, DeviceSessionStart, params, &res)
+			// Refused before the node took the ticket, the same ticket starts it; one the refused start took and
+			// dropped is gone, and the values are staged once more for this start.
+			if values != nil && refusedWith(err, proto.CodeSecretEnvGone) {
+				if params["secret_ticket"], err = values.stage(sctx); err != nil {
+					return "", fmt.Errorf("the secrets could not be staged on %s again: %v; no agent was started", am.Name, err)
+				}
+				err = s.call(sctx, am.ID, DeviceSessionStart, params, &res)
+			}
 		}
+		values.wipe()
 		if err != nil {
 			s.recordStartFailure(ctx, am.ID, launcher, err)
 			if startResultUnknown(err) {

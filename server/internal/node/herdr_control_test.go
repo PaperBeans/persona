@@ -597,13 +597,22 @@ func TestHerdrSendChecksThePaneAndPressesEnterForAStuckPrompt(t *testing.T) {
 	})
 }
 
-// session.send to a session that is not running: it is resumed (launcher and directory from what is known of it),
-// its pane checked again, then prompted.
+// session.send to a session that is not running: a stopped agent takes no messages (#4754), refused with nothing
+// opened or typed; a branch nothing has started yet (fork.go) is started by its first message (launcher and
+// directory from what is known of it), its pane checked again, then prompted.
 func TestHerdrSendResumesAnOfflineSession(t *testing.T) {
 	n, f, home := herdrNode(t)
 	cwd := mkdir(t, filepath.Join(home, "proj"))
 	writeTranscript(t, home, cwd, sidA, time.Now(),
 		`{"type":"user","timestamp":"2026-01-01T00:00:00Z","cwd":"`+cwd+`","message":{"role":"user","content":"hello"}}`)
+	_, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "go on"})
+	if code, _ := refusalOf(t, err); code != agentStopped {
+		t.Fatalf("a message to a stopped agent: %v", err)
+	}
+	assertTrace(t, f.trace(), []string{call("session.snapshot", nil)}) // is it running? nothing else
+	f.reset()
+
+	n.freshForks = map[string]bool{sidA: true}
 	f.reply("workspace.list", map[string]any{"workspaces": []any{}})
 	f.reply("workspace.create", map[string]any{"workspace": map[string]any{"workspace_id": "w7"},
 		"tab": map[string]any{"tab_id": "w7:t1"}, "root_pane": map[string]any{"pane_id": "w7:p1"}})
@@ -630,9 +639,12 @@ func TestHerdrSendResumesAnOfflineSession(t *testing.T) {
 		call("agent.prompt", map[string]any{"target": "w7:p1", "text": "go on"}),
 		readANSI("w7:p1"), // the box emptied: no enter
 	})
+	if n.freshFork(sidA) {
+		t.Error("the branch is still fresh after it ran: its next stop would let a message resume it")
+	}
 }
 
-// A session that is not running and that nothing says which launcher it ran with (started outside Persona) is
+// A branch that is not running and that nothing says which launcher it ran with (started outside Persona) is
 // resumed with the launcher the hub sends ("New Agent"'s), not plain claude; the launcher Persona started it with
 // still wins over the hub's.
 func TestHerdrSendResumesWithTheHubsLauncher(t *testing.T) {
@@ -650,6 +662,7 @@ func TestHerdrSendResumesWithTheHubsLauncher(t *testing.T) {
 			if tc.recorded != "" {
 				n.state.put(sidA, sessionState{Launcher: tc.recorded, Cwd: cwd})
 			}
+			n.freshForks = map[string]bool{sidA: true} // only a branch is started by a message (#4754)
 			f.reply("workspace.list", map[string]any{"workspaces": []any{}})
 			f.reply("workspace.create", map[string]any{"workspace": map[string]any{"workspace_id": "w7"},
 				"tab": map[string]any{"tab_id": "w7:t1"}, "root_pane": map[string]any{"pane_id": "w7:p1"}})
@@ -822,7 +835,7 @@ func TestHerdrRenames(t *testing.T) {
 	assertTrace(t, f.trace(), nil)
 }
 
-// markTab is the call that marks a tab the node opened for session id as Persona's (shelltabs.go).
+// markTab is the call that marks a tab the node opened for session id as Persona's (personatab.go).
 func markTab(pane, id string) string {
 	return call("pane.report_metadata", map[string]any{"pane_id": pane, "source": "persona", "tokens": map[string]any{personaTabToken: id}})
 }

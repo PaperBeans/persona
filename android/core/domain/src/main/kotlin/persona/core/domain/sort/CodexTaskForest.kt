@@ -24,9 +24,10 @@ val AgentSession.isNestedSubtask: Boolean get() = session.isSubtask && state != 
 
 data class CodexTaskForest(val roots: List<AgentSession>, val children: Map<String, List<AgentSession>>) {
     /** Search retains an ancestor when a descendant matches, so the matching conversation remains reachable. */
-    fun searchSettings(settings: AgentListSettings): AgentListSettings {
+    fun searchSettings(settings: AgentListSettings, pins: AgentPreferences = AgentPreferences(),
+                       machineNames: Map<String, String> = emptyMap()): AgentListSettings {
         if (settings.query.isEmpty()) return settings
-        fun matches(row: AgentSession): Boolean = settings.admits(row.session) || children[row.id].orEmpty().any(::matches)
+        fun matches(row: AgentSession): Boolean = settings.admits(row.session, pins, machineNames) || children[row.id].orEmpty().any(::matches)
         return settings.copy(queryAncestors = settings.queryAncestors + roots.filter(::matches).map { it.id })
     }
 }
@@ -72,4 +73,17 @@ fun codexTaskForest(
     val children = rows.filter { it.id in parents }.groupBy { parents.getValue(it.id) }
         .mapValues { (_, members) -> members.sortedWith(compareByDescending<AgentSession> { it.updatedAt }.thenBy { it.id }) }
     return CodexTaskForest(rows.filterNot { it.id in parents }, children)
+}
+
+/**
+ * The ids of the rows a flat list of sessions leaves out as subtasks (#4769), the list drawing the rows [draws] says
+ * (the main chat's dock, the capsule's activity, a knowledge project's agents): each [isNestedSubtask] it draws that
+ * hangs under a row it draws above it, as [codexTaskForest] hangs one under its parent while the list of running
+ * sessions draws a row above it. One that needs the user is never among them, nor one with no row drawn above it (a
+ * working agent whose creator finished or was let go): those stay entries of their own. The parents are looked up among
+ * all of [rows], drawn or not, so a creator that no longer runs still leads to the one above it.
+ */
+fun foldedSubtasks(rows: List<AgentSession>, draws: (AgentSession) -> Boolean): Set<String> {
+    if (rows.none { it.isNestedSubtask && draws(it) }) return emptySet()
+    return codexTaskForest(rows, runs = draws).children.values.flatten().filter(draws).mapTo(HashSet()) { it.id }
 }

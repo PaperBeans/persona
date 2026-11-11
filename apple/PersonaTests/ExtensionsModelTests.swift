@@ -22,7 +22,7 @@ struct ExtensionsModelTests {
 
     private func make(_ hub: FakeHub) -> ExtensionModel { ExtensionModel(id: "example-notes", deps: .init(api: { hub.client })) }
 
-    @Test func listDecodesAndSummarizes() async {
+    @Test func listDecodesAndSummarizes() async throws {
         let hub = FakeHub()
         hub.on("GET", "/api/v1/plugins", json: #"{"plugins":[{"id":"voice","name":"语音","kind":"voice","status":"running"},"# +
                #"{"id":"example-notes","name":"Example Notes","kind":"connectors","status":"needs_setup","source":"installed","enabled":true}],"can_install":true}"#)
@@ -30,7 +30,9 @@ struct ExtensionsModelTests {
         await page.load()
         #expect(page.error == nil && page.plugins?.count == 2)
         #expect(ExtensionText.listSummary(page.plugins) == "2 个 · 1 个要处理")
-        #expect(ExtensionText.summary(page.plugins![0]) == "启动")
+        #expect(page.plugins?.map(\.id) == ["example-notes", "voice"], "legacy responses sort by name")
+        let voice = try #require(page.plugins?.first { $0.id == "voice" })
+        #expect(ExtensionText.summary(voice) == "启动")
         #expect(ExtensionText.listSummary([]) == "没有")
     }
 

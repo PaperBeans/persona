@@ -34,6 +34,9 @@ var (
 	larkRiskRe        = lazyre.New(`(?m)^\s*Risk:\s*([a-z-]+)`)
 	// larkCLIRe: a lark-cli call anywhere in a command the gate cannot parse.
 	larkCLIRe = lazyre.New("(^|[\\s;&|(\"'`])(\\S*/)?lark-cli(\\s|[\"']|$)")
+	// larkCLINamed: lark-cli as a word of its own anywhere in a command, a variable's value (`L=lark-cli; $L …`)
+	// included; what lets a whole-command card say it acts on Lark (wholeCommandTitle).
+	larkCLINamed = lazyre.New(`(^|[^A-Za-z0-9_.-])lark-cli([^A-Za-z0-9_.-]|$)`)
 )
 
 func isLarkCLI(name string) bool { return name == "lark-cli" || filepath.Base(name) == "lark-cli" }

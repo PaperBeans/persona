@@ -86,6 +86,8 @@ data class PersonaPalette(
     /** Media overlays stay readable over a photograph/video, independent of the page's appearance. */
     val mediaBackdrop: Color get() = Color.Black
     val onMediaBackdrop: Color get() = Color.White
+    /** Transparent third-party logos keep their brand colors on a neutral light backing in either appearance. */
+    val catalogLogoBackground: Color get() = Tokens.System.Light.page
     /** Outside the circle an avatar crop keeps (New from photo, #2407): dimmed in every style and appearance, as iOS `Theme.Crop.outside`. */
     val cropOutside: Color get() = mediaBackdrop.copy(alpha = 0.5f)
     /** The crop circle's edge, as iOS `Theme.Crop.edge`. */

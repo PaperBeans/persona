@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // noticesTo are the texts sent into assistant conversation id.
@@ -145,9 +146,9 @@ func TestMainReviewKeepsLeaderSupervisor(t *testing.T) {
 	}
 }
 
-// Without leaders nothing changes: a task supervised by a side conversation that is not (or no longer) a leader is
-// told in the main conversation, and a side conversation's task_plan task gets no ledger.
-func TestDigestGoesToMainWithoutLeader(t *testing.T) {
+// Without leaders a task supervised by a side conversation is told in that conversation: the supervisor is the
+// conversation that handed the task out, leader or not, and a task_plan task gets its ledger from it.
+func TestDigestGoesToItsSupervisorWithoutLeader(t *testing.T) {
 	s, f := newQuietService(t)
 	ctx := context.Background()
 	f.known["lead1"] = true
@@ -162,26 +163,26 @@ func TestDigestGoesToMainWithoutLeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.signal(superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "1", Detail: "做完了"})
-	waitFor(t, "the message", func() bool { return len(f.noticesTo("conv1")) == 1 })
-	if n := f.noticesTo("conv1")[0]; strings.Contains(n, "leader") {
-		t.Fatalf("the default message changed:\n%s", n)
+	waitFor(t, "the message", func() bool { return len(f.noticesTo("lead1")) == 1 })
+	if n := f.noticesTo("lead1")[0]; !strings.Contains(n, "由你督办") {
+		t.Fatalf("the side conversation's message does not say it supervises:\n%s", n)
 	}
 	s.supervise.dedupMu.Lock()
 	s.supervise.dedupMu.Unlock() // the digest send has finished before checking the non-recipient
-	if got := f.noticesTo("lead1"); len(got) != 0 {
-		t.Fatalf("a conversation that is not a leader was told: %q", got)
+	if got := f.noticesTo("conv1"); len(got) != 0 {
+		t.Fatalf("the main conversation was told a side conversation's task: %q", got)
 	}
 	if strings.Contains(s.Context(ctx, ContextParams{SessionID: "lead1"}).Text, "leader") {
 		t.Fatal("a side conversation's context says it is a leader")
 	}
 
-	// task_plan from a side conversation that is not a leader: no ledger, as before.
+	// task_plan from a side conversation that is not a leader: it supervises it itself.
 	res, err := s.toolTaskPlan(ctx, "lead1", planArgs(true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(res, "You supervise them") {
-		t.Fatalf("a side conversation is told it supervises: %s", res)
+	if !strings.Contains(res, "You supervise them") || strings.Contains(res, "The main conversation supervises them") {
+		t.Fatalf("a side conversation is told who supervises: %s", res)
 	}
 	var planned Todo
 	waitFor(t, "the task", func() bool {
@@ -193,8 +194,8 @@ func TestDigestGoesToMainWithoutLeader(t *testing.T) {
 		}
 		return false
 	})
-	if planned.Supervision != nil {
-		t.Fatalf("a side conversation's task is supervised: %+v", planned.Supervision)
+	if planned.Supervision == nil || planned.Supervision.Supervisor != "lead1" {
+		t.Fatalf("a side conversation's task is not its own to supervise: %+v", planned.Supervision)
 	}
 }
 
@@ -227,7 +228,7 @@ func TestDigestTo(t *testing.T) {
 		{"main's task", leaders, superviseSignal{Todo: mains, Kind: sigReview}, "conv1"},
 		{"leader's task", leaders, superviseSignal{Todo: leads, Kind: sigReview}, "lead1"},
 		{"leader's report", leaders, superviseSignal{Todo: leads, Kind: sigReport, Report: upReportQuestion}, "lead1"},
-		{"no leaders", none, superviseSignal{Todo: leads, Kind: sigReview}, "conv1"},
+		{"no leaders: the supervisor conversation itself", none, superviseSignal{Todo: leads, Kind: sigReview}, "lead1"},
 		{"leader's task waits for the user", leaders, superviseSignal{Todo: waits, Kind: sigIdle}, "conv1"},
 		{"leader's escalation", leaders, superviseSignal{Todo: waits, Kind: sigEscalated}, "conv1"},
 		{"leader's failed start", leaders, superviseSignal{Todo: leads, Kind: sigFailed}, "conv1"},
@@ -277,8 +278,8 @@ func TestWorkerCannotHandOutTasks(t *testing.T) {
 	}
 }
 
-// Cancelling a task closes its agent, ends the card it waits on and archives it (reversible); another task's agent
-// with a card waiting is left as it is.
+// Cancelling a task stops its agent (session.stop: its terminal stays, #4754), ends the card it waits on and archives
+// it (reversible); another task's agent with a card waiting is left as it is.
 func TestCancelStopsAndArchivesAgents(t *testing.T) {
 	ft, row := closeTestService(t, func(s *proto.Session) {
 		s.Status, s.State, s.PendingInteractions = proto.StatusBlocked, proto.StateNeedsYou, 1
@@ -289,15 +290,23 @@ func TestCancelStopsAndArchivesAgents(t *testing.T) {
 	ft.f.setSessions("mac", row, other)
 	var closed []string
 	ft.f.answerNode("session.close", func(_ string, raw json.RawMessage) (any, error) {
+		t.Errorf("closed the agent's terminal: %s", raw)
+		return map[string]any{"ok": true}, nil
+	})
+	ft.f.answerNode(deviceSessionStop, func(_ string, raw json.RawMessage) (any, error) {
 		var a struct {
 			SessionID string `json:"session_id"`
+			Retire    bool   `json:"retire"`
 		}
 		_ = json.Unmarshal(raw, &a)
+		if a.Retire {
+			t.Errorf("a cancelled task's agent is stopped whatever it does: %s", raw)
+		}
 		closed = append(closed, a.SessionID)
 		gone := row // its node lists it closed a moment later
 		gone.Status, gone.State, gone.PendingInteractions, gone.PaneID = proto.StatusOffline, proto.StateOffline, 0, ""
 		ft.d.setSessions("mac", []proto.Session{gone, other})
-		return map[string]any{"ok": true}, nil
+		return map[string]any{"stopped": true}, nil
 	})
 	s := ft.s
 	ctx := context.Background()
@@ -402,10 +411,12 @@ func TestCancelLeavesAnotherTasksAgent(t *testing.T) {
 	ft, row := closeTestService(t, nil)
 	ft.f.setSessions("mac", row)
 	var closed []string
-	ft.f.answerNode("session.close", func(_ string, raw json.RawMessage) (any, error) {
-		closed = append(closed, string(raw))
-		return map[string]any{"ok": true}, nil
-	})
+	for _, m := range []string{"session.close", deviceSessionStop} {
+		ft.f.answerNode(m, func(_ string, raw json.RawMessage) (any, error) {
+			closed = append(closed, string(raw))
+			return map[string]any{"ok": true}, nil
+		})
+	}
 	s, ctx := ft.s, context.Background()
 	todo, err := s.createTodo(ctx, "新任务", "做", "conv1", "")
 	if err != nil {
@@ -420,5 +431,49 @@ func TestCancelLeavesAnotherTasksAgent(t *testing.T) {
 	ft.f.mu.Unlock()
 	if n != 0 || archivedIDs(t, s)[row.SessionID] {
 		t.Fatalf("another task's agent was closed (%d) or archived", n)
+	}
+}
+
+// A cancelled task's agent with no terminal (another tool's, an engine that runs agents itself: the node answers
+// session.stop with no_terminal) is closed as before; one the node cannot stop for another reason is left running,
+// never closed.
+func TestCancelClosesOnlyAnAgentWithoutTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		code  string
+		close bool
+	}{{"no_terminal", true}, {"not_stopped", false}} {
+		ft, row := closeTestService(t, nil)
+		ft.f.setSessions("mac", row)
+		var calls []string
+		ft.f.answerNode(deviceSessionStop, func(_ string, _ json.RawMessage) (any, error) {
+			calls = append(calls, deviceSessionStop)
+			return nil, &rpc.Error{Code: tc.code, Message: "no"}
+		})
+		ft.f.answerNode("session.close", func(_ string, _ json.RawMessage) (any, error) {
+			calls = append(calls, "session.close")
+			gone := row
+			gone.Status, gone.State, gone.PaneID = proto.StatusOffline, proto.StateOffline, ""
+			ft.d.setSessions("mac", []proto.Session{gone})
+			return map[string]any{"ok": true}, nil
+		})
+		s, ctx := ft.s, context.Background()
+		todo, err := s.createTodo(ctx, "做", "做", "conv1", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.linkTodoAgent(ctx, todo.ID, "mac", row.SessionID, "x", "/code", "claude"); err != nil {
+			t.Fatal(err)
+		}
+		s.stopCancelledAgent(ctx, todo.ID, "mac", row.SessionID)
+		ft.f.mu.Lock()
+		got := append([]string(nil), calls...)
+		ft.f.mu.Unlock()
+		want := []string{deviceSessionStop}
+		if tc.close {
+			want = append(want, "session.close")
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s: calls %v, want %v", tc.code, got, want)
+		}
 	}
 }

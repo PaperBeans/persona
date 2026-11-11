@@ -66,13 +66,16 @@ type ExtensionView struct {
 	Status string `json:"status"` // disabled | needs_setup | incompatible | stopped | starting | running | error
 	Error  string `json:"error,omitempty"`
 
-	Version     string              `json:"version,omitempty"`
-	Source      string              `json:"source,omitempty"` // builtin | hub.json | installed
-	Enabled     bool                `json:"enabled"`
-	Description string              `json:"description,omitempty"`
-	Contributes map[string][]string `json:"contributes,omitempty"`
-	NeedsSetup  []string            `json:"needs_setup,omitempty"`
-	Warnings    []string            `json:"warnings,omitempty"`
+	Version            string              `json:"version,omitempty"`
+	Source             string              `json:"source,omitempty"` // builtin | hub.json | installed
+	Enabled            bool                `json:"enabled"`
+	Description        string              `json:"description,omitempty"`
+	IconURL            string              `json:"icon_url,omitempty"`
+	Downloads          *int64              `json:"downloads,omitempty"`
+	DownloadsUpdatedAt string              `json:"downloads_updated_at,omitempty"`
+	Contributes        map[string][]string `json:"contributes,omitempty"`
+	NeedsSetup         []string            `json:"needs_setup,omitempty"`
+	Warnings           []string            `json:"warnings,omitempty"`
 
 	// A plugin from a market (extension_autoupgrade.go): its own auto-upgrade switch, why that switch does not apply
 	// now ("market_removed": its market is no longer registered; "disabled": the extension is switched off; the switch
@@ -387,6 +390,7 @@ func (ps *extensions) view(ctx context.Context, p *extension.Extension) Extensio
 	}
 	if ps.h != nil {
 		ps.h.extensionUpgrades().decorate(ctx, &v, p)
+		ps.h.decorateMarketMetadata(ctx, &v, p)
 	}
 	if m.NodeProgram() != nil {
 		v.Nodes = ps.nodes.views(p.Record.ID)
@@ -531,6 +535,9 @@ func (ps *extensions) changed(c extension.Change) {
 		ps.apply(ctx, c.Old.Record.ID)
 		ps.forgetAuth(c.Old.Record.ID)
 		ps.nodes.drop(ps.root, c.Old.Record.ID, "")
+		if err := ps.h.moveHandoffRules(ctx, c.Old.Record.ID, c.ID); err != nil { // its Always rules for hand-offs follow it
+			ps.logf("plugin %s is %s now: its hand-off rules were not moved: %v", c.Old.Record.ID, c.ID, err)
+		}
 	}
 	ps.apply(ctx, c.ID)
 	if ps.voiceID != "" && c.ID != ps.voiceID {
@@ -547,6 +554,14 @@ func (ps *extensions) changed(c extension.Change) {
 	ps.forgetAuth(c.ID)          // another version, removed, switched, set up again: ask again
 	ps.forgetSecretWords(c.ID)   // a provider's references may name other things now
 	ps.kept.forgetProvider(c.ID) // and give other values, or none
+	// A removed provider's Always rules for hand-offs go with it (secret_handoff_rules.go).
+	if c.Kind == "removed" {
+		if n, err := ps.h.removeHandoffRules(ctx, c.ID, ""); err != nil {
+			ps.logf("plugin %s removed: its hand-off rules were not: %v", c.ID, err)
+		} else if n > 0 {
+			ps.logf("plugin %s removed: %d hand-off rules with it", c.ID, n)
+		}
+	}
 	switch c.Kind {
 	case "removed", "upgraded", "rolled_back": // only the version installed now keeps its packages for computers
 		keep := ""
@@ -952,7 +967,11 @@ func (ps *extensions) specOf(ctx context.Context, p *extension.Extension, hp *hu
 		if err := os.MkdirAll(dataDir, 0o700); err != nil {
 			return s, err
 		}
-		s.Env = []string{"PERSONA_PLUGIN_ID=" + id, "PERSONA_PLUGIN_DIR=" + p.Dir, "PERSONA_PLUGIN_DATA=" + dataDir}
+		s.Env = []string{"PERSONA_PLUGIN_ID=" + id, "PERSONA_PLUGIN_DIR=" + p.Dir, "PERSONA_PLUGIN_DATA=" + dataDir,
+			// The same settings also arrive at initialize. Supplying them here
+			// lets a supervisor choose a configured interpreter before it can
+			// speak RPC; this is configuration, never decrypted secrets.
+			"PERSONA_PLUGIN_CONFIG=" + string(ps.reg.Config(p))}
 		s.Env = append(s.Env, managerEnv...)
 		// Its command-line programs (manifest.tools, installed with this version) first on PATH, for it and what it runs.
 		if len(ps.reg.Tools(id, p.Record.Version)) > 0 {
@@ -1089,6 +1108,11 @@ func (ps *extensions) specOf(ctx context.Context, p *extension.Extension, hp *hu
 			return ps.extensionModelCall(ctx, id, params)
 		case connector.MethodSentRecord:
 			return ps.extensionSentRecord(ctx, id, params)
+		case "cli.call":
+			if len(p.Manifest.HostIntegrations) != 1 || ps.h == nil {
+				return nil, &rpc.Error{Code: extension.CodePermissionDenied, Message: "host CLI: no declared integration"}
+			}
+			return ps.h.extensionHostCLICall(ctx, id, p.Manifest.HostIntegrations[0], params)
 		}
 		if rest, ok := strings.CutPrefix(method, serve.Namespace+"."); ok {
 			c := byID[contributionOf(params)]

@@ -284,8 +284,18 @@ internal fun ChatLineContent(
     closeoutReply: String? = null,
     /** The main conversation folds its background rounds (#4314): a scheduled task's or follow-up's prompt is never shown. */
     hideTaskPrompts: Boolean = false,
+    /** This line is the turn's error and the hub named its fix ([TurnErrorFix]): an answer, a notice or an API error draws the card. */
+    turnFix: TurnErrorFix? = null,
 ) {
     val res = LocalResources.current
+    if (turnFix != null) {
+        val raw = when {
+            line is ChatLine.ApiError -> line.info.raw
+            line is ChatLine.Row && (line.row.type == "reply" || line.row.type == "notice") -> line.row.item?.item?.text
+            else -> null
+        }
+        if (raw != null || line is ChatLine.ApiError) return TurnErrorFixCard(turnFix, raw)
+    }
     when (line) {
         is ChatLine.Row -> when (line.row.type) {
             "user" -> line.row.item?.item?.let { item ->
@@ -334,7 +344,10 @@ internal fun ChatLineContent(
                     { onToggle(line.id) }, running = line.live && !waits) {}
             }
         }
-        is ChatLine.Step -> WorkStep(line.step, session, loader, onFold, folding, foldErrors, onFullText, style, textUpdates, workRunning, lastWorkStep, plan)
+        // Every open step sits on the work line's rail, the plan and its items too (Glass, iOS's timeline, #4339 C5).
+        is ChatLine.Step -> Box(Modifier.fillMaxWidth().workRail(lastWorkStep)) {
+            WorkStep(line.step, session, loader, onFold, folding, foldErrors, onFullText, style, textUpdates, workRunning, lastWorkStep, plan)
+        }
         is ChatLine.End -> TimelineMark(pluralStringResource(R.plurals.chat_content_collapse_steps, line.count, line.count),
             Modifier.heightIn(min = 44.dp).clickable(role = Role.Button) { onToggle(line.groupId) })
         is ChatLine.Wakes -> ChatSystemLine(pluralStringResource(R.plurals.chat_content_wakes, line.turn.wakes.size, line.turn.wakes.size))

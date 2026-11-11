@@ -1,4 +1,6 @@
 {
+  "decision_review_changed": "This decision has changed or was already handled. Refresh before trying again.",
+  "decision_review_fields": "This request is missing a valid review time or Undo receipt.",
   "draft_changed": "This draft has changed or is no longer pending. Refresh before trying again.",
   "draft_dismissed": "You chose not to handle this draft. Undo that decision before sending it.",
   "draft_decision_question": "Reply drafted from the task’s progress",
@@ -30,6 +32,7 @@
   "done": "Done",
   "route_no_task": "This chat doesn’t have that task",
   "route_no_agent": "This task has no running agent",
+  "route_agents_stopped": "Every agent of this task has stopped, so nothing was sent. A message on the task starts a new agent for it.",
   "route_offline": "That computer is offline",
   "outcome_question": "Outcome",
   "outcome_pitfall": "Pitfall",

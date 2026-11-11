@@ -54,6 +54,19 @@ export interface Manifest {
    */
   tools?: ToolSpec[];
   auth?: AuthSpec;
+  /**
+   * Configured host CLI integrations the program may use through a bounded, read-only typed RPC. IDs never name an
+   * executable; writes and arbitrary command lines are not part of this contract.
+   */
+  host_integrations?: HostIntegrationSpec[];
+}
+
+/**
+ * A configured CLI integration, selected by a closed ID rather than by an extension-provided executable.
+ */
+export interface HostIntegrationSpec {
+  id: string;
+  version: string;
 }
 
 /**
@@ -4706,6 +4719,8 @@ export interface KBDetail {
   segments?: KBRecordingSegment[];
   /** A recording's meeting minutes, once written (docs/assistant/meeting-minutes.md); kept as the hub sends them. */
   minutes?: unknown;
+  /** An all-day recording's day recap, once written (docs/assistant/day-recap.md); kept as the hub sends them. */
+  recap?: unknown;
   /** A topic's knowledge points (docs/assistant/knowledge.md "Topics"). */
   points?: KBTopicPoint[];
 }
@@ -4756,6 +4771,11 @@ export interface KBRecordingSegment {
   start: number;
   end: number;
   text: string;
+  /**
+   * An all-day recording's line number: the segment's 1-based position in its uploads (docs/assistant/day-recap.md);
+   * absent on other recordings.
+   */
+  n?: number;
 }
 
 /**

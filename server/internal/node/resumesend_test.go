@@ -56,7 +56,8 @@ func methodHerdr(t *testing.T, answer func(method string, params map[string]any)
 	return &herdr.Client{Socket: sock}, func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), typed...) }
 }
 
-// A message to a session that is not running starts it again (claude --resume) and then types the message. When
+// A message to a branch nothing has started yet (fork.go; a stopped agent takes none, #4754) starts it (claude
+// --resume) and then types the message. When
 // Claude came up with a dialog of its own (start returns as soon as herdr calls it blocked), the message used to be
 // typed into the dialog — picking an option. It is refused, nothing typed, like a send to a running pane.
 func TestResumedSessionWithADialogIsNotTypedInto(t *testing.T) {
@@ -79,6 +80,7 @@ func TestResumedSessionWithADialogIsNotTypedInto(t *testing.T) {
 	n.hosts, n.dir, n.panes = herdrHosts(h), filepath.Join(home, ".persona"), map[string]string{}
 	n.files, n.modes, n.metas, n.bgScans = map[string]*transcript.File{}, map[string]sessionModes{}, map[string]quickMeta{}, map[string]*bgScan{}
 	n.state.put(id, sessionState{Cwd: home, Launcher: "claude"})
+	n.freshForks = map[string]bool{id: true}
 	err := n.send(context.Background(), id, "部署到线上", nil, sendOpts{})
 	if code, _ := refusalOf(t, err); code != "dialog_open" {
 		t.Fatalf("send: %v", err)

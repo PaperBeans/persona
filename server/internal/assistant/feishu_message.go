@@ -158,6 +158,9 @@ func (s *Service) resolveBotTarget(ctx context.Context, t botTarget) (resolvedTa
 		if sess.SourceKind != "" && (sess.Capabilities == nil || !sess.Capabilities.Send) {
 			return resolvedTarget{}, errors.New(i18n.T(l, "assistant-feishu.agent_read_only", i18n.Args{"reason": sess.ReadOnlyReason}))
 		}
+		if stoppedAgent(sess) { // read-only (#4754)
+			return resolvedTarget{}, errors.New(i18n.T(l, "assistant-feishu.agent_stopped"))
+		}
 		return resolvedTarget{machine: d.ID, machineName: d.Name, session: sess, label: agentLabel(sess) + " · " + d.Name}, nil
 	default:
 		cfg := s.settings(ctx)

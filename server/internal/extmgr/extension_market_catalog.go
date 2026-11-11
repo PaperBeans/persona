@@ -1,6 +1,7 @@
 package extmgr
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"time"
@@ -11,17 +12,18 @@ import (
 
 // MarketView is a market as the apps list it.
 type MarketView struct {
-	ID          string     `json:"id"`
-	Spec        string     `json:"spec"`
-	Name        string     `json:"name"`
-	Description string     `json:"description,omitempty"`
-	Homepage    string     `json:"homepage,omitempty"`
-	HasToken    bool       `json:"has_token"`
-	Extensions  int        `json:"extensions"`
-	Warnings    []string   `json:"warnings"`
-	Error       string     `json:"error,omitempty"`
-	FetchedAt   *time.Time `json:"fetched_at,omitempty"`
-	AddedAt     time.Time  `json:"added_at"`
+	ID                 string     `json:"id"`
+	Spec               string     `json:"spec"`
+	Name               string     `json:"name"`
+	Description        string     `json:"description,omitempty"`
+	Homepage           string     `json:"homepage,omitempty"`
+	DownloadsUpdatedAt string     `json:"downloads_updated_at,omitempty"`
+	HasToken           bool       `json:"has_token"`
+	Extensions         int        `json:"extensions"`
+	Warnings           []string   `json:"warnings"`
+	Error              string     `json:"error,omitempty"`
+	FetchedAt          *time.Time `json:"fetched_at,omitempty"`
+	AddedAt            time.Time  `json:"added_at"`
 	// Official: the market every hub has without adding it (extension.Official), listed first.
 	Official bool `json:"official,omitempty"`
 	// Signature is the index's signature (docs/extensions/extensions.md "Signing"): signed / unsigned / invalid / key_changed,
@@ -37,19 +39,22 @@ type MarketSignatureView struct {
 
 // CatalogItem is a market's plugin as the catalog shows it, with what this hub has of it.
 type CatalogItem struct {
-	Replaces    string                     `json:"replaces,omitempty"`
-	RenameFrom  string                     `json:"rename_from,omitempty"`
-	Market      string                     `json:"market"`
-	MarketName  string                     `json:"market_name"`
-	ID          string                     `json:"id"`
-	Name        string                     `json:"name"`
-	Version     string                     `json:"version"`
-	Description string                     `json:"description,omitempty"`
-	Publisher   string                     `json:"publisher,omitempty"`
-	Homepage    string                     `json:"homepage,omitempty"`
-	Tags        []string                   `json:"tags"`
-	Contributes map[string][]string        `json:"contributes"`
-	Permissions []extension.PermissionLine `json:"permissions"`
+	Replaces           string                     `json:"replaces,omitempty"`
+	RenameFrom         string                     `json:"rename_from,omitempty"`
+	Market             string                     `json:"market"`
+	MarketName         string                     `json:"market_name"`
+	ID                 string                     `json:"id"`
+	Name               string                     `json:"name"`
+	Version            string                     `json:"version"`
+	Description        string                     `json:"description,omitempty"`
+	Publisher          string                     `json:"publisher,omitempty"`
+	Homepage           string                     `json:"homepage,omitempty"`
+	IconURL            string                     `json:"icon_url,omitempty"`
+	Downloads          *int64                     `json:"downloads,omitempty"`
+	DownloadsUpdatedAt string                     `json:"downloads_updated_at,omitempty"`
+	Tags               []string                   `json:"tags"`
+	Contributes        map[string][]string        `json:"contributes"`
+	Permissions        []extension.PermissionLine `json:"permissions"`
 	// Problem: why this hub cannot install it (no package for its platform, a newer hub needed); "" when it can.
 	Problem string `json:"problem,omitempty"`
 	// Installed is the version this hub has ("" none); InstalledSource where that one is from (builtin, hub.json,
@@ -95,6 +100,7 @@ func (h *Manager) marketView(s *marketState) MarketView {
 	}
 	if s.index != nil {
 		v.Description, v.Homepage, v.Extensions = s.index.Description, s.index.Homepage, len(s.index.Extensions)
+		v.DownloadsUpdatedAt = s.index.DownloadsUpdatedAt
 	}
 	if v.Name == "" {
 		v.Name = s.rec.Spec
@@ -139,6 +145,7 @@ func (h *Manager) catalogIn(l i18n.Lang, q, market string) []CatalogItem {
 		if s.index == nil || (market != "" && market != s.rec.ID) {
 			continue
 		}
+		start := len(out)
 		for i := range s.index.Extensions {
 			e := &s.index.Extensions[i]
 			m := e.Parsed
@@ -147,7 +154,8 @@ func (h *Manager) catalogIn(l i18n.Lang, q, market string) []CatalogItem {
 				continue
 			}
 			it := CatalogItem{Replaces: e.Replaces, Market: s.rec.ID, MarketName: marketName(l, s.rec), ID: m.ID, Name: ts.Name(l, m.Name), Version: m.Version, Description: ts.Description(l, m.Description),
-				Publisher: m.Publisher, Homepage: m.Homepage, Tags: append([]string{}, e.Tags...), Contributes: m.Contributions(), Permissions: extension.ExplainIn(l, m)}
+				Publisher: m.Publisher, Homepage: m.Homepage, IconURL: e.IconURL, Downloads: e.Downloads, DownloadsUpdatedAt: s.index.DownloadsUpdatedAt,
+				Tags: append([]string{}, e.Tags...), Contributes: m.Contributions(), Permissions: extension.ExplainIn(l, m)}
 			if s.rec.Signature.Bad() || (extension.IsOfficialMarket(s.rec.Spec) && (s.rec.Signature.State != extension.SigSigned || s.rec.Signature.KeyID != keyIDOf(extension.Official.SigningKey))) {
 				it.Problem = i18n.T(l, "hub-extension_market.bad_signature", i18n.Args{"err": s.rec.Error})
 			} else if e.PackageFor(extension.Platform()) == nil {
@@ -167,6 +175,23 @@ func (h *Manager) catalogIn(l i18n.Lang, q, market string) []CatalogItem {
 				it.Upgradable = cur.Record.Source == extension.SourceInstalled && extension.NewerVersion(m.Version, cur.Record.Version)
 			}
 			out = append(out, it)
+		}
+		if extension.IsOfficialMarket(s.rec.Spec) {
+			slices.SortFunc(out[start:], func(a, b CatalogItem) int {
+				count := func(it CatalogItem) int64 {
+					if it.Downloads != nil {
+						return *it.Downloads
+					}
+					return 0
+				}
+				if c := cmp.Compare(count(b), count(a)); c != 0 {
+					return c
+				}
+				if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
+					return c
+				}
+				return strings.Compare(a.ID, b.ID)
+			})
 		}
 	}
 	return out
