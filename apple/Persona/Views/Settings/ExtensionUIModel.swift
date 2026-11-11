@@ -130,7 +130,9 @@ extension APIClient {
                   values: [String: String]? = nil, manager: String? = nil) async throws -> ExtensionActionResult {
         let body = ExtensionUIRequest(context: context, state: state, action: action, values: values)
         let query = manager.map { ["manager": $0] } ?? [:]
-        return try JSON.decoder.decode(ExtensionActionResult.self, from: try await request("POST", extensionPath("/\(ext)/-/ui/\(ui)"), query: query, body: body))
+        // The source subscription pages (#2041) are the manager's own, drawn and pressed as an extension page.
+        let path = ext == SubscriptionsUI.id ? SubscriptionsUI.path : extensionPath("/\(ext)/-/ui/\(ui)")
+        return try JSON.decoder.decode(ExtensionActionResult.self, from: try await request("POST", path, query: query, body: body))
     }
 }
 
@@ -296,7 +298,8 @@ extension APIClient {
         self.deps = deps
         ExtensionUIRegistry.shared.add(self)
         #if os(iOS) || os(macOS)
-        if context.uiVersion == ExtensionUIContext.pageVersion, let connection = deps.connection() {
+        // The source subscription pages (#2041) are the manager's, drawn over HTTP only.
+        if context.uiVersion == ExtensionUIContext.pageVersion, plugin != SubscriptionsUI.id, let connection = deps.connection() {
             let stream = ExtensionPageStream(connection: connection, owner: plugin, contribution: ui,
                                              context: context, state: state ?? "", manager: manager)
             self.stream = stream

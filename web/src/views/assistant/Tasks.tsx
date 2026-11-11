@@ -39,7 +39,7 @@ import {
 } from "../../lib/feed";
 import { backgroundWorkLine, type BackgroundWork } from "../../lib/background-work";
 import { runningWorkflows, workflowCounts, workflowLine } from "../../lib/workflows";
-import { askOptions, dockAgents, type DockAgent, interruption, isRemovable, mostUrgentAgent, openAsk, orphanedLine, runningSubagents, stoppedReason, taskNow, todoStatus, TODO_STATUS_INFO, waitingLine, type SessionLookup, type Todo, type TodoStatus } from "../../lib/todos";
+import { dockAgents, type DockAgent, interruption, isRemovable, mostUrgentAgent, openAsk, orphanedLine, runningSubagents, stoppedReason, taskNow, todoStatus, TODO_STATUS_INFO, waitingLine, type SessionLookup, type Todo, type TodoStatus } from "../../lib/todos";
 import { TodoAskLine } from "../TodoAsk";
 import { usageLimitContinues, usageLimitLabel } from "../../lib/usage-limit";
 import { parseAPIError } from "../../lib/api-errors";
@@ -62,11 +62,13 @@ import { AcceptRow, BriefCard } from "./Brief";
 const PlanBrief = lazy(() => import("./TaskBrief").then((m) => ({ default: m.PlanBrief })));
 
 // A decision's row comes with the tray's first decision, not with the first screen (startup-preload's budget).
-const DecisionRow = lazy(() => import("./DecisionRow").then((m) => ({ default: m.DecisionRow })));
+const TaskDecision = lazy(() => import("./TaskDecision").then((m) => ({ default: m.TaskDecision })));
 import { SentLine, TaskSentList } from "./Sent";
 import { latestReview, parkedLine, progressLine } from "../../lib/supervision";
 import { planLabel, planLine, planShown } from "../../lib/plan";
 import { AnsweredCard, InteractionCard } from "../chat/Interactions";
+import { cardLine } from "../chat/dock";
+import { interactionKicker } from "../../lib/row-line";
 import { MessageActions } from "../chat/MessageActions";
 import { sessionTitle, stateOf } from "../../lib/format";
 import { formatDate, t } from "../../i18n";
@@ -260,7 +262,7 @@ export function taskInteraction(todo: Todo, interactions: Interaction[], lead?: 
   return (lead && interactions.find((ix) => ix.machine_id === lead.machine_id && ix.session_id === lead.session_id)) ?? interactions.find(mine);
 }
 
-/** What a waiting task needs, in a line (#3301): "Has a question: which framework?", "Needs your permission: swift test", "Plan awaiting approval", the words
+/** What a waiting task needs, in a line (#3301): "Has a question: which framework?", "Waiting for your approval: swift test", "Plan awaiting approval", the words
  *  the to-dos page's agent rows use; undefined without a card. */
 export function taskAsk(ix: Interaction | undefined): string | undefined {
   if (!ix) return undefined;
@@ -704,6 +706,8 @@ export const FeedLineView = memo(function FeedLineView({ item, simplified = fals
             {item.body?.interrupted === true ? t("assistant-tasks.said_to_interrupting", { title }) : t("assistant-tasks.say_to", { title })}
           </span>
           <div className="rounded-[18px] bg-field px-3.5 py-2 text-[14.5px]">{field(item, "text")}</div>
+          {/* every Agent of the task had stopped, so the message started a new one for it (#4754) */}
+          {field(item, "new_agent") && <NewAgentLine sid={field(item, "new_agent")!} mid={field(item, "new_agent_machine")} />}
         </div>
       );
     case "today":
@@ -728,6 +732,18 @@ export const FeedLineView = memo(function FeedLineView({ item, simplified = fals
       return null;
   }
 });
+
+/** Under a message to a task whose Agents had all stopped: it went to a new Agent (#4754), which the line opens. */
+function NewAgentLine({ mid, sid }: { mid?: string; sid: string }) {
+  const text = t("assistant-tasks.new_agent_started");
+  if (!mid) return <span className="text-[12px] text-ink-3">{text}</span>;
+  return (
+    <button type="button" onClick={() => navigate({ name: "session", mid, sid })} className="touch-hit inline-flex items-center gap-1 text-[12px] text-ink-3 hover:text-ink hover:underline">
+      <Icon name="agent" size={11} />
+      {text}
+    </button>
+  );
+}
 
 /** A card of a task's agent the user dealt with, kept as a line "✓ task · answer". Click it for every question with its
  *  answer in full (#1231), selectable, and again to fold it; the task's name opens the task. */
@@ -1376,12 +1392,11 @@ function NeedsYouRow({ item }: { item: NeedsYouItem }) {
   const { todo, asks, status } = item;
   if (asks.length) return <div data-needs-row={item.key}><button type="button" onClick={() => openTask(todo.id)} className="block max-w-full truncate px-1 text-left text-sm font-semibold hover:underline">{todo.title}</button>{asks.map((ix) => <InteractionCard key={ix.id} ix={ix} />)}</div>;
   const ask = openAsk(todo);
-  // a decision with its options is answered on the row (#3804); any other ask keeps its one button
-  if (ask && askOptions(ask).length)
+  // Both structured decisions and older review-only decisions have the same deferral controls.
+  if (ask?.outcome === "decide" || todo.supervision?.state === "needs_user")
     return (
-      // until its code is here: the row's surface with the task's title, so the tray does not jump
       <Suspense fallback={<div data-needs-row={item.key} className="truncate rounded-control bg-field px-3 py-2.5 text-[12px] text-ink-2">{todo.title}</div>}>
-        <DecisionRow key={todo.id + ask.asked_at} rowKey={item.key} todo={todo} ask={ask} />
+        <TaskDecision key={todo.id + (todo.supervision?.reviews?.at(-1)?.at || todo.decision_review?.review_at || ask?.asked_at)} rowKey={item.key} todo={todo} />
       </Suspense>
     );
   if (ask) return <div data-needs-row={item.key}><AcceptRow stacked key={todo.id + ask.asked_at} row={{ id: todo.id, title: todo.title, waited_s: Math.max(0, (Date.now() - Date.parse(ask.asked_at)) / 1000), outcome: ask.outcome, verdict: ask.verdict, recommend: ask.recommend, asked_at: ask.asked_at }} /></div>;
@@ -1405,7 +1420,21 @@ function RunningAgentRow({ session, activity }: { session: Session; activity?: B
 
 /** The conversation's two upward trays (#3387): Needs you, everything waiting on the user, and In progress, everything
  *  running that does not; each thing in one of them only (lib/assistant-entries). Finished things are on the board. */
-export const AssistantActionBar = memo(function AssistantActionBar({ conversation, ownPending, ownCount = 0 }: { conversation: string; ownPending?: ReactNode; ownCount?: number }) {
+const NO_ASKS: Interaction[] = [];
+
+/** One of the conversation's own cards in Needs you (#4883): the card itself is in the chat above the composer, as on
+ *  iOS (ActionTrayContent's asks); its row says what it waits for and closes the tray onto it. */
+function OwnAskRow({ ix, onOpen }: { ix: Interaction; onOpen: () => void }) {
+  return (
+    <button type="button" data-own-ask={ix.id} onClick={onOpen} className="flex items-center gap-2 rounded-control bg-field px-3 py-2 text-left text-sm">
+      <StatusMark state="needs_you" />
+      <span className="min-w-0 flex-1 truncate">{cardLine(ix)}</span>
+      <span className="shrink-0 whitespace-nowrap text-xs text-ink-2">{interactionKicker(ix)}</span>
+    </button>
+  );
+}
+
+export const AssistantActionBar = memo(function AssistantActionBar({ conversation, ownAsks = NO_ASKS }: { conversation: string; ownAsks?: Interaction[] }) {
   const [tray, setTrayNow] = useState<AssistantTray | null>(null);
   // the open tray filling the chat column (#4656), for going through many cards; closing or switching trays undoes it
   const [expanded, setExpanded] = useState(false);
@@ -1451,7 +1480,12 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
     const row = conversations?.find((c) => c.session_id === id);
     return row ? conversationTitle(row) : t("assistant-tasks.needs_group_another");
   };
-  const counts: Record<AssistantTray, number> = { needs: ownCount + entries.needsYou.length, running: entries.running.length };
+  const counts: Record<AssistantTray, number> = { needs: ownAsks.length + entries.needsYou.length, running: entries.running.length };
+  // the card is in the chat already: close the tray onto it and bring it into view
+  const openOwn = (id: string) => {
+    setTray(null);
+    requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-card]")].find((el) => el.dataset.card === id)?.firstElementChild?.scrollIntoView?.({ block: "nearest" }));
+  };
   useEffect(() => {
     const needs = (event: Event) => { if ((event as CustomEvent).detail === conversation) setTray("needs"); };
     window.addEventListener("persona:task-pending", needs);
@@ -1486,7 +1520,7 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
           </div>}
           {tray === "needs" && <div className="flex flex-col gap-2 p-2">
             {asking.map((item) => <NeedsYouRow key={item.key} item={item} />)}
-            {ownPending}
+            {ownAsks.map((ix) => <OwnAskRow key={ix.id} ix={ix} onOpen={() => openOwn(ix.id)} />)}
             {rest.map((item) => <NeedsYouRow key={item.key} item={item} />)}
             {groups.slice(1).map((group) => (
               <section key={group.supervisor} data-needs-supervisor={group.supervisor} aria-label={supervisorTitle(group.supervisor)} className="flex flex-col gap-2">

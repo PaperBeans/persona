@@ -35,7 +35,7 @@ import java.io.File
  * The sessions are the hub's JSON. PNGs in `build/by-status-shots/`.
  */
 @RunWith(AndroidJUnit4::class)
-@Config(sdk = [35], qualifiers = "en-w400dp-h1300dp")
+@Config(sdk = [35], qualifiers = "en-w400dp-h1500dp")
 @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
 class ByStatusShotsTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
@@ -101,6 +101,10 @@ class ByStatusShotsTest {
         rule.onNodeWithText("Seen").performClick()
         rule.waitForIdle()
         save("by-status-seen-open")
+        // A chosen quick filter takes its own state's color (#4338 A11).
+        rule.runOnIdle { model.filter(persona.core.domain.sort.AgentQuickFilter.Working) }
+        rule.waitForIdle()
+        save("quick-working")
     }
 
     private object Nowhere : Navigator {

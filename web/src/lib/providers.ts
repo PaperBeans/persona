@@ -3,8 +3,9 @@
 // in views/settings/Provider*.tsx only render it.
 import { ApiError, errorText } from "./api";
 import { hostOf as urlHost } from "./hubs";
-import { launcherNameProblem } from "./launcher-presets";
+import { launcherNameProblem, testableKey } from "./launcher-presets";
 import type { ScopeView } from "./provider-scope";
+import { TIER_SLOTS, type TierSource } from "./provider-tiers";
 import { EFFORTS } from "./session-actions";
 import { t } from "../i18n";
 
@@ -87,6 +88,8 @@ export interface ProviderForm {
   sonnet_model: string;
   haiku_model: string;
   fable_model: string;
+  /** Which tier models were filled in by themselves and which the user chose (lib/provider-tiers.ts); never sent. */
+  tier_source: TierSource;
   /** "Name: value" a line; only sent when touched (a stored one is never shown). */
   headers: string;
   headers_touched: boolean;
@@ -125,6 +128,7 @@ export function newForm(): ProviderForm {
     sonnet_model: "",
     haiku_model: "",
     fable_model: "",
+    tier_source: {},
     headers: "",
     headers_touched: false,
     env: "",
@@ -148,6 +152,9 @@ export function formModel(m: ProviderModel, checked = true): FormModel {
   return { id: m.id, name: m.name ?? "", context_window: numText(m.context_window), efforts: [...(m.efforts ?? [])], default_effort: m.default_effort ?? "", checked };
 }
 
+/** How a saved provider signs in: what it stores, else x-api-key (providers saved before the choice existed). */
+export const storedAuth = (v: ProviderView): ProviderForm["auth"] => v.auth ?? "api_key";
+
 /** The form an existing provider opens with: its models checked, the default among them even when not listed. */
 export function formFromView(v: ProviderView): ProviderForm {
   const models = (v.models ?? []).map((m) => formModel(m));
@@ -159,7 +166,7 @@ export function formFromView(v: ProviderView): ProviderForm {
     api: v.api ?? "messages",
     name: v.name,
     base_url: v.base_url ?? "",
-    auth: v.auth ?? "api_key",
+    auth: storedAuth(v),
     models,
     model: v.model ?? "",
     small_model: v.small_model ?? "",
@@ -169,6 +176,8 @@ export function formFromView(v: ProviderView): ProviderForm {
     sonnet_model: v.sonnet_model ?? "",
     haiku_model: v.haiku_model ?? "",
     fable_model: v.fable_model ?? "",
+    // a saved provider's tiers are its own: nothing fills them in (#4975)
+    tier_source: Object.fromEntries(TIER_SLOTS.map((s) => [s, "user"])),
     proxy: v.proxy ?? "",
     no_proxy: v.no_proxy ?? "",
     timeout_ms: numText(v.timeout_ms),
@@ -198,6 +207,27 @@ export function mergeDiscovered(models: FormModel[], found: ProviderModel[], cha
     } else if (!out[i].context_window && m.context_window) {
       out[i] = { ...out[i], context_window: String(m.context_window), ...(!chat && !out[i].efforts.length ? { efforts: [...(m.efforts ?? [])] } : {}) };
     }
+  }
+  return out;
+}
+
+/** A model typed by hand, filled in from the hub's catalog (POST /api/v1/launchers/catalog, #4975): only what is still
+ *  empty (its name, context window, thinking levels and default level), so what the user typed meanwhile stays. A Chat
+ *  Completions provider takes no thinking levels. */
+export function fillFromCatalog(models: FormModel[], found: ProviderModel[], chat = false): FormModel[] {
+  let out = models;
+  for (const m of found) {
+    const i = out.findIndex((x) => x.id === m.id);
+    if (i < 0) continue;
+    const row = out[i];
+    const patch: Partial<FormModel> = {};
+    if (!row.name && m.name) patch.name = m.name;
+    if (!row.context_window && m.context_window) patch.context_window = String(m.context_window);
+    if (!chat && !row.efforts.length && m.efforts?.length) {
+      patch.efforts = [...m.efforts];
+      if (!row.default_effort && m.default_effort && m.efforts.includes(m.default_effort)) patch.default_effort = m.default_effort;
+    }
+    if (Object.keys(patch).length) out = out.map((x, j) => (j === i ? { ...x, ...patch } : x));
   }
   return out;
 }
@@ -261,19 +291,22 @@ export function proxyProblem(raw: string): string {
 
 /** What keeps each step from going on ("" when it can): the same rules the hub checks (launchers.go), said earlier. */
 export interface FormProblems {
+  /** The name, the address and the key: what keeps "Next" and "Save" from going on. */
   connect: string;
+  /** Only the address and the key: what keeps "Test connection" and "Fetch models" from running. The name plays no part
+   *  in reaching the gateway, so it never blocks them (#4881). */
+  reach: string;
   models: string;
   advanced: string;
 }
 
 export function formProblems(f: ProviderForm, isNew: boolean, hadKey = false): FormProblems {
   const requiresUrlAndKey = f.kind === "api" || !f.agent || f.agent === "claude";
-  const connect =
-    (!f.name.trim() && t("lib-providers.name_required")) ||
-    (isNew && launcherNameProblem(f.name)) ||
+  const reach =
     ((requiresUrlAndKey || f.base_url.trim() !== "") && gatewayProblem(f.base_url)) ||
     (requiresUrlAndKey && !f.api_key.trim() && (isNew || !hadKey) && t("lib-providers.key_required")) ||
     "";
+  const connect = (!f.name.trim() && t("lib-providers.name_required")) || (isNew && launcherNameProblem(f.name)) || reach;
 
   const chat = f.kind === "api" && f.api === "chat";
   let models = "";
@@ -300,7 +333,19 @@ export function formProblems(f: ProviderForm, isNew: boolean, hadKey = false): F
     (!chat && !nonNegInt(f.max_context) && t("lib-providers.max_context_int")) ||
     (f.kind !== "api" && f.args.split(/\s+/).some((a) => a && !a.startsWith("-")) && t("lib-providers.args_dash")) ||
     "";
-  return { connect, models, advanced };
+  return { connect, reach, models, advanced };
+}
+
+/** Whether the Connect step checks the connection by itself (fetches the models, then tests one): a valid address and a
+ *  key that looks whole (typed, or the stored one when editing). A saved provider is checked only once its address, key
+ *  or sign-in method differs from what is stored, so opening it sends nothing (#4881). */
+export function autoCheckable(f: ProviderForm, old: ProviderView | null): boolean {
+  if (!f.base_url.trim() || gatewayProblem(f.base_url)) return false;
+  const key = f.api_key.trim();
+  if (key && !testableKey(key)) return false;
+  if (!old) return !!key;
+  if (!key && !old.has_key) return false;
+  return !!key || f.base_url.trim() !== (old.base_url ?? "").trim() || f.auth !== storedAuth(old);
 }
 
 const int = (s: string) => (s.trim() ? parseInt(s.trim(), 10) : 0);

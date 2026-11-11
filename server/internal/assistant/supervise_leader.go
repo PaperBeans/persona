@@ -39,6 +39,28 @@ func (s *Service) supervises(ctx context.Context, id string) bool {
 	return s.isMain(ctx, id) || s.isLeader(ctx, id)
 }
 
+// defaultPlanSupervisor is who supervises a task conversation hands out with task_plan when conversation does not supervise
+// (supervises): that conversation itself, so a side conversation follows up and reviews the work it dispatched. None for
+// a task leader's worker (parent set: its leader's agent supervises it), a reporting conversation's task (its notices
+// go back to it, #4101) or a plan with no conversation. A planning conversation that is not a live assistant
+// conversation cannot be told anything, so its task stays the main conversation's (#4669).
+func (s *Service) defaultPlanSupervisor(ctx context.Context, conversation, parent string) (string, bool) {
+	if parent != "" || conversation == "" {
+		return "", false
+	}
+	if _, reports := s.reporterOf(ctx, conversation); reports {
+		return "", false
+	}
+	if s.supervises(ctx, conversation) {
+		return "", false // the main conversation and leaders supervise their own (supervises)
+	}
+	if c, ok := s.session(ctx, s.settings(ctx).MachineID, conversation); ok && c.Assistant {
+		return conversation, true
+	}
+	main := s.settings(ctx).Main
+	return main, main != "" && main != conversation
+}
+
 // digestTo is the conversation signal g goes to, with cfg the settings in effect: the one it names (To), else its task's
 // supervisor when that is a leader, unless the main conversation handles it (a leader's needs_user, a start to remedy, a task waiting for the
 // user); else the main conversation.
@@ -55,7 +77,10 @@ func (s *Service) digestTo(cfg Settings, g superviseSignal) string {
 		return cfg.Main
 	}
 	lead := t.Supervision.Supervisor
-	if lead == "" || lead == cfg.Main || !slices.Contains(cfg.Leaders, lead) || t.Supervision.state(t) == reviewNeedsUser {
+	// A supervisor is the conversation that handed the task out: the main conversation, a leader, or any other
+	// conversation (sendDigest falls back to the main one when that conversation is gone). A task leader's agent never
+	// reaches this: leaderRoute takes its workers' signals first.
+	if lead == "" || lead == cfg.Main || t.Supervision.state(t) == reviewNeedsUser {
 		return cfg.Main
 	}
 	return lead

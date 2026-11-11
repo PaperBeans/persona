@@ -201,13 +201,33 @@ import Observation
 
 extension AppModel {
     /// Only summaries land here; complete fields already fetched for a chat stay intact.
+    /// Rows keep their places and new ones go at the end: a read that brings the same rows again leaves every list
+    /// equal, so nothing that reads the sessions redraws (#4683).
     func landSessionSummaries(_ rows: [Session], group: String) {
         let old = allSessions.filter { $0.group == group }
         let index = Dictionary(old.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         let incoming = rows.map { $0.preservingDetails(from: index[$0.key]) }
-        let keys = Set(rows.map(\.key))
-        let kept = old.filter { !keys.contains($0.key) }
-        applySessions(Dictionary(grouping: kept + incoming, by: \.machineRef))
+        applySessions(Dictionary(grouping: Self.merging(incoming, into: old), by: \.machineRef))
+    }
+
+    /// `old` with each row `incoming` has replaced where it is (one copy), then the rows it did not have, in their order.
+    nonisolated static func merging(_ incoming: [Session], into old: [Session]) -> [Session] {
+        var pending = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        var placed = Set<SessionKey>()
+        var out: [Session] = []
+        out.reserveCapacity(old.count + incoming.count)
+        for row in old {
+            let key = row.key
+            if let new = pending[key] {
+                if placed.insert(key).inserted { out.append(new) }
+            } else {
+                out.append(row)
+            }
+        }
+        for row in incoming where placed.insert(row.key).inserted {
+            out.append(pending.removeValue(forKey: row.key) ?? row)
+        }
+        return out
     }
 }
 

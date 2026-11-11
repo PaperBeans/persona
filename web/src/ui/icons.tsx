@@ -66,6 +66,14 @@ const P: Record<string, React.ReactNode> = {
   download: <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />,
   retry: <path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />,
   undo: <path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />,
+  // a message sent on to another chat (#3899, iOS Theme.Icon.forwardMessage): undo's arrow, turned the other way
+  forward: <path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />,
+  // the image editor's (#4991, iOS Theme.Icon.redo / crop / rotateLeft / cropRatio): Redo is undo's arrow turned the
+  // other way, as forward is; a crop's two corners; a frame turned a quarter left; a tall and a wide frame over each other
+  redo: <path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />,
+  crop: <path d="M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2" />,
+  rotateLeft: <g><path d="M20 9V7a2 2 0 0 0-2-2h-6M15 2l-3 3 3 3" /><path d="M20 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" /></g>,
+  ratio: <g><rect x="6" y="2" width="12" height="20" rx="2" /><rect x="2" y="6" width="20" height="12" rx="2" /></g>,
   lock: <g><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></g>,
   // show / hide what a secret field holds while it is typed (Lucide's eye / eye-off)
   eye: <g><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0" /><circle cx="12" cy="12" r="3" /></g>,

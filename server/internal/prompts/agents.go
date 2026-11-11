@@ -193,6 +193,17 @@ type DispatchTask struct {
 
 func RenderDispatchTask(t DispatchTask) string { return render("agents/dispatch_task", t) }
 
+// TaskSuccessor is the first message of an agent Persona starts for a task whose agents have all stopped (#4754): who
+// worked on it before and its last reply, then the user's message on the task (agents/task_successor).
+type TaskSuccessor struct {
+	Previous   string // the stopped agent's tab / title
+	PreviousID string // its session id
+	LastReply  string // its last reply, clipped; "" when there is none
+	Text       string
+}
+
+func RenderTaskSuccessor(t TaskSuccessor) string { return render("agents/task_successor", t) }
+
 // RenderTaskLeader is what follows the prompt of a task whose agent is a task leader (agents/task_leader, #3656): that it
 // can hand direct workers to task_plan and how their reports reach it.
 func RenderTaskLeader() string { return render("agents/task_leader", struct{}{}) }

@@ -46,9 +46,14 @@ nonisolated struct HubExtension: Codable, Hashable, Sendable, Identifiable {
     var manager: String?
     var attached: ExtensionAttached?
     var sandbox: ExtensionSandbox?
+    /// Optional catalog artwork/popularity on newer hubs; absent on legacy responses.
+    var iconURL: String?
+    var downloads: Int?
+    var downloadsUpdatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, kind, status, error, version, source, enabled, description, contributes, warnings, market, upgrade, nodes, auth, tools, manager, attached, sandbox
+        case id, name, kind, status, error, version, source, enabled, description, contributes, warnings, market, upgrade, nodes, auth, tools, manager, attached, sandbox, downloads
+        case iconURL = "icon_url", downloadsUpdatedAt = "downloads_updated_at"
         case needsSetup = "needs_setup", autoUpgrade = "auto_upgrade", autoUpgradePaused = "auto_upgrade_paused", upgradeNote = "upgrade_note"
     }
 
@@ -562,7 +567,10 @@ enum ExtensionText {
             async let managers = ManagerRoster.read(api, keeping: last)
             let list = try await api.pluginList()
             roster = await managers
-            plugins = list.plugins
+            plugins = list.plugins.sorted {
+                ExtensionPopularity.precedes(downloads: $0.downloads, name: $0.name, identity: $0.listKey,
+                                             downloads: $1.downloads, name: $1.name, identity: $1.listKey)
+            }
             for p in list.plugins where p.auth != nil { deps.auth.received(p.id, p.auth, manager: manager(of: p)) }
             markets = list.markets
             error = nil

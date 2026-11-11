@@ -44,8 +44,9 @@ const (
 	maxLiveText      = 4000 // bytes of one sentence: longer ones are cut at a character boundary
 	maxLivePositions = 20000
 	maxLiveBytes     = 4 << 20 // of live text in all
-	// What MeetingMaterial gives of the live sentences, and of earlier meetings.
+	// What MeetingMaterial gives of the live sentences, of the photos' words, and of earlier meetings.
 	materialLiveRunes  = 12000
+	materialPhotoRunes = 8000
 	materialMaxEarlier = 6
 )
 
@@ -65,13 +66,15 @@ type LiveSegment struct {
 	Text  string  `json:"text"`
 }
 
-// AskSource is an earlier meeting (kind recordings) or a project (kind projects) an answer drew on; When is the
-// meeting's minutes when.
+// AskSource is an earlier meeting (kind recordings) or a project (kind projects) an answer drew on; When, Start and End
+// are the meeting's minutes' (#4713: clients format Start / End and show When only without them).
 type AskSource struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	When string `json:"when,omitempty"`
+	Kind  string    `json:"kind"`
+	ID    string    `json:"id"`
+	Name  string    `json:"name"`
+	When  string    `json:"when,omitempty"`
+	Start time.Time `json:"start,omitzero"`
+	End   time.Time `json:"end,omitzero"`
 }
 
 // LiveAsk is a question asked during the meeting (POST /api/v1/recordings/{id}/ask) and its answer.

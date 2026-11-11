@@ -402,19 +402,34 @@ struct TerminalPanel: View {
                 .tint(Color(hex: side.foreground))
         } else if canResume {
             EmptyStateView(symbol: Theme.Icon.terminal, title: String(localized: "No Terminal"),
-                           message: String(localized: "This session isn't running on its computer. Resume it to open its terminal."),
+                           message: String(localized: "This Agent has stopped. Resume runs it again in a terminal on its computer."),
                            action: (title: String(localized: "Resume Session"), run: resumeSession))
         } else {
             EmptyStateView(symbol: Theme.Icon.terminal, title: String(localized: "No Terminal"),
-                           message: String(localized: "This session isn't running on its computer. Send it a message to resume it."))
+                           message: String(localized: "This session isn't running on its computer."))
         }
     }
 
-    /// A Claude Code session in a terminal engine that isn't being started: one Resume Session can bring back. Others
-    /// (Codex, which resumes with its next message) are resumed by a message.
+    /// A session Resume Session can bring back, the one way a stopped Agent runs again (#4754): a stopped Agent (Claude
+    /// Code, Codex or a compatible CLI), a Codex thread nothing has open, or a Claude Code session of the engine that is
+    /// not being started.
     private var canResume: Bool {
-        guard let s = model.session(key) else { return false }
-        return !s.hasSource && s.isClaude && !s.assistant && s.starting != true
+        guard let s = model.session(key), !s.assistant, s.starting != true else { return false }
+        return s.isStopped || (s.sourceKind == "codex_history" && s.canTerminal) || (!s.hasSource && s.isClaude)
+    }
+
+    /// Over the shell a stopped Agent left (#4754): Resume runs it again in that shell.
+    @ViewBuilder private var stoppedResume: some View {
+        if canResume, model.session(key)?.isStopped == true {
+            Button(action: resumeSession) {
+                Text(resuming ? String(localized: "Resuming…") : String(localized: "Resume Session"))
+                    .font(Theme.Font.captionStrong).lineLimit(1)
+            }
+            .themedButton(prominent: true)
+            .disabled(resuming)
+            .padding(Theme.Space.m)
+            .accessibilityIdentifier("terminal-stopped-resume")
+        }
     }
 
     /// Resumes it with what it ran with (the node fills in what is left out) and connects as soon as it is up.
@@ -443,6 +458,7 @@ struct TerminalPanel: View {
         liveContent
             .clipShape(.rect(cornerRadius: Theme.Radius.card, style: .continuous))
             .overlay(alignment: .bottom) { bottomOverlay }
+            .overlay(alignment: .topTrailing) { stoppedResume }
             .overlay { pinchOverlay }
             .overlay(alignment: .top) {
                 if let error = feed.error {
@@ -1153,14 +1169,13 @@ struct BackgroundTasksStrip: View {
 // MARK: - Activity chips
 
 /// "⟳ 13:24 │ ⚙ 2" at the end of the chat header's second row: what keeps an agent going, in one neutral pill as tall
-/// as the tabs beside it. Only the icons carry color (the folded bar's marks, `ChatView.activityMark`); the words are in
-/// its VoiceOver label and its sheet (`ActivitySheet`). At the largest text sizes, with both there, the loop is only its
-/// arrows so the pill leaves the tabs some room.
+/// as the tabs beside it. The background work is a count by a neutral gear: whether it works or only waits is the
+/// agent's state, which the title's line says once (#3719; it used to draw the state's clock or amber gear here too).
+/// The loop's arrows keep their color; the words are in its VoiceOver label and its sheet (`ActivitySheet`). At the
+/// largest text sizes, with both there, the loop is only its arrows so the pill leaves the tabs some room.
 struct ActivityChips: View {
     var loop: LoopInfo?
     var background: [BackgroundTask]
-    /// All that background work only waits (`Session.waitsInBackground`, #6045): the clock, lighter, for the gear.
-    var waiting = false
     var open: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -1185,8 +1200,7 @@ struct ActivityChips: View {
                 }
                 if !background.isEmpty {
                     HStack(spacing: Theme.Space.xxs) {
-                        ThemedIcon(waiting ? Theme.Icon.backgroundWaiting : Self.backgroundSymbol).font(Theme.Font.labelHeavy)
-                            .foregroundStyle(waiting ? StatusPalette.backgroundWaiting.dot : Theme.busy)
+                        ThemedIcon(Self.backgroundSymbol).font(Theme.Font.labelHeavy).foregroundStyle(.secondary)
                         Text("\(background.count)").monospacedDigit().lineLimit(1)
                     }
                 }
@@ -1205,7 +1219,7 @@ struct ActivityChips: View {
 
     /// The loop's and the background work's symbols, shared with the folded bar's mark.
     static let loopSymbol = Theme.Icon.inProgress
-    static let backgroundSymbol = Theme.Icon.backgroundTaskFilled
+    static let backgroundSymbol = Theme.Icon.backgroundTask
 
     private var a11yLabel: String {
         let parts = [loop.map { String(localized: "Looping, \(Self.loopLabel($0, now: .now))") },

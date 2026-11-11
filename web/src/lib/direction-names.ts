@@ -4,15 +4,18 @@
 // works out (the name given, else the project's, else the title without its "MMDD | kind | " prefix).
 // Asked again whenever the leaders or their titles change; until it answers, or on a hub that cannot, a row shows its title.
 // Names and counts come from the hub's direction tree (GET /api/v1/assistant/directions/tree, #4352): each current
-// direction in the leaders' order with its name and `counts` (Working and Waiting on you are shown, #4331). The hub sends
-// `directions` whenever the tree changes (a leader made or ended anywhere, a name, a task's state), and the page reads
-// the tree again then (readDirectionTree), so an open sidebar follows at once. A hub without the tree answers 404: the
-// names come from GET /api/v1/assistant/leaders and there are no counts.
+// direction in the leaders' order with its name and `counts` (Working and Waiting on you are shown, #4331). The tree is
+// read and held in one place, lib/direction-tree.ts (the To-dos page and the Agents list draw the same one); this module
+// only takes the names and counts from it whenever it changes. The hub sends `directions` whenever the tree changes (a
+// leader made or ended anywhere, a name, a task's state), and the page reads the tree again then (readDirectionTree), so
+// an open sidebar follows at once. A hub without the tree answers 404: the names come from GET
+// /api/v1/assistant/leaders and there are no counts.
 import { useEffect, useSyncExternalStore } from "react";
 import { api } from "./api";
+import { DIRECTION_TREE_PATH, directionTreeNow, readDirectionTreeOnce, refreshDirectionTree, resetDirectionTree, subscribeDirectionTree } from "./direction-tree";
 
 export const LEADERS_PATH = "/assistant/leaders";
-export const TREE_PATH = "/assistant/directions/tree";
+export const TREE_PATH = DIRECTION_TREE_PATH;
 
 /** A direction as the tree lists it (only what the sidebar reads). */
 interface TreeDirection {
@@ -26,10 +29,6 @@ interface TreeDirection {
 export function treeLeaders(tree: { directions?: TreeDirection[] } | undefined): LeaderInfo[] {
   return (tree?.directions ?? []).filter((d) => d.id && !d.secretary).map((d) => ({ id: d.id, name: d.name, counts: { working: d.counts?.working ?? 0, needs_you: d.counts?.needs_you ?? 0 } }));
 }
-
-/** The tree, or a rejection when the answer is none (an older hub's 404, a layer in front of it): a tree always lists
- *  its secretary group. */
-const fetchTree = () => api<{ directions?: TreeDirection[] }>(TREE_PATH).then((t) => (Array.isArray(t?.directions) ? t : Promise.reject(new Error("no direction tree"))));
 
 export interface LeaderInfo {
   id: string;
@@ -123,14 +122,19 @@ function ask(key: string) {
   if (toldIds !== null && idsOf(key) === toldIds) return;
   const n = ++asked;
   if (!key) return set([]);
-  fetchTree()
-    .then(treeLeaders, () => api<{ leaders?: LeaderInfo[] }>(LEADERS_PATH).then((res) => res.leaders ?? [])) // an older hub: names only
-    .then(
-    (res) => n === asked && set(res),
-    // an older hub or a failed read: the rows keep their titles; the next change asks again
-    () => n === asked && (askedFor = ""),
-  );
+  // the tree's names and counts arrive through followTree; only without a tree are the names asked for on their own
+  readDirectionTreeOnce()
+    .then((t) => (t ? undefined : api<{ leaders?: LeaderInfo[] }>(LEADERS_PATH).then((res) => n === asked && set(res.leaders ?? [])))) // an older hub: names only
+    // a failed read: the rows keep their titles; the next change asks again
+    .catch(() => n === asked && (askedFor = ""));
 }
+
+/** The tree's leaders, every time the tree changes (lib/direction-tree.ts reads it, for every screen at once). */
+function followTree() {
+  const t = directionTreeNow();
+  if (t) applyLeadersEvent(treeLeaders(t));
+}
+subscribeDirectionTree(followTree);
 
 /** Forget the names (another login, tests). */
 export function resetDirectionNames() {
@@ -139,6 +143,7 @@ export function resetDirectionNames() {
   names = new Map();
   counts = new Map();
   toldIds = null;
+  resetDirectionTree();
 }
 
 const subscribe = (l: () => void) => {
@@ -161,12 +166,10 @@ export function useLeaderCounts(): ReadonlyMap<string, LeaderCounts> {
   return useSyncExternalStore(subscribe, countsSnapshot, countsSnapshot);
 }
 
-/** Reads the tree (on `directions` and on every hello): the leaders' ids in order, or null when it could not be read
- *  (an older hub, a failure), in which case nothing changes. */
-export async function readDirectionTree(): Promise<string[] | null> {
-  try {
-    return applyLeadersEvent(treeLeaders(await fetchTree()));
-  } catch {
-    return null;
-  }
+/** Reads the tree (on every hello, `since` the socket opened: a read sent since then serves; with `changed`, on
+ *  `directions`, once more after any read out): the leaders' ids in order, or null when it could not be read (an older
+ *  hub, a failure), in which case nothing changes. The names and counts are already taken from it by then (followTree). */
+export async function readDirectionTree(changed = false, since?: number): Promise<string[] | null> {
+  const t = await (changed ? refreshDirectionTree() : readDirectionTreeOnce(since));
+  return t ? treeLeaders(t).map((l) => l.id) : null;
 }

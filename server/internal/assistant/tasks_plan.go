@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -83,10 +82,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.Title, t.Prompt, t.Cwd = strings.TrimSpace(t.Title), strings.TrimSpace(t.Prompt), strings.TrimSpace(t.Cwd)
 		t.Model = strings.TrimSpace(t.Model)
 		t.Permission = strings.TrimSpace(t.Permission)
-		if err := t.checkWritablePermission(); err != nil {
-			return "", fmt.Errorf("task %d: %w. Nothing was planned", i+1, err)
-		}
-		if err := t.checkRole(ctx, s, sessionID, scope != nil); err != nil {
+		if err := t.checkRole(scope != nil); err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
 		if m, ok := s.machineByName(ctx, t.Machine); ok && t.Role == roleLeader && s.isWorkMachine(m.ID) {
@@ -257,6 +253,10 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		fmt.Fprintf(&b, " Leader conversation %s supervises them: their supervision messages go there, and it reviews them with task_review.", lead)
 	case s.supervises(ctx, sessionID):
 		b.WriteString(" You supervise them: a supervision message comes when one needs you (review it with task_review).")
+	default:
+		if _, ok := s.defaultPlanSupervisor(ctx, sessionID, ""); ok {
+			b.WriteString(" You supervise them: a supervision message comes when one needs you (review it with task_review).")
+		}
 	}
 	b.WriteString(dups)
 	return b.String(), nil
@@ -337,44 +337,15 @@ func planErr(w http.ResponseWriter, err error) {
 	}
 }
 
-// checkWritablePermission refuses a task that changes files and does not say bypassPermissions itself: it starts with
-// nobody there to answer a permission prompt, and a plan that left it to a default would stop at a prompt at run time.
-// It runs when a plan is made and again when a saved one is started, so a plan saved earlier, or one a card edit changed,
-// cannot get past it. Called with the permission trimmed.
-func (t *PlanTask) checkWritablePermission() error {
-	if t.Readonly || t.Permission == permBypass {
-		return nil
-	}
-	return t.permissionRuleError()
-}
-
-// errPermissionRule marks the refusal of checkWritablePermission, for a start that must not be tried again.
-var errPermissionRule = errors.New("writable task without bypassPermissions")
-
-type permissionRuleError struct{ error }
-
-func (e permissionRuleError) Is(target error) bool { return target == errPermissionRule }
-
-func (t *PlanTask) permissionRuleError() error {
-	got := "none"
-	if t.Permission != "" {
-		got = strconv.Quote(t.Permission)
-	}
-	return permissionRuleError{fmt.Errorf("%q changes files (readonly false), so permission must be %q, set explicitly (got %s); set it, or set "+
-		"readonly true when the task only reads", t.Title, permBypass, got)}
-}
-
-// checkRole refuses a role a plan task may not have, before anything is planned. Role leader is for a supervising
-// conversation: the leader's own reports need a supervisor to reach; a task leader's workers are never one.
-func (t *PlanTask) checkRole(ctx context.Context, s *Service, sessionID string, byLeader bool) error {
+// checkRole refuses a role a plan task may not have, before anything is planned. Any conversation may hand out a
+// leader: its own reports reach the conversation that planned it. A task leader's workers are never one.
+func (t *PlanTask) checkRole(byLeader bool) error {
 	switch {
 	case t.Role == "":
 	case byLeader:
 		return errors.New("a task leader plans workers only: role is refused")
 	case t.Role != roleLeader:
 		return fmt.Errorf("role %q is not one: leave it out, or \"leader\"", t.Role)
-	case !s.supervises(ctx, sessionID):
-		return errors.New("role \"leader\" is for the main conversation or a leader conversation: a task leader reports to its supervisor")
 	}
 	return nil
 }

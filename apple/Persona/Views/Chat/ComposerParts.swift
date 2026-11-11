@@ -132,9 +132,37 @@ extension ComposerRow {
 /// snapshots the app in another width on its way to the background (iPhone Duo open).
 @MainActor @Observable
 final class ComposerAttachments {
-    var images: [(UIImage, ImagePayload)] = []
+    var images: [(UIImage, ImagePayload)] = [] {
+        didSet { edited.removeAll { e in !images.contains { $0.0 === e.result } } }
+    }
     let uploads = FileUploads()
     let videos = VideoAttachments()
+    /// The photos here that were edited (in the strip or the + panel): each one's source, edits and history beside the
+    /// picture that goes, so the editor opens it again as it was left. Dropped with the photo.
+    private(set) var edited: [EditedImage] = []
+
+    /// How `image`, one of `images`, was edited; nil when it never was.
+    func edits(of image: UIImage) -> EditedImage? { edited.first { $0.result === image } }
+
+    /// `image` in the strip becomes `edit`'s result, in its place, and remembers how it was made; nothing when it is gone
+    /// (another window on the same chat took it out).
+    func replace(_ image: UIImage, with edit: EditedImage) {
+        guard edit.result !== image, let i = images.firstIndex(where: { $0.0 === image }), let p = MessagePhotos.payload(edit.result) else { return }
+        var kept = edit
+        kept.result = p.0
+        images[i] = p
+        edited.append(kept)
+    }
+
+    /// An edited picture after the photos (at most `MessagePhotos.limit`, a toast says so).
+    func add(_ edit: EditedImage, model: AppModel) {
+        let before = images.count
+        MessagePhotos.add(edit.result, to: &images, model: model)
+        guard images.count > before, let added = images.last?.0 else { return }
+        var kept = edit
+        kept.result = added
+        edited.append(kept)
+    }
 }
 
 /// The new conversation's composer (#2626): its text and quotes as well, there being no conversation yet whose draft
@@ -155,12 +183,47 @@ final class StarterDraft {
         held.videos.sent()
         generation += 1
     }
+
+    /// The first message as it goes, from what was typed (`typed`, trimmed) and the box: the quoted sessions as
+    /// <persona-context> tags first, as in a chat; with nothing typed, a line saying what to look at; then the videos.
+    func message(_ typed: String, files: [AttachedFile]) -> String {
+        let said = typed.isEmpty
+            ? (held.images.isEmpty ? (files.isEmpty ? String(localized: "See the context above.") : String(localized: "Please look at the image [Assistant View a3e0a0]"))
+                                   : String(localized: "Please look at the image [Assistant View 5ad878]"))
+            : typed
+        let body = AttachedFile.message(said, files: files)
+        return quotes.isEmpty ? body : quotes.map(\.xml).joined(separator: "\n") + "\n\n" + body
+    }
+}
+
+/// The composer's Take Photo and Glasses Photo, in a conversation and a new one alike: the system camera over the page,
+/// the glasses' viewfinder in a sheet (iOS); each picture taken goes to `add`.
+struct ComposerCaptureSheets: ViewModifier {
+    @Binding var camera: Bool
+    @Binding var glasses: Bool
+    var add: (UIImage) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .fullScreenCover(isPresented: $camera) {
+                CameraPicker { img in add(img) }.ignoresSafeArea()
+            }
+            #if os(iOS)
+            .sheet(isPresented: $glasses) {
+                GlassesCaptureSheet { img in add(img) }
+            }
+            #endif
+    }
 }
 
 /// Photos picked for the next message, above the composer: × takes one out; with `edit`, a tap marks it up first.
 struct ComposerImages: View {
     @Binding var images: [(UIImage, ImagePayload)]
     var edit: ((Int) -> Void)?
+
+    /// A conversation's photos (`held`): a tap opens one in the image editor, which picks up where an earlier edit (here
+    /// or in the + panel) left off; Done puts the result in its place.
+    static func editable(_ held: ComposerAttachments) -> some View { ComposerEditableImages(held: held) }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -192,6 +255,29 @@ struct ComposerImages: View {
                 }
             }
             .padding(.top, Theme.Space.sm)
+        }
+    }
+}
+
+/// `ComposerImages` with the image editor behind a tap, for the composers that keep their photos in a
+/// `ComposerAttachments` (a conversation's, a new conversation's).
+private struct ComposerEditableImages: View {
+    let held: ComposerAttachments
+    @State private var editing: EditingPhoto?
+
+    private struct EditingPhoto: Identifiable {
+        let image: UIImage
+        var id: ObjectIdentifier { ObjectIdentifier(image) }
+    }
+
+    var body: some View {
+        ComposerImages(images: Binding(get: { held.images }, set: { held.images = $0 })) { i in
+            if held.images.indices.contains(i) { editing = EditingPhoto(image: held.images[i].0) }
+        }
+        .fullScreenCover(item: $editing) { e in
+            ImageEditor(held.edits(of: e.image) ?? EditedImage(source: e.image)) { edited in
+                held.replace(e.image, with: edited)
+            }
         }
     }
 }

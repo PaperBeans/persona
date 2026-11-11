@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
 )
@@ -21,7 +22,8 @@ type MarketIndex struct {
 	Description   string `json:"description,omitempty"`
 	Homepage      string `json:"homepage,omitempty"`
 	// SigningKey is legacy catalog metadata, never a trust grant.
-	SigningKey string `json:"signing_key,omitempty"`
+	SigningKey         string `json:"signing_key,omitempty"`
+	DownloadsUpdatedAt string `json:"downloads_updated_at,omitempty"`
 	// Extensions are "extensions" in an index; the old key "plugins" is read too, and still the one written out (the
 	// hub keeps the index it read, which a hub rolled back to a build before #1844 reads again).
 	Extensions []MarketEntry `json:"plugins"`
@@ -46,10 +48,12 @@ func (ix *MarketIndex) UnmarshalJSON(data []byte) error {
 // MarketEntry is one plugin of a market: its manifest (so the permissions are known before downloading) and its
 // packages.
 type MarketEntry struct {
-	Replaces string          `json:"replaces,omitempty"`
-	Manifest json.RawMessage `json:"manifest"`
-	Tags     []string        `json:"tags,omitempty"`
-	Packages []MarketPackage `json:"packages"`
+	Replaces  string          `json:"replaces,omitempty"`
+	IconURL   string          `json:"icon_url,omitempty"`
+	Downloads *int64          `json:"downloads,omitempty"`
+	Manifest  json.RawMessage `json:"manifest"`
+	Tags      []string        `json:"tags,omitempty"`
+	Packages  []MarketPackage `json:"packages"`
 	// L10n is the package's translations again ({"<language>": <l10n/<language>.json>}, l10n.go), so the catalog can
 	// show them before anything is downloaded. Kept as written (read with Translations); hubs before it ignore the key.
 	L10n json.RawMessage `json:"l10n,omitempty"`
@@ -94,6 +98,11 @@ func ParseIndex(data []byte) (*MarketIndex, []string, error) {
 	if ix.Homepage != "" && !isHTTPS(ix.Homepage) {
 		ix.Homepage = ""
 	}
+	if ix.DownloadsUpdatedAt != "" {
+		if _, err := time.Parse(time.RFC3339, ix.DownloadsUpdatedAt); err != nil {
+			ix.DownloadsUpdatedAt = ""
+		}
+	}
 	if len(ix.Extensions) > IndexExtensionsMost {
 		return nil, nil, fmt.Errorf("索引里多于 %d 个扩展", IndexExtensionsMost)
 	}
@@ -122,6 +131,12 @@ func ParseIndex(data []byte) (*MarketIndex, []string, error) {
 		default:
 			seen[m.ID] = true
 			e.Parsed = m
+			if !ValidIconURL(e.IconURL) {
+				e.IconURL = ""
+			}
+			if e.Downloads != nil && *e.Downloads < 0 {
+				e.Downloads = nil
+			}
 			if _, err := ParseEntryTranslations(e.L10n); err != nil { // the entry stays, in its manifest's words
 				warnings = append(warnings, i18n.T(i18n.En, "extension-status.entry_translation_skipped", i18n.Args{"id": m.ID, "err": err.Error()}))
 				e.L10n = nil
@@ -186,6 +201,14 @@ func (e *MarketEntry) check() (*Manifest, error) {
 		}
 	}
 	return m, nil
+}
+
+func ValidIconURL(s string) bool {
+	if len(s) > 2048 {
+		return false
+	}
+	u, err := url.Parse(s)
+	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil
 }
 
 func isHTTPS(s string) bool {

@@ -157,11 +157,14 @@ func anyActionFlag(params map[string]any, flags []string) bool {
 // nodeActions are the routes of those menu items, by path under /api/v1/machines/{mid}/.
 var nodeActions = map[string]nodeAction{
 	"panes/close": {method: "panes.close", timeout: 30 * time.Second, required: []string{"pane"}},
-	"panes/split": {method: "panes.split", timeout: 30 * time.Second, required: []string{"pane", "direction"}},
-	"panes/agent": {method: "panes.agent", timeout: 120 * time.Second, required: []string{"pane", "launcher"}},
-	"panes/git":   {method: "panes.git", timeout: 90 * time.Second, required: []string{"op"}, optional: []string{"pane", "workspace_id", "kind"}},
-	"tabs/close":  {method: "tabs.close", timeout: 30 * time.Second, required: []string{"tab_id"}, optional: []string{"kind"}},
-	"tabs/rename": {method: "tabs.rename", timeout: 30 * time.Second, required: []string{"tab_id", "label"}, optional: []string{"kind"}},
+	// #4754 "Close finished terminals": the terminals stopped agents left, those the user confirmed (panes, comma-separated);
+	// preview lists them and closes nothing.
+	"panes/close_finished": {method: "panes.close_finished", timeout: 60 * time.Second, optional: []string{"panes"}, flags: []string{"preview"}},
+	"panes/split":          {method: "panes.split", timeout: 30 * time.Second, required: []string{"pane", "direction"}},
+	"panes/agent":          {method: "panes.agent", timeout: 120 * time.Second, required: []string{"pane", "launcher"}},
+	"panes/git":            {method: "panes.git", timeout: 90 * time.Second, required: []string{"op"}, optional: []string{"pane", "workspace_id", "kind"}},
+	"tabs/close":           {method: "tabs.close", timeout: 30 * time.Second, required: []string{"tab_id"}, optional: []string{"kind"}},
+	"tabs/rename":          {method: "tabs.rename", timeout: 30 * time.Second, required: []string{"tab_id", "label"}, optional: []string{"kind"}},
 	// #2431 "New worktree…": the repository of a workspace the host lists, and a Git worktree of it opened as a workspace.
 	// The branch and the path are typed in the dialog; the node refuses a path that holds something and never forces.
 	"worktree/prepare": {method: "worktree.prepare", timeout: 30 * time.Second, required: []string{"workspace_id"}, optional: []string{"kind", "locale"}, flags: []string{"composer"}, strictFlags: []string{"composer"}},
@@ -187,6 +190,7 @@ func (h *Hub) paneRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /api/v1/machines/{mid}/panes", h.withMachine(h.newShell))
 	// close / split / run an agent / git in a pane, close / rename a tab: full devices only (panes.go)
 	api.HandleFunc("POST /api/v1/machines/{mid}/panes/close", h.nodeAction(nodeActions["panes/close"]))
+	api.HandleFunc("POST /api/v1/machines/{mid}/panes/close_finished", h.nodeAction(nodeActions["panes/close_finished"]))
 	api.HandleFunc("POST /api/v1/machines/{mid}/panes/split", h.nodeAction(nodeActions["panes/split"]))
 	api.HandleFunc("POST /api/v1/machines/{mid}/panes/agent", h.nodeAction(nodeActions["panes/agent"]))
 	api.HandleFunc("POST /api/v1/machines/{mid}/panes/git", h.nodeAction(nodeActions["panes/git"]))

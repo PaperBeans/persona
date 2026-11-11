@@ -74,7 +74,8 @@ private fun SpaceDestination(route: SpaceRoute, navigator: Navigator, dependenci
         val creationModel = creationService?.let { service ->
             viewModel(key = "space-new-agent:${service.scope}:${System.identityHashCode(service)}") {
                 NewAgentViewModel(service, wiring.creationPreferences?.let { AgentCreationPreferences(context, it) }
-                    ?: AgentCreationPreferences(context), dependencies.sessions().machines)
+                    ?: AgentCreationPreferences(context), dependencies.sessions().machines,
+                    usage = dependencies.machines()?.let { m -> { id: String -> m.usageWindows(id) } })
             }
         }
         SpacePage(route, model, navigator, creationModel)
@@ -139,6 +140,7 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
                     navigator.navigate(ChatRoute(it.machineId, it.sessionId, kind = ConversationKind.Assistant))
                 })
             },
+            onInterrupt = { model.interrupt(row.session) },
             onClose = { operationDialog = AgentOperationDialog.Close(row.session) },
             onDelete = { operationDialog = AgentOperationDialog.Delete(row.session) })
     }

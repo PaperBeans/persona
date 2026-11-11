@@ -267,6 +267,8 @@ private fun ChatPage(
     }).collectAsStateWithLifecycle()
     val requests = taps.shown(allRequests).filter { it.sessionKey == key || it.sessionKey in taskKeys }
         .sortedBy { if (it.id == chrome.requestId) 0 else 1 }
+    // the conversation's own cards are in the panel above the composer, not only behind Needs you (#4883)
+    val panel = panelRequests(renderStyle == ChatRenderStyle.Assistant, requests, key, trayReview, taps.shown(allRequests))
     val messages = chatBubbles(allMessages, key, snapshot.items)
     val currentMessageCount by rememberUpdatedState(messages.size)
     val composerDeliveries by (composerService?.deliveries ?: remember {
@@ -769,6 +771,10 @@ private fun ChatPage(
         taps = taps.pending(allRequests.map { it.id }.toSet())
     }
     val lastUserId = snapshot.items.lastOrNull { it.role == "user" && it.kind == "text" }?.id
+    // Persona's last turn ended on a model set-up error the hub named: the fix replaces the error line (#4339 C18, iOS
+    // `turnFix`). Persona's conversations only, as iOS and the web.
+    val turnFix = if (renderStyle == ChatRenderStyle.Assistant) TurnErrorFix.of(session?.turnErrorCode) else null
+    val fixModel = chrome.onFixModel?.let { open -> { action: persona.core.designsystem.ReadinessActionId -> open(action, session?.launcher, session?.manager) } }
     ChatCompletionFeedback(lastUserId, session?.status,
         lifecycle == Lifecycle.State.RESUMED && !chrome.covered && !overlay && !chromeOverlay && !linkVisible &&
             !statusSheet && !terminalHelp && !taskPageVisible && fullText == null && !search.visible &&
@@ -899,8 +905,8 @@ private fun ChatPage(
                                 nextWaiting(chrome.waiting, key)?.let { next ->
                                     NextWaitingRow(next, { offerNext = false; openRequest?.invoke(next.request.session, next.request.requestId) })
                                 }
-                            if (!readOnly && (renderStyle != ChatRenderStyle.Assistant || trayReview != null)) InteractionPanel(
-                                if (renderStyle == ChatRenderStyle.Assistant) taps.shown(allRequests).filter { it.id == trayReview } else requests,
+                            if (!readOnly && (renderStyle != ChatRenderStyle.Assistant || panel.isNotEmpty())) InteractionPanel(
+                                panel,
                                 machine, panelMax, taps.busyId, taps.uncertain, { interaction, resolution ->
                                 if (taps.canTap(interaction, allRequests, java.time.Instant.now())) {
                                     taps = taps.tapped(interaction.id)
@@ -992,7 +998,7 @@ private fun ChatPage(
                                     // /clear and /model type into Claude's pane: Claude in a terminal engine only (positive check).
                                     canClear = clearingPane == null && session?.canTypeClaudeCommands == true,
                                     service = composerService, onSend = { send() }, onCommand = { send(it) }, onNotice = { notice = it },
-                                    extraContent = linkContexts.isNotEmpty(), visible = (renderStyle == ChatRenderStyle.Assistant && trayReview == null) || requests.isEmpty() || requestCollapsed,
+                                    extraContent = linkContexts.isNotEmpty(), visible = composerShown(panel, requestCollapsed),
                                     enabled = canSend, placeholder = if (canSend) stringResource(R.string.chat_screen_placeholder) else READ_ONLY.text(),
                                     // Permission mode and effort for Claude's sessions, Persona's included; the model for Claude in a pane;
                                     // the effort alone for a Codex thread on its app-server.
@@ -1055,11 +1061,13 @@ private fun ChatPage(
                                 }
                                 items(lines, key = { it.contentKey }, contentType = { it.contentType() }) { line ->
                                     ChatSearchHighlight(search, line.contentKey) {
-                                        androidx.compose.runtime.CompositionLocalProvider(LocalAssistantTaskHost provides taskHost) {
+                                        androidx.compose.runtime.CompositionLocalProvider(LocalAssistantTaskHost provides taskHost,
+                                            LocalTurnErrorFixAction provides fixModel) {
                                         ChatLineContent(line, key, loader,
                                         line.recordedDuration(snapshot.recordedTurnDurations),
                                         ::toggle, ::expand, folding, foldErrors,
                                         lastUserId = lastUserId,
+                                        turnFix = turnFix.takeIf { line.contentKey == lines.firstOrNull()?.contentKey },
                                         onLastLine = { extent -> chatList.reportLastLine(line.contentKey, extent) }, onFullText = { item ->
                                         scope.launch {
                                             try { fullText = repository.fullText(key, item.id) }

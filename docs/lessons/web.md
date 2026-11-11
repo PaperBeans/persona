@@ -1,5 +1,31 @@
 # Lessons: web UI and interactions
 
+## A menu opened from a layer above the menus' own goes inside that layer (#4991)
+
+- `Menu` portals to `document.body` at `z-50`. The image editor is a full-screen `z-[60]` layer, so a menu opened from it
+  drew under it, out of sight. Pass the layer as `container`: the menu is put inside it, above its content, and takes its
+  look (the editor's `dark`).
+- A layer that closes on Esc from a capture-phase `keydown` on the window runs before an open menu's handler (also capture,
+  registered later). It has to leave Esc alone while its menu is open, or Esc closes the editor instead of the menu.
+
+## Review state is not an answerable decision (#4808)
+
+An old task can remain `supervision.state: needs_user` without any acceptance-book `ask`. Render its original review
+explanation and the same dismiss/defer controls as a structured decision, but never invent options or send a review
+timestamp as `asked_at` to acceptance. Dismiss the exact review, not the task: completing it or accepting its recommendation
+changes what the owner asked to ignore. Keep persistence and receipt-scoped Undo on the manager, and Later in the browser
+session. Give all mixed actions one synchronous admission guard, fence late replies against the review and credential
+owner, and exercise both the legacy row and structured choices with a real browser. Load the extra controls lazily;
+the collapsed tray does not need their code on the first screen.
+
+## Bound the navigation range, not only transcript bodies (#4836)
+
+A complete lightweight position index can still render hundreds of marks while the transcript loads only two turns.
+Expose its latest 50 positions first, preserve the full-history ordinal offset, and extend the range when backward
+transcript pages reach earlier inputs. Capture the initial loaded boundary separately: a restored large cache must
+not silently change the initial range, and metadata arrival or hovering must not download old bodies. Test the real
+main conversation as well as session pages with hundreds of genuine inputs and interleaved automated records.
+
 ## Viewport ownership must not create a second hover-width peak (#4792)
 
 The user-input rail's viewport-current identity is separate from the pointer or keyboard preview. Apply the existing

@@ -27,7 +27,7 @@ func Enabled(v url.Values) bool {
 // field: adapters choose the counts endpoint, while Query ignores the selector.
 func Parse(v url.Values) (Options, error) {
 	o := Options{Limit: defaultLimit}
-	for _, key := range []string{"limit", "cursor", "since", "summary", "state", "machine_id", "project", "group", "source", "provider", "q", "counts", "pane_source"} {
+	for _, key := range []string{"limit", "cursor", "since", "summary", "state", "machine_id", "project", "group", "source", "provider", "q", "counts", "with_counts", "pane_source"} {
 		if values, exists := v[key]; exists && len(values) != 1 {
 			return Options{}, failure("invalid_query", key+" must have exactly one value")
 		}
@@ -46,9 +46,11 @@ func Parse(v url.Values) (Options, error) {
 		}
 		o.Summary = b
 	}
-	if values, exists := v["counts"]; exists {
-		if _, err := boolean(values[0]); err != nil {
-			return Options{}, err
+	for _, key := range []string{"counts", "with_counts"} {
+		if values, exists := v[key]; exists {
+			if _, err := boolean(values[0]); err != nil {
+				return Options{}, err
+			}
 		}
 	}
 	o.Cursor, o.Since = v.Get("cursor"), v.Get("since")

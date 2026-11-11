@@ -71,8 +71,52 @@ async function save() {
   expect(saved).toHaveBeenCalledOnce();
   return calls.find((c) => c.method === "PUT")!;
 }
+// The Connect step's automatic check waits this long after the address and key stop changing (AUTO_TEST_MS in
+// ProviderWizard.tsx). Timers are fake, so nothing fires unless a test advances them.
+const AUTO = 700;
+async function advance(ms: number) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  await flush();
+}
+const nameInput = () => input('input[placeholder*="my_gateway"]');
+const urlInput = () => input('input[inputmode="url"]');
+const keyInput = () => input('input[type="password"]');
+const primary = (key: string) => button(key).classList.contains("bg-ink");
+async function resolve(request: Pending, value: unknown) {
+  await act(async () => request.resolve(value));
+  await flush();
+}
+/** Leaves a field (focus, then away), as Tab or a click elsewhere does. */
+function leave(el: HTMLInputElement) {
+  act(() => { el.focus(); el.blur(); });
+}
+/** Pastes `text`: over all the field's text (`whole`), or at the caret after it. As a browser does, the paste event
+ *  carries the text, then the field changes (only when its text does). */
+function paste(el: HTMLInputElement, text: string, whole = true) {
+  act(() => {
+    const before = el.value;
+    if (whole) el.setSelectionRange(0, before.length);
+    else el.setSelectionRange(before.length, before.length);
+    const event = new Event("paste", { bubbles: true });
+    Object.defineProperty(event, "clipboardData", { value: { getData: () => text } });
+    el.dispatchEvent(event);
+    const after = whole ? text.replace(/[\r\n]+/g, "") : before + text;
+    if (after === before) return;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, after);
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }));
+  });
+}
+async function newGateway(url = "https://a.example.com", key = "example-key-a") {
+  await draw("new");
+  click("settings-providerwizard.custom");
+  type(urlInput(), url);
+  leave(urlInput());
+  type(keyInput(), key);
+}
 
 beforeEach(() => {
+  // only timers are faked: promises, fetch and React's scheduling keep running for real
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   calls = [];
   pending = [];
   saved = vi.fn();
@@ -94,6 +138,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("provider discovery ownership", () => {
@@ -279,7 +324,7 @@ describe("connection test ownership", () => {
     expect(pending).toHaveLength(2);
     await settle(pending[0]!, outcome);
     expect(button("settings-providerwizard.test").getAttribute("aria-busy")).toBe("true");
-    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(document.querySelector('[role="status"]')?.textContent).toBe(t("settings-providerwizard.testing"));
     await settle(pending[1]!, "http error");
     expect(text()).toContain("Retired request failed");
     click("settings-providerwizard.test");
@@ -319,3 +364,297 @@ describe("connection test ownership", () => {
     expect((await save()).body).toMatchObject({ model: "valid-model", models: [{ id: "valid-model" }] });
   });
 });
+
+describe("the Connect step's own check (#4881)", () => {
+  it("tests and fetches whatever the name is; only Next waits for a valid one", async () => {
+    await newGateway();
+    for (const name of ["", "1 bad name"]) {
+      type(nameInput(), name);
+      expect(button("settings-providerwizard.test").disabled).toBe(false);
+      expect(button("settings-providerwizard.discover").disabled).toBe(false);
+    }
+    click("settings-providerwizard.test");
+    expect(pending.map((r) => r.path)).toEqual(["/api/v1/launchers/test"]);
+    click("settings-providerwizard.next");
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe(t("lib-launcher-presets.name_invalid"));
+    expect(urlInput().value).toBe("https://a.example.com");
+    // a check started by hand is the check: nothing more is sent by itself
+    await advance(AUTO * 3);
+    expect(pending).toHaveLength(1);
+  });
+
+  it("fetches the models once the address and key stop changing, then tests the default model once", async () => {
+    await draw("new");
+    click("settings-providerwizard.custom");
+    expect(text()).toContain(t("settings-providerwizard.check_hint"));
+    type(urlInput(), "https://a.example.com");
+    leave(urlInput());
+    type(keyInput(), "example-key");
+    expect(text()).toContain(t("settings-providerwizard.check_wait"));
+    await advance(AUTO - 1);
+    type(keyInput(), "example-key-a");
+    await advance(AUTO - 1);
+    expect(pending).toHaveLength(0);
+    await advance(1);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ path: "/api/v1/launchers/discover", body: { base_url: "https://a.example.com", api_key: "example-key-a", auth: "bearer", api: "messages" } });
+    expect(text()).toContain(t("settings-providerwizard.discovering"));
+    expect(primary("settings-providerwizard.next")).toBe(true);
+    await resolve(pending[0]!, { models: [{ id: "first-model" }, { id: "second-model" }] });
+    expect(pending).toHaveLength(2);
+    expect(pending[1]).toMatchObject({ path: "/api/v1/launchers/test", body: { base_url: "https://a.example.com", api_key: "example-key-a", model: "first-model" } });
+    expect(text()).toContain(t("settings-providerwizard.testing"));
+    await resolve(pending[1]!, { ok: true, ms: 412, model: "first-model" });
+    expect(text()).toContain(t("lib-providers.test_ok", { ms: 412 }));
+    expect(text()).toContain(t("settings-providerwizard.discover_found", { count: 2 }));
+    // the same connection is not checked again: naming it, waiting, or going to the models and back
+    type(nameInput(), "my_gateway");
+    await advance(AUTO * 3);
+    click("settings-providerwizard.next");
+    expect(document.querySelector('[data-model="first-model"] [role="checkbox"]')?.getAttribute("aria-checked")).toBe("true");
+    click("settings-providerwizard.back");
+    await advance(AUTO * 3);
+    expect(pending).toHaveLength(2);
+    expect(text()).toContain(t("lib-providers.test_ok", { ms: 412 }));
+  });
+
+  it("tests the first model found when a long list leaves nothing checked", async () => {
+    await newGateway();
+    await advance(AUTO);
+    await resolve(pending[0]!, { models: Array.from({ length: 12 }, (_, i) => ({ id: `listed-${i + 1}` })) });
+    expect(pending[1]).toMatchObject({ path: "/api/v1/launchers/test", body: { model: "listed-1" } });
+  });
+
+  it.each(["key", "address"] as const)("checks again once the %s changes", async (field) => {
+    await newGateway();
+    await advance(AUTO);
+    await resolve(pending[0]!, { models: [{ id: "first-model" }] });
+    await resolve(pending[1]!, { ok: true, ms: 412, model: "first-model" });
+    if (field === "key") type(keyInput(), "example-key-b");
+    else {
+      type(urlInput(), "https://b.example.com");
+      leave(urlInput());
+    }
+    expect(text()).not.toContain(t("lib-providers.test_ok", { ms: 412 }));
+    await advance(AUTO);
+    expect(pending).toHaveLength(3);
+    expect(pending[2]).toMatchObject({ path: "/api/v1/launchers/discover", body: field === "key" ? { api_key: "example-key-b" } : { base_url: "https://b.example.com" } });
+    await resolve(pending[2]!, { models: [{ id: "first-model" }] });
+    expect(pending[3]).toMatchObject({ path: "/api/v1/launchers/test", body: { model: "first-model" } });
+  });
+
+  it("sends nothing on its own while a new gateway's address or key is incomplete", async () => {
+    await newGateway("https://a.example.com", "short");
+    await advance(AUTO * 3);
+    type(keyInput(), "example-key-a");
+    type(urlInput(), "a.example.com");
+    await advance(AUTO * 3);
+    expect(pending).toHaveLength(0);
+    expect(text()).toContain(t("settings-providerwizard.check_hint"));
+  });
+
+  it.each(["address", "key"] as const)("sends nothing for a saved provider until its %s changes", async (field) => {
+    await draw(a);
+    await advance(AUTO * 3);
+    expect(pending).toHaveLength(0);
+    expect(text()).not.toContain(t("settings-providerwizard.check_hint"));
+    expect(primary("common.save")).toBe(true);
+    expect(primary("settings-providerwizard.next")).toBe(false);
+    if (field === "key") type(keyInput(), "example-key-b");
+    else paste(urlInput(), "https://b.example.com");
+    await advance(AUTO);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ path: "/api/v1/launchers/discover", body: { name: "provider-a", ...(field === "key" ? { api_key: "example-key-b" } : { base_url: "https://b.example.com" }) } });
+    await resolve(pending[0]!, { models: [{ id: "new-model" }] });
+    // models to choose from: Next is the step's one primary action, Save steps back
+    expect(primary("settings-providerwizard.next")).toBe(true);
+    expect(primary("common.save")).toBe(false);
+  });
+
+  it.each(["saved", "new"] as const)("never sends a key to an address still being typed (%s provider)", async (kind) => {
+    if (kind === "saved") await draw(a);
+    else {
+      await draw("new");
+      click("settings-providerwizard.custom");
+      type(keyInput(), "example-key-a");
+    }
+    // typed a character at a time, paused partway: "https://b.example.co" may be someone else's host
+    type(urlInput(), "https://b.example.co");
+    await advance(AUTO * 3);
+    expect(pending).toHaveLength(0);
+    type(urlInput(), "https://b.example.com");
+    leave(urlInput());
+    await advance(AUTO);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ path: "/api/v1/launchers/discover", body: { base_url: "https://b.example.com" } });
+  });
+
+  it("still tests a model it already knows when the gateway lists none, and does not test it again on Retry", async () => {
+    await draw({ ...a, model: "known-model", models: [{ id: "known-model" }] });
+    type(keyInput(), "example-key-b");
+    await advance(AUTO);
+    await resolve(pending[0]!, { models: [], error: "The gateway has no model list", code: "not_found" });
+    expect(pending[1]).toMatchObject({ path: "/api/v1/launchers/test", body: { name: "provider-a", api_key: "example-key-b", model: "known-model" } });
+    await resolve(pending[1]!, { ok: true, ms: 412, model: "known-model" });
+    // Retry is the list's: the test that passed is not paid for again
+    click("settings-providerwizard.retry");
+    await resolve(pending[2]!, { models: [], error: "The gateway has no model list", code: "not_found" });
+    expect(pending.map((r) => r.path)).toEqual(["/api/v1/launchers/discover", "/api/v1/launchers/test", "/api/v1/launchers/discover"]);
+    expect(text()).toContain(t("lib-providers.test_ok", { ms: 412 }));
+  });
+
+  it.each([
+    // a key may answer without being allowed to list models: the list's 401 / 403 says nothing about chatting
+    ["a list refused for the key", { models: [], error: "The gateway refused this key", code: "auth" }],
+    ["a busy gateway", { models: [], error: "Too many requests" }],
+    ["an unreadable list", { models: [], error: "The model list could not be read" }],
+    ["a list that failed after its first page", { models: [{ id: "first-model" }], error: "The next page could not be read" }],
+  ] as const)("still tests the model after %s", async (_, answer) => {
+    await draw({ ...a, model: "known-model", models: [{ id: "known-model" }] });
+    type(keyInput(), "example-key-b");
+    await advance(AUTO);
+    await resolve(pending[0]!, answer);
+    expect(pending[1]).toMatchObject({ path: "/api/v1/launchers/test", body: { model: "known-model" } });
+  });
+
+  it("still tests the model when the hub itself could not fetch the list", async () => {
+    await draw({ ...a, model: "known-model", models: [{ id: "known-model" }] });
+    type(keyInput(), "example-key-b");
+    await advance(AUTO);
+    await settle(pending[0]!, "http error");
+    expect(pending[1]).toMatchObject({ path: "/api/v1/launchers/test", body: { model: "known-model" } });
+  });
+
+  it("does not send a second test when the list is retried while the check's test runs", async () => {
+    await draw({ ...a, model: "known-model", models: [{ id: "known-model" }] });
+    type(keyInput(), "example-key-b");
+    await advance(AUTO);
+    await resolve(pending[0]!, { models: [], error: "The gateway has no model list", code: "not_found" });
+    expect(text()).toContain(t("settings-providerwizard.testing"));
+    click("settings-providerwizard.retry");
+    await resolve(pending[2]!, { models: [], error: "The gateway has no model list", code: "not_found" });
+    await resolve(pending[1]!, { ok: true, ms: 412, model: "known-model" });
+    expect(pending.map((r) => r.path)).toEqual(["/api/v1/launchers/discover", "/api/v1/launchers/test", "/api/v1/launchers/discover"]);
+    expect(text()).toContain(t("lib-providers.test_ok", { ms: 412 }));
+  });
+
+  it("counts a paste into part of the URL as typing", async () => {
+    await draw(a);
+    const url = urlInput();
+    act(() => url.focus());
+    type(url, "https://b.exa");
+    paste(url, "mple", false);
+    expect(url.value).toBe("https://b.example");
+    await advance(AUTO * 3);
+    expect(pending).toHaveLength(0);
+    paste(url, "https://b.example.com\n");
+    await advance(AUTO);
+    expect(pending[0]).toMatchObject({ path: "/api/v1/launchers/discover", body: { base_url: "https://b.example.com" } });
+  });
+
+  it("counts pasting the same URL over all of it, though nothing changes", async () => {
+    await draw(a);
+    const url = urlInput();
+    act(() => url.focus());
+    type(url, "https://b.example.com");
+    await advance(AUTO * 3);
+    expect(pending).toHaveLength(0);
+    paste(url, "https://b.example.com");
+    await advance(AUTO);
+    expect(pending[0]).toMatchObject({ path: "/api/v1/launchers/discover", body: { base_url: "https://b.example.com" } });
+  });
+
+  it("keeps a half-typed URL waiting when Next is refused for the name", async () => {
+    await draw("new");
+    click("settings-providerwizard.custom");
+    type(nameInput(), "1 bad");
+    type(keyInput(), "example-key-a");
+    type(urlInput(), "https://api.exa");
+    click("settings-providerwizard.next");
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe(t("lib-launcher-presets.name_invalid"));
+    await advance(AUTO * 3);
+    expect(pending).toHaveLength(0);
+  });
+
+  it("takes leaving the step as the URL being entered, even when the field never blurs", async () => {
+    await draw("new");
+    click("settings-providerwizard.custom");
+    type(nameInput(), "my_gateway");
+    type(keyInput(), "example-key-a");
+    type(urlInput(), "https://a.example.com");
+    expect(text()).toContain(t("settings-providerwizard.check_leave_url"));
+    click("settings-providerwizard.next");
+    click("settings-providerwizard.back");
+    await advance(AUTO);
+    expect(pending[0]).toMatchObject({ path: "/api/v1/launchers/discover", body: { base_url: "https://a.example.com" } });
+  });
+
+  it("keeps waiting while the window, not the field, loses focus, and says leaving the field starts the check", async () => {
+    await draw(a);
+    const url = urlInput();
+    act(() => url.focus());
+    type(url, "https://b.example.co");
+    expect(text()).toContain(t("settings-providerwizard.check_leave_url"));
+    // switching to another app blurs the field but leaves it the page's focused element
+    act(() => { url.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    await advance(AUTO * 3);
+    expect(pending).toHaveLength(0);
+    // typing after a paste is typing again
+    paste(url, "https://b.example.com");
+    type(url, "https://b.example.com/x");
+    await advance(AUTO * 3);
+    expect(pending).toHaveLength(0);
+    leave(url);
+    await advance(AUTO);
+    expect(pending).toHaveLength(1);
+  });
+
+  it("does not repeat a test pressed by hand while the check is fetching", async () => {
+    await newGateway();
+    await advance(AUTO);
+    click("settings-providerwizard.test");
+    await resolve(pending[0]!, { models: [{ id: "first-model" }] });
+    expect(pending.map((r) => r.path)).toEqual(["/api/v1/launchers/discover", "/api/v1/launchers/test"]);
+  });
+
+  it("retries a fetch pressed by hand as a fetch only", async () => {
+    await newGateway();
+    click("settings-providerwizard.discover");
+    await resolve(pending[0]!, { models: [], error: "The gateway has no model list" });
+    click("settings-providerwizard.retry");
+    await resolve(pending[1]!, { models: [{ id: "first-model" }] });
+    await advance(AUTO * 3);
+    expect(pending.map((r) => r.path)).toEqual(["/api/v1/launchers/discover", "/api/v1/launchers/discover"]);
+  });
+
+  it("says the hub's words with Retry, and tests nothing after a failed fetch with no model known", async () => {
+    await newGateway();
+    await advance(AUTO);
+    await resolve(pending[0]!, { models: [], error: "The gateway has no model list" });
+    expect(pending).toHaveLength(1);
+    expect(text()).toContain(t("settings-providerwizard.discover_failed", { error: "The gateway has no model list" }));
+    expect(primary("settings-providerwizard.next")).toBe(true);
+    click("settings-providerwizard.retry");
+    expect(pending[1]).toMatchObject({ path: "/api/v1/launchers/discover" });
+    await resolve(pending[1]!, { models: [{ id: "first-model" }] });
+    expect(pending[2]).toMatchObject({ path: "/api/v1/launchers/test", body: { model: "first-model" } });
+    await resolve(pending[2]!, { ok: false, ms: 80, model: "first-model", error: "The gateway refused this key" });
+    expect(text()).toContain("The gateway refused this key");
+    click("settings-providerwizard.retry");
+    expect(pending).toHaveLength(4);
+    expect(pending[3]).toMatchObject({ path: "/api/v1/launchers/test", body: { model: "first-model" } });
+    await resolve(pending[3]!, { ok: true, ms: 412, model: "first-model" });
+    expect(text()).not.toContain("The gateway refused this key");
+    expect(document.body.querySelectorAll("button").length).toBeGreaterThan(0);
+    expect([...document.body.querySelectorAll("button")].some((el) => el.textContent === t("settings-providerwizard.retry"))).toBe(false);
+  });
+
+  it("only fetches when Fetch models is pressed by hand", async () => {
+    await newGateway();
+    click("settings-providerwizard.discover");
+    await resolve(pending[0]!, { models: [{ id: "first-model" }] });
+    await advance(AUTO * 3);
+    expect(pending.map((r) => r.path)).toEqual(["/api/v1/launchers/discover"]);
+  });
+});
+
