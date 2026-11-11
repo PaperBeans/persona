@@ -1276,6 +1276,30 @@ How often a client reads `GET /api/v1/sessions`, and what kind of read, while it
 - A real hub's `traffic` journal lines count by route template, not query: there a complete list and a delta are told
   apart only by `body_bytes / count`.
 
+## A relayed upload's memory (`scripts/diag/relay_body_rss.py`, #3199)
+
+What a large request body costs the hub's slot and the manager it is relayed to, and how long they keep it.
+
+- `python3 scripts/diag/relay_body_rss.py --binary base=<personad built from main> --binary head=<personad built from the branch> --rounds 3`
+  starts, for every run, a throwaway hub (`<binary> hub run`: edge, slot and built-in manager) on a free loopback port,
+  with its own directory under `/tmp` as `HOME` and `PERSONA_HOME` and its own database in a `postgres:18-alpine`
+  container named `persona-ci-db-relay-rss-<random>`; it removes all of them at the end. It never reads the real
+  `~/.persona`, whatever the caller's environment says. Docker is the only thing it needs besides the binaries.
+- Each run posts a 22.4 MB JSON body (16 MiB as one image's base64, `--body-mib`) to
+  `POST /api/v1/assistant/conversations` for a machine that does not exist: the hub relays the whole body, the manager
+  decodes the whole body and answers 400, and no conversation starts. It reads each process's RSS just before the
+  post, at its peak, 10 s and `--settle` (60) seconds after the answer. Binaries alternate from round to round; the
+  tables give the median and the range. `--posts 2 --gap 5` sends a second body inside the trim's 30 s window,
+  `--chunked` one without a Content-Length, `--env GODEBUG=gctrace=1 --logs <dir>` keeps each hub's log with its
+  collections.
+- On Linux the peak is the kernel's (`VmHWM`). On macOS it is the highest of the samples (every 50 ms), and the
+  script also prints the physical footprint: when the Mac is short of memory it compresses the pages of an idle
+  process, RSS falls though the process gave nothing back, and only the footprint still counts them. Compare builds
+  by the footprint there.
+- The micro benchmarks behind it: `go test -run '^$' -bench 'Relay|ReadRelayed' -benchmem ./internal/hub`,
+  `-bench 'Decode(22MB|1K)' ./internal/assistant`, `-bench CallLarge ./internal/rpc`; compare two builds' test
+  binaries in alternating rounds with `benchstat`.
+
 ## Live Activity screenshots (`LiveActivityShots`)
 
 `simctl io screenshot` doesn't capture Dynamic Island/lock-screen activities. `LiveActivityShots` uses `-showFleetSample` for fictional activity,
