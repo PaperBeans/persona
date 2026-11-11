@@ -129,6 +129,7 @@ func TestWorkStatsCountReopenedAutoDone(t *testing.T) {
 		t.Fatalf("open again: %d %s", w.Code, w.Body)
 	}
 
+	s.waitWorkEvents() // a stored event is written on its own goroutine (workEvent)
 	got := eventsOf(storedEvents(st), todoReopenedEvent)
 	for id, want := range map[string]struct {
 		doneBy string
