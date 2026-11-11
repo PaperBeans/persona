@@ -102,16 +102,17 @@ func readRelayed(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 }
 
 // httpParams is req as http.request's params, its body appended in base64 straight into the request's line. As a
-// value, json.Marshal encodes the body into a buffer of its own and copies it out, and the line's encoder copies it
+// value, the encoder writes the body into a buffer of its own and copies it out, and the line's encoder copies it
 // once more: three copies of a 22 MB upload, of 30 MB each, and the encoder's buffer kept for the next. The bytes are
-// json.Marshal's for req: the body is its last field, and base64 has nothing to escape.
+// the ones rpc.Call writes for req as a value: the rest of it goes through the same encoder (rpc.Marshal), the body
+// is its last field, and base64 has nothing to escape.
 func httpParams(req assistantwire.HTTPRequest) any {
 	body := req.Body
 	if len(body) == 0 {
 		return req
 	}
 	req.Body = nil
-	head, err := json.Marshal(req)
+	head, err := rpc.Marshal(req)
 	if err != nil {
 		req.Body = body
 		return req

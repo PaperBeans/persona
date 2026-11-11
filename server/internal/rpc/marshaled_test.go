@@ -93,17 +93,14 @@ func BenchmarkNotifyMarshaled(b *testing.B) {
 	}
 }
 
-// oldCall is the line Call wrote before it took Appended params: params encoded, then the envelope, then the newline.
+// oldCall is the line Call wrote before it took Appended params, and writes for a value still: params through the
+// encoder, then the envelope and its newline.
 func oldCall(id, method string, params any) ([]byte, error) {
-	raw, err := json.Marshal(params)
+	raw, err := marshal(params)
 	if err != nil {
 		return nil, err
 	}
-	b, err := json.Marshal(message{ID: id, Method: method, Params: raw})
-	if err != nil {
-		return nil, err
-	}
-	return append(b, '\n'), nil
+	return encodeLine(message{ID: id, Method: method, Params: raw})
 }
 
 // lineCatcher keeps what a peer writes and closes it then, so a Call returns without an answer.
@@ -134,9 +131,9 @@ func appended(raw []byte) Appended {
 	return Appended{Size: len(raw), Append: func(b []byte) []byte { return append(b, raw...) }}
 }
 
-// Appended params json.Marshal wrote go out in the line json.Marshal writes for the request: HTML characters, U+2028
-// and control characters escaped and invalid UTF-8 replaced in params, a method the encoder would escape or leave out
-// written by the encoder, and the same error (nothing written) for empty ones.
+// Appended params Marshal wrote go out in the line Call writes for the same value: HTML characters as they are,
+// U+2028 and control characters escaped and invalid UTF-8 replaced in params, a method the encoder would escape or
+// leave out written by the encoder, and the same error (nothing written) for empty ones.
 func TestCallAppendedIsTheSameLine(t *testing.T) {
 	values := []any{
 		map[string]any{"header": map[string][]string{"X-A": {`<b>&</b>`, "  ", "\xff\xfe", "日本"}}, "body": []byte{0, 1, 2}},
@@ -144,14 +141,15 @@ func TestCallAppendedIsTheSameLine(t *testing.T) {
 	}
 	for _, method := range []string{"http.request", "", "a<b", "é", `q"`} {
 		for _, v := range values {
-			raw, err := json.Marshal(v)
+			raw, err := Marshal(v)
 			if err != nil {
 				t.Fatal(err)
 			}
 			got, err := callWrote(method, appended(raw), 0)
 			want, werr := oldCall("t1", method, v)
-			if err != nil || werr != nil || !bytes.Equal(got, want) {
-				t.Errorf("Call(%q, %s):\n%q, %v\nwas %q, %v", method, raw, got, err, want, werr)
+			value, verr := callWrote(method, v, 0) // and what Call writes for the value now
+			if err != nil || werr != nil || verr != nil || !bytes.Equal(got, want) || !bytes.Equal(got, value) {
+				t.Errorf("Call(%q, %s):\n%q, %v\nwas %q, %v\nas a value %q, %v", method, raw, got, err, want, werr, value, verr)
 			}
 		}
 	}

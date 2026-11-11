@@ -32,14 +32,18 @@ func plain(s string) bool {
 	return true
 }
 
-// Appended is a Call's params written straight into its line: Append adds Size bytes, the params exactly as
-// json.Marshal writes them (compact; HTML characters, U+2028 and U+2029 escaped; valid UTF-8). A relayed upload is
-// most of its request's params, in base64: as a value, json.Marshal encodes it into a buffer of its own and copies it
-// out, and the line's encoder checks and copies it once more; appended, the line is the only copy.
+// Appended is a Call's params written straight into its line: Append adds Size bytes, the params exactly as Call
+// writes them for a value (Marshal: compact, U+2028 and U+2029 escaped, valid UTF-8). A relayed upload is most of its
+// request's params, in base64: as a value, the encoder writes it into a buffer of its own and copies it out, and the
+// line's encoder checks and copies it once more; appended, the line is the only copy.
 type Appended struct {
 	Size   int
 	Append func([]byte) []byte
 }
+
+// Marshal is v as Call and Notify write it for params: json.Marshal's bytes with < > & as they are (marshal). The
+// parts of Appended params that are not appended by hand are made with it, so the line is the one a value gives.
+func Marshal(v any) ([]byte, error) { return marshal(v) }
 
 // callSize is the size of the line callLine writes, and whether it writes it: {"id":<id>,"method":<method>,
 // "params":<params>} and a newline, as json.Marshal writes the envelope. Not when id or method has a byte the encoder
