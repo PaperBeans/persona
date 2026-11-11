@@ -92,6 +92,18 @@ func Has(reply string) bool {
 	return ok
 }
 
+// WaitsOnNobody reports whether reply's closeout says the turn is finished and needs nobody: status done, with no
+// missing and no waiting line. An agent that needs someone says blocked or names what is missing, so a closing
+// question in such a reply is conversation or an offer, not a wait (docs/protocol/agent-states.md "Awaiting your
+// reply", #4110). False when the reply has no closeout.
+func WaitsOnNobody(reply string) bool {
+	if !strings.Contains(reply, "<closeout") { // most replies have none: no regexp run, nothing allocated
+		return false
+	}
+	c, _, ok := Parse(reply)
+	return ok && c.Status == proto.CloseoutDone && c.Missing == "" && c.Waiting == ""
+}
+
 // cutKey splits "key: value", taking a full-width colon as well and a leading list marker.
 func cutKey(line string) (key, val string, ok bool) {
 	line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-*"))

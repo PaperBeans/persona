@@ -7,6 +7,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 // 待你回复 (#5096): which stopped agents wait on the user's answer, and the manager's one reminder of those the user
@@ -62,6 +63,45 @@ func TestDecorateAwaitsReadsShortLastText(t *testing.T) {
 	s = proto.Session{Status: proto.StatusDone, State: proto.StateIdle, LastText: "改好了。要合并吗？", AsksRead: true}
 	if decorateAwaits(&s, askReader{}); s.AwaitsReply || s.Asks != "" {
 		t.Fatalf("read by the node: awaits %v asks %q", s.AwaitsReply, s.Asks)
+	}
+}
+
+// A conversational agent ends every turn on a question (#4110). When its closeout says the turn is done and needs
+// nobody, the turn does not await the user's reply, whether the node read the reply (asks) or the manager reads a
+// whole last_text itself; the same turn without that closeout still does; a card the agent put up with an ask tool is
+// Needs You either way.
+func TestAwaitsReplyHonoursCloseout(t *testing.T) {
+	const question = "你最在意哪一点？"
+	plain := "三个方向都列在上面了。" + question
+	settled := "三个方向都列在上面了。<closeout status=\"done\" merged=\"n/a\" deployed=\"n/a\"></closeout> " + question
+	for _, c := range []struct {
+		name  string
+		reply string
+		want  bool
+	}{
+		{"no closeout", plain, true},
+		{"closeout: done, needs nobody", settled, false},
+		{"closeout: blocked on the user", "三个方向都列在上面了。<closeout status=\"blocked\"> waiting: 你选一个 </closeout> " + question, true},
+	} {
+		// Read by the node off the whole reply.
+		s := proto.Session{Status: proto.StatusDone, State: proto.StateIdle, LastText: c.reply, Asks: transcript.AskOf(c.reply), AsksRead: true}
+		if decorateAwaits(&s, askReader{}); s.AwaitsReply != c.want {
+			t.Errorf("%s, read by the node: awaits %v asks %q, want %v", c.name, s.AwaitsReply, s.Asks, c.want)
+		}
+		// An older node: the manager reads the whole last_text.
+		s = proto.Session{Status: proto.StatusDone, State: proto.StateUnread, LastText: c.reply}
+		if decorateAwaits(&s, askReader{}); s.AwaitsReply != c.want {
+			t.Errorf("%s, read by the manager: awaits %v asks %q, want %v", c.name, s.AwaitsReply, s.Asks, c.want)
+		}
+	}
+	// A real ask tool: its card is pending and the session Needs You, with or without the closeout.
+	for _, reply := range []string{plain, settled} {
+		s := proto.Session{Status: proto.StatusBlocked, State: proto.StateNeedsYou, PendingInteractions: 1, LastText: reply,
+			Asks: transcript.AskOf(reply), AsksRead: true}
+		decorateAwaits(&s, askReader{})
+		if s.State != proto.StateNeedsYou || s.PendingInteractions != 1 || s.AwaitsReply {
+			t.Errorf("card pending, reply %q: state %s pending %d awaits %v; want Needs You from the card alone", reply, s.State, s.PendingInteractions, s.AwaitsReply)
+		}
 	}
 }
 

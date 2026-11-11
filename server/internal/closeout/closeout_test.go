@@ -68,3 +68,27 @@ func TestStrip(t *testing.T) {
 		t.Fatalf("Strip = %q", got)
 	}
 }
+
+// A closeout that says done and names nothing missing or waited for says the turn waits on nobody (#4110); any other
+// closeout, or none, says nothing of it.
+func TestWaitsOnNobody(t *testing.T) {
+	for _, c := range []struct {
+		name, reply string
+		want        bool
+	}{
+		{"done", "Which part matters most to you?\n<closeout status=\"done\" merged=\"n/a\" deployed=\"n/a\">\nverified: untested\n</closeout>", true},
+		{"done, waiting no", "<closeout status=\"done\">\nwaiting: no\nmissing: none\n</closeout>", true},
+		{"done, one line", "<closeout status=\"done\"></closeout>", true},
+		{"done with something missing", "<closeout status=\"done\">\nmissing: your pick of A or B\n</closeout>", false},
+		{"done, waiting for someone", "<closeout status=\"done\">\nwaiting: the review\n</closeout>", false},
+		{"not done", "<closeout status=\"not_done\">\ndid: x\n</closeout>", false},
+		{"blocked", "<closeout status=\"blocked\">\nwaiting: your answer\n</closeout>", false},
+		{"no status", "<closeout merged=\"yes\"></closeout>", false},
+		{"none", "Which part matters most to you?", false},
+		{"a later block wins", "<closeout status=\"done\"></closeout>\n<closeout status=\"blocked\">\nwaiting: you\n</closeout>", false},
+	} {
+		if got := WaitsOnNobody(c.reply); got != c.want {
+			t.Errorf("%s: WaitsOnNobody = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

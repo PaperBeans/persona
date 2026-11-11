@@ -34,7 +34,11 @@ forgotten. So a stopped session carries `awaits_reply` (`state` is unchanged; ol
   phrase when the close says there is nothing to decide (没有需要你拍板的问题; a real question mark before it still counts), nor a reply a newer message came after (the user already
   answered; a host's answer such as botmux's counts the same way when the host gives its time). Marks inside inline code and links end no sentence (`user?.name`,
   `…?w=1` ask nothing; the question keeps their words), an ASCII `?` only ends a sentence before a space or the line's end, and a Chinese sentence ending in
-  吗 asks even without its question mark (not 么 / 呢: "…为什么。" is a statement). The node marks the session `asks_read`; only without it (an older node, a
+  吗 asks even without its question mark (not 么 / 呢: "…为什么。" is a statement). A reply whose closeout
+  (`../assistant/agent-work.md` "Closeout") says `status="done"` with no `missing` and no `waiting` line asks nothing,
+  wherever its question stands (#4110, `closeout.WaitsOnNobody`): it is the Agent's own word that the turn waits on
+  nobody, so a closing question is conversation or an offer, as triage reads the same closeout. `not_done`, `blocked`,
+  `done` with something missing or waited for, and no closeout at all leave the words to decide, as before. The node marks the session `asks_read`; only without it (an older node, a
   host that does not say) the manager reads `last_text` itself, and only when it was not cut.
 - **Still waiting** (`awaits_reply`, the manager's): Unread or Seen, no pending interaction (that is Needs You), no model
   error, no background work or `/loop`, and either the triage says it waits on the user (not put off on its card:
