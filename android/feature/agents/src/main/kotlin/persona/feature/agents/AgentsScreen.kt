@@ -102,6 +102,7 @@ internal fun AgentsScreen(
     /** A project being put on a to-do ("Link to to-do…"): its machine and its name as the hub keys it. */
     var pickingTodoForSpace by remember { mutableStateOf<Pair<String, String>?>(null) }
     val todos by (model.tasks?.todos ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
+    val sessionsByKey = remember(page.sessions) { page.sessions.associateBy { it.key } }
     // By To-do only when the hub has to-dos, as iOS offers it (`DevGrouping.offered(supportsTodos:)`, #4338 A5).
     val todosSupported by (model.tasks?.todosSupported ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsStateWithLifecycle()
     val groupings = offeredGroupings(todosSupported)
@@ -486,24 +487,17 @@ internal fun AgentsScreen(
                             }, menu = space?.let { { spaceMenu(it, true) } }, icon = group.repo?.icon,
                             kind = group.repo?.kind ?: stringResource(R.string.agents_kind_space))
                         else if (group.id.startsWith("todo/") && group.id != TodoNoneGroup && group.id != TodoManualGroup) {
-                            // "By to-do": a todo under its project (#3156), one step in; the arrow opens the todo.
+                            // "By to-do" as iOS (#4338 A5): the to-do's title, its agents' count in the to-do's state, and
+                            // the arrow to the to-do.
                             val todoId = group.id.removePrefix("todo/")
-                            AgentSpaceHeader(groupTitle, group.folded, { model.fold(group) }, depth = entry.depth, first = entry.first,
-                                counts = group.headingCounts, icon = PhIcons.ListChecks, kind = stringResource(R.string.agents_kind_todo),
-                                menu = { HeadingAction(PhIcons.CaretRight, stringResource(R.string.agents_view_todo),
-                                    { navigator.navigate(persona.core.navigation.TodoDetailRoute(todoId)) }) })
-                        } else if (group.id.startsWith(TodoLoosePrefix)) {
-                            // "Started by hand" / "No to-do" agents of one project
-                            AgentSpaceHeader(groupTitle, group.folded, { model.fold(group) }, depth = entry.depth, first = entry.first,
-                                counts = group.headingCounts, icon = PhIcons.Folder, kind = stringResource(R.string.agents_kind_project))
-                        } else if (group.id.startsWith(TodoProjectPrefix)) {
-                            val todoCount = page.list.groups.count { it.under == group.id }
-                            AgentTreeHeader(groupTitle, group.folded, { model.fold(group) }, first = entry.first,
-                                icon = PhIcons.Folder, counts = group.headingCounts,
-                                detail = pluralStringResource(R.plurals.agents_count_todos, todoCount, todoCount))
+                            val todoState = todos.firstOrNull { it.id == todoId }?.state { key -> sessionsByKey[key] }
+                            AgentTreeHeader(groupTitle, group.folded, { model.fold(group) }, first = entry.first, icon = PersonaIcons.todo,
+                                counts = listOf(todoState.countTone to group.rows.count { !it.isNestedSubtask }),
+                                onAction = { navigator.navigate(persona.core.navigation.TodoDetailRoute(todoId)) },
+                                actionLabel = stringResource(R.string.agents_view_todo))
                         } else AgentTreeHeader(groupTitle, group.folded, { model.fold(group) }, first = entry.first,
                             icon = PhIcons.PushPin.takeIf { group.id == "pinned" } ?: PersonaIcons.backgroundWaiting.takeIf { group.id == "state/background" },
-                            counts = group.stateSectionCounts ?: group.headingCounts)
+                            counts = group.stateSectionCounts ?: group.todoLooseCounts ?: group.headingCounts)
                     }
                     is TreeRowEntry -> item(entry.key, contentType = "session") {
                         val row = entry.row

@@ -29,7 +29,7 @@ type hostCLI interface {
 	AuthStatus(ctx context.Context) (larkcliadapter.AuthStatus, error)
 	ListChats(ctx context.Context, limit int) (larkcliadapter.ChatList, error)
 	ListMessages(ctx context.Context, chatID, thread, before string, limit int) (larkcliadapter.MessagePage, error)
-	Search(ctx context.Context, kind, query string) (json.RawMessage, error)
+	SearchLimit(ctx context.Context, kind, query string, limit int) (json.RawMessage, error)
 }
 
 type hostCLIState struct {
@@ -175,7 +175,7 @@ func (h *Manager) invokeHostCLI(ctx context.Context, spec extension.HostIntegrat
 		default:
 			return nil, &rpc.Error{Code: hostCLIInvalid, Message: "host CLI: unsupported search kind"}
 		}
-		data, err := runner.Search(ctx, in.Kind, in.Query)
+		data, err := runner.SearchLimit(ctx, in.Kind, in.Query, in.Limit)
 		if err != nil {
 			return nil, publicHostCLIError(err)
 		}

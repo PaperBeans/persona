@@ -75,7 +75,9 @@ The minutes themselves are `detail.minutes`, present once minutes have been writ
   "revision": 7,                     // the recording revision they were made from
   "generated_at": "2026-11-10T07:12:03Z",
   "title": "Design review",
-  "when": "2026-11-10 14:00–15:10",  // in the user's time zone
+  "when": "2026-11-10 14:00–15:10",  // in the user's time zone, one fixed format: for older clients and the Markdown
+  "start": "2026-11-10T14:00:00+08:00", // the same span, RFC 3339 (#4713): what clients format
+  "end": "2026-11-10T15:10:00+08:00",
   "where": "Room 3",                 // omitted when nobody said and no calendar has it
   "attendees": ["Ada", "Bo"],        // omitted when not known; never invented
   "points": [
@@ -95,6 +97,7 @@ The minutes themselves are `detail.minutes`, present once minutes have been writ
 }
 ```
 
+- `start` / `end` are the recording's span (its start, and its end or at least a minute after the start) in the user's time zone, to the second (#4713). Clients format them with their own localized date and time, as they show the recording's own dates, and show `when` only when they are absent (minutes from an older hub). `when` is never parsed. Minutes written before these fields existed get them from their recording when the detail is read.
 - `at` is seconds from the start of the recording, the same clock as `segments[].start`, so a client can jump straight to that part of the transcript. Every point, decision, action and open question carries one.
 - `who` is omitted unless the transcript or the calendar actually supports it. There is no speaker diarization, so a name appears only when someone was addressed by name or is the only attendee who could have said it. Otherwise the field is absent, not guessed.
 - `by` is the deadline as spoken ("Friday", "before the 20th"), not a parsed date. Absent when none was said. `due_date` (`YYYY-MM-DD`) is added only when the spoken deadline resolves to one date unambiguously, counting from the meeting day.
@@ -270,7 +273,8 @@ All of it is optional and additive. A phone that sends none of it, and a hub wit
   "answer": "At the design review on November 3 you kept the 4 MB cap for this release. Bo owns the regression test; it is still open.",
   "lang": "en",                           // BCP 47: the language the answer is written in
   "speak": true,                          // participant: say it aloud; listener: screen only
-  "sources": [{"kind": "recordings", "id": "<recording id>", "name": "Design review", "when": "2026-11-03 14:00–15:10"}],
+  "sources": [{"kind": "recordings", "id": "<recording id>", "name": "Design review", "when": "2026-11-03 14:00–15:10",
+               "start": "2026-11-03T14:00:00+08:00", "end": "2026-11-03T15:10:00+08:00"}],
   "error": "model_unavailable",           // only when failed
   "asked_at": "2026-11-10T07:12:03Z",
   "answered_at": "2026-11-10T07:12:09Z"   // omitted until answered
@@ -280,7 +284,7 @@ All of it is optional and additive. A phone that sends none of it, and a hub wit
 - `answer` is plain text, at most 400 characters, a few short sentences that read well aloud: no Markdown, no links. When the material does not hold the answer it says so instead of guessing. `answer` is `""` and `sources` `[]` unless `state` is `answered`.
 - `lang` is the recording's `language`, else the request's language. The phone speaks the answer with an on-device voice for it.
 - `speak` is fixed when the ask is made, from the role then. The phone says an answer aloud at most once, only for an ask it made in this run, only while the recording runs and only when the answer arrives within 60 seconds of the tap; otherwise it only shows it.
-- `sources` are the earlier meetings (`kind: "recordings"`) and projects (`kind: "projects"`) the answer drew on; each opens with `GET /api/v1/kb/{kind}/{id}`. `when` is the earlier meeting's minutes `when`, a display string in the user's time zone that is never parsed; absent for projects.
+- `sources` are the earlier meetings (`kind: "recordings"`) and projects (`kind: "projects"`) the answer drew on; each opens with `GET /api/v1/kb/{kind}/{id}`. `when`, `start` and `end` are the earlier meeting's minutes' (clients format `start` / `end` and show `when` only without them, as for the minutes); absent for projects, and `start` / `end` absent in answers from before #4713.
 - `asked_at` / `answered_at` are RFC 3339 in UTC.
 - `error` (open set; unknown values are shown as a generic failure): `model_unavailable` (no model configured, or paused), `model_error`, `model_timeout` (no answer within 3 minutes), `interrupted` (the hub restarted while answering; ask again with the same `id`), `nothing_heard` (no question and no live sentence in the 45 seconds before `at`).
 - Errors, checked in this order: `503` as above, `413 too_large` (a body over 64 KiB), `410 recording_deleted`, `404 recording_not_found`, `400` (`id` missing or not a UUID, a `question` over 1000 characters, or neither `question` nor `at`), then a stored `id` as above (`409 op_id_reused` when it does not match), `403 kb_read_only` (no model call is made then), `409 not_attending`, `409 asks_full` (100 questions in this meeting already), `429 ask_busy` (two of its questions are being answered now; no `Retry-After`: ask again once one is answered).

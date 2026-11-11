@@ -127,6 +127,22 @@ from colliding with its buttons.
   the screen drew it over the bar and hid the bar's buttons; it starts at `AssistantTopBar.fogSolid`, the bar fog's solid end, and goes
   down from there. The bar, the shell's moving bar and the switcher share `fogSolid` and `fade` so they cannot drift apart.
 
+## Fog under the chat's footer (#3696)
+
+The chat list and its footer (Persona's capsules, cards, the composer) are stacked, not overlaid, so the keyboard shortens the
+page and the newest message stays over the composer. A fade drawn by the footer over the list's last 48 pt still left three faults:
+
+- **The list's own edge is a line.** The gradient ended at the list's bottom, where the scroll view clips: a card crossing it lost
+  its rounded bottom to a straight cut, and below it was only page. A fade must end where nothing is drawn any more: the fog is
+  solid at the list's bottom edge (`FooterFog`), so whatever the clip cuts is already invisible.
+- **A band under the capsules reads as a plate.** To fade behind the capsules, the list runs on under the footer by a fixed band
+  (`ChatView.underDock`, negative bottom padding on the list) and its newest end gets the same extra content margin. Positions,
+  `newestGap` (offset + inset) and the follow logic are unchanged; what reads the list's frame (`scratch.listFrame`, the scroll
+  geometry's height, the navigator, the arrow) takes the part over the footer. The band is a constant per chat type, never the
+  footer's measured height: margins that track the footer would move the list on every card, tray and line of text.
+- **Whatever is drawn after the fade covers what is drawn before it.** The footer's gradient also dimmed Jump to Latest, which is
+  an overlay of the list. The fog is now the list's first overlay; the navigator and the arrow come after it.
+
 ## Personal Agent entry availability (#2935)
 
 - Gate entry points on source setup, configured accounts and an unfiltered session list, not the personal page's search/unread preferences. Unknown availability starts hidden; a source/account response alone cannot reveal the chip. Keep an event listener alive while the Agents tab is visible so the first session can reveal a previously hidden entry, and fence cancelled reads and changed hub credentials.
@@ -1765,6 +1781,24 @@ A worktree's display name and its Agents' conversation names are different comma
 ## Configuration refusals are not retryable connection failures (#1915)
 
 HTTP failures live in `Shared/APIClient.swift`, not PersonaKit's model-response `APIErrorInfo`. Classify business codes before status or timeout wording. A background sync must pause on disabled/read-only configuration without discarding uploads or deletion intent; another local save cannot repair that configuration. Reopen/foreground can explicitly recheck. Do not continue writes after failed reconciliation, and do not acknowledge a remote deletion from an unsupported 404. Keep the list's pending-delete explanation durable across relaunch.
+
+## A header holding a Menu can stretch the scroll edge blur over a whole List (2026-11-11, #4218)
+
+- On an iPhone (TestFlight), the inbox's rows all turned blurred and washed out as soon as a section title stuck under the navigation bar,
+  and came back only at the list's top. Section titles stayed sharp, but the edge's hairline sat at the bottom of Done's title, the header
+  of an empty section (`Section { EmptyView() } header:`) holding a `Menu` (Jump To), and that title was blurred with the rows.
+- The iOS 27.0 and 27.1 simulators never blurred the rows (same style, grouping, sections, an end bounce, the offset set directly with
+  `personactl.py scroll`, real drags in a UI test), but they did draw that one title washed out like a stuck title's, wherever it was:
+  its secondary text at about half the luminance spread of Collapsed's title, an empty-section header with the same styling and no
+  `Menu` (0.23 to 0.28 against 0.46 to 0.56, light and dark). Other empty-section headers rendered normally. Measure titles' contrast
+  on screenshots: a header the edge treats as stuck shows there even when the blur itself is device-only.
+- How the edge is built (iOS 27, read from a running app with `xcrun lldb -p <pid>`, `recursiveDescription` and `_ivarDescription`): a
+  List's top `UIKit.ScrollEdgeEffectView` is sized to a `PocketElementModel`'s region: the bar, the status bar, and the content of every
+  stuck header, which SwiftUI registers as "floating" elements (`ScrollPocketElementInteraction` views in each header cell). With a
+  floating element the automatic style draws `thinFilm(floating)`, a film down to the region's bottom with a hairline there; forcing
+  `.soft` draws `soft` over the same region. A header counted as floating while it is not stuck therefore takes the film down to it.
+- So a title with a `Menu` and nothing under it is a row, not a section header (Done's title in `InboxView`; it never stuck anyway).
+  `InboxScrollEdgeTests` measures both the rows and that title. Look for the region in the lldb dump first when a list blurs as a whole.
 
 ## Rolling recording
 

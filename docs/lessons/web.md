@@ -1,5 +1,15 @@
 # Lessons: web UI and interactions
 
+## Review state is not an answerable decision (#4808)
+
+An old task can remain `supervision.state: needs_user` without any acceptance-book `ask`. Render its original review
+explanation and the same dismiss/defer controls as a structured decision, but never invent options or send a review
+timestamp as `asked_at` to acceptance. Dismiss the exact review, not the task: completing it or accepting its recommendation
+changes what the owner asked to ignore. Keep persistence and receipt-scoped Undo on the manager, and Later in the browser
+session. Give all mixed actions one synchronous admission guard, fence late replies against the review and credential
+owner, and exercise both the legacy row and structured choices with a real browser. Load the extra controls lazily;
+the collapsed tray does not need their code on the first screen.
+
 ## Viewport ownership must not create a second hover-width peak (#4792)
 
 The user-input rail's viewport-current identity is separate from the pointer or keyboard preview. Apply the existing

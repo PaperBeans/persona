@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import persona.core.contracts.AgentState
 import persona.core.contracts.Machine
+import persona.core.contracts.TodoState
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
@@ -204,6 +205,19 @@ internal val AgentListGroup.stateSectionCounts: List<Pair<Status, Int>>?
             else -> return null
         }
         return listOf(status to (totalCount ?: rows.count { !it.isNestedSubtask }))
+    }
+
+/** "By to-do"'s "Opened by hand" and "No to-do": one count of their agents, as iOS's sections without a to-do. */
+internal val AgentListGroup.todoLooseCounts: List<Pair<Status, Int>>?
+    get() = if (id == TodoManualGroup || id == TodoNoneGroup) listOf(Status.Idle to rows.count { !it.isNestedSubtask }) else null
+
+/** A to-do's count in its state's color (iOS `todoTone`): needing you, unread, working, else plain. */
+internal val TodoState?.countTone: Status
+    get() = when (this) {
+        TodoState.NeedsYou -> Status.NeedsYou
+        TodoState.Unread -> Status.Unread
+        TodoState.Working -> Status.Working
+        else -> Status.Idle
     }
 
 internal val AgentListGroup.headingCounts: List<Pair<Status, Int>>

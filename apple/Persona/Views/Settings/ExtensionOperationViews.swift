@@ -99,7 +99,8 @@ struct ExtensionOperationSection: View {
         VStack(alignment: .leading, spacing: Theme.Space.xxs) {
             if let partial {
                 Text(ExtensionPartialRemoval.title).font(Theme.Font.labelStrong).foregroundStyle(Theme.cautionText)
-                ForEach(Array(partial.enumerated()), id: \.offset) { _, line in
+                // Each line is a different sentence (what it means, then one per group).
+                ForEach(partial, id: \.self) { line in
                     Text(line).font(Theme.Font.label).textSelection(.enabled)
                 }
             } else if let step = operation.failedStep {

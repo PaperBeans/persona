@@ -599,7 +599,16 @@ struct InboxPage: View {
                     let count = more ? "\(doneCount)+" : "\(doneCount)"
                     let filtered = !source.isEmpty || !kind.isEmpty || !query.isEmpty
                     if dg.count > 1 {
-                        Section { EmptyView() } header: { doneHeader(count: count, groups: dg, manager: manager, proxy: proxy) }
+                        // Its title as a row, not as the header of a section with nothing in it: as that header (with its
+                        // Jump To menu, #2979) its text came out washed like a stuck title's wherever it was, and on an
+                        // iPhone the scroll edge reached from the top down to it, over every row between (#4218).
+                        Section {
+                            doneHeader(count: count, groups: dg, manager: manager, proxy: proxy)
+                                .listRowInsets(.vertical, Theme.Space.s)
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .accessibilityAddTraits(.isHeader)
+                        }
                         if folds.isOpen("done", manager: manager) {
                             ForEach(dg) { g in
                                 Section {

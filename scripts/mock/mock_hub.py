@@ -2705,6 +2705,7 @@ def recording_minutes(body, rid=None):
     out = {
         "title": cal.get("title") or body.get("title") or None,
         "when": "2027-01-15 16:00–17:00",
+        "start": "2027-01-15T16:00:00+08:00", "end": "2027-01-15T17:00:00+08:00",  # the same span, for the apps to format (#4713)
         "where": cal.get("location"),
         "attendees": cal.get("attendees"),
         "points": [item(x) for x in segs[:2]] + [
@@ -3164,7 +3165,8 @@ def meeting_answer(st, a):
         return
     zh = a["lang"].lower().startswith("zh")
     earlier = next((k for k, v in reversed(list(RECORDINGS.items())) if earlier_material(k, v) and k != st["id"]), None)
-    sources = ([{"kind": "recordings", "id": earlier, "name": RECORDINGS[earlier].get("title") or "Design review", "when": "2026-11-03 14:00–15:10"}]
+    sources = ([{"kind": "recordings", "id": earlier, "name": RECORDINGS[earlier].get("title") or "Design review", "when": "2026-11-03 14:00–15:10",
+                "start": "2026-11-03T14:00:00+08:00", "end": "2026-11-03T15:10:00+08:00"}]
                if earlier else []) + [{"kind": "projects", "id": "weather-app", "name": "天气 App"}]
     a.update(state="answered", sources=sources, answered_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
              answer="上次设计评审定了：这一版保留 4 MB 的导出上限，补充清楚的提示。回归测试由 Bo 负责，还没完成。" if zh else  # i18n-ignore: made-up model answer
@@ -7429,14 +7431,46 @@ MAIL_FLAGS = []  # POST …/mail/messages/{aid}/{uid}/flags, {"account_id", "uid
 QUEUE_EDITS = []  # bodies of …/queue ("Withdraw to edit" / "Delete" of a queued message; GET /mock/queue_edits)
 
 
-def queue_messages(text=None, clear=False):
+QUEUED_IMAGES = [0]  # Claude Code numbers the pictures pasted into a session: [Image #1], [Image #2]…
+
+
+def claude_queued(mid, text, images):
+    """What Claude Code's queue holds of a message the node typed while the agent works (the transcript's queue-operation
+    line, as the hub's applyQueue keeps it), seen in a real transcript (#3022): each photo saved under the machine's
+    ~/.persona/uploads (served back by …/file and …/file/download), the node's <attached_images> block with a `path: `
+    line per photo (keepImagePaths), each bare path turned into an `[Image #n]` up front by Claude's paste, and the
+    <pasted_content> wrapper around the rest dropped by the hub, its line breaks left."""
+    text = (text or "").strip()
+    if not images: return text
+    paths, day = [], datetime.now().strftime("%Y-%m-%d")
+    for img in images:
+        mime = img.get("mime") or "image/jpeg"
+        ext = {"image/png": ".png", "image/heic": ".heic", "image/gif": ".gif", "image/webp": ".webp"}.get(mime, ".jpg")
+        rel = ".persona/uploads/%s/%s%s" % (day, uuid.uuid4().hex[:8], ext)
+        MOCK_TREE[rel] = (mime, img.get("data") or "")
+        paths.append(mock_home(mid) + "/" + rel)
+    marks = []
+    for _ in paths:
+        QUEUED_IMAGES[0] += 1
+        marks.append("[Image #%d]" % QUEUED_IMAGES[0])
+    return (" ".join(marks) + "\n\n\n" + text + "\n<attached_images>\n" + "\n".join("path: " + p for p in paths)
+            + "\n</attached_images>")
+
+
+def queue_messages(text=None, clear=False, photos=0):
     """GET /mock/queue: messages typed while the first working agent works, not taken yet (Session.queued): `text`
-    adds one (none: two samples), `clear` empties it. Pushed like the real hub's sessions update."""
+    adds one (none: two samples), `clear` empties it; `photos=N` with it: N pictures went with that one, queued as
+    Claude Code holds them (claude_queued): a message from another device, no outbox copy on this one. Pushed like the
+    real hub's sessions update."""
     working = [s for s in SESSIONS if s["state"] == "working" and not s.get("assistant")]
     if not working: return {"error": "no working agent"}
     s = working[0]
     if clear: s["queued"] = []
-    elif text: s["queued"] = (s.get("queued") or []) + [text]
+    elif text or photos:
+        rgb = [(52, 120, 246), (255, 149, 0), (52, 199, 89), (175, 82, 222)]
+        images = [{"mime": "image/png", "data": base64.b64encode(_fs_png(240, 180, rgb[i % 4], (30, 30, 40))).decode()}
+                  for i in range(photos)]
+        s["queued"] = (s.get("queued") or []) + [claude_queued(s["machine_id"], text, images)]
     else: s["queued"] = (s.get("queued") or []) + ["测试跑完之后把截图也更新一下", "顺便检查一下深色模式下小组件的对比度\n不够的话调一下文字颜色"]
     push_machine(s["machine_id"])
     return {"key": s["machine_id"] + "/" + s["session_id"], "queue": s["queued"]}
@@ -12977,12 +13011,14 @@ def case_route(h, method, p, q, body):
         return True
     if p == "/mock/case/load" and method == "POST":  # another case in the same mock (its sockets closed first)
         try:
-            case = sync_case.load(json.loads(body or b"{}").get("case", ""))
+            asked = json.loads(body or b"{}")
+            case = sync_case.load(asked.get("case", ""))
         except (ValueError, KeyError, OSError) as e:
             case_json(h, {"error": str(e)}, 400)
             return True
         CASE.close()
-        CASE = sync_case.CaseHub(case)
+        # "now": its times moved to the present, for an app on the real clock (the iOS simulator's)
+        CASE = sync_case.CaseHub(case, shift=sync_case.shift_to(time.time()) if asked.get("now") else 0)
         case_json(h, CASE.state())
         return True
     if method == "GET" and MOCK_WEB and not p.startswith(("/api/", "/mock/")):
@@ -17616,7 +17652,7 @@ class H(BaseHTTPRequestHandler):
         if p == "/mock/uploads": return self.send_json({"uploads": UPLOADS})
         if p == "/mock/keys": return self.send_json({"keys": KEYS})
         if p == "/mock/rewinds": return self.send_json({"rewinds": REWINDS})
-        if p == "/mock/queue": return self.send_json(queue_messages(q.get("text", [None])[0], "clear" in q))
+        if p == "/mock/queue": return self.send_json(queue_messages(q.get("text", [None])[0], "clear" in q, int(q.get("photos", ["0"])[0] or 0)))
         if p == "/mock/queue_edits": return self.send_json({"edits": QUEUE_EDITS})
         if p == "/mock/terminal_input": return self.send_json({"input": TERMINAL_INPUT})
         if p == "/mock/herdr_client": return self.send_json({"log": FULL_LOG})
@@ -19045,6 +19081,11 @@ class H(BaseHTTPRequestHandler):
                         if body.get("images"):
                             QUEUED_PHOTOS[body.get("text") or ""] = [{"mime": i.get("mime"), "data": i.get("data")} for i in body["images"]]
                         push_machine(q["machine_id"])
+                # MOCK_QUEUE_SENDS=1: one to a working agent joins its own queue (#3022), as Claude Code holds it.
+                s = next((x for x in SESSIONS if len(parts) >= 7 and x["machine_id"] == parts[4] and x["session_id"] == parts[5]), None)
+                if os.environ.get("MOCK_QUEUE_SENDS") and s and s["state"] == "working" and not s.get("assistant"):
+                    s["queued"] = (s.get("queued") or []) + [claude_queued(s["machine_id"], body.get("text"), body.get("images") or [])]
+                    push_machine(s["machine_id"])
             return self.send_json({"ok": True})
         if p == "/api/v1/inbox/refresh": return self.send_json(inbox_list(parse_qs(urlparse(self.path).query)))
         if p == "/api/v1/inbox/done" and self.command == "POST":  # "Mark all as handled" / "Undo"

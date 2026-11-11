@@ -533,6 +533,8 @@ extension Theme {
         static let handToAI = "paperplane"
         /// Mentions of the user (@Me).
         static let mention = "at"
+        /// An Agent's Quick Commands (Continue, Report Progress, /compact…): the submenu of the composer's + (#3225).
+        static let quickCommands = "slash.circle"
         /// The day's Today card at the top of the assistant's conversation (docs/assistant/unified-entry.md).
         static let today = "sun.max.fill"
         /// Something done on the phone from the conversation: an event added to its calendar, a reminder.

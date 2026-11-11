@@ -943,6 +943,24 @@ verify trust dialog detected (`dialog_open` refusal), option answers (rev check,
 (`input_draft`), unrelated text not cleared, clearing seen draft allows send. Without local Go, cross-build test binary on hub/copy back.
 Requires herdr/claude locally (claude starts but receives no message).
 
+First-prompt image delivery has a separate opt-in real-Agent test (`server/internal/node/firstprompt_live_test.go`,
+#4794). Start your own named `herdr --session persona-firstprompt-<unique> server`; set `HERDR_SESSION` to that
+name and `HERDR_SOCKET_PATH` to its socket, never the active server's. Then, from `server/`, run:
+
+```sh
+PERSONA_LIVE_FIRST_PROMPT=1 PERSONA_LIVE_LAUNCHER=<launcher> \
+  go test -tags herdrlive -run '^TestLiveFirstPrompt$' ./internal/node -v -timeout 6m
+```
+
+It starts disposable Claude Agents in temporary directories/profiles, with no Persona hooks or hub/node service
+changes, and sends a synthetic 768×768 PNG plus multiline text through `firstPrompt`. A launcher's first Bypass
+Permissions confirmation is accepted only in its disposable test profile. The normal case uses real
+`agent.prompt`; the fault-injected case pastes into the real terminal but omits initial Enter and swallows one
+recovery Enter. Both require exactly one user prompt and image in the transcript, a model reply, and an empty
+input box. `PERSONA_LIVE_ARTIFACTS=<existing directory outside the repo>` keeps redacted ANSI captures and JSON
+receipts. Stop the test server by its exact session name afterwards. A fault-injected pass proves recovery, not
+that the normal case reproduced the original timing race.
+
 ## Codex integration
 
 `./scripts/test/test-codex.sh` tests real Codex question/approval cards (`docs/integrations/codex.md` ("Questions and approvals")), independent `persona-codex-<pid>` herdr

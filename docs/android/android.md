@@ -166,7 +166,10 @@ without opening sockets. JVM Native-rendered component captures are separate evi
 - **Back** follows the same route from the toolbar and Android: Confirm or failure returns to the manual form with the entered details, or to the connection options for a pairing link. The manual form returns to the connection options, and those return to Welcome when the flow started there. Settings › Pairing and Add hub return to their caller instead. Connecting and the required engine step have no Back action. On the first checklist, **Set up later** and Android Back both enter the app and leave the checklist pending.
 - **Settings › Pairing** and Add hub start directly in the connection flow, even while the first checklist is unfinished. Only the root pairing page with no link reopens that checklist. A pairing link goes to Confirm, and successful pairing from any entry goes to the engine step or checklist.
 - **Keyboard**: on the manual form, the address field's Next key moves to the code field, and the code field's Go key does what **Next** does.
+- **QR scanner** centers the title between equal margins. Close and Android Back both return to the connection options.
 - Tests: `PairingFlowTest` in `feature:settings` (Robolectric).
+
+- **Connection diagnostics** opens over its caller. The toolbar arrow and Android Back dismiss it, keeping the pairing input or checklist scroll position.
 
 ## Aligning the Agents list and the Machines page (#3038)
 

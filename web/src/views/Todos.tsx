@@ -60,7 +60,20 @@ import { StatusMark } from "../ui/StatusMark";
 import { Icon } from "../ui/icons";
 import { formatDate, t } from "../i18n";
 import { groupTodosByProject, treeStateLabel, type TodoProjectGroup, type TreeState } from "../lib/todo-tree";
-import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, lastActivity, triageTodos, type TriageGroup, type TriageSection } from "../lib/todo-triage";
+import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, lastActivity, supersededFailedStarts, triageTodos, type TriageGroup, type TriageSection } from "../lib/todo-triage";
+import {
+  TODO_LIST_FILTERS,
+  TODO_LIST_SORTS,
+  hiddenWaiting,
+  isTodoListFilter,
+  isTodoListSort,
+  listFilterCounts,
+  matchesListFilter,
+  sortTriageGroups,
+  type TodoListFilter,
+  type TodoListSort,
+} from "../lib/todo-list-filter";
+import type { MenuItem } from "../ui/menu-model";
 import { useRestoredTodos } from "../lib/todo-restore";
 import { autoReviewLine, checklist, latestReview, parkedLine, progressLine, type CheckMark, type Supervision } from "../lib/supervision";
 import { resultExtras } from "../lib/brief";
@@ -90,6 +103,13 @@ const MODE_KEY = "persona.todos.calendar.mode";
 const DONE_KEY = "persona.todos.calendar.showDone";
 /** The list by status sections (default, #3156) or by folder (#2526). */
 const GROUPING_KEY = "persona.todos.grouping";
+/** The list's filter by due date and its order inside each section (#3740), kept per browser like the view. */
+const FILTER_KEY = "persona.todos.filter";
+const SORT_KEY = "persona.todos.sort";
+
+/** A filter's and a sort's name, as the menu and the chip say them. */
+const filterLabel = (f: TodoListFilter) => t(`todos.filter_${f}`);
+const sortLabel = (s: TodoListSort) => t(`todos.sort_${s}`);
 
 function pref(key: string): string | null {
   try {
@@ -211,15 +231,41 @@ export function TodosView({
   const steadyCompleted = useSteady(completed, sameList);
   const views = useSteady(useMemo(() => todoRowViews(todos, lookup, interactions), [todos, lookup, interactions]), steadyViews);
 
+  // The filter by due date and the order inside each section (#3740): this browser's, in both groupings
+  const [listFilter, setListFilter] = useState<TodoListFilter>(() => {
+    const v = pref(FILTER_KEY);
+    return isTodoListFilter(v) ? v : "all";
+  });
+  const [listSort, setListSort] = useState<TodoListSort>(() => {
+    const v = pref(SORT_KEY);
+    return isTodoListSort(v) ? v : "recent";
+  });
+  const chooseFilter = (f: TodoListFilter) => {
+    setPref(FILTER_KEY, f);
+    setListFilter(f);
+  };
+  const chooseSort = (s: TodoListSort) => {
+    setPref(SORT_KEY, s);
+    setListSort(s);
+  };
+  // a minute's tick moves to-dos across the 24 h and 48 h lines (and today's end) while nothing else changes
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setTick(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const inFilter = (td: Todo) => matchesListFilter(td, listFilter, tick);
   // Filter by search query
-  const filterTodo = (t: Todo) => {
+  const matchesSearch = (t: Todo) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return t.title.toLowerCase().includes(q) || (t.notes ?? "").toLowerCase().includes(q);
   };
+  // a search and the filter narrow the to-dos first; the sections (or the folders) place what is left
+  const filterTodo = (t: Todo) => matchesSearch(t) && inFilter(t);
 
-  const filteredUncompleted = useMemo(() => steadyUncompleted.filter(filterTodo), [steadyUncompleted, search]);
-  const filteredCompleted = useMemo(() => steadyCompleted.filter(filterTodo), [steadyCompleted, search]);
+  const filteredUncompleted = useMemo(() => steadyUncompleted.filter(filterTodo), [steadyUncompleted, search, listFilter, tick]);
+  const filteredCompleted = useMemo(() => steadyCompleted.filter(filterTodo), [steadyCompleted, search, listFilter, tick]);
   // open todos under the knowledge-base project they are in (#2581), else the one their agents work in (#2526)
   const kbProjects = useTodoProjects();
   const projectName = useMemo(() => projectNames(kbProjects), [kbProjects]);
@@ -237,14 +283,24 @@ export function TodosView({
   const [grouping, setGrouping] = useState<"status" | "folder">(() => (pref(GROUPING_KEY) === "folder" ? "folder" : "status"));
   const byStatus = grouping === "status";
   const [restored, restoreTodo] = useRestoredTodos();
-  // a minute's tick moves to-dos across the 24 h and 48 h lines while nothing else changes
-  const [tick, setTick] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setTick(Date.now()), 60_000);
-    return () => window.clearInterval(id);
-  }, []);
-  const triaged = useMemo(() => triageTodos(todos.filter(filterTodo), lookup, Date.now(), restored), [todos, lookup, restored, search, tick]);
-  const triageAll = useMemo(() => (search.trim() ? triageTodos(todos, lookup, Date.now(), restored) : triaged), [todos, lookup, restored, search, triaged, tick]);
+  // whether a failed start was superseded by finished work (#3713) is decided on every to-do: a search or a filter that
+  // leaves the finished one out must not put it back in Needs you
+  const superseded = useMemo(() => supersededFailedStarts(todos), [todos]);
+  const triaged = useMemo(
+    () => triageTodos(todos.filter(filterTodo), lookup, Date.now(), restored, { superseded }),
+    [todos, lookup, restored, search, listFilter, superseded, tick],
+  );
+  // the header's counts: what the filter shows, whatever is searched
+  const triageAll = useMemo(
+    () => (search.trim() ? triageTodos(todos.filter(inFilter), lookup, Date.now(), restored, { superseded }) : triaged),
+    [todos, lookup, restored, search, listFilter, superseded, triaged, tick],
+  );
+  // what waits on the user that the filter leaves out: the line over the sections says how many (#3740)
+  const hiddenWaitingCount = useMemo(
+    () => (listFilter === "all" ? 0 : hiddenWaiting(todos.filter(matchesSearch), inFilter, lookup, Date.now(), restored, superseded)),
+    [todos, lookup, restored, search, listFilter, superseded, tick],
+  );
+  const filterCounts = useMemo(() => listFilterCounts(todos.filter(matchesSearch), tick), [todos, search, tick]);
   const onRestore = useCallback(
     (id: string) => {
       restoreTodo(id);
@@ -411,7 +467,9 @@ export function TodosView({
               // a phone's header has the List | Calendar switch to fit (#2029): the counts stay on wider screens
               <span className="text-[12px] whitespace-nowrap text-ink-3 max-sm:hidden">
                 {byStatus
-                  ? t("todos.summary_triage", { open: triageAll.open, shelved: triageAll.shelved, done: triageAll.finished })
+                  ? listFilter === "all"
+                    ? t("todos.summary_triage", { open: triageAll.open, shelved: triageAll.shelved, done: triageAll.finished })
+                    : t("todos.summary_filtered", { filter: filterLabel(listFilter), open: triageAll.open, shelved: triageAll.shelved, done: triageAll.finished })
                   : t("todos.summary", { open: uncompleted.length, done: completed.length })}
               </span>
             )}
@@ -509,6 +567,7 @@ export function TodosView({
             <div className="min-w-0 flex-1">
               <SearchField tone="inset" value={search} onChange={setSearch} placeholder={t("todos.search_placeholder")} />
             </div>
+            <TodoListControls filter={listFilter} sort={listSort} counts={filterCounts} onFilter={chooseFilter} onSort={chooseSort} />
             <Segmented
               label={t("todos.grouping_label")}
               value={grouping}
@@ -549,6 +608,22 @@ export function TodosView({
                 <Empty icon="search" title={t("todos.no_match_title")}>
                   {t("todos.no_match_body")}
                 </Empty>
+              ) : listFilter !== "all" ? (
+                // the filter left nothing (#3740): which, and the way back to every to-do
+                <>
+                  {hiddenWaitingCount > 0 && <HiddenWaitingLine count={hiddenWaitingCount} filter={listFilter} onShowAll={() => chooseFilter("all")} />}
+                  <Empty
+                    icon="calendar"
+                    title={t(`todos.filter_empty_${listFilter}`)}
+                    action={
+                      <Button tone="secondary" onClick={() => chooseFilter("all")}>
+                        {t("todos.filter_show_all")}
+                      </Button>
+                    }
+                  >
+                    {t("todos.filter_empty_body")}
+                  </Empty>
+                </>
               ) : (
                 <Empty
                   icon="todo"
@@ -565,14 +640,16 @@ export function TodosView({
             ) : (
               byStatus ? (
               <div className="flex flex-col gap-1" data-testid="todos-sections">
+                {hiddenWaitingCount > 0 && <HiddenWaitingLine count={hiddenWaitingCount} filter={listFilter} onShowAll={() => chooseFilter("all")} />}
                 {TRIAGE_SECTIONS.map((sec) =>
                   triaged.sections[sec].length === 0 ? null : (
                     <TodoTriageSection
                       key={sec}
                       section={sec}
-                      folded={FOLDED_SECTIONS.has(sec) && !(sec === "other" && !TRIAGE_SECTIONS.some((o) => !FOLDED_SECTIONS.has(o) && triaged.sections[o].length > 0))}
-                      groups={triaged.sections[sec]}
-                      count={triaged.todoCounts[sec]}
+                      // Other open unfolds when nothing above it shows, or under a filter (it narrows; as a search does on iOS)
+                      folded={FOLDED_SECTIONS.has(sec) && !(sec === "other" && (listFilter !== "all" || !TRIAGE_SECTIONS.some((o) => !FOLDED_SECTIONS.has(o) && triaged.sections[o].length > 0)))}
+                      groups={sortTriageGroups(triaged.sections[sec], listSort)}
+                      count={triaged.sections[sec].reduce((n, g) => n + g.members.length, 0)}
                       views={views}
                       selectedId={activeTodo?.id}
                       onSelect={openFromList}
@@ -841,6 +918,69 @@ const TodoProjectSection = memo(function TodoProjectSection({
   );
 });
 
+// ── Filter and sort (#3740) ──────────────────────────────────
+
+/** Beside the search field: the filter as a chip that clears it, and one button whose menu picks the filter (with how
+ *  many each shows) and the order inside the sections. Both start as All and Recent activity, the list as it was. */
+function TodoListControls({
+  filter,
+  sort,
+  counts,
+  onFilter,
+  onSort,
+}: {
+  filter: TodoListFilter;
+  sort: TodoListSort;
+  counts: Record<TodoListFilter, number>;
+  onFilter: (f: TodoListFilter) => void;
+  onSort: (s: TodoListSort) => void;
+}) {
+  const menu = useMenu();
+  const items: MenuItem[] = [
+    { key: "show", label: t("todos.filter_show"), heading: true, onSelect: () => {} },
+    ...TODO_LIST_FILTERS.map((f): MenuItem => ({ key: `filter-${f}`, label: filterLabel(f), hint: String(counts[f]), checked: f === filter, radio: true, onSelect: () => onFilter(f) })),
+    { key: "sort", label: t("todos.sort_by"), heading: true, divider: true, onSelect: () => {} },
+    ...TODO_LIST_SORTS.map((s): MenuItem => ({ key: `sort-${s}`, label: sortLabel(s), checked: s === sort, radio: true, onSelect: () => onSort(s) })),
+  ];
+  return (
+    <>
+      {filter !== "all" && (
+        <button
+          type="button"
+          data-testid="todos-filter-chip"
+          aria-label={t("todos.filter_clear", { filter: filterLabel(filter) })}
+          onClick={() => onFilter("all")}
+          className="touch-hit flex h-7 shrink-0 items-center gap-1 rounded-full bg-accent-tint px-2.5 text-[12px] font-medium whitespace-nowrap text-accent-ink hover:bg-accent-tint/70"
+        >
+          {filterLabel(filter)}
+          <Icon name="x" size={10} stroke={2.4} />
+        </button>
+      )}
+      {/* a dot while the filter or the order is not the default, as iOS fills its mark: the list is not as it was */}
+      <span data-testid="todos-filter" data-filter={filter} data-sort={sort} className="relative inline-flex shrink-0">
+        <IconButton icon="filter" label={t("todos.filter_label")} onClick={menu.open} active={Boolean(menu.anchor)} />
+        {(filter !== "all" || sort !== "recent") && (
+          <span data-testid="todos-filter-changed" aria-hidden className="pointer-events-none absolute top-0.5 right-0.5 size-1.5 rounded-full bg-accent" />
+        )}
+      </span>
+      {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} align="right" width={224} items={items} />}
+    </>
+  );
+}
+
+/** What waits on the user outside the filter, over the sections: Needs you is filtered too, never silently. */
+function HiddenWaitingLine({ count, filter, onShowAll }: { count: number; filter: TodoListFilter; onShowAll: () => void }) {
+  return (
+    <div data-testid="todos-hidden-waiting" className="mx-1 mb-1 flex items-center gap-2 rounded-control bg-attention/10 px-2.5 py-2 text-[12px] text-ink-2">
+      <span className="size-1.5 shrink-0 rounded-full bg-attention" aria-hidden />
+      <span className="min-w-0 flex-1">{t("todos.filter_hidden_waiting", { count, filter: filterLabel(filter) })}</span>
+      <button type="button" onClick={onShowAll} className="shrink-0 font-medium whitespace-nowrap text-accent-ink hover:underline">
+        {t("todos.filter_show_all")}
+      </button>
+    </div>
+  );
+}
+
 // ── Status sections (#3156) ──────────────────────────────────
 
 const SECTION_TONE: Record<TriageSection, string> = {
@@ -878,7 +1018,7 @@ const TodoTriageSection = memo(function TodoTriageSection({
   /** Whether it starts folded: Other open only while some open section has rows. */
   folded: boolean;
   groups: TriageGroup[];
-  /** To-dos in it (a merged row holds several). */
+  /** To-dos its rows list (a merged row holds several): the number its title shows (#3712, the same on iOS). */
   count: number;
   views: ReadonlyMap<string, TodoRowView>;
   selectedId: string | undefined;
@@ -894,7 +1034,7 @@ const TodoTriageSection = memo(function TodoTriageSection({
       <button type="button" aria-expanded={!folded} onClick={toggle} className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-control px-2 text-left text-[12px] hover:bg-hover">
         <Icon name="chevron" size={10} stroke={2.4} className="shrink-0 text-ink-3 opacity-60 transition-transform" style={{ transform: folded ? "rotate(-90deg)" : "none" }} />
         <span className={cx("min-w-0 flex-1 truncate font-semibold whitespace-nowrap", SECTION_TONE[section])}>{sectionTitle(section)}</span>
-        <span className="shrink-0 text-[11px] text-ink-3 tabular-nums">{groups.length}</span>
+        <span className="shrink-0 text-[11px] text-ink-3 tabular-nums">{count}</span>
       </button>
       {!folded && section === "shelved" && <p className="px-2.5 pb-1 text-[11.5px] text-ink-3">{t("todos.shelved_hint")}</p>}
       {!folded && (

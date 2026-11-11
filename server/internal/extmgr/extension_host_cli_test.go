@@ -13,11 +13,12 @@ import (
 )
 
 type fakeHostCLI struct {
-	version string
-	auth    larkcliadapter.AuthStatus
-	chats   larkcliadapter.ChatList
-	search  json.RawMessage
-	err     error
+	version     string
+	auth        larkcliadapter.AuthStatus
+	chats       larkcliadapter.ChatList
+	search      json.RawMessage
+	searchLimit int
+	err         error
 }
 
 func (f *fakeHostCLI) CheckVersion(context.Context) error { return nil }
@@ -33,7 +34,8 @@ func (f *fakeHostCLI) ListChats(context.Context, int) (larkcliadapter.ChatList, 
 func (f *fakeHostCLI) ListMessages(context.Context, string, string, string, int) (larkcliadapter.MessagePage, error) {
 	return larkcliadapter.MessagePage{}, f.err
 }
-func (f *fakeHostCLI) Search(context.Context, string, string) (json.RawMessage, error) {
+func (f *fakeHostCLI) SearchLimit(_ context.Context, _, _ string, limit int) (json.RawMessage, error) {
+	f.searchLimit = limit
 	return f.search, f.err
 }
 
@@ -67,6 +69,35 @@ func TestExtensionHostCLIRequiresConfiguredGrantAndDeclaration(t *testing.T) {
 	}
 	if _, err := h.extensionHostCLICall(context.Background(), "example", spec, []byte(`{"operation":"search","kind":"docs","query":"handbook"}`)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestExtensionHostCLISearchForwardsLimit(t *testing.T) {
+	h := newTestManager(t)
+	h.cfg.Lark = lark.Config{CLI: &lark.CLIConfig{Extensions: true}}
+	runner := &fakeHostCLI{version: "1.0.98", search: json.RawMessage(`{"results":[]}`)}
+	h.hostCLIState = &hostCLIState{runner: runner}
+	spec := extension.HostIntegrationSpec{ID: "lark-cli", Version: ">=1.0.0"}
+	for _, tc := range []struct {
+		name  string
+		limit int
+	}{
+		{name: "requested", limit: 3},
+		{name: "default", limit: 0},
+		{name: "manager maximum", limit: 50},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(hostCLIRequest{Operation: "search", Kind: "docs", Query: "example", Limit: tc.limit})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.extensionHostCLICall(context.Background(), "example", spec, raw); err != nil {
+				t.Fatal(err)
+			}
+			if runner.searchLimit != tc.limit {
+				t.Fatalf("search limit = %d, want %d", runner.searchLimit, tc.limit)
+			}
+		})
 	}
 }
 
