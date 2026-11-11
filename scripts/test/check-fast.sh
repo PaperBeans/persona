@@ -392,7 +392,10 @@ job_i18n() {
   in_dir scripts/app step "$TIMEOUT_OTHER" "scripts/app: test_android_i18n_check.py self-test" \
     python3 -B test_android_i18n_check.py || return $?
   in_dir scripts/app step "$TIMEOUT_OTHER" "scripts/app: test_android_token_baseline.py self-test" \
-    python3 -B test_android_token_baseline.py
+    python3 -B test_android_token_baseline.py || return $?
+  in_dir scripts/app step "$TIMEOUT_OTHER" "scripts/app: test_android_slot_order.py self-test" \
+    python3 -B test_android_slot_order.py || return $?
+  in_dir scripts/app step "$TIMEOUT_OTHER" "scripts/app: android_slot_order.py" python3 -B android_slot_order.py
 }
 
 job_external_refs() {

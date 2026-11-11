@@ -250,3 +250,125 @@ private class FakeSender : MainConversationSender {
         if (sent.size == 1) throw IOException("Uncertain submission")
     }
 }
+
+/**
+ * An entry's page stays the assistant's it was opened for (docs/assistant/managers.md "Clients"): switching while it is
+ * open leaves its reads, saves and questions with that one, never the newly current one.
+ */
+class KnowledgeOwnerTest {
+    @org.junit.After fun reset() { AssistantManagerChoice.reset(); AssistantManagerChoice.forgetItems() }
+
+    @Test fun anEntryPageKeepsTheAssistantItWasOpenedForAfterASwitch() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            AssistantManagerChoice.choose("hub", "m-work", "assistant")
+            val repository = PinnedKnowledge()
+            val connection = object : KnowledgeConnection { override val current = MutableStateFlow<KnowledgeRepository?>(repository) }
+            val main = FakeMainSender()
+            val messages = FakeMessages()
+            val conversations = FakeConversations()
+            val detail = KnowledgeDetailViewModel(KnowledgeKind.Projects, "weather", connection, main, "m-work", conversations, messages)
+            store.put("detail", detail)
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { detail.page.collect() }
+            runCurrent()
+            assertEquals(listOf("m-work"), repository.reads)
+
+            // The default made current while the page is open: what the page does is still the other assistant's.
+            AssistantManagerChoice.choose("hub", null, "assistant")
+            detail.refresh(); runCurrent()
+            detail.saveTags(KnowledgeUpdate("P0", 90, listOf("iOS"))); runCurrent()
+            assertEquals(listOf("m-work", "m-work", "m-work"), repository.reads)
+            assertEquals(listOf("m-work"), repository.saves)
+            var handoff: KnowledgeHandoff? = null
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { detail.handoffs.collect { handoff = it } }
+            detail.ask("下一步呢？", "项目"); runCurrent()
+            assertEquals(listOf("m-work"), conversations.asked)
+            assertEquals(SessionKey("server", "work-main"), messages.sent.single().first)
+            assertTrue(main.sent.isEmpty())
+            assertEquals(KnowledgeHandoff("m-work", SessionKey("server", "work-main")), handoff)
+        } finally {
+            backgroundScope.cancel()
+            store.clear()
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test fun theDefaultAssistantsEntryNamesNoneAndAsksTheMainQueue() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            AssistantManagerChoice.choose("hub", null, "assistant")
+            val repository = PinnedKnowledge()
+            val connection = object : KnowledgeConnection { override val current = MutableStateFlow<KnowledgeRepository?>(repository) }
+            val main = FakeMainSender()
+            val messages = FakeMessages()
+            val conversations = FakeConversations()
+            val detail = KnowledgeDetailViewModel(KnowledgeKind.Projects, "weather", connection, main, "assistant", conversations, messages)
+            store.put("detail", detail)
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { detail.page.collect() }
+            runCurrent()
+            // The default's own page while it is current: the main queue, and the Persona page shows it (no conversation to open).
+            var handoff: KnowledgeHandoff? = null
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { detail.handoffs.collect { handoff = it } }
+            detail.ask("先问这个", "项目"); runCurrent()
+            assertEquals(1, main.sent.size)
+            assertEquals(KnowledgeHandoff("assistant", null), handoff)
+            // Another assistant made current: the default's page names the default (none on the wire), not the new one,
+            // and its question goes to the default's main conversation, opened in place (Persona's page shows the new one's).
+            AssistantManagerChoice.choose("hub", "m-work", "assistant")
+            detail.saveTags(KnowledgeUpdate(tags = listOf("iOS"))); runCurrent()
+            assertEquals(listOf("", ""), repository.reads)
+            assertEquals(listOf(""), repository.saves)
+            detail.ask("下一步呢？", "项目"); runCurrent()
+            assertEquals(1, main.sent.size)
+            assertEquals(listOf("assistant"), conversations.asked)
+            assertEquals(SessionKey("server", "work-main"), messages.sent.single().first)
+            assertEquals(KnowledgeHandoff("assistant", SessionKey("server", "work-main")), handoff)
+        } finally {
+            backgroundScope.cancel()
+            store.clear()
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
+}
+
+/** Records the manager each read and save named, as the hub client would put it on the request. */
+private class PinnedKnowledge : KnowledgeRepository {
+    override val scope = HubScope("demo", "pinned")
+    val reads = mutableListOf<String?>()
+    val saves = mutableListOf<String?>()
+    private suspend fun named(path: List<String>) = currentCoroutineContext()[ManagerPins]?.manager(path, "hub")
+    override suspend fun list(kind: KnowledgeKind, tag: String?) = KnowledgeList(emptyList())
+    override suspend fun detail(kind: KnowledgeKind, id: String) = KnowledgeDetail(kind.wire, id, "data/projects/$id",
+        meta = buildJsonObject { put("name", "天气 App") })
+    override suspend fun entry(kind: KnowledgeKind, id: String): KnowledgeDetailResponse {
+        reads += named(listOf("kb", kind.wire, id))
+        return KnowledgeDetailResponse(detail(kind, id))
+    }
+    override suspend fun search(query: String) = emptyList<KnowledgeHit>()
+    override suspend fun update(kind: KnowledgeKind, id: String, update: KnowledgeUpdate) { saves += named(listOf("kb", kind.wire, id)) }
+}
+
+private class FakeMainSender : MainConversationSender {
+    override val outbox = MutableStateFlow(emptyList<OutboxMessage>())
+    val sent = mutableListOf<String>()
+    override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?) { sent += text }
+}
+
+private class FakeMessages : MessageSender {
+    override val outbox = MutableStateFlow(emptyList<OutboxMessage>())
+    val sent = mutableListOf<Pair<SessionKey, String>>()
+    override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) { sent += session to text }
+}
+
+private class FakeConversations : AssistantConversations {
+    val asked = mutableListOf<String>()
+    override val assistant = MutableStateFlow(AssistantSnapshot())
+    override val pinned = MutableStateFlow(emptySet<SessionKey>())
+    override suspend fun refresh() = Unit
+    override suspend fun startConversation(): SessionKey = error("not here")
+    override suspend fun mainConversationOf(manager: String): SessionKey { asked += manager; return SessionKey("server", "work-main") }
+}

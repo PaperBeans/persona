@@ -7,7 +7,7 @@ import {
   chooseManager, conversationManager, defaultKnown, defaultManager, fromDefaultManager, fromShownManager, itemHeaders, managerHeaderFor, noteConversation, noteItemManager,
   onDefaultManager, ownedSub, ownerHeaders, parseOwnedSub, pinManager, resetManagerChoice, setRosterDefault, settleRosterDefault, shownManager, withManager,
 } from "./manager-choice";
-import { groupByManager, lastSyncedText, managerOrder, multiManager, offlineManagerOf, ownerIn, type ManagerList } from "./managers";
+import { lastSyncedText, managerOrder, multiManager, offlineManagerOf, ownerIn, type ManagerList } from "./managers";
 
 afterEach(() => resetManagerChoice());
 
@@ -236,20 +236,13 @@ describe("grouping by manager", () => {
     expect(multiManager(null)).toBe(false);
     expect(multiManager({ default: "assistant", managers: [ROSTER.managers[0], ROSTER.managers[3]] })).toBe(false);
     expect(multiManager(ROSTER)).toBe(true);
-    expect(groupByManager([{ id: "x" }], { default: "assistant", managers: [ROSTER.managers[0]] }, () => undefined)).toBeNull();
   });
 
-  it("the default first, then the roster's order, empty groups left out, unknown and none to the default", () => {
+  it("the default first, then the roster's order; none and unknown are the default's", () => {
     const list = { ...ROSTER, default: "m-1" };
     expect(managerOrder(list).map((m) => m.id)).toEqual(["m-1", "assistant", "m-2"]);
-    const items = [{ id: "a", manager: "assistant" }, { id: "b" }, { id: "c", manager: "m-2" }, { id: "d", manager: "m-9" }, { id: "e", manager: "m-1" }];
-    const groups = groupByManager(items, list, (x) => x.manager)!;
-    expect(groups.map((g) => [g.manager.id, g.items.map((x) => x.id)])).toEqual([
-      ["m-1", ["b", "d", "e"]],
-      ["assistant", ["a"]],
-      ["m-2", ["c"]],
-    ]);
     expect(ownerIn(list, undefined)).toBe("m-1");
+    expect(ownerIn(list, "m-9")).toBe("m-1");
     expect(ownerIn(list, "m-3")).toBe("m-1"); // still installing: nothing of its own is shown yet
   });
 

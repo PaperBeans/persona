@@ -93,5 +93,9 @@
   "ask_failed_model_error": "回答できませんでした：モデルでエラーが発生しました。",
   "ask_failed_model_timeout": "回答できませんでした：モデルの応答に時間がかかりすぎました。",
   "ask_failed_interrupted": "ハブの再起動で中断されました。スマートフォンでもう一度聞いてください。",
-  "ask_failed_nothing_heard": "タップの直前に誰も話していませんでした。"
+  "ask_failed_nothing_heard": "タップの直前に誰も話していませんでした。",
+  "transcript_expired": "文字起こしは保存期間を過ぎました。",
+  "minutes_kept_until": "文字起こしは保存期間を過ぎました。この議事録は {date} まで保存されます。",
+  "minutes_transcript_expired": "文字起こしは保存期間を過ぎました。この議事録だけが残っています。",
+  "minutes_kept_forever": "文字起こしの保存期間が終了しました。この議事録は削除するまで保存されます。"
 }

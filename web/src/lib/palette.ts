@@ -69,6 +69,8 @@ export interface PaletteCommand {
   /** Unique among commands; a provider's own ids are prefixed by the provider. */
   id: string;
   title: string;
+  /** Drawn quieter after the title: what it acts on ("Go back to the previous conversation": that conversation's title). */
+  detail?: string;
   /** The group it is listed under: a heading in the list, also searched. */
   section?: string;
   icon?: IconName;

@@ -1,0 +1,34 @@
+{
+  "repo": "example-org/example-repo",
+  "number": 12,
+  "changed": 3,
+  "additions": 10,
+  "deletions": 2,
+  "files": [
+    {
+      "id": "src/example.go",
+      "title": "src/example.go",
+      "path": "src/example.go",
+      "status": "modified",
+      "additions": 8,
+      "deletions": 2
+    },
+    {
+      "id": "docs/new.md",
+      "title": "docs/new.md",
+      "path": "docs/new.md",
+      "previous": "docs/old.md",
+      "status": "renamed",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "id": "assets/big.bin",
+      "title": "assets/big.bin",
+      "path": "assets/big.bin",
+      "status": "added",
+      "additions": 0,
+      "deletions": 0
+    }
+  ]
+}

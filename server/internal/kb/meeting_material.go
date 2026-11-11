@@ -11,7 +11,9 @@ import (
 
 // What the answering model of an attended meeting reads (docs/assistant/meeting-minutes.md "What the hub gives the
 // answering model"): an answer may be said aloud in front of other people, who can ask for anything it was given, so
-// the boundary is this material, not the prompt. It is built from four sources and nothing else: this meeting's own
+// the boundary is this material, not the prompt. Until #3862 phase 1 adds a private-meeting mark, only this meeting's
+// own material is included. EarlierMeetingsInAnswers gates the other three sources below together.
+// The four possible sources are this meeting's own
 // upload title and calendar hint, live sentences and answered questions; the minutes of earlier meetings (never their
 // transcript, summary, live log or questions); the name and status of the projects those meetings are linked to; and
 // the to-do ids of their action items, whose open or done the assistant looks up. Nothing else of the knowledge base
@@ -28,6 +30,8 @@ type MeetingMaterial struct {
 	Lines []LiveSegment
 	// Asks are this meeting's questions already answered, oldest first.
 	Asks []LiveAsk
+	// EarlierAvailable distinguishes an allowed but empty lookup from material excluded by the privacy policy.
+	EarlierAvailable bool
 	// Earlier are at most materialMaxEarlier earlier meetings, the best ranked first.
 	Earlier []EarlierMeeting
 }
@@ -57,7 +61,8 @@ func (e *Engine) MeetingMaterial(rawID, question string) (MeetingMaterial, error
 	if err != nil {
 		return MeetingMaterial{}, err
 	}
-	m := MeetingMaterial{Title: r.Title, Language: r.Language, Lines: latestLines(l.Segments, materialLiveRunes)}
+	m := MeetingMaterial{Title: r.Title, Language: r.Language, Lines: latestLines(l.Segments, materialLiveRunes),
+		EarlierAvailable: e.EarlierMeetingsInAnswers}
 	if c := r.Calendar; c != nil {
 		m.Calendar = &RecordingCalendar{Title: c.Title, Attendees: slices.Clone(c.Attendees), Location: c.Location}
 	}
@@ -67,7 +72,9 @@ func (e *Engine) MeetingMaterial(rawID, question string) (MeetingMaterial, error
 			m.Asks = append(m.Asks, a)
 		}
 	}
-	m.Earlier = e.earlierMeetings(&r, question)
+	if m.EarlierAvailable {
+		m.Earlier = e.earlierMeetings(&r, question)
+	}
 	return m, nil
 }
 

@@ -1,6 +1,7 @@
 import { backgroundWork, taskBackgroundWork, type BackgroundWork } from "./background-work";
-import { cardFiled, cardSent, startFailure, type FeedItem, type TaskPlan } from "./feed";
+import { cardDismissed, cardFiled, cardSent, startFailure, type FeedItem, type TaskPlan } from "./feed";
 import { cardBucket, taskCardSlots, type TaskCardMetadata } from "./task-cards";
+import { supersededFailedStarts } from "./todo-triage";
 import { dockAgents, makeSessionLookup, openAsk, todoRank, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { byTime } from "./times";
 import type { Interaction, Session } from "./types";
@@ -50,7 +51,7 @@ export interface AssistantEntriesInput {
   feed: FeedItem[];
   /** The hub's task card slots for the conversation (`task_cards`). */
   cards?: TaskCardMetadata[];
-  /** Message cards the user put off (`later`), by ref. */
+  /** Message cards the user put off locally (`later`), by card id. */
   deferred?: Record<string, unknown>;
   /** Looks up a task's agents; defaults to `sessions`. */
   lookup?: SessionLookup;
@@ -78,9 +79,9 @@ export function taskAwaitsDecision(todo: Todo): boolean {
   return !todo.done_at && (todo.supervision?.state === "pending_review" || todo.supervision?.state === "needs_user");
 }
 
-/** The message card still waits for Send: not sent, not filed, not put off. */
+/** The message card still waits for Send: not sent, filed, dismissed, or put off. */
 export function messageWaits(it: FeedItem, deferred: Record<string, unknown> = {}): boolean {
-  return it.kind === "message" && !cardSent(it) && !cardFiled(it) && !(it.ref && deferred[it.ref]);
+  return it.kind === "message" && !cardSent(it) && !cardFiled(it) && !cardDismissed(it) && !deferred[it.id];
 }
 
 export function assistantEntries(input: AssistantEntriesInput): AssistantEntries {
@@ -89,6 +90,8 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
   const lookup = input.lookup ?? makeSessionLookup(sessions);
   const isMain = !!main && main === conversation;
   const byTodo = new Map(todos.map((todo) => [todo.id, todo]));
+  // failed starts whose work finished in a related to-do: closed, as the To-dos page has them (#3713)
+  const superseded = supersededFailedStarts(todos);
   const asksOf = new Map<string, Interaction[]>();
   for (const ix of [...interactions].sort((a, b) => byTime(a.created_at, b.created_at) || a.id.localeCompare(b.id))) {
     const k = sessionKey(ix.machine_id, ix.session_id);
@@ -108,7 +111,7 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     const active = todo.done_at ? [] : (todo.agents ?? []).filter((a) => !a.released_at);
     const asks = active.flatMap((a) => asksOf.get(sessionKey(a.machine_id, a.session_id)) ?? []);
     const key = `task:${todo.id}`;
-    const bucket = cardBucket(card, todo, plans, lookup, now, input.restored?.get(todo.id) ?? 0);
+    const bucket = cardBucket(card, todo, plans, lookup, now, input.restored?.get(todo.id) ?? 0, superseded.has(todo.id));
     // a failed start carries done_at (the hub ends it), yet it is the user's to retry while its bucket says open
     const waits = status === "failed" ? bucket === "open" : !todo.done_at && WAITS_ON_YOU.has(status);
     if (asks.length) asking.push({ kind: "task", key, todo, status, asks });

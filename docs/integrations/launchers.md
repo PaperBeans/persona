@@ -9,7 +9,7 @@ Code: `server/internal/assistant/models_launchers.go` (owned by the manager; hub
 | Source | Defined in | Actions |
 | --- | --- | --- |
 | **Persona-managed** | Added in the app: name, Base URL, API Key, authentication method, model, small model, sub-Agent model, custom model option, extra arguments | Edit, delete |
-| **rc file (~/.zshrc / ~/.bashrc) and PATH** | Functions and aliases in each computer's login shell config (zsh reads `~/.zshrc`, bash reads `~/.bashrc`), grouped by file, and wrapper scripts on its PATH (`source: "path"`), synchronized when opening this page (node caches for 1 minute) | View each computer's function definition or script text (Key / Token redacted), hide / restore in Persona |
+| **rc file (~/.zshrc / ~/.bashrc) and PATH** | Functions and aliases in each computer's login shell config (zsh reads `~/.zshrc`, bash reads `~/.bashrc`), grouped by file, and wrapper scripts on its PATH (`source: "path"`), shown from the last snapshot and refreshed in the background when opening this page (node caches for 1 minute) | View each computer's function definition or script text (Key / Token redacted), hide / restore in Persona |
 | **Built-in** | Each computer's plain `claude` command (“Claude Code default” in Model Configuration, `source: "builtin"`), listed per computer with its version | View only; can't be hidden (the hub refuses) |
 
 - Scope: each Persona-managed entry has its own **device scope** (“Device scope and on-demand delivery” below): all your computers, chosen ones, or none (the key stays with the manager). ~/.zshrc entries identify their source computers (same-name entries merge into one row). Offline computers use their last synchronized lists (settings `launchers.zshrc`).
@@ -18,7 +18,7 @@ Code: `server/internal/assistant/models_launchers.go` (owned by the manager; hub
 
 ## Sync state (#2854)
 
-`GET /api/v1/launchers` (handled by the assistant process, `assistant/models_launchers_routes.go`; the hub gives each computer's Claude version as `claude_version` in `devices.list`) waits at most 10 seconds per computer (`launcherSyncTimeout`), so one slow or disconnected computer doesn't hold up the page. The node's list script isn't interrupted when the hub gives up: it finishes into the cache, ready for the next time the page opens.
+`GET /api/v1/launchers` (handled by the assistant process, `assistant/models_launchers_routes.go`; the hub gives each computer's Claude version as `claude_version` in `devices.list`) answers the last-seen snapshot immediately when one exists and runs one bounded refresh behind it; a later read sees the refreshed list and sync state. The first-ever list, with no in-memory or persisted snapshot, still synchronizes before answering. Each computer has at most 10 seconds (`launcherSyncTimeout`) in either path, so a slow or disconnected computer does not hold up a cached page. The node's list script isn't interrupted when the hub gives up: it finishes into the cache, ready for a later read.
 The answer adds `sync`: one item per computer, with `state` `ok` / `offline` / `timeout` / `error` (`error` carries the reason), plus `shell`, `rc_file` and the last successful sync time `synced_at`
 (settings `launchers.zshrc.meta`). A computer that didn't answer still shows its last list, but the entries' `stale` names that computer; every client marks them “Not updated” and explains why in the per-computer group.
 An entry's `rc_files` are the files it came from (`source: "zshrc"` only; older nodes don't report it, so it is `~/.zshrc`).
@@ -255,7 +255,7 @@ Persona-managed entries swipe to “Delete,” removing the stored key too, with
 
 | API | Purpose |
 | --- | --- |
-| `GET /api/v1/launchers` | All entries (first synchronize each computer's rc file and PATH, at most 10 seconds per computer), plus the built-in `claude`; `sync` is each computer's sync state |
+| `GET /api/v1/launchers` | All entries plus the built-in `claude`; a last-seen snapshot answers at once while one background refresh runs (the first-ever list synchronizes, at most 10 seconds per computer); `sync` is each computer's latest known sync state |
 | `GET /api/v1/launchers/{name}` | One entry; ~/.zshrc entries include `definitions` (redacted functions per computer) and `details` (parameters from running once) |
 | `POST /api/v1/launchers/{name}/check?machine=` | Test availability |
 | `POST /api/v1/launchers` | Add `{name, base_url, model, small_model?, subagent_model?, custom_model?, custom_model_name?, custom_model_description?, args?, api_key, auth?, preset?, display_name?, assign?, share?, scope_machines?, delivery?, own_service?, machine_keys?}` (scope fields: “Device scope and on-demand delivery”); `auth` is `api_key` (default) or `bearer`. With `preset`, missing values are filled from the preset, and `name` may be empty (see “Built-in presets” and “Adding from extensions” below); with `assign`, returns `{launcher, assigned, kept}` |

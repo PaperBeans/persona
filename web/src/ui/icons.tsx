@@ -70,6 +70,8 @@ const P: Record<string, React.ReactNode> = {
   eyeOff: <g><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c4.64 0 8.58 2.97 9.94 7.1a1 1 0 0 1 0 .7 10.8 10.8 0 0 1-1.44 2.49" /><path d="M14.08 14.16a3 3 0 0 1-4.24-4.24" /><path d="M17.48 17.5A10.75 10.75 0 0 1 2.06 12.35a1 1 0 0 1 0-.7 10.8 10.8 0 0 1 4.45-5.14" /><path d="m2 2 20 20" /></g>,
   // Generic protection and authorization status.
   shield: <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />,
+  // the shield with a warning mark: Allow Everything (iOS exclamationmark.shield, #3956)
+  shieldAlert: <g><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="M12 8v4M12 16h.01" /></g>,
   key: <g><circle cx="7.5" cy="15.5" r="5.5" /><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3" /></g>,
   terminal: <g><rect x="2" y="4" width="20" height="16" rx="2.5" /><path d="m6 9 3 3-3 3M12 15h5" /></g>,
   // a desktop app's window, a frame with a title bar: an agent in an app's own chat (the sidebar's source marks; a terminal's is `run`)

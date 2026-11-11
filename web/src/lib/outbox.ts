@@ -9,6 +9,7 @@ import { pickedLauncher, pickedModel, conversationKey } from "./assistant-chat";
 import { startConversation } from "./assistant-start";
 import { removeStoredValue, storedValue, storeValue } from "./compatibility";
 import { uuid } from "./format";
+import { conversationPage } from "./conversation-page";
 import { navigate } from "./router";
 import { getState, refreshAssistant, setOutbox } from "./store";
 import { chosenManager, noteConversation, otherManager, ownerHeaders } from "./manager-choice";
@@ -375,17 +376,17 @@ export async function askPersona(text: string): Promise<void> {
     await refreshAssistant().catch(() => {});
     a = getState().assistant;
   }
+  const chosen = chosenManager() ?? undefined;
   if (a?.main) {
-    void sendToMain(a.machine_id, a.main, text);
+    void sendToMain(a.machine_id, a.main, text, chosen);
     return;
   }
-  const chosen = chosenManager() ?? undefined;
   const r = await startConversation({ prompt: text, main: true });
   // the manager the page showed when it started (it named that one): the conversation's requests go there
   noteConversation(r.session.session_id, chosen);
   noteSent(r.session.machine_id, r.session.session_id, { text });
   void refreshAssistant().catch(() => {});
-  navigate({ name: "persona", sid: r.session.session_id });
+  navigate(conversationPage(r.session.session_id, r.session.machine_id, chosen));
 }
 
 /**
@@ -400,19 +401,20 @@ export async function askPersonaOf(owner: string | undefined, text: string): Pro
   const a = await api<AssistantInfo>("/assistant", { headers });
   if (a.machine_id && a.main) {
     adoptConversation(owner, a.main, a.machine_id);
-    return { sent: sendToMain(a.machine_id, a.main, text) };
+    return { sent: sendToMain(a.machine_id, a.main, text, owner) };
   }
   const r = await startConversation({ prompt: text, main: true }, headers);
   adoptConversation(owner, r.session.session_id, r.session.machine_id);
   noteSent(r.session.machine_id, r.session.session_id, { text });
   void refreshAssistant().catch(() => {});
-  navigate({ name: "persona", sid: r.session.session_id });
+  navigate(conversationPage(r.session.session_id, r.session.machine_id, owner));
   return { sent: Promise.resolve(true) };
 }
 
-/** Opens a main conversation and sends text there with the launcher and model picked for it. */
-function sendToMain(mid: string, sid: string, text: string): Promise<boolean> {
-  navigate({ name: "persona", sid });
+/** Opens owner's main conversation (owner none: the default's) and sends text there with the launcher and model picked
+ *  for it. */
+function sendToMain(mid: string, sid: string, text: string, owner: string | undefined): Promise<boolean> {
+  navigate(conversationPage(sid, mid, owner));
   const key = outboxKey(mid, sid);
   return sendToSession(mid, sid, { text }, { launcher: pickedLauncher(key), model: pickedModel(key) });
 }

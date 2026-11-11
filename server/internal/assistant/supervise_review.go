@@ -95,7 +95,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	// supervision messages come to the new one, which has to be able to close them (#4262).
 	isMain := s.isMain(ctx, self)
 	if t.Origin == "" || t.Origin != self && (t.Supervision == nil || t.Supervision.Supervisor != self && !isMain) {
-		return "", fmt.Errorf("task %s was not handed out from this conversation", t.ID)
+		if !s.mayReviewForLeader(ctx, self, t) {
+			return "", fmt.Errorf("task %s was not handed out from this conversation", t.ID)
+		}
 	}
 	if t.DoneAt != nil && (a.Verdict == reviewRework || a.Verdict == reviewNeedsUser) {
 		return "", fmt.Errorf("task %s is done already (%s): hand out a new task for what is left", t.ID, cmp.Or(t.DoneReason, "closed"))
@@ -125,10 +127,16 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		return "", fmt.Errorf("task %s is not supervised: send what is missing to its agent with agent_send, or ask the user in your answer", t.ID)
 	}
 	over, refused := false, false
+	var waiting *OwnerWait // accepted while the work stopped on the owner's decision: refused, nothing written (#1277)
 	var v Supervision
 	if ledger {
 		v, _, err = s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
-			if isMain && !s.isLeader(ctx, v.Supervisor) {
+			if verdict == reviewAccepted && t.DoneAt == nil && v.Waits != nil {
+				w := *v.Waits
+				waiting = &w
+				return false
+			}
+			if isMain && !s.isLeader(ctx, v.Supervisor) && !s.isLeaderRef(v.Supervisor) {
 				v.Supervisor = self // the main conversation takes over an old main conversation's task, not a leader's
 			} else if v.Supervisor == "" {
 				v.Supervisor = t.Origin
@@ -149,7 +157,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				v.Round++
 				r.Round = v.Round
 			}
-			v.State = verdict
+			v.State, v.Waits = verdict, nil // reviewed: the supervisor answered what the judge found
 			v.Reviews = append(v.Reviews, r)
 			if len(v.Reviews) > 20 {
 				v.Reviews = v.Reviews[len(v.Reviews)-20:]
@@ -162,6 +170,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	}
 	if refused {
 		return "", reworkOverError(t.ID)
+	}
+	if waiting != nil {
+		return "", ownerWaitError(t.ID, waiting)
 	}
 	if verdict == reviewRework || verdict == reviewNeedsUser || a.UserCheck || a.Outcome == outcomeCannot {
 		s.setTaskStageKind(ctx, t.ID, "unverified", "", "", false)
@@ -461,6 +472,20 @@ func (s *Service) sendToTask(ctx context.Context, t Todo, text string) (string, 
 		return "", err
 	}
 	return "sent to the agent", nil
+}
+
+// ownerWaitError refuses accepting task id while its latest stretch of work stopped on a decision only the owner can
+// make (OwnerWait, #1277): closing it would drop the decision, the way a task whose drafts wait for the owner to pick one
+// was once accepted as done.
+func ownerWaitError(id string, w *OwnerWait) error {
+	why := ""
+	if w.Reason != "" {
+		why = fmt.Sprintf(" (the done judge: %q)", w.Reason)
+	}
+	return fmt.Errorf("task %s stopped on a decision only the owner can make%s: accepting it would close the task and lose "+
+		"that decision. Review it needs_user as a decision they can answer (why_owner, reason, recommend, options, "+
+		"cost_of_waiting); if the owner already decided, send their answer to its agent with agent_send and review the "+
+		"work it does next; or cancelled when it is no longer wanted", id, why)
 }
 
 // reworkOverError refuses a rework past maxReworkRounds that states no decision: the task goes to the owner only as a

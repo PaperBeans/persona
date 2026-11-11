@@ -189,15 +189,18 @@ final class TodoStore {
     }
 
     /// `api` is the client to write through (tests pass a fake hub's); the app uses the current hub connection.
-    func toggleDone(_ todo: TodoItem, api: APIClient? = nil) {
+    /// Closes an open to-do or reopens a closed one. `done` says which when the row knows better than `doneAt`: a failed
+    /// start waiting on the owner reads open and is closed for good (#3713, `TodoTriageLogic.checksAsOpen`).
+    func toggleDone(_ todo: TodoItem, done: Bool? = nil, api: APIClient? = nil) {
         let targetGeneration = generation
-        let newDone = !todo.isDone
+        let newDone = done ?? !todo.isDone
         let original = todos
         // Optimistic update; a read already in flight cannot replace it.
         mutationRevision += 1
         var updated = todos
         if let idx = updated.firstIndex(where: { $0.id == todo.id }) {
             updated[idx].doneAt = newDone ? Date() : nil
+            updated[idx].startError = nil // closed by the owner, or reopened: no longer failed (the hub does the same)
             apply(updated)
         }
         Task {

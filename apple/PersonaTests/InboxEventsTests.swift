@@ -162,6 +162,7 @@ struct InboxEventsTests {
     @Test func aChainConversationIsPushedOverTheItemOnTheShell() {
         let model = AppModel()
         model.selectedTab = .chats
+        model.openChat = nil
         let before = model.assistantCurrent
         let key = SessionKey(machineID: "box", sessionID: "h1")
         var pushed: [InboxChatRoute] = []

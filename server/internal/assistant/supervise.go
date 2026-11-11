@@ -45,7 +45,11 @@ type Supervision struct {
 	Reviews       []TaskReview `json:"reviews"`
 	// AutoReview is the latest independent review of its change (supervise_autoreview.go, #2173); nil when none ran.
 	AutoReview *AutoReview `json:"auto_review,omitempty"`
-	UpdatedAt  time.Time   `json:"updated_at"`
+	// Waits: the done judge found the latest stretch of work stopped on a decision only the owner can make (verdict
+	// needs_user, #1277). While it holds, task_review accepted is refused: closing the task would lose the decision.
+	// Its agent working again, or any review, clears it. nil when the last judgment said otherwise.
+	Waits     *OwnerWait `json:"waits,omitempty"`
+	UpdatedAt time.Time  `json:"updated_at"`
 	// Progress: what its agent last reported to the supervisor (report_to_supervisor, agent_control.go). A live
 	// reading kept in memory only (the next report brings it back after a restart), and apart from UpdatedAt, which
 	// names the review a task waits for.
@@ -97,6 +101,14 @@ type TaskReview struct {
 	HoldReleased    bool      `json:"hold_released,omitempty"`
 }
 
+// OwnerWait is a judgment that a supervised task's stretch of work (begun at Work) stopped on the owner's decision:
+// when it was judged and the judge's reason.
+type OwnerWait struct {
+	Work   time.Time `json:"work"`
+	At     time.Time `json:"at"`
+	Reason string    `json:"reason,omitempty"`
+}
+
 type ReviewCheck struct {
 	Criterion string `json:"criterion"`
 	Met       bool   `json:"met"`
@@ -125,6 +137,10 @@ func (v *Supervision) clone() *Supervision {
 	if v.AutoReview != nil {
 		a := *v.AutoReview
 		out.AutoReview = &a
+	}
+	if v.Waits != nil {
+		w := *v.Waits
+		out.Waits = &w
 	}
 	return &out
 }
@@ -165,17 +181,26 @@ func supervisionFromRow(r db.TodoSupervisionRow) *Supervision {
 			v.AutoReview = &a
 		}
 	}
+	if len(r.Waits) > 0 {
+		var w OwnerWait
+		if json.Unmarshal(r.Waits, &w) == nil {
+			v.Waits = &w
+		}
+	}
 	return v.clone()
 }
 
 func (v *Supervision) row(todoID string) db.TodoSupervisionRow {
 	raw, _ := json.Marshal(v.Reviews)
-	var auto json.RawMessage
+	var auto, waits json.RawMessage
 	if v.AutoReview != nil {
 		auto, _ = json.Marshal(v.AutoReview)
 	}
+	if v.Waits != nil {
+		waits, _ = json.Marshal(v.Waits)
+	}
 	return db.TodoSupervisionRow{TodoID: todoID, Supervisor: v.Supervisor, DoneWhen: v.DoneWhen, ExpectMinutes: v.ExpectMinutes,
-		State: v.State, Round: v.Round, Reviews: raw, AutoReview: auto, UpdatedAt: v.UpdatedAt}
+		State: v.State, Round: v.Round, Reviews: raw, AutoReview: auto, Waits: waits, UpdatedAt: v.UpdatedAt}
 }
 
 // cleanDoneWhen is a task's criteria as kept: trimmed, no empty or repeated ones, at most 6 of at most 200 characters.
@@ -276,6 +301,9 @@ func taskHealth(t Todo, agents []proto.Session, now time.Time) (string, int) {
 	}
 	if t.DoneAt != nil {
 		return "", 8
+	}
+	if v.Waits != nil { // the judge found it stopped on the owner's decision (#1277): not to be accepted as done
+		return "停下等用户拍板，别直接验收", 0 // i18n-ignore: the snapshot is the assistant's prompt
 	}
 	for _, c := range agents {
 		if c.State == proto.StateNeedsYou || c.PendingInteractions > 0 {

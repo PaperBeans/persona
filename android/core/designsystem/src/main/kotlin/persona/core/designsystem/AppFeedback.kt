@@ -16,3 +16,12 @@ interface AppFeedback {
     fun notice(message: String, action: FeedbackAction): Boolean = false
 }
 val LocalAppFeedback = staticCompositionLocalOf<AppFeedback?> { null }
+
+/** Keep the standard snackbar geometry, with actions as readable as its message in every interface style. */
+@androidx.compose.runtime.Composable
+fun JAppSnackbarHost(state: androidx.compose.material3.SnackbarHostState, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier) {
+    androidx.compose.material3.SnackbarHost(state, modifier) { data ->
+        // The accent is not a text color on an inverse surface (Brief's can equal its background).
+        androidx.compose.material3.Snackbar(data, actionColor = androidx.compose.material3.MaterialTheme.colorScheme.inverseOnSurface)
+    }
+}

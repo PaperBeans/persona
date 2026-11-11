@@ -117,6 +117,8 @@ internal class AssistantTaskHost(
     /** Original records remain inspectable from Progress, never discarded by the conversation projection. */
     val backgroundRecords: List<persona.core.domain.lines.ChatLine> = emptyList(),
     val onOpenBackground: (() -> Unit)? = null,
+    /** The conversation's own manager (its session row), for plan and Brief writes; null: not known. */
+    val manager: String? = null,
 ) {
     /** Each session's first card ([firstBySession]). */
     val cards: Map<SessionKey, persona.core.contracts.Interaction> by lazy { pending.firstBySession() }
@@ -244,7 +246,8 @@ private fun FeedLine(item: FeedItem, host: AssistantTaskHost) {
                 .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s), style = PersonaTheme.type.body, color = PersonaTheme.palette.ink)
         }
         "today" -> TodayCard(item, host, todos)
-        "message" -> if (item.ref != null && item.ref !in later) MessageCard(item, host, todos)
+        "brief" -> BriefCard(item, host)
+        "message" -> if (item.ref != null && item.id !in later) MessageCard(item, host, todos)
         // A live card: drawn where it was created, as the hub's latest version of it (docs/assistant/assistant-views.md "Live cards").
         "view" -> item.ref?.let { id -> persona.core.designsystem.LocalViewBlocks.current?.live?.invoke(id) }
     }
@@ -465,18 +468,18 @@ internal fun PlanCard(plan: TaskPlan, host: AssistantTaskHost) {
             }
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                 JButton(if (plan.tasks.size > 1) pluralStringResource(R.plurals.chat_tasks_plan_start_count, plan.tasks.size, plan.tasks.size)
-                    else stringResource(R.string.chat_tasks_plan_start), { host.tasks.startPlan(plan, remember, host.onError) },
+                    else stringResource(R.string.chat_tasks_plan_start), { host.tasks.startPlan(plan, remember, host.onError, manager = host.manager) },
                     Modifier.weight(1f), size = JButtonSize.Medium, loading = plan.id in busy)
                 JButton(stringResource(R.string.chat_plan_edit), { editing = true }, kind = JButtonKind.Secondary, size = JButtonSize.Medium,
                     enabled = plan.id !in busy)
-                JButton(stringResource(R.string.chat_tasks_plan_dismiss), { host.tasks.dismissPlan(plan, host.onError) }, kind = JButtonKind.Secondary, size = JButtonSize.Medium,
+                JButton(stringResource(R.string.chat_tasks_plan_dismiss), { host.tasks.dismissPlan(plan, host.onError, host.manager) }, kind = JButtonKind.Secondary, size = JButtonSize.Medium,
                     enabled = plan.id !in busy)
             }
         }
     }
     // The sheet closes when the started plan comes back; a failed start leaves it open with its edits (#5312).
     if (editing) PlanEditSheet(plan, host, onDismiss = { editing = false }, starting = plan.id in busy) { edits ->
-        host.tasks.startPlan(plan, remember, host.onError, edits)
+        host.tasks.startPlan(plan, remember, host.onError, edits, host.manager)
     }
 }
 
@@ -846,14 +849,17 @@ private fun TodayCard(item: FeedItem, host: AssistantTaskHost, todos: List<Todo>
 // ── message cards ──
 
 @Composable
-private fun MessageCard(item: FeedItem, host: AssistantTaskHost, todos: List<Todo>) {
-    val itemId = item.ref ?: return
+internal fun MessageCard(item: FeedItem, host: AssistantTaskHost, todos: List<Todo>, enabled: Boolean = true) {
+    if (item.ref == null) return
+    val feedback = persona.core.designsystem.LocalAppFeedback.current
+    val resources = androidx.compose.ui.platform.LocalContext.current.resources
     val busy by host.tasks.busy.collectAsStateWithLifecycle()
     var draft by remember(item.id) { mutableStateOf(item.field("draft").orEmpty()) }
     val sent = item.sent
     val done = sent != null
     // Dealt with elsewhere and not sent from here (#4797): nothing left to send, so no send / later and no blank warning.
     val filed = item.filedAt != null
+    val dismissed = item.dismissedAt != null
     val blank = if (!item.canSend) null else draftPlaceholder(draft)
     val todo = todos.firstOrNull { it.id == item.field("todo_id") }
     JCard {
@@ -875,13 +881,13 @@ private fun MessageCard(item: FeedItem, host: AssistantTaskHost, todos: List<Tod
             }
             // A filed card is no longer a draft to send (#5095): plain well, a read-only text and a title saying so.
             Column(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape)
-                .background(if (filed) PersonaTheme.palette.sunken else PersonaTheme.palette.statusSurface)
+                .background(if (filed || dismissed) PersonaTheme.palette.sunken else PersonaTheme.palette.statusSurface)
                 .padding(Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-                Text(stringResource(when { done -> R.string.chat_tasks_message_replied; filed -> R.string.chat_tasks_message_filed_title
-                    else -> R.string.chat_tasks_message_drafted }), style = PersonaTheme.type.caption,
-                    color = when { done -> PersonaTheme.palette.done.text; filed -> PersonaTheme.palette.ink2; else -> PersonaTheme.palette.accent })
+                Text(stringResource(when { done -> R.string.chat_tasks_message_replied; dismissed -> R.string.chat_tasks_draft_dismissed
+                    filed -> R.string.chat_tasks_message_filed_title; else -> R.string.chat_tasks_message_drafted }), style = PersonaTheme.type.caption,
+                    color = when { done -> PersonaTheme.palette.done.text; filed || dismissed -> PersonaTheme.palette.ink2; else -> PersonaTheme.palette.accent })
                 if (sent != null) Text(sent.text, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink)
-                else if (filed) Text(draft, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink2)
+                else if (filed || dismissed) Text(item.field("draft").orEmpty(), style = PersonaTheme.type.body, color = PersonaTheme.palette.ink2)
                 else BasicTextField(draft, { draft = it }, Modifier.fillMaxWidth(),
                     textStyle = PersonaTheme.type.body.copy(color = PersonaTheme.palette.ink),
                     cursorBrush = SolidColor(PersonaTheme.palette.accent))
@@ -889,11 +895,24 @@ private fun MessageCard(item: FeedItem, host: AssistantTaskHost, todos: List<Tod
             if (blank != null) Text(stringResource(R.string.chat_tasks_message_blank, blank), style = PersonaTheme.type.caption,
                 color = PersonaTheme.palette.danger.text)
             if (filed) Text(stringResource(R.string.chat_tasks_message_filed), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
-            else if (item.canSend) Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                JButton(stringResource(R.string.chat_tasks_send), { host.tasks.sendMessage(item, draft, host.onError) }, Modifier.weight(1f), size = JButtonSize.Medium,
-                    enabled = blank == null && draft.isNotBlank(), loading = item.id in busy)
-                JButton(stringResource(R.string.chat_tasks_later), { host.tasks.putOff(itemId) }, kind = JButtonKind.Secondary, size = JButtonSize.Medium)
-            }
+            else if (item.canSend) persona.core.designsystem.DraftDecisionButtons(
+                send = persona.core.designsystem.JAction(stringResource(R.string.chat_tasks_send),
+                    onClick = { host.tasks.sendMessage(item, draft, host.onError) }, enabled = enabled && blank == null && draft.isNotBlank()),
+                later = persona.core.designsystem.JAction(stringResource(R.string.chat_tasks_later),
+                    onClick = { host.tasks.putOff(item.id) }, enabled = enabled),
+                dismiss = persona.core.designsystem.JAction(stringResource(R.string.chat_tasks_dismiss_draft), onClick = {
+                    host.tasks.dismissMessage(item, host.onError) { dismissal ->
+                        feedback?.notice(resources.getString(R.string.chat_tasks_draft_dismissed),
+                            persona.core.designsystem.FeedbackAction(resources.getString(R.string.chat_tasks_undo_draft)) {
+                                host.tasks.undoDismissMessage(dismissal, host.onError)
+                            })
+                    }
+                }, enabled = enabled),
+                busy = item.id in busy,
+                sendModifier = Modifier.testTag("assistant-draft-send-${item.id}"),
+                laterModifier = Modifier.testTag("assistant-draft-later-${item.id}"),
+                dismissModifier = Modifier.testTag("assistant-draft-dismiss-${item.id}"),
+            )
         }
     }
 }

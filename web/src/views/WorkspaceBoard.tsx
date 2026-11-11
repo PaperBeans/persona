@@ -41,7 +41,7 @@ export function WorkspaceBoardOff() {
     <Icon name="layers" size={28} className="text-ink-3" />
     <h2 className="text-base font-semibold text-ink">{t("workspace-board.off_title")}</h2>
     <p className="max-w-sm text-sm text-ink-3">{t("workspace-board.off_body")}</p>
-    <Button tone="primary" icon="gear" className="whitespace-nowrap" onClick={() => navigate("/settings?tab=general")}>{t("workspace-board.open_settings")}</Button>
+    <Button tone="primary" icon="gear" className="whitespace-nowrap" onClick={() => navigate("/settings?tab=hub")}>{t("workspace-board.open_settings")}</Button>
   </div>;
 }
 

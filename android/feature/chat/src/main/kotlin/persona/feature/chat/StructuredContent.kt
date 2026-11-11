@@ -269,7 +269,7 @@ internal fun DiffView(diff: ToolDiff, id: String) {
 @Composable
 internal fun TodoList(todos: List<TodoEntry>, failed: Boolean) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        val progress = stringResource(R.string.chat_todos_progress, todos.count { it.status == "completed" }, todos.size)
+        val progress = pluralStringResource(R.plurals.chat_todos_progress, todos.size, todos.count { it.status == "completed" }, todos.size)
         Text(if (failed) stringResource(R.string.chat_todos_progress_failed, progress) else progress,
             style = PersonaTheme.type.caption, color = if (failed) PersonaTheme.palette.danger.text else PersonaTheme.palette.ink2)
         todos.forEach { todo ->

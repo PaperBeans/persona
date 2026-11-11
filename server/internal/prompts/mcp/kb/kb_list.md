@@ -1,4 +1,4 @@
-List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (transcripts of the user's phone / watch recordings, kept a few days; newest first, saying which have meeting minutes). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.
+List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes and which transcripts have expired), topics (knowledge points curated by subject out of the timelines and chats: concepts, decisions with their reasons, practices, pitfalls, facts, open questions; the biggest first). Transcripts are kept for recording_days (14 days by default); meetings' minutes are kept longer under minutes_days (forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.
 
 ```json
 {
@@ -7,7 +7,7 @@ List knowledge-base entities of one kind ranked by importance (P0 first), releva
   "properties": {
     "kind": {
       "type": "string",
-      "enum": ["projects", "chats", "people", "docs", "meetings", "events", "recordings"]
+      "enum": ["projects", "chats", "people", "docs", "meetings", "events", "recordings", "topics"]
     },
     "tag": {
       "type": "string"

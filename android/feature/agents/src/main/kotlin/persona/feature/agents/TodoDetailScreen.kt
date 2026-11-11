@@ -448,7 +448,7 @@ fun TodoDetailScreen(
             if (todo.releasedAgents.isNotEmpty()) {
                 item(key = "past-header") {
                     Row(
-                        Modifier.fillMaxWidth().clickable { pastFolded = !pastFolded }.padding(vertical = Tokens.Space.xs),
+                        Modifier.fillMaxWidth().foldToggle(open = !pastFolded) { pastFolded = !pastFolded }.padding(vertical = Tokens.Space.xs),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         JSectionHeader(
@@ -456,7 +456,7 @@ fun TodoDetailScreen(
                             count = todo.releasedAgents.size,
                             modifier = Modifier.weight(1f)
                         )
-                        JIcon(if (pastFolded) PhIcons.CaretDown else PhIcons.CaretRight, null, size = Tokens.Space.l, tint = PersonaTheme.palette.ink3)
+                        JIcon(if (pastFolded) PhIcons.CaretRight else PhIcons.CaretDown, null, size = Tokens.Space.l, tint = PersonaTheme.palette.ink3)
                     }
                 }
 

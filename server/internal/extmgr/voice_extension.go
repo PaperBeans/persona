@@ -157,7 +157,7 @@ func (ps *extensions) voiceGatewaySpec(ctx context.Context) json.RawMessage {
 		if !p.Record.Enabled || p.Manifest.Kind() != "quota" {
 			continue
 		}
-		secrets, err := ps.reg.Secrets(ctx, p.Record.ID)
+		secrets, err := ps.programSecrets(ctx, p.Record.ID)
 		if err != nil {
 			continue
 		}

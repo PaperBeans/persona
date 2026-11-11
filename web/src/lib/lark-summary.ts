@@ -90,13 +90,43 @@ export function forwardedText(m: Meta): string {
   return text.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
 }
 
-/** Lark gateway media paths (old /api/media/, agent API /agent/v1/media/) mapped onto the hub's /api/v1/lark/media/.
- * Forwarded messages carry them, and so do inbox items stored before the extension rewrote them (#1353). */
+// Hosts that serve Lark's signed `static-resource` picture links (avatars, read-state pictures). Kept in sync with the
+// Lark connector server's CDN host check: only a link from one of these is ever rewritten.
+const LARK_CDN_HOST = /(?:^|\.)(?:feishucdn\.com|larksuitecdn\.com|feishu\.cn|larksuite\.com|larkoffice\.com)$/i;
+const RESOURCE_KEY = /^[a-zA-Z0-9_./:+-]{1,500}$/;
+
+/** The media key inside a Lark `static-resource` CDN URL, or undefined when `s` is not one. A signed link expires and
+ * only a Lark browser session can fetch it, so it is replaced by the hub's own media route rather than rendered. */
+export function larkStaticResourceKey(s: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(s);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:" || !LARK_CDN_HOST.test(url.hostname)) return undefined;
+  const match = /\/static-resource\/v1\/([^/~?]+)/.exec(url.pathname);
+  if (!match?.[1]) return undefined;
+  let key: string;
+  try {
+    key = decodeURIComponent(match[1]);
+  } catch {
+    return undefined;
+  }
+  return RESOURCE_KEY.test(key) ? key : undefined;
+}
+
+/** A Lark picture URL the hub can serve itself: the gateway's media paths and a signed Lark CDN link both become the
+ * hub's `/api/v1/lark/media/<key>`; anything else is returned unchanged. Forwarded messages carry the gateway paths,
+ * and so do inbox items stored before the extension rewrote them (#1353); older rows keep the expiring CDN link the
+ * connector stored before its agent boundary learned to proxy these, which is why that rewrite lives here too. */
 export function hubMediaURL(s: string | undefined): string | undefined {
   if (!s) return undefined;
   for (const prefix of ["/api/media/", "/agent/v1/media/"]) {
     if (s.startsWith(prefix)) return "/api/v1/lark/media/" + s.slice(prefix.length);
   }
+  const key = larkStaticResourceKey(s);
+  if (key) return "/api/v1/lark/media/" + encodeURIComponent(key);
   return s;
 }
 

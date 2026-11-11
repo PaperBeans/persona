@@ -2,6 +2,7 @@
   "title_notes": "关于我",
   "title_main_tasks_quiet": "主对话派的任务只在主对话里通知",
   "title_start_requested_tasks": "我在对话里说过的，直接开始",
+  "title_kb_topics": "按主题整理知识点",
   "title_launcher": "Persona 的启动器",
   "none": "（无）",
   "on": "开",
@@ -9,6 +10,7 @@
   "change_notes": "改「关于我」：{before} → {after}",
   "change_main_tasks_quiet": "「主对话派的任务只在主对话里通知」：{before} → {after}",
   "change_start_requested_tasks": "「我在对话里说过的，直接开始」：{before} → {after}",
+  "change_kb_topics": "「按主题整理知识点」：{before} → {after}",
   "change_launcher": "Persona 的默认启动器：{before} → {after}",
   "title_recording_days": "录音在知识库里保留",
   "change_recording_days": "录音在知识库里保留：{before} → {after} 天",
@@ -28,5 +30,12 @@
   "change_meeting_attendance_default": "录音会议里的 Persona：{before} → {after}",
   "meeting_role_off": "不参加",
   "meeting_role_listener": "旁听",
-  "meeting_role_participant": "参与"
+  "meeting_role_participant": "参与",
+  "title_minutes_days": "会议纪要保留",
+  "change_minutes_days": "会议纪要保留：{before} → {after}",
+  "change_minutes_days_saved": "会议纪要保留：保存 {previous} → {saved}；目前保留 {after}（不短于录音保留时间）",
+  "minutes_forever": "永久保留",
+  "minutes_days_value": "{days} 天",
+  "minutes_unchanged": "会议纪要保留设置未变：已保存 {saved}，当前生效为 {after}。",
+  "minutes_applied": "会议纪要保留已设为 {saved}，当前生效为 {after}。转写仍按录音保留时间清理。"
 }

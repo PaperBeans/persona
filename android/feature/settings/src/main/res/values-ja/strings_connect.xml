@@ -76,6 +76,8 @@
     <string name="settings_pairing_failure_timeout">ハブに接続できません。自宅では、スマートフォンとハブのあるパソコンが同じネットワークにつながっているか確認してください。外出先では、自宅のルーターが外部からの接続を許可しているか確認してください。</string>
     <string name="settings_pairing_failure_local">自宅でハブに接続するには、Personaにローカルネットワークへのアクセスを許可してください。</string>
     <string name="settings_pairing_failure_certificate">証明書かハブの身元が一致しません。ハブを入れ直した場合は、ログイン済みのデバイスで新しいコードを出してもう一度読み取ってください。</string>
+    <string name="settings_pairing_failure_proxy_certificate">%1$s の証明書はこのスマートフォンで信頼されていません。このアドレスはリバースプロキシかトンネルを経由しているため、その証明書がこのドメイン名に有効か確認してください。ハブ自体は問題なく、コードを作り直しても解決しません。</string>
+    <string name="settings_pairing_failure_proxy_this_address">このアドレス</string>
     <string name="settings_pairing_failure_expired">このコードは期限切れか、すでに使われています。ログイン済みのデバイスで新しいコードを出してください。</string>
     <string name="settings_pairing_failure_incompatible">接続コンポーネントかハブがこのペアリング方法に対応していません。更新してからもう一度お試しください。</string>
     <string name="settings_pairing_failure_tls_required">このアドレスには暗号化された接続が必要です。HTTPSのアドレスでペアリングし直してください。</string>

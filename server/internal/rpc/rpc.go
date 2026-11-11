@@ -212,7 +212,7 @@ func (p *Peer) handle(ctx context.Context, m message) {
 	} else if err != nil {
 		out.Error = &Error{Message: err.Error()}
 	} else {
-		b, merr := json.Marshal(res)
+		b, merr := marshal(res)
 		if merr != nil {
 			out.Error = &Error{Message: merr.Error()}
 		} else {
@@ -232,17 +232,36 @@ func (p *Peer) write(m message) error {
 	return p.writeContext(context.Background(), m)
 }
 
-// encodeLine is json.Marshal(m) and its newline, encoded into one buffer: the same bytes and errors without copying
-// the line once more to append the newline.
+// encodeLine is marshal(m) and its newline, encoded into one buffer: the same bytes and errors without copying the
+// line once more to append the newline.
 func encodeLine(m message) ([]byte, error) {
 	if m.line != nil {
 		return m.line, nil
 	}
 	var b bytes.Buffer
-	if err := json.NewEncoder(&b).Encode(m); err != nil {
+	if err := plainEncoder(&b).Encode(m); err != nil {
 		return nil, err
 	}
 	return b.Bytes(), nil
+}
+
+// marshal is json.Marshal(v) with < > & as they are. Escaped, they cost six bytes each, and a transcript's HTML or
+// code went out at up to three times its size in every page and push (#2907); a later encoder keeps escapes it is
+// given, so only the first hop can leave them out. Escapes already in a json.RawMessage stay as they are, and U+2028
+// and U+2029 are still escaped, as encoding/json does without HTML escaping.
+func marshal(v any) ([]byte, error) {
+	var b bytes.Buffer
+	if err := plainEncoder(&b).Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
+}
+
+// plainEncoder is an encoder to w that leaves < > & as they are (marshal).
+func plainEncoder(w io.Writer) *json.Encoder {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	return enc
 }
 
 func (p *Peer) writeContext(ctx context.Context, m message) error {
@@ -296,7 +315,7 @@ func (p *Peer) Call(ctx context.Context, method string, params any, out any) err
 		delete(p.pending, id)
 		p.mu.Unlock()
 	}()
-	raw, err := json.Marshal(params)
+	raw, err := marshal(params)
 	if err != nil {
 		return err
 	}
@@ -331,13 +350,13 @@ func (p *Peer) Notify(event string, params any) error {
 		}
 		params = json.RawMessage(raw)
 	}
-	// Bytes already encoded go into the envelope as they are: its Marshal checks, compacts and escapes them as this
-	// one would, with the same errors, so the line is the same without encoding them twice (a computer's session list
-	// each time it changes). An empty one is what json.Marshal says it is (an error).
+	// Bytes already encoded go into the envelope as they are: its encoder checks and compacts them as this one would,
+	// with the same errors, so the line is the same without encoding them twice (a computer's session list each time
+	// it changes). An empty one is what json.Marshal says it is (an error).
 	if raw, ok := params.(json.RawMessage); ok && len(raw) > 0 {
 		return p.write(message{Event: event, Params: raw})
 	}
-	raw, err := json.Marshal(params)
+	raw, err := marshal(params)
 	if err != nil {
 		return err
 	}

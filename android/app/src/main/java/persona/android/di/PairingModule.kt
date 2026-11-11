@@ -80,10 +80,12 @@ class WiredPairingService @Inject constructor(application: Application, private 
             val parsed = request.parsedPairingLink()?.copy(access = request.access)
                 ?: request.copy(url = request.url.trim(), token = request.token.trim())
             val addresses = HubPairingClient.addresses(parsed)
-            networking = HubPairingClient(parsed.hub, parsed.fp, addresses, app.clientVersion(), parsed.access)
+            // A link's `url` behind a proxy with a public CA's certificate (#2622): that origin alone is checked like any site.
+            val proxied = setOfNotNull(HubPairingClient.systemTrustedOrigin(parsed))
+            networking = HubPairingClient(parsed.hub, parsed.fp, addresses, app.clientVersion(), parsed.access, systemOrigins = proxied)
             val result = networking.pair(parsed.token, app.deviceName, progress)
             val saved = HubCredentials(result.address, result.hubId, result.fingerprint,
-                result.candidates, result.token, result.deviceId)
+                result.candidates, result.token, result.deviceId, systemOrigins = result.systemOrigins.toList())
             withContext(NonCancellable) {
                 save(saved, parsed.access)
                 progress(PairingProgress(PairingStage.Complete))
@@ -126,14 +128,16 @@ class WiredPairingService @Inject constructor(application: Application, private 
 
     private fun Exception.pairingException(): PairingException {
         if (this is PairingException) return this
+        val failure = HubFailure.from(this)
         val reason = if (this is IllegalArgumentException) PairingFailure.InvalidCode
         else if (this is SecurityException) PairingFailure.LocalPermission
-        else when (HubFailure.from(this).kind) {
+        else when (failure.kind) {
             HubError.AddressNotFound -> PairingFailure.Dns
             HubError.ConnectionRefused -> PairingFailure.Refused
             HubError.Unreachable, HubError.NoNetwork -> PairingFailure.Unreachable
             HubError.Timeout -> PairingFailure.Timeout
-            HubError.CertificateMismatch, HubError.HubMismatch -> PairingFailure.Certificate
+            HubError.CertificateMismatch -> if (failure.code == persona.core.hub.PROXY_CERTIFICATE) PairingFailure.ProxyCertificate else PairingFailure.Certificate
+            HubError.HubMismatch -> PairingFailure.Certificate
             HubError.PairingExpired -> PairingFailure.Expired
             HubError.Incompatible -> PairingFailure.Incompatible
             HubError.TlsRequired -> PairingFailure.TlsRequired
@@ -142,7 +146,9 @@ class WiredPairingService @Inject constructor(application: Application, private 
             HubError.AccessRejected -> PairingFailure.AccessRejected
             else -> PairingFailure.Unknown
         }
-        return PairingException(reason).also { it.initCause(this) }
+        // The proxied address whose certificate was refused is named (#2622).
+        val address = failure.detail.takeIf { reason == PairingFailure.ProxyCertificate }
+        return PairingException(reason, address).also { it.initCause(this) }
     }
 }
 

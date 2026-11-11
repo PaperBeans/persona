@@ -7,5 +7,6 @@
   "relevance_title": "自分との関連度（0〜100、大きいほど関連が強い）",
   "relevance": "関連度 {value}/100",
   "collapse": "折りたたむ",
-  "project_kind": "{kind}プロジェクト"
+  "project_kind": "{kind}プロジェクト",
+  "points_other": "ポイント {count} 件"
 }

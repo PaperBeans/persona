@@ -59,5 +59,8 @@ internal fun ChatSessionStatusLine(
         session?.background?.takeIf { it.isNotEmpty() }?.let { stringResource(R.string.chat_status_chip_background, it.size) },
         draftSaveError?.let { stringResource(R.string.chat_status_draft_failed) },
     )
-    StatusLine(state, chips = chips, onClick = { onDetails() })
+    // The header's title line says the state, once (#3957; iOS shows none above its composer): this line keeps only what
+    // the header does not say, the facts and an unconfirmed delivery, and is gone without them. The header's title still
+    // opens the status sheet it opened.
+    StatusLine(state, chips = chips, onClick = { onDetails() }, sayState = false)
 }

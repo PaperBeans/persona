@@ -105,15 +105,48 @@ func (d *DB) UpdateTaskPlan(ctx context.Context, id, from, to string, tasks json
 }
 
 func (d *DB) AppendFeed(ctx context.Context, f FeedRow) error {
+	_, err := d.appendDraftFeed(ctx, f, false)
+	return err
+}
+
+// AppendDraftFeed suppresses another card for a progress generation the user
+// already dismissed. Insertion and the dismissal decision share the ref lock.
+func (d *DB) AppendDraftFeed(ctx context.Context, f FeedRow) (bool, error) {
+	return d.appendDraftFeed(ctx, f, true)
+}
+
+func (d *DB) appendDraftFeed(ctx context.Context, f FeedRow, deduplicate bool) (bool, error) {
 	body := []byte(f.Body)
 	if len(body) == 0 {
 		body = []byte("{}")
 	}
 	// sent_at mirrors body.sent_at (0390) so that Feed finds the sent cards by index.
-	_, err := d.pool.Exec(ctx, `INSERT INTO assistant_feed (id, conversation, at, kind, ref, body, sent_at)
-		VALUES ($1, $2, $3, $4, $5, $6, ($6::jsonb->>'sent_at')::timestamptz)`,
-		f.ID, f.Conversation, f.At, f.Kind, f.Ref, body)
-	return err
+	inserted := false
+	err := pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+		if err := lockFeedRef(ctx, tx, f.Kind, f.Ref); err != nil {
+			return err
+		}
+		if deduplicate {
+			var ignored bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM assistant_feed
+				WHERE kind = 'message' AND ref = $1 AND body ? 'dismissal_id'
+				AND body->>'todo_id' = $2::jsonb->>'todo_id'
+				AND COALESCE(body->>'message_version', '') = COALESCE($2::jsonb->>'message_version', '')
+				AND (COALESCE($2::jsonb->>'progress_version', '') = ''
+					OR body->>'progress_version' = $2::jsonb->>'progress_version'))`, f.Ref, body).Scan(&ignored); err != nil {
+				return err
+			}
+			if ignored {
+				return nil
+			}
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO assistant_feed (id, conversation, at, kind, ref, body, sent_at)
+			VALUES ($1, $2, $3, $4, $5, $6, ($6::jsonb->>'sent_at')::timestamptz)`,
+			f.ID, f.Conversation, f.At, f.Kind, f.Ref, body)
+		inserted = err == nil
+		return err
+	})
+	return inserted && err == nil, err
 }
 
 // Feed lists a conversation's items after since (zero: from the start), oldest first, at most limit, and the
@@ -128,6 +161,10 @@ func (d *DB) Feed(ctx context.Context, conversation string, since time.Time, lim
 		UNION ALL
 		(SELECT id, conversation, at, kind, ref, body FROM assistant_feed
 			WHERE conversation = $1 AND kind = 'message' AND sent_at > $2 AND at <= $2)
+		UNION ALL
+		(SELECT id, conversation, at, kind, ref, body FROM assistant_feed
+			WHERE conversation = $1 AND kind = 'message' AND updated_at > $2 AND at <= $2
+			AND (sent_at IS NULL OR sent_at <= $2))
 		ORDER BY at, id LIMIT $3`
 	}
 	rows, err := d.pool.Query(ctx, q, conversation, since, limit)

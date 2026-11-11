@@ -1,0 +1,248 @@
+{
+  "schema_version": 1,
+  "max_entries": 10,
+  "palette": 5,
+  "home_screen": 1,
+  "cases": [
+    {
+      "name": "open_into_empty",
+      "operation": "open",
+      "description": "The first conversation opened is the only entry.",
+      "input": {
+        "before": [],
+        "opened": "s:m1/a"
+      },
+      "expected": {
+        "after": [
+          "s:m1/a"
+        ]
+      }
+    },
+    {
+      "name": "open_goes_first",
+      "operation": "open",
+      "description": "A conversation opened goes before the ones opened earlier.",
+      "input": {
+        "before": [
+          "s:m1/a",
+          "j:p1"
+        ],
+        "opened": "s:m2/b"
+      },
+      "expected": {
+        "after": [
+          "s:m2/b",
+          "s:m1/a",
+          "j:p1"
+        ]
+      }
+    },
+    {
+      "name": "open_again_moves_to_front",
+      "operation": "open",
+      "description": "One opened again moves to the front, without a second entry.",
+      "input": {
+        "before": [
+          "s:m2/b",
+          "s:m1/a",
+          "j:p1"
+        ],
+        "opened": "j:p1"
+      },
+      "expected": {
+        "after": [
+          "j:p1",
+          "s:m2/b",
+          "s:m1/a"
+        ]
+      }
+    },
+    {
+      "name": "open_the_first_again",
+      "operation": "open",
+      "description": "Opening the newest again changes nothing.",
+      "input": {
+        "before": [
+          "j:p1",
+          "s:m2/b"
+        ],
+        "opened": "j:p1"
+      },
+      "expected": {
+        "after": [
+          "j:p1",
+          "s:m2/b"
+        ]
+      }
+    },
+    {
+      "name": "keeps_ten",
+      "operation": "open",
+      "description": "Only the ten newest stay.",
+      "input": {
+        "before": [
+          "s:m1/0",
+          "s:m1/1",
+          "s:m1/2",
+          "s:m1/3",
+          "s:m1/4",
+          "s:m1/5",
+          "s:m1/6",
+          "s:m1/7",
+          "s:m1/8",
+          "s:m1/9"
+        ],
+        "opened": "j:p1"
+      },
+      "expected": {
+        "after": [
+          "j:p1",
+          "s:m1/0",
+          "s:m1/1",
+          "s:m1/2",
+          "s:m1/3",
+          "s:m1/4",
+          "s:m1/5",
+          "s:m1/6",
+          "s:m1/7",
+          "s:m1/8"
+        ]
+      }
+    },
+    {
+      "name": "ignores_empty",
+      "operation": "open",
+      "description": "An empty key is not a conversation: the list stays as it was.",
+      "input": {
+        "before": [
+          "s:m1/a"
+        ],
+        "opened": ""
+      },
+      "expected": {
+        "after": [
+          "s:m1/a"
+        ]
+      }
+    },
+    {
+      "name": "shown_skips_the_current",
+      "operation": "shown",
+      "description": "The conversation on the page is not offered: the first shown is the one before it.",
+      "input": {
+        "entries": [
+          "s:m2/b",
+          "s:m1/a",
+          "j:p1"
+        ],
+        "current": "s:m2/b",
+        "existing": [
+          "s:m2/b",
+          "s:m1/a",
+          "j:p1"
+        ],
+        "limit": 5
+      },
+      "expected": {
+        "shown": [
+          "s:m1/a",
+          "j:p1"
+        ]
+      }
+    },
+    {
+      "name": "shown_skips_the_missing",
+      "operation": "shown",
+      "description": "A conversation the client no longer has (deleted, its machine gone) is skipped, and the ones after it move up.",
+      "input": {
+        "entries": [
+          "s:m2/b",
+          "s:m1/gone",
+          "s:m1/a",
+          "j:p1"
+        ],
+        "current": "s:m2/b",
+        "existing": [
+          "s:m2/b",
+          "s:m1/a",
+          "j:p1"
+        ],
+        "limit": 5
+      },
+      "expected": {
+        "shown": [
+          "s:m1/a",
+          "j:p1"
+        ]
+      }
+    },
+    {
+      "name": "shown_up_to_the_limit",
+      "operation": "shown",
+      "description": "At most `limit` (`palette`: 5 in ⌘K, `home_screen`: 1 in the iPhone's home screen menu).",
+      "input": {
+        "entries": [
+          "s:m1/1",
+          "s:m1/2",
+          "s:m1/3",
+          "s:m1/4"
+        ],
+        "current": "",
+        "existing": [
+          "s:m1/1",
+          "s:m1/2",
+          "s:m1/3",
+          "s:m1/4"
+        ],
+        "limit": 2
+      },
+      "expected": {
+        "shown": [
+          "s:m1/1",
+          "s:m1/2"
+        ]
+      }
+    },
+    {
+      "name": "shown_without_a_current",
+      "operation": "shown",
+      "description": "Away from any conversation (another page), the newest is the first offered.",
+      "input": {
+        "entries": [
+          "j:p1",
+          "s:m1/a"
+        ],
+        "current": "",
+        "existing": [
+          "j:p1",
+          "s:m1/a"
+        ],
+        "limit": 5
+      },
+      "expected": {
+        "shown": [
+          "j:p1",
+          "s:m1/a"
+        ]
+      }
+    },
+    {
+      "name": "shown_nothing_else",
+      "operation": "shown",
+      "description": "Only the current one opened so far: nothing to go back to.",
+      "input": {
+        "entries": [
+          "s:m1/a"
+        ],
+        "current": "s:m1/a",
+        "existing": [
+          "s:m1/a"
+        ],
+        "limit": 5
+      },
+      "expected": {
+        "shown": []
+      }
+    }
+  ]
+}

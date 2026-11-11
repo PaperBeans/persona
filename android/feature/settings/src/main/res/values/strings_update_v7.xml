@@ -31,5 +31,4 @@
     <string name="settings_update_v7_system_failed">System installation did not finish. Try again.</string>
     <string name="settings_update_v7_native_title">Open native chats by default</string>
     <string name="settings_update_v7_native_subtitle">Use chat bubbles when on, or the extension event details when off. Applies the next time you open an item.</string>
-    <string name="settings_update_v7_native_section">Inbox</string>
 </resources>

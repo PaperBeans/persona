@@ -469,7 +469,7 @@ func (s *Service) answerMeetingAsk(ctx context.Context, e *kb.Engine, id string,
 		return failed(askModelError)
 	}
 	system := prompts.RenderMeetingAnswer(prompts.MeetingAnswer{Owner: s.owner(ctx),
-		Today: time.Now().In(s.location(ctx)).Format("2006-01-02 (Monday)"), Language: a.Lang})
+		Today: time.Now().In(s.location(ctx)).Format("2006-01-02 (Monday)"), Language: a.Lang, EarlierAvailable: m.EarlierAvailable})
 	var out meetingReply
 	err = s.meetingAnswerModel().JSONMax(ctx, system, prompts.RenderMeetingAnswerInput(s.answerInput(ctx, m, a, heard)), 1024, &out)
 	switch {
@@ -548,7 +548,8 @@ func (s *Service) answerInput(ctx context.Context, m kb.MeetingMaterial, a kb.Li
 		}
 		return out
 	}
-	in := prompts.MeetingAnswerInput{Title: oneLine(m.Title), Language: oneLine(m.Language), Lines: lines(m.Lines)}
+	in := prompts.MeetingAnswerInput{Title: oneLine(m.Title), Language: oneLine(m.Language), Lines: lines(m.Lines),
+		EarlierAvailable: m.EarlierAvailable}
 	if c := m.Calendar; c != nil {
 		in.Calendar = &prompts.MeetingCalendar{Title: oneLine(c.Title), Location: oneLine(c.Location), Attendees: each(c.Attendees)}
 	}

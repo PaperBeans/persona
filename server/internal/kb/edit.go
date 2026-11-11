@@ -130,6 +130,8 @@ func (s *Store) putEntity(kind, id string, v any, t *Tagging, manual bool) (err 
 			*entity = Item{}
 		case *Recording:
 			*entity = Recording{}
+		case *Topic:
+			*entity = Topic{}
 		}
 		_ = json.Unmarshal(after, v)
 		t.persisted = true

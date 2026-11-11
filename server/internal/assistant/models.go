@@ -96,6 +96,7 @@ var modelPurposes = []ModelPurpose{
 	{ID: "kb.dedupe", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "kb.items", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "kb.moments", Group: "group_processing", Kind: "api", Parent: "kb"},
+	{ID: "kb.topics", Group: "group_processing", Kind: "api", Parent: "kb"}, // knowledge points by topic (kb/topics.go)
 	{ID: "assistant.title", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "assistant.route", Group: "group_processing", Kind: "api", Parent: "kb"}, // New chat: a direction or a quick chat (route.go)
 	{ID: "agent.title", Group: "group_processing", Kind: "api", Parent: "kb"},
@@ -192,8 +193,9 @@ type modelsState struct {
 
 	customMu sync.Mutex // one change of the remembered typed ids at a time (models_custom.go)
 
-	zshrcMu sync.Mutex
-	zshrc   map[string][]proto.Launcher // machine → its rc-file launchers (nil: not asked since the start)
+	zshrcMu         sync.Mutex
+	zshrc           map[string][]proto.Launcher // machine → its rc-file launchers (nil: not asked since the start)
+	zshrcRefreshing bool                        // one background refresh fills the last-seen snapshot at a time
 	// zshrcSync: how each machine's list came in the last time they were asked (设置 › 模型供应商's 各台电脑).
 	zshrcSync map[string]LauncherSync
 

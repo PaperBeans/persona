@@ -1,0 +1,42 @@
+{
+  "more": false,
+  "messages": [
+    {
+      "id": "Lunch@example.com",
+      "message_id": "Lunch@example.com",
+      "account_id": "acc_test",
+      "mailbox": "INBOX",
+      "uid": 2,
+      "title": "Lunch",
+      "sender": "friend@example.com",
+      "sender_email": "friend@example.com",
+      "to": [
+        {
+          "name": "",
+          "email": "me@example.com"
+        }
+      ],
+      "time": "2006-01-02T22:04:05Z",
+      "body": "See you at noon",
+      "seen": false
+    },
+    {
+      "id": "acc_test:INBOX:1",
+      "account_id": "acc_test",
+      "mailbox": "INBOX",
+      "uid": 1,
+      "title": "Quarterly report",
+      "sender": "Example Boss",
+      "sender_email": "boss@example.com",
+      "to": [
+        {
+          "name": "",
+          "email": "me@example.com"
+        }
+      ],
+      "time": "2006-01-02T22:04:05Z",
+      "body": "Numbers are attached",
+      "seen": false
+    }
+  ]
+}

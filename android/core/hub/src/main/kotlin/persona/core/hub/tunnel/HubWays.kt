@@ -127,7 +127,11 @@ class HubWays(
     private val lock = Any()
 
     private class Running(val tunnel: HubTunnel, val ssh: SshTunnel?, val forward: LocalProxyForward?) : AutoCloseable {
-        val alive: Boolean get() = ssh?.alive ?: forward!!.listening
+        /** A proxy listener can accept before start's final epoch check; only a completed start may be reused. */
+        @Volatile private var ready = false
+        val alive: Boolean get() = ready && (ssh?.alive ?: forward!!.listening)
+
+        fun markReady() { ready = true }
 
         suspend fun start(preferred: Int): Int = ssh?.start(preferred)
             ?: blocking(forward!!::close) { forward.check(); forward.listen(preferred) }
@@ -219,6 +223,7 @@ class HubWays(
                 current(key, epoch)
                 if (running[key] !== handle) throw CancellationException("Tunnel replaced")
                 ports[key] = port
+                handle.markReady()
                 recent += key
                 setState(key, TunnelState.Up)
                 HubTunnel.baseUrl(tunnel.hubAddress, port)

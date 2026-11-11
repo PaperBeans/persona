@@ -23,11 +23,15 @@ import (
 
 func (s *Service) launcherRoutes() {
 	s.handle("GET /api/v1/launchers", func(w http.ResponseWriter, r *http.Request) {
-		// Each machine gets launcherSyncTimeout: one that is slow or gone never holds the page (sync says which).
 		ctx, cancel := context.WithTimeout(r.Context(), launcherSyncTimeout+5*time.Second)
 		defer cancel()
-		// A launcher just added to an rc file shows up (the node caches a minute).
-		zshrc := s.zshrcLaunchers(ctx, true)
+		// A last-seen snapshot answers at once; a first-ever list still fills before it answers.
+		zshrc, cached := s.zshrcLaunchersLastSeen(ctx)
+		if cached {
+			s.refreshZshrcLaunchers(r.Context())
+		} else {
+			zshrc = s.zshrcLaunchers(ctx, true)
+		}
 		views := s.withKeyMachines(ctx, s.launcherViewsOf(ctx, zshrc))
 		if b, ok := s.builtinClaude(ctx, zshrc); ok {
 			views = append(views, b)

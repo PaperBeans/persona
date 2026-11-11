@@ -240,8 +240,10 @@ func (s *Store) readLive(id string) (Live, error) {
 	return l, nil
 }
 
-// putLive writes recording id's live.json as putMinutes writes the minutes: not when the recording was deleted
-// meanwhile (false then), so a delete stays a delete. The caller holds liveMu.
+// putLive writes recording id's live.json as putMinutes writes the minutes: not when the recording was deleted or
+// trimmed meanwhile (false then), so a delete stays a delete and a trim keeps no live log. The trim (recording_trim.go)
+// holds recFilesMu from its meta.json to its last removal, so a read-modify-write that read the live log before it
+// cannot write it back after. The caller holds liveMu.
 func (s *Store) putLive(id string, l *Live) (bool, error) {
 	if s.readOnly {
 		return false, ErrReadOnly
@@ -255,7 +257,14 @@ func (s *Store) putLive(id string, l *Live) (bool, error) {
 	if err := s.recoverRecordingLocked(id); err != nil {
 		return false, err
 	}
-	if _, err := os.Stat(s.path(KindRecording, id, "meta.json")); err != nil {
+	meta, err := os.ReadFile(s.path(KindRecording, id, "meta.json"))
+	if err != nil {
+		return false, nil
+	}
+	var trim struct {
+		TrimmedAt *time.Time `json:"trimmed_at"`
+	}
+	if json.Unmarshal(meta, &trim) == nil && trim.TrimmedAt != nil {
 		return false, nil
 	}
 	// Synced before it replaces the old one: the phone was told next, and does not send those positions again.
@@ -386,10 +395,13 @@ func (e *Engine) liveAppend(id string, from int, segs []LiveSegment) (Live, Reco
 	return next, r, true, nil
 }
 
-// goneError is why recording id is not there any more: deleted, or never uploaded.
+// goneError is why recording id takes no live log any more: deleted, trimmed (attending it is over) or never uploaded.
 func (s *Store) goneError(id string) error {
 	if _, gone := s.tombstones()[id]; gone {
 		return ErrRecordingDeleted
+	}
+	if r, ok := s.Recording(id); ok && r.Trimmed() {
+		return ErrNotAttending
 	}
 	return ErrNotFound
 }
@@ -406,7 +418,7 @@ func (e *Engine) LiveRead(rawID string) (Live, Recording, error) {
 
 // LiveUpdate changes recording id's live log with fn (given it and the stored upload) and writes the result unless fn
 // fails or changed nothing; the live log after it. ErrNotFound when the recording's meta.json is gone (also deleted
-// meanwhile), ErrReadOnly on a read-only knowledge base. fn runs with the live log locked: it must be quick and call
+// meanwhile) or the recording was trimmed meanwhile, ErrReadOnly on a read-only knowledge base. fn runs with the live log locked: it must be quick and call
 // no Engine method of the live log or the recordings.
 func (e *Engine) LiveUpdate(rawID string, fn func(l *Live, r Recording) error) (Live, error) {
 	id, ok := RecordingID(rawID)

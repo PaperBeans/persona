@@ -29,7 +29,7 @@ Three optional hub integrations: Lark gateway (third-party user-authenticated we
 - `GET /api/v1/lark/raw/<path>` = gateway `GET /agent/v1/<path>`, read-only; JSON `/api/...` media rewritten to hub. POST only `search/page` / `search/mention-history` (large-body read search). Assistant `lark_*` MCP same `lark.Read` allowlist.
 - **Assistant calls gateway itself** (2026-10-30), gateway skill from extension since #1571, no repo copy. Commands directly call agent API for reads / writes; node gate confirms externally visible writes on phone. `docs/assistant/assistant.md` “Lark: skill supplied by the Lark extension”. Quick reference below supplements local tests; gateway skill references more complete and authoritative.
 - Chats / messages / read / send / reactions / card buttons use dedicated hub routes (`docs/protocol/protocol.md` Lark APIs).
-- **Without gateway, official `lark-cli`** (`docs/plans/plan-lark-cli.md`,#273): assistant integration done, `lark.cli` in the manager's manager.json, assistant PATH, same write gate (`docs/assistant/assistant.md` “Lark: `lark-cli`”). Inbox / knowledge / `/agent` / app Lark pages still gateway-only; add L2–L6 progressively.
+- **Without gateway, official `lark-cli`** (`docs/plans/plan-lark-cli.md`,#273): assistant integration and the L2 read-only `larkcli` connector are available, with `lark.cli` in the manager's manager.json, assistant PATH, and the same write gate (`docs/assistant/assistant.md` “Lark: `lark-cli`”). Inbox / knowledge / `/agent` / app Lark pages still gateway-only; add L3–L6 progressively.
 
 ## Gateway and hub on separate computers
 

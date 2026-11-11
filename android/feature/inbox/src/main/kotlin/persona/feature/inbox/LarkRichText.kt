@@ -288,7 +288,14 @@ fun LarkCodeBlock(code: String, language: String, modifier: Modifier = Modifier)
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)
             ) {
                 JIcon(PhIcons.Copy, modifier = Modifier.size(RichTextTokens.codeCopyIcon), tint = palette.accent)
-                Text(stringResource(R.string.inbox_lark_code_copy), style = PersonaTheme.type.micro, color = palette.accent)
+                Text(
+                    stringResource(R.string.inbox_lark_code_copy),
+                    style = PersonaTheme.type.micro,
+                    color = palette.accent,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
         SelectionContainer {

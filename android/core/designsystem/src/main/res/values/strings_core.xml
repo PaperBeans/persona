@@ -139,6 +139,8 @@
     <string name="designsystem_core_compact_before">%1$s tokens before</string>
     <string name="designsystem_core_compact_unit">1000</string>
     <string name="designsystem_core_compact_count">%1$sK</string>
+    <!-- Only a language whose compact unit is 1000 steps up to millions (persona.core.contracts.compactCount); Chinese and Japanese count in ten-thousands. -->
+    <string name="designsystem_core_compact_millions" translatable="false">%1$sM</string>
     <plurals name="designsystem_core_work_tools">
         <item quantity="one">%1$d tool</item>
         <item quantity="other">%1$d tools</item>
@@ -455,7 +457,10 @@
     <string name="designsystem_core_workflow_failed">Failed</string>
     <string name="designsystem_core_workflow_killed">Stopped</string>
     <string name="designsystem_core_workflow_stalled">Gone quiet</string>
-    <string name="designsystem_core_workflow_agents_done">%1$d/%2$d agents done</string>
+    <plurals name="designsystem_core_workflow_agents_done">
+        <item quantity="one">%2$d/%1$d agent done</item>
+        <item quantity="other">%2$d/%1$d agents done</item>
+    </plurals>
     <string name="designsystem_core_always_scope_commands">All commands in this conversation</string>
     <string name="designsystem_core_always_scope_read_directory">All reads in this directory in this conversation</string>
     <string name="designsystem_core_always_scope_edit_directory">All file edits in this directory in this conversation</string>

@@ -49,4 +49,7 @@
     <string name="chat_tray_done">完了</string>
     <string name="chat_tray_accepted">検収済み</string>
     <string name="chat_tray_in_progress">進行中</string>
+    <string name="chat_tasks_dismiss_draft">対応しない</string>
+    <string name="chat_tasks_draft_dismissed">対応を見送りました。下書きは送信していません。</string>
+    <string name="chat_tasks_undo_draft">元に戻す</string>
 </resources>

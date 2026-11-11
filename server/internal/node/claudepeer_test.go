@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -289,6 +290,39 @@ func TestPeerTaken(t *testing.T) {
 	}()
 	if !peerTaken(context.Background(), func() string { return p }, st.Size(), "say \"hi\"\nsecond line", 2*time.Second) {
 		t.Fatal("the queue-operation it wrote was not seen")
+	}
+}
+
+// A line longer than peerSeen decodes (a user line with pasted images inline, a large tool result) is read past: the
+// queue-operation after it still counts, and nothing is made up when none follows.
+func TestPeerSeenPastALongLine(t *testing.T) {
+	long := `{"type":"user","message":{"content":"` + strings.Repeat("A", 9<<20) + `"}}` + "\n"
+	taken := `{"type":"queue-operation","operation":"enqueue","content":"say \"hi\""}` + "\n"
+	for _, c := range []struct {
+		name, after string
+		want        bool
+	}{
+		{"taken after it", taken, true},
+		{"nothing after it", `{"type":"assistant","message":{"content":"ok"}}` + "\n", false},
+		{"taken, no newline yet", strings.TrimSuffix(taken, "\n"), true},
+	} {
+		p := filepath.Join(t.TempDir(), "s.jsonl")
+		if err := os.WriteFile(p, []byte(`{"type":"summary"}`+"\n"+long+c.after), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := peerSeen(p, int64(len(`{"type":"summary"}`)+1), `say "hi"`); got != c.want {
+			t.Errorf("%s: peerSeen = %v, want %v", c.name, got, c.want)
+		}
+	}
+	// A long line that fits is still decoded: a peer's message with a long body.
+	p := filepath.Join(t.TempDir(), "s.jsonl")
+	body := `say "hi" ` + strings.Repeat("x", 200<<10)
+	line, _ := json.Marshal(map[string]any{"type": "user", "origin": map[string]string{"kind": "peer", "body": body}})
+	if err := os.WriteFile(p, append(line, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !peerSeen(p, 0, `say "hi"`) {
+		t.Error("a 200 KiB peer line was not decoded")
 	}
 }
 

@@ -13,7 +13,7 @@ This meeting, being recorded now (times are minutes:seconds from its start):
   A: {{attr .Answer}}
 {{end}}{{end}}</this_meeting>
 
-Earlier meetings, by their minutes:
+{{if .EarlierAvailable}}Earlier meetings, by their minutes:
 {{range .Earlier}}<earlier_meeting id="{{attr .ID}}">
 Title: {{attr .Title}}
 {{with .When}}When: {{attr .}}
@@ -31,7 +31,7 @@ Title: {{attr .Title}}
 {{end}}{{end}}</earlier_meeting>
 {{else}}(none with minutes)
 {{end}}
-{{if .Question}}The question, typed on the phone:
+{{end}}{{if .Question}}The question, typed on the phone:
 <question>{{attr .Question}}</question>{{else}}No question was typed: the user tapped at [{{.HeardAt}}]. The lines said in the 45 seconds before the tap:
 <heard>
 {{range .Heard}}[{{.At}}] {{attr .Text}}

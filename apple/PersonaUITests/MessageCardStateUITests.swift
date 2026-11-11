@@ -31,15 +31,20 @@ final class MessageCardStateUITests: XCTestCase {
         try app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: "\(dir)/message-card-\(appearance)-\(name).png"))
     }
 
-    @MainActor func testTheCardSaysWhereItsReplyStands() throws {
+    @MainActor func testTheCardSaysWhereItsReplyStands() async throws {
+        if ProcessInfo.processInfo.environment["PERSONA_MOCK_DRAFT_ACTIONS"] == "1" {
+            _ = try await fixture("reset")
+        }
         let app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app.launchArguments = ["-pairURL", pair, "-app.tab", "assistant", "-tab", "assistant", "-openAssistant", main]
         app.launchPinned()
+        #if os(iOS)
         // The notification question from SpringBoard covers the card on a fresh install.
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let allow = springboard.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
         if allow.waitForExistence(timeout: 3) { allow.tap() }
+        #endif
 
         let reply = app.descendants(matching: .any)["messageCard.reply"].firstMatch
         XCTAssertTrue(reply.waitForExistence(timeout: 20), "no message card:\n\(app.debugDescription)")
@@ -57,8 +62,122 @@ final class MessageCardStateUITests: XCTestCase {
         default:
             XCTAssertTrue(app.staticTexts["按任务进度起草的回复"].exists, app.debugDescription)
             XCTAssertTrue(send.exists, "an open card has no Send")
+            XCTAssertTrue(app.buttons["messageCard.dismiss"].exists, "an open draft has no Do not handle")
             XCTAssertFalse(filedLine.exists)
         }
         try shot(app, message.isEmpty ? "open" : message)
+    }
+
+    @MainActor private func fixture(_ action: String, method: String = "POST") async throws -> [String: Any] {
+        var request = URLRequest(url: URL(string: hub + "/mock/draft/" + action)!)
+        request.httpMethod = method
+        let (data, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+    }
+
+    @MainActor private func launchDraft() -> XCUIApplication {
+        let app = XCUIApplication()
+        let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
+        app.launchArguments = ["-pairURL", pair, "-tab", "assistant", "-dev.openChat", "", "-openAssistant", main]
+        #if os(macOS)
+        app.launchArguments += ["-macAppearance", ProcessInfo.processInfo.environment["PERSONA_SHOTS_APPEARANCE"] ?? "light",
+                                "-macWindowSize", "1280x820"]
+        #endif
+        app.launchPinned()
+        #if os(iOS)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = springboard.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
+        if allow.waitForExistence(timeout: 3) { allow.tap() }
+        #endif
+        return app
+    }
+
+    @MainActor private func reveal(_ element: XCUIElement, in tray: XCUIElement) {
+        for _ in 0..<4 where !element.isHittable {
+            #if os(macOS)
+            tray.scroll(byDeltaX: 0, deltaY: -250)
+            #else
+            tray.swipeUp()
+            #endif
+        }
+    }
+
+    @MainActor func testDismissRemovesOnlyTheDraftUndoRestoresAndReloadKeepsItDismissed() async throws {
+        _ = try await fixture("reset")
+        let app = launchDraft()
+        let needs = app.buttons["action-bar.needs-you"]
+        XCTAssertTrue(needs.waitForExistence(timeout: 20), app.debugDescription)
+        needs.tap()
+        let tray = app.otherElements["action-tray.needs-you"].firstMatch
+        XCTAssertTrue(tray.waitForExistence(timeout: 5), app.debugDescription)
+        let dismiss = tray.buttons["messageCard.dismiss"].firstMatch
+        XCTAssertTrue(dismiss.waitForExistence(timeout: 10), app.debugDescription)
+        reveal(dismiss, in: tray)
+        XCTAssertTrue(dismiss.isHittable, app.debugDescription)
+        XCTAssertGreaterThanOrEqual(dismiss.frame.height, 44, "the pending decision target is too small")
+        try shot(app, "needs-you-open")
+        let countBefore = needs.label
+        dismiss.tap()
+        XCTAssertTrue(dismiss.waitForNonExistence(timeout: 10), "draft stayed in Needs you")
+        let undo = app.buttons["toast-action"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertNotEqual(needs.label, countBefore, "Needs you count did not change")
+        undo.tap()
+        XCTAssertTrue(dismiss.waitForExistence(timeout: 10), "Undo did not restore the card")
+        let edit = tray.buttons["messageCard.edit"].firstMatch
+        reveal(edit, in: tray)
+        edit.tap()
+        let field = tray.textFields.firstMatch.exists ? tray.textFields.firstMatch : tray.textViews.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        field.tap()
+        field.typeText("Local edit that must not be sent")
+        reveal(edit, in: tray)
+        edit.tap()
+        reveal(dismiss, in: tray)
+        dismiss.tap()
+        XCTAssertTrue(dismiss.waitForNonExistence(timeout: 10))
+        app.terminate()
+        let reopened = launchDraft()
+        let reopenedNeeds = reopened.buttons["action-bar.needs-you"]
+        XCTAssertTrue(reopenedNeeds.waitForExistence(timeout: 20))
+        reopenedNeeds.tap()
+        XCTAssertFalse(reopened.otherElements["action-tray.needs-you"].buttons["messageCard.dismiss"].exists,
+                       "a dismissed card returned after relaunch")
+        _ = try await fixture("progress")
+        XCTAssertTrue(reopened.otherElements["action-tray.needs-you"].buttons["messageCard.dismiss"].firstMatch.waitForExistence(timeout: 10),
+                      "a new same-reference draft should still need attention")
+        let evidence = try await fixture("evidence", method: "GET")
+        XCTAssertEqual((evidence["sent"] as? [Any])?.count, 0, "Dismiss sent a reply")
+        XCTAssertEqual(evidence["task_mutations"] as? Int, 0, "Dismiss changed the task")
+        XCTAssertEqual(evidence["agent_mutations"] as? Int, 0, "Dismiss changed the Agent")
+        let operations = evidence["operations"] as? [[String: Any]] ?? []
+        XCTAssertEqual(operations.compactMap { $0["action"] as? String }, ["dismiss", "undo-dismiss", "dismiss"])
+        XCTAssertTrue(operations.filter { $0["action"] as? String == "dismiss" }.allSatisfy {
+            ($0["body"] as? [String: String])?["draft"] == "测试已通过，稍后提交变更。"
+        }, "Dismiss used edited text rather than the original draft")
+        let attachment = XCTAttachment(data: try JSONSerialization.data(withJSONObject: evidence, options: .sortedKeys), uniformTypeIdentifier: "public.json")
+        attachment.name = "draft-no-send-evidence"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor func testFailedDismissKeepsTheCardAndCanBeRetried() async throws {
+        _ = try await fixture("reset")
+        _ = try await fixture("fail-next")
+        let app = launchDraft()
+        let dismiss = app.buttons["messageCard.dismiss"].firstMatch
+        XCTAssertTrue(dismiss.waitForExistence(timeout: 20), app.debugDescription)
+        dismiss.tap()
+        let toast = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "toast", "无法忽略草稿")
+        ).firstMatch
+        XCTAssertTrue(toast.waitForExistence(timeout: 5), "no failure toast:\n\(app.debugDescription)")
+        XCTAssertTrue(dismiss.exists, "a failed request removed the draft")
+        XCTAssertTrue(dismiss.isEnabled, "a failed request left the card busy")
+        dismiss.tap()
+        XCTAssertTrue(dismiss.waitForNonExistence(timeout: 10))
+        let evidence = try await fixture("evidence", method: "GET")
+        XCTAssertEqual((evidence["sent"] as? [Any])?.count, 0)
     }
 }

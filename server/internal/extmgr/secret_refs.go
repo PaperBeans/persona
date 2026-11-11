@@ -1,0 +1,120 @@
+package extmgr
+
+import (
+	"context"
+	"errors"
+	"sort"
+	"time"
+
+	"github.com/nwverse/persona/sdk/go/wire"
+	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/i18n"
+)
+
+// References in an extension's secrets (docs/extensions/secret-providers.md "References in an extension's secrets"):
+// saving one in Settings is the owner's standing approval for that extension, so it is resolved, without a card, each
+// time the manager hands the extension its secrets, and the extension gets the value as if it had been typed in.
+
+// secretDescribeForView bounds asking a provider for a reference's words while a details page is drawn.
+const secretDescribeForView = 2 * time.Second
+
+// SecretReferenceView is a secret that holds a reference, as its extension's details show it: "From 1Password:
+// op://…" with what it names under it.
+type SecretReferenceView struct {
+	Provider     string `json:"provider"`
+	ProviderName string `json:"provider_name"`
+	Reference    string `json:"reference"`
+	// Title is what the reference names (the provider's words; the reference itself when it can't be asked).
+	Title string `json:"title"`
+}
+
+// SecretUserView is a secret of another extension that holds one of a provider's references, as the provider's
+// details list them: who its approvals cover.
+type SecretUserView struct {
+	Extension     string `json:"extension"`
+	ExtensionName string `json:"extension_name"`
+	Secret        string `json:"secret"`
+	SecretTitle   string `json:"secret_title"`
+	Reference     string `json:"reference"`
+}
+
+// programSecrets are extension id's secrets as its program gets them: values as stored, references resolved. One
+// that does not resolve fails the whole hand-over, so a program never starts with a secret missing or a reference in
+// place of its value.
+func (ps *extensions) programSecrets(ctx context.Context, id string) (map[string]string, error) {
+	stored, err := ps.reg.Secrets(ctx, id)
+	if err != nil || stored == nil {
+		return stored, err
+	}
+	return ps.resolveStored(ctx, id, stored)
+}
+
+// resolveStored resolves the references among stored (extension id's secrets, or the ones a change would leave it).
+func (ps *extensions) resolveStored(ctx context.Context, id string, stored map[string]string) (map[string]string, error) {
+	values, refs := extension.SplitSecrets(stored)
+	names := make([]string, 0, len(refs))
+	for name := range refs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		v, err := ps.resolveSecret(ctx, refs[name], wire.SecretPurpose{Kind: "extension", ID: id}, "settings")
+		if err != nil {
+			return nil, err
+		}
+		values[name] = v
+	}
+	return values, nil
+}
+
+// secretReferenceView is how a stored reference shows in its extension's details.
+func (ps *extensions) secretReferenceView(ctx context.Context, ref string) *SecretReferenceView {
+	v := &SecretReferenceView{Reference: ref, Title: ref}
+	scheme, _ := extension.ReferenceScheme(ref)
+	if prov, ok := ps.reg.SecretProviderFor(scheme); ok {
+		v.Provider, v.ProviderName = prov.Extension, prov.Name
+	}
+	if v.Provider == "" {
+		return v
+	}
+	cctx, cancel := context.WithTimeout(ctx, secretDescribeForView)
+	defer cancel()
+	if d, err := ps.describeSecret(cctx, ref); err == nil {
+		v.Title = d.Title
+		if d.Detail != "" {
+			v.Title += " · " + d.Detail
+		}
+	}
+	return v
+}
+
+// secretUsers are the secrets of the installed extensions that hold references to p's schemes.
+func (ps *extensions) secretUsers(ctx context.Context, p *extension.Extension, l i18n.Lang) []SecretUserView {
+	schemes := p.Full.Schemes()
+	if len(schemes) == 0 {
+		return nil
+	}
+	var out []SecretUserView
+	for _, r := range ps.reg.ReferencesTo(ctx, schemes) {
+		u := SecretUserView{Extension: r.Extension, ExtensionName: r.Extension, Secret: r.Name, SecretTitle: r.Name, Reference: r.Reference}
+		if holder := ps.reg.Get(r.Extension); holder != nil {
+			u.ExtensionName = holder.L10n.Name(l, holder.Full.Name)
+			for _, s := range holder.Full.Secrets {
+				if s.Name == r.Name {
+					u.SecretTitle = holder.L10n.Secret(l, s).Title
+				}
+			}
+		}
+		out = append(out, u)
+	}
+	return out
+}
+
+// secretRefError is a resolution failure as a settings check reports it (in l).
+func secretRefError(err error, l i18n.Lang) string {
+	var se *SecretError
+	if errors.As(err, &se) {
+		return se.Text(l)
+	}
+	return i18n.Localize(err, l)
+}

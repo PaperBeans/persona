@@ -7,5 +7,6 @@
   "relevance_title": "和我有多相关，0–100，越大越相关",
   "relevance": "与我相关 {value} 分",
   "collapse": "收起",
-  "project_kind": "{kind}项目"
+  "project_kind": "{kind}项目",
+  "points_other": "{count} 条知识点"
 }

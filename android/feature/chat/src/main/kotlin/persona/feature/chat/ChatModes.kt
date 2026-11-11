@@ -2,6 +2,10 @@ package persona.feature.chat
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.annotation.StringRes
 import android.content.res.Resources
 import androidx.compose.material3.Text
@@ -12,6 +16,7 @@ import persona.core.contracts.Session
 import persona.core.contracts.api.ChatAction
 import persona.core.contracts.api.modelName
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.sort.canChangeEffortOnly
 import persona.core.domain.sort.canChangeModes
@@ -68,15 +73,68 @@ internal object SessionModes {
         Option("haiku", 0, R.string.chat_modes_model_haiku_detail, raw = "Haiku"),
     )
 
+    /** Allow Everything where the agent can take it while it runs: it says what it does, not "only when starting". */
+    private val bypassRunning = Option(BYPASS, R.string.chat_modes_bypass, R.string.chat_modes_bypass_detail_running)
+
     /**
-     * What a running session can switch to: not bypassPermissions (only at start), plus the current mode when it is
-     * none of these (bypassPermissions, or a newer Claude Code's mode, shown by its raw name), so it still shows as picked.
+     * What a running session can switch to (iOS `switchableModes` / `listed`): every mode for an assistant conversation
+     * (the node restarts its Claude in Allow Everything) and for an agent whose process can take it ([Session.bypassAvailable]),
+     * the rest without Allow Everything; plus the current mode when it is none of these (Allow Everything, or a newer
+     * Claude Code's mode, shown by its raw name), so it still shows as picked.
      */
-    fun switchable(current: String?): List<Option> {
-        val list = permissionModes.filter { it.id != BYPASS }
+    fun switchable(session: Session): List<Option> {
+        val list = if (session.assistant || session.bypassAvailable) permissionModes.map { if (it.id == BYPASS) bypassRunning else it }
+            else permissionModes.filter { it.id != BYPASS }
+        val current = session.permissionMode
         if (current.isNullOrEmpty() || list.any { it.id == current }) return list
         return list + (permissionModes.firstOrNull { it.id == current } ?: Option(current, 0, R.string.chat_modes_unknown_detail, raw = current))
     }
+
+    /** Allow Everything shown but not offered, saying why, where the agent cannot take it while it runs (iOS `bypassUnavailable`). */
+    fun bypassUnavailable(session: Session): Option? =
+        permissionModes.first { it.id == BYPASS }.takeIf {
+            !session.assistant && session.canChangeModes && !session.bypassAvailable && session.permissionMode != BYPASS
+        }
+
+    /** What switching to a mode asks first (#3719): going into Allow Everything, and leaving it when the agent can't come back to it from here. */
+    enum class Confirmation { AllowEverything, LeaveAllowEverything }
+
+    /** An assistant conversation switches without asking, as on iOS and the web. */
+    fun confirmation(session: Session, to: String): Confirmation? = when {
+        session.assistant || to == session.permissionMode -> null
+        to == BYPASS -> Confirmation.AllowEverything
+        session.permissionMode == BYPASS && !session.bypassAvailable -> Confirmation.LeaveAllowEverything
+        else -> null
+    }
+
+    /**
+     * The header's tone for a mode (iOS `headerLook`): a mode not reported yet, or one this app does not know, is
+     * [ModeTone.Unknown] with the plain permissions symbol, never a guessed Ask First, which would make an agent started in
+     * Allow Everything look safe.
+     */
+    fun headerTone(id: String?): ModeTone = when (id) {
+        "default" -> ModeTone.Asks
+        "plan" -> ModeTone.Plans
+        "acceptEdits", "auto" -> ModeTone.Acts
+        BYPASS -> ModeTone.AllowsAll
+        else -> ModeTone.Unknown
+    }
+
+    /** The mode's symbol (iOS `Theme.Icon`: hand.raised, pencil.line, list.bullet.clipboard, wand.and.sparkles, exclamationmark.shield, lock.shield). */
+    fun headerIcon(id: String?): PhIcon = when (id) {
+        "default" -> PhIcons.HandPalm
+        "acceptEdits" -> PhIcons.PencilSimple
+        "plan" -> PhIcons.ListChecks
+        "auto" -> PhIcons.Sparkle
+        BYPASS -> PhIcons.ShieldWarning
+        else -> PhIcons.Shield
+    }
+
+    /**
+     * The header shows an agent's mode when there is one to see or to change (iOS `showsInHeader`): Claude Code's, before
+     * its first prompt too. Not an assistant conversation, nor an agent whose mode can be neither read nor changed (Codex).
+     */
+    fun showsInHeader(session: Session): Boolean = !session.assistant && (session.permissionMode != null || session.canChangeModes)
 
     /** The alias a session's model reads as ("claude-opus-…" → opus); a gateway model or none is the default. */
     fun claudeModelId(model: String?): String {
@@ -195,8 +253,16 @@ internal fun ChatModeBar(
     var ultracodeAsk by remember(session?.key) { mutableStateOf<Ultracode.Ask?>(null) }
     val latest by rememberUpdatedState(session)
     LaunchedEffect(session, ultracodeAsk) { ultracodeAsk?.let { ask -> if (session != null && Ultracode.spent(session, ask)) ultracodeAsk = null } }
+    // Allow Everything in the danger red, as the header, iOS and the web (#3957); amber read as Working.
     JIconButton(PhIcons.SlidersHorizontal, stringResource(if (bypass) R.string.chat_modes_button_bypass else R.string.chat_modes_button), { open = true },
-        tint = if (bypass) PersonaTheme.palette.cautionText else null)
+        tint = if (bypass) PersonaTheme.palette.danger.text else null)
+    var asked by remember(session?.key) { mutableStateOf<Pair<SessionModes.Confirmation, String>?>(null) }
+    asked?.let { (kind, mode) ->
+        if (session != null) ModeConfirmDialog(kind, mode, onDismiss = { asked = null }) {
+            asked = null
+            state.run(session, ChatAction.Modes(permissionMode = mode))
+        }
+    }
     if (open) JSheet(onDismiss = { open = false }, title = stringResource(R.string.chat_modes_title), scrollable = true) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             if (!editable) Text(stringResource(if (session?.canChangeModes == false && !effortOnly) R.string.chat_modes_locked else R.string.chat_modes_offline),
@@ -204,12 +270,16 @@ internal fun ChatModeBar(
             if (session != null) {
                 if (!effortOnly) {
                     JSectionHeader(stringResource(R.string.chat_modes_section_permissions))
-                    SessionModes.switchable(session.permissionMode).forEach { option ->
+                    SessionModes.switchable(session).forEach { option ->
                         val current = option.id == session.permissionMode
                         DecisionOption(option.title(resources), {
                             open = false
-                            if (!current) state.run(session, ChatAction.Modes(permissionMode = option.id))
+                            if (!current) SessionModes.confirmation(session, option.id)?.let { asked = it to option.id }
+                                ?: state.run(session, ChatAction.Modes(permissionMode = option.id))
                         }, detail = option.detail(resources), selected = current, enabled = editable)
+                    }
+                    SessionModes.bypassUnavailable(session)?.let { option ->
+                        DecisionOption(option.title(resources), {}, detail = option.detail(resources), selected = false, enabled = false)
                     }
                 }
                 JSectionHeader(stringResource(R.string.chat_modes_section_effort))
@@ -238,4 +308,60 @@ internal fun ChatModeBar(
             }
         }
     }
+}
+
+/** The question before a mode change that needs one ([SessionModes.confirmation]), on the header and in the composer's sheet alike. */
+@Composable
+internal fun ModeConfirmDialog(kind: SessionModes.Confirmation, mode: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    val resources = LocalResources.current
+    when (kind) {
+        SessionModes.Confirmation.AllowEverything -> JDialog(onDismiss = onDismiss, title = stringResource(R.string.chat_modes_confirm_bypass_title),
+            text = stringResource(R.string.chat_modes_bypass_detail_running),
+            confirm = stringResource(R.string.chat_modes_bypass) to onConfirm, destructive = true)
+        SessionModes.Confirmation.LeaveAllowEverything -> JDialog(onDismiss = onDismiss, title = stringResource(R.string.chat_modes_confirm_leave_title),
+            text = stringResource(R.string.chat_modes_confirm_leave_text),
+            confirm = stringResource(R.string.chat_modes_confirm_leave_action, SessionModes.modeLabel(mode, resources) ?: mode) to onConfirm)
+    }
+}
+
+/**
+ * The permission mode at the end of an Agent's header (#3957, iOS `HeaderModeButton` from #3719): the mode's symbol in its
+ * tone, no words (they are its description and its menu). Its menu lists the modes the agent can switch to, the current
+ * one checked, Allow Everything greyed with its reason where the agent cannot take it; a change that needs it asks first.
+ * [onOverlay] says while the menu or a question is up.
+ */
+@Composable
+internal fun HeaderModeButton(session: Session, state: ChatChromeState, online: Boolean, onOverlay: (Boolean) -> Unit) {
+    val resources = LocalResources.current
+    var open by remember { mutableStateOf(false) }
+    var asked by remember(session.key) { mutableStateOf<Pair<SessionModes.Confirmation, String>?>(null) }
+    var changing by remember(session.key) { mutableStateOf(false) }
+    LaunchedEffect(open, asked) { onOverlay(open || asked != null) }
+    DisposableEffect(Unit) { onDispose { onOverlay(false) } }
+    val mode = session.permissionMode
+    val words = stringResource(R.string.chat_modes_header, SessionModes.modeLabel(mode, resources) ?: stringResource(R.string.chat_modes_unknown))
+    val editable = state.available && online && session.canChangeModes
+    fun change(to: String) {
+        changing = true
+        state.run(session, ChatAction.Modes(permissionMode = to)) { changing = false }
+    }
+    Box {
+        JModeButton(SessionModes.headerIcon(mode), SessionModes.headerTone(mode), words, { open = true }, Modifier.testTag("chat-mode"), changing = changing)
+        val options = SessionModes.switchable(session)
+        val actions = options.mapIndexed { i, option ->
+            JAction(option.title(resources), checked = option.id == mode, enabled = editable, subtitle = option.detail(resources).ifEmpty { null },
+                section = if (i == 0) words else null) {
+                if (option.id != mode) SessionModes.confirmation(session, option.id)?.let { asked = it to option.id } ?: change(option.id)
+            }
+        } + listOfNotNull(SessionModes.bypassUnavailable(session)?.let { option ->
+            JAction(option.title(resources), enabled = false, subtitle = option.detail(resources)) {}
+        })
+        // Why nothing can be picked: not running (or a runtime that can't), or the hub out of reach.
+        JMenu(open, { open = false }, actions, content = if (editable) null else ({
+            Text(stringResource(if (!session.canChangeModes) R.string.chat_modes_locked else R.string.chat_modes_offline),
+                style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3,
+                modifier = Modifier.padding(horizontal = MenuTokens.itemPadding, vertical = MenuTokens.sectionPadding))
+        }))
+    }
+    asked?.let { (kind, to) -> ModeConfirmDialog(kind, to, onDismiss = { asked = null }) { asked = null; change(to) } }
 }

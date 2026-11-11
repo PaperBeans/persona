@@ -58,11 +58,13 @@ struct VoiceThreadTail: View {
 
     private func row(_ caption: VoiceCaption) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-            Text(caption.isUser ? String(localized: "You") : model.persona.name)
-                .font(Theme.Font.labelStrong)
-                .foregroundStyle(caption.isUser ? Color.secondary : Theme.persona)
-                .lineLimit(1)
-                .fixedSize()
+            if caption.isUser || model.showsAssistantIdentity {
+                Text(caption.isUser ? String(localized: "You") : model.persona.name)
+                    .font(Theme.Font.labelStrong)
+                    .foregroundStyle(caption.isUser ? Color.secondary : Theme.persona)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
             Text(caption.text)
                 .font(Theme.Font.secondary)
                 .foregroundStyle(caption.final ? Color.primary : Color.secondary)

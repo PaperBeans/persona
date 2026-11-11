@@ -71,6 +71,6 @@ object WorkflowSummary {
         WorkflowStatus.Stalled -> Key.WorkflowStalled
     })
 
-    /** "169/185 agents done": what the card's counts and progress bar say to a screen reader. */
-    fun agentsDone(workflow: Workflow): CoreText = CoreText.of(Key.WorkflowAgentsDone, workflow.agentsDone, workflow.agentsStarted)
+    /** "169/185 agents done": what the card's counts and progress bar say to a screen reader; the total comes first, as the plural's count. */
+    fun agentsDone(workflow: Workflow): CoreText = CoreText.of(Key.WorkflowAgentsDone, workflow.agentsStarted, workflow.agentsDone)
 }

@@ -2,8 +2,12 @@ package persona.feature.agents
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performScrollToKey
+import androidx.compose.ui.test.performTextInput
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
@@ -54,7 +58,8 @@ class AgentsCurrentAssistantTest {
         Interaction("c6", "laptop", "s5", kind = "permission", manager = "m-2", sessionTitle = "Work source task"),
     ))
 
-    private fun model(): AgentsViewModel {
+    private fun model(tasks: persona.core.domain.tasks.TasksStore? = null, only: (Session) -> Boolean = { true },
+                      extraMachines: List<Machine> = emptyList()): AgentsViewModel {
         val stored = MutableStateFlow<Preferences>(emptyPreferences())
         return AgentsViewModel(object : SessionsRepository {
             override val sessions = MutableStateFlow(listOf(
@@ -65,13 +70,13 @@ class AgentsCurrentAssistantTest {
                 // a manager the roster no longer lists (deleted): the default's
                 Session("old", "s4", title = "Old task", state = "working", manager = "m-gone"),
                 Session("laptop", "s5", title = "Work source task", state = "working", manager = "m-2", sourceKind = "example-source"),
-            ))
+            ).filter(only))
             override val machines = MutableStateFlow(listOf(
                 Machine("box", "Example computer", online = true),
                 Machine("laptop", "Work computer", online = true, manager = "m-2"),
                 Machine("far~g0123abcd", "Elsewhere computer", online = true, manager = "assistant"),
                 Machine("old", "Old computer", online = true, manager = "m-gone"),
-            ))
+            ).filter { machine -> machine.id != "far~g0123abcd" || only(Session("far~g0123abcd", "s3")) } + extraMachines)
             override suspend fun refresh() = Unit
         }, object : InteractionCenter {
             override val pending = requests
@@ -95,7 +100,7 @@ class AgentsCurrentAssistantTest {
             override suspend fun togglePin(path: String, space: Boolean) = Unit
             override suspend fun toggleMute(path: String, space: Boolean) = Unit
             override suspend fun markSeen(session: SessionKey, version: String) = Unit
-        }))
+        }), tasks = tasks)
     }
 
     private fun current() = CurrentAssistant(roster, AssistantManagerChoice.current.value)
@@ -134,6 +139,136 @@ class AgentsCurrentAssistantTest {
         rule.runOnIdle { AssistantManagerChoice.pick(null) }
         rule.waitUntil(5_000) { ids() == listOf("s1", "s3", "s4") }
         assertEquals(listOf("c1", "c3", "c4", "c5"), cards())
+    }
+
+    /**
+     * A new to-do linked at once to an agent is made under the agent's own assistant, whichever is current when it is made
+     * (#3374 follow-up): never the current one's to-do on another assistant's agent. The sheet offers that assistant's.
+     */
+    @Test fun aToDoLinkedToAnAgentIsMadeUnderItsAssistant() {
+        val api = OwnerTasks()
+        val store = persona.core.domain.tasks.TasksStore(api, object : HubConnection {
+            override val state = MutableStateFlow(ConnectionState.Online)
+            override val events = MutableSharedFlow<ServerEvent>()
+            override fun reconnect() = Unit
+            override fun send(message: JsonObject) = true
+        }, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
+        val model = model(store)
+        AssistantManagerChoice.choose("hub", "m-2", "assistant")
+        model.show(current())
+        val work = Session("laptop", "s2", title = "Work task", state = "working", manager = "m-2")
+        val example = Session("box", "s1", title = "Example task", state = "working")
+        // Work's agent while the default is current (made current from the sidebar with the sheet open).
+        AssistantManagerChoice.choose("hub", null, "assistant")
+        model.createAndLinkTodo("Ship it", work)
+        rule.waitUntil(5_000) { api.made.size == 1 && api.linked.size == 1 }
+        assertEquals("m-2", api.made.single())
+        // The default's agent while Work is current: the default's, naming none.
+        AssistantManagerChoice.choose("hub", "m-2", "assistant")
+        model.show(current())
+        model.createAndLinkTodo("Fix it", example)
+        rule.waitUntil(5_000) { api.made.size == 2 }
+        assertEquals("", api.made.last())
+        // A project's new to-do goes by its computer's assistant.
+        model.linkSpace(null, "laptop", "app", newTitle = "App")
+        rule.waitUntil(5_000) { api.made.size == 3 }
+        assertEquals("m-2", api.made.last())
+        // The sheet offers an agent its own assistant's to-dos; another group's computer, every one.
+        val todos = listOf(Todo("t1", "Default's"), Todo("t2", "Work's", manager = "m-2"), Todo("t3", "Gone's", manager = "m-gone"))
+        assertEquals(listOf("t2"), current().todosFor(todos, "laptop", "m-2").map { it.id })
+        assertEquals(listOf("t1", "t3"), current().todosFor(todos, "box", null).map { it.id })
+        assertEquals(listOf("t1", "t2", "t3"), current().copy(group = null).todosFor(todos, "far~g0123abcd", "assistant").map { it.id })
+    }
+
+    /**
+     * An offline assistant (the hub leaves it out of the merged lists, and keeps nothing of it here): Agents and To-dos say
+     * it is offline, not a first run or "no to-dos" (docs/assistant/managers.md "Clients"); online ones read as before.
+     */
+    @Test fun anOfflineAssistantsPagesSaySoInsteadOfEmpty() {
+        val away = ManagerRoster(roster.managers + HubManager("m-3", "Home", online = false,
+            lastSeen = java.time.Instant.now().minusSeconds(3 * 3600).toString()), "assistant")
+        // Nothing of another group's here either (its agents are on every assistant's list).
+        val model = model(only = { it.machineId != "far~g0123abcd" })
+        var todos by androidx.compose.runtime.mutableStateOf(false)
+        AssistantManagerChoice.choose("hub", "m-3", "assistant")
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true) {
+                CompositionLocalProvider(LocalManagerRoster provides away) {
+                    if (todos) TodosScreen(emptyList(), emptyList(), null, onBack = null, onOpenTodo = {},
+                        assistant = persona.core.designsystem.currentAssistant())
+                    else AgentsScreen(model, Nowhere, AgentsMetadata())
+                }
+            }
+        }
+        fun shown(text: String) = rule.onAllNodesWithText(text, substring = true, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        rule.waitUntil(5_000) { model.page.value.loaded && model.page.value.allCount == 0 }
+        // The list's end, under the cards and the filters: where its empty state is.
+        rule.onNode(androidx.compose.ui.test.hasScrollToKeyAction()).performScrollToKey("empty")
+        rule.waitUntil(5_000) { shown("Home is offline") }
+        assertTrue(shown("Last synced 3 hours ago. This updates when it's back online."))
+        assertFalse(shown("No computers yet"))
+        assertFalse(shown("Start your first coding session"))
+        rule.runOnIdle { todos = true }
+        rule.waitForIdle()
+        assertTrue(shown("Home is offline"))
+        assertFalse(shown("No to-dos yet"))
+        // Work is online: its to-dos page with none is empty, as before.
+        rule.runOnIdle { AssistantManagerChoice.pick("m-2") }
+        rule.waitForIdle()
+        assertTrue(shown("No to-dos yet"))
+        assertFalse(shown("is offline"))
+    }
+
+    /** Offline reads as offline only when nothing is kept: a kept computer (or to-do) means the page has something to do or find. */
+    @Test fun anOfflineAssistantWithAKeptComputerOrTodoIsNotJustOffline() {
+        val away = ManagerRoster(roster.managers + HubManager("m-3", "Home", online = false,
+            lastSeen = java.time.Instant.now().minusSeconds(3 * 3600).toString()), "assistant")
+        // The hub still keeps one of Home's computers, with no agent yet.
+        val model = model(only = { it.machineId != "far~g0123abcd" }, extraMachines = listOf(Machine("nas", "Home NAS", online = true, manager = "m-3")))
+        var todos by androidx.compose.runtime.mutableStateOf(false)
+        AssistantManagerChoice.choose("hub", "m-3", "assistant")
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true) {
+                CompositionLocalProvider(LocalManagerRoster provides away) {
+                    if (todos) TodosScreen(listOf(Todo("t1", "Water the plants")), emptyList(), null, onBack = null, onOpenTodo = {},
+                        assistant = persona.core.designsystem.currentAssistant())
+                    else AgentsScreen(model, Nowhere, AgentsMetadata())
+                }
+            }
+        }
+        fun shown(text: String) = rule.onAllNodesWithText(text, substring = true, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        rule.waitUntil(5_000) { model.page.value.loaded && model.page.value.allCount == 0 }
+        rule.onNode(androidx.compose.ui.test.hasScrollToKeyAction()).performScrollToKey("empty")
+        rule.waitUntil(5_000) { shown("Start your first coding session") }
+        assertFalse(shown("Home is offline"))
+        rule.runOnIdle { todos = true }
+        rule.waitForIdle()
+        // A to-do is kept: a search with no hit is "no match", not offline.
+        rule.onNode(androidx.compose.ui.test.hasSetTextAction()).performTextInput("zzz")
+        rule.waitUntil(5_000) { shown("No matching to-dos") }
+        assertFalse(shown("Home is offline"))
+    }
+
+    /** Records whose name each new to-do was asked under ("": the default's, none named). */
+    private class OwnerTasks : TasksApi {
+        val made = mutableListOf<String?>()
+        val linked = mutableListOf<String>()
+        override suspend fun todos() = emptyList<Todo>()
+        override suspend fun createTodo(title: String, notes: String): Todo {
+            made += kotlinx.coroutines.currentCoroutineContext()[RequestManager]?.id
+            return Todo("t-${made.size}", title)
+        }
+        override suspend fun linkTodoAgent(todoId: String, machineId: String, sessionId: String) { linked += todoId }
+        override suspend fun linkTodoSpace(todoId: String, machineId: String, space: String) = Unit
+        override suspend fun feed(conversation: String, since: String?) = FeedResponse(emptyList(), emptyMap())
+        override suspend fun startPlan(id: String, remember: Boolean): TaskPlan = error("unused")
+        override suspend fun dismissPlan(id: String): TaskPlan = error("unused")
+        override suspend fun retryTask(todoId: String): Todo = error("unused")
+        override suspend fun removeTask(todoId: String) = Unit
+        override suspend fun route(conversation: String, todoId: String, text: String): FeedItem = error("unused")
+        override suspend fun today(conversation: String): FeedItem = error("unused")
+        override suspend fun mainConversation(): String? = null
+        override suspend fun inboxReply(itemId: String, text: String, card: String?) = Unit
     }
 
     /** A computer picked on one assistant is let go on another that has no such computer, and the shell hears it (#3374 review). */

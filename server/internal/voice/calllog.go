@@ -245,7 +245,7 @@ func (c *conversation) toolsLog(p *Provider, tools []string) string {
 	}
 	declare, _ := p.toolsMode()
 	switch {
-	case p.Dialect != DialectLive:
+	case p.Dialect != DialectLive && p.Dialect != DialectRealtime:
 		return "none (the " + p.Dialect + " dialect takes none)"
 	case !declare:
 		return "none (the provider is set to declare none)"

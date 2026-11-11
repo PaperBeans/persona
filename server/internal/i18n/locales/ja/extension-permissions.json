@@ -95,5 +95,8 @@
   "network_config_title": "設定に入力したアドレスへのアクセス",
   "network_config_detail": "設定「{field}」に入力したアドレス（現在：{host}）。このホストとポートだけ、https のみ",
   "network_config_detail_http": "設定「{field}」に入力したアドレス（現在：{host}）。このホストとポートだけ。暗号化されない http も許可",
-  "network_config_unset": "未入力"
+  "network_config_unset": "未入力",
+  "secret_provider_title": "シークレットの値を提供",
+  "secret_provider_more_title": "シークレットの値を提供（新規）",
+  "secret_provider_detail": "設定に {schemes} 参照が入っているとき、またはスマートフォンで参照を Agent に渡すことを承認したとき、Persona はこの拡張機能に値を求めます。どの参照が何に使われるかは伝わりますが、ほかのシークレットは見えません"
 }

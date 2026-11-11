@@ -79,6 +79,12 @@ class StyleContrastTest {
         assertTrue("words on a solid fill under 4.5:1: $found", found.isEmpty())
     }
 
+    @Test fun snackbarActionsAndMessagesOnTheInverseSurface() {
+        // PersonaTheme maps inverseOnSurface to background and inverseSurface to ink.
+        val found = below { p -> listOf(Check("snackbar message and action", p.background, p.ink, 4.5)) }
+        assertTrue("snackbar text under 4.5:1: $found", found.isEmpty())
+    }
+
     @Test fun theAccentAsALink() {
         val found = below { p -> listOf(Check("accent on background", p.accent, p.background, 4.5), Check("accent on surface", p.accent, p.surface, 4.5),
             Check("accent on statusSurface", p.accent, p.statusSurface, 4.5)) }

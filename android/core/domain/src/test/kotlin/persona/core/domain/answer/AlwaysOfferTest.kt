@@ -45,4 +45,18 @@ class AlwaysOfferTest {
         assertFalse(AnswerBuilder.build(card.copy(agent = "codex"), AnswerAction.Always).allowed)
         assertTrue(AnswerBuilder.build(labelled, AnswerAction.Always).allowed)
     }
+
+    /** #3590 / #3941: where the manager says whether it keeps an "always allow", that decides, over the card's own rule. */
+    @Test fun theManagersAlwaysHonoredDecides() {
+        val own = card.copy(toolName = "iphone_do", alwaysHonored = false)
+        assertFalse(own.offersAlways)
+        assertFalse(AnswerBuilder.build(own, AnswerAction.Always).allowed)
+        assertTrue(AnswerBuilder.build(own, AnswerAction.Allow).allowed)
+        val codex = card.copy(agent = "codex", alwaysHonored = true)
+        assertTrue(codex.offersAlways)
+        assertTrue(AnswerBuilder.build(codex, AnswerAction.Always).allowed)
+        assertFalse(card.copy(agent = "codex", alwaysLabel = "Only this command", alwaysHonored = false).offersAlways)
+        assertTrue(card.copy(alwaysHonored = null).offersAlways)
+        assertFalse(card.copy(agent = "codex", alwaysHonored = null).offersAlways)
+    }
 }

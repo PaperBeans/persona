@@ -17,6 +17,8 @@ internal object HomeTokens {
     /** An assistant's monogram: in the sidebar's head, and in the switcher's rows. */
     val assistantAvatar = 40.dp
     val assistantAvatarSmall = 32.dp
+    /** In the head of Settings' first group. */
+    val assistantAvatarHeader = 24.dp
     const val assistantInitialShare = 0.42f
     const val assistantOfflineAlpha = 0.45f
     /** An assistant's presence dot at its monogram's corner, and the ring cut around it. */

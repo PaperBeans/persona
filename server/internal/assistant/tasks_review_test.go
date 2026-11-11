@@ -202,7 +202,7 @@ func TestTaskReceiptReviewOmittedForFailedStart(t *testing.T) {
 	}
 	s.superviseTodo(ctx, todo.ID, "conv1", []string{"Tests pass"}, 0)
 	f.failStart = errors.New("launcher unavailable")
-	s.startPlanTask("", "conv1", 0, PlanTask{TodoID: todo.ID, Title: todo.Title, Prompt: todo.Notes, Machine: "box", Cwd: "/code/app"}, false)
+	s.startPlanTask("", "conv1", 0, PlanTask{TodoID: todo.ID, Title: todo.Title, Prompt: todo.Notes, Machine: "box", Cwd: "/code/app", Permission: "bypassPermissions"}, false)
 	items, _, err := s.feed(ctx, "conv1", time.Time{})
 	if err != nil {
 		t.Fatal(err)

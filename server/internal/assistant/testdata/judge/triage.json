@@ -1,0 +1,151 @@
+{
+  "about": "Behaviour checks for the turn triage (assistant/agents_triage.go, prompts/agents/triage.md): where a stopped agent's turn stands. Synthetic cases only; no reply carries a closeout block (that is decided without the model). want: the states the hub may end with after its own rules (triageWork, before an approval is applied): done, unsure (no phase), blocked/user, blocked/agent or blocked/external; any one passes. question: a request the card should carry, copied from the reply (the card must ask something). no_question: the card must ask nothing. link: the link the card must carry. waits_for: the other agent it must wait for. risky: what it does after the wait is on a red line, so the hub keeps the wait the user's. same: with an approved step, whether it still waits on that very step. known: why the hub gets the case wrong today; the live check reports it and does not fail on it.",
+  "scenarios": [
+    {
+      "name": "merged-and-verified",
+      "agent": "登录页崩溃",
+      "ask": "把登录页的崩溃修好，提 PR 合并",
+      "reply": "修好了：token 为空时登录页会解引用空指针，加了判空和单测。PR https://github.com/example/app/pull/12 已合并，CI 全绿。",
+      "want": ["done"]
+    },
+    {
+      "name": "optional-offer-at-the-end",
+      "agent": "首页加载",
+      "ask": "查一下首页为什么加载慢，能改就改",
+      "reply": "查清楚了：首页一次请求了 40 张原图，没走缩略图。改成缩略图后首屏从 4.2 秒降到 1.1 秒，commit a1b2c3d 已提交到当前分支。要不要我顺便把列表页也改了？",
+      "want": ["done"]
+    },
+    {
+      "name": "answered-a-question",
+      "agent": "Go 问题",
+      "ask": "context.WithTimeout 返回的 cancel 不调用会怎样？",
+      "reply": "不调用 cancel 的话，计时器和子 context 要等到超时才释放；在循环或高频调用里会累积成泄漏，go vet 的 lostcancel 检查也会报。所以拿到 cancel 就 defer cancel()，即使函数会在超时前返回。",
+      "want": ["done"]
+    },
+    {
+      "name": "pick-a-design",
+      "agent": "设置页排版",
+      "ask": "设置页重新排版，出几个方案给我看",
+      "reply": "三个方案的截图放在 docs/settings-mockups/：\n- D2：分组卡片，信息最密\n- D4：两栏布局，iPad 上最好看（推荐）\n- D10：单列大标题，最接近系统设置\n\n你选哪个？选定后我再细化。",
+      "want": ["blocked/user"],
+      "question": "你选哪个？"
+    },
+    {
+      "name": "asks-before-pushing",
+      "agent": "推送重复",
+      "ask": "修好推送通知重复的问题",
+      "reply": "找到原因了：断线重连时重复注册了监听。已在本地修好，单测通过。要我推到 beta 分支让 CI 跑一遍吗？",
+      "want": ["blocked/user"],
+      "question": "要我推到 beta 分支让 CI 跑一遍吗？"
+    },
+    {
+      "name": "sign-in-request",
+      "agent": "数据迁移",
+      "ask": "把剩下的表迁移完",
+      "reply": "迁到第 7 张表时 CLI 的登录过期了，接口一直返回 401。请登录后告诉我，我接着迁剩下的 5 张表。",
+      "want": ["blocked/user"],
+      "question": "请登录后告诉我，我接着迁剩下的 5 张表。"
+    },
+    {
+      "name": "device-code-link-only",
+      "agent": "接入 CLI",
+      "ask": "把部署 CLI 配好",
+      "reply": "CLI 需要设备授权：打开 https://example.com/device 输入代码 ABCD-1234，10 分钟内有效。授权完成后它会自动继续。",
+      "want": ["blocked/user"],
+      "link": "https://example.com/device",
+      "no_question": true
+    },
+    {
+      "name": "english-pick-the-copy",
+      "agent": "Onboarding copy",
+      "ask": "Write the onboarding copy for the welcome screens",
+      "reply": "I drafted two versions in docs/onboarding-copy.md:\n- A: short, one line per screen\n- B: detailed, with a tip on each screen\n\nWhich one should I use?",
+      "want": ["blocked/user"],
+      "question": "Which one should I use?"
+    },
+    {
+      "name": "waiting-for-ci",
+      "agent": "上传重试",
+      "ask": "上传失败时自动重试，提 PR",
+      "reply": "PR https://github.com/example/app/pull/20 已提交，CI 在跑，通常 10 分钟左右。CI 过了我再跑一遍端到端测试。",
+      "want": ["blocked/external"]
+    },
+    {
+      "name": "waiting-for-a-deploy",
+      "agent": "预发验证",
+      "ask": "合并后在预发环境验证一下登录",
+      "reply": "PR 合并后预发环境的流水线自动开始了，大约 15 分钟。跑完后我去预发环境把登录流程走一遍。",
+      "want": ["blocked/external"]
+    },
+    {
+      "name": "waiting-for-app-review",
+      "agent": "发版",
+      "ask": "提交 App Store 审核",
+      "reply": "构建 1234 已提交 App Store 审核，一般 24 小时内有结果。有结果后我再看崩溃统计。",
+      "want": ["blocked/external"]
+    },
+    {
+      "name": "waiting-for-another-agent",
+      "agent": "接入新 HTTP 库",
+      "ask": "用新版 http 库重写下载",
+      "reply": "下载的改动依赖新版 http 库。另一个会话「升级依赖」正在升级 go.mod，等它做完我 rebase 再继续。",
+      "others": [{"id": "a1b2c3d4", "label": "升级依赖", "line": "在升级 go.mod 里的依赖"}, {"id": "e5f6a7b8", "label": "写周报", "line": "在整理本周的提交"}],
+      "want": ["blocked/agent"],
+      "waits_for": "a1b2c3d4"
+    },
+    {
+      "name": "a-plan-not-a-question",
+      "agent": "性能对比",
+      "ask": "等基准跑完把数字发到 PR #123 的评论里",
+      "reply": "收到。等「跑基准」那个会话出结果，我把数字整理好发到 PR #123 的评论里。",
+      "others": [{"id": "c9d0e1f2", "label": "跑基准", "line": "在跑基准测试"}],
+      "want": ["blocked/user"],
+      "risky": true,
+      "no_question": true
+    },
+    {
+      "name": "half-a-report",
+      "agent": "夜间任务",
+      "ask": "排查夜间任务为什么偶尔失败",
+      "reply": "先看了最近一周的日志，失败都发生在凌晨 3 点前后，和备份任务的时间重叠。数据库那一侧的锁等待还在看",
+      "want": ["unsure"]
+    },
+    {
+      "name": "quoted-old-question",
+      "agent": "设置页排版",
+      "ask": "用 D4",
+      "reply": "按你选的 D4 改完了（之前问的是「用 D4 还是 D10？」）。两栏布局在 iPhone 和 iPad 上都截了图，PR https://github.com/example/app/pull/51 已合并。",
+      "answered": [{"question": "用 D4 还是 D10？", "answer": "用 D4"}],
+      "want": ["done"]
+    },
+    {
+      "name": "tool-output-question",
+      "agent": "前端依赖",
+      "ask": "把前端依赖装好，跑通构建",
+      "reply": "npm install 中途输出了「Do you want to install peer dependencies? (y/n)」，我改用 npm install --yes 重新跑了，依赖装好了，构建和测试都通过。",
+      "want": ["done"]
+    },
+    {
+      "name": "approved-step-still-waiting",
+      "agent": "推送重复",
+      "ask": "可以，CI 过了就推到 beta",
+      "reply": "CI 还在跑，大概 10 分钟。过了就按你同意的推到 beta。",
+      "approved_wait": "CI 通过",
+      "approved_then": "推到 beta",
+      "want": ["blocked/user", "blocked/external"],
+      "risky": true,
+      "same": true,
+      "no_question": true
+    },
+    {
+      "name": "approved-step-changed",
+      "agent": "推送重复",
+      "ask": "可以，CI 过了就推到 beta",
+      "reply": "CI 过了，beta 也推好了，内测反馈正常。下一步要直接发布到生产吗？",
+      "approved_wait": "CI 通过",
+      "approved_then": "推到 beta",
+      "want": ["blocked/user"],
+      "question": "下一步要直接发布到生产吗？"
+    }
+  ]
+}

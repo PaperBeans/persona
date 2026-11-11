@@ -1,5 +1,6 @@
 package persona.core.designsystem
 
+import android.icu.text.CompactDecimalFormat
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -52,7 +54,8 @@ data class JCandle(val open: Double, val high: Double, val low: Double, val clos
 }
 
 /**
- * A chart's data: the labels along the bottom (one per value) and 1–4 series. [axis] writes the side scale's numbers.
+ * A chart's data: the labels along the bottom (one per value) and 1–4 series. [axis] writes the side scale's numbers
+ * (pass `{ ChartMath.compact(it, locale) }` for the page's language; the default is English).
  * A candlestick has one series (its closes) and a [candles] per label; [risingRed] draws rising candles red (and
  * falling green) as some markets do. A donut writes [center] in its hole.
  */
@@ -76,9 +79,18 @@ fun PersonaPalette.series(index: Int): Color {
 
 /** The arithmetic of a chart, apart from drawing it (tested on the JVM). */
 object ChartMath {
-    /** A number written short: 1,234 → 1.2K, 1,200,000 → 1.2M; small ones keep up to two decimals. */
-    fun compact(value: Double): String {
+    /**
+     * A number written short in [locale]'s words: 12,345 → 12.3K, 1,200,000 → 1.2M; small ones keep up to two decimals.
+     * Chinese and Japanese count in ten-thousands (12,345 → 1.2万, 1,200,000,000 → 12亿 / 12億), written by the
+     * system's ICU; every other language keeps the K / M / B / T below. The app's Chinese is Simplified only, so any
+     * `zh` locale (`zh-TW`, `zh-Hant-HK`…) writes 万 / 亿, not ICU's Traditional 萬 / 億; the region does not change the units.
+     */
+    fun compact(value: Double, locale: Locale = Locale.ENGLISH): String {
         if (!value.isFinite()) return "—"
+        when (locale.language) {
+            "zh" -> return cjk(Locale.SIMPLIFIED_CHINESE).format(value)
+            "ja" -> return cjk(locale).format(value)
+        }
         val a = abs(value)
         val (scaled, suffix) = when {
             a >= 1e12 -> value / 1e12 to "T"
@@ -99,6 +111,12 @@ object ChartMath {
     }
 
     private fun String.trimDecimals(): String = if (contains('.')) trimEnd('0').trimEnd('.') else this
+
+    // ICU formats are not thread-safe and slow to make: one per thread, made again when the language changes.
+    private val cjkFormat = ThreadLocal<Pair<Locale, CompactDecimalFormat>>()
+
+    private fun cjk(locale: Locale): CompactDecimalFormat = cjkFormat.get()?.takeIf { it.first == locale }?.second
+        ?: CompactDecimalFormat.getInstance(locale, CompactDecimalFormat.CompactStyle.SHORT).also { cjkFormat.set(locale to it) }
 
     /**
      * The lowest and highest the plot shows: always with zero, stacked bars and areas by their sums above and below it;
@@ -580,7 +598,8 @@ fun JSparkline(spark: JSpark, modifier: Modifier = Modifier.size(SparkSize.width
     val color = spark.tone?.takeIf { it != Tone.Neutral }?.let { palette.tone(it).dot } ?: spark.hue?.let { palette.hue(it).dot } ?: palette.ink3
     val values = spark.values.filter(Double::isFinite)
     if (values.size < 2) return
-    val description = "${ChartMath.compact(values.first())} → ${ChartMath.compact(values.last())}"
+    val locale = currentLocale
+    val description = "${ChartMath.compact(values.first(), locale)} → ${ChartMath.compact(values.last(), locale)}"
     Canvas(modifier.semantics { contentDescription = description }) {
         val low = values.min(); val high = values.max()
         val span = (high - low).takeIf { it > 0 } ?: 1.0

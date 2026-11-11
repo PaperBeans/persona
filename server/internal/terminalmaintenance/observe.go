@@ -52,8 +52,12 @@ func parseProcessTable(data string, pid int) (Process, error) {
 		if err != nil || rowPID <= 0 {
 			return Process{}, errors.New("invalid process table PID")
 		}
+		// Negative is a real owner: macOS ps prints uid_t signed, so nobody (4294967294) is -2 there (#3687).
+		// It is not in os.Getuid()'s number space: on darwin a process running as nobody gets 4294967294 from
+		// os.Getuid() but -2 from ps, so the owner checks in Prepare and Validate never match it and fail closed.
+		// Normalizing both to uint32 is left for later.
 		uid, err := strconv.Atoi(fields[1])
-		if err != nil || uid < 0 {
+		if err != nil {
 			return Process{}, errors.New("invalid process table owner")
 		}
 		if rowPID != pid {

@@ -32,5 +32,8 @@
   "words_machines": "电脑 监控 内存",
   "words_terminal": "终端 命令行",
   "words_settings": "设置 偏好",
-  "group_sessions": "会话"
+  "group_sessions": "会话",
+  "group_recent": "最近打开",
+  "previous": "上一个",
+  "previous_chat": "回到上一个对话"
 }

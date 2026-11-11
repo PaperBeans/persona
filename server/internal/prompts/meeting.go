@@ -1,13 +1,15 @@
 package prompts
 
 // The answers Persona gives during a meeting it attends (meeting/, docs/assistant/meeting-minutes.md "What the hub
-// gives the answering model"): one model call with no tools. The system prompt is fixed; the input holds only the
+// gives the answering model"): one model call with no tools. The system prompt follows the material policy; the input holds only the
 // meeting material the caller built (kb.MeetingMaterial), every text of it other people's words.
 
-// MeetingAnswer is the system prompt of an answer (meeting/answer): it takes only the owner's name, today's date in
-// the user's zone and the answer's language (a BCP 47 tag), never the assistant's notes, memory or snapshot.
+// MeetingAnswer is the system prompt of an answer (meeting/answer): it takes the owner's name, today's date in
+// the user's zone, the answer's language (a BCP 47 tag) and whether earlier meetings may be used, never the
+// assistant's notes, memory or snapshot.
 type MeetingAnswer struct {
 	Owner, Today, Language string
+	EarlierAvailable       bool
 }
 
 func RenderMeetingAnswer(d MeetingAnswer) string { return render("meeting/answer", d) }
@@ -21,6 +23,7 @@ type MeetingAnswerInput struct {
 	Calendar          *MeetingCalendar
 	Lines             []MeetingLine
 	Asks              []MeetingQA
+	EarlierAvailable  bool
 	Earlier           []MeetingEarlier
 	Question, HeardAt string
 	Heard             []MeetingLine

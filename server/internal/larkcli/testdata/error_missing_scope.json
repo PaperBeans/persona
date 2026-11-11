@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "identity": "user",
+  "error": {
+    "type": "authorization",
+    "subtype": "missing_scope",
+    "message": "missing required scope(s): im:chat:read",
+    "hint": "run `lark-cli auth login --scope \"im:chat:read\" --no-wait --json` to get device_code and verification_url; present verification_url to the user exactly and end this turn; after the user confirms authorization, run `lark-cli auth login --device-code <device_code>` in a later turn to finish login",
+    "missing_scopes": ["im:chat:read"],
+    "identity": "user"
+  }
+}

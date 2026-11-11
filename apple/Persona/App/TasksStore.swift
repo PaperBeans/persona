@@ -29,8 +29,8 @@ final class TasksStore {
     /// A task or an agent picked on the board, opened when the board has gone down.
     var openAfterBoard: String?
     var openAgentAfterBoard: SessionKey?
-    /// Message cards (inbox item ids) put off with Later, the ones sent from their card, and the ones whose Send the hub
-    /// refused as handled elsewhere (409 inbox_item_done).
+    /// Feed card IDs put off with Later, sent here, or refused as handled elsewhere (409 inbox_item_done).
+    /// A new draft with the same Inbox reference has its own decision state.
     private(set) var laterMessages: Set<String> = []
     private(set) var sentMessages: Set<String> = []
     private(set) var filedMessages: Set<String> = []
@@ -38,8 +38,16 @@ final class TasksStore {
     private(set) var undone: Set<String> = []
     /// Plans being started or dismissed (their card shows it and takes no second tap).
     private(set) var busyPlans: Set<String> = []
+    /// Send, dismissal and Undo share admission for the exact feed card.
+    private(set) var busyMessages: Set<String> = []
+    /// A bounded read stopped before its frozen recovery cursor completed; the next refresh resumes it.
+    private(set) var feedRecoveryPending: Set<String> = []
     var error: String?
 
+    @ObservationIgnored private var feedCursors: [String: String] = [:]
+    @ObservationIgnored private var feedAPIs: [String: APIClient] = [:]
+    @ObservationIgnored private var messageWrites: [String: UInt] = [:]
+    @ObservationIgnored private let showToast: (Toast) -> Void
     @ObservationIgnored private let todoStore: TodoStore
     @ObservationIgnored private let viewStore: AssistantViewsStore
     @ObservationIgnored private var generation: UInt = 0
@@ -47,9 +55,11 @@ final class TasksStore {
     /// Conversation id → the day its Today card was asked for (once a day).
     @ObservationIgnored private var todayAsked: [String: String] = [:]
 
-    init(todoStore: TodoStore = .shared, viewStore: AssistantViewsStore = AssistantViewsStore()) {
+    init(todoStore: TodoStore = .shared, viewStore: AssistantViewsStore = AssistantViewsStore(),
+         toast: @escaping (Toast) -> Void = { AppModel.shared.toast = $0 }) {
         self.todoStore = todoStore
         self.viewStore = viewStore
+        self.showToast = toast
     }
 
     /// Entering or leaving Demo Mode, or another hub: nothing of the other side may show.
@@ -66,6 +76,14 @@ final class TasksStore {
         fullAgent = nil
         showBoard = false
         busyPlans = []
+        busyMessages = []
+        laterMessages = []
+        sentMessages = []
+        filedMessages = []
+        feedAPIs = [:]
+        feedCursors = [:]
+        feedRecoveryPending = []
+        messageWrites = [:]
     }
 
     /// Full Screen in the detail sheet: the sheet goes down and the agent's page is pushed onto the assistant page, the
@@ -98,40 +116,81 @@ final class TasksStore {
     /// Pulls a conversation's feed (what came since the newest item it has, page after page: FeedPaging) and the todos.
     @discardableResult
     func load(_ conversation: String, refreshTodos: Bool = true, api injected: APIClient? = nil) -> Task<Void, Never>? {
+        guard let api = injected ?? feedAPIs[conversation] ?? AppModel.shared.api else { return nil }
+        // Pin the owner while this conversation is shown; Undo must not follow a later manager selection.
+        feedAPIs[conversation] = api.manager(api.managerID ?? api.shownManager)
         if let task = loading[conversation] { return task }
-        guard let api = injected ?? AppModel.shared.api else { return nil }
         if refreshTodos { reloadTodos(api: injected) }
         let first = feeds[conversation]?.last?.at
         let ticket = generation
         let task = Task {
             defer { if generation == ticket { loading[conversation] = nil } }
             var since = first
+            var cursor = feedCursors[conversation]
+            var seenCursors: Set<String> = []
             for _ in 0..<FeedPaging.maxPages {
-                guard let res = try? await api.feed(conversation: conversation, since: since),
+                let writes = messageWrites
+                guard let res = try? await api.feed(conversation: conversation, since: since, cursor: cursor),
                       !Task.isCancelled, generation == ticket else { return }
+                // A legacy hub ignores cursor; restart its timestamp request rather than applying that unrelated page.
+                if cursor != nil, res.nextCursor == nil {
+                    cursor = nil
+                    feedCursors[conversation] = nil
+                    continue
+                }
                 // The cards' snapshot comes whole with every page: what an event missed comes back here.
                 viewStore.receive(res.views ?? [:], conversation: conversation, group: api.group)
                 viewStore.receiveActions(res.viewActions ?? [:], conversation: conversation, group: api.group)
                 viewStore.receiveBlocks(res.viewBlocks ?? [], conversation: conversation, group: api.group)
-                let items = res.items.filter { $0.conversation == conversation }
+                let items = res.items.filter {
+                    $0.conversation == conversation && writes[$0.id] == messageWrites[$0.id]
+                }
                 for item in items { viewStore.receive(item, group: api.group) }
                 for (id, plan) in res.plans ?? [:] where plan.conversation == conversation && plans[id] != plan { plans[id] = plan }
                 merge(items, into: conversation)
-                guard let next = FeedPaging.next(after: res.items, since: since) else { return }
+                if let next = res.nextCursor {
+                    guard !next.isEmpty else {
+                        feedCursors[conversation] = nil
+                        feedRecoveryPending.remove(conversation)
+                        return
+                    }
+                    feedRecoveryPending.insert(conversation)
+                    guard next != cursor, seenCursors.insert(next).inserted else {
+                        feedCursors[conversation] = nil
+                        incompleteFeed()
+                        return
+                    }
+                    cursor = next
+                    feedCursors[conversation] = next
+                    continue
+                }
+                guard let next = FeedPaging.next(after: res.items, since: since) else {
+                    feedRecoveryPending.remove(conversation)
+                    return
+                }
                 since = next
             }
+            if cursor != nil { incompleteFeed() }
         }
         loading[conversation] = task
         return task
     }
 
+    private func incompleteFeed() {
+        let message = String(localized: "Task updates aren't fully loaded. Refresh to continue.")
+        error = message
+        showToast(Toast(message, style: .error))
+    }
+
     /// The (re)connect: every conversation shown so far, again.
     @discardableResult
     func reconnected(api: APIClient? = nil) -> [Task<Void, Never>] {
-        feeds.keys.compactMap { load($0, refreshTodos: false, api: api) }
+        feeds.keys.compactMap { load($0, refreshTodos: false, api: feedAPIs[$0] ?? api) }
     }
 
     func received(_ item: FeedItem, group: String = "") {
+        // An authoritative push or write receipt wins over a snapshot already in flight, including a no-op Undo.
+        if item.kind == .message { messageWrites[item.id, default: 0] &+= 1 }
         viewStore.receive(item, group: group)
         merge([item], into: item.conversation)
         if item.kind == .task || item.kind == .receipt || item.kind == .review || item.kind == .report { reloadTodos() }
@@ -147,19 +206,19 @@ final class TasksStore {
             return
         }
         var list = feeds[conversation] ?? []
-        let have = Dictionary(list.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
-        // One it has whose body changed (an interrupted receipt the hub resolved, #3834) takes the new body, as on the
-        // web and Android.
+        // Replace complete items, including receipt updates (#3834) and fields removed by draft Undo.
+        var indexes = Dictionary(list.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { a, _ in a })
         var changed = false
         for item in items {
-            if let i = have[item.id], list[i].body != item.body {
-                list[i] = item
+            if let index = indexes[item.id] {
+                if list[index] != item { list[index] = item; changed = true }
+            } else {
+                indexes[item.id] = list.count
+                list.append(item)
                 changed = true
             }
         }
-        let new = items.filter { have[$0.id] == nil }
-        guard !new.isEmpty || changed else { return }
-        list += new
+        guard changed else { return }
         list.sort { ($0.at, $0.id) < ($1.at, $1.id) }
         feeds[conversation] = list
     }
@@ -252,51 +311,116 @@ final class TasksStore {
 
     // MARK: Actions
 
-    /// Send on a message card: the draft (as edited) goes out through the inbox, which files the item as done. The
-    /// card's id goes along, so the hub sends once per card and nothing for an item handled since (#4797).
-    func sendMessage(_ card: FeedItem, itemID: String, text: String) async {
-        guard messageState(card, itemID: itemID) == .open else { return }
-        let inbox = InboxStore.shared
-        if let item = Self.cardItem(itemID) {
-            // A refusal comes back as the hub's words; the reload brings the item as the hub has it (handled elsewhere).
-            if await inbox.send(item, text: text, card: card.id) { sentMessages.insert(itemID) } else { inbox.reload() }
+    /// Send and dismiss admit only one operation per displayed card, before their first suspension.
+    func sendMessage(_ card: FeedItem, itemID: String, text: String, api injected: APIClient? = nil) async {
+        guard messageState(card, itemID: itemID) == .open, !busyMessages.contains(card.id),
+              let api = injected ?? feedAPIs[card.conversation] else { return }
+        let ticket = beginMessage(card.id)
+        defer { endMessage(card.id, generation: ticket) }
+        // Keep the Inbox's optimistic filing, saved failed reply and item-wide Send lock on the existing path.
+        if injected == nil, let item = cardItem(itemID, conversation: card.conversation) {
+            let sent = await InboxStore.shared.send(item, text: text, card: card.id, api: api)
+            guard generation == ticket else { return }
+            if sent { sentMessages.insert(card.id) } else { InboxStore.shared.reload() }
             return
         }
-        guard let api = AppModel.shared.api else { return }
         do {
             try await api.inboxReply(itemID, text: text, card: card.id)
-            sentMessages.insert(itemID)
+            guard generation == ticket else { return }
+            sentMessages.insert(card.id)
             Haptics.success()
-            inbox.reload()
+            InboxStore.shared.reload()
         } catch let e as APIError where e.code == "inbox_item_done" {
-            filedMessages.insert(itemID) // handled elsewhere before this card heard of it: nothing went out
-            inbox.reload()
+            guard generation == ticket else { return }
+            filedMessages.insert(card.id)
+            InboxStore.shared.reload()
         } catch {
-            AppModel.shared.toast = Toast(String(localized: "Reply not sent: \(error.localizedDescription)"), style: .error)
+            guard generation == ticket else { return }
+            showToast(Toast(String(localized: "Reply not sent: \(error.localizedDescription)"), style: .error))
         }
     }
 
-    func later(_ itemID: String) { laterMessages.insert(itemID) }
+    @discardableResult
+    func dismissMessage(_ card: FeedItem, api injected: APIClient? = nil) async -> Bool {
+        guard card.kind == .message, let id = card.ref, messageState(card, itemID: id) == .open,
+              !busyMessages.contains(card.id), let api = injected ?? feedAPIs[card.conversation] else { return false }
+        let ticket = beginMessage(card.id)
+        defer { endMessage(card.id, generation: ticket) }
+        do {
+            let result = try await api.dismissDraft(card.id, original: card.draft ?? "")
+            guard generation == ticket else { return false }
+            received(result.item, group: api.group)
+            Haptics.success()
+            showToast(Toast(String(localized: "Draft dismissed. Nothing was sent."), style: .success,
+                            action: Toast.Action(title: String(localized: "Undo")) { [weak self] in
+                                Task { await self?.undoDismissMessage(card, receipt: result.dismissalID, api: api, expectedGeneration: ticket) }
+                            }, duration: Theme.Motion.draftUndo))
+            return true
+        } catch {
+            guard generation == ticket else { return false }
+            showToast(Toast(String(localized: "Couldn't dismiss draft: \(error.localizedDescription)"), style: .error))
+            if let e = error as? APIError, e.status == 409 { load(card.conversation, refreshTodos: false, api: api) }
+            return false
+        }
+    }
 
-    enum MessageState { case open, sent, filed }
+    @discardableResult
+    func undoDismissMessage(_ card: FeedItem, receipt: String, api: APIClient, expectedGeneration: UInt? = nil) async -> Bool {
+        guard !receipt.isEmpty, !busyMessages.contains(card.id),
+              expectedGeneration == nil || generation == expectedGeneration else { return false }
+        let ticket = beginMessage(card.id)
+        defer { endMessage(card.id, generation: ticket) }
+        do {
+            let item = try await api.undoDraftDismissal(card.id, receipt: receipt)
+            guard generation == ticket else { return false }
+            received(item, group: api.group)
+            laterMessages.remove(card.id)
+            Haptics.tap()
+            return true
+        } catch {
+            guard generation == ticket else { return false }
+            showToast(Toast(String(localized: "Couldn't restore draft: \(error.localizedDescription)"), style: .error))
+            if let e = error as? APIError, e.status == 409 { load(card.conversation, refreshTodos: false, api: api) }
+            return false
+        }
+    }
 
-    /// A message card's inbox item: the default manager's, as the feed and the reply without the item go to it (each
-    /// manager numbers its own items).
-    private static func cardItem(_ itemID: String) -> InboxItem? {
-        InboxStore.shared.items.first { $0.id == itemID && AppModel.shared.pushedBy($0.manager) == nil }
+    private func beginMessage(_ id: String) -> UInt {
+        busyMessages.insert(id)
+        messageWrites[id, default: 0] &+= 1
+        return generation
+    }
+
+    private func endMessage(_ id: String, generation ticket: UInt) {
+        guard generation == ticket else { return }
+        messageWrites[id, default: 0] &+= 1
+        busyMessages.remove(id)
+    }
+
+    func later(_ cardID: String) { laterMessages.insert(cardID) }
+
+    enum MessageState { case open, sent, filed, dismissed }
+
+    func messageCard(_ card: FeedItem) -> FeedItem {
+        feeds[card.conversation]?.first { $0.id == card.id } ?? card
+    }
+
+    private func cardItem(_ itemID: String, conversation: String) -> InboxItem? {
+        let owner = AppModel.shared.itemManager(feedAPIs[conversation]?.managerID)
+        return InboxStore.shared.items.first {
+            $0.id == itemID && AppModel.shared.itemManager($0.manager) == owner
+        }
     }
 
     func messageState(_ card: FeedItem, itemID: String) -> MessageState {
-        Self.messageState(card, inbox: Self.cardItem(itemID),
-                          sentHere: sentMessages.contains(itemID), refused: filedMessages.contains(itemID))
+        Self.messageState(messageCard(card), inbox: cardItem(itemID, conversation: card.conversation),
+                          sentHere: sentMessages.contains(card.id), refused: filedMessages.contains(card.id))
     }
 
-    /// Where a message card's reply stands: sent (from the card here, the hub's `sent_at`, or replied in the inbox), filed
-    /// (the hub's `filed_at`, a refused Send, or the inbox has it done some other way: Done, Ignore, read elsewhere), or
-    /// still open. The inbox list only keeps items done in the last 3 days, so the card's own fields cover older ones;
-    /// an item the inbox lists as open was moved back since, and sends again (#4797).
+    /// A dismissal belongs to this card even while its Inbox reference is still open; a future card is independent.
     nonisolated static func messageState(_ card: FeedItem, inbox item: InboxItem?, sentHere: Bool, refused: Bool) -> MessageState {
         if sentHere || card.sentAt != nil { return .sent }
+        if card.dismissedAt != nil { return .dismissed }
         if let item { return item.isDone ? (item.doneBy == "replied" ? .sent : .filed) : .open }
         return card.filedAt != nil || refused ? .filed : .open
     }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The sidebar's switcher (docs/assistant/managers.md "Clients"): the current assistant in the sidebar's head, the roster it
 // opens (status, where each runs, what waits there, the default tagged, the current one checked), switching, New
-// assistant and Manage assistants…, an installing one's install commands, and the same row with one assistant.
+// assistant and Manage assistants…, an installing one's install commands, and the earlier product row with one assistant.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -191,16 +191,60 @@ describe("the sidebar's assistant switcher", () => {
     expect(document.body.textContent).toContain("mi_again");
   });
 
-  it("is there with one assistant too: its row, New assistant, no default tag and no counts", async () => {
+  it("restores the product row and menu with one assistant, without its name, avatar or roster dropdown", async () => {
     setRoster({ default: "assistant", managers: [ROSTER.managers[0]] });
     await render();
-    expect(head().textContent).toContain("助手");
+    expect(head().textContent).toBe("Persona2 / 3 台电脑在线");
+    expect(head().getAttribute("data-assistant-switcher")).toBe("");
+    expect(head().getAttribute("aria-label")).toBeNull();
+    expect(head().querySelector("[data-assistant-avatar]")).toBeNull();
     expect(head().querySelector("[data-avatar-waiting]")).toBeNull();
     await open();
-    const radios = [...document.body.querySelectorAll<HTMLElement>("[role=menuitemradio]")];
-    expect(radios).toHaveLength(1);
-    expect(radios[0].textContent).not.toContain("默认");
-    expect(row("新建助手")).toBeDefined();
+    expect(document.body.querySelectorAll("[role=menuitemradio]")).toHaveLength(0);
+    expect(rows().map((r) => r.textContent)).toEqual(["跟随系统", "浅色", "深色", "设置", "断开这个浏览器"]);
+    expect(document.body.textContent).not.toContain("助手");
+    await choose("设置");
+    expect(navigate).toHaveBeenCalledWith({ name: "settings" });
+  });
+
+  it("hides a renamed sole assistant even when it is not built in and is offline", async () => {
+    setRoster({ default: "m-only", managers: [{ id: "m-only", name: "Personal assistant name", online: false }] });
+    await render();
+    expect(head().textContent).toBe("Persona2 / 3 台电脑在线");
+    expect(head().querySelector("[data-assistant-avatar]")).toBeNull();
+    await open();
+    expect(document.body.querySelectorAll("[role=menuitemradio]")).toHaveLength(0);
+    expect(document.body.textContent).not.toContain("Personal assistant name");
+  });
+
+  it("does not expose assistant identity while a second assistant is still installing", async () => {
+    setRoster({ default: "assistant", managers: [ROSTER.managers[0], ROSTER.managers[3]] });
+    await render();
+    expect(head().textContent).toContain("Persona");
+    expect(head().querySelector("[data-assistant-avatar]")).toBeNull();
+    await open();
+    expect(document.body.querySelectorAll("[role=menuitemradio]")).toHaveLength(0);
+    expect(rows().some((r) => r.textContent?.includes("测试"))).toBe(false);
+  });
+
+  it("shows identity and switching as soon as two assistants are installed, then hides them when one remains", async () => {
+    setRoster({ default: "assistant", managers: [ROSTER.managers[0], ROSTER.managers[1]] });
+    await render();
+    expect(head().textContent).toContain("助手");
+    expect(head().querySelector("[data-assistant-avatar]")).not.toBeNull();
+    await open();
+    expect(document.body.querySelectorAll("[role=menuitemradio]")).toHaveLength(2);
+    await choose("工作");
+    expect(shownManager()).toBe("m-1");
+    expect(head().textContent).toContain("工作");
+    act(() => setRoster({ default: "assistant", managers: [ROSTER.managers[0]] }));
+    await flush();
+    expect(shownManager()).toBe("assistant");
+    expect(head().textContent).toContain("Persona");
+    expect(head().querySelector("[data-assistant-avatar]")).toBeNull();
+    await open();
+    expect(document.body.querySelectorAll("[role=menuitemradio]")).toHaveLength(0);
+    expect(document.body.textContent).not.toContain("工作");
   });
 
   it("keeps the row it had on a hub without a roster", async () => {

@@ -17,6 +17,8 @@ import {
 import { modelIdRule, TYPED_MODELS_FEATURE, typedModelProblem } from "../../lib/model-id";
 import { runtimeFallbackText } from "../../lib/model-config";
 import { personaState } from "../../lib/persona";
+import { conversationPage } from "../../lib/conversation-page";
+import { shownManager } from "../../lib/manager-choice";
 import { navigate } from "../../lib/router";
 import { hubHas, refreshAssistant, useStore } from "../../lib/store";
 import type { Item, Session } from "../../lib/types";
@@ -289,7 +291,7 @@ export function useAssistantMenu(session: Session | undefined): { items: MenuIte
   const items: MenuItem[] = [
     { key: "profile", label: t("assistant-assistantchat.details"), icon: "info", onSelect: () => navigate({ name: "profile" }) },
     { key: "kb", label: t("assistant-assistantchat.knowledge"), icon: "book", onSelect: () => navigate({ name: "kb" }) },
-    ...(assistant?.main && !isMain ? [{ key: "main", label: t("assistant-assistantchat.back_to_main"), icon: "home" as const, onSelect: () => navigate({ name: "persona", sid: assistant.main }) }] : []),
+    ...(assistant?.main && !isMain ? [{ key: "main", label: t("assistant-assistantchat.back_to_main"), icon: "home" as const, onSelect: () => navigate(conversationPage(assistant.main!, assistant.machine_id, shownManager())) }] : []),
     ...(isMain && canCompact
       ? [{ key: "compact", label: compacting ? t("assistant-assistantchat.compacting") : t("assistant-assistantchat.compact"), icon: "layers" as const, disabled: compacting, onSelect: () => void startCompaction(session) }]
       : []),

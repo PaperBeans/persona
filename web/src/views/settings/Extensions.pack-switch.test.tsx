@@ -10,6 +10,8 @@ const hub = vi.hoisted(() => ({ detail: null as unknown, enabled: vi.fn() }));
 vi.mock("../../lib/extensions", async (original) => ({
   ...(await original<typeof import("../../lib/extensions")>()),
   extensionDetail: () => Promise.resolve(hub.detail),
+  // Installed: two of the pack's three members (#4122: named; the third keeps its id).
+  listExtensions: () => Promise.resolve([{ id: "base", name: "基础" }, { id: "addon", name: "附加" }]),
   setExtensionEnabled: (...args: unknown[]) => {
     hub.enabled(...args);
     return Promise.resolve({ ...(hub.detail as HubExtensionDetail), enabled: false, pack_off: ["base", "addon"] });
@@ -59,7 +61,18 @@ describe("合集的启用开关", () => {
     await flush();
     expect(hub.enabled).toHaveBeenCalledWith("group", false, false);
     expect(document.body.textContent).not.toContain("停用「示例合集」和它的成员？");
-    expect(host.textContent).toContain("重新启用合集会重新启用 base、addon");
+    expect(host.textContent).toContain("重新启用合集会重新启用 基础、附加");
+  });
+
+  it("names the pack's members, with the id beside, and keeps the id of one not installed (#4122)", async () => {
+    hub.detail = pack({ extension_pack: [{ id: "base", market: "m1", version: "1.0.0" }, { id: "addon" }, { id: "gone" }] });
+    act(() => root.render(<Extensions open="group" onOpen={() => {}} />));
+    await flush();
+    const text = host.textContent ?? "";
+    expect(text).toContain("基础base · m11.0.0");
+    expect(text).toContain("附加addon");
+    expect(text).toContain("gone");
+    expect(text).not.toContain("gonegone");
   });
 
   it("cancelling leaves everything as it was", async () => {

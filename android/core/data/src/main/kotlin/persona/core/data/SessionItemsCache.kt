@@ -26,6 +26,9 @@ class SessionItemsCache(
     internal var onRelease: () -> Unit = {}
     internal fun activeSessions(): Set<SessionKey> = synchronized(active) { active.keys.toSet() }
     internal val ledgerTotal: Long? get() = ledger.total
+    /** Full scans run so far (tests). */
+    internal var scans = 0
+        private set
 
     override suspend fun retain(session: SessionKey) = database.withTransaction {
         synchronized(active) { active[session] = (active[session] ?: 0) + 1 }
@@ -42,7 +45,7 @@ class SessionItemsCache(
                     val count = (active[session] ?: 1) - 1
                     if (count == 0) active.remove(session) else active[session] = count
                 }
-                trim()
+                trimIfNeeded()
             }
         } catch (closed: IllegalStateException) {
             if (database.isOpen) throw closed
@@ -53,6 +56,7 @@ class SessionItemsCache(
 
     /** The full scan: every cached session's bytes, evicting over budget; leaves [ledger] holding what stays. */
     private suspend fun trim() {
+        scans++
         val dao = database.items()
         val entries = dao.sizes(scope.path).map { BudgetEntry(SessionKey(it.machine, it.session), it.bytes, it.accessed) }
         val pinned = activeSessions()
@@ -62,6 +66,15 @@ class SessionItemsCache(
             dao.clearCursor(scope.path, it.machineId, it.sessionId)
         }
         ledger.seed(entries.filter { it.key !in evicted })
+    }
+
+    /**
+     * The full scan only when it can evict something: the total is not known yet, or it is over the budget. Opening and
+     * closing a chat ran it every time, summing every stored row inside a write transaction (#4045); at or under the
+     * budget it evicts nothing, whatever is pinned or touched, and [ledger] already knows the total.
+     */
+    private suspend fun trimIfNeeded() {
+        if (ledger.total.let { it == null || it > budget }) trim()
     }
 
     /** A transaction that uses [ledger]; when it fails, nothing it recorded is trusted and the next save scans again. */
@@ -76,7 +89,7 @@ class SessionItemsCache(
 
     override suspend fun load(session: SessionKey): CachedChat = ledgerTransaction {
         database.items().touch(scope.path, session.machineId, session.sessionId, System.currentTimeMillis())
-        trim()
+        trimIfNeeded()
         val cursor = database.items().cursor(scope.path, session.machineId, session.sessionId)
         CachedChat(observe(session).first(), cursor?.history, cursor?.covered ?: 0, cursor?.has_more)
     }

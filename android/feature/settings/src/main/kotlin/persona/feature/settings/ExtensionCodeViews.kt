@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -312,15 +313,19 @@ internal fun MiniComposer(placeholder: String, busy: Boolean, enabled: Boolean, 
 @Composable
 internal fun ReplyBox(action: ExtensionViewAction, values: Map<String, String>, state: ExtensionViewState, handle: ExtensionViewHandle) {
     val slot = "reply-${values["thread"].orEmpty()}"
-    val openState: androidx.compose.runtime.MutableState<Boolean> = handle.nativeLocal?.slot(handle.nodeKey, "$slot-open") { false } ?: rememberSaveable { mutableStateOf(false) }
-    var open by openState
-    val palette = PersonaTheme.palette
-    if (open) MiniComposer(stringResource(R.string.settings_ext_code_reply), busy = state.acting == action.id, enabled = !state.busy, onCancel = { open = false },
-        local = handle.nativeLocal, nodeKey = handle.nodeKey, slot = slot) { body ->
-        handle.act(action, values + ("body" to body)); open = false
-    } else Text(stringResource(R.string.settings_ext_code_reply), Modifier.fillMaxWidth().padding(horizontal = rowPadding, vertical = Tokens.Space.s)
-        .clip(RoundedCornerShape(Tokens.Radius.control)).background(palette.sunken).clickable { open = true }.padding(Tokens.Space.m),
-        style = PersonaTheme.type.callout, color = palette.ink3, maxLines = 1)
+    // Without the extension's own state, the box (open or not, its draft) is the thread's, not its place's: a thread
+    // added above doesn't move an open box down one (#4179). No thread id: one key for all, as before.
+    key(slot) {
+        val openState: androidx.compose.runtime.MutableState<Boolean> = handle.nativeLocal?.slot(handle.nodeKey, "$slot-open") { false } ?: rememberSaveable { mutableStateOf(false) }
+        var open by openState
+        val palette = PersonaTheme.palette
+        if (open) MiniComposer(stringResource(R.string.settings_ext_code_reply), busy = state.acting == action.id, enabled = !state.busy, onCancel = { open = false },
+            local = handle.nativeLocal, nodeKey = handle.nodeKey, slot = slot) { body ->
+            handle.act(action, values + ("body" to body)); open = false
+        } else Text(stringResource(R.string.settings_ext_code_reply), Modifier.fillMaxWidth().padding(horizontal = rowPadding, vertical = Tokens.Space.s)
+            .clip(RoundedCornerShape(Tokens.Radius.control)).background(palette.sunken).clickable { open = true }.padding(Tokens.Space.m),
+            style = PersonaTheme.type.callout, color = palette.ink3, maxLines = 1)
+    }
 }
 
 @Composable
@@ -337,7 +342,8 @@ internal fun CodeCommentThread(item: ExtensionViewItem, state: ExtensionViewStat
         comments.forEachIndexed { i, c -> if (i > 0) JDivider(); CommentLine(c) }
         if (comments.isEmpty()) Text(stringResource(R.string.settings_ext_code_no_comments), Modifier.fillMaxWidth().padding(Tokens.Space.l),
             style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
-        item.reply?.takeIf { it.id.isNotEmpty() }?.let { JDivider(); ReplyBox(it, emptyMap(), state, handle) }
+        // its reply box is this thread's (the item's key) where the items are drawn by place (#4179)
+        item.reply?.takeIf { it.id.isNotEmpty() }?.let { reply -> JDivider(); key(item.key) { ReplyBox(reply, emptyMap(), state, handle) } }
     }
 }
 

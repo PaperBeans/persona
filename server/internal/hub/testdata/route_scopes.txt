@@ -335,6 +335,8 @@ assistant.ask        POST /api/v1/assistant/conversations/{id}/stop
 -                    POST /api/v1/assistant/directions/{id}/end
 -                    POST /api/v1/assistant/directions/{id}/make
 -                    POST /api/v1/assistant/directions/{id}/start
+-                    POST /api/v1/assistant/feed/{id}/dismiss
+-                    POST /api/v1/assistant/feed/{id}/undo-dismiss
 -                    POST /api/v1/assistant/feishu/notices/action
 -                    POST /api/v1/assistant/feishu/workbench
 -                    POST /api/v1/assistant/followups/{id}/run

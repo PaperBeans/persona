@@ -5,7 +5,7 @@
 Route: Claude calls a `phone_*` tool → `personad mcp` → node.sock → hub → an online device (iPhone, Android, or Mac, WebSocket `tool_call`) →
 the app queries/writes locally → `tool_result` returns along the same route.
 
-Device tool descriptions and schemas are registered by the app (iOS `apple/Persona/PhoneTools/`, Android `android/platform/phonetools/` (`PhoneToolCatalog.kt`)). The hub adds an optional `queue_if_offline` parameter to confirmed writes and supplies its own queue management tools from `server/internal/prompts/mcp/phone/` (`docs/assistant/prompts.md`, "MCP tools").
+Device tool descriptions and schemas are registered by the app (iOS `apple/Persona/PhoneTools/`, Android `android/platform/phonetools/` (`PhoneToolCatalog.kt`)). The hub adds an optional `queue_if_offline` parameter to confirmed writes and supplies its own queue management tools from `server/internal/prompts/mcp/phone/` (`docs/assistant/prompts.md`, "MCP tools"). `personad mcp` adds `file` and `trim` to `phone_clipboard_set` (see "Copying a file to the clipboard").
 Descriptions and parameters for tools with the same name must match exactly on both platforms (the hub merges tools from all phones by name; `PhoneToolCatalogTest` compares against the catalog exported by iOS).
 
 Mail tools `mail_*` use the same `personad mcp`, but execute on the hub without going through the phone; see "Mail tools (mail_*)" below.
@@ -59,7 +59,7 @@ See `docs/android/android.md` ("App shell and direct page navigation," the Setti
 | `phone_photo_get {id, max_size?}` | Photos (read) | No | Returns the JPEG image itself (default longest edge 1280, quality 0.7) + metadata |
 | `phone_device_info {}` | None | No | Model identifier, iOS version, battery and charging state, Low Power Mode, storage, network type, time zone, language, thermal state, the app's `app_version`, `app_build` and `app_channel` (`debug` / `release`; the app carries no commit) |
 | `phone_clipboard_get {}` | None (system paste prompt) | No | Reads clipboard text |
-| `phone_clipboard_set {text}` | None | No | Replaces clipboard text |
+| `phone_clipboard_set {text}` or `{file, trim?}` | None | No | Replaces clipboard text; `file` copies a text file from the agent's computer without the model reading it (see "Copying a file to the clipboard") |
 | `phone_notify {title, body, delay_seconds?}` | Notifications | No | Local notification, optionally delayed up to 24 hours |
 | `phone_alarms_list {}` | Alarms (AlarmKit) | No | Persona's own alarms and timers (#2278): id, label, state, time / repeat days, timer length. The Clock app's alarms are invisible to apps |
 | `phone_alarm_create {time, repeat?, label?}` | Alarms | **Yes** | `time` is `HH:mm` (next occurrence, or weekly on `repeat` days) or one ISO 8601 moment; rings through silent mode and Focus |
@@ -207,6 +207,32 @@ The authenticated hub API exposes the same list and cancellation operations at `
 `POST /api/v1/phone/write-queue/{id}/cancel` (see `docs/protocol/protocol.md`, "Phone write queue"). Clients can poll the
 list and use `pending_count` for a pending-write badge. The iOS / Android queue screen and badge are not implemented;
 existing apps continue to show the usual per-write confirmation cards.
+
+## Copying a file to the clipboard
+
+`phone_clipboard_set` takes either `text` or `file` (#3947). `file` is the absolute path of a text file on the computer
+the agent runs on; for the assistant, that is the hub machine. It is for secrets (API keys, tokens, passwords): the model
+sends only the path and never sees the text, so the text stays out of its context, its transcript and Claude Code's
+safety checks. `trim` (default true) removes line breaks at both ends, since key files usually end with one.
+
+- **Who reads it**: `personad mcp` (`server/internal/mcpserver/clipboard_file.go`), the process Claude Code starts for
+  the agent. It runs as the agent's user, inside the agent's sandbox when there is one (`docs/server/agent-sandbox.md`),
+  so it reads only what the agent could read itself. It sends the phone an ordinary `{text}` call, so the iOS and
+  Android apps and the protocol are unchanged. Not the node: it is not sandboxed, so a sandboxed agent could have it
+  copy `hub.json` to the clipboard and read it back with `phone_clipboard_get`. Not the hub: it may run in a container
+  or on another machine than the agent.
+- **What it accepts**: an absolute path (`~` is not expanded) that resolves, after symlinks, inside the user's home
+  directory. The file must be a regular file the same user owns (not checked on Windows), at most 64 KiB, and UTF-8
+  text with no NUL or other control characters except tab, LF and CR. A leading byte order mark is dropped. The last
+  part of the path is opened without following symlinks, and the opened file is checked again. A guest conversation's
+  server neither lists `file` nor reads one. These rules keep the argument to its purpose. They are not a wall against
+  the agent, which runs as the same user anyway.
+- **What comes back**: `Copied the text of <path> to the phone's clipboard: N bytes, M characters, ending in "wxyz".`
+  The last 4 characters are shown only for text of 16 characters or more. Refusals name the path and the rule, never
+  the content. A phone answer that quotes the text is replaced. Nothing on the way (node, manager, hub) logs a call's
+  arguments; the phone gets the text, as it does with `text`.
+- `personad mcp` alone lists the two arguments (in `tools/list`); runtimes that reach phone tools another way
+  (`docs/integrations/runtimes.md`) see the phone's own schema with `text` only.
 
 ## Mail tools (mail_*)
 

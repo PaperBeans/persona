@@ -223,7 +223,8 @@ type Meta struct {
 	// codexLimitFull: when the full windows of a rollout's latest rate limits (Codex's own limit, at 100%) reset, the
 	// latest of them; zero when none is full. A usage-limit failure resets then (TurnErrorResetsAt).
 	codexLimitFull time.Time
-	// codexSeen: newer rollouts record an item both as event_msg/item_completed and in history_mutation.
+	// codexSeen: newer rollouts record an item both as event_msg/item_completed and in history_mutation, within
+	// one turn: the ids of the turn under way (task_started drops them, as a window starting there has none).
 	codexSeen   map[string]bool
 	codexTurnID string
 	codexUserID string

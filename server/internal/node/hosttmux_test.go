@@ -48,7 +48,7 @@ func TestTmuxHostReadsAndPresses(t *testing.T) {
 [ "$1" = "-S" ] && { echo "socket:$2" >> ` + calls + `; shift 2; }
 case "$1" in
 -V) echo 'tmux 3.6a' ;;
-capture-pane) echo 'Do you want to proceed?' ;;
+capture-pane) echo "$@" >> ` + calls + `; echo 'Do you want to proceed?' ;;
 send-keys) echo "$@" >> ` + calls + ` ;;
 esac
 `
@@ -62,6 +62,10 @@ esac
 	if err != nil || !strings.Contains(text, "Do you want to proceed?") {
 		t.Fatalf("Read = %q, %v", text, err)
 	}
+	// The source travels to tmux: the scrollback with wrapped lines joined.
+	if _, err := h.Read(context.Background(), pane, host.ReadOpts{Source: "recent-unwrapped", Lines: 30}); err != nil {
+		t.Fatal(err)
+	}
 	if err := h.SendKeys(context.Background(), pane, "enter"); err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +77,9 @@ esac
 	b, err := os.ReadFile(calls)
 	if err != nil || !strings.Contains(string(b), "send-keys -t %3 Enter") {
 		t.Fatalf("keys pressed = %q, %v", b, err)
+	}
+	if !strings.Contains(string(b), "capture-pane -p -t %3 -S -30 -J") {
+		t.Fatalf("recent-unwrapped not read as such = %q", b)
 	}
 	if !strings.Contains(string(b), "socket:/tmp/tmux-501/work") {
 		t.Fatalf("socket not passed = %q", b)

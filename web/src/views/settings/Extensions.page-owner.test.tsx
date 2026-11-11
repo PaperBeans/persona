@@ -21,7 +21,7 @@ vi.mock("../../lib/store", async (original) => ({
 
 import { getState } from "../../lib/store";
 import { setRoster } from "../../lib/managers";
-import { managerHeaderFor, resetManagerChoice } from "../../lib/manager-choice";
+import { chooseManager, managerHeaderFor, resetManagerChoice } from "../../lib/manager-choice";
 import { setToken } from "../../lib/api";
 import { t } from "../../i18n";
 import { Extensions } from "./Extensions";
@@ -122,7 +122,11 @@ afterEach(async () => {
 });
 
 it.each(["example@m-1/ui/main", "example/ui/main"])("keeps resolved owner content and actions on %s", async (route) => {
-  if (!route.includes("@")) listedOwners = ["m-1"];
+  // a page that names no manager is the current assistant's: 工作 is current
+  if (!route.includes("@")) {
+    listedOwners = ["m-1"];
+    chooseManager("m-1");
+  }
   const onOpen = await render(route);
   expect(host.textContent).toContain("Work main content");
   expect(host.textContent).not.toContain("Personal main content");

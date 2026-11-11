@@ -26,7 +26,27 @@ interface PersonaPacks {
 
     /** PUT /api/v1/looks/current: chooses a look for every device; [ifUnset] only when the hub has none yet (moving this phone's old choice up). */
     suspend fun choose(id: String, ifUnset: Boolean = false): LookCurrent = throw PersonaPacksUnsupported()
+
+    /** The hub makes avatars from images (`look_uploads` in its features, #2404): the apps offer New from Photo only then. */
+    val uploads: Boolean get() = false
+
+    /**
+     * POST /api/v1/looks/uploads (docs/apple/persona.md "Uploading an image"): makes an avatar from [image] (PNG or JPEG
+     * bytes, cropped square and upright), named [name] with an optional [subtitle]; [choose] chooses it for every device.
+     */
+    suspend fun upload(name: String, subtitle: String?, image: ByteArray, choose: Boolean = true): LookUploaded = throw PersonaPacksUnsupported()
+
+    /** DELETE /api/v1/looks/uploads/{id}: deletes an avatar made from an image; the hub's choice after it (the default when it was the chosen one). */
+    suspend fun deleteUpload(id: String): LookCurrent = throw PersonaPacksUnsupported()
 }
+
+/** The answer to an upload: the new look as GET /api/v1/looks lists it, and the choice when it was chosen. */
+@Serializable
+data class LookUploaded(val look: LookView, val current: LookCurrent? = null)
+
+/** The answer to deleting an upload: the hub's choice after it. */
+@Serializable
+data class LookDeleted(val current: LookCurrent = LookCurrent())
 
 /** The body of GET /api/v1/looks. */
 @Serializable
@@ -44,6 +64,8 @@ data class LookView(
     val rev: String? = null,
     val bytes: Long = 0,
     val manifest: PersonaManifest? = null,
+    /** Made from an image in the apps (#2404): the only looks the apps can delete. */
+    val uploaded: Boolean = false,
 ) {
     /** The package to download and show, for the hub's and the extensions' looks. */
     val pack: PersonaInfo? get() = if (source != "builtin" && manifest != null && rev != null) PersonaInfo(id, rev, bytes, manifest) else null
@@ -99,6 +121,9 @@ data class PersonaManifest(
     @Serializable data class Source(val kind: String = "", @SerialName("extension_name") val extensionName: String? = null)
     @Serializable data class Dot(val size: Int? = null, val states: Map<String, DotState>)
     @Serializable data class DotState(val file: String, val fps: Double? = null)
+
+    /** Made from an image in the apps (`source.kind` `upload`, #2404): the only packages the apps can delete. */
+    val uploaded: Boolean get() = source?.kind == "upload"
 
     /** Every file it names: what the phone downloads. */
     val files: List<String> get() = (avatar.sizes.values + avatar.dark?.sizes.orEmpty().values + dot.states.values.map { it.file }).toSortedSet().toList()

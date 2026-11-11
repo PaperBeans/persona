@@ -101,9 +101,8 @@ fun ChatTopBar(
         }
         AppStyle.Board -> Column(modifier.fillMaxWidth().background(palette.background).statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                back()
-                if (status != null) { JStatusMark(status); Spacer(Modifier.width(8.dp)) }
-                titleBlock(); actions()
+                // The state is said once, in the title's line (#3957, as iOS #3719): no second mark before the title.
+                back(); titleBlock(); actions()
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(palette.line))
         }

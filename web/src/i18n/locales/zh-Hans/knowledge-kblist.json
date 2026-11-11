@@ -28,5 +28,9 @@
   "clear_filter": "清除筛选",
   "all": "全部",
   "no_tags": "这一类还没有标签。",
-  "empty_recordings": "还没有录音"
+  "empty_recordings": "还没有录音",
+  "empty_topics": "还没有主题",
+  "empty_topics_body": "Persona 会在后台从项目时间线和会话里整理出以后用得上的知识（概念、决定、做法、踩过的坑、事实），按主题归类，整理出来就会显示在这里。",
+  "map": "知识导图",
+  "map_title": "用思维导图查看主题和项目"
 }

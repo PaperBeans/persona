@@ -5,6 +5,7 @@ import { alsoOpenText } from "../../lib/engines";
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, errorText, pastHub, sessionPath } from "../../lib/api";
 import { ago, attentionReason, backgroundWaiting, externalLink, failureReason, resumeCommand, sessionCan, sessionDeletable, sessionMenuActions, sourceSubtitle, sessionTitle, shortPath, stateOf, tabLabel, uuid } from "../../lib/format";
+import { conversationPage } from "../../lib/conversation-page";
 import { navigate, type SessionView } from "../../lib/router";
 import { canShowTerminal, otherView, useSessionView } from "../../lib/session-view";
 import { openLink } from "../../lib/links";
@@ -72,7 +73,8 @@ import { useUserInputs } from "./useUserInputs";
 import { NavRail } from "./NavRail";
 import { ChatLineView, closedRecap, closeRecap, OpenRecapLine } from "./Lines";
 import { useTranscript } from "./useTranscript";
-import { ArchiveCloseDialog, CloseAgentDialog, DeleteSessionDialog, ModeChips, RenameDialog, RenameSpaceDialog, SessionInfoDialog } from "./SessionDialogs";
+import { ArchiveCloseDialog, CloseAgentDialog, DeleteSessionDialog, HeaderModeButton, ModeChips, RenameDialog, RenameSpaceDialog, SessionInfoDialog } from "./SessionDialogs";
+import { showsInHeader } from "../../lib/header-mode";
 import { archiveItems } from "../AgentMenus";
 import { ChatSidebarButton } from "../ShellSwitch";
 import { appArchiveDeps, deleteInsteadOfArchive, restoreAgent, useArchived } from "../../lib/agent-archives";
@@ -153,12 +155,13 @@ const ULTRACODE_SEND_TRIES = 4;
 const STOP_SETTLE_MS = 15_000;
 
 /** "Branch to new chat" (#2137): the node copies the conversation up to this reply's turn into a new one, which opens here. */
-async function forkAt(mid: string, sid: string, itemId: string, assistant: boolean, space?: string) {
+async function forkAt(mid: string, sid: string, itemId: string, assistant: boolean, space?: string, manager?: string) {
   try {
     const r = await api<{ session_id: string }>(`${sessionPath(mid, sid)}/fork`, { method: "POST", json: { at_item_id: itemId } });
     await refresh();
     // a health conversation's branch runs in the health space too (docs/assistant/health.md)
-    navigate(!assistant ? { name: "session", mid, sid: r.session_id } : space === "health" ? { name: "health", sid: r.session_id } : { name: "persona", sid: r.session_id });
+    // a Persona conversation's branch is on its computer and its manager's (lib/conversation-page.ts)
+    navigate(!assistant ? { name: "session", mid, sid: r.session_id } : space === "health" ? { name: "health", sid: r.session_id } : conversationPage(r.session_id, mid, manager));
     toast(t("chat-chatview.forked"), "ok");
   } catch (e) {
     toast(t("chat-chatview.fork_failed", { error: errorText(e) }), "error");
@@ -390,7 +393,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
       canCompose,
       speaker: assistant ? persona.name : "Agent",
       images: () => items.current.filter((i) => i.kind === "image"),
-      fork: canFork ? (itemId: string) => void forkAt(mid, sid, itemId, Boolean(assistant), session?.space) : undefined,
+      fork: canFork ? (itemId: string) => void forkAt(mid, sid, itemId, Boolean(assistant), session?.space, session?.manager) : undefined,
       rewind: canRewind ? { block: rewindLive, run: (messageId, text, restore) => rewindTo(mid, sid, draftKey, items.current, messageId, text, restore) } : undefined,
     }),
     [draftKey, title, canCompose, canFork, canRewind, rewindLive, mid, sid, assistant, persona.name],
@@ -1893,8 +1896,9 @@ export const Header = memo(function Header({
           {chrome?.agents && chrome.agents.length > 1 && (
             <IconButton icon="chevron" label={t("chat-chatview.switch_agent")} onClick={pick.open} active={Boolean(pick.anchor)} className="-ml-1.5 shrink-0" />
           )}
-          {/* a panel is a phone's width: the dot says the state there too */}
-          {session && !assistant && !chrome && (state !== "idle" || awaiting) && <span className="hidden @min-[800px]:contents"><StatePill state={state} awaiting={awaiting} waiting={Boolean(session && backgroundWaiting(session))} /></span>}
+          {/* a panel is a phone's width: the dot says the state there too. Wide, the pill gives the dot's state its words, not
+              a second dot (#3956: the state is said once) */}
+          {session && !assistant && !chrome && (state !== "idle" || awaiting) && <span className="hidden @min-[800px]:contents"><StatePill state={state} awaiting={awaiting} waiting={Boolean(session && backgroundWaiting(session))} dot={false} /></span>}
           {/* narrow: the context bar gives way to the title too (#3532); "Session info" still has the token count. The header's own
               width decides (a container), so a side panel beside the chat narrows it as a phone does; the pill and the
               bar go below 800px, the chips' words below 640px, so the title keeps room in between (#3670) */}
@@ -1967,6 +1971,9 @@ export const Header = memo(function Header({
       )}
       {/* wide screens have New chat at the top of the sidebar; a phone's sidebar is a drawer */}
       {assistant && !chrome && session?.space !== "health" && <IconButton icon="compose" label={t("chat-chatview.new_chat")} onClick={() => navigate({ name: "persona-new" })} className="lg:hidden" />}
+      {/* the permission mode, always in view and changed here (#3956, iOS #3719): the end of the header's controls, before ⋯,
+          at every width; not in a panel, whose header stays as it was */}
+      {!chrome && showsInHeader(session, assistant) && session && <HeaderModeButton session={session} />}
       {items.length > 0 && (
         <span className="relative flex shrink-0">
           <IconButton icon="more" label={t("chat-chatview.more")} onClick={menu.open} active={Boolean(menu.anchor)} />

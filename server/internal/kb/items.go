@@ -258,7 +258,7 @@ func (e *Engine) Search(query string, messages bool, limit int) []Hit {
 // any other kind.
 func (e *Engine) SearchKind(query, kind string, messages bool, limit int) []Hit {
 	switch kind {
-	case KindProject, KindChat, KindPerson, KindDoc, KindMeeting, KindEvent, KindRecording:
+	case KindProject, KindChat, KindPerson, KindDoc, KindMeeting, KindEvent, KindRecording, KindTopic:
 	default:
 		return nil
 	}
@@ -446,6 +446,8 @@ func (e *Engine) List(kind, tag string) []Entry {
 				out = append(out, recordingEntry(r))
 			}
 		}
+	case KindTopic:
+		return e.listTopics(has) // the biggest first: topics carry no importance of their own
 	}
 	Rank(out)
 	return out

@@ -22,6 +22,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 data class PairedHub(
     val hubId: String, val token: String, val deviceId: String?, val address: String,
     val fingerprint: String?, val candidates: List<String>,
+    /** The link's proxied origins, checked with system trust ([HubHttpClient.systemOrigins], #2622). */
+    val systemOrigins: Set<String> = emptySet(),
 ) {
     override fun toString() = "PairedHub(<redacted>)"
 }
@@ -33,13 +35,19 @@ class HubPairingClient private constructor(
     addresses: List<String>,
     version: String,
     private val connection: OkHttpHubConnection?,
+    /** The link's proxied origins ([systemTrustedOrigin], #2622). */
+    private val systemOrigins: Set<String> = emptySet(),
+    /** Tests: where system trust comes from. */
+    systemTrust: () -> javax.net.ssl.X509TrustManager = ::systemTrustManager,
 ) : AutoCloseable {
     /**
      * Pairing uses temporary credentials before a live connection exists. [access] is the Cloudflare Access service token
      * entered before pairing: sent to the pairing's HTTPS addresses (and those the hub lists) from the first probe on.
+     * [systemOrigins]: the link's proxied `url`, checked with system trust ([systemTrustedOrigin]).
      */
-    constructor(expectedHubId: String?, fingerprint: String?, addresses: List<String>, version: String, access: HubAccess? = null) :
-        this(expectedHubId, fingerprint, addresses, version, connection = null) {
+    constructor(expectedHubId: String?, fingerprint: String?, addresses: List<String>, version: String, access: HubAccess? = null,
+        systemOrigins: Set<String> = emptySet(), systemTrust: () -> javax.net.ssl.X509TrustManager = ::systemTrustManager) :
+        this(expectedHubId, fingerprint, addresses, version, connection = null, systemOrigins, systemTrust) {
         if (access != null) http.access = { url -> access.takeIf { endpoints.any { it.url.toHttpUrl().sameOrigin(url) } } }
     }
 
@@ -47,7 +55,7 @@ class HubPairingClient private constructor(
     constructor(connection: OkHttpHubConnection) : this(connection.http.hubId, connection.http.fingerprint,
         connection.candidates().map { it.url }, "", connection)
 
-    val http = connection?.http ?: HubHttpClient(expectedHubId, fingerprint, version)
+    val http = connection?.http ?: HubHttpClient(expectedHubId, fingerprint, version, systemTrust = systemTrust, systemOrigins = systemOrigins)
     private val selector = HubRouteSelector(http)
     private var endpoints = addresses.distinct().map(::endpoint)
     private var pairedAddress: String = endpoints.first().url
@@ -99,7 +107,7 @@ class HubPairingClient private constructor(
         if (machines["machines"] !is JsonArray) throw HubFailure(HubError.Protocol)
         refreshEndpoints(deviceToken)
         return PairedHub(hubId, deviceToken, exchanged?.get("id")?.jsonPrimitive?.contentOrNull,
-            address, fingerprint, endpoints.map { it.url })
+            address, fingerprint, endpoints.map { it.url }, systemOrigins)
     }
 
     suspend fun refreshEndpoints(token: String) {
@@ -218,6 +226,23 @@ class HubPairingClient private constructor(
             // checked against the system CAs and the host name instead of a pinned key; see SpkiTrustManager.
             return urls
         }
+
+        /**
+         * The origin ("host:port") of a link with `fp` whose `url` is served by a reverse proxy or tunnel with a public
+         * CA's certificate (#2622, docs/operations/network.md "Reverse-proxy subpaths (Android)"): an HTTPS `url` on a
+         * host name, not on the hub's own TLS port (`tls`), checked like any site (system CAs, host name) as the iOS app
+         * and the web client do. Null for every other link: an IP literal, the `tls` port, no `fp` (all of its HTTPS is
+         * system-trusted anyway) or no `tls` (then `url` is the hub's own listener). Decided from the link alone and kept
+         * with the pairing: the hub's endpoint list never adds one.
+         */
+        fun systemTrustedOrigin(request: PairingRequest): String? {
+            if (request.fp == null || request.tls == null) return null
+            val url = runCatching { endpoint(request.url).url.toHttpUrl() }.getOrNull() ?: return null
+            if (!url.isHttps || url.port == request.tls || isIpLiteral(url.host)) return null
+            return tlsKey(url.host, url.port)
+        }
+
+        private fun isIpLiteral(host: String) = host.contains(':') || host.matches(Regex("""\d{1,3}(\.\d{1,3}){3}"""))
 
         fun legacyHubId(address: String): String = "legacy-" + MessageDigest.getInstance("SHA-256")
             .digest(endpoint(address).url.toByteArray()).take(16).joinToString("") { "%02x".format(it) }

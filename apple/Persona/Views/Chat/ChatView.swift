@@ -145,6 +145,8 @@ struct ChatView: View {
     /// In the detail column of a split (iPhone Duo open): the list is beside the chat, the tab bar stays.
     @Environment(\.splitDetail) private var split
     @Environment(\.splitShowList) private var showList
+    /// A phone's tabs (iPhone Duo open, #2623): on its side the system's Show Sidebar brings a folded list back (#3680).
+    @Environment(\.pageTabSwitch) private var pageTabSwitch
     /// The Persona conversation in the shell (docs/apple/ios.md「New shell」).
     @Environment(\.shellChat) private var shellChat
     @Environment(\.shell) private var shell
@@ -229,6 +231,15 @@ struct ChatView: View {
     /// item's it was opened from or the one the Persona page shows it for; nil for the default's.
     private var linkManager: String? {
         model.linkManager(session?.manager ?? itemManager ?? (style == .assistant ? model.assistantManagerID : nil), group: key.group)
+    }
+    /// A listed default-manager session has a nil owner; it must not inherit the page's current selection.
+    private var feedManager: String? {
+        if let session { return session.manager ?? model.managerRosters[key.group]?.defaultID }
+        return linkManager ?? model.managerRosters[key.group]?.defaultID
+    }
+    nonisolated private struct FeedScope: Hashable {
+        var key: SessionKey
+        var manager: String?
     }
     /// The latest state of the subagent being viewed (the list refreshes with the session).
     private var viewedAgent: Subagent? {
@@ -634,9 +645,9 @@ struct ChatView: View {
         .task(id: "\(key.machineID)/\(key.sessionID)|\(session?.cwd ?? "")") { await loadGit() }
         // A Workflow call the hub folded into a turn's work (#3436): that fold is fetched, so the run's card comes out.
         .task(id: workflowFolds.map(\.id)) { await unfoldWorkflowCalls(workflowFolds) }
-        .task(id: key) {
+        .task(id: FeedScope(key: key, manager: feedManager)) {
             guard style == .assistant else { return }
-            TasksStore.shared.load(key.sessionID)
+            TasksStore.shared.load(key.sessionID, api: model.api(key.group)?.manager(feedManager))
             if key == model.assistantMain { TasksStore.shared.loadToday(key.sessionID) }
             #if DEBUG
             // `-showTaskDetail <todo id>` / `-showTaskBoard YES`: a task's detail or the board, for screenshots.
@@ -1867,7 +1878,13 @@ struct ChatView: View {
             }
             // It may get as short as the cards make it while the keyboard is up (its margins set no minimum of their own).
             .frame(minHeight: .zero)
-            ChatRegion(name: "ChatFooter.body") { footer }
+            // A stack of its own, laid out before the list (which may get as short as nothing): with an attachment over the
+            // shell's composer (a photo, a quote) the footer kept its height while the draft grew, and the field held a line
+            // and a half of it, cut at its top (#3703, the open iPhone Duo on its side with the keyboard up). Priority on
+            // the region alone did not do it. Not the classic composer's island, which takes what it is offered until it
+            // has measured itself.
+            ChatRegion(name: "ChatFooter.body") { VStack(spacing: 0) { footer } }
+                .layoutPriority(usesShellComposer ? 1 : 0)
                 // What the footer takes of the page: the pending cards grow into the rest while the keyboard is up.
                 // Exact, like the cards' own height inside it (`PendingCards.shown`): the cards take one from the other for
                 // what the footer holds besides them, which must not move with their own height (#1580).
@@ -2207,7 +2224,7 @@ struct ChatView: View {
                 }
                 // The last card was answered: one low-key entry to the next conversation that needs you (#4348).
                 if let next = nextNeedsYouSession {
-                    NextNeedsYouStrip(title: next.assistant ? (next.title.isEmpty ? model.persona.name : next.title) : next.displayTitle) {
+                    NextNeedsYouStrip(title: next.assistant ? (next.title.isEmpty ? model.assistantDisplayName : next.title) : next.displayTitle) {
                         openNext(next)
                     }
                 }
@@ -2229,7 +2246,7 @@ struct ChatView: View {
                 if let s = session, !s.canSend, let reason = s.sourceSubtitle {
                     Text(reason).font(Theme.Font.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Composer(key: key, status: status, placeholder: style == .assistant ? String(localized: "Ask \(model.persona.name)…") : String(localized: "Message \(session?.agentLabel ?? "Claude") [Chat View c6f021]"),
+                Composer(key: key, status: status, placeholder: style == .assistant ? String(localized: "Ask \(model.assistantDisplayName)…") : String(localized: "Message \(session?.agentLabel ?? "Claude") [Chat View c6f021]"),
                          onCleared: { switchTo($0) }, onFocus: { composerTyping = $0 })
                     // The shell's expanding field stays in the page's layout graph; so does BeautifulUI's prompt bar,
                     // whose menus hang above it: an island's hosting view takes no touches outside its bounds.
@@ -2331,7 +2348,7 @@ struct ChatView: View {
             // (`FirstMessagePending`), where the turn's work line comes in. Without it the chat that took over showed
             // the message a line lower, then pushed it up when the turn began (#1911).
             if frozen == nil, startingTurn(pending) {
-                TypingIndicator(text: String(localized: "\(style == .assistant ? model.persona.name : (session?.agentLabel ?? "Claude")) is getting ready…"))
+                TypingIndicator(text: String(localized: "\(style == .assistant ? model.assistantDisplayName : (session?.agentLabel ?? "Claude")) is getting ready…"))
                     .flippedBack()
                     .id("starting-turn")
             }
@@ -3248,11 +3265,20 @@ struct ChatView: View {
         }
     }
 
-    /// The first page of a split's detail column, on the chat: nothing to go back to (the list is beside it).
-    private var hidesBack: Bool { host == nil && split?.isFirstPage == true && split?.listHidden != true && pane == .chat }
+    /// The first page of a split's detail column, on the chat: nothing to go back to (the list is beside it). On iPhone
+    /// Duo open on its side also with the list folded (#3680): the chat's actions are in the system's side bars, whose
+    /// Show Sidebar at the top left brings the list back, and a ‹ that did the same read as a Back that opened the
+    /// sidebar instead of going back.
+    private var hidesBack: Bool {
+        host == nil && split?.isFirstPage == true && (split?.listHidden != true || systemShowsList) && pane == .chat
+    }
     /// The split's first page with its list column closed: ‹ brings the list back. There is nothing to go back to, and
-    /// with this page's own header no system button to open the list (iPhone Duo open, iPad).
-    private var backShowsList: Bool { host == nil && split?.isFirstPage == true && split?.listHidden == true && pane == .chat }
+    /// with this page's own header no system button to open the list (the iPad; the open Duo upright).
+    private var backShowsList: Bool {
+        host == nil && split?.isFirstPage == true && split?.listHidden == true && !systemShowsList && pane == .chat
+    }
+    /// The system's Show Sidebar is on screen beside a folded list: the side bars' column on a phone's tabs.
+    private var systemShowsList: Bool { pageTabSwitch && sideBars }
 
     /// The header's leading button: back to the chat from files / Git; on the chat ‹, or a hosting page's ✕ / ‹.
     private var backSymbol: String { pane == .git || pane == .files ? Theme.Icon.back : host?.leaveSymbol ?? Theme.Icon.back }
@@ -4406,7 +4432,7 @@ struct Composer: View, Equatable {
             } else if usesShellComposer {
                 // The shell's composer (docs/apple/ios.md「New shell」), whatever the style: the assistant's and an agent's (#1091).
                 ShellComposerBar(placeholder: status.isActive ? String(localized: "Add a note (queued)")
-                                     : (suggestion ?? (shellChat ? String(localized: "Ask \(model.persona.name)") : placeholder ?? String(localized: "Message Claude"))),
+                                     : (suggestion ?? (shellChat ? String(localized: "Ask \(model.assistantDisplayName)") : placeholder ?? String(localized: "Message Claude"))),
                                  text: textBinding, selection: $selection, focused: $focused, canSend: canSend,
                                  hasAttachments: hasAttachments,
                                  stop: status.isActive && model.session(key)?.canInterrupt == true ? { Task { await model.interrupt(key) } } : nil,
@@ -4961,6 +4987,8 @@ struct SlashMenu: View {
             list
         }
         .scrollBounceBehavior(.basedOnSize)
+        // Its rows' own height until one is measured, not what it is offered: the footer is laid out first (#3703).
+        .fixedSize(horizontal: false, vertical: rowHeight == 0)
         .frame(height: rowHeight > 0 ? rowHeight * min(CGFloat(rows.count), Self.visibleRows) : nil)
         .padding(.vertical, Theme.Space.xs)
         .surface(in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
@@ -5077,6 +5105,8 @@ struct QueueStrip: View {
                 rows
             }
             .scrollBounceBehavior(.basedOnSize)
+            // Its rows' own height until one is measured, not what it is offered: the footer is laid out first (#3703).
+            .fixedSize(horizontal: false, vertical: rowHeight == 0)
             .frame(height: rowHeight > 0 ? rowHeight * min(CGFloat(queued.count), Self.visibleRows) : nil)
             .padding(.top, Theme.Space.sm)
         } label: {

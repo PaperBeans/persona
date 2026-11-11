@@ -28,9 +28,15 @@ class ChatListState internal constructor(
     internal val store: ChatAnchorStore?,
     initial: ChatReadingPosition,
 ) {
+    /** The reading anchor. Scrolling writes a new offset into it every frame: composition reads [expanded] and [followsEnd]. */
     var position by mutableStateOf(initial)
         internal set
-    val followsEnd get() = position.followsEnd
+    // Derived, so a reader is invalidated only when the value changes, not by every offset written while scrolling (#4039).
+    private val followsEndState = derivedStateOf { position.followsEnd }
+    private val expandedState = derivedStateOf { position.expanded }
+    val followsEnd: Boolean get() = followsEndState.value
+    /** The open work groups. */
+    val expanded: Set<String> get() = expandedState.value
     var restored by mutableStateOf(false)
         internal set
     var programmaticScroll by mutableStateOf(false)
@@ -39,6 +45,9 @@ class ChatListState internal constructor(
     internal var epoch by mutableIntStateOf(0)
     internal var latestRequest by mutableIntStateOf(0)
     internal var rowIds: List<String> = emptyList()
+        set(value) { if (value !== field) { field = value; rowIdSet = null } }
+    /** [rowIds] as a set, built once per list: [capture] runs every frame of a scroll. */
+    private var rowIdSet: Set<String>? = null
     internal val lastLineExtents = mutableMapOf<String, Int>()
 
     fun setExpanded(ids: Set<String>) { position = position.copy(expanded = ids) }
@@ -54,7 +63,8 @@ class ChatListState internal constructor(
 
     internal fun capture() {
         if (!restored || programmaticScroll) return
-        val top = list.layoutInfo.visibleItemsInfo.filter { it.key in rowIds }.maxByOrNull { it.index }
+        val rows = rowIdSet ?: rowIds.toHashSet().also { rowIdSet = it }
+        val top = list.layoutInfo.visibleItemsInfo.filter { it.key in rows }.maxByOrNull { it.index }
         position = position.copy(rowId = top?.key as? String ?: position.rowId,
             offsetPx = top?.let { -it.offset } ?: position.offsetPx)
     }

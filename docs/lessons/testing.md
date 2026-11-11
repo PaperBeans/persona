@@ -1,5 +1,12 @@
 # Lessons: testing and validation
 
+- Bulk Postgres fixtures need physical isolation, not just row deletion (#3743). Deleting 500 feed rows left a larger
+  unsent B-tree than the sent index; a controlled statistics refresh then changed a later index-choice assertion even
+  though no fixture rows remained. Use the existing migrated-database clone for bulk fixtures so table, index and
+  catalog state stay private. Preserve the original planner assertion; an isolated passing test alone does not prove
+  that the complete package is unaffected. The controlled reproducer shows the mechanism, not which background
+  statistics event happened in a particular failed run.
+
 - Bound cold simulator compilation separately from test execution (#2671). A combined `xcodebuild test` can spend
   most of its deadline compiling before the first test starts. Build for testing, then test without building against
   the same derived data and suite selection; preserve failure propagation, integration exclusions and result-bundle
@@ -706,6 +713,10 @@ On test hangs, send `kill -QUIT` to the test process first, identify the test an
 When a built-in extension's `runtime.command` is `personad`, the manager launches `os.Executable()` with manifest `args`; inside `go test`, that is the test binary (`extmgr.test voice`).
 The test binary does not recognize `voice`, reruns the whole package recursively, and times out. `extmgr` `TestMain` therefore checks `os.Args[1]`: if `voice`, run as `personad voice`
 (`voice.Run`). Future built-in executable extensions (not declarations only) need the same `TestMain` dispatch, so tests actually run them through hub forwarding.
+
+## Stop test programs before their temporary directories go (2026-11-11, #4104)
+
+`t.TempDir` removes all of a test's temporary directories in one cleanup, added at its first call, and cleanups run last added, first called. A test that first calls it after starting extension programs (`extensionTestHub` adds the cleanup that stops them) has its directories removed while the programs still run. A program the test's last change restarted (a provider switched back on restarts the extensions holding its references) then writes into a directory being removed, and the run fails with only `TempDir RemoveAll cleanup: … directory not empty`, about one run in three. `startTestExtensions` therefore calls `t.TempDir` before adding its cleanup. Anything else that starts processes writing into a test's directories must also add its stop cleanup after the first `t.TempDir` call.
 
 ## Web screenshots on Linux unsupported by Playwright (2026-11-06, #3140)
 

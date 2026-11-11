@@ -1,7 +1,5 @@
 package persona.feature.files
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
@@ -243,6 +241,5 @@ private const val MAX_LISTED = 2000
 
 /** Copies [text] and says so through the app's one notice line. */
 internal fun copyText(context: Context, text: String, feedback: AppFeedback?, notice: String) {
-    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Persona", text))
-    feedback?.notice(notice)
+    copyTextSafely(context = context, text = text, label = "Persona", feedback = feedback, successNotice = notice)
 }

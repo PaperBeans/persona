@@ -106,6 +106,10 @@ func (e *Engine) Matches(kind, id, query string, limit int) []Match {
 		for _, f := range []string{"summary.md", "minutes.md", "transcript.md", "meta.json"} {
 			look(e.Store.path(kind, id, f), false)
 		}
+	case KindTopic:
+		for _, f := range []string{"summary.md", "meta.json"} {
+			look(e.Store.path(kind, id, f), false)
+		}
 	case KindDoc, KindMeeting, KindEvent:
 		look(filepath.Join(e.Store.Dir, kind, SafeID(id)+".json"), false)
 	}

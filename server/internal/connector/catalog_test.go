@@ -126,6 +126,42 @@ func TestCatalogLegacyReadToolsOnly(t *testing.T) {
 	}
 }
 
+// catalogJSON is a read-tool connector that also answers some tools as JSON (ReadJSON).
+type catalogJSON struct {
+	catalogLegacy
+	jsonCalls int
+}
+
+func (f *catalogJSON) CallJSON(_ context.Context, name string, args json.RawMessage) (json.RawMessage, bool, error) {
+	if name != "example_list" {
+		return nil, false, nil
+	}
+	f.jsonCalls++
+	return json.RawMessage(`{"items":[{"id":"1","args":` + string(args) + `}]}`), true, nil
+}
+
+func (*catalogJSON) Tools() []proto.Tool {
+	return []proto.Tool{{Name: "example_list", Description: "Read items", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		{Name: "example_read", Description: "Read one", InputSchema: json.RawMessage(`{"type":"object"}`)}}
+}
+
+// A derived catalog's call takes the JSON answer of a tool that has one and the text of one that has not; the
+// models' Call is not asked for the JSON tools, and the read-only rule comes first either way.
+func TestCatalogReadJSON(t *testing.T) {
+	ctx := context.Background()
+	f := &catalogJSON{}
+	if out, err := CallCatalog(ctx, f, CatalogQuery{Source: "example", Tool: "list", Args: json.RawMessage(`{"n":2}`)}); err != nil ||
+		out != `{"items":[{"id":"1","args":{"n":2}}]}` || f.jsonCalls != 1 || f.reads != 0 {
+		t.Fatalf("json tool: %s %v (%d json, %d text)", out, err, f.jsonCalls, f.reads)
+	}
+	if out, err := CallCatalog(ctx, f, CatalogQuery{Source: "example", Tool: "read"}); err != nil || out != "example_read:{}" || f.reads != 1 {
+		t.Fatalf("text tool: %s %v", out, err)
+	}
+	if _, err := CallCatalog(ctx, f, CatalogQuery{Source: "example", Tool: "send"}); err == nil || f.jsonCalls != 1 || f.writes != 0 {
+		t.Fatalf("an action reached the connector: %v", err)
+	}
+}
+
 func TestCatalogUnsafeDeclarationsNeverDispatch(t *testing.T) {
 	no, yes := false, true
 	for _, tc := range []struct {

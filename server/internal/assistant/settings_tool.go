@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -66,10 +67,29 @@ func (s *Service) ownSettings() []ownSetting {
 			set: s.setStartRequestedTasks},
 		{Setting: Setting{Key: "assistant.recording_days", Title: "录音在知识库里保留", Actions: getSet,
 			About: "how many days the phone's and watch's recording transcripts stay in the knowledge base (kind recordings); older " +
-				"ones are deleted from it (the audio and the recordings on the phone are not touched). 14 by default",
+				"transcripts are deleted from it, and the phone deletes its local recordings too (audio and text). " +
+				"Meeting minutes follow assistant.minutes_days instead. 14 by default",
 			Value: "a whole number of days, 1–365"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.recordingDays(ctx)), nil },
 			set: s.setRecordingDays},
+		{Setting: Setting{Key: "assistant.minutes_days", Title: "Keep meeting minutes", Actions: getSet,
+			About: "how many days a meeting recording's minutes stay in the knowledge base. Past assistant.recording_days its " +
+				"transcript, summary and live log are deleted and only the minutes (and the recording's metadata) stay, still " +
+				"searchable and readable with kb_get, until this many days after the meeting; then the rest goes too. Never " +
+				"fewer than assistant.recording_days for finite windows. 0 (or forever) keeps minutes until the user deletes them, " +
+				"which is the default",
+			Value: "0 or forever, or a whole number of days, 1–3650"},
+			get: func(ctx context.Context) (string, error) {
+				return minutesDaysLabel(s.lang(ctx), s.minutesDays(ctx)), nil
+			},
+			set: s.setMinutesDays},
+		{Setting: Setting{Key: "assistant.kb_topics", Title: "Organize knowledge points by topic", Actions: getSet,
+			About: "on (the default): the knowledge base pulls durable knowledge (concepts, decisions, practices, pitfalls, facts, open " +
+				"questions) out of the projects' timelines and the chats' summaries and files it by topic (kind topics), a few model calls " +
+				"a round on the knowledge base's model; off: no more calls, the topics already written stay",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.kbTopics(ctx)), nil },
+			set: s.setKBTopics},
 		{Setting: Setting{Key: "assistant.meeting_attendance_default", Title: "Persona in recorded meetings", Actions: getSet,
 			About: "the role a meeting recording on the phone pre-selects (the user can still change it when it starts): off (the " +
 				"default) only records and makes minutes afterwards; listener follows the meeting in a session and answers questions " +
@@ -244,7 +264,8 @@ var settingTitles = map[string]string{"assistant.notes": "title_notes", "assista
 	"assistant.recording_days": "title_recording_days", "assistant.done_needs_delivery": "title_done_needs_delivery",
 	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders",
 	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "model_profiles.tiers": "title_model_tiers",
-	"assistant.meeting_attendance_default": "title_meeting_attendance_default"}
+	"assistant.meeting_attendance_default": "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
+	"assistant.kb_topics": "title_kb_topics"}
 
 // clipped is a value as the card shows it, in l.
 func clipped(l i18n.Lang, s string) string {
@@ -320,6 +341,13 @@ func (s *Service) setStartRequestedTasks(ctx context.Context, v json.RawMessage)
 		"assistant.start_requested_tasks is %v for plans from now on.")
 }
 
+func (s *Service) setKBTopics(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setBoolSetting(ctx, v, s.kbTopics, "assistant.kb_topics is unchanged", func(l i18n.Lang, before, after string) string {
+		return i18n.T(l, "assistant-settings_tool.change_kb_topics", i18n.Args{"before": before, "after": after})
+	}, func(v *Settings) **bool { return &v.KBTopics },
+		"assistant.kb_topics is %v from the knowledge base's next round on.")
+}
+
 func (s *Service) setRecordingDays(ctx context.Context, v json.RawMessage) (*ownChange, error) {
 	var days int
 	if err := json.Unmarshal(v, &days); err != nil || days < minRecordingDays || days > maxRecordingDays {
@@ -342,6 +370,52 @@ func (s *Service) setRecordingDays(ctx context.Context, v json.RawMessage) (*own
 			s.settingsChanged(ctx)
 			s.kbWake() // a shorter retention prunes now
 			return fmt.Sprintf("assistant.recording_days is %d: recordings older than that leave the knowledge base.", days), nil
+		}}, nil
+}
+
+// minutesDaysLabel spells out the forever sentinel instead of showing a misleading zero-day retention.
+func minutesDaysLabel(l i18n.Lang, days int) string {
+	if days == 0 {
+		return i18n.T(l, "assistant-settings_tool.minutes_forever")
+	}
+	return i18n.T(l, "assistant-settings_tool.minutes_days_value", i18n.Args{"days": days})
+}
+
+// setMinutesDays compares the saved setting, not its recording_days floor. A finite value below that floor is saved
+// for when recording_days becomes shorter. Unset and 0 both mean forever; the card names the effective before/after.
+func (s *Service) setMinutesDays(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	var days int
+	var word string
+	forever := json.Unmarshal(v, &word) == nil && strings.EqualFold(strings.TrimSpace(word), "forever")
+	if !forever && (strings.TrimSpace(string(v)) == "null" || json.Unmarshal(v, &days) != nil || days < minMinutesDays || days > maxMinutesDays) {
+		return nil, i18n.Err("assistant-profile.bad_minutes_days")
+	}
+	cur := s.settings(ctx)
+	saved, recording := minutesDaysSetting(cur), recordingDaysOf(cur)
+	before, after := kb.MinutesDaysFor(saved, recording), kb.MinutesDaysFor(days, recording)
+	args := func(l i18n.Lang) i18n.Args {
+		return i18n.Args{"before": minutesDaysLabel(l, before), "after": minutesDaysLabel(l, after),
+			"saved": minutesDaysLabel(l, days), "previous": minutesDaysLabel(l, saved)}
+	}
+	if days == saved {
+		return &ownChange{summary: i18n.T(s.lang(ctx), "assistant-settings_tool.minutes_unchanged", args(s.lang(ctx)))}, nil
+	}
+	if s.store() == nil {
+		return nil, errors.New("no database on this hub")
+	}
+	return &ownChange{cardText: func(l i18n.Lang) string {
+		if after == before {
+			return i18n.T(l, "assistant-settings_tool.change_minutes_days_saved", args(l))
+		}
+		return i18n.T(l, "assistant-settings_tool.change_minutes_days", args(l))
+	},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.MinutesDays = &days; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			s.kbWake() // a shorter retention prunes now
+			return i18n.T(s.lang(ctx), "assistant-settings_tool.minutes_applied", args(s.lang(ctx))), nil
 		}}, nil
 }
 

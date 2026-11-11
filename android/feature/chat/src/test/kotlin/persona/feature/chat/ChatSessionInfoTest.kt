@@ -25,10 +25,29 @@ class ChatSessionInfoTest {
         section.title to section.rows.associate { it.label to it.value }
     }
 
-    @Test fun tokensReadAsIos() {
-        assertEquals("950", formatTokens(950))
-        assertEquals("12.3k", formatTokens(12_345))
-        assertEquals("1.20M", formatTokens(1_200_000))
+    // Token counts use the language's compact unit, as the compaction divider does (#4137).
+    @Test fun tokensCountInTenThousandsInChinese() {
+        assertEquals("950", formatTokens(950, res))
+        assertEquals("9500", formatTokens(9_500, res))
+        assertEquals("1.2 万", formatTokens(12_345, res))
+        assertEquals("120 万", formatTokens(1_200_000, res))
+    }
+
+    @Config(qualifiers = "ja")
+    @Test fun tokensCountInTenThousandsInJapanese() {
+        assertEquals("950", formatTokens(950, res))
+        assertEquals("4.8万", formatTokens(48_200, res))
+        assertEquals("120万", formatTokens(1_200_000, res))
+    }
+
+    @Config(qualifiers = "en")
+    @Test fun tokensCountInThousandsAndMillionsInEnglish() {
+        assertEquals("950", formatTokens(950, res))
+        assertEquals("12.3K", formatTokens(12_345, res))
+        assertEquals("500K", formatTokens(500_000, res))
+        assertEquals("999.9K", formatTokens(999_949, res))
+        assertEquals("1M", formatTokens(999_950, res))
+        assertEquals("1.2M", formatTokens(1_200_000, res))
     }
 
     @Test fun claudesSessionShowsWhatItRunsHowFarAndWhere() {
@@ -42,7 +61,7 @@ class ChatSessionInfoTest {
         assertEquals("2.1.320", all.getValue("运行")["Claude Code"])
         assertEquals("自动改文件", all.getValue("运行")["权限"])
         assertEquals("很高", all.getValue("运行")["思考强度"])
-        assertEquals("48.2k tokens", all.getValue("用量")["上下文"])
+        assertEquals("4.8 万 tokens", all.getValue("用量")["上下文"])
         assertFalse("压缩" in all.getValue("用量"))
         assertEquals("6 轮", all.getValue("用量")["对话"])
         assertEquals("11月1日 10:00", all.getValue("用量")["开始"])

@@ -102,6 +102,18 @@ class ExtensionConfigRejected(val field: String, message: String) : Exception(me
 /** 409 `has_dependents`: enabled extensions depend on it (deepest first); asked, the call goes on with `cascade`. */
 class ExtensionHasDependents(val dependents: List<ExtensionDependent>, message: String) : Exception(message)
 
+/**
+ * 409 `partial_uninstall` (#1154): some of a pack's members were uninstalled and some were not, so the pack is still
+ * installed. Nothing was put back: [removed] stay uninstalled, [failed] say why, [remaining] were not tried.
+ */
+class ExtensionPartialUninstall(
+    val removed: List<String>, val failed: List<ExtensionFailedMember>, val remaining: List<String>, message: String,
+) : Exception(message)
+
+/** A pack member a `partial_uninstall` couldn't remove, and the hub's reason. */
+@Serializable
+data class ExtensionFailedMember(val id: String = "", val error: String = "", val detail: String? = null)
+
 /** One extension of a `has_dependents` answer. */
 @Serializable
 data class ExtensionDependent(val id: String = "", val name: String = "") {

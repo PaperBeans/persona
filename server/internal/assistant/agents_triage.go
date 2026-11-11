@@ -89,21 +89,44 @@ func (s *Service) triageTurnModel(ctx context.Context, v *workView, machine stri
 		}
 		in.Answered = triageAnswered(records)
 	}
-	var out triageOut
-	if err := s.purposeModel("agent.triage").JSON(ctx, prompts.RenderAgentTriage(prompts.AgentTriage{Owner: s.owner(ctx), Language: answerLanguage(s.hello(ctx).Locale)}),
-		prompts.RenderAgentTriageInput(in), &out); err != nil {
+	w, same, err = judgeTriageWith(ctx, s.purposeModel("agent.triage"), triageJudgeInput{
+		System: prompts.AgentTriage{Owner: s.owner(ctx), Language: answerLanguage(s.hello(ctx).Locale)},
+		Input:  in, Reply: reply, Others: byShort, Lang: s.lang(ctx),
+	})
+	if err != nil {
 		return nil, false, err
 	}
-	same = out.Wait != nil && out.Wait.Approved && in.ApprovedThen != ""
-	out.Questions = slices.DeleteFunc(out.Questions, func(q proto.Question) bool {
-		text := strings.TrimSpace(q.Question)
-		return text == "" || !strings.Contains(reply, text) || !explicitUserRequest(text)
-	})
-	w = triageWork(out, byShort, time.Now(), s.lang(ctx))
 	if hasCloseout {
 		w = unfinished(withCloseout(w, co, coArtifacts), s.lang(ctx))
 	}
 	return w, same, nil
+}
+
+// triageJudgeInput is everything the triage model's answer is judged on, read from the session and the hub
+// (triageTurnModel) or written out by a test.
+type triageJudgeInput struct {
+	System prompts.AgentTriage
+	Input  prompts.AgentTriageInput
+	Reply  string                     // the whole last reply: a question must be copied from it (Input.Reply is clipped)
+	Others map[string]proto.WorkAgent // the agents it may wait for, by the ids in Input.Others
+	Lang   i18n.Lang                  // the texts the hub fills in itself
+}
+
+// judgeTriageWith asks m where the stopped turn in stands and applies the hub's rules to what it answers: a question
+// must be an explicit request copied from the reply, and triageWork keeps only what the model may say. same: it waits
+// on the very step the user approved (#3824). It reads nothing else, so a behaviour check can run it on written-out
+// turns (#2586, agents_triage_judge_live_test.go).
+func judgeTriageWith(ctx context.Context, m jsonModel, j triageJudgeInput) (w *proto.WorkState, same bool, err error) {
+	var out triageOut
+	if err := m.JSON(ctx, prompts.RenderAgentTriage(j.System), prompts.RenderAgentTriageInput(j.Input), &out); err != nil {
+		return nil, false, err
+	}
+	same = out.Wait != nil && out.Wait.Approved && j.Input.ApprovedThen != ""
+	out.Questions = slices.DeleteFunc(out.Questions, func(q proto.Question) bool {
+		text := strings.TrimSpace(q.Question)
+		return text == "" || !strings.Contains(j.Reply, text) || !explicitUserRequest(text)
+	})
+	return triageWork(out, j.Others, time.Now(), j.Lang), same, nil
 }
 
 // Interactions returns newest first. Deferral, delegation and permission approval are not user decisions on questions.

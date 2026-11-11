@@ -10,7 +10,7 @@
     <string name="settings_onb_key_paste">Paste the API key</string>
     <string name="settings_onb_key_hint_with">%1$s Stored encrypted on the hub and never shown again.</string>
     <string name="settings_onb_where_key">Where do I get a key?</string>
-    <string name="settings_onb_assign_label">Use it for the main conversation and new Agents</string>
+    <string name="settings_onb_assign_label">Use it for the main conversation and new agents</string>
     <string name="settings_onb_assign_hint">Only where nothing was picked yet. Models you chose stay as they are.</string>
     <string name="settings_onb_assign_hint_works">The main conversation already works with Claude Code on %1$s, so this is off. Turn it on to use this key instead (only where nobody has picked a model).</string>
     <string name="settings_onb_assign_hint_works_here">The main conversation already works with Claude Code on your computer, so this is off. Turn it on to use this key instead (only where nobody has picked a model).</string>
@@ -26,15 +26,15 @@
     <string name="settings_onb_key_test_failed">The test didn\'t pass</string>
     <string name="settings_onb_retest">Test again</string>
     <string name="settings_onb_done_title">%1$s is connected</string>
-    <string name="settings_onb_done_pick_later">To use it for the main conversation or Agents, pick it under Models.</string>
-    <string name="settings_onb_direct_note">The main chat and Agents can\'t run on it. Processing, Sorting and other uses without a picked model may now use it; change that under Models.</string>
+    <string name="settings_onb_done_pick_later">To use it for the main conversation or agents, pick it under Models.</string>
+    <string name="settings_onb_direct_note">The main chat and agents can\'t run on it. Processing, Sorting and other uses without a picked model may now use it; change that under Models.</string>
     <string name="settings_onb_done_no_claude">The key is saved. Claude Code still needs to be installed on %1$s before the main conversation can use it.</string>
     <string name="settings_onb_done_no_claude_any">The key is saved. Claude Code still needs to be installed on the computer before the main conversation can use it.</string>
     <string name="settings_onb_done_no_claude_kept">The key is saved. Claude Code still needs to be installed on %1$s before anything can run on it.</string>
     <string name="settings_onb_done_no_claude_kept_any">The key is saved. Claude Code still needs to be installed on the computer before anything can run on it.</string>
     <string name="settings_onb_how_install">How to install</string>
     <string name="settings_onb_purpose_assistant">the main conversation</string>
-    <string name="settings_onb_purpose_agent_new">new Agents</string>
+    <string name="settings_onb_purpose_agent_new">new agents</string>
     <string name="settings_onb_assigned">Now used by %1$s.</string>
     <string name="settings_onb_assigned_both">Now used by %1$s and %2$s.</string>
     <string name="settings_onb_kept">Left %1$s as it was: %2$s</string>

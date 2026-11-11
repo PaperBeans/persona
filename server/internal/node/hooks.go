@@ -198,6 +198,9 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 		}
 		// The assistant's only when the node says so too (clicall.go mcpSession).
 		session, assistant := n.mcpSession(c, req)
+		if session == "" && !assistant {
+			session = n.paneCaller(req.Pane) // an agent's: the hub tells a task leader's tools from any other's by it
+		}
 		// A guest's (its MCP server says so, or this node knows it is one): the hub gives it only its own tools.
 		guest := req.Guest || n.guestOf(session) != nil
 		if err := n.peer.Call(ctx, "mcp.tools", map[string]any{"assistant": assistant, "session_id": session, "guest": guest}, &res); err != nil {
@@ -827,8 +830,9 @@ func toolSummary(name string, input json.RawMessage) string {
 
 // callerTools are the agents' own tools that act for the agent calling them (assistant/agent_control.go
 // agentToolNames): reporting to its supervisor, reading and noting the decisions of the todo it works on, binding
-// that todo to a chat thread, handing a subtask to another computer and reading it back (assistant/dispatch.go).
-var callerTools = []string{"report_to_supervisor", "todo_decisions", "todo_decision_add", "todo_bind_thread", "dispatch_start", "dispatch_read"}
+// that todo to a chat thread, handing a subtask to another computer and reading it back (assistant/dispatch.go), and a
+// task leader's task_plan and task_review (assistant/task_leader.go).
+var callerTools = []string{"report_to_supervisor", "todo_decisions", "todo_decision_add", "todo_bind_thread", "dispatch_start", "dispatch_read", "task_plan", "task_review"}
 
 // mcpCaller is the session an MCP call of tool name goes to the hub with: the one it names, else, for an agent's
 // tools that need to know whose call it is (callerTools), the session its pane runs. The rest go on as before, with

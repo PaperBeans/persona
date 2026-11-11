@@ -62,4 +62,10 @@
     <string name="settings_switcher_line">%1$s · %2$s</string>
     <string name="settings_switcher_switched">%1$sに切り替えました</string>
     <string name="settings_switcher_manage">アシスタントを管理…</string>
+    <string name="settings_group_assistant">%1$sの設定</string>
+    <string name="settings_group_assistant_switch">切り替え</string>
+    <string name="settings_group_assistant_footer">「%1$s」の設定だけを表示しています。ほかのアシスタントを変更するには、先に切り替えてください。</string>
+    <string name="settings_group_device">このデバイス</string>
+    <string name="settings_group_hub">ハブ</string>
+    <string name="settings_group_hub_footer">この 2 つのグループは、どのアシスタントを選んでいても同じです。</string>
 </resources>

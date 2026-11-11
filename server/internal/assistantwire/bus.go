@@ -119,6 +119,8 @@ var Routes = []string{
 	"POST /api/v1/assistant/agents/{mid}/{sid}/supervisor",
 	"PUT /api/v1/assistant/directions/{id}/name",
 	"GET /api/v1/assistant/conversations/{id}/feed",
+	"POST /api/v1/assistant/feed/{id}/dismiss",
+	"POST /api/v1/assistant/feed/{id}/undo-dismiss",
 	"POST /api/v1/assistant/conversations/{id}/route",
 	"POST /api/v1/assistant/conversations/{id}/today",
 	"GET /api/v1/assistant/tasks",

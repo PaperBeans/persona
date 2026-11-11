@@ -1,6 +1,8 @@
 package transcript
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,6 +120,92 @@ func TestHistoryMutationRollout(t *testing.T) {
 	_ = os.WriteFile(path, []byte(strings.Join(append(lines, `{"timestamp":"2026-10-28T08:43:51.000Z","ordinal":13,"type":"event_msg","payload":{"type":"task_complete","turn_id":"t1"}}`), "\n")+"\n"), 0o644)
 	if _, err := f.Refresh(); err != nil || f.Meta().TurnOpen {
 		t.Fatalf("turn still open after task_complete: %v", err)
+	}
+}
+
+// codexTurns is a synthesized rollout of n turns: each a user message and four agent messages, the second of them
+// recorded again in history_mutation (the newer format), and the last turn reusing an id of the first.
+func codexTurns(n int) []string {
+	const ts = `"timestamp":"2026-11-10T08:00:00.000Z"`
+	agent := func(id, text string) string {
+		return `{"type":"AgentMessage","id":"` + id + `","content":[{"type":"Text","text":"` + text + `"}],"phase":"commentary"}`
+	}
+	lines := []string{`{` + ts + `,"type":"session_meta","payload":{"id":"01a1","cwd":"/r/fake","cli_version":"0.170.0"}}`}
+	for k := range n {
+		lines = append(lines,
+			fmt.Sprintf(`{%s,"type":"event_msg","payload":{"type":"task_started","turn_id":"t%d"}}`, ts, k),
+			fmt.Sprintf(`{%s,"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u%d","content":[{"type":"text","text":"ask %d"}]}}}`, ts, k, k))
+		for j := range 4 {
+			id := fmt.Sprintf("m%d-%d", k, j)
+			if k == n-1 && j == 3 {
+				id = "m0-3" // an id an earlier turn used
+			}
+			it := agent(id, fmt.Sprintf("step %d of %d", j, k))
+			lines = append(lines, fmt.Sprintf(`{%s,"type":"event_msg","payload":{"type":"item_completed","item":%s}}`, ts, it))
+			if j == 1 {
+				lines = append(lines, fmt.Sprintf(`{%s,"type":"history_mutation","payload":{"display_completions":[{"turn_id":"t%d","item":%s}]}}`, ts, k, it))
+			}
+		}
+		lines = append(lines, fmt.Sprintf(`{%s,"type":"event_msg","payload":{"type":"task_complete","turn_id":"t%d"}}`, ts, k))
+	}
+	return lines
+}
+
+// An item is recorded twice only within its turn (window.go), so the ids the parser keeps to drop the repeat are
+// those of the turn under way: a long rollout does not grow them with every item it ever had.
+func TestCodexSeenBoundedByTurn(t *testing.T) {
+	const turns = 2000
+	meta := &Meta{Codex: true}
+	most, n := 0, 0
+	for i, line := range codexTurns(turns) {
+		n += len(ParseLine(i+1, []byte(line), meta))
+		most = max(most, len(meta.codexSeen))
+	}
+	if most > 5 {
+		t.Fatalf("the parser kept %d item ids; a turn has 5", most)
+	}
+	if n != turns*5 {
+		t.Fatalf("%d items for %d turns of 5: the repeat in history_mutation is not dropped once", n, turns)
+	}
+}
+
+// A full read and a read opened by its end (its window starting at a turn) give the same items: neither drops an
+// item whose id an earlier turn used, and both drop the repeat within a turn.
+func TestCodexSeenFullEqualsWindowed(t *testing.T) {
+	defer func(w int64) { windowBytes = w }(windowBytes)
+	data := []byte(strings.Join(codexTurns(60), "\n") + "\n")
+	p := filepath.Join(t.TempDir(), "rollout-2026-11-10T08-00-00-01a1.jsonl")
+	if err := os.WriteFile(p, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	windowBytes = 1 << 40
+	full := NewFile(p)
+	if _, err := full.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	all, _, _ := full.Page(0, 1<<30)
+	if len(all) != 60*5 {
+		t.Fatalf("a full read gives %d items for 60 turns of 5", len(all))
+	}
+	windowBytes = int64(len(data)) / 8
+	f := NewFile(p)
+	if _, err := f.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if f.base == 0 {
+		t.Fatal("the file was not opened by its end: the test checks nothing")
+	}
+	var got []proto.Item
+	for before := 0; ; {
+		items, more, _ := f.Page(before, 7)
+		got = append(append([]proto.Item(nil), items...), got...)
+		if !more || len(items) == 0 {
+			break
+		}
+		before = items[0].Seq
+	}
+	if !bytes.Equal(marshal(t, got), marshal(t, all)) {
+		t.Fatalf("a windowed read gives %d items, a full read %d", len(got), len(all))
 	}
 }
 

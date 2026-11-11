@@ -93,6 +93,10 @@ var Features = []string{
 	"file_inbox",               // POST /api/v1/machines/{mid}/files?dest=inbox: into the machine's receive folder, kept for good (docs/protocol/file-transfer.md)
 	"file_transfer",            // POST/GET/DELETE /api/v1/files/transfer: computer to computer, run by the manager, file_transfer events (docs/protocol/file-transfer.md)
 	"task_push",                // Task.push on /api/v1/assistant/tasks: "Push when done", every run or only what a run sends (docs/assistant/assistant.md "Push when done")
+
+	// A secret may hold a provider's op://… reference: PUT …/{id}/-/secrets/{name} {reference}; secrets[].reference and
+	// secret_users in the details (docs/extensions/secret-providers.md).
+	"extension_secret_references",
 }
 
 // Codes of a failed credential.gh_token (hub → node, node/credential.go).

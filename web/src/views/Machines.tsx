@@ -10,7 +10,8 @@ import { hubLabel, routeText } from "../lib/mesh";
 import { machineDeployment } from "../lib/machine-deploy";
 import { classifyConnection } from "../lib/node-health";
 import { href, navigate, onLinkClick, type Route } from "../lib/router";
-import { offlineManagerOf, useRoster } from "../lib/managers";
+import { currentRoster, managerOrder, multiManager, offlineManagerOf, useRoster } from "../lib/managers";
+import { defaultManager, withManager } from "../lib/manager-choice";
 import { useStore } from "../lib/store";
 import { documentPage, visiblePoll } from "../lib/visible-poll";
 import type { Machine, MachineMetrics, MetricPoint, Session } from "../lib/types";
@@ -39,10 +40,27 @@ export function Machines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 
   useEffect(() => {
     let dead = false;
-    const load = () =>
-      api<{ machines: MachineMetrics[] }>("/metrics")
-        .then((r) => !dead && (setMetrics(r.machines ?? []), setError("")))
-        .catch((e) => !dead && setError(errorText(e)));
+    const previous = new Map<string, MachineMetrics[]>();
+    const load = async () => {
+      const roster = currentRoster();
+      const ids = multiManager(roster) ? managerOrder(roster).filter((m) => m.online).map((m) => m.id) : [defaultManager()];
+      const results = await Promise.allSettled(ids.map((id) => api<{ machines: MachineMetrics[] }>(withManager("/metrics", id))));
+      if (dead) return;
+      const failed = results.find((r) => r.status === "rejected");
+      if (failed && results.every((r) => r.status === "rejected")) {
+        setError(errorText(failed.reason));
+        return;
+      }
+      const merged = new Map<string, MachineMetrics>();
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled") previous.set(ids[i], r.value.machines ?? []);
+        for (const m of previous.get(ids[i]) ?? []) {
+          if (!merged.has(m.machine_id)) merged.set(m.machine_id, m);
+        }
+      });
+      setMetrics([...merged.values()]);
+      setError("");
+    };
     // Right away and every 10 s while the tab is shown; a hidden tab asks nothing and loads again when shown.
     const stop = visiblePoll(() => void load(), 10_000, documentPage);
     return () => {

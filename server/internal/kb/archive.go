@@ -68,6 +68,12 @@ type Engine struct {
 	Unindex func(kind string, ids []string)
 	// RecordingDaysFunc is how many days recordings are kept (the assistant's recording_days; nil or <= 0: 14).
 	RecordingDaysFunc func() int
+	// MinutesDaysFunc is how many days a meeting's minutes are kept once its transcript went (the assistant's
+	// minutes_days; nil or <= 0: forever); finite windows are never fewer than RecordingDaysFunc's (MinutesDays).
+	MinutesDaysFunc func() int
+	// EarlierMeetingsInAnswers stays false until #3862 phase 1 adds a per-meeting private mark.
+	// Only tests opt in for now, preserving retrieval coverage without exposing earlier minutes in answers.
+	EarlierMeetingsInAnswers bool
 	// MinutesWritten is told when a recording's minutes for its current revision are written (minutes.go): the
 	// assistant pushes them. Called from the loop, outside the store's locks.
 	MinutesWritten func(ctx context.Context, r Recording, m Minutes)
@@ -77,6 +83,8 @@ type Engine struct {
 	LiveChanged func(id string)
 	// HandleKey is the hub's key for the senders' identity hints (handles.go); without it none are kept.
 	HandleKey []byte
+	// TopicsOn says whether the knowledge points curation runs (topics.go; assistant.kb_topics). nil: it does.
+	TopicsOn func() bool
 
 	// Limits (zero: defaults).
 	ChatsPerRun  int // how many recently active chats an archive run looks at (100)
@@ -103,6 +111,8 @@ type Engine struct {
 	find findCache // what Find read last time, kept while the files are unchanged (find_cache.go)
 
 	projectRetries map[string]projectRetry // projects whose rewrite failed, by slug (RefreshProjects)
+	// topicRetries: sources whose distill call failed ("<kind>/<id>") and topics whose merge failed ("topics/<slug>").
+	topicRetries map[string]projectRetry
 }
 
 func (e *Engine) modelFor(id string) Model {

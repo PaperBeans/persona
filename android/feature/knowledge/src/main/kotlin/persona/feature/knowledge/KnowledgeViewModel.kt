@@ -6,7 +6,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import persona.core.contracts.HubScope
 import persona.core.contracts.Session
+import persona.core.contracts.SessionKey
 import persona.core.contracts.api.*
+import persona.core.designsystem.UiText
 import persona.core.designsystem.operationFeedback
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
@@ -109,18 +111,36 @@ internal data class KnowledgeDetailPage(
     val detail: KnowledgeDetail? = null,
     val agents: List<Session> = emptyList(),
     @StringRes val message: Int? = null,
+    /** The reload this page came from ([KnowledgeDetailViewModel.refresh] counts them): a write's read-back waits for a newer one. */
+    val reload: Int = 0,
 )
 internal data class KnowledgeSending(val busy: Boolean = false, @StringRes val message: Int? = null)
 
-/** The tag editor's save: [saved] counts the saves that went through, so the sheet closes on each; [error] says why one did not. */
-internal data class KnowledgeTagging(val busy: Boolean = false, val error: persona.core.designsystem.UiText? = null, val saved: Int = 0)
+/** A recording's minutes being made or turned into to-dos (#2738): [busy] while the write and its read-back are on their way; [message] why one didn't go. */
+internal data class KnowledgeMinutesWork(val busy: Boolean = false, val message: UiText? = null)
 
+/** The tag editor's save: [saved] counts the saves that went through, so the sheet closes on each; [error] says why one did not. */
+internal data class KnowledgeTagging(val busy: Boolean = false, val error: UiText? = null, val saved: Int = 0)
+
+/**
+ * An entry's page. [owner] is the assistant whose knowledge base it was opened in (docs/assistant/managers.md "Clients"):
+ * the page reads, saves and asks that one's whatever assistant is made current while it is open, so nothing it writes
+ * goes to another's. Null (a page restored from before it was kept): the current one's, as the hub client names it.
+ * A question about the entry goes to the default's main queue, or to [owner]'s main conversation ([conversations],
+ * sent with [messages]) when it is another's.
+ */
 internal class KnowledgeDetailViewModel(
     private val kind: KnowledgeKind,
     private val id: String,
     private val connection: KnowledgeConnection,
     private val sender: MainConversationSender,
+    val owner: String? = null,
+    private val conversations: AssistantConversations? = null,
+    private val messages: MessageSender? = null,
 ) : ViewModel() {
+    // The hub this page was opened on: its pin names nothing on another one.
+    private val pins: kotlin.coroutines.CoroutineContext = ManagerPins.of(KnowledgePrefixes, owner, AssistantManagerChoice.current.value.hubId)
+        ?: kotlin.coroutines.EmptyCoroutineContext
     private val revision = MutableStateFlow(0)
     private var sendJob: Job? = null
     private var attempt: Pair<String, String>? = null
@@ -128,17 +148,20 @@ internal class KnowledgeDetailViewModel(
     val sending = _sending.asStateFlow()
     private val _tagging = MutableStateFlow(KnowledgeTagging())
     val tagging = _tagging.asStateFlow()
-    private val opened = Channel<Unit>(Channel.BUFFERED)
+    private val _minutes = MutableStateFlow(KnowledgeMinutesWork())
+    val minutesWork = _minutes.asStateFlow()
+    private val opened = Channel<KnowledgeHandoff>(Channel.BUFFERED)
+    /** Each question handed over, and where it went. */
     val handoffs = opened.receiveAsFlow()
     private var last: KnowledgeDetailPage? = null
-    val page = combine(connection.current, revision) { repository, _ -> repository }
-        .flatMapLatest { repository -> flow {
-            val initial = KnowledgeDetailPage(scope = repository?.scope, paired = repository != null, loading = repository != null)
+    val page = combine(connection.current, revision) { repository, reload -> repository to reload }
+        .flatMapLatest { (repository, reload) -> flow {
+            val initial = KnowledgeDetailPage(scope = repository?.scope, paired = repository != null, loading = repository != null, reload = reload)
             // A reload (pull, a saved tag) keeps the page on screen until the new one comes.
             val shown = last?.takeIf { repository != null && it.scope == repository.scope && it.detail != null }
             emit(initial.copy(detail = shown?.detail, agents = shown?.agents.orEmpty()))
             if (repository != null) try {
-                val response = repository.entry(kind, id)
+                val response = withContext(pins) { repository.entry(kind, id) }
                 emit(initial.copy(loading = false, detail = response.detail, agents = projectAgents(response.agents)))
             } catch (cancelled: CancellationException) { throw cancelled }
             // A failed reload keeps the entry on screen; the page says it could not reload (#3991).
@@ -154,6 +177,7 @@ internal class KnowledgeDetailViewModel(
                 attempt = null
                 _sending.value = KnowledgeSending()
                 _tagging.value = KnowledgeTagging()
+                _minutes.value = KnowledgeMinutesWork()
                 while (opened.tryReceive().isSuccess) { }
             }
         }
@@ -176,11 +200,18 @@ internal class KnowledgeDetailViewModel(
             try {
                 checkCurrent(repository)
                 // The data layer owns durable delivery, offline queueing and deduplication.
-                sender.sendToMain(text, messageId)
+                // Not the assistant shown now (the default's entry after a switch too): its own main conversation, opened in place.
+                val other = owner?.takeIf { it != AssistantManagerChoice.current.value.shown }
+                val main = if (other == null) { sender.sendToMain(text, messageId); null } else {
+                    val key = checkNotNull(conversations) { "managers unavailable" }.mainConversationOf(other)
+                    checkCurrent(repository)
+                    checkNotNull(messages) { "agent message sender not wired" }.send(key, text, messageId)
+                    key
+                }
                 checkCurrent(repository)
                 attempt = null
                 _sending.value = KnowledgeSending(message = R.string.knowledge_handed)
-                opened.send(Unit)
+                opened.send(KnowledgeHandoff(owner, main))
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
                 _sending.value = KnowledgeSending(message = R.string.knowledge_hand_failed)
@@ -197,7 +228,7 @@ internal class KnowledgeDetailViewModel(
         viewModelScope.launch {
             try {
                 checkCurrent(repository)
-                repository.update(kind, id, update)
+                withContext(pins) { repository.update(kind, id, update) }
                 checkCurrent(repository)
                 _tagging.value = KnowledgeTagging(saved = saved + 1)
                 refresh()
@@ -213,10 +244,66 @@ internal class KnowledgeDetailViewModel(
 
     fun dismissTagError() { _tagging.update { it.copy(error = null) } }
 
+    /** Asks the hub for the recording's minutes, new or again (`POST …/minutes`). */
+    fun makeMinutes() = minutesWrite { it.makeMinutes(id) }
+
+    /** Makes the minutes' [actions] to-dos (`POST …/minutes/todos`) with the version shown. */
+    fun addMinutesTodos(actions: List<String>) {
+        val version = page.value.detail?.minutes?.version ?: return
+        if (actions.isEmpty()) return
+        minutesWrite { it.addMinutesTodos(id, version, actions) }
+    }
+
+    /**
+     * One write to the minutes, then the recording read back before another is allowed (the web's `readback`): a to-do
+     * just added shows as added, and new minutes as writing. `409 minutes_stale` (rewritten since they were shown) reads them
+     * back too and says so; nothing is sent again.
+     */
+    private fun minutesWrite(write: suspend (KnowledgeRepository) -> Unit) {
+        if (_minutes.value.busy) return
+        val repository = connection.current.value ?: return
+        if (page.value.scope != repository.scope) return
+        _minutes.value = KnowledgeMinutesWork(busy = true)
+        viewModelScope.launch {
+            var message: UiText? = null
+            try {
+                checkCurrent(repository)
+                withContext(pins) { write(repository) }
+            } catch (cancelled: CancellationException) {
+                _minutes.value = KnowledgeMinutesWork()
+                throw cancelled
+            } catch (error: Exception) {
+                val failure = hubCodedFailure(error)
+                message = if (failure?.status == 409 && failure.code == "minutes_stale") UiText.Res(R.string.knowledge_minutes_stale)
+                    else UiText.Res(R.string.knowledge_minutes_request_failed, listOf(operationFeedback(error).text))
+            }
+            try {
+                checkCurrent(repository)
+                val asked = revision.value
+                refresh()
+                // Until the page is read again after the write (or the pairing changes, which clears all of this).
+                page.first { it.scope != repository.scope || (!it.loading && it.reload > asked) }
+                checkCurrent(repository)
+                _minutes.value = KnowledgeMinutesWork(message = message)
+            } catch (cancelled: CancellationException) {
+                _minutes.value = KnowledgeMinutesWork()
+                throw cancelled
+            }
+        }
+    }
+
+    fun dismissMinutesMessage() { _minutes.update { it.copy(message = null) } }
+
     private fun checkCurrent(repository: KnowledgeRepository) {
         if (connection.current.value !== repository) throw CancellationException("Pairing changed")
     }
 }
+
+/** The knowledge base's routes (segments under /api/v1): an entry's page pins its assistant on them. */
+internal val KnowledgePrefixes = listOf(listOf("kb"), listOf("kb-search"), listOf("recordings"))
+
+/** A question handed over from an entry's page: to [owner]'s ([main], its main conversation; null: the main queue). */
+internal data class KnowledgeHandoff(val owner: String?, val main: SessionKey?)
 
 @StringRes
 internal fun loadMessage(error: Exception): Int {

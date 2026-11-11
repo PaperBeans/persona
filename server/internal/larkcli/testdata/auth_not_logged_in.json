@@ -1,0 +1,11 @@
+{
+  "appId": "cli_example",
+  "identities": {
+    "user": {
+      "status": "not_signed_in",
+      "available": false,
+      "message": "User identity is not signed in"
+    }
+  },
+  "identity": "user"
+}

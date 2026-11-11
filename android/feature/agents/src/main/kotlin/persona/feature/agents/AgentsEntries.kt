@@ -158,6 +158,7 @@ fun EntryProviderScope<NavKey>.agentsEntries(
             onBack = { navigator.back() },
             onOpenTodo = { todoId -> navigator.navigate(TodoDetailRoute(todoId)) },
             newTodoRequests = newTodo,
+            assistant = assistant,
         )
     }
     entry<TodosRoute> { todosPage(null) }

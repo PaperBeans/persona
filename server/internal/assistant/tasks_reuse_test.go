@@ -16,7 +16,7 @@ func reuseArgs(readonly bool, todoIDs ...string) json.RawMessage {
 	var tasks []map[string]any
 	for _, id := range todoIDs {
 		task := map[string]any{"title": "发版", "prompt": "把 1.3 版发出去", "machine": "box", "cwd": "/code/app",
-			"readonly": readonly, "why": "这个仓库在 box 上", "done_when": []string{"PR 合并到 master"}}
+			"readonly": readonly, "permission": "bypassPermissions", "why": "这个仓库在 box 上", "done_when": []string{"PR 合并到 master"}}
 		if id != "" {
 			task["todo_id"] = id
 		}
@@ -228,17 +228,17 @@ func TestTaskPlanTodoIDIsCheckedAgainOnStart(t *testing.T) {
 func TestTodoTakenByAStartedPlanIsNotTakenTwice(t *testing.T) {
 	e := newThreadEnv(t, nil)
 	todo := e.openedTodo()
-	if _, err := e.s.takeTodoForTask("m1", todo.ID); err != nil {
+	if _, err := e.s.takeTodoForTask(context.Background(), "new-plan", "m1", todo.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.s.takeTodoForTask("m1", todo.ID); err == nil || !strings.Contains(err.Error(), "another plan is starting an agent on it") {
+	if _, err := e.s.takeTodoForTask(context.Background(), "new-plan", "m1", todo.ID); err == nil || !strings.Contains(err.Error(), "another plan is starting an agent on it") {
 		t.Fatalf("a second take: %v", err)
 	}
 	if _, err := e.s.toolTaskPlan(context.Background(), "m1", reuseArgs(true, todo.ID)); err == nil || !strings.Contains(err.Error(), "another plan is starting") {
 		t.Fatalf("a plan made in the gap: %v", err)
 	}
 	e.s.releaseTakenTodo(todo.ID)
-	if _, err := e.s.takeTodoForTask("m1", todo.ID); err != nil {
+	if _, err := e.s.takeTodoForTask(context.Background(), "new-plan", "m1", todo.ID); err != nil {
 		t.Fatalf("after it was let go: %v", err)
 	}
 }

@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "data": {
+    "chats": [
+      {
+        "chat_id": "oc_example_group",
+        "name": "Example Group",
+        "description": "Example chat",
+        "chat_type": "group",
+        "chat_mode": "group",
+        "chat_status": "normal"
+      },
+      {
+        "chat_id": "oc_example_dm",
+        "name": "Example User",
+        "chat_type": "p2p",
+        "chat_mode": "p2p",
+        "p2p_target_type": "user",
+        "p2p_target_id": "ou_example_peer"
+      }
+    ],
+    "total": 2,
+    "has_more": false
+  }
+}

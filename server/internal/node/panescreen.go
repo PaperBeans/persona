@@ -117,10 +117,11 @@ func (n *Node) screenBefore(ctx context.Context, id string, anchor []string, lin
 	page := all[start:at]
 	if ansi {
 		// The same rows with their colors: herdr reads both from one grid, so row i is row i — unless output arrived
-		// between the two reads, then the plain page is still right.
+		// between the two reads (a full scrollback then keeps its row count but shifts), so the colored rows are used
+		// only when they show the plain page's text; otherwise the plain page is still right.
 		if colored, err := n.readPaneANSI(ctx, a.PaneID, "recent", herdrScrollbackLines); err == nil {
 			rows := strings.Split(strings.TrimRight(strings.ReplaceAll(colored, "\r\n", "\n"), "\n"), "\n")
-			if len(rows) == len(all) {
+			if len(rows) == len(all) && sameRows(page, rows[start:at]) {
 				page = rows[start:at]
 			}
 		}

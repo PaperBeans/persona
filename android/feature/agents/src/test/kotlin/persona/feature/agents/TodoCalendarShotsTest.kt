@@ -260,7 +260,7 @@ class TodoCalendarShotsTest {
             // "See list" goes back to the list
             rule.onNodeWithText("看列表").performClick()
             rule.waitForIdle()
-            assertTrue("month: See list did not show the list", rule.onAllNodesWithTag("todos-summary").fetchSemanticsNodes().isNotEmpty())
+            assertTrue("month: See list did not show the list", rule.onAllNodesWithTag("todos-filter").fetchSemanticsNodes().isNotEmpty())
         }
     }
 

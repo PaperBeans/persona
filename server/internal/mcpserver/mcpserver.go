@@ -288,6 +288,14 @@ func handle(ctx context.Context, version string, req request) (any, *rpcError) {
 		if rerr := checkCallParams(&p.Name, &p.Arguments); rerr != nil {
 			return nil, rerr
 		}
+		var copied *clipboardCopy // phone_clipboard_set with file: read here, on the agent's machine (clipboard_file.go)
+		if p.Name == clipboardSetTool {
+			args, c, err := clipboardFileArgs(p.Arguments)
+			if err != nil {
+				return toolResult(proto.TextResult(err.Error(), true)), nil
+			}
+			p.Arguments, copied = args, c
+		}
 		// Phone round trips, approvals and ask_user can take a while (the user may need to unlock the phone).
 		ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 		defer cancel()
@@ -301,6 +309,9 @@ func handle(ctx context.Context, version string, req request) (any, *rpcError) {
 		var res proto.ToolResult
 		if err := json.Unmarshal(line, &res); err != nil {
 			return toolResult(proto.TextResult(fmt.Sprintf("bad response from Persona node (%v)", err), true)), nil
+		}
+		if copied != nil {
+			res = copied.answer(res)
 		}
 		return toolResult(res), nil
 	}
@@ -382,7 +393,8 @@ func listTools(ctx context.Context) ([]map[string]any, error) {
 }
 
 func listToolsOnce(ctx context.Context) ([]map[string]any, error) {
-	line, err := dialNode(ctx, map[string]any{"kind": "mcp.tools", "away_ok": true, "assistant": isAssistant(), "session_id": sessionID(), "guest": isGuest()})
+	line, err := dialNode(ctx, map[string]any{"kind": "mcp.tools", "away_ok": true, "assistant": isAssistant(), "session_id": sessionID(), "guest": isGuest(),
+		"pane": nodeclient.HookPane(os.Getenv)}) // the pane names the agent whose tools these are (a task leader's task_plan)
 	if err != nil {
 		return nil, fmt.Errorf("Persona node is not reachable: %w", err)
 	}
@@ -398,11 +410,14 @@ func listToolsOnce(ctx context.Context) ([]map[string]any, error) {
 	}
 	tools := []map[string]any{}
 	for _, t := range res.Tools {
-		schema := t.InputSchema
+		schema, description := t.InputSchema, t.Description
 		if len(schema) == 0 {
 			schema = json.RawMessage(`{"type":"object","properties":{}}`)
 		}
-		tools = append(tools, map[string]any{"name": t.Name, "description": t.Description, "inputSchema": schema})
+		if t.Name == clipboardSetTool && !isGuest() { // its file argument is read here (clipboard_file.go)
+			schema, description = withClipboardFile(schema, description)
+		}
+		tools = append(tools, map[string]any{"name": t.Name, "description": description, "inputSchema": schema})
 	}
 	return tools, nil
 }

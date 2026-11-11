@@ -121,6 +121,10 @@ type conversation struct {
 	reply       string
 	replyVoiced bool
 	silent      []string
+	// replying: a reply is under way (evReply until evTurnEnd). A response.create sent then is refused
+	// (conversation_already_has_active_response, realtime dialect): sendUp holds it back as createOwed and sends it once
+	// the reply is over.
+	replying, createOwed bool
 	// sus is the call's pausing of its upstream while its conversation works (suspend.go, protocol 2).
 	sus suspension
 	// log is what the call's log counts, and its id (calllog.go).

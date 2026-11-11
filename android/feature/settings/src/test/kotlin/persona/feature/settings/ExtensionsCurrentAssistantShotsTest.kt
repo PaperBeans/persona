@@ -18,14 +18,18 @@ import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import persona.core.contracts.api.AssistantManagerChoice
 import persona.core.contracts.api.ExtensionListing
 import persona.core.contracts.api.HubExtension
 import persona.core.contracts.api.HubManager
@@ -39,18 +43,18 @@ import java.io.File
 import java.time.Instant
 
 /**
- * 设置 › 扩展 with several managers (docs/assistant/managers.md step 4): each manager's extensions under its name, the default's
- * first (the unstamped ones are its), the offline one greyed with 最后同步于; with one manager the list is as before.
- * Written to `build/managers-shots/plugins-*.png`.
+ * 设置 › 扩展 is the current assistant's (docs/assistant/managers.md "Clients"): its extensions only, in one list with no
+ * assistant headings (the unstamped ones are the default's); another assistant current, that one's. Written to
+ * `build/managers-shots/plugins-*.png`.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "zh-w400dp-h900dp-xhdpi")
-class ManagerGroupsShotsTest {
+class ExtensionsCurrentAssistantShotsTest {
     @get:Rule val rule = createComposeRule()
+    @After fun reset() = AssistantManagerChoice.reset()
 
     private val roster = ManagerRoster(ManagersSample.map {
-        // 最后同步于 counts from now: the offline one went away three hours ago.
         if (it.id == "m-8b04d2") it.copy(lastSeen = Instant.now().minusSeconds(3 * 3600).toString()) else it
     }, "assistant")
 
@@ -71,34 +75,33 @@ class ManagerGroupsShotsTest {
         File(dir, "$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    private fun top(text: String) = rule.onAllNodesWithText(text)[0].fetchSemanticsNode().boundsInRoot.top
+    private fun shown(text: String) = rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
 
-    @Test fun extensionsGroupByManager() {
+    @Test fun extensionsAreTheCurrentAssistants() {
         var style by mutableStateOf(AppStyle.Glass)
         var dark by mutableStateOf(false)
-        var shown by mutableStateOf<ManagerRoster?>(roster)
+        AssistantManagerChoice.choose("hub", null, "assistant")
         rule.setContent {
             PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
-                CompositionLocalProvider(LocalManagerRoster provides shown) {
+                CompositionLocalProvider(LocalManagerRoster provides roster) {
                     Box(Modifier.testTag("shot").fillMaxSize().background(PersonaTheme.palette.background)) { ExtensionsPage(api, {}, { _, _ -> }) }
                 }
             }
         }
-        rule.waitUntil { rule.onAllNodesWithText("示例笔记").fetchSemanticsNodes().isNotEmpty() }
-        // The default first (both of its), then the roster's order; 测试 is still installing and has none.
-        assertTrue(top("助手") < top("示例笔记") && top("示例语音") < top("工作"))
-        assertTrue(top("工作") < top("工作邮箱") && top("工作邮箱") < top("家里"))
-        assertTrue(rule.onAllNodesWithText("最后同步于 3 小时前").fetchSemanticsNodes().isNotEmpty())
-        assertEquals(0, rule.onAllNodesWithText("测试").fetchSemanticsNodes().size)
+        rule.waitUntil { shown("示例笔记") }
+        // The default's: its own and the unstamped one, under the list's one heading; no assistant headings.
+        assertTrue(shown("示例语音") && shown("这台 hub 的扩展"))
+        assertFalse(shown("工作邮箱") || shown("家里的相册") || shown("助手") || shown("工作") || shown("家里"))
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
-            capture("plugins-grouped-${s.key}-${if (d) "dark" else "light"}")
+            capture("plugins-current-${s.key}-${if (d) "dark" else "light"}")
         }
-        // One manager: the one list as before.
-        shown = ManagerRoster(listOf(HubManager("assistant", "助手", online = true, isDefault = true)), "assistant")
-        rule.waitForIdle()
-        assertEquals(0, rule.onAllNodesWithText("助手").fetchSemanticsNodes().size)
-        assertTrue(rule.onAllNodesWithText("这台 hub 的扩展").fetchSemanticsNodes().isNotEmpty())
+        // Another assistant current: that one's alone.
+        rule.runOnIdle { AssistantManagerChoice.pick("m-3fa21c") }
+        rule.waitUntil { shown("工作邮箱") }
+        assertFalse(shown("示例笔记") || shown("示例语音") || shown("家里的相册"))
+        style = AppStyle.Glass; dark = false
+        capture("plugins-current-work-glass-light")
     }
 
     /** The merged list as the hub sends it with several managers: a built-in once per manager. */
@@ -109,20 +112,25 @@ class ManagerGroupsShotsTest {
         ), canInstall = true)
     }
 
-    /** Before the roster is read (or with a hub that sends none) the merged list is one list: the same id twice still draws. */
-    @Test fun theSameIdTwiceBeforeTheRoster() {
+    /** Before the roster is read the current assistant is the one kept on the device: its copy of a built-in alone. */
+    @Test fun beforeTheRosterTheKeptAssistantsCopy() {
+        AssistantManagerChoice.choose("hub", "m-3fa21c", "assistant")
+        val opened = mutableListOf<Pair<String, String?>>()
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
                 CompositionLocalProvider(LocalManagerRoster provides null) {
-                    Box(Modifier.fillMaxSize()) { ExtensionsPage(twice, {}, { _, _ -> }) }
+                    Box(Modifier.fillMaxSize()) { ExtensionsPage(twice, {}, { id, manager -> opened += id to manager }) }
                 }
             }
         }
-        rule.waitUntil { rule.onAllNodesWithText("示例语音").fetchSemanticsNodes().size == 2 }
+        rule.waitUntil { rule.onAllNodesWithText("示例语音").fetchSemanticsNodes().size == 1 }
+        rule.onNodeWithText("示例语音").performClick()
+        assertEquals(listOf<Pair<String, String?>>("example-voice" to "m-3fa21c"), opened)
     }
 
-    /** A built-in is listed under every manager: each row opens its own manager's, and the open one is selected alone. */
-    @Test fun aBuiltInUnderEachManagerIsItsOwn() {
+    /** A built-in is listed under every manager: the current assistant's copy opens its own, and is the selected one. */
+    @Test fun aBuiltInIsTheCurrentAssistantsOwn() {
+        AssistantManagerChoice.choose("hub", "m-3fa21c", "assistant")
         val opened = mutableListOf<Pair<String, String?>>()
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
@@ -131,12 +139,14 @@ class ManagerGroupsShotsTest {
                 }
             }
         }
-        rule.waitUntil { rule.onAllNodesWithText("示例语音").fetchSemanticsNodes().size == 2 }
-        val selected = rule.onAllNodes(hasText("示例语音") and isSelected()).fetchSemanticsNodes()
-        assertEquals(1, selected.size)
-        assertTrue(selected[0].boundsInRoot.top > top("工作"))
-        rule.onAllNodesWithText("示例语音")[0].performClick()
-        rule.onAllNodesWithText("示例语音")[1].performClick()
-        assertEquals(listOf<Pair<String, String?>>("example-voice" to null, "example-voice" to "m-3fa21c"), opened)
+        rule.waitUntil { rule.onAllNodesWithText("示例语音").fetchSemanticsNodes().size == 1 }
+        assertEquals(1, rule.onAllNodes(hasText("示例语音") and isSelected()).fetchSemanticsNodes().size)
+        rule.onNodeWithText("示例语音").performClick()
+        // The default current: its own copy, opened as the default's (no manager named).
+        rule.runOnIdle { AssistantManagerChoice.pick(null) }
+        rule.waitForIdle()
+        assertEquals(0, rule.onAllNodes(hasText("示例语音") and isSelected()).fetchSemanticsNodes().size)
+        rule.onNodeWithText("示例语音").performClick()
+        assertEquals(listOf<Pair<String, String?>>("example-voice" to "m-3fa21c", "example-voice" to null), opened)
     }
 }
