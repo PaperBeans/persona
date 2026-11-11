@@ -9,6 +9,7 @@
   "err_chat_launcher": "Chat Completions 接入不能作为启动器运行",
   "err_claude_messages": "Claude 启动器只支持 Messages 接入",
   "err_auth": "认证方式不支持",
+  "err_key_value_or_reference": "密钥和引用只能填一个",
   "err_api_launch_fields": "直接 API 接入不能设置启动参数、小模型或子 Agent 模型",
   "err_subagent_model_long": "子 Agent 模型太长",
   "err_custom_model_long": "自定义模型太长",

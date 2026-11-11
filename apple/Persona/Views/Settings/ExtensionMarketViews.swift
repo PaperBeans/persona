@@ -603,7 +603,8 @@ struct ExtensionMarketsView: View {
             }
             ForEach(page.markets) { m in
                 Section {
-                    MarketRow(market: m, busy: page.busyMarket == m.id) { act in
+                    MarketRow(market: m, busy: page.busyMarket == m.id, removalCount: page.removalMarket == m.id ? page.removalCount : nil,
+                              prepareRemoval: { await page.prepareRemoval(of: m.id) }) { act in
                         switch act {
                         case .refresh: Task { await page.refreshMarket(m.id) }
                         case .token: tokenFor = m
@@ -659,15 +660,19 @@ private struct MarketRow: View {
     enum Act { case refresh, token, remove }
     var market: ExtensionMarket
     var busy: Bool
+    var removalCount: Int?
+    var prepareRemoval: () async -> Bool
     var act: (Act) -> Void
     @State private var confirmRemove = false
+    @State private var preparingRemoval = false
+    @State private var removalAttempt = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
                 Text(market.title).font(Theme.Font.bodyStrong).lineLimit(1)
                 Spacer(minLength: Theme.Space.s)
-                if busy { ProgressView().controlSize(.small) }
+                if busy || preparingRemoval { ProgressView().controlSize(.small) }
             }
             Text(market.spec).font(Theme.Font.code).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle).textSelection(.enabled)
             if let d = market.description, !d.isEmpty { Text(d).font(Theme.Font.secondary).foregroundStyle(.secondary) }
@@ -690,7 +695,17 @@ private struct MarketRow: View {
             action(String(localized: "Refresh"), .refresh, id: "market-refresh-\(market.id)")
             action(market.hasToken ? String(localized: "Change Token") : String(localized: "Set Token"), .token, id: "market-token-\(market.id)")
             Spacer(minLength: 0)
-            Button(role: .destructive) { confirmRemove = true } label: { Text("Delete").lineLimit(1) }
+            Button(role: .destructive) {
+                removalAttempt += 1
+                let attempt = removalAttempt
+                Task {
+                    preparingRemoval = true
+                    let prepared = await prepareRemoval()
+                    guard attempt == removalAttempt else { return }
+                    preparingRemoval = false
+                    if prepared { confirmRemove = true }
+                }
+            } label: { Text("Delete").lineLimit(1) }
             .buttonStyle(.borderless)
             .foregroundStyle(Theme.danger) // a Mac borderless button draws its role in the accent
             .accessibilityIdentifier("market-remove-\(market.id)")
@@ -699,11 +714,12 @@ private struct MarketRow: View {
                     .accessibilityIdentifier("market-remove-confirm")
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("The hub stops reading this market. Extensions installed from it stay.")
+                Text(ExtensionMarketText.removalReason(removalCount))
+                    .accessibilityIdentifier("market-remove-note")
             }
         }
         .font(Theme.Font.secondary)
-        .disabled(busy)
+        .disabled(busy || preparingRemoval)
     }
 
     /// Several buttons in one row of a list: borderless, or the whole row is one button.

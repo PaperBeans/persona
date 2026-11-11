@@ -21,7 +21,7 @@ As part of moving hub business logic into managers (`docs/assistant/assistant.md
   Triage after an Agent's turn stops moved into the assistant (`docs/assistant/agent-work.md` ("Responsibilities")), which reads the project owning a directory directly; `kb.context` and `kb.projects` still answer on the bus, but nothing calls them now.
   Events seen by the hub are one-way: new source data (connector live events, enabling "Include in knowledge base", enabling "Hand to Persona" for "Information", `kb.kick`),
   and an Agent finishing a turn (before deciding notifications, `kb.agent_turn`, the project timeline entry).
-- **Models**: the knowledge base uses the manager's model configuration (`kb.compress`, `kb.project`, `kb.items`, `kb.dedupe`, `kb.moments`, defaulted by `kb.ai` in its `manager.json`),
+- **Models**: the knowledge base uses the manager's model configuration (`kb.compress`, `kb.project`, `kb.items`, `kb.dedupe`, `kb.moments`, `kb.topics`, defaulted by `kb.ai` in its `manager.json`),
   resolved at every call, all in one place, `assistant/kb_model.go`.
 - **Where data lives**: by default the manager is a hub child process on the same machine. Its knowledge base is the data directory's `~/.persona/data` (`kb_dir` in its `manager.json` can move it), and its `handles.key` is in its own directory, `~/.persona/managers/assistant/` (copied there once from `~/.persona`, [managers.md](managers.md) ("The built-in manager's own files")).
   Storage **follows the manager's `manager.json`**: its `kb` section (`enabled`, `text_days`, `attachment_days`, `extra_dirs`, and `ai` for the models; `docs/operations/config.md` ("manager.json")). Since 2026-11-06 the hub neither reads it nor hands it over in its handshake response (`docs/protocol/protocol.md` ("Handshake")), except raw, once, to a built-in manager it did not start (`legacy_config`, [managers.md](managers.md) ("Configuration"));
@@ -58,6 +58,8 @@ The former switches off knowledge ingestion; the latter switches off the connect
 - Archived posts whose `source` is this connector, including their Markdown and metadata; the Moments index is rewritten from the remaining posts.
 - Documents, meetings and events whose `source` is this connector, with their database index rows.
 - References to the removed entities in projects, the connector's archive cursor and deleted chats' history-import state. Affected projects are marked dirty for rewriting from the remaining content.
+- Knowledge points that came from the removed chats, or from project timeline lines the removal dropped ("Topics" below): a point keeps its other sources or goes, a topic left empty is removed
+  (reported under `items` as `topics`, so its index row goes too), and a project whose timeline lost lines is distilled again from its remaining lines.
 
 The deletion result and audit include `chats`, `people`, `posts` and `items` counts; the HTTP result also includes `inbox` (zero for archive-only deletion).
 New connector ingestion records `connector` on chats and people and `source` on items; document links discovered in chats inherit the chat's connector.
@@ -113,6 +115,11 @@ and tells it to read their AGENTS.md / CLAUDE.md before reading or writing. Pers
     meta.json               # Name, type (short requirement / long mission), status, members, related chats / docs / meetings / Agent directories
     summary.md              # Goal, current state, next steps, risks, my role
     log.md                  # Timeline: append an entry for each update (date · source · one line)
+    .topics.json            # How far the knowledge points curation read the timeline ("Topics"; bookkeeping, not searched; a chat has one too)
+  topics/<slug>/            # One directory per topic of knowledge points ("Topics" below, #3783)
+    meta.json               # Name, one line, aliases, how many points, the projects and chats they came from, tags
+    points.json             # The points (kind, text, reason, subtopic path, sources, date) and the candidates waiting to be merged; bookkeeping, not searched
+    summary.md              # The points as Markdown by subtopic, written from points.json; searched
   docs/<id>.json            # Documents / meetings / events: title, link, time, tags, linked projects
   meetings/<id>.json
   events/<id>.json
@@ -181,6 +188,8 @@ A value the model writes that doesn't fit is dropped on its own, not with the re
    and projects whose aliases are locked (set by hand) are not touched.
    Rewrite at most 3 dirty project summaries per round (old summary + latest 40 timeline entries + summaries of up to 8 related chats). Person / chat / project associations are written into each
    `meta.json` bidirectionally. Long-term projects (`long`) never revert to short-term.
+3b. **Topics** (#3783, `kb/topic_distill.go`, `kb/topic_merge.go`; "Topics" below): after the project rewrites, at most 2 distill calls (new timeline lines or a changed chat summary → candidate
+   knowledge points) and 2 merges (a topic's candidates folded into its points) per round, while `assistant.kb_topics` is on.
 4. **Documents / meetings / events**: every 30 minutes read Lark calendar (yesterday through 8 days ahead, busy events) and the latest 30 meetings, fill titles for 10 documents (first line of Markdown export),
    and send new or changed items to the model in batches of 40 for tags and project links.
 5. **History import**: the live archive only reads forward from each connector's cursor, so a chat's messages from before it began come in through a separate import
@@ -662,6 +671,39 @@ The model may mistake product names in notification emails (each App Store app, 
 and prompts (`server/internal/prompts/kb/`, `docs/assistant/prompts.md`) explicitly exclude notifications, marketing and billing. At startup the manager marks projects sourced only from these chats and never manually tagged as `ignored`:
 no more updates, snapshots or prompts; the app groups them under **Not projects**. Changing their status in tags restores them.
 
+## Topics (#3783)
+
+Projects and chats are filed by where knowledge came from, and their summaries follow fixed status sections (what this is, progress, next steps, risks). They say where a piece of work
+stands, not what the owner knows: how a system works, what was decided and why, the commands and steps that work, the pitfalls already hit. Those facts sit in timeline lines (the main
+chat's progress, each Agent's last words, to-do conclusions) and chat summaries, and compression drops them over time. Topics file them by subject (`kb/topics.go`):
+
+- **A topic** is a subject (a system, a product, an area), `topics/<slug>/`. It holds **knowledge points** under up to two levels of subtopics (`path`). A point has a kind
+  (`concept`, `decision` with its reason, `practice`, `pitfall` with its cause, `fact`, `question` for what is still open), a text of at most 60 characters asked for (200 kept),
+  the entries it came from (`sources`: `projects/<slug>` or `chats/<id>` and the day) and the day it was last confirmed (`when`). `points.json` is the record; `summary.md` is
+  written from it after every change, grouped by subtopic, and is what search and the assistant read.
+- **Distill** (`kb/topic_distill.go`, prompt `kb/topic_distill`): a project is due once its timeline has 8 new lines, or fewer and it has been quiet 30 minutes; a chat (not P3, with
+  real people, `HasPeople`) once its summary changed and it was last distilled more than 12 hours ago. One call takes up to 12 KB of a project's timeline lines from where the last one
+  stopped (each clipped to 600 characters, oldest first), or a chat's summary, plus the names, aliases and one lines of the 80 biggest topics, and returns at most 25 candidates, each
+  with a topic name and a path. A name matching a topic's name or alias (`normName`, as projects match) files it there; a new name opens a topic, at most 4 a call and 150 in all (the
+  rest of that call's points for new topics are dropped and logged). How far a source was read is its mark, `.topics.json` in its directory: a project's line count and the size of
+  `log.md` when it read to the end (an unchanged size means nothing new, and the timeline is not read again), a chat's summary hash. The first pass over existing timelines is the
+  same step from line one, so a knowledge base with long timelines fills in over some rounds.
+- **Merge** (`kb/topic_merge.go`, prompt `kb/topic_merge`): a topic with candidates sends its points and up to 40 candidates; the model answers with edits only, never the whole list,
+  so the answer stays short however big the topic grows: `add` (a new point from some candidates), `update` (attach candidates to an existing point, optionally reworded) or `drop`
+  (outdated, contradicted, or progress rather than knowledge). The engine checks each edit (known point ids, known candidates, kinds, lengths), takes each point's sources and day
+  from the candidates it names, and lets go of candidates no edit names. The answer is applied only if the points and that batch are unchanged since the question (a source forgotten
+  meanwhile changes them; the topic is merged again next round). A topic keeps at most 300 points (the model is asked to stay under it; past 350 the oldest go).
+- **Pinned facts and hand edits**: `pinned` on a topic is read-only input to the merge, which drops points contradicting it. By hand (`kb_update`, `PUT /api/v1/kb/topics/<id>`) a topic's
+  name, `note` (its one line), aliases, tags and pinned facts change and lock as for other kinds; its summary cannot be replaced (it is written from the points).
+- **Failures** wait like a project rewrite's (`retryWait`, in memory) per source and per topic. Both steps use the model use `kb.topics`.
+- **Switch**: `assistant.kb_topics`, on by default (Settings › Knowledge on the web, and Persona's settings tool after the user confirms). Off, neither step calls the model; the topics
+  already written stay readable, and turning it back on continues from the marks.
+- **Reading**: topics list (the most points first), open (`points` in the detail, `links` to the projects and chats they came from), search (`summary.md` and `meta.json`) and change
+  events (`kb.changed` with kind `topics`) like the other kinds, through the app API, the assistant's `kb_list` / `kb_get` / `kb_search` and the extension `kb.*` RPC. `kb.recent`
+  does not include them by default (it is what came in, and topics are derived). The web shows them under Knowledge › Topics and in the knowledge map (`docs/web/web.md`); the iOS
+  and Android apps do not show the kind yet and skip it.
+- **Deleting a source** removes the points that came only from it ("Deleting a connector's saved knowledge" above).
+
 ## Who uses it
 
 - **Persona (main chat and other chats)**: CLAUDE.md describes the layout and requires "keep context flowing"; MCP tools `kb_search` (full text) / `kb_list` (sorted list) /
@@ -780,8 +822,8 @@ and a disabled knowledge base (`kb.enabled: false`) returns 503 as before.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/v1/kb/{kind}?tag=` | Sorted list (`items`) and common tags (`tags`); kind is projects / chats / people / docs / meetings / events / recordings |
-| `GET /api/v1/kb/{kind}/{id}` | `detail` (meta, summary, project timeline, last 7 days' chat messages); projects also include `agents` |
+| `GET /api/v1/kb/{kind}?tag=` | Sorted list (`items`) and common tags (`tags`); kind is projects / chats / people / docs / meetings / events / recordings / topics (topics: the most points first, `extra` is the count) |
+| `GET /api/v1/kb/{kind}/{id}` | `detail` (meta, summary, project timeline, last 7 days' chat messages, a topic's `points`); projects also include `agents` |
 | `PUT /api/v1/kb/{kind}/{id}` | Edit (fields as in `kb_update`); create a project if absent |
 | `GET /api/v1/kb-search?q=&messages=0` | Full-text search (by line, for older apps; assistant `kb_search` does the same search through bus `kb.search`) |
 | `GET /api/v1/kb-search?q=&results=1` | App search: grouped and sorted by entry (`results`: `entry`, `count`, first 3 `hits` lines, `in_name`), see "Search" below |

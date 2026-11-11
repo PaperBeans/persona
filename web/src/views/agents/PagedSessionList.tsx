@@ -70,17 +70,21 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const rootPage = useSyncExternalStore(root.subscribe, root.getSnapshot, root.getSnapshot);
   // Counts without state keep other state tabs reachable; machine scopes disambiguate computer-local groups.
   const facetFilters = useMemo(() => ({ ...(q ? { q } : {}), ...(provider ? { provider } : {}), ...(machine && dimension === "group" ? { machine_id: machine } : {}) }), [q, provider, machine, dimension]);
+  // Unscoped counts are the root's own: follow them. Scoped counts are read on their own, now and once per hint; they
+  // do not follow the root's counts, which land for that same hint (a second read of the same counts every time).
+  const facetScoped = Object.keys(facetFilters).length > 0;
   useEffect(() => {
+    if (facetScoped) return;
+    setFacets(rootPage.counts);
+    setFacetError("");
+  }, [facetScoped, rootPage.counts]);
+  useEffect(() => {
+    if (!facetScoped) return;
     let live = true;
     let sequence = 0;
     const controller = new AbortController();
     const read = () => {
       const request = ++sequence;
-      if (!Object.keys(facetFilters).length) {
-        setFacets(root.getSnapshot().counts);
-        setFacetError("");
-        return;
-      }
       const params = new URLSearchParams({ counts: "1", ...facetFilters });
       void api<ListCounts>(`${path}?${params}`, { signal: controller.signal }).then((counts) => {
         if (live && request === sequence && counts.state && counts.group && counts.project && counts.machine) { setFacets(counts); setFacetError(""); }
@@ -89,14 +93,15 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     read();
     const off = onHubEvent(event, read);
     return () => { live = false; controller.abort(); off(); };
-  }, [path, event, root, rootPage.counts, facetFilters]);
+  }, [path, event, facetScoped, facetFilters]);
   useEffect(() => {
     // Keep the last counts while a refresh or a new scope is loading, including a root rebaseline.
-    if (scopeQuery === "counts=1") {
-      if (rootPage.counts) setScopeCounts(rootPage.counts);
-      setScopeError("");
-      return;
-    }
+    if (scopeQuery !== "counts=1") return;
+    if (rootPage.counts) setScopeCounts(rootPage.counts);
+    setScopeError("");
+  }, [scopeQuery, rootPage.counts]);
+  useEffect(() => {
+    if (scopeQuery === "counts=1") return;
     let sequence = 0;
     const abort = new AbortController();
     const read = () => {
@@ -108,7 +113,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     read();
     const off = onHubEvent(event, read);
     return () => { sequence++; abort.abort(); off(); };
-  }, [scopeQuery, path, event, rootPage.counts]);
+  }, [scopeQuery, path, event]);
   useEffect(() => {
     if (filtered) void list.setFilters(filters).catch(() => {});
     else if (!list.getSnapshot().loaded) void list.load().catch(() => {});

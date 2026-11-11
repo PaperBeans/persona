@@ -53,8 +53,14 @@ func (h *Manager) subscriptionUI(w http.ResponseWriter, r *http.Request) {
 		writeSubscriptionErr(w, err)
 		return
 	}
+	// Drawn for the app's UI version as an extension page is: the view itself (an older app gets a switch as a row it
+	// taps, version 6's icons as older ones), then the result's lines and items.
 	slot, _ := extension.Slot("extension_page")
-	if err := extension.FitResult(&res, slot, version, lang); err != nil {
+	err = extension.FitResult(&res, slot, version, lang)
+	if res.View != nil && err == nil {
+		_, err = extension.Fit(res.View, slot, version, lang)
+	}
+	if err != nil {
 		h.logf("subscriptions: page does not fit ui_version %d: %v", version, err)
 		writeErr(w, http.StatusInternalServerError, err)
 		return

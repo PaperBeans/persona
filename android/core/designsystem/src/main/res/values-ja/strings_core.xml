@@ -426,7 +426,9 @@
     <string name="designsystem_core_workflow_failed">失敗</string>
     <string name="designsystem_core_workflow_killed">停止済み</string>
     <string name="designsystem_core_workflow_stalled">反応なし</string>
-    <string name="designsystem_core_workflow_agents_done">%1$d/%2$d 個の agent が完了</string>
+    <plurals name="designsystem_core_workflow_agents_done">
+        <item quantity="other">%2$d/%1$d 個の agent が完了</item>
+    </plurals>
     <string name="designsystem_core_always_scope_commands">この会話内のすべてのコマンド</string>
     <string name="designsystem_core_always_scope_read_directory">この会話中、このディレクトリ内のすべての読み取り</string>
     <string name="designsystem_core_always_scope_edit_directory">この会話中、このディレクトリ内のすべてのファイル編集</string>

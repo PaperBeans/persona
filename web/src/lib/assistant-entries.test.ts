@@ -29,3 +29,33 @@ describe("the Assistant's Needs you and In progress entries (spec/fixtures/entri
     });
   }
 });
+
+// A task its supervisor parked (#3804) is In progress, however it would be filed otherwise: not Needs you, not folded
+// under shelved after two days still, not dropped as finished unseen.
+describe("a parked task in the Assistant's entries", () => {
+  const now = Date.parse("2026-11-10T09:00:00Z");
+  const parked = { reason: "The design team has to pick the icon set first", until: "2026-11-14T09:00:00Z", waiting_on: "someone_else" as const, count: 1 };
+  const todo = (state: "parked" | "needs_user" | "", at: string): Todo => ({
+    id: "todo_1", title: "Redraw the toolbar icons", origin: "main", plan_id: "plan_1", created_at: at, updated_at: at,
+    agents: [{ machine_id: "box", session_id: "s1", linked_at: at }],
+    supervision: { supervisor: "main", state, ...(state === "parked" ? { parked } : {}), reviews: [], updated_at: at },
+  } as unknown as Todo);
+  const entries = (t: Todo, at: string) => assistantEntries({
+    conversation: "main", main: "main", todos: [t], sessions: [], interactions: [], plans: {}, feed: [], now,
+    cards: [{ id: "plan:plan_1:0", todo_id: t.id, plan_id: "plan_1", index: 0, at, updated_at: at, state: "working" }],
+  });
+  const keys = (got: ReturnType<typeof assistantEntries>) => ({ needsYou: got.needsYou.map((i) => i.key), running: got.running.map((i) => i.key), shelved: got.shelved.map((i) => i.key) });
+
+  it("is listed with the tasks in progress, not under Needs you", () => {
+    const at = "2026-11-10T08:00:00Z";
+    expect(keys(entries(todo("parked", at), at))).toEqual({ needsYou: [], running: ["task:todo_1"], shelved: [] });
+    // the same task waiting for the owner's decision is theirs
+    expect(keys(entries(todo("needs_user", at), at)).needsYou).toEqual(["task:todo_1"]);
+  });
+
+  it("stays in progress after days without activity, where an unparked task folds away", () => {
+    const at = "2026-11-05T08:00:00Z";
+    expect(keys(entries(todo("parked", at), at))).toEqual({ needsYou: [], running: ["task:todo_1"], shelved: [] });
+    expect(keys(entries(todo("", at), at)).running).toEqual([]);
+  });
+});

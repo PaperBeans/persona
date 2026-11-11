@@ -1,6 +1,8 @@
 import { backgroundWork, taskBackgroundWork, type BackgroundWork } from "./background-work";
 import { cardDismissed, cardFiled, cardSent, startFailure, type FeedItem, type TaskPlan } from "./feed";
 import { cardBucket, taskCardSlots, type TaskCardMetadata } from "./task-cards";
+import { reviewState } from "./supervision";
+import { supersededFailedStarts } from "./todo-triage";
 import { dockAgents, makeSessionLookup, openAsk, todoRank, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { byTime } from "./times";
 import type { Interaction, Session } from "./types";
@@ -9,7 +11,7 @@ import type { Interaction, Session } from "./types";
  * The Assistant's two entries above the composer (#3387, docs/assistant/unified-entry.md "Needs you and In progress"):
  * Needs you lists everything waiting on the user, In progress everything running that does not. Each thing is one row in
  * exactly one of them, Needs you first; finished things are in neither (the board has them), and each entry's count is
- * its rows. A task is one row whatever its agents: they are not listed on their own. In the main conversation an
+ * its rows. A task its supervisor parked is In progress, saying until when and why; it is never in Needs you for that. A task is one row whatever its agents: they are not listed on their own. In the main conversation an
  * Agent that belongs to no task (opened by hand) is a row of its own.
  */
 export type NeedsYouItem =
@@ -89,6 +91,8 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
   const lookup = input.lookup ?? makeSessionLookup(sessions);
   const isMain = !!main && main === conversation;
   const byTodo = new Map(todos.map((todo) => [todo.id, todo]));
+  // failed starts whose work finished in a related to-do: closed, as the To-dos page has them (#3713)
+  const superseded = supersededFailedStarts(todos);
   const asksOf = new Map<string, Interaction[]>();
   for (const ix of [...interactions].sort((a, b) => byTime(a.created_at, b.created_at) || a.id.localeCompare(b.id))) {
     const k = sessionKey(ix.machine_id, ix.session_id);
@@ -108,12 +112,13 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     const active = todo.done_at ? [] : (todo.agents ?? []).filter((a) => !a.released_at);
     const asks = active.flatMap((a) => asksOf.get(sessionKey(a.machine_id, a.session_id)) ?? []);
     const key = `task:${todo.id}`;
-    const bucket = cardBucket(card, todo, plans, lookup, now, input.restored?.get(todo.id) ?? 0);
+    const bucket = cardBucket(card, todo, plans, lookup, now, input.restored?.get(todo.id) ?? 0, superseded.has(todo.id));
     // a failed start carries done_at (the hub ends it), yet it is the user's to retry while its bucket says open
     const waits = status === "failed" ? bucket === "open" : !todo.done_at && WAITS_ON_YOU.has(status);
     if (asks.length) asking.push({ kind: "task", key, todo, status, asks });
     else if (waits || taskAwaitsDecision(todo)) deciding.push({ item: { kind: "task", key, todo, status, asks }, rank: todoRank(todo, status), at: card.at });
-    else if (bucket === "open") open.push({ item: { kind: "task", key, card, todo, status, activity: taskBackgroundWork(todo, lookup) }, rank: todoRank(todo, status), at: card.at });
+    // a parked task waits on purpose (#3804): with the tasks in progress however long it has been still, never folded away
+    else if (bucket === "open" || reviewState(todo) === "parked") open.push({ item: { kind: "task", key, card, todo, status, activity: taskBackgroundWork(todo, lookup) }, rank: todoRank(todo, status), at: card.at });
     else if (bucket === "shelved") shelved.push({ item: { kind: "task", key, card, todo, status }, at: card.at });
     else continue;
     for (const agent of active) folded.add(sessionKey(agent.machine_id, agent.session_id));

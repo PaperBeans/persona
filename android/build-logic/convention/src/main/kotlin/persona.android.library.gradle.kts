@@ -21,6 +21,11 @@ android {
         test.inputs.files(fileTree(File(repositoryRoot, "spec/fixtures")) { include("**/*.json") })
             .withPropertyName("sharedFixtures")
             .withPathSensitivity(PathSensitivity.RELATIVE)
+        // Robolectric under JDK 21 accesses raw FileDescriptor internals and the internal access bridge.
+        test.jvmArgs(
+            "--add-opens=java.base/java.io=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED"
+        )
     }
     compileOptions {
         sourceCompatibility = JavaVersion.toVersion(libs.findVersion("jvm").get().requiredVersion)

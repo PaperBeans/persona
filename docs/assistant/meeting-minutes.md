@@ -21,7 +21,7 @@ The knowledge base currently holds no recordings at all, so nothing is being cap
 4. Once `complete: true` and the recording is a meeting, the assistant generates **minutes** with the model it already uses for knowledge-base compression. An ordinary recording still gets the short summary it gets today.
 5. Minutes are stored inside the recording's directory. Deleting the recording deletes them. When they are ready, the user gets one notification.
 6. Action items are **suggested to-dos**. Nothing is created until the user confirms.
-7. The web Knowledge › Recordings detail shows the minutes; the iOS detail does the same (#2694). Asking the assistant "what were the minutes of the meeting just now" resolves through `kb_get` / `kb_search`.
+7. The web Knowledge › Recordings detail shows the minutes; the iOS (#2694) and Android (#2738) details do the same. Asking the assistant "what were the minutes of the meeting just now" resolves through `kb_get` / `kb_search`.
 
 ## Who does what
 
@@ -328,7 +328,7 @@ The system prompt is one fixed template that takes only the owner's name, today'
 
 1. **This document and the field contract**, merged first so #2694 and #2704 can build against it.
 2. **Hub**: generate minutes for meetings, store and delete them with the recording, notify once, suggest to-dos and create the confirmed ones, use an overlapping calendar item, and answer `kb_get` / `kb_search` (`kb_get` prints the minutes before the transcript; `kb_list recordings` shows each recording's start and whether it has minutes). Unit tests with a fake model.
-3. **Web**: the Knowledge › Recordings detail renders the minutes, with a light and a dark screenshot. Android follows in its own issue.
+3. **Web**: the Knowledge › Recordings detail renders the minutes, with a light and a dark screenshot. Android renders them too (#2738).
 4. **iOS** (#2694) and **Mac** (#2704) send `kind` and `calendar` and render the same `detail.minutes`.
 5. **Attending** (#2981): the role, the attending session, live sentences and tap-to-ask above; the iPhone side is #3375.
 6. **Later**: a push that opens the recording; a "meeting starting, record it?" nudge from the knowledge base's calendar; attendees, end and place on connector calendar items.

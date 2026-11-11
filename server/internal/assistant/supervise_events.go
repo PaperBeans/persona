@@ -66,10 +66,10 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 			}
 		}
 		v, _, uerr := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
-			if v.state(t) == reviewPending {
+			if v.state(t) == reviewPending && v.Waits == nil {
 				return false
 			}
-			v.State = reviewPending
+			v.State, v.Waits = reviewPending, nil
 			return true
 		})
 		if uerr != nil {
@@ -80,8 +80,8 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 		s.signal(superviseSignal{Todo: t.ID, Kind: sigReview, Key: reviewKey(&v), Detail: detail})
 		return
 	}
-	if st == reviewNeedsUser {
-		return // the supervisor knows it waits for the user
+	if st == reviewNeedsUser || st == reviewParked {
+		return // the supervisor knows it waits: for the user, or parked until its time (parked.go)
 	}
 	if v := t.Supervision; t.DoneAt == nil && (v.State == reviewAccepted || v.State == reviewCancelled) {
 		// Closed by its review, open again only because its agent was sent more (taskWorking, #5892): what it did then
@@ -94,6 +94,9 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 		// "stopped short" (#3111). The supervisor reads the agent's reply and decides.
 		s.signal(superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: "判定模型出错"})
 		return
+	}
+	if c.Verdict == verdictNeedsUser {
+		s.noteOwnerWait(ctx, t, work, c.Reason)
 	}
 	detail := verdictWords[c.Verdict]
 	if c.Reason != "" {
@@ -116,15 +119,35 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 var verdictWords = map[string]string{verdictNotDone: "没做完", verdictWaiting: "在等别人或别的事", verdictNeedsUser: "要用户决定",
 	verdictUnsure: "看不出做没做完", verdictUndelivered: "做完了但还没上线"}
 
-// supervisedWorking: one of supervised task t's agents started a turn: a review waiting is moot (the work goes on).
+// noteOwnerWait keeps on supervised task t's ledger that the stretch of work begun at work stopped on a decision only
+// the owner can make (the done judge's needs_user, with its reason), so task_review accepted cannot close it and lose
+// the decision (#1277). The same stretch judged again keeps the first note.
+func (s *Service) noteOwnerWait(ctx context.Context, t Todo, work time.Time, reason string) {
+	if _, _, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
+		if v.Waits != nil && v.Waits.Work.Equal(work) {
+			return false
+		}
+		v.Waits = &OwnerWait{Work: work.UTC(), At: time.Now().UTC(), Reason: clip(oneLine(reason), 200)}
+		return true
+	}); err != nil {
+		s.logf("task %s: owner wait: %v", t.ID, err)
+	}
+}
+
+// supervisedWorking: one of supervised task t's agents started a turn: a review waiting is moot (the work goes on),
+// and a parked task is parked no longer (someone sent its agent something: it is supervised as before, parked.go).
 func (s *Service) supervisedWorking(ctx context.Context, t Todo) {
 	s.autoReviewWorking(ctx, t)
-	if t.Supervision.state(t) != reviewPending {
+	if st := t.Supervision.state(t); st != reviewPending && st != reviewParked && (t.Supervision == nil || t.Supervision.Waits == nil) {
 		return
 	}
 	if _, _, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
-		if v.State != reviewPending {
+		if v.State != reviewPending && v.State != reviewParked && v.Waits == nil {
 			return false
+		}
+		v.Waits = nil // its agent goes on: the owner's answer reached it, or the work changed (#1277)
+		if v.State != reviewPending && v.State != reviewParked {
+			return true
 		}
 		v.State = ""
 		if v.Round > 0 {
@@ -137,6 +160,7 @@ func (s *Service) supervisedWorking(ctx context.Context, t Todo) {
 	b := &s.supervise
 	b.mu.Lock()
 	delete(b.pending, t.ID+"|"+sigReview)
+	delete(b.pending, t.ID+"|"+sigParkedDue)
 	b.mu.Unlock()
 }
 

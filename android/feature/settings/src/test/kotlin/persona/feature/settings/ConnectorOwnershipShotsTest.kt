@@ -81,13 +81,18 @@ class ConnectorOwnershipShotsTest {
             rows.map { connectorTitle(it, rows, sameNames) })
     }
 
-    @Test fun settingsDistinguishesOwnersAndClicksKeepTheOwner() {
-        val api = Api(listOf(signedOut, signedOut.copy(manager = "work")))
+    /**
+     * Settings › Connectors is the current assistant's (docs/assistant/managers.md "Clients"): its list is asked for it and
+     * shows its connectors alone (no owner after the name), a click opens its own; another assistant current, that one's.
+     */
+    @Test fun connectorsAreTheCurrentAssistants() {
+        val api = Api(listOf(signedOut, signedOut.copy(manager = "work", account = "work-example", status = "ok")))
         val context = ApplicationProvider.getApplicationContext<Context>()
         val services = demoSettingsServices(context.resources).copy(demo = false, connection = Online(), connectors = api)
         var dark by mutableStateOf(false)
         var style by mutableStateOf(AppStyle.Glass)
         val opened = mutableListOf<ConnectorRoute>()
+        AssistantManagerChoice.choose("hub", null, "assistant")
         rule.setContent {
             PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
                 CompositionLocalProvider(LocalManagerRoster provides roster) {
@@ -98,14 +103,24 @@ class ConnectorOwnershipShotsTest {
             }
         }
         rule.waitUntil { api.calls.isNotEmpty() }
-        rule.onNode(hasScrollAction()).performScrollToNode(hasText("GitHub · Work"))
-        rule.onNodeWithText("GitHub · Personal").assertExists().performClick()
-        rule.onNodeWithText("GitHub · Work").assertExists().performClick()
-        assertEquals(listOf(ConnectorRoute("github", "assistant"), ConnectorRoute("github", "work")), opened)
+        rule.waitUntil { rule.onAllNodesWithText("GitHub").fetchSemanticsNodes().isNotEmpty() }
+        // The default assistant's list names no manager (the request the hub always got).
+        assertEquals(listOf<Pair<String, String?>>("list" to null), api.calls.filter { it.first == "list" }.distinct())
+        assertEquals(0, rule.onAllNodesWithText("work-example", substring = true).fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("GitHub · ", substring = true).fetchSemanticsNodes().size)
+        rule.onNodeWithText("GitHub").performClick()
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
-            capture("connectors-owners-${s.key}-${if (d) "dark" else "light"}")
+            capture("connectors-current-${s.key}-${if (d) "dark" else "light"}")
         }
+        style = AppStyle.Glass; dark = false
+        // Work current: its list, asked for it, and its own connector.
+        rule.runOnIdle { AssistantManagerChoice.pick("work") }
+        rule.waitUntil { rule.onAllNodesWithText("work-example", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(api.calls.contains("list" to "work"))
+        rule.onNodeWithText("GitHub").performClick()
+        assertEquals(listOf(ConnectorRoute("github", "assistant"), ConnectorRoute("github", "work")), opened)
+        AssistantManagerChoice.reset()
     }
 
     @Test fun detailLoginAndSettingsStayWithTheClickedOwnerWhenOwnersChange() {

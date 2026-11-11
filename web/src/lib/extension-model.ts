@@ -41,6 +41,27 @@ export function previewBlocked(pv: BundlePreview, now: number): boolean {
   });
 }
 
+/** A pack's uninstall that stopped part way (409 `partial_uninstall`, #4072): the pack is still installed, nothing was put back. */
+export interface PartialUninstall {
+  /** Members uninstalled; they stay uninstalled. */
+  removed: string[];
+  /** Members the hub couldn't uninstall, each with its reason. */
+  failed: { id: string; error: string }[];
+  /** Members not tried; still installed. */
+  remaining: string[];
+}
+
+export function partialUninstall(e: unknown): PartialUninstall | null {
+  if (!e || typeof e !== "object" || !("body" in e)) return null;
+  const b = e.body as Record<string, unknown>;
+  if (b?.code !== "partial_uninstall") return null;
+  const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  const failed = (Array.isArray(b.failed_members) ? b.failed_members : [])
+    .filter((f): f is { id: string; error?: unknown } => !!f && typeof f.id === "string")
+    .map((f) => ({ id: f.id, error: typeof f.error === "string" ? f.error : "" }));
+  return { removed: ids(b.removed_members), failed, remaining: ids(b.remaining_members) };
+}
+
 export function dependentError(e: unknown): Dependent[] | null {
   if (!e || typeof e !== "object" || !("body" in e)) return null;
   const b = e.body as Record<string, unknown>;

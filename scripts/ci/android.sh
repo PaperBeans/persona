@@ -129,8 +129,10 @@ if [[ $LANE == full || $LANE == lint-build-test-0 ]]; then
   cd "$ROOT/scripts/app"
   run_check 'translation checker tests' python3 -B test_android_i18n_check.py
   run_check 'token checker tests' python3 -B test_android_token_baseline.py
+  run_check 'slot order checker tests' python3 -B test_android_slot_order.py
   run_check 'translation resources and literal baseline' python3 -B android_i18n_check.py
   run_check 'design token baseline' python3 -B android_token_baseline.py
+  run_check 'design-system slot order' python3 -B android_slot_order.py
 fi
 
 cd "$ROOT/android"

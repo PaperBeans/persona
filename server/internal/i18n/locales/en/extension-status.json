@@ -107,5 +107,10 @@
   "sandbox_unavailable": "The sandbox is unavailable",
   "settings_moved": "The settings changed while this was being checked. Nothing was saved; try again",
   "translation_skipped": "{file} is left out: {err}; the manifest's own text is shown instead",
-  "entry_translation_skipped": "{id}: the index entry's l10n is left out: {err}; the manifest's own text is shown instead"
+  "entry_translation_skipped": "{id}: the index entry's l10n is left out: {err}; the manifest's own text is shown instead",
+  "missing_secret_provider": "Secret “{title}”: no extension that is on supplies {scheme} references",
+  "secret_not_reference": "This is not a reference (scheme://…)",
+  "secret_own_scheme": "An extension cannot take its own {scheme} references as its secrets",
+  "secret_no_provider": "No extension that is on supplies {scheme} references. Install or turn one on first",
+  "secret_value_or_reference": "Give either a value or a reference, not both"
 }

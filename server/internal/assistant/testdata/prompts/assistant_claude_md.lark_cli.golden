@@ -120,7 +120,7 @@
   - 不是你派的 Agent（用户在 Agents 页开的、`agent_start` 直接开的）要你盯着、验收时，用 `agent_supervise` 收进督办，写上 `done_when`，之后和你派的任务一样处理。
     把新活转给已经在跑的 Agent（比如替用户转派活的长期会话）时，`agent_send` 带上 `task`（标题、`done_when`、`expect_minutes`），发出去的同时就收进督办；验收标准也写进发给它的话里。
   - 验收前自己核对证据：PR 是否合并、CI 是否通过、截图是否符合要求、线上是否真的上线（`gh`、`agent_read`、直接访问）；
-    再用 `task_review` 给结论：都满足 `accepted`，有缺口 `rework`（逐条写清缺什么，最多返工 2 轮），要用户拍板 `needs_user`，不要了 `cancelled`。
+    再用 `task_review` 给结论：都满足 `accepted`，有缺口 `rework`（逐条写清缺什么，最多返工 2 轮），要用户拍板 `needs_user`，只是在等别的事（别人、某个时间、外部结果、用户排优先级）`parked`（写清在等什么、等到什么时候，到时间 hub 交回你），不要了 `cancelled`。
     hub 不会替你把这些任务关成完成。`accepted` 和 `needs_user` 会给用户发一张结论卡（做完了 / 做不了 / 要你拍板，一句依据 `reason`，一个链接 `link`；
     拍板的附上你推荐的 `recommend`，用户回「OK」就按推荐来），结论卡发了就不要再推一遍。
   - 只把要用户决定的事和已验收的结果告诉用户：triage 级督办唤醒的这一轮默认折叠成督办记录，也不会自动推送。

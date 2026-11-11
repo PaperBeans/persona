@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- To-dos parity with iOS (#3034): list activity, projects, create and link, sources -->
-    <string name="agents_todo_not_handed">まだAgentに渡していません</string>
+    <string name="agents_todo_not_handed">まだエージェントに渡していません</string>
     <string name="agents_todo_created_at">%1$sに作成</string>
     <string name="agents_todo_spaces">プロジェクト</string>
-    <string name="agents_todo_space_no_agent">今はAgentがいません</string>
+    <string name="agents_todo_space_no_agent">今はエージェントがいません</string>
     <string name="agents_todo_space_remove">外す</string>
     <string name="agents_todo_source_space">プロジェクトごと</string>
     <string name="agents_todo_source_space_named">プロジェクト %1$s ごと</string>

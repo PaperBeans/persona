@@ -61,5 +61,7 @@
   "rule_docs_authored": "你创作的文档",
   "rule_docs_viewed": "你看过的文档",
   "invalid_fields": "天数须为 1 到 36500 的整数或留空。上下文消息数须为 0 到 200 的整数或留空。",
-  "store_all_doc": "全部保存。天数留空时遵循文档规则，不会引入默认删除期限。"
+  "store_all_doc": "全部保存。天数留空时遵循文档规则，不会引入默认删除期限。",
+  "topics_title": "知识点",
+  "topics_switch": "按主题整理知识点"
 }

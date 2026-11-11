@@ -42,4 +42,12 @@ object ClientLanguage {
 
     /** The language's code, `zh-Hans`, `en` or `ja`. */
     val tag: String get() = current.tag ?: "en"
+
+    /**
+     * The extension UI context's `locale` (docs/protocol/i18n.md "Protocol"): the shown language with the phone's
+     * region, such as `zh-Hans-CN`, `en-GB` or `ja-US`. Not `Locale.getDefault()` alone: below Android 13 the app
+     * language only pins resources, so the default stays the phone's language.
+     */
+    fun localeTag(system: Locale = Locale.getDefault()): String =
+        system.country.takeIf { it.isNotEmpty() }?.let { "$tag-$it" } ?: tag
 }

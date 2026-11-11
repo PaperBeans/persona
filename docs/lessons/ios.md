@@ -2,6 +2,16 @@
 
 Pitfalls, odd behavior and the decisions made at the time (formerly "Lessons" in `CLAUDE.md`; index in `docs/lessons/README.md`). Add new lessons to the relevant section, or create one if none fits.
 
+## The general pasteboard belongs to the app on screen (#4192)
+
+`UIPasteboard.general.string = …` neither throws nor returns anything, and in the background (an app woken by a silent
+push, or a connection outliving the app on screen) iOS drops the write; a read there comes back empty with `hasStrings`
+false, which looks like an empty clipboard rather than the paste prompt. A tool that answered ok after the assignment
+told the model a secret was copied when nothing was. Check `applicationState == .active` before touching the pasteboard,
+and after a write check that `changeCount` moved and `hasStrings` is true before saying it worked. Neither property
+shows the paste prompt. Waking the phone by push for such a call is pointless: the hub answers at once instead
+(`phoneOnScreenTools`, `docs/apple/phone-tools.md` "Foreground restrictions").
+
 ## A dispatch link must retain its target and its hand-off (#3711)
 
 A passing task-sheet test is not evidence that a dispatch link pushes an Agent on iPhone. Test the actual feed link,
@@ -91,6 +101,11 @@ from colliding with its buttons.
 
 - Under iPhone Duo's vertical bars (the outer display, the inner one on its side), a view that hosts a `UINavigationController` and moves sideways makes the controller run its deferred transition on every layout pass and lay its top view controller out twice (`transitionConductor:didStartDeferredTransition:context:` → `_layoutTopViewControllerLookForNested:`, then `_computeAndApplyScrollContentInsetDeltaForViewController:` → `_updateTopViewFramesToMatchScrollOffsetInViewController:…`). The shell's slide between Assistant and Agents spent 28 ms a frame (p95), 140 ms of hitches a second. An `offset`, a render-only `transformEffect` and a page under a mask all cost the same; only not moving helps (`ShellPageSlide` cross-fades there). An ordinary iPhone runs the same passes cheaply, so measure on the Duo simulator.
 - Measuring with the runtime CLI (`scripts/app/personactl.py launch`), install the build first (`xcrun simctl install`): the launcher runs whatever is installed, and a round of experiments once measured an older build.
+
+## A split's detail stack shares its modifiers only with its root page (#3680)
+
+- In a `NavigationSplitView`, the detail column's `NavigationStack` becomes the column's own navigation controller: a page opened on it covers the whole column. A `.safeAreaInset` on that stack, or a row in a `VStack` above it, shows only over the stack's root page and goes as soon as a page is opened (the Assistant | Agents switch over Agents' empty page vanished over every opened agent, with no way back to Assistant). Put what every page of the column needs on the pages themselves: the root page, each destination (`SplitDetailPage`), and pages pushed with `navigationDestination(item:)` / `(isPresented:)` (`detailPresentation`, a space's New Session).
+- Check it with a page opened from the list *and* one opened in code (`-openSession`, an Inbox item, a notification): only the empty page showed the row.
 
 ## A relay push keeps the fallback's sound unless the service extension sets it (#1862)
 
@@ -298,6 +313,11 @@ Use an invalidation revision as the task key and handle the flag after completio
   Lark chat rows updated "seen" and report timers on entry, receipt bookkeeping on exit, repeatedly reevaluating the entire page during scrolling and doubling dropped frames.
   Keep invisible bookkeeping in a class held by `@State` (`LarkChatBook`), whose writes do not invalidate views; visible counts / receipts remain state, written only when actually changed.
 - Do not construct WKWebView on the main thread while scrolling: preload links only for recent replies (within 15 minutes); preloading every old reply caused 1–2 second freezes.
+- A pooled WKWebView keyed by its link's URL carries the page the user browsed to, and its back/forward history, into the next opening of that link
+  (2026-11-11, #4074: a PR link reopened on an issue page). Hand a view out for one opening only: `dismantleUIView` gives it back and the pool drops it
+  (`WebViewPool.release`). A WKWebView's history cannot be cleared, so a fresh opening needs a new view. In a unit test neither
+  `loadHTMLString` nor a script's `history.pushState` adds back/forward entries (iOS 26.5 simulator), and a UI test's synthesized edge swipe
+  does not start WebKit's back gesture: a followed link in a UI test (`LinkSheetReopenTests`) is what builds real history.
 - Scroll bookkeeping (visible rows, touch state) belongs in unobserved objects (`ChatScratch`); writing `@State` reevaluates the page. Cache derived rows by
   `ChatStore.version` and similar keys. Decode WebSocket messages on callback threads, not after returning to main.
 - `ScrollPosition.scrollTo(y:)` also zeros horizontal offset: with `contentMargins(.horizontal)`, the page sticks to screen edges.
@@ -560,11 +580,23 @@ Use an invalidation revision as the task key and handle the flag after completio
 - A `.contextMenu` on a view inside a `List` / `Form` row is the whole row's (2026-11-10, #2405): with several in one row (Settings › Avatar's grid of cards is one row), a long press anywhere lifts the whole row and runs one of them, whichever SwiftUI kept, intermittently. The uploaded avatar's Delete deleted another avatar, and a long press on Mochi offered New from Photo's Photos / Files. Give each card a control of its own: a visible button (the avatars' corner Delete), on iOS a `Menu` with a `primaryAction` (`.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)`), on the Mac `macBoundedContextMenu`. A UI test that long-presses the card it means passes whenever SwiftUI happens to keep that card's menu: long-press a neighbor too and assert no menu opens.
 - A `.contextMenu(menuItems:preview:)` preview is drawn in the context menu's own host, which the app's environment objects do not reach (2026-11-08, #1490): a preview showing a view with `@Environment(AppModel.self)` crashed the app on the long press, in SwiftUI's environment assertion with no app frame on the stack. Hand the preview what it reads (`.environment(model)`, the scopes it uses).
 - Put MarkdownUI `.markdownTextStyle` inside `.markdownTheme`, called first, or theme text styles overwrite it.
+- A MarkdownUI theme built from `Theme()` styles only the blocks it names: `.persona` set heading1–3, so `####` was drawn as bare body text with
+  no margins and read as the next paragraph's first line (#3863). Name every heading level; anything `ReplyText` mirrors goes through `ReplyMetrics`.
+- cmark (MarkdownUI, and `AttributedString(markdown:)` in `ReplyText`) applies CommonMark's flanking rules as written: `**注意：**后文` and
+  `这是**「强调」**的` keep their asterisks, because a `**` after full-width punctuation closes only before a space or punctuation (#3863; the web uses
+  remark-cjk-friendly). `CJKEmphasis` moves the punctuation outside such a pair before parsing, in the reply memo pipeline and in `ReplyText`, never
+  inside code (fences under list items and in quotes included) or a formula, and a bracket only with its partner: moving the `）` of
+  `**方案（推荐）：**` alone bolded half a bracket. Check a parsing claim against cmark-gfm itself (the swift-cmark checkout builds
+  `cmark-gfm-bin`), not against the spec from memory.
 - Link endings have one rule (`Links`): stop at whitespace or any non-ASCII (Chinese / fullwidth punctuation), strip trailing `.,;:!?` and unmatched `)` / `]`.
   MarkdownUI cmark-gfm autolinks stop only at whitespace, swallowing Chinese paragraphs after URLs (2026-10-30). Run all MarkdownUI text through
   `Links.markdown` (bare links become `<url>`): replies, plans, files, Lark messages, knowledge. `FilePaths` also stops at non-ASCII.
 - Reply tables must not grow by content (MarkdownUI Grid uses widest cells, sending long Chinese columns offscreen): `FittedTable` allocates available widths,
   preserves short columns and wraps long ones, scrolling horizontally only `if` minimum widths do not fit; right-edge fade hints at scrolling (`TablePlan`).
+  - A fitted cell is framed to its column's whole planned width, so the `gridColumnAlignment` MarkdownUI sets from the delimiter row no longer moves
+    anything and `| --: |` drew leading (#3863). The cell aligns itself (`MarkdownTableText.alignments`, passed through the environment like the
+    widths; the frame's alignment and `multilineTextAlignment`). Measure in the font the cells draw: tabular digits (`monospacedDigitSystemFont`
+    with `FontDigitVariant(.monospaced)`), or a number measured in proportional digits can wrap at its last digit.
   - 表格尺寸已有共享缓存，不代表布局准备没有重活（2026-11-06，#5730）：先调用 `renderMarkdown()` 再查尺寸缓存，仍会每次序列化整张表。按完整 `MarkdownContent` 保留当前表的源文本和尺寸；字号变化只重测，内容变化同步替换，不能只按宽度或行数判断。
 - 代码高亮缓存超过上限时不能全表清空（2026-11-06，#5730）：用有界 LRU 保留仍在使用的块，键包含代码、语言和字号比例。300 项及 2 MiB 源文本 UTF-8 预算不是整个 `Text` 的内存上限；不把本来就跳过词法分析的 60,000 字节及以上纯文本块放进缓存，避免挤走昂贵的高亮热点。验证字号、内容、语言失效及冷项淘汰，不用帧率中位数代替持续达标。
 - Custom `Layout` `proposal.width` can be `.infinity`; check `isFinite` before `Int(...)` conversion or crash (Lark card columns).
@@ -987,6 +1019,11 @@ producing "`ask_user` + empty gray box". After answering / collapsing the card, 
 Production interactions showed creation, push and answer 21 seconds later; app rendering was wrong. When adding assistant-only tools (`assistant/tools.go`),
 also give them Chinese display names / meaningful parameters in `ToolPresentation`; model-facing English results need user-readable details (`AskUserDetail` reads selected answers from results).
 
+Claude Code keeps adding tools (`TaskCreate` replaced `TodoWrite`, `SendMessage`, `Monitor`, `LSP`…), and a table that lags shows raw names (2026-11-10, #2986).
+Since then an unknown tool falls back to `ToolNaming` instead: another server's MCP tool reads "<Server> · <Tool>" in words, any other name is humanized,
+the subject is the most telling input field, and the detail is a key/value list with the JSON under Raw Input. Bookkeeping tools (`ToolNaming.quiet`)
+stay out of a run's chips. Check the [tools reference](https://code.claude.com/docs/en/tools-reference) when Claude Code ships a new tool.
+
 ## Trace "two pages share a component" from actual call sites (2026-11-04, #1079→#1091)
 
 #1079 requested Agent dictation / stop buttons matching assistant; only buttons were extracted, assuming both composers used `ShellComposerBar`.
@@ -1031,6 +1068,30 @@ When a computer disconnects, hub marks sessions unknown, not offline; `AgentStat
   - A tick change alone is not enough: a finger held still trembles by a point or two, and with many messages the ticks are `Theme.Size.edgeTickGapMin` (5 pt) apart, so a tremble over the line between two ticks would count as a pick.
 - **Tests**: UI tests that drive the navigator hold first (`press(forDuration: 0.5, thenDragTo:…)`). `testEdgeSwipeScrollsTheList` swipes quickly in the band and checks that nothing jumps and the list follows the finger.
   - `thenHoldForDuration` after a fast synthesized drag does not stop the list from coasting once the finger lifts: the list was where the finger left it, then moved on by more than the drag itself. Measure a lower bound in the finger's direction, and tap to stop the coasting before reading frames.
+
+## Jump to Latest during a glide: take the touch in UIKit, on touch-down (2026-11-10, #3027)
+
+- **What happened**: on a phone (TestFlight 221), flick up through a chat, Agent or Persona, and tap ↓ while the list
+  still glides: nothing. The arrow stayed and the list glided on; a second tap once it had stopped worked. So neither ↓'s
+  SwiftUI `Button` (it would have jumped) nor the list's scroll view (a touch on a gliding `UIScrollView` stops it) had
+  the touch. ↓ is an overlay on the scroll view, not part of its content.
+- **The simulator never showed it**: on an iOS 27.0 simulator, about 15 taps on the old `Button` at every stage of
+  a glide (from a ↓-placed newest end or from further up, 0.3 to 2 s into it, a slow or a 3000 pt/s flick, Agent and
+  Persona chats) all jumped: the glide stopped and SwiftUI's animated `scrollTo(edge:)` got there in about 0.23 s. A
+  theory that `ScrollPosition` still held `.edge(.top)` from the last jump and setting it again changed nothing was
+  ruled out the same way. What on the device keeps the touch from SwiftUI's button stayed unknown.
+- **Fix**: the touch is not SwiftUI's to arbitrate. `JumpArrowTouch` is a plain `UIView` (a `UIViewRepresentable`)
+  laid over the button: UIKit hands it the touch directly, and it acts in `touchesBegan`, the moment the finger lands,
+  as a keyboard key does, so nothing that recognizes later can cancel it. It swallows the rest of the touch. The
+  `Button` under it stays for its look and for VoiceOver, Full Keyboard Access and Switch Control (the pad is not an
+  accessibility element); `point(inside:with:)` lets the pointer's hover through so iPad keeps the button's highlight.
+- **The jump itself no longer asks SwiftUI either**: `ChatJumpRun` stops the glide with
+  `setContentOffset(contentOffset, animated: false)`, puts a far list one screen short of the newest end and animates the
+  rest on a display link (`ChatJump`, docs/apple/ios-state.md「How ↓ gets there」). It starts on the tap's frame whatever
+  SwiftUI thinks of the position, and says when it is there.
+- **Verify on a device**: a UI test proves the touch reaches ↓ during a glide and the list gets there
+  (`ScrollToBottomTests` 11 and 12), but the old code passed it too. The device check is the report's own steps on a
+  TestFlight build: flick hard, tap ↓ at once, in an Agent chat and in Persona's.
 
 ## Context compaction as a divider (2026-11-04, #1064)
 

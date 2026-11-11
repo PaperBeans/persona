@@ -28,9 +28,11 @@ nonisolated struct HubExtension: Codable, Hashable, Sendable, Identifiable {
     /// A plugin from a market (a hub with plugin_auto_upgrade): its own auto-upgrade switch, its newer version and what
     /// happened last with an upgrade (docs/extensions/extensions.md「Auto-upgrade」).
     var autoUpgrade: Bool?
-    /// Why its own switch does not apply now: "disabled" while the extension is switched off (the hub keeps the switch
-    /// for when it is on again). Nil from a hub from before it.
+    /// Why its own switch does not apply now: "market_removed" once its market is gone, or "disabled" while it is off.
     var autoUpgradePaused: String?
+    var marketWasRemoved: Bool { autoUpgradePaused == "market_removed" }
+    /// The market it upgrades from, retained after that market is removed (nil: a hub from before this field).
+    var market: String?
     var upgrade: ExtensionUpgrade?
     var upgradeNote: ExtensionUpgradeNote?
     /// An extension with a program on computers: how that program is on each machine it is switched on for.
@@ -46,7 +48,7 @@ nonisolated struct HubExtension: Codable, Hashable, Sendable, Identifiable {
     var sandbox: ExtensionSandbox?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, kind, status, error, version, source, enabled, description, contributes, warnings, upgrade, nodes, auth, tools, manager, attached, sandbox
+        case id, name, kind, status, error, version, source, enabled, description, contributes, warnings, market, upgrade, nodes, auth, tools, manager, attached, sandbox
         case needsSetup = "needs_setup", autoUpgrade = "auto_upgrade", autoUpgradePaused = "auto_upgrade_paused", upgradeNote = "upgrade_note"
     }
 

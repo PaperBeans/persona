@@ -38,7 +38,8 @@ struct ContinuousMotionTests {
     ]
 
     /// Loops per file, comments left out.
-    static func found() -> [String: Int] {
+    static func found(in root: URL = apple) -> [String: Int] {
+        let apple = root.resolvingSymlinksInPath()
         var out: [String: Int] = [:]
         for dir in dirs {
             let urls = FileManager.default.enumerator(at: apple.appending(path: dir), includingPropertiesForKeys: nil)?
@@ -49,7 +50,7 @@ struct ContinuousMotionTests {
                     .map { l in l.range(of: "//").map { String(l[..<$0.lowerBound]) } ?? l }
                     .joined(separator: "\n")
                 let n = loop.numberOfMatches(in: code, range: NSRange(code.startIndex..., in: code))
-                if n > 0 { out[String(url.path.dropFirst(apple.path.count + 1))] = n }
+                if n > 0 { out[String(url.resolvingSymlinksInPath().path.dropFirst(apple.path.count + 1))] = n }
             }
         }
         return out
@@ -58,6 +59,18 @@ struct ContinuousMotionTests {
     @Test func readsTheSources() {
         #expect(FileManager.default.fileExists(atPath: Self.apple.appending(path: "Persona/Views").path))
         #expect(Self.found().count >= Self.registry.count / 2)
+    }
+
+    @Test func symlinkedRootsKeepTheSameRegistryPaths() throws {
+        let temporary = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let canonical = Self.apple.resolvingSymlinksInPath()
+        let linked = temporary.appending(path: "apple")
+        try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: canonical)
+        let expected = Self.registry.mapValues(\.count)
+        #expect(Self.found(in: canonical) == expected)
+        #expect(Self.found(in: linked) == expected)
     }
 
     @Test func everyLoopIsRegistered() {

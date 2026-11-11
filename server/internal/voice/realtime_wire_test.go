@@ -5,7 +5,7 @@ import (
 	"io"
 	"log"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 // The realtime dialect's session.update is the GA shape a Realtime endpoint takes (#4011): type realtime, the formats
@@ -98,7 +98,16 @@ func TestRealtimeWireDecodesMeasuredFrames(t *testing.T) {
 
 // A response.create sent while a reply is under way is refused by the service (conversation_already_has_active_response):
 // it is held back and sent once that reply is over, once however many asked for it meanwhile.
+//
+// It runs in a synctest bubble: the held response.create goes out on a goroutine of its own. synctest.Wait returns
+// once every goroutine the turn's end started has finished or waits on a timer, so the count after it is final rather
+// than whatever arrived within a fixed window, and a send still waiting when the test ends fails it (the bubble's time
+// stops then). recLink is in memory, so nothing blocks outside the bubble.
 func TestResponseCreateWaitsForTheReplyUnderWay(t *testing.T) {
+	synctest.Test(t, responseCreateWaitsForTheReplyUnderWay)
+}
+
+func responseCreateWaitsForTheReplyUnderWay(t *testing.T) {
 	up := &recLink{left: -1}
 	c := captionConversation(t)
 	c.pl, c.w, c.ready, c.up = &Plugin{logger: log.New(io.Discard, "", 0)}, realtimeWire{}, true, up
@@ -125,11 +134,7 @@ func TestResponseCreateWaitsForTheReplyUnderWay(t *testing.T) {
 	c.mu.Lock()
 	c.handle(0, event{kind: evTurnEnd, id: "resp_1"})
 	c.mu.Unlock()
-	deadline := time.Now().Add(2 * time.Second)
-	for len(types()) < 3 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	time.Sleep(50 * time.Millisecond)
+	synctest.Wait() // the held response.create has gone out, and nothing else is still on its way
 	if got := types(); len(got) != 3 || got[2] != "response.create" {
 		t.Fatalf("after the reply: %v", got)
 	}

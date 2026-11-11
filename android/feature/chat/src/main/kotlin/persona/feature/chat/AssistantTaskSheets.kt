@@ -106,7 +106,8 @@ private fun TaskDetailSheet(todoId: String, host: AssistantTaskHost, onDismiss: 
             TaskMark(state)
             Column(Modifier.weight(1f)) {
                 Text(todo.title, style = PersonaTheme.type.title, color = PersonaTheme.palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(state.label.text(), style = PersonaTheme.type.caption, color = PersonaTheme.palette.status(state.status()).text, maxLines = 1)
+                Text(state.label.text(), style = PersonaTheme.type.caption, color = PersonaTheme.palette.status(state.status()).text, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
             }
             if (state.isRemovable) JIconButton(PhIcons.DotsThree, stringResource(R.string.chat_task_detail_more), { menu = true })
             JIconButton(PhIcons.X, stringResource(R.string.chat_task_detail_close), onDismiss)
@@ -156,7 +157,8 @@ private fun AgentDetailSheet(key: SessionKey, host: AssistantTaskHost, onDismiss
             Column(Modifier.weight(1f)) {
                 Text(session?.displayTitle ?: stringResource(R.string.chat_task_detail_agent), style = PersonaTheme.type.title, color = PersonaTheme.palette.ink,
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(stringResource(R.string.chat_task_detail_own_agent), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1)
+                Text(stringResource(R.string.chat_task_detail_own_agent), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             JIconButton(PhIcons.X, stringResource(R.string.chat_task_detail_close), onDismiss)
         }

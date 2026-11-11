@@ -173,13 +173,16 @@ extension LanguageStore {
     nonisolated static var drawingLocale: Locale { Locale(identifier: shared.groupResolved ?? shared.launched) }
 }
 
-/// `String(localized:)`, except that in the widget extension the text follows the app's current language at once
-/// (`LanguageStore.drawingLocale`): Foundation fixes an extension's language when its process starts. A
-/// `LocalizedStringResource` parameter, so the compiler still extracts the literals passed in.
+/// `String(localized:)`, except that the interface locale is explicit. In the widget extension it follows the app's
+/// current language at once (`LanguageStore.drawingLocale`); elsewhere it follows the launched interface language.
+/// An explicit locale also makes English keys with a bracketed suffix resolve to their zh-Hans catalog entries in
+/// the unit-test host. A `LocalizedStringResource` parameter, so the compiler still extracts the literals passed in.
 nonisolated func interfaceText(_ resource: LocalizedStringResource) -> String {
-    #if WIDGET_EXTENSION
     var resource = resource
+    #if WIDGET_EXTENSION
     resource.locale = LanguageStore.drawingLocale
+    #else
+    resource.locale = .interface
     #endif
     return String(localized: resource)
 }

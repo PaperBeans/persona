@@ -495,6 +495,7 @@ fun InboxScreen(repository: InboxRepository, navigator: Navigator, onOpenCard: (
                         count = if (group.id == "done") doneTotal(group, manager) else group.count,
                         status = when (group.id) { "action" -> Status.NeedsYou; "working" -> Status.Working; else -> null },
                         trailing = if (group.id == "working") null else if (group.folded) stringResource(R.string.inbox_expand) else stringResource(R.string.inbox_collapse),
+                        open = !group.folded, trailingIsFoldAction = true,
                         onClick = if (group.id == "working") null else ({
                             filter(currentFilters.copy(section = if (section == group.id) "" else section,
                                 expanded = if (group.id in expanded) expanded - group.id else expanded + group.id))

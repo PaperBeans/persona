@@ -55,6 +55,18 @@ struct ExtensionSettingsView<Configuration: View, AdvancedInformation: View>: Vi
             information
             advancedInformation
             updates
+            // Review's download, checks and install, right under the button that started it (#3692).
+            if let op = lifecycle.operation {
+                ExtensionOperationSection(operation: op, name: detail.plugin.name) {
+                    Task { if await lifecycle.retry() { await page.load() } }
+                } review: {
+                    Task {
+                        do { try await lifecycle.review(op) } catch { AppModel.shared.toast = Toast(error.localizedDescription, style: .error) }
+                    }
+                } dismiss: {
+                    Task { await lifecycle.dismissOperation() }
+                }
+            }
             danger
         }
     }
@@ -157,7 +169,7 @@ struct ExtensionSettingsView<Configuration: View, AdvancedInformation: View>: Vi
                         Text(ExtensionText.upgradeAction(upgrade) ?? String(localized: "Update [Extensions Model 326f67]")).lineLimit(1)
                     }
                     .themedButton()
-                    .disabled(busy || !policy.canCheck)
+                    .disabled(busy || !policy.canCheck || !lifecycle.canReview)
                     .accessibilityIdentifier("plugin-upgrade")
                 }
             }
@@ -175,7 +187,9 @@ struct ExtensionSettingsView<Configuration: View, AdvancedInformation: View>: Vi
                 identity("Previous Version", value: previous)
                 Text("This manager does not provide a rollback preview.").font(Theme.Font.label).foregroundStyle(.secondary)
             }
-            if lifecycle.busy { ProgressView() }
+            // The operation's card says what is going on once there is one; a spinner only while asking for it (or an
+            // older hub's synchronous preview).
+            if lifecycle.busy && lifecycle.operation == nil { ProgressView() }
             if let error = lifecycle.error {
                 Text(error).font(Theme.Font.label).foregroundStyle(Theme.danger).textSelection(.enabled)
                     .accessibilityIdentifier("extension-lifecycle-error")
@@ -196,13 +210,13 @@ struct ExtensionSettingsView<Configuration: View, AdvancedInformation: View>: Vi
 
     private var autoUpgradeReason: String {
         if offline { return offlineReason }
-        if !policy.canAutoUpgrade { return policy.updateReason }
-        if detail.plugin.autoUpgradePaused == "market_removed" {
-            return String(localized: "The extension market is unavailable. Check its source and try again.")
+        if detail.plugin.marketWasRemoved {
+            return String(localized: "Auto-upgrade is paused because its market was removed. Your setting is kept and applies again once the market is added back with the same address.")
         }
         if detail.plugin.enabled == false || detail.plugin.autoUpgradePaused == "disabled" {
             return String(localized: "Auto-upgrade is paused while this extension is off.")
         }
+        if !policy.canAutoUpgrade { return policy.updateReason }
         if lifecycle.globalAuto == false { return String(localized: "Automatic upgrades are paused globally for this manager.") }
         return String(localized: "Compatible updates run automatically. Permission changes require review.")
     }
@@ -245,12 +259,24 @@ struct ExtensionSettingsPageWork: ViewModifier {
                     roster = await ManagerRoster.read(api.manager(nil), keeping: roster)
                 }
             }
+            .task { await lifecycle.loadOperations() }
+            // One started earlier (the page left and opened again) went through while this page is up: read it again.
+            .onChange(of: lifecycle.operationState) { old, new in
+                if old == .running, new == .succeeded { Task { await page.load() } }
+            }
+            // Closed without Update: the operation waiting on this preview is canceled.
             .sheet(isPresented: Binding(get: { lifecycle.preview != nil }, set: { if !$0 { lifecycle.dismissPreview() } })) {
                 if let preview = lifecycle.preview {
                     ExtensionInstallSheet(preview: preview, name: page.detail?.plugin.name ?? page.id) {
-                        let succeeded = await lifecycle.confirmUpgrade()
-                        if succeeded { await page.load() }
-                        return succeeded
+                        guard let consent = lifecycle.takeConsent() else {
+                            let succeeded = await lifecycle.confirmUpgrade()
+                            if succeeded { await page.load() }
+                            return succeeded
+                        }
+                        // The sheet closes at once; the steps show on the page. The operation is taken before it
+                        // closes, so closing does not cancel what was just agreed to.
+                        Task { if await lifecycle.confirmUpgrade(preview, consent: consent) { await page.load() } }
+                        return true
                     }
                 }
             }

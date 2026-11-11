@@ -96,6 +96,7 @@ var modelPurposes = []ModelPurpose{
 	{ID: "kb.dedupe", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "kb.items", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "kb.moments", Group: "group_processing", Kind: "api", Parent: "kb"},
+	{ID: "kb.topics", Group: "group_processing", Kind: "api", Parent: "kb"}, // knowledge points by topic (kb/topics.go)
 	{ID: "assistant.title", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "assistant.route", Group: "group_processing", Kind: "api", Parent: "kb"}, // New chat: a direction or a quick chat (route.go)
 	{ID: "agent.title", Group: "group_processing", Kind: "api", Parent: "kb"},

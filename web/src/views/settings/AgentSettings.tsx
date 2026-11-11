@@ -24,11 +24,11 @@ import { api, enc, errorText } from "../../lib/api";
 import { t } from "../../i18n";
 import { machineWithHub } from "../../lib/mesh";
 import { composing } from "../../lib/send-history";
-import { useStore } from "../../lib/store";
 import { Button, copyText, cx, EASE, IconButton, Loading, Menu, Spinner, toast, useMenu } from "../../ui/atoms";
 import { ClaudeDirs } from "./ClaudeDirs";
 import { LiveReplies } from "./LiveReplies";
 import { Group, Switch } from "./SettingsParts";
+import { useScopedMachines } from "../../lib/current-assistant";
 
 const MACHINE_KEY = "persona.agentSettings.machine";
 const ALL_KEY = "persona.agentSettings.applyAll";
@@ -37,7 +37,8 @@ const controlClass = "h-8 rounded-control bg-field px-2.5 text-[12.5px] text-ink
 
 export function AgentSettings({ agent }: { agent: AgentKind }) {
   const text = AGENT_TEXT[agent];
-  const machines = useStore((s) => s.machines);
+  // the current assistant's computers (docs/assistant/managers.md "The current assistant"): all of them with one
+  const machines = useScopedMachines();
   const online = useMemo(() => machines.filter((m) => m.online), [machines]);
   const [mid, setMid] = useState(() => localStorage.getItem(MACHINE_KEY) ?? "");
   const [applyAll, setApplyAll] = useState(() => localStorage.getItem(ALL_KEY) !== "0"); // on by default, as on iOS

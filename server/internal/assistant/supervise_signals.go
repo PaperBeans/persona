@@ -265,7 +265,8 @@ func (s *Service) retryDigestLocked(d time.Duration) {
 // watchSignals are what t and its agents show now that the supervisor should hear of, by their state alone: a task
 // waiting for review (told once per review: again after a restart of the assistant, which forgot what it told), an
 // agent waiting for an answer (at once for a quiet task), or working without progress for long. Nothing more for a
-// task waiting for review or for the user, and nothing for one done or not supervised. A task nobody works on any more
+// task waiting for review or for the user, only that its time came for a parked one, and nothing for one done or not
+// supervised. A task nobody works on any more
 // is told from what the minute pass found (orphanSignal, tasks_orphan.go), since that asks whether its computers answer.
 func watchSignals(t Todo, agents []proto.Session, now time.Time) []superviseSignal {
 	v := t.Supervision
@@ -276,6 +277,11 @@ func watchSignals(t Todo, agents []proto.Session, now time.Time) []superviseSign
 	case reviewPending:
 		return []superviseSignal{{Todo: t.ID, Kind: sigReview, Key: reviewKey(v)}}
 	case reviewNeedsUser:
+		return nil
+	case reviewParked: // nothing until its time, then that it came (parked.go)
+		if g, ok := parkedDueSignal(t, now); ok {
+			return []superviseSignal{g}
+		}
 		return nil
 	}
 	var out []superviseSignal

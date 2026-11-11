@@ -495,7 +495,7 @@ internal fun AgentsScreen(
             }
             if (page.pagination.paged && !firstPageIncomplete) item("sessions-pagination", contentType = "pagination") {
                 Column(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.m), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(stringResource(R.string.agents_page_loaded, page.sessions.size, page.pagination.total),
+                    Text(pluralStringResource(R.plurals.agents_page_loaded, page.pagination.total, page.sessions.size, page.pagination.total),
                         style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
                     if (page.pagination.loading) JSpinner()
                     else if (page.pagination.hasMore) JTextButton(stringResource(R.string.agents_page_more), model::loadMore)

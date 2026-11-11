@@ -107,5 +107,10 @@
   "sandbox_unavailable": "サンドボックスを利用できません",
   "settings_moved": "確認中に設定が変わったため保存していません。もう一度お試しください",
   "translation_skipped": "{file} は使われません：{err}。マニフェスト自体のテキストを表示します",
-  "entry_translation_skipped": "{id}：インデックスエントリの l10n は使われません：{err}。マニフェスト自体のテキストを表示します"
+  "entry_translation_skipped": "{id}：インデックスエントリの l10n は使われません：{err}。マニフェスト自体のテキストを表示します",
+  "missing_secret_provider": "シークレット「{title}」：{scheme} 参照の値を提供するオンの拡張機能がありません",
+  "secret_not_reference": "参照ではありません（scheme://… の形式）",
+  "secret_own_scheme": "拡張機能は自分の {scheme} 参照を自分のシークレットにできません",
+  "secret_no_provider": "{scheme} 参照の値を提供するオンの拡張機能がありません。先にインストールするかオンにしてください",
+  "secret_value_or_reference": "値か参照のどちらか一方を指定してください"
 }

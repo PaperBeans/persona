@@ -39,7 +39,8 @@ nonisolated enum JSONValue: Codable, Hashable, Sendable {
     var string: String? {
         switch self {
         case .string(let s): s
-        case .number(let n): n == n.rounded() ? String(Int(n)) : String(n)
+        // A whole number in Int's range without a decimal point; anything else (1e20, which `Int(_:)` traps on) as Double prints it.
+        case .number(let n): Int(exactly: n).map { String($0) } ?? String(n)
         case .bool(let b): b ? "true" : "false"
         default: nil
         }
@@ -53,7 +54,8 @@ nonisolated enum JSONValue: Codable, Hashable, Sendable {
         }
     }
 
-    var int: Int? { double.map { Int($0) } }
+    /// Toward zero, as `Int(_:)`; nil past Int's range or for "nan" and "inf", where `Int(_:)` traps.
+    var int: Int? { double.flatMap { Int(exactly: $0.rounded(.towardZero)) } }
     var bool: Bool? { if case .bool(let b) = self { b } else { nil } }
     var array: [JSONValue]? { if case .array(let a) = self { a } else { nil } }
     var object: [String: JSONValue]? { if case .object(let o) = self { o } else { nil } }

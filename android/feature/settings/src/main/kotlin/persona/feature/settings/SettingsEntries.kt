@@ -107,3 +107,35 @@ internal fun SettingsServices.bound(): SettingsServices {
         copy(deviceSettings = current?.deviceSettings, hubAddress = current?.hubAddress, binding = null)
     }
 }
+
+/**
+ * These services with the current assistant's settings scoped to it (docs/assistant/managers.md "Clients", the first group
+ * of Settings): model providers, model configuration, triage, connectors with mail and Lark, channels, the Lark bot
+ * and the sent-as-you ledger name [assistant] on every request, so their pages read and write that assistant's alone;
+ * extensions are pinned to it under `extensions/` (their list is filtered by each one's stamp). A hub without a roster
+ * (older, one assistant) gets the requests it always got.
+ */
+internal fun SettingsServices.forAssistant(assistant: persona.core.contracts.api.CurrentAssistant): SettingsServices {
+    // The default assistant's (one assistant too) and an older hub's (no roster) name none: the requests they always sent.
+    val roster = assistant.roster ?: return this
+    val id = assistant.id
+    if (id.isBlank() || id == roster.defaultManagerId) return this
+    return copy(
+        providers = providers?.forManager(id),
+        models = models?.forManager(id),
+        triage = triage?.forManager(id),
+        connectors = connectors?.forManager(id),
+        channels = channels?.forManager(id),
+        feishuBot = feishuBot?.forManager(id),
+        sent = sent?.forManager(id),
+        // Its extensions and their source subscriptions (`/api/v1/subscriptions…`, answered by its own extension manager).
+        extensions = extensions?.pinned(ManagerPins.of(listOf(listOf("extensions"), listOf("plugins"), listOf("subscriptions")), id)),
+    )
+}
+
+/** [SettingsServices.forAssistant] for the current assistant, made again when it changes. */
+@Composable
+internal fun SettingsServices.forCurrentAssistant(): SettingsServices {
+    val assistant = persona.core.designsystem.currentAssistant()
+    return remember(this, assistant.id, assistant.roster?.defaultManagerId, assistant.roster != null) { forAssistant(assistant) }
+}

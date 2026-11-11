@@ -55,6 +55,8 @@ type Service struct {
 	leaderStarts atomic.Int64
 	// ext is the extensions' tools in this process (extensions.go SetExtensions); nil: none (tests).
 	ext ExtensionTools
+	// refs is the provider extensions' values for launcher keys that are references (launcher_secrets.go); nil: none.
+	refs launcherSecrets
 
 	hub   Hub
 	store func() Store

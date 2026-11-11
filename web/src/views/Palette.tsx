@@ -13,6 +13,7 @@ import { conversationPage } from "../lib/conversation-page";
 import { href, navigate, type Route } from "../lib/router";
 import { composing } from "../lib/send-history";
 import { useAgentSessions } from "../lib/sessions";
+import { PALETTE_RECENT_CHATS, shownChats, useRecentChats } from "../lib/recent-chats";
 import { chordParts, handlerOf, runShortcut, SCOPE_LABEL, useBindings } from "../lib/shortcuts";
 import { useStore } from "../lib/store";
 import { buildTerminalTree, type PanesResponse } from "../lib/terminals";
@@ -38,7 +39,8 @@ interface Hit {
 /** One selectable row of the list: a conversation, a terminal pane, an inbox item, a page ("Go to"), a file
  *  (views/palette/FilesSection.tsx), or (command mode) a command. */
 type Row =
-  | { kind: "session"; key: string; hit: Hit }
+  /** `recent`: in "Recently opened" (#2191), `previous` its first, the one ⌘K ⏎ goes back to. */
+  | { kind: "session"; key: string; hit: Hit; recent?: boolean; previous?: boolean }
   | { kind: "pane"; key: string; hit: TerminalHit }
   | { kind: "inbox"; key: string; hit: InboxHit<InboxItem> }
   | { kind: "place"; key: string; hit: PlaceHit }
@@ -126,6 +128,20 @@ function score(s: Session, q: string, machine: string): number {
 
 const HOME: Route = { name: "home" };
 
+/** The conversation "Go back" opens (#2191): the newest opened here, other than the one on the page, that still exists. */
+function previousChat(recent: { entries: string[]; current: string }, sessions: Session[], conversations: Session[]): { s: Session; to: Route } | null {
+  const find = (k: string): { s: Session; to: Route } | null => {
+    if (k.startsWith("j:")) {
+      const s = conversations.find((c) => `j:${c.session_id}` === k);
+      return s ? { s, to: { name: "persona", sid: s.session_id } } : null;
+    }
+    const s = sessions.find((c) => `s:${c.machine_id}/${c.session_id}` === k);
+    return s ? { s, to: { name: "session", mid: s.machine_id, sid: s.session_id } } : null;
+  };
+  const [key] = shownChats(recent.entries, recent.current, (k) => find(k) !== null, 1);
+  return key ? find(key) : null;
+}
+
 export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { open: boolean; onClose: () => void; onNewAgent: () => void; pane?: { mid: string; sid: string }; route?: Route }) {
   // what is typed lives in the store (lib/palette.ts): the shortcuts open it in a mode (`>` for commands) and read it
   const q = usePalette().query;
@@ -134,6 +150,8 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
   const [active, setActive] = useState(0);
   const [box, setBox] = useState<{ top: number; height: number } | null>(null);
   const sessions = useAgentSessions();
+  // the conversations opened here, newest first, and the one on the page (#2191)
+  const recentChats = useRecentChats();
   const assistant = useStore((s) => s.assistant);
   const machines = useStore((s) => s.machines);
   const bySession = useStore((s) => s.sessions);
@@ -201,15 +219,20 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
       const sc = score(s, query, "persona");
       if (sc) out.push({ key: `j:${s.session_id}`, s, to: conversationPage(s.session_id, s.machine_id, s.manager), assistant: true, score: sc });
     }
+    // nothing typed: the conversations opened here come first, newest first, without the one on the page (#2191); the
+    // first is the one before it, picked already, so ⌘K ⏎ goes back to it
+    const byKey = new Map(out.map((h) => [h.key, h]));
+    const recent = query ? [] : shownChats(recentChats.entries, recentChats.current, (k) => byKey.has(k), PALETTE_RECENT_CHATS);
+    const recentRows: Row[] = recent.map((k, i) => ({ kind: "session" as const, key: k, hit: byKey.get(k)!, recent: true, previous: i === 0 }));
     const all: (Row & { score: number; at: string })[] = [
-      ...out.map((h) => ({ kind: "session" as const, key: h.key, hit: h, score: h.score, at: h.s.updated_at ?? "" })),
+      ...out.filter((h) => !recent.includes(h.key)).map((h) => ({ kind: "session" as const, key: h.key, hit: h, score: h.score, at: h.s.updated_at ?? "" })),
       ...terminalHits(machinePanes, text).map((h) => ({ kind: "pane" as const, key: h.key, hit: h, score: h.score, at: "" })),
     ];
     all.sort((a, b) => b.score - a.score || byTime(b.at, a.at));
     const mail = inboxHits(inboxItems.filter((it) => !isDone(it)), text).map((h) => ({ kind: "inbox" as const, key: h.key, hit: h, score: h.score }));
     const go = placeHits(places, text).map((h) => ({ kind: "place" as const, key: h.key, hit: h, score: h.score }));
-    return orderGroups<Row & { score: number }>([all.slice(0, 40), mail, go]).flat();
-  }, [mode, text, sessions, assistant, machines, machinePanes, inboxItems, places]);
+    return [...recentRows, ...orderGroups<Row & { score: number }>([all.slice(0, 40), mail, go]).flat()];
+  }, [mode, text, sessions, assistant, machines, machinePanes, inboxItems, places, recentChats]);
 
   // command mode: what other modules offer for here, then the registered commands with their shortcuts
   const commands = useMemo((): Row[] => {
@@ -217,14 +240,17 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
     const run = (id: string, digit?: number) => {
       if (!runShortcut(id, { digit })) toast(t("palette.command_unavailable"));
     };
+    // Go back to the previous conversation (#2191): the newest opened here other than the one on the page that still exists
+    const back = previousChat(recentChats, sessions, assistant?.conversations ?? []);
     const extra: PaletteCommand[] = [
+      ...(back ? [{ id: "app:previous-chat", title: t("palette.previous_chat"), detail: sessionTitle(back.s), section: SCOPE_LABEL.global, icon: "undo" as const, keywords: "back previous last recent 返回 上一个 最近", run: () => navigate(back.to) }] : []), // i18n-ignore: search words in both languages, as PLACE_WORDS
       { id: "app:new-agent", title: t("palette.new_agent"), section: SCOPE_LABEL.global, icon: "plus", keywords: "new agent", run: onNewAgent },
       { id: "app:new-conversation", title: t("palette.new_conversation"), section: SCOPE_LABEL.global, icon: "chat", keywords: "persona new", run: () => navigate({ name: "persona-new" }) },
     ];
     const all = [...contextCommands({ route, pane }), ...appCommands({ bindings, available: (id) => Boolean(handlerOf(id)), run, machines: machines.map((m) => ({ id: m.id, name: m.name })), extra })];
     return filterCommands(all, text).map((cmd) => ({ kind: "command" as const, key: cmd.id, cmd }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `route` is parsed anew each render; its path says it all
-  }, [open, mode, text, bindings, machines, pane?.mid, pane?.sid, href(route), onNewAgent]);
+  }, [open, mode, text, bindings, machines, pane?.mid, pane?.sid, href(route), onNewAgent, recentChats, sessions, assistant]);
   // the files under the directory of the page (#2438): listed after the conversations and panes
   const files = usePaletteFiles({ open, jump: mode === "jump", text, route, pane, machinePanes });
   const shown = useMemo(() => (mode === "command" ? commands : [...hits, ...files.rows]), [mode, commands, hits, files.rows]);
@@ -323,7 +349,10 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
                 row: (
                   <button ref={ref} type="button" {...option} onMouseMove={() => setActive(i)} onClick={() => pick(r)} className={rowClass}>
                     <span className="flex size-5 shrink-0 items-center justify-center">{c.icon && <Icon name={c.icon} size={13} className={c.danger ? "text-red" : "text-ink-3"} />}</span>
-                    <span className={`min-w-0 flex-1 truncate text-[13px] ${c.danger ? "text-red" : "text-ink"}`}>{c.title}</span>
+                    <span className={`min-w-0 flex-1 truncate text-[13px] ${c.danger ? "text-red" : "text-ink"}`}>
+                      {c.title}
+                      {c.detail && <span className="ml-2 text-[12px] text-ink-3">{c.detail}</span>}
+                    </span>
                     {c.chord && (
                       <span className="flex shrink-0 items-center gap-1 [@media(pointer:coarse)]:hidden">
                         {commandKeys(c).map((k, n) => (
@@ -367,9 +396,15 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
                 ),
               };
             }
-            // the conversations and panes have a heading only after another group ("Inbox" or "Go to" matched better)
-            const prev = (shown[i - 1] as Row | undefined)?.kind;
-            const sessionsHeading = i > 0 && prev !== "session" && prev !== "pane" ? <GroupHeading>{t("palette.group_sessions")}</GroupHeading> : null;
+            // the conversations and panes have a heading only after another group ("Recently opened", "Inbox" or "Go to");
+            // "Recently opened" has its own
+            const before = shown[i - 1] as Row | undefined;
+            const prev = before?.kind;
+            const recent = r.kind === "session" && r.recent;
+            const afterRecent = before?.kind === "session" && before.recent && !recent;
+            const sessionsHeading = recent
+              ? (i === 0 ? <GroupHeading>{t("palette.group_recent")}</GroupHeading> : null)
+              : (i > 0 && ((prev !== "session" && prev !== "pane") || afterRecent) ? <GroupHeading>{t("palette.group_sessions")}</GroupHeading> : null);
             if (r.kind === "pane") {
               const h = r.hit;
               return {
@@ -399,7 +434,10 @@ export function Palette({ open, onClose, onNewAgent, pane, route = HOME }: { ope
                 {!h.assistant && <SessionMark s={h.s} size={14} />}
                 <span className="flex size-5 shrink-0 items-center justify-center">{h.assistant ? <Icon name="spark" size={13} className="text-ink-3" /> : <StatusMark state={st} />}</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium text-ink">{sessionTitle(h.s)}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate text-[13px] font-medium text-ink">{sessionTitle(h.s)}</span>
+                    {r.previous && <span className="shrink-0 rounded-[5px] bg-field px-1.5 text-[10.5px] text-ink-3 shadow-hairline">{t("palette.previous")}</span>}
+                  </span>
                   <span className="block truncate text-[11.5px] text-ink-3">{[meta, shortPath(h.s.cwd)].filter(Boolean).join(" · ")}</span>
                 </span>
                 <span className="shrink-0 text-[11px] text-ink-3">{st === "offline" || h.assistant ? ago(h.s.updated_at) : STATE_LABEL[st]}</span>

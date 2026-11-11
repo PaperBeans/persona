@@ -6,12 +6,14 @@ import XCTest
 ///   TEST_RUNNER_PERSONA_MOCK_HUB=http://127.0.0.1:<port> xcodebuild test … -only-testing:PersonaUITests/DuoSplitTests
 final class DuoSplitTests: XCTestCase {
     private var app: XCUIApplication!
+    private var hub = ""
 
     override func setUpWithError() throws {
         continueAfterFailure = false
         guard let hub = ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"] else {
             throw XCTSkip("needs scripts/mock/mock_hub.py (PERSONA_MOCK_HUB)")
         }
+        self.hub = hub
         app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app.launchArguments = ["-pairURL", pair, "-dev.openChat", "", "-tab", "dev", "-openAgentsFresh", "YES"]
@@ -79,8 +81,10 @@ final class DuoSplitTests: XCTestCase {
 
     /// An agent opened beside the list has no ‹ (nothing to go back to: the list is there). With the list closed by its
     /// toolbar button, the chat's ‹ brings it back: the chat draws its own header, so no system button would. Before,
-    /// the row's glass drew the hidden ‹ anyway and it did nothing, with or without the list. With nothing open, the
-    /// empty page offers Show List instead.
+    /// the row's glass drew the hidden ‹ anyway and it did nothing, with or without the list. On iPhone Duo open on its
+    /// side the chat's actions are in the system's side bars, whose Show Sidebar brings it back, and the chat has no ‹
+    /// either (#3680: a ‹ that did the same read as a Back that opened the sidebar). With nothing open, the empty page
+    /// offers Show List instead.
     func testBackBringsTheClosedListBack() {
         app.terminate()
         // The chat as the split's first page (`-openSession`), its header held open to be tapped.
@@ -93,10 +97,52 @@ final class DuoSplitTests: XCTestCase {
         sleep(1)
         XCTAssertFalse(back.exists, "a ‹ beside the list, with nothing to go back to")
         close(closeList)
+        let window = app.windows.firstMatch.frame
+        if UIDevice.current.userInterfaceIdiom == .phone, window.width > window.height {
+            let showList = app.buttons["显示边栏"]
+            XCTAssertTrue(showList.waitForExistence(timeout: 5), "the list is closed and nothing brings it back")
+            XCTAssertFalse(back.exists, "a ‹ on the split's first page with the list folded: it opened the sidebar")
+            showList.tap()
+            XCTAssertTrue(closeList.waitForExistence(timeout: 5), "Show Sidebar did not bring the list back")
+            return
+        }
         XCTAssertTrue(back.waitForExistence(timeout: 5), "the list is closed and the chat has no way back to it")
         back.tap()
         XCTAssertTrue(closeList.waitForExistence(timeout: 5), "‹ did not bring the list back")
         XCTAssertFalse(back.exists, "‹ still there with the list beside the chat")
+    }
+
+    /// What the list shows (`probe.agents-list`): each agent's last line.
+    private struct Shown: Decodable { var last: [String: String] }
+
+    @discardableResult
+    private func mock(_ what: String) -> [String: Any] {
+        var out: [String: Any] = [:]
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: URL(string: hub + "/mock/" + what)!) { data, _, _ in
+            out = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 10)
+        return out
+    }
+
+    /// The list beside an agent opened in code (the one remembered at launch, a card, New Session, a worktree line) keeps
+    /// following the hub (#3680): the split's sidebar column reads compact on a phone, so the list held itself as out of
+    /// sight under a pushed page, and other agents' last lines, the order and new agents stopped coming in.
+    func testTheListBesideAnOpenedAgentKeepsUpdating() {
+        app.terminate()
+        app.launchArguments += ["-openSession", "macbook/a1f3c2d4-0000-4000-8000-000000000002", "-probes", "YES"]
+        app.launchPinned()
+        XCTAssertTrue(app.descendants(matching: .any)["chat.title"].firstMatch.waitForExistence(timeout: 15), "the agent did not open")
+        sleep(2)
+        let bumped = mock("bump?what=last")
+        defer { mock("reset") }
+        guard let key = bumped["key"] as? String, let last = bumped["last"] as? String else { return XCTFail("the mock changed nothing: \(bumped)") }
+        eventually("the list beside the chat shows \(key)'s new last line", within: 5) {
+            let shown = app.probe("agents-list", as: Shown.self)?.last[key]
+            return shown == last ? [] : ["the list shows \(shown ?? "no row"), the hub \(last)"]
+        }
     }
 
     /// One search field: the system's drawer above the list. The list's first row has the quick filters alone, not the

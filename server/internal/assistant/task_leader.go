@@ -450,6 +450,7 @@ func (s *Service) deliverToLeaderAgent(ctx context.Context, lead TodoAgent, list
 		return false
 	}
 	s.logf("supervise: %d signal(s) to task leader %s", len(entries), short(lead.SessionID))
+	s.parkedDueTold(ctx, kept)
 	return true
 }
 

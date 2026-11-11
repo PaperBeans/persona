@@ -46,6 +46,9 @@ func (s *Service) snapshotTasks(ctx context.Context, web string) []prompts.Snaps
 		task.Delivery = clip(oneLine(deliverySummary(t)), 80)
 		var rank int
 		task.Health, rank = taskHealth(t, agents, now) // supervised tasks: what needs the assistant first (supervise.go)
+		if v := t.Supervision; v.state(t) == reviewParked {
+			task.Health = parkedHealth(v.parked(), s.location(ctx)) // until when, in the owner's zone (parked.go)
+		}
 		if o, ok := s.orphanOf(t.ID); ok && t.DoneAt == nil {
 			task.Orphan = o.Reason   // nobody works on it any more (tasks_orphan.go)
 			if task.Health == "正常" { // i18n-ignore: the snapshot's words, as taskHealth has them

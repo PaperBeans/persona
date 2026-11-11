@@ -95,9 +95,14 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
  * interrupted receipts' text and handling (#3903 added 883 B, #3917), and 512 B for adding a computer to the current
  * assistant (views/machines/AddComputer.tsx's words and its add.manager handling, #3508), and 512 B for the address's manager that conversation requests fall back on (lib/manager-choice.ts routedConversationManager, #3670),
  * and 1,024 B for the Agent header's permission mode (#3956 added 708 B: its button and tones, the mode menu's question
- * on leaving Allow all and its disabled Allow all row, their words). Raise it on purpose, in the change that needs it.
+ * on leaving Allow all and its disabled Allow all row, their words), and 512 B for the Machines page asking each online
+ * manager for its computers' metrics (#4026 added 254 B over), and 800 B for the Topics kind (#3783: its tab and name, the
+ * shared stylesheet's classes for the topic page and the knowledge map, and its switch in Settings' search; the pages,
+ * their code and words load on demand), and 2,048 B for tool names in words (#2986 added 1,996 B: lib/turns.ts's
+ * subjects of Claude Code's newer tools and other servers' MCP tools named in words, the verbs views/chat/ActionRow.tsx
+ * gives them). Raise it on purpose, in the change that needs it.
  */
-export const FIRST_SCREEN_BUDGET = 582_496;
+export const FIRST_SCREEN_BUDGET = 585_856;
 
 /** What the built-in hub sends for `files` (paths below `dir`) to a browser that takes br: each one's brotli copy, or
  *  the file itself when it has none. Build time only. */

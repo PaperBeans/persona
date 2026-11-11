@@ -1,10 +1,12 @@
 // Settings › Extensions: all sources use the host-owned layout in ExtensionSettingsPage.
 // This controller owns manager routing, configuration drafts, authentication and mutation results;
 // extensions supply only their configuration fields and custom content (docs/extensions/extension-settings.md).
+import { OwnerMark } from "./OwnerMark";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { enc, errorText, subscribeCredentialOwner } from "../../lib/api";
-import { defaultManager, pinManagerAt, useKnownDefault } from "../../lib/manager-choice";
-import { groupByManager, multiManager, useRoster } from "../../lib/managers";
+import { OfflineState, useShownOffline } from "../ManagerParts";
+import { defaultManager, otherManager, pinManagerAt, useChosenManager } from "../../lib/manager-choice";
+import { useRoster } from "../../lib/managers";
 import { isResumed } from "../../lib/reconnect";
 import { onHubEvent, useStore } from "../../lib/store";
 import { EXTENSIONS_CHANGED } from "../../lib/extension-prompts";
@@ -23,7 +25,7 @@ import { Button, cx, Dialog, EASE, IconButton, Loading, Spinner, toast } from ".
 import { TriageRuleField } from "../../ui/TriageRuleField";
 import { Icon } from "../../ui/icons";
 import { ChannelLink } from "./Channels";
-import { MarketCatalog, MarketItem, Markets, UninstallDialog } from "./ExtensionMarket";
+import { MarketCatalog, MarketItem, Markets, PackMemberRow, UninstallDialog, useInstalledNames } from "./ExtensionMarket";
 import { ExtensionSettingsPage } from "./ExtensionSettingsPage";
 import { ExtensionUI } from "./ExtensionView";
 import { ExtensionConnectorInbox } from "./HubConnector";
@@ -31,8 +33,8 @@ import { getAuth, listAuthNote, onAuthChange, shownPages, signInAsked, takeSignI
 import { AuthGroup } from "./ExtensionAuth";
 import { dependencyText, dependentError, type Contribution, type Dependent } from "../../lib/extension-model";
 import { Group, Pill, Row, Switch, SettingsHint } from "./SettingsParts";
-import { ManagerHeading } from "../ManagerParts";
 import { formatList, t } from "../../i18n";
+import { scoped, useScope } from "../../lib/current-assistant";
 import { SubscriptionsEntry } from "../subscriptions/SubscriptionsEntry";
 
 /**
@@ -48,6 +50,9 @@ export function Extensions({ open, onOpen, onChannel, onConnector }: {
 }) {
   const r = extensionsRoute(open);
   const go = (to: Parameters<typeof routeSub>[0]) => onOpen(routeSub(to));
+  // what is installed from a market goes to the current assistant (none: the default, named by no header)
+  const picked = useChosenManager();
+  const installTo = otherManager(picked ?? undefined);
   switch (r.kind) {
     case "extension":
       return (
@@ -81,7 +86,7 @@ export function Extensions({ open, onOpen, onChannel, onConnector }: {
           key={open}
           market={r.market}
           id={r.id}
-          manager={r.manager}
+          manager={r.manager ?? installTo}
           onBack={() => go(r.manager ? { kind: "extension", id: r.id, manager: r.manager } : { kind: "catalog" })}
           onInstalled={(id) => go({ kind: "extension", id, manager: r.manager })}
         />
@@ -94,35 +99,13 @@ export function Extensions({ open, onOpen, onChannel, onConnector }: {
 }
 
 /**
- * Whose extension a route is: the manager it names (`<id>@<manager>`), else, for a link that names none (written by
- * hand, or before several managers), the one the merged list has it under: the default's when it has it, else the
- * manager that has it, so the page doesn't open on a manager without it (a 404).
+ * Whose extension a route is: the manager it names (`<id>@<manager>`), else the current assistant's (Settings › Extensions
+ * is the current assistant's, docs/assistant/managers.md "The current assistant"): a link that names none (written by
+ * hand, or before several managers) opens its copy there, or says it isn't there.
  */
-function OwnedExtension({ id, manager, children }: { id: string; manager?: string; children: (manager: string | undefined) => React.ReactNode }) {
-  const [found, setFound] = useState<{ id: string; manager?: string } | null>(null);
-  const roster = useRoster();
-  const known = useKnownDefault();
-  const several = multiManager(roster); // one manager: every extension is its own, nothing to look up
-  useEffect(() => {
-    if (manager || !several) return;
-    let live = true;
-    listExtensionsInfo()
-      .then(({ extensions }) => {
-        if (!live) return;
-        const listed = extensions.filter((x) => x.id === id);
-        const own = listed.some((x) => !x.manager || x.manager === defaultManager());
-        setFound({ id, manager: own ? undefined : listed[0]?.manager });
-      })
-      .catch(() => live && setFound({ id })); // the page itself says what is wrong
-    return () => {
-      live = false;
-    };
-  }, [id, manager, several]);
-  // before the roster is read it is not known whose a link without a manager is: nothing of the default's is drawn
-  if (!manager && !known) return <div className="p-6"><Loading /></div>;
-  if (manager || !several) return <>{children(manager)}</>;
-  if (found?.id !== id) return <div className="p-6"><Loading /></div>;
-  return <>{children(found.manager)}</>;
+function OwnedExtension({ id: _id, manager, children }: { id: string; manager?: string; children: (manager: string | undefined) => React.ReactNode }) {
+  const picked = useChosenManager();
+  return <>{children(manager ?? otherManager(picked ?? undefined))}</>;
 }
 
 /** A page an extension draws (placement plugin_page), under the extension's name. */
@@ -206,10 +189,12 @@ function ExtensionList({ onOpen, onMarket, onMarkets }: { onOpen: (id: string) =
   useEffect(() => onAuthChange((id, auth, from) => setExtensions((cur) => cur?.map((x) => ((x.manager || defaultManager()) === from ? withAuth(x, id, auth) : x)) ?? cur)), []);
   // a reconnect the hub could not resume: the extension_auth pushes missed meanwhile are not replayed (#4954)
   useEffect(() => onHubEvent("hello", (m) => !isResumed(m) && load()), []);
-  // with several managers, each one's extensions under its name (docs/assistant/managers.md "Clients"); one: as before
-  const roster = useRoster();
-  const groups = groupByManager(extensions ?? [], roster, (x) => x.manager);
+  // the current assistant's extensions only (docs/assistant/managers.md "The current assistant"); one assistant: all
+  const scope = useScope();
+  const own = useMemo(() => (extensions ? scoped(extensions, scope) : null), [extensions, scope]);
   const drafts = useUnsaved();
+  // an offline current assistant: the hub has none of its extensions to merge in, which must not read as "none installed"
+  const offline = useShownOffline();
 
   return (
     <>
@@ -244,13 +229,13 @@ function ExtensionList({ onOpen, onMarket, onMarkets }: { onOpen: (id: string) =
         title={
           <span className="flex items-center gap-2">
             {t("settings-extensions.title")}
-            {extensions && <span className="font-normal">{listSummary(extensions)}</span>}
+            {own && !(offline && own.length === 0) && <span className="font-normal">{listSummary(own)}</span>}
           </span>
         }
         right={<IconButton icon="retry" label={t("settings-extensions.refresh")} onClick={load} disabled={loading} size={24} iconSize={13} className="-mb-1" />}
         footer={markets ? t("settings-extensions.list_footer_market") : t("settings-extensions.list_footer")}
       >
-        {!extensions && !error && (
+        {!own && !error && (
           <div className="px-4 py-3">
             <Loading />
           </div>
@@ -263,7 +248,8 @@ function ExtensionList({ onOpen, onMarket, onMarkets }: { onOpen: (id: string) =
             </Button>
           </div>
         )}
-        {extensions?.length === 0 && (
+        {own?.length === 0 && offline && <OfflineState offline={offline} ring="ring-surface" className="py-8" />}
+        {own?.length === 0 && !offline && (
           <div className="flex flex-col items-center gap-2 px-6 py-8 text-center">
             <span className="flex size-10 items-center justify-center rounded-[10px] bg-inset text-ink-3 shadow-hairline">
               <Icon name="extension" size={18} />
@@ -272,51 +258,45 @@ function ExtensionList({ onOpen, onMarket, onMarkets }: { onOpen: (id: string) =
             <p className="max-w-[420px] text-[12px] leading-relaxed text-ink-3">{t("settings-extensions.empty_detail")}</p>
           </div>
         )}
-        {(groups ?? [{ manager: null, items: extensions ?? [] }]).map((g) => [
-          g.manager && (
-            <div key={`h:${g.manager.id}`} className="bg-inset px-4 py-1.5">
-              <ManagerHeading manager={g.manager} count={g.items.length} />
-            </div>
-          ),
-          ...g.items.map((p) => {
-            const i = (extensions ?? []).indexOf(p);
-            const kept = drafts.has(unsavedKey(p.id, p.manager));
-            // the kept edits' mark goes before what is still missing, not instead of it
-            const needs = p.needs_setup?.length ? t("settings-extensions.needs_setup", { items: formatList(p.needs_setup, NARROW_LIST) }) : "";
-            const note = p.error || [kept ? t("settings-extensions.unsaved") : "", needs].filter(Boolean).join(" · ") || p.description;
-            return (
-              <button
-                key={`${p.manager ?? ""}:${p.id}`}
-                type="button"
-                onClick={() => onOpen(routeSub({ kind: "extension", id: p.id, manager: p.manager && p.manager !== defaultManager() ? p.manager : undefined }) ?? p.id)}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-hover"
-                style={{ animation: `fade-up 320ms ${EASE} ${Math.min(i, 8) * 30}ms both` }}
-              >
-                <span className={cx("flex size-8 shrink-0 items-center justify-center rounded-[8px]", TILE[extensionTone(p)])}>
-                  <Icon name="extension" size={15} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-[13px] text-ink">{p.name}</span>
-                    {p.source && p.source !== "installed" && <Pill>{sourceText(p.source)}</Pill>}
-                  </div>
-                  {note && (
-                    <div className={cx("mt-0.5 truncate text-[11.5px]", p.error ? "text-red" : kept || needs ? "text-orange" : "text-ink-3")}>
-                      {note}
-                    </div>
-                  )}
+        {(own ?? []).map((p, i) => {
+          const kept = drafts.has(unsavedKey(p.id, p.manager));
+          // the kept edits' mark goes before what is still missing, not instead of it
+          const needs = p.needs_setup?.length ? t("settings-extensions.needs_setup", { items: formatList(p.needs_setup, NARROW_LIST) }) : "";
+          const note = p.error || [kept ? t("settings-extensions.unsaved") : "", needs].filter(Boolean).join(" · ") || p.description;
+          return (
+            <button
+              key={`${p.manager ?? ""}:${p.id}`}
+              type="button"
+              data-extension-row={p.id}
+              data-manager={p.manager ?? ""}
+              onClick={() => onOpen(routeSub({ kind: "extension", id: p.id, manager: p.manager && p.manager !== defaultManager() ? p.manager : undefined }) ?? p.id)}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-hover"
+              style={{ animation: `fade-up 320ms ${EASE} ${Math.min(i, 8) * 30}ms both` }}
+            >
+              <span className={cx("flex size-8 shrink-0 items-center justify-center rounded-[8px]", TILE[extensionTone(p)])}>
+                <Icon name="extension" size={15} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-[13px] text-ink">{p.name}</span>
+                  {p.source !== "installed" && sourceText(p.source) && <Pill>{sourceText(p.source)}</Pill>}
                 </div>
-                <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12px] text-ink-2">
-                  <StateDot extension={p} />
-                  {extensionState(p)}
-                  {listAuthNote(p.auth)}
-                  {p.upgrade?.state === "needs_permission" && t("settings-extensions.upgrade_pending")}
-                </span>
-                <Icon name="chevronRight" size={12} stroke={2} className="shrink-0 text-ink-3" />
-              </button>
-            );
-          }),
-        ])}
+                {note && (
+                  <div className={cx("mt-0.5 truncate text-[11.5px]", p.error ? "text-red" : kept || needs ? "text-orange" : "text-ink-3")}>
+                    {note}
+                  </div>
+                )}
+              </div>
+              <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12px] text-ink-2">
+                <StateDot extension={p} />
+                {extensionState(p)}
+                {listAuthNote(p.auth)}
+                {p.upgrade?.state === "needs_permission" && t("settings-extensions.upgrade_pending")}
+              </span>
+              <Icon name="chevronRight" size={12} stroke={2} className="shrink-0 text-ink-3" />
+            </button>
+          );
+        })}
       </Group>
     </>
   );
@@ -663,6 +643,8 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
   const secretDone = (n: number, d: HubExtensionDetail) => wrote(n, d);
 
   const p = detail;
+  // A pack's members by their installed names (#4122); one not installed keeps its id.
+  const memberNames = useInstalledNames(!!detail?.extension_pack?.length);
 
   return (
     <div>
@@ -671,6 +653,7 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
         <Button tone="quiet" icon="chevronLeft" onClick={back} className="-ml-2">
           {t("settings-extensions.title")}
         </Button>
+        <OwnerMark manager={manager} />
         <span className="flex-1" />
         <IconButton icon="retry" label={t("settings-extensions.reload")} onClick={load} disabled={loading} />
       </div>
@@ -704,6 +687,7 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
       {p && (
         <ExtensionSettingsPage
           detail={p}
+          memberNames={memberNames}
           manager={manager}
           busy={toggling || saving}
           offline={offline}
@@ -791,9 +775,11 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
             </Group>
           )}
           {!!p.extension_pack?.length && (
-            <Group title={t("settings-extensions.pack_title")} footer={t("settings-extensions.pack_footer")}>
-              {p.extension_pack.map((m) => <Row key={m.id} label={m.id} hint={m.market} mono>{m.version || ""}</Row>)}
-            </Group>
+            <div data-pack-members>
+              <Group title={t("settings-extensions.pack_title")} footer={t("settings-extensions.pack_footer")}>
+                {p.extension_pack.map((m) => <PackMemberRow key={m.id} member={m} name={memberNames[m.id]} mono />)}
+              </Group>
+            </div>
           )}
           {!!p.contributions?.length && (
             <Group title={t("settings-extensions.contributions_title")} footer={t("settings-extensions.contributions_footer")}>

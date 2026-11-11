@@ -60,6 +60,17 @@ class HttpTasksApiTest {
         }
     }
 
+    @Test fun laterHandlingEscapesTheExactQuestion() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+            api(server).markLaterHandled("question/one")
+            val request = server.takeRequest()
+            assertEquals("POST", request.method)
+            assertEquals("/api/v1/later/question%2Fone/handled", request.path)
+            assertEquals("{}", request.body.readUtf8())
+        }
+    }
+
     @Test fun retryPostsAndAnswersTheReopenedTodo() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("""{"todo":{"id":"todo_1","title":"设置页按钮对齐","origin":"c","plan_id":"p","agents":[]}}"""))

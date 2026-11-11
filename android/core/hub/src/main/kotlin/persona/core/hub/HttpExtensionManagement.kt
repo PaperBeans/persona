@@ -9,6 +9,9 @@ import persona.core.contracts.api.ExtensionCatalog
 import persona.core.contracts.api.ExtensionConfigRejected
 import persona.core.contracts.api.ExtensionDependent
 import persona.core.contracts.api.ExtensionHasDependents
+import persona.core.contracts.api.ExtensionFailedMember
+import persona.core.contracts.api.ExtensionPartialUninstall
+import persona.core.contracts.api.ExtensionRemoval
 import persona.core.contracts.api.ExtensionDetail
 import persona.core.contracts.api.ExtensionListing
 import persona.core.contracts.api.ExtensionManagement
@@ -39,6 +42,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -246,10 +250,14 @@ class HttpExtensionManagement internal constructor(
     override suspend fun upgrade(id: String, preview: ExtensionPreview): ExtensionDetail =
         detail(call(path(id, "-", "upgrade"), "POST", agreed(preview)))
 
-    override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean) {
-        val query = listOfNotNull("keep_data=1".takeIf { keepData }, "cascade=1".takeIf { cascade }).joinToString("&")
-        call(path(id, "-", "") + if (query.isNotEmpty()) "?$query" else "", "DELETE")
+    override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean, members: Boolean): ExtensionRemoval {
+        val query = uninstallQuery(keepData, cascade, members).joinToString("&")
+        val body = call(path(id, "-", "") + if (query.isNotEmpty()) "?$query" else "", "DELETE")
+        return runCatching { JsonCodec.decodeFromString<ExtensionRemoval>(body) }.getOrDefault(ExtensionRemoval())
     }
+
+    private fun uninstallQuery(keepData: Boolean, cascade: Boolean, members: Boolean) =
+        listOfNotNull("keep_data=1".takeIf { keepData }, "cascade=1".takeIf { cascade }, "members=1".takeIf { members })
 
     // ---- signing in (#4507): the extension's own sign-in, a step at a time; the values go to the extension only.
 
@@ -276,8 +284,8 @@ class HttpExtensionManagement internal constructor(
         return accepted(call(if (upgradeOf != null) path(upgradeOf, "-", "upgrade") else hubPath("install"), "POST", body))
     }
 
-    override suspend fun startUninstall(id: String, keepData: Boolean, cascade: Boolean): ExtensionOperation {
-        val query = listOfNotNull("async=1", "keep_data=1".takeIf { keepData }, "cascade=1".takeIf { cascade }).joinToString("&")
+    override suspend fun startUninstall(id: String, keepData: Boolean, cascade: Boolean, members: Boolean): ExtensionOperation {
+        val query = (listOf("async=1") + uninstallQuery(keepData, cascade, members)).joinToString("&")
         return accepted(call(path(id, "-", "") + "?$query", "DELETE"))
     }
 
@@ -365,6 +373,15 @@ class HttpExtensionManagement internal constructor(
             ExtensionHasDependents(list?.let { runCatching { JsonCodec.decodeFromJsonElement(ListSerializer(ExtensionDependent.serializer()), it) }.getOrNull() }.orEmpty(),
                 failure.message)
         }
+        // A pack's members partly uninstalled (#1154): which went, which didn't and why, which weren't tried.
+        failure.status == 409 && failure.code == "partial_uninstall" -> {
+            val body = runCatching { JsonCodec.parseToJsonElement(failure.body.orEmpty()) as? JsonObject }.getOrNull()
+            fun ids(key: String) = (body?.get(key) as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
+            val failed = (body?.get("failed_members") as? JsonArray)?.let {
+                runCatching { JsonCodec.decodeFromJsonElement(ListSerializer(ExtensionFailedMember.serializer()), it) }.getOrNull()
+            }.orEmpty()
+            ExtensionPartialUninstall(ids("removed_members"), failed, ids("remaining_members"), failure.message)
+        }
         else -> null
     }
 
@@ -410,8 +427,8 @@ class HttpExtensionManagement internal constructor(
         /** The hub takes at most 4 MB from an extension; a little room over it. */
         const val MaxImageBytes = 5L * 1024 * 1024
 
-        /** This phone's time zone (IANA) and language (a BCP 47 tag), the platform and the UI version it draws. */
-        fun deviceContext() = ExtensionUiContext(tz = java.util.TimeZone.getDefault().id, locale = java.util.Locale.getDefault().toLanguageTag(),
+        /** This phone's time zone (IANA) and the app's language with the phone's region (a BCP 47 tag), the platform and the UI version it draws. */
+        fun deviceContext() = ExtensionUiContext(tz = java.util.TimeZone.getDefault().id, locale = persona.core.contracts.ClientLanguage.localeTag(),
             platform = "android", uiVersion = UI_VERSION)
 
         private val json = "application/json; charset=utf-8".toMediaType()

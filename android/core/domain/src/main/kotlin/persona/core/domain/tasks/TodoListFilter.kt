@@ -80,7 +80,11 @@ fun sortedRows(rows: List<TriageGroup>, sort: TodoListSort, zone: ZoneId): List<
 /** To-dos listed under a section: its rows' members, the related ones merged into a row included (the section's count). */
 fun TriageResult.listed(section: TriageSection): Int = rows(section).sumOf { it.members.size }
 
-/** Of [todos], those waiting on the owner (Needs you) that [shown] leaves out: the line over a filtered list. */
+/**
+ * Of [todos], those waiting on the owner (Needs you) that [shown] leaves out: the line over a filtered list.
+ * [superseded] is decided on every to-do ([supersededFailedStarts]), so a failed start whose finished work the filter
+ * leaves out is not counted as waiting (#3713).
+ */
 fun hiddenWaiting(
     todos: List<Todo>,
     shown: List<Todo>,
@@ -88,7 +92,10 @@ fun hiddenWaiting(
     now: Long,
     restored: Map<String, Long> = emptyMap(),
     zone: ZoneId = ZoneId.systemDefault(),
+    superseded: Set<String> = supersededFailedStarts(todos),
 ): Int {
     val ids = shown.mapTo(HashSet()) { it.id }
-    return todos.count { it.id !in ids && it.triage(lookup, now, restored[it.id] ?: 0, zone).section == TriageSection.Waiting }
+    return todos.count {
+        it.id !in ids && it.triage(lookup, now, restored[it.id] ?: 0, zone, superseded = it.id in superseded).section == TriageSection.Waiting
+    }
 }

@@ -66,12 +66,30 @@ func (g *dependencyGraph) localMissing(p *Extension) []string {
 			if secret.Required && !set[secret.Name] {
 				out = append(out, i18n.T(l, "extension-status.missing_secret", i18n.Args{"title": p.L10n.Secret(l, secret).Title}))
 			}
+			// A reference needs its provider on: without one there is nothing to hand the extension.
+			if ref, ok := ReferenceOf(secrets[secret.Name]); ok {
+				scheme, _ := ReferenceScheme(ref)
+				if !g.supplies(scheme) {
+					out = append(out, i18n.T(l, "extension-status.missing_secret_provider",
+						i18n.Args{"title": p.L10n.Secret(l, secret).Title, "scheme": scheme + "://"}))
+				}
+			}
 		}
 	}
 	if err := p.Schema.Check(p.Record.Config); err != nil {
 		out = append(out, i18n.T(l, "extension-status.missing_config", i18n.Args{"err": StatusErrorText(l, err)}))
 	}
 	return out
+}
+
+// supplies says whether an enabled extension without a problem has a secret_providers contribution on for scheme.
+func (g *dependencyGraph) supplies(scheme string) bool {
+	for _, p := range g.nodes {
+		if p.Record.Enabled && p.Problem == "" && p.Manifest != nil && slices.Contains(p.Manifest.Schemes(), scheme) {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *dependencyGraph) state(d Dependency) DependencyState {
@@ -259,6 +277,18 @@ func (r *Registry) DependencyOrder(ids ...string) []*Extension {
 						changed = true
 						break
 					}
+				}
+			}
+			// The extensions holding references to a selected provider's schemes go along: it went on, off or away.
+			var schemes []string
+			for id := range selected {
+				if p := g.nodes[id]; p != nil {
+					schemes = append(schemes, p.Full.Schemes()...)
+				}
+			}
+			for _, id := range r.ReferenceHolders(schemes) {
+				if !selected[id] && g.nodes[id] != nil {
+					selected[id], changed = true, true
 				}
 			}
 		}

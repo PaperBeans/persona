@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.draw.rotate
@@ -22,8 +23,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,21 +68,27 @@ fun JSectionHeader(
     /** Before the title: a group's tick while selecting (#2576). */
     leading: (@Composable () -> Unit)? = null,
     /** A group inside a section (an inbox section's source or day, #2576): closer to its rows, the title a level below the
-     *  section's (caption, regular, in every style; as iOS and the web), and a caret for whether it is open (null: none). */
+     *  section's (caption, regular, in every style; as iOS and the web), and a caret for whether it is open (null: none).
+     *  With [onClick], [open] also tells TalkBack whether the section is open and what a tap does (#4100), in every style. */
     sub: Boolean = false,
     open: Boolean? = null,
     /** The [count] in a capsule of this state's tone (the To-dos list's sections, #3712, as iOS `CountBadge`); none: quiet digits. */
     countTone: Status? = null,
+    /** [trailing] is the fold's own action word ("Expand" / "Collapse"): while the header folds ([onClick] and [open]),
+     *  TalkBack hears it from the state and click label, so the visible word is not read a second time (#4120). */
+    trailingIsFoldAction: Boolean = false,
+    // Last, so a caller can pass it as a trailing lambda: `JSectionHeader(title) { … }`.
     action: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
+    val fold = if (onClick != null && open != null) foldLabels(open) else null
     Row(
-        modifier.fillMaxWidth().then(if (onClick != null) Modifier.combinedClickable(role = Role.Button, onClick = onClick) else Modifier)
+        modifier.fillMaxWidth().then(if (onClick != null) Modifier.combinedClickable(role = Role.Button, onClickLabel = fold?.action, onClick = onClick) else Modifier)
             .padding(top = if (sub) Tokens.Space.s else if (style == AppStyle.Board) 18.dp else 26.dp, bottom = if (sub) Tokens.Space.xs else 10.dp,
                 start = if (style == AppStyle.Brief) 0.dp else 4.dp, end = if (style == AppStyle.Brief) 0.dp else 4.dp)
             .heightIn(min = if (leading != null) 48.dp else 0.dp)
-            .semantics { heading() },
+            .semantics { heading(); fold?.let { stateDescription = it.state } },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leading?.let { it(); Spacer(Modifier.width(Tokens.Space.xs)) }
@@ -113,9 +123,33 @@ fun JSectionHeader(
             }
         }
         if (trailing != null || action != null) Spacer(Modifier.width(8.dp))
-        trailing?.let { Text(it, style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1) }
+        trailing?.let {
+            Text(it, style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1,
+                modifier = if (trailingIsFoldAction && fold != null) Modifier.clearAndSetSemantics {} else Modifier)
+        }
         action?.invoke(this)
     }
+}
+
+/** What TalkBack says for a section that folds: whether it is open ([state]) and what a tap does ([action]). */
+@Immutable
+private data class FoldLabels(val state: String, val action: String)
+
+@Composable
+private fun foldLabels(open: Boolean) = FoldLabels(
+    state = stringResource(if (open) R.string.designsystem_expanded else R.string.designsystem_collapsed),
+    action = stringResource(if (open) R.string.designsystem_collapse else R.string.designsystem_expand),
+)
+
+/**
+ * A row of its own that folds a section open or shut on tap (a header drawn around a [JSectionHeader] with its own
+ * caret): a button that tells TalkBack whether the section is [open] and what a tap does (#4100), as [JSectionHeader]
+ * does with `onClick` and `open`. Draws nothing.
+ */
+@Composable
+fun Modifier.foldToggle(open: Boolean, onToggle: () -> Unit): Modifier {
+    val fold = foldLabels(open)
+    return clickable(role = Role.Button, onClickLabel = fold.action, onClick = onToggle).semantics { stateDescription = fold.state }
 }
 
 /** A [JSectionHeader]'s count capsule ([JSectionHeader] `countTone`). */

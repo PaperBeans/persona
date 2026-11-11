@@ -42,11 +42,14 @@ type settingsCheckLimited struct{ error }
 
 func (e settingsCheckLimited) Unwrap() error { return e.error }
 
-// checkLimiter counts each extension's checks in the current window.
+// checkLimiter counts each extension's checks (or, with most and window set, any calls) in the current window.
 type checkLimiter struct {
 	mu   sync.Mutex
 	seen map[string][]time.Time
 	now  func() time.Time
+	// most per window; zero is a settings check's (settingsChecksMost per settingsCheckWindow).
+	most   int
+	window time.Duration
 }
 
 func (l *checkLimiter) allow(id string) bool {
@@ -59,13 +62,17 @@ func (l *checkLimiter) allow(id string) bool {
 	if l.seen == nil {
 		l.seen = map[string][]time.Time{}
 	}
+	most, window := l.most, l.window
+	if most == 0 {
+		most, window = settingsChecksMost, settingsCheckWindow
+	}
 	keep := l.seen[id][:0]
 	for _, t := range l.seen[id] {
-		if now.Sub(t) < settingsCheckWindow {
+		if now.Sub(t) < window {
 			keep = append(keep, t)
 		}
 	}
-	if len(keep) >= settingsChecksMost {
+	if len(keep) >= most {
 		l.seen[id] = keep
 		return false
 	}
@@ -90,13 +97,18 @@ func (ps *extensions) settingsCheck(ctx context.Context, p *extension.Extension,
 	if !p.Record.Enabled || hp == nil || hp.proc == nil {
 		return settingsCheckFailed{i18n.T(lang, "hub-extension_settings.check_not_running")}
 	}
+	// A reference among them is checked as the value it stands for (saving one is the owner's approval).
+	secrets, err := ps.resolveStored(ctx, id, secrets)
+	if err != nil {
+		return settingsCheckFailed{secretRefError(err, lang)}
+	}
 	cctx, cancel := context.WithTimeout(ctx, settingsCheckTimeout)
 	defer cancel()
 	var out struct {
 		OK    bool   `json:"ok"`
 		Error string `json:"error"`
 	}
-	err := hp.proc.Call(cctx, "settings.check", map[string]any{"config": config, "secrets": secrets}, &out)
+	err = hp.proc.Call(cctx, "settings.check", map[string]any{"config": config, "secrets": secrets}, &out)
 	switch {
 	case cctx.Err() != nil && ctx.Err() == nil:
 		return settingsCheckFailed{i18n.T(lang, "hub-extension_settings.check_timeout", i18n.Args{"seconds": int(settingsCheckTimeout / time.Second)})}

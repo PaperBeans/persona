@@ -55,31 +55,16 @@ function CountedSwitcher(props: SwitcherProps) {
   return <SwitcherRow {...props} badges={useManagerBadges()} />;
 }
 
-const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, badges }: SwitcherProps & { badges: Record<string, number> }) {
-  const menu = useMenu();
-  const theme = useTheme();
+/** The roster's rows (each assistant, then New assistant and Manage assistants…) and the dialogs they open: the one list
+ *  the sidebar's head and Settings' Switch both show. `open`: whether the list is open (its lines count minutes then). */
+function useAssistantList(route: Route, badges: Record<string, number>, open: boolean) {
   const roster = useRoster();
   const current = useShownManager();
-  const otherHubs = hubMenuItems(useHubs());
-  const disconnect = useDisconnect();
   const [creating, setCreating] = useState(false);
   const [shown, setShown] = useState<ShownCode | null>(null);
   const [asking, setAsking] = useState(false);
   // the lines count minutes (an install code running out, "last synced"): once a minute while the list is open
-  const now = useNow(30_000, Boolean(menu.anchor));
-  const several = multiManager(roster);
-  const known = several ? managerOf(roster, current) : undefined;
-  // before the roster is read (a reload), a kept pick shows the name the roster last gave it, not the hub's own row
-  const picked = useChosenManager();
-  const me: Pick<Manager, "id" | "name"> | null = known ?? (!roster && picked ? { id: picked, name: pickedName() ?? picked } : null);
-  const linked = phase === "online";
-  const othersWaiting = Object.entries(badges).some(([id, n]) => id !== current && n > 0);
-
-  const themes: { k: Theme; label: string; icon: IconName }[] = [
-    { k: "system", label: t("sidebar.theme_system"), icon: "monitor" },
-    { k: "light", label: t("sidebar.theme_light"), icon: "sun" },
-    { k: "dark", label: t("sidebar.theme_dark"), icon: "moon" },
-  ];
+  const now = useNow(30_000, open);
 
   // a manager still installing: its install commands, with the code this page has while it lasts, else a new one
   const showCode = async (m: Manager) => {
@@ -98,8 +83,9 @@ const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, bad
     }
   };
 
-  const installed = several ? managerOrder(roster) : [];
-  const installing = several ? roster.managers.filter((m) => m.installing) : [];
+  const installed = roster ? managerOrder(roster) : [];
+  const installing = roster ? roster.managers.filter((m) => m.installing) : [];
+  const several = installed.length + installing.length > 1;
   const row = (m: Manager): MenuItem => ({
     key: `assistant:${m.id}`,
     label: m.name,
@@ -114,14 +100,65 @@ const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, bad
       else if (m.id !== current) switchAssistant(m, route);
     },
   });
+  const items: MenuItem[] = roster
+    ? [
+        ...[...installed, ...installing].map(row),
+        { key: "new-assistant", label: t("sidebar.new_assistant"), icon: "plus" as const, divider: true, onSelect: () => setCreating(true) },
+        { key: "manage-assistants", label: t("sidebar.manage_assistants"), icon: "gear" as const, onSelect: () => navigate("/settings?tab=managers") },
+      ]
+    : [];
+  const dialogs = (
+    <>
+      <NewManager
+        open={creating}
+        onClose={() => setCreating(false)}
+        onMade={(m, code) => {
+          setCreating(false);
+          codes.set(m.id, code);
+          setShown({ id: m.id, name: m.name, code, fresh: true });
+          void loadRoster();
+        }}
+      />
+      <CodeDialog
+        open={Boolean(shown)}
+        shown={shown}
+        onClose={() => setShown(null)}
+        onCode={(code, id) => {
+          codes.set(id, code);
+          setShown((s) => (s ? { ...s, code, id } : s));
+          void loadRoster();
+        }}
+      />
+    </>
+  );
+  return { items, dialogs, asking, now };
+}
+
+const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, badges }: SwitcherProps & { badges: Record<string, number> }) {
+  const menu = useMenu();
+  const theme = useTheme();
+  const roster = useRoster();
+  const current = useShownManager();
+  const otherHubs = hubMenuItems(useHubs());
+  const disconnect = useDisconnect();
+  const list = useAssistantList(route, badges, Boolean(menu.anchor));
+  const { now, asking } = list;
+  const several = multiManager(roster);
+  const known = several ? managerOf(roster, current) : undefined;
+  // before the roster is read (a reload), a kept pick shows the name the roster last gave it, not the hub's own row
+  const picked = useChosenManager();
+  const me: Pick<Manager, "id" | "name"> | null = known ?? (!roster && picked ? { id: picked, name: pickedName() ?? picked } : null);
+  const linked = phase === "online";
+  const othersWaiting = Object.entries(badges).some(([id, n]) => id !== current && n > 0);
+
+  const themes: { k: Theme; label: string; icon: IconName }[] = [
+    { k: "system", label: t("sidebar.theme_system"), icon: "monitor" },
+    { k: "light", label: t("sidebar.theme_light"), icon: "sun" },
+    { k: "dark", label: t("sidebar.theme_dark"), icon: "moon" },
+  ];
+
   const items: MenuItem[] = [
-    ...[...installed, ...installing].map(row),
-    ...(several
-      ? [
-          { key: "new-assistant", label: t("sidebar.new_assistant"), icon: "plus" as const, divider: true, onSelect: () => setCreating(true) },
-          { key: "manage-assistants", label: t("sidebar.manage_assistants"), icon: "gear" as const, onSelect: () => navigate("/settings?tab=managers") },
-        ]
-      : []),
+    ...(several ? list.items : []),
     // the three looks as rows of their own under a small title, as the row's menu had them: a submenu would open over
     // the rows under it on a narrow screen (a phone, a zoomed page) and hide Settings and Disconnect
     ...(several ? [{ key: "appearance", label: t("sidebar.appearance"), heading: true, divider: true, onSelect: () => {} }] : []),
@@ -165,26 +202,42 @@ const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, bad
       </button>
       {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} width={several ? ASSISTANT_MENU_WIDTH.roster : ASSISTANT_MENU_WIDTH.product} header={several ? t("sidebar.assistants") : t("sidebar.appearance")} items={items} />}
       {disconnect.dialog}
-      <NewManager
-        open={creating}
-        onClose={() => setCreating(false)}
-        onMade={(m, code) => {
-          setCreating(false);
-          codes.set(m.id, code);
-          setShown({ id: m.id, name: m.name, code, fresh: true });
-          void loadRoster();
-        }}
-      />
-      <CodeDialog
-        open={Boolean(shown)}
-        shown={shown}
-        onClose={() => setShown(null)}
-        onCode={(code, id) => {
-          codes.set(id, code);
-          setShown((s) => (s ? { ...s, code, id } : s));
-          void loadRoster();
-        }}
-      />
+      {list.dialogs}
     </>
   );
 });
+
+/** Settings' Switch beside "<name>'s settings": the sidebar's list of assistants (the same rows: switch, New assistant,
+ *  Manage assistants…) under a text button. Shown with one assistant too; a hub without a roster has none to show. */
+export function AssistantSwitchButton({ route }: { route: Route }) {
+  return multiManager(useRoster()) ? <CountedSwitchButton route={route} /> : <SwitchButton route={route} badges={NO_BADGES} />;
+}
+
+function CountedSwitchButton({ route }: { route: Route }) {
+  return <SwitchButton route={route} badges={useManagerBadges()} />;
+}
+
+function SwitchButton({ route, badges }: { route: Route; badges: Record<string, number> }) {
+  const menu = useMenu();
+  const roster = useRoster();
+  const list = useAssistantList(route, badges, Boolean(menu.anchor));
+  if (!roster) return null;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={menu.open}
+        aria-haspopup="menu"
+        aria-expanded={Boolean(menu.anchor)}
+        aria-label={t("settings-nav.switch_label")}
+        data-settings-switch
+        className="touch-hit inline-flex shrink-0 items-center gap-1 rounded-control px-1.5 py-0.5 text-[12px] font-medium whitespace-nowrap text-accent-ink transition-colors hover:bg-hover"
+      >
+        {list.asking ? <Spinner size={12} /> : null}
+        {t("settings-nav.switch")}
+      </button>
+      {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} width={264} header={t("sidebar.assistants")} items={list.items} />}
+      {list.dialogs}
+    </>
+  );
+}

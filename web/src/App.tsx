@@ -14,6 +14,7 @@ import { useSessionPanels } from "./lib/panel-memory";
 import { resolveTab, tabOfSessionLink, tabPagePane } from "./lib/herdr-tree";
 import { resolveSessionLink, sessionLinkRoute, type SessionLink } from "./lib/session-link";
 import { href, navigate, onLinkClick, type Route, routePath, useRoute } from "./lib/router";
+import { agentChatKey, noteChatShown, personaChatKey } from "./lib/recent-chats";
 import { ago, sessionTitle, shortPath } from "./lib/format";
 import type { Session } from "./lib/types";
 import { unreachable } from "./lib/shell";
@@ -300,6 +301,12 @@ function Shell() {
   // and coming back to it opens them again where they were (#5150, lib/panel-memory.ts); a Persona chat's panel too
   // (#6199)
   const chat = route.name === "persona" ? (route.sid ?? "") : undefined;
+  // the conversation on the page goes first among the recently opened ones, ⌘K's first group (#2191): an Agent's, or a
+  // Persona conversation (the main one when the page names none); any other page shows none
+  const personaMain = useStore((s) => s.assistant?.main ?? "");
+  const personaShown = route.name === "persona" ? (route.sid || personaMain) : "";
+  const shownChat = pane ? agentChatKey(pane.mid, pane.sid) : personaShown ? personaChatKey(personaShown) : "";
+  useEffect(() => noteChatShown(shownChat), [shownChat]);
   const at = pane ? `${pane.mid}/${pane.sid}` : chat !== undefined ? `persona/${chat}` : route.name;
   useSessionPanels(at, pane, chat);
 

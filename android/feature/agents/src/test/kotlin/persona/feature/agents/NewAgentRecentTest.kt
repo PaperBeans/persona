@@ -254,6 +254,23 @@ class NewAgentRecentTest {
         assertEquals(HandOffDefaults(), handOffDefaults(null, "", "second"))
     }
 
+    @Test fun theHandOffKeepsThePickedAgentWhileTheListReSorts() {
+        val a = Session(machineId = "m", sessionId = "a")
+        val b = Session(machineId = "m", sessionId = "b")
+        val c = Session(machineId = "other", sessionId = "c")
+        assertEquals("Nothing picked: the first", a.key, handOffTarget(listOf(a, b, c), null))
+        assertEquals(b.key, handOffTarget(listOf(a, b, c), b.key))
+        assertEquals("Another agent updated and moved up: the pick stays", b.key, handOffTarget(listOf(c, a, b), b.key))
+        assertEquals("The picked agent stopped: the first", c.key, handOffTarget(listOf(c, a), b.key))
+        assertEquals(null, handOffTarget(emptyList(), b.key))
+
+        // The list is empty for a moment (a refresh, a reconnect): the pick survives and comes back with B.
+        val kept = handOffPick(b.key, handOffTarget(emptyList(), b.key))
+        assertEquals(b.key, kept)
+        assertEquals(b.key, handOffTarget(listOf(a, b), kept))
+        assertEquals(c.key, handOffPick(b.key, c.key))
+    }
+
     private class MemoryStore(var last: String = "first") : AgentCreationStore {
         var operation: AgentStartOperation? = null
         val saved = mutableMapOf<String, AgentDefaults>()

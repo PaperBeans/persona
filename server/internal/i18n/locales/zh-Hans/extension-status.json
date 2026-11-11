@@ -107,5 +107,10 @@
   "sandbox_unavailable": "沙箱不可用",
   "settings_moved": "保存的同时设置被改过了，没有保存，再试一次",
   "translation_skipped": "{file} 已略过：{err}；显示清单原有的文字",
-  "entry_translation_skipped": "{id}：已略过索引条目的 l10n：{err}；显示清单原有的文字"
+  "entry_translation_skipped": "{id}：已略过索引条目的 l10n：{err}；显示清单原有的文字",
+  "missing_secret_provider": "密钥「{title}」：没有已打开的扩展提供 {scheme} 引用的值",
+  "secret_not_reference": "这不是引用（应为 scheme://…）",
+  "secret_own_scheme": "扩展不能把自己的 {scheme} 引用当作自己的密钥",
+  "secret_no_provider": "没有已打开的扩展提供 {scheme} 引用的值，先安装或打开一个",
+  "secret_value_or_reference": "填值或填引用，二选一"
 }

@@ -117,7 +117,7 @@ internal class AssistantTaskHost(
     /** Original records remain inspectable from Progress, never discarded by the conversation projection. */
     val backgroundRecords: List<persona.core.domain.lines.ChatLine> = emptyList(),
     val onOpenBackground: (() -> Unit)? = null,
-    /** The conversation's own manager (its session row), for a plan's Start / Don't start; null: not known. */
+    /** The conversation's own manager (its session row), for plan and Brief writes; null: not known. */
     val manager: String? = null,
 ) {
     /** Each session's first card ([firstBySession]). */
@@ -246,6 +246,7 @@ private fun FeedLine(item: FeedItem, host: AssistantTaskHost) {
                 .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s), style = PersonaTheme.type.body, color = PersonaTheme.palette.ink)
         }
         "today" -> TodayCard(item, host, todos)
+        "brief" -> BriefCard(item, host)
         "message" -> if (item.ref != null && item.id !in later) MessageCard(item, host, todos)
         // A live card: drawn where it was created, as the hub's latest version of it (docs/assistant/assistant-views.md "Live cards").
         "view" -> item.ref?.let { id -> persona.core.designsystem.LocalViewBlocks.current?.live?.invoke(id) }

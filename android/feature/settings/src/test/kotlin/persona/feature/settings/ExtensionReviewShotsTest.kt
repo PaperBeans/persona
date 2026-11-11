@@ -3,6 +3,7 @@ package persona.feature.settings
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
@@ -15,6 +16,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -34,6 +38,7 @@ import persona.core.contracts.JsonCodec
 import persona.core.contracts.api.ExtensionFileLines
 import persona.core.contracts.api.ExtensionUiResult
 import persona.core.contracts.api.ExtensionView
+import persona.core.contracts.api.ExtensionViewAction
 import persona.core.designsystem.*
 import java.io.File
 
@@ -95,6 +100,22 @@ class ExtensionReviewShotsTest {
         rule.waitForIdle()
         capture("review-picked")
         rule.onNodeWithText("评论第 24–28 行", substring = true).assertExists()
+    }
+
+    @Test fun anOpenReplyBoxStaysWithItsThread() {
+        // drawn by place, as the review's threads are: a thread added above must not get the box opened below it (#4179)
+        var threads by mutableStateOf(listOf("t1"))
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true) {
+                Column { threads.forEach { id -> Box(Modifier.testTag("thread-$id")) { ReplyBox(ExtensionViewAction("reply"), mapOf("thread" to id), ExtensionViewState(), handle) } } }
+            }
+        }
+        rule.onNodeWithText("回复…").performClick()
+        rule.waitForIdle()
+        rule.onNode(hasTestTag("thread-t1") and hasAnyDescendant(hasText("取消"))).assertExists()
+        threads = listOf("t0", "t1")
+        rule.waitForIdle()
+        rule.onNode(hasTestTag("thread-t0") and hasAnyDescendant(hasText("取消"))).assertDoesNotExist()
     }
 
     @Test fun marksAFileViewed() {

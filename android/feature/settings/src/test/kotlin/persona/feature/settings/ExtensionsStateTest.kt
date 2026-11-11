@@ -56,9 +56,10 @@ private class FakeExtensions(var detail: ExtensionDetail) : ExtensionApiStub() {
         detail = detail.copy(extension = detail.extension.copy(autoUpgrade = auto))
         return detail
     }
-    override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean) {
+    override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean, members: Boolean): ExtensionRemoval {
         refuseDependents("uninstall", cascade)
         uninstalls += keepData; fail?.let { throw it }
+        return ExtensionRemoval()
     }
     private fun refuseDependents(call: String, cascade: Boolean) {
         cascades += "$call cascade=$cascade"

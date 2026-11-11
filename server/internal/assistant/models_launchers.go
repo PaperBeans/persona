@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/extmgr"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -126,6 +127,11 @@ type LauncherView struct {
 	OwnService    string   `json:"own_service,omitempty"`
 	KeyMachines   []string `json:"key_machines,omitempty"`
 	LegacyScope   bool     `json:"legacy_scope,omitempty"`
+	// KeyReference (managed): the key is a reference to a provider extension's secret: the reference and what it
+	// names, never the value (launcher_secrets.go). MachineKeyReferences: the same for the computers' own keys.
+	KeyReference         *extmgr.SecretReferenceView            `json:"key_reference,omitempty"`
+	MachineKeyReferences map[string]*extmgr.SecretReferenceView `json:"machine_key_references,omitempty"`
+	keySealed            string                                 // the stored key, for withKeyReferences
 	// Definition per machine (zshrc launchers, detail only): the function body, secrets masked.
 	Definitions map[string]string `json:"definitions,omitempty"`
 	// Details per machine (zshrc launchers, detail only): what the launcher really sets when run (node/launcherprobe.go).
@@ -140,7 +146,8 @@ func launcherView(l storedLauncher) LauncherView {
 		Models: l.Models, OpusModel: l.OpusModel, SonnetModel: l.SonnetModel, HaikuModel: l.HaikuModel, FableModel: l.FableModel,
 		SubagentForce: l.SubagentForce, HasHeaders: l.HeadersSealed != "", HasEnv: l.EnvSealed != "", Proxy: l.Proxy, NoProxy: l.NoProxy, TimeoutMS: l.TimeoutMS,
 		CompactWindow: l.CompactWindow, MaxContext: l.MaxContext, Effort: l.Effort, Origin: l.Source,
-		Share: l.share(), ScopeMachines: l.ScopeMachines, Delivery: l.delivery(), OwnService: l.ownService(), LegacyScope: l.Share == ""}
+		Share: l.share(), ScopeMachines: l.ScopeMachines, Delivery: l.delivery(), OwnService: l.ownService(), LegacyScope: l.Share == "",
+		keySealed: l.KeySealed}
 }
 
 var managedLauncherName = lazyre.New(`^[A-Za-z_][A-Za-z0-9_-]*$`)

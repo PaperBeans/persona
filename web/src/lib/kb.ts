@@ -2,14 +2,15 @@
 // list grouping and ranking, search results merged by entry with the words marked, which tags a row has room for,
 // the timeline, the profile without what the header shows, and the message "Ask Persona" sends. The iOS app is the
 // reference (apple/Persona/Views/Knowledge/KnowledgeView.swift, apple/Shared/Knowledge.swift).
+import type { TopicPoint } from "./kb-points";
 import { formatDate, t } from "../i18n";
 import { contextBody } from "./context-body";
 import type { Session } from "./types";
 
-export const KB_KINDS = ["projects", "chats", "people", "docs", "meetings", "events", "recordings"] as const;
+export const KB_KINDS = ["projects", "topics", "chats", "people", "docs", "meetings", "events", "recordings"] as const;
 export type KBKind = (typeof KB_KINDS)[number];
 
-export const KIND_TITLE: Record<KBKind, string> = { projects: t("lib-kb.kind_projects"), chats: t("lib-kb.kind_chats"), people: t("lib-kb.kind_people"), docs: t("lib-kb.kind_docs"), meetings: t("lib-kb.kind_meetings"), events: t("lib-kb.kind_events"), recordings: t("lib-kb.kind_recordings") };
+export const KIND_TITLE: Record<KBKind, string> = { projects: t("lib-kb.kind_projects"), topics: t("lib-kb.kind_topics"), chats: t("lib-kb.kind_chats"), people: t("lib-kb.kind_people"), docs: t("lib-kb.kind_docs"), meetings: t("lib-kb.kind_meetings"), events: t("lib-kb.kind_events"), recordings: t("lib-kb.kind_recordings") };
 
 export function isKind(k: unknown): k is KBKind {
   return typeof k === "string" && (KB_KINDS as readonly string[]).includes(k);
@@ -35,7 +36,7 @@ export interface KBEntry {
   relevance: number;
   tags?: string[] | null;
   updated?: string;
-  /** projects: "short · active" (kind · status); chats: dm / group… */
+  /** projects: "short · active" (kind · status); chats: dm / group…; topics: how many knowledge points, in decimal */
   extra?: string;
 }
 
@@ -74,6 +75,16 @@ export interface KBDetail {
   segments?: KBSegment[] | null;
   /** Recordings may retain older minutes while a newer revision is pending or failed. */
   minutes?: RecordingMinutes | null;
+  /** topics: the knowledge points (docs/assistant/knowledge.md "Knowledge points"). */
+  points?: TopicPoint[] | null;
+}
+
+/** A topic's point count from its list entry (extra) or its metadata (points). */
+export function topicPointCount(e: Pick<KBEntry, "kind" | "extra">, meta?: Record<string, unknown> | null): number | null {
+  if (e.kind !== "topics") return null;
+  if (typeof meta?.points === "number") return meta.points;
+  const n = Number.parseInt(e.extra ?? "", 10);
+  return Number.isFinite(n) ? n : null;
 }
 
 export interface MinutesPoint {
@@ -288,6 +299,11 @@ export function groupEntries(kind: KBKind, items: KBEntry[], tag?: string): Entr
         footer: t("lib-kb.ignored_footer"),
       },
     ];
+  } else if (kind === "topics") {
+    // Topics are curated as a whole: one list, the ones with the most knowledge first after any importance set by hand.
+    const n = (e: KBEntry) => topicPointCount(e) ?? 0;
+    const sorted = [...items].sort((a, b) => importanceRank(a.importance) - importanceRank(b.importance) || n(b) - n(a) || a.name.localeCompare(b.name));
+    out = [{ key: "all", title: tag ? `#${tag}` : t("lib-kb.section_all"), items: sorted }];
   } else if (tag) {
     out = [{ key: "tag", title: `#${tag}`, items: list }];
   } else {
@@ -526,6 +542,7 @@ export function entryFromDetail(base: KBEntry | undefined, d: KBDetail): KBEntry
   const line = str(m.one_line) || str(m.note);
   if (line) e.one_line = line;
   if (e.kind === "projects" && str(m.kind)) e.extra = `${str(m.kind)} · ${str(m.status) || "active"}`;
+  if (e.kind === "topics" && typeof m.points === "number") e.extra = String(m.points);
   return e;
 }
 

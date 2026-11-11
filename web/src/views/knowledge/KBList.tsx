@@ -14,13 +14,14 @@ import {
   projectInfo,
   rowTags,
   statusLabel,
+  topicPointCount,
   type KBEntry,
   type KBKind,
   type KBList,
   type KBResult,
 } from "../../lib/kb";
 import { href, navigate } from "../../lib/router";
-import { Collapse, cx, EASE, IconButton, Loading, Spinner } from "../../ui/atoms";
+import { Button, Collapse, cx, EASE, IconButton, Loading, Spinner } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { lists, listKey, remember, searches, searchKey } from "./cache";
 import { Badges, Card, KBIcon, KIND_ICON, Marked, onPlainClick, SectionTitle, Tile } from "./KBParts";
@@ -123,6 +124,9 @@ export function ListPane({
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 sm:px-4">
         <IconButton icon="sidebar" label={t("knowledge-kblist.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
         <h1 className="flex-1 truncate text-[14px] font-semibold text-ink">{t("knowledge-kblist.title")}</h1>
+        <Button tone="secondary" icon="branch" title={t("knowledge-kblist.map_title")} onClick={() => navigate({ name: "kb", kind: "map" })}>
+          {t("knowledge-kblist.map")}
+        </Button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[760px] px-3 pt-3 pb-16 sm:px-4">
@@ -254,7 +258,7 @@ function EntryRow({ e, tag, selected, onOpen }: { e: KBEntry; tag?: string; sele
   const tags = rowTags(e, tag);
   const when = ago(e.updated);
   const status = projectInfo(e)?.status === "paused" ? statusLabel("paused") : null;
-  const badges = e.importance || e.relevance > 0 || tags.length || status || e.kind === "projects";
+  const badges = e.importance || e.relevance > 0 || tags.length || status || e.kind === "projects" || topicPointCount(e) !== null;
   return (
     <a
       href={href({ name: "kb", kind: e.kind, id: e.id })}
@@ -382,6 +386,7 @@ const EMPTY_TITLE: Record<KBKind, string> = {
   meetings: t("knowledge-kblist.empty_meetings"),
   events: t("knowledge-kblist.empty_events"),
   recordings: t("knowledge-kblist.empty_recordings"),
+  topics: t("knowledge-kblist.empty_topics"),
 };
 
 function Empty({ kind, tag }: { kind: KBKind; tag?: string }) {
@@ -391,7 +396,7 @@ function Empty({ kind, tag }: { kind: KBKind; tag?: string }) {
         <KBIcon name={KIND_ICON[kind]} size={18} />
       </span>
       <p className="text-[13.5px] font-medium text-ink">{tag ? t("knowledge-kblist.empty_tag", { tag, kind: KIND_TITLE[kind] }) : EMPTY_TITLE[kind]}</p>
-      <p className="mt-1 max-w-[340px] text-[12.5px] leading-relaxed text-ink-3">{t("knowledge-kblist.empty_body")}</p>
+      <p className="mt-1 max-w-[340px] text-[12.5px] leading-relaxed text-ink-3">{kind === "topics" && !tag ? t("knowledge-kblist.empty_topics_body") : t("knowledge-kblist.empty_body")}</p>
     </div>
   );
 }

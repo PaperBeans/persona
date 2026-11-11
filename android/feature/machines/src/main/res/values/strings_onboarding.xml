@@ -39,7 +39,7 @@
     <string name="machines_onb_confirm">It\'s mine</string>
     <string name="machines_onb_reject">No, remove</string>
     <string name="machines_onb_confirmed">Added %1$s</string>
-    <string name="machines_onb_confirmed_hint">It\'s in the machine list now, and you can pick it for new Agents.</string>
+    <string name="machines_onb_confirmed_hint">It\'s in the machine list now, and you can pick it for new agents.</string>
     <string name="machines_onb_rejected">Removed \"%1$s\"</string>
     <string name="machines_onb_gone">\"%1$s\" is gone</string>
     <string name="machines_onb_rejected_hint">The pairing link it used no longer works. Add the computer again to try once more.</string>
@@ -65,4 +65,17 @@
     <string name="machines_onb_err_too_many_pending">3 computers are already waiting for you to confirm them. Confirm or remove them first.</string>
     <string name="machines_onb_err_forbidden">This device can\'t add computers. Try from an app or browser that\'s signed in.</string>
     <string name="machines_onb_err_invalid_name">Give it a name of up to 40 characters.</string>
+    <!-- Adding a computer to the current assistant (docs/assistant/managers.md "Clients"). -->
+    <string name="machines_onb_added_under">This computer was added under %1$s.</string>
+    <string name="machines_onb_assistant_offline">%1$s is offline, so a computer can\'t be added to it right now.</string>
+    <string name="machines_onb_never_connected">Never connected</string>
+    <string name="machines_onb_waiting_confirm">Waiting for you</string>
+    <plurals name="machines_onb_too_many_never">
+        <item quantity="one">You already added %1$d computer and it hasn\'t connected yet. Remove it if you don\'t need it, then add a new one.</item>
+        <item quantity="other">You already added %1$d computers and none of them has connected yet. Remove the ones you don\'t need, then add a new one.</item>
+    </plurals>
+    <plurals name="machines_onb_too_many_waiting">
+        <item quantity="one">%1$d computer is already waiting: remove it if it never connected, or confirm it if it did, then add a new one.</item>
+        <item quantity="other">%1$d computers are already waiting: remove the ones that never connected, and confirm the ones that did, then add a new one.</item>
+    </plurals>
 </resources>

@@ -563,6 +563,7 @@ Test report-only hooks with real input: `SessionStart` always carries `source`.
 
 Revoking an assistant conversation's grants kills its whole process group (`resetAssistantPermissions`, #5936). On macOS, a process that is forking while `kill(-pgid, SIGKILL)` goes out can leave a child that missed the signal. The child is adopted by launchd, keeps the group's pipes and goes on working; Linux orders the two, so CI never saw it. `TestResetAssistantPermissionsKillsUncooperativeChild` failed two runs in three on macOS, each time with one `sleep 30` left over (PPID 1, the killed group's pgid).
 After a group kill whose leftovers matter, sweep with `osproc.SweepGroup`, which kills again until `kill(-pgid, 0)` says ESRCH. Killed members count until they are reaped, which happens quickly.
+Leftovers matter whenever anything waits for the group's pipes to close: the Lark CLI login's cancel (`larkcli.Runner.StartLogin`) killed its group once, and a surviving `sleep 30` held stdout, so the login reported done only 30 s later (#4004).
 
 ## Verify the actual question producer and durable consumer (#5976)
 
@@ -777,3 +778,10 @@ node RPC so an older node cannot silently ignore a billable setting in `session.
 
 Persona-owned Codex conversations use a separate stdio connection. Share catalog parsing across both transports and
 include the owned connection in session projection, setting routing and native notifications.
+
+## Runtime assistant identity comes from persisted state (#4202)
+
+A runtime can rediscover an assistant conversation with its current project directory. Apply the node's trusted
+session-state projection before publishing runtime rows so the original assistant or health directory and launcher
+survive snapshots and reconnects. The hub uses that directory to classify assistant history. Preserve the runtime's
+status, model, permission choices and capabilities while restoring owned metadata.

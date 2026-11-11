@@ -226,6 +226,22 @@ func (p *Pusher) reachable(d Device) bool {
 	return p.relayed(d)
 }
 
+// routed: a push to the device with this credential (or push registration id) can go somewhere. APNs keeps its alerts
+// while it is away, so the hub keeps none of its WebSocket's for it (notifyring.go).
+func (p *Pusher) routed(id string) bool {
+	if p == nil || id == "" {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, d := range p.devices {
+		if (d.DeviceID == id || d.CredentialID == id) && p.reachable(d) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Pusher) currentPushTarget(d Device) bool {
 	cur, ok := p.device(d.DeviceID)
 	return ok && cur.APNSToken == d.APNSToken && cur.RelayURL == d.RelayURL && cur.PushKey == d.PushKey && cur.Topic == d.Topic && cur.APNSEnv == d.APNSEnv

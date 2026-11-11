@@ -97,6 +97,8 @@ func (h *Hub) onClientHello(c *client, data []byte) {
 	c.meta = msg.clientMeta
 	updates, done := c.meta.updates, c.meta.done
 	c.mu.Unlock()
+	// Last, after the cards it can now answer: the notify events kept while it had no ws_notify socket (notifyring.go).
+	defer h.replayNotifyRing(c)
 	go h.fleetClientsChanged() // its features (elicitation) count now (fleet_link.go)
 	h.noteClientApp(c)         // its version, for the assistant (client_apps.go)
 	if c.role == roleFull && c.hub != nil {

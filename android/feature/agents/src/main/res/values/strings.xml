@@ -361,6 +361,7 @@
     <string name="agents_todo_delete_action">Delete</string>
     <string name="agents_todo_done_failed">Couldn\'t complete the to-do: %1$s</string>
     <string name="agents_todo_delete_failed">Couldn\'t delete the to-do: %1$s</string>
+    <string name="agents_todo_state_didnt_start">Didn\'t start</string>
     <string name="agents_todo_start_failed">Couldn\'t start: %1$s</string>
     <string name="agents_todo_in_progress">In progress</string>
     <plurals name="agents_todo_agents">
@@ -511,7 +512,10 @@
     <string name="agents_herdr_why_timeout">herdr took too long to come up; check again in a moment</string>
     <string name="agents_empty_no_computer_title">No computers yet</string>
     <string name="agents_empty_no_computer_hint">Add one and Persona can work on it for you.</string>
-    <string name="agents_page_loaded">%1$d of %2$d sessions loaded</string>
+    <plurals name="agents_page_loaded">
+        <item quantity="one">%1$d of %2$d session loaded</item>
+        <item quantity="other">%1$d of %2$d sessions loaded</item>
+    </plurals>
     <string name="agents_page_more">Load more</string>
     <string name="agents_page_previous">Load earlier sessions</string>
     <!-- To-do status sections (#3206, docs/assistant/todo-status-sop.md) -->

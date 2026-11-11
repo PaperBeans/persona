@@ -31,7 +31,10 @@ type launcherInput struct {
 	CustomModelDescription string   `json:"custom_model_description"`
 	Args                   []string `json:"args"`
 	APIKey                 *string  `json:"api_key"` // nil or "" on an update keeps the key
-	Auth                   string   `json:"auth"`    // api_key (x-api-key, the default) or bearer (Authorization: Bearer)
+	// APIKeyReference is a reference to a provider extension's secret in place of the key (launcher_secrets.go); nil
+	// or "" keeps the key, and a key given later replaces it.
+	APIKeyReference *string `json:"api_key_reference"`
+	Auth            string  `json:"auth"` // api_key (x-api-key, the default) or bearer (Authorization: Bearer)
 	// Preset is the provider it is added from (GET /api/v1/launchers/presets): what is left empty is filled in, the
 	// name too (POST only).
 	Preset string `json:"preset,omitempty"`
@@ -60,6 +63,10 @@ type launcherInput struct {
 
 	// The device scope (models_launchers_scope.go); left out keeps what is stored.
 	scopeInput
+
+	// keyRefSealed and machineRefsSealed are the references above, checked and sealed (sealKeyReferences).
+	keyRefSealed      string
+	machineRefsSealed map[string]string
 }
 
 // checkEffort: a thinking level Claude Code takes (CLAUDE_CODE_EFFORT_LEVEL), or none. whose is the error's key
@@ -267,6 +274,14 @@ func (in launcherInput) check() error {
 	if in.Auth != "" && in.Auth != "api_key" && in.Auth != "bearer" {
 		return i18n.Err("assistant-models_launchers.err_auth")
 	}
+	if keyGiven(in.APIKey) && keyGiven(in.APIKeyReference) {
+		return i18n.Err("assistant-models_launchers.err_key_value_or_reference")
+	}
+	for m, ref := range in.MachineKeyReferences {
+		if keyGiven(ref) && keyGiven(in.MachineKeys[m]) {
+			return i18n.Err("assistant-models_launchers.err_key_value_or_reference")
+		}
+	}
 	if in.Kind == "api" && (len(in.Args) != 0 || in.SmallModel != "" || in.SubagentModel != "" || in.CustomModel != "") {
 		return i18n.Err("assistant-models_launchers.err_api_launch_fields")
 	}
@@ -407,6 +422,9 @@ func (s *Service) saveLauncher(ctx context.Context, in launcherInput, old *store
 		}
 		l.KeySealed = sealed
 	}
+	if in.keyRefSealed != "" {
+		l.KeySealed = in.keyRefSealed
+	}
 	in.applyProvider(&l)
 	// A bypass list that is the gateway's host alone (iOS's Proxy › No Proxy) follows the gateway to a new address: the
 	// web form and an import send it back as it was, and the old host would leave the new gateway on the proxy (#6238).
@@ -444,7 +462,7 @@ func (s *Service) saveLauncher(ctx context.Context, in launcherInput, old *store
 	if err != nil {
 		return storedLauncher{}, err
 	}
-	newKeys, _, err := s.withMachineKeys(keys, l.Name, in.MachineKeys)
+	newKeys, _, err := s.withMachineKeys(keys, l.Name, in.MachineKeys, in.MachineKeyReferences, in.machineRefsSealed)
 	if err != nil {
 		return storedLauncher{}, err
 	}
@@ -505,3 +523,6 @@ func (s *Service) storeManagedWithKeys(ctx context.Context, list []storedLaunche
 	s.pushNodeLaunchers(ctx, "", list, keys)
 	return nil
 }
+
+// keyGiven: a key or reference that is there (nil and blank are not).
+func keyGiven(v *string) bool { return v != nil && strings.TrimSpace(*v) != "" }

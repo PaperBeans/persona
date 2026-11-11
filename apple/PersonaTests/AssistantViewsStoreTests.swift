@@ -17,9 +17,9 @@ struct AssistantViewsStoreTests {
                         kind: .view, ref: view.id, body: .object(["view": encoded]))
     }
 
-    private func response(_ view: ExtensionAssistantView) throws -> String {
+    private func response(_ view: ExtensionAssistantView, creation: ExtensionAssistantView) throws -> String {
         let encoded = try JSON.decoder.decode(JSONValue.self, from: JSONEncoder().encode(view))
-        let feed = try JSON.decoder.decode(JSONValue.self, from: JSON.encoder.encode(item(view)))
+        let feed = try JSON.decoder.decode(JSONValue.self, from: JSON.encoder.encode(item(creation)))
         let object: JSONValue = .object(["items": .array([feed]), "views": .object([view.id: encoded])])
         return String(decoding: try JSON.encoder.encode(object), as: UTF8.self)
     }
@@ -77,12 +77,12 @@ struct AssistantViewsStoreTests {
         var api = hub.client
         api.group = "test-group"
         let route = "/api/v1/assistant/conversations/conversation/feed"
-        hub.on("GET", route, json: try response(view(1)))
+        hub.on("GET", route, json: try response(view(1), creation: view(1)))
         await tasks.load("conversation", refreshTodos: false, api: api)?.value
         let original = tasks.feed("conversation")
         #expect(original.count == 1 && original.first?.kind == .view)
         #expect(views.view("view_example", conversation: "conversation", group: "test-group")?.version == 1)
-        hub.on("GET", route, json: try response(view(4)))
+        hub.on("GET", route, json: try response(view(4), creation: view(1)))
         for refresh in tasks.reconnected(api: api) { await refresh.value }
         #expect(tasks.feed("conversation") == original)
         #expect(views.view("view_example", conversation: "conversation", group: "test-group")?.version == 4)
@@ -94,7 +94,7 @@ struct AssistantViewsStoreTests {
         let views = AssistantViewsStore()
         let todos = TodoStore(cachedTodos: [], cacheWriter: nil, hubListChanged: {})
         let tasks = TasksStore(todoStore: todos, viewStore: views)
-        hub.on("GET", "/api/v1/assistant/conversations/conversation/feed", json: try response(view(1)))
+        hub.on("GET", "/api/v1/assistant/conversations/conversation/feed", json: try response(view(1), creation: view(1)))
         var api = hub.client
         api.transport = { request in
             let data = try await hub.client.transport!(request)
@@ -126,7 +126,7 @@ struct AssistantViewsStoreTests {
         let views = AssistantViewsStore()
         let todos = TodoStore(cachedTodos: [], cacheWriter: nil, hubListChanged: {})
         let tasks = TasksStore(todoStore: todos, viewStore: views)
-        hub.on("GET", "/api/v1/assistant/conversations/conversation/feed", json: try response(view(1, conversation: "other")))
+        hub.on("GET", "/api/v1/assistant/conversations/conversation/feed", json: try response(view(1, conversation: "other"), creation: view(1, conversation: "other")))
         await tasks.load("conversation", refreshTodos: false, api: hub.client)?.value
         #expect(tasks.feed("conversation").isEmpty)
         #expect(views.snapshots.isEmpty)

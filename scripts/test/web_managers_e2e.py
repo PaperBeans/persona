@@ -22,11 +22,14 @@ Manage assistants…; the pick names the assistant's requests and survives a rel
 composer off, its inbox and to-dos saying it is offline rather than empty; an installing one opens its install code),
 that the machines and inbox pages list only the current assistant's (no manager headings), another assistant's inbox
 item opened by its address (its requests name its manager, the Trail's too, and the current assistant stays, also after
-Hand to AI on it), the Muted dialog, and Settings › Assistants' Notifications switch;
-Once after the rounds: the count beside 工作 (its agents waiting plus the roster's inbox_needs_you) moving without a
-reload when the hub pushes `managers`, and every row of the list reachable and clickable at 200% zoom and at the largest
-text size. --outdated its Needs update badge; --single checks the earlier Persona product row and appearance menu,
-without assistant identity or a roster dropdown, that nothing is filtered
+Hand to AI on it), the Muted dialog, and Settings › Assistants' Notifications switch. Each round also checks Settings'
+three groups ("<name>'s settings" with Switch, This device, Hub), that Switch opens the sidebar's list, and that the
+first group then follows the new assistant (its pages' requests name it, Connectors and Extensions list its copies
+only); with --single, the title and Switch with one assistant. Once after the rounds: the count beside 工作 (its agents
+waiting plus the roster's inbox_needs_you) moving without a reload when the hub pushes `managers`, and every row of the
+list reachable and clickable at 200% zoom and at the largest text size. --outdated its Needs update badge; --single
+checks the earlier Persona product row and appearance menu, without assistant identity or a roster dropdown, that
+nothing is filtered
 and that no request names a manager (no X-Persona-Manager header, no manager= in the address). Screenshots (390 and
 1200 wide, light and dark) contain only mock data.
 """
@@ -151,7 +154,8 @@ def check(browser, base, width, theme, shots, single, outdated):
             page.keyboard.press("Escape")
             expect(page.get_by_role("dialog")).to_have_count(0)  # closing it goes back in history: let it land
             go(page, base + "/settings?tab=extensions")
-            main.locator("button").filter(has=page.locator("span.truncate")).first.click()
+            main.locator("[data-extension-row]").first.click()  # an extension's page
+            page.wait_for_url(re.compile(r"extension="))
             page.wait_for_timeout(1200)
             page.goto(base + "/health")
             page.wait_for_timeout(1000)
@@ -317,11 +321,12 @@ def check(browser, base, width, theme, shots, single, outdated):
         if width >= 1024:
             expect(head).to_contain_text("助手")
 
+        # Settings › Extensions is the current assistant's (the default's here): its copies only, no assistant's name over them
         page.goto(base + "/settings?tab=extensions")
-        expect(main.get_by_text("工作", exact=True).first).to_be_visible()
-        if shots:
-            page.wait_for_timeout(600)
-            page.screenshot(path=name("extensions"))
+        rows = main.locator("[data-extension-row]")
+        expect(rows.first).to_be_visible()
+        assert set(rows.evaluate_all("(rs) => rs.map((r) => r.dataset.manager)")) == {"assistant"}
+        expect(main.get_by_text("工作", exact=True)).to_have_count(0)
 
         go(page, base + "/settings?tab=managers")
         work = main.get_by_role("button").filter(has=page.get_by_text("工作", exact=True)).first
@@ -424,6 +429,114 @@ def agents_waiting(request, base, auth, manager):
             continue
         waiting.add(key(c["machine_id"], c["session_id"]))
     return len(waiting)
+
+
+def check_settings(browser, base, width, theme, shots, single):
+    """Settings' three groups (docs/assistant/managers.md "The current assistant"): "<name>'s settings" with the current
+    assistant's avatar and Switch, This device and Hub, in that order with their lines; Switch opens the sidebar's list
+    and the first group then follows the new assistant (its pages' requests name it, Connectors and Extensions list its
+    copies only), and with an offline one Connectors says it is offline; one assistant shows the title and Switch too."""
+    context = browser.new_context(viewport={"width": width, "height": 900}, color_scheme=theme, locale="zh-CN")
+    context.add_init_script("localStorage.setItem('persona.theme', " + repr(theme) + ")")
+    page = context.new_page()
+    page.set_default_timeout(15000)
+    errors, named = [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("request", lambda r: "/api/" in r.url and named.append((urlparse(r.url).path, r.headers.get("x-persona-manager"))))
+    name = lambda what: os.path.join(shots, f"settings-{what}-{width}-{theme}.png")
+    phone = width < 640
+    groups_of = "[data-settings-group^='nav-']" if phone else "[data-settings-nav-group]"
+    key = "settingsGroup" if phone else "settingsNavGroup"
+    try:
+        page.goto(base + "/?token=mock")
+        page.wait_for_function("localStorage.getItem('persona.token')")
+        page.goto(base + "/settings")
+        groups = page.locator(groups_of)
+        expect(groups).to_have_count(3)
+        assert [g.replace("nav-", "") for g in groups.evaluate_all(f"(gs) => gs.map((g) => g.dataset.{key})")] == ["assistant", "device", "hub"]
+        first, last = groups.nth(0), groups.nth(2)
+        expect(first).to_contain_text("助手 的设置")
+        expect(first.locator("[data-assistant-avatar]")).to_have_attribute("data-assistant-avatar", "assistant")
+        expect(first.locator("[data-settings-switch]")).to_have_text("切换")
+        expect(first).to_contain_text("只显示「助手」自己的内容。要改别的助手，先切换过去。")
+        expect(groups.nth(1)).to_contain_text("这台设备")
+        expect(last).to_contain_text("Hub")
+        expect(last).to_contain_text("这两组和当前是哪个助手无关。")
+        if shots:
+            page.wait_for_timeout(500)
+            page.screenshot(path=name("home"))
+        switch = first.locator("[data-settings-switch]")
+        switch.click()
+        menu = page.get_by_role("menu")
+        expect(menu.get_by_role("menuitem", name="新建助手")).to_be_visible()
+        expect(menu.get_by_role("menuitem", name="管理助手…")).to_be_visible()
+        if single:
+            expect(menu.get_by_role("menuitemradio")).to_have_count(1)
+            if shots:
+                page.wait_for_timeout(400)
+                page.screenshot(path=name("switch-single"))
+            page.keyboard.press("Escape")
+            assert all(m is None for _, m in named), [x for x in named if x[1]][:5]
+            assert not errors, errors
+            return
+        expect(menu.get_by_role("menuitemradio")).to_have_count(3)
+        if shots:
+            page.wait_for_timeout(400)
+            page.screenshot(path=name("switch"))
+        menu.get_by_role("menuitemradio").filter(has_text="工作").click()
+        expect(first).to_contain_text("工作 的设置")
+        expect(first.locator("[data-assistant-avatar]")).to_have_attribute("data-assistant-avatar", MANAGERS["工作"])
+        expect(first).to_contain_text("只显示「工作」自己的内容。要改别的助手，先切换过去。")
+
+        # the first group's pages are 工作's: Connectors and Extensions list its copies only, and its pages ask it
+        def opened(tab):
+            del named[:]
+            go(page, base + f"/settings?tab={tab}")
+            page.wait_for_timeout(1200)
+
+        opened("connectors")
+        rows = page.locator("main [data-connector-row]")
+        expect(rows.first).to_be_visible()
+        assert set(rows.evaluate_all("(rs) => rs.map((r) => r.dataset.manager)")) == {MANAGERS["工作"]}
+        mail = [m for p, m in named if p.startswith("/api/v1/mail/accounts")]
+        assert mail and all(m == MANAGERS["工作"] for m in mail), mail
+        if shots:
+            page.screenshot(path=name("connectors"))
+        opened("extensions")
+        rows = page.locator("main [data-extension-row]")
+        expect(rows.first).to_be_visible()
+        assert set(rows.evaluate_all("(rs) => rs.map((r) => r.dataset.manager)")) == {MANAGERS["工作"]}
+        if shots:
+            page.screenshot(path=name("extensions"))
+        opened("persona")
+        for path in ("/api/v1/assistant", "/api/v1/agents/triage"):
+            asked = [m for p, m in named if p == path]
+            assert asked and all(m == MANAGERS["工作"] for m in asked), (path, asked)
+        opened("models")
+        asked = [m for p, m in named if p == "/api/v1/launchers"]
+        assert asked and all(m == MANAGERS["工作"] for m in asked), asked
+        # a page of this device's names nobody
+        opened("general")
+        assert all(m is None for p, m in named if not p.startswith("/api/v1/assistant")), [x for x in named if x[1]][:5]
+        # 家里, offline: the hub's merged list leaves its connectors out, so Connectors says it is offline instead of none
+        go(page, base + "/settings")
+        page.locator(groups_of).nth(0).locator("[data-settings-switch]").click()
+        page.get_by_role("menu").get_by_role("menuitemradio").filter(has_text="家里").click()
+        expect(page.locator(groups_of).nth(0)).to_contain_text("家里 的设置")
+        opened("connectors")
+        expect(page.locator(f'main [data-assistant-offline="{MANAGERS["家里"]}"]')).to_be_visible()
+        expect(page.locator("main [data-connector-row]")).to_have_count(0)
+        if shots:
+            page.screenshot(path=name("connectors-offline"))
+        # back to 助手, from the same Switch (the list the sidebar shows)
+        go(page, base + "/settings")
+        page.locator(groups_of).nth(0).locator("[data-settings-switch]").click()
+        page.get_by_role("menu").get_by_role("menuitemradio").filter(has_text="助手").click()
+        expect(page.locator(groups_of).nth(0)).to_contain_text("助手 的设置")
+        assert page.evaluate(KEPT) == {}, page.evaluate(KEPT)
+        assert not errors, errors
+    finally:
+        context.close()
 
 
 def check_counts(browser, base):
@@ -687,6 +800,7 @@ def main():
             for width in (390, 1200):
                 for theme in ("light", "dark"):
                     check(browser, a.base.rstrip("/"), width, theme, a.shots, a.single, a.outdated)
+                    check_settings(browser, a.base.rstrip("/"), width, theme, a.shots, a.single)
             if not a.single:
                 check_counts(browser, a.base.rstrip("/"))
                 check_reach(browser, a.base.rstrip("/"), a.shots)

@@ -27,11 +27,11 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Settings › Claude Code settings / Codex settings: the common options of each computer's Claude Code or Codex ([kind]), written to
- * one or all online machines.
+ * one or all online machines. [owns] keeps the computers listed (the current assistant's, docs/assistant/managers.md "Clients").
  */
 @Composable
 internal fun ClaudeSettingsPage(sessions: SessionsRepository, management: MachineManagement?, onBack: () -> Unit,
-    kind: AgentSettingsKind = AgentSettingsKind.Claude) {
+    kind: AgentSettingsKind = AgentSettingsKind.Claude, owns: (persona.core.contracts.Machine) -> Boolean = { true }) {
     if (management == null) {
         JListPage(title = stringResource(kind.title), onBack = onBack) { item { JNotice(stringResource(kind.demo)) } }
         return
@@ -41,7 +41,7 @@ internal fun ClaudeSettingsPage(sessions: SessionsRepository, management: Machin
     val model = remember(management, kind) { ClaudeSettingsModel(management, StoredClaudeSettingsChoices(context), kind) }
     val state by model.state.collectAsState()
     val machines by sessions.machines.collectAsState()
-    val online = machines.filter { it.online }
+    val online = machines.filter { it.online && owns(it) }
     val scope = rememberCoroutineScope()
     val feedback = LocalAppFeedback.current
     var picking by remember { mutableStateOf(false) }

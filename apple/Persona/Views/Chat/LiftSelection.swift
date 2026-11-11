@@ -1,4 +1,5 @@
 import MarkdownUI
+import PersonaKit
 import SwiftUI
 #if os(iOS) || os(visionOS)
 import UIKit
@@ -26,8 +27,11 @@ nonisolated enum ReplyMetrics {
     static let heading1 = (size: CGFloat(1.3), top: CGFloat(16), bottom: CGFloat(8))
     /// The second level, at the text's size.
     static let heading2 = (top: CGFloat(14), bottom: CGFloat(6))
-    /// The rest.
+    /// The third level.
     static let heading3 = (top: CGFloat(12), bottom: CGFloat(4))
+    /// The fourth to sixth (#3863): a step smaller (the secondary level's size, em), semibold in the quieter ink
+    /// (`Theme.Reply.secondaryInk`), with the third's space above and below, so they read as headings under it.
+    static let heading4 = (size: Theme.Level.secondary.size / Theme.Level.body.size, top: Theme.Space.m, bottom: Theme.Space.xs)
     /// Above a list item, em.
     static let itemTop: CGFloat = 0.2
     /// Around a code block.
@@ -434,6 +438,8 @@ enum ReplyText {
         var inlineCode: UIFont
         var color: UIColor
         var link: UIColor
+        /// The fourth to sixth heading levels' ink (`ReplyMetrics.heading4`).
+        var secondaryInk: UIColor
         var traits: UITraitCollection
 
         init(_ words: LiftWords, traits: UITraitCollection) {
@@ -447,6 +453,7 @@ enum ReplyText {
             code = .monospacedSystemFont(ofSize: body.pointSize * Theme.Level.code.size / Theme.Level.body.size, weight: .regular)
             inlineCode = .monospacedSystemFont(ofSize: body.pointSize * ReplyMetrics.inlineCode, weight: .regular)
             link = UIColor(Theme.accent)
+            secondaryInk = UIColor(Theme.Reply.secondaryInk)
             self.traits = traits
         }
 
@@ -518,7 +525,10 @@ enum ReplyText {
         private var markerGap: CGFloat { look.size * 0.35 }
 
         func read(_ markdown: String) {
-            let source = markdown.components(separatedBy: "\n")
+            // Bold next to CJK punctuation is read as the chat reads it (`CJKEmphasis`, line for line); a table still
+            // copies as it was written.
+            let written = markdown.components(separatedBy: "\n")
+            let source = CJKEmphasis.apply(markdown).components(separatedBy: "\n")
             var i = 0
             while i < source.count {
                 let raw = source[i]
@@ -572,13 +582,15 @@ enum ReplyText {
                     continue
                 }
                 if !deep, trimmed.contains("|"), i < source.count, Self.isDelimiterRow(source[i]) {
+                    let first = i - 1
                     var rows = [raw, source[i]]
                     i += 1
                     while i < source.count, source[i].contains("|"), !source[i].trimmingCharacters(in: .whitespaces).isEmpty {
                         rows.append(source[i])
                         i += 1
                     }
-                    table(rows.joined(separator: "\n"))
+                    let drawn = rows.joined(separator: "\n")
+                    table(drawn, copied: written.count == source.count ? written[first..<i].joined(separator: "\n") : drawn)
                     continue
                 }
                 if !deep, Self.isRule(trimmed) {
@@ -591,12 +603,14 @@ enum ReplyText {
                     continue
                 }
                 if !deep, let (level, title) = Self.heading(trimmed) {
-                    let m = level == 1 ? (top: ReplyMetrics.heading1.top, bottom: ReplyMetrics.heading1.bottom)
-                        : level == 2 ? ReplyMetrics.heading2 : ReplyMetrics.heading3
+                    let m: (top: CGFloat, bottom: CGFloat) = level == 1 ? (top: ReplyMetrics.heading1.top, bottom: ReplyMetrics.heading1.bottom)
+                        : level == 2 ? ReplyMetrics.heading2 : level == 3 ? ReplyMetrics.heading3
+                        : (top: ReplyMetrics.heading4.top, bottom: ReplyMetrics.heading4.bottom)
                     blocks.append(Block(top: m.top, bottom: m.bottom))
-                    let font = level == 1 ? Self.weight(look.body.withSize(look.size * ReplyMetrics.heading1.size), .bold)
-                        : Self.weight(look.body, .semibold)
-                    add(inline(title, font: font), in: blocks.count - 1)
+                    let font: UIFont = level == 1 ? Self.weight(look.body.withSize(look.size * ReplyMetrics.heading1.size), .bold)
+                        : level <= 3 ? Self.weight(look.body, .semibold)
+                        : Self.weight(look.body.withSize(look.size * ReplyMetrics.heading4.size), .semibold)
+                    add(inline(title, font: font, color: level > 3 ? look.secondaryInk : nil), in: blocks.count - 1)
                     open = nil
                     levels = []
                     continue
@@ -701,12 +715,12 @@ enum ReplyText {
             }
         }
 
-        private func table(_ source: String) {
+        private func table(_ source: String, copied: String) {
             blocks.append(Block())
             open = nil
             levels = []
             guard let image = ReplyTable.picture(source, width: width, traits: look.traits) else {
-                add(verbatim(source, look.body), in: blocks.count - 1, lineSpacing: true)
+                add(verbatim(copied, look.body), in: blocks.count - 1, lineSpacing: true)
                 return
             }
             let a = NSTextAttachment()
@@ -715,7 +729,7 @@ enum ReplyText {
                 ? CGSize(width: width, height: image.size.height * width / image.size.width) : image.size
             a.bounds = CGRect(origin: .zero, size: size)
             let line = NSMutableAttributedString(attachment: a)
-            line.addAttributes([.replySource: source, .font: look.body], range: NSRange(location: 0, length: line.length))
+            line.addAttributes([.replySource: copied, .font: look.body], range: NSRange(location: 0, length: line.length))
             add(line, in: blocks.count - 1)
         }
 
@@ -904,7 +918,9 @@ enum ReplyText {
         // scroll views at all).
         let table = Markdown(source)
             .markdownBlockStyle(\.table) { config in
-                FittedTable.drawn(config.label).environment(\.tableColumnWidths, plan.widths)
+                FittedTable.drawn(config.label)
+                    .environment(\.tableColumnWidths, plan.widths)
+                    .environment(\.tableColumnAlignments, m.alignments)
             }
             .markdownTheme(.persona)
             // At the columns' planned widths: no clear space beside a narrow table (it would be selected as part of it);

@@ -48,7 +48,7 @@
     <string name="chat_agent_share_done">完了</string>
     <string name="chat_agent_share_work">実行過程</string>
     <string name="chat_agent_share_user">あなた</string>
-    <string name="chat_agent_share_assistant">Agent</string>
+    <string name="chat_agent_share_assistant">エージェント</string>
     <string name="chat_agent_share_remove_note">削除するメッセージを選び、変更を保存してください。保存済みの履歴を使うため、ソースのコンピュータは不要です。</string>
     <string name="chat_agent_share_once">今すぐリンクをコピーしてください。この画面を離れると再表示できず、アプリにも保存されません。</string>
     <string name="chat_agent_share_copy">リンクをコピー</string>

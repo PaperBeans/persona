@@ -225,6 +225,10 @@ struct LinkSheet: View {
 
 /// WKWebViews kept warm: the links of the latest answers load in the background, so opening one shows a finished
 /// page. All share the default (on-disk) website data store, so assets and logins carry over.
+/// On iPhone, iPad and Vision Pro a view serves one opening of its link: once a sheet has shown it, the pool lets it go
+/// (`release`, from `PooledWebView`), so a later tap on the link starts on the link's own page with no back/forward
+/// history, not where the last opening was left (#4074). The Mac's panel (frozen, apple/Mac/Link) still reuses its views:
+/// its Open in Separate Window moves the view on screen, page and history, into the window.
 @MainActor
 final class WebViewPool {
     static let shared = WebViewPool()
@@ -264,6 +268,18 @@ final class WebViewPool {
 
     /// The view for this url if the pool has one (nothing is loaded).
     func existing(for url: URL) -> SelectableWebView? { views[url.absoluteString] }
+
+    /// The sheet that showed `v` for `url` has closed. The pool drops `v`, with the page the user browsed to and its
+    /// back/forward history, and starts a fresh view on the link, so tapping it again opens the link's own page at once
+    /// (#4074). A machine's dev server is asked only when its page is opened, as before. A view the pool no longer
+    /// holds (pushed out by newer links while it was shown) changes nothing.
+    func release(_ v: WKWebView, for url: URL) {
+        let key = url.absoluteString
+        guard views[key] === v else { return }
+        views[key] = nil
+        order.removeAll { $0 == key }
+        if !Self.isLoopback(url) { _ = view(for: url) }
+    }
 
     /// The sheet's Refresh: the page again from the server, not from the cache. A view that never got a page (its first
     /// load failed: `url` is nil) loads it afresh.
@@ -330,16 +346,24 @@ struct PooledWebView: UIViewRepresentable {
         let v = WebViewPool.shared.view(for: url)
         v.removeFromSuperview()
         v.onPick = onPick
+        context.coordinator.url = url
         context.coordinator.observe(v) { title = $0 }
         return v
     }
 
     func updateUIView(_ v: SelectableWebView, context: Context) { v.onPick = onPick }
 
+    /// The sheet has closed: this opening's page and history go with it, and the next tap on the link starts fresh (#4074).
+    static func dismantleUIView(_ v: SelectableWebView, coordinator: Coordinator) {
+        if let url = coordinator.url { WebViewPool.shared.release(v, for: url) }
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     @MainActor
     final class Coordinator {
+        /// The link this view was taken for: the pool's key, which the page the user browsed to no longer is.
+        var url: URL?
         private var token: NSKeyValueObservation?
         private var onTitle: ((String) -> Void)?
         func observe(_ v: WKWebView, title: @escaping (String) -> Void) {

@@ -21,10 +21,16 @@ class ChatGoalTest {
     }
 
     @Test fun usageSaysTokensBudgetAndTime() {
-        assertEquals("12.3k / 500.0k tokens · 10 分钟",
+        assertEquals("1.2 万 / 50 万 tokens · 10 分钟",
             goalUsage(res, GoalInfo(objective = "x", status = "active", tokensUsed = 12345, tokenBudget = 500_000, seconds = 600)))
         assertEquals("950 tokens · 1 分钟", goalUsage(res, GoalInfo(objective = "x", tokensUsed = 950, tokenBudget = 0, seconds = 20)))
         assertEquals("2 小时 5 分", goalUsage(res, GoalInfo(objective = "x", seconds = 7500)))
         assertNull(goalUsage(res, GoalInfo(objective = "x", tokensUsed = 0)))
+    }
+
+    @Config(qualifiers = "en")
+    @Test fun usageCountsTokensInEnglishUnits() {
+        assertEquals("12.3K / 500K tokens", goalUsage(res, GoalInfo(objective = "x", tokensUsed = 12345, tokenBudget = 500_000)))
+        assertEquals("1.2M / 5M tokens", goalUsage(res, GoalInfo(objective = "x", tokensUsed = 1_200_000, tokenBudget = 5_000_000)))
     }
 }
