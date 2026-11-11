@@ -95,6 +95,23 @@ func spreadOf(values []float64) spread {
 	return spread{Median: median, Mean: sum / float64(len(sorted)), Min: sorted[0], Max: sorted[len(sorted)-1]}
 }
 
+// cpuRatio is the manager's CPU time over the hub's, minute by minute. CPU time moves with what else the machine does
+// and with the cores the processes get, by a factor of two on a laptop, but both processes move together: when a
+// change leaves the hub's work as it was, the ratio is the manager's CPU with the machine's state taken out.
+func cpuRatio(rep *report) spread {
+	m, h := rep.Processes["manager"], rep.Processes["hub"]
+	if m == nil || h == nil {
+		return spread{}
+	}
+	var ratios []float64
+	for i := range min(len(m.PerMinute), len(h.PerMinute)) {
+		if h.PerMinute[i].CPUMs > 0 {
+			ratios = append(ratios, m.PerMinute[i].CPUMs/h.PerMinute[i].CPUMs)
+		}
+	}
+	return spreadOf(ratios)
+}
+
 // readProcess reads the samples of the process run as `personad <role>` and cuts them into the window's first
 // minutes whole minutes, from start. Of several processes of a role (a short-lived helper), the longest-lived counts.
 func readProcess(stats, role string, start time.Time, minutes int) (*processReport, error) {
@@ -244,6 +261,9 @@ func printReport(w io.Writer, rep *report) {
 		row("of it GC ms", "%.0f", p.GCCPUMs)
 		row("live heap MB", "%.1f", p.LiveMB)
 	}
+	if r := cpuRatio(rep); r.Median > 0 {
+		fmt.Fprintf(w, "| manager CPU per hub CPU, same minute | %.3f | %.3f | %.3f | %.3f |\n", r.Median, r.Mean, r.Min, r.Max)
+	}
 	fmt.Fprintln(w)
 }
 
@@ -296,6 +316,10 @@ func printComparison(w io.Writer, before, after string) error {
 		row("CPU ms", "%.0f", pa.CPUMs, pb.CPUMs)
 		row("of it GC ms", "%.0f", pa.GCCPUMs, pb.GCCPUMs)
 		row("live heap MB", "%.1f", pa.LiveMB, pb.LiveMB)
+	}
+	if x, y := cpuRatio(a), cpuRatio(b); x.Median > 0 && y.Median > 0 {
+		fmt.Fprintf(w, "| manager CPU per hub CPU, same minute | %.3f [%.3f..%.3f] | %.3f [%.3f..%.3f] | %+.1f%% |\n",
+			x.Median, x.Min, x.Max, y.Median, y.Min, y.Max, (y.Median-x.Median)/x.Median*100)
 	}
 	return nil
 }

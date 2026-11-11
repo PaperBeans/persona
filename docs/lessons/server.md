@@ -1885,9 +1885,12 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
   A benchmark of a path has to end where production ends (`lineHub` writes the line as `BusHub.Tell` does), and the
   shares come from profiles of the real programs: the soak lays a sampler over `cmd/personad` at build time
   (`go build -overlay`), so nothing in the shipped program changes to measure it.
-- CPU time per minute moved by a factor of two with what else the machine did (an Apple Silicon Mac moves a busy
-  process between fast and slow cores); bytes allocated per minute stayed within 1%. Keep the machine quiet during a
-  soak, compare medians, and read the CPU profile's shares beside the totals.
+- CPU time per minute moved by a factor of two and more with the machine's state (an Apple Silicon Mac moves a
+  process between fast and slow cores; a whole run on the slow ones used 3.5 s a minute for the work that took 1.7 s
+  on a quiet minute before), while bytes allocated per minute stayed within 1.5%. The hub's CPU time moved with the
+  manager's, minute for minute, and the hub's work was the same in both runs: the manager's CPU time over the hub's
+  in the same minute stayed within 6% of its median, enough to see a 5.8% difference the totals hid
+  (`cpuRatio`). Measure a noisy quantity against a reference that sees the same noise.
 - The largest share was not in the event path at all: `liveLoop` builds the fleet again up to ten times a second
   while it changes, and each round took a new copy of every machine's list to decorate, 54% of what the manager
   allocated. A loop that reads the same lists again and again keeps its arrays: `Devices.AppendSessions` copies a

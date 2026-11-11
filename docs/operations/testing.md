@@ -1333,8 +1333,10 @@ go run ./internal/fleetsoak -compare <base directory>/report.json <head director
 - `<out>` also has `report.md` and `report.json`, the hub's log, CPU and allocation profiles of the window
   (`stats/*.pprof`) and what `go tool pprof -top` says of them (`manager-alloc-cum.txt`, `manager-cpu-cum.txt`, the
   hub's beside them).
-- Allocation per minute repeats within about a percent from run to run. CPU time moves with whatever else the
-  machine does: note the load average the report prints, alternate base and head, and rerun when it was high.
+- Allocation per minute repeats within about a percent from run to run. CPU time does not: it moves with what else
+  the machine does and with the cores the processes get, by a factor of two on a laptop. The hub's and the manager's
+  move together, so the report also gives the manager's CPU time over the hub's in the same minute: when a change
+  leaves the hub's work as it was, compare that ratio, and read the two windows' profiles for where the difference is.
 - It ends with one line: `PASS`, `FAIL` or `TIMEOUT`.
 
 ## Live Activity screenshots (`LiveActivityShots`)
