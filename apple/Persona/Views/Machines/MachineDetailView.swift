@@ -266,7 +266,7 @@ struct MachineDetailView: View {
             TerminalsView(only: ref.path)
         } label: {
             HStack(spacing: Theme.Space.s) {
-                ThemedIcon(Theme.Icon.terminal).foregroundStyle(.secondary)
+                ThemedIcon(Theme.Icon.terminal).font(Theme.Font.body).foregroundStyle(Theme.accent).scaledFrame(width: Theme.Size.icon)
                 Text("Terminals").font(Theme.Font.body).lineLimit(1)
                 Spacer(minLength: Theme.Space.s)
                 ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)

@@ -9,9 +9,7 @@ import { CHAT_MIN, PANEL_MIN, useLayout } from "../lib/layout";
 import { cx, EASE, Loading } from "../ui/atoms";
 import { ResizeHandle } from "../ui/ResizeHandle";
 import { AgentPanel, TaskPanel } from "./assistant/TaskPanel";
-import { SubagentPanel } from "./chat/SubagentPanel";
 import { PlanPanel } from "./chat/PlanPanel";
-import { subagentParent } from "../lib/tasks";
 import { useCloseOnBack } from "../lib/back-close";
 import { mediaMatches, NARROW, PHONE, useMedia } from "../lib/viewport";
 import { t } from "../i18n";
@@ -154,8 +152,7 @@ function body(p: Panel) {
     case "task":
       return <TaskPanel key={p.todo} todoId={p.todo} onClose={closePanel} />;
     case "agent":
-      // a subagent's conversation ("<parent>@<agent>", its card's "View full run"), read-only
-      if (subagentParent(p.sid) !== p.sid) return <SubagentPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} onClose={closePanel} />;
+      // never a subagent's own conversation: openPanel opens its parent's instead (#5030, lib/subagent-link.ts)
       return <AgentPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} onClose={closePanel} />;
     case "plan":
       return <PlanPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} onClose={closePanel} />;

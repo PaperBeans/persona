@@ -114,6 +114,7 @@ export const Composer = memo(function Composer({
   stopping,
   autoFocus,
   footer,
+  trailing,
   suggestion,
   mention,
   onFocusChange,
@@ -144,6 +145,10 @@ export const Composer = memo(function Composer({
   stopping?: boolean;
   autoFocus?: boolean;
   footer?: React.ReactNode;
+  /** At the right of the bottom row, before voice / Stop / Send: an Agent's model pill (#5032, ModelPill.tsx). It sizes
+   *  itself by the card's width (the card is the `composer` container); keep it the same object while nothing in it
+   *  changes, as `footer`. */
+  trailing?: React.ReactNode;
   suggestion?: string;
   /** Turns on the @ menu: the chat's files and folder, and other sessions. */
   mention?: MentionSource;
@@ -737,7 +742,8 @@ export const Composer = memo(function Composer({
 
       <div
         className={cx(
-          "relative flex flex-col gap-1.5 rounded-[14px] border bg-surface p-1.5 shadow-card transition-[border-color,box-shadow] duration-150 focus-within:border-line-strong",
+          // a container: what sits in its bottom row (the model pill) takes its width modes from the card's own width
+          "@container/composer relative flex flex-col gap-1.5 rounded-[14px] border bg-surface p-1.5 shadow-card transition-[border-color,box-shadow] duration-150 focus-within:border-line-strong",
           dragging ? "border-accent shadow-[0_0_0_3px_var(--accent-tint)]" : "border-line",
         )}
       >
@@ -828,7 +834,7 @@ export const Composer = memo(function Composer({
               if (e.key === "Escape") e.stopPropagation();
               return;
             }
-            // `/model` alone opens the model popover instead of sending (where the agent has one)
+            // `/model` alone opens the model panel instead of sending (where the agent switches models)
             if (enterSends(e, hasFinePointer()) && isModelCommand(draft) && requestModelPicker(draftKey)) {
               e.preventDefault();
               setDraft("");
@@ -983,6 +989,7 @@ export const Composer = memo(function Composer({
           )}
           {/* not overflow-hidden: the chips' tap areas reach past this row (touch-hit); the footer truncates its own text */}
           <div className="min-w-0 flex-1 px-1 text-[11.5px] whitespace-nowrap text-ink-3">{footer}</div>
+          {trailing}
           {voice && !roundVoice && (
             <button
               type="button"

@@ -7,6 +7,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // The ask a to-do waits on, on the to-do itself (#2056, docs/assistant/todos.md "Waiting for the owner"): the apps list
@@ -44,6 +45,9 @@ type todoAsk struct {
 	Responses     []string         `json:"responses,omitempty"`
 	// Response: the fixed answer the owner already gave it while it still waits (explain_first).
 	Response string `json:"response,omitempty"`
+	// Suggestion: the owner gave this go-ahead for this directory three times; the decision offers a standing
+	// authorization for it (rule_suggest.go, #4929).
+	Suggestion *proto.RuleSuggestion `json:"suggestion,omitempty"`
 	// ForBriefing: it can wait and nothing was pushed for it yet: the next briefing lists it (decision_wait.go).
 	ForBriefing bool `json:"for_briefing,omitempty"`
 }
@@ -76,6 +80,7 @@ func (s *Service) todoAsks(ctx context.Context) map[string]todoAsk {
 			a.ForBriefing = w.ask.ForBriefing
 			a.WhyOwner, a.Options, a.CostOfWaiting = w.ask.WhyOwner, w.ask.Options, w.ask.CostOfWaiting
 			a.From, a.Stands, a.Background = w.ask.From, w.ask.Stands, backgroundText(l, loc, &w.ask)
+			a.Suggestion = s.askSuggestion(ctx, w.todo, &w.ask, l)
 			switch {
 			case !w.ask.Deadline.IsZero() && w.ask.Reversible && w.ask.DueAt.IsZero() && a.Recommend != "":
 				d := w.ask.Deadline

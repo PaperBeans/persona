@@ -346,6 +346,9 @@ func (s *Service) takeRecommendation(ctx context.Context, id string, a acceptAsk
 		if ok, err := s.insertDecision(ctx, st, row); err != nil {
 			s.logf("task %s: conclusion decision: %v", id, err)
 		} else if ok {
+			if !a.ByDefault {
+				s.ownerDecided(id, row.ID, a.WhyOwner)
+			}
 			s.decisionsChanged(ctx, id, at)
 		}
 	}

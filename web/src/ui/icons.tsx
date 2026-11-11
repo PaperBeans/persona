@@ -115,6 +115,8 @@ const P: Record<string, React.ReactNode> = {
   wrap: <g><path d="M3 6h18M3 12h15a3 3 0 1 1 0 6h-4M3 18h7" /><path d="m16 16-2 2 2 2" /></g>,
   arrowLeft: <path d="M19 12H5M12 19l-7-7 7-7" />,
   arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
+  // the chat's model change divider (Lucide's arrow-left-right, as cindy's)
+  arrowLeftRight: <path d="M8 3 4 7l4 4M4 7h16M16 21l4-4-4-4M20 17H4" />,
   textSize: <path d="M4 7V4h16v3M9 20h6M12 4v16" />,
   // an extension's entry on the sidebar (docs/extensions/extensions.md "UI slots" nav_page icons; extension, list, bell and doc reuse the above)
   chart: <path d="M3 3v16a2 2 0 0 0 2 2h16M8 17v-4M13 17V8M18 17v-7" />,
@@ -126,6 +128,11 @@ const P: Record<string, React.ReactNode> = {
   // a row's icons in an extension's view (docs/extensions/extensions.md "Declarative UI" row icon; the rest reuse the above)
   person: <g><circle cx="12" cy="8" r="4" /><path d="M4.5 21a7.5 7.5 0 0 1 15 0" /></g>,
   star: <path d="M12 2.8l2.84 5.76 6.36.92-4.6 4.49 1.09 6.33L12 17.31l-5.69 2.99 1.09-6.33-4.6-4.49 6.36-.92z" />,
+  // the model panel (#5032, after Cindy's): its rail's Recent and All (Lucide's history and layout-grid), a row's
+  // Customize (Lucide's sliders-horizontal)
+  history: <g><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5M12 7v5l4 2" /></g>,
+  grid: <g><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></g>,
+  sliders: <path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4" />,
   warning: <g><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><path d="M12 9v4M12 17h.01" /></g>,
   tag: <g><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.41l8.71 8.71a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z" /><path d="M7.5 7.5h.01" /></g>,
   // Health (docs/assistant/health.md)

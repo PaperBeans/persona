@@ -97,10 +97,12 @@ struct TerminalsView: View {
         return Button { show(r, on: ref) } label: {
             HStack(spacing: Theme.Space.m) {
                 ThemedIcon(r.kind == .agent ? Theme.Icon.agents : Theme.Icon.terminal)
+                    .font(Theme.Font.body)
                     .foregroundStyle(r.kind == .finished ? .secondary : .primary)
+                    .scaledFrame(width: Theme.Size.icon) // one column: the titles and separators line up
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                     Text(name).font(Theme.Font.body).foregroundStyle(Color.primary).lineLimit(1)
-                    Text(subtitle(r)).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
+                    Text(subtitle(r, on: ref, title: name)).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
@@ -172,13 +174,16 @@ struct TerminalsView: View {
         return String(localized: "Finished: \(name)")
     }
 
-    private func subtitle(_ r: TerminalsList.Row) -> String {
+    private func subtitle(_ r: TerminalsList.Row, on ref: MachineRef, title: String) -> String {
         let dir = TerminalsList.folder(r.pane.cwd)
         switch r.kind {
         case .agent:
-            return [r.pane.agent ?? "", dir].filter { !$0.isEmpty }.joined(separator: " · ")
+            // The name the app gives the Agent everywhere (Session.agentLabel), not the runtime's id.
+            let s = r.pane.sessionID.flatMap { model.session(SessionKey(group: ref.group, machineID: ref.id, sessionID: $0)) }
+            return [s?.agentLabel ?? TerminalsList.agentName(r.pane.agent), dir].filter { !$0.isEmpty }.joined(separator: " · ")
         case .finished, .plain:
-            return [String(localized: "Terminal"), r.pane.foreground ?? "", dir].filter { !$0.isEmpty }.joined(separator: " · ")
+            return ([String(localized: "Terminal")] + TerminalsList.plainDetails(title: title, foreground: r.pane.foreground, folder: dir))
+                .joined(separator: " · ")
         }
     }
 
@@ -332,6 +337,25 @@ nonisolated enum TerminalsList {
 
     static func hasFinished(_ list: TerminalPanes) -> Bool {
         list.hosts.contains { $0.panes.contains { !($0.agentSession ?? "").isEmpty } }
+    }
+
+    /// An Agent's name as the app shows it (Session.agentLabel) from a pane's runtime id, when no session row says.
+    static func agentName(_ raw: String?) -> String {
+        switch (raw ?? "").lowercased() {
+        case "", "claude": "Claude"
+        case "codex": "Codex"
+        case "traex": "TRAEX"
+        default: raw ?? ""
+        }
+    }
+
+    /// What follows "Terminal" under a plain pane: the program in front unless its title already names it, then the
+    /// folder.
+    static func plainDetails(title: String, foreground: String?, folder: String) -> [String] {
+        var out: [String] = []
+        if let fg = foreground, !fg.isEmpty, !title.localizedCaseInsensitiveContains(fg) { out.append(fg) }
+        if !folder.isEmpty { out.append(folder) }
+        return out
     }
 
     /// A pane's folder by its last name ("" when not known): the computer's paths mean little on the phone.

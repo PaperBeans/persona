@@ -66,6 +66,8 @@ const TaskDecision = lazy(() => import("./TaskDecision").then((m) => ({ default:
 import { SentLine, TaskSentList } from "./Sent";
 import { latestReview, parkedLine, progressLine } from "../../lib/supervision";
 import { planLabel, planLine, planShown } from "../../lib/plan";
+import { namedLauncher, providerIdNote, providerTitle, useProviderNames } from "../../lib/provider-names";
+import { useChosenManager, useLinkManager } from "../../lib/manager-choice";
 import { AnsweredCard, InteractionCard } from "../chat/Interactions";
 import { cardLine } from "../chat/dock";
 import { interactionKicker } from "../../lib/row-line";
@@ -411,12 +413,18 @@ export function PlanCard({ plan }: { plan: TaskPlan }) {
 function PlanTaskRow({ n, task, numbered, ultra, busy, onUltra }: { n: number; task: PlanTask; numbered: boolean; ultra?: { on: boolean; blocked: string }; busy?: boolean; onUltra: (on: boolean) => void }) {
   const machines = useStore((s) => s.machines);
   const machine = machines.find((m) => m.id === task.machine)?.name ?? task.machine;
-  const chips: { icon: IconName; text: string }[] = [
+  // its launcher by the provider's display name, the startup ID in the chip's tooltip (#5029): the providers of the
+  // assistant the chat belongs to, else the current one's
+  const chatManager = useLinkManager();
+  const chosen = useChosenManager();
+  const names = useProviderNames(chatManager ?? chosen ?? "");
+  const launcher = task.launcher && !task.model ? namedLauncher(task.launcher, names) : null;
+  const chips: { icon: IconName; text: string; title?: string }[] = [
     { icon: "machine", text: machine },
     { icon: "folder", text: task.cwd.split("/").filter(Boolean).at(-1) ?? task.cwd },
     // an explicit model wins over the preset's (resolved at the start, with the profile in use then); a launcher of its own
     // is said with it: a different one runs instead of the preset's
-    { icon: "agent", text: task.model || [task.launcher, task.tier && t("assistant-tasks.preset", { tier: task.tier })].filter(Boolean).join(" · ") || t("assistant-tasks.default_model") },
+    { icon: "agent", text: task.model || [launcher && providerTitle(launcher), task.tier && t("assistant-tasks.preset", { tier: task.tier })].filter(Boolean).join(" · ") || t("assistant-tasks.default_model"), title: (launcher && providerIdNote(launcher)) || undefined },
   ];
   return (
     <div className={cx("flex flex-col gap-1.5", n > 1 && "border-t border-line pt-3")}>
@@ -426,7 +434,7 @@ function PlanTaskRow({ n, task, numbered, ultra, busy, onUltra }: { n: number; t
       </div>
       <div className="flex flex-wrap gap-1.5">
         {chips.map((c) => (
-          <span key={c.icon} className="inline-flex h-6 items-center gap-1 rounded-full bg-field px-2 text-[12px] text-ink-2">
+          <span key={c.icon} title={c.title} className="inline-flex h-6 items-center gap-1 rounded-full bg-field px-2 text-[12px] text-ink-2">
             <Icon name={c.icon} size={12} />
             {c.text}
           </span>

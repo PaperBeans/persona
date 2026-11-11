@@ -11,7 +11,7 @@ import { canShowTerminal, composerSlot, otherView, useSessionView, viewOnlyRow }
 import { openLink } from "../../lib/links";
 import { openPanel, togglePanel, usePanel } from "../../lib/panel";
 import { machineWithHub } from "../../lib/mesh";
-import { hasEffortOnly, hasModes, isMuted, toggleMute } from "../../lib/session-actions";
+import { hasModes, isMuted, toggleMute } from "../../lib/session-actions";
 import { attachLive, flipPin } from "../../lib/agent-actions";
 import { isPinned } from "../../lib/pins";
 import { acknowledgeLaunch } from "../../lib/new-agent";
@@ -20,11 +20,11 @@ import { ArchivedNotice, SessionDetailNotice } from "../../ui/SessionDetailNotic
 import { REVIEW_FEATURE } from "../../lib/session-review";
 import { getSession, getState, hubHas, listenSession, refresh, refreshTodos, saveMutes, useStore, viewSession } from "../../lib/store";
 import { PREVIEW_FEATURE } from "../../lib/preview";
-import { agentsWorking, buildTaskIndex, stableSubagents, STOP_LOOP_MESSAGE, subagentParent, terminalCalls, type TaskIndex } from "../../lib/tasks";
+import { agentsWorking, buildTaskIndex, stableSubagents, STOP_LOOP_MESSAGE, subagentCall, subagentCardKey, terminalCalls, type TaskIndex } from "../../lib/tasks";
 import { stabilizeLines, stableValue } from "../../lib/stable-lines";
 import { planProgress, workLineStyle } from "../../lib/work-groups";
 import { echoed, taggedSeen } from "../../lib/echo";
-import { acceptOutgoing, forgetOutgoing, inSendOrder, keepFailed, keepOutgoing, noteWritten, outboxKey, placeFailed, restoreOutbox, retryOutbox, SENT_GRACE_MS, settleOutbox, type OutboxEntry } from "../../lib/outbox";
+import { acceptOutgoing, forgetOutgoing, inSendOrder, keepFailed, keepOutgoing, noteWritten, outboxKey, placeFailed, restoreOutbox, retryOutbox, SENT_GRACE_MS, settleOutbox } from "../../lib/outbox";
 import { apiOp } from "../../lib/ops";
 import { conversationKey, pickedLauncher, pickedModel } from "../../lib/assistant-chat";
 import { unlinkAgentFromTodo } from "../../lib/todos";
@@ -46,6 +46,7 @@ import { segmentChanges, shiftAbove } from "./offscreen";
 import { glide } from "./glide";
 import { AGENT_COMMANDS, Composer, type Outgoing } from "./Composer";
 import { agentCommands } from "../../lib/composer-commands";
+import { CLEAR_MAIN_FEATURE, clearMainContext, isClearCommand, mainCommands } from "../../lib/main-clear";
 import { PendingCards } from "./Interactions";
 import { focusedCard, focusedFirst } from "../../lib/card-focus";
 import { lostWith } from "../../lib/dock-focus";
@@ -55,6 +56,7 @@ import { shownCloseout } from "../../lib/closeout";
 import { AWAIT_MS, awaitingTurn, DOCK_MAX, turnStart } from "./dock";
 import { HEADER_SLOT, HEADER_SLOT_END, HEADER_SLOT_START } from "./header";
 import { ContextMeter } from "./ContextMeter";
+import { AgentModelPill } from "./ModelPill";
 import { NARROW, NO_HOVER, PHONE, SHORT, useFinePointer, useMedia } from "../../lib/viewport";
 import { UserBubble } from "./SegmentView";
 import { scrollsAFold } from "./fold-scroll";
@@ -67,7 +69,10 @@ import { latestPlan, PlanPill, usePlanOutOfView } from "./PlanCard";
 import { publishPlan } from "../../lib/plan-store";
 import { ChatContext, LiveClockContext, type ChatContextValue } from "./chat-context";
 import { addFreshWords, resetFreshWords } from "./fresh-words";
-import { backgroundLine, backgroundWaitLine, waitingOnWorkflow, workflowCalls, workflowCallsKey } from "../../lib/workflows";
+import { backgroundLine, backgroundWaitLine, waitingOnWorkflow, workflowAgentFor, workflowCalls, workflowCallsKey } from "../../lib/workflows";
+import { waitingOnSubagents } from "../../lib/background-work";
+import { doneSubagentLink, useSubagentLink } from "../../lib/subagent-link";
+import { openExpanded } from "./expanded";
 import { seekCall } from "./jump";
 import { navRailTicks, type NavRailSource, type NavRailTick } from "../../lib/nav-rail";
 import { containsInput, indexedNavTicks, userInputRevision, windowUserInputs, USER_INPUT_PAGE_SIZE } from "../../lib/user-input-index";
@@ -198,15 +203,12 @@ export interface PanelChrome {
   agents?: MenuItem[];
 }
 
-/** `readOnly`: a subagent's conversation (`<parent>@<agent>`) in the side panel (SubagentPanel): the transcript only,
- *  no header, no composer. */
-export function ChatView({ mid, sid, assistant, starting: launching, onToggleSidebar, readOnly, topCenter, inPage, terminalAvailable, panel, banner, offline, mainCache, refreshError, onRefresh, headerActions }: {
+export function ChatView({ mid, sid, assistant, starting: launching, onToggleSidebar, topCenter, inPage, terminalAvailable, panel, banner, offline, mainCache, refreshError, onRefresh, headerActions }: {
   mid: string;
   sid: string;
   assistant?: boolean;
   starting?: boolean;
   onToggleSidebar?: () => void;
-  readOnly?: boolean;
   /** On a narrow screen, in the header's middle in place of the title (the shell's "Assistant" | "Agents" switch). */
   topCenter?: React.ReactNode;
   /** The agent's own page (`/s/…`, `/t/…`): its terminal is a view of the middle, switched in place with the header's
@@ -227,6 +229,8 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   headerActions?: React.ReactNode;
 }) {
   const { session, detail, retry: retryDetail } = useRuntimeSession(mid, sid);
+  // the main conversation, with a hub that clears its context in place: /clear in its command list (#5095)
+  const clears = useStore((s) => Boolean(assistant) && s.assistant?.main === sid && hubHas(s.features, CLEAR_MAIN_FEATURE));
   // an archived agent (lib/agent-archives.ts) is not in the lists: its chat says so and offers Restore
   const archivedHere = useArchived(mid, sid);
   // its manager offline (several managers): nothing can be sent, wherever it was opened from; the page's own word first
@@ -234,24 +238,20 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   // the main conversation is titled with the current assistant's name once there are several
   const mainTitle = useAssistantTitle();
   const offlineLine = offline ?? ownerOffline;
-  // Virtual subagent transcript views read their execution metadata from the complete parent snapshot.
-  const parentSid = subagentParent(sid);
-  useRuntimeSession(mid, parentSid, parentSid !== sid);
-  const listed = useStore((s) => (s.sessions[mid] ?? []).find((x) => x.session_id === parentSid)?.subagents);
+  const listed = useStore((s) => (s.sessions[mid] ?? []).find((x) => x.session_id === sid)?.subagents);
   // the same array while nothing a card shows changed (#5602): the context, and every exchange reading it, stay put
   const lastSubagents = useRef<Subagent[] | undefined>(undefined);
   const subagents = stableSubagents(lastSubagents.current, listed);
   lastSubagents.current = subagents;
   const machineName = useStore((s) => machineWithHub(mid, s.machines));
   // only the tab's own rows (the same objects, the same array): a push for another agent on the machine leaves the chat be
-  const panes = useStore((s) => (session && !assistant && !readOnly ? tabSessions(s.sessions[mid] ?? [], session) : NO_PANES));
+  const panes = useStore((s) => (session && !assistant ? tabSessions(s.sessions[mid] ?? [], session) : NO_PANES));
   const siblings = useStore((s) => (session?.space_id ? (s.sessions[mid] ?? []).filter((x) => x.space_id === session.space_id && stateOf(x) !== "offline") : []));
   const interactions = useStore((s) => s.interactions.filter((i) => i.machine_id === mid && i.session_id === sid));
   const answered = useStore((s) => Object.values(s.answered).filter((a) => a.ix.machine_id === mid && a.ix.session_id === sid));
   const delegated = useStore((s) => Object.values(s.delegated).filter((d) => d.ix.machine_id === mid && d.ix.session_id === sid));
-  // the list as pushed: its updated_at and rev are what tell the page it fell behind (useTranscript); a subagent has no rev
-  const viewed = readOnly ? (listed?.find((a) => a.session_id === sid) ?? null) : null;
-  const tr = useTranscript(mid, sid, { starting: Boolean(launching) && !readOnly, updatedAt: (readOnly ? viewed : session)?.updated_at, rev: readOnly ? undefined : session?.rev, cache: mainCache, assistant });
+  // the list as pushed: its updated_at and rev are what tell the page it fell behind (useTranscript)
+  const tr = useTranscript(mid, sid, { starting: Boolean(launching), updatedAt: session?.updated_at, rev: session?.rev, cache: mainCache, assistant });
   const trNow = useRef(tr);
   trNow.current = tr;
   const railChat = useRef(`${mid}/${sid}`);
@@ -302,7 +302,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   const itemsNow = useRef(tr.items);
   itemsNow.current = tr.items;
   const readItems = useCallback(() => itemsNow.current, []);
-  const voiceEntry = useVoiceEntry({ ...voiceOwner, session, items: readItems, label: voiceLabel, off: readOnly || Boolean(offlineLine) || !sessionCan(session, "send") });
+  const voiceEntry = useVoiceEntry({ ...voiceOwner, session, items: readItems, label: voiceLabel, off: Boolean(offlineLine) || !sessionCan(session, "send") });
   // the message is in, the hub has not said working yet (#3654): the live row covers that wait too
   const segs = useMemo(() => segments(tr.items), [tr.items]);
   const lastSeg = segs[segs.length - 1];
@@ -311,7 +311,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   // a message whose wait the hub took a stop for (#2450): it is no longer worked on, so Working… and Interrupt go at
   // once instead of after AWAIT_MS; a turn the hub reports later still shows through `state`
   const [stoppedTurn, setStoppedTurn] = useState<string>();
-  const awaitedTurn = !readOnly && awaitingTurn(lastSeg, state, awaitNow, turnFailure) ? lastSeg?.user?.id : undefined;
+  const awaitedTurn = awaitingTurn(lastSeg, state, awaitNow, turnFailure) ? lastSeg?.user?.id : undefined;
   const awaiting = awaitedTurn !== undefined && awaitedTurn !== stoppedTurn;
   const awaitingNow = useRef<string | undefined>(undefined);
   awaitingNow.current = awaiting ? awaitedTurn : undefined;
@@ -336,7 +336,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   const opening = Boolean(assistant) && !tr.items.length && outgoing > 0;
 
   // ── the middle of an agent's page: its conversation, or its terminal in place (lib/session-view.ts) ──
-  const switchable = Boolean(inPage && terminalAvailable !== false && !assistant && !readOnly && canShowTerminal(session));
+  const switchable = Boolean(inPage && terminalAvailable !== false && !assistant && canShowTerminal(session));
   const openFiles = () => session && togglePanel({ kind: "files", mid, sid, cwd: session.cwd });
   const [view, setView] = useSessionView(mid, sid, switchable);
   // The terminal connects when first shown and stays connected while the page is on screen (the chat is hidden under it,
@@ -361,9 +361,9 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   const items = useRef(tr.items);
   items.current = tr.items;
   const draftKey = `${mid}/${sid}`;
-  const canCompose = !readOnly && sessionCan(session, "send");
+  const canCompose = sessionCan(session, "send");
   // a stopped Agent (#4754): a read-only line with Terminal and Resume where the composer goes
-  const stoppedLine = composerSlot(session, { readOnly, assistant: Boolean(assistant), offline: Boolean(offlineLine) }) === "stopped";
+  const stoppedLine = composerSlot(session, { assistant: Boolean(assistant), offline: Boolean(offlineLine) }) === "stopped";
   const openTerminal = () => (switchable ? setView("term") : navigate({ name: "session", mid, sid, view: "term" }));
   // The main conversation is always Persona (#1313): not its first message, the node's title for it.
   const mainConversation = useStore((s) => s.assistant?.main);
@@ -375,7 +375,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   const noRow = !session || detail.missing;
   // the hub could not say what this chat is (an older hub without the cached row, or a session it no longer has): the
   // notice above the chat says so, and an opening line under it would claim the chat started
-  const noDetails = !readOnly && Boolean(detail.error) && (detail.missing || !session);
+  const noDetails = Boolean(detail.error) && (detail.missing || !session);
   const gone = detail.missing && !isMain;
   const refusedNoRow = noRow && !isMain;
   const unknownGate = useRef({ isMain, gone: detail.missing });
@@ -384,13 +384,13 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   // A Persona conversation without a title yet is "New chat", as All chats and the sidebar call it, not its folder's name (#1697)
   const named = session ?? archivedHere;
   const title = isMain ? mainTitle : named ? (assistant ? conversationTitle(named) : sessionTitle(named)) : assistant ? t("chat-chatview.new_chat") : t("chat-chatview.session");
-  const canFork = Boolean(session?.can_fork) && !readOnly;
+  const canFork = Boolean(session?.can_fork);
   // "Rewind to here" (#2436): offered on your messages of a session in a terminal; off with a reason while it cannot. Live
   // (chat-actions.ts): it changes with every turn, and in `actions` it would render every message's actions again.
   const rewindOff = rewindBlock(session, working);
   const [rewindLive] = useState(() => liveValue(rewindOff));
   useLayoutEffect(() => rewindLive.set(rewindOff), [rewindLive, rewindOff]);
-  const canRewind = canCompose && !readOnly && !assistant;
+  const canRewind = canCompose && !assistant;
   // Edit last message (#2945) and ↑ in an empty box (#4503), Slack's way: ↑, Esc twice or the safeguards card's button put
   // the last prompt in the box with an "Editing" bar, and the conversation-only rewind to before it runs when the edit is
   // sent (commitEdit), so starting or cancelling an edit changes nothing on the computer. One edit, of this conversation:
@@ -464,7 +464,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
       draftKey,
       title,
       canCompose,
-      forward: readOnly ? undefined : (pick) => {
+      forward: (pick) => {
         const machine = getState().machines.find((m) => m.id === mid)?.name;
         openForward(forwardDraftOf({ mid, sid, assistant: Boolean(assistant), title: forwardChat.current.title, items: items.current, session: getSession(mid, sid) ?? forwardChat.current.session, machine }, pick));
       },
@@ -473,7 +473,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
       fork: canFork ? (itemId: string) => void forkAt(mid, sid, itemId, Boolean(assistant), session?.space, session?.manager) : undefined,
       rewind: canRewind ? { block: rewindLive, run: (messageId, text, restore) => rewindTo(mid, sid, draftKey, items.current, messageId, text, restore) } : undefined,
     }),
-    [draftKey, title, canCompose, canFork, canRewind, rewindLive, mid, sid, assistant, persona.name, readOnly],
+    [draftKey, title, canCompose, canFork, canRewind, rewindLive, mid, sid, assistant, persona.name],
   );
   // the assistant works on any computer, so its @ menu offers workspaces too
   const mention = useMemo(() => ({ cwd: session?.cwd, self: draftKey, files: () => chatFiles(items.current), workspaces: Boolean(assistant) }), [session?.cwd, draftKey, assistant]);
@@ -484,7 +484,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   useEffect(() => {
     // what a reload interrupted, once the hub's first page can tell what went in (a cached page cannot),
     // and not before this chat is known: a restored bubble's Retry posts without passing through deliver
-    if (!readOnly && tr.firstRead && !refusedNoRow) restoreOutbox(mid, sid, pending.map((p) => p.id));
+    if (tr.firstRead && !refusedNoRow) restoreOutbox(mid, sid, pending.map((p) => p.id));
     const users = [...segs.slice(-4).flatMap((seg) => (seg.user && !seg.user.injected ? [seg.user] : [])), ...taggedSeen(tr.items)];
     users.forEach((user) => acknowledgeLaunch(mid, sid, user));
     settleOutbox(mid, sid, users);
@@ -522,8 +522,8 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   }, [mid, sid, pending, outbox, state]);
 
   // seen: on open, when the page comes back to the front, and whenever a turn ends while it is on screen (lib/store.ts
-  // viewSession); a subagent's transcript is not an agent of its own
-  useEffect(() => (readOnly ? undefined : viewSession(mid, sid)), [mid, sid, readOnly]);
+  // viewSession)
+  useEffect(() => viewSession(mid, sid), [mid, sid]);
 
   // what came in over the WebSocket after the chat subscribed: the agent's words among it fade in (contract §3); the
   // first page, older pages and unfolded ranges come over HTTP and do not. Outside React (fresh-words.ts): a new reply
@@ -894,6 +894,9 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   }
 
   const onSend = async (out: Outgoing): Promise<boolean> => {
+    // /clear in the main conversation clears its context in place, it is not words for Persona (#5095); an edit of the
+    // last message stays an edit (its rewind already ran)
+    if (clears && !out.edit && isClearCommand(out.text, out.images.length)) return clearMainContext(sid);
     // Routed to a task ("Tell "xx""): straight to its agent, not to Persona (docs/assistant/unified-entry.md "Routing").
     if (assistant && out.images.length && getFeedState().routes[sid]) {
       toast(t("chat-chatview.route_no_images"), "error");
@@ -978,14 +981,16 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   }, [state, awaiting, session, view]);
 
   // The hub says its turn is over and a workflow it launched keeps it working (#3434): the exchange is drawn finished
-  // (its work folded, the run's card in the open), and the running bar says the workflow, timed from its start, instead
+  // (its work folded, the run's card inside it), and the running bar says the workflow, timed from its start, instead
   // of the turn's "Working…" clock going on. Other background work (a command, a Monitor, a subagent) leaves the turn as
   // it was. A message of yours on its way, or one it is answering, is a turn again.
   // The same for an agent that only waits on background commands (#6045): its turn is drawn finished.
-  const backgroundOnly = (waitingOnWorkflow(session) || Boolean(session && backgroundWaiting(session))) && !tr.streaming && !outgoing && !awaiting;
-  const lastLive = (readOnly ? Boolean(viewed?.running) : working && !backgroundOnly) && !tr.loading;
+  // The same for a background subagent still running after the turn ended (#5030, cindy's background subtasks).
+  const subtasks = waitingOnSubagents(session, subagents);
+  const backgroundOnly = (waitingOnWorkflow(session) || Boolean(session && backgroundWaiting(session)) || subtasks) && !tr.streaming && !outgoing && !awaiting;
+  const lastLive = working && !backgroundOnly && !tr.loading;
   // the main conversation's readiness: the card for what is missing, and the send button saying it (4.4)
-  const gate = useReadinessGate(isMain && !readOnly);
+  const gate = useReadinessGate(isMain);
   blockedRef.current = gate.blocked;
   const failedEntry = sendFailure?.chat === `${mid}/${sid}` ? outbox.find((e) => e.id === sendFailure.entry && e.state === "failed") : undefined;
   const failure = failedEntry ? sendFailure!.failure : null;
@@ -1000,8 +1005,8 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   // the main conversation folds rounds it did not start from the user (docs/assistant/assistant.md "Background rounds")
   const foldBackground = useStore((s) => s.assistant?.main_background_folded) !== false && isMain;
   const lines = useMemo(
-    () => stabilizeLines(lastLines.current, chatLines(tr.items, { live: lastLive && (readOnly || !outgoing), background: foldBackground })),
-    [tr.items, lastLive, readOnly, outgoing, foldBackground],
+    () => stabilizeLines(lastLines.current, chatLines(tr.items, { live: lastLive && !outgoing, background: foldBackground })),
+    [tr.items, lastLive, outgoing, foldBackground],
   );
   lastLines.current = lines;
   // the last two exchanges are always drawn (the one going on, the one just done); those before them skip drawing while
@@ -1014,7 +1019,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   linesNow.current = lines;
   const limitOn = limitLine ? lines.reduce((id, line) => (line.kind === "apiError" ? line.id : id), "") : "";
   // failed messages where they were sent: before the first message written after them (lib/outbox.ts placeFailed)
-  const placed = useMemo(() => (readOnly ? { before: new Map<string, OutboxEntry[]>(), rest: [] } : placeFailed(lines, outbox)), [readOnly, lines, outbox]);
+  const placed = useMemo(() => placeFailed(lines, outbox), [lines, outbox]);
   const failedBefore = (id: string) => {
     const list = placed.before.get(id);
     return list ? [<OutboxBubbles key={`failed:${id}`} mid={mid} sid={sid} entries={list} canRetry={!refusedNoRow} />] : [];
@@ -1131,6 +1136,18 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
     [mid, sid, follow, expandFold, landRow],
   );
   const jump = useCallback((call: string) => void jumpToCall(call), [jumpToCall]);
+  // A link to one of its subagents' conversations (#5030, lib/subagent-link.ts): that subagent's card in view, opened; a
+  // workflow agent's, its run's card. Once the chat and its subagents are in; a subagent no longer listed: just the chat.
+  const linkedAgent = useSubagentLink(mid, sid);
+  useEffect(() => {
+    if (!linkedAgent || !session || tr.loading || detail.loading) return;
+    doneSubagentLink(mid, sid);
+    const agent = subagents?.find((a) => a.id === linkedAgent);
+    const call = agent ? subagentCall(agent) : workflowAgentFor(session, `${sid}@${linkedAgent}`)?.run.tool_use_id;
+    if (!call) return;
+    if (agent) openExpanded([subagentCardKey(`${mid}/${sid}:`, call)]);
+    jump(call);
+  }, [linkedAgent, session, tr.loading, detail.loading, subagents, mid, sid, jump]);
   // its workflow runs by the Workflow call that launched each (#3434): rebuilt only when a run starts or goes, not with
   // each push of a run's progress (the cards read that themselves), so the exchanges do not all render again
   const runs = session?.workflows;
@@ -1302,13 +1319,13 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   const retried = retriedOn?.chat === `${mid}/${sid}` ? retriedOn.reason : undefined;
   // a turn that failed on the refusal fallback's missing model (#2528): "Continue" would send it to the same model
   const canRetry =
-    !readOnly && lastLine?.kind === "apiError" && state !== "working" && !outgoing && sessionCan(session, "send") && session?.turn_error_code !== FALLBACK_UNAVAILABLE;
+    lastLine?.kind === "apiError" && state !== "working" && !outgoing && sessionCan(session, "send") && session?.turn_error_code !== FALLBACK_UNAVAILABLE;
   // Claude Code's "while you were away" recap, open in full while it is the newest thing and not closed: the chat's last
   // line, in the flow with the agent's words (#1360: above the composer it covered the end of the reply)
   const recapKey = `${mid}/${sid}`;
   const [recapClosed, setRecapClosed] = useState(() => closedRecap(recapKey));
   useEffect(() => setRecapClosed(closedRecap(recapKey)), [recapKey]);
-  const newestRecap = !assistant && !readOnly && lastLine?.kind === "recaps" ? lastLine.items[lastLine.items.length - 1] : undefined;
+  const newestRecap = !assistant && lastLine?.kind === "recaps" ? lastLine.items[lastLine.items.length - 1] : undefined;
   const pendingRecap = newestRecap && recapClosed !== newestRecap.id ? newestRecap : undefined;
   const open = useMemo(() => openRecap(lines, pendingRecap), [lines, pendingRecap]);
   const dismissRecap = () => {
@@ -1322,7 +1339,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   // A task's or an agent's side panel (TaskPanel, AgentPanel) is a phone's width: its cards fold and its dock keeps
   // to DOCK_MAX as a narrow screen's do. Unbounded there, a plan with a question and a permission stood taller than the
   // panel, and focusing the composer scrolled the whole page up under it, the panel's header cut off (#1282).
-  const compactDock = narrow || (!inPage && !assistant && !readOnly);
+  const compactDock = narrow || (!inPage && !assistant);
   const short = useMedia(SHORT);
   const [typing, setTyping] = useState(false);
   const keyboard = typing && !fine;
@@ -1361,16 +1378,16 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
     <PlanPill todos={plan.todos} onClick={() => openPanel({ kind: "plan", mid, sid })} />
   ) : null;
   // Persona's own chats too (#3654), and from the moment the message is in, not from the hub's next push
-  const background = useMemo(() => (readOnly ? null : backgroundLine(session)), [readOnly, session]);
-  const wait = useMemo(() => (readOnly || outgoing || awaiting ? null : backgroundWaitLine(session)), [readOnly, outgoing, awaiting, session]);
-  const running = session ? <RunningStatusBar mid={mid} sid={sid} working={state === "working" || awaiting} startedAt={runStart} clock={barClock.current} agents={waitingOn} background={background} wait={wait} /> : null;
+  const background = useMemo(() => backgroundLine(session), [session]);
+  const wait = useMemo(() => (outgoing || awaiting ? null : backgroundWaitLine(session)), [outgoing, awaiting, session]);
+  const running = session ? <RunningStatusBar mid={mid} sid={sid} working={state === "working" || awaiting} startedAt={runStart} clock={barClock.current} agents={waitingOn} background={background} wait={wait} subtasks={subtasks && !outgoing && !awaiting} /> : null;
   const queue =
     session && queued.length > 0 ? (
       <QueueStrip session={session} draftKey={draftKey} canEdit={canCompose} compact={short} persona={assistant ? persona.name : undefined} onWithdrawn={withdrawn}
         photosOf={assistant ? queuedPhotos : undefined} />
     ) : null;
   // with the plan's pill showing, "Jump to bottom" goes beside it (over the chat, they hid each other)
-  const jumpInDock = Boolean(planPill) && !readOnly;
+  const jumpInDock = Boolean(planPill);
   const pills = jumpInDock && away ? (
     <div className="flex shrink-0 items-center justify-center gap-2">
       {planPill}
@@ -1386,15 +1403,18 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
   const lastRole = lastItem?.role;
   const lastKind = lastItem?.kind;
   const faceLast = useMemo(() => (lastRole && lastKind ? { role: lastRole, kind: lastKind } : undefined), [lastRole, lastKind]);
-  const commands = useMemo(() => (assistant ? [] : agentCommands(AGENT_COMMANDS, session)), [assistant, session]);
+  // the main conversation's /clear (#5095, lib/main-clear.ts): Persona's other conversations take no commands
+  const commands = useMemo(() => (assistant ? (clears ? mainCommands() : []) : agentCommands(AGENT_COMMANDS, session)), [assistant, clears, session]);
   const footer = useMemo(() => (session ? <ComposerFooter session={session} assistant={assistant} /> : null), [session, assistant]);
+  // an Agent's model pill (#5032); a Persona conversation keeps its launcher chip in the footer for now (#5033)
+  const trailing = useMemo(() => (session && !assistant ? <AgentModelPill session={session} /> : null), [session, assistant]);
 
   const pendingCards = (
     <PendingCards
       interactions={focusedFirst(interactions, focusedCard())}
       answered={answered}
       delegated={delegated}
-      offerNext={inPage && !readOnly && !assistant ? { mid, sid } : undefined}
+      offerNext={inPage && !assistant ? { mid, sid } : undefined}
       narrow={compactDock}
       short={short}
       keyboard={keyboard}
@@ -1404,29 +1424,27 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
 
   const page = (
     <div className="flex h-full min-w-0 flex-col">
-      {!readOnly && (
-        <Header
-          session={session}
-          title={title}
-          machineName={machineName}
-          assistant={assistant}
-          main={isMain}
-          siblings={siblings}
-          onToggleSidebar={onToggleSidebar}
-          onInterrupt={interrupt}
-          onStopLoop={stopLoop}
-          onJumpToCall={jump}
-          last={faceLast}
-          onSearch={openSearch}
-          topCenter={topCenter}
-          view={switchable ? view : undefined}
-          onView={switchable ? setView : undefined}
-          viewDot={view === "term" && (interactions.length > 0 || state === "needs_you")}
-          panel={panel}
-          actions={headerActions}
-        />
-      )}
-      {!readOnly && !panel && isMain && <MainRuntimeSlot sid={sid} />}
+      <Header
+        session={session}
+        title={title}
+        machineName={machineName}
+        assistant={assistant}
+        main={isMain}
+        siblings={siblings}
+        onToggleSidebar={onToggleSidebar}
+        onInterrupt={interrupt}
+        onStopLoop={stopLoop}
+        onJumpToCall={jump}
+        last={faceLast}
+        onSearch={openSearch}
+        topCenter={topCenter}
+        view={switchable ? view : undefined}
+        onView={switchable ? setView : undefined}
+        viewDot={view === "term" && (interactions.length > 0 || state === "needs_you")}
+        panel={panel}
+        actions={headerActions}
+      />
+      {!panel && isMain && <MainRuntimeSlot sid={sid} />}
       {banner}
       {/* a known session keeps its chat: a failed background read is retried quietly (runtime-session.ts) */}
       {archivedHere ? <ArchivedNotice session={archivedHere} /> : noDetails && <SessionDetailNotice error={detail.error} retry={retryDetail} />}
@@ -1523,22 +1541,21 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
             </ChatContext.Provider>
             </LiveClockContext.Provider>
             {/* what is on its way, and failed messages with nothing sent after them, in the order they were written */}
-            {!readOnly &&
-              [...shownPending.map((p) => ({ at: p.at, el: (
-                <div key={p.id} className="flex flex-col gap-3">
-                  <UserBubble msg={p.msg} mid={mid} sid={sid} pending sendState="sending" />
-                </div>
-              ) })), ...placed.rest.map((e) => ({ at: e.at, el: <OutboxBubbles key={`outbox:${e.id}`} mid={mid} sid={sid} entries={[e]} canRetry={!refusedNoRow} /> }))]
-                .sort((a, b) => a.at - b.at)
-                .map((x) => x.el)}
-            {!readOnly && (shownPending.length > 0 || outbox.some((e) => e.state === "sending") || (starting && outgoing > 0)) && (
+            {[...shownPending.map((p) => ({ at: p.at, el: (
+              <div key={p.id} className="flex flex-col gap-3">
+                <UserBubble msg={p.msg} mid={mid} sid={sid} pending sendState="sending" />
+              </div>
+            ) })), ...placed.rest.map((e) => ({ at: e.at, el: <OutboxBubbles key={`outbox:${e.id}`} mid={mid} sid={sid} entries={[e]} canRetry={!refusedNoRow} /> }))]
+              .sort((a, b) => a.at - b.at)
+              .map((x) => x.el)}
+            {(shownPending.length > 0 || outbox.some((e) => e.state === "sending") || (starting && outgoing > 0)) && (
               <div className="flex items-center gap-2.5">
                 <Loading label={starting ? t("chat-chatview.preparing") : shownPending.some((p) => p.waits) ? t("ultracode.send_waits") : online ? t("chat-chatview.delivering") : t("chat-chatview.waiting_for_hub")} />
               </div>
             )}
             {voiceState && <VoiceTail owner={voiceOwner} persona={persona.name} />}
           </div>
-          {!readOnly && <CommentMarks scroller={scroller} jump={landRow} />}
+          <CommentMarks scroller={scroller} jump={landRow} />
           </ChatActionsContext.Provider>
         </div>
         {/* A transient edge overlay; native scrolling and the centered text column keep their existing layout. */}
@@ -1547,7 +1564,6 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
         {picked && !search.open && <ReturnPill onClick={backToOrigin} />}
       </div>
 
-      {!readOnly && (
       <div
         data-chat-dock
         // at most DOCK_MAX on every width (#5375): what sits over the composer gives up its height first and scrolls in
@@ -1587,7 +1603,7 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
           </>
         )}
         {pendingCards}
-        {!assistant && !readOnly && session?.model_fallback && <ModelFallbackCard session={session} headless={false} />}
+        {!assistant && session?.model_fallback && <ModelFallbackCard session={session} headless={false} />}
         {assistant && session && <CompactionStrip session={session} />}
         {failure ? <FailureCard failure={failure} onClose={() => setSendFailure(null)} onHelp={gate.help} onConfirm={gate.confirm} onRetry={failedEntry && !refusedNoRow && sessionCan(session, "send") && !gate.blocked ? () => void retryOutbox(mid, sid, failedEntry.id) : undefined} /> : <ReadinessCard gate={gate} />}
         <ChatOnlyNote gate={gate} />
@@ -1595,8 +1611,8 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
         {session && !assistant && <AttentionNote session={session} />}
         {session && !assistant && <ConflictNote session={session} />}
         {/* a resume turned ultracode off (#3428): one line with "Turn back on" */}
-        {session && !assistant && !readOnly && <UltracodeLostNote session={session} />}
-        {session && !assistant && showsFailureNote(session, { readOnly, retried }) && (
+        {session && !assistant && <UltracodeLostNote session={session} />}
+        {session && !assistant && showsFailureNote(session, { retried }) && (
           <FailureNote
             session={session}
             onRetry={() => {
@@ -1641,12 +1657,12 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
           onFocusChange={setTyping}
           blocked={gate.blocked ?? noRowBlock}
           footer={footer}
+          trailing={trailing}
           voice={voiceEntry.offer}
         />
         )}
         </div>
       </div>
-      )}
       </ViewLayer>
       {switchable && termKept && (
         <ViewLayer on={view === "term"} from="end" enter layerRef={termLayer}>
@@ -1660,19 +1676,17 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
       )}
       </div>
 
-      {!readOnly && (
-        <ChatSearch
-          open={search.open}
-          query={search.query}
-          onQuery={(query) => setSearch((x) => ({ ...x, query }))}
-          items={tr.items}
-          rounds={rounds}
-          hasMore={tr.hasMore}
-          onLoadEarlier={loadForSearch}
-          onPick={goTo}
-          onClose={closeSearch}
-        />
-      )}
+      <ChatSearch
+        open={search.open}
+        query={search.query}
+        onQuery={(query) => setSearch((x) => ({ ...x, query }))}
+        items={tr.items}
+        rounds={rounds}
+        hasMore={tr.hasMore}
+        onLoadEarlier={loadForSearch}
+        onPick={goTo}
+        onClose={closeSearch}
+      />
       <Dialog
         open={Boolean(draftRefusal)}
         onClose={() => setDraftRefusal(null)}
@@ -1755,16 +1769,17 @@ function JumpPill({ label, onClick, inline }: { label: string; onClick: () => vo
   );
 }
 
-function ComposerFooter({ session, assistant }: { session: Session; assistant?: boolean }) {
-  // a Persona conversation's launcher and model are its chip (they switch there)
-  const parts = [sourceSubtitle(session), ...(assistant ? [] : [session.launcher, session.model?.split("/").pop(), shortPath(session.cwd)])].filter(Boolean);
+export function ComposerFooter({ session, assistant }: { session: Session; assistant?: boolean }) {
+  // the launcher and model are the composer's model pill (an Agent's, #5032) or the launcher chip (a Persona
+  // conversation's): they switch there, so the line keeps only where the chat comes from and runs
+  const parts = [sourceSubtitle(session), ...(assistant ? [] : [shortPath(session.cwd)])].filter(Boolean);
   const info = useMenu();
-  // a Persona conversation (the main one too) switches its modes whatever its state: the hub applies them (#2416)
+  // a Persona conversation (the main one too) switches its modes whatever its state: the hub applies them (#2416). An
+  // Agent's effort (a Codex thread's too) is on its model pill
   const modes = assistant || (hasModes(session) && stateOf(session) !== "offline");
-  const effortOnly = !assistant && hasEffortOnly(session) && stateOf(session) !== "offline"; // a Codex thread on its app-server
   return (
     <span className="flex min-w-0 items-center gap-2">
-      {(modes || effortOnly) && <ModeChips session={session} effortOnly={effortOnly} assistant={assistant} withInfo={parts.length > 0} />}
+      {modes && <ModeChips session={session} assistant={assistant} withInfo={parts.length > 0} />}
       {assistant && <AssistantLauncherChip session={session} />}
       {parts.length > 0 && <span className="min-w-0 truncate max-sm:hidden" title={[sourceSubtitle(session), session.cwd].filter(Boolean).join(" · ")}>{parts.join(" · ")}</span>}
       {/* phone width (#3533): the line would show a letter or two, so it is a button that lists the parts in full */}
@@ -1775,15 +1790,12 @@ function ComposerFooter({ session, assistant }: { session: Session; assistant?: 
 }
 
 /** The composer footer's parts as menu rows (#3533): the value in full (wrapped), what it is beside it; choosing one
- *  copies it, except the source, which is a sentence to read rather than a value to paste. */
+ *  copies it, except the source, which is a sentence to read rather than a value to paste. The launcher and model are
+ *  the model pill's (#5032). */
 export function footerRows(session: Session, assistant?: boolean): MenuItem[] {
   const rows: [string, string, string | undefined][] = [
     ["source", t("chat-chatview.composer_source"), sourceSubtitle(session)],
-    ...(assistant ? [] : ([
-      ["launcher", t("chat-sessiondialogs.launcher"), session.launcher],
-      ["model", t("chat-sessiondialogs.model"), session.model?.split("/").pop()],
-      ["folder", t("chat-sessiondialogs.folder"), shortPath(session.cwd)],
-    ] as [string, string, string | undefined][])),
+    ...(assistant ? [] : ([["folder", t("chat-sessiondialogs.folder"), shortPath(session.cwd)]] as [string, string, string | undefined][])),
   ];
   return rows.filter(([, , v]) => v).map(([key, what, v]) => ({ key, label: v!, hint: what, wrap: true, onSelect: key === "source" ? () => {} : () => void copyText(key === "folder" ? session.cwd! : v!) }));
 }

@@ -36,6 +36,17 @@ import Testing
         #expect(TerminalsList.folder(nil).isEmpty)
     }
 
+    @Test func rowsSayWhatRunsOnce() {
+        #expect(TerminalsList.agentName("codex") == "Codex", "the app's name, not the runtime id")
+        #expect(TerminalsList.agentName("claude") == "Claude")
+        #expect(TerminalsList.agentName(nil) == "Claude")
+        #expect(TerminalsList.agentName("pi") == "pi")
+        #expect(TerminalsList.plainDetails(title: "shell · zsh", foreground: "zsh", folder: "persona") == ["persona"],
+                "the title names the program already")
+        #expect(TerminalsList.plainDetails(title: "shell", foreground: "vim", folder: "app") == ["vim", "app"])
+        #expect(TerminalsList.plainDetails(title: "shell", foreground: nil, folder: "").isEmpty)
+    }
+
     @Test func noNewTerminalWhereTheHostCannotOpenOne() {
         let list = panes(#"{"hosts":[{"kind":"orca","new_tab":false,"workspaces":[{"id":"w1","label":"app"}],"panes":[]}]}"#)
         #expect(TerminalsList.spaces(list).isEmpty)

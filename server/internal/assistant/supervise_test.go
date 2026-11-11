@@ -171,6 +171,7 @@ func sentToAgent(f *fakeHub) []string {
 // (round 1, 2); a third rework goes to the user; accepted closes the todo by review.
 func TestSupervisedTaskRound(t *testing.T) {
 	s, f, todo := newSupervisedService(t)
+	presenceTimes(t, 0, 0) // the user speaks below; what comes after is not held for them (relay_presence.go)
 	ctx := context.Background()
 	f.mu.Lock()
 	prompt, _ := f.starts[0]["prompt"].(string)

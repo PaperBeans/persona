@@ -4,6 +4,7 @@
 // a link stays until closed (it is not tied to the conversation it came from).
 import { useSyncExternalStore } from "react";
 import type { DiffScope } from "./comments";
+import { followSubagentLink } from "./subagent-link";
 
 /** A diff opened straight at a line (a comment's card, lib/comments.ts): which diff, which file, which line. */
 export interface GitSpot {
@@ -47,6 +48,8 @@ let opener: Element | null = null;
 const listeners = new Set<() => void>();
 
 export function openPanel(p: Panel | null) {
+  // a subagent's conversation is not opened (#5030): its parent's chat, at the subagent's card
+  if (p?.kind === "agent") p = { ...p, sid: followSubagentLink(p.mid, p.sid) };
   // what had the focus when the panel opened (its header button): closing gives the focus back to it (#5155). Called
   // from the click, before the panel renders, so it is never something inside the panel; a panel replacing another keeps
   // the first one's.
