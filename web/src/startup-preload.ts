@@ -114,10 +114,13 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
  * (#4518, allocated in #4597), and 128 B for sending an edit of the last message safely (#4605 added 115 B to ja:
  * ChatView's wait for Claude's box after the rewind, the send's clear_draft and the give-back of a refused edit), and
  * 1,664 B for Forward (#3899 added 1,588 B: the action, the forward's card in a sent bubble and over the box, and its
- * strings; the picker loads on the first Forward).
+ * strings; the picker loads on the first Forward), and 1,152 B for task cards (#5030 added 1,105 B to ja: the shared
+ * task card head, a workflow call's card with its progress line and agent strip, the chat's Background dialog opened
+ * from it, the old subagent links' redirect and the background-subtasks line, their words; the subagent card itself
+ * loads when a summary is opened).
  * Raise it on purpose, in the change that needs it.
  */
-export const FIRST_SCREEN_BUDGET = 597_056;
+export const FIRST_SCREEN_BUDGET = 598_208;
 
 /** What the built-in hub sends for `files` (paths below `dir`) to a browser that takes br: each one's brotli copy, or
  *  the file itself when it has none. Build time only. */

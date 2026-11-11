@@ -256,7 +256,28 @@ struct MachineDetailView: View {
                 .card(padding: 0)
             }
             engineRow(machine)
+            if machine.online { terminalsRow }
         }
+    }
+
+    /// This computer's terminals, plain ones too (#4754): a leaf like the engine row, so a view push is fine here.
+    private var terminalsRow: some View {
+        NavigationLink {
+            TerminalsView(only: ref.path)
+        } label: {
+            HStack(spacing: Theme.Space.s) {
+                ThemedIcon(Theme.Icon.terminal).font(Theme.Font.body).foregroundStyle(Theme.accent).scaledFrame(width: Theme.Size.icon)
+                Text("Terminals").font(Theme.Font.body).lineLimit(1)
+                Spacer(minLength: Theme.Space.s)
+                ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, Theme.Space.l)
+            .padding(.vertical, Theme.Space.m)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("machine.terminals")
+        .card(padding: 0)
     }
 
     /// Which engine's sessions the machine shows (herdr, Herdr App…): it decides the list above.

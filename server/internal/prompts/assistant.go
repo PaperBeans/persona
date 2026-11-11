@@ -3,6 +3,7 @@ package prompts
 import (
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // AssistantMachine is one computer in the assistant's CLAUDE.md, as seen from where the assistant runs.
@@ -395,6 +396,69 @@ type BriefFacts struct {
 	// Briefs: the open pieces of work that need the owner or changed since the last briefing, in their own words;
 	// BriefsDone: those that ended since, once, with each criterion's result (#3822).
 	Briefs, BriefsDone []BriefTask
+	// Day: the evening routine's today's all-day recording (#4741), for the model only; nil leaves the section out.
+	Day *BriefDay
+}
+
+// BriefDay is today's all-day recording in the evening routine's facts (#4741), the day's parts merged by time; the
+// clock times are the owner's ("15:04", with the date when it is not today). Nothing of it is in the card, the brief
+// item or a channel, so the model says it even when Card is set.
+type BriefDay struct {
+	Date     string // the owner's today, YYYY-MM-DD
+	From, To string // when it was recorded: from its start to its end, or now while it is open
+	// Transcribed is how far its text goes when that is short of To (the phone transcribes and uploads as it can).
+	Transcribed string
+	// Gaps are the time with no text by reason, the reasons with the most of it; GapReasonsLeft counts the other
+	// reasons, GapsLeft their stretches and GapMinutesLeft their minutes.
+	Gaps                                     []BriefDayGap
+	GapReasonsLeft, GapsLeft, GapMinutesLeft int
+	// Parts are each part's recap or, without one, its state, the first and the latest ones; PartsLeft counts those
+	// from the middle left out (the section's bound).
+	Parts     []BriefDayPart
+	PartsLeft int
+	// Timeline is every part's recap entries by time; Left counts those from the middle of the day left out (the
+	// section's bound).
+	Timeline []BriefDayEntry
+	Left     int
+	// Actions are the suggested to-dos the user has not confirmed, by time; ActionsLeft counts those left out.
+	Actions     []BriefDayAction
+	ActionsLeft int
+}
+
+// BriefDayGap is the time of one reason with no text (paused, interrupted, stopped, pending, lost, erased, or the
+// phone's own word): how many stretches, how many minutes in all, the longest of them (More: there are others).
+type BriefDayGap struct {
+	Reason         string
+	Count, Minutes int
+	Ranges         []string
+	More           bool
+}
+
+// BriefDayPart is one part of the day: its recap (Made when it was written, Upto how far it read, Summary) and State
+// "pending" or "failed" when a newer one is being written or failed; without a recap, State is "pending", "failed",
+// "none" (nothing transcribed in Recorded minutes) or "" (not due yet).
+type BriefDayPart struct {
+	Part           int
+	Made, Upto     string
+	Final, Partial bool
+	Summary        string
+	State          string
+	Recorded       int
+}
+
+// BriefDayEntry is one entry of the day's timeline, without its points.
+type BriefDayEntry struct {
+	From, To string
+	Meeting  bool
+	Title    string
+}
+
+// BriefDayAction is a suggested to-do not confirmed yet.
+type BriefDayAction struct{ Who, What string }
+
+// BriefDayRunes is how many runes day adds to the facts (the evening routine keeps it about 4000).
+func BriefDayRunes(day *BriefDay) int {
+	return utf8.RuneCountInString(RenderBriefFacts(BriefFacts{Day: day})) - utf8.RuneCountInString(RenderBriefFacts(BriefFacts{}))
 }
 
 // BriefTask is one piece of work in the briefing, told from its brief: Date and Words are when the owner asked and
@@ -553,6 +617,8 @@ type Supervise struct {
 	// Leader: it goes to a leader conversation, for the tasks it handed out (#3133); Escalated: an entry is a leader's
 	// needs_user, told the main conversation.
 	Leader, Escalated bool
+	// Side: it goes to an ordinary side conversation, for the tasks that conversation handed out itself.
+	Side bool
 	// LeaderStuck: an entry is a leader's task stuck over a day (sigLeaderStuck), told the main conversation (#3609).
 	LeaderStuck bool
 	// Overdue: an entry is a task past its brief's clock (#3822).

@@ -80,6 +80,8 @@ type fakeHub struct {
 	noModel       bool
 	asked         []modelCall
 	pushes        []Notification
+	failNotify    int              // notify.request fails this many more times as when the hub is away and nothing was kept
+	refuseNotify  error            // notify.request is the hub's refusal (answered) while set
 	events        []string         // the type of each event the apps were sent
 	liveEvents    []map[string]any // the meeting_live events as sent
 	snaps         []Snapshot
@@ -581,6 +583,13 @@ func (f *fakeHub) NotifyRequest(_ context.Context, p NotifyRequest) error {
 	case NotifyPush, assistantwire.NotifyDone, assistantwire.NotifyInput, assistantwire.NotifyReply, assistantwire.NotifyDecide:
 	default:
 		return fmt.Errorf("kind %q", p.Notification.Kind)
+	}
+	if f.refuseNotify != nil {
+		return f.refuseNotify
+	}
+	if f.failNotify > 0 {
+		f.failNotify--
+		return errors.New("the hub is away")
 	}
 	f.pushes = append(f.pushes, p.Notification)
 	return nil

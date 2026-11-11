@@ -377,13 +377,15 @@ fun AgentRow(
     val gap = Tokens.Space.s - Tokens.Space.xxs
     val hasMetadata = note != null || facts.isNotEmpty()
     val boardMetadata = board && hasMetadata && !compact
+    val statusLabel = stringResource(shown.labelRes)
     val click = Modifier.selectedRow(selected).onSecondaryClick(onLongClick).combinedClickable(role = Role.Button, onClick = onClick, onLongClick = onLongClick)
         // Compact rows and Board's two-line metadata rows have no visible state line: TalkBack still says it (#3902).
-        // Board also keeps the latest message in its merged text without replacing the title or metadata.
+        // Board also keeps the latest message in its merged text without replacing the title or metadata. A row whose
+        // state is its dot's alone ([statusText] null, #4338 A9) is told it by name too.
         .then(if (compact || boardMetadata) Modifier.semantics {
-            if (statusText != null) stateDescription = statusText
+            stateDescription = statusText ?: statusLabel
             if (boardMetadata && !preview.isNullOrBlank()) text = AnnotatedString(preview.replace('\n', ' '))
-        } else Modifier)
+        } else if (statusText == null) Modifier.semantics { stateDescription = statusLabel } else Modifier)
     val text: @Composable ColumnScope.() -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {

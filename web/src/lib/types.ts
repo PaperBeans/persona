@@ -101,6 +101,10 @@ export interface Subagent {
   steps?: number;
   /** Its latest tool call: what it is doing now while it runs (newer nodes). */
   last_tool?: { id?: string; name: string; summary: string };
+  /** The model it ran on, from its own transcript (newer nodes, #5030); never the model its call asked for. */
+  model?: string;
+  /** Its latest reply's context plus output tokens, as a workflow agent's `tokens` (newer nodes, #5030). */
+  tokens?: number;
 }
 
 export interface SessionCapabilities {
@@ -543,6 +547,9 @@ export interface Item {
   compact?: CompactInfo;
   /** A notice for a Claude Code model_refusal_* record (#2289), kept as recorded. */
   model_refusal?: ModelRefusal;
+  /** The model that wrote this assistant item, as its transcript records it (proto.Item.Model, #5034); absent when the
+   *  transcript does not say and from older nodes. Drawn only as a divider where the replies' model changes. */
+  model?: string;
   /** A message Persona typed in for the model (a task's notice, a scheduled run…), not by you (lib/injected.ts). */
   injected?: Injected;
   /** Display provenance, independent of the model-facing role. Unknown kinds remain non-user sources. */

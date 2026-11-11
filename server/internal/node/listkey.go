@@ -156,7 +156,7 @@ func listKeySized(list []proto.Session, size int) string {
 			w.quote(p.Current, '\n')
 		}
 		// A subagent's new call shows at once (its card says what it does now, #5602); the list goes out at most once a
-		// second, with the poll.
+		// second, with the poll. Its model and tokens ride along (#5030).
 		for _, a := range s.Subagents {
 			w.str(a.ID, ':')
 			w.str(strconv.FormatBool(a.Running), ':')

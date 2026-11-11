@@ -35,7 +35,7 @@ func sessionLayout() uint64 {
 // the reflect encoder (value), the rest of the session still written here.
 const (
 	backgroundWireLayout   = 0xf3f44642839ae39d
-	subagentWireLayout     = 0x6cceb04bc9a10526
+	subagentWireLayout     = 0xbf84f2ee699de074
 	workflowToolWireLayout = 0x56c71f2c71223998
 )
 
@@ -375,6 +375,8 @@ func (w *wireWriter) subagents(list []Subagent) {
 			w.str(`"summary":`, t.Summary, false)
 			w.close()
 		}
+		w.str(`"model":`, a.Model, true)
+		w.integer(`"tokens":`, int64(a.Tokens), true)
 		w.close()
 	}
 	w.b = append(w.b, ']')

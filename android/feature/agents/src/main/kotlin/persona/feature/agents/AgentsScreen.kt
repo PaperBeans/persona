@@ -804,6 +804,8 @@ internal fun SlotRow(
             if (source?.readOnly == true) add(RowFact(stringResource(R.string.agents_row_view_only), caution = true))
             if (located) listOfNotNull(machine, session.spaceName?.takeIf { it.isNotBlank() } ?: session.folderName.takeIf { it.isNotBlank() })
                 .joinToString(" / ").takeIf { it.isNotBlank() }?.let { add(RowFact(it)) }
+            // The model it runs on, as iOS's row names it (#4338 A9): the session's model, else its launcher's.
+            (session.model ?: session.launcher)?.trim()?.takeIf(String::isNotEmpty)?.let { add(RowFact(it)) }
             session.todo?.let { add(RowFact(stringResource(R.string.agents_row_todo, it.title))) }
             slotLabel?.let { add(RowFact(it)) }
             if (requestCount > 0) add(RowFact(pluralStringResource(R.plurals.agents_row_requests, requestCount, requestCount), caution = true))
@@ -999,10 +1001,16 @@ internal fun AgentSession.rowStatus(muted: Boolean): Status = if (asksYou && !mu
 
 /** A row's state words: "Awaiting your reply" for a seen agent waiting on the user's answer; none for a plain seen one. */
 @Composable
+/**
+ * The row's state in words, as iOS's default row (#4338 A9): only what its dot does not say alone, Needs you (unless
+ * muted), Awaiting reply and Waiting in the background. Working, Unread and the rest are the dot's; TalkBack still
+ * hears the state ([AgentRow]).
+ */
 internal fun AgentSession.rowStatusText(muted: Boolean): String? = when {
+    state == AgentState.NeedsYou && !muted -> state.label
     asksYou && !muted -> CoreText.of(CoreText.Key.StateAwaitingReply).text()
-    state == AgentState.Idle || state == AgentState.Unknown -> null
-    else -> state.label
+    waitsInBackground && !muted -> CoreText.of(CoreText.Key.StateBackgroundWaiting).text()
+    else -> null
 }
 @Composable
 internal fun StateDot(state: AgentState, breathe: Boolean = false) {

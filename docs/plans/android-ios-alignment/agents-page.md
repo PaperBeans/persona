@@ -39,8 +39,8 @@ The Agents page on Android shows the same sessions as on iOS, in the same groupi
 **A9. Row content.** The work-item row in section 3.4, as iOS's default Avatar style draws it:
 
 - Leading: the agent mark in a round well with the state on its corner. Android puts the agent mark and the state mark side by side.
-- Line 2: up to two lines of the latest words, a state word only for Needs You, Awaiting Reply and Waiting in the background. Android writes a state word for every state but Seen.
-- Line 3: source · tab · space › tab · computer (the computer only when the list mixes computers), the model's short name, a to-do chip and the muted bell. Android shows "computer / space" only outside the tree and never the model.
+- Line 2: up to two lines of the latest words, a state word only for Needs You, Awaiting Reply and Waiting in the background. Android writes a state word for every state but Seen. Done (11-12, owner review): the state word only for those three (`rowStatusText`); TalkBack still hears every row's state.
+- Line 3: source · tab · space › tab · computer (the computer only when the list mixes computers), the model's short name, a to-do chip and the muted bell. Android shows "computer / space" only outside the tree and never the model. The model is now among the row's facts (11-12); the rest of line 3 is still to do.
 - Row styles: Avatar, Two Lines, State Cards and Compact List in ⋯ › Display and in Settings. Android has Compact and Detailed only.
 
 **A10. Search.** iOS matches every word across twelve fields (path, repository root, question, model, agent and errors among them) and takes `machine:`, `project:`, `agent:`, `model:`, `state:`, `is:pinned`, `is:error` and `since:`. Android matches the whole query as one substring in five fields. Requirement: as on iOS.

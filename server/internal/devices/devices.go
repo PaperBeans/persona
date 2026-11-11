@@ -823,6 +823,19 @@ type Summary struct {
 // Has reports whether id is one of the machines (an entry another one absorbed included).
 func (d *Devices) Has(id string) bool { return d.machineByID(id) != nil }
 
+// NodeAnnounced reports whether machine id's node is connected and announced capability in its handshake, never
+// assumed for an older node: the assistant checks secret_env before it shows a hand-off card.
+func (d *Devices) NodeAnnounced(id, capability string) bool {
+	m := d.machineByID(id)
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	info, connected := m.info, m.peer != nil
+	m.mu.Unlock()
+	return connected && info.Protocol > 0 && slices.Contains(info.Capabilities, capability)
+}
+
 // CallNode is a call to a machine's node from the manager itself (the assistant's device.call): errors as the
 // hub's were (apierr.ErrOffline, rpc.ErrClosed, the node's *rpc.Error).
 func (d *Devices) CallNode(ctx context.Context, id, method string, params json.RawMessage) (json.RawMessage, error) {

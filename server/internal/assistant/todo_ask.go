@@ -44,6 +44,8 @@ type todoAsk struct {
 	Responses     []string         `json:"responses,omitempty"`
 	// Response: the fixed answer the owner already gave it while it still waits (explain_first).
 	Response string `json:"response,omitempty"`
+	// ForBriefing: it can wait and nothing was pushed for it yet: the next briefing lists it (decision_wait.go).
+	ForBriefing bool `json:"for_briefing,omitempty"`
 }
 
 // How a decision's default reads on its to-do (todoAsk.Default).
@@ -71,6 +73,7 @@ func (s *Service) todoAsks(ctx context.Context) map[string]todoAsk {
 		if decideAsk(&w.ask) {
 			a.Recommend = w.ask.Recommend
 			a.Question, a.Responses, a.Response = w.ask.Reason, ownerResponses, w.ask.Response
+			a.ForBriefing = w.ask.ForBriefing
 			a.WhyOwner, a.Options, a.CostOfWaiting = w.ask.WhyOwner, w.ask.Options, w.ask.CostOfWaiting
 			a.From, a.Stands, a.Background = w.ask.From, w.ask.Stands, backgroundText(l, loc, &w.ask)
 			switch {
@@ -103,14 +106,21 @@ func (s *Service) askChanged(ctx context.Context) {
 // round). True when the hub took it. None for a decision without a recommendation (nothing for OK to take), for a task
 // from a health conversation (the lock screen says nothing of those) or a muted one.
 func (s *Service) pushDecision(ctx context.Context, id string) bool {
+	sent, _ := s.pushDecisionErr(ctx, id)
+	return sent
+}
+
+// pushDecisionErr is pushDecision that tells a push the hub did not take (the error: it may take it later) from one
+// that is not due (false, nil).
+func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) {
 	a, ok := s.askCopy(id)
 	t, found := s.todoNow(id)
 	if !ok || !found || !decideAsk(&a) || a.Recommend == "" || !a.AcceptedAt.IsZero() || t.Origin == "" {
-		return false
+		return false, nil
 	}
 	here := s.settings(ctx).MachineID
 	if s.muted(here, t.Origin) || s.inHealth(ctx, t.Origin) {
-		return false
+		return false, nil
 	}
 	l := s.lang(ctx)
 	n := Notification{ID: "ntf_" + randomHex(8), Kind: assistantwire.NotifyDecide, Subtitle: "Persona", DeviceID: here, SessionID: t.Origin,
@@ -129,7 +139,7 @@ func (s *Service) pushDecision(ctx context.Context, id string) bool {
 	}
 	if err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
 		s.logf("task %s: decision push: %v", id, err)
-		return false
+		return false, err
 	}
-	return true
+	return true, nil
 }

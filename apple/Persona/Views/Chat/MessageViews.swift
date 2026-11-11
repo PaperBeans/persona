@@ -88,7 +88,7 @@ extension MarkdownUI.Theme {
                 ReplyQuote(config: config)
                 #endif
             }
-            .table { config in FittedTable(config: config) } // fits the width it gets; scrolls only when it cannot
+            .table { config in FittedTable(config: config).oneBlockInLift() } // fits the width it gets; scrolls only when it cannot
             .tableCell { config in FittedTableCell(config: config).runFonts() }
     }
 }
@@ -132,7 +132,7 @@ extension MarkdownUI.Theme {
     /// below the third level (the secondary level's size), semibold in the quieter ink, more space above than below.
     /// Its label is built as heading1–3's are: a modifier theirs gains (the style's run fonts, say) belongs here too.
     @MainActor static func minorHeading(_ config: BlockConfiguration) -> some View {
-        config.label.markdownMargin(top: ReplyMetrics.heading4.top, bottom: ReplyMetrics.heading4.bottom)
+        config.label.runFonts().markdownMargin(top: ReplyMetrics.heading4.top, bottom: ReplyMetrics.heading4.bottom)
             .markdownTextStyle {
                 FontWeight(.semibold)
                 FontSize(.em(ReplyMetrics.heading4.size))
@@ -348,6 +348,7 @@ struct PeerMessage: View {
         Markdown(d.markdown)
             .markdownSoftBreakMode(.lineBreak)
             .markdownTheme(.persona)
+            .environment(\.replyKey, RowMemo.key(memoScope, item.id)) // its quotes' folds, the lifted copy's too
             .selectableInLift(item.text ?? "", as: .reply(quiet: false)) // #603
             .frame(maxWidth: .infinity, alignment: .leading)
             #if os(macOS)
@@ -581,6 +582,7 @@ struct AssistantText: View, Equatable {
             // Inside the theme (applied first), or the theme's text style wins (docs/lessons/ios.md).
             .modifier(QuietMarkdown(on: quiet))
             .markdownTheme(.persona)
+            .environment(\.replyKey, RowMemo.key(memoScope, item.id)) // its quotes' folds, the lifted copy's too
             .selectableInLift(item.text ?? "", as: .reply(quiet: quiet)) // #603
             .frame(maxWidth: .infinity, alignment: .leading)
             .chatBoxed(Theme.ChatBox.persona, on: boxed)
@@ -1168,6 +1170,14 @@ struct LinkedMarkdown: View {
 
     private static let memo = TextMemo<MarkdownContent>(limit: 512)
 
+    /// The paths of a message that are there to open, which it links: none outside a chat. Only a message with paths
+    /// reads the presence (and is drawn again when an answer comes). Also how its words are laid out to select them
+    /// in place (`SelectableInLift`): a path written as code that is linked is drawn as words.
+    static func linkable(_ paths: PathMarkdown, model: AppModel?, scope: FileScope?) -> [String] {
+        guard !paths.paths.isEmpty, let model, let scope else { return [] }
+        return paths.paths.filter { model.filePresence.linkable($0, in: scope) }
+    }
+
     var body: some View { Markdown(content) }
 
     private var content: MarkdownContent {
@@ -1179,11 +1189,7 @@ struct LinkedMarkdown: View {
         let copies = false
         #endif
         let paths = paths
-        // Only a message with paths reads the presence (and is drawn again when an answer comes).
-        guard !paths.paths.isEmpty, let model, let scope else {
-            return copies ? Self.memo(key + "\u{1}") { _ in MarkdownContent(CodeCopyMarkdown.linked(paths.source)) } : plain
-        }
-        let there = paths.paths.filter { model.filePresence.linkable($0, in: scope) }
+        let there = Self.linkable(paths, model: model, scope: scope)
         guard !there.isEmpty else {
             return copies ? Self.memo(key + "\u{1}") { _ in MarkdownContent(CodeCopyMarkdown.linked(paths.source)) } : plain
         }

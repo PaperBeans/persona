@@ -480,7 +480,25 @@ final class ChatStore {
     var isLoadingOlder = false
     /// Messages sent from this phone that the transcript has not shown yet: drawn at the end right away, and a failed one
     /// before the first message written after it (`ChatLines.placeFailed`).
-    var pending: [PendingMessage] = []
+    var pending: [PendingMessage] = [] {
+        didSet { rebuildQueuePhotoMarks() }
+    }
+    /// The Persona queue's own messages, kept to derive their photo marks again when the outbox changes.
+    @ObservationIgnored private var ownQueue: [String] = []
+    /// Local photo counts for the own queue rows, derived once per queue/outbox change rather than in a view body (P4).
+    private(set) var queuePhotoMarks: [Int] = []
+
+    func updateQueuePhotoMarks(queued: [String]?, own: Int) {
+        ownQueue = Array((queued ?? []).prefix(max(0, own)))
+        rebuildQueuePhotoMarks()
+    }
+
+    private func rebuildQueuePhotoMarks() {
+        let marks = ownQueue.map { raw in
+            pending.first { PendingMessage.same($0.text, raw) }?.images.count ?? 0
+        }
+        if marks != queuePhotoMarks { queuePhotoMarks = marks }
+    }
     /// When this phone wrote the messages it sent whose copies have arrived, by their id (`Item.clientMsgID`, upper
     /// case): a failed message goes by the phone's own times, not by when the computer wrote a copy (a queued message
     /// is written when the agent takes it in, minutes later; its clock may differ) (#6023). This run's only.

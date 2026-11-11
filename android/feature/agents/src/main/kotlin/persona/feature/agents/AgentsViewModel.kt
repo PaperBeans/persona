@@ -85,6 +85,7 @@ internal class AgentsViewModel(
             preferences.range(pairingScope, AgentRange.All)
         }
         _notice.value = AgentText(if (archived) R.string.agents_notice_archived else R.string.agents_notice_restored)
+        _haptics.tryEmit(Haptic.Tap)
         repository.refresh()
     } }
     private val operations = bindings?.operations?.let { AgentOperationsState(it, preferences.hubCache) }

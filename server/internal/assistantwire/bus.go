@@ -36,6 +36,10 @@ const (
 	// photos"). The hub lists meeting_photos only while the default manager names it beside
 	// CapabilityMeetingConversation.
 	CapabilityMeetingPhotos = "meeting_photos"
+	// CapabilityRecordingDay: the manager takes all-day recordings and writes their daily recap (the upload's kind
+	// day, POST …/segments, detail.recap, recap_state; #4741). The hub lists the recording_day feature only while the
+	// default manager names it.
+	CapabilityRecordingDay = "recording_day"
 )
 
 // The methods and events, by direction. The assistant's handshake is manager.hello {id, host, os, arch, deploy,
@@ -91,6 +95,10 @@ const (
 	// CodeMeetingEnded: a message into a meeting's room that ended (docs/assistant/meeting-minutes.md "Messages from
 	// elsewhere"): the hub answers 409 meeting_ended, and the apps write in the follow-up instead.
 	CodeMeetingEnded = "meeting_ended"
+	// CodeLauncherOtherKind: a launcher of another agent kind picked for a message in an existing assistant
+	// conversation (Data: conversation_agent, launcher, launcher_agent, delivered "none"): the hub answers 409, nothing
+	// was sent, and the conversation keeps its agent (docs/assistant/assistant.md, #4662).
+	CodeLauncherOtherKind = "launcher_other_kind"
 )
 
 // HTTPRequest is http.request's params: an app's request on one of Routes, with an escaped URL path (header without
@@ -240,6 +248,8 @@ var Routes = []string{
 	"GET /api/v1/recordings",
 	"POST /api/v1/recordings/{id}/minutes",
 	"POST /api/v1/recordings/{id}/minutes/todos",
+	// All-day recordings' appends (kb_day.go there, #4741).
+	"POST /api/v1/recordings/{id}/segments",
 	// Attending a meeting (meeting_live.go there, docs/assistant/meeting-minutes.md "Attending a meeting").
 	"POST /api/v1/recordings/{id}/live",
 	"GET /api/v1/recordings/{id}/live",

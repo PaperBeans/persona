@@ -1,5 +1,13 @@
 # Lessons: web UI and interactions
 
+## A menu opened from a layer above the menus' own goes inside that layer (#4991)
+
+- `Menu` portals to `document.body` at `z-50`. The image editor is a full-screen `z-[60]` layer, so a menu opened from it
+  drew under it, out of sight. Pass the layer as `container`: the menu is put inside it, above its content, and takes its
+  look (the editor's `dark`).
+- A layer that closes on Esc from a capture-phase `keydown` on the window runs before an open menu's handler (also capture,
+  registered later). It has to leave Esc alone while its menu is open, or Esc closes the editor instead of the menu.
+
 ## Review state is not an answerable decision (#4808)
 
 An old task can remain `supervision.state: needs_user` without any acceptance-book `ask`. Render its original review
@@ -515,7 +523,7 @@ Six parallel lanes (chat rendering, message actions, Agents list / Machines, Ter
 
 ### Chat page
 
-- Message context actions must target the message's `ChatActions.draftKey`, not the most recently focused composer (2026-11-07, #4528): a side panel can own that focus. Set `canCompose` from both the session's send capability and `!readOnly`; subagent transcript panels have no composer even if their session can send. Handoff to Persona remains available in read-only Agent chats. Use the conversation title for context cards, not `speaker`, which is only the generic quote attribution. Own-message hover bars sit to the left of the bubble: adding direct buttons clips them in narrow mouse windows or side panels. Put additional actions in their existing More menu and check it at narrow widths with mouse input, not only touch emulation.
+- Message context actions must target the message's `ChatActions.draftKey`, not the most recently focused composer (2026-11-07, #4528): a side panel can own that focus. Set `canCompose` from the session's send capability (subagents no longer open as transcripts of their own, #5030). Handoff to Persona remains available in read-only Agent chats. Use the conversation title for context cards, not `speaker`, which is only the generic quote attribution. Own-message hover bars sit to the left of the bubble: adding direct buttons clips them in narrow mouse windows or side panels. Put additional actions in their existing More menu and check it at narrow widths with mouse input, not only touch emulation.
 
 - TypeScript still narrows a closure-mutated `let` to its initial value in an outer loop (`let x: T | null = null` remains `null`, so `x.id` reports `never`); wrap in an object (`const last = { raw: null as T | null }`).
 - `encodeURIComponent` encodes `@` in sub-Agent session IDs as `%40`; real hub (Go `PathValue`) decodes it, but mock routing must `unquote` explicitly.

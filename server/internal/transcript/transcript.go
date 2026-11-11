@@ -228,6 +228,9 @@ type Meta struct {
 	codexSeen   map[string]bool
 	codexTurnID string
 	codexUserID string
+	// codexTurnModel: the model the turn under way runs on (its turn_context), which the turn's agent items carry.
+	// task_started clears it, as a window starting there has none.
+	codexTurnModel string
 	// LastTurnWake: the latest turn was started by a background task reporting back, not by a message (no
 	// "finished" push for it).
 	LastTurnWake bool
@@ -727,9 +730,13 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		if e.Message == nil {
 			return nil
 		}
-		if e.Message.Model != "" && e.Message.Model != "<synthetic>" {
-			meta.Model = e.Message.Model
-			meta.observeReplyModel(e.Message.Model)
+		model := e.Message.Model
+		if model == "<synthetic>" { // Claude Code's own lines (an API error, an interruption): no model wrote them
+			model = ""
+		}
+		if model != "" {
+			meta.Model = model
+			meta.observeReplyModel(model)
 		}
 		var blocks []block
 		if unmarshalLine(e.Message.Content, &blocks) != nil {
@@ -782,6 +789,9 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 			}
 		}
 		meta.claudeReply(&e, blocks, len(out) > 0)
+		for i := range out {
+			out[i].Model = model
+		}
 		return out
 	}
 	return nil

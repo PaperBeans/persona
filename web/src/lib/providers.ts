@@ -5,6 +5,7 @@ import { ApiError, errorText } from "./api";
 import { hostOf as urlHost } from "./hubs";
 import { launcherNameProblem, testableKey } from "./launcher-presets";
 import type { ScopeView } from "./provider-scope";
+import { TIER_SLOTS, type TierSource } from "./provider-tiers";
 import { EFFORTS } from "./session-actions";
 import { t } from "../i18n";
 
@@ -87,6 +88,8 @@ export interface ProviderForm {
   sonnet_model: string;
   haiku_model: string;
   fable_model: string;
+  /** Which tier models were filled in by themselves and which the user chose (lib/provider-tiers.ts); never sent. */
+  tier_source: TierSource;
   /** "Name: value" a line; only sent when touched (a stored one is never shown). */
   headers: string;
   headers_touched: boolean;
@@ -125,6 +128,7 @@ export function newForm(): ProviderForm {
     sonnet_model: "",
     haiku_model: "",
     fable_model: "",
+    tier_source: {},
     headers: "",
     headers_touched: false,
     env: "",
@@ -172,6 +176,8 @@ export function formFromView(v: ProviderView): ProviderForm {
     sonnet_model: v.sonnet_model ?? "",
     haiku_model: v.haiku_model ?? "",
     fable_model: v.fable_model ?? "",
+    // a saved provider's tiers are its own: nothing fills them in (#4975)
+    tier_source: Object.fromEntries(TIER_SLOTS.map((s) => [s, "user"])),
     proxy: v.proxy ?? "",
     no_proxy: v.no_proxy ?? "",
     timeout_ms: numText(v.timeout_ms),
@@ -201,6 +207,27 @@ export function mergeDiscovered(models: FormModel[], found: ProviderModel[], cha
     } else if (!out[i].context_window && m.context_window) {
       out[i] = { ...out[i], context_window: String(m.context_window), ...(!chat && !out[i].efforts.length ? { efforts: [...(m.efforts ?? [])] } : {}) };
     }
+  }
+  return out;
+}
+
+/** A model typed by hand, filled in from the hub's catalog (POST /api/v1/launchers/catalog, #4975): only what is still
+ *  empty (its name, context window, thinking levels and default level), so what the user typed meanwhile stays. A Chat
+ *  Completions provider takes no thinking levels. */
+export function fillFromCatalog(models: FormModel[], found: ProviderModel[], chat = false): FormModel[] {
+  let out = models;
+  for (const m of found) {
+    const i = out.findIndex((x) => x.id === m.id);
+    if (i < 0) continue;
+    const row = out[i];
+    const patch: Partial<FormModel> = {};
+    if (!row.name && m.name) patch.name = m.name;
+    if (!row.context_window && m.context_window) patch.context_window = String(m.context_window);
+    if (!chat && !row.efforts.length && m.efforts?.length) {
+      patch.efforts = [...m.efforts];
+      if (!row.default_effort && m.default_effort && m.efforts.includes(m.default_effort)) patch.default_effort = m.default_effort;
+    }
+    if (Object.keys(patch).length) out = out.map((x, j) => (j === i ? { ...x, ...patch } : x));
   }
   return out;
 }

@@ -150,9 +150,11 @@ actor ShortcutOutbox {
         save(all)
     }
 
+    /// Read once, on this actor's own executor: an actor is never the main actor, whatever the target's default isolation.
     private func load() -> [String: [ShortcutItem]] {
         if let held { return held }
-        let loaded = url.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSON.decoder.decode([String: [ShortcutItem]].self, from: $0) } ?? [:]
+        let data = url.flatMap { try? Data(contentsOf: $0) } // perf-ok: ShortcutOutbox is an actor, so this runs off the main actor
+        let loaded = data.flatMap { try? JSON.decoder.decode([String: [ShortcutItem]].self, from: $0) } ?? [:]
         held = loaded
         return loaded
     }
