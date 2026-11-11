@@ -43,5 +43,6 @@
   "minutes_unchanged": "Meeting minutes retention is unchanged: {saved} is saved; {after} is in effect.",
   "minutes_applied": "Meeting minutes retention is saved as {saved}; {after} is in effect. Transcripts still follow the recording retention.",
   "title_main_background_folded": "Fold background rounds",
-  "change_main_background_folded": "“Fold background rounds”: {before} → {after}"
+  "change_main_background_folded": "“Fold background rounds”: {before} → {after}",
+  "title_standing_authorizations": "Standing authorizations"
 }

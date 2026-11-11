@@ -72,5 +72,12 @@
   "model_config_assistant": "模型统一跟随「模型配置 › 主对话」",
   "until_label": "截止时间",
   "until_hint": "可选。到了这个时间，任务会自己关掉，并记一笔已跳过。留空则一直重复。",
-  "until_clear": "清除"
+  "until_clear": "清除",
+  "repeat_cron": "Cron",
+  "cron_label": "Cron 表达式",
+  "cron_hint": "分 时 日 月 周，按{zone}计算。日和周都写了时，满足其中一个就运行。",
+  "cron_hint_zone": "你的时区",
+  "cron_checking": "正在检查…",
+  "cron_next": "接下来的运行时间（{zone}）",
+  "cron_examples": "示例"
 }

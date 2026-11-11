@@ -43,5 +43,6 @@
   "minutes_unchanged": "会议纪要保留设置未变：已保存 {saved}，当前生效为 {after}。",
   "minutes_applied": "会议纪要保留已设为 {saved}，当前生效为 {after}。转写仍按录音保留时间清理。",
   "title_main_background_folded": "后台轮次默认折叠",
-  "change_main_background_folded": "「后台轮次默认折叠」：{before} → {after}"
+  "change_main_background_folded": "「后台轮次默认折叠」：{before} → {after}",
+  "title_standing_authorizations": "长期授权"
 }

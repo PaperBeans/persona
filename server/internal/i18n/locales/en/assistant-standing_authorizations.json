@@ -1,0 +1,7 @@
+{
+  "full_access": "Full access is required to manage standing authorizations.",
+  "conflict": "Standing authorizations changed. Refresh the list and try again.",
+  "change": "Change standing authorizations. These grants allow matching questions and plans to continue without another confirmation. Tool permissions always stay manual. Conditions must be independently verified.\n\nBefore:\n{before}\n\nAfter:\n{after}",
+  "continue": "Already authorized, continue.",
+  "basis": "Standing authorization {id}: “{quote}” (source: {source})."
+}

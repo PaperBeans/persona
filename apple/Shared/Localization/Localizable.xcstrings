@@ -158546,7 +158546,76 @@
         }
       }
     }
-  }
+  },
+    "Cron": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cron"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cron"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cron"
+          }
+        }
+      }
+    },
+    "Cron Expression": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cron Expression"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cron 表达式"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "cron 式"
+          }
+        }
+      }
+    },
+    "Runs when its cron expression matches, in your time zone. To change the expression, edit it in Persona on the web or ask Persona.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs when its cron expression matches, in your time zone. To change the expression, edit it in Persona on the web or ask Persona."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按你的时区，在 cron 表达式匹配时运行。要改表达式，请在网页版 Persona 里编辑，或者直接告诉 Persona。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "あなたのタイムゾーンで、cron 式に一致したときに実行します。式を変えるには、Web 版の Persona で編集するか、Persona に頼んでください。"
+          }
+        }
+      }
+    }
   },
   "version": "1.0"
 }

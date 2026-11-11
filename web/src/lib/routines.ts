@@ -3,13 +3,34 @@
 // Pure functions of their arguments (`now` passed in), so they are tested without a DOM.
 import { currentLanguage, formatDate, t } from "../i18n";
 
-export type Repeat = "once" | "daily" | "interval";
+export type Repeat = "once" | "daily" | "interval" | "cron";
 
 /** "Push when done": "" every run's answer is pushed, "asked" only what a run sends itself. */
 export type Push = "" | "asked";
 
 /** The hub feature that says it takes Task.push; without it the editor leaves the setting out. */
 export const TASK_PUSH_FEATURE = "task_push";
+
+/** The hub feature that says it runs cron tasks (repeat "cron", Task.cron, GET /assistant/tasks/cron). */
+export const TASK_CRON_FEATURE = "task_cron";
+
+/** A new cron task's expression: 09:00 on weekdays. */
+export const DEFAULT_CRON = "0 9 * * 1-5";
+
+/** The editor's quick picks for "Cron". */
+export const CRON_EXAMPLES = [
+  { cron: "*/30 9-18 * * 1-5", label: t("lib-routines.cron_example_work_hours") },
+  { cron: "0 9 * * 1-5", label: t("lib-routines.cron_example_weekdays") },
+  { cron: "0 10 1 * *", label: t("lib-routines.cron_example_monthly") },
+];
+
+/** GET /assistant/tasks/cron: the expression as the hub stores it, in words ("" when it has none), the user's time zone and the next runs. */
+export interface CronPreview {
+  cron: string;
+  text: string;
+  timezone: string;
+  next_runs: string[] | null;
+}
 
 export interface Task {
   id: string;
@@ -23,6 +44,11 @@ export interface Task {
   /** daily: 1 = Monday … 7 = Sunday; empty = every day. */
   weekdays?: number[] | null;
   every_minutes?: number;
+  /** cron: "minute hour day-of-month month day-of-week" (or @daily…) in the user's time zone. */
+  cron?: string;
+  /** cron, from the hub: the expression in words in the app's language ("" when it has none) and its next runs. */
+  cron_text?: string;
+  next_runs?: string[] | null;
   enabled: boolean;
   machine_id?: string;
   /** A conversation runs go into ("Continue the original chat"); empty = the task's own one. */
@@ -167,9 +193,14 @@ export function taskTitle(task: Pick<Task, "title" | "prompt">): string {
   return first.trim() || t("lib-routines.scheduled_follow_up");
 }
 
-/** The rule in words: "Every weekday 9:00 AM" / "Every 30 minutes" / "Once · New chat". */
+/** The rule in words: "Every weekday 9:00 AM" / "Every 30 minutes" / "Once · New chat" / "0 10 1 * * · At 10:00, on day 1 of the month"
+ *  (a cron task's expression first, so a one-line row always shows it). */
 export function ruleText(task: Task): string {
   if (task.repeat === "interval") return everyLabel(task.every_minutes ?? 0);
+  if (task.repeat === "cron") {
+    const cron = task.cron ?? "";
+    return task.cron_text ? t("lib-routines.rule_cron_text", { text: task.cron_text, cron }) : t("lib-routines.rule_cron", { cron });
+  }
   if (task.repeat === "once") return task.session_id ? t("lib-routines.once_same_chat") : t("lib-routines.once_new_chat");
   const d = normalizeDays(task.weekdays);
   const days = d.length === 0 ? t("lib-routines.every_day") : d.join() === WORKDAYS.join() ? t("lib-routines.every_workday") : d.join() === WEEKEND.join() ? t("lib-routines.every_weekend") : repeatsLabel(d);
@@ -260,6 +291,10 @@ export function validateTask(d: Task, now: Date): string | null {
       if (!Number.isInteger(m) || m < MIN_EVERY || m > MAX_EVERY) return t("lib-routines.error_interval");
       return pastUntil(d, now);
     }
+    case "cron":
+      // the hub checks the expression itself (the editor shows its answer as you type)
+      if (!(d.cron ?? "").trim()) return t("lib-routines.error_cron");
+      return pastUntil(d, now);
     case "once": {
       const at = parseTime(d.at);
       if (!at) return t("lib-routines.error_at");
@@ -286,6 +321,8 @@ export function sameTask(a: Task, b: Task): boolean {
       return a.time === b.time && normalizeDays(a.weekdays).join() === normalizeDays(b.weekdays).join();
     case "interval":
       return a.every_minutes === b.every_minutes;
+    case "cron":
+      return (a.cron ?? "").trim() === (b.cron ?? "").trim();
   }
 }
 
@@ -317,10 +354,12 @@ export function taskBody(d: Task, saved?: Task | null): Record<string, unknown> 
     time: d.repeat === "daily" ? d.time ?? "" : "",
     weekdays: d.repeat === "daily" ? normalizeDays(d.weekdays) : [],
     every_minutes: d.repeat === "interval" ? d.every_minutes ?? 0 : 0,
+    // always sent, so a hub that knows cron tasks changes the rule (left out, it keeps a cron task's); an older one ignores it
+    cron: d.repeat === "cron" ? (d.cron ?? "").trim() : "",
     session_id: d.session_id ?? "",
     permission_mode: d.permission_mode ?? "",
   };
-  const at = d.repeat === "daily" ? null : parseTime(d.at);
+  const at = d.repeat === "daily" || d.repeat === "cron" ? null : parseTime(d.at);
   if (at) body.at = at.toISOString();
   const until = untilBody(d, saved);
   if (until !== undefined) body.until = until;
@@ -364,12 +403,13 @@ export function fromLocalInput(s: string): Date | null {
 }
 
 /** Switching the rule keeps the editor valid: "Once" gets the next whole hour when it has no future time, "Interval" 30 minutes
- *  when it has none, "Every day" 09:00 when it has no time. */
+ *  when it has none, "Every day" 09:00 when it has no time, "Cron" 09:00 on weekdays when it has no expression. */
 export function withRepeat(d: Task, r: Repeat, now: Date): Task {
   const t: Task = { ...d, repeat: r };
   if (r === "once" && (parseTime(t.at)?.getTime() ?? 0) < now.getTime()) t.at = nextHour(now).toISOString();
   if (r === "interval" && (t.every_minutes ?? 0) < MIN_EVERY) t.every_minutes = 30;
   if (r === "daily" && !HHMM.test(t.time ?? "")) t.time = "09:00";
+  if (r === "cron" && !(t.cron ?? "").trim()) t.cron = DEFAULT_CRON;
   return t;
 }
 

@@ -21,7 +21,10 @@ func durableQuestion(ix proto.Interaction) bool {
 // These owner cards are reconstructed from snapshots. A successful response must
 // survive that reconstruction before the owner is allowed to act on it.
 func (s *Service) persistQuestion(p *pending, status string, resolution proto.Resolution) error {
-	err := s.writeQuestionOutcome(p.ix, status, resolution)
+	return s.finishQuestionPersistence(p, s.writeQuestionOutcome(p.ix, status, resolution))
+}
+
+func (s *Service) finishQuestionPersistence(p *pending, err error) error {
 	s.fleet.mu.Lock()
 	attempt := p.persisting
 	attempt.err = err

@@ -43,5 +43,6 @@
   "minutes_unchanged": "議事録の保存期間は変更されていません。保存値は{saved}、現在の有効値は{after}です。",
   "minutes_applied": "議事録の保存期間を{saved}に設定しました。現在の有効値は{after}です。文字起こしは引き続き録音の保存期間に従います。",
   "title_main_background_folded": "バックグラウンドのラウンドを折りたたむ",
-  "change_main_background_folded": "「バックグラウンドのラウンドを折りたたむ」：{before} → {after}"
+  "change_main_background_folded": "「バックグラウンドのラウンドを折りたたむ」：{before} → {after}",
+  "title_standing_authorizations": "継続的な承認"
 }

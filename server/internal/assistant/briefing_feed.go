@@ -21,9 +21,10 @@ const feedBrief = "brief" // ref: the routine's task id; body: briefBody
 // to verify, and the newest of done (10) and failed (8), whose totals say how many there were. Texts the hub writes (a
 // waiting card's line) are in the bot's language.
 type briefBody struct {
-	Title string    `json:"title"` // the routine's name
-	At    time.Time `json:"at"`
-	Hours int       `json:"hours"` // how far back done / failed look
+	Confirmations briefConfirmations `json:"confirmations"`
+	Title         string             `json:"title"` // the routine's name
+	At            time.Time          `json:"at"`
+	Hours         int                `json:"hours"` // how far back done / failed look
 	// WaitingUnknown: the cards waiting were not read yet (the hub had just started): `waiting` is empty for want of knowing.
 	WaitingUnknown bool            `json:"waiting_unknown,omitempty"`
 	Waiting        []briefBodyRow  `json:"waiting"`
@@ -80,7 +81,7 @@ type briefBodyProgress struct {
 
 // body is the facts as a `brief` item's body.
 func (f *briefFacts) body(s *Service, title string) briefBody {
-	b := briefBody{Title: title, At: f.At, Hours: int(briefWindow / time.Hour), WaitingUnknown: f.WaitingUnknown, DoneTotal: f.DoneTotal,
+	b := briefBody{Confirmations: f.Confirmations, Title: title, At: f.At, Hours: int(briefWindow / time.Hour), WaitingUnknown: f.WaitingUnknown, DoneTotal: f.DoneTotal,
 		Failed: f.Failed, FailedTotal: f.FailedTotal, Waiting: []briefBodyRow{}, Done: []briefBodyDone{}, Accept: []briefBodyRow{}, ProgressTotal: f.ProgressTotal, Progress: []briefBodyProgress{}}
 	if b.Failed == nil {
 		b.Failed = []todayFailed{}

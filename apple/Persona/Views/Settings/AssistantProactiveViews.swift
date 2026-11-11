@@ -33,11 +33,12 @@ enum AssistantScheduleText {
     }
 
     /// The rule in words, as Reminders says it: "Every weekday 9:00 AM" / "Every Day 9:30 PM" / "Every Fri 5:00 PM" /
-    /// "Every 30 min" / "Once · Today 15:30".
+    /// "Every 30 min" / "Once · Today 15:30" / "0 10 1 * * · At 10:00, on day 1 of the month".
     static func sentence(_ r: APIClient.ScheduledTask) -> String {
         switch r.repeats {
         case .interval: return every(r.everyMinutes)
         case .once: return r.at.map { String(localized: "Once · \(moment($0))") } ?? String(localized: "Once")
+        case .cron: return cronRule(r)
         case .daily: break
         }
         let d = Set(r.weekdays)
@@ -48,6 +49,14 @@ enum AssistantScheduleText {
         else { let list = dayList(d); days = String(localized: "Every \(list)") }
         let time = clock(r.time)
         return String(localized: "\(days) \(time)", comment: "Repeat rule and time of day, e.g. Every weekday 9:00 AM")
+    }
+
+    /// A cron task's rule: its expression, then the hub's words for it (first, so a one-line row always shows the
+    /// expression); "Cron <expression>" when the hub has no words for it.
+    static func cronRule(_ r: APIClient.ScheduledTask) -> String {
+        let cron = r.cron
+        guard let text = r.cronText else { return String(localized: "Cron \(cron)") }
+        return String(localized: "\(cron) · \(text)")
     }
 
     /// "09:00" → "9:00 AM", "21:30" → "9:30 PM", "00:15" → "12:15 AM".
@@ -144,7 +153,7 @@ enum AssistantScheduleText {
         return switch r.repeats {
         case .once: Theme.Icon.followOn
         case .interval: Theme.Icon.inProgress
-        case .daily: "alarm"
+        case .daily, .cron: "alarm"
         }
     }
 
@@ -317,6 +326,7 @@ struct AssistantRoutinesView: View {
         switch UserDefaults.standard.string(forKey: "openAssistantPage") {
         case "routine" where editing == nil: editing = page.repeating.first
         case "intervalTask" where editing == nil: editing = page.repeating.first { $0.repeats == .interval }
+        case "cronTask" where editing == nil: editing = page.repeating.first { $0.repeats == .cron }
         case "followup" where editing == nil: editing = page.oneOff.first
         case "newRoutine" where creating == nil: creating = AssistantRoutineTemplate.all.last?.routine
         default: break
@@ -708,13 +718,10 @@ struct AssistantTaskEditor: View {
         Section {
             Group {
                 if AppStyle.current.usesBeautifulUI {
-                    BUISegmented([.init(APIClient.ScheduledTask.Repeat.once, String(localized: "Once")), .init(.daily, String(localized: "Every Day")), .init(.interval, String(localized: "Interval [Assistant Proactive Views 100107]"))],
-                                 selection: repeats, fills: true)
+                    BUISegmented(repeatOptions.map { .init($0.value, $0.label) }, selection: repeats, fills: true)
                 } else {
                     Picker("Repeat", selection: repeats) {
-                        Text("Once").tag(APIClient.ScheduledTask.Repeat.once)
-                        Text("Every Day").tag(APIClient.ScheduledTask.Repeat.daily)
-                        Text("Interval [Assistant Proactive Views 100107]").tag(APIClient.ScheduledTask.Repeat.interval)
+                        ForEach(repeatOptions, id: \.value) { o in Text(o.label).tag(o.value) }
                     }
                     .pickerStyle(.segmented)
                 }
@@ -731,6 +738,14 @@ struct AssistantTaskEditor: View {
                 Picker("Interval [Assistant Proactive Views 4f5df7]", selection: $draft.everyMinutes) {
                     ForEach(intervals, id: \.self) { m in Text(AssistantScheduleText.every(m)).tag(m) }
                 }
+            case .cron:
+                // Shown, not edited here: the web editor checks an expression as it is typed (docs/assistant/assistant.md "Scheduled tasks").
+                LabeledContent("Cron Expression") {
+                    Text(verbatim: draft.cron).font(Theme.Font.code).textSelection(.enabled)
+                }
+                if let text = draft.cronText {
+                    Text(text).font(Theme.Font.secondary).foregroundStyle(.secondary)
+                }
             }
         } header: {
             Text("When")
@@ -746,6 +761,7 @@ struct AssistantTaskEditor: View {
                 case .daily: Text("\(AssistantScheduleText.repeats(draft.weekdays)) at \(draft.time), in your phone's time zone.")
                 #endif
                 case .interval: Text("Runs \(AssistantScheduleText.every(draft.everyMinutes)), counting from when it's saved.")
+                case .cron: Text("Runs when its cron expression matches, in your time zone. To change the expression, edit it in Persona on the web or ask Persona.")
                 }
             }
         }
@@ -789,6 +805,15 @@ struct AssistantTaskEditor: View {
                      + (draft.sessionID != nil ? String(localized: " When it continues in the original chat, that chat switches to these settings too.", comment: "Appended right after the previous sentence") : ""))
             }
         }
+    }
+
+    /// The rules the editor offers; Cron only for a task that is one (its expression is edited on the web).
+    private var repeatOptions: [(value: APIClient.ScheduledTask.Repeat, label: String)] {
+        var options: [(value: APIClient.ScheduledTask.Repeat, label: String)] = [
+            (.once, String(localized: "Once")), (.daily, String(localized: "Every Day")), (.interval, String(localized: "Interval [Assistant Proactive Views 100107]")),
+        ]
+        if opened.repeats == .cron, !opened.cron.isEmpty { options.append((.cron, String(localized: "Cron"))) }
+        return options
     }
 
     private var intervals: [Int] {
@@ -846,6 +871,7 @@ struct AssistantTaskEditor: View {
         case .once: a.at == b.at
         case .daily: a.time == b.time && Set(a.weekdays) == Set(b.weekdays)
         case .interval: a.everyMinutes == b.everyMinutes
+        case .cron: a.cron == b.cron
         }
     }
 

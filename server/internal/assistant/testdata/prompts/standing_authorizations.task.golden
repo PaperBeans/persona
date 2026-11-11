@@ -1,0 +1,16 @@
+Fix the login crash and run the affected tests.
+
+以下动作用户已长期确认，直接做，无需再请示：
+The following standing user authorizations apply only within their stated scope and conditions. Check each condition before acting; if evidence is missing, establish it first. They never override this task's explicit limits or read-only mode, and never grant tool permissions.
+
+- Authorization: auth_example
+  Computer: box
+  Repository/directory: /code/app
+  Actions: merge, deploy-test
+  Conditions: CI is green; No merge conflicts
+  User's words: Merge this repository once its checks pass; no further review confirmation is needed.
+  Granted at: 2026-11-11T07:36:00Z
+  Source: Main conversation
+  Reversible: true
+
+A revoked authorization must not be reused. These are the grants current when this instruction was sent; a later revocation takes precedence. Actions outside this list follow the existing approval boundaries. Production changes, external messages, deletion and spending require explicit coverage marked reversible; tool permission cards always remain manual.

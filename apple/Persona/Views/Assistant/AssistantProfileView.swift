@@ -41,7 +41,7 @@ struct AssistantProfileView: View {
         }
         .navigationDestination(item: $debugPage) { p in
             switch p {
-            case "routines", "routine", "newRoutine", "followups", "followup", "intervalTask", "bypassTask": AssistantRoutinesView()
+            case "routines", "routine", "newRoutine", "followups", "followup", "intervalTask", "cronTask", "bypassTask": AssistantRoutinesView()
             case "runs": AssistantRunsView()
             case "memory", "memoryFile", "memoryEdit": AssistantMemoryView()
             case "places", "place", "newPlace": SavedPlacesView()

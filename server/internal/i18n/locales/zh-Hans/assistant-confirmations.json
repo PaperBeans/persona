@@ -1,0 +1,14 @@
+{
+  "heading": "今日确认卡",
+  "summary": "今天向你发送确认卡 {user} 张 · 按长期授权自动放行 {auto} 张",
+  "unknown": "今日确认卡统计读取失败，数量未知。",
+  "unnamed_agent": "未命名 Agent",
+  "source": "{source} · {kind}：向你发送 {user} 张 · 自动放行 {auto} 张",
+  "kind_question": "提问",
+  "kind_permission": "工具权限",
+  "kind_plan": "计划",
+  "kind_wait": "等待",
+  "kind_screen": "终端对话框",
+  "kind_elicitation": "表单",
+  "kind_unknown": "其他确认"
+}

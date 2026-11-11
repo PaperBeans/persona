@@ -1,0 +1,14 @@
+{
+  "heading": "今日の確認カード",
+  "summary": "今日：あなたに送った確認カード {user} 件 · 自動承認 {auto} 件",
+  "unknown": "今日の確認カード数を読み込めませんでした。件数は不明です。",
+  "unnamed_agent": "名前のない Agent",
+  "source": "{source} · {kind}：あなたに送信 {user} 件 · 自動承認 {auto} 件",
+  "kind_question": "質問",
+  "kind_permission": "ツール権限",
+  "kind_plan": "計画",
+  "kind_wait": "待機",
+  "kind_screen": "端末ダイアログ",
+  "kind_elicitation": "フォーム",
+  "kind_unknown": "その他の確認"
+}

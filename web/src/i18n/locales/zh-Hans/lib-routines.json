@@ -63,5 +63,11 @@
   "template_patrol_title": "Agent 巡检",
   "template_patrol_prompt": "看看各台电脑上的 Agent：哪些在等我、哪些卡住或报错了、哪些跑完了没人看。有要我处理的就列出来（一行一个，说清楚在哪台电脑、等什么）；都正常就回一句「都正常」。",
   "template_wrapup_title": "下班前盘点",
-  "template_wrapup_prompt": "下班前盘点：今天还有哪些消息没回、答应别人的事还没做、各台电脑上还在跑或在等我的 Agent，明天上午有哪些会要准备。按紧急程度列出来，最后问我哪些要设提醒。"
+  "template_wrapup_prompt": "下班前盘点：今天还有哪些消息没回、答应别人的事还没做、各台电脑上还在跑或在等我的 Agent，明天上午有哪些会要准备。按紧急程度列出来，最后问我哪些要设提醒。",
+  "rule_cron_text": "{cron} · {text}",
+  "rule_cron": "Cron {cron}",
+  "error_cron": "请写一个 cron 表达式，比如 0 9 * * 1-5",
+  "cron_example_work_hours": "工作时间每 30 分钟",
+  "cron_example_weekdays": "工作日 9:00",
+  "cron_example_monthly": "每月 1 号 10:00"
 }

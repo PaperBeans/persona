@@ -295,9 +295,9 @@ type Snapshot struct {
 type TaskView struct {
 	ID           string    `json:"id"`
 	Label        string    `json:"label"`  // its title, or what stands for one
-	Repeat       string    `json:"repeat"` // once / daily / interval
+	Repeat       string    `json:"repeat"` // once / daily / interval / cron
 	Enabled      bool      `json:"enabled"`
-	At           time.Time `json:"at,omitempty"` // once: when; interval: the next run
+	At           time.Time `json:"at,omitempty"` // once: when; interval, cron: the next run
 	EveryMinutes int       `json:"every_minutes,omitempty"`
 	MachineID    string    `json:"machine_id,omitempty"` // of the conversation it came from
 	RunMachineID string    `json:"run_machine_id,omitempty"`

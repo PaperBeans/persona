@@ -76,5 +76,12 @@
   "model_config_assistant": "Models follow Model settings › Main chat",
   "until_label": "End time",
   "until_hint": "Optional. After this moment the task turns off by itself and a skipped run is recorded. Leave it empty to keep going.",
-  "until_clear": "Clear"
+  "until_clear": "Clear",
+  "repeat_cron": "Cron",
+  "cron_label": "Cron expression",
+  "cron_hint": "Minute, hour, day of month, month, day of week, in {zone}. When both day fields are set, a day matching either runs.",
+  "cron_hint_zone": "your time zone",
+  "cron_checking": "Checking…",
+  "cron_next": "Next runs ({zone})",
+  "cron_examples": "Examples"
 }

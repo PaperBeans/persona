@@ -35,7 +35,9 @@ var briefFleetWait = 20
 
 // briefFacts is what one run of a routine with facts on says, as it was when the run started.
 type briefFacts struct {
-	At time.Time
+	At                time.Time
+	Confirmations     briefConfirmations
+	ConfirmationLines []string
 	// l, web and loc are what the rows are said in: the bot's language, the hub's web address and the owner's time zone.
 	l   i18n.Lang
 	web string
@@ -120,6 +122,8 @@ func (s *Service) briefFactsAt(ctx context.Context, now time.Time, self string) 
 	}
 	f.FailedTotal = total
 	f.Progress, f.ProgressTotal = s.briefProgress(ctx, waiting)
+	f.Confirmations = s.briefConfirmationsAt(ctx, now, loc)
+	f.ConfirmationLines = s.confirmationLines(l, f.Confirmations)
 	f.Leaders = s.briefLeaders(ctx, now)
 	return f
 }
@@ -359,6 +363,8 @@ func (f *briefFacts) modelText() string {
 	for _, x := range f.Failed {
 		b.Failed = append(b.Failed, prompts.BriefFailed{Title: clip(oneLine(x.Title), 60), Why: x.Why, Run: x.Kind == "routine", Skipped: x.Skipped})
 	}
+	b.ConfirmationSummary = f.Confirmations.summary(f.l)
+	b.Confirmations = f.ConfirmationLines
 	b.ProgressTotal, b.Leaders = f.ProgressTotal, f.Leaders
 	b.Briefs, b.BriefsDone = f.Briefs, f.BriefsDone
 	for _, p := range f.Progress {

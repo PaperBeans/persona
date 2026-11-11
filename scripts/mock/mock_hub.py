@@ -39,6 +39,7 @@ def features():
                 ["conversation_origin"] if os.environ.get("MOCK_AUTO_CONVERSATIONS") == "1" else []) + (
                 ["sessions_list", "sessions_lookup"] if os.environ.get("MOCK_SESSIONS_LIST") == "1" else []) + (
                 ["preview"] if os.environ.get("MOCK_PREVIEW") else []) + (
+                ["task_cron"] if os.environ.get("MOCK_CRON") == "1" else []) + (
                 [] if os.environ.get("MOCK_LOOK_UPLOADS") == "off" else ["look_uploads"])
 
 
@@ -1729,7 +1730,69 @@ SCHEDULE = [
      "prompt": "周五发周报前，把这周的数据再核对一遍，有对不上的列出来。", "enabled": True, "created_by": "assistant",
      "machine_id": "macbook", "created_at": ago(hours=5)},
 ]
-TASK_FIELDS = ("title", "prompt", "repeat", "at", "time", "weekdays", "every_minutes", "enabled", "launcher", "permission_mode", "effort", "push")
+TASK_FIELDS = ("title", "prompt", "repeat", "at", "time", "weekdays", "every_minutes", "cron", "enabled", "launcher", "permission_mode", "effort", "push")
+
+# MOCK_CRON=1 (#4399, docs/assistant/assistant.md "Scheduled tasks"): the hub runs cron tasks (feature task_cron) and has
+# one, every 30 minutes in work hours on weekdays. GET /api/v1/assistant/tasks/cron answers the web editor's examples as
+# the hub does (lnquy/cron's words, the next runs in UTC+8) and refuses anything else with the hub's kind of message.
+CRON_PREVIEWS = {
+    "*/30 9-18 * * 1-5": ({"en": "Every 30 minutes, between 09:00 and 18:59, Monday through Friday",
+                           "zh-Hans": "每隔 30 分钟, 在 09:00 和 18:59 之间, 星期一至星期五",
+                           "ja": "30 分ごと, 09:00 と 18:59 の間、月曜日 から 金曜日 まで"},
+                          lambda d: d.minute in (0, 30) and 9 <= d.hour <= 18 and d.isoweekday() <= 5),
+    "0 9 * * 1-5": ({"en": "At 09:00, Monday through Friday", "zh-Hans": "在09:00, 星期一至星期五",
+                     "ja": "次において実施09:00、月曜日 から 金曜日 まで"},
+                    lambda d: d.minute == 0 and d.hour == 9 and d.isoweekday() <= 5),
+    "0 10 1 * *": ({"en": "At 10:00, on day 1 of the month", "zh-Hans": "在10:00, 限每月 1 号", "ja": "次において実施10:00、月の 1 日目"},
+                   lambda d: d.minute == 0 and d.hour == 10 and d.day == 1),
+}
+
+
+def cron_lang(header):
+    """The hub's language for the words: the request's Accept-Language, else Chinese."""
+    first = (header or "").split(",")[0].strip().lower()
+    return "en" if first.startswith("en") else "ja" if first.startswith("ja") else "zh-Hans"
+
+
+def cron_runs(expr, n=5):
+    """The next n runs of a known expression after NOW, on the UTC+8 wall clock (each match is on a half hour)."""
+    match = CRON_PREVIEWS[expr][1]
+    d = NOW.astimezone(SCHEDULE_TZ).replace(second=0, microsecond=0)
+    d += timedelta(minutes=30 - d.minute % 30)
+    out = []
+    while len(out) < n:
+        if match(d): out.append(d.isoformat())
+        d += timedelta(minutes=30)
+    return out
+
+
+def cron_view(t, lang):
+    """A task as GET /api/v1/assistant/tasks has it: a cron task gains its words and next runs."""
+    if t.get("repeat") != "cron" or t.get("cron") not in CRON_PREVIEWS: return t
+    v = dict(t, cron_text=CRON_PREVIEWS[t["cron"]][0][lang])
+    if t.get("enabled"):
+        runs = cron_runs(t["cron"])
+        v.update(next_runs=runs, next_run=runs[0])
+    return v
+
+
+def cron_refusal(expr, lang):
+    """The hub's message for an expression the mock does not know."""
+    n = len(expr.split())
+    if n != 5:
+        return {"en": f'"{expr}" has {n} fields. A cron expression has 5: minute hour day-of-month month day-of-week (like 0 9 * * 1-5; seconds aren’t supported).',
+                "zh-Hans": f'"{expr}" 有 {n} 段。cron 表达式是 5 段：分 时 日 月 周（比如 0 9 * * 1-5，不支持秒）。',
+                "ja": f'"{expr}" のフィールドは {n} 個です。cron 式は 5 個です：分 時 日 月 曜日（例：0 9 * * 1-5。秒は使えません）。'}[lang]
+    v = expr.split()[0]
+    return {"en": f'In "{expr}", the minute (0–59) can’t be "{v}". Use a number in its range, *, a list (1,15), a range (9-18) or a step (*/30).',
+            "zh-Hans": f'"{expr}" 里的分钟（0–59）不能是 "{v}"。请写范围内的数字、*、列表（1,15）、区间（9-18）或步长（*/30）。',
+            "ja": f'"{expr}" の分（0–59）に "{v}" は使えません。範囲内の数字、*、リスト（1,15）、範囲（9-18）、ステップ（*/30）を使ってください。'}[lang]
+
+
+if os.environ.get("MOCK_CRON") == "1":
+    SCHEDULE.insert(2, {"id": "rt_cron", "title": "工作时间巡检", "prompt": "工作时间里每半小时看一眼 CI 和各台电脑上的 Agent，有卡住的告诉我。",
+                        "repeat": "cron", "cron": "*/30 9-18 * * 1-5", "enabled": True, "created_by": "assistant",
+                        "last_run": ago(minutes=20), "last_status": "ok", "created_at": ago(days=1)})
 
 
 def save_task(old, new):
@@ -1748,6 +1811,9 @@ def save_task(old, new):
         t["until"] = new["until"]
     if t.get("repeat") == "daily":
         t["next_run"] = next_at(t.get("time", "09:00"), t.get("weekdays") or [])
+    elif t.get("repeat") == "cron":
+        t.pop("at", None)
+        t["next_run"] = cron_runs(t["cron"])[0] if t.get("cron") in CRON_PREVIEWS else None
     elif t.get("repeat") == "interval":
         if old.get("every_minutes") != t.get("every_minutes") or not t.get("at"):
             t["at"] = later(minutes=t.get("every_minutes") or 30)
@@ -16279,7 +16345,12 @@ class H(BaseHTTPRequestHandler):
             purpose = next((x for x in catalog["purposes"] if x["id"] == unquote(p.rsplit("/", 1)[1])), None)
             if not purpose: return self.send_json({"error": "模型用途不存在"}, 404)
             return self.send_json({"purpose": purpose, "providers": catalog["providers"]})
-        if p == "/api/v1/assistant/tasks": return self.send_json({"tasks": SCHEDULE})
+        if p == "/api/v1/assistant/tasks":
+            return self.send_json({"tasks": [cron_view(t, cron_lang(self.headers.get("Accept-Language"))) for t in SCHEDULE]})
+        if p == "/api/v1/assistant/tasks/cron":  # the web editor checks an expression as it is typed (MOCK_CRON)
+            expr, lang = " ".join(q.get("cron", [""])[0].split()), cron_lang(self.headers.get("Accept-Language"))
+            if expr not in CRON_PREVIEWS: return self.send_json({"error": cron_refusal(expr, lang)}, 400)
+            return self.send_json({"cron": expr, "text": CRON_PREVIEWS[expr][0][lang], "timezone": "Asia/Taipei", "next_runs": cron_runs(expr)})
         if p == "/api/v1/assistant/routines": return self.send_json({"routines": schedule_routines()})
         if p == "/api/v1/assistant/followups": return self.send_json({"followups": schedule_followups()})
         if p.startswith("/api/v1/machines/") and p.endswith("/stat"):
@@ -17806,7 +17877,7 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/v1/assistant/tasks" and self.command == "POST":
             t = save_task({"id": "task_" + uuid.uuid4().hex[:8], "created_at": ago()}, json.loads(self.last_body or b"{}"))
             SCHEDULE.append(t)
-            return self.send_json({"task": t})
+            return self.send_json({"task": cron_view(t, cron_lang(self.headers.get("Accept-Language")))})
         if p == "/api/v1/assistant/routines" and self.command == "PUT":  # the Android app saves all its routines at once
             saved, error = put_routines(json.loads(self.last_body or b"{}"))
             if error: return self.send_json({"error": error}, 400)
@@ -17873,7 +17944,7 @@ class H(BaseHTTPRequestHandler):
                 del SCHEDULE[i]
                 return self.send_json({"ok": True})
             SCHEDULE[i] = save_task(SCHEDULE[i], json.loads(self.last_body or b"{}"))
-            return self.send_json({"task": SCHEDULE[i]})
+            return self.send_json({"task": cron_view(SCHEDULE[i], cron_lang(self.headers.get("Accept-Language")))})
         if p.startswith("/api/v1/sessions/") and self.command == "DELETE" and len(p.split("/")) == 6:
             # Delete conversation (docs/protocol/protocol.md): out of the lists; refused while it runs, as the hub's deleted_sessions.go.
             if is_read_only(self): return self.send_json({"error": "read-only role cannot delete conversations"}, 403)

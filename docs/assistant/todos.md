@@ -465,6 +465,13 @@ The assistant's snapshot says it on the task's line, and a supervised task's sup
 
 ## Decision records
 
+A standing authorization answer records an Agent decision naming the grant, original user words and source. It is
+committed in the same transaction as the hook's resolved question or plan, before the answer is delivered. It is not
+presented as a fresh user click. The grant itself is managed through the main conversation's `persona_settings` key
+and the list/delete API in [Unified entry](unified-entry.md#standing-authorizations); established task decisions keep
+their provenance even after that grant is revoked.
+
+
 The costliest long-task mistake is an Agent forgetting a decision already made: asking again or silently overturning it (#1618). Decisions scattered across Agent chats disappear when switching Agents or compacting, so collect them by to-do:
 
 - **One decision** = question + choice + reason + time + provenance (asking Agent, answering card).

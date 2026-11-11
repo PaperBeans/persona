@@ -294,6 +294,12 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 				text = prompts.RenderSideConversation(prompts.SideConversation{From: self, Text: a.Text})
 			}
 		}
+		if a.Task != nil {
+			text, err = s.withStandingAuthorizations(ctx, am.ID, c.Cwd, text)
+			if err != nil {
+				return "", task.sendFailed(ctx, s, err)
+			}
+		}
 		// The user's attachments, copied to the agent's computer when it is another one: the text ends with them, the
 		// pictures in the <attached_images> block a picture sent straight to the agent ends with (#2437).
 		params := sendParams(c.SessionID, text, a.DismissNotice)

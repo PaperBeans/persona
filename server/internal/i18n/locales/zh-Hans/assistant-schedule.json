@@ -28,5 +28,18 @@
   "streak_unknown": "没有说明原因",
   "deleted_not_again": "{id}「{name}」在这一轮运行时已被主人删掉，不再安排。不要再安排它，把这一轮做完即可。",
   "waiting_skipped": "「{name}」这次没跑：上一轮还在等你",
-  "waiting_skipped_body": "上一轮在等你批准或回答，处理完下一次就会照常运行。点开看它在等什么。"
+  "waiting_skipped_body": "上一轮在等你批准或回答，处理完下一次就会照常运行。点开看它在等什么。",
+  "cron_empty": "请写一个 cron 表达式，比如 0 9 * * 1-5（分 时 日 月 周）",
+  "cron_zone": "{cron} 自带了时区。去掉 TZ= / CRON_TZ=：cron 任务按你的时区运行。",
+  "cron_every": "@every 不是 cron 时间。要每 N 分钟（至少 {min} 分钟）重复一次，请改用“按间隔”。",
+  "cron_alias": "{cron} 不是 cron 别名。可以用 @hourly、@daily、@weekly、@monthly、@yearly，或写 5 段，比如 0 9 * * 1-5。",
+  "cron_fields": "{cron} 有 {n} 段。cron 表达式是 5 段：分 时 日 月 周（比如 0 9 * * 1-5，不支持秒）。",
+  "cron_field": "{cron} 里的{field}不能是 {value}。请写范围内的数字、*、列表（1,15）、区间（9-18）或步长（*/30）。",
+  "cron_minute": "分钟（0–59）",
+  "cron_hour": "小时（0–23）",
+  "cron_day_of_month": "日期（1–31）",
+  "cron_month": "月份（1–12 或 JAN–DEC）",
+  "cron_day_of_week": "星期（0–7 或 SUN–SAT，0 和 7 都是周日）",
+  "cron_often": "{cron} 两次运行只隔 {gap} 分钟。定时任务最多每 {min} 分钟运行一次。",
+  "cron_never": "{cron} 永远不会运行：未来 5 年里没有符合的日期。"
 }

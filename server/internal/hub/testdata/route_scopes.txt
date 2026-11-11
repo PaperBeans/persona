@@ -130,6 +130,7 @@ assistant.ask        GET /api/v1/assistant/reporters
 -                    GET /api/v1/assistant/routines
 -                    GET /api/v1/assistant/runs
 -                    GET /api/v1/assistant/tasks
+-                    GET /api/v1/assistant/tasks/cron
 -                    GET /api/v1/auth/tokens
 -                    GET /api/v1/bots/feishu
 -                    GET /api/v1/channels

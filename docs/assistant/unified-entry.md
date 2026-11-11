@@ -543,6 +543,40 @@ The depth is dot (the main chat or a leader conversation) → task leader → wo
 - **Permissions**: any `task_plan` task that is not read-only (`readonly: false`), from a conversation or from a task leader, must say `permission: "bypassPermissions"` itself; a missing or other value is refused before anything is planned, with a readable reason (it would otherwise stop at a permission prompt at run time, with nobody there to answer it), and Start, `retryTask`, `task_retry` and every start of a plan task (`runPlanTaskStart`: retry, remedy, recovered) refuse a saved plan that lacks it before starting anything. `readonly: true` is unaffected and always runs in plan mode. Its `ExitPlanMode` request is denied automatically before a card is registered, with instructions to return findings and report completion to its supervisor; it never grants implementation permission just to finish (#3985).
 - **Work-trust computers**: a `role: "leader"` task is refused with a readable reason at planning, at Start, on a retry, in `startTaskAgent` (so a remedy or recovered start) and in the health detour (`healthyPlace` never moves a flexible task leader there): a work-trust computer's agents get only the reporting tools, so the role could not work, and its privacy boundary is not widened.
 
+#### Standing authorizations
+
+The manager keeps explicit user grants in its Postgres settings key `assistant.standing_authorizations`.
+The main conversation reads and changes them through `persona_settings` with that key. A change requires the
+user's own permission-card approval; an Agent cannot turn its own quoted authorization into a grant. An unchanged
+list asks nothing. The setting value is `{revision, authorizations}`; writes include the revision just read and the
+whole list. New entries omit `id` and `granted_at`, which the server assigns. Existing IDs are immutable: changing a
+scope means removing its entry and adding a new one. A stale approval cannot restore a grant revoked meanwhile.
+
+Each authorization has `id`, `machine_id`, `directory`, `actions`, `conditions`, `quote`, `source`, `granted_at`
+(RFC 3339), and `reversible`. Actions are `merge`, `push`, `deploy-test`, `deploy-production`, `send`, `delete`,
+and `spend`. Conditions retain the user's wording; `ci_green` and `no_conflicts` have independent runtime checks
+(see [Agent work](agent-work.md#standing-authorization-answers)). The original words and source remain inspectable.
+Directories are specific absolute paths on one computer, matched by path segment: `/code/example` includes its
+subdirectories but not `/code/example-copy`. Roots, single-level paths and wildcards are rejected. Linked worktrees
+outside that directory need their own directory grant; repository basenames never establish identity.
+
+At actual `task_plan` dispatch and `agent_send` with `task`, the manager reads matching grants and appends the prompt
+template containing scope, actions, conditions and the user's words. No other repository receives them. Pending plans
+read again when started, and a failed lookup stops dispatch. Ordinary chat messages are unchanged. Explicit task
+limits and read-only mode remain stronger than a standing grant. Revocation affects future dispatches and answers;
+it cannot undo an instruction already delivered or work already executed.
+
+App API (the conversation's manager, with full-access role):
+
+| Method | Path | JSON response |
+| --- | --- | --- |
+| GET | `/api/v1/assistant/standing-authorizations` | `{"revision": 1, "authorizations": [{"id": "sa_example", "machine_id": "example-node", "directory": "/code/example", "actions": ["merge"], "conditions": ["ci_green", "no_conflicts"], "quote": "Merge after checks pass without asking again.", "source": "Main conversation", "granted_at": "2026-11-11T07:36:00Z", "reversible": true}]}` |
+| DELETE | `/api/v1/assistant/standing-authorizations/{id}` | `{"ok": true, "revision": 2}` |
+
+DELETE is idempotent; deleting a missing entry keeps the revision. A concurrent update returns 409 and the caller
+refreshes before retrying; storage unavailable returns 503, and insufficient role returns 403. There is no HTTP grant
+creation endpoint: additions use the main conversation's approval flow. The empty default list authorizes nothing.
+
 #### Asks go to the supervisor first (#3589)
 
 Only with leaders configured (`assistant.leaders` not empty); without them every card goes to the user as above.

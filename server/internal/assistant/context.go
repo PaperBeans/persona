@@ -392,7 +392,7 @@ func (s *Service) snapshotSchedule(ctx context.Context, loc *time.Location, now 
 		if !t.Enabled {
 			continue
 		}
-		if t.Repeat == repeatDaily {
+		if t.calendar() {
 			routinesTotal++
 			if len(routines) < 8 {
 				r := prompts.SnapshotRoutine{Label: clip(t.label(), 30), Rule: ruleText(t, loc)}

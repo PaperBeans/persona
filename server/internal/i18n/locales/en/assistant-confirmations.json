@@ -1,0 +1,14 @@
+{
+  "heading": "Today's confirmation cards",
+  "summary": "Today: {user} confirmation cards sent to you · {auto} automatically authorized",
+  "unknown": "Today's confirmation counts could not be read; they are unknown.",
+  "unnamed_agent": "Unnamed Agent",
+  "source": "{source} · {kind}: {user} sent to you · {auto} automatically authorized",
+  "kind_question": "question",
+  "kind_permission": "tool permission",
+  "kind_plan": "plan",
+  "kind_wait": "wait",
+  "kind_screen": "terminal dialog",
+  "kind_elicitation": "form",
+  "kind_unknown": "other confirmation"
+}
