@@ -1887,7 +1887,11 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
   (`go build -overlay`), so nothing in the shipped program changes to measure it.
 - CPU time per minute moved by a factor of two and more with the machine's state (an Apple Silicon Mac moves a
   process between fast and slow cores; a whole run on the slow ones used 3.5 s a minute for the work that took 1.7 s
-  on a quiet minute before), while bytes allocated per minute stayed within 1.5%. The hub's CPU time moved with the
-  manager's, minute for minute, and the hub's work was the same in both runs: the manager's CPU time over the hub's
-  in the same minute stayed within 6% of its median, enough to see a 5.8% difference the totals hid
-  (`cpuRatio`). Measure a noisy quantity against a reference that sees the same noise.
+  on a quiet minute before), while bytes allocated per minute stayed within 1.5% and repeated within 0.1% between
+  runs. Soaks run one after the other said -3%, +68% and +30% for three changes that each save CPU; even the same
+  function's samples cannot be compared across runs, since code that copies memory slowed 2.3 times where a `write`
+  slowed 1.06. Dividing by the hub's CPU time in the same minute helped, and was still 3 points apart between two
+  sessions. What worked was running the trees at the same time, each with its own hub, manager and database: every
+  minute is then the same machine for all of them, and the head's CPU time over the base's in the same minute came
+  out at 0.943 with every one of the 20 minutes below 1, the unchanged hub's at 0.983 (`pairedCPU`). Measure a noisy
+  quantity against a reference that sees the same noise at the same moment.
