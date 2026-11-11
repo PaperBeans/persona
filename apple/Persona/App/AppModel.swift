@@ -132,7 +132,10 @@ final class AppModel {
     @ObservationIgnored private var spaceCells: [String: SpaceCell] = [:]
     /// Pending interactions by `uid` (the hub's id, with the group for another group).
     private(set) var interactions: [String: Interaction] = [:] {
-        didSet { saveSnapshot(); countBadges(); withdrawSettled(Set(oldValue.keys).subtracting(interactions.keys)) }
+        didSet {
+            saveSnapshot(); countBadges(); withdrawSettled(Set(oldValue.keys).subtracting(interactions.keys))
+            PermissionDiff.prewarm(interactions.lazy.filter { oldValue[$0.key] == nil }.map(\.value))
+        }
     }
     /// When each group's whole list of pending interactions was last asked for (NotificationWithdrawal.stale).
     @ObservationIgnored var interactionsListedAt: [String: Date] = [:]
@@ -1472,8 +1475,10 @@ final class AppModel {
         visibleSession = shown.last?.key
     }
 
-    /// Asks for everything after what the chat holds without holes (`covered`), or the last exchanges if nothing.
+    /// Asks for everything after what the chat holds without holes (`covered`), or the last exchanges if nothing. Built
+    /// only to be sent: the moves of the session's rev heard so far count as read (`AgentSync.subscribing`).
     private func subscribeMessage(_ key: SessionKey) -> [String: Any] {
+        AgentSync.shared.subscribing(key)
         var msg: [String: Any] = ["type": "subscribe", "machine_id": key.machineID, "session_id": key.sessionID, "lazy_images": true,
                                   "fold_work": true]
         let covered = chat(key).covered
@@ -2254,22 +2259,72 @@ final class AppModel {
     /// A send the computer refused because its input box holds a draft (SendSafety.swift).
     var sendRefusal: SendRefusal?
 
-    /// Edit or delete one queued message: everything is pulled back out of claude and the others re-queued.
+    /// Edit or delete one queued message: everything is pulled back out of claude and the others re-queued. One taken
+    /// back to edit goes into the composer as it was written (#3022), not as the text Claude's queue keeps of it.
     func editQueued(_ key: SessionKey, index: Int, delete: Bool) async {
         guard allowSend(key), let api = api(key.group), let queue = session(key)?.queued, queue.indices.contains(index) else { return }
         do {
             let pulled = try await api.editQueue(key, keep: queue.indices.filter { $0 != index })
+            let taken = pulled.indices.contains(index) ? pulled[index] : nil
+            // The photos this phone sent with it are in its outbox copy, which goes with its bubble.
+            let sent = taken.flatMap { t in chat(key).pending.first { $0.state == .sent && PendingMessage.same(t, $0.text) } }?.images ?? []
             // The one taken out will not reach the transcript: its sent bubble goes now, not when the turn ends.
-            if pulled.indices.contains(index), chat(key).pulledBack(pulled[index]) { saveOutbox() }
-            if !delete, pulled.indices.contains(index) {
-                let current = drafts[key] ?? ""
-                drafts[key] = current.isEmpty ? pulled[index] : current + "\n" + pulled[index]
-            }
+            if let taken, chat(key).pulledBack(taken) { saveOutbox() }
+            var left = 0
+            if !delete, let taken { left = await restoreQueued(key, QueuedDraft(taken), sent: sent) }
             Haptics.success()
-            toast = Toast(delete ? String(localized: "Removed from the queue") : String(localized: "Moved back to the input box. Edit it and send again."), style: .success)
+            toast = left > 0
+                ? Toast(String(localized: "Moved back to the input box. \(left) attachments couldn't be put back and stay in the message as text."), style: .info)
+                : Toast(delete ? String(localized: "Removed from the queue") : String(localized: "Moved back to the input box. Edit it and send again."), style: .success)
         } catch {
             show(error)
         }
+    }
+
+    /// A queued message taken back to edit (#3022): its words under what the box holds, its photos (the ones this phone
+    /// sent, else read from the conversation's machine by their paths), videos and quotes back in their bars. A photo that
+    /// can't be had, or doesn't fit beside the ones already in the box, leaves its path in the words (a video its tag):
+    /// nothing is lost. Returns how many were left there.
+    private func restoreQueued(_ key: SessionKey, _ draft: QueuedDraft, sent: [ImagePayload]) async -> Int {
+        let held = composerAttachments(key)
+        // Each photo with its path on the machine (the outbox's in the order they went, as the paths are).
+        var photos: [(path: String?, photo: (UIImage, ImagePayload))] = []
+        var left: [String] = []
+        let copies = sent.compactMap(Self.composerPhoto)
+        if copies.count >= draft.imagePaths.count {
+            photos = copies.enumerated().map { (draft.imagePaths.indices.contains($0.offset) ? draft.imagePaths[$0.offset] : nil, $0.element) }
+        } else { // sent from elsewhere, or its copy here is gone
+            for path in draft.imagePaths {
+                if let photo = await machinePhoto(key, path) { photos.append((path, photo)) } else { left.append(path) }
+            }
+        }
+        let room = max(0, MessagePhotos.limit - held.images.count)
+        left += photos.dropFirst(room).compactMap(\.path)
+        held.images += photos.prefix(room).map(\.photo)
+        left += held.videos.restore(draft.files).map(\.xml)
+        if !draft.contexts.isEmpty { composerContexts[key] = (composerContexts[key] ?? []) + draft.contexts }
+        let words = ([draft.text] + left).filter { !$0.isEmpty }.joined(separator: "\n")
+        if !words.isEmpty {
+            let current = drafts[key] ?? ""
+            drafts[key] = current.isEmpty ? words : current + "\n" + words
+        }
+        return left.count
+    }
+
+    /// A photo as the composer holds it, from the bytes a message carried.
+    private static func composerPhoto(_ payload: ImagePayload) -> (UIImage, ImagePayload)? {
+        guard let data = Data(base64Encoded: payload.data), let image = UIImage(data: data) else { return nil }
+        return (image, payload)
+    }
+
+    /// A photo a message carried, read back from the conversation's machine.
+    private func machinePhoto(_ key: SessionKey, _ path: String) async -> (UIImage, ImagePayload)? {
+        guard let api = api(key.group), let file = try? await api.file(machine: key.machineID, path: path, cwd: nil) else { return nil }
+        let mime = file.mime ?? "image/jpeg"
+        if let data = file.data, let photo = Self.composerPhoto(ImagePayload(mime: mime, data: data)) { return photo }
+        // A big one comes described, its bytes from the download.
+        guard let bytes = try? await api.fileBytes(machine: key.machineID, path: path, cwd: nil) else { return nil }
+        return Self.composerPhoto(ImagePayload(mime: mime, data: bytes.base64EncodedString()))
     }
 
     /// Moves a queued message one place up or down (#6088): the queue is pulled back and re-queued in the new order.

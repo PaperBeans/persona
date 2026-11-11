@@ -2705,6 +2705,7 @@ def recording_minutes(body, rid=None):
     out = {
         "title": cal.get("title") or body.get("title") or None,
         "when": "2027-01-15 16:00–17:00",
+        "start": "2027-01-15T16:00:00+08:00", "end": "2027-01-15T17:00:00+08:00",  # the same span, for the apps to format (#4713)
         "where": cal.get("location"),
         "attendees": cal.get("attendees"),
         "points": [item(x) for x in segs[:2]] + [
@@ -3164,7 +3165,8 @@ def meeting_answer(st, a):
         return
     zh = a["lang"].lower().startswith("zh")
     earlier = next((k for k, v in reversed(list(RECORDINGS.items())) if earlier_material(k, v) and k != st["id"]), None)
-    sources = ([{"kind": "recordings", "id": earlier, "name": RECORDINGS[earlier].get("title") or "Design review", "when": "2026-11-03 14:00–15:10"}]
+    sources = ([{"kind": "recordings", "id": earlier, "name": RECORDINGS[earlier].get("title") or "Design review", "when": "2026-11-03 14:00–15:10",
+                "start": "2026-11-03T14:00:00+08:00", "end": "2026-11-03T15:10:00+08:00"}]
                if earlier else []) + [{"kind": "projects", "id": "weather-app", "name": "天气 App"}]
     a.update(state="answered", sources=sources, answered_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
              answer="上次设计评审定了：这一版保留 4 MB 的导出上限，补充清楚的提示。回归测试由 Bo 负责，还没完成。" if zh else  # i18n-ignore: made-up model answer
@@ -7429,14 +7431,46 @@ MAIL_FLAGS = []  # POST …/mail/messages/{aid}/{uid}/flags, {"account_id", "uid
 QUEUE_EDITS = []  # bodies of …/queue ("Withdraw to edit" / "Delete" of a queued message; GET /mock/queue_edits)
 
 
-def queue_messages(text=None, clear=False):
+QUEUED_IMAGES = [0]  # Claude Code numbers the pictures pasted into a session: [Image #1], [Image #2]…
+
+
+def claude_queued(mid, text, images):
+    """What Claude Code's queue holds of a message the node typed while the agent works (the transcript's queue-operation
+    line, as the hub's applyQueue keeps it), seen in a real transcript (#3022): each photo saved under the machine's
+    ~/.persona/uploads (served back by …/file and …/file/download), the node's <attached_images> block with a `path: `
+    line per photo (keepImagePaths), each bare path turned into an `[Image #n]` up front by Claude's paste, and the
+    <pasted_content> wrapper around the rest dropped by the hub, its line breaks left."""
+    text = (text or "").strip()
+    if not images: return text
+    paths, day = [], datetime.now().strftime("%Y-%m-%d")
+    for img in images:
+        mime = img.get("mime") or "image/jpeg"
+        ext = {"image/png": ".png", "image/heic": ".heic", "image/gif": ".gif", "image/webp": ".webp"}.get(mime, ".jpg")
+        rel = ".persona/uploads/%s/%s%s" % (day, uuid.uuid4().hex[:8], ext)
+        MOCK_TREE[rel] = (mime, img.get("data") or "")
+        paths.append(mock_home(mid) + "/" + rel)
+    marks = []
+    for _ in paths:
+        QUEUED_IMAGES[0] += 1
+        marks.append("[Image #%d]" % QUEUED_IMAGES[0])
+    return (" ".join(marks) + "\n\n\n" + text + "\n<attached_images>\n" + "\n".join("path: " + p for p in paths)
+            + "\n</attached_images>")
+
+
+def queue_messages(text=None, clear=False, photos=0):
     """GET /mock/queue: messages typed while the first working agent works, not taken yet (Session.queued): `text`
-    adds one (none: two samples), `clear` empties it. Pushed like the real hub's sessions update."""
+    adds one (none: two samples), `clear` empties it; `photos=N` with it: N pictures went with that one, queued as
+    Claude Code holds them (claude_queued): a message from another device, no outbox copy on this one. Pushed like the
+    real hub's sessions update."""
     working = [s for s in SESSIONS if s["state"] == "working" and not s.get("assistant")]
     if not working: return {"error": "no working agent"}
     s = working[0]
     if clear: s["queued"] = []
-    elif text: s["queued"] = (s.get("queued") or []) + [text]
+    elif text or photos:
+        rgb = [(52, 120, 246), (255, 149, 0), (52, 199, 89), (175, 82, 222)]
+        images = [{"mime": "image/png", "data": base64.b64encode(_fs_png(240, 180, rgb[i % 4], (30, 30, 40))).decode()}
+                  for i in range(photos)]
+        s["queued"] = (s.get("queued") or []) + [claude_queued(s["machine_id"], text, images)]
     else: s["queued"] = (s.get("queued") or []) + ["测试跑完之后把截图也更新一下", "顺便检查一下深色模式下小组件的对比度\n不够的话调一下文字颜色"]
     push_machine(s["machine_id"])
     return {"key": s["machine_id"] + "/" + s["session_id"], "queue": s["queued"]}
@@ -10988,6 +11022,43 @@ if os.environ.get("MOCK_TOOL_OUTCOMES") == "1":
     mock_tool_outcomes()
 
 
+# MOCK_PERMISSION_DIFF=1 (#4621): two MacBook chats wait on a Claude Code permission card for a file tool, as a hub sends
+# it (the node's summary is the file's path, `tool_input` the call's own). The edit changes a function in several places,
+# more lines than the card shows before Show All; the write creates a short test file. Made-up content.
+PERM_DIFF = {"edit": "a1f3c2d4-0000-4000-8000-0000000c4621", "write": "a1f3c2d4-0000-4000-8000-0000000c4622"}
+
+
+def mock_permission_diff():
+    edit = {"file_path": "/Users/me/code/weather/export/csv.py",
+            "old_string": "def export(rows, out):\n    \"\"\"Write rows to out in batches of BATCH.\"\"\"\n    batch = []\n"
+                          "    for row in rows:\n        batch.append(row)\n        if len(batch) == BATCH:\n"
+                          "            flush(batch, out)\n    return len(rows)",
+            "new_string": "def export(rows, out):\n    \"\"\"Write rows to out in batches of BATCH, the last one possibly shorter.\"\"\"\n"
+                          "    batch, total = [], 0\n    for row in rows:\n        batch.append(row)\n        total += 1\n"
+                          "        if len(batch) == BATCH:\n            flush(batch, out)\n            batch = []\n"
+                          "    if batch:\n        flush(batch, out)\n    return total"}
+    write = {"file_path": "/Users/me/code/weather/export/test_last_batch.py",
+             "content": "from export.csv import BATCH, export\n\n\ndef test_last_batch_is_written():\n    out = []\n"
+                        "    assert export(range(BATCH * 2 + 3), out) == BATCH * 2 + 3\n    assert len(out) == 3\n    assert len(out[-1]) == 3\n"}
+    chats = [("edit", "Edit", edit, "Keep the last export batch", "The last batch is never flushed. I'll write it after the loop."),
+             ("write", "Write", write, "Test the last export batch", "I'll add a test that exports two batches and three rows.")]
+    for n, (name, tool_name, inp, title, say) in enumerate(chats):
+        sid, tid = PERM_DIFF[name], "toolu_perm_" + name
+        ITEMS[sid] = [it("user", "text", 3 + n, text=title),
+                      it("assistant", "text", 2.9 + n, text=say),
+                      it("assistant", "tool_use", 2.8 + n, tool_use_id=tid, tool_name=tool_name, tool_input=inp)]
+        SESSIONS.append(sess("macbook", sid, title, "/Users/me/code/weather", "blocked", "needs_you", "weather", 1, "perm-" + name,
+                             31 + n, 2.8 + n, say, pending=1))
+        INTERACTIONS.append({"id": "ix_perm_" + name, "machine_id": "macbook", "session_id": sid, "session_title": title,
+                             "cwd": "/Users/me/code/weather", "kind": "permission", "created_at": ago(minutes=2.8 + n),
+                             "expires_at": later(minutes=27), "tool_name": tool_name, "tool_use_id": tid,
+                             "summary": inp["file_path"], "tool_input": inp})
+
+
+if os.environ.get("MOCK_PERMISSION_DIFF") == "1":
+    mock_permission_diff()
+
+
 # MOCK_REPLY_MARKDOWN=1 (#3863): a reply with a table whose delimiter row aligns its columns (leading, trailing, centered;
 # decimals that line up), headings at levels 4 to 6 and bold labels next to full-width punctuation (`**注意：**后文`,
 # `**「必须」**`), which CommonMark alone leaves as literal asterisks; in an Agents chat of its own and at the end of
@@ -12940,12 +13011,14 @@ def case_route(h, method, p, q, body):
         return True
     if p == "/mock/case/load" and method == "POST":  # another case in the same mock (its sockets closed first)
         try:
-            case = sync_case.load(json.loads(body or b"{}").get("case", ""))
+            asked = json.loads(body or b"{}")
+            case = sync_case.load(asked.get("case", ""))
         except (ValueError, KeyError, OSError) as e:
             case_json(h, {"error": str(e)}, 400)
             return True
         CASE.close()
-        CASE = sync_case.CaseHub(case)
+        # "now": its times moved to the present, for an app on the real clock (the iOS simulator's)
+        CASE = sync_case.CaseHub(case, shift=sync_case.shift_to(time.time()) if asked.get("now") else 0)
         case_json(h, CASE.state())
         return True
     if method == "GET" and MOCK_WEB and not p.startswith(("/api/", "/mock/")):
@@ -15910,6 +15983,26 @@ CATALOG = [
     {"market": _MARKET_B, "id": "team-windows", "name": "Windows 工具", "version": "0.2.0", "description": "只有 Windows 版的包。",
      "publisher": "team", "tags": [], "contributes": {"assistant": ["tools"]}, "permissions": [_RUNS], "problem": "没有这台 hub（linux-amd64）能用的包"},
 ]
+# MOCK_EXTENSION_PACK=1 (with MOCK_EXTENSIONS): extension packs (#4072, #4122). Example 合集 is installed from the first
+# market with four members: Example Notes, Example 助手 and example-gateway installed, example-mail not (it keeps its id).
+# Uninstalling it with its members answers 409 partial_uninstall (one member uninstalled, one not, with the hub's reason,
+# one not tried) and changes nothing, so a run can repeat; the real hub tries every member, so its "not tried" is
+# rarely more than the failed ones. Example 套件 isn't installed: its preview names Example Notes as installed and installs
+# Example 日历 together with it.
+if PLUGINS_MODE and os.environ.get("MOCK_EXTENSION_PACK") == "1":
+    PLUGINS["example-pack"] = {
+        "id": "example-pack", "name": "Example 合集", "kind": "extension_pack", "status": "running", "version": "1.0.0",
+        "source": "installed", "enabled": True, "description": "Example 的几个扩展，一起装。", "contributes": {}, "publisher": "example",
+        "origin": "market:%s/example-pack" % _MARKET_A, "form": {"fields": []}, "config": {}, "secrets": [], "permissions": [],
+        "extension_pack": [{"id": "example-notes", "version": ">=1.0.0"}, {"id": "example-helper", "market": "github:example/team-plugins"},
+                           {"id": "example-gateway"}, {"id": "example-mail", "version": ">=0.3.0"}]}
+    CATALOG += [
+        {"market": _MARKET_A, "id": "example-pack", "name": "Example 合集", "version": "1.0.0", "description": "Example 的几个扩展，一起装。",
+         "publisher": "example", "tags": ["合集"], "contributes": {}, "permissions": [], "extension_pack": PLUGINS["example-pack"]["extension_pack"]},
+        {"market": _MARKET_A, "id": "example-suite", "name": "Example 套件", "version": "1.0.0", "description": "笔记和日历，一起装。",
+         "publisher": "example", "tags": ["合集"], "contributes": {}, "permissions": [],
+         "extension_pack": [{"id": "example-notes", "version": ">=1.0.0"}, {"id": "example-calendar", "market": MARKETS[_MARKET_A]["spec"]}]},
+    ]
 _PREVIEWS = {}
 _PREVIEW_BODIES = {}
 
@@ -15934,6 +16027,12 @@ def _ext_make_preview(c):
         if renamed:  # the hub's notice leads the warnings (extension.Preview.In)
             pv["rename_from"] = renamed["id"]
             pv["warnings"] = ["此次更新会将扩展 ID 从 %s 更改为 %s，需要明确确认。设置和数据仍属于同一个安装。" % (renamed["id"], c["id"])]  # i18n-ignore: the hub's words
+    if c.get("extension_pack"):  # a pack: its members, and the ones not installed yet installed together (the bundle)
+        pv["manifest"]["extension_pack"] = c["extension_pack"]
+        ids = {m["id"] for m in c["extension_pack"]}
+        pv["bundle"] = [{"preview_id": "%s-%s" % (pid, b["id"]), "permissions_digest": "d-" + b["id"], "market": b["market"],
+                         "manifest": {"id": b["id"], "name": b["name"], "version": b["version"]}, "permissions": b["permissions"]}
+                        for b in CATALOG if b["id"] in ids and b["id"] not in PLUGINS]
     _PREVIEWS[pid] = c
     _PREVIEW_BODIES[pid] = pv
     return pv
@@ -16410,6 +16509,10 @@ def markets_route(handler, p, body):
         if not PLUGINS[parts[4]].get("origin", "").startswith("market:"):
             handler.send_json({"error": "这个扩展只能在 hub 机器上（personad extension …）或 hub 的管理界面里装、升级和卸载；手机上只能装扩展市场里的",
                                "code": "this_machine_only"}, 403); return True
+        if parts[4] == "example-pack" and q.get("members") == "1":  # MOCK_EXTENSION_PACK: stopped part way, nothing changed
+            handler.send_json({"ok": False, "code": "partial_uninstall", "error": "卸载未完成。已卸载成员：example-notes；未卸载：example-helper。合集仍保留，可以重试。",  # i18n-ignore: the hub's words
+                               "removed_members": ["example-notes"], "failed_members": [{"id": "example-helper", "error": "扩展还在运行，停不下来"}],  # i18n-ignore: the hub's words
+                               "remaining_members": ["example-helper", "example-gateway"]}, 409); return True
         if EXT_OPS:
             # Recorded as an operation either way; async answers at once, else when it is done (as the hub does).
             ext = parts[4]
@@ -16781,6 +16884,7 @@ MOCK_HELP = [
     "MOCK_PASEO=1  A computer whose engine is Paseo: a project with its main checkout and two titled worktree workspaces, an agent with the two agents it created (one waiting for you), and a Codex agent whose thread has a subagent",
     "MOCK_LIVE_STEP=bash|command|reads|parallel|thinking|thinking-folded  The widget chat a minute into a turn whose newest step is still going: the running work line names it (#2987)",
     "MOCK_TOOL_OUTCOMES=1  A turn whose tool results carry outcomes: a failed test run (exit code, the cut output's end), a denied edit, a refused write, an interrupted and a timed-out command; only the failure is red (#4303)",
+    "MOCK_PERMISSION_DIFF=1  Two chats wait on a Claude Code permission card for an Edit (longer than the card's preview) and a Write; the card shows the change (#4621)",
     "MOCK_MENTIONS=1  The review agent read README.md and WeatherWidget/Provider.swift in unfolded calls: its composer's @ list starts with them (#2319)",
     "MOCK_EXTENSIONS=1  设置 › 插件：五个示例插件（需要设置 / 运行中 / hub.json / 已停用 / 不兼容），表单、密钥、开关在内存里",
     "MOCK_CONNECTOR_PLUGIN=1  设置 › 连接器：一个插件提供的通用连接器「示例笔记」，令牌 example-token 一步登录",
@@ -17548,7 +17652,7 @@ class H(BaseHTTPRequestHandler):
         if p == "/mock/uploads": return self.send_json({"uploads": UPLOADS})
         if p == "/mock/keys": return self.send_json({"keys": KEYS})
         if p == "/mock/rewinds": return self.send_json({"rewinds": REWINDS})
-        if p == "/mock/queue": return self.send_json(queue_messages(q.get("text", [None])[0], "clear" in q))
+        if p == "/mock/queue": return self.send_json(queue_messages(q.get("text", [None])[0], "clear" in q, int(q.get("photos", ["0"])[0] or 0)))
         if p == "/mock/queue_edits": return self.send_json({"edits": QUEUE_EDITS})
         if p == "/mock/terminal_input": return self.send_json({"input": TERMINAL_INPUT})
         if p == "/mock/herdr_client": return self.send_json({"log": FULL_LOG})
@@ -18977,6 +19081,11 @@ class H(BaseHTTPRequestHandler):
                         if body.get("images"):
                             QUEUED_PHOTOS[body.get("text") or ""] = [{"mime": i.get("mime"), "data": i.get("data")} for i in body["images"]]
                         push_machine(q["machine_id"])
+                # MOCK_QUEUE_SENDS=1: one to a working agent joins its own queue (#3022), as Claude Code holds it.
+                s = next((x for x in SESSIONS if len(parts) >= 7 and x["machine_id"] == parts[4] and x["session_id"] == parts[5]), None)
+                if os.environ.get("MOCK_QUEUE_SENDS") and s and s["state"] == "working" and not s.get("assistant"):
+                    s["queued"] = (s.get("queued") or []) + [claude_queued(s["machine_id"], body.get("text"), body.get("images") or [])]
+                    push_machine(s["machine_id"])
             return self.send_json({"ok": True})
         if p == "/api/v1/inbox/refresh": return self.send_json(inbox_list(parse_qs(urlparse(self.path).query)))
         if p == "/api/v1/inbox/done" and self.command == "POST":  # "Mark all as handled" / "Undo"
@@ -19644,9 +19753,12 @@ class H(BaseHTTPRequestHandler):
         # The live screen (#1184): macOS's Screen Sharing on this Mac's own 5900, for a Mac the plugin cua is on for.
         machine = next((m for m in MACHINES if m["id"] == mid), {})
         listed = listed or (port == 5900 and (machine.get("computer", {}).get("enabled") or machine.get("browser", {}).get("enabled")))  # cua or ego (#1507)
+        # MOCK_PREVIEW: a preview's running port is the made-up app's page server (scripts/mock/mock_preview.py).
+        preview_to = mock_preview.forward(port) if preview_route else None
+        listed = listed or preview_to is not None
         if not listed: return self.send_json({"error": "port %d is not an agent's and was not opened" % port}, 403)
         try:
-            to = FAKE_SCREEN["port"] if port == 5900 and FAKE_SCREEN["port"] else port
+            to = preview_to or (FAKE_SCREEN["port"] if port == 5900 and FAKE_SCREEN["port"] else port)
             tcp = socket.create_connection(("127.0.0.1", to), timeout=3)
             tcp.settimeout(None)
         except OSError:
@@ -20737,6 +20849,8 @@ def plugins_route(handler, p, body):
         return mock_showcase(handler, p.rsplit("/", 1)[-1], body)
     if p == "/mock/invalidate" and PLUGINS_MODE:
         return mock_invalidate(handler)
+    if p == "/mock/controls/reset" and PLUGINS_MODE:
+        return mock_controls_reset(handler)
     if p in ("/mock/motion/next", "/mock/motion/reset") and PLUGINS_MODE:
         return mock_motion(handler, reset=p.endswith("/reset"))
     if EXTENSIONS_API and (p == "/api/v1/extensions" or p.startswith("/api/v1/extensions/")):
@@ -20765,10 +20879,55 @@ def mock_showcase(handler, ui, body):
         handler.send_json({"error": "没有这个快照"}, 404)
         return True
     request = json.loads(body) if body else {}
+    if ui == "controls":
+        return _showcase_controls(handler, view, request)
     if request.get("action"):
         handler.send_json({"toast": "快照测试不执行写操作"})
     else:
         handler.send_json({"view": view})
+    return True
+
+
+# showcase › controls (UI version 6, #827): the controls keep what they were changed to while the mock runs, and each
+# change answers with just its row (`items`), as an extension best does. `fail` answers 502, so the app puts the switch
+# back. Two switches ask first (`confirm`), as the source subscription page's do. `GET /mock/controls/reset` forgets.
+_SHOWCASE_CONTROLS = {}
+_SHOWCASE_CONFIRMS = {"light.floor": (False, "打开落地灯？它在卧室门口，可能会吵醒家人。"),
+                      "purifier": (True, "关掉空气净化器？房间里的 PM2.5 会慢慢回升。")}
+
+
+def _showcase_controls(handler, view, request):
+    action = request.get("action")
+    if action == "fail":
+        handler.send_json({"error": "设备没有回应"}, 502)
+        return True
+    rows = [item for s in view["sections"] for item in s["items"] if item.get("control")]
+    changed = None
+    if action:
+        values = request.get("values") or {}
+        changed = next((row for row in rows if row["control"]["name"] in values), None)
+        if changed is None:
+            handler.send_json({"toast": "快照测试不执行写操作"})
+            return True
+        _SHOWCASE_CONTROLS[changed["control"]["name"]] = values[changed["control"]["name"]]
+    for row in rows:
+        c = row["control"]
+        saved = _SHOWCASE_CONTROLS.get(c["name"])
+        if saved is not None:
+            if c["kind"] == "switch": c["on"] = saved == "true"
+            else: c["value"] = float(saved) if "." in saved else int(saved)
+            c.pop("display", None)
+        # asked first only one way (turning the lamp on, the purifier off)
+        when, words = _SHOWCASE_CONFIRMS.get(c["name"], (None, ""))
+        if when is not None and bool(c.get("on")) == when:
+            c["action"]["confirm"] = words
+    handler.send_json({"items": [changed]} if changed else {"view": view})
+    return True
+
+
+def mock_controls_reset(handler):
+    _SHOWCASE_CONTROLS.clear()
+    handler.send_json({"ok": True})
     return True
 
 
