@@ -83,6 +83,9 @@
   --mark-green: #34c759;
   --mark-blue: #007aff;
   --mark-white: #fff;
+  /* Public package artwork may contain a transparent black mark: keep its backing light in both schemes. */
+  --extension-logo-backing: var(--mark-white);
+  --extension-meta-size: 11px;
   --mark-black: #000;
   --shadow-hairline: 0 0 0 1px var(--line);
   --shadow-btn: 0 0 0 1px var(--line-strong), 0 1px 2px #1018280d;

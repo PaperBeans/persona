@@ -744,6 +744,7 @@ targets:
     sources:
       - path: PersonaMacTests
       # Shared logic the Mac runs as is: the same tests, run against the Mac build (docs/apple/mac.md「验收清单」).
+      - path: PersonaTests/ExtensionArtworkTests.swift
       - path: PersonaTests/HeadingMenuTests.swift
       - path: PersonaTests/CalmAttentionTests.swift
       - path: PersonaTests/IntentsTests.swift

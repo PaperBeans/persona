@@ -3,7 +3,7 @@
 // the markets themselves (add with an optional write-only token, remove, read again, change the token). Logic in
 // lib/extension-market.ts.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { t } from "../../i18n";
+import { formatNumber, t } from "../../i18n";
 import { enc, errorText } from "../../lib/api";
 import { defaultManager, pinManagerAt } from "../../lib/manager-choice";
 import { useRoster } from "../../lib/managers";
@@ -15,6 +15,8 @@ import {
 } from "../../lib/extension-market";
 import { extensionDetail, extensionUpgrades, listExtensions, pointText, setExtensionUpgrades, type ExtensionPermission } from "../../lib/extensions";
 import { Button, cx, Dialog, EASE, IconButton, Loading, Spinner, toast, useNow } from "../../ui/atoms";
+import { ExtensionLogo } from "../../ui/ExtensionLogo";
+import { ExtensionDownloads, packageDownloads } from "../../ui/ExtensionDownloads";
 import { Icon } from "../../ui/icons";
 import { dependentError, dependencyText, partialUninstall, previewBlocked, type Dependent, type PackMember, type PartialUninstall } from "../../lib/extension-model";
 import { Group, Pill, Row, settingsInputClass as inputClass, Switch } from "./SettingsParts";
@@ -201,9 +203,7 @@ export function MarketCatalog({ onBack, onOpen, onMarkets }: { onBack: () => voi
               className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-hover"
               style={{ animation: `fade-up 320ms ${EASE} ${Math.min(i, 8) * 30}ms both` }}
             >
-              <span className={cx("flex size-9 shrink-0 items-center justify-center rounded-[9px]", it.installed ? "bg-accent-tint text-accent-ink" : "bg-inset text-ink-3 shadow-hairline")}>
-                <Icon name="extension" size={16} />
-              </span>
+              <ExtensionLogo url={it.icon_url} iconSize={16} className={cx("flex size-9 shrink-0 items-center justify-center rounded-[9px]", it.installed ? "bg-accent-tint text-accent-ink" : "bg-inset text-ink-3 shadow-hairline")} />
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-[13px] font-medium text-ink">{it.name}</span>
@@ -212,6 +212,7 @@ export function MarketCatalog({ onBack, onOpen, onMarkets }: { onBack: () => voi
                 {it.description && <div className="mt-0.5 truncate text-[11.5px] text-ink-3">{it.description}</div>}
                 <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
                   <span className="mr-1 truncate text-[11px] text-ink-3">{it.market_name}</span>
+                  <ExtensionDownloads downloads={it.downloads} />
                   {(it.tags ?? []).map((tag) => (
                     <Pill key={tag}>{tag}</Pill>
                   ))}
@@ -332,9 +333,7 @@ export function MarketItem({ market, id, manager, onBack, onInstalled }: { marke
       <Back label={t("settings-extensionmarket.market_title")} onBack={onBack} right={<IconButton icon="retry" label={t("settings-extensionmarket.reload")} onClick={load} disabled={loading} />} />
       <section className="mb-6 overflow-hidden rounded-card bg-surface shadow-card">
         <div className="flex items-center gap-3 px-4 py-3.5">
-          <span className={cx("flex size-11 shrink-0 items-center justify-center rounded-[11px]", it?.installed ? "bg-accent-tint text-accent-ink" : "bg-inset text-ink-3 shadow-hairline")}>
-            <Icon name="extension" size={20} />
-          </span>
+          <ExtensionLogo url={it?.icon_url} iconSize={20} className={cx("flex size-11 shrink-0 items-center justify-center rounded-[11px]", it?.installed ? "bg-accent-tint text-accent-ink" : "bg-inset text-ink-3 shadow-hairline")} />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-[15px] font-semibold text-ink">{it?.name ?? id}</h2>
             <div className="mt-0.5 truncate text-[12px] text-ink-3">{it ? itemLine(it) : loading ? t("settings-extensionmarket.reading") : ""}</div>
@@ -357,6 +356,7 @@ export function MarketItem({ market, id, manager, onBack, onInstalled }: { marke
             {error && <p className="text-[12px] break-words text-red">{error}</p>}
           </div>
         )}
+        {it && packageDownloads(it.downloads) !== null && <Row label={t("settings-extensions.package_downloads_label")} hint={t("settings-extensions.package_downloads_definition")} wrapHint><span data-extension-downloads>{formatNumber(it.downloads!)}</span></Row>}
         {it && st && (st.kind === "install" || st.kind === "upgrade" || canUninstall(it)) && (
           <div className="flex flex-wrap items-center gap-2 border-t border-line bg-inset px-4 py-2.5">
             {canUninstall(it) && (

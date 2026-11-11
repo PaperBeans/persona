@@ -253,7 +253,7 @@ export function NavRail({ ticks, total, scroller, onJump, reset }: {
           e.stopPropagation();
           pick(ticks[next].id, "keyboard");
           setWindowCenter(ticks[next].id);
-          setAnnouncement(t("chat-navrail.selection", { index: next + 1, count: ticks.length, preview: labelOf(ticks[next]), answer: ticks[next].answerExcerpt ?? "" }));
+          setAnnouncement(t("chat-navrail.selection", { index: ticks[next].ordinal ?? next + 1, count: total ?? ticks.length, preview: labelOf(ticks[next]), answer: ticks[next].answerExcerpt ?? "" }));
         } else if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           e.stopPropagation();
@@ -311,7 +311,7 @@ export function NavRail({ ticks, total, scroller, onJump, reset }: {
             type="button"
             data-tick={i}
             tabIndex={-1}
-            aria-label={t("chat-navrail.jump", { index: i + 1, preview: labelOf(tick) })}
+            aria-label={t("chat-navrail.jump", { index: tick.ordinal ?? i + 1, preview: labelOf(tick) })}
             aria-current={isCurrent ? "true" : undefined}
             aria-describedby={tick.id === preview ? previewId : undefined}
             className="flex shrink-0 items-center justify-end"

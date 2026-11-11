@@ -355,7 +355,7 @@ with its own tag and "Message the Agent" input label. Code: `server/internal/nod
   (full context after compaction); decode only `display_completions`. `task_started` / `task_complete` are recorded in `Meta.TurnOpen`.
   `TerminalInteraction` (polling / sending input to a running command) is not displayed.
 - **Messaging**: herdr's `agent prompt` recognizes only known Agents and returns not found for fork panes, so use `pane send-text` + Enter (`Node.prompt`).
-- A phone message to an exited internal-fork session Persona started resumes it (`<launcher> resume <id> <message>`, `node/retire.go`); one started outside Persona returns an error (its launcher is not known).
+- A phone message to an exited internal-fork session is refused: a stopped Agent is read-only (#4754). Resume on its terminal page resumes one Persona started (`<launcher> resume <id>`, `node/retire.go` `resumeOtherWith`); one started outside Persona returns an error (its launcher is not known).
 
 ## Research: app-server and approval hooks for Codex in Agents (2026-11-02, conclusions only, not implemented)
 

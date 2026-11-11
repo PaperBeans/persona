@@ -31,6 +31,12 @@ export interface HubExtension {
   source?: string;
   enabled?: boolean;
   description?: string;
+  /** Public catalog artwork: absolute HTTPS without URL credentials; absent on older hubs. */
+  icon_url?: string;
+  /** Cumulative package downloads across all versions, not users or Persona installations. Explicit zero is meaningful. */
+  downloads?: number;
+  /** When the package-download statistics were last updated. */
+  downloads_updated_at?: string;
   /** The extension points it contributes to, with the ids. */
   contributes?: Record<string, string[]>;
   /** What it still needs before it runs, in words. */

@@ -2,9 +2,11 @@ package assistant
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
@@ -506,12 +508,12 @@ var (
 	// error (500, 502, 503, 504) or overloaded (529).
 	transientStatus = lazyre.New(`\b(408|429|500|502|503|504|529)\b`)
 	rateLimitStatus = lazyre.New(`\b429\b`)
-	userErrorWords  = []string{"failed to authenticate", "oauth token has expired", "invalid api key", "not logged in", "please run /login",
-		"issue with the selected model", "permission_error", "authentication_error", "credit balance", "billing",
-		"ssl certificate", "self-signed certificate", "certificate verif",
+	// userErrorWords: the auth words shared with the node's failed-turn check (assistantwire.AuthErrorWords, #4669),
+	// then a request the service refuses as it is, a context too long, an interrupt.
+	userErrorWords = append(slices.Clone(assistantwire.AuthErrorWords),
 		"invalid_request_error", "invalid request", "prompt is too long", "context length", "context window", "context_length_exceeded",
 		"maximum context", "too many tokens", "request too large", "request_too_large",
-		"interrupted by user", "request was aborted", "aborted by user", "user aborted"}
+		"interrupted by user", "request was aborted", "aborted by user", "user aborted")
 	transientWords = []string{"overloaded", "rate limit", "rate_limit", "too many requests",
 		"connection", "timed out", "timeout", "socket hang up", "econnreset", "econnrefused", "fetch failed", "no eligible upstream",
 		"internal server error", "service unavailable", "bad gateway", "gateway timeout", "network", "api_error", "upstream",

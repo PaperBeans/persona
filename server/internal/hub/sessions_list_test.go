@@ -206,6 +206,28 @@ func TestRuntimeListPagesAndSummary(t *testing.T) {
 	}
 }
 
+// q finds a row by its branch, as the apps' own searches do (#4770): a working tree's sessions by `fix/123`.
+func TestRuntimeListSearchesTheBranch(t *testing.T) {
+	h := newTestHub(t)
+	m := newMachine(h, MachineConfig{ID: "demo"})
+	h.machines, h.byID["demo"] = []*Machine{m}, m
+	m.sessions = []proto.Session{
+		{MachineID: "demo", SessionID: "tree", Title: "Login form", State: "idle", UpdatedAt: time.Unix(100, 0), Cwd: "/demo/app-wt",
+			RepoRoot: "/demo/app", Worktree: "/demo/app-wt", Branch: "fix/123-login"},
+		{MachineID: "demo", SessionID: "main", Title: "Release notes", State: "idle", UpdatedAt: time.Unix(90, 0), Cwd: "/demo/app",
+			RepoRoot: "/demo/app", Worktree: "/demo/app", Branch: "main"},
+	}
+	for query, want := range map[string]string{"FIX/123": "tree", "123-login": "tree", "release": "main"} {
+		page := runtimePage(t, h, "summary=1&q="+neturl.QueryEscape(query))
+		if page.Total != 1 || page.Sessions[0].SessionID != want || page.Sessions[0].Branch == "" {
+			t.Fatalf("q=%s: %+v", query, page)
+		}
+	}
+	if page := runtimePage(t, h, "summary=1&q=fix%2F999"); page.Total != 0 {
+		t.Fatalf("another branch: %+v", page)
+	}
+}
+
 func TestRuntimeListDeltaTransitionsAndMachineRemoval(t *testing.T) {
 	h := newTestHub(t)
 	m := newMachine(h, MachineConfig{ID: "demo"})
@@ -361,7 +383,7 @@ func fullIndexItems(mid string, list []proto.Session, encoded []sentSession) []s
 			ID: string(id), Machine: mid, Project: cmp.Or(row.RepoRoot, row.WorkspaceCwd, row.Cwd), Group: cmp.Or(row.SpaceID, row.WorkspaceID),
 			PaneSource: sessionorigin.Of(row), State: row.State, BackgroundWaiting: row.BackgroundWaiting, Source: row.SourceKind,
 			Provider: row.Agent, UpdatedAt: row.UpdatedAt,
-			SearchText: strings.Join([]string{row.Title, row.Cwd, row.RepoRoot, row.SpaceName, row.SlotName, row.AgentName, row.LastText}, "\n"),
+			SearchText: strings.Join([]string{row.Title, row.Cwd, row.RepoRoot, row.Branch, row.SpaceName, row.SlotName, row.AgentName, row.LastText}, "\n"),
 			Summary:    json.RawMessage(summary),
 			Full: runtimeListFields(full[row.SessionID], struct {
 				PaneSource string `json:"pane_source"`
@@ -434,6 +456,9 @@ func TestIndexRowReuseMatchesFullPath(t *testing.T) {
 		},
 		func(r *proto.Session, n int) {
 			r.RepoRoot, r.WorkspaceCwd, r.Cwd = cycle(n, "", "/demo/repo", ""), cycle(n, "", "", "/demo/real"), cycle(n, "/demo/app", "/demo/b")
+		},
+		func(r *proto.Session, n int) { // searched by q (#4770)
+			r.Branch, r.SlotName = cycle(n, "", "fix/needle-1", "main"), cycle(n, "", "Demo workspace")
 		},
 		func(r *proto.Session, n int) {
 			r.State, r.BackgroundWaiting = cycle(n, "working", "needs_you", "idle"), n%2 == 0
@@ -810,5 +835,74 @@ func TestSessionsOfOneManagerSeveralComputersExtension(t *testing.T) {
 	var c sessionlist.Counts
 	if err := json.Unmarshal([]byte(out), &c); code != 200 || err != nil || c.Total != 2 || !reflect.DeepEqual(c.Machine, map[string]int{"mb": 1, "mc": 1}) {
 		t.Errorf("B's counts through its extension: %d %s %v", code, out, err)
+	}
+}
+
+// with_counts=1 (#4858): the page is what it is without the key, and its counts are what ?counts=1 with the same
+// filters answers, ignoring since, cursor and limit, so one read replaces a refresh's two.
+func TestRuntimePageWithCounts(t *testing.T) {
+	h := newTestHub(t)
+	m := newMachine(h, MachineConfig{ID: "demo"})
+	h.machines, h.byID["demo"] = []*Machine{m}, m
+	for n := range 60 {
+		state := "idle"
+		if n%3 == 0 {
+			state = "working"
+		}
+		m.sessions = append(m.sessions, proto.Session{MachineID: "demo", SessionID: fmt.Sprintf("s%02d", n), State: state})
+	}
+	read := func(query string) (int, []byte) {
+		w := httptest.NewRecorder()
+		h.listSessions(w, httptest.NewRequest("GET", "/api/v1/sessions?"+query, nil))
+		return w.Code, w.Body.Bytes()
+	}
+	counts := func(query string) sessionlist.Counts {
+		t.Helper()
+		code, body := read("counts=1" + query)
+		var c sessionlist.Counts
+		if err := json.Unmarshal(body, &c); code != 200 || err != nil {
+			t.Fatalf("counts%s: %d %s %v", query, code, body, err)
+		}
+		return c
+	}
+	first := runtimePage(t, h, "summary=1&limit=50")
+	for _, tc := range []struct{ page, filters string }{
+		{"summary=1&limit=50", ""},
+		{"summary=1&limit=10", "&state=working"},
+		{"summary=1&limit=50&since=" + neturl.QueryEscape(first.Revision), ""},
+		{"summary=1&limit=50&cursor=" + neturl.QueryEscape(first.Cursor), ""},
+	} {
+		code, body := read(tc.page + tc.filters + "&with_counts=1")
+		var got struct {
+			listTestPage
+			Counts *sessionlist.Counts `json:"counts"`
+		}
+		if err := json.Unmarshal(body, &got); code != 200 || err != nil || got.Counts == nil {
+			t.Fatalf("%s: %d %s %v", tc.page, code, body, err)
+		}
+		want := runtimePage(t, h, tc.page+tc.filters)
+		if (got.Cursor == "") != (want.Cursor == "") {
+			t.Errorf("%s: cursor %q, want one like %q", tc.page, got.Cursor, want.Cursor)
+		}
+		got.Cursor, want.Cursor = "", "" // every read freezes its own view, under a new token
+		if !reflect.DeepEqual(got.listTestPage, want) {
+			t.Errorf("%s: the page changed with with_counts:\n got %+v\nwant %+v", tc.page, got.listTestPage, want)
+		}
+		if want := counts(tc.filters); !reflect.DeepEqual(*got.Counts, want) {
+			t.Errorf("%s: counts %+v, want %+v", tc.page, *got.Counts, want)
+		}
+	}
+	if c := counts("&state=working"); c.Total != 20 {
+		t.Fatalf("fixture: %+v", c)
+	}
+	// Without the key nothing is added; a malformed value is refused like any other boolean.
+	if _, body := read("summary=1&limit=50"); strings.Contains(string(body), `"counts"`) {
+		t.Errorf("counts without with_counts: %s", body)
+	}
+	if code, _ := read("summary=1&limit=50&with_counts=yes"); code != 400 {
+		t.Errorf("with_counts=yes: %d, want 400", code)
+	}
+	if !slices.Contains(h.features(), featureSessionsPageCounts) || slices.Contains(proto.Features, featureSessionsPageCounts) {
+		t.Error("sessions_page_counts must be advertised by the hub")
 	}
 }

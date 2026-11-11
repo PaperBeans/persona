@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./api";
 import {
+  autoCheckable,
   formFromView,
   formModel,
   formProblems,
@@ -51,7 +52,7 @@ describe("newForm", () => {
 
 describe("formProblems", () => {
   it("passes a ready form", () => {
-    expect(formProblems(ready(), true)).toEqual({ connect: "", models: "", advanced: "" });
+    expect(formProblems(ready(), true)).toEqual({ connect: "", reach: "", models: "", advanced: "" });
   });
   it("checks the connection step", () => {
     expect(formProblems(ready({ name: "" }), true).connect).toBe("要填名称");
@@ -61,6 +62,19 @@ describe("formProblems", () => {
     expect(formProblems(ready({ api_key: "" }), true).connect).toBe("要填 API Key");
     // editing one that has a key: left empty keeps it
     expect(formProblems(ready({ api_key: "" }), false, true).connect).toBe("");
+  });
+  it("lets the address and the key alone decide whether the gateway can be reached (#4881)", () => {
+    expect(formProblems(ready(), true)).toMatchObject({ connect: "", reach: "" });
+    for (const name of ["", "1bad", "claude"]) {
+      const p = formProblems(ready({ name }), true);
+      expect(p.connect).not.toBe("");
+      expect(p.reach).toBe("");
+    }
+    expect(formProblems(ready({ name: "", base_url: "ftp://x" }), true).reach).toMatch(/http/);
+    expect(formProblems(ready({ name: "", api_key: "" }), true).reach).toBe("要填 API Key");
+    expect(formProblems(ready({ api_key: "" }), false, true).reach).toBe("");
+    // Codex runs without an address or key, so nothing keeps it from being tested
+    expect(formProblems(ready({ agent: "codex", base_url: "", api_key: "" }), true).reach).toBe("");
   });
   it("ignores unsupported chat draft values without weakening other protocols' validation", () => {
     const draft = ready({ kind: "api", api: "chat", headers: "invalid", headers_touched: true, proxy: "invalid", no_proxy: "example.com", env: "invalid", env_touched: true, timeout_ms: "bad", compact_window: "bad", max_context: "bad", effort: "high", opus_model: "tier-a", sonnet_model: "tier-b", haiku_model: "tier-c", fable_model: "tier-d", subagent_force: true });
@@ -204,5 +218,29 @@ describe("import preview", () => {
     expect(importErrorText(new ApiError(503, "x", { code: "offline" }))).toBe("这台电脑不在线");
     expect(importErrorText(new ApiError(502, "坏了", { code: "internal" }))).toContain("HTTP 502");
     expect(importErrorText(new ApiError(502, "private internal exception", { code: "internal" }))).not.toContain("private internal exception");
+  });
+});
+
+describe("autoCheckable (#4881)", () => {
+  const saved: ProviderView = { name: "gw", base_url: "https://gw.example.com", auth: "bearer", has_key: true };
+  it("checks a new gateway once its address is valid and a whole key is typed, whatever its name", () => {
+    expect(autoCheckable(ready({ name: "" }), null)).toBe(true);
+    expect(autoCheckable(ready({ name: "1bad" }), null)).toBe(true);
+    expect(autoCheckable(ready({ base_url: "" }), null)).toBe(false);
+    expect(autoCheckable(ready({ base_url: "gw.example.com" }), null)).toBe(false);
+    expect(autoCheckable(ready({ api_key: "" }), null)).toBe(false);
+    expect(autoCheckable(ready({ api_key: "sk-1" }), null)).toBe(false);
+    // Codex may leave both out, but there is nothing to check without an address
+    expect(autoCheckable(ready({ agent: "codex", base_url: "", api_key: "" }), null)).toBe(false);
+  });
+  it("checks a saved provider only once its address, key or sign-in method changed", () => {
+    const opened = { ...formFromView(saved), api_key: "" };
+    expect(autoCheckable(opened, saved)).toBe(false);
+    expect(autoCheckable({ ...opened, base_url: "https://gw.example.com " }, saved)).toBe(false);
+    expect(autoCheckable({ ...opened, base_url: "https://other.example.com" }, saved)).toBe(true);
+    expect(autoCheckable({ ...opened, api_key: "sk-new-key-1" }, saved)).toBe(true);
+    expect(autoCheckable({ ...opened, auth: "api_key" }, saved)).toBe(true);
+    // a new address with no key stored and none typed has nothing to sign in with
+    expect(autoCheckable({ ...opened, base_url: "https://other.example.com" }, { ...saved, has_key: false })).toBe(false);
   });
 });

@@ -188,6 +188,36 @@ final class NewChatLayoutTests: XCTestCase {
         try verifySettings(["-openAppearance", "chat"], name: "settings-retired-link")
     }
 
+    /// An 81-input history with only its two-turn tail loaded still opens with the latest 50 inputs (#4838).
+    /// Run against apple/PersonaUITests/Fixtures/navigation_hub.py, passing scripts/mock/mock_hub.py as its argument.
+    @MainActor func testLongHistoryNavigatorStartsWithFifty() throws {
+        let app = launch(["-showEdgeScrub", "3"])
+        defer { app.terminate() }
+        let navigator = app.descendants(matching: .any)["chat.edgeScrub"].firstMatch
+        let preview = app.descendants(matching: .any)["chat.edgeScrub.preview"].firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(navigator.value as? String, "50", app.debugDescription)
+        XCTAssertTrue(preview.label.contains("79"), "The third newest input's ordinal must be 79, not 48: \(preview.label)")
+        XCTAssertFalse(app.staticTexts["Navigation regression input 32"].firstMatch.exists,
+                       "The initial navigator must not preload 50 transcript bodies")
+        try shot(app, "edge-fifty")
+    }
+
+    /// Releasing the oldest of the initial 50 ticks loads its missing body and positions it in the conversation.
+    @MainActor func testLongHistoryNavigatorLoadsTheReleasedInput() throws {
+        let app = launch(["-showEdgeScrub", "3"])
+        defer { app.terminate() }
+        let preview = app.descendants(matching: .any)["chat.edgeScrub.preview"].firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 20), app.debugDescription)
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.985, dy: 0.7))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.985, dy: 0.15))
+        start.press(forDuration: 0.5, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.5)
+        let target = app.staticTexts["Navigation regression input 32"].firstMatch
+        XCTAssertTrue(target.waitForExistence(timeout: 30), "The released input never loaded: \(app.debugDescription)")
+        XCTAssertTrue(target.isHittable, "The loaded input was not brought into view: \(app.debugDescription)")
+        try shot(app, "edge-fifty-landed")
+    }
+
     /// `-showEdgeScrub 3`: the navigator held open on the third newest message, for its screenshot.
     @MainActor func testEdgeNavigatorShot() throws {
         let app = launch(["-showEdgeScrub", "3"])

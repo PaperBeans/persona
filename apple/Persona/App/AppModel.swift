@@ -422,6 +422,16 @@ final class AppModel {
         applyPersonaPalette()
         connection.onCaughtUp = { [weak self] in self?.flushOutbox() }
         #if os(iOS) || os(visionOS)
+        let leaving = [UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification]
+        #else
+        let leaving = [NSApplication.willTerminateNotification]
+        #endif
+        for name in leaving {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { @Sendable [weak self] _ in
+                MainActor.assumeIsolated { self?.flushSnapshot() }
+            }
+        }
+        #if os(iOS) || os(visionOS)
         if registryUnreadable {
             NotificationCenter.default.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil,
                                                    queue: .main) { @Sendable _ in MainActor.assumeIsolated { AppModel.shared.retryRegistry() } }
@@ -746,7 +756,10 @@ final class AppModel {
         phoneConfirmations.denyAll()
         toolResults.forget(groups: Set(links.map(\.group)))
         // Where Hand to AI sent each source's items: ids on a hub that is gone (#2121).
-        for group in Set(links.map(\.group)).union([hubGroup]) { InboxHandOffMemory.forget(group: group) }
+        for group in Set(links.map(\.group)).union([hubGroup]) {
+            InboxHandOffMemory.forget(group: group)
+            ForwardMemory.forget(group: group) // and where forwards went (#3807)
+        }
         LarkDrafts.shared.forget()
         pairingEngineMachine = nil
         checklistPending = false
@@ -1275,11 +1288,25 @@ final class AppModel {
             // still reported, by the read of the transcript itself.
             guard let full = try await api.sessionListDetail(key, title: latest(key)?.title ?? "") else { return }
             guard self.api(key.group)?.config.url == api.config.url else { return }
-            let list = (sessionsByMachine[key.machineRef] ?? []).filter { $0.key != key } + [full]
-            applySessions([key.machineRef: list])
+            // In its place: the same row again must leave the list equal, or every reader of the sessions redraws
+            // for nothing (#4683).
+            applySessions([key.machineRef: Self.replacing(full, in: sessionsByMachine[key.machineRef] ?? [])])
         } catch {
             if isSubscribed(key), !error.isQuiet { chat(key).error = error.localizedDescription }
         }
+    }
+
+    /// `row` where the list has its session (any other copy of it dropped), or at the end when it has none: an unchanged
+    /// row leaves the list equal.
+    nonisolated static func replacing(_ row: Session, in list: [Session]) -> [Session] {
+        let key = row.key
+        guard let first = list.firstIndex(where: { $0.key == key }) else { return list + [row] }
+        var out = list
+        out[first] = row
+        if out[(first + 1)...].contains(where: { $0.key == key }) {
+            out = out.enumerated().filter { $0.offset <= first || $0.element.key != key }.map(\.element)
+        }
+        return out
     }
 
     func subscribe(_ key: SessionKey, by owner: UUID) {
@@ -1582,6 +1609,8 @@ final class AppModel {
         registerPhone(link)
         // Phone tool results answered while the socket was down: the hub matches them to their calls by call_id (#4456).
         toolResults.flush(group: group, on: link.live)
+        // Items the Handle Notification shortcut kept while this hub could not be reached (#3848).
+        if let api = api(group) { Task { await ShortcutItemFlow.flush(api) } }
         // The hub resumed its broadcasts (docs/operations/hub-restart.md): what this app missed follows the hello, and the
         // connection's snapshot (machines, sessions, pending interactions) is whole: nothing to fetch again, no Updating….
         let plan = ReconnectPlan(resumed: link.live.resumed)
@@ -1776,7 +1805,8 @@ final class AppModel {
         var olds: [(old: [Session], new: [Session])] = []
         for (machineID, list) in byMachine {
             let old = lists[machineID] ?? []
-            if old != list { lists[machineID] = list }
+            guard old != list else { continue } // the same rows again: no transition, nothing new for AgentSync (#4683)
+            lists[machineID] = list
             olds.append((old, list))
         }
         if lists != sessionsByMachine { sessionsByMachine = lists }
@@ -1956,6 +1986,7 @@ final class AppModel {
             if isHub, pushedBy(manager) == nil { ExtensionSlots.shared.received(plugin: plugin, id: id, badge: badge) }
         case .extensionInvalidate(let ext, let id):
             ExtensionUIRegistry.shared.invalidate(extension: ext, ui: id, group: group)
+            if ext == SubscriptionsUI.id { SubscriptionsRefresh.shared.changed() } // the entry rows' counts
             #if os(iOS) || os(visionOS)
             ExtensionWidgetReconciliation.invalidate(group: group, owner: ext, contribution: id)
             #endif
@@ -2290,7 +2321,10 @@ final class AppModel {
         // Each photo with its path on the machine (the outbox's in the order they went, as the paths are).
         var photos: [(path: String?, photo: (UIImage, ImagePayload))] = []
         var left: [String] = []
-        let copies = sent.compactMap(Self.composerPhoto)
+        var copies: [(UIImage, ImagePayload)] = []
+        for payload in sent {
+            if let photo = await Self.composerPhoto(payload) { copies.append(photo) }
+        }
         if copies.count >= draft.imagePaths.count {
             photos = copies.enumerated().map { (draft.imagePaths.indices.contains($0.offset) ? draft.imagePaths[$0.offset] : nil, $0.element) }
         } else { // sent from elsewhere, or its copy here is gone
@@ -2311,20 +2345,24 @@ final class AppModel {
         return left.count
     }
 
-    /// A photo as the composer holds it, from the bytes a message carried.
-    private static func composerPhoto(_ payload: ImagePayload) -> (UIImage, ImagePayload)? {
-        guard let data = Data(base64Encoded: payload.data), let image = UIImage(data: data) else { return nil }
-        return (image, payload)
+    /// A photo as the composer holds it, from the bytes a message carried: decoded off the main actor and no larger than
+    /// a picked one (`MessagePhotos.maxSide`), as `LarkMedia` decodes (docs/apple/performance.md, P8).
+    private static func composerPhoto(_ payload: ImagePayload) async -> (UIImage, ImagePayload)? {
+        let side = MessagePhotos.maxSide
+        let image = await Task.detached(priority: .userInitiated) {
+            Data(base64Encoded: payload.data).flatMap { LarkMedia.decode($0, maxPixel: side) }
+        }.value
+        return image.map { ($0, payload) }
     }
 
     /// A photo a message carried, read back from the conversation's machine.
     private func machinePhoto(_ key: SessionKey, _ path: String) async -> (UIImage, ImagePayload)? {
         guard let api = api(key.group), let file = try? await api.file(machine: key.machineID, path: path, cwd: nil) else { return nil }
         let mime = file.mime ?? "image/jpeg"
-        if let data = file.data, let photo = Self.composerPhoto(ImagePayload(mime: mime, data: data)) { return photo }
+        if let data = file.data, let photo = await Self.composerPhoto(ImagePayload(mime: mime, data: data)) { return photo }
         // A big one comes described, its bytes from the download.
         guard let bytes = try? await api.fileBytes(machine: key.machineID, path: path, cwd: nil) else { return nil }
-        return Self.composerPhoto(ImagePayload(mime: mime, data: bytes.base64EncodedString()))
+        return await Self.composerPhoto(ImagePayload(mime: mime, data: bytes.base64EncodedString()))
     }
 
     /// Moves a queued message one place up or down (#6088): the queue is pulled back and re-queued in the new order.
@@ -2432,9 +2470,26 @@ final class AppModel {
         }
     }
 
+    /// Deletes a message only on this phone (`PendingMessage.onlyHere`: failed, or waiting for the network), from its
+    /// mark's menu or its long press: the bubble and its outbox entry go and nothing is sent. Undo in the toast puts it
+    /// back where it was (#4626).
     func discard(_ key: SessionKey, _ msg: PendingMessage) {
-        chat(key).pending.removeAll { $0.id == msg.id }
+        let store = chat(key)
+        guard let i = store.pending.firstIndex(where: { $0.id == msg.id }) else { return }
+        let gone = store.pending.remove(at: i)
         saveOutbox()
+        toast = .messageDeleted { [weak self] in self?.undoDiscard(key, gone, at: i) }
+    }
+
+    /// `discard`'s Undo: the message comes back as it was, where it was; a waiting one goes out once the app is
+    /// connected. Not when its transcript copy came in meanwhile (one that may have arrived after all).
+    func undoDiscard(_ key: SessionKey, _ msg: PendingMessage, at i: Int) {
+        let store = chat(key)
+        guard !store.pending.contains(where: { $0.id == msg.id }),
+              !store.items.contains(where: { PendingMessage.tied($0, to: msg.id) == true }) else { return }
+        store.pending.insert(msg, at: min(i, store.pending.count))
+        saveOutbox()
+        if msg.state == .waiting { flushOutbox() }
     }
 
     private func deliver(_ key: SessionKey, _ msg: PendingMessage, clearDraft: String? = nil) {
@@ -2989,7 +3044,9 @@ final class AppModel {
         }
     }
 
-    @ObservationIgnored private let snapshotWriter = Debouncer(.seconds(2))
+    /// At most one write a minute (#4684): about 390 KB on a hub with about 230 sessions, which change all the time. A
+    /// cold start paints from it, and a minute-old copy paints as well; the app leaving writes what is waiting.
+    @ObservationIgnored private let snapshotWriter = Throttle(gap: .seconds(60))
     /// Each group's default manager's Persona settings, kept for when its page shows again (`assistantConfig` is the page's
     /// of the moment).
     @ObservationIgnored var assistantByGroup: [String: APIClient.AssistantState] = [:]
@@ -3027,6 +3084,9 @@ final class AppModel {
         interactions = Dictionary(allInteractions.map { ($0.uid, $0) }, uniquingKeysWith: { a, _ in a })
         assistantConfig = heldAssistant(hub?.group ?? "")
     }
+
+    /// The snapshot waiting for its turn, written now: the app is going to the background or quitting.
+    func flushSnapshot() { snapshotWriter.flush() }
 
     func saveSnapshot() {
         snapshotWriter.run { [weak self] in
@@ -3070,6 +3130,7 @@ final class AppModel {
             defaultAssistantReads.remove(g)
             assistantItemManagers = assistantItemManagers.filter { $0.key.group != g }
             InboxHandOffMemory.forget(group: g)
+            ForwardMemory.forget(group: g)
             if !keepingPushKeys { PushCrypto.removeKey(group: g) }
         }
         if links.contains(where: { $0.fleet != nil }) { LiveActivityController.shared.apply(mergedFleet()) }
@@ -3487,6 +3548,11 @@ struct Toast: Identifiable, Equatable {
     }
 
     static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
+
+    /// A message only on this phone was deleted (#4626): Undo brings it back.
+    static func messageDeleted(undo: @escaping @MainActor () -> Void) -> Toast {
+        Toast(String(localized: "Message deleted"), style: .success, action: Action(title: String(localized: "Undo"), run: undo))
+    }
 }
 
 #if os(visionOS)

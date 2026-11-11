@@ -49,6 +49,29 @@ func putMarket(h *Manager, id string, n int, signature string, entries ...extens
 		index: &extension.MarketIndex{MarketVersion: 1, Name: "Market " + id, Extensions: entries}}
 }
 
+// makeOfficial makes market id the official market for this test or benchmark (TestMain turns the official market
+// off for the rest), its index signed with the pinned key: the catalog lists its entries most downloaded first.
+func makeOfficial(tb testing.TB, h *Manager, id string) {
+	tb.Helper()
+	was := extension.Official
+	extension.Official = extension.OfficialMarket{Spec: "github:example/extensions", SigningKey: "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
+	tb.Cleanup(func() { extension.Official = was })
+	ms := h.marketsState()
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.byID[id].rec.Spec = extension.Official.Spec
+	ms.byID[id].rec.Signature = extension.MarketSignature{State: extension.SigSigned, KeyID: keyIDOf(extension.Official.SigningKey)}
+	if !extension.IsOfficialMarket(ms.byID[id].rec.Spec) {
+		tb.Fatal("the market is not the official one")
+	}
+}
+
+// downloaded is e with a download count.
+func downloaded(e extension.MarketEntry, n int64) extension.MarketEntry {
+	e.Downloads = &n
+	return e
+}
+
 // marketManifest is an extension's manifest as a market lists it: a connector, the hosts it reaches, and the
 // channels named, if any.
 func marketManifest(id string, channels ...string) *extension.Manifest {
@@ -96,8 +119,10 @@ func officialLikeMarket(tb testing.TB, n int) *Manager {
 		} else {
 			entries[i] = marketEntryOf(marketManifest(id))
 		}
+		entries[i] = downloaded(entries[i], int64(i*37%500))
 	}
 	putMarket(h, "official", 0, extension.SigSigned, entries...)
+	makeOfficial(tb, h, "official")
 	return h
 }
 

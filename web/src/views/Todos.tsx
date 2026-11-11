@@ -60,6 +60,8 @@ import { StatusMark } from "../ui/StatusMark";
 import { Icon } from "../ui/icons";
 import { formatDate, t } from "../i18n";
 import { groupTodosByProject, treeStateLabel, type TodoProjectGroup, type TreeState } from "../lib/todo-tree";
+import { directionTitle, groupsByDirection, useDirectionTree, type Direction } from "../lib/direction-tree";
+import { DirectionCountsText } from "./DirectionMarks";
 import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, lastActivity, supersededFailedStarts, triageTodos, type TriageGroup, type TriageSection } from "../lib/todo-triage";
 import {
   TODO_LIST_FILTERS,
@@ -101,7 +103,7 @@ import { dueOn, duePatch, todoRowMenu } from "./todo-row-menu";
 const VIEW_KEY = "persona.todos.view";
 const MODE_KEY = "persona.todos.calendar.mode";
 const DONE_KEY = "persona.todos.calendar.showDone";
-/** The list by status sections (default, #3156) or by folder (#2526). */
+/** The list by status sections (default, #3156), by folder (#2526) or by pinned direction (#4352). */
 const GROUPING_KEY = "persona.todos.grouping";
 /** The list's filter by due date and its order inside each section (#3740), kept per browser like the view. */
 const FILTER_KEY = "persona.todos.filter";
@@ -110,6 +112,13 @@ const SORT_KEY = "persona.todos.sort";
 /** A filter's and a sort's name, as the menu and the chip say them. */
 const filterLabel = (f: TodoListFilter) => t(`todos.filter_${f}`);
 const sortLabel = (s: TodoListSort) => t(`todos.sort_${s}`);
+
+type TodoGrouping = "status" | "folder" | "direction";
+
+/** The grouping saved in this browser; status for none or an unknown one. */
+function todoGrouping(saved: string | null): TodoGrouping {
+  return saved === "folder" || saved === "direction" ? saved : "status";
+}
 
 function pref(key: string): string | null {
   try {
@@ -280,8 +289,31 @@ export function TodosView({
   );
 
   // The list by status sections (#3156, docs/assistant/todo-status-sop.md), or by folder as before
-  const [grouping, setGrouping] = useState<"status" | "folder">(() => (pref(GROUPING_KEY) === "folder" ? "folder" : "status"));
+  const [chosenGrouping, setGrouping] = useState<TodoGrouping>(() => todoGrouping(pref(GROUPING_KEY)));
+  // "Pinned" (#4352): the hub's direction tree, offered while there is a leader; else the list goes by status and the
+  // choice is kept for when there is one. Before the first read lands (undefined) a saved 常驻 choice stays and the list
+  // shows its loading state, as the sidebar's Agents block does, rather than flashing the status grouping.
+  const directionTree = useDirectionTree();
+  const byDirection = groupsByDirection(directionTree);
+  const directionPending = chosenGrouping === "direction" && directionTree === undefined;
+  const grouping: TodoGrouping = chosenGrouping === "direction" && !byDirection && !directionPending ? "status" : chosenGrouping;
   const byStatus = grouping === "status";
+  const leaderTitles = useStore((s) => s.assistant?.conversations);
+  const directionSections = useMemo(() => {
+    if (grouping !== "direction" || !byDirection) return [];
+    const open = new Map(filteredUncompleted.map((td) => [td.id, td]));
+    return directionTree.directions
+      .map((d) => ({ d, todos: (d.tasks ?? []).map((task) => open.get(task.id)).filter((td): td is Todo => !!td) }))
+      .filter((g) => g.todos.length > 0)
+      .map(({ d, todos }) => ({ d, todos, title: directionTitle(d, leaderTitles?.find((c) => c.session_id === d.id)?.title) }));
+  }, [grouping, byDirection, directionTree, filteredUncompleted, leaderTitles]);
+  // open to-dos no 常驻 section lists: the hub nests a worker's to-do under its leader's Agent instead of listing it
+  // (server/internal/assistant/direction_tree.go), so the page says how many and where to see them rather than hide them
+  const directionUnlisted = useMemo(() => {
+    if (grouping !== "direction" || !byDirection) return 0;
+    const listed = new Set(directionSections.flatMap((g) => g.todos.map((td) => td.id)));
+    return filteredUncompleted.filter((td) => !listed.has(td.id)).length;
+  }, [grouping, byDirection, directionSections, filteredUncompleted]);
   const [restored, restoreTodo] = useRestoredTodos();
   // whether a failed start was superseded by finished work (#3713) is decided on every to-do: a search or a filter that
   // leaves the finished one out must not put it back in Needs you
@@ -321,8 +353,10 @@ export function TodosView({
       // nothing in the open sections: Other open starts unfolded (TodoTriageSection), its first row; never a shelved or done one
       return triaged.sections.other[0]?.lead;
     }
+    // by 常驻: the first row shown (a to-do outside every section is not on the list), else the first completed one
+    if (grouping === "direction") return directionSections[0]?.todos[0] ?? filteredCompleted[0];
     return filteredUncompleted[0] ?? filteredCompleted[0];
-  }, [activeId, todos, filteredUncompleted, filteredCompleted, byStatus, triaged]);
+  }, [activeId, todos, filteredUncompleted, filteredCompleted, byStatus, triaged, grouping, directionSections]);
 
   // The to-do open beside the calendar: the address's, while it is there.
   const selectedTodo = calendarOn && selectedId ? todos.find((td) => td.id === selectedId) : undefined;
@@ -574,6 +608,7 @@ export function TodosView({
               options={[
                 { v: "status", label: t("todos.grouping_status") },
                 { v: "folder", label: t("todos.grouping_folder") },
+                ...(byDirection || directionPending ? [{ v: "direction" as const, label: t("todos.grouping_direction") }] : []),
               ]}
               onChange={(next) => {
                 setPref(GROUPING_KEY, next);
@@ -585,7 +620,7 @@ export function TodosView({
 
           {/* List Content */}
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-            {!todosLoaded && todos.length === 0 ? (
+            {(!todosLoaded && todos.length === 0) || (grouping === "direction" && directionPending) ? (
               <div className="flex justify-center py-16" data-testid="todos-loading">
                 <Loading />
               </div>
@@ -601,7 +636,7 @@ export function TodosView({
               >
                 {todosError}
               </Empty>
-            ) : filteredUncompleted.length === 0 && filteredCompleted.length === 0 ? (
+            ) : (filteredUncompleted.length === 0 || (grouping === "direction" && directionSections.length === 0 && directionUnlisted === 0)) && filteredCompleted.length === 0 ? (
               offline && todos.length === 0 ? (
                 <OfflineState offline={offline} ring="ring-surface" className="py-14" />
               ) : search.trim() ? (
@@ -662,7 +697,28 @@ export function TodosView({
               </div>
               ) : (
               <div className="flex flex-col gap-1">
-                {projectGroups.map((g) => (
+                {grouping === "direction" ? (
+                  <>
+                    {directionSections.map((g) => (
+                      <TodoDirectionSection
+                        key={g.d.id}
+                        direction={g.d}
+                        title={g.title}
+                        todos={g.todos}
+                        views={views}
+                        selectedId={activeTodo?.id}
+                        onSelect={openFromList}
+                        onToggleDone={toggleDone}
+                        onMenu={openRowMenu}
+                      />
+                    ))}
+                    {directionUnlisted > 0 && (
+                      <p data-testid="todos-direction-unlisted" className="px-2 pt-1 text-[12px] text-ink-3">
+                        {t("todos.direction_unlisted", { count: directionUnlisted })}
+                      </p>
+                    )}
+                  </>
+                ) : projectGroups.map((g) => (
                   <TodoProjectSection
                     key={g.key}
                     group={g}
@@ -980,6 +1036,48 @@ function HiddenWaitingLine({ count, filter, onShowAll }: { count: number; filter
     </div>
   );
 }
+
+/** One pinned direction's open to-dos (#4352): its name (书记官 for the secretary's group) and the hub's two counts on a
+ *  folding title, the to-dos in the tree's order. */
+const TodoDirectionSection = memo(function TodoDirectionSection({
+  direction,
+  title,
+  todos,
+  views,
+  selectedId,
+  onSelect,
+  onToggleDone,
+  onMenu,
+}: {
+  direction: Direction;
+  title: string;
+  todos: readonly Todo[];
+  views: ReadonlyMap<string, TodoRowView>;
+  selectedId: string | undefined;
+  onSelect: (id: string) => void;
+  onToggleDone: (todo: Todo, open?: boolean) => void;
+  onMenu: TodoRowMenuOpener;
+}) {
+  const holds = todos.some((td) => td.id === selectedId);
+  const [folded, toggle] = useFolded(`todos-direction:${direction.id}`, false, { holds });
+  return (
+    <div className="mt-1 first:mt-0" data-testid="todo-group" data-group={`direction:${direction.secretary ? "secretary" : direction.id}`}>
+      <button type="button" aria-expanded={!folded} onClick={toggle} className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-control px-2 text-left text-[12px] text-ink-2 hover:bg-hover [@media(pointer:coarse)]:min-h-11">
+        <Icon name="chevron" size={10} stroke={2.4} className="shrink-0 opacity-60 transition-transform" style={{ transform: folded ? "rotate(-90deg)" : "none" }} />
+        <Icon name={direction.secretary ? "person" : "target"} size={12} stroke={2} className="shrink-0 text-ink-3" />
+        <span className="min-w-0 flex-1 truncate font-semibold">{title}</span>
+        <DirectionCountsText counts={direction.counts} />
+      </button>
+      {!folded && (
+        <div className="flex flex-col gap-1 pl-2 pt-0.5">
+          {todos.map((todo) => (
+            <TodoListItem key={todo.id} todo={todo} view={views.get(todo.id)!} selected={selectedId === todo.id} onSelect={onSelect} onToggleDone={onToggleDone} onMenu={onMenu} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
 
 // ── Status sections (#3156) ──────────────────────────────────
 

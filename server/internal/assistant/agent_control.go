@@ -61,6 +61,9 @@ func (s *Service) toolAgentInterrupt(ctx context.Context, machine, self string, 
 	if c.SourceKind != "" && (c.Capabilities == nil || !c.Capabilities.Interrupt || then != "" && !c.Capabilities.Send) {
 		return "", fmt.Errorf("this agent can only be read: %s", c.ReadOnlyReason)
 	}
+	if stoppedAgent(c) { // read-only (#4754): nothing runs to stop, and nothing here starts it again
+		return "", fmt.Errorf("%s has already stopped and is read-only: nothing to interrupt, and nothing was sent", agentLabel(c))
+	}
 	if err := s.exitAllowed(ctx, self, am, c, then, 0); err != nil { // refused before the turn is stopped or the user asked
 		return "", err
 	}
@@ -724,4 +727,11 @@ func (s *Service) reportNow(ctx context.Context, t Todo, machine, session, kind,
 	}
 	return "Sent to your supervisor: it reads it within minutes and answers you by message. Don't wait idle for it if there is " +
 		"other work in the task; stop when you cannot go on.", nil
+}
+
+// stoppedAgent: c is an agent that has stopped and is read-only (node stopped.go, #4754): its terminal engine keeps its
+// conversation and terminal, and a message to it is refused (agent_stopped).
+func stoppedAgent(c proto.Session) bool {
+	return c.SourceKind == "" && c.Capabilities != nil && !c.Capabilities.Send &&
+		(c.Status == proto.StatusOffline || c.Status == proto.StatusInterrupted)
 }

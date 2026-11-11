@@ -331,7 +331,8 @@ xcrun simctl launch --terminate-running-process $SIM <bundle id> \
 - Messaging sources (`messaging` extension point, #2138): `MOCK_MESSAGING=1`, `GET /api/v1/messaging` lists `lark` (extension `larkext`); `/api/v1/messaging/lark/…` follows `docs/extensions/extension-messaging.md`. `scripts/mock/lark_messaging.py` reads mock `/api/v1/lark/…` and converts, applying extension display rules for encrypted external/unlocked display, recall/edit history. Settings is full extension UI `POST /api/v1/extensions/larkext/-/ui/display`; hello/health add `messaging` feature, and every `{type: lark}` push also emits `{type: messaging}`. Can combine other fixtures (`MOCK_LARK=1`, `MOCK_LARK_TRAINER=1`, `MOCK_LARK_NATIVE_OLK=1`…). `python3 scripts/mock/test_lark_messaging.py` verifies schemas and processing.
 - Hub without Lark gateway extension (#1530): default features include extension-provided `lark`, `lark_moments`; `MOCK_NO_LARK=1` removes them and `lark_attachments`, all `/api/v1/lark/…` return 404, no Lark connector. Messages, Settings › Connectors › Lark, translation's Lark chat option vanish; Lark docs/Moments links open as regular web pages.
 - Lark /agent context (#876): `MOCK_LARK_AGENT=1` turns the "Schedule Friday…" request into Lark /agent (instructions + 7 context items in `<persona-context>`, only request outside). `-openSession server/b2e4d6f8-0000-4000-8000-000000000003`, `-showContexts YES` expands context group and first item.
-- Persona sidebar: `MOCK_ASSISTANT_SIDEBAR=1` adds 36 Recent chats (above displayed 30, showing View All); first three Needs you (red), unread (blue), Working (spinner).
+- Conversations an extension opened (#3758): `MOCK_AUTO_CONVERSATIONS=1 MOCK_EXTERNAL=1` gives the Lark /agent auto chat (`-openAssistant server/b2e4d6f8-0000-4000-8000-000000000308`) a first message of context blocks and a request, and adds one opened by another extension (`…000000000310`, origin `extension`). Their rows carry the source mark and their first message "From Lark /agent" / "From an extension". UI suite `ExternalConversationsTests` (`TEST_RUNNER_PERSONA_EXTERNAL_HUB`, screenshots in `PERSONA_SHOTS`).
+- Persona sidebar: `MOCK_ASSISTANT_SIDEBAR=1` adds 36 Recent chats (above displayed 30, showing View All); first three Needs you (blue dot), unread (green dot), Working (spinner).
 - Follow latest (`ChatFollowTests`, `MOCK_LONG_HISTORY=1`): long chat opens at bottom; new replies follow when already there (Persona replies first stream via `delta`); scrolling up shows "Back to latest",
   replies don't pull you down; tapping returns to bottom and resumes following. Agent opens tested normally, Unread (`-showAsUnread YES`), saved position (`-chat.read.<session> <row id>`), and cold-start with disk cache far from end (mock `/mock/paging?on=1` mimics hub pagination, `/mock/delay?s=3` shows cache first, #597; `/mock/reset` disables both).
   `GET /mock/say?text=…&user=…&stream=1` pushes replies to all open chats. App `-showScrollState YES` reports list state via accessibility
@@ -1302,6 +1303,44 @@ How often a client reads `GET /api/v1/sessions`, and what kind of read, while it
   default By Repository grouping, which needs every row), then read the counters around the same two minutes.
 - A real hub's `traffic` journal lines count by route template, not query: there a complete list and a delta are told
   apart only by `body_bytes / count`.
+
+## Fleet soak (`server/internal/fleetsoak`, #3197)
+
+What a fleet's churn costs the hub and its manager, per minute: bytes and objects allocated, CPU time, live heap.
+For a change that claims to make the manager or the hub cheaper under load, run it on the base and on the change and
+put both in the PR.
+
+```sh
+cd server
+go run ./internal/fleetsoak -label head -minutes 20 -out <directory>
+go run ./internal/fleetsoak -label base -minutes 20 -out <directory> -tree <a worktree of the base commit>/server
+go run ./internal/fleetsoak -compare <base directory>/report.json <head directory>/report.json
+```
+
+- It builds `personad` from `-tree` and runs a throwaway hub with its manager: a home directory of its own under
+  `/tmp`, a free loopback port, and a `persona-ci-db-fleetsoak-<pid>` Postgres 18 container, all removed when it ends
+  (it needs Docker and the `postgres:18-alpine` image). Every process gets an environment made by the soak, so the
+  machine's own installation is neither read nor written.
+- The computers are played by the soak itself: it puts itself on the manager's `PATH` as `ssh`, and started that way
+  it is the node of the host asked for (`node.go`): 10 computers with 50 sessions each by default, one of them starting
+  or ending a turn every 2 s on each computer (`-machines`, `-sessions`, `-interval`). 20 WebSocket connections play
+  apps left open (`-clients`). Nodes answer every other call with `{}`: transcripts, screens and cards are not played.
+- The measured programs are the ones that ship, plus a sampler laid over `cmd/personad` at build time
+  (`go build -overlay`, `sampler.go`): every five seconds it appends the runtime's allocation and GC counters and the
+  process's CPU time to `<out>/stats/<role>-<pid>.jsonl`. The window starts after `-warmup` (a minute) and is cut into
+  whole minutes; steady numbers have their min and max close to the median.
+- The manager refreshes the official market first, as a hub in use has it (the report says how many catalog entries
+  it got; without the network the catalog is empty and the channel list cheaper than in use).
+- `<out>` also has `report.md` and `report.json`, the hub's log, CPU and allocation profiles of the window
+  (`stats/*.pprof`) and what `go tool pprof -top` says of them (`manager-alloc-cum.txt`, `manager-cpu-cum.txt`, the
+  hub's beside them).
+- Allocation per minute repeats within about a percent from run to run, so base and head can run one after the
+  other. CPU time cannot be compared that way: it follows what else the machine does and which cores the processes
+  get, by a factor of two on a laptop. For CPU, run base and head at the same time (each in its own terminal, they
+  share nothing): every minute is then the same machine for both, and `-compare` adds the head's CPU time over the
+  base's in the same minute, for the manager and for the hub. When the change leaves the hub's work as it was, the
+  hub's row shows how much is noise.
+- It ends with one line: `PASS`, `FAIL` or `TIMEOUT`.
 
 ## Live Activity screenshots (`LiveActivityShots`)
 

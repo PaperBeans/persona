@@ -184,6 +184,10 @@
     <string name="settings_ext_contributions_note">Turning one off doesn\'t reduce the extension\'s permissions; the other contributions keep working, and the extension restarts after a change.</string>
     <string name="settings_ext_permissions_note">You agreed to these when installing. If a new version asks for more, you\'ll be asked again before upgrading.</string>
     <string name="settings_ext_about_version">Version</string>
+    <plurals name="settings_ext_downloads">
+        <item quantity="one">%1$s download</item>
+        <item quantity="other">%1$s downloads</item>
+    </plurals>
     <string name="settings_ext_about_previous">Previous version</string>
     <string name="settings_ext_about_source">Source</string>
     <string name="settings_ext_about_publisher">Publisher</string>

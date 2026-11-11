@@ -454,6 +454,10 @@ func (s *Service) reviewDoneTodo(ctx context.Context, id, reason string, accepte
 	if ok && accepted && row.DoneAt != nil {
 		s.goRecordTaskOutcome(before, *row.DoneAt)
 	}
+	if t, now := s.todoNow(id); ok && now {
+		// A side conversation's task the main conversation supervised: the planning conversation hears it ended (#4669).
+		go s.taskEndedNotice(context.WithoutCancel(ctx), t, accepted, reason)
+	}
 	return ok, nil
 }
 
@@ -487,7 +491,11 @@ func (s *Service) sendToTask(ctx context.Context, t Todo, text string) (string, 
 	if len(agents) == 0 {
 		return "", errors.New("the task has no agent")
 	}
-	c := pickTaskAgent(agents)
+	live, _ := liveTaskAgents(agents)
+	if len(live) == 0 { // stopped agents are read-only (#4754): Persona's follow-ups start nothing (tasks_successor.go)
+		return "", errTaskAgentsStopped
+	}
+	c := pickTaskAgent(live)
 	if _, ok := s.device(ctx, c.MachineID); !ok {
 		return "", errors.New("its machine is offline")
 	}

@@ -214,9 +214,12 @@ struct ImageViewing: Identifiable {
 struct UserBubble: View, Equatable {
     @Environment(\.rowMemoScope) private var memoScope
     var item: Item
+    /// The extension that opened the conversation with this message (#3758): 「来自 飞书 /agent」 under it. Set by the chat
+    /// page on the conversation's first message only.
+    var external: AutoConversationSource? = nil
     /// Only the message itself: the chat page re-evaluates its body on every hub push, and without this every row on
     /// screen (and in the lazy list's buffer) ran its body again too (about 45 a push on a long Persona conversation).
-    nonisolated static func == (a: Self, b: Self) -> Bool { a.item == b.item }
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.item == b.item && a.external == b.external }
     @Environment(\.openFile) private var openFile
     @Environment(\.loadImage) private var loadImage
 
@@ -244,8 +247,13 @@ struct UserBubble: View, Equatable {
                 }
             }
             if let openFile { FileChips(paths: d.chips, open: openFile) }
-            // Came in from a channel (WeChat, the Feishu bot…): 「来自 微信」 under it.
-            if ChannelSource.possible(item.clientMsgID) { ChannelSourceLine(clientMsgID: item.clientMsgID) }
+            // Came in from a channel (WeChat, the Feishu bot…): 「来自 微信」 under it; an extension opened the conversation
+            // with it: 「来自 飞书 /agent」.
+            if ChannelSource.possible(item.clientMsgID) {
+                ChannelSourceLine(clientMsgID: item.clientMsgID)
+            } else if let external {
+                ExternalSourceLine(source: external)
+            }
             if d.cardSource != nil {
                 Text("From a card").font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
                     .accessibilityIdentifier("assistant-card-source")
@@ -310,7 +318,7 @@ struct PeerMessage: View {
             .padding(.trailing, Theme.Space.xxl)
             .chatPinned(pinKey)
             .messageLongPress(id: item.id) { card }
-            .messageActionBar(id: item.id, text: item.text ?? "", isUser: false, date: item.ts)
+            .messageActionBar(id: item.id, text: item.text ?? "", isUser: false, date: item.ts, from: from)
     }
 
     /// The message in its card (also what a long press lifts).
@@ -351,7 +359,8 @@ struct PeerMessage: View {
 /// A message just sent from this phone, before the transcript has it: drawn like a sent bubble right away, with a
 /// quiet clock while the request runs, the clock and "Sends when connected" while it waits for the network (Outbox.swift),
 /// and a red "Resend" when it failed. A long press gives an action bar like a sent message's, with Copy, Select Text and
-/// Share (#6427): one that never went out can be copied rather than typed again.
+/// Share (#6427): one that never went out can be copied rather than typed again. One only on this phone (failed or
+/// waiting) ends the bar in Delete / Don't Send, as its mark's menu does (#4626).
 struct PendingBubble: View {
     var msg: PendingMessage
     var retry: () -> Void
@@ -425,7 +434,9 @@ struct PendingBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
-        .messageActionBar(id: msg.id.uuidString, text: shown, isUser: true, date: msg.createdAt, pending: true)
+        // The bar's last item on one only on this phone (#4626): what its mark's menu says, doing the same.
+        .messageActionBar(id: msg.id.uuidString, text: shown, isUser: true, date: msg.createdAt, pending: true,
+                          delete: .of(msg, run: discard))
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }

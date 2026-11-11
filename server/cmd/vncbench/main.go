@@ -105,4 +105,3 @@ func fail(err error) {
 	fmt.Fprintln(os.Stderr, "vncbench:", err)
 	os.Exit(1)
 }
-

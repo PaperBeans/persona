@@ -120,10 +120,15 @@ func TestReadOnlyCodexResume(t *testing.T) {
 			}
 			host.reset()
 			got := resumeFile(host, cwd)
-			if tc.send {
-				if _, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "Inspect the project"}); err != nil {
-					t.Fatal(err)
+			if tc.send { // a stopped Codex takes no messages (#4754): only the user's Resume below brings it back
+				_, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "Inspect the project"})
+				if code, _ := refusalOf(t, err); code != agentStopped {
+					t.Fatalf("a message to a stopped Codex: %v", err)
 				}
+				if got := host.trace("tab.create"); len(got) != 0 {
+					t.Fatalf("opened a tab: %q", got)
+				}
+				return
 			} else {
 				res, err := request(t, n, "session.start", map[string]any{
 					"resume_session_id": startThread, "launcher": "code-alias", "permission_mode": tc.mode, "prompt": "Inspect the project",

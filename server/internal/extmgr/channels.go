@@ -244,16 +244,22 @@ func (h *Manager) marketChannels(have []channel.View) []channel.View {
 		if s.index == nil {
 			continue
 		}
+		// Few entries contribute a channel, and the catalog's item is costly (translations, permission lines, every
+		// contribution, whether this hub can install it): only the entries that do are built. The channel list is
+		// asked for every few seconds while agents work, and building the whole catalog for it was 4.4 ms and
+		// 1.1 MB a time with the official market's entries (#3197).
+		var items []CatalogItem
 		for i := range s.index.Extensions {
 			e := &s.index.Extensions[i]
-			// Few entries contribute a channel, and the catalog's item is costly (translations, permission lines, every
-			// contribution, whether this hub can install it): only the entries that do are built. The channel list is
-			// asked for every few seconds while agents work, and building the whole catalog for it was 4.4 ms and
-			// 1.1 MB a time with the official market's entries (#3197).
 			if len(e.Parsed.Contributes["channel"]) == 0 || len(e.Parsed.Items("channel")) == 0 {
 				continue
 			}
-			it := h.catalogItem(l, s, e, e.Translations())
+			items = append(items, h.catalogItem(l, s, e, e.Translations()))
+		}
+		if extension.IsOfficialMarket(s.rec.Spec) {
+			slices.SortFunc(items, officialCatalogOrder) // the catalog's order for that market
+		}
+		for _, it := range items {
 			if it.Installed != "" || len(it.Contributes["channel"]) == 0 || it.Problem != "" {
 				continue
 			}

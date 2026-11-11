@@ -6,7 +6,7 @@ import XCTest
 /// same, less what needs a conversation (Voice Chat). The iPad's + is that menu, with Photos and Files first. Against
 /// scripts/mock/mock_hub.py (PERSONA_MOCK_HUB); `-showCameraRows YES` lists Take Photo, since the simulator has no camera.
 /// TEST_RUNNER_PERSONA_SHOTS=<dir> keeps screenshots, in light and dark (`-ui.scheme`) and in the BeautifulUI style too.
-/// Voice Chat is the iPhone's alone (`VoicePlatform.phone`), as it was before.
+/// Voice Chat is in the menu on the iPad too, as it was before (`VoicePlatform.phone`: iPhone, iPad and Vision Pro, #4896).
 final class AttachMenuTests: XCTestCase {
     private var hub = ""
     private static let tab = ["-tab", "assistant", "-app.tab", "assistant"]
@@ -33,7 +33,7 @@ final class AttachMenuTests: XCTestCase {
             for scheme in schemes {
                 let app = launch(Self.persona, scheme: scheme, style: style)
                 openMenu(app)
-                for id in ["composer-menu-camera", "composer-menu-mention"] + (isPad ? [] : ["composer-menu-voice"]) {
+                for id in ["composer-menu-camera", "composer-menu-mention", "composer-menu-voice"] {
                     XCTAssertTrue(item(app, id).waitForExistence(timeout: 5), "no \(id) in the menu:\n\(app.debugDescription)")
                 }
                 XCTAssertFalse(commands(app).exists, "Quick Commands in Persona's conversation")
@@ -72,7 +72,7 @@ final class AttachMenuTests: XCTestCase {
             let quick = commands(app)
             XCTAssertTrue(quick.waitForExistence(timeout: 5), "no Quick Commands:\n\(app.debugDescription)")
             XCTAssertTrue(item(app, "composer-menu-mention").exists, "no Mention:\n\(app.debugDescription)")
-            XCTAssertEqual(item(app, "composer-menu-voice").exists, !isPad, "Voice Chat in an Agent's menu")
+            XCTAssertTrue(item(app, "composer-menu-voice").exists, "no Voice Chat in an Agent's menu")
             XCTAssertFalse(item(app, "attach-clear").exists, "the commands are not folded")
             shot("attach-menu-agent", scheme)
             quick.tap()

@@ -131,5 +131,11 @@
   "assign_checking": "メインの会話がすでに使えるか確認しています…",
   "done_no_claude_kept": "キーを保存しました。このキーで動かすには、{machine} に Claude Code をインストールする必要があります。",
   "done_no_claude_kept_any": "キーを保存しました。このキーで動かすには、コンピューターに Claude Code をインストールする必要があります。",
-  "step_devices": "コンピューター"
+  "step_devices": "コンピューター",
+  "check_hint": "URLとキーを入力すると、モデル一覧の取得と接続テストを自動で一度行います。",
+  "check_wait": "入力が止まったら確認します…",
+  "discovering": "モデル一覧を取得中…",
+  "testing": "接続をテスト中…",
+  "retry": "再試行",
+  "check_leave_url": "URL欄から移動するとチェックします。"
 }

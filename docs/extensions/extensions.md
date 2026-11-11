@@ -1042,7 +1042,7 @@ install, upgrade and uninstall its extensions. Only one official marketplace is 
 | `https://example.com/extensions/` (not ending in `.json`) | `https://example.com/extensions/persona-extensions.json` |
 | `https://example.com/v100/market.json` | That file itself |
 | `github:owner/repo`, `github:owner/repo@ref` (also accepts `https://github.com/owner/repo`, `…/tree/<branch>`) | `persona-extensions.json` at the repo root, read through the GitHub API; private repos work too. The ref can be a branch, tag or full commit SHA; omitted means the default branch |
-| `git:<address>`, `git:<address>#branch` (address is `git@host:path.git`, `ssh://…` or `https://…`; `git@host:path.git` can also omit `git:`) | The hub shallow-clones the repo into `~/.persona/extensions/markets/<marketplace id>/` and reads `persona-extensions.json` at the root; refresh does a fetch. Uses **the hub machine's own credentials** for SSH; HTTPS clones may use a token scoped to the original clone URL, without credential redirects, argv secrets or persisted tokens; ssh / https only, no prompts, 3-minute timeout. Use this for private git hosting that has no "read a single file with a token" endpoint |
+| `git:<address>`, `git:<address>#branch` (address is `git@host:path.git`, `ssh://…` or `https://…`; `git@host:path.git` can also omit `git:`) | The hub shallow-clones the repo into `~/.persona/extensions/markets/<marketplace id>/` and reads `persona-extensions.json` at the root; refresh does a fetch. Uses **the hub machine's own credentials** for SSH; HTTPS clones may use a token scoped to the original clone URL, without credential redirects, argv secrets or persisted tokens (git 2.31 or newer on the hub machine: an older git cannot take these settings from the environment, so the hub refuses the token clone and says so); ssh / https only, no prompts, 3-minute timeout. Use this for private git hosting that has no "read a single file with a token" endpoint |
 
 https and GitHub marketplaces accept https only. A private https / GitHub marketplace takes a **token** (for GitHub, a read-only fine-grained token: Contents read permission on this repo). It is stored encrypted with the manager's `secret.key`,
 sent only as `Authorization: Bearer` to the marketplace's own origin (for a GitHub marketplace, the API origin), except for the explicitly derived GHCR binding described under "OCI packages and mirrors". It is never sent to external redirects or echoed back. Token reuse and address moves retain the original HTTPS origin or GitHub owner binding.
@@ -1077,6 +1077,8 @@ sent only as `Authorization: Bearer` to the marketplace's own origin (for a GitH
 - `l10n` (optional) is the package's translations again, `{"<language>": <its l10n/<language>.json>}` (see "Translations: `l10n/`"), so
   the catalog can show them before anything is downloaded. Older hubs ignore the key. One that does not check out is left out with a warning,
   and the entry stays, in its manifest's words.
+- `icon_url` (optional, #4780) is an absolute HTTPS logo URL without account credentials, at most 2048 bytes. Clients load it anonymously and keep the existing extension mark when absent, invalid or unavailable. It is catalog metadata, not a runtime manifest or navigation icon.
+- `downloads` (optional integer, #4780) is the package download count at the publisher's snapshot. The official publisher reports GHCR **Total downloads** across all versions of that package, not Persona installs or unique users. Explicit zero is retained; absent or negative counts are unknown, not zero in the UI. Top-level `downloads_updated_at` is the RFC 3339 snapshot timestamp (official publication uses UTC seconds); an invalid timestamp is omitted.
 - `packages` are searched in order for the first whose `platforms` includes this hub (`GOOS-GOARCH`); one without `platforms` counts as usable anywhere. `url` is a path relative to the index (for GitHub and git marketplaces, a path in the repo; git marketplaces cannot escape the repo through links),
   an HTTPS address, an immutable `oci:<registry>/<repository>@sha256:<64 lowercase hex>` reference, or for GitHub marketplaces `release:<tag>/<asset name>` (downloads the Release asset through the API; private repos work too). `sha256` is required and checked after download; on mismatch it is not installed.
 - Broken entries (invalid manifest, no packages, non-https address, the same id twice) are dropped with a warning and the rest work as usual; a whole index whose `market_version` is not 1 or that has no `name` is rejected.
@@ -1107,7 +1109,26 @@ A GitHub marketplace can commit installable archives alongside its catalog: no R
 
 `CatalogItem`: `market`, `market_name`, `id`, `name` and `description` (in the request's language, from the entry's `l10n`), `version`, `publisher`, `homepage`, `tags`, `contributes` (extension point → id),
 `permissions` (a few human-readable lines, same as before install), `problem` (why it cannot be installed: no package for this hub's platform, needs a newer hub, bad marketplace signature), `installed` (installed version),
-`installed_source`, `from_this_market`, `upgradable`.
+`installed_source`, `from_this_market`, `upgradable`, and optional `icon_url`, `downloads`, `downloads_updated_at` (#4780).
+
+The same three optional metadata fields appear on installed `ExtensionView` (`GET /api/v1/extensions`) and `ExtensionDetail`
+(`GET /api/v1/extensions/{id}/-/`), resolved from that installation's exact `market:<market id>/<extension id>` origin.
+Local, built-in, removed-market, missing-entry and quarantined installations do not borrow another source's logo or count.
+A network read failure keeps the last verified snapshot; a signature failure suppresses installed metadata.
+`MarketView` also includes optional `downloads_updated_at`. The existing legacy extension routes carry the same additive fields.
+All fields can be absent on an older hub or catalog; clients must not require them, invent a count or change install permissions.
+The signed payload and envelope are stored and checked as original bytes; sorting applies only to the client projection.
+
+**Apple client integration (#4780)**: decode `icon_url` and `downloads_updated_at` as optional strings and `downloads` as an optional
+64-bit integer in market items, installed summaries and details. Keep catalog order from the hub; use the same anonymous HTTPS image
+loader and generic-mark fallback in each location. Do not attach hub, market or extension credentials to the logo request. A new URL
+can retry after an earlier image failed. No new feature flag, route or installation permission is needed.
+
+**Logo transport (#4780)**: no hub URL proxy or persistent image cache is added. Public catalog logos follow the existing anonymous
+HTTPS `url` image boundary (see "Pictures through the hub (`ui.image`, #2301)"), not the authenticated `ui.image`/`ref` path meant
+for private extension data. Web uses lazy asynchronous image decoding and no referrer; native clients use their existing image cache.
+This keeps third-party fetches out of the hub (no new SSRF or egress path) and adds no cold web dependency. Clients may need internet
+access to show the logo; offline or blocked hosts keep the generic mark. Public sharing's image-disabled CSP is unchanged.
 
 **Who can do it**: full-access devices can register / delete marketplaces; when a preview comes from a marketplace they can install and upgrade with it (`POST /api/v1/extensions/-/install`, `…/{id}/-/upgrade`, with the permission summary as usual),
 and can roll back and uninstall extensions whose source is recorded as `market:<marketplace id>/<extension id>`. Why: a full-access device can already run arbitrary commands on every computer through an Agent, so opening up marketplaces does not widen the trust boundary;
@@ -1130,7 +1151,7 @@ Older hubs have none of this: they preview synchronously as before and wait for 
 - **No duplicates**: if the user had already added the same repo by hand (a `github:` / `https://github.com/…` / `git:` address, with or without a branch, different case), it is not added again and that one counts as the official marketplace;
   while the official marketplace is there, adding or moving another marketplace to the same repo in any form is refused. Address moves recheck exact-address and official-identity uniqueness under the final lock after fetching the target.
 - **Pinned signature**: every official alias uses the compiled-in key, including manual re-registration and cached catalogs. Unknown saved owner pins remain unchanged and isolated; there is no trust endpoint. Release integration fixes the official key id at `3cce0f471911a1cf` without rotating it for embedded signatures. A shipped update can explicitly list recognized retired official pins in `extension.Official.PreviousSigningKeys`: only exact matches are replaced, across all official aliases. Removed markets stay removed, unsigned registrations and unknown pins are not migrated, and a failed write leaves loading retryable. The retained old envelope or legacy detached payload cannot authorize installation until a complete new envelope verifies against the new pin.
-- **Order**: the official marketplace comes first in `markets` and in the catalog, the rest by registration time (all ordering is done on the hub; all three clients show the hub's order). The web (settings and `/admin`) and Android show an **Official** badge based on `official: true`; iOS / macOS do not yet (separate task).
+- **Order**: the official marketplace comes first in `markets` and in the catalog, the rest by registration time. Within the official catalog, packages sort by `downloads` descending, then case-insensitive displayed name, then id (#4780); missing counts sort as zero, so a legacy catalog sorts by name. Other marketplaces keep their publisher's entry order. All ordering is done on the hub, and clients keep that order. The web (settings and `/admin`) and Android show an **Official** badge based on `official: true`; iOS / macOS do not yet (separate task).
 - **Name** (#5017): the official marketplace is always displayed as **Official extensions** (Japanese: 公式拡張機能, the shipped Japanese label), not the index's `name` (which names the publisher).
   The hub fills `markets[].name` and the catalog's `market_name` in the owner's interface language (`marketName`, `extension_market_catalog.go`); when the web, Android, iOS / macOS see `official: true`, they localize it again,
   so it also works with old hubs. Only display changes: spec, index, signature, and market id remain unchanged; `personad extension market list` uses this name too.

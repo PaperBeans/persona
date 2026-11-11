@@ -178,6 +178,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		s.push(ctx, Notification{Subtitle: "Persona", DeviceID: machine, SessionID: self, Title: a.Title, Body: a.Body, Asked: true})
 		// The Feishu bot and the channels with pushes on (channels_handler.go).
 		s.channelsPushed(machine, self, a.Title, a.Body)
+		s.recordNotify(ctx, machine, self) // an interruption (north_star.go)
 		s.promoteSupervision(self)
 		return "Notification sent.", nil
 	case "conversations_list":
@@ -262,6 +263,15 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if strings.TrimSpace(a.Text) == "" {
 			return "", fmt.Errorf("text is empty")
 		}
+		if stoppedAgent(c) { // read-only (#4754): nothing here starts it again
+			if exitText(a.Text) {
+				return fmt.Sprintf("%s has already stopped: nothing was sent.", agentLabel(c)), nil
+			}
+			return "", fmt.Errorf("%s has stopped and is read-only: its conversation and terminal stay, it takes no messages, "+
+				"and nothing here starts it again. Read it with agent_read; to go on, start a new agent with agent_start in its "+
+				"directory (with the task when it worked on one) and give it what it needs. Only the user can resume it, with "+
+				"Resume on its terminal page. Nothing was sent", agentLabel(c))
+		}
 		atts, err := cleanAttachments(a.Attachments)
 		if err == nil {
 			atts, err = s.checkAttachments(ctx, machine, self, atts)
@@ -319,8 +329,9 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			}
 			return fmt.Sprintf("Sent to %s on %s.", agentLabel(c), am.Name) + handed.said() + task.sent(ctx, s, a.Text), nil
 		}
-		// Not running (a finished task's agent is closed: hub tasks_close.go): its node resumes it first, which can
-		// take minutes and goes on if this call stops waiting.
+		// Not running and not read-only: a branch nothing has started yet (node fork.go), or a node from before #4754
+		// that still resumes a stopped agent. Its node starts it first, which can take minutes and goes on if this call
+		// stops waiting.
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
 		if err := s.call(sctx, am.ID, DeviceSessionSend, params, nil); err != nil {

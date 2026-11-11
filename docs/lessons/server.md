@@ -1856,7 +1856,10 @@ same spread, and the Mac's `sshd-session` already has TCP_NODELAY (lsof `-T f`: 
 - Test the cheap condition on the raw entry first (`len(e.Parsed.Contributes["channel"])`, then its items), and build
   the ones that pass with the function the full list uses (`catalogItem`): 38 µs and 22 KB. Sharing the builder is what
   keeps the two from drifting; a second, slimmer builder would have to track every later change to names, problems
-  and install state.
+  and install state. It happened while this was in review: the catalog began to list the official market's entries
+  most downloaded first (#4909), and the channel list had to keep that order. The comparison with the old path caught
+  it once the test had an official market; the order is a named function both use (`officialCatalogOrder`), a total
+  order, so sorting only the entries kept gives the order the whole catalog has.
 - No cache, so nothing to invalidate when a market is refreshed, an extension installed or the language changed. A
   cache would have saved the remaining 38 µs and cost a stale channel list on any missed invalidation.
 - Prove it against the old path kept in the test, over every kind of entry the filter tells apart (installed, no
@@ -1877,3 +1880,39 @@ The hub copies sessions by value (decorated lists, readers that keep rows), and 
 One `int` took a 1,528-byte `Session` to 1,536, and those readers went 5 to 12% over. Small fields fit in the padding instead
 (between the bools and the next 8-byte field): check the layout with `reflect` field offsets and keep the size unchanged.
 A new field type also needs wire samples in `session_wire_test.go`.
+
+## Fleet events: bytes checked again on the bus, every machine built to read one (2026-11-12, #3197)
+
+Measured with the fleet soak (`docs/operations/testing.md` "Fleet soak": 10 computers x 50 sessions, a change per
+computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a minute; the shares below are of those.
+
+- `publishList` and `tellLive` handed `Tell` the bytes `json.Marshal` had just written as `json.RawMessage`, so the
+  bus's envelope encoder checked, compacted and copied each list again: 9.6% of the manager's CPU. Bytes that are
+  `json.Marshal`'s go as `rpc.Marshaled`. Prove the wire, not the type: write every told value both ways and compare
+  the lines (`TestFleetEventsGoOutAsTheSameLine`), with HTML characters, U+2028, control characters and invalid UTF-8
+  in the rows, and a list that does not encode (a time past the year 9999), which still goes out as `null`.
+- An allocation ceiling taken with the GC off cannot see a copy that lands in a pooled buffer. Told either way, a
+  200-session list allocated the same 663 KB once json's encoder had grown its `sync.Pool` buffers; in a busy manager
+  a GC empties those pools every few lists. Take such a bound cold: two `runtime.GC()` calls before each run (the pool
+  has two generations) and none during it. The two ways are then 708,868 and 1,224,668 bytes, to the byte
+  (`toldAllocation`), and a second test keeps the old way failing the same limit.
+- A lookup that builds the collection pays for every element's derived fields. `fleetMachine(id)` built every
+  machine's summary (`Devices.List`: each one's trust from all its paths, whether it is reachable) to read one, several
+  times for each list a node sends: 5.2% of the manager's allocation. Ask the owner for the one (`Devices.Summary`,
+  8 bytes where the list of ten was 4,080), build it with the function the list uses, and compare the two in every
+  state the list can be in: before the first regroup, with absorbed and derived machines, and while the entries and
+  the listed order disagree (`TestSummaryIsListsEntry`).
+- The micro benchmarks did not show either share: the fake hub writes no bus line and the fake devices' list is free.
+  A benchmark of a path has to end where production ends (`lineHub` writes the line as `BusHub.Tell` does), and the
+  shares come from profiles of the real programs: the soak lays a sampler over `cmd/personad` at build time
+  (`go build -overlay`), so nothing in the shipped program changes to measure it.
+- CPU time per minute moved by a factor of two and more with the machine's state (an Apple Silicon Mac moves a
+  process between fast and slow cores; a whole run on the slow ones used 3.5 s a minute for the work that took 1.7 s
+  on a quiet minute before), while bytes allocated per minute stayed within 1.5% and repeated within 0.1% between
+  runs. Soaks run one after the other said -3%, +68% and +30% for three changes that each save CPU; even the same
+  function's samples cannot be compared across runs, since code that copies memory slowed 2.3 times where a `write`
+  slowed 1.06. Dividing by the hub's CPU time in the same minute helped, and was still 3 points apart between two
+  sessions. What worked was running the trees at the same time, each with its own hub, manager and database: every
+  minute is then the same machine for all of them, and the head's CPU time over the base's in the same minute came
+  out at 0.943 with every one of the 20 minutes below 1, the unchanged hub's at 0.983 (`pairedCPU`). Measure a noisy
+  quantity against a reference that sees the same noise at the same moment.

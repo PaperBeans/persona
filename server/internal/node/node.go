@@ -164,10 +164,12 @@ type Node struct {
 	cx        codexCards      // Codex questions and approvals listed to the hub (codexask.go)
 	kept      map[string]bool // sessions always listed (node.configure keep_sessions)
 	forked    map[string]bool // sessions "Branch to new chat" made (fork.go): listed however short they are
-	starts    startLog        // sessions starting in the background (starting.go)
-	ups       uploads         // files arriving from the phone (upload.go)
-	sysOnce   sync.Once       // system: read once (metrics.go)
-	sys       proto.System
+	// freshForks: branches nothing has started yet, which a message may start (stopped.go); a stopped agent may not.
+	freshForks map[string]bool
+	starts     startLog  // sessions starting in the background (starting.go)
+	ups        uploads   // files arriving from the phone (upload.go)
+	sysOnce    sync.Once // system: read once (metrics.go)
+	sys        proto.System
 
 	// usageRetried: when a conversation's message was last sent again after its transcript's usage was repaired
 	// (assistant_usage.go): once in a while at most. Under mu; nil until the first.
@@ -650,7 +652,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	if n.codexBlocked(p.ResumeSessionID) && devicewire.IsSessionStart(method) {
 		return nil, refusal("identity_conflict", "会话 ID 与另一来源重复，不能恢复", nil)
 	}
-	if devicewire.IsSessionStart(method) && n.externalCodex(p.ResumeSessionID) && !n.codexResumable(p.ResumeSessionID) { // codex_resume.go
+	if devicewire.IsSessionStart(method) && n.externalCodex(p.ResumeSessionID) && !n.codexResumable(withStartHost(ctx, p.Host), p.ResumeSessionID) { // codex_resume.go
 		return nil, refusal("codex_read_only", "外部 Codex 会话只能接入原 app-server，不能用启动器恢复", nil)
 	}
 	if n.externalCodex(p.SessionID) {
@@ -943,6 +945,9 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	case "session.start.options":
 		return n.workSessionOptions(ctx, p.Name, p.ConfiguredAgent, "", p.Configured, true)
 	case "session.start", devicewire.MethodStartWorkSession:
+		if p.ResumeSessionID != "" && p.Host == "" {
+			p.Host = n.startKind(n.withResumeHost(ctx, p.ResumeSessionID))
+		}
 		var work workStartOptions
 		if method == devicewire.MethodStartWorkSession {
 			if p.ResumeSessionID != "" {
@@ -1033,8 +1038,14 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			execution: modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Ultracode: p.Ultracode, SecretTicket: p.SecretTicket}}
 		if p.ResumeSessionID != "" {
 			r = n.fillResume(p.ResumeSessionID, r) // what it ran with, for what the start leaves out (retire.go)
+			// The user's Resume (the only way a stopped agent runs again, #4754): in the shell it left when that is
+			// still there (stopped.go).
+			ctx = n.inKeptTerminal(ctx, p.ResumeSessionID, r.cwd)
 		}
 		s, err := n.start(ctx, r.cwd, r.launcher, p.Prompt, p.ResumeSessionID, p.WorkspaceID, r.mode, r.effort, r.tab, "", p.AgentType, r.execution)
+		if err == nil && p.ResumeSessionID != "" {
+			n.forkStarted(p.ResumeSessionID)
+		}
 		return n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation)
 	case "session.fork": // "Branch to new chat" (fork.go)
 		id, err := n.fork(ctx, p.SessionID, p.AtItemID)
@@ -1233,7 +1244,11 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		return n.terminalWatch(ctx, p.SessionID, a.Control)
 	case "panes.list": // the terminal browser: every workspace, tab and pane, agent or shell (panes.go)
 		n.configured()
-		return n.listPanes(ctx)
+		res, err := n.listPanes(ctx)
+		if err == nil {
+			n.paneForegrounds(ctx, &res)
+		}
+		return res, err
 	case "panes.new": // an explicit "New terminal" from the browser: a shell tab in a workspace (panes.go)
 		var a struct {
 			Kind        string `json:"kind"`
@@ -1241,6 +1256,13 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		}
 		_ = json.Unmarshal(params, &a)
 		return n.newShell(ctx, a.Kind, a.WorkspaceID)
+	case "panes.close_finished": // the user's "Close finished terminals" (stopped.go, #4754)
+		var a struct {
+			Panes   string `json:"panes"`
+			Preview bool   `json:"preview"`
+		}
+		_ = json.Unmarshal(params, &a)
+		return n.closeFinished(ctx, a.Panes, a.Preview)
 	case "panes.close":
 		return ok(n.closePane(ctx, p.Pane))
 	case "panes.split":

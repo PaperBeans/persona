@@ -131,5 +131,11 @@
   "assign_checking": "正在看主对话现在能不能用…",
   "done_no_claude_kept": "Key 存好了；要用它，还得先在 {machine} 上装 Claude Code。",
   "done_no_claude_kept_any": "Key 存好了；要用它，还得先在电脑上装 Claude Code。",
-  "step_devices": "电脑"
+  "step_devices": "电脑",
+  "check_hint": "填好地址和 Key 后，会自动获取模型列表并测试一次连接。",
+  "check_wait": "停下来就开始检查…",
+  "discovering": "正在获取模型列表…",
+  "testing": "正在测试连接…",
+  "retry": "重试",
+  "check_leave_url": "离开地址输入框后开始检查。"
 }

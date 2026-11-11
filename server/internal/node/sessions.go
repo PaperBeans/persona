@@ -269,6 +269,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 	n.markInterrupted(out[from:], seen) // the restart cut these off (#1917)
 	for i := from; i < len(out); i++ {
 		n.decorateIn(&out[i], pass)
+		n.markStopped(&out[i]) // read-only (stopped.go, #4754)
 	}
 	n.listRows.Store(int32(max(peak, len(out))))
 	// Terminal-owned Codex parents were already seen before history was added: over the whole list, before any row goes.

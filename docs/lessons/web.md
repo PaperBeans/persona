@@ -10,6 +10,14 @@ session. Give all mixed actions one synchronous admission guard, fence late repl
 owner, and exercise both the legacy row and structured choices with a real browser. Load the extra controls lazily;
 the collapsed tray does not need their code on the first screen.
 
+## Bound the navigation range, not only transcript bodies (#4836)
+
+A complete lightweight position index can still render hundreds of marks while the transcript loads only two turns.
+Expose its latest 50 positions first, preserve the full-history ordinal offset, and extend the range when backward
+transcript pages reach earlier inputs. Capture the initial loaded boundary separately: a restored large cache must
+not silently change the initial range, and metadata arrival or hovering must not download old bodies. Test the real
+main conversation as well as session pages with hundreds of genuine inputs and interleaved automated records.
+
 ## Viewport ownership must not create a second hover-width peak (#4792)
 
 The user-input rail's viewport-current identity is separate from the pointer or keyboard preview. Apply the existing

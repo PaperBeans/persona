@@ -40,6 +40,7 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 		}
 		v.unknown = v.unknown || child.unknown || child.unparsed && larkCLIRe.MatchString(cmd)
 		v.cliWrite = v.cliWrite || child.cliWrite
+		v.unread = append(v.unread, child.unread...)
 	}
 	for _, g := range gates {
 		for _, name := range g.Secret {
@@ -185,6 +186,7 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 			}
 			if !ok {
 				v.other, v.unknown = true, true
+				v.unread = append(v.unread, gate)
 				continue
 			}
 			c.Gate = gate

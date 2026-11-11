@@ -3,6 +3,7 @@ package extmgr
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/channel"
@@ -74,6 +75,18 @@ func mixedMarkets(t *testing.T, lang i18n.Lang) *Manager {
 		with(marketManifest("is-feishu", channel.Feishu), nil), // an id the list has already
 		with(marketManifest("renamed", "renamedchat"), func(e *extension.MarketEntry) { e.Replaces = "old-name" }),
 	)
+	// The official market lists its entries most downloaded first, then by name: not the order of its index.
+	putMarket(h, "official", 9, extension.SigSigned,
+		downloaded(with(marketManifest("few-downloads", "fewchat"), nil), 5),
+		downloaded(with(marketManifest("shared-low", "sharedchat"), nil), 1), // loses sharedchat to shared-high, listed before it
+		downloaded(with(marketManifest("plain-popular"), nil), 10000),
+		with(marketManifest("no-count", "nocountchat"), nil),
+		downloaded(with(marketManifest("b-name", "bchat"), nil), 50),
+		downloaded(with(marketManifest("a-name", "achat"), nil), 50),
+		downloaded(with(marketManifest("shared-high", "sharedchat", "highchat"), nil), 100),
+		downloaded(with(marketManifest("most-downloads", "mostchat"), nil), 900),
+	)
+	makeOfficial(t, h, "official")
 	putMarket(h, "second", 2, extension.SigUnsigned,
 		with(marketManifest("again", "chatone", "chatsix"), nil), // chatone again, from a later market
 		with(marketManifest("plain-too"), nil),
@@ -118,48 +131,67 @@ func TestMarketChannelsAreTheCatalogs(t *testing.T) {
 			t.Errorf("market channel: %+v", v)
 		}
 	}
-	want := []string{"chatone/one-chat/first", "chattwo/two-chats/first", "plainchat/untranslated/first", "oddchat/bad-translations/first",
+	want := []string{"mostchat/most-downloads/official", "sharedchat/shared-high/official", "highchat/shared-high/official",
+		"achat/a-name/official", "bchat/b-name/official", "fewchat/few-downloads/official", "nocountchat/no-count/official",
+		"chatone/one-chat/first", "chattwo/two-chats/first", "plainchat/untranslated/first", "oddchat/bad-translations/first",
 		"validchat/one-valid-item/first", "renamedchat/renamed/first", "chatsix/again/second"}
 	if !reflect.DeepEqual(ids, want) {
 		t.Errorf("market channels:\n got %q\nwant %q", ids, want)
 	}
-	if got := h.marketChannels(haves[1]); got[0].Name != "Example one-chat (en)" || got[2].Name != "Example untranslated" {
-		t.Errorf("names: %q, %q", got[0].Name, got[2].Name)
+	if got := h.marketChannels(haves[1]); got[7].Name != "Example one-chat (en)" || got[9].Name != "Example untranslated" {
+		t.Errorf("names: %q, %q", got[7].Name, got[9].Name)
 	}
 	if (&Manager{}).marketChannels(nil) != nil {
 		t.Error("a manager without extensions has market channels")
 	}
 }
 
-// The catalog itself is unchanged by being built entry by entry: the items a search and a market filter give are
-// the ones they gave, and every entry's item is the one marketChannels builds for it.
+// The catalog itself is unchanged by being built entry by entry: every market's items are the ones catalogItem
+// builds, in the catalog's order (the official market's most downloaded first), and a search and a market filter give
+// the items they gave.
 func TestCatalogItemsAreTheCatalogs(t *testing.T) {
 	h := mixedMarkets(t, "ja")
 	all := h.catalog("", "")
-	if len(all) != 18 {
-		t.Fatalf("%d catalog items, want 18", len(all))
+	if len(all) != 26 {
+		t.Fatalf("%d catalog items, want 26", len(all))
 	}
 	var built []CatalogItem
 	for _, s := range h.marketStates() {
 		if s.index == nil {
 			continue
 		}
+		var items []CatalogItem
 		for i := range s.index.Extensions {
 			e := &s.index.Extensions[i]
-			built = append(built, h.catalogItem(h.userLang(), s, e, e.Translations()))
+			items = append(items, h.catalogItem(h.userLang(), s, e, e.Translations()))
 		}
+		if extension.IsOfficialMarket(s.rec.Spec) {
+			slices.SortFunc(items, officialCatalogOrder)
+		}
+		built = append(built, items...)
 	}
 	if !reflect.DeepEqual(built, all) {
 		t.Errorf("entry by entry:\n got %+v\nwant %+v", built, all)
 	}
-	if got := h.catalog("two-chats", ""); len(got) != 1 || got[0].ID != "two-chats" || !reflect.DeepEqual(got[0], all[3]) {
+	byID := map[string]CatalogItem{}
+	var ids []string
+	for _, it := range all {
+		byID[it.Market+"/"+it.ID] = it
+		ids = append(ids, it.ID)
+	}
+	if want := []string{"plain-popular", "most-downloads", "shared-high", "a-name", "b-name", "few-downloads", "shared-low", "no-count"}; !reflect.DeepEqual(ids[:8], want) {
+		t.Errorf("the official market's order: %q, want %q", ids[:8], want)
+	}
+	if got := h.catalog("two-chats", ""); len(got) != 1 || !reflect.DeepEqual(got[0], byID["first/two-chats"]) {
 		t.Errorf("search: %+v", got)
 	}
-	if got := h.catalog("", "second"); len(got) != 2 || !reflect.DeepEqual(got, all[15:17]) {
+	if got := h.catalog("", "second"); len(got) != 2 || !reflect.DeepEqual(got[0], byID["second/again"]) || !reflect.DeepEqual(got[1], byID["second/plain-too"]) {
 		t.Errorf("one market: %+v", got)
 	}
-	if all[2].Installed == "" || all[4].Problem == "" || all[5].Problem == "" || all[17].Problem == "" || all[1].Problem != "" {
-		t.Errorf("installed and problems: %+v", all)
+	if byID["first/has-already"].Installed == "" || byID["first/other-platform"].Problem == "" || byID["first/needs-newer-hub"].Problem == "" ||
+		byID["refused/unsigned-chat"].Problem == "" || byID["first/one-chat"].Problem != "" || byID["official/most-downloads"].Problem != "" ||
+		byID["official/most-downloads"].Downloads == nil || *byID["official/most-downloads"].Downloads != 900 {
+		t.Errorf("installed, problems and downloads: %+v", all)
 	}
 }
 
