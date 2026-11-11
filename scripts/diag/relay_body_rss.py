@@ -3,7 +3,8 @@
 takes for it and how long it keeps it (issue #3199, docs/lessons/server.md).
 
 Everything it starts is its own and is removed at the end:
-  - a Postgres 18 container named persona-ci-db-relay-rss-<random> (unless --database-url names a server);
+  - a Postgres 18 container named persona-ci-db-relay-rss-<random> (unless --database-url names a server, as when
+    the script itself runs in a Linux container);
   - for each run a fresh database there and a fresh directory under /tmp that is both HOME and PERSONA_HOME's parent
     (short on purpose: the hub's edge needs Unix socket paths under 104 bytes), so the run never reads or writes the
     real ~/.persona, whatever the caller's environment says;
@@ -46,6 +47,7 @@ import sys
 import tempfile
 import threading
 import time
+from urllib.parse import urlsplit, urlunsplit
 
 ROUTE = "/api/v1/assistant/conversations"
 MACHINE = "relay-rss-no-such-machine"
@@ -88,6 +90,23 @@ def process_table(text):
         if len(parts) >= 3 and parts[0].isdigit() and parts[1].isdigit() and parts[2].isdigit():
             table[int(parts[0])] = (int(parts[1]), int(parts[2]), parts[3] if len(parts) > 3 else "")
     return table
+
+
+def read_process_table():
+    """Every process as {pid: (ppid, RSS KiB or 0, args)}: from /proc on Linux (a container's ps may know no such
+    columns), from ps elsewhere."""
+    if sys.platform.startswith("linux"):
+        table = {}
+        for entry in Path("/proc").iterdir():
+            if entry.name.isdigit():
+                try:
+                    stat = (entry / "stat").read_text()
+                    args = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+                    table[int(entry.name)] = (int(stat.rsplit(")", 1)[1].split()[1]), 0, args)
+                except (OSError, ValueError, IndexError):
+                    pass  # gone meanwhile
+        return table
+    return process_table(subprocess.run(["ps", "-axo", "pid=,ppid=,rss=,args="], capture_output=True, text=True, timeout=20).stdout)
 
 
 def descendants(table, root):
@@ -237,7 +256,7 @@ class Postgres:
     """A Postgres 18 container of this run's own (as scripts/ci/server.sh makes one), or a server given by URL."""
 
     def __init__(self, url):
-        self.url, self.container = url, None
+        self.url, self.container, self.tag = url, None, secrets.token_hex(3)
 
     def start(self):
         if self.url:
@@ -256,11 +275,19 @@ class Postgres:
         self.url = f"postgres://persona:ci-only@127.0.0.1:{port}/persona?sslmode=disable"
 
     def database(self, name):
-        """A fresh database's URL in the container; a server given by URL is used as it is."""
-        if not self.container:
+        """A fresh database's URL: in the container, or in the server given by URL when psql is here to make it. Without
+        psql that URL's own database is used as it is (one run)."""
+        name = f"{name}_{self.tag}"
+        create = ["-v", "ON_ERROR_STOP=1", "-c", f'CREATE DATABASE "{name}"']
+        if self.container:
+            docker("exec", self.container, "psql", "-U", "persona", "-d", "persona", *create)
+        elif shutil.which("psql"):
+            res = subprocess.run(["psql", self.url, *create], capture_output=True, text=True, timeout=60)
+            if res.returncode != 0:
+                raise Failed(f"psql could not make a database: {res.stderr.strip()[:200]}")
+        else:
             return self.url
-        docker("exec", self.container, "psql", "-U", "persona", "-d", "persona", "-v", "ON_ERROR_STOP=1", "-c", f'CREATE DATABASE "{name}"')
-        return self.url.replace("/persona?", f"/{name}?")
+        return urlunsplit(urlsplit(self.url)._replace(path="/" + name))
 
     def remove(self):
         if self.container:
@@ -314,7 +341,7 @@ def post(port, token, body, chunked):
 
 def stop_hub(proc, pids_before):
     """SIGTERM to the edge (it releases its slot, which stops the manager), then whatever is left of its tree."""
-    table = process_table(subprocess.run(["ps", "-axo", "pid=,ppid=,rss=,args="], capture_output=True, text=True, timeout=20).stdout)
+    table = read_process_table()
     tree = {pid: table[pid][2] for pid in descendants(table, proc.pid) | (set(pids_before) & set(table))}
     if proc.poll() is None:
         proc.send_signal(signal.SIGTERM)
@@ -328,7 +355,7 @@ def stop_hub(proc, pids_before):
         pass
     proc.wait(timeout=30)
     time.sleep(0.5)
-    table = process_table(subprocess.run(["ps", "-axo", "pid=,ppid=,rss=,args="], capture_output=True, text=True, timeout=20).stdout)
+    table = read_process_table()
     for pid, args in tree.items():  # one that left the process group; the same command still, so the same process
         if pid in table and table[pid][2] == args:
             try:
@@ -358,7 +385,7 @@ def run_once(label, binary, pg, body, args, name):
     try:
         wait_for("the hub's health", 120, lambda: get(port, "/api/v1/health", token)[0] == 200, proc)
         wait_for("the built-in manager", 180, lambda: get(port, "/api/v1/assistant/capabilities", token)[0] == 200, proc)
-        table = process_table(subprocess.run(["ps", "-axo", "pid=,ppid=,rss=,args="], capture_output=True, text=True, timeout=20).stdout)
+        table = read_process_table()
         slot, manager, edge = pick_processes(table, proc.pid)
         if manager is None:
             raise Failed("no manager process among the hub's children")
@@ -468,7 +495,8 @@ def main():
     parser.add_argument("--settle", type=float, default=60, help="seconds after the answer for the last reading (default 60)")
     parser.add_argument("--interval", type=float, default=0.05, help="seconds between RSS samples (default 0.05)")
     parser.add_argument("--env", action="append", default=[], metavar="KEY=VALUE", help="an environment variable for the hub (GODEBUG=…)")
-    parser.add_argument("--database-url", help="use this Postgres database instead of a container (one run only: it is not emptied)")
+    parser.add_argument("--database-url", help="a Postgres server to use instead of a container (inside a container, say); each run "
+                        "gets a database of its own there when psql is installed, else the URL's own, for one run")
     parser.add_argument("--json", help="write every run's numbers (KiB) to this file")
     parser.add_argument("--logs", metavar="DIR", help="copy every run's hub.log (the hub's and the manager's output) here")
     parser.add_argument("--keep-failed", action="store_true", help="keep a failed run's directory and hub.log")
@@ -481,8 +509,8 @@ def main():
             parser.error(f"{path} is not an executable")
     if any("=" not in kv for kv in args.env):
         parser.error("--env takes KEY=VALUE")
-    if args.database_url and (args.rounds > 1 or len(args.binary) > 1):
-        parser.error("--database-url holds one run; leave it out to compare builds or run rounds")
+    if args.database_url and (args.rounds > 1 or len(args.binary) > 1) and not shutil.which("psql"):
+        parser.error("--database-url without psql holds one run; install psql or leave it out to compare builds or run rounds")
     if args.rounds < 1 or args.posts < 1 or args.interval <= 0 or args.body_mib <= 0 or min(args.settle, args.warmup, args.gap) < 0:
         parser.error("--rounds and --posts are at least 1, --interval and --body-mib above 0, the waits not negative")
 

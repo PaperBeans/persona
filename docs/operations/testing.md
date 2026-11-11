@@ -1285,6 +1285,10 @@ What a large request body costs the hub's slot and the manager it is relayed to,
   with its own directory under `/tmp` as `HOME` and `PERSONA_HOME` and its own database in a `postgres:18-alpine`
   container named `persona-ci-db-relay-rss-<random>`; it removes all of them at the end. It never reads the real
   `~/.persona`, whatever the caller's environment says. Docker is the only thing it needs besides the binaries.
+  With `--database-url <server>` it uses that Postgres server instead of a container (each run gets a database of
+  its own there when `psql` is installed): that is how it runs inside a Linux container, next to a Postgres one
+  (`docker run --network container:<postgres container> … python3 relay_body_rss.py --database-url …`, with
+  linux binaries mounted in).
 - Each run posts a 22.4 MB JSON body (16 MiB as one image's base64, `--body-mib`) to
   `POST /api/v1/assistant/conversations` for a machine that does not exist: the hub relays the whole body, the manager
   decodes the whole body and answers 400, and no conversation starts. It reads each process's RSS just before the

@@ -59,6 +59,22 @@ class RelayBodyRSSTests(unittest.TestCase):
         # Another hub's processes are never taken for this one's.
         self.assertEqual(rss.pick_processes(table, 103), (103, None, False))
 
+    def test_process_table_of_this_machine(self):
+        table = rss.read_process_table()
+        me = __import__("os").getpid()
+        self.assertIn(me, table)
+        self.assertEqual(table[me][0], __import__("os").getppid())
+        self.assertIn("test_relay_body_rss", table[me][2] + " test_relay_body_rss")  # args read without error
+
+    def test_database_per_run(self):
+        pg = rss.Postgres("postgres://persona:secret@127.0.0.1:5432/persona_test?sslmode=disable")
+        original = rss.shutil.which
+        try:
+            rss.shutil.which = lambda name: None  # no psql: the URL as it is
+            self.assertEqual(pg.database("relay_rss_0_0"), pg.url)
+        finally:
+            rss.shutil.which = original
+
     def test_sampler_readings(self):
         sampler = rss.Sampler([7], 0.05)
         sampler.samples = [(10.0, {7: (100, 60)}), (10.5, {7: (400, 300)}), (11.2, {7: (300, 200)}), (12.4, {7: (120, 70)}), (13.0, {})]
@@ -91,7 +107,9 @@ class RelayBodyRSSTests(unittest.TestCase):
                           ["--binary", sys.executable, "--rounds", "0"],
                           ["--binary", sys.executable, "--env", "GODEBUG"],
                           ["--binary", sys.executable, "--database-url", "postgres://x", "--rounds", "2"]):
-            result = subprocess.run([sys.executable, script, *arguments], capture_output=True, text=True, timeout=60)
+            # No psql on this PATH: a server given by URL then holds one run.
+            result = subprocess.run([sys.executable, script, *arguments], capture_output=True, text=True, timeout=60,
+                                    env={"PATH": "/nonexistent"})
             self.assertEqual(result.returncode, 2, arguments)
             self.assertNotIn("PASS", result.stdout)
 
