@@ -2,6 +2,8 @@ package persona.feature.machines
 
 import persona.core.contracts.*
 import persona.core.contracts.api.*
+import persona.core.domain.sort.AgentSession
+import persona.core.domain.sort.buildAgentList
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.*
@@ -20,6 +22,24 @@ class MachinesTest {
         assertEquals("1.0 GB/s", MetricFormat.rate(1023.97 * 1024 * 1024, en))
         assertEquals("16.0 GB", MetricFormat.bytes(16L shl 30, en))
         assertEquals("2,048.0 TB", MetricFormat.bytes(2048.0 * (1L shl 40), en))
+    }
+
+    /** A lead with agents it created (#4494): the card counts what the Agents list counts for the computer. */
+    @Test fun theCardCountsTheSessionsTheAgentsListCounts() {
+        fun runtime(id: String, parent: String? = null, state: String = "working") = Session("machine", id, state = state,
+            status = if (state == "needs_you") "blocked" else state, sourceKind = "runtime", agent = "claude",
+            isSubagent = parent != null, parentSessionId = parent)
+        val codexSubagent = Session("machine", "thread", state = "working", status = "working", sourceKind = "codex_app_server",
+            agent = "codex", parentThreadId = "parent-thread")
+        val sessions = listOf(runtime("lead"), runtime("review", "lead"), runtime("check", "lead"), runtime("deploy", "lead", "needs_you"),
+            codexSubagent, Session("machine", "plain", state = "working", status = "working"))
+        assertEquals(listOf("deploy", "lead", "plain"), machineSessions(sessions, "machine").map { it.sessionId }.sorted())
+        val list = buildAgentList(sessions.map(::AgentSession), listOf(Machine("machine", online = true)))
+        val counted = machineSessions(sessions, "machine")
+        val computer = list.machines.single()
+        assertEquals(computer.sessionCount, counted.size)
+        assertEquals(computer.stateCounts[AgentState.Working], counted.count { it.agentState == AgentState.Working })
+        assertEquals(computer.stateCounts[AgentState.NeedsYou], counted.count { it.agentState == AgentState.NeedsYou })
     }
 
     @Test fun historyPreservesGapsAndPollingStopsWithThePage() = runTest {

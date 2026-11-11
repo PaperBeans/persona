@@ -25,13 +25,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.Lifecycle
@@ -506,7 +504,7 @@ internal fun LarkBubble(
     val openReactionPicker = onOpenReactionPicker.takeUnless { message.recalled }
     var menuExpanded by remember { mutableStateOf(false) }
     var showingHistory by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
+    val copy = rememberCopy()
     if (showingHistory) LarkEditHistorySheet(message, onDismiss = { showingHistory = false })
 
     val body: @Composable ColumnScope.() -> Unit = {
@@ -556,7 +554,7 @@ internal fun LarkBubble(
                 onCopy = {
                     val textToCopy = message.parts.filterIsInstance<LarkPart.Text>().joinToString("\n") { it.text }
                         .ifBlank { message.parts.filterIsInstance<LarkPart.Code>().joinToString("\n") { it.code } }
-                    clipboard.setText(AnnotatedString(textToCopy))
+                    copy(textToCopy, null)
                 }
             )
         }

@@ -6,7 +6,6 @@ import android.os.Looper
 import android.provider.Settings
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -20,6 +19,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import kotlin.math.PI
+import kotlin.math.pow
 
 /** Corner radii of one style. Buttons and chips are pills in glass and brief, nearly square on the board. */
 @Immutable
@@ -39,16 +40,31 @@ data class PersonaShapes(
 }
 
 /**
- * Durations and curves; [PersonaTheme.reduceMotion] collapses them to instant changes. [count] is how long a number
- * that changed takes to count to its new value, and a chart's marks to move (#2811); [breathe] one half of a breathing
- * mark's cycle (a running workflow's chip, #2935).
+ * A spring as SwiftUI writes it, `.spring(duration:bounce:)`: Compose's damping ratio is `1 - bounce` and its stiffness
+ * `(2π / duration)²` (unit mass), so the same tokens move the same way on both (spec/tokens/motion.json).
  */
 @Immutable
-data class PersonaMotion(val quick: Int, val standard: Int, val springy: Boolean, val count: Int, val breathe: Int = 1300) {
-    fun <T> enter(): FiniteAnimationSpec<T> =
-        if (springy) spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow) else tween(standard, easing = FastOutSlowInEasing)
-    fun size(): FiniteAnimationSpec<IntSize> =
-        if (springy) spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow) else tween(standard, easing = FastOutSlowInEasing)
+data class IosSpring(val durationMs: Int, val bounce: Float) {
+    val dampingRatio: Float get() = 1f - bounce
+    val stiffness: Float get() = (2 * PI / (durationMs / 1000.0)).pow(2).toFloat()
+    fun <T> spec(): FiniteAnimationSpec<T> = spring(dampingRatio = dampingRatio, stiffness = stiffness)
+}
+
+/**
+ * Durations and curves; [PersonaTheme.reduceMotion] collapses them to instant changes. [count] is how long a number
+ * that changed takes to count to its new value, and a chart's marks to move (#2811); [breathe] one half of a breathing
+ * mark's cycle (a running workflow's chip, #2935). [state] and [layout] are the iPhone's springs (Glass); styles without
+ * them use tweens of [standard] milliseconds.
+ */
+@Immutable
+data class PersonaMotion(
+    val quick: Int, val standard: Int, val count: Int, val breathe: Int = 1300,
+    val state: IosSpring? = null, val layout: IosSpring? = null,
+) {
+    /** Something appearing or changing state. */
+    fun <T> enter(): FiniteAnimationSpec<T> = state?.spec() ?: tween(standard, easing = FastOutSlowInEasing)
+    /** A size or position change. */
+    fun size(): FiniteAnimationSpec<IntSize> = layout?.spec() ?: tween(standard, easing = FastOutSlowInEasing)
 }
 
 internal object Shapes {
@@ -63,9 +79,14 @@ internal object Shapes {
 
 internal object Motions {
     fun of(style: AppStyle) = when (style) {
-        AppStyle.Glass -> PersonaMotion(quick = 160, standard = 320, springy = true, count = 600)
-        AppStyle.Brief -> PersonaMotion(quick = 140, standard = 240, springy = false, count = 520)
-        AppStyle.Board -> PersonaMotion(quick = 100, standard = 160, springy = false, count = 400)
+        // Glass moves as the iPhone does: Theme.Motion.state and .layout, through spec/tokens.
+        AppStyle.Glass -> PersonaMotion(
+            quick = Tokens.Motion.State.duration, standard = Tokens.Motion.Layout.duration, count = 600,
+            state = IosSpring(Tokens.Motion.State.duration, Tokens.Motion.State.bounce),
+            layout = IosSpring(Tokens.Motion.Layout.duration, Tokens.Motion.Layout.bounce),
+        )
+        AppStyle.Brief -> PersonaMotion(quick = 140, standard = 240, count = 520)
+        AppStyle.Board -> PersonaMotion(quick = 100, standard = 160, count = 400)
     }
 }
 
@@ -127,7 +148,8 @@ fun PersonaTheme(
 private fun PersonaPalette.materialScheme(style: AppStyle): ColorScheme {
     val primary = if (style == AppStyle.Brief) action else accent
     val onPrimary = if (customRoles) ExtensionThemeColors.on(primary)
-        else if (style == AppStyle.Brief) onAction else if (dark) Palettes.GlassDark.onAction else androidx.compose.ui.graphics.Color.White
+        else if (style == AppStyle.Brief) onAction else if (whiteOnAccent) onAccent // Glass: white on the accent, as on iOS
+        else if (dark) Palettes.GlassDark.onAction else androidx.compose.ui.graphics.Color.White
     val base = if (dark) darkColorScheme() else lightColorScheme()
     return base.copy(
         primary = primary, onPrimary = onPrimary, primaryContainer = accentSoft, onPrimaryContainer = ink,

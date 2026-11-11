@@ -18,7 +18,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
@@ -136,7 +135,7 @@ private fun ChatMarkdownBody(text: String, id: String, bodyStyle: TextStyle, col
     // Inline code a tap copies, in the body's color on its well; inside a path's link it stays the link's (#2984).
     val copy = rememberCopy()
     val codeSpan = inlineCodeStyle(color)
-    val annotator = remember(codeSpan, copy) { copyingCode(codeSpan, copy) }
+    val annotator = remember(codeSpan, copy) { copyingCode(codeSpan) { copy(it, null) } }
     CompositionLocalProvider(LocalUriHandler provides uriHandler) {
         if (parsed == null) ChatLinkText(text, Modifier.fillMaxWidth(), bodyStyle.copy(color = color))
         else Markdown(parsed!!, modifier = Modifier.fillMaxWidth(), imageTransformer = rememberMathImages(color, bodyStyle),
@@ -189,11 +188,11 @@ internal fun CodeText(text: String, language: String = "", syntax: Boolean = fal
     val palette = PersonaTheme.palette
     val colour = syntax && language.isNotBlank()
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (bar) CodeBody(preview, language, colour) { CodeBar(language) { copy(text) } }
+        if (bar) CodeBody(preview, language, colour) { CodeBar(language) { copy(text, null) } }
         else {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(language, Modifier.weight(1f), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
-                JTextButton(stringResource(R.string.chat_content_copy), { copy(text) }, icon = PhIcons.Copy)
+                JTextButton(stringResource(R.string.chat_content_copy), { copy(text, null) }, icon = PhIcons.Copy)
             }
             CodeBody(preview, language, colour)
         }
@@ -285,8 +284,18 @@ internal fun ChatLineContent(
     closeoutReply: String? = null,
     /** The main conversation folds its background rounds (#4314): a scheduled task's or follow-up's prompt is never shown. */
     hideTaskPrompts: Boolean = false,
+    /** This line is the turn's error and the hub named its fix ([TurnErrorFix]): an answer, a notice or an API error draws the card. */
+    turnFix: TurnErrorFix? = null,
 ) {
     val res = LocalResources.current
+    if (turnFix != null) {
+        val raw = when {
+            line is ChatLine.ApiError -> line.info.raw
+            line is ChatLine.Row && (line.row.type == "reply" || line.row.type == "notice") -> line.row.item?.item?.text
+            else -> null
+        }
+        if (raw != null || line is ChatLine.ApiError) return TurnErrorFixCard(turnFix, raw)
+    }
     when (line) {
         is ChatLine.Row -> when (line.row.type) {
             "user" -> line.row.item?.item?.let { item ->
@@ -309,7 +318,8 @@ internal fun ChatLineContent(
             "thinking" -> if (!style.hideThoughts) ThoughtContent(line.row.item?.text.orEmpty(), line.id, style.collapseThoughts)
             "image" -> line.row.item?.item?.let { ChatPicture(session, it, loader) }
             "recap" -> line.row.item?.item?.let { RecapLine(listOf(it)) }
-            else -> line.row.item?.compaction?.let { TimelineMark(it.label.text()) }
+            else -> line.row.item?.item?.refusal?.let { RefusalNotice(it) }
+                ?: line.row.item?.compaction?.let { TimelineMark(it.label.text()) }
                 ?: line.row.item?.takeIf { it.task != null }?.let { TaskNoteLine(it, last = true, onFullText = onFullText) }
                 ?: ChatSystemLine(line.row.item?.text.orEmpty(), line.row.item?.task?.failed == true)
         }
@@ -334,7 +344,10 @@ internal fun ChatLineContent(
                     { onToggle(line.id) }, running = line.live && !waits) {}
             }
         }
-        is ChatLine.Step -> WorkStep(line.step, session, loader, onFold, folding, foldErrors, onFullText, style, textUpdates, workRunning, lastWorkStep, plan)
+        // Every open step sits on the work line's rail, the plan and its items too (Glass, iOS's timeline, #4339 C5).
+        is ChatLine.Step -> Box(Modifier.fillMaxWidth().workRail(lastWorkStep)) {
+            WorkStep(line.step, session, loader, onFold, folding, foldErrors, onFullText, style, textUpdates, workRunning, lastWorkStep, plan)
+        }
         is ChatLine.End -> TimelineMark(pluralStringResource(R.plurals.chat_content_collapse_steps, line.count, line.count),
             Modifier.heightIn(min = 44.dp).clickable(role = Role.Button) { onToggle(line.groupId) })
         is ChatLine.Wakes -> ChatSystemLine(pluralStringResource(R.plurals.chat_content_wakes, line.turn.wakes.size, line.turn.wakes.size))

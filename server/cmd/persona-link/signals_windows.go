@@ -16,3 +16,7 @@ func notifySignals(ctx context.Context, path string, check, redial func()) {
 		log.Printf("pokes: %v", err) // the link still works; only the tray's "Reconnect now" does not
 	}
 }
+
+func pokeRunning(path string) {
+	_ = link.Poke(path, link.PokeRedial)
+}

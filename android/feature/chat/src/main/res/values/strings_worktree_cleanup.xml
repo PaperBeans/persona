@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keep or remove the worktree Persona made, in Close Agent and Delete Chat (#4532): iOS AgentWorktree words. -->
+<resources>
+    <string name="chat_worktree_made">This agent worked in a worktree Persona made</string>
+    <string name="chat_worktree_keep">Keep worktree</string>
+    <string name="chat_worktree_remove">Remove</string>
+    <string name="chat_worktree_delete_branch">Delete the branch %1$s too</string>
+    <string name="chat_worktree_confirm_loss">I understand these changes will be lost</string>
+    <string name="chat_worktree_removed">Worktree removed</string>
+    <string name="chat_worktree_removed_branch">Worktree and branch removed</string>
+    <string name="chat_worktree_remove_failed">Couldn’t remove the worktree: %1$s</string>
+    <plurals name="chat_worktree_dirty">
+        <item quantity="one">%d file has uncommitted changes. Removing the worktree loses it.</item>
+        <item quantity="other">%d files have uncommitted changes. Removing the worktree loses them.</item>
+    </plurals>
+    <plurals name="chat_worktree_unmerged">
+        <item quantity="one">The branch has %1$d commit that isn’t on %2$s. Deleting the branch loses it.</item>
+        <item quantity="other">The branch has %1$d commits that aren’t on %2$s. Deleting the branch loses them.</item>
+    </plurals>
+</resources>

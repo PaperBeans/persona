@@ -1,5 +1,6 @@
 {
   "history_hint": "↑↓ browse sent messages · Ctrl+R search",
+  "history_hint_edit": "↑ edit last message · ↑↓ browse sent messages · Ctrl+R search",
   "history_placeholder": "Search sent messages",
   "history_list": "Sent messages",
   "history_empty": "No matching messages",

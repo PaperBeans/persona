@@ -142,6 +142,39 @@ func (s *Store) recoverIngest(id string) error {
 	return s.recoverIngestLocked(id)
 }
 
+// SettleIngest completes a previously installed intent for a source chat.
+// A caller holding a source commit reservation must settle failed writes before
+// releasing that reservation, because recovery itself can publish messages.
+func (s *Store) SettleIngest(source, chat string) error {
+	if s.ReadOnly() {
+		return ErrReadOnly
+	}
+	id := ChatID(source, chat)
+	recovered := false
+	err := func() error {
+		s.ingestMu.Lock()
+		defer s.ingestMu.Unlock()
+		s.chatMu.Lock()
+		defer s.chatMu.Unlock()
+		if _, err := os.Stat(s.path(KindChat, id, ingestJournal)); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if err := s.recoverIngest(id); err != nil {
+			return err
+		}
+		recovered = true
+		return nil
+	}()
+	if err == nil && recovered {
+		s.notify(KindChat, id, "messages")
+		s.notify(KindChat, id, "metadata")
+	}
+	return err
+}
+
 func (s *Store) recoverIngestLocked(id string) error {
 	var in ingestIntent
 	ok, err := readJSON(s.path(KindChat, id, ingestJournal), &in)

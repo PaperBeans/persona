@@ -30,6 +30,7 @@ func (n *Node) assistantCompact(ctx context.Context, id string) error {
 	if n.runtimeAssistant(id) {
 		return refusal("unsupported", "这个对话由 runtime 运行，不能在这里压缩", nil)
 	}
+	defer n.assistantLife.lock(id)() // not while a send or a restore has this conversation's process (model_restore.go)
 	n.mu.Lock()
 	p := n.procs[id]
 	n.mu.Unlock()

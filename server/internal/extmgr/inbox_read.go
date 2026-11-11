@@ -142,6 +142,7 @@ func mailAddresses(list []mail.Address) []assistantwire.MailAddress {
 // of it waits); one whose Collect failed is left out (it keeps what it had).
 func (h *Manager) readConnectors(ctx context.Context) []assistantwire.InboxSource {
 	out := []assistantwire.InboxSource{}
+	h.reconcileIMessageAI(ctx)
 	for _, c := range h.connectors.All() {
 		in, ok := connector.As[connector.Inbox](c)
 		if !ok {

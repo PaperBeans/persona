@@ -1,0 +1,12 @@
+{
+  "due": "Due date",
+  "due_today": "Today",
+  "due_tomorrow": "Tomorrow",
+  "due_next_week": "Next week",
+  "due_pick": "Pick a date…",
+  "due_none": "No due date",
+  "remind_hour": "In 1 hour",
+  "remind_tomorrow": "Tomorrow morning",
+  "remind_none": "No reminder",
+  "hand_over": "Hand to agent…"
+}

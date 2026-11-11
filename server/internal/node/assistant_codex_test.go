@@ -127,6 +127,7 @@ type fakeHub struct {
 	context map[string]any    // assistant.context's answer; nil: just a snapshot
 	acks    []json.RawMessage // assistant.context calls that acked view errors
 	mcp     []map[string]any  // the mcp.tools / mcp.call params relayed ("method" says which)
+	onModel func()            // called as assistant.model is asked, before it answers (model_restore_test.go)
 }
 
 func (h *fakeHub) interactions() []proto.Interaction {
@@ -170,6 +171,12 @@ func withFakeHub(t *testing.T, n *Node) *fakeHub {
 				SessionID string `json:"session_id"`
 			}
 			_ = json.Unmarshal(params, &p)
+			fh.mu.Lock()
+			onModel := fh.onModel
+			fh.mu.Unlock()
+			if onModel != nil {
+				onModel()
+			}
 			fh.mu.Lock()
 			defer fh.mu.Unlock()
 			if fh.queried == nil {

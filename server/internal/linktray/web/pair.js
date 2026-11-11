@@ -9,7 +9,13 @@
   let tab = lt.boot.tab || (state.mode === "passive" ? "passive" : "active");
 
   // What the user typed survives a redraw (the tray pushes new state when link.json changes).
-  const form = { link: lt.boot.prefill || "", machine: "", advanced: false, preview: null, result: null, busy: false,
+  const initPreview = lt.boot.preview || null;
+  const initTarget = state.ssh ? state.ssh.target : (initPreview && initPreview.default_ssh_target ? initPreview.default_ssh_target : "");
+  const initAlways = state.ssh ? Boolean(state.ssh.always) : Boolean(initPreview && initPreview.default_ssh_always);
+  const form = { link: lt.boot.prefill || "", machine: "", advanced: false, preview: initPreview, result: null, busy: false,
+    sshOpen: Boolean(state.ssh), sshServer: state.ssh ? state.ssh.server : "", sshTarget: initTarget,
+    sshTargetTouched: Boolean(state.ssh), sshAlways: initAlways, sshAlwaysTouched: Boolean(state.ssh),
+    sshDirtyUser: false, sshTesting: false, sshSaving: false, sshNotice: null,
     listen: state.listen, invitation: null, passiveError: "", generating: false, newAddress: "", addressError: "",
     copied: "" };
 
@@ -45,8 +51,33 @@
     clearTimeout(parseTimer);
     parseTimer = setTimeout(async () => {
       form.preview = value.trim() ? await send("parse_link", { raw: value }).catch(() => null) : null;
+      if (form.preview && form.preview.kind === "ok" && !state.ssh) {
+        if (!form.sshTargetTouched) form.sshTarget = form.preview.default_ssh_target || "";
+        if (!form.sshAlwaysTouched) form.sshAlways = Boolean(form.preview.default_ssh_always);
+      }
       drawActive();
     }, 120);
+  }
+
+  function currentSSH() {
+    const server = form.sshServer.trim();
+    if (!server) return null;
+    return { server, target: form.sshTarget.trim(), always: Boolean(form.sshAlways) };
+  }
+
+  function defaultTargetPlaceholder() {
+    if (form.preview && form.preview.default_ssh_target) return form.preview.default_ssh_target;
+    if (state.default_ssh_target) return state.default_ssh_target;
+    return L.ssh_target_placeholder;
+  }
+
+  function sshChanged() {
+    const cur = currentSSH();
+    const saved = state.ssh || null;
+    if (!cur && !saved) return false;
+    if (!cur || !saved) return Boolean(cur);
+    const curTarget = cur.target || defaultTargetPlaceholder();
+    return cur.server !== saved.server || curTarget !== saved.target || Boolean(cur.always) !== Boolean(saved.always);
   }
 
   async function pair() {
@@ -54,15 +85,135 @@
     form.result = null;
     drawActive();
     try {
-      const r = await send("pair", { raw: form.link, machine: form.machine });
+      const r = await send("pair", { raw: form.link, machine: form.machine, ssh: currentSSH() });
       form.result = { ok: true, text: r.text };
       form.link = "";
       form.preview = null;
+      form.sshDirtyUser = false;
     } catch (err) {
       form.result = { ok: false, text: err.message };
     }
     form.busy = false;
     drawActive();
+  }
+
+  async function testSSH() {
+    const ssh = currentSSH();
+    if (!ssh || form.sshTesting || form.sshSaving) return;
+    form.sshTesting = true;
+    form.sshNotice = null;
+    drawActive();
+    try {
+      const r = await send("ssh_test", { ssh, raw: form.link });
+      if (r && r.ssh && !form.sshTarget.trim()) form.sshTarget = r.ssh.target;
+      form.sshNotice = { ok: true, text: r.text };
+    } catch (err) {
+      form.sshNotice = { ok: false, text: err.message };
+    }
+    form.sshTesting = false;
+    drawActive();
+  }
+
+  async function saveSSH() {
+    const ssh = currentSSH();
+    if (!ssh || form.sshSaving || form.sshTesting) return;
+    form.sshSaving = true;
+    form.sshNotice = null;
+    drawActive();
+    try {
+      const r = await send("ssh_set", { ssh });
+      if (r && r.ssh) {
+        form.sshServer = r.ssh.server;
+        form.sshTarget = r.ssh.target;
+        form.sshAlways = Boolean(r.ssh.always);
+        form.sshTargetTouched = true;
+        form.sshAlwaysTouched = true;
+      }
+      form.sshDirtyUser = false;
+      form.sshNotice = { ok: true, text: r.text };
+    } catch (err) {
+      form.sshNotice = { ok: false, text: err.message };
+    }
+    form.sshSaving = false;
+    drawActive();
+  }
+
+  async function removeSSH() {
+    if (form.sshSaving || form.sshTesting) return;
+    form.sshSaving = true;
+    form.sshNotice = null;
+    drawActive();
+    try {
+      const r = await send("ssh_set", { ssh: null });
+      form.sshServer = "";
+      form.sshTarget = defaultTargetPlaceholder();
+      form.sshTargetTouched = false;
+      form.sshAlways = false;
+      form.sshAlwaysTouched = false;
+      form.sshDirtyUser = false;
+      form.sshNotice = { ok: true, text: r.text };
+    } catch (err) {
+      form.sshNotice = { ok: false, text: err.message };
+    }
+    form.sshSaving = false;
+    drawActive();
+  }
+
+  function sshSection() {
+    const serverInput = el("input", {
+      class: "textbox code", id: "ssh-server-input", type: "text", placeholder: L.ssh_server_placeholder,
+      spellcheck: "false", autocomplete: "off", value: form.sshServer,
+      oninput: (e) => { form.sshServer = e.target.value; form.sshDirtyUser = true; form.sshNotice = null; updateSSHButtons(); },
+    });
+    const targetInput = el("input", {
+      class: "textbox code", id: "ssh-target-input", type: "text", placeholder: defaultTargetPlaceholder(),
+      spellcheck: "false", autocomplete: "off", value: form.sshTarget,
+      oninput: (e) => { form.sshTarget = e.target.value; form.sshTargetTouched = true; form.sshDirtyUser = true; form.sshNotice = null; updateSSHButtons(); },
+    });
+    const testBtn = el("button", {
+      class: "button", id: "ssh-test-btn",
+      disabled: !form.sshServer.trim() || form.sshTesting || form.sshSaving,
+      onclick: testSSH,
+    }, form.sshTesting ? L.ssh_testing : L.ssh_test);
+    const removeBtn = state.ssh ? el("button", {
+      class: "button subtle", disabled: form.sshSaving || form.sshTesting, onclick: removeSSH,
+    }, L.ssh_remove) : null;
+    const saveBtn = state.active_paired ? el("button", {
+      class: "button accent", id: "ssh-save-btn",
+      disabled: !sshChanged() || !form.sshServer.trim() || form.sshSaving || form.sshTesting,
+      onclick: saveSSH,
+    }, form.sshSaving ? L.ssh_saving : L.ssh_save) : null;
+    function updateSSHButtons() {
+      testBtn.disabled = !form.sshServer.trim() || form.sshTesting || form.sshSaving;
+      if (saveBtn) saveBtn.disabled = !sshChanged() || !form.sshServer.trim() || form.sshSaving || form.sshTesting;
+    }
+    const switchBtn = el("button", {
+      class: "row", role: "switch", "aria-checked": String(form.sshAlways),
+      onclick: () => {
+        form.sshAlways = !form.sshAlways;
+        form.sshAlwaysTouched = true;
+        form.sshDirtyUser = true;
+        form.sshNotice = null;
+        drawActive();
+      },
+    }, el("span", { class: "label", text: L.ssh_always_label }), el("span", { class: "switch" }));
+
+    return el("details", { open: form.sshOpen, ontoggle: (e) => { form.sshOpen = e.target.open; } },
+      el("summary", {}, icon("chevron"), el("span", { text: L.ssh_title })),
+      el("div", { class: "card stack ssh-body" },
+        el("div", { class: "caption secondary", text: L.ssh_intro }),
+        el("label", { class: "caption secondary", for: "ssh-server-input", text: L.ssh_server_label }),
+        serverInput,
+        el("label", { class: "caption secondary", for: "ssh-target-input", text: L.ssh_target_label }),
+        targetInput,
+        switchBtn,
+        el("div", { class: "caption tertiary", text: L.ssh_always_hint }),
+        el("div", { class: "ssh-actions" }, testBtn, el("span", { class: "spacer" }), removeBtn, saveBtn),
+        form.sshNotice
+          ? (form.sshNotice.ok
+              ? infobar("positive", "check_filled", el("span", { class: "selectable", text: form.sshNotice.text }))
+              : infobar("danger", "octagon", el("span", { class: "selectable", text: form.sshNotice.text })))
+          : null));
   }
 
   function drawActive() {
@@ -87,6 +238,7 @@
           value: form.machine, oninput: (e) => { form.machine = e.target.value; } }));
       nodes.push(details);
     }
+    nodes.push(sshSection());
     nodes.push(el("div", { class: "end" }, el("button", {
       class: "button accent", disabled: !canPair(), onclick: pair,
     }, form.busy ? L.pairing : L.pair_button)));
@@ -96,11 +248,18 @@
         : infobar("danger", "octagon", el("span", { class: "selectable", text: form.result.text })));
     }
     nodes.push(addresses());
-    const focused = document.activeElement && document.activeElement.classList.contains("code");
+    const focusedId = document.activeElement ? document.activeElement.id : "";
+    const focusedLink = document.activeElement && document.activeElement.classList.contains("code") && !focusedId;
     $("active").replaceChildren(...nodes.filter(Boolean));
-    if (focused) {
+    if (focusedLink) {
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
+    } else if (focusedId) {
+      const next = $(focusedId);
+      if (next && typeof next.focus === "function") {
+        next.focus();
+        if (typeof next.setSelectionRange === "function") next.setSelectionRange(next.value.length, next.value.length);
+      }
     }
   }
 
@@ -223,6 +382,22 @@
   lt.on("pair", (m) => {
     state = m.pair;
     if (!form.listen) form.listen = state.listen;
+    if (!form.sshDirtyUser) {
+      if (state.ssh) {
+        form.sshOpen = true;
+        form.sshServer = state.ssh.server;
+        form.sshTarget = state.ssh.target;
+        form.sshAlways = Boolean(state.ssh.always);
+        form.sshTargetTouched = true;
+        form.sshAlwaysTouched = true;
+      } else if (!form.link.trim()) {
+        form.sshServer = "";
+        form.sshTarget = state.default_ssh_target || "";
+        form.sshAlways = false;
+        form.sshTargetTouched = false;
+        form.sshAlwaysTouched = false;
+      }
+    }
     draw();
   });
   lt.on("prefill", (m) => {
@@ -232,6 +407,5 @@
   });
   lt.on("tab", (m) => { tab = m.tab; draw(); });
 
-  form.preview = lt.boot.preview || null;
   draw();
 })();

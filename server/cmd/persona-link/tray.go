@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/link"
 	"github.com/nwverse/persona/server/internal/linktray"
 )
 
@@ -72,6 +74,10 @@ func removeTray(e *env) {
 // pairError marks the pairing failures the tray explains in the user's language: explain's two, which the command
 // line says in its own words.
 func pairError(err error) error {
+	var se *link.SSHError
+	if errors.As(err, &se) {
+		return se
+	}
 	switch {
 	case rejected(err):
 		return &linktray.PairError{Rejected: true, Err: err}

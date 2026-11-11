@@ -83,7 +83,7 @@ class WiredPairingService @Inject constructor(application: Application, private 
             // A link's `url` behind a proxy with a public CA's certificate (#2622): that origin alone is checked like any site.
             val proxied = setOfNotNull(HubPairingClient.systemTrustedOrigin(parsed))
             networking = HubPairingClient(parsed.hub, parsed.fp, addresses, app.clientVersion(), parsed.access, systemOrigins = proxied)
-            val result = networking.pair(parsed.token, app.deviceName, progress)
+            val result = networking.pair(parsed.token, app.deviceName, deviceId = parsed.deviceId, progress = progress)
             val saved = HubCredentials(result.address, result.hubId, result.fingerprint,
                 result.candidates, result.token, result.deviceId, systemOrigins = result.systemOrigins.toList())
             withContext(NonCancellable) {

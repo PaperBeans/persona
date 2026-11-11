@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A to-do's stage bar (#4636): iOS TodoStage words. -->
+<resources>
+    <string name="agents_todo_stage_plan">Plan</string>
+    <string name="agents_todo_stage_develop">Develop</string>
+    <string name="agents_todo_stage_review">Review</string>
+    <string name="agents_todo_stage_merge">Merge</string>
+    <string name="agents_todo_stage_deploy">Deploy</string>
+    <string name="agents_todo_stage_verify">Verified</string>
+    <string name="agents_todo_stage_a11y">Stage: %1$s (step %2$d of %3$d)</string>
+</resources>

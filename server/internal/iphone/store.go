@@ -9,9 +9,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/lazyre"
 )
 
 // Record is what this computer keeps about one paired phone besides the pairing record itself: nothing secret. The
@@ -52,7 +53,7 @@ const (
 )
 
 // udidPattern keeps a UDID a single safe path element.
-var udidPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{3,63}$`)
+var udidPattern = lazyre.New(`^[A-Za-z0-9][A-Za-z0-9-]{3,63}$`)
 
 // ValidUDID says whether udid can name a device directory.
 func ValidUDID(udid string) bool { return udidPattern.MatchString(udid) }

@@ -9,21 +9,35 @@ enum class AgentRange { Running, All, History }
 
 internal fun agentRangeKey(scope: String) = stringPreferencesKey("agent-range:$scope")
 
+/** [ownRows]: rows opened under the quick filter while they were rows of their own, which stay so ([openedRowsOfTheirOwn]). */
 internal fun scopedAgentList(
     rows: List<AgentSession>, machines: List<Machine>, preferences: AgentsPreferencesSnapshot, settings: AgentListSettings,
-    todos: List<persona.core.contracts.Todo> = emptyList(),
+    todos: List<persona.core.contracts.Todo> = emptyList(), ownRows: Set<String> = emptySet(),
 ): AgentListResult {
-    val tree = codexTaskForest(rows)
+    // The rows this range's list of running sessions draws, where it has one: a subtask among them hangs under its
+    // parent only while a row above it is among them too, so a working agent whose creator was let go is not lost with
+    // it (#4494, codexTaskForest). They are what scopedRootAgentList hands buildFlatAgentList, and what that draws.
+    val allRunning = settings.copy(includeCodexHistory = true)
+    val runs: ((AgentSession) -> Boolean)? = when (preferences.range) {
+        AgentRange.Running -> { row -> settings.draws(row, preferences.pins) }
+        AgentRange.All -> { row -> row.session.runsInAll && allRunning.draws(row, preferences.pins) }
+        AgentRange.History -> null
+    }
+    val tree = codexTaskForest(rows, ownRows, runs)
     return scopedRootAgentList(tree.roots, machines, preferences, tree.searchSettings(settings), todos)
         .copy(children = tree.children)
 }
 
+/** "All" lists these with the running ones (Codex threads of the past too), every other session with the history. */
+private val persona.core.contracts.Session.runsInAll: Boolean get() = isLive || isCodexTask
+
+/** [rows] are a forest's roots ([scopedAgentList]), so no list here hangs subtasks again. */
 private fun scopedRootAgentList(
     rows: List<AgentSession>, machines: List<Machine>, preferences: AgentsPreferencesSnapshot, settings: AgentListSettings,
     todos: List<persona.core.contracts.Todo> = emptyList(),
 ): AgentListResult {
     if (preferences.range == AgentRange.Running)
-        return buildAgentList(rows, machines, preferences.pins, preferences.mutes, settings, todos)
+        return buildFlatAgentList(rows, machines, preferences.pins, preferences.mutes, settings, todos)
     val history = rows.filter { !it.session.isLive && !(preferences.range == AgentRange.All && it.session.isCodexTask) && settings.admitsHistory(it.session) && !(settings.hideBotmux && it.session.isBotmux) }
     val filtered = history.filter { settings.quick.matches(it) }
     val groups = filtered.groupBy { it.session.machineId to if (it.session.isCodexTask) repoOf(it.session.cwd, it.session.repoRoot).repo else it.session.cwd }.map { (project, members) ->
@@ -33,16 +47,16 @@ private fun scopedRootAgentList(
         AgentListGroup(id, persona.core.contracts.CoreText.plain(project.second), ordered, if (folded) emptyList() else ordered, folded)
     }.sortedWith(compareByDescending<AgentListGroup> { it.rows.first().updatedAt }.thenBy { it.id })
     val running = if (preferences.range == AgentRange.All)
-        buildAgentList(rows.filter { it.session.isLive || it.session.isCodexTask }, machines, preferences.pins, preferences.mutes, settings.copy(includeCodexHistory = true), todos)
+        buildFlatAgentList(rows.filter { it.session.runsInAll }, machines, preferences.pins, preferences.mutes, settings.copy(includeCodexHistory = true), todos)
     else AgentListResult(emptyMap(), emptyList(), emptyList())
     return running.copy(groups = running.groups + groups, counts = AgentQuickFilter.entries.associateWith { filter ->
-        (running.counts[filter] ?: 0) + history.count { !it.session.isCodexSubagent && filter.matches(it) }
+        (running.counts[filter] ?: 0) + history.count { !it.isNestedSubtask && filter.matches(it) }
     })
 }
 
 private fun AgentListSettings.admitsHistory(s: persona.core.contracts.Session): Boolean =
     !s.assistant && (machineFilter.isEmpty() || machineFilter == s.machineId) &&
-        (query.isEmpty() || s.key.path in queryAncestors || listOf(s.displayTitle, s.cwd, s.lastText).any { it?.contains(query, true) == true })
+        (query.isEmpty() || s.key.path in queryAncestors || listOf(s.displayTitle, s.cwd, s.lastText, s.branch).any { it?.contains(query, true) == true })
 
 /**
  * The botmux sessions the "Show botmux" switch counts: what [scopedAgentList] would count under "Lark groups" with botmux shown,

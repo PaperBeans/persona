@@ -19,5 +19,6 @@
   "advanced": "Advanced: sign in with the hub's master key",
   "master_warning": "This is the hub's master key. Whoever has it can do anything, so don't share it. This browser trades it for its own credentials and doesn't keep it.",
   "master_where": "On the hub machine, run {pair} or {jq}.",
-  "master_placeholder": "The hub's master key (token)"
+  "master_placeholder": "The hub's master key (token)",
+  "password_pairing": "Scan or use a pairing link"
 }

@@ -313,7 +313,7 @@ Swiping the sheet down or Hide keeps recording and leaves the now-recording card
 6. Bottom bar: pinned with `.safeAreaInset(edge: .bottom)`, always reachable, never scrolls (the large-type layout below keeps
    it that way). Ask Persona is the **only solid, prominent control** (DS 3.7: one per group).
    - Row 1, only when Persona attends: "Ask Persona" full width (id `meeting-ask`), a round keyboard button beside it
-     (id `meeting-ask-type`, opens the existing text-entry alert). Ask shows a busy label and is disabled while `ask.busy`.
+     (id `meeting-ask-type`; it opened a text-entry alert, since #4486 an inline question row in the bar, DESIGN_SYSTEM 4.4). Ask shows a busy label and is disabled while `ask.busy`.
    - Row 2: Pause / Continue (left), Stop (center), Bookmark (right): three standard-weight buttons, icon over label, each at least
      44 pt. Stop is a constant `stop.fill` icon in the neutral button style, not a red fill and not a morphing record button
      (Voice Memos' morph rested on unverified knowledge, section 3, and the sheet has no start button for it to morph from). Pause

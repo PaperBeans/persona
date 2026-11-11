@@ -59,7 +59,7 @@ internal fun mergedSessions(stacks: GroupStacks): SessionsRepository = object : 
             total = statuses.sumOf { it.total },
             counts = SessionListCounts(total = statuses.sumOf { it.counts.total }, machine = totals({ it.machine }),
                 project = totals({ it.project }), group = totals({ it.group }), state = totals({ it.state }),
-                revision = statuses.joinToString("|") { it.counts.revision }),
+                revision = statuses.joinToString("|") { it.counts.revision }, backgroundWaiting = statuses.sumOf { it.counts.backgroundWaiting }),
             machineCounts = SessionListCounts(total = statuses.sumOf { it.machineCounts.total }, machine = totals({ it.machine }, true),
                 project = totals({ it.project }, true), group = totals({ it.group }, true), state = totals({ it.state }, true)),
         )
@@ -93,10 +93,14 @@ internal fun mergedSessions(stacks: GroupStacks): SessionsRepository = object : 
     }
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 internal fun mergedInteractions(stacks: GroupStacks): InteractionCenter = object : InteractionCenter {
     override val pending = stacks.merged(emptyList<Interaction>(), { s ->
         s.mapped(s.repositories.interactions.pending) { list -> list.map(::interaction) }
     }) { it.flatten() }
+    override val arrivals = stacks.stacks.flatMapLatest { list ->
+        list.map { s -> s.mapped(s.repositories.interactions.arrivals) { interaction(it) } }.merge()
+    }
     override suspend fun refresh() = stacks.forEach { it.repositories.interactions.refresh() }
     // Only the request's own group: another group answering says nothing about this one (#5697).
     override suspend fun refresh(id: String) = stacks.use(GroupKeys.namespaceOf(id)) { it.repositories.interactions.refresh() }
@@ -193,6 +197,7 @@ internal fun mergedMachineManagement(
     override suspend fun setBrowser(machineId: String, enabled: Boolean) = routes.on(machineId) { it.setBrowser(machineId, enabled) }
     override suspend fun browserJob(machineId: String, action: String) = routes.on(machineId) { it.browserJob(machineId, action) }
     override suspend fun usageWindows() = groups.read(usage?.invoke().orEmpty())
+    override suspend fun usageWindows(machineId: String) = routes.on(machineId) { it.usageWindows() }
     override suspend fun moveToManager(machineId: String, manager: String) = routes.on(machineId) { it.moveToManager(machineId, manager) }
 }
 
@@ -286,6 +291,7 @@ internal class MergedShellServices(private val stacks: GroupStacks) {
         override suspend fun verify(session: Session, action: ChatAction) = of(session).verify(session, action)
         override suspend fun editQueue(session: Session, keep: List<Int>) = of(session).editQueue(session, keep)
         override suspend fun info(session: Session) = of(session).info(session)
+        override suspend fun restoreModel(session: Session) = of(session).restoreModel(session)
         override suspend fun fork(session: Session, atItemId: String) = of(session).fork(session, atItemId)
         override suspend fun rewind(session: Session, target: RewindTarget, restore: RewindRestore) = of(session).rewind(session, target, restore)
     }
@@ -389,6 +395,11 @@ internal fun mergedAgentsState(list: List<GroupNames>, states: List<AgentsWiring
         override suspend fun newAgentModel() = creations.getOrNull(chosen)?.newAgentModel()
         override suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean) =
             creation(of(machineId)).launcherModels(machineId, launcher, refresh)
+        override suspend fun worktreeStatus(machineId: String, cwd: String) = creation(of(machineId)).worktreeStatus(machineId, cwd)
+        override suspend fun addWorktree(machineId: String, cwd: String, nameHint: String, branch: String) =
+            creation(of(machineId)).addWorktree(machineId, cwd, nameHint, branch)
+        override suspend fun removeWorktree(machineId: String, path: String, deleteBranch: Boolean, force: Boolean) =
+            creation(of(machineId)).removeWorktree(machineId, path, deleteBranch, force)
     }
     return AgentsWiringState(
         scope = scope,

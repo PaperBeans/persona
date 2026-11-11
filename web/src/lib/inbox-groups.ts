@@ -1,7 +1,7 @@
 // Groups inside the inbox's sections (docs/assistant/inbox.md "Grouping and selection", #2059): Needs you, FYI and Collapsed by source
 // or by time (the switch at the top, kept on this device), Done always by time. Pure functions: tests give `now`.
 import { formatDate, t } from "../i18n";
-import type { InboxItem } from "./inbox";
+import { isLarkSource, type InboxItem } from "./inbox";
 
 export type Grouping = "source" | "time";
 
@@ -67,6 +67,7 @@ export function groupByTime(items: InboxItem[], now: number, at: (it: InboxItem)
 
 /** An item's source group: Lark, each mail account, each connector or extension source (by its account), else its source. */
 export function sourceKey(it: InboxItem): string {
+  if (isLarkSource(it)) return "lark"; // lark-cli's items group with Lark's
   if (it.connector) return `c:${it.account}`;
   if (it.source === "mail") return `mail:${it.account}`;
   return it.source;

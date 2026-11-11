@@ -14,7 +14,7 @@ import (
 
 // start does the handshake and opens the thread: thread/start for a new conversation (Codex picks the id),
 // thread/resume for an existing one.
-func (c *codexConn) start(ctx context.Context, id, cwd string, resume bool) error {
+func (c *codexConn) start(ctx context.Context, id, cwd string, resume bool, startupMode ...string) error {
 	n := c.p.ownerOr(c.n)
 	var init struct {
 		CodexHome string `json:"codexHome"`
@@ -33,6 +33,9 @@ func (c *codexConn) start(ctx context.Context, id, cwd string, resume bool) erro
 		n.logger.Printf("assistant codex: skills root: %v", err)
 	}
 	mode := n.codexPermissionMode(id)
+	if len(startupMode) > 0 && startupMode[0] != "" {
+		mode = startupMode[0]
+	}
 	params := map[string]any{"cwd": cwd}
 	if mode != "" {
 		approval, sandbox := codexPolicy(mode)

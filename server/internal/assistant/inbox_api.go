@@ -43,6 +43,10 @@ func (s *Service) inboxRoutes() {
 		if !s.inboxUp(w, r) {
 			return
 		}
+		if q := r.URL.Query(); q.Has("since") { // only what changed since a list it had (inbox_delta.go)
+			s.writeInboxSince(w, q.Get("sources") == "all", q.Get("since"))
+			return
+		}
 		s.writeInboxList(w, r.URL.Query().Get("sources") == "all") // from each item's kept bytes (inbox_list_memo.go)
 	})
 	s.handle("GET /api/v1/inbox/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -275,7 +279,9 @@ func (s *Service) inboxListAt(all bool) ([]InboxItem, time.Time) {
 		it.arrived(now)
 		out = append(out, it.listed())
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	sort.Slice(out, func(i, j int) bool {
+		return inboxListOrder(out[i].UpdatedAt, out[i].ID, out[j].UpdatedAt, out[j].ID) < 0
+	})
 	return out, now
 }
 

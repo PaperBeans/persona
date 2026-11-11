@@ -1,20 +1,141 @@
 {
   "motion": {
     "state": {
-      "$type": "duration",
-      "$value": {
-        "value": 250,
-        "unit": "ms"
+      "duration": {
+        "$type": "duration",
+        "$value": {
+          "value": 250,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.state: Animation.snappy(duration: 0.25), a state change"
       },
-      "$description": "Theme.Motion.state：snappy 配置时长，非性能实测"
+      "bounce": {
+        "$type": "number",
+        "$value": 0.15,
+        "$description": "snappy's bounce (SwiftUI's default for .snappy); SwiftUI's spring(duration:bounce:): Compose takes dampingRatio = 1 - bounce and stiffness = (2π / duration)²"
+      }
     },
     "layout": {
-      "$type": "duration",
-      "$value": {
-        "value": 300,
-        "unit": "ms"
+      "duration": {
+        "$type": "duration",
+        "$value": {
+          "value": 300,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.layout: Animation.smooth(duration: 0.3), a layout change"
       },
-      "$description": "Theme.Motion.layout：smooth 配置时长，非性能实测"
+      "bounce": {
+        "$type": "number",
+        "$value": 0,
+        "$description": "smooth has no bounce; SwiftUI's spring(duration:bounce:): Compose takes dampingRatio = 1 - bounce and stiffness = (2π / duration)²"
+      }
+    },
+    "expand": {
+      "duration": {
+        "$type": "duration",
+        "$value": {
+          "value": 400,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.expand: Animation.smooth(duration: 0.4), a block unfolding in place"
+      },
+      "bounce": {
+        "$type": "number",
+        "$value": 0,
+        "$description": "smooth has no bounce"
+      }
+    },
+    "reveal": {
+      "duration": {
+        "$type": "duration",
+        "$value": {
+          "value": 280,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.revealTime: what opens in the chat shows itself"
+      },
+      "curve": {
+        "$type": "string",
+        "$value": "easeOut",
+        "$description": "Theme.Motion.reveal: Animation.easeOut"
+      }
+    },
+    "conceal": {
+      "duration": {
+        "$type": "duration",
+        "$value": {
+          "value": 200,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.concealTime: closing folds it away first, quicker"
+      },
+      "curve": {
+        "$type": "string",
+        "$value": "easeIn",
+        "$description": "Theme.Motion.conceal: Animation.easeIn"
+      }
+    },
+    "drawer": {
+      "duration": {
+        "$type": "duration",
+        "$value": {
+          "value": 320,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.drawer: interpolatingSpring(duration: 0.32, bounce: 0), a drawer let go"
+      },
+      "bounce": {
+        "$type": "number",
+        "$value": 0,
+        "$description": "no bounce"
+      }
+    },
+    "springBack": {
+      "duration": {
+        "$type": "duration",
+        "$value": {
+          "value": 300,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.springBack: Animation.spring(duration: 0.3, bounce: 0.25)"
+      },
+      "bounce": {
+        "$type": "number",
+        "$value": 0.25,
+        "$description": "springBack's bounce"
+      }
+    },
+    "keyboard": {
+      "stiffness": {
+        "$type": "number",
+        "$value": 555.027,
+        "$description": "Theme.Motion.keyboard: interpolatingSpring(mass: 1, stiffness: 555.027, damping: 47.118), the system keyboard's spring"
+      },
+      "damping": {
+        "$type": "number",
+        "$value": 47.118,
+        "$description": "the keyboard spring's damping coefficient (mass 1)"
+      }
+    },
+    "needsYouBreath": {
+      "duration": {
+        "$type": "duration",
+        "$value": {
+          "value": 1000,
+          "unit": "ms"
+        },
+        "$description": "Theme.Motion.needsYouBreathDuration: one breath of the Needs You ring"
+      },
+      "scale": {
+        "$type": "number",
+        "$value": 1.2,
+        "$description": "Theme.Motion.needsYouBreathScale: the ring grows to 1 + scale times the dot as it fades"
+      },
+      "ringOpacity": {
+        "$type": "number",
+        "$value": 0.6,
+        "$description": "Theme.Motion.needsYouRingOpacity: the ring's color opacity at the start of a breath"
+      }
     },
     "reduced": {
       "$type": "duration",
@@ -22,7 +143,7 @@
         "value": 0,
         "unit": "ms"
       },
-      "$description": "减少动态效果时统一用零时长，组件还须停止循环动效"
+      "$description": "with reduced motion every duration is zero; components also stop their loops"
     }
   }
 }

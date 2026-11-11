@@ -4,13 +4,14 @@ import { t } from "../i18n";
 import { useEffect, useRef } from "react";
 import { toast } from "../ui/atoms";
 import { AGENT_GROUPINGS } from "./agent-groups";
+import { directionTreeGroups } from "./direction-tree";
 import { adjacentTab, machineAt, panelToggle, terminalChat, type PaneRef } from "./shortcut-nav";
 import { toggleHelp } from "./shortcut-help";
 import { toggleMaximized, toggleSidebarColumn } from "./layout";
 import { togglePalette } from "./palette";
 import { closePanel, getPanel, openPanel, type Panel } from "./panel";
-import { navigate, type Route } from "./router";
-import { canShowTerminal, readView, resolveView } from "./session-view";
+import { inWorkView, navigate, withWorkView, type Route } from "./router";
+import { canShowTerminal, readView, rememberView, resolveView } from "./session-view";
 import { cycleGrouping, groupingLabel, setAllFolded, stepSidebarRow } from "./sidebar-api";
 import { focusWaitingCard } from "./card-keys";
 import { dispatchKey, registerShortcut } from "./shortcuts";
@@ -20,6 +21,7 @@ export interface ShortcutContext {
   route: Route;
   /** The conversation on the page. */
   pane?: PaneRef;
+  workPaneAvailable?: (pane: PaneRef) => boolean;
   /** A phone-width screen: the sidebar is a drawer, there is no column to hide. */
   narrow: boolean;
   toggleDrawer: () => void;
@@ -78,11 +80,13 @@ export function useShortcuts(ctx: ShortcutContext) {
       }),
       registerShortcut("maximize", () => (at.current.narrow ? false : void toggleMaximized())),
       registerShortcut("terminal-chat", () => {
-        const { route, pane } = at.current;
-        const can = Boolean(pane) && canShowTerminal(getSession(pane!.mid, pane!.sid));
+        const { route, pane, workPaneAvailable } = at.current;
+        const inWork = inWorkView(route);
+        const can = !!pane && canShowTerminal(getSession(pane.mid, pane.sid)) && (!inWork || workPaneAvailable?.(pane) === true);
         const url = route.name === "session" || route.name === "tab" ? route.view : undefined;
         const to = terminalChat(route, pane ? resolveView(url, readView(pane.mid, pane.sid), can) : "chat", can);
         if (!to) return false;
+        if (inWork && pane && (to.go.name === "session" || to.go.name === "tab") && to.go.view) rememberView(pane.mid, pane.sid, to.go.view);
         // on an agent's page the view changes in place: Back leaves the page, it does not undo each ⌘J
         navigate(to.go, route.name === "session" || route.name === "tab");
       }),
@@ -102,7 +106,7 @@ export function useShortcuts(ctx: ShortcutContext) {
       registerShortcut("prev-tab", () => step(-1)),
       registerShortcut("next-tab", () => step(1)),
       registerShortcut("sidebar-grouping", () => {
-        const offered = AGENT_GROUPINGS.map((g) => g.key).filter((k) => getState().todosSupported !== false || k !== "todo");
+        const offered = AGENT_GROUPINGS.map((g) => g.key).filter((k) => (getState().todosSupported !== false || k !== "todo") && (k !== "direction" || directionTreeGroups()));
         toast(t("lib-use-shortcuts.grouping_toast", { grouping: groupingLabel(cycleGrouping(offered)) }));
       }),
       registerShortcut("prev-row", () => stepSidebarRow(-1)),
@@ -114,7 +118,7 @@ export function useShortcuts(ctx: ShortcutContext) {
       const s = getState();
       const to = adjacentTab(s.machines, Object.values(s.sessions).flat(), at.current.pane, dir);
       if (!to) return false;
-      navigate(to);
+      navigate(withWorkView(to, inWorkView(at.current.route)));
     }
     const key = (e: KeyboardEvent) => void dispatchKey(e, { overlay: overlayOpen() });
     addEventListener("keydown", key);

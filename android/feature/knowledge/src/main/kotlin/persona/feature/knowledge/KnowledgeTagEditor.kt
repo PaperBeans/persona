@@ -47,7 +47,7 @@ internal fun KnowledgeTagEditor(entry: KnowledgeEntry, tagging: KnowledgeTagging
                 Spacer(Modifier.height(Tokens.Space.m))
                 JNotice(stringResource(R.string.knowledge_not_saved, it.text()), status = Status.NeedsYou)
             }
-            Spacer(Modifier.height(ContentTokens.legacyXl))
+            Spacer(Modifier.height(Tokens.Space.section))
             JButton(stringResource(R.string.knowledge_save), {
                 onSave(KnowledgeTagForm(importance, relevance, tags, projectKind, status).update(entry.isProject))
             }, Modifier.fillMaxWidth(), loading = tagging.busy, loadingText = stringResource(R.string.knowledge_saving))

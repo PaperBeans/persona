@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/nwverse/persona/server/internal/compat"
 	"slices"
 	"strings"
@@ -44,7 +45,14 @@ type guestConv struct {
 	MachineID string    `json:"machine_id"`
 	Tools     []string  `json:"tools"`
 	At        time.Time `json:"at"`
+	// Kind is guestKindMeeting for a meeting's room (meeting_room.go), Recording its recording: kept until the room
+	// is deleted, not guestKeep.
+	Kind      string `json:"kind,omitempty"`
+	Recording string `json:"recording,omitempty"`
 }
+
+// guestKindMeeting is a meeting's room conversation (docs/assistant/meeting-minutes.md "The room conversation").
+const guestKindMeeting = "meeting"
 
 type guestBook struct {
 	mu     sync.Mutex
@@ -73,8 +81,74 @@ func (s *Service) guestsLocked(ctx context.Context) error {
 	return nil
 }
 
-// guestSet notes that a conversation the hub just started is a guest with tools.
+// newGuestSessionID is the id the manager registers before asking the node to start. The SDK bridge lists its tools
+// during startup, before assistant.send can answer, so a node-generated id would leave its first list empty.
+func newGuestSessionID() string {
+	id := randomHex(16)
+	return fmt.Sprintf("%s-%s-%s-%s-%s", id[:8], id[8:12], id[12:16], id[16:20], id[20:])
+}
+
+// guestSet notes that a conversation the hub is about to start is a guest with tools.
 func (s *Service) guestSet(ctx context.Context, machine, id string, tools []string) error {
+	return s.guestPut(ctx, id, &guestConv{MachineID: machine, Tools: slices.Clone(tools)})
+}
+
+// guestSetRoom notes that conversation id on machine is recording's room (before the node starts it: its first MCP
+// calls come before the start answers).
+func (s *Service) guestSetRoom(ctx context.Context, machine, id, recording string) error {
+	return s.guestPut(ctx, id, &guestConv{MachineID: machine, Tools: meetingRoomToolNames(), Kind: guestKindMeeting, Recording: recording})
+}
+
+// guestDrop forgets guest id (a room deleted).
+func (s *Service) guestDrop(ctx context.Context, id string) error {
+	b := &s.guests
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := s.guestsLocked(ctx); err != nil {
+		return err
+	}
+	if b.m[id] == nil {
+		return nil
+	}
+	delete(b.m, id)
+	return s.saveGuestsLocked(ctx)
+}
+
+// roomOf is the recording whose room machine's conversation session is; false when it is no room; an error when that
+// cannot be told.
+func (s *Service) roomOf(ctx context.Context, machine, session string) (string, bool, error) {
+	if session == "" {
+		return "", false, nil
+	}
+	b := &s.guests
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := s.guestsLocked(ctx); err != nil {
+		return "", false, err
+	}
+	g := b.m[session]
+	if g == nil || g.Kind != guestKindMeeting || !s.sameMachine(g.MachineID, machine) {
+		return "", false, nil
+	}
+	return g.Recording, true, nil
+}
+
+// isRoom: session is a meeting's room on any machine (what does not know cannot tell is no room).
+func (s *Service) isRoom(session string) bool {
+	if session == "" {
+		return false
+	}
+	b := &s.guests
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if s.guestsLocked(context.Background()) != nil {
+		return false
+	}
+	g := b.m[session]
+	return g != nil && g.Kind == guestKindMeeting
+}
+
+func (s *Service) guestPut(ctx context.Context, id string, g *guestConv) error {
 	b := &s.guests
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -83,11 +157,18 @@ func (s *Service) guestSet(ctx context.Context, machine, id string, tools []stri
 	}
 	now := time.Now().UTC()
 	for k, g := range b.m {
-		if now.Sub(g.At) > guestKeep {
+		if g.Kind != guestKindMeeting && now.Sub(g.At) > guestKeep {
 			delete(b.m, k)
 		}
 	}
-	b.m[id] = &guestConv{MachineID: machine, Tools: slices.Clone(tools), At: now}
+	g.At = now
+	b.m[id] = g
+	return s.saveGuestsLocked(ctx)
+}
+
+// saveGuestsLocked writes the book; s.guests.mu is held.
+func (s *Service) saveGuestsLocked(ctx context.Context) error {
+	b := &s.guests
 	st := s.store()
 	if st == nil {
 		return nil

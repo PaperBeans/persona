@@ -43,7 +43,12 @@
     <string name="terminal_select_empty_body">等终端显示内容后再来选择。</string>
     <string name="terminal_screen_description">终端画面</string>
     <string name="terminal_note_offline">连不上 hub，显示的是上次画面</string>
-    <string name="terminal_note_no_terminal">没有终端：恢复会话后就能看到</string>
+    <string name="terminal_note_no_terminal">这个会话没有在电脑上运行。给它发一条消息就会恢复。</string>
+    <string name="terminal_no_terminal_title">没有终端</string>
+    <string name="terminal_note_no_terminal_resume">这个会话没有在电脑上运行。恢复会话后就能打开它的终端。</string>
+    <string name="terminal_resume">恢复会话</string>
+    <string name="terminal_resuming">正在恢复…</string>
+    <string name="terminal_resume_failed">没能恢复会话</string>
     <string name="terminal_note_read_failed">读取终端失败，正在重试</string>
     <string name="terminal_note_disconnected">连接已断开，刚才的输入没有发出</string>
     <string name="terminal_note_stream_stopped">终端流已停止，正在重试</string>

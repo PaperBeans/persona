@@ -81,6 +81,21 @@ class HttpChatActionsTest {
         }
     }
 
+    /** #582: the after-resume notice is dismissed with `ultracode_dismiss_lost` and verified by the notice being gone. */
+    @Test fun theAfterResumeNoticeIsDismissed() = runBlocking {
+        MockWebServer().use { server ->
+            val actions = actions(server)
+            server.enqueue(MockResponse().setBody("{}"))
+            assertEquals(ChatActionResult.Done, actions.execute(Session("m", "s1"), ChatAction.Modes(dismissUltracodeLost = true)))
+            assertEquals(buildJsonObject { put("ultracode_dismiss_lost", true) }, JsonCodec.parseToJsonElement(server.takeRequest().body.readUtf8()))
+            server.enqueue(MockResponse().setBody("""{"sessions":[{"machine_id":"m","session_id":"s1","ultracode_lost_at":"2026-11-11T12:00:00Z"}]}"""))
+            assertEquals(ChatActionResult.Unknown, actions.verify(Session("m", "s1"), ChatAction.Modes(dismissUltracodeLost = true)))
+            server.enqueue(MockResponse().setBody("""{"sessions":[{"machine_id":"m","session_id":"s1"}]}"""))
+            assertEquals(ChatActionResult.Done, actions.verify(Session("m", "s1"), ChatAction.Modes(dismissUltracodeLost = true)))
+            assertEquals("2026-11-11T12:00:00Z", JsonCodec.decodeFromString<Session>("""{"session_id":"s","ultracode_lost_at":"2026-11-11T12:00:00Z"}""").ultracodeLostAt)
+        }
+    }
+
     @Test fun forkPostsTheReplyAndReturnsTheNewSession() = runBlocking {
         MockWebServer().use { server ->
             val actions = actions(server)

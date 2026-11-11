@@ -1,5 +1,77 @@
 # Lessons: web UI and interactions
 
+## A menu opened from a layer above the menus' own goes inside that layer (#4991)
+
+- `Menu` portals to `document.body` at `z-50`. The image editor is a full-screen `z-[60]` layer, so a menu opened from it
+  drew under it, out of sight. Pass the layer as `container`: the menu is put inside it, above its content, and takes its
+  look (the editor's `dark`).
+- A layer that closes on Esc from a capture-phase `keydown` on the window runs before an open menu's handler (also capture,
+  registered later). It has to leave Esc alone while its menu is open, or Esc closes the editor instead of the menu.
+
+## Review state is not an answerable decision (#4808)
+
+An old task can remain `supervision.state: needs_user` without any acceptance-book `ask`. Render its original review
+explanation and the same dismiss/defer controls as a structured decision, but never invent options or send a review
+timestamp as `asked_at` to acceptance. Dismiss the exact review, not the task: completing it or accepting its recommendation
+changes what the owner asked to ignore. Keep persistence and receipt-scoped Undo on the manager, and Later in the browser
+session. Give all mixed actions one synchronous admission guard, fence late replies against the review and credential
+owner, and exercise both the legacy row and structured choices with a real browser. Load the extra controls lazily;
+the collapsed tray does not need their code on the first screen.
+
+## Bound the navigation range, not only transcript bodies (#4836)
+
+A complete lightweight position index can still render hundreds of marks while the transcript loads only two turns.
+Expose its latest 50 positions first, preserve the full-history ordinal offset, and extend the range when backward
+transcript pages reach earlier inputs. Capture the initial loaded boundary separately: a restored large cache must
+not silently change the initial range, and metadata arrival or hovering must not download old bodies. Test the real
+main conversation as well as session pages with hundreds of genuine inputs and interleaved automated records.
+
+## Viewport ownership must not create a second hover-width peak (#4792)
+
+The user-input rail's viewport-current identity is separate from the pointer or keyboard preview. Apply the existing
+preview-centered bell width to every mark, rather than imposing a minimum width on the current input. Preserve idle
+geometry and current-position accessibility/color. Browser acceptance must hover well away from the current input
+and check all rendered widths against the bell in both themes; a screenshot with both identities on one input hides
+this regression.
+
+## Profile selections do not follow the catalog revision (#4528)
+
+The model-profile revision versions definitions, not the active selection or rollback. Retire earlier reads, errors,
+and authentication side effects when a newer read, action, manager generation, or credential generation takes over.
+An event received while a switch is pending needs a read after that write settles; its earlier snapshot cannot establish
+the final server state. Admit one profile write per manager across view and credential changes, because ignoring an old
+response cannot undo an already dispatched write. After it settles, refresh the current view and keep later selections
+and action errors intact. Exercise the mounted component and real API client with deferred synthetic responses, including
+old hubs without a revision and current versus retired authentication failures.
+
+## Lazy features can add shared startup bookkeeping (#4597)
+
+The file-mutation UI loads lazily, while its credential-owner generation is shared with authentication at startup.
+After the localization savings in #4595, main still exceeded the Japanese first-screen budget by 63 B. The 64 B
+allocation is documented beside `FIRST_SCREEN_BUDGET`; the production build continues to measure every locale.
+
+## A Go toolchain's files are not always under GOROOT (#4559)
+
+Homebrew's Go sets `GOROOT` to the formula's `libexec` directory and keeps `LICENSE` one level up, so a build step that
+reads `$(go env GOROOT)/LICENSE` works with the official distribution and fails on a Homebrew machine. Look in every
+place a supported install keeps the file and, when none has it, fail naming each place tried
+(`web/scripts/go-license.mjs`). Check a build script that reads the toolchain's files on Homebrew's Go too.
+
+## Remembered task rules need their exact owner and retry context (#4418)
+
+A remembered task rule's key is opaque: encode the returned value as a query parameter, not a reconstruction from its
+computer and directory. A manager may flag a key as ambiguous; show its raw identifier as unresolved rather than
+presenting a guessed directory. A failed or unconfirmed removal can be omitted by a later list read, so keep the rule
+and its retry context in session memory scoped to the assistant and credential generation, including across unmounts.
+When a lost reply is followed by a not-remembered response, let the user dismiss the local warning without calling
+the removal confirmed; a later list can show the rule again. Include access type in each row action's spoken name.
+Synchronous admission prevents a second delete after reopening while the first is pending. Fence reads, confirmation,
+refresh and callbacks on manager changes (including a round trip), credential replacement and unmount. A retired
+request's 401 must not sign out a later view, even when it uses the same credential; a current request keeps the normal
+401 policy. A proxy login page or redirect can also reload the whole app: apply the same context and credential fence
+before that side effect, while retaining unowned pairing probes and validated 304 responses. A successful removal does not rule out a matching plan remembering it
+again, and an older manager's empty response is not proof that storage was read successfully.
+
 ## Dismiss a draft, not its source item (#3743)
 
 A task-progress reply card has its own feed id; its Inbox reference can be shared by later progress drafts. Persist
@@ -333,6 +405,14 @@ A settings editor must wait for the loaded document, preserve history, optional 
 A panel can stay mounted when another tab replaces its credential. Capture the opaque generation and matching authorization when admitting files, including when opening the native chooser. Retire queued files, conflicts and retry controls on replacement or sign-out; fence dispatch, progress and completion independently of React cleanup. Settle cancellation before asking XHR to abort, since transports can ignore abort or deliver late callbacks. An already dispatched server write may still finish.
 
 Exercise the actual hook and upload helper together with a synthetic XHR transport and a real storage event, keeping the same panel mounted. Assert both file identity and Authorization headers: a helper mock can hide a queued file borrowing the next credential. Also cover same-document changes, sign-out followed by the same token, fresh selection recovery, normal progress/cancel/retry and both conflict choices.
+
+### Pending file changes belong to their admitted context (#4453)
+
+Capture the credential generation and panel context before opening a confirmation, editing a name or offering Undo. Retire the action, its retries and its success, error and cleanup callbacks when that context changes; check again immediately before each dispatch. A completed delete's Undo belongs to its workspace and absolute trash identity, so ordinary navigation to another folder does not discard it. Explicit-token requests must still opt into current-owner 401 recovery, while a retired context cannot sign out or reload its replacement. An already dispatched write can still finish on the server.
+
+Hand off the move picker to its conflict question as one sheet, retaining the chosen destination. If a fast replacement closes two stacked history entries together on a phone, their Back cleanup can close the underlying Files panel.
+
+A successful new sign-in is a new generation even when the token is identical. A nonsecret shared epoch lets another tab and its feed cache observe that change synchronously before the storage event. Token and epoch are separate storage writes: a tab that admits work between them retires it when the epoch arrives, and a write already dispatched may still finish remotely. Older web clients that do not read the epoch cannot observe a same-token generation change; if shared storage rejects the epoch, only the signing-in tab can retire that generation. Exercise mounted file controls, the real REST client and synthetic deferred responses, including same-token reauthentication, conflict retry, Undo and ordinary current-owner behavior.
 
 ## Popup menus
 
@@ -817,6 +897,10 @@ A narrow shell can unmount its sidebar list and mount the same list in the Agent
 
 `URL.port` is empty for both an implicit port and an explicitly written HTTP `:80` or HTTPS `:443`. When recognizing links to an Agent's dev server, retain explicit authority-port intent from the original text after validating its URL, protocol and host. Do not infer a scheme default for a URL with no port, or borrow a colon from credentials, a path, query or fragment. Regress the public helper, reply chips and click routing together; keep hub-owned pages and preview capability/session/folder checks ahead of opening a preview. Recognition alone does not establish HTTPS preview transport support.
 
+For reply tokenization (#4498), distinguish a bracketed IPv6 authority from surrounding Markdown brackets. A direct URL helper can accept the address while the prose tokenizer drops it, leaving no chip. Exercise scheme links, Markdown/autolinks and existing bare forms through the public chip renderer as well as the helper; keep URL/host admission and delimiter boundaries unchanged.
+
+An HTTP(S) URL also owns addresses embedded in its path, query or fragment (#4716). Keep balanced parentheses/brackets in that envelope and end it at an unmatched closing delimiter; otherwise a foreign URL can produce a local chip and port probe. Apply ownership to both scheme and bare candidates. Regress a genuinely separate bare address immediately after a Markdown link, not just whitespace-separated examples; a blanket until-whitespace mask would hide it too. Leave host/port validation and preview transport at their existing owners.
+
 ## Connection tests must use the form's credential choice (#1903)
 
 A saved credential and an empty input are different from explicitly removing that credential. Send the removal flag through the test API and give it the same precedence as saving, including when a new key was typed before removal was selected. Changing the credential choice invalidates both the displayed test result and any pending result for the old form. Test against a synthetic source and assert that the saved configuration stays unchanged.
@@ -849,6 +933,13 @@ is not done), so the owner saw one task out of four and asked what the others we
 other way and listed every slot ever dispatched, closed ones included. "Open" is a property of the task (`done_at`,
 `start_error`, an open plan), not of its agent: filter on that, sort what needs the user first, and fold the closed ones.
 
+## A deploy is not seen until the open page checks for it (#4331)
+
+A sidebar change was deployed and checked with a fresh load, yet the owner's tab, open since before, kept the old build
+and its old sidebar: the service worker answers navigations with the new shell, but a single-page app that stays open
+never navigates again. "Deployed" meant new for new loads only. The page now compares the shell's entry script with its
+own and reloads when idle (docs/web/web.md "New versions"). When verifying a web deploy, also check a tab that was open
+before it, not only a fresh load.
 ## Workspace identity outlives its Agents
 
 An Agent collection cannot serve as a workspace inventory: empty ancestors disappear, and pinning or filtering can remove the only row carrying a parent edge. Keep discovery independent of the board and count actual Agents separately from catalog containers. Bind actions to credential generation, manager, computer, host and runtime workspace ID; matching paths do not grant ownership. A combined browser fixture must stamp its sessions and discovery with the same manager, or it correctly exercises isolation instead of navigation.
@@ -883,3 +974,12 @@ A connected delta hub keeps its pushed session rows during REST refresh. Refresh
 optimistically removed. Keep the pre-request session snapshot and restore it immediately on archive failure,
 before refreshing. Preserve a newer pushed row if one arrived meanwhile. Exercise mounted rows and the real
 store refresh with both delta and bounded list negotiation.
+
+## Recovering from an expired page cursor must not shrink the list
+The hub keeps a session list's frozen view for 5 minutes and at most 32 of them (`server/internal/sessionlist/index.go`).
+Reaching the end of an Agents list open longer than that asked for the next page with an expired cursor, and both
+clients recovered by starting over: the web emptied the list (`clearBaseline`) and the iPhone replaced its rows with the
+first page. A list 300 rows deep became 50, the scroller clamped its offset, and the reader was thrown back near the top
+every time they reached the bottom. Recover by reading a fresh view as deep as the reader has scrolled plus one page,
+keeping the old rows on screen until it arrives (web `SessionList.reread`, #4431; iOS `SessionListModel.rebaseline`); any
+recovery that publishes fewer rows than are on screen moves the reader.

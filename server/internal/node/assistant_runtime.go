@@ -140,6 +140,7 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		st.Launcher, st.Cwd = launcher, cwd
 		n.state.put(id, st)
 	}
+	n.persistModes(id, mode, pickedEffort)
 	live, commit := n.turnContext(id, n.assistantContext(id))
 	if instructions != "" {
 		live = strings.TrimSpace(instructions + "\n" + live)

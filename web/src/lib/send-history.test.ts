@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  canRecall, composing, HISTORY_MAX, moveActive, opensSearch, readAllHistory, readHistory, recallStep, recordSent, searchAction, searchSent, withSent,
+  canRecall, composing, HISTORY_MAX, moveActive, opensSearch, readAllHistory, readHistory, recallIndexOf, recallStep, recordSent, searchAction, searchSent, withSent,
   type KeyLike, type SentEntry,
 } from "./send-history";
 
@@ -117,6 +117,21 @@ describe("walking the history with the arrows", () => {
     expect(recallStep(3, 2, "down")).toBe(-1);
     expect(recallStep(3, -1, "down")).toBe(-1);
     expect(recallStep(0, -1, "up")).toBe(-1);
+  });
+
+  it("goes on from the last message being edited (#4503): ↑ to the one before it, ↓ to an empty box", () => {
+    const list: SentEntry[] = [{ text: "first", at: 1 }, { text: "second", at: 2 }, { text: "last", at: 3 }];
+    // sent from here: the walk stands on it, as if ↑ had recalled it
+    expect(recallIndexOf(list, "last")).toBe(2);
+    expect(recallStep(list.length, recallIndexOf(list, "last"), "up")).toBe(1);
+    expect(recallStep(list.length, recallIndexOf(list, "last"), "down")).toBe(-1);
+    // sent from another device: just past the newest, so ↑ still shows the newest sent from here
+    expect(recallIndexOf(list, "from the phone")).toBe(3);
+    expect(recallStep(list.length, recallIndexOf(list, "from the phone"), "up")).toBe(2);
+    expect(recallStep(list.length, recallIndexOf(list, "from the phone"), "down")).toBe(-1);
+    // nothing sent from here
+    expect(recallIndexOf([], "last")).toBe(0);
+    expect(recallStep(0, 0, "down")).toBe(-1);
   });
 });
 

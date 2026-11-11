@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -56,34 +55,8 @@ func (n *Node) editQueue(ctx context.Context, id string, keep []int) ([]string, 
 	return queue, nil
 }
 
-// sendNowHints are Claude Code's hints beside a queued message for its own "send now" (#6088), and the keys each one
-// names. Claude Code 2.1.311 binds both to send-now and names ctrl+enter where the terminal reports extended keys (a
-// herdr pane), ctrl+x ctrl+s inside tmux or screen or a terminal without them (#2467); 2.1.319 was seen with ctrl+x
-// ctrl+s.
-var sendNowHints = []struct {
-	hint string
-	keys []string
-}{
-	{"ctrl+enter to send now", []string{"ctrl+enter"}},
-	{"ctrl+x ctrl+s to send now", []string{"ctrl+x", "ctrl+s"}},
-}
-
-// otherSendNowRE is a send-now hint naming keys that are not in sendNowHints, for the refusal to quote.
-var otherSendNowRE = lazyre.New(`(?:\S+\+\S+ )+to send now`)
-
-// sendNowOffer is the send-now hint the screen shows beside a queued message and the keys it names: no keys for a hint
-// Persona does not know, "" for none.
-func sendNowOffer(screen string) (hint string, keys []string) {
-	s := strings.Join(strings.Fields(screen), " ")
-	for _, h := range sendNowHints {
-		if strings.Contains(s, h.hint) {
-			return h.hint, h.keys
-		}
-	}
-	return otherSendNowRE.FindString(s), nil
-}
-
-// offersSendNow: the screen shows a queued message with a send-now Persona knows how to press.
+// offersSendNow: the screen shows a queued message with a send-now Persona knows how to press (sendNowOffer,
+// sendnow_hint.go).
 func offersSendNow(screen string) bool {
 	_, keys := sendNowOffer(screen)
 	return keys != nil
@@ -92,11 +65,14 @@ func offersSendNow(screen string) bool {
 // sendNowWait is how long the node looks for the send-now hint to go once the key is pressed.
 var sendNowWait = 3 * time.Second
 
+// sendNowScrollWait is how long the node waits for a scrolled-up Claude Code to be back at its end.
+var sendNowScrollWait = time.Second
+
 // sendQueuedNow gives the agent what waits in Claude Code's queue now (#6088), with Claude Code's own send-now, the keys
 // its hint names: a command the agent runs moves to the background and goes on, a reply it is writing is asked again
-// with the message (measured on 2.1.319 and 2.1.311; Esc would stop the command). Pressed only while the screen offers
-// it: that is the queue right now (the transcript says a message was taken about a second late, and a key pressed then
-// would hit a turn that already has it), and an older Claude without it offers nothing.
+// with the message (measured on 2.1.319, 2.1.311 and 2.1.321; Esc would stop the command). Pressed only while the
+// screen offers it: that is the queue right now (the transcript says a message was taken about a second late, and a key
+// pressed then would hit a turn that already has it), and an older Claude without it offers nothing.
 func (n *Node) sendQueuedNow(ctx context.Context, id string) error {
 	if a, ok := n.agent(id); ok && a.Agent != "claude" {
 		return refusal("send_now_unsupported", "only Claude Code can send queued messages now", nil)
@@ -109,11 +85,28 @@ func (n *Node) sendQueuedNow(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	// A fullscreen Claude Code scrolled up shows older lines, with the queued message and its hint off screen (#4537):
+	// back to the end with its own scroll key, which sends nothing, and the hint is read there.
+	if jump, ok := scrolledUp(screen); ok && n.sendKeys(ctx, pane, jump...) == nil {
+		for deadline := time.Now().Add(sendNowScrollWait); time.Now().Before(deadline); {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+			if s, err := n.readPane(ctx, pane, "visible", 80); err == nil {
+				screen = s
+				if _, still := scrolledUp(s); !still {
+					break
+				}
+			}
+		}
+	}
 	hint, keys := sendNowOffer(screen)
 	if keys == nil {
-		// Something is queued but its hint is not one Persona knows: nothing pressed, and no guess at the keys.
+		// Something is queued but its hint is not one Persona can press: nothing pressed, and no guess at the keys.
 		if hint != "" {
-			return refusal("send_now_unrecognized", fmt.Sprintf("the screen offers send-now as %q, keys Persona does not know", hint), nil)
+			return refusal("send_now_unrecognized", fmt.Sprintf("the screen offers send-now as %q, keys Persona cannot press", hint), nil)
 		}
 		if p := n.transcriptPath(id); p != "" {
 			if st, err := os.Stat(p); err == nil && len(n.meta(p, st).queue) > 0 {

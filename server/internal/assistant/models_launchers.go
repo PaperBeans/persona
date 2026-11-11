@@ -226,14 +226,27 @@ func memoSetting(ctx context.Context, st Store, key string, out any) (bool, erro
 }
 
 func (s *Service) storedLaunchers(ctx context.Context) []storedLauncher {
+	list, _ := s.storedLaunchersKnown(ctx)
+	return list
+}
+
+// storedLaunchersKnown is storedLaunchers with whether the list is really known: false means the setting could not be
+// read, which is not the same as no managed launcher. Callers that judge whether a launcher still exists must not read
+// an unknown list as "it is gone": a message would be refused as launcher_missing while the provider is still
+// configured (#4437). No database configured counts as no managed launchers, as storedLaunchers always did.
+func (s *Service) storedLaunchersKnown(ctx context.Context) ([]storedLauncher, bool) {
 	if list, ok := ctx.Value(managedSnapshotKey{}).([]storedLauncher); ok {
-		return list
+		return list, true
+	}
+	st := s.store()
+	if st == nil {
+		return nil, true // no database configured: no managed launchers, as before
 	}
 	var list []storedLauncher
-	if st := s.store(); st != nil {
-		_, _ = memoSetting(ctx, st, launchersManagedKey, &list)
+	if _, err := memoSetting(ctx, st, launchersManagedKey, &list); err != nil {
+		return nil, false
 	}
-	return list
+	return list, true
 }
 
 var errManagedLaunchersRead = errors.New("managed provider configuration unavailable")

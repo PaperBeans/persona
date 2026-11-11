@@ -118,4 +118,27 @@ final class PairLinkTests: XCTestCase {
         let older = #"{"state":"connected","machine":"macbook","node":"online"}"#
         XCTAssertNil(try LinkModel.decoder.decode(LinkStatus.self, from: Data(older.utf8)).pending)
     }
+
+    func testSSHDefaultsFromPairingLink() throws {
+        guard case .link(let lan) = PairLink.parse(full) else { return XCTFail("lan link not parsed") }
+        XCTAssertEqual(lan.defaultSSHTarget, "127.0.0.1:18662")
+        XCTAssertFalse(lan.loopbackOnly)
+
+        let loopback = "persona://link?url=http%3A%2F%2F127.0.0.1%3A18660&token=jp_example&machine=macbook&fp=Zm9v&tls=18662"
+        guard case .link(let lb) = PairLink.parse(loopback) else { return XCTFail("loopback link not parsed") }
+        XCTAssertEqual(lb.defaultSSHTarget, "127.0.0.1:18662")
+        XCTAssertTrue(lb.loopbackOnly)
+
+        let proxy = "persona://link?url=https%3A%2F%2Fhub.example.com%2Fprefix&token=jp_example"
+        guard case .link(let px) = PairLink.parse(proxy) else { return XCTFail("proxy link not parsed") }
+        XCTAssertEqual(px.defaultSSHTarget, "127.0.0.1:443")
+        XCTAssertFalse(px.loopbackOnly)
+    }
+
+    func testSSHStatusDecoding() throws {
+        let json = #"{"state":"waiting","machine":"macbook","ssh":{"server":"user@example.com","target":"127.0.0.1:18662","always":true},"ssh_error":{"code":"host_key","server":"user@example.com","target":"127.0.0.1:18662"}}"#
+        let decoded = try LinkModel.decoder.decode(LinkStatus.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.ssh, SSHConfig(server: "user@example.com", target: "127.0.0.1:18662", always: true))
+        XCTAssertEqual(decoded.sshError, SSHStatusError(code: "host_key", server: "user@example.com", target: "127.0.0.1:18662"))
+    }
 }

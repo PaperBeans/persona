@@ -2,6 +2,7 @@ package proto
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -21,6 +22,36 @@ func TestSecretKey(t *testing.T) {
 		if SecretKey(k) {
 			t.Errorf("%s: not a credential", k)
 		}
+	}
+}
+
+func TestSecretEnvNameProblem(t *testing.T) {
+	invalid := "it is not an environment variable name (capital letters, digits and _, at most 64)"
+	cases := []struct {
+		label, name, want string
+	}{
+		{"letter", "A", ""},
+		{"underscore", "_", ""},
+		{"digits after first", "_A1", ""},
+		{"maximum length", "A" + strings.Repeat("0", 63), ""},
+		{"empty", "", invalid},
+		{"leading digit", "1NAME", invalid},
+		{"lowercase", "Name", invalid},
+		{"punctuation", "TOKEN-NAME", invalid},
+		{"non ASCII", "Å_NAME", invalid},
+		{"leading newline", "\nNAME", invalid},
+		{"trailing newline", "NAME\n", invalid},
+		{"too long", "A" + strings.Repeat("0", 64), invalid},
+		{"reserved name", "PATH", "the computer or Persona sets it"},
+		{"reserved prefix", "GIT_TOKEN", "names starting with GIT_ are the computer's or Persona's"},
+	}
+	for _, c := range cases {
+		t.Run(c.label, func(t *testing.T) {
+			t.Parallel()
+			if got := SecretEnvNameProblem(c.name); got != c.want {
+				t.Errorf("SecretEnvNameProblem(%q) = %q, want %q", c.name, got, c.want)
+			}
+		})
 	}
 }
 

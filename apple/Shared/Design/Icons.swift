@@ -12,6 +12,10 @@ extension Theme {
         static let errorFilled = "exclamationmark.triangle.fill"
         /// The highest alert level, above `error` (a machine's critical alert).
         static let critical = "exclamationmark.octagon.fill"
+        /// A tool call the user, a permission rule or a hook turned down (Denied, #4303): gray, not an error.
+        static let denied = "hand.raised.slash"
+        /// A tool call refused before it ran (Did not run): a skipped step.
+        static let didNotRun = skipped
         static let success = "checkmark.circle"
         static let successFilled = "checkmark.circle.fill"
         static let done = "checkmark"
@@ -95,6 +99,8 @@ extension Theme {
         static let askFirst = "hand.raised"
         /// bypassPermissions: nothing is asked.
         static let allowEverything = "exclamationmark.shield"
+        /// The auto permission mode: the agent judges the risk itself.
+        static let autoMode = "wand.and.sparkles"
         static let permissions = "lock.shield"
         /// The two little arrows after a value that opens a menu of choices.
         static let choices = "chevron.up.chevron.down"
@@ -118,6 +124,14 @@ extension Theme {
         static let edit = "pencil"
         /// Draw on a picture (the image viewer's Markup, into the composer).
         static let markup = "pencil.tip.crop.circle"
+        /// The image editor's tools (`ImageEditor`): a box round what matters, a free line, cropping and turning the
+        /// picture, the line's width, a crop's shape.
+        static let markupBox = "rectangle"
+        static let markupPen = "scribble"
+        static let crop = "crop"
+        static let rotateLeft = "rotate.left"
+        static let lineWidth = "lineweight"
+        static let cropRatio = "aspectratio"
         static let compose = "square.and.pencil"
         /// Speech to text in the composer (a tap starts, a second one ends).
         static let dictate = "mic"
@@ -167,6 +181,7 @@ extension Theme {
         /// Loads the in-app page again (the link sheet's header).
         static let reload = retry
         static let undo = "arrow.uturn.backward"
+        static let redo = "arrow.uturn.forward"
         static let interrupt = "stop.fill"
         static let stopLoop = "stop.circle"
         static let run = "play.fill"
@@ -261,6 +276,8 @@ extension Theme {
         static let unmute = "bell"
         /// An Inbox rule: where a chat's, sender's or repository's items go and what the AI twin does with them.
         static let inboxRule = "signpost.right"
+        /// Source subscriptions (#2041): what a connector's read-only tools pull into the Inbox or the knowledge base.
+        static let subscriptions = "arrow.2.circlepath"
         static let collapseAll = "rectangle.compress.vertical"
         static let expandAll = "rectangle.expand.vertical"
         static let newConversation = "plus.bubble"
@@ -329,6 +346,8 @@ extension Theme {
         static let context = "gauge.with.dots.needle.33percent"
         /// A piece of context a message carries (a page excerpt, a part of a Feishu /agent request's context).
         static let quote = "text.quote"
+        /// The mark at the top of a quote in a reply (#2984).
+        static let quoteMark = "quote.closing"
         /// The context a message carries, folded into one row.
         static let contexts = "rectangle.stack"
         static let space = "square.stack.3d.up"
@@ -425,6 +444,9 @@ extension Theme {
         /// A hub behind Cloudflare Access and the service token that lets the app through (Settings › hub › Cloudflare
         /// Access, docs/operations/network.md "Behind Cloudflare Access").
         static let cloudflareAccess = "person.badge.shield.checkmark"
+        /// A paired hub's other addresses, tried after its paired one (Settings › hub › Addresses, docs/operations/network.md
+        /// "Client-added candidates").
+        static let hubAddresses = "signpost.right.and.left"
         /// This device's own SSH key (its public half, to copy onto the server).
         static let sshKey = "key.horizontal"
         /// The SSH server's key fingerprint, confirmed and pinned.
@@ -463,6 +485,12 @@ extension Theme {
         static let servedPage = "globe"
         /// The web: a page an agent fetches, a browser it drives (the same globe).
         static let web = servedPage
+        /// A dev server's preview (#150): a picture of the page for the message (the link card's bar).
+        static let pageScreenshot = "camera.viewfinder"
+        /// Picking an element of the page to comment on (the link card's bar), and the element comment's card.
+        static let pickElement = pointer
+        /// Runs a launch.json entry's command (the preview's Start…).
+        static let startServer = run
         /// Something opened in a window of its own (Mac).
         static let newWindow = "macwindow.badge.plus"
         /// The Mac code viewer's find bar: the previous / next match.
@@ -518,6 +546,8 @@ extension Theme {
         static let handToAI = "paperplane"
         /// Mentions of the user (@Me).
         static let mention = "at"
+        /// An Agent's Quick Commands (Continue, Report Progress, /compact…): the submenu of the composer's + (#3225).
+        static let quickCommands = "slash.circle"
         /// The day's Today card at the top of the assistant's conversation (docs/assistant/unified-entry.md).
         static let today = "sun.max.fill"
         /// Something done on the phone from the conversation: an event added to its calendar, a reminder.
@@ -529,6 +559,8 @@ extension Theme {
         static let taskPlan = "list.clipboard"
         /// Saying something straight to a task (Message, and Message “xx”).
         static let routeToTask = "arrowshape.turn.up.right"
+        /// Forward a message to another chat (#3807): sending it on, the same arrow as saying something to a task.
+        static let forwardMessage = routeToTask
         /// A pull request a task opened.
         static let pullRequest = "arrow.triangle.pull"
         /// GitHub's thread page: a merged pull request, an open issue, a review asking for changes, a check skipped

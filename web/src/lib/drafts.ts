@@ -9,6 +9,7 @@ import { storedValue, storeValue, removeStoredValue } from "./compatibility";
 import { useSyncExternalStore } from "react";
 import { clampComment, commentBlock, isCommentHead, parseCommentBlock, type QuoteComment } from "./comments";
 import { uuid } from "./format";
+import type { EditedImage } from "./image-edit";
 
 export interface DraftImage {
   name: string;
@@ -53,11 +54,14 @@ export function parseQuote(text: string): DraftQuote {
 
 export type DraftEvent =
   | ({ type: "quote" } & DraftQuote)
-  | { type: "replace"; text: string }
+  /** `edit`: it starts editing the last message (#4503); any other replace ends an edit. */
+  | { type: "replace"; text: string; edit?: boolean }
   | { type: "append"; text: string }
   /** The words of a send that failed after its box moved on (another conversation, or closed): back in front. */
   | { type: "unsent"; text: string }
-  | { type: "image"; image: DraftImage };
+  /** `edited`: the picture came out of the image editor; its source, edits and history, so the composer's tile opens
+   *  it where the editor stopped (#4991). */
+  | { type: "image"; image: DraftImage; edited?: EditedImage };
 
 /** "> " in front of every line, then a blank line, then what was already typed (ChatView.swift bindMenu). */
 export function withQuote(draft: string, text: string): string {

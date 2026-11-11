@@ -40,6 +40,10 @@ printf 'Checking pairing and tailcat key\n'
 docker compose exec -T hub personad hub pair | holds 'persona://pair?'
 docker compose exec -T hub personad hub tailcat-key | holds '^nodekey:'
 curl --max-time 10 -fsS "$smoke_url/" | holds -i '<html'
+# Password login must ship WASM bytes and their licenses, not the SPA's HTML fallback.
+curl --max-time 10 -fsS "$smoke_url/pake/client.wasm" -o password-client.wasm
+python3 -c 'from pathlib import Path; assert Path("password-client.wasm").read_bytes()[:4] == b"\x00asm"'
+curl --max-time 10 -fsS "$smoke_url/pake/THIRD_PARTY_NOTICES.txt" | holds 'github.com/bytemare/opaque'
 curl --max-time 10 -fsSk "https://127.0.0.1:${CI_IMAGE_TLS_PORT:?}/api/v1/health" >/dev/null
 docker compose exec -T --user 0 hub test -s /home/persona/.persona/docker/db-password
 docker compose exec -T --user 0 hub grep -q '"first_setup": "code"' /home/persona/.persona/hub.json
@@ -65,7 +69,7 @@ admin_code=$(curl --max-time 10 -sS -o admin-state.json -w '%{http_code}' "$smok
 app_code=$(curl --max-time 10 -sS -o app-state.json -w '%{http_code}' "$smoke_url/api/v1/machines")
 [ "$admin_code" = 401 ] && [ "$app_code" = 401 ]
 cmp admin-state.json app-state.json
-rm admin-local.html client.html admin-mapped.html admin-state.json app-state.json
+rm admin-local.html client.html admin-mapped.html admin-state.json app-state.json password-client.wasm
 if docker info --format '{{json .SecurityOptions}}' | holds 'name=rootless'; then
   mapped_uid="$(docker run --rm --entrypoint awk persona-hub:ci -v uid="$(id -u)" '$1 <= uid && uid < $1 + $3 { print $2 + uid - $1 }' /proc/self/uid_map)"
   [ -n "$mapped_uid" ] && [ "$(stat -c %u data)" = "$mapped_uid" ]

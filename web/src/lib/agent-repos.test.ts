@@ -311,7 +311,8 @@ describe("Every agent source in Orca worktrees", () => {
     expect(ids(orcaRepo.worktrees[0]!.sessions)).toEqual(["hosted"]);
     const inferred = built.repos.find((r) => r.repo === path)!;
     expect(inferred.count).toBe(3);
-    expect(inferred.worktrees.map((w) => w.path)).toEqual(nested.map((s) => s.cwd));
+    // Three trees of one name: in the order of their keys, whichever session came first.
+    expect(inferred.worktrees.map((w) => w.path)).toEqual(nested.map((s) => s.cwd).sort());
   });
 
   it("matches complete path segments rather than a string prefix", () => {
@@ -561,5 +562,100 @@ describe("the node's git place (#1805): machine → project → branch → sessi
       session("c", "/code/beta", { repo_root: "/code/beta", worktree: "/code/beta", branch: "main" }),
     ], machines);
     expect(tree.map((m) => [m.machine.id, m.repos.map((r) => r.name)])).toEqual([["machine-b", ["alpha"]], ["machine-a", ["beta", "zeta"]]]);
+  });
+});
+
+describe("a linked worktree named by its host workspace's title (#4497)", () => {
+  const repo = "/home/me/code/app";
+  const fox = "/home/me/.paseo/worktrees/abc123/brave-fox";
+  /** An agent Paseo placed: the node's git place and branch, its workspace's title in slot_name, no slot_id. */
+  const paseo = (id: string, worktree: string, patch: Partial<Session> = {}) =>
+    session(id, worktree, { host: "paseo", repo_root: repo, worktree, branch: "fix/login", slot_name: "Fix the login flow", ...patch });
+  const main = (id: string, patch: Partial<Session> = {}) => session(id, repo, { repo_root: repo, worktree: repo, branch: "main", ...patch });
+  const linked = (all: Session[]) => onMachineA(all)[0]!.worktrees.find((w) => !w.main)!;
+
+  it("names a linked worktree by the title its sessions share and keeps its branch", () => {
+    const tree = onMachineA([main("main"), paseo("a", fox), paseo("b", fox)]);
+    expect(tree[0]!.worktrees.map((w) => [w.name, w.branch, w.main])).toEqual([
+      ["main", "main", true],
+      ["Fix the login flow", "fix/login", false],
+    ]);
+    expect(ids(tree[0]!.worktrees[1]!.sessions).sort()).toEqual(["a", "b"]);
+  });
+
+  it("lets a session of another source, with no slot_name, neither vote nor block", () => {
+    const tree = linked([paseo("a", fox), paseo("b", fox), session("cli", fox, { repo_root: repo, worktree: fox, branch: "fix/login" })]);
+    expect([tree.name, tree.branch, tree.sessions.length]).toEqual(["Fix the login flow", "fix/login", 3]);
+  });
+
+  it("keeps the branch when the tree's sessions name two different workspaces", () => {
+    const tree = linked([paseo("a", fox), paseo("b", fox, { slot_name: "Speed up the importer" })]);
+    expect([tree.name, tree.branch]).toEqual(["fix/login", "fix/login"]);
+  });
+
+  it("keeps the branch for a tab's label: a slot_name beside a slot_id (herdr)", () => {
+    const tree = linked([paseo("tab", fox, { host: "herdr", slot_id: "w1:t2", slot_name: "Fix the login flow" })]);
+    expect([tree.name, tree.branch]).toEqual(["fix/login", "fix/login"]);
+  });
+
+  it("leaves the main checkout's name alone", () => {
+    expect(onMachineA([main("main", { slot_name: "Triage" })])[0]!.worktrees.map((w) => [w.name, w.main])).toEqual([["main", true]]);
+    // An older node sends no git place: the main checkout is named after its repository.
+    expect(onMachineA([session("old", repo, { repo_root: repo, slot_name: "Triage" })])[0]!.worktrees.map((w) => [w.name, w.main]))
+      .toEqual([["app", true]]);
+  });
+
+  it("names a tree without a branch by its title, else by its folder", () => {
+    expect(linked([paseo("a", fox, { branch: undefined })]).name).toBe("Fix the login flow");
+    expect(linked([paseo("a", fox, { branch: undefined, slot_name: undefined })]).name).toBe("brave-fox");
+    expect(linked([paseo("a", fox, { branch: undefined, slot_name: "  " })]).name).toBe("brave-fox");
+    // An older node: the tree is the cwd under the repository the host names (#2840).
+    expect(linked([paseo("a", fox, { branch: undefined, worktree: undefined })]).name).toBe("Fix the login flow");
+  });
+
+  it("keeps a tree's key with and without the title", () => {
+    const titled = linked([paseo("a", fox)]);
+    const plain = linked([paseo("a", fox, { slot_name: undefined })]);
+    expect([titled.name, plain.name]).toEqual(["Fix the login flow", "fix/login"]);
+    expect(titled.key).toBe(plain.key);
+    expect(titled.path).toBe(plain.path);
+  });
+
+  it("sorts the linked trees by the names they show, after the main checkout", () => {
+    const tree = onMachineA([
+      paseo("readme", "/home/me/.paseo/worktrees/abc123/wise-owl", { branch: "docs/readme", slot_name: "Update the README" }),
+      paseo("import", "/home/me/.paseo/worktrees/abc123/calm-otter", { branch: "perf/importer", slot_name: "Speed up the importer" }),
+      paseo("login", fox),
+      main("main"),
+    ]);
+    expect(worktrees(tree[0]!)).toEqual(["main*", "Fix the login flow", "Speed up the importer", "Update the README"]);
+  });
+
+  it("keeps two trees with one title in the same order whichever session comes first", () => {
+    const owl = "/home/me/.paseo/worktrees/abc123/wise-owl";
+    const twins = [paseo("fox", fox), paseo("owl", owl, { branch: "fix/login-2" })];
+    const paths = (all: Session[]) => onMachineA(all)[0]!.worktrees.map((w) => [w.name, w.path]);
+    expect(paths(twins)).toEqual([["Fix the login flow", fox], ["Fix the login flow", owl]]);
+    expect(paths([...twins].reverse())).toEqual(paths(twins));
+  });
+
+  it("leaves an Orca worktree to Orca's naming", () => {
+    const orcaTree = "/home/me/orca/workspaces/app/fix-login";
+    const tree = onMachineA([
+      session("orca", orcaTree, { repo_root: repo, worktree: orcaTree, branch: "fix/login", space_kind: "orca", space_id: spaceId("repo-a", orcaTree), slot_id: "tab1", slot_name: "tab tab1" }),
+      paseo("paseo", orcaTree),
+    ]);
+    expect(tree[0]!.worktrees.map((w) => [w.name, ids(w.sessions).sort()])).toEqual([["fix/login", ["orca", "paseo"]]]);
+  });
+
+  it("still shows the level of a lone linked tree it names", () => {
+    expect(showsWorktreeLevel(onMachineA([paseo("a", fox)])[0]!)).toBe(true);
+    expect(showsWorktreeLevel(onMachineA([paseo("a", fox, { branch: undefined })])[0]!)).toBe(true);
+  });
+
+  it("names the tree the same way through the sidebar's options when the computer has no workspace catalog", () => {
+    const all = [main("main"), paseo("a", fox)];
+    const built = buildRepoMachineTree(all, machines, { workspaces: [], owner: "credential-a", manager: "manager-a", navigationSessions: all });
+    expect(built[0]!.repos[0]!.worktrees.map((w) => w.name)).toEqual(["main", "Fix the login flow"]);
   });
 });

@@ -38,7 +38,7 @@ class TokenBaselineTest(unittest.TestCase):
         self.assertEqual(2, counts['dp']['token'])
         former = ('jar' + 'vis').capitalize()
         retired_symbols = f'{former}Theme.palette.ink {former}Typography.body {former}Theme.shapes.card'
-        self.assertEqual({key: {'hardcoded': 0, 'token': 0} for key in ('color', 'font', 'dp', 'material3')}, count(retired_symbols))
+        self.assertEqual({key: {'hardcoded': 0, 'token': 0} for key in ('color', 'font', 'dp', 'material3', 'icon')}, count(retired_symbols))
 
     def test_new_file_or_category_cannot_spend_another_files_reduction(self):
         baseline = baseline_of({'version': 2, 'files': {'a.kt': count('1.dp 2.dp'), 'b.kt': count('Text("ok")')}})
@@ -75,6 +75,17 @@ class TokenBaselineTest(unittest.TestCase):
         self.assertEqual(1, wildcard_material3(wildcard))
         self.assertEqual(1, wildcard_material3('import androidx.compose.material3.adaptive.layout.*'))
         self.assertEqual(0, wildcard_material3('import androidx.compose.material3.Text\n// import androidx.compose.material3.*'))
+
+    def test_icons_by_glyph_count_in_pages_and_by_meaning_as_tokens(self):
+        page = '''
+            import persona.core.designsystem.icons.PhIcons
+            // PhIcons.Trash in a comment
+            val a = PhIcons.Copy
+            val b = persona.core.designsystem.icons.PhIcons.Sparkle.regular
+            val c = PersonaIcons.copy
+        '''
+        self.assertEqual({'hardcoded': 2, 'token': 1}, count(page)['icon'])
+        self.assertEqual({'hardcoded': 0, 'token': 1}, count(page, pages=False)['icon'])  # the design system draws glyphs
 
     def test_scan_covers_every_module_but_tests_and_generated_tokens(self):
         with tempfile.TemporaryDirectory() as tmp:

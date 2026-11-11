@@ -19,5 +19,6 @@
   "advanced": "高级：用 hub 的总钥匙登录",
   "master_warning": "这是 hub 的总钥匙，拿到它就能做任何事，不要发给别人。登录后这个浏览器会换成自己的凭据，不保存它。",
   "master_where": "在 hub 所在的机器上运行 {pair}，或者 {jq}。",
-  "master_placeholder": "hub 的总钥匙（token）"
+  "master_placeholder": "hub 的总钥匙（token）",
+  "password_pairing": "扫码或配对链接"
 }

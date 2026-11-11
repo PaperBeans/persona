@@ -28,7 +28,7 @@ func TestRunnerSuccessJSONAndProfile(t *testing.T) {
 	ctx := context.Background()
 
 	auth, err := r.AuthStatus(ctx)
-	if err != nil || !auth.LoggedIn || auth.UserName != "Example User" || auth.OpenID != "ou_example_user" || auth.AppID != "cli_example" {
+	if err != nil || !auth.LoggedIn || auth.AppID != "cli_example" || auth.UserName != "Example User" || auth.OpenID != "ou_example_user" {
 		t.Fatalf("auth = %+v, err = %v", auth, err)
 	}
 	if got := auth.GrantedScopes; len(got) < 2 || got[0] != "im:chat:read" || got[1] != "im:message:readonly" {
@@ -60,6 +60,94 @@ func TestRunnerSuccessJSONAndProfile(t *testing.T) {
 	text := string(log)
 	if !strings.Contains(text, "--profile example") || !strings.Contains(text, "--as user --format json") {
 		t.Fatalf("profile or user JSON flags missing from %q", text)
+	}
+}
+
+func TestSearchLimit(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "search-args.log")
+	t.Setenv("LARKCLI_FAKE_LOG", logPath)
+	r := New(fakeConfig(t, "success"))
+	ctx := context.Background()
+	tests := []struct {
+		name        string
+		kind        string
+		limit       int
+		command     string
+		wantArgs    string
+		withoutArgs string
+	}{
+		{name: "documents requested", kind: "docs", limit: 3, command: "drive +search", wantArgs: " --page-size 3 "},
+		{name: "documents default", kind: "docs", command: "drive +search", withoutArgs: " --page-size "},
+		{name: "documents maximum", kind: "docs", limit: 50, command: "drive +search", wantArgs: " --page-size 20 "},
+		{name: "people requested", kind: "people", limit: 3, command: "contact +search-user", wantArgs: " --page-size 3 "},
+		{name: "people default", kind: "people", command: "contact +search-user", withoutArgs: " --page-size "},
+		{name: "people maximum", kind: "people", limit: 50, command: "contact +search-user", wantArgs: " --page-size 30 "},
+		{name: "chats requested", kind: "chats", limit: 3, command: "im +chat-search", wantArgs: " --page-size 3 "},
+		{name: "chats default", kind: "chats", command: "im +chat-search", withoutArgs: " --page-size "},
+		{name: "chats maximum", kind: "chats", limit: 100, command: "im +chat-search", wantArgs: " --page-size 50 "},
+		{name: "messages requested", kind: "messages", limit: 3, command: "im +messages-search", wantArgs: " --page-size 3 "},
+		{name: "messages default", kind: "messages", command: "im +messages-search", wantArgs: " --page-size 20 "},
+		{name: "messages maximum", kind: "messages", limit: 100, command: "im +messages-search", wantArgs: " --page-size 50 "},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			before, err := os.ReadFile(logPath)
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			if _, err := r.SearchLimit(ctx, tc.kind, "example", tc.limit); err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := " " + strings.TrimSpace(strings.TrimPrefix(string(after), string(before))) + " "
+			if !strings.Contains(got, " "+tc.command+" ") {
+				t.Fatalf("search command = %q", got)
+			}
+			if tc.wantArgs != "" && !strings.Contains(got, tc.wantArgs) {
+				t.Fatalf("search args = %q, want %q", got, tc.wantArgs)
+			}
+			if tc.withoutArgs != "" && strings.Contains(got, tc.withoutArgs) {
+				t.Fatalf("default search overrode CLI page size: %q", got)
+			}
+		})
+	}
+	before, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Search(ctx, "docs", "example"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimPrefix(string(after), string(before)); strings.Contains(got, "--page-size") {
+		t.Fatalf("legacy Search changed CLI defaults: %q", got)
+	}
+}
+
+func TestRunnerWritesUseBotIdentity(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "args.log")
+	t.Setenv("LARKCLI_FAKE_LOG", logPath)
+	r := New(fakeConfig(t, "inbox"))
+	if _, err := r.SendText(context.Background(), "oc_example_dm", "hello", "send-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ReplyText(context.Background(), "om_example_direct", "reply", "send-2", true); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	if !strings.Contains(got, "--as bot --format json") || !strings.Contains(got, "+messages-send --chat-id oc_example_dm --text hello --idempotency-key send-1") ||
+		!strings.Contains(got, "+messages-reply --message-id om_example_direct --text reply --idempotency-key send-2 --reply-in-thread") {
+		t.Fatalf("write args = %q", got)
 	}
 }
 

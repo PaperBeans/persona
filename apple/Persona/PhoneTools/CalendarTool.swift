@@ -46,16 +46,7 @@ enum CalendarTool {
                     ], required: ["title", "start", "end"])
                 ),
                 source: .calendar,
-                confirmation: { args in
-                    let title = ToolArgs.string(args, "title") ?? "(untitled)"
-                    let start = ToolArgs.string(args, "start") ?? "?"
-                    let end = ToolArgs.string(args, "end") ?? "?"
-                    let location = ToolArgs.string(args, "location")
-                    var summary = String(localized: "New event “\(title)”\\n\(start) → \(end)")
-                    if ToolArgs.bool(args, "all_day") == true { summary += String(localized: " (all day)") }
-                    if let location { summary += String(localized: "\\nLocation: \(location)") }
-                    return summary
-                },
+                confirmation: { args in createConfirmation(args) },
                 run: { args in try await create(args) }
             ),
             PhoneTool(
@@ -214,6 +205,50 @@ enum CalendarTool {
 
     // MARK: - Creating
 
+    /// The approval card resolves the calendar with the same exact-then-containing match as the write. Without
+    /// access or a match, the requested name stays visible and the write reports its existing error.
+    static func createConfirmation(_ args: JSONValue) -> String {
+        let store = EKEventStore()
+        var calendar = ToolArgs.string(args, "calendar")
+        if let wanted = calendar {
+            calendar = (try? eventCalendar(named: wanted, in: store))?.title ?? wanted
+        } else {
+            calendar = store.defaultCalendarForNewEvents?.title
+        }
+        return createSummary(args, calendar: calendar)
+    }
+
+    /// Pure formatting half of `createConfirmation`: every field the write uses, in the phone's own date style.
+    static func createSummary(_ args: JSONValue, calendar: String?) -> String {
+        let title = ToolArgs.string(args, "title") ?? "(untitled)"
+        let start = ToolArgs.string(args, "start") ?? "?"
+        let end = ToolArgs.string(args, "end") ?? "?"
+        let allDay = ToolArgs.bool(args, "all_day") == true
+        let shownStart = (try? ToolDate.parse(start)).map { CardTime.text($0, allDay: allDay) } ?? start
+        let shownEnd = (try? ToolDate.parse(end)).map { CardTime.text($0, allDay: allDay) } ?? end
+        let location = ToolArgs.string(args, "location")
+        var summary = String(localized: "New event “\(title)”\\n\(shownStart) → \(shownEnd)")
+        if allDay { summary += String(localized: " (all day)") }
+        if let location { summary += String(localized: "\\nLocation: \(location)") }
+        if let calendar { summary += "\n" + String(localized: "Calendar: \(calendar)") }
+        if let notes = ToolArgs.string(args, "notes") {
+            summary += "\n" + String(localized: "Notes: \(String(notes.prefix(200)))")
+        }
+        return summary
+    }
+
+    /// The calendar a create writes to: an exact name first, then one containing it.
+    private static func eventCalendar(named wanted: String, in store: EKEventStore) throws -> EKCalendar {
+        let calendars = store.calendars(for: .event)
+        let key = wanted.lowercased()
+        guard let match = calendars.first(where: { $0.title.lowercased() == key })
+            ?? calendars.first(where: { $0.title.lowercased().contains(key) }) else {
+            let names = calendars.map(\.title).sorted().joined(separator: ", ")
+            throw ToolFailure(.invalidArgument, "no calendar named \"\(key)\"; available calendars: \(names)")
+        }
+        return match
+    }
+
     static func create(_ args: JSONValue) async throws -> [ToolContent] {
         try CalendarAccess.requireEvents()
         guard let title = ToolArgs.string(args, "title") else {
@@ -238,14 +273,8 @@ enum CalendarTool {
         if let location = ToolArgs.string(args, "location") { event.location = location }
         if let notes = ToolArgs.string(args, "notes") { event.notes = notes }
 
-        if let wanted = ToolArgs.string(args, "calendar")?.lowercased() {
-            let calendars = store.calendars(for: .event)
-            guard let match = calendars.first(where: { ($0.title.lowercased()) == wanted })
-                ?? calendars.first(where: { $0.title.lowercased().contains(wanted) }) else {
-                let names = calendars.map(\.title).sorted().joined(separator: ", ")
-                throw ToolFailure(.invalidArgument, "no calendar named \"\(wanted)\"; available calendars: \(names)")
-            }
-            event.calendar = match
+        if let wanted = ToolArgs.string(args, "calendar") {
+            event.calendar = try eventCalendar(named: wanted, in: store)
         } else if let fallback = store.defaultCalendarForNewEvents {
             event.calendar = fallback
         }

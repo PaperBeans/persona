@@ -177,6 +177,9 @@
     <string name="settings_ext_contributions_note">关掉一项不会减少扩展的权限；其余贡献照常，修改后扩展会重新启动。</string>
     <string name="settings_ext_permissions_note">安装时你同意过这些；新版本要得更多时，升级前会再问一次。</string>
     <string name="settings_ext_about_version">版本</string>
+    <plurals name="settings_ext_downloads">
+        <item quantity="other">下载 %1$s 次</item>
+    </plurals>
     <string name="settings_ext_about_previous">上一个版本</string>
     <string name="settings_ext_about_source">来源</string>
     <string name="settings_ext_about_publisher">发布者</string>

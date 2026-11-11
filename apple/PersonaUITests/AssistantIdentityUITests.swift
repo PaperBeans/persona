@@ -3,6 +3,13 @@ import XCTest
 final class AssistantIdentityUITests: XCTestCase {
     private var env: [String: String] { ProcessInfo.processInfo.environment }
 
+    /// Back on the default assistant's main conversation for the classes after this one: these tests open another
+    /// conversation and switch assistants (`AssistantUITestReset`).
+    override class func tearDown() {
+        MainActor.assumeIsolated { AssistantUITestReset.toDefaultMain(hub: ProcessInfo.processInfo.environment["PERSONA_IDENTITY_MULTIPLE_HUB"]) }
+        super.tearDown()
+    }
+
     @MainActor private func launch(_ hubKey: String, extra: [String] = []) throws -> XCUIApplication {
         let hub = try XCTUnwrap(env[hubKey], "Provide an isolated mock hub for this roster size")
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
@@ -17,18 +24,24 @@ final class AssistantIdentityUITests: XCTestCase {
         app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label == %@", "assistant-sidebar", "Persona")).firstMatch
     }
 
-    @MainActor func testSingleAssistantKeepsNavigationWithoutIdentity() throws {
+    /// The sidebar's head with several assistants: the current one's switcher (`AssistantSwitcherHeader`, the default
+    /// assistant here). The drawer's identifier can cover its own on a phone (`drawerSettingsButton`).
+    @MainActor private func switcherHeader(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier == %@ OR (identifier == %@ AND label BEGINSWITH %@)",
+                                         "assistant-switcher", "assistant-sidebar", "助手")).firstMatch
+    }
+
+    @MainActor func testSingleAssistantKeepsNameAvatarAndNavigation() throws {
         let app = try launch("PERSONA_IDENTITY_SINGLE_HUB")
         let sidebar = app.buttons["assistant-sidebar-button"]
-        XCTAssertFalse((sidebar.value as? String ?? "").contains("Persona"))
+        XCTAssertTrue((sidebar.value as? String ?? "").contains("Persona"), "the sidebar button draws and names the persona")
         XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "manager-switcher").firstMatch.exists)
-        XCTAssertFalse(app.buttons["persona-avatar"].exists)
         sidebar.tap()
         XCTAssertTrue(app.drawerSettingsButton.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.drawerNewChatButton.exists)
-        XCTAssertFalse(identityHeading(app).exists)
-        XCTAssertFalse(app.buttons["sidebar-main"].label.contains("Persona"))
-        XCTAssertTrue(app.buttons["sidebar-main"].label.contains("主对话"))
+        XCTAssertTrue(identityHeading(app).waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(switcherHeader(app).exists, "one assistant: no switcher")
+        XCTAssertTrue(app.buttons["sidebar-main"].label.contains("Persona"))
     }
 
     @MainActor private func shot(_ app: XCUIApplication, name: String) throws {
@@ -58,19 +71,26 @@ final class AssistantIdentityUITests: XCTestCase {
 
     @MainActor func testVoiceAttributionAndCaptionsFollowRosterSize() throws {
         for (count, hubKey) in [("single", "PERSONA_IDENTITY_SINGLE_HUB"), ("multiple", "PERSONA_IDENTITY_MULTIPLE_HUB")] {
+            // On the default assistant, whichever an earlier test switched to (the pick is kept across launches).
+            let onDefault = count == "multiple" ? ["-openAssistantManager", "assistant"] : []
             for look in ["light", "dark"] {
-                let chat = try launch(hubKey, extra: ["-ui.scheme", look])
+                let chat = try launch(hubKey, extra: ["-ui.scheme", look] + onDefault)
                 let body = chat.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "早上好")).firstMatch
                 XCTAssertTrue(body.waitForExistence(timeout: 20), chat.debugDescription)
-                let switcher = chat.descendants(matching: .any).matching(identifier: "manager-switcher").firstMatch
-                if count == "multiple" { XCTAssertTrue(switcher.waitForExistence(timeout: 20)) } else { XCTAssertFalse(switcher.exists) }
+                XCTAssertFalse(chat.descendants(matching: .any).matching(identifier: "manager-switcher").firstMatch.exists, "no chips under the top bar")
                 try shot(chat, name: "iphone-\(count)-chat-\(look)")
                 chat.buttons["assistant-sidebar-button"].tap()
                 XCTAssertTrue(chat.drawerSettingsButton.waitForExistence(timeout: 10), chat.debugDescription)
-                if count == "single" { XCTAssertFalse(identityHeading(chat).exists) } else { XCTAssertTrue(identityHeading(chat).exists) }
+                if count == "single" {
+                    XCTAssertTrue(identityHeading(chat).waitForExistence(timeout: 10), chat.debugDescription)
+                    XCTAssertFalse(switcherHeader(chat).exists)
+                } else {
+                    XCTAssertFalse(identityHeading(chat).exists)
+                    XCTAssertTrue(switcherHeader(chat).waitForExistence(timeout: 20))
+                }
                 try shot(chat, name: "iphone-\(count)-sidebar-\(look)")
                 chat.terminate()
-                let app = try launch(hubKey, extra: ["-ui.scheme", look, "-showVoiceSample", "speaking"])
+                let app = try launch(hubKey, extra: ["-ui.scheme", look, "-showVoiceSample", "speaking"] + onDefault)
                 let tail = app.descendants(matching: .any).matching(identifier: "voice-tail").firstMatch
                 XCTAssertTrue(tail.waitForExistence(timeout: 20), app.debugDescription)
                 try shot(app, name: "iphone-\(count)-voice-\(look)")
@@ -79,7 +99,7 @@ final class AssistantIdentityUITests: XCTestCase {
                 let captions = app.descendants(matching: .any).matching(identifier: "voice-transcript").firstMatch
                 XCTAssertTrue(captions.waitForExistence(timeout: 10), app.debugDescription)
                 let named = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Persona"))
-                if count == "single" { XCTAssertEqual(named.count, 0) } else { XCTAssertGreaterThan(named.count, 0) }
+                XCTAssertGreaterThan(named.count, 0, "voice attribution keeps the persona name for either roster size")
                 try shot(app, name: "iphone-\(count)-captions-\(look)")
                 app.terminate()
             }
@@ -87,14 +107,20 @@ final class AssistantIdentityUITests: XCTestCase {
     }
 
     @MainActor func testMultipleAssistantsKeepIdentityAndSwitching() throws {
-        let app = try launch("PERSONA_IDENTITY_MULTIPLE_HUB")
-        let switcher = app.descendants(matching: .any).matching(identifier: "manager-switcher").firstMatch
-        XCTAssertTrue(switcher.waitForExistence(timeout: 20), app.debugDescription)
-        app.buttons["manager-switch-m-3fa21c"].tap()
-        XCTAssertTrue(app.buttons["manager-switch-m-8b04d2"].exists)
+        let app = try launch("PERSONA_IDENTITY_MULTIPLE_HUB", extra: ["-openAssistantManager", "assistant"])
         app.buttons["assistant-sidebar-button"].tap()
         XCTAssertTrue(app.drawerSettingsButton.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(identityHeading(app).exists)
+        let header = switcherHeader(app)
+        XCTAssertTrue(header.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertTrue(app.buttons["sidebar-main"].label.contains("Persona"))
+        header.tap()
+        let work = app.descendants(matching: .any).matching(identifier: "assistant-switcher-row-m-3fa21c").firstMatch
+        XCTAssertTrue(work.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "assistant-switcher-row-m-8b04d2").firstMatch.exists)
+        work.tap()
+        // The head itself (not the row just tapped, while the list goes away) names the assistant switched to.
+        let named = app.buttons.matching(NSPredicate(format: "(identifier == %@ OR identifier == %@) AND label BEGINSWITH %@",
+                                                     "assistant-switcher", "assistant-sidebar", "工作")).firstMatch
+        XCTAssertTrue(named.waitForExistence(timeout: 10), "the head names the assistant switched to:\n\(app.debugDescription)")
     }
 }

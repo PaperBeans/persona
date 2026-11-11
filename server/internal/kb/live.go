@@ -44,8 +44,9 @@ const (
 	maxLiveText      = 4000 // bytes of one sentence: longer ones are cut at a character boundary
 	maxLivePositions = 20000
 	maxLiveBytes     = 4 << 20 // of live text in all
-	// What MeetingMaterial gives of the live sentences, and of earlier meetings.
+	// What MeetingMaterial gives of the live sentences, of the photos' words, and of earlier meetings.
 	materialLiveRunes  = 12000
+	materialPhotoRunes = 8000
 	materialMaxEarlier = 6
 )
 
@@ -65,13 +66,15 @@ type LiveSegment struct {
 	Text  string  `json:"text"`
 }
 
-// AskSource is an earlier meeting (kind recordings) or a project (kind projects) an answer drew on; When is the
-// meeting's minutes when.
+// AskSource is an earlier meeting (kind recordings) or a project (kind projects) an answer drew on; When, Start and End
+// are the meeting's minutes' (#4713: clients format Start / End and show When only without them).
 type AskSource struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	When string `json:"when,omitempty"`
+	Kind  string    `json:"kind"`
+	ID    string    `json:"id"`
+	Name  string    `json:"name"`
+	When  string    `json:"when,omitempty"`
+	Start time.Time `json:"start,omitzero"`
+	End   time.Time `json:"end,omitzero"`
 }
 
 // LiveAsk is a question asked during the meeting (POST /api/v1/recordings/{id}/ask) and its answer.
@@ -93,6 +96,28 @@ type LiveAsk struct {
 	AnsweredAt     *time.Time  `json:"answered_at,omitempty"`
 	// Fed is the hub's: the answer already went to the attending session in a batch.
 	Fed bool `json:"fed,omitempty"`
+	// Room meetings (docs/assistant/meeting-minutes.md "Asking the room"). Via is the way it is answered (AskViaRoom or
+	// AskViaMaterial), fixed when its first attempt goes out ("" before); Spoken the request's spoken (a Talk span);
+	// Heard the lines a heard question was made of; Attempts the messages it sent the room, the latest last.
+	Via      string        `json:"via,omitempty"`
+	Spoken   bool          `json:"spoken,omitempty"`
+	Heard    []LiveSegment `json:"heard,omitempty"`
+	Attempts []AskAttempt  `json:"attempts,omitempty"`
+}
+
+// The ways an ask is answered (LiveAsk.Via).
+const (
+	AskViaRoom     = "room"
+	AskViaMaterial = "material"
+)
+
+// AskAttempt is one message a room ask sent the room: its attempt number k (1 for the first), its client_msg_id
+// (ask-<id>-<k>), the room's last line before it (where its turn is read from) and when it went out.
+type AskAttempt struct {
+	K      int       `json:"k"`
+	MsgID  string    `json:"msg_id"`
+	Base   int       `json:"base"`
+	SentAt time.Time `json:"sent_at,omitzero"`
 }
 
 // Live is live.json: the live log of an attended meeting and what became of it.
@@ -111,6 +136,8 @@ type Live struct {
 	// Full: sentences were refused for the limits (ErrLiveFull), so the phone stopped sending them (problem live_full).
 	Full bool      `json:"full,omitempty"`
 	Asks []LiveAsk `json:"asks,omitempty"`
+	// AsksRev is the asks' revision (the meeting_live event's asks): it goes up whenever they change (LiveUpdate).
+	AsksRev int64 `json:"asks_rev,omitempty"`
 }
 
 var (
@@ -140,12 +167,17 @@ func (e LiveGapError) As(target any) bool {
 	return false
 }
 
-// AttendanceRole is the role r is attended in: AttendanceOff, AttendanceListener or AttendanceParticipant.
+// AttendanceRole is the role r is attended in: AttendanceOff, AttendanceListener or AttendanceParticipant. A room
+// meeting's is its room's (meeting.json), never meta.json's; a trimmed recording is attended no more.
 func (r Recording) AttendanceRole() string {
-	if r.Attendance == "" {
+	role := r.Attendance
+	if r.RoomMeeting() {
+		role = r.Conv.Room.Attendance
+	}
+	if role == "" || r.TrimmedAt != nil {
 		return AttendanceOff
 	}
-	return r.Attendance
+	return role
 }
 
 // UnmarshalJSON reads an upload like the default does, except that a value of the wrong type for attendance or
@@ -157,10 +189,13 @@ func (u *RecordingUpload) UnmarshalJSON(data []byte) error {
 		*plain
 		Attendance       json.RawMessage `json:"attendance"`
 		AttendingSession json.RawMessage `json:"attending_session"`
+		Room             json.RawMessage `json:"room"`
+		Private          json.RawMessage `json:"private"`
 	}{plain: (*plain)(u)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
+	u.readRoomAndPrivate(aux.Room, aux.Private)
 	u.Attendance, u.AttendingSession, u.badRole, u.badSession = "", nil, false, false
 	if raw := aux.Attendance; !jsonNull(raw) {
 		u.badRole = json.Unmarshal(raw, &u.Attendance) != nil
@@ -361,7 +396,7 @@ func (e *Engine) liveAppend(id string, from int, segs []LiveSegment) (Live, Reco
 		return l, r, false, fmt.Errorf("%w: from must be 0 or more", ErrBadLive)
 	case len(segs) > MaxLiveRequest:
 		return l, r, false, fmt.Errorf("%w: at most %d sentences a request", ErrBadLive, MaxLiveRequest)
-	case r.Attendance == "":
+	case !r.Attending():
 		return l, r, false, ErrNotAttending
 	case from > len(l.Segments):
 		return l, r, false, LiveGapError{Next: len(l.Segments)}
@@ -425,37 +460,51 @@ func (e *Engine) LiveUpdate(rawID string, fn func(l *Live, r Recording) error) (
 	if !ok {
 		return Live{}, ErrNotFound
 	}
+	l, asks, err := e.liveUpdate(id, fn)
+	if asks {
+		e.meetingChanged(id, []string{PartAsks})
+	}
+	return l, err
+}
+
+func (e *Engine) liveUpdate(id string, fn func(l *Live, r Recording) error) (Live, bool, error) {
 	st := e.Store
 	st.liveMu.Lock()
 	defer st.liveMu.Unlock()
 	r, ok := st.Recording(id)
 	if !ok {
-		return Live{}, ErrNotFound
+		return Live{}, false, ErrNotFound
 	}
 	if st.ReadOnly() {
-		return Live{}, ErrReadOnly
+		return Live{}, false, ErrReadOnly
 	}
 	l, err := st.readLive(id)
 	if err != nil {
-		return Live{}, err
+		return Live{}, false, err
 	}
 	before, err := json.Marshal(l)
 	if err != nil {
-		return Live{}, err
+		return Live{}, false, err
 	}
+	asksBefore, _ := json.Marshal(l.Asks)
 	if err := fn(&l, *r); err != nil {
-		return Live{}, err
+		return Live{}, false, err
 	}
 	after, err := json.Marshal(l)
 	if err != nil || bytes.Equal(before, after) {
-		return l, err
+		return l, false, err
+	}
+	asksAfter, _ := json.Marshal(l.Asks)
+	asks := !bytes.Equal(asksBefore, asksAfter)
+	if asks {
+		l.AsksRev++
 	}
 	if ok, err := st.putLive(id, &l); err != nil {
-		return Live{}, err
+		return Live{}, false, err
 	} else if !ok {
-		return Live{}, ErrNotFound
+		return Live{}, false, ErrNotFound
 	}
-	return l, nil
+	return l, asks, nil
 }
 
 // AttendingRecordings is every recording whose stored attendance is not off and whose end batch has not gone out,
@@ -463,7 +512,7 @@ func (e *Engine) LiveUpdate(rawID string, fn func(l *Live, r Recording) error) (
 func (e *Engine) AttendingRecordings() []Recording {
 	var out []Recording
 	for _, r := range e.Store.Recordings() {
-		if r.Attendance == "" {
+		if !r.Attending() {
 			continue
 		}
 		if l, err := e.Store.readLive(r.ID); err == nil && l.EndFed {

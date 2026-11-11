@@ -523,8 +523,7 @@
         "jarvis-link",
         "jarvis-link-",
         "jarvisd",
-        "jarvisd-",
-        "jarvisd-wechat"
+        "jarvisd-"
       ],
       "path_tokens": [],
       "external_refs": []
@@ -560,7 +559,6 @@
         "com.jarvis.node",
         "jarvis",
         "jarvis-link",
-        "jarvis-link-",
         "jarvis-pgdata",
         "jarvis-postgres",
         "jarvisd",

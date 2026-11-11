@@ -1,5 +1,6 @@
 {
   "history_hint": "↑↓ 送信済みメッセージを表示 · Ctrl+R 検索",
+  "history_hint_edit": "↑ 前のメッセージを編集 · ↑↓ 送信済みメッセージを表示 · Ctrl+R 検索",
   "history_placeholder": "送信済みメッセージを検索",
   "history_list": "送信済みメッセージ",
   "history_empty": "一致するメッセージはありません",

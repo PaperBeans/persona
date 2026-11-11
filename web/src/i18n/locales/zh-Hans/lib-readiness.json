@@ -12,7 +12,7 @@
   "action_connect_model": "接上模型",
   "action_edit_provider": "换 Key",
   "action_test_assistant": "试一句",
-  "action_main_chat_model": "切换启动器",
+  "action_main_chat_model": "选择其他应用或配置",
   "action_open_admin": "打开管理界面",
   "turn_not_logged_in": "模型没接好：Claude Code 没登录",
   "turn_not_logged_in_detail": "在那台电脑上登录一次，或者改用 API Key。",

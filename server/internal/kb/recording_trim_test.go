@@ -185,8 +185,9 @@ func TestRecordingTrimmedReadAndRefused(t *testing.T) {
 		t.Fatalf("confirming a to-do: %+v %v", m, err)
 	}
 
-	// Retrieval remains tested with the privacy gate on; production keeps it off until #3862 phase 1.
+	// Earlier meetings come back as material once marked not private, a trimmed one too.
 	e.EarlierMeetingsInAnswers = true
+	markPrivate(t, e, recID, false)
 	later := "44444444-4444-4444-8444-444444444444"
 	putRecording(t, e, later, attendedUpload(1, now, AttendanceListener), now)
 	material, err := e.MeetingMaterial(later, "What did the design review decide?")
@@ -250,7 +251,7 @@ func TestRecordingTrimKeepsNoLiveLog(t *testing.T) {
 	}
 	kept := func(when string) {
 		t.Helper()
-		if names := recordingFileNames(t, e, recID); !slices.Equal(names, trimKept) {
+		if names := recordingFileNames(t, e, recID); !slices.Equal(names, trimKeptNoMeeting) {
 			t.Fatalf("%s: a trimmed recording keeps %v", when, names)
 		}
 		l, r, err := e.LiveRead(recID)
@@ -324,7 +325,7 @@ func TestRecordingTrimFinishedWithinWindow(t *testing.T) {
 	if n := e.PruneRecordings(now); n != 0 {
 		t.Fatalf("pruned %d", n)
 	}
-	if names := recordingFileNames(t, e, recID); !slices.Equal(names, trimKept) {
+	if names := recordingFileNames(t, e, recID); !slices.Equal(names, trimKeptNoMeeting) {
 		t.Fatalf("a trim cut short keeps %v", names)
 	}
 	d, err := e.Get(KindRecording, recID, 12000)
@@ -368,7 +369,7 @@ func TestRecordingMinutesKeptForever(t *testing.T) {
 				if n := e.PruneRecordings(sweep); n != 0 {
 					t.Fatalf("forever pruned %d", n)
 				}
-				if files := recordingFileNames(t, e, recID); !slices.Equal(files, trimKept) {
+				if files := recordingFileNames(t, e, recID); !slices.Equal(files, trimKeptNoMeeting) {
 					t.Fatalf("forever kept %v", files)
 				}
 			}
@@ -386,3 +387,6 @@ func TestRecordingMinutesKeptForever(t *testing.T) {
 		})
 	}
 }
+
+// trimKeptNoMeeting are the files a trimmed recording without a meeting.json keeps.
+var trimKeptNoMeeting = []string{"meta.json", "minutes.json", "minutes.md"}

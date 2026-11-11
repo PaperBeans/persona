@@ -12,7 +12,7 @@ whether there's a pending interaction, and whether the user has looked at it in 
 | Waiting in the background (a kind of `working`) | The turn is over and all the agent still runs only waits: background commands that sleep, loop on a check (`until … sleep`), `gh … --watch`, `tail -f` (#6045, `Session.background_waiting`) | — | The node looks at the processes under the session's `claude`: every background command is a shell Claude Code starts there (it sources its shell snapshot). One `ps` at most every 20 s, and only while an agent with background commands has ended its turn; CPU is what they used between two looks (Linux `ps` counts whole seconds). Waiting: only waiters, shells and filters in their pipes, near-zero CPU, a loop's short probes (younger than 10 s) left out. Working: a compiler, build tool, test runner or download runs, or CPU is used, or a process nothing here knows runs while their output grew in the last 2 minutes. No look to compare with yet, or no shell found: Working, as before. Subagents and workflows are work. `state` stays `working` (older apps show Working); new clients leave it out of the Working count | Amber, faded, still |
 | `unread` Unread | A turn finished and the result hasn't been seen | `done` (never focused in herdr) | And not viewed in the App since it finished | Green |
 | `idle` Seen | Finished and seen, waiting for input | `idle` (seen in herdr) | Or herdr still says `done` but it was viewed in the App | Gray |
-| `offline` Not running | Not in the host, only a transcript; sending a message does `--resume` | — | — | Light gray |
+| `offline` Not running | Not in the host, only a transcript. An Agent of a terminal engine is read-only (#4754): a message is refused (`agent_stopped`), and Resume on its terminal page brings it back (`--resume`) | — | — | Light gray |
 | `interrupted` Interrupted by restart | Was running before a restart, and the restart took herdr's panes with it (#1917) | — | The record has a pane, the start time is earlier than this node's start, and there's no live agent now | Light gray, with "Continue" |
 | `unknown` Unknown | The host recognized the agent but can't tell its state | `unknown` | — | Gray |
 
@@ -194,8 +194,13 @@ List order (the same for all three groupings): Needs you → Unread → Awaiting
 DSH (`docs/integrations/dsh.md`): `space_kind` is `dsh`, the space is the session's directory (`space_id` = directory, `space_name` = directory name), no slots;
 state comes from the plugin: running → working, a permission / question waiting → blocked, otherwise done (the hub splits it into Unread / Seen by whether it's been seen, as usual).
 
+Codex App (`docs/integrations/codex.md` ("Sessions in the Codex desktop App (App-local IPC)")): `space_kind` is `codex_app`, the space is a project of the App's sidebar
+(`space_id` = `codex-project:<repository root>`, `space_name` = the App's name for it) or its chats in no project (`codex-chats:<CODEX_HOME>`);
+`space_index` is the project's place in the App's sidebar, from 1 (its `project-order`), absent for a project the App does not order and for chats in no project.
+
 Paseo (`docs/integrations/paseo.md` ("Which sessions appear")): `space_kind` is `paseo`, the space is a Paseo project (`space_id` = project record id, `space_name` = project name);
-a repository's main checkout and its worktrees share a space; the slot is a Paseo workspace (`slot_id` = workspace id, `slot_name` = workspace title).
+a repository's main checkout and its worktrees share a space. No slots (#4493): a workspace's Agents are separate conversations, not the panes of one tab;
+`slot_name` alone carries the Paseo workspace's title, as the Agent's place label.
 
 opencode (`docs/integrations/opencode.md`): those in herdr panes are herdr sessions (`space_kind` is `herdr`); those outside herdr (web, other terminals) are runtime sessions,
 `space_kind` is `opencode`, the space is the session's directory, no slots, and state comes from the plugin (running → working, waiting on a permission → blocked, otherwise done / idle depending on whether there's an assistant message).

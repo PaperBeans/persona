@@ -87,7 +87,7 @@ internal fun HubsScreen(hubs: HubGroups, onAdd: (() -> Unit)?, onBack: () -> Uni
             }
         }
         if (onAdd != null) item {
-            JButton(stringResource(R.string.settings_hubs_add), onAdd, Modifier.fillMaxWidth().padding(top = ContentTokens.legacyXl), icon = PhIcons.Plus, enabled = !busy)
+            JButton(stringResource(R.string.settings_hubs_add), onAdd, Modifier.fillMaxWidth().padding(top = Tokens.Space.section), icon = PhIcons.Plus, enabled = !busy)
         }
         message?.let { id -> item { JNotice(stringResource(id), Modifier.padding(top = Tokens.Space.m), status = Status.NeedsYou) } }
         item { footer() }

@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BASELINE = ROOT / 'android/core/designsystem/tools/token-baseline.json'
-CATEGORIES = ('color', 'font', 'dp', 'material3')
+CATEGORIES = ('color', 'font', 'dp', 'material3', 'icon')
 # Production Kotlin of every app module; build-logic holds Gradle plugins, not app code.
 MODULE_GROUPS = ('app', 'core', 'feature', 'platform')
 DESIGN_SYSTEM = 'android/core/designsystem/'
@@ -118,12 +118,15 @@ def count(source, pages=True):
     counts = {category: {
         'hardcoded': len(re.findall(PATTERNS[category], code)),
         'token': len(re.findall(TOKEN_PATTERNS[category], code)),
-    } for category in CATEGORIES if category != 'material3'}
+    } for category in ('color', 'font', 'dp')}
     # A call or a trailing lambda, by its imported name or written out in full; design-system components are the tokens.
     calls = len(re.findall(rf'(?<![\w.])(?:{"|".join(map(re.escape, sorted(denied)))})(?=\s*[({{])', code)) if denied else 0
     calls += 0 if not pages else len(re.findall(
         rf'\bandroidx\.compose\.material3\.(?:{"|".join(sorted(MATERIAL3_DENIED))})(?=\s*[({{])', code))
     counts['material3'] = {'hardcoded': calls, 'token': 0}
+    # Icons by meaning (#4209): pages name what an icon means (PersonaIcons), not which glyph draws it (PhIcons).
+    counts['icon'] = {'hardcoded': len(re.findall(r'\bPhIcons\.[A-Z]\w*', code)) if pages else 0,
+                      'token': len(re.findall(r'\bPersonaIcons\.\w+', code))}
     return counts
 
 
@@ -220,6 +223,9 @@ def main():
         for category, values in counts.items():
             if category == 'material3':
                 parts.append(f"material3 components {values['hardcoded']}")
+                continue
+            if category == 'icon':
+                parts.append(f"icons by glyph {values['hardcoded']} / by meaning {values['token']}")
                 continue
             ratio = values['token_ratio']
             rate = 'unused' if ratio is None else f'{ratio:.1%}'

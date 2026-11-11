@@ -21,7 +21,7 @@ func TestModelRefusalNoticeKeepsOriginalSignal(t *testing.T) {
 			it := only(t, ParseLine(1, []byte(line), &m))
 			want := proto.ModelRefusal{Subtype: subtype, OriginalModel: "primary-model", FallbackModel: "fallback-model",
 				Category: "synthetic-policy", Scope: "session", Explanation: "Upstream refused the request", Raw: line}
-			if it.Kind != proto.KindNotice || it.Role != "system" || it.Text != line || it.ModelRefusal == nil || *it.ModelRefusal != want {
+			if it.Kind != proto.KindNotice || it.Role != "system" || it.Text != "Upstream refused the request" || it.ModelRefusal == nil || *it.ModelRefusal != want {
 				t.Fatalf("notice lost refusal fields: %+v", it)
 			}
 			if (m.ModelFallback != nil) != (subtype == "model_refusal_fallback") {
@@ -38,9 +38,42 @@ func TestModelRefusalNoticeKeepsOriginalSignal(t *testing.T) {
 	} {
 		var m Meta
 		it := only(t, ParseLine(1, []byte(line), &m))
-		if it.Text != line || it.ModelRefusal.Raw != line || m.ModelFallback != nil {
+		if it.Text == "" || it.Text == line || it.ModelRefusal.Raw != line || m.ModelFallback != nil {
 			t.Fatalf("unknown or incomplete record was lost or became a fallback: %+v", it)
 		}
+	}
+}
+
+// The record's own fields and words reach clients; nothing else of the line does (#2528), however deep it is
+// nested, from a notice or from the session's active fallback. The line stays for the node's own use (Raw).
+func TestModelRefusalPublicProjection(t *testing.T) {
+	const marker = "HIDDEN-MARKER-2528-transcript"
+	line := `{"type":"system","subtype":"model_refusal_fallback","scope":"session","originalModel":"primary-model","fallbackModel":"fallback-model","apiRefusalCategory":"synthetic-policy","apiRefusalExplanation":"Upstream refused the request","content":"Synthetic refusal words, kept as written: <b>&</b>","requestId":"req-` + marker + `","syntheticHidden":{"nested":{"deeper":["` + marker + `"]}}}`
+	var m Meta
+	it := only(t, ParseLine(1, []byte(line), &m))
+	want := proto.ModelRefusal{Subtype: "model_refusal_fallback", OriginalModel: "primary-model", FallbackModel: "fallback-model",
+		Category: "synthetic-policy", Scope: "session", Explanation: "Upstream refused the request",
+		Text: "Synthetic refusal words, kept as written: <b>&</b>", Raw: line}
+	if it.ModelRefusal == nil || *it.ModelRefusal != want || it.Text != want.Text || m.ModelFallback == nil || *m.ModelFallback != want {
+		t.Fatalf("projection %+v text %q fallback %+v", it.ModelRefusal, it.Text, m.ModelFallback)
+	}
+	for name, v := range map[string]any{"item": it, "fallback": m.ModelFallback} {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(b, []byte(marker)) || bytes.Contains(b, []byte("syntheticHidden")) || bytes.Contains(b, []byte(`"raw"`)) {
+			t.Fatalf("%s carries the record's other fields: %s", name, b)
+		}
+		var back proto.ModelRefusal
+		if name == "fallback" && (json.Unmarshal(b, &back) != nil || back.Text != want.Text || back.Category != want.Category) {
+			t.Fatalf("%s lost the refusal's words: %s", name, b)
+		}
+	}
+	// A structured content is not taken for the refusal's words.
+	it = only(t, ParseLine(1, []byte(`{"type":"system","subtype":"model_refusal_future","content":{"x":"`+marker+`"}}`), &Meta{}))
+	if b, _ := json.Marshal(it); bytes.Contains(b, []byte(marker)) || it.ModelRefusal.Text != "" {
+		t.Fatalf("structured content leaked: %s", b)
 	}
 }
 

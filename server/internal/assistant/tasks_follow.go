@@ -454,12 +454,24 @@ func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text,
 	if len(agents) == 0 {
 		return FeedItem{}, i18n.Err("assistant-tasks.route_no_agent")
 	}
-	c := pickTaskAgent(agents)
+	live, last := liveTaskAgents(agents)
+	if len(live) == 0 { // every agent has stopped (read-only, #4754): the user's message starts a new one (tasks_successor.go)
+		if relay != "" {
+			return FeedItem{}, i18n.Err("assistant-tasks.route_agents_stopped")
+		}
+		started, err := s.startTaskSuccessor(ctx, t, last, text)
+		if err != nil {
+			return FeedItem{}, err
+		}
+		return s.appendFeed(ctx, conversation, feedRouted, todoID, map[string]string{"text": text,
+			"new_agent": started.SessionID, "new_agent_machine": started.MachineID})
+	}
+	c := pickTaskAgent(live)
 	if _, ok := s.device(ctx, c.MachineID); !ok {
 		return FeedItem{}, i18n.Err("assistant-tasks.route_offline")
 	}
-	// An agent closed after its task was done (tasks_close.go) is resumed first: that can take minutes, and goes
-	// on when the phone stops waiting, as a send from the chat does.
+	// An offline row a node before #4754 lists is resumed first: that can take minutes, and goes on when the phone
+	// stops waiting, as a send from the chat does.
 	wait := 90 * time.Second
 	if c.Status == proto.StatusOffline {
 		wait = 5 * time.Minute

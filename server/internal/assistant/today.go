@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -229,23 +230,38 @@ type todayDone struct {
 
 // trustKind is a remembered kind of task (trustKey), as the settings page lists it.
 type trustKind struct {
-	Key      string `json:"key"`
-	Machine  string `json:"machine"`
-	Cwd      string `json:"cwd"`
-	Readonly bool   `json:"readonly"`
+	Key       string `json:"key"`
+	Machine   string `json:"machine"`
+	Cwd       string `json:"cwd"`
+	Readonly  bool   `json:"readonly"`
+	Ambiguous bool   `json:"ambiguous,omitempty"`
 }
 
-func (s *Service) trustList(ctx context.Context) []trustKind {
+func (s *Service) trustList(ctx context.Context) ([]trustKind, error) {
+	have, err := s.trustedKindsErr(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := []trustKind{}
-	for k := range s.trustedKinds(ctx) {
+	for k := range have {
 		parts := strings.Split(k, "|")
-		if len(parts) != 3 {
+		if len(parts) < 3 {
 			continue
 		}
-		out = append(out, trustKind{Key: k, Machine: parts[0], Cwd: parts[1], Readonly: parts[2] == "read"})
+		if len(parts) == 3 {
+			out = append(out, trustKind{Key: k, Machine: parts[0], Cwd: parts[1], Readonly: parts[2] == "read"})
+			continue
+		}
+		// A legacy machine ID or a directory can contain '|'. Neither side of the separator is recoverable from the
+		// key alone. A path-escaped identifier retains the whole key in older clients' lastPathComponent titles;
+		// it is not a resolved directory.
+		mode := parts[len(parts)-1]
+		if mode == "read" || mode == "edit" {
+			out = append(out, trustKind{Key: k, Cwd: url.PathEscape(k), Readonly: mode == "read", Ambiguous: true})
+		}
 	}
 	slices.SortFunc(out, func(a, b trustKind) int { return strings.Compare(a.Key, b.Key) })
-	return out
+	return out, nil
 }
 
 // forgetTrust stops a kind from starting without asking; false when it was not remembered. A failed read is an
@@ -287,7 +303,12 @@ func (s *Service) todayRoutes() {
 		apierr.WriteJSON(w, map[string]any{"item": it, "new": made})
 	})
 	s.handle("GET /api/v1/task-trust", func(w http.ResponseWriter, r *http.Request) {
-		apierr.WriteJSON(w, map[string]any{"kinds": s.trustList(r.Context())})
+		kinds, err := s.trustList(r.Context())
+		if err != nil {
+			apierr.Write(w, http.StatusServiceUnavailable, err)
+			return
+		}
+		apierr.WriteJSON(w, map[string]any{"kinds": kinds})
 	})
 	s.handle("DELETE /api/v1/task-trust", func(w http.ResponseWriter, r *http.Request) {
 		if !fullRole(r) {

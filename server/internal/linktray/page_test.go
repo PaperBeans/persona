@@ -130,6 +130,14 @@ func TestWritePages(t *testing.T) {
 			preview := ParseLink(l, prefill)
 			write("pair-"+suffix, "pair", l, Boot{Theme: theme, Version: "1.4.2", Pair: &ps, Prefill: prefill, Preview: &preview})
 			write("pair-passive-"+suffix, "pair", l, Boot{Theme: theme, Version: "1.4.2", Pair: &ps, Tab: "passive"})
+			// The pairing window with a tunnel saved and in use: its section open, its row in the addresses.
+			tunnel := Samples(now)[0].Snapshot
+			cfg, st := *tunnel.Config, *tunnel.Status
+			cfg.SSH = &link.SSH{Server: "user@example.com", Target: "127.0.0.1:18661"}
+			st.Address, st.Kind, st.SSH = cfg.SSH.Server, link.KindSSH, cfg.SSH
+			tunnel.Config, tunnel.Status = &cfg, &st
+			sshState := BuildPair(l, tunnel)
+			write("pair-ssh-"+suffix, "pair", l, Boot{Theme: theme, Version: "1.4.2", Pair: &sshState})
 		}
 	}
 }

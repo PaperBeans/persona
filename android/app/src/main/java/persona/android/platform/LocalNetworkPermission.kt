@@ -47,7 +47,9 @@ class LocalNetworkPermission @Inject constructor(private val application: Applic
     internal fun granted() = !needsLocalNetworkPermission(Build.VERSION.SDK_INT, application.applicationInfo.targetSdkVersion) ||
         application.checkSelfPermission(LOCAL_NETWORK) == PackageManager.PERMISSION_GRANTED
 
-    internal suspend fun missingFor(pairing: PairingRequest): Boolean {
+    internal suspend fun missingFor(pairing: PairingRequest): Boolean = missingForAddresses(HubPairingClient.addresses(pairing))
+
+    private suspend fun missingForAddresses(addresses: List<String>): Boolean {
         if (granted()) return false
         return withContext(Dispatchers.IO) {
             val manager = application.getSystemService(ConnectivityManager::class.java)
@@ -55,7 +57,7 @@ class LocalNetworkPermission @Inject constructor(private val application: Applic
             // granted() is always true below 37; the SDK check spells out IpPrefix(InetAddress, Int), public from 33.
             val prefixes = if (Build.VERSION.SDK_INT < 33) emptyList()
                 else properties?.linkAddresses.orEmpty().map { IpPrefix(it.address, it.prefixLength) }
-            HubPairingClient.addresses(pairing).any { endpoint ->
+            addresses.any { endpoint ->
                 val host = endpoint.toHttpUrl().host
                 host.endsWith(".local", ignoreCase = true) || runCatching { InetAddress.getAllByName(host).toList() }
                     .getOrDefault(emptyList()).any { address ->
@@ -65,8 +67,12 @@ class LocalNetworkPermission @Inject constructor(private val application: Applic
         }
     }
 
-    internal suspend fun ensureAllowed(pairing: PairingRequest) = lock.withLock {
-        if (!missingFor(pairing)) return@withLock
+    internal suspend fun ensureAllowed(pairing: PairingRequest) = ensure { missingFor(pairing) }
+
+    internal suspend fun ensureAllowedAddress(address: String) = ensure { missingForAddresses(listOf(address)) }
+
+    private suspend fun ensure(missing: suspend () -> Boolean) = lock.withLock {
+        if (!missing()) return@withLock
         val reply = CompletableDeferred<Boolean>()
         request.value = reply
         try {
@@ -77,10 +83,11 @@ class LocalNetworkPermission @Inject constructor(private val application: Applic
 
 @Singleton
 class PlatformPairing @Inject constructor(
-    application: Application,
+    private val application: Application,
     private val delegate: WiredPairingService,
     private val runtime: ConnectionRuntime,
     private val permission: LocalNetworkPermission,
+    private val passwordBrowser: PasswordBrowserLogin,
 ) : PairingService by delegate {
     private val preferences = application.getSharedPreferences("platform-entry", 0)
     internal fun readinessPending(): Boolean = runtime.activeCredentials()?.deviceToken?.let {
@@ -90,6 +97,10 @@ class PlatformPairing @Inject constructor(
         runtime.activeCredentials()?.deviceToken?.let { preferences.edit().remove(readinessKey(it)).apply() }
     }
     override suspend fun pair(request: PairingRequest) = pair(request) { }
+    override suspend fun passwordLogin(address: String, progress: (PairingProgress) -> Unit) {
+        permission.ensureAllowedAddress(normalizedPasswordAddress(application, address).toString())
+        pair(passwordBrowser.login(address), progress)
+    }
     override suspend fun pair(request: PairingRequest, progress: (PairingProgress) -> Unit) {
         val parsed = request.parsedPairingLink() ?: request
         permission.ensureAllowed(parsed)
@@ -108,6 +119,10 @@ class PlatformPairing @Inject constructor(
         private val none = kotlinx.coroutines.flow.MutableStateFlow(false)
         // The pairing page warns that a new pairing replaces the current one while paired; adding replaces nothing.
         override val isPaired: kotlinx.coroutines.flow.StateFlow<Boolean> = none
+        override suspend fun passwordLogin(address: String, progress: (PairingProgress) -> Unit) {
+            permission.ensureAllowedAddress(normalizedPasswordAddress(application, address).toString())
+            pair(passwordBrowser.login(address), progress)
+        }
         override suspend fun pair(request: PairingRequest) = pair(request) { }
         override suspend fun pair(request: PairingRequest, progress: (PairingProgress) -> Unit) {
             val parsed = request.parsedPairingLink() ?: request

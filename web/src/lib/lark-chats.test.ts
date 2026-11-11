@@ -98,6 +98,18 @@ describe("LarkChatsStore", () => {
     expect(s.state.pages).toBe(2);
   });
 
+  it("finds a chat past the loaded pages without adding them to the list, and gives up on a failed read", async () => {
+    const { d, pages } = deps({ "": { account_id: "acc", conversations: [c("a")], next_cursor: "2" }, "2": { account_id: "acc", conversations: [c("b")], next_cursor: "3" },
+      "3": { account_id: "acc", conversations: [c("x")] } });
+    const s = new LarkChatsStore(d);
+    await s.refresh();
+    expect((await s.find("x"))?.id).toBe("x");
+    expect(s.state.rows.map((x) => x.id)).toEqual(["a"]);
+    expect(await s.find("nowhere")).toBeUndefined();
+    pages["2"] = new ApiError(502, "down", {});
+    expect(await s.find("x")).toBeUndefined();
+  });
+
   it("re-reads the loaded window and drops chats that left; a failed refresh keeps the list", async () => {
     const { d, calls, pages } = deps({ "": { account_id: "acc", conversations: [c("a"), c("b")], next_cursor: "2" }, "2": { account_id: "acc", conversations: [c("c")], next_cursor: "3" } });
     const s = new LarkChatsStore(d);

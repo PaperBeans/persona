@@ -14,11 +14,12 @@ export interface ModelProfile {
   changes: string[];
 }
 export interface ModelProfiles {
-  revision: number;
+  revision?: number;
   active?: string;
   profiles: ModelProfile[];
   rollback?: { to?: string; changes: string[] };
 }
-export const modelProfiles = (manager?: string) => api<ModelProfiles>("/model-profiles", { headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
-export const switchModelProfile = (id: string, manager?: string) => api<ModelProfiles>(`/model-profiles/${enc(id)}/apply`, { method: "POST", headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
-export const rollbackModelProfile = (manager?: string) => api<ModelProfiles>("/model-profiles/rollback", { method: "POST", headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
+type RequestContext = { token: string; tokenOwner: string; isAuthContextCurrent: () => boolean; signal?: AbortSignal };
+export const modelProfiles = (manager?: string, context?: RequestContext) => api<ModelProfiles>("/model-profiles", { ...context, headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
+export const switchModelProfile = (id: string, manager?: string, context?: RequestContext) => api<ModelProfiles>(`/model-profiles/${enc(id)}/apply`, { ...context, method: "POST", headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
+export const rollbackModelProfile = (manager?: string, context?: RequestContext) => api<ModelProfiles>("/model-profiles/rollback", { ...context, method: "POST", headers: manager ? { [MANAGER_HEADER]: manager } : undefined });

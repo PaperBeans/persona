@@ -220,8 +220,16 @@ struct StatusBlock: View {
             var out = [Line(symbol: "personalhotspot.slash", text: "离线" + (s.retry.map { " · " + LinkText.until($0, now: now) } ?? ""),
                             primary: true, tint: .red)]
             // persona-link joins the failures of the addresses it tried with 「；」: one line each.
-            for part in (s.error ?? "").split(separator: "；") where !part.isEmpty {
-                out.append(Line(symbol: "xmark.circle", text: String(part)))
+            var parts = (s.error ?? "").split(separator: "；").map(String.init).filter { !$0.isEmpty }
+            if let se = s.sshError {
+                if parts.isEmpty {
+                    parts = [LinkText.sshError(se)]
+                } else {
+                    parts[parts.count - 1] = LinkText.sshError(se)
+                }
+            }
+            for part in parts {
+                out.append(Line(symbol: "xmark.circle", text: part))
             }
             return out + [hub, machine].compactMap { $0 }
         }

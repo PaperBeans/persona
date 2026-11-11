@@ -139,6 +139,7 @@ POST /api/v1/machines/{mid}/node-update/{action}
 POST /api/v1/machines/{mid}/panes
 POST /api/v1/machines/{mid}/panes/agent
 POST /api/v1/machines/{mid}/panes/close
+POST /api/v1/machines/{mid}/panes/close_finished
 POST /api/v1/machines/{mid}/panes/git
 POST /api/v1/machines/{mid}/panes/split
 POST /api/v1/machines/{mid}/ports/{port}/open
@@ -172,6 +173,7 @@ POST /api/v1/sessions/{mid}/{sid}/modes
 POST /api/v1/sessions/{mid}/{sid}/queue
 POST /api/v1/sessions/{mid}/{sid}/queue/send-now
 POST /api/v1/sessions/{mid}/{sid}/rename
+POST /api/v1/sessions/{mid}/{sid}/restore-model # a relay to the node (session.restore_model, #2528)
 POST /api/v1/sessions/{mid}/{sid}/rewind
 POST /api/v1/sessions/{mid}/{sid}/screen/before
 POST /api/v1/sessions/{mid}/{sid}/seen
@@ -196,3 +198,12 @@ PUT /api/v1/pins
 # Phone write delivery receipts (full credentials only).
 GET /api/v1/phone/write-queue
 POST /api/v1/phone/write-queue/{id}/cancel
+/api/v1/auth/password/
+GET /api/v1/auth/password/state
+POST /api/v1/auth/password/start
+POST /api/v1/auth/password/finish
+POST /api/v1/auth/password/exchange
+GET /api/v1/admin/password-login
+POST /api/v1/admin/password-login/register/start
+POST /api/v1/admin/password-login/register/finish
+PUT /api/v1/admin/password-login

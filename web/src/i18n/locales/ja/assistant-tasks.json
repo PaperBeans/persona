@@ -12,6 +12,8 @@
   "workspace_engine_path": "パスはマシンのエンジンが決定します。ブランチを変更すると再表示します。",
   "tray_needs_you": "要対応",
   "tray_running": "進行中",
+  "tray_expand": "拡大",
+  "tray_restore": "元のサイズ",
   "background_tasks_running": "バックグラウンドタスク {count} 件が実行中",
   "subagents_count_running": "サブエージェント {count} 件が実行中",
   "background_running": "バックグラウンドで作業中",
@@ -207,5 +209,6 @@
   "interrupt_batch_title_on_other": "{machine} で{cause}：{count} 件のタスクが中断",
   "interrupt_batch_counts": "→ 対応済み {resolved} / 未対応 {pending}",
   "interrupt_batch_all": "→ すべて対応済み",
-  "needs_group_another": "別の会話"
+  "needs_group_another": "別の会話",
+  "new_agent_started": "このタスクのために新しいエージェントを起動しました"
 }

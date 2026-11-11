@@ -11,7 +11,6 @@
   "title_workspace_board": "工作流看板",
   "title_todos": "待办",
   "title_machines": "机器",
-  "title_terminal": "终端",
   "title_settings": "设置",
   "title_agents": "个人 Agent",
   "title_extension": "扩展",
@@ -29,5 +28,7 @@
   "session_choices_other": "有 {count} 个会话的 id 以 {sid} 开头，选一个打开",
   "title_health": "健康",
   "title_agent_archives": "已归档的 Agent",
-  "title_subscriptions": "订阅来源"
+  "title_subscriptions": "订阅来源",
+  "new_version": "有新版本",
+  "new_version_reload": "点此刷新"
 }

@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import persona.core.contracts.AgentState
 import persona.core.contracts.Machine
+import persona.core.contracts.TodoState
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
@@ -40,10 +41,13 @@ internal data class TreeGroupEntry(val group: AgentListGroup, val space: Boolean
 /**
  * A session. [located] rows sit outside the computer tree and show where they run. A row under a [TreeTabEntry] says
  * whether it is its tab's [launcher] (the one that started it) or a [branch] the launcher split off, drawn one step further in.
+ * A [nested] row is a subtask drawn under its parent's [TreeChildrenEntry].
  */
 internal data class TreeRowEntry(
     val row: AgentSession, val depth: Int, val first: Boolean, val last: Boolean, val located: Boolean,
-    val launcher: Boolean = false, val branch: Boolean = false,
+    val launcher: Boolean = false, val branch: Boolean = false, val nested: Boolean = false,
+    /** Under a By Status section that names its state, so the row leaves the word out (iOS `inStateSection`); Muted mixes states. */
+    val inStateSection: Boolean = false,
 ) : AgentTreeEntry {
     override val key: String get() = "session:${row.id}"
 }
@@ -55,6 +59,17 @@ internal data class TreeRowEntry(
  */
 internal data class TreeTabEntry(val tab: AgentTab, val depth: Int, val first: Boolean, val last: Boolean, val folded: Boolean) : AgentTreeEntry {
     override val key: String get() = "tab:${tab.key}"
+}
+
+/**
+ * Whether Collapse All is done: every section folded. It leaves the computer headings as they are (#4338 A11), so they
+ * say nothing about it.
+ */
+internal val AgentListResult.allCollapsed: Boolean get() = groups.isNotEmpty() && groups.all { it.folded }
+
+/** A section's run of rows past [AgentRowCap]: "Show All [count]", or "Collapse" once they all show ([expanded]). */
+internal data class TreeShowAllEntry(val group: AgentListGroup, val count: Int, val depth: Int, val expanded: Boolean) : AgentTreeEntry {
+    override val key: String get() = "all:${group.id}"
 }
 
 /** Finished sessions of an active space that are tucked away until asked for. */
@@ -78,6 +93,11 @@ internal fun agentTreeEntries(
     list: AgentListResult, machineFilter: String, tabs: Boolean = false, foldedTabs: Set<String> = emptySet(),
     mutes: AgentPreferences = AgentPreferences(),
     expandedTasks: Set<String> = emptySet(),
+    /**
+     * The sections showing all their rows ([AgentRowCap.key]); null: no section is capped (a search, a quick filter or a
+     * paged list shows every row it leaves, as iOS).
+     */
+    showAll: Set<String>? = null,
 ): List<AgentTreeEntry> {
     val entries = mutableListOf<AgentTreeEntry>()
     fun group(group: AgentListGroup, space: Boolean, depth: Int, first: Boolean) {
@@ -87,16 +107,20 @@ internal fun agentTreeEntries(
         // each line is a row of its own or a tab of several, in the group's order
         val lines = mutableListOf<Any>()
         val placed = mutableSetOf<String>()
-        group.visibleRows.forEach { row ->
+        val cap = showAll?.let { AgentRowCap.capped(group.visibleRows.size) }
+        val open = cap != null && AgentRowCap.key(group.id) in showAll.orEmpty()
+        val drawn = if (cap != null && !open) group.visibleRows.take(cap) else group.visibleRows
+        drawn.forEach { row ->
             val tab = row.session.tabKey?.let(byTab::get)
             if (tab == null) lines += row else if (placed.add(tab.key)) lines += tab
         }
+        val inStateSection = group.id.startsWith("state/") && group.id != "state/muted"
         var shown = 0
         lines.forEachIndexed { index, line ->
             val firstLine = index == 0
             val lastLine = index == lines.lastIndex
             when (line) {
-                is AgentSession -> { shown++; entries += TreeRowEntry(line, depth, firstLine, lastLine, located = !space) }
+                is AgentSession -> { shown++; entries += TreeRowEntry(line, depth, firstLine, lastLine, located = !space, inStateSection = inStateSection) }
                 is AgentTab -> {
                     val folded = line.foldKey in foldedTabs
                     shown += line.members.size
@@ -109,13 +133,16 @@ internal fun agentTreeEntries(
                 }
             }
         }
-        val hidden = group.rows.size - shown
+        if (cap != null) entries += TreeShowAllEntry(group, group.visibleRows.size, depth, expanded = open)
+        val hidden = group.rows.size - shown - (group.visibleRows.size - drawn.size)
         if (hidden > 0) entries += TreeIdleEntry(group, hidden, depth)
     }
     val byId = list.groups.associateBy { it.id }
     val treeIds = list.machines.flatMap { it.groups }.toSet()
     list.groups.filter { it.id == "pinned" }.forEach { group(it, space = false, depth = 0, first = entries.isEmpty()) }
-    val headed = machineFilter.isEmpty() || list.machines.size > 1
+    // Computer headings only while the list holds more than one computer, as iOS's `byHost` (#4338 A7): one computer's
+    // name over its own list says nothing.
+    val headed = machineFilter.isEmpty() && list.machines.size > 1
     list.machines.forEach { machine ->
         // A computer whose sessions are all pinned has nothing left to hold here; "Pinned" says where they run.
         if (machine.groups.none(byId::containsKey)) return@forEach
@@ -142,7 +169,7 @@ internal fun agentTreeEntries(
         val expanded = entry.row.id in expandedTasks
         nested += TreeChildrenEntry(entry.row, children.size, entry.depth + 1, expanded)
         if (expanded) children.forEachIndexed { index, child ->
-            append(TreeRowEntry(child, entry.depth + 1, false, index == children.lastIndex, entry.located, branch = true))
+            append(TreeRowEntry(child, entry.depth + 1, false, index == children.lastIndex, entry.located, branch = true, nested = true))
         }
     }
     entries.forEach(::append)
@@ -155,7 +182,7 @@ internal data class MachineCount(val machine: Machine, val count: Int)
 
 /** Every computer, online ones first (the tree's order), with the count the list would show for it. */
 internal fun machineCounts(machines: List<Machine>, rows: List<AgentSession>): List<MachineCount> {
-    val counts = rows.filterNot { it.session.isCodexSubagent }.groupingBy { it.session.machineId }.eachCount()
+    val counts = rows.filterNot { it.isNestedSubtask }.groupingBy { it.session.machineId }.eachCount()
     return machines.sortedBy { !it.online }.map { MachineCount(it, counts[it.id] ?: 0) }
 }
 
@@ -182,12 +209,51 @@ internal fun MachineFilterRow(machines: List<MachineCount>, total: Int, selected
     }
 }
 
+/**
+ * A computer heading's counts, as iOS's `StateCounts` (#4338 A7): needing you, working, unread, then idle; the agents that
+ * only wait in the background are out of Working and drawn apart ([AgentMachineGroup.waitingInBackground], a clock).
+ */
 internal val AgentMachineGroup.headingCounts: List<Pair<Status, Int>>
-    get() = listOf(AgentState.NeedsYou, AgentState.Working, AgentState.Unread).map { it.designStatus to (stateCounts[it] ?: 0) }
+    get() = listOf(
+        Status.NeedsYou to (stateCounts[AgentState.NeedsYou] ?: 0),
+        Status.Working to ((stateCounts[AgentState.Working] ?: 0) - waitingInBackground).coerceAtLeast(0),
+        Status.Unread to (stateCounts[AgentState.Unread] ?: 0),
+        Status.Idle to (stateCounts[AgentState.Idle] ?: 0) + (stateCounts[AgentState.Unknown] ?: 0),
+    )
+
+/**
+ * A By Status section's one count, in its state's color (iOS `SectionHeader` with the section's tone): Awaiting reply
+ * takes Unread's, Waiting in the background Working's, Muted and Seen the idle one. Null for every other group.
+ */
+internal val AgentListGroup.stateSectionCounts: List<Pair<Status, Int>>?
+    get() {
+        val status = when (id.takeIf { it.startsWith("state/") }?.removePrefix("state/")) {
+            "needs" -> Status.NeedsYou
+            "unread", "awaiting" -> Status.Unread
+            "working", "background" -> Status.Working
+            "waiting" -> Status.Waiting
+            "muted", "idle" -> Status.Idle
+            else -> return null
+        }
+        return listOf(status to (totalCount ?: rows.count { !it.isNestedSubtask }))
+    }
+
+/** "By to-do"'s "Opened by hand" and "No to-do": one count of their agents, as iOS's sections without a to-do. */
+internal val AgentListGroup.todoLooseCounts: List<Pair<Status, Int>>?
+    get() = if (id == TodoManualGroup || id == TodoNoneGroup) listOf(Status.Idle to rows.count { !it.isNestedSubtask }) else null
+
+/** A to-do's count in its state's color (iOS `todoTone`): needing you, unread, working, else plain. */
+internal val TodoState?.countTone: Status
+    get() = when (this) {
+        TodoState.NeedsYou -> Status.NeedsYou
+        TodoState.Unread -> Status.Unread
+        TodoState.Working -> Status.Working
+        else -> Status.Idle
+    }
 
 internal val AgentListGroup.headingCounts: List<Pair<Status, Int>>
     get() = listOf(AgentState.NeedsYou, AgentState.Working, AgentState.Unread).map { state ->
         // A repository with working trees holds no rows itself (its trees do): it counts from stateCounts.
         state.designStatus to if (totalCount != null || rows.isEmpty()) stateCounts?.get(state) ?: 0
-            else rows.count { !it.session.isCodexSubagent && it.state == state }
+            else rows.count { !it.isNestedSubtask && it.state == state }
     }

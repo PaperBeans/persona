@@ -183,6 +183,21 @@ describe("Feishu bot dialog", () => {
     expect(setConnector).toHaveBeenCalledWith("larkcli", { enabled: false });
   });
 
+  it("turns on every comment for documents I own from the Lark page, keeping the other options", async () => {
+    const options = { inbox_all_chats: ["oc_example"], documents: [], wiki_spaces: [], owned_all_comments: false, triage_rules: "rule" };
+    const larkcli: HubConnector = { id: "larkcli", name: "Lark · my messages", status: "ok", account: "me", enabled: true, options };
+    setConnector.mockResolvedValue({ ...larkcli, options: { ...options, owned_all_comments: true } });
+    connectorList.value = [larkcli];
+    act(() => root.render(<FeishuBot larkcli={larkcli} />));
+    await act(async () => calls.status[0].resolve(saved({ owner: { name: "owner", paired_at: 1 } })));
+    await act(async () => host.querySelector<HTMLButtonElement>("button")!.click());
+
+    const sw = document.querySelector<HTMLButtonElement>(`[role=dialog] [role="switch"][aria-label="${t("settings-hubconnector.lark_docs_owned")}"]`)!;
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    await act(async () => sw.click());
+    expect(setConnector).toHaveBeenCalledWith("larkcli", { options: { ...options, owned_all_comments: true } });
+  });
+
   it("starts lark-cli authorization inline and renders a device-code step", async () => {
     const larkcli: HubConnector = { id: "larkcli", name: "Lark via lark-cli", status: "not_signed_in", capabilities: ["login"] };
     connectorLogin.mockResolvedValue({ step: "device", kind: "device_code", user_code: "ABC123", url: "https://example.test/authorize" });

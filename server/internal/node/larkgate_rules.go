@@ -112,24 +112,44 @@ func larkPattern(c larkCall) string {
 	return c.Method + " /" + strings.Join(segs, "/")
 }
 
+type larkBoundary uint8
+
+const (
+	larkOrdinary larkBoundary = iota
+	larkOutbound
+	larkDeletion
+)
+
 var larkActions = []struct {
-	re   *lazyre.Regexp
-	what string
+	re       *lazyre.Regexp
+	what     string
+	boundary larkBoundary // classified alongside the phone-card action
 }{
+	{lazyre.New(`^CLI /im/messages/delete`), "撤回消息", larkDeletion},
+	{lazyre.New(`^DELETE `), "删除", larkDeletion},
+	{lazyre.New(`^(?:GET|HEAD|POST|PUT|PATCH|OPTIONS) /.*(?:delete|remove|trash|recall)`), "删除", larkDeletion},
+	{lazyre.New(`^CLI /.*(?:/|\+|-)(?:delete|remove|trash|recall)(?:$|/|-)`), "删除", larkDeletion},
+	{lazyre.New(`^CLI /.*(?:comments|replies)/(?:create|reply)$`), "发表评论", larkOutbound},
+	{lazyre.New(`^CLI /mail/.*(?:send|reply|forward)$`), "发邮件", larkOutbound},
+	{lazyre.New(`^CLI /mail/\+.*(?:send|reply|forward)`), "发邮件", larkOutbound},
+	{lazyre.New(`^(POST|PUT|PATCH) /(?:open-apis/)?im/(?:v[0-9]+/)?(?:messages|batch_messages|threads)(?:/|$)`), "发消息", larkOutbound},
+	{lazyre.New(`^POST /(?:conversations/[^/]+/(?:messages|files|images)|messages/[^/]+/(?:reply|forward|recall|reactions))`), "发消息", larkOutbound},
+	{lazyre.New(`^(POST|PUT|PATCH) /.*(?:comments|replies)(?:/|$)`), "发表评论", larkOutbound},
+	{lazyre.New(`^POST /.*(?:mail|mailboxes).*/(?:send|reply|forward)$`), "发邮件", larkOutbound},
+	{lazyre.New(`^CLI /im/(?:messages/(?:create|reply|patch|update|send)|threads/forward)(?:/|$)`), "发消息", larkOutbound},
 	// lark-cli commands (larkcligate.go): "CLI /<domain>/<command>"
-	{lazyre.New(`^CLI /im/\+messages-send`), "发消息"},
-	{lazyre.New(`^CLI /im/\+messages-reply`), "回复消息"},
-	{lazyre.New(`^CLI /im/reactions/`), "表情回复"},
-	{lazyre.New(`^CLI /im/messages/delete`), "撤回消息"},
-	{lazyre.New(`^CLI /im/(messages/(forward|merge_forward)|threads/forward)`), "转发消息"},
-	{lazyre.New(`^CLI /im/messages/urgent`), "加急"},
-	{lazyre.New(`^CLI /im/`), "改群 / 会话"},
-	{lazyre.New(`^CLI /(markdown|slides|whiteboard|mindnotes)`), "写文档"},
-	{lazyre.New(`^CLI /task`), "改待办"},
-	{lazyre.New(`^CLI /approval`), "处理审批"},
-	{lazyre.New(`^CLI /calendar`), "建 / 改日程"},
-	{lazyre.New(`^CLI /(docs|sheets|wiki|drive|base)`), "写文档"},
-	{lazyre.New(`^CLI /mail`), "发 / 改邮件"},
+	{lazyre.New(`^CLI /im/\+messages-send`), "发消息", larkOutbound},
+	{lazyre.New(`^CLI /im/\+messages-reply`), "回复消息", larkOutbound},
+	{lazyre.New(`^CLI /im/reactions/`), "表情回复", larkOutbound},
+	{lazyre.New(`^CLI /im/(messages/(forward|merge_forward)|threads/forward)`), "转发消息", larkOutbound},
+	{lazyre.New(`^CLI /im/messages/urgent`), "加急", larkOutbound},
+	{lazyre.New(`^CLI /im/`), "改群 / 会话", larkOrdinary},
+	{lazyre.New(`^CLI /(markdown|slides|whiteboard|mindnotes)`), "写文档", larkOrdinary},
+	{lazyre.New(`^CLI /task`), "改待办", larkOrdinary},
+	{lazyre.New(`^CLI /approval`), "处理审批", larkOrdinary},
+	{lazyre.New(`^CLI /calendar`), "建 / 改日程", larkOrdinary},
+	{lazyre.New(`^CLI /(docs|sheets|wiki|drive|base)`), "写文档", larkOrdinary},
+	{lazyre.New(`^CLI /mail`), "发 / 改邮件", larkOrdinary},
 }
 
 // larkSummary is the phone card's text: what each write does, then its method, path and body.
@@ -180,4 +200,27 @@ func prettyBody(body string) string {
 		body = string(r[:2000]) + "…"
 	}
 	return body
+}
+
+// Only the message send/reply shortcuts are documented to use the bot (plan-lark-cli.md).
+// Raw API calls, mail and comments cannot claim this exemption by passing --as bot.
+var larkBotOutbound = map[string]bool{
+	"/im/+messages-send":  true,
+	"/im/+messages-reply": true,
+}
+
+// larkBypassSafe uses the same action classification as the card. Unknown CLI risk is not an ordinary write.
+func larkBypassSafe(c larkCall) bool {
+	if c.CLI && c.Method == "CLI" && larkRead(c) {
+		return true
+	}
+	for _, action := range larkActions {
+		if action.boundary != larkOrdinary && action.re.MatchString(c.Method+" "+c.Path) {
+			return action.boundary == larkOutbound && c.CLI && c.Method == "CLI" && larkBotOutbound[c.Path] && flagValue(c.Args, "--as") == "bot"
+		}
+	}
+	if c.CLI && c.Method == "CLI" {
+		return c.Risk == "write"
+	}
+	return httpMethod.MatchString(c.Method) && !strings.Contains(c.Path, "$")
 }

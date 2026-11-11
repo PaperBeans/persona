@@ -18,6 +18,20 @@ import (
 // maxFileBytes caps what the phone can pull in one request: a bigger text file comes in pages (`offset`, `next`).
 const maxFileBytes = 2 << 20
 
+type fileReadHandle interface {
+	io.Reader
+	io.ReaderAt
+	io.Closer
+	Stat() (os.FileInfo, error)
+	Fd() uintptr
+}
+
+type fileReadDependencies struct {
+	size    func(os.FileInfo) int64
+	open    func(string) (fileReadHandle, error)
+	isSysfs func(fileReadHandle) (bool, error)
+}
+
 // FileContent is a file read for the phone's file viewer (paths mentioned in a conversation).
 type FileContent struct {
 	Path      string   `json:"path"`
@@ -59,6 +73,14 @@ func (n *Node) resolvePath(path, cwd string) string {
 // whole up to the cap (they are not paged), or with stream only described: the client fetches them from
 // file/download by Range, however big.
 func (n *Node) readFile(path, cwd string, offset int64, stream bool) (*FileContent, error) {
+	open := func(path string) (fileReadHandle, error) { return os.Open(path) }
+	isSysfs := fileReadIsSysfs
+	if n.fileReadDeps != nil && n.fileReadDeps.open != nil {
+		open = n.fileReadDeps.open
+	}
+	if n.fileReadDeps != nil && n.fileReadDeps.isSysfs != nil {
+		isSysfs = n.fileReadDeps.isSysfs
+	}
 	asked := strings.TrimSpace(path)
 	if asked == "" {
 		return nil, fmt.Errorf("empty path")
@@ -71,7 +93,11 @@ func (n *Node) readFile(path, cwd string, offset int64, stream bool) (*FileConte
 	if err != nil {
 		return nil, explainDenied(path, n.home, err)
 	}
-	fc := &FileContent{Path: path, Name: filepath.Base(path), Size: st.Size()}
+	size := st.Size()
+	if n.fileReadDeps != nil && n.fileReadDeps.size != nil {
+		size = n.fileReadDeps.size(st)
+	}
+	fc := &FileContent{Path: path, Name: filepath.Base(path), Size: size}
 	if st.IsDir() {
 		fc.IsDir = true
 		ents, err := os.ReadDir(real)
@@ -93,20 +119,54 @@ func (n *Node) readFile(path, cwd string, offset int64, stream bool) (*FileConte
 	}
 	// A regular file whose size is 0 can still have content: Linux's /proc and /sys make theirs up as they are read
 	// (#4172). Such a file is read to its end, a page at a time like any other; its size says nothing about the offset.
-	madeUp := st.Size() == 0 && st.Mode().IsRegular()
-	if offset < 0 || (!madeUp && offset > st.Size()) {
-		return nil, fmt.Errorf("offset %d is outside the file (%d bytes)", offset, st.Size())
+	madeUp := size == 0 && st.Mode().IsRegular()
+	if offset < 0 || (!madeUp && offset > size) {
+		return nil, fmt.Errorf("offset %d is outside the file (%d bytes)", offset, size)
 	}
-	f, err := os.Open(real)
+	f, err := open(real)
 	if err != nil {
 		return nil, explainDenied(path, n.home, err)
 	}
 	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !sameFileRead(st, opened) {
+		return nil, errFileChanged
+	}
+	// Validate both the opened object and the checked path. A rename, symlink replacement or truncation between
+	// the path check and the read must not make this page (or its stream revision) describe a different file.
+	validate := func() error {
+		after, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		if !sameFileRead(st, after) {
+			return errFileChanged
+		}
+		_, current, err := n.statSafe(path)
+		if err != nil {
+			return explainDenied(path, n.home, err)
+		}
+		if !sameFileRead(st, current) {
+			return errFileChanged
+		}
+		return nil
+	}
 	fc.Offset = offset
 	if stream {
 		fc.Revision = fileRevision(st)
 		if offset == 0 && st.Mode().IsRegular() {
-			if m := fileMime(path, readHead(f)); streamedMime(m) {
+			head := make([]byte, sniffBytes)
+			nr, err := f.ReadAt(head, 0)
+			if err != nil && !errors.Is(err, io.EOF) {
+				return nil, err
+			}
+			if m := fileMime(path, head[:nr]); streamedMime(m) {
+				if err := validate(); err != nil {
+					return nil, err
+				}
 				fc.Mime, fc.Stream = m, true
 				return fc, nil
 			}
@@ -114,6 +174,7 @@ func (n *Node) readFile(path, cwd string, offset int64, stream bool) (*FileConte
 	}
 	var buf []byte
 	var more bool
+	var shortSysfs bool
 	if madeUp {
 		// One byte past the page says whether there is more; a device (size 0, not regular) is never read: /dev/zero
 		// does not end.
@@ -121,17 +182,65 @@ func (n *Node) readFile(path, cwd string, offset int64, stream bool) (*FileConte
 		if offset == 0 {
 			r = io.LimitReader(f, maxFileBytes+1) // a plain read from the start, which every such file allows
 		}
-		buf, _ = io.ReadAll(r)
+		buf, err = io.ReadAll(r)
+		if err != nil {
+			return nil, err
+		}
 		if more = len(buf) > maxFileBytes; more {
 			buf = buf[:maxFileBytes]
 		} else {
 			fc.Size = offset + int64(len(buf)) // as far as it goes: what the viewer shows as its size
 		}
 	} else {
-		buf = make([]byte, min(st.Size()-offset, maxFileBytes))
-		nr, _ := f.ReadAt(buf, offset)
+		buf = make([]byte, min(size-offset, maxFileBytes))
+		want := len(buf)
+		nr, readErr := f.ReadAt(buf, offset)
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return nil, readErr
+		}
 		buf = buf[:nr]
-		more = st.Size() > offset+int64(nr)
+		if nr < want {
+			if !errors.Is(readErr, io.EOF) {
+				return nil, io.ErrUnexpectedEOF
+			}
+			if !st.Mode().IsRegular() {
+				return nil, io.ErrUnexpectedEOF
+			}
+			virtual, err := isSysfs(f)
+			if err != nil {
+				return nil, err
+			}
+			if !virtual {
+				if err := validate(); err != nil {
+					return nil, err
+				}
+				return nil, io.ErrUnexpectedEOF
+			}
+			if nr == 0 && offset > 0 {
+				if err := checkFileEnd(f, offset); err != nil {
+					return nil, err
+				}
+			}
+			fc.Size = offset + int64(nr)
+			shortSysfs = true
+		} else {
+			more = size > offset+int64(nr)
+			// A sysfs offset at the reported size may already be beyond the actual end.
+			if len(buf) == 0 && offset > 0 && st.Mode().IsRegular() {
+				virtual, err := isSysfs(f)
+				if err != nil {
+					return nil, err
+				}
+				if virtual {
+					if err := checkFileEnd(f, offset); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+	}
+	if err := validate(); err != nil {
+		return nil, err
 	}
 	fc.Mime = fileMime(path, buf[:min(len(buf), sniffBytes)])
 	// Text is valid UTF-8 (a page may cut the last character) with no NUL bytes.
@@ -155,12 +264,34 @@ func (n *Node) readFile(path, cwd string, offset int64, stream bool) (*FileConte
 		return nil, fmt.Errorf("binary files are read whole, not from an offset")
 	}
 	if stream {
+		if shortSysfs {
+			// The download endpoint still uses the stat size and revision in its stream descriptor.
+			fc.Size = size
+		}
 		fc.Stream = true
 		return fc, nil
 	}
 	fc.Truncated = more
 	fc.Data = base64.StdEncoding.EncodeToString(buf)
 	return fc, nil
+}
+
+func sameFileRead(a, b os.FileInfo) bool {
+	return os.SameFile(a, b) && a.Mode() == b.Mode() && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime())
+}
+
+// A zero-byte read does not distinguish the end from an offset past it. Check the preceding byte, without reading
+// the whole file or assuming that the reported size is the true size.
+func checkFileEnd(f fileReadHandle, offset int64) error {
+	var last [1]byte
+	n, err := f.ReadAt(last[:], offset-1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("offset %d is outside the file", offset)
+	}
+	return nil
 }
 
 // maxStatPaths bounds one fs.stat: a page of conversation mentions a few dozen paths at most.

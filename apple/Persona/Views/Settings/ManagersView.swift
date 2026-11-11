@@ -24,7 +24,7 @@ struct ManagersView: View {
     var body: some View {
         SettingsForm {
             if page.unsupported {
-                Section { Text("This hub's version doesn't support managers yet. Update the hub and come back.").foregroundStyle(.secondary) }
+                Section { Text("This hub's version doesn't support several assistants yet. Update the hub and come back.").foregroundStyle(.secondary) }
             } else if let list = page.managers {
                 Section {
                     ForEach(list) { m in
@@ -32,14 +32,14 @@ struct ManagersView: View {
                             .accessibilityIdentifier("managers.row.\(m.id)")
                     }
                 } footer: {
-                    Text("Each manager is a whole assistant, running wherever you choose.")
+                    Text("Each assistant is complete on its own, with its own chats, inbox and computers, running wherever you choose.")
                 }
                 Section {
                     Button {
                         newName = ""
                         naming = true
                     } label: {
-                        Label("New Manager", systemImage: Theme.Icon.add).lineLimit(1)
+                        Label("New Assistant", systemImage: Theme.Icon.add).lineLimit(1)
                     }
                     .modifier(SettingsButtonLook())
                     .disabled(page.busy)
@@ -52,7 +52,7 @@ struct ManagersView: View {
             }
         }
         .themedPage()
-        .detailTitle(String(localized: "Managers"))
+        .detailTitle(String(localized: "Assistants"))
         .task { await page.load() }
         .refreshable { await page.load() }
         .onChange(of: app.managersRevision) { Task { await page.load() } }
@@ -63,7 +63,7 @@ struct ManagersView: View {
                 page.tick()
             }
         }
-        .alert("New Manager", isPresented: $naming) {
+        .alert("New Assistant", isPresented: $naming) {
             TextField("For example: Work", text: $newName)
             Button("Create") { Task { await page.create(name: newName) } }
                 .disabled(!ManagersText.validName(newName))
@@ -138,14 +138,14 @@ struct ManagerDetailView: View {
         let m = page.manager(id)
         SettingsForm {
             if page.unsupported {
-                Section { Text("This hub's version doesn't support managers yet. Update the hub and come back.").foregroundStyle(.secondary) }
+                Section { Text("This hub's version doesn't support several assistants yet. Update the hub and come back.").foregroundStyle(.secondary) }
             } else if let m {
                 facts(m)
                 // This device's pushes from it (#1863); one still installing sends none yet.
                 if m.installing == nil { ManagerPushSection(push: push) }
                 actions(m)
             } else if page.managers != nil {
-                Section { Text("This manager is no longer there").foregroundStyle(.secondary) }
+                Section { Text("This assistant is no longer there").foregroundStyle(.secondary) }
             } else if let e = page.error {
                 Section { Text(e).foregroundStyle(.secondary) }
             } else {
@@ -153,7 +153,7 @@ struct ManagerDetailView: View {
             }
         }
         .themedPage()
-        .detailTitle(m?.name ?? String(localized: "Managers"))
+        .detailTitle(m?.name ?? String(localized: "Assistants"))
         .task { await page.load() }
         .task { await push.load() }
         .refreshable {
@@ -176,7 +176,7 @@ struct ManagerDetailView: View {
         .confirmationDialog("Install Elsewhere?", isPresented: $confirmMove, titleVisibility: .visible) {
             Button("Install Elsewhere", role: .destructive) { if let m { Task { await page.newCode(m) } } }
         } message: {
-            Text("Installing elsewhere gives you a new install code. Once it's installed with that code, the manager where it ran before stops working right away.")
+            Text("Installing elsewhere gives you a new install code. Once it's installed with that code, the assistant where it ran before stops working right away.")
         }
         .confirmationDialog(deleteTitle(m), isPresented: $confirmDelete, titleVisibility: .visible) {
             Button(m?.installing != nil ? String(localized: "Cancel Install") : String(localized: "Delete"), role: .destructive) {
@@ -207,7 +207,7 @@ struct ManagerDetailView: View {
         Section {
             Group {
                 statusRow(status)
-                if m.isDefault { info(String(localized: "Default Manager"), String(localized: "Yes [V N C Pi P Diagnostics b5141d]")) }
+                if m.isDefault { info(String(localized: "Default Assistant"), String(localized: "Yes [V N C Pi P Diagnostics b5141d]")) }
                 if !place.isEmpty { info(String(localized: "Runs On"), place) }
                 if let v = m.version, !v.isEmpty { info(String(localized: "Version"), v, code: true) }
                 if m.online, let at = m.since { info(String(localized: "Connected Since"), at.formatted(.relative(presentation: .named, unitsStyle: .wide))) }
@@ -345,7 +345,7 @@ private struct ManagerCodeSheet: View {
                                 Text("Code expires in \(ConnectDeviceText.clock(page.secondsLeft))")
                                     .font(Theme.Font.caption.monospacedDigit())
                                     .accessibilityIdentifier("managerCode.countdown")
-                                if !commands { Text("Install the manager with this code on the computer that will run it. Once installed, it shows up in the list.") }
+                                if !commands { Text("Install the assistant with this code on the computer that will run it. Once installed, it shows up in the list.") }
                             }
                         }
                         if let service {
@@ -400,8 +400,8 @@ private struct ManagerCodeSheet: View {
     }
 }
 
-private extension View {
-    /// The install code sheet, while the model has a code on screen.
+extension View {
+    /// The install code sheet, while the model has a code on screen (here, and under the sidebar's switcher).
     func managerCodeSheet(_ page: ManagersModel) -> some View {
         sheet(isPresented: Binding(get: { page.shown != nil }, set: { if !$0 { page.shown = nil } })) {
             ManagerCodeSheet(page: page)

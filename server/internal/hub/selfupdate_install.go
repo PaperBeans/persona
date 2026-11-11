@@ -21,7 +21,7 @@ import (
 
 // begin starts an update the user asked for; now skips waiting for idle ("Update now" in the second confirmation).
 func (u *updater) begin(ctx context.Context, now bool) error {
-	if !u.h.build.SelfUpdates() {
+	if !u.h.selfUpdates() {
 		return u.whyNot()
 	}
 	u.mu.Lock()
@@ -84,7 +84,8 @@ func (u *updater) install(ctx context.Context, auto bool) {
 		return
 	}
 	u.set("downloading", "hub", "")
-	bin, err := update.Download(ctx, u.client, u.h.build.UpdateURL, file, staged)
+	source := u.h.updateURL()
+	bin, err := update.Download(ctx, u.client, source, file, staged)
 	if err != nil {
 		fail(err)
 		return
@@ -98,7 +99,7 @@ func (u *updater) install(ctx context.Context, auto bool) {
 		fail(err)
 		return
 	}
-	// The programs the hub runs beside it (personad-wechat): this platform's build of each, checked like personad. One
+	// The programs the hub runs beside it (persona-hub and persona-manager): this platform's build of each, checked like personad. One
 	// the release has no build of keeps its old file (persona-hub and persona-manager only when no service runs it:
 	// unreplaced).
 	programs := map[string]string{} // name -> the downloaded binary
@@ -108,7 +109,7 @@ func (u *updater) install(ctx context.Context, auto bool) {
 			continue
 		}
 		u.set("downloading", name, "")
-		pb, err := update.Download(ctx, u.client, u.h.build.UpdateURL, f, filepath.Join(staged, "programs"))
+		pb, err := update.Download(ctx, u.client, source, f, filepath.Join(staged, "programs"))
 		if err != nil {
 			fail(err)
 			return

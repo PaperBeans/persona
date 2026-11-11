@@ -35,7 +35,7 @@ func (b *busNode) Call(ctx context.Context, method string, params, out any) erro
 		return err
 	}
 	p := devicewire.NodeCall{MachineID: b.id, Method: method, Params: raw}
-	if method == "session.start" || method == "session.send" {
+	if devicewire.IsSessionStart(method) || method == "session.send" {
 		attachNodeCaller(ctx, &p)
 		if p.Caller != nil && p.Caller.OwnerSubject != "" {
 			if store := b.h.shareRoutingStore(); store != nil {

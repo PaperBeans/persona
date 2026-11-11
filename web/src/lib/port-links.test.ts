@@ -53,6 +53,71 @@ describe("a port link", () => {
 });
 
 describe("port links in an answer", () => {
+  it.each([
+    "https://example.com/?next=[::1]:4173/app",
+    "https://example.com/path(localhost:4173/app)",
+    "https://example.com/path(http://localhost:4173/app)",
+    "https://example.com/#next=[::1]:4173/app",
+    "[external](https://example.com/path(localhost:4173/app))",
+    "https://example.com/path([::1]:4173/app)",
+    "https://example.com/?next=localhost:4173/app",
+  ])("does not extract a local link owned by a foreign URL: %s", (text) => {
+    expect(portLinks(text)).toEqual([]);
+  });
+
+  it.each([
+    "https://example.com/help localhost:4173/app",
+    "https://example.com/help (localhost:4173/app)",
+    "[external](https://example.com/help)localhost:4173/app",
+    "https://example.com/help]localhost:4173/app",
+    'https://example.com/help "localhost:4173/app"',
+  ])("keeps a genuinely separate bare address after %s", (text) => {
+    expect(portLinks(text)).toEqual([{ port: 4173, path: "/app", secure: false }]);
+  });
+
+  it("keeps balanced URL punctuation in the path, query and fragment", () => {
+    expect(portLinks("[preview](http://localhost:4173/a(b)?q=[x]#top)")).toEqual([
+      { port: 4173, path: "/a(b)?q=[x]#top", secure: false },
+    ]);
+  });
+
+  it("orders and deduplicates separate links without letting nested foreign text use the chip cap", () => {
+    const foreign = Array.from({ length: MAX_PORT_LINKS + 1 }, (_, i) => `https://example.com/path(localhost:${3000 + i}/)`).join(" ");
+    expect(portLinks(`${foreign} then http://[::1]:4173/app and localhost:4173/app`)).toEqual([
+      { port: 4173, path: "/app", secure: false },
+    ]);
+  });
+
+  it.each([
+    ["http://[::1]:4173/app?x=1#top", 4173, "/app?x=1#top", false],
+    ["https://[::1]:8443/docs", 8443, "/docs", true],
+    ["http://[::]:3000/", 3000, "/", false],
+    ["http://[0:0:0:0:0:0:0:1]:4173/app", 4173, "/app", false],
+    ["[preview](http://[::1]:4173/app)", 4173, "/app", false],
+    ["Open <https://[::1]:8443/docs>.", 8443, "/docs", true],
+    ["http://[::1]:80/app", 80, "/app", false],
+    ["https://[::1]:443/docs", 443, "/docs", true],
+  ] as const)("keeps the bracketed authority in %s", (text, port, path, secure) => {
+    expect(portLinks(text)).toEqual([{ port, path, secure }]);
+  });
+
+  it.each([
+    "http://[2001:db8::1]:4173/app", "http://[::1]/app", "http://[::1]:0/app",
+    "http://[::1]:65536/app", "http://[not-an-address]:4173/app",
+    "http://[::1]:4173@example.com/app", "http://example.com/[::1]:4173/app",
+  ])("still refuses an invalid or foreign IPv6 reply link: %s", (text) => {
+    expect(portLinks(text)).toEqual([]);
+  });
+
+  it("keeps IPv6 link boundaries, order and deduplication alongside ordinary links", () => {
+    expect(portLinks("[preview](http://[::1]:4173/app?x=1#top). Then http://localhost:8080/api; <http://[::1]:4173/app?x=1#top>.")).toEqual([
+      { port: 4173, path: "/app?x=1#top", secure: false },
+      { port: 8080, path: "/api", secure: false },
+    ]);
+    const many = Array.from({ length: MAX_PORT_LINKS + 3 }, (_, i) => `http://[::1]:${3000 + i}/`).join(" ");
+    expect(portLinks(many)).toHaveLength(MAX_PORT_LINKS);
+  });
+
   it("finds explicit default ports in scheme and bare links, preserving scheme and suffix", () => {
     expect(portLinks("Open http://localhost:80/app?x=1#top or https://studio.local:443/docs then localhost:80/bare", ["studio"])).toEqual([
       { port: 80, path: "/app?x=1#top", secure: false },

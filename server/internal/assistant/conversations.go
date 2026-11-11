@@ -201,6 +201,9 @@ type relayHop struct {
 type relayState struct {
 	Queue map[string][]relayMsg `json:"queue,omitempty"` // by receiver
 	Hops  map[string]relayHop   `json:"hops,omitempty"`  // by conversation: the hop of the message it is working on
+	// Spawned: the conversations conversation_new opened, by id, until they report back or their parent is told
+	// (spawned.go, #4669).
+	Spawned map[string]spawnedConv `json:"spawned,omitempty"`
 }
 
 type relayBook struct {
@@ -229,6 +232,9 @@ func (s *Service) relayLocked(ctx context.Context) bool {
 	if rs.Hops == nil {
 		rs.Hops = map[string]relayHop{}
 	}
+	if rs.Spawned == nil {
+		rs.Spawned = map[string]spawnedConv{}
+	}
 	b.st, b.loaded = rs, true
 	b.sent, b.draining = map[[2]string][]time.Time{}, map[string]bool{}
 	return true
@@ -242,6 +248,11 @@ func (s *Service) saveRelayLocked() {
 	for id, hp := range s.relays.st.Hops {
 		if time.Since(hp.At) > relayHopMemory {
 			delete(s.relays.st.Hops, id)
+		}
+	}
+	for id, c := range s.relays.st.Spawned {
+		if time.Since(c.At) > spawnedKeep {
+			delete(s.relays.st.Spawned, id)
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -350,7 +361,7 @@ func (s *Service) queuedRelays() (map[string][]string, bool) {
 	out := map[string][]string{}
 	for id, q := range b.st.Queue {
 		for _, msg := range q {
-			if msg.Tool == noticeTool || msg.Tool == askAnswerTool { // a quiet task's notice (quiet.go), a question's answer (ask_todo.go): its title is enough
+			if msg.Tool == noticeTool || msg.Tool == askAnswerTool || msg.Tool == spawnNoticeTool || msg.Tool == taskEndTool { // a quiet task's notice (quiet.go), a question's answer (ask_todo.go): its title is enough
 				out[id] = append(out[id], msg.FromTitle+"的通知")
 				continue
 			}
@@ -379,7 +390,7 @@ func (msg relayMsg) source() *proto.MessageSource {
 // notice (quiet.go) is its own text, and the work it starts is not a hop of any chain.
 func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg relayMsg) error {
 	text := relayText(msg)
-	if msg.Tool == noticeTool || msg.Tool == superviseTool || msg.Tool == askAnswerTool {
+	if msg.Tool == noticeTool || msg.Tool == superviseTool || msg.Tool == askAnswerTool || msg.Tool == spawnNoticeTool || msg.Tool == taskEndTool {
 		text = msg.Text
 	}
 	if msg.Tool == superviseTool {
@@ -394,6 +405,9 @@ func (s *Service) deliverRelay(ctx context.Context, machine, to string, msg rela
 	}
 	if msg.Tool == superviseTool {
 		return nil
+	}
+	if msg.Tool == taskEndTool {
+		return nil // a record for the conversation that planned the task: no hop of any chain, no push of its own
 	}
 	if msg.Tool == noticeTool || msg.Tool == askAnswerTool {
 		s.noteReportTurn(to) // the answer to a task's notice (or to the owner's late call) is pushed however quick it was (#3438)
@@ -763,6 +777,8 @@ func (s *Service) toolConversationNew(ctx context.Context, self string, args jso
 	b.mu.Lock()
 	if s.relayLocked(ctx) {
 		b.st.Hops[c.SessionID] = relayHop{Hop: hop, At: time.Now().UTC()}
+		// Followed until it reports back: a turn that fails or ends without a word tells self (spawned.go, #4669).
+		b.st.Spawned[c.SessionID] = spawnedConv{Parent: self, At: time.Now().UTC()}
 		s.saveRelayLocked()
 	}
 	b.mu.Unlock()
@@ -800,12 +816,16 @@ func (s *Service) toolConversationSend(ctx context.Context, self string, args js
 	}
 	if c.Status == proto.StatusWorking || c.Starting || s.queuedFor(c.SessionID) > 0 {
 		n := s.queueRelay(c.SessionID, msg)
+		if n > 0 {
+			s.spawnReported(self, c.SessionID) // a conversation conversation_new opened reports back (spawned.go)
+		}
 		s.publish(ctx) // the receiver shows it waiting above its composer
 		return fmt.Sprintf("「%s」 is running: the message is queued (%d waiting) and goes in when its current turn ends.%s", name, n, back), nil
 	}
 	if err := s.deliverRelay(ctx, c.MachineID, c.SessionID, msg); err != nil {
 		return "", err
 	}
+	s.spawnReported(self, c.SessionID)
 	return fmt.Sprintf("Sent to 「%s」 (%s).%s", name, c.SessionID, back), nil
 }
 

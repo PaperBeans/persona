@@ -20,6 +20,7 @@ import (
 )
 
 type Hub struct {
+	passwordLogin passwordLoginState
 	// errs: the hub's own error reports on their way to the managers (error_reports.go).
 	errs hubErrors
 
@@ -76,6 +77,8 @@ type Hub struct {
 
 	inboxForms   inboxForms   // the inbox lists' items as localized lately (inbox_forms.go)
 	inboxAnswers inboxAnswers // the merged inbox answer, reused while no manager's inbox moved (inbox_answers.go)
+	// handoffRecorded: the refused approvals of hand-off cards recorded lately (secret_handoff.go).
+	handoffRecorded handoffRecorded
 
 	// sessionsSent: each machine's last session list sent to the apps, as encoded (broadcastSessions).
 	sessionsMu   sync.Mutex
@@ -244,6 +247,7 @@ func runHub(ctx context.Context, b update.Build, cfg *Config, budget *shutdownBu
 	h.live = newLiveActivities(h)
 	h.upd = newUpdater(h)
 	h.upd.confirmed = !updating // an update under way is confirmed by this process (its watchdog waits for that)
+	h.upd.logSource()
 	database, err := db.Open(ctx, cfg.DatabaseURL, db.HubSet)
 	if err != nil {
 		return err

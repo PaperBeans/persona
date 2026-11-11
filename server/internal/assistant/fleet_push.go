@@ -219,6 +219,17 @@ func (s *Service) notifyFinished(machine, id string, gen int) {
 
 // notifyFinishedNow is notifyFinished once its delay is over, with the timings it was read with.
 func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings) {
+	if s.justMeNow(machine, id) {
+		// A Just me turn: never on a screen but the meeting page (meeting_justme.go). Over all the same unless its
+		// background work goes on (the turn that work's report wakes keeps the mark): its start and its hold are not
+		// the next turn's (#4133).
+		if sess, ok := s.decoratedSession(machine, id); !ok || sess.Status != proto.StatusWorking && !backgroundRunning(sess) {
+			if start, dropped := s.turnsBook().drop(machine+"/"+id, gen); dropped {
+				s.reportTurn(id, start)
+			}
+		}
+		return
+	}
 	sess, ok := s.decoratedSession(machine, id)
 	if ok && s.completionChildrenRunning(machine, sess) {
 		// Only the completion decision uses this copy; session state and reports stay intact.
@@ -271,8 +282,8 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 		return
 	}
 	long := t.longTurn()
-	if report {
-		long = 0
+	if report || sess.Assistant && strings.TrimSpace(sess.TurnError) != "" {
+		long = 0 // a failed assistant turn is pushed however quick it was, as other failures are (#4669)
 	}
 	// The own conversation of a scheduled task that pushes only what its runs send, finished normally (#2396): its
 	// news, if any, went out with notify_user. Decided after settle, not as a push: a turn held for its background
@@ -487,7 +498,7 @@ func (s *Service) mainSessionRep(machine, session string) bool {
 	r.mu.RLock()
 	p := r.profile
 	r.mu.RUnlock()
-	return p != nil && p.Main == session && p.MachineID == machine
+	return p != nil && p.Main == session && p.MainRouteMachine() == machine
 }
 
 // taskSessionRep says whether session is a scheduled task's own conversation as the last snapshot has it, whatever

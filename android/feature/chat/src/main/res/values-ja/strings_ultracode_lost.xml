@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The after-resume ultracode notice (#582): iOS UltracodeLostNote words. -->
+<resources>
+    <string name="chat_ultracode_lost">再開後 ultracode オフ</string>
+    <string name="chat_ultracode_turn_back_on">再びオン</string>
+    <string name="chat_ultracode_lost_dismiss">閉じる</string>
+</resources>

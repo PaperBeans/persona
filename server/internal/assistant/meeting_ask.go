@@ -109,12 +109,16 @@ type askView struct {
 	Error          string         `json:"error,omitempty"`
 	AskedAt        time.Time      `json:"asked_at"`
 	AnsweredAt     *time.Time     `json:"answered_at,omitempty"`
+	// Room meetings (meeting_room_ask.go): how it is answered once its first attempt went out, and a heard
+	// question's lines.
+	Via   string           `json:"via,omitempty"`
+	Heard []kb.LiveSegment `json:"heard,omitempty"`
 }
 
 // viewAsk is a as the routes show it: an answer and sources only once answered, an error only once failed.
 func viewAsk(a kb.LiveAsk) askView {
 	v := askView{ID: a.ID, Question: a.Question, QuestionSource: a.QuestionSource, At: a.At, State: a.State, Lang: a.Lang,
-		Speak: a.Speak, Sources: []kb.AskSource{}, AskedAt: a.AskedAt.UTC()}
+		Speak: a.Speak, Sources: []kb.AskSource{}, AskedAt: a.AskedAt.UTC(), Via: a.Via, Heard: a.Heard}
 	switch a.State {
 	case askAnswered:
 		v.Answer, v.Sources, v.AnsweredAt = a.Answer, append(v.Sources, a.Sources...), a.AnsweredAt
@@ -131,6 +135,7 @@ type askRequest struct {
 	Question string
 	At       *float64
 	LiveNext *int
+	Spoken   bool // the phone transcribed the question from a Talk span (#3862)
 }
 
 // parseAsk reads a POST …/ask body: 400 for an id that is not a UUID, a question over maxAskQuestionRunes, neither a
@@ -141,6 +146,7 @@ func parseAsk(raw []byte) (askRequest, error) {
 		Question json.RawMessage `json:"question"`
 		At       json.RawMessage `json:"at"`
 		LiveNext json.RawMessage `json:"live_next"`
+		Spoken   json.RawMessage `json:"spoken"`
 	}
 	var req askRequest
 	if err := json.Unmarshal(raw, &in); err != nil {
@@ -181,9 +187,13 @@ func parseAsk(raw []byte) (askRequest, error) {
 		next := int(n)
 		req.LiveNext = &next
 	}
+	if given(in.Spoken) && json.Unmarshal(in.Spoken, &req.Spoken) != nil {
+		return req, bad("spoken")
+	}
 	if req.Question == "" && req.At == nil {
 		return req, i18n.Err("assistant-meeting.no_question")
 	}
+	req.Spoken = req.Spoken && req.Question != "" // a question heard in the room is never spoken
 	return req, nil
 }
 
@@ -227,6 +237,9 @@ func (s *Service) askRoute() {
 		case errors.Is(err, errAskBusy):
 			apierr.WriteCode(w, http.StatusTooManyRequests, codeAskBusy, i18n.Err("assistant-meeting.ask_busy"))
 			return
+		case errors.Is(err, errMeetingEnded):
+			apierr.WriteCode(w, http.StatusConflict, codeMeetingEnded, i18n.Err("assistant-meeting.meeting_ended"))
+			return
 		case err != nil:
 			writeMeetingError(w, err)
 			return
@@ -260,7 +273,7 @@ func (s *Service) asksRead(e *kb.Engine, id string) (kb.Live, kb.Recording, erro
 	defer b.mu.Unlock()
 	l, rec, err := e.LiveRead(id)
 	if err == nil {
-		s.settleAsksLocked(e, rec.ID, &l)
+		s.settleAsksLocked(e, rec, &l)
 	}
 	return l, rec, err
 }
@@ -278,13 +291,24 @@ func (s *Service) askNow(e *kb.Engine, id, askID string) (kb.LiveAsk, bool) {
 	return l.Asks[i], true
 }
 
-// settleAsksLocked fails, as interrupted, the questions of recording id's live log l that are pending while this
+// settleAsksLocked fails, as interrupted, the questions of recording rec's live log l that are pending while this
 // process is not answering them (it restarted meanwhile), in l and, when it can, in the live log. s.asks.mu is held.
-func (s *Service) settleAsksLocked(e *kb.Engine, id string, l *kb.Live) {
+// In a room meeting such a question is taken up again instead (meeting_room_ask.go): its attempt may be in the room,
+// whose turn settles it, and one never sent goes again under the same id.
+func (s *Service) settleAsksLocked(e *kb.Engine, rec kb.Recording, l *kb.Live) {
+	id := rec.ID
 	running := s.asks.running[id]
 	stale := func(a kb.LiveAsk) bool { return a.State == askPending && running[a.ID] == nil }
 	if !slices.ContainsFunc(l.Asks, stale) {
 		return
+	}
+	if rec.RoomMeeting() && !e.Store.ReadOnly() {
+		for _, a := range l.Asks {
+			if stale(a) && a.Via != kb.AskViaMaterial {
+				s.askRunLocked(e, id, a) // the room's: taken up again
+			}
+		}
+		running = s.asks.running[id]
 	}
 	settle := func(asks []kb.LiveAsk) {
 		for i, a := range asks {
@@ -322,11 +346,12 @@ func (s *Service) askStart(ctx context.Context, e *kb.Engine, id string, req ask
 		return a, nil, err
 	}
 	id = rec.ID
-	s.settleAsksLocked(e, id, &l)
+	s.settleAsksLocked(e, rec, &l)
 	retry := false
+	var failed kb.LiveAsk
 	if i := slices.IndexFunc(l.Asks, func(x kb.LiveAsk) bool { return strings.EqualFold(x.ID, req.ID) }); i >= 0 {
 		stored := l.Asks[i]
-		if stored.QuestionSent != req.Question || !sameAt(stored.At, req.At) {
+		if stored.QuestionSent != req.Question || !sameAt(stored.At, req.At) || stored.Spoken != req.Spoken {
 			return stored, nil, errOpIDReused
 		}
 		if stored.State != askFailed {
@@ -335,7 +360,7 @@ func (s *Service) askStart(ctx context.Context, e *kb.Engine, id string, req ask
 			}
 			return stored, nil, nil
 		}
-		retry = true
+		retry, failed = true, stored
 	}
 	kept := len(l.Asks)
 	if retry {
@@ -344,22 +369,42 @@ func (s *Service) askStart(ctx context.Context, e *kb.Engine, id string, req ask
 	switch {
 	case !s.meetingWritable(ctx, e):
 		return a, nil, kb.ErrReadOnly // and no model call
-	case rec.Attendance == "":
+	case !rec.Attending():
 		return a, nil, kb.ErrNotAttending
+	case rec.RoomMeeting() && rec.Conv.Room.State == kb.RoomEnded, rec.RoomMeeting() && rec.Conv.Room.State == kb.RoomDeleted:
+		return a, nil, errMeetingEnded // ask in the follow-up
 	case kept >= maxAsks:
 		return a, nil, errAsksFull
 	case len(b.running[id]) >= maxAsksAnswering:
 		return a, nil, errAskBusy
 	}
 	a = kb.LiveAsk{ID: req.ID, QuestionSent: req.Question, QuestionSource: askTyped, At: req.At, LiveNext: req.LiveNext,
-		State: askPending, Sources: []kb.AskSource{}, AskedAt: time.Now().UTC().Truncate(time.Second)}
-	if req.Question == "" {
+		State: askPending, Sources: []kb.AskSource{}, AskedAt: time.Now().UTC().Truncate(time.Second), Spoken: req.Spoken}
+	switch {
+	case req.Question == "":
 		a.QuestionSource = askHeard
-	} else {
+	case req.Spoken:
+		a.QuestionSource, a.Question = askSpoken, oneLine(req.Question)
+	default:
 		a.Question = oneLine(req.Question)
 	}
+	if retry && rec.RoomMeeting() {
+		// Asked again: the same way as its first attempt, the next attempt's id so the room's send-once check does not
+		// swallow it. A room ask while the room is unavailable fails at once: the phone asks a new question.
+		a.Via, a.Attempts = failed.Via, slices.Clone(failed.Attempts)
+		// Only attempts that went out count: one never sent is sent now under its own id.
+		a.Attempts = slices.DeleteFunc(a.Attempts, func(x kb.AskAttempt) bool { return x.SentAt.IsZero() })
+	}
+	roomDown := retry && a.Via == kb.AskViaRoom && rec.Conv.Room.State != kb.RoomReady
+	if retry && a.Via == kb.AskViaRoom && !roomDown {
+		k := len(a.Attempts) + 1
+		a.Attempts = append(a.Attempts, kb.AskAttempt{K: k, MsgID: askMsgID(a.ID, k)})
+	}
+	if roomDown {
+		a = failAsk(a, askRoomUnavailble)
+	}
 	if _, err := e.LiveUpdate(id, func(l *kb.Live, r kb.Recording) error {
-		if r.Attendance == "" {
+		if !r.Attending() {
 			return kb.ErrNotAttending // an upload turned it off meanwhile
 		}
 		l.Asks = slices.DeleteFunc(l.Asks, func(x kb.LiveAsk) bool { return x.ID == a.ID }) // the failed one asked again
@@ -367,12 +412,22 @@ func (s *Service) askStart(ctx context.Context, e *kb.Engine, id string, req ask
 			return errAsksFull
 		}
 		// Fixed now, from the role and the recording then: what the phone says aloud and in which voice.
-		a.Speak, a.Lang = r.Attendance == kb.AttendanceParticipant, cmp.Or(strings.TrimSpace(r.Language), lang)
+		a.Speak, a.Lang = r.AttendanceRole() == kb.AttendanceParticipant, cmp.Or(strings.TrimSpace(r.Language), lang)
 		l.Asks = append(l.Asks, a)
 		return nil
 	}); err != nil {
 		return kb.LiveAsk{}, nil, err
 	}
+	if roomDown {
+		return a, nil, nil
+	}
+	return a, s.askRunLocked(e, id, a), nil
+}
+
+// askRunLocked starts answering question a of recording id in the background; the channel closed once its answer is
+// stored. s.asks.mu is held.
+func (s *Service) askRunLocked(e *kb.Engine, id string, a kb.LiveAsk) chan struct{} {
+	b := &s.asks
 	ch := make(chan struct{})
 	if b.running == nil {
 		b.running = map[string]map[string]chan struct{}{}
@@ -382,8 +437,10 @@ func (s *Service) askStart(ctx context.Context, e *kb.Engine, id string, req ask
 	}
 	b.running[id][a.ID] = ch
 	go s.answerAsk(e, id, a, ch)
-	return a, ch, nil
+	return ch
 }
+
+var errMeetingEnded = errors.New("the meeting has ended: ask in its follow-up")
 
 // sameAt: two requests' at are the same (both absent, or equal).
 func sameAt(a, b *float64) bool {
@@ -401,9 +458,15 @@ func (s *Service) answerAsk(e *kb.Engine, id string, a kb.LiveAsk, done chan str
 		s.asks.finished(id, a.ID, done)
 		close(done)
 	}()
-	ctx, cancel := context.WithTimeout(s.runCtx(), askTimeout)
-	defer cancel()
-	out := s.answerMeetingAsk(ctx, e, id, a)
+	var out kb.LiveAsk
+	ctx := s.runCtx()
+	if _, rec, err := e.LiveRead(id); err == nil && rec.RoomMeeting() {
+		out = s.answerInRoom(ctx, e, id, a) // the room answers it (meeting_room_ask.go)
+	} else {
+		tctx, cancel := context.WithTimeout(ctx, askTimeout)
+		out = s.answerMeetingAsk(tctx, e, id, a)
+		cancel()
+	}
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return
 	}
@@ -414,6 +477,12 @@ func (s *Service) answerAsk(e *kb.Engine, id string, a kb.LiveAsk, done chan str
 		}
 		x := &l.Asks[i]
 		x.Question, x.State, x.Answer, x.Sources, x.Error, x.AnsweredAt = out.Question, out.State, out.Answer, out.Sources, out.Error, out.AnsweredAt
+		if out.Via != "" {
+			x.Via = out.Via
+		}
+		if out.Heard != nil {
+			x.Heard = out.Heard
+		}
 		return nil
 	})
 	switch {
@@ -556,6 +625,9 @@ func (s *Service) answerInput(ctx context.Context, m kb.MeetingMaterial, a kb.Li
 	for _, q := range m.Asks {
 		in.Asks = append(in.Asks, prompts.MeetingQA{Question: oneLine(q.Question), Answer: oneLine(q.Answer)})
 	}
+	if len(m.Photos) > 0 { // their words only, never an image
+		in.Photos = meetingPhotos(m.Photos)
+	}
 	for _, em := range m.Earlier {
 		mm := em.Minutes
 		pe := prompts.MeetingEarlier{ID: em.ID, Title: oneLine(em.Name), When: oneLine(em.When), Attendees: each(mm.Attendees)}
@@ -653,7 +725,7 @@ func answerSources(m kb.MeetingMaterial, named []json.RawMessage) []kb.AskSource
 		}
 		for _, em := range m.Earlier {
 			if strings.EqualFold(em.ID, ref) {
-				add(kb.AskSource{Kind: kb.KindRecording, ID: em.ID, Name: em.Name, When: em.When})
+				add(kb.AskSource{Kind: kb.KindRecording, ID: em.ID, Name: em.Name, When: em.When, Start: em.Start, End: em.End})
 			}
 			for _, p := range em.Projects {
 				if p.Slug == ref {

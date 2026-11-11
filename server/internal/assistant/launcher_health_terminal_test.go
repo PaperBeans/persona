@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +38,19 @@ func TestLauncherHealthNotInTerminal(t *testing.T) {
 	ctx := context.Background()
 
 	s.recordStartFailure(ctx, "l4", "work", terminalRefusal(proto.CodeLauncherMissing, "work"))
+	// It stays pickable, with its record: only a real start clears this one, so hiding it would leave no way to make
+	// that start, and the clients gray it out with the reason.
+	var picker struct {
+		Launchers []launcherWithHealth `json:"launchers"`
+	}
+	if err := json.Unmarshal(getJSON(t, s, "/api/v1/machines/l4/launchers"), &picker); err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(picker.Launchers, func(l launcherWithHealth) bool { return l.Name == "work" })
+	if i < 0 || picker.Launchers[i].Health == nil || picker.Launchers[i].Health.State != healthBlocked ||
+		picker.Launchers[i].Health.Kind != errKindNotInTerminal {
+		t.Fatalf("the picker hid a launcher only a start can clear, or lost its reason: %+v", picker.Launchers)
+	}
 	r := healthState(s, "l4", "work")
 	if r.State != healthBlocked || r.Kind != errKindNotInTerminal || r.Source != healthSourceStart ||
 		!strings.Contains(r.BlockedReason, "terminal") || !strings.Contains(r.Error, "has no command work") {

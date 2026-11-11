@@ -19,8 +19,8 @@ import { Group, Row, Pill, RowConfirm, Switch } from "./settings/SettingsParts";
 import { LanguageRow } from "./settings/LanguageRow";
 import { TextSizeRow, ThemeColorPicker } from "./settings/LookSettings";
 import { setReplyMotionEnabled, useReplyMotionSetting } from "../ui/stream/motion";
-import { setSidebarTerminals, useSidebarTerminals } from "../lib/sidebar-terminals";
 import { setAgentDetails, setContextAsUsed, useAgentDetails, useContextAsUsed } from "../lib/context-usage";
+import { setSidebarTerminals, useSidebarTerminals } from "../lib/sidebar-terminals";
 import { HubList } from "./Hubs";
 import { useDisconnect } from "./DisconnectBrowser";
 import { KnowledgeSelection } from "./settings/KnowledgeSelection";
@@ -52,7 +52,8 @@ import { ProviderWizard } from "./settings/ProviderWizard";
 import { ProviderImport } from "./settings/ProviderImport";
 import { builtinRows, loadLaunchers, rcFilesOf, rcGroups, syncStateText, type LauncherSync } from "../lib/launcher-list";
 import { TerminalModeRow } from "./settings/TerminalModeSetting";
-import { AGENT_KINDS, ASSISTANT_TABS, categoryState, FROM_LIST, itemIsPage, itemState, NAV_GROUPS, openedFromSub, redirectLegacySettings, searchSettings, settingsAt, settingsHref, SENT_SUB, stepsToList, TAB_INFO, TABS, type AgentTab, type SearchGroup, type SettingsSection, type Tab } from "./settings/nav";
+import { AGENT_KINDS, ASSISTANT_TABS, categoryState, FROM_LIST, itemIsPage, itemState, NAV_GROUPS, openedFromSub, redirectLegacySettings, settingsAt, settingsHref, SENT_SUB, stepsToList, TAB_INFO, TABS, type AgentTab, type SettingsSection, type Tab } from "./settings/nav";
+import { searchSettings, type SearchGroup } from "./settings/search";
 import { GroupAction, GroupFooter, GroupTitle, hasFooter } from "./settings/SettingsGroups";
 import { SHEET_QUERY, useMedia } from "../ui/overlay";
 import { formatList, t } from "../i18n";
@@ -587,15 +588,16 @@ function AssistantProfile({ onTriageModel }: { onTriageModel: () => void }) {
 
 /** This browser's own switches for Agents (the terminal, the sidebar, the details shown). */
 function AgentPreferences() {
+  const workBrowserReady = useStore((s) => s.features.includes("sessions_dimensions"));
   const sidebarTerminals = useSidebarTerminals();
   const agentDetails = useAgentDetails();
   const contextAsUsed = useContextAsUsed();
   return (
     <Group title={t("settings.agent_preferences")} anchor="agent-preferences">
       <TerminalModeRow />
-      <Row label={t("settings.sidebar_terminals")} hint={t("settings.sidebar_terminals_hint")}>
+      {!workBrowserReady && <Row label={t("settings.sidebar_terminals")} hint={t("settings.sidebar_terminals_hint")}>
         <Switch on={sidebarTerminals} onChange={setSidebarTerminals} label={t("settings.sidebar_terminals")} />
-      </Row>
+      </Row>}
       <Row label={t("context.details")} hint={t("context.details_hint")}>
         <Switch on={agentDetails} onChange={setAgentDetails} label={t("context.details")} />
       </Row>

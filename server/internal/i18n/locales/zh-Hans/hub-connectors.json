@@ -1,7 +1,4 @@
 {
-  "program_missing": "没有找到 {name} 的程序（{path}）",
-  "program_fails": "{name} 的程序运行不了：{err}",
-  "program_version": "{name} 的程序和 hub 不是同一个版本（{got} / {want}）",
   "not_installed": "hub 机器没有安装 lark-cli",
   "install_guide": "请在 hub 机器安装 lark-cli，或把 lark.cli.bin 设置为它的可执行文件",
   "old_version": "lark-cli {got} 太旧，Persona 需要 {want} 或更新版本",
@@ -16,5 +13,13 @@
   "rate_limited": "lark-cli 受到频率限制，请稍后再试",
   "error": "lark-cli 无法读取飞书",
   "expiry_reminder": "登录还有 {count} 天过期，请在 hub 机器运行 {command}",
-  "larkcli_name": "飞书 · 我的消息"
+  "larkcli_message": "飞书消息",
+  "larkcli_direct_message": "飞书私聊消息",
+  "larkcli_mention": "飞书提及",
+  "watched_doc_unreadable": "已关注的文档“{title}”暂时读取不到，每 10 分钟会重试一次；不再需要可在设置 › 连接器中移除",
+  "doc_comment_label": "文档评论",
+  "doc_comment_rule": "规则：文档评论提到了你，或回复了你参与过的评论。",
+  "larkcli_name": "飞书 · 我的消息",
+  "github_rate_low": "这个小时的 GitHub 请求额度快用完了，约 {minutes} 分钟内只看通知",
+  "github_paused": "GitHub 要求暂停请求，约 {minutes} 分钟内不读取任何内容"
 }

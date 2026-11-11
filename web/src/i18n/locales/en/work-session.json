@@ -1,0 +1,20 @@
+{
+  "choose": "Select…",
+  "project": "Project folder",
+  "harness": "Harness",
+  "launcher": "Launcher",
+  "model": "Model",
+  "checking": "Checking available models…",
+  "fixed": "Fixed: {model}",
+  "default": "Launcher default",
+  "no_override": "This launcher has no selectable models. It will start with its own settings.",
+  "one_start": "This model choice applies to this start only.",
+  "model_changed": "The selected model is no longer available. Choose again.",
+  "harness_changed": "This launcher now starts a different harness. Choose again.",
+  "no_launchers": "This computer has no available launchers.",
+  "launcher_unavailable": "This launcher cannot start a session on the selected computer right now.",
+  "browse": "Browse selected folder",
+  "offline": "The computer is offline. Your draft is kept. Options will be checked when it reconnects.",
+  "unconfirmed": "Confirm this computer first.",
+  "remove_attachments": "This launcher cannot send attachments with the first message. Remove them or choose another launcher."
+}

@@ -1,10 +1,6 @@
 package persona.feature.agents
 
 import android.graphics.Bitmap
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -70,6 +66,10 @@ import persona.core.designsystem.PersonaTheme
 import java.io.File
 import java.time.Instant
 import java.util.TimeZone
+import persona.core.designsystem.FeedbackNotice
+import persona.core.designsystem.JToast
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 /**
  * The to-dos' month (#2046) on a phone: List | Calendar, November 2026 from Monday with today (the 5th) circled, a
@@ -144,7 +144,7 @@ class TodoCalendarShotsTest {
         override fun send(message: JsonObject) = true
     }
 
-    /** The shell's notices, to the snackbar the test draws where Root.kt draws it. */
+    /** The shell's notices, to the toast the test draws where Root.kt draws it. */
     private class Shell : AppFeedback {
         val shown = MutableSharedFlow<Pair<String, FeedbackAction?>>(extraBufferCapacity = 4)
         override fun failure(error: Throwable, operation: Boolean) = shown.tryEmit((error.message ?: "") to null)
@@ -160,21 +160,14 @@ class TodoCalendarShotsTest {
         val shell = Shell()
         rule.setContent {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
-                val snackbar = remember { SnackbarHostState() }
-                LaunchedEffect(shell) {
-                    shell.shown.collect { (message, action) ->
-                        launch {
-                            // the shell's is Short; kept up here for the shot
-                            val result = snackbar.showSnackbar(message, actionLabel = action?.label, duration = SnackbarDuration.Indefinite)
-                            if (result == SnackbarResult.ActionPerformed) action?.run?.invoke()
-                        }
-                    }
-                }
+                // The shell's toast, drawn where Root.kt draws it but kept up for the shot (the host times it out).
+                var notice by remember { mutableStateOf<FeedbackNotice?>(null) }
+                LaunchedEffect(shell) { shell.shown.collect { (message, action) -> notice = FeedbackNotice(message, action) } }
                 CompositionLocalProvider(LocalAppFeedback provides shell) {
                     val shown by store.todos.collectAsState()
                     Box(Modifier.testTag("shot").width(400.dp).height(860.dp).background(PersonaTheme.palette.background)) {
                         TodosScreen(shown, sessions, store, onBack = {}, onOpenTodo = {}, now = now)
-                        SnackbarHost(snackbar, Modifier.align(Alignment.TopCenter).padding(12.dp))
+                        notice?.let { JToast(it, dismiss = {}, modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)) }
                     }
                 }
             }

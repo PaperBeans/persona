@@ -50,6 +50,9 @@ fun TerminalScreen(model: TerminalViewModel, onBack: () -> Unit, sessionTitle: S
     LaunchedEffect(model, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { model.run() } }
     val resources = LocalResources.current
     LaunchedEffect(model, feedback, resources) { model.notices.collect { feedback?.notice(resources.getString(it.text)) } }
+    LaunchedEffect(model, feedback, resources) {
+        model.resumeFailures.collect { feedback?.notice(it ?: resources.getString(R.string.terminal_resume_failed)) }
+    }
     LaunchedEffect(typing) { if (!typing) { keyboard = false; paste = null } }
     DisposableEffect(model) { onDispose { canvas?.keyboard(false) } }
     fun pasteClipboard() {
@@ -80,7 +83,8 @@ fun TerminalScreen(model: TerminalViewModel, onBack: () -> Unit, sessionTitle: S
             // OSC 8 links open where every link opens: the shell's in-app card (other schemes are confirmed first).
             val uriHandler = LocalUriHandler.current
             // The notice sits above the terminal, never over its text.
-            state.note?.let { note -> JNotice(stringResource(note.text), Modifier.padding(horizontal = pagePadding, vertical = Tokens.Space.s),
+            val notRunning = state.note == TerminalNote.NoTerminal
+            state.note?.takeUnless { notRunning }?.let { note -> JNotice(stringResource(note.text), Modifier.padding(horizontal = pagePadding, vertical = Tokens.Space.s),
                 actionLabel = stringResource(R.string.terminal_retry), onAction = model::retry) }
             Box(Modifier.fillMaxWidth().weight(1f).background(palette.terminalBackground)) {
                 AndroidView(factory = { ctx -> TerminalCanvasView(ctx, palette.terminalText.toArgb(), palette.terminalBackground.toArgb()).also { view ->
@@ -92,7 +96,8 @@ fun TerminalScreen(model: TerminalViewModel, onBack: () -> Unit, sessionTitle: S
                     view.font(state.fontSize)
                     view.render(state, wrap, palette.terminalText.toArgb(), palette.terminalBackground.toArgb()); view.keyboard(keyboard && typing)
                 }, onRelease = { it.keyboard(false); canvas = null })
-                if (!state.loaded) JSpinner(Modifier.align(Alignment.Center))
+                if (notRunning) TerminalNotRunning(state.resumable, state.resuming, model::resume, Modifier.matchParentSize())
+                else if (!state.loaded) JSpinner(Modifier.align(Alignment.Center))
             }
         }
     }
@@ -106,6 +111,24 @@ fun TerminalScreen(model: TerminalViewModel, onBack: () -> Unit, sessionTitle: S
         confirm = stringResource(R.string.terminal_paste) to { model.type(text); paste = null }) }
     selecting?.let { text -> TerminalSelectText(text) { selecting = null } }
     if (display) TerminalDisplaySheet(state.fontSize, model::font, wrap, { wrap = it }, wrapEnabled = !active, onDismiss = { display = false })
+}
+
+/**
+ * The session isn't running (#4345): in place of the terminal, as on iOS (#4328), with Resume session for a Claude Code
+ * session; others resume with their next message.
+ */
+@Composable
+private fun TerminalNotRunning(resumable: Boolean, resuming: Boolean, onResume: () -> Unit, modifier: Modifier) {
+    Box(modifier.background(PersonaTheme.palette.terminalBackground), contentAlignment = Alignment.Center) {
+        // The terminal is dark in either appearance, so what stands in for it is drawn in the dark palette, as on iOS.
+        PersonaTheme(darkTheme = true) {
+            JEmptyState(stringResource(R.string.terminal_no_terminal_title),
+                stringResource(if (resumable) R.string.terminal_note_no_terminal_resume else R.string.terminal_note_no_terminal),
+                icon = PhIcons.TerminalWindow,
+                action = if (resumable) ({ JButton(stringResource(if (resuming) R.string.terminal_resuming else R.string.terminal_resume), onResume,
+                    size = JButtonSize.Small, loading = resuming, enabled = !resuming) }) else null)
+        }
+    }
 }
 
 /** Under the title: the grid the phone drives, taking it over, the pane it mirrors, or the screen read once a second. */

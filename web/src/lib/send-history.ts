@@ -116,6 +116,14 @@ export function recallStep(length: number, index: number, dir: "up" | "down"): n
   return index + 1 >= length ? -1 : index + 1;
 }
 
+/** Where the walk stands while the box shows a message being edited, untouched (#4503). If that message was sent from
+ *  here, it stands on that entry (usually the newest). Otherwise it stands just past the newest. Either way the next ↑
+ *  goes to an older message than the one being edited, and ↓ goes back to an empty box. */
+export function recallIndexOf(list: SentEntry[], text: string): number {
+  for (let i = list.length - 1; i >= 0; i--) if (list[i].text === text) return i;
+  return list.length;
+}
+
 // ── keys ─────────────────────────────────────────────────────────────────────
 
 export interface KeyLike {

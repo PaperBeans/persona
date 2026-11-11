@@ -17,9 +17,9 @@ export type Route =
   | { name: "workspace-board" }
   | { name: "persona-new" }
   // `view` is the page's `?view=chat|term`; without it the page shows what it showed last (lib/session-view.ts)
-  | { name: "session"; mid: string; sid: string; view?: SessionView }
+  | { name: "session"; mid: string; sid: string; view?: SessionView; work?: true }
   // one herdr tab (a slot) of a workspace; `sid` picks its pane (lib/herdr-tree.ts resolveTab)
-  | { name: "tab"; mid: string; space: string; slot: string; sid?: string; view?: SessionView }
+  | { name: "tab"; mid: string; space: string; slot: string; sid?: string; view?: SessionView; work?: true }
   // `mid` / `manager`: the computer the conversation runs on and its manager when another than the default
   // (`?machine=…&manager=…`, lib/conversation-page.ts): with several assistants a reload, a new tab or a link finds it
   // where it runs, whichever assistant is current
@@ -41,8 +41,9 @@ export type Route =
   // one space of a machine by its name (lib/space-page.ts): its agents, the todos it hangs on, what can be done to it
   | { name: "space"; mid: string; space: string }
   // the terminal browser (docs/integrations/terminal.md "Standalone terminal"): every pane of every machine; `id` is the terminal opened (an agent
-  // session's id, or "pane:<pane>" for a plain shell)
-  | { name: "terminal"; mid?: string; id?: string }
+  // session's id, or "pane:<pane>" for a plain shell); `view` is the list beside it, `?view=sessions|terminals`
+  // (lib/terminal-list.ts): without it the one this browser chose last
+  | { name: "terminal"; mid?: string; id?: string; view?: "sessions" | "terminals" }
   | { name: "settings" }
   | { name: "agents"; id?: string }
   // the phone's "Agents" page (#1996): the sidebar's Agents block on a page of its own, next to the assistant
@@ -73,8 +74,9 @@ export function parse(path: string, search = ""): Route {
   // a malformed escape must still route: parse runs outside every error boundary
   const p = path.split("/").filter(Boolean).map(decodeURIComponentSafe);
   const view = parseView(search);
-  if (p[0] === "s" && p[1] && p[2]) return { name: "session", mid: p[1], sid: p[2], ...(view && { view }) };
-  if (p[0] === "t" && p[1] && p[2] && p[3]) return { name: "tab", mid: p[1], space: p[2], slot: p[3], sid: p[4] || undefined, ...(view && { view }) };
+  const detail = () => ({ ...(view && { view }), ...(new URLSearchParams(search).get("work") === "1" && { work: true as const }) });
+  if (p[0] === "s" && p[1] && p[2]) return { name: "session", mid: p[1], sid: p[2], ...detail() };
+  if (p[0] === "t" && p[1] && p[2] && p[3]) return { name: "tab", mid: p[1], space: p[2], slot: p[3], sid: p[4] || undefined, ...detail() };
   if (!p.length) return { name: "persona" };
   if (assistantPath(p[0])) return p[1] === "new" && !p[2] ? { name: "persona-new" } : p[1] ? { name: "persona", sid: p[1], ...conversationQuery(search) } : { name: "persona" };
   if (p[0] === "workspace-board") return { name: "workspace-board" };
@@ -92,7 +94,11 @@ export function parse(path: string, search = ""): Route {
   if (p[0] === "kb") return { name: "kb", kind: p[1], id: p[2] };
   if (p[0] === "space" && p[1] && p[2]) return { name: "space", mid: p[1], space: p[2] };
   if (p[0] === "machines") return p[1] ? { name: "machine", mid: p[1] } : { name: "machines" };
-  if (p[0] === "terminal") return p[1] && p[2] ? { name: "terminal", mid: p[1], id: p[2] } : { name: "terminal" };
+  if (p[0] === "terminal") {
+    const list = new URLSearchParams(search).get("view");
+    const shown = list === "sessions" || list === "terminals" ? { view: list as "sessions" | "terminals" } : {};
+    return p[1] && p[2] ? { name: "terminal", mid: p[1], id: p[2], ...shown } : { name: "terminal", ...shown };
+  }
   if (p[0] === "a") return { name: "agents", id: p[1] };
   if (p[0] === "agents") return p[1] === "archived" ? { name: "agent-archives" } : { name: "agent-list" };
   if (p[0] === "settings") return { name: "settings" };
@@ -139,9 +145,9 @@ export function routePath(r: Route): string {
     case "request":
       return `/requests/${encodeURIComponent(r.id)}`;
     case "session":
-      return `/s/${encodeURIComponent(r.mid)}/${encodeURIComponent(r.sid)}${viewQuery(r.view)}`;
+      return `/s/${encodeURIComponent(r.mid)}/${encodeURIComponent(r.sid)}${detailQuery(r)}`;
     case "tab":
-      return ["/t", r.mid, r.space, r.slot, ...(r.sid ? [r.sid] : [])].map((x, i) => (i ? encodeURIComponent(x) : x)).join("/") + viewQuery(r.view);
+      return ["/t", r.mid, r.space, r.slot, ...(r.sid ? [r.sid] : [])].map((x, i) => (i ? encodeURIComponent(x) : x)).join("/") + detailQuery(r);
     case "persona": {
       if (!r.sid) return "/";
       const q = new URLSearchParams();
@@ -172,8 +178,10 @@ export function routePath(r: Route): string {
       return `/machines/${encodeURIComponent(r.mid)}`;
     case "space":
       return `/space/${encodeURIComponent(r.mid)}/${encodeURIComponent(r.space)}`;
-    case "terminal":
-      return r.mid && r.id ? `/terminal/${encodeURIComponent(r.mid)}/${encodeURIComponent(r.id)}` : "/terminal";
+    case "terminal": {
+      const path = r.mid && r.id ? `/terminal/${encodeURIComponent(r.mid)}/${encodeURIComponent(r.id)}` : "/terminal";
+      return r.view ? `${path}?view=${r.view}` : path;
+    }
     case "workspace-board":
       return "/workspace-board";
     case "settings":
@@ -204,7 +212,19 @@ export function routePath(r: Route): string {
   }
 }
 
-const viewQuery = (view?: SessionView) => (view ? `?view=${view}` : "");
+function detailQuery({ view, work }: { view?: SessionView; work?: true }): string {
+  const q = [view && `view=${view}`, work && "work=1"].filter(Boolean).join("&");
+  return q ? `?${q}` : "";
+}
+
+export function inWorkView(r: Route): boolean {
+  return (r.name === "session" || r.name === "tab") && r.work === true;
+}
+
+/** Keep the split view when resolving a legacy session address or following a tab inside it. */
+export function withWorkView(r: Route, work: boolean): Route {
+  return work && (r.name === "session" || r.name === "tab") ? { ...r, work: true } : r;
+}
 
 const listeners = new Set<() => void>();
 // The address Back / Forward last landed on, until a page takes it (takeReturn) or the app navigates on: a page that

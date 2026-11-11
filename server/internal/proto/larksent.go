@@ -14,6 +14,7 @@ const (
 	LarkThroughRule   = "rule"                // a rule of the gate allowed it
 	LarkThroughAlways = "conversation_always" // "Always allow in this conversation" covered it, no card was shown
 	LarkThroughCard   = "card"                // the user (or the assistant for them) allowed it on a card
+	LarkThroughBypass = "permission_mode"     // the assistant conversation runs in bypassPermissions
 )
 
 // LarkSent is one write the gate proxy forwarded and the API answered with a 2xx. Which machine it happened on is not

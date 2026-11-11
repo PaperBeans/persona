@@ -127,7 +127,7 @@ class SessionItemsCache(
         }
         val rows = ordered.drop(start).map { item ->
             // Inline originals belong to the display-sized image cache, not the items database.
-            val cached = item.image?.let { item.copy(image = it.copy(data = "", lazy = true)) } ?: item
+            val cached = publicRefusalItem(item.image?.let { item.copy(image = it.copy(data = "", lazy = true)) } ?: item)
             ItemRow(scope.path, session.machineId, session.sessionId, item.seq, part(item), item.id, JsonCodec.encodeToString(cached))
         }
         ledgerTransaction {
@@ -192,4 +192,13 @@ internal class ItemsLedger {
     }
 
     fun clear() { sessions = null; total = null }
+}
+
+/**
+ * A refusal notice as it may be kept (#2528, web `publicRefusalItem`): its text is the refusal's words (else its
+ * explanation, else its subtype), never the record's whole line, which an older hub sent as the notice's text.
+ */
+internal fun publicRefusalItem(item: Item): Item {
+    val r = item.modelRefusal ?: return item
+    return item.copy(text = r.text?.takeIf(String::isNotEmpty) ?: r.explanation?.takeIf(String::isNotEmpty) ?: r.subtype)
 }

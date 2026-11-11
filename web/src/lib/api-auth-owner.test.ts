@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { api, credentialOwner, getToken, handleUnauthorized, onCredentialChange, setToken, subscribeCredentialOwner } from "./api";
+import { api, credentialOwner, getToken, handleUnauthorized, onCredentialChange, setPairedToken, setToken, subscribeCredentialOwner } from "./api";
 
 const unauthorized = vi.fn();
 let respond: (response: Response) => void;
@@ -75,4 +75,13 @@ it("exposes successful response metadata through the authenticated API without f
   expect(metadata).toHaveBeenCalledOnce();
   expect(metadata.mock.calls[0]![0].get("X-Persona-Computer-Apps-Owner")).toBe("example-manager");
   expect(vi.mocked(fetch).mock.calls[0]![1]).not.toHaveProperty("onResponse");
+});
+
+it.each(["implicit", "owned"])("fences a %s 401 after same-token reauthentication", async (mode) => {
+  const token = getToken(), tokenOwner = credentialOwner();
+  const pending = api("/machines", mode === "owned" ? { token, tokenOwner } : {}).catch((error: Error) => error);
+  setPairedToken(token);
+  respond(Response.json({ error: "invalid token" }, { status: 401 }));
+  expect(await pending).toMatchObject({ status: 401 });
+  expect(unauthorized).not.toHaveBeenCalled();
 });

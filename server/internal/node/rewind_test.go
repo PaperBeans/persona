@@ -157,6 +157,157 @@ func TestRewindConversationToLastPrompt(t *testing.T) {
 	}
 }
 
+// The panel can close before Claude puts the rewound prompt back. The rewind must not answer during that temporarily
+// empty box: a client sending immediately would otherwise have its text prepended by the late restore (#4609).
+func TestRewindWaitsForALateRestoredPrompt(t *testing.T) {
+	for _, c := range []struct {
+		name           string
+		prompts        []simPrompt
+		prompt         string
+		withTranscript bool
+	}{
+		{"last of several", threePrompts(), "Reply with only: ok5", false},
+		{"only prompt", []simPrompt{{"the only prompt", noCode}}, "the only prompt", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			sim := newClaudeSim(c.prompts...)
+			sim.restoreGate = make(chan struct{})
+			sim.restoreSeenEmpty = make(chan struct{})
+			empty := sim.restoreSeenEmpty
+			n := rewindNode(t, sim, "claude", proto.StatusIdle)
+			var f *transcript.File
+			var transcriptPath string
+			var transcriptLines []string
+			if c.withTranscript {
+				transcriptLines = []string{
+					`{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-11-05T10:00:01Z","message":{"role":"user","content":"the only prompt"}}`,
+					`{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-11-05T10:00:02Z","message":{"role":"assistant","id":"m1","content":[{"type":"text","text":"old answer"}]}}`,
+					`{"type":"system","subtype":"turn_duration","uuid":"t1","parentUuid":"a1","timestamp":"2026-11-05T10:00:03Z","durationMs":1000}`,
+				}
+				transcriptPath = filepath.Join(t.TempDir(), "only.jsonl")
+				if err := os.WriteFile(transcriptPath, []byte(strings.Join(transcriptLines, "\n")+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				f = transcript.NewFile(transcriptPath)
+				if _, err := f.Refresh(); err != nil {
+					t.Fatal(err)
+				}
+				n.files = map[string]*transcript.File{"s1": f}
+				n.watches = map[string]*watch{}
+				n.metas = map[string]quickMeta{}
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			type answer struct {
+				res map[string]any
+				err error
+			}
+			answered := make(chan answer, 1)
+			go func() {
+				res, err := n.rewind(ctx, "s1", rewindOpts{Prompt: c.prompt, Occurrence: 1, PromptsAfter: after(0), Restore: RestoreConversation})
+				answered <- answer{res, err}
+			}()
+			released, finished := false, false
+			defer func() {
+				cancel()
+				if !released {
+					close(sim.restoreGate)
+				}
+				if !finished {
+					select {
+					case <-answered:
+					case <-time.After(2 * time.Second):
+						t.Error("the rewind goroutine did not stop after cleanup")
+					}
+				}
+			}()
+			select {
+			case <-empty:
+			case <-time.After(2 * time.Second):
+				t.Fatal("the rewind never read the empty box after confirming")
+			}
+			select {
+			case got := <-answered:
+				finished = true
+				t.Fatalf("answered before the restored prompt arrived: result %v, error %v", got.res, got.err)
+			case <-time.After(20 * time.Millisecond):
+			}
+			close(sim.restoreGate)
+			released = true
+			var got answer
+			select {
+			case got = <-answered:
+				finished = true
+			case <-time.After(2 * time.Second):
+				t.Fatal("the rewind did not answer after the prompt was restored")
+			}
+			if got.err != nil || got.res["input_cleared"] != true {
+				t.Fatalf("result %v, error %v", got.res, got.err)
+			}
+			if sim.box != "" || !strings.Contains(sim.pressed(), "ctrl+k ctrl+u") {
+				t.Fatalf("restored prompt was not removed: box %q, keys %q", sim.box, sim.pressed())
+			}
+			followUp := "new message"
+			if f != nil {
+				followUp = c.prompt
+			}
+			if err := n.sendText(context.Background(), "w1:p1", followUp); err != nil {
+				t.Fatal(err)
+			}
+			if sim.box != followUp {
+				t.Fatalf("quick follow-up was combined with the old prompt: %q", sim.box)
+			}
+			if f != nil {
+				items, _, rewound := f.Page(0, 100)
+				if len(items) != 0 {
+					t.Fatalf("the only turn survived Node.rewind: %v", items)
+				}
+				// Claude writes the same prompt again as another root with an empty parent after the rewind.
+				transcriptLines = append(transcriptLines,
+					`{"type":"user","uuid":"u2","parentUuid":null,"timestamp":"2026-11-05T10:01:01Z","message":{"role":"user","content":"the only prompt"}}`,
+					`{"type":"assistant","uuid":"a2","parentUuid":"u2","timestamp":"2026-11-05T10:01:02Z","message":{"role":"assistant","id":"m2","content":[{"type":"text","text":"new answer"}]}}`,
+					`{"type":"system","subtype":"turn_duration","uuid":"t2","parentUuid":"a2","timestamp":"2026-11-05T10:01:03Z","durationMs":1000}`,
+				)
+				if err := os.WriteFile(transcriptPath, []byte(strings.Join(transcriptLines, "\n")+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := n.refresh("s1", f); err != nil {
+					t.Fatal(err)
+				}
+				items, _, after := f.Page(0, 100)
+				var texts []string
+				for _, it := range items {
+					if it.Text != "" {
+						texts = append(texts, it.Text)
+					}
+				}
+				if strings.Join(texts, "|") != "the only prompt|new answer" || after.History != rewound.History {
+					t.Fatalf("same-text resend revived the old turn: items %q, history %q -> %q", texts, rewound.History, after.History)
+				}
+			}
+		})
+	}
+}
+
+// If Claude restores nothing, an empty box is still a successful end state, but only after the ordinary key-effect
+// grace. The grace shares the existing draft budget rather than extending the rewind.
+func TestRewindWaitsForEmptyBoxGraceWhenNothingIsRestored(t *testing.T) {
+	sim := newClaudeSim(threePrompts()...)
+	sim.restoreNothing = true
+	n := rewindNode(t, sim, "claude", proto.StatusIdle)
+	started := time.Now()
+	res, err := n.rewind(context.Background(), "s1", rewindOpts{Prompt: "Reply with only: ok5", Occurrence: 1, PromptsAfter: after(0), Restore: RestoreConversation})
+	if err != nil || res["input_cleared"] != true {
+		t.Fatalf("result %v, error %v", res, err)
+	}
+	if elapsed := time.Since(started); elapsed < rewindStepWait {
+		t.Fatalf("accepted the first empty read after %v, before the %v grace", elapsed, rewindStepWait)
+	}
+	if sim.box != "" || strings.Contains(sim.pressed(), "ctrl+k") {
+		t.Fatalf("an empty box was cleared: box %q, keys %q", sim.box, sim.pressed())
+	}
+}
+
 // An earlier prompt with code changes: code and conversation is the first choice (no arrow keys), conversation alone
 // is the second.
 func TestRewindPicksTheChoiceByLabel(t *testing.T) {
@@ -345,6 +496,28 @@ func TestRewindLeavesAnotherDraftInTheBox(t *testing.T) {
 		t.Fatalf("%v %v", res, err)
 	}
 	if sim.box != "typed meanwhile" || strings.Contains(sim.pressed(), "ctrl+c") {
+		t.Fatalf("box %q keys %q", sim.box, sim.pressed())
+	}
+}
+
+// Text typed at the computer during the empty-box grace is not the restored prompt either. It ends the wait without
+// being cleared, just as a draft already visible when the panel closes does.
+func TestRewindLeavesALateOtherDraftInTheBox(t *testing.T) {
+	sim := newClaudeSim(threePrompts()...)
+	sim.boxAfter = "typed meanwhile"
+	sim.restoreGate = make(chan struct{})
+	sim.restoreSeenEmpty = make(chan struct{})
+	gate, empty := sim.restoreGate, sim.restoreSeenEmpty
+	go func() {
+		<-empty
+		close(gate)
+	}()
+	n := rewindNode(t, sim, "claude", proto.StatusIdle)
+	res, err := n.rewind(context.Background(), "s1", rewindOpts{Prompt: "Reply with only: ok5", Occurrence: 1, Restore: RestoreConversation})
+	if err != nil || res["input_cleared"] != false {
+		t.Fatalf("%v %v", res, err)
+	}
+	if sim.box != "typed meanwhile" || strings.Contains(sim.pressed(), "ctrl+c") || strings.Contains(sim.pressed(), "ctrl+k") {
 		t.Fatalf("box %q keys %q", sim.box, sim.pressed())
 	}
 }

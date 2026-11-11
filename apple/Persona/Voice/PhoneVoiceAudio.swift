@@ -8,9 +8,9 @@ import PersonaKit
 // The call's audio on an iPhone and in CarPlay (docs/assistant/voice.md 6.4). Adapted from the audio half of the earlier
 // CarPlay `DuplexVoiceSession` in PR #1931 (coordination in #1951); #1931 now calls through `VoiceConversation`
 // with this engine. Play-and-record / voice-chat with voice processing, AVAudioConverter down to the extension's
-// PCM16, an AVAudioPlayerNode at its output rate, dropping what `clear` cancels by generation, and ending on a call
-// or a media services reset. The microphone goes into a `VoiceUplink` (held until `ready`, muted as silence, measured
-// for the orb). The route follows `VoiceRoute` (#3015): a connected headset plays and records, else the loudspeaker,
+// PCM16, an AVAudioPlayerNode at its output rate behind a short jitter buffer (`VoicePlayout`, #4430), dropping what
+// `clear` cancels by generation, and ending on a call or a media services reset. The microphone goes into a
+// `VoiceUplink` (held until `ready`, muted as silence, measured for the orb). The route follows `VoiceRoute` (#3015): a connected headset plays and records, else the loudspeaker,
 // and a device coming or going during the call is followed; a route change rebuilds the tap and converter (or the whole
 // engine) instead of ending the call; voice processing that will not run falls back to plain capture. Nothing reads
 // `engine.inputNode` before `VoiceCapture.plan` says there is an input that starts (#5029): the simulator records
@@ -151,6 +151,9 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     private var generation = 0
     /// The loudness of the voice's buffers still queued, in order: the first is the one playing.
     private var queued: [Float] = []
+    /// The voice held back until enough of it has gathered (#4430), and the wait that plays it anyway.
+    private var playout = VoicePlayout<Piece>(rate: VoiceFrame.defaultOutputRate)
+    private var holdTimer: Task<Void, Never>?
     private var activated = false
     private var observers: [NSObjectProtocol] = []
     /// The engine's configuration-change observer: a rebuilt engine gets its own.
@@ -222,6 +225,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
 
     func clear() {
         generation += 1
+        dropHeld()
         let was = !queued.isEmpty
         queued = []
         if let player {
@@ -248,6 +252,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         playFormat = nil
         pump = nil
         generation += 1
+        dropHeld()
         queued = []
         if activated {
             activated = false
@@ -321,6 +326,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         self.player = player
         self.playFormat = playFormat
         self.pump = pump
+        playout = VoicePlayout(rate: format.outputRate)
     }
 
     /// Takes the engine apart and puts it together again for the input as it is now (a new route or new rates). What
@@ -362,6 +368,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     private func dropQueued() {
         let was = !queued.isEmpty
         generation += 1
+        dropHeld()
         queued = []
         if was {
             events?(.outputLevel(0))
@@ -378,6 +385,12 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
 
     // MARK: Playback
 
+    /// A piece of the voice and its loudness, held until it goes to the player.
+    private struct Piece {
+        let buffer: AVAudioPCMBuffer
+        let level: Float
+    }
+
     private func schedule(_ pcm: Data, voice: Bool) {
         guard let player, let playFormat, engine?.isRunning == true else { return }
         let samples = VoicePCM.floats(pcm)
@@ -387,9 +400,41 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         else { return }
         buffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { channel.update(from: $0.baseAddress!, count: samples.count) }
+        guard voice else { return enqueue(buffer, level: nil, on: player) }
+        let ready = playout.add(Piece(buffer: buffer, level: VoicePCM.rms(samples)), frames: samples.count, playing: !queued.isEmpty)
+        if playout.isHolding {
+            waitForLead()
+        } else {
+            holdTimer?.cancel()
+            holdTimer = nil
+        }
+        for piece in ready { enqueue(piece.buffer, level: piece.level, on: player) }
+    }
+
+    /// Plays what is held once the first of it has waited `VoicePlayout.wait`, lead or not.
+    private func waitForLead() {
+        guard holdTimer == nil else { return }
         let generation = generation
-        if voice {
-            let level = VoicePCM.rms(samples)
+        holdTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(VoicePlayout<Piece>.wait))
+            guard !Task.isCancelled, let self else { return }
+            holdTimer = nil
+            guard generation == self.generation, let player, engine?.isRunning == true else { return playout.clear() }
+            for piece in playout.release() { enqueue(piece.buffer, level: piece.level, on: player) }
+        }
+    }
+
+    private func dropHeld() {
+        holdTimer?.cancel()
+        holdTimer = nil
+        playout.clear()
+    }
+
+    /// Onto the player: the voice with its loudness, a cue without.
+    private func enqueue(_ buffer: AVAudioPCMBuffer, level: Float?, on player: AVAudioPlayerNode) {
+        let generation = generation
+        let voice = level != nil
+        if let level {
             if queued.isEmpty {
                 events?(.playing(true))
                 events?(.outputLevel(level))

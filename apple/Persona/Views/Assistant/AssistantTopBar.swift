@@ -129,11 +129,7 @@ struct AssistantTopBar: View {
             Menu { menuItems(link) } label: {
                 HStack(spacing: Theme.Space.xs) {
                     VStack(alignment: .leading, spacing: 0) {
-                        if let menuName {
-                            Text(menuName).font(Theme.Font.heading).foregroundStyle(Theme.macLabel).lineLimit(1)
-                        } else {
-                            ThemedIcon(Theme.Icon.more).font(Theme.Font.heading).foregroundStyle(Theme.macLabel)
-                        }
+                        Text(name).font(Theme.Font.heading).foregroundStyle(Theme.macLabel).lineLimit(1)
                         Group {
                             if let hint {
                                 Label(hint, systemImage: Theme.Icon.successFilled).foregroundStyle(Theme.positive)
@@ -153,8 +149,8 @@ struct AssistantTopBar: View {
             .buttonStyle(.plain)
             .fixedSize()
             .help("Knowledge, details, copy directory and chat info")
-            .accessibilityLabel(menuAccessibilityLabel)
-            .accessibilityIdentifier(model.showsAssistantIdentity ? "persona-avatar" : "assistant-menu")
+            .accessibilityLabel(link != .online ? String(localized: "\(name), \(ConnectionLabel.text(link, hubRestarting: model.hubUpdate?.restarting == true))") : name)
+            .accessibilityIdentifier("persona-avatar")
             .connectionDetails($showLink)
             .layoutPriority(-1)
             Spacer(minLength: Theme.Space.s)
@@ -348,67 +344,49 @@ struct AssistantTopBar: View {
         let link = model.connection.shown
         return Menu { menuItems(link) } label: {
             VStack(spacing: -7) {
-                if model.showsAssistantIdentity {
-                    TopBarDot(key: key, machineID: machineID)
-                        .shadow(color: Theme.persona.opacity(0.3), radius: 8, y: 3)
-                } else {
-                    ThemedIcon(Theme.Icon.more)
-                        .font(Theme.Font.heading)
-                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
-                        .surface(interactive: true, in: .circle)
-                }
-                if menuName != nil || link != .online {
-                    ZStack {
-                        if link != .online {
-                            ConnectionLabel(phase: link, compact: true).transition(.opacity)
-                        } else {
-                            Text(menuName ?? "").font(Theme.Font.labelStrong).lineLimit(1).transition(.opacity)
-                        }
+                TopBarDot(key: key, machineID: machineID)
+                    .shadow(color: Theme.persona.opacity(0.3), radius: 8, y: 3)
+                ZStack {
+                    if link != .online {
+                        ConnectionLabel(phase: link, compact: true).transition(.opacity)
+                    } else {
+                        Text(name).font(Theme.Font.labelStrong).lineLimit(1).transition(.opacity)
                     }
-                    .padding(.horizontal, Theme.Space.m)
-                    .scaledFrame(height: Theme.Size.icon)
-                    .scaledFrame(maxWidth: Theme.Size.box200)
-                    .fixedSize()
-                    .background(.regularMaterial, in: .capsule)
-                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
-                    .animation(Theme.Motion.standard, value: link)
-                    .opacity(hint == nil ? 1 : 0)
                 }
+                .padding(.horizontal, Theme.Space.m)
+                .scaledFrame(height: Theme.Size.icon)
+                .scaledFrame(maxWidth: Theme.Size.box200)
+                .fixedSize() // as wide as the name, at most 200
+                // Not the glass `surface`: inside a Menu's label the glass spreads over the whole label (face included).
+                .background(.regularMaterial, in: .capsule)
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+                .animation(Theme.Motion.standard, value: link)
+                .opacity(hint == nil ? 1 : 0)
             }
             .contentShape(.rect)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
-        .accessibilityLabel(menuAccessibilityLabel)
+        .accessibilityLabel(link != .online ? String(localized: "\(name), \(ConnectionLabel.text(link, hubRestarting: model.hubUpdate?.restarting == true))") : name)
         .accessibilityHint("Knowledge, details, copy directory and chat info")
-        .accessibilityIdentifier(model.showsAssistantIdentity ? "persona-avatar" : "assistant-menu")
+        .accessibilityIdentifier("persona-avatar")
         .connectionDetails($showLink)
     }
 
-    /// The pill's name: the persona's (Persona's) on the main conversation and the new-conversation page, a side
-    /// conversation's title.
+    /// The pill's name: the assistant's on the main conversation and the new-conversation page, a side conversation's
+    /// title.
     private var name: String {
-        let persona = model.persona.name
-        guard let key, key != model.assistantMain else { return persona }
+        let own = ownName
+        guard let key, key != model.assistantMain else { return own }
         let t = session?.title ?? ""
-        return t.isEmpty || t == "Claude Code" ? persona : t
+        return t.isEmpty || t == "Claude Code" ? own : t
     }
 
-    nonisolated static func visibleTitle(showsIdentity: Bool, persona: String, conversation: String?, isMain: Bool) -> String? {
-        let title = conversation.flatMap { $0.isEmpty || $0 == "Claude Code" ? nil : $0 }
-        if isMain || title == nil { return showsIdentity ? persona : nil }
-        return title
-    }
-
-    private var menuName: String? {
-        Self.visibleTitle(showsIdentity: model.showsAssistantIdentity, persona: model.persona.name,
-                          conversation: session?.title, isMain: key == nil || key == model.assistantMain)
-    }
-
-    private var menuAccessibilityLabel: String {
-        guard let menuName else { return String(localized: "Knowledge, details, copy directory and chat info") }
-        let link = model.connection.shown
-        return link != .online ? String(localized: "\(menuName), \(ConnectionLabel.text(link, hubRestarting: model.hubUpdate?.restarting == true))") : menuName
+    /// Whose page it is: the current assistant's name on a hub with several (the face stays the persona's, picked in
+    /// Appearance), the persona's with one; another assistant's conversation opened from elsewhere names its own.
+    private var ownName: String {
+        if let key, let other = model.otherAssistant(of: key) { return other.name }
+        return model.assistantManager?.name ?? model.persona.name
     }
 
     /// The conversation's launcher (the next message uses it) or, on the new-conversation page, the default one.
@@ -603,7 +581,7 @@ struct AssistantTopBar: View {
     private var baseMenuTitle: String {
         guard let key else { return String(localized: "New chat · \(launcher)") }
 
-        let title = name == model.persona.name && key == model.assistantMain ? String(localized: "Main Chat") : name
+        let title = name == ownName && key == model.assistantMain ? String(localized: "Main Chat") : name
         return [title, launcher, Fmt.model(pickedModel ?? session?.model)].compactMap { $0 }.joined(separator: " · ")
     }
 
@@ -744,15 +722,9 @@ struct TopFog: View {
         .accessibilityHidden(true)
     }
 
-    /// Opaque down to `start`, then out to clear over `length` (unit points) along a smoothstep curve: no kink where the
-    /// fade begins or ends for the eye to read as an edge.
+    /// Opaque down to `start`, then out to clear over `length` (unit points) along the eased curve the chat's footer fog
+    /// shares (`EasedFade`).
     private static func easedMask(from start: CGFloat, over length: CGFloat) -> LinearGradient {
-        let steps = 8
-        let stops = (0...steps).map { i -> Gradient.Stop in
-            let t = CGFloat(i) / CGFloat(steps)
-            let eased = t * t * (3 - 2 * t)
-            return .init(color: .black.opacity(1 - eased), location: min(1, start + length * t))
-        }
-        return LinearGradient(stops: [.init(color: .black, location: 0)] + stops, startPoint: .top, endPoint: .bottom)
+        LinearGradient(stops: EasedFade.stops(.black, from: start, over: length), startPoint: .top, endPoint: .bottom)
     }
 }

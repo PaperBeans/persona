@@ -13,6 +13,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
@@ -45,6 +46,7 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 			// reconnect to the same turn. Only a known stopped turn proves a
 			// new one and resets its persisted loop state.
 			newTurn := prev == proto.StatusDone || prev == proto.StatusIdle || prev == proto.StatusInterrupted
+			s.justMeStarted(machine, sess.SessionID, newTurn, sess.WokeByTask) // meeting_justme.go
 			if s.meetingTurnStarted(machine, sess.SessionID, newTurn) {
 				break // a meeting's batch: a side exchange, neither the turn tracker's nor a task's or the Agents' (meeting_turns.go)
 			}
@@ -55,6 +57,8 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 			s.inOrder(func() { s.turnStartedObserved(context.Background(), ref, newTurn) }) // after the items that came before it
 		case prev == proto.StatusWorking && (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle):
 			ref := SessionRef{MachineID: machine, SessionID: sess.SessionID}
+			// After its finished push is decided against the mark; held while its background work runs.
+			defer s.justMeEnded(machine, sess.SessionID, backgroundRunning(sess))
 			if s.meetingTurnEnded(machine, sess.SessionID) { // no finished push, and the other turns' stay as they were
 				s.inOrder(func() { go s.turnEnded(context.Background(), ref, true) })
 				break
@@ -194,7 +198,10 @@ func (s *Service) publishList(machine string) []proto.Session {
 	}
 	f.shown[machine] = awaitingReply(list)
 	f.shownMu.Unlock()
-	s.hub.Tell(assistantwire.EventFleetSessions, json.RawMessage(b))
+	// As json.Marshal wrote them (rpc.Marshaled): the bus puts them into its line as they are. As json.RawMessage its
+	// encoder checked and copied the whole list twice more to write the same line. Nil (the list does not encode) is
+	// told as null either way.
+	s.hub.Tell(assistantwire.EventFleetSessions, rpc.Marshaled(b))
 	s.liveChanged(false)
 	return list
 }

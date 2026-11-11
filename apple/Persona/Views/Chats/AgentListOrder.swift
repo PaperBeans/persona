@@ -99,8 +99,11 @@ nonisolated struct AgentListOrder {
 nonisolated enum AgentRowCap {
     #if os(iOS)
     static let rows = 20
+    /// A By App project's: several projects share a section (`AppGroups.projects`).
+    static let projectRows = 8
     #else
     static let rows = Int.max
+    static let projectRows = Int.max
     #endif
     /// How many to show of `count`; nil: all of them. A run only a few over the cap shows them all (no "Show All 22").
     static func capped(_ count: Int, cap: Int = rows) -> Int? {

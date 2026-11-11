@@ -47,7 +47,6 @@ import persona.core.designsystem.AppStyle
 import persona.core.designsystem.LocalAssistantCards
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.Tokens
-import persona.core.designsystem.ContentTokens
 import persona.core.domain.views.AssistantCardActions
 import persona.core.domain.views.AssistantCardsHost
 import persona.core.domain.views.AssistantViewStore
@@ -144,7 +143,7 @@ class AssistantCardsShotsTest {
         rule.setContent {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
                 Box(Modifier.testTag("shot").width(400.dp).background(PersonaTheme.palette.background)) {
-                    Column(Modifier.fillMaxWidth().padding(Tokens.Space.l), verticalArrangement = Arrangement.spacedBy(ContentTokens.legacyXl)) {
+                    Column(Modifier.fillMaxWidth().padding(Tokens.Space.l), verticalArrangement = Arrangement.spacedBy(Tokens.Space.l)) {
                         when (scene) {
                             0 -> CompositionLocalProvider(LocalAssistantCards provides open) {
                                 AssistantBlock("i1/0", example("decision"), complete = true)

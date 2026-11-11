@@ -292,6 +292,17 @@ class CheckFastScriptsTests(unittest.TestCase):
                 self.assertEqual(1, code, out)
                 self.assertIn("FAIL     scripts/assets/test_gen_tokens.py", out)
 
+    def test_icon_inputs_run_the_icon_suite(self):
+        self.commit_on_top("scripts/assets/test_gen_icon_meanings.py", FAILING, "base")
+        for path in ("spec/icons/meanings.json", "apple/Shared/Design/Icons.swift",
+                     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/icons/PersonaIcons.kt"):
+            with self.subTest(path=path):
+                self.write(path, "changed\n")
+                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
+                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
+                self.assertEqual(1, code, out)
+                self.assertIn("FAIL     scripts/assets/test_gen_icon_meanings.py", out)
+
     def test_a_docker_change_runs_the_entrypoint_suite(self):
         self.break_suite("test_docker_entrypoint.py")
         self.write("deploy/docker/entrypoint.sh", "echo changed\n")
@@ -836,7 +847,7 @@ class CheckFastWebInputsTests(unittest.TestCase):
                 finally:
                     (self.repo / sample).unlink()
                 self.assertIn("queued: web\n", out)
-                self.assertEqual(["web|run typecheck", "web|test"], npm_calls, out)
+                self.assertEqual(["web|run check:deps", "web|run typecheck", "web|test"], npm_calls, out)
                 self.assertNotIn("no fast check maps to", out)
 
     def test_web_inputs_keep_their_other_checks(self):

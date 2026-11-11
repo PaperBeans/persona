@@ -24,6 +24,8 @@ export interface Market {
   /** Why the last read failed; the extensions it had before stay listed. */
   error?: string;
   fetched_at?: string;
+  /** When this market's package-download statistics were last updated. */
+  downloads_updated_at?: string;
   added_at?: string;
   /** How its index is signed (a hub with market signatures, #1848). */
   signature?: MarketSignature;
@@ -45,6 +47,11 @@ export interface CatalogItem {
   name: string;
   version: string;
   description?: string;
+  /** Public catalog artwork: absolute HTTPS without URL credentials; absent on older hubs. */
+  icon_url?: string;
+  /** Cumulative package downloads across all versions, not users or Persona installations. Explicit zero is meaningful. */
+  downloads?: number;
+  downloads_updated_at?: string;
   publisher?: string;
   homepage?: string;
   tags?: string[];

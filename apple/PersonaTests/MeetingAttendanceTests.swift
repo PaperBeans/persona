@@ -296,6 +296,19 @@ import Testing
         #expect(calls.said.isEmpty, "the hub said not to speak it: listening in")
     }
 
+    /// The live bar's send button waits for words (#4486): spaces and new lines alone ask nothing, the same rule `ask` keeps.
+    @Test func aTypedQuestionNeedsWords() {
+        for blank in ["", " ", "\n", " \t\n  "] {
+            #expect(!MeetingAsk.hasWords(blank), "\(blank.debugDescription) has no words")
+        }
+        for typed in ["?", "  Who owns the test?  ", "First line\nsecond line"] {
+            #expect(MeetingAsk.hasWords(typed), "\(typed.debugDescription) can be asked")
+        }
+        let ask = model(Calls())
+        #expect(ask.ask(meeting(.listener), text: " \n ") == nil, "nothing is asked for a blank question")
+        #expect(ask.exchanges.isEmpty)
+    }
+
     /// Said aloud only while the role still speaks and within a minute of the tap.
     @Test func anAnswerIsSaidOnlyWhenItMayBe() async throws {
         let calls = Calls()

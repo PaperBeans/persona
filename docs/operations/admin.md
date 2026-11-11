@@ -8,6 +8,14 @@ Code: server `server/internal/hub/admin*.go` (extensions in `admin_extensions.go
 web `web/admin/index.html` + `web/src/admin/` (same project and same design tokens as the web app, with its own entry point).
 The admin console is only at the hub's root path: the web app can be mounted under a reverse-proxy subpath ([web.md](../web/web.md) ("Subpaths")), but the admin console does not read `X-Forwarded-Prefix` and cannot be opened through a subpath; access the hub's port directly.
 
+
+## 客户端密码登录
+
+「设备」页可设置独立的客户端连接密码，开启网页端和移动端的密码登录。设置和登录使用 OPAQUE，连接密码原文不上传；
+管理员密码仍使用现有后台登录方式，两者不共用。密码登录要求可信 HTTPS；本机回环可用于开发。
+改密码或切换开关时可勾选「同时退出所有设备」，撤销手机、手表、浏览器和电脑链路的设备凭据；不勾选则保留已有登录。
+关闭密码登录后仍可扫码或使用配对链接。详细接口和移动端授权流程见 [协议](../protocol/protocol.md#客户端密码登录)。
+
 ## Access scope `admin.access`
 
 `hub.json`:

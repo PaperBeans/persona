@@ -8,17 +8,25 @@ import { requestCrumb } from "./error-reports";
 import { currentLanguage, t } from "../i18n";
 import type { Item } from "./types";
 import { clearFeedCache } from "./feed-cache";
+import { credentialEpoch, renewCredentialEpoch } from "./credential-epoch";
 
 let ownerToken: string | undefined;
+let ownerEpoch: string | undefined;
 let ownerGeneration = 0;
 const credentialListeners = new Set<(owner: string) => void>();
+function publishCredentialOwner(): string {
+  const owner = `credential-${++ownerGeneration}`;
+  credentialListeners.forEach((listener) => listener(owner));
+  return owner;
+}
 /** Opaque in-memory auth partition; never expose credentials in tree keys or persisted drafts. */
 export function credentialOwner(): string {
   const token = getToken();
-  if (token !== ownerToken) {
+  const epoch = credentialEpoch();
+  if (token !== ownerToken || epoch !== ownerEpoch) {
     ownerToken = token;
-    ownerGeneration++;
-    credentialListeners.forEach((listener) => listener(`credential-${ownerGeneration}`));
+    ownerEpoch = epoch;
+    return publishCredentialOwner();
   }
   return `credential-${ownerGeneration}`;
 }
@@ -45,6 +53,20 @@ export function setToken(token: string, tokenId?: string) {
   if (token !== getToken() || !token) clearFeedCache();
   storeCredentials(token, tokenId);
   credentialOwner();
+}
+
+/** A successful sign-in is a new owner even if the hub returned the same token. */
+export function setPairedToken(token: string, tokenId?: string) {
+  credentialOwner();
+  storeCredentials(token, tokenId);
+  const shared = renewCredentialEpoch();
+  clearFeedCache();
+  if (shared) credentialOwner();
+  else {
+    ownerToken = getToken();
+    ownerEpoch = credentialEpoch();
+    publishCredentialOwner();
+  }
 }
 
 export class ApiError extends Error {
@@ -120,15 +142,26 @@ export class HubTimeoutError extends Error {
   }
 }
 
-type ApiOptions = RequestInit & { json?: unknown; token?: string; tokenOwner?: string; onResponse?: (headers: Headers, status: number) => void };
+type ApiOptions = RequestInit & { json?: unknown; token?: string; tokenOwner?: string; isAuthContextCurrent?: () => boolean; onResponse?: (headers: Headers, status: number) => void };
 
 /** `tokenOwner`: explicit credentials opt into 401 recovery only while both the token and credential generation are current.
+ *  `isAuthContextCurrent`: an optional additional lifetime fence for a request scoped to a view or manager.
  *  `timeout`: ms before a read gives up with HubTimeoutError (default READ_TIMEOUT_MS for GET, none otherwise; 0: none). */
-export async function api<T>(path: string, init: ApiOptions & { timeout?: number } = {}): Promise<T> {
+export function api<T>(path: string, init: ApiOptions & { timeout?: number } = {}): Promise<T> {
+  return call<T>(path, init, false);
+}
+
+/** A hub route's bytes (an image it serves, such as a meeting photo's) with `api`'s credentials, headers, time limit and
+ *  errors: for what an `<img>` can't fetch itself, since it sends no header (the bearer token, the manager's). */
+export function apiBlob(path: string, init: ApiOptions & { timeout?: number } = {}): Promise<Blob> {
+  return call<Blob>(path, init, true);
+}
+
+async function call<T>(path: string, init: ApiOptions & { timeout?: number }, binary: boolean): Promise<T> {
   const { timeout, ...rest } = init;
   const read = (init.method ?? "GET").toUpperCase() === "GET";
   const limit = timeout ?? (read ? READ_TIMEOUT_MS : 0);
-  if (!limit) return request<T>(path, rest);
+  if (!limit) return request<T>(path, rest, binary);
   // The caller's own signal still aborts as before (an AbortError); only the time running out becomes HubTimeoutError.
   const controller = new AbortController();
   const outer = init.signal;
@@ -143,7 +176,7 @@ export async function api<T>(path: string, init: ApiOptions & { timeout?: number
   try {
     for (let tries = 0; ; tries++) {
       try {
-        return await request<T>(path, { ...rest, signal: controller.signal });
+        return await request<T>(path, { ...rest, signal: controller.signal }, binary);
       } catch (e) {
         // asking again is safe for a read: a gap gets a couple more tries, all inside the read's own time limit
         if (!read || tries >= readRetryMs().length || !isTransient(e)) throw e;
@@ -168,8 +201,8 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-async function request<T>(path: string, init: ApiOptions): Promise<T> {
-  const { onResponse, ...fetchOptions } = init;
+async function request<T>(path: string, init: ApiOptions, binary = false): Promise<T> {
+  const { onResponse, isAuthContextCurrent, ...fetchOptions } = init;
   const owner = init.token === undefined ? credentialOwner() : init.tokenOwner;
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${init.token ?? getToken()}`);
@@ -202,8 +235,16 @@ async function request<T>(path: string, init: ApiOptions): Promise<T> {
   const notModified = res.status === 304 && headers.has("If-None-Match");
   if (!notModified && intercepted(res)) {
     requestCrumb(method, path, res.status);
-    reloadForSignIn(); // the layer in front takes over the page and sends it to its sign-in
+    // Retired requests cannot reload a replacement view or credential; an unowned pairing probe can still sign in.
+    if ((isAuthContextCurrent?.() ?? true)
+      && (owner === undefined || (owner === credentialOwner() && (init.token === undefined || init.token === getToken())))) {
+      reloadForSignIn(); // the layer in front takes over the page and sends it to its sign-in
+    }
     throw new ApiError(res.status || 401, t("lib-api.hub_no_response"), {}, false);
+  }
+  if (binary && res.ok) {
+    onResponse?.(res.headers, res.status);
+    return (await res.blob()) as T;
   }
   const text = await res.text();
   let data: Record<string, unknown> = {};
@@ -218,7 +259,8 @@ async function request<T>(path: string, init: ApiOptions): Promise<T> {
   }
   if (!res.ok && !notModified) {
     requestCrumb(method, path, res.status);
-    if (res.status === 401 && owner !== undefined && owner === credentialOwner() && (init.token === undefined || init.token === getToken())) onUnauthorized();
+    if (res.status === 401 && owner !== undefined && owner === credentialOwner() && (init.token === undefined || init.token === getToken())
+      && (isAuthContextCurrent?.() ?? true)) onUnauthorized();
     const msg = typeof data.error === "string" && data.error ? data.error : `HTTP ${res.status}`;
     throw new ApiError(res.status, msg, data, isJson, res.headers?.get("X-Request-Id") ?? undefined, path);
   }
@@ -282,6 +324,8 @@ function businessFailureText(e: ApiError): string | undefined {
   if (e.code === "assistant_offline") return t("lib-api.manager_offline");
   if (e.code === "node_unreachable") return t(e.body.delivered === "none" ? "lib-api.computer_offline" : "lib-api.computer_dropped");
   if (e.code === "timeout") return t("lib-api.computer_timeout");
+  // a stopped Agent takes no messages (#4754): Resume on its terminal page runs it again
+  if (e.code === "agent_stopped") return t("lib-api.agent_stopped");
   return undefined;
 }
 

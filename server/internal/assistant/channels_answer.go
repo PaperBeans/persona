@@ -383,6 +383,9 @@ func (s *Service) channelTurnEnded(ctx context.Context, machine, session string)
 	if s.meetingTurnNow(machine, session) {
 		return // a meeting's batch: neither a channel's answer nor mirrored (meeting_turns.go)
 	}
+	if s.justMeNow(machine, session) {
+		return // a Just me turn: mirrored nowhere (meeting_justme.go)
+	}
 	c := &s.chans
 	c.mu.Lock()
 	s.loadChannelStateLocked(ctx)

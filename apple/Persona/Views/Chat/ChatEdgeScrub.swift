@@ -12,9 +12,18 @@ import SwiftUI
 // outside the band, or one that moves before the hold is over, does at once (#2615).
 
 /// One tick: a message the user typed, by its line's id, and its first words.
-nonisolated struct EdgeMark: Equatable, Sendable {
+nonisolated struct EdgeMark: Hashable, Sendable {
     var id: String
     var text: String
+    var seq: Int? = nil
+    /// One-based position among every genuine input in the complete history, never the loaded page's offset.
+    var ordinal: Int? = nil
+
+    var preview: String {
+        guard let ordinal else { return text }
+        if text.isEmpty { return String(localized: "Message \(ordinal) [Chat Navigation]") }
+        return String(localized: "Item \(ordinal): \(text)")
+    }
 }
 
 /// Where the ticks go in a list `height` tall, between `top` and `bottom` margins (the top bar floats over the list):
@@ -65,13 +74,19 @@ nonisolated struct EdgeScrubColumn: Equatable, Sendable {
     /// The messages the user typed, oldest first: not Persona's notes to the model, not other conversations', not a
     /// /loop tick.
     static func marks(_ lines: [ChatLine]) -> [EdgeMark] {
-        lines.compactMap { line in
-            guard case .row(.user(let item)) = line.content, Injected.of(item) == nil, item.from == nil,
-                  MessageSource.of(item) == nil else { return nil }
+        var seen = Set<String>()
+        return lines.compactMap { line in
+            let item: Item?
+            switch line.content {
+            case .row(let row): item = row.userInput
+            case .userImages(_, let images): item = images.first
+            default: item = nil
+            }
+            guard let item, Injected.of(item) == nil, item.from == nil, MessageSource.of(item) == nil else { return nil }
             let raw = item.text ?? ""
-            guard !raw.hasPrefix("/loop") else { return nil }
+            guard !raw.hasPrefix("/loop"), seen.insert(String(item.id.split(separator: "#")[0])).inserted else { return nil }
             let shown = UserRowText(raw).shown.trimmingCharacters(in: .whitespacesAndNewlines)
-            return EdgeMark(id: line.id, text: shown.isEmpty ? String(localized: "Photo [Chat Layout]") : shown)
+            return EdgeMark(id: line.id, text: shown.isEmpty ? String(localized: "Photo [Chat Layout]") : shown, seq: item.seq)
         }
     }
 
@@ -139,7 +154,7 @@ struct EdgeScrubOverlay: View {
                 if let i = state.picked, let mark = state.pickedMark {
                     HStack(spacing: Theme.Space.flush) {
                         Spacer(minLength: 0)
-                        Text(mark.text)
+                        Text(mark.preview)
                             .font(Theme.Font.secondary)
                             .foregroundStyle(.primary)
                             .lineLimit(2)
@@ -164,6 +179,7 @@ struct EdgeScrubOverlay: View {
             .allowsHitTesting(false)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("chat.edgeScrub")
+            .accessibilityValue(String(state.marks.count))
         }
     }
 }

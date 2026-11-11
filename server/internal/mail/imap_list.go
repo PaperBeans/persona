@@ -86,23 +86,22 @@ func (s *Service) ListMessages(ctx context.Context, opts ListOptions) (*ListResu
 		}(i, a)
 	}
 	wg.Wait()
+	// A caller that gave up must not receive another account's completed page as a success.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	var all []MailSummary
 	hasMore, headersOnly := false, false
-	var firstErr error
 	for _, r := range results {
 		if r.err != nil {
-			if firstErr == nil {
-				firstErr = r.err
-			}
-			continue
+			// Never expose an incomplete merged page as a success, including to older clients which do not
+			// understand partial-result metadata. Upstream error text can contain account or credential data.
+			return nil, &IncompleteSearchError{}
 		}
 		all = append(all, r.res.Messages...)
 		hasMore = hasMore || r.res.HasMore
 		headersOnly = headersOnly || r.res.HeadersOnly
-	}
-	if len(all) == 0 && firstErr != nil {
-		return nil, firstErr
 	}
 	sort.SliceStable(all, func(i, j int) bool {
 		if all[i].Date != all[j].Date {

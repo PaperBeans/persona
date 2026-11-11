@@ -16,7 +16,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -38,14 +37,42 @@ import persona.core.designsystem.icons.PhIcons
 fun JStatusDot(status: Status, modifier: Modifier = Modifier, size: Dp = 8.dp) {
     val tone = PersonaTheme.palette.status(status)
     when (PersonaTheme.style) {
-        AppStyle.Glass -> Canvas(modifier.size(size).clearAndSetSemantics {}) {
-            drawCircle(Brush.radialGradient(listOf(tone.dot.copy(alpha = 0.55f), Color.Transparent), radius = this.size.minDimension), radius = this.size.minDimension)
-            drawCircle(tone.dot)
-            drawCircle(tone.text, style = Stroke(1.dp.toPx()))
+        AppStyle.Glass -> {
+            val breath = needsYouBreath(status == Status.NeedsYou && !PersonaTheme.reduceMotion)
+            Canvas(modifier.size(size).clearAndSetSemantics {}) {
+                drawCircle(Brush.radialGradient(listOf(tone.dot.copy(alpha = 0.55f), Color.Transparent), radius = this.size.minDimension), radius = this.size.minDimension)
+                drawCircle(tone.dot)
+                drawCircle(tone.text, style = Stroke(1.dp.toPx()))
+                breath?.let { drawBreathingRing(tone.dot, this.size.minDimension / 2, it()) }
+            }
         }
         AppStyle.Brief -> Box(modifier.size(size).clip(CircleShape).background(tone.dot).border(1.dp, tone.text, CircleShape).clearAndSetSemantics {})
         AppStyle.Board -> Box(modifier.size(size).clip(RoundedCornerShape(2.dp)).background(tone.dot).border(1.dp, tone.text, RoundedCornerShape(2.dp)).clearAndSetSemantics {})
     }
+}
+
+/**
+ * The Needs You breath, as iOS draws it (`StatusDot`, `Theme.Motion.needsYouBreath*`): every breath a ring leaves the dot
+ * and grows to `1 + scale` times it as it fades, eased as a whole by iOS's curve. Null when the dot doesn't breathe; read
+ * the returned progress only while drawing, so a breath redraws the canvas and nothing else.
+ */
+@Composable
+internal fun needsYouBreath(breathes: Boolean): (() -> Float)? {
+    if (!breathes) return null
+    val progress = rememberInfiniteTransition(label = "needs-you").animateFloat(
+        0f, 1f,
+        infiniteRepeatable(tween(Tokens.Motion.NeedsYouBreath.duration, easing = BreathEasing), RepeatMode.Restart),
+        label = "breath",
+    )
+    return { progress.value }
+}
+
+private val BreathEasing = CubicBezierEasing(1f / 3, 2f / 3, 2f / 3, 1f)
+
+internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBreathingRing(color: Color, radius: Float, progress: Float) {
+    val alpha = Tokens.Motion.NeedsYouBreath.ringOpacity * (1f - progress)
+    drawCircle(color.copy(alpha = color.alpha * alpha), radius = radius * (1f + Tokens.Motion.NeedsYouBreath.scale * progress),
+        style = Stroke(Tokens.Size.lineMedium.toPx()))
 }
 
 /** The older dot; same as [JStatusDot]. */
@@ -63,13 +90,13 @@ fun JStatusMark(status: Status, modifier: Modifier = Modifier, animated: Boolean
     val moving = animated && !PersonaTheme.reduceMotion
     when (PersonaTheme.style) {
         AppStyle.Glass -> Box(modifier.size(28.dp), contentAlignment = Alignment.Center) {
-            val pulse = if (moving && status == Status.NeedsYou) {
-                rememberInfiniteTransition(label = "glow").animateFloat(0.55f, 1f, infiniteRepeatable(tween(1300), RepeatMode.Reverse), label = "pulse").value
-            } else 1f
-            Canvas(Modifier.size(26.dp).alpha(pulse).clearAndSetSemantics {}) {
+            val breath = needsYouBreath(moving && status == Status.NeedsYou)
+            Canvas(Modifier.size(26.dp).clearAndSetSemantics {}) {
+                val dot = 4.5.dp.toPx()
                 drawCircle(Brush.radialGradient(listOf(tone.dot.copy(alpha = 0.5f), Color.Transparent)))
-                drawCircle(tone.dot, radius = 4.5.dp.toPx())
-                drawCircle(tone.text, radius = 4.5.dp.toPx(), style = Stroke(1.dp.toPx()))
+                drawCircle(tone.dot, radius = dot)
+                drawCircle(tone.text, radius = dot, style = Stroke(1.dp.toPx()))
+                breath?.let { drawBreathingRing(tone.dot, dot, it()) }
             }
         }
         AppStyle.Brief -> Box(modifier.size(36.dp).clip(CircleShape).background(palette.surface), contentAlignment = Alignment.Center) {

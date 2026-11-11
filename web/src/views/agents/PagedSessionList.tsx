@@ -52,7 +52,7 @@ function countsQuery(filters: ListFilters): string {
   return params.toString();
 }
 
-function scrollParent(el: HTMLElement | null): HTMLElement | null {
+export function scrollParent(el: HTMLElement | null): HTMLElement | null {
   for (let p = el?.parentElement; p; p = p.parentElement) {
     if (/auto|scroll/.test(getComputedStyle(p).overflowY)) return p;
   }
@@ -79,7 +79,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   }), [q, state, dimension, value, machine, provider]);
   const filtered = Object.keys(filters).length > 0;
   const summaryMode = root.isSummary();
-  const list = useMemo(() => filtered ? new SessionList<T>(path, identity, compare, undefined, removeIdentity, { summary: summaryMode }) : root, [filtered, path, identity, compare, removeIdentity, summaryMode, root, filters]);
+  const list = useMemo(() => filtered ? new SessionList<T>(path, identity, compare, undefined, removeIdentity, { summary: summaryMode, pageCounts: () => root.usesPageCounts() }) : root, [filtered, path, identity, compare, removeIdentity, summaryMode, root, filters]);
   const page = useSyncExternalStore(list.subscribe, list.getSnapshot, list.getSnapshot);
   const [facets, setFacets] = useState<ListCounts | null>(null);
   const [facetError, setFacetError] = useState("");

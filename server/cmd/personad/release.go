@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,7 +17,7 @@ import (
 	"github.com/nwverse/persona/server/internal/update"
 )
 
-// runRelease is `personad release …`, what scripts/release/publish.sh runs to describe a release (docs/operations/hub-update.md "Public publishing").
+// runRelease is `personad release …`, what scripts/release/publish.sh runs to describe and check a release (docs/operations/hub-update.md "Public publishing").
 func runRelease(args []string) error {
 	if len(args) == 0 {
 		return usageError(releaseUsage())
@@ -59,8 +61,43 @@ func runRelease(args []string) error {
 		if err != nil {
 			return err
 		}
+		// What it describes has to be the build it was told: binaries from an earlier run with another build number
+		// would make every hub refuse the release after downloading it (#4522).
+		if err := update.VerifyRelease(context.Background(), *dir, m); err != nil {
+			return err
+		}
 		b, _ := json.MarshalIndent(m, "", "  ")
 		return os.WriteFile(*out, append(b, '\n'), 0o644)
+	case "verify":
+		// The check before an upload, of the latest.json as written: publish.sh runs it on what it is about to put up.
+		fs := flag.NewFlagSet("release verify", flag.ContinueOnError)
+		dir := fs.String("dir", "", "where latest.json's downloads are")
+		manifest := fs.String("manifest", "", "the manifest (default: latest.json in --dir)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if err := noReleaseArgs("release verify", fs.Args()); err != nil {
+			return err
+		}
+		if *dir == "" {
+			return usageError("release verify needs --dir\n" + releaseUsage())
+		}
+		if *manifest == "" {
+			*manifest = filepath.Join(*dir, "latest.json")
+		}
+		b, err := os.ReadFile(*manifest)
+		if err != nil {
+			return err
+		}
+		m, err := update.ParseManifest(b)
+		if err != nil {
+			return err
+		}
+		if err := update.VerifyRelease(context.Background(), *dir, m); err != nil {
+			return err
+		}
+		fmt.Printf("%s describes the downloads in %s: %s, build %d\n", *manifest, *dir, m.Version, m.Build)
+		return nil
 	case "check-next":
 		fs := flag.NewFlagSet("release check-next", flag.ContinueOnError)
 		num := fs.String("build", "", "this release's build number")
@@ -118,6 +155,7 @@ func noReleaseArgs(cmd string, rest []string) error {
 // releaseUsage is what `release` without a known subcommand prints.
 func releaseUsage() string {
 	return "usage: " + commandName() + " release manifest --dir D --version V --build N --commit C --out latest.json […]\n" +
+		"       " + commandName() + " release verify --dir D [--manifest latest.json]\n" +
 		"       " + commandName() + " release check-next <served latest.json> --build N --commit C\n" +
 		"(" + commandName() + " release manifest -h for its flags)"
 }

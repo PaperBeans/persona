@@ -72,3 +72,13 @@ func (d *DB) CleanupClientOps(ctx context.Context, before time.Time) error {
 	_, err := d.pool.Exec(ctx, `DELETE FROM client_ops WHERE created_at < $1`, before)
 	return err
 }
+
+// ReclaimClientOp takes back an operation a restart left unknown, for a kind whose call may run again (a meeting's
+// follow-up: its creation record makes nothing twice); false when it is not unknown (finished, or taken already).
+func (d *DB) ReclaimClientOp(ctx context.Context, id string) (bool, error) {
+	tag, err := d.pool.Exec(ctx, `UPDATE client_ops SET state = 'pending', updated_at = now() WHERE id = $1 AND state = 'unknown'`, id)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}

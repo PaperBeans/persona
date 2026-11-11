@@ -12,7 +12,7 @@
   "action_connect_model": "モデルをつなぐ",
   "action_edit_provider": "キーを変更",
   "action_test_assistant": "試してみる",
-  "action_main_chat_model": "ランチャーを切り替える",
+  "action_main_chat_model": "別のアプリや設定を選ぶ",
   "action_open_admin": "管理画面を開く",
   "turn_not_logged_in": "モデル未接続：Claude Code にログインしていません",
   "turn_not_logged_in_detail": "そのパソコンで一度ログインするか、API キーを使ってください。",

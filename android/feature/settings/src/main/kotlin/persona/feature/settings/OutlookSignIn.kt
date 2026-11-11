@@ -1,7 +1,5 @@
 package persona.feature.settings
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.text.KeyboardOptions
@@ -80,9 +78,8 @@ internal fun LazyListScope.outlookSignIn(state: OutlookSignInState, connectors: 
             })
         }
     } else item("outlook-register") {
-        val context = LocalContext.current
         val scope = rememberCoroutineScope()
-        val feedback = LocalAppFeedback.current
+        val copy = rememberCopy()
         val res = LocalResources.current
         Column(Modifier.fillMaxWidth().padding(top = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             JSectionHeader(stringResource(R.string.settings_src_mail_outlook_register_header))
@@ -104,8 +101,7 @@ internal fun LazyListScope.outlookSignIn(state: OutlookSignInState, connectors: 
                     JRow(stringResource(R.string.settings_src_mail_outlook_redirect), subtitle = uri, subtitleLines = 1, chevron = false,
                         trailing = {
                             JIconButton(PhIcons.Copy, stringResource(R.string.settings_src_mail_outlook_copy_redirect), {
-                                context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(res.getString(R.string.settings_src_mail_outlook_redirect), uri))
-                                feedback?.notice(res.getString(R.string.settings_src_mail_outlook_copied))
+                                copy(uri, res.getString(R.string.settings_src_mail_outlook_copied))
                             })
                         })
                 }

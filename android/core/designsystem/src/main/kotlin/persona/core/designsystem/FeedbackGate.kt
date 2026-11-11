@@ -34,19 +34,22 @@ class FeedbackGate(
             if (lastOffline[message]?.let { now - it < 4_000 } == true) return true
             lastOffline[message] = now
         }
-        // As iOS: a failure buzzes as an error; one that only waits for the hub, as a nudge (Haptic.Attention).
-        return emit(message, if (offline) Haptic.Attention else Haptic.Error)
+        // As iOS: a failure is an error toast; one that only waits for the hub is info with a nudge (Haptic.Attention).
+        return if (offline) emit(message, Haptic.Attention, FeedbackStyle.Info) else emit(message, null, FeedbackStyle.Error)
     }
 
     @Synchronized
-    override fun notice(message: String): Boolean = emit(message, null)
+    override fun notice(message: String): Boolean = emit(message, null, FeedbackStyle.Info)
 
-    private fun emit(message: String, haptic: Haptic?): Boolean {
+    @Synchronized
+    override fun notice(message: String, style: FeedbackStyle): Boolean = emit(message, null, style)
+
+    private fun emit(message: String, haptic: Haptic?, style: FeedbackStyle): Boolean {
         val now = clock()
         lastNotices.entries.removeAll { now - it.value >= 4_000 }
         if (lastNotices[message]?.let { now - it < 4_000 } == true) return true
         lastNotices[message] = now
-        queue.tryEmit(FeedbackNotice(message, haptic = haptic))
+        queue.tryEmit(FeedbackNotice(message, haptic = haptic, style = style))
         return true
     }
 

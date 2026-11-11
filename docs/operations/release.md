@@ -99,8 +99,21 @@ under its `logs/` subdirectory. Do not enable shell tracing or print credentials
 
 A missing baseline runs that target once. Later checks compare the last successful commit directly with the newest branch HEAD,
 including deleted paths. Failure does not advance that baseline; two failures at the same HEAD suspend that target until another
-HEAD appears. Lock contention exits 75 and is a deferral, not a failure. Successful actions only log; failures invoke the configured
-notification command, retaining failed notifications in a durable outbox for subsequent delivery attempts.
+HEAD appears. Lock contention exits 75 and is a deferral, not a failure. The deploy script's explicit checkout-behind-origin
+message with exit 2 also defers the target without notification or a failure-budget charge; the next round fetches the newest HEAD.
+Other exit-2 errors still count as failures, and the freshness guard is never bypassed.
+
+Failures invoke the configured notification command once per target and consecutive failure cause, even across new commits.
+The worker hashes the step/result and first diagnostic line (or first nonempty output line), normalizing revision identifiers and
+timestamps; raw summaries never enter notification payloads or state. Each target's successful action clears its remembered failure, so the
+same cause notifies again if it recurs after recovery. Successful actions only log, including recovery; there is no extra recovery
+push. Preflight failures have a separate worker identity, cleared when preflight completes. Lock contention and stale checkouts
+neither clear incidents nor create them. Failed notification deliveries remain in the durable at-least-once outbox, retried without
+queuing another copy of a continuing failure. There is no periodic reminder for an unchanged cause.
+
+For a worker upgrade, pause future timer runs and let any active service finish, copy the verified main worker to its installed
+path with mode 0600, and resume the same timer. Keep configuration, targets, retry state, checkpoints, adapters and unit files intact;
+record the source revision and installed file hash in the private STATE document.
 
 Use a dedicated detached clean worktree on the hub and another on the build computer. The worker refuses to discard dirty files.
 `scripts/operations/hub_action.py deploy` retains the deployment lock through a live API and serving-binary verification;
@@ -349,7 +362,8 @@ curl -fsSL <publish.site_url>/install.sh | sh   # install to ~/.persona/bin/pers
   and no publish happens without `publish.site_url` in config. Standalone: `./scripts/release/publish.sh`; `NO_DEPLOY=1` only builds and checks (outputs in `build-publish/`).
 - Website-only changes (`site/`): `SITE_ONLY=1 ./scripts/release/publish.sh` skips a new build, fetches the small files of the currently published version (`VERSION`, `SHA256SUMS`, `latest.json`, `SLOT`, `install.sh`) and deploys them with the committed `site/`, leaving archives in R2 unchanged. Afterwards it checks the live small files are unchanged and every archive still exists (`HEAD` size). It refuses if there's no live `dl/SLOT` yet (a release from before R2); do one full publish first. **Don't run `wrangler deploy` directly in `site/`**: it makes `/dl/` and `install.sh` return 404 (`docs/lessons/server.md`).
 - Web dependencies always install from the official npm registry (`npm ci --registry=https://registry.npmjs.org/`, overridable with `PERSONA_NPM_REGISTRY`), ignoring local npm config. `package-lock.json` already points to the official registry; a locally configured mirror may lack packages (on 2026-11-06 it lacked `elkjs`, stopping release before web bundling).
-- Build four platforms (linux / darwin × amd64 / arm64), with `-tags "$(cat server/build-tags.txt)" -trimpath -s -w`, embedding `channel=release`, build number (UTC `YYYYMMDDHHMM`) and `updateURL`:
+- Build four platforms (linux / darwin × amd64 / arm64), with `-tags "$(cat server/build-tags.txt)" -trimpath -s -w`, embedding `channel=release`, build number (UTC `YYYYMMDDHHMM`) and `updateURL`
+  (the config's `publish.update_url` as written, e.g. a GitHub repository's `releases/latest/download`, else `<publish.site_url>/dl`; the script notes when the binaries look somewhere other than the site it publishes to; a hub's `hub.json` `update.url` replaces it at run time, `docs/operations/hub-update.md` ("Update source")):
   - **Web bundled into the binary** (`server/internal/hub/webdist`, `go:embed`): the hub uses it when the hub machine has no `~/.persona/web`; otherwise it still uses the directory.
     The plain copy is privacy-scanned first, then its hashed assets and `third-party-licenses.txt` are kept gzipped (`go run ./internal/webasset/precompress`); the script stops if none are, or if a compressible asset of 1 KB or more is left plain. The first screen's brotli copies (`name.br`) come from `npm run build` and stay as they are (`docs/web/web.md` "Precompressed assets").
   - **No skills included**: the skill connecting to the Lark gateway was copied from a private upstream repository (GPL-3.0) and cannot be redistributed. Skills live in `~/.persona/skills/` on each machine,
@@ -359,9 +373,10 @@ curl -fsSL <publish.site_url>/install.sh | sh   # install to ~/.persona/bin/pers
     `server/internal/buildtags` computes the line from tailscale.com's feature registry; after a tailscale.com bump, `TestTagsFileInSync` asks for `cd server && go run ./internal/buildtags/printtags > build-tags.txt`.
     The image, `deploy.sh`, `mac-link.sh` and the test scripts build with the same line (`scripts/test/test_build_tags_builds.py` checks every `go build` of the image, `deploy.sh`, `mac-link.sh` and `publish.sh`), and CI builds the programs and runs the tunnel tests with it (`scripts/ci/server.sh`).
   - **Version manifest** `dl/latest.json` (each platform's archive and unpacked sha256, build number, commit), unsigned (the user's decision; trade-offs in `docs/operations/hub-update.md` ("Security"));
-    before publishing, check that the build number is greater than the live one, the live version's commit is an ancestor of this one, and server/ and web/ have no uncommitted changes. The manifest includes all commits in this release (`ancestors`):
+    before publishing, check that the build number is greater than the live one, the live version's commit is an ancestor of this one, and server/ and web/ have no uncommitted changes.
+    `release manifest` refuses binaries of another build than the one it writes, and `personad release verify` reads the written `latest.json` back against every download before the first upload. It runs this machine's binaries (`version -v` must say the version and build) and finds the build number in the others. A manifest written over an earlier run's binaries (v0.2.1, #4522) stops there (`docs/operations/hub-update.md` ("Version manifest")). The manifest includes all commits in this release (`ancestors`):
     hubs read it for auto-update, but only install automatically if it includes the commit they're running (`docs/operations/hub-update.md` ("Preventing rollback")).
-  - **Programs published together**: `personad-wechat` (WeChat bot, a separate program, `docs/extensions/wechat.md`), built for all four platforms with the same
+  - **Programs published together**: `persona-hub` and `persona-manager` (`docs/server/server.md`), built for all four platforms with the same
     `-X` flags, privacy scan and size check as personad; its `version -v` must match personad's. The manifest's `programs` lists them, and hub auto-update replaces them together.
   - Before upload, run `check_bundle_privacy.py --whole-short`: binaries must contain none of the configured values (except Go module paths; values of four characters or fewer match whole words,
     since Unicode tables and compressed JS contain short letter combinations everywhere). A few protocol names, official contact links and standard network constants in public dependencies are classified by exact context, without allowing whole domains or private network ranges;
@@ -471,6 +486,14 @@ A private configuration has only these fields, with no secrets:
   public (not draft) GitHub Release to exist, then uploads verified assets and
   compares their remote SHA-256 digests. A failed platform does not complete
   that platform's checkpoint, and does not claim that another platform passed.
+- A receipt that carries `latest.json` (the hub's) is checked before anything
+  is uploaded. It must list only files in the receipt, at their sizes and
+  sha256s. Every binary must be its build, and this machine's `personad
+  version -v` must say its version and build. Otherwise the platform fails
+  (#4522: v0.2.1's manifest named another build than its binaries). The
+  downloads go up first; `VERSION`, `SHA256SUMS` and then `latest.json` go
+  last, each on its own, so a hub reading `releases/latest/download` never sees
+  a manifest whose files are not there yet.
 
 For the first release, merge this consumer's PR before pushing `v0.1.0` from
 the merged `main` commit. The public workflow creates the Release and image;

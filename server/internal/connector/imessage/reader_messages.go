@@ -11,7 +11,9 @@ import (
 // msgRow is one message as the queries select it.
 type msgRow struct {
 	Conv        int     `json:"conv"`
-	ChatRow     int64   `json:"chat"` // the chat's ROWID (Changes, Search)
+	ChatRow     int64   `json:"chat"`         // the chat's ROWID (Changes, Search)
+	ChatPresent int     `json:"chat_present"` // the chat existed in the Changes snapshot
+	HasMore     int     `json:"has_more"`     // another distinct message exists (Changes)
 	RowID       int64   `json:"rowid"`
 	GUID        string  `json:"guid"`
 	Date        int64   `json:"date"`
@@ -38,6 +40,10 @@ const msgColumns = `m.ROWID AS rowid, m.guid AS guid, m.date AS date, m.text AS 
   m.group_action_type AS action, m.other_handle AS other, m.group_title AS title, m.cache_has_attachments AS att,
   m.is_audio_message AS audio, m.thread_originator_guid AS thread, m.date_edited AS edited,
   m.date_retracted AS retracted, m.balloon_bundle_id AS balloon`
+
+// History merges one bounded index scan per chat. Keep the SQL and the candidate set bounded if a conversation
+// has an exceptional number of associated chats; do not return a partial page or a cursor in that case.
+const maxHistoryChats = 200
 
 // text is a message's words: its text column, or what its attributedBody holds. ok is false when neither can be
 // read (the app shows that it could not).
@@ -75,6 +81,9 @@ func (r *Reader) Messages(ctx context.Context, id string, limit int, before, kee
 	if cv == nil {
 		return MessagesPage{}, ErrNoChat
 	}
+	if len(cv.chats) > maxHistoryChats {
+		return MessagesPage{}, ErrTooManyAssociations
+	}
 	if keep == KeepContacts {
 		people, err := r.members(ctx, []*conversation{cv})
 		if err != nil {
@@ -98,10 +107,33 @@ func (r *Reader) Messages(ctx context.Context, id string, limit int, before, kee
 		}
 		where = fmt.Sprintf(" AND (j.message_date < %d OR j.message_date = %d AND j.message_id < %d)", d, d, n)
 	}
+	var sql string
+	if len(cv.chats) == 1 {
+		sql = fmt.Sprintf(`SELECT 0 AS conv, %s FROM chat_message_join j JOIN message m ON m.ROWID = j.message_id
+WHERE j.chat_id = %d AND m.associated_message_type = 0%s ORDER BY j.message_date DESC, j.message_id DESC LIMIT %d`,
+			msgColumns, cv.chats[0], where, limit+1)
+	} else {
+		// A chat/message pair is unique in Messages' schema. Keep only the newest association for each message,
+		// breaking ties by chat id. Each indexed chat scan needs at most limit+1 of these unique messages: if a
+		// row is older than that many in its own chat, it cannot be in the global newest limit+1. Merge the bounded
+		// slices inside one statement, retaining the existing join-date ordering and message-date cursor.
+		unique := fmt.Sprintf(` AND NOT EXISTS (
+  SELECT 1 FROM chat_message_join other WHERE other.message_id = j.message_id AND other.chat_id IN (%s)
+    AND (other.message_date > j.message_date OR (j.message_date IS NULL AND other.message_date IS NOT NULL)
+         OR (other.message_date IS j.message_date AND other.chat_id < j.chat_id))
+		)`, ints(cv.chats))
+		parts := make([]string, 0, len(cv.chats))
+		for _, chat := range cv.chats {
+			parts = append(parts, fmt.Sprintf(`SELECT * FROM (
+  SELECT 0 AS conv, j.message_date AS sort_date, %s FROM chat_message_join j JOIN message m ON m.ROWID = j.message_id
+  WHERE j.chat_id = %d AND m.associated_message_type = 0%s%s
+  ORDER BY j.message_date DESC, j.message_id DESC LIMIT %d
+)`, msgColumns, chat, unique, where, limit+1))
+		}
+		sql = strings.Join(parts, "\nUNION ALL\n") + fmt.Sprintf(" ORDER BY sort_date DESC, rowid DESC LIMIT %d", limit+1)
+	}
 	var rows []msgRow
-	if err := r.query(ctx, r.chatDB(), fmt.Sprintf(`SELECT 0 AS conv, %s FROM chat_message_join j JOIN message m ON m.ROWID = j.message_id
-WHERE j.chat_id IN (%s) AND m.associated_message_type = 0%s ORDER BY j.message_date DESC, j.message_id DESC LIMIT %d`,
-		msgColumns, ints(cv.chats), where, limit+1), &rows); err != nil {
+	if err := r.query(ctx, r.chatDB(), sql, &rows); err != nil {
 		return MessagesPage{}, err
 	}
 	page := MessagesPage{Messages: []Message{}}

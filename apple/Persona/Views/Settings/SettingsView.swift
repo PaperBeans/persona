@@ -1,4 +1,5 @@
 import BeautifulUI
+import AuthenticationServices
 import SwiftUI
 import VisionKit
 
@@ -98,7 +99,7 @@ struct SettingsView: View {
                         .settingsListRow(SettingsPage.modelConfiguration)
                         NavigationLink(value: SettingsPage.assistant) {
                             // No model here: the assistant's model is Model Settings › Main Chat (#1291).
-                            SettingsRow(title: String(localized: "Assistant"), symbol: Theme.Icon.ai, tint: Theme.ai)
+                            SettingsRow(title: String(localized: "Assistant Profile"), symbol: Theme.Icon.ai, tint: Theme.ai)
                         }
                         .settingsListRow(SettingsPage.assistant)
                         .accessibilityIdentifier("settings-assistant")
@@ -220,9 +221,9 @@ struct SettingsView: View {
                             }
                             .settingsListRow(SettingsPage.hub)
                             .accessibilityIdentifier("settings.hub")
-                            // The hub's managers, each a whole assistant (docs/assistant/managers.md).
+                            // The hub's managers, "assistants" in the interface (docs/assistant/managers.md).
                             NavigationLink(value: SettingsPage.managers) {
-                                SettingsRow(title: String(localized: "Managers"), symbol: Theme.Icon.managers, tint: Theme.ai)
+                                SettingsRow(title: String(localized: "Assistants"), symbol: Theme.Icon.managers, tint: Theme.ai)
                             }
                             .settingsListRow(SettingsPage.managers)
                             .accessibilityIdentifier("settings.managers")
@@ -384,13 +385,16 @@ struct SettingsView: View {
         else if d.bool(forKey: "openNotificationSettings") { p.append(SettingsPage.notifications) }
         else if d.string(forKey: "openAssistantPage") != nil { p.append(SettingsPage.assistant) }
         else if d.bool(forKey: "openDevices") { p.append(SettingsPage.devices) }
-        else if d.bool(forKey: "openHubs") || d.bool(forKey: "openSSHTunnel") || d.bool(forKey: "openLocalProxy") || d.bool(forKey: "openCloudflareAccess") {
+        else if d.bool(forKey: "openHubs") || d.bool(forKey: "openSSHTunnel") || d.bool(forKey: "openLocalProxy") || d.bool(forKey: "openCloudflareAccess")
+                    || d.bool(forKey: "openHubAddresses") {
             p.append(SettingsPage.hubs)
             // `-openSSHTunnel YES` / `-openLocalProxy YES`: the first hub's Settings › hub › SSH Tunnel / Local Proxy (screenshots).
             if d.bool(forKey: "openSSHTunnel"), let first = model.registry.hubs.first { p.append(SettingsPage.sshTunnel(first.id)) }
             if d.bool(forKey: "openLocalProxy"), let first = model.registry.hubs.first { p.append(SettingsPage.localProxy(first.id)) }
             // `-openCloudflareAccess YES`: its Settings › hub › Cloudflare Access.
             if d.bool(forKey: "openCloudflareAccess"), let first = model.registry.hubs.first { p.append(SettingsPage.cloudflareAccess(first.id)) }
+            // `-openHubAddresses YES`: its Settings › hub › Addresses (`-seedHubAddresses` fills them).
+            if d.bool(forKey: "openHubAddresses"), let first = model.registry.hubs.first { p.append(SettingsPage.hubAddresses(first.id)) }
         }
         else if d.bool(forKey: "openHubUpdate") { p.append(SettingsPage.hub) }
         else if d.bool(forKey: "openManagers") || d.string(forKey: "openManagerPage") != nil || d.bool(forKey: "showManagerCode") {
@@ -401,6 +405,9 @@ struct SettingsView: View {
         else if d.bool(forKey: "openSentAsYou") { p = SettingsPage.sentPath }
         else if d.bool(forKey: "openConnectors") { p.append(SettingsPage.connectors) }
         else if d.bool(forKey: "openSkills") { p.append(SettingsPage.skills) }
+        else if let scope = str("openSubscriptions") { // the source subscription pages: `all`, or their first state (#2041)
+            p.append(SettingsPage.subscriptions(state: scope == "all" ? nil : scope))
+        }
         else if flag("openExtensions") || str("openExtension") != nil { // Settings › Extensions (› one (› a page of it))
             p.append(SettingsPage.plugins)
             if let id = str("openExtension") {
@@ -446,6 +453,7 @@ struct SettingsView: View {
         else if d.bool(forKey: "openTriageSettings") { p.append(SettingsPage.triage) }
         else if d.string(forKey: "openKnowledgeSelection") != nil { p.append(SettingsPage.knowledgeSelection) } // (rule | chat | doc: with that sheet)
         else if d.string(forKey: "openAppearance") == "layout" { p.append(SettingsPage.layout) } // Layout (#2530)
+        else if d.string(forKey: "openAppearance") == "language" { p.append(SettingsPage.language) } // Language and dictation (#5005)
         else if let a = d.string(forKey: "openAppearance"), a != "chat" { // persona (or YES, or icon: the icon is the Avatar's) | color | style | scheme
             p.append(a == "color" ? SettingsPage.themeColor : a == "style" ? SettingsPage.style
                      : a == "scheme" ? SettingsPage.colorScheme : SettingsPage.persona)
@@ -535,6 +543,9 @@ enum SettingsPage: Hashable {
     /// A page a plugin draws (placement plugin_page, docs/extensions/extensions.md「Declarative UI」), titled until its View says
     /// otherwise; `manager`: the plugin's (nil: the default's).
     case pluginPage(plugin: String, ui: String, title: String, manager: String? = nil)
+    /// The source subscription pages (#2041, docs/extensions/subscriptions.md "Pages"), drawn by the manager; `state` opens them on
+    /// one extension's or one connector's (`SubscriptionsUI.state`), nil on every subscription.
+    case subscriptions(state: String? = nil)
     /// Settings › Extensions › Extension Market, one plugin of a market, and the markets (docs/extensions/extensions.md「Extension marketplace」).
     case pluginMarket
     case marketExtension(market: String, id: String)
@@ -549,6 +560,8 @@ enum SettingsPage: Hashable {
     case localProxy(String)
     /// Settings › hub › Cloudflare Access of one paired hub (docs/operations/network.md "Behind Cloudflare Access").
     case cloudflareAccess(String)
+    /// Settings › hub › Addresses of one paired hub (#4670, docs/operations/network.md "Client-added candidates").
+    case hubAddresses(String)
     /// Settings › Managers, and one manager by its id (docs/assistant/managers.md).
     case managers
     case manager(String)
@@ -621,6 +634,7 @@ private struct SettingsDestinations: ViewModifier {
         case .inAppTunnel(let id): HubInAppTunnelPage(hubID: id)
         case .localProxy(let id): HubLocalProxyPage(hubID: id)
         case .cloudflareAccess(let id): HubCloudflareAccessPage(hubID: id)
+        case .hubAddresses(let id): HubAddressesPage(hubID: id)
         case .managers: ManagersView()
         case .manager(let id): ManagerDetailView(id: id)
         case .connectors: ConnectorsView()
@@ -630,6 +644,8 @@ private struct SettingsDestinations: ViewModifier {
         case .plugins: ExtensionsView()
         case .plugin(let id, let manager): ExtensionDetailView(id: id, manager: manager)
         case .pluginPage(let plugin, let ui, let title, let manager): ExtensionPageView(plugin: plugin, ui: ui, title: title, manager: manager)
+        case .subscriptions(let state):
+            ExtensionPageView(plugin: SubscriptionsUI.id, ui: SubscriptionsUI.page, title: String(localized: "Subscriptions [Source Subscriptions]"), state: state)
         case .pluginMarket: ExtensionMarketView()
         case .marketExtension(let market, let id): MarketExtensionDetailView(market: market, id: id)
         case .pluginMarkets: ExtensionMarketsView()
@@ -993,6 +1009,7 @@ struct PairView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.webAuthenticationSession) private var webAuth
     var start: Start = .scan
     @State private var url = ""
     @State private var token = ""
@@ -1007,6 +1024,7 @@ struct PairView: View {
     @State private var editingSSH = false
     #endif
     @State private var connecting = false
+    @State private var passwordMode = true
     @State private var error: String?
     @State private var scanning = DataScannerViewController.isSupported && DataScannerViewController.isAvailable
     /// The code was refused as expired or used (401 invalid_token): say so, and offer to scan again.
@@ -1018,7 +1036,20 @@ struct PairView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if expired {
+                Section {
+                    Picker("Connection method", selection: $passwordMode) {
+                        Text("Password sign-in").tag(true)
+                        Text("Scan or token").tag(false)
+                    }.pickerStyle(.segmented)
+                }
+                if passwordMode {
+                    Section("Password sign-in") {
+                        TextField("HTTPS hub address", text: $url).autocorrectionDisabled()
+                        Text("Enter the connection password set by your administrator in the system sign-in window. Use QR pairing for self-signed certificates.")
+                            .font(Theme.Font.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if !passwordMode && expired {
                     Section {
                         Label("This code has expired or was already used; get a new one", systemImage: Theme.Icon.error)
                             .font(Theme.Font.secondaryStrong).foregroundStyle(Theme.danger)
@@ -1034,12 +1065,13 @@ struct PairView: View {
                         Text("Get a new code on the screen from setting up the hub, or on a connected device in Settings › Devices › Connect a new device.")
                     }
                 }
-                if scanning && !other {
+                if !passwordMode && scanning && !other {
                     Section {
                         QRScanner { code in
                             if let cfg = ServerConfig(pairURL: code) {
                                 url = cfg.url.absoluteString
                                 token = cfg.token
+                                passwordMode = false
                                 scanning = false
                                 Task { await connect() }
                             }
@@ -1057,7 +1089,7 @@ struct PairView: View {
                         #endif
                     }
                 }
-                if !other {
+                if !passwordMode && !other {
                     Section {
                         Button { withAnimation(Theme.Motion.standard) { showOther = true } } label: {
                             Label("Other ways", systemImage: Theme.Icon.more).lineLimit(1)
@@ -1067,8 +1099,8 @@ struct PairView: View {
                         Text("Type the address, connect through an SSH tunnel, or make a code with a command on the hub's machine.")
                     }
                 }
-                if other { otherWays }
-                accessSection
+                if !passwordMode && other { otherWays }
+                if !passwordMode { accessSection }
                 if let error { Section { Text(error).foregroundStyle(Theme.danger).font(Theme.Font.caption) } }
             }
             .themedPage()
@@ -1084,6 +1116,7 @@ struct PairView: View {
                 if let cfg = ServerConfig(pairURL: s) {
                     url = cfg.url.absoluteString
                     token = cfg.token
+                    passwordMode = false
                     Task { await connect() }
                 }
             }
@@ -1099,7 +1132,7 @@ struct PairView: View {
             .onAppear { if UserDefaults.standard.bool(forKey: "openPairSSH") { editingSSH = true } }
             #endif
             #endif
-            .modifier(PairSheetChrome(url: $url, token: $token, connecting: connecting, connect: { await connect() }))
+            .modifier(PairSheetChrome(url: $url, token: $token, passwordMode: $passwordMode, connecting: connecting, connect: { await connect() }))
         }
     }
 
@@ -1174,6 +1207,7 @@ struct PairView: View {
 private struct PairSheetChrome: ViewModifier {
     @Binding var url: String
     @Binding var token: String
+    @Binding var passwordMode: Bool
     var connecting: Bool
     var connect: () async -> Void
     @Environment(\.dismiss) private var dismiss
@@ -1190,6 +1224,7 @@ private struct PairSheetChrome: ViewModifier {
                 guard let cfg = ServerConfig(pairURL: typed) else { return }
                 url = cfg.url.absoluteString
                 token = cfg.token
+                passwordMode = false
                 Task { await connect() }
             }
             #endif
@@ -1199,7 +1234,7 @@ private struct PairSheetChrome: ViewModifier {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task { await connect() } } label: { if connecting { ProgressView() } else { Text("Connect [V N C Page a55741]") } }
-                        .disabled(connecting || token.isEmpty || URL(string: url) == nil)
+                        .disabled(connecting || (!passwordMode && token.isEmpty) || url.isEmpty)
                 }
             }
     }
@@ -1231,6 +1266,7 @@ extension AppModel {
 
 extension PairView {
     fileprivate func connect() async {
+        if passwordMode { await passwordLogin(); return }
         guard let u = URL(string: url.trimmingCharacters(in: .whitespaces)) else { return }
         connecting = true
         defer { connecting = false }
@@ -1259,6 +1295,30 @@ extension PairView {
             }
             if !expired { scanning = DataScannerViewController.isSupported && DataScannerViewController.isAvailable } // scan again
             Haptics.error()
+        }
+    }
+
+    private func passwordLogin() async {
+        connecting = true
+        error = nil
+        defer { connecting = false }
+        do {
+            #if os(macOS)
+            let kind = "desktop"
+            #else
+            let kind = "phone"
+            #endif
+            let flow = try PasswordLoginRequest(address: url, name: UIDevice.current.name, kind: kind)
+            let callback = try await webAuth.authenticate(using: flow.page, callback: .customScheme("persona"),
+                preferredBrowserSession: .ephemeral, additionalHeaderFields: [:])
+            let credential = try await flow.exchange(callback)
+            try await model.pair(ServerConfig(url: flow.server, token: credential.token), deviceID: credential.id)
+            Haptics.success()
+            dismiss()
+        } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
+            return
+        } catch {
+            if !error.isCancellation { self.error = error.localizedDescription; Haptics.error() }
         }
     }
 }
@@ -1468,11 +1528,15 @@ struct SettingsRow: View {
     var look: ValueLook = .plain
     /// A brand's own mark (an asset of `Theme.Brand`) in place of the tinted tile, in the BeautifulUI style.
     var brand: String? = nil
+    /// Public catalog artwork; absent artwork preserves the existing row mark.
+    var iconURL: String? = nil
 
     var body: some View {
         if AppStyle.current.usesBeautifulUI {
             BUIListRow(title, value: value.flatMap { $0.isEmpty ? nil : $0 }) {
-                if let brand { SettingsBrandMark(asset: brand) } else { IconTile(symbol, tint: tint) }
+                if let iconURL, ExtensionImageCache.url(iconURL) != nil {
+                    ExtensionLogo(url: iconURL, side: Theme.Size.iconL)
+                } else if let brand { SettingsBrandMark(asset: brand) } else { IconTile(symbol, tint: tint) }
             }
         } else if let value {
             LabeledContent {

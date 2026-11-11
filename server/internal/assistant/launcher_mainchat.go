@@ -14,8 +14,10 @@ import (
 // The main chat, a scheduled task's conversation and the side conversations run headless on their machine: claude -p
 // or codex app-server started through the launcher's shell command (node/assistant_start.go), or a runtime that
 // declared caps.assistant. The picker (?purpose=assistant) lists assistantLaunchers (modelProviderCompatible), and the
-// check before each message (sendModel) holds a launcher to the same list through mainChatFit, so the menu offers only
-// what a message can run on and a message runs only on what the menu would offer.
+// check before each message (sendModel) holds a launcher to the same list through mainChatFit. On top of that, the
+// pickers leave out a launcher whose latest health check failed (launcher_health_check.go, withHealth): health keeps a
+// message from being refused as launcher_missing on a wrong read, but a failing launcher is not refused here, and a
+// model configuration that names one is left alone.
 
 // mainChatFit is whether launcher name can run an assistant conversation on machine: in the main chat's list (fit),
 // one the machine has that can't run it (refused, with why in the user's language), or not there at all (gone).

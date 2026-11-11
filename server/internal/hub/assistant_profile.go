@@ -127,8 +127,9 @@ func (a assistantRemote) SendParams(ctx context.Context, machine, session string
 	var res struct {
 		Params map[string]any `json:"params"`
 	}
+	who := principalOf(ctx) // a person's own app: a full device's credential (secret_handoff.go)
 	err := a.call(ctx, assistantwire.MethodSendParams, assistantwire.SendParams{MachineID: machine, SessionID: session, Params: params,
-		Lang: string(a.h.contextLang(ctx))}, &res)
+		Lang: string(a.h.contextLang(ctx)), Human: who.Role == roleFull && who.ID != ""}, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +172,9 @@ func writeAssistantErr(w http.ResponseWriter, err error) {
 			return
 		case assistantwire.CodeBadRequest:
 			writeErr(w, http.StatusBadRequest, errors.New(re.Message))
+			return
+		case assistantwire.CodeMeetingEnded: // a message into a meeting's room that ended: write in its follow-up
+			writeErrCode(w, http.StatusConflict, assistantwire.CodeMeetingEnded, errors.New(re.Message))
 			return
 		case assistantwire.CodeMachineOffline: // as the hub's own call to that machine would answer
 			callErr(w, fmt.Errorf("%s: %w", re.Message, errOffline))

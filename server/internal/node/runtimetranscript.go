@@ -191,8 +191,10 @@ func (b *runtimeRegistry) isWatched(id string) bool {
 
 // mergeRuntimeTranscript completes the row of a runtime session whose conversation is a transcript on this machine
 // with what the transcript says, as for an agent in a terminal: the last words, what it is doing, background tasks,
-// subagents, the revision the apps pull on. The runtime's status, title, model and modes stay. Returns the Claude
-// session id the transcript is (its own row is left out of the list), "" when the row has none here.
+// subagents, the revision the apps pull on. The runtime's status, title, model and modes stay, and so does the
+// background work it lists itself, beside the transcript's: what the runtime started for the session outside Claude
+// Code (Paseo: the agents this one created, #4494). Returns the Claude session id the transcript is (its own row is
+// left out of the list), "" when the row has none here.
 func (n *Node) mergeRuntimeTranscript(s *proto.Session) string {
 	t := n.runtimes.transcriptOf(s.SessionID)
 	if t == "" {
@@ -216,7 +218,7 @@ func (n *Node) mergeRuntimeTranscript(s *proto.Session) string {
 	if s.PermissionMode == "" && s.Effort == "" {
 		s.PermissionMode, s.Effort = n.currentModes(s.SessionID, m)
 	}
-	setContext(s, m)
+	setRuntimeContext(s, m)
 	s.ModelFallback = m.modelFallback
 	s.LastText, s.Rev = snippet(m.lastText), st.Size()
 	if u := lastUsed(m, st); u.After(s.UpdatedAt) {
@@ -227,7 +229,9 @@ func (n *Node) mergeRuntimeTranscript(s *proto.Session) string {
 	if s.Status == proto.StatusWorking || s.Status == proto.StatusBlocked {
 		s.Queued = m.queue
 	}
+	own := s.Background
 	n.setBackground(s, m) // as for a pane's session: its workflows, and the background tasks not shown as them
+	s.Background = append(s.Background, own...)
 	s.Loop, s.Goal, s.Plan = m.loop, m.goal, m.plan
 	s.Subagents = n.subagents(s.SessionID)
 	return t

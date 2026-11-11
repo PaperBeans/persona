@@ -81,7 +81,42 @@ struct PhoneSystemToolsTests {
         #expect(card?.contains("no-such-event") == true)
     }
 
+    @Test func theNewEventCardShowsEverythingItWillWrite() throws {
+        guard let start = try ToolDate.parse("2027-01-15T15:00:00+08:00"),
+              let end = try ToolDate.parse("2027-01-15T16:00:00+08:00") else {
+            Issue.record("valid test dates required")
+            return
+        }
+        let notes = "bring gift " + String(repeating: "n", count: 240)
+        let tool = PhoneToolRegistry.all.first { $0.spec.name == "phone_calendar_create_event" }
+        let card = try #require(tool?.confirmation?(.object([
+            "title": .string("Dinner"), "start": .string("2027-01-15T15:00:00+08:00"),
+            "end": .string("2027-01-15T16:00:00+08:00"), "calendar": .string("Family"), "notes": .string(notes),
+        ])))
+        #expect(card.contains("Family"))
+        #expect(card.contains(String(notes.prefix(200))))
+        #expect(!card.contains(String(notes.prefix(201))))
+        #expect(card.contains(CardTime.text(start)) && card.contains(CardTime.text(end)))
+        #expect(!card.contains("2027-01-15T15:00:00+08:00"))
+    }
+
     // MARK: - Reminders (#2277)
+
+    @Test func theNewReminderCardShowsEverythingItWillWrite() throws {
+        guard let due = try ToolDate.parse("2027-01-15T18:00:00+08:00") else {
+            Issue.record("valid test due date required")
+            return
+        }
+        let tool = PhoneToolRegistry.all.first { $0.spec.name == "phone_reminders_create" }
+        let card = try #require(tool?.confirmation?(.object([
+            "title": .string("Expenses"), "due": .string("2027-01-15T18:00:00+08:00"),
+            "notes": .string("call first"), "list": .string("Personal"), "priority": .number(1),
+        ])))
+        #expect(card.contains("Personal") && card.contains("call first"))
+        #expect(card.contains(RemindersTool.priorityName(1)))
+        #expect(card.contains(CardTime.text(due)))
+        #expect(!card.contains("2027-01-15T18:00:00+08:00"))
+    }
 
     @Test func theReminderCardNamesNotesPriorityAndList() throws {
         let target = RemindersTool.CompletionTarget(title: "Expenses", list: "Work", due: nil)

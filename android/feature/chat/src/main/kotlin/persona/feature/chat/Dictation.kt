@@ -21,14 +21,15 @@ import androidx.compose.ui.text.input.TextFieldValue
  * only finds one because the module's manifest declares the RECOGNIZE_SPEECH query.
  */
 @Composable
-internal fun rememberDictation(onHeard: (String) -> Unit, onError: (String) -> Unit): (() -> Unit)? {
+fun rememberDictation(onHeard: (String) -> Unit, onError: (String) -> Unit, prompt: String? = null): (() -> Unit)? {
     val context = LocalContext.current
     val resources = LocalResources.current
-    val intent = remember(resources) {
+    // Also the to-do notes' mic (#4636), with its own [prompt].
+    val intent = remember(resources, prompt) {
         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, resources.configuration.locales[0].let { if (it.language == "zh") "zh-CN" else it.toLanguageTag() })
-            .putExtra(RecognizerIntent.EXTRA_PROMPT, resources.getString(R.string.chat_dictation_prompt))
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, prompt ?: resources.getString(R.string.chat_dictation_prompt))
     }
     val available = remember(context) { runCatching { intent.resolveActivity(context.packageManager) != null }.getOrDefault(false) }
     val heard by rememberUpdatedState(onHeard)
@@ -45,7 +46,7 @@ internal fun rememberDictation(onHeard: (String) -> Unit, onError: (String) -> U
  * What dictation heard, at the end of the draft: right after it, with one space only between Latin text and a Latin
  * start ("run the tests" + "and commit"); Chinese needs none, and spaces the draft ended with are dropped.
  */
-internal fun withDictation(draft: String, heard: String): String {
+fun withDictation(draft: String, heard: String): String {
     if (draft.isBlank()) return heard
     if (heard.isEmpty()) return draft
     val text = draft.trimEnd()

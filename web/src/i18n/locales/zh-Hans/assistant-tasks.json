@@ -12,6 +12,8 @@
   "workspace_engine_path": "路径由机器的工作区引擎决定；可修改分支后重新预览。",
   "tray_needs_you": "要你处理",
   "tray_running": "进行中",
+  "tray_expand": "放大",
+  "tray_restore": "还原",
   "background_tasks_running": "后台任务 {count} 个在跑",
   "subagents_count_running": "子 Agent {count} 个在跑",
   "background_running": "后台工作在跑",
@@ -207,5 +209,6 @@
   "interrupt_batch_title_on_other": "{machine} {cause}，{count} 个任务被打断",
   "interrupt_batch_counts": "→ 已处理 {resolved} / 待处理 {pending}",
   "interrupt_batch_all": "→ 都处理了",
-  "needs_group_another": "其他对话"
+  "needs_group_another": "其他对话",
+  "new_agent_started": "已为这个任务启动新的 Agent"
 }

@@ -22,6 +22,8 @@ internal data class AgentStartOperation(
     val request: AgentStartRequest,
     val firstMessage: String? = null,
     val firstMessageId: String? = null,
+    /** The folder picked when the agent starts in a worktree made from it (#4532): what recents and defaults keep. */
+    val folder: String? = null,
 )
 
 internal interface AgentCreationStore {

@@ -154,6 +154,8 @@ type Config struct {
 	Trust     string     `json:"trust,omitempty"`
 	Token     string     `json:"token"`
 	Endpoints []Endpoint `json:"endpoints"`
+	// SSH is the optional SSH tunnel for active mode (docs/operations/link.md "SSH tunnel").
+	SSH *SSH `json:"ssh,omitempty"`
 	// Mode is ModeActive (also when empty: files from before passive mode) or ModePassive.
 	Mode    string   `json:"mode,omitempty"`
 	Passive *Passive `json:"passive,omitempty"`

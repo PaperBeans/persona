@@ -77,7 +77,7 @@ type attemptError struct {
 func (e *attemptError) Error() string { return e.ep.URL + ": " + e.err.Error() }
 func (e *attemptError) Unwrap() error { return e.err }
 
-var kindNames = map[string]string{"lan": "内网", "ipv6": "公网 IPv6", "name": "域名", "ipv4": "公网 IPv4"}
+var kindNames = map[string]string{"lan": "内网", "ipv6": "公网 IPv6", "name": "域名", "ipv4": "公网 IPv4", KindSSH: "SSH"}
 
 // summary says in one line why the link failed, for the menu bar app: per candidate when no candidate worked.
 func summary(err error) string {

@@ -51,6 +51,103 @@ struct ChatStoreTests {
         #expect(s.backlogBuilt)
     }
 
+    @Test func duplicateCachedIDsDoNotCrashWhenBacklogRepeatsThem() throws {
+        let key = SessionKey(machineID: "test", sessionID: UUID().uuidString)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cached = item(1, .text, text: "cached")
+        ChatCache.save(key, items: [cached, cached], hasMore: false, in: folder)
+        let s = ChatStore(key: key, cacheFolder: folder)
+        var fresh = cached
+        fresh.text = "fresh"
+        #expect(s.apply([fresh], span: ItemSpan(history: "h", from: nil, to: 1), backlog: true, hasMore: false) == .none)
+        #expect(s.items.count == 1)
+        #expect(s.items.first?.text == "fresh")
+    }
+
+    @Test func duplicateIDsInOneBacklogKeepTheNewestCopy() {
+        let s = ChatStore(key: SessionKey(machineID: "test", sessionID: UUID().uuidString))
+        let old = item(1, .text, text: "old")
+        var newest = old
+        newest.text = "newest"
+        s.merge([old, newest], backlog: true, hasMore: false)
+        #expect(s.items.count == 1)
+        #expect(s.items.first?.text == "newest")
+    }
+
+    @Test func duplicateCachedIDsKeepTheNewestCopyBeforeAnEmptyMerge() throws {
+        let key = SessionKey(machineID: "test", sessionID: UUID().uuidString)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var old = item(1, .text, text: "old")
+        old.supervisionUser = true
+        var newest = old
+        newest.text = "newest"
+        newest.supervisionUser = nil
+        ChatCache.save(key, items: [old, newest], hasMore: false, in: folder)
+        let s = ChatStore(key: key, cacheFolder: folder)
+        s.merge([])
+        #expect(s.items.count == 1)
+        #expect(s.items.first?.text == "newest")
+        #expect(s.items.first?.supervisionUser == true)
+    }
+
+    @Test func interleavedDuplicateCacheRestoresTranscriptOrder() async throws {
+        let key = SessionKey(machineID: "test", sessionID: UUID().uuidString)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let old = item(1, .text, role: "user", text: "old")
+        let answer = item(2, .text, text: "answer")
+        var newest = old
+        newest.text = "newest"
+        ChatCache.save(key, items: [old, answer, newest], hasMore: false, in: folder)
+        let s = ChatStore(key: key, cacheFolder: folder)
+        s.merge([])
+        #expect(s.items.map(\.id) == ["1#0", "2#0"])
+        for _ in 0..<50 where s.isRebuilding { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!s.isRebuilding)
+        #expect(s.rows.count == 2)
+        guard s.rows.count == 2, case .user(let question) = s.rows[0], case .assistant(let builtAnswer) = s.rows[1] else {
+            Issue.record("expected the question before its answer")
+            return
+        }
+        #expect(question.text == "newest")
+        #expect(builtAnswer.text == "answer")
+    }
+
+    @Test func reconnectReplayKeepsToolResultsAndImagesUnique() async throws {
+        let key = SessionKey(machineID: "test", sessionID: UUID().uuidString)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let call = item(1, .toolUse, tool: "Read", id: "tool")
+        let result = item(2, .toolResult, role: "user", text: "ok", id: "tool")
+        var picture = item(3, .image, role: "user", id: "tool")
+        picture.image = ImagePayload(mime: "image/png", data: "")
+        picture.image?.lazy = true
+        let answer = item(4, .text, text: "done")
+        let replay = [call, result, picture, answer]
+        ChatCache.save(key, items: replay + replay, hasMore: false, in: folder)
+        let s = ChatStore(key: key, cacheFolder: folder)
+        let span = ItemSpan(history: "h", from: nil, to: 4)
+        #expect(s.apply(replay, span: span, backlog: true, hasMore: false) == .none)
+        #expect(s.apply(replay, span: span, backlog: true, hasMore: false) == .none)
+        for _ in 0..<50 where s.isRebuilding || !s.backlogBuilt { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(s.backlogBuilt && !s.isRebuilding)
+        #expect(s.items.map(\.id) == ["1#0", "2#0", "3#0", "4#0"])
+        #expect(s.images.count == 1)
+        #expect(s.images.first?.ref == ImageRef.make(key, item: picture.id))
+        #expect(s.rows.count == 2)
+        guard let firstRow = s.rows.first, case .tools(let steps) = firstRow else { Issue.record("expected tools"); return }
+        #expect(steps.count == 1)
+        guard let firstStep = steps.first, case .call(let built) = firstStep else { Issue.record("expected call"); return }
+        #expect(built.result?.text == "ok")
+        #expect(built.images.count == 1)
+    }
+
     @Test func parsesSpinnerAndOptions() {
         let screen = """
         ⏺ Working on it

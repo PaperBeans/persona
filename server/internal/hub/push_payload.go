@@ -71,10 +71,15 @@ func interactionPayloadIn(l i18n.Lang, ix proto.Interaction, machine string) map
 	if inHealth(ix.Cwd) { // a health conversation's card: the lock screen does not say what it is about (assistant.go)
 		subtitle, body = i18n.T(l, "push.health_title"), i18n.T(l, "push.health_body")
 	}
+	if ix.Private { // a Just me turn's card (proto.Interaction.Private): the room may see the phone
+		subtitle, body = "", i18n.T(l, "push.private_card")
+	}
 	category := "INTERACTION_" + strings.ToUpper(ix.Kind)
 	if len(ix.Fields) > 0 { // something to fill in first: no buttons on the notification, a tap opens the card
 		category = "INTERACTION_INPUT"
 		body += i18n.T(l, "push.fill_in_suffix")
+	} else if ix.ToolName == proto.SecretHandoffTool { // approved on the card only (secret_handoff.go): a tap opens it
+		category = "INTERACTION_INPUT"
 	}
 	out := map[string]any{
 		"aps": map[string]any{
@@ -99,7 +104,7 @@ func interactionPayloadIn(l i18n.Lang, ix proto.Interaction, machine string) map
 // askQuestion selects cards a notification can answer without opening the app.
 func askQuestion(ix proto.Interaction) (proto.Question, bool) {
 	if ix.Kind != proto.IxQuestion || len(ix.Questions) != 1 || len(ix.Fields) > 0 ||
-		len(ix.Questions[0].Options) == 0 || inHealth(ix.Cwd) {
+		len(ix.Questions[0].Options) == 0 || inHealth(ix.Cwd) || ix.Private {
 		return proto.Question{}, false
 	}
 	return ix.Questions[0], true

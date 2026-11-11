@@ -98,6 +98,7 @@ func (e *env) lingering() bool {
 func install(e *env, args []string) error {
 	var pairLink, machine, listen, personad string
 	var addrs []string
+	var sshFlags sshPairFlags
 	nodeBinAny := false // --node-bin: either program, asked which (nodeInstall)
 	pairing, passive, withNode, withTray := false, false, true, true
 	for i := 0; i < len(args); i++ {
@@ -117,6 +118,13 @@ func install(e *env, args []string) error {
 		default:
 			if v, next, ok := optionalValue(args, i, "--listen"); ok {
 				passive, listen, i = true, v, next
+				continue
+			}
+			if next, ok, err := sshFlags.consume(args, i); ok || err != nil {
+				if err != nil {
+					return err
+				}
+				i = next
 				continue
 			}
 			var v string
@@ -157,6 +165,9 @@ func install(e *env, args []string) error {
 	if pairing && (passive || len(addrs) > 0) {
 		return errors.New("--pair（我去连 hub）和 --listen（让 hub 来连）只能选一个")
 	}
+	if sshFlags.any() && (passive || len(addrs) > 0) {
+		return errors.New("install --listen 不要 --ssh：SSH 隧道只在主动模式（我去连 hub）下用")
+	}
 	switch e.goos {
 	case "linux", "windows":
 	case "darwin":
@@ -169,11 +180,24 @@ func install(e *env, args []string) error {
 		return fmt.Errorf("%s is not personad: on Windows the node runs personad (docs/operations/windows.md); give personad with --personad", personad)
 	}
 	if pairing {
-		c, err := pair(e, pairLink, machine)
+		c, err := pairWithSSH(e, pairLink, machine, sshFlags)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(e.stdout, "配对好了：这台是 hub 上的「%s」，凭据存在 %s。\n", c.Machine, e.configPath())
+	} else if sshFlags.any() {
+		if strings.TrimSpace(sshFlags.server) == "" {
+			return errors.New("用了 --ssh-target 或 --ssh-always 时要一起填 --ssh <服务器>")
+		}
+		always := sshFlags.always
+		if !sshFlags.alwaysSet {
+			if c, err := link.Read(e.configPath()); err == nil {
+				always = link.AllLoopback(c.Endpoints)
+			}
+		}
+		if _, err := link.SetSSH(e.configPath(), &link.SSH{Server: sshFlags.server, Target: sshFlags.target, Always: always}); err != nil {
+			return err
+		}
 	}
 	var invite *link.PairInvite
 	if passive || len(addrs) > 0 {

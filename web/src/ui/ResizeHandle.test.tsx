@@ -60,7 +60,9 @@ describe("the resize handle", () => {
     draw("right");
     const capture = vi.fn();
     handle().setPointerCapture = capture;
-    pointer(handle(), "pointerdown", 100);
+    const down = pointer(handle(), "pointerdown", 100);
+    expect(down.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(handle());
     expect(capture).toHaveBeenCalledWith(1);
     // no text selection and the resize cursor everywhere while it goes
     expect(document.body.style.userSelect).toBe("none");

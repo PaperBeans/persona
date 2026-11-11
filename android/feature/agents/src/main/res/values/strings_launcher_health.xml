@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- New Agent: blocked launchers and their help (#4530): iOS LauncherAvailability / LauncherBlockedHelp words. -->
+<resources>
+    <string name="agents_launcher_blocked_not_in_terminal">Not available in this computer\'s terminal</string>
+    <string name="agents_launcher_blocked_auth">Its key or sign-in was rejected</string>
+    <string name="agents_launcher_blocked_model_route">Its gateway can\'t use this model</string>
+    <string name="agents_launcher_blocked_cli_outdated">Its CLI is too old</string>
+    <string name="agents_launcher_blocked_timeout">Didn\'t answer in its last check</string>
+    <string name="agents_launcher_blocked_other">Failed its last check on this computer</string>
+    <string name="agents_launcher_help_title_terminal">Not available in the terminal</string>
+    <string name="agents_launcher_help_title_computer">Unavailable on this computer</string>
+    <string name="agents_launcher_help_how">How to fix</string>
+    <string name="agents_launcher_help_fix_startup">Define it in a startup file the terminal\'s shell reads (for bash, ~/.bashrc), then start again.</string>
+    <string name="agents_launcher_help_fix_provider">Or add it to Persona as a model provider: those work in any terminal.</string>
+    <string name="agents_launcher_help_fix_other">Fix its key, gateway or CLI on that computer, or pick another launcher.</string>
+    <string name="agents_launcher_help_details">Details</string>
+    <string name="agents_launcher_help_clears_terminal">A start with it that works clears this; otherwise it clears by itself after 6 hours.</string>
+    <string name="agents_launcher_help_clears">A check or start with it that works clears this.</string>
+    <string name="agents_launcher_help_add_provider">Add provider</string>
+    <string name="agents_launcher_help_try_anyway">Try anyway</string>
+    <string name="agents_launcher_help_failed">Its latest check on this computer failed, and automatic repair didn\'t fix it.</string>
+    <string name="agents_launcher_help_not_in_terminal">Persona found “%1$s” in this computer\'s login shell, but the shell new terminal tabs run doesn\'t have it: another shell, a container, or a startup file that stops early. New agents start in those tabs.</string>
+</resources>

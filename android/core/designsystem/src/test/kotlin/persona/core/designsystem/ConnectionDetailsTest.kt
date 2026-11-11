@@ -88,7 +88,9 @@ class ConnectionDetailsTest {
         clock += 5_000
         gate.notice("plain")
         collector.cancel()
-        assertEquals(listOf(Haptic.Error, Haptic.Attention, null), seen.map { it.haptic })
+        // A failure is an error toast (its style plays the error haptic); one while offline is info with a nudge.
+        assertEquals(listOf(Haptic.Error, Haptic.Attention, null), seen.map { it.haptic ?: it.style.haptic })
+        assertEquals(listOf(FeedbackStyle.Error, FeedbackStyle.Info, FeedbackStyle.Info), seen.map { it.style })
     }
 }
 

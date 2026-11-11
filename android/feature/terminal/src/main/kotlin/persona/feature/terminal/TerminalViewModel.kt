@@ -19,6 +19,17 @@ enum class TerminalNote(@StringRes val text: Int) {
     Unsupported(R.string.terminal_note_unsupported), TakenOver(R.string.terminal_note_taken),
 }
 
+/**
+ * Brings back a session that isn't running ("Resume session", #4345): a Claude Code session in a terminal engine resumes
+ * in a new tab with what it ran with, as iOS does (#4328). Others resume with their next message.
+ */
+interface TerminalResumer {
+    fun canResume(key: SessionKey): Boolean
+    /** Returns once the agent is up; throws [TerminalResumeFailed] with the hub's words, or anything else when it can't tell. */
+    suspend fun resume(key: SessionKey)
+}
+class TerminalResumeFailed(override val message: String) : Exception(message)
+
 /** One-off messages for the shell's feedback. */
 enum class TerminalNotice(@StringRes val text: Int) { KeysNotSent(R.string.terminal_notice_keys_not_sent) }
 data class TerminalUiState(
@@ -35,6 +46,10 @@ data class TerminalUiState(
     val fontSize: Float = TerminalFontSize.DEFAULT,
     /** What the user chose last: "Take over" or "Read-only" (kept on the phone, [TerminalPreferences.drive]). */
     val drive: Boolean = true,
+    /** The session isn't running and [TerminalResumer] can bring it back. */
+    val resumable: Boolean = false,
+    /** Resume session is on its way: the hub answers once the agent is up (up to a couple of minutes). */
+    val resuming: Boolean = false,
 ) {
     /** The phone drives the pane at its own size (or is about to): keys go straight into the stream. */
     val driving: Boolean get() = control == TerminalControl.Active && online
@@ -42,12 +57,16 @@ data class TerminalUiState(
 
 class TerminalViewModel(val key: SessionKey, private val transport: TerminalTransport,
                         private val parserDispatcher: CoroutineDispatcher = Dispatchers.Default,
-                        private val preferences: TerminalPreferences = MemoryTerminalPreferences()) : ViewModel() {
+                        private val preferences: TerminalPreferences = MemoryTerminalPreferences(),
+                        private val resumer: TerminalResumer? = null) : ViewModel() {
     private val _state = MutableStateFlow(TerminalUiState(fontSize = preferences.fontSize, drive = preferences.drive))
     val state = _state.asStateFlow()
     private val _notices = MutableSharedFlow<TerminalNotice>(extraBufferCapacity = 4)
     /** One-off messages for the shell's feedback (a key that did not go out); the page's notice is the stream's state. */
     val notices = _notices.asSharedFlow()
+    private val _resumeFailures = MutableSharedFlow<String?>(extraBufferCapacity = 1)
+    /** Resume session failed: the hub's words, or null when it gave none. */
+    val resumeFailures = _resumeFailures.asSharedFlow()
     private val frames = TerminalFrames()
     private val modifiers = TerminalModifiers()
     private val legacyKeys = KeyBatcher()
@@ -82,7 +101,8 @@ class TerminalViewModel(val key: SessionKey, private val transport: TerminalTran
         try {
             while (isActive) {
                 val online = transport.connection.value == ConnectionState.Online
-                _state.update { it.copy(online = online, wheel = "terminal_scroll" in transport.features.value) }
+                _state.update { it.copy(online = online, wheel = "terminal_scroll" in transport.features.value,
+                    resumable = it.note == TerminalNote.NoTerminal && resumer?.canResume(key) == true) }
                 if (!online) {
                     subscribed = false
                     _state.update { it.copy(control = TerminalControl.Watching, note = TerminalNote.Offline) }
@@ -149,7 +169,22 @@ class TerminalViewModel(val key: SessionKey, private val transport: TerminalTran
         wanted = true; revision++; frames.forget(); retryAt = 0
         subscribe(force)
     }
-    fun retry() { subscribed = false; retryAt = 0; pollAt = 0; failures = 0; _state.update { it.copy(note = null) } }
+    fun retry() { subscribed = false; retryAt = 0; pollAt = 0; failures = 0; _state.update { it.copy(note = null, resumable = false) } }
+
+    /** Resume session: on success the terminal connects at once to the new tab; on failure the hub's error is shown. */
+    fun resume() {
+        val resumer = resumer ?: return
+        if (_state.value.resuming || !_state.value.resumable) return
+        _state.update { it.copy(resuming = true) }
+        viewModelScope.launch {
+            val failure = try { resumer.resume(key); null }
+                catch (e: CancellationException) { throw e }
+                catch (e: TerminalResumeFailed) { e.message }
+                catch (_: Exception) { "" }
+            _state.update { it.copy(resuming = false) }
+            if (failure == null) retry() else _resumeFailures.tryEmit(failure.ifBlank { null })
+        }
+    }
     fun marked(text: String) { _state.update { it.copy(marked = text) } }
     /** A size step up or down, kept on the phone; the view lays out the new grid and a driven pane follows it. */
     fun font(up: Boolean) {

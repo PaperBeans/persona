@@ -136,19 +136,21 @@ const (
 		AND id NOT IN (SELECT protected.id FROM settings,
 			jsonb_array_elements(CASE WHEN jsonb_typeof(value) = 'array' THEN value ELSE '[]'::jsonb END) AS item,
 			LATERAL unnest(ARRAY[item->'card'->>'id', item->>'expired_id']) AS protected(id)
-			WHERE key = 'agents.tool_loops' AND protected.id IS NOT NULL)`
+			WHERE key = 'agents.tool_loops' AND protected.id IS NOT NULL)
+		RETURNING id`
 )
 
 // ExpireStaleInteractions marks interactions left pending by a previous hub process cancelled, and returns the
 // resumable ones not yet expired instead: their hooks reconnect and claim them again. The manager's cards about a
 // turn (session_work's interaction_id) and loop cards in the manager's settings stay pending too. The manager restores
-// them under the same id and ends cards it no longer needs.
-func (d *DB) ExpireStaleInteractions(ctx context.Context) ([]proto.Interaction, error) {
+// them under the same id and ends cards it no longer needs. cancelled are the ids it marked: the apps may still show
+// them (#4568).
+func (d *DB) ExpireStaleInteractions(ctx context.Context) (kept []proto.Interaction, cancelled []string, err error) {
 	rows, err := d.pool.Query(ctx, resumablePendingSQL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	keep, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (proto.Interaction, error) {
+	kept, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (proto.Interaction, error) {
 		var payload []byte
 		var ix proto.Interaction
 		if err := r.Scan(&payload); err != nil {
@@ -157,14 +159,18 @@ func (d *DB) ExpireStaleInteractions(ctx context.Context) ([]proto.Interaction, 
 		return ix, json.Unmarshal(payload, &ix)
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	ids := make([]string, len(keep))
-	for i, ix := range keep {
+	ids := make([]string, len(kept))
+	for i, ix := range kept {
 		ids[i] = ix.ID
 	}
-	_, err = d.pool.Exec(ctx, cancelPendingSQL, ids)
-	return keep, err
+	rows, err = d.pool.Query(ctx, cancelPendingSQL, ids)
+	if err != nil {
+		return nil, nil, err
+	}
+	cancelled, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	return kept, cancelled, err
 }
 
 // InteractionOutcome returns an interaction's status and resolution; an empty status when there is no such row.

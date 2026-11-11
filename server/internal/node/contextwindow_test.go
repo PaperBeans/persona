@@ -42,6 +42,35 @@ func TestSetContextOmitsUnknown(t *testing.T) {
 	}
 }
 
+// A runtime's session runs as the model the runtime names: its "[1m]" is the 1M window, whatever id the transcript
+// records for the replies (the id without the suffix; behind a gateway, the gateway's own).
+func TestSetRuntimeContext(t *testing.T) {
+	for _, c := range []struct {
+		name, runAs string
+		m           quickMeta
+		want        int
+	}{
+		{"the 1M variant of the model that answered", "claude-fable-5-2[1m]", quickMeta{model: "claude-fable-5-2", contextTokens: 80_000}, 1_000_000},
+		{"a gateway answering under its own id", "gw-model-high[1m]", quickMeta{model: "gw-model-trial", contextTokens: 80_000}, 1_000_000},
+		{"no variant named", "claude-fable-5-2", quickMeta{model: "claude-fable-5-2", contextTokens: 80_000}, 200_000},
+		{"a gateway model with no variant named", "gw-model-high", quickMeta{model: "gw-model-trial", contextTokens: 80_000}, 0},
+		{"a window the transcript records", "gw-model[1m]", quickMeta{model: "gw-model", contextTokens: 80_000, contextWindow: 400_000}, 400_000},
+		{"answering as a fallback model", "claude-fable-5-2[1m]",
+			quickMeta{model: "claude-opus-5-5", contextTokens: 80_000, modelFallback: &proto.ModelRefusal{}}, 200_000},
+		{"answered by another Claude model (an overload fallback)", "claude-fable-5-2[1m]", quickMeta{model: "claude-sonnet-5-5", contextTokens: 80_000}, 200_000},
+		{"the same model under its dated id", "claude-opus-5-5[1m]", quickMeta{model: "claude-opus-5-5-20261101", contextTokens: 80_000}, 1_000_000},
+		{"a gateway's name answered under a Claude id", "gw-model-high[1m]", quickMeta{model: "claude-fable-5-2", contextTokens: 80_000}, 1_000_000},
+		{"a transcript that names no model", "claude-fable-5-2[1m]", quickMeta{contextTokens: 80_000}, 1_000_000},
+		{"no reply yet", "claude-fable-5-2[1m]", quickMeta{model: "claude-fable-5-2"}, 0},
+	} {
+		s := proto.Session{Model: c.runAs}
+		setRuntimeContext(&s, c.m)
+		if s.ContextWindow != c.want || s.ContextTokens != c.m.contextTokens {
+			t.Errorf("%s: %d / %d, want %d / %d", c.name, s.ContextTokens, s.ContextWindow, c.m.contextTokens, c.want)
+		}
+	}
+}
+
 func ctxReply(id string, input, cacheRead, cacheCreate int) string {
 	return `{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"model":"claude-opus-5-5","id":"` + id +
 		`","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":` + strconv.Itoa(input) +

@@ -746,6 +746,41 @@ func TestRuntimeSubagentsAndBackground(t *testing.T) {
 	}
 }
 
+// A session of a runtime's that another of its sessions started (is_subagent, parent_session_id: an agent another
+// Paseo agent created, #4494) is listed under it, with its root filled in, however deep. One that waits for the user
+// is a row of its own while it does: it names no parent, so no app folds it away or leaves it out of a count.
+func TestRuntimeSessionAnotherStarted(t *testing.T) {
+	n, _ := runtimeNode(t)
+	host := dialRuntime(t, n, paseoHello())
+	rows := func(leaf string) []map[string]any {
+		return []map[string]any{
+			{"session_id": "lead", "status": "idle", "cwd": "/w/app"},
+			{"session_id": "mid", "status": "idle", "cwd": "/w/app", "is_subagent": true, "parent_session_id": "lead"},
+			{"session_id": "leaf", "status": leaf, "cwd": "/w/app", "is_subagent": true, "parent_session_id": "mid", "root_session_id": "lead"},
+		}
+	}
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": rows("working")})
+	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["leaf"]; return ok })
+	got := listed(t, n)
+	if mid, leaf := got["mid"], got["leaf"]; !mid.IsSubagent || mid.ParentSessionID != "lead" || mid.RootSessionID != "lead" ||
+		!leaf.IsSubagent || leaf.ParentSessionID != "mid" || leaf.RootSessionID != "lead" || got["lead"].IsSubagent {
+		t.Fatalf("mid under %q (root %q), leaf under %q (root %q)", mid.ParentSessionID, mid.RootSessionID, leaf.ParentSessionID, leaf.RootSessionID)
+	}
+
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": rows("blocked")})
+	waitFor(t, "waiting for the user", func() bool { return listed(t, n)["leaf"].Status == proto.StatusBlocked })
+	got = listed(t, n)
+	if leaf := got["leaf"]; leaf.IsSubagent || leaf.ParentSessionID != "" || leaf.RootSessionID != "" {
+		t.Fatalf("a session that waits for the user still names a parent: %+v", leaf)
+	}
+	if mid := got["mid"]; !mid.IsSubagent || mid.ParentSessionID != "lead" {
+		t.Fatalf("the others keep theirs: %+v", mid)
+	}
+
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": rows("idle")})
+	waitFor(t, "answered: under its parent again", func() bool { s := listed(t, n)["leaf"]; return s.ParentSessionID == "mid" && s.RootSessionID == "lead" })
+}
+
 // A runtime running another version of a package the node carries is offered the node's in the hello reply, and
 // fetches it with runtime.package; one running the same is not (docs/integrations/runtimes.md "Auto-update").
 func TestRuntimePackageUpdate(t *testing.T) {

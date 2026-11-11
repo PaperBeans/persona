@@ -2,7 +2,7 @@
 // Carried over from #1974 (by @tzh476): the idle pages preload when the browser is idle, the others as a link to them
 // is reached, a failed load is asked again, and a chunk that comes in draws its page at once.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startTransition, Suspense, type ComponentType } from "react";
+import { act, Component, startTransition, Suspense, type ComponentType, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { lazyPage, preloadPages } from "./lazy-page";
@@ -86,6 +86,44 @@ describe("lazyPage", () => {
     arrive(() => <p>page</p>);
     expect(await turns(el, "<p>page</p>")).toBe("<p>page</p>"); // not 300 ms later, when React would reveal a retry
     root.unmount();
+  });
+
+  it("delivers a rejected import to the boundary and loads again after remounting", async () => {
+    class Boundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+      state = { error: null as Error | null };
+      static getDerivedStateFromError(error: Error) { return { error }; }
+      render() { return this.state.error ? <p role="alert">{this.state.error.message}</p> : this.props.children; }
+    }
+    let rejectImport!: (error: Error) => void;
+    const pending = new Promise<ComponentType>((_, reject) => { rejectImport = reject; });
+    const load = vi.fn<() => Promise<ComponentType>>()
+      .mockImplementationOnce(() => pending)
+      .mockImplementation(() => new Promise(() => {}));
+    const Lazy = lazyPage(load);
+    const tree = (attempt: number) => <Boundary key={attempt}><Suspense fallback={<p>Loading page</p>}><Lazy /></Suspense></Boundary>;
+    const el = document.createElement("div"); document.body.append(el);
+    const root = createRoot(el);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      await act(async () => root.render(tree(0)));
+      await vi.waitFor(() => expect(el.textContent).toBe("Loading page"), { timeout: 20_000 });
+      await act(async () => rejectImport(new TypeError("Chunk unavailable")));
+      await vi.waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("Chunk unavailable"), { timeout: 20_000 });
+
+      load.mockResolvedValue(() => <p>Recovered page</p>);
+      await act(async () => root.render(tree(1)));
+      await vi.waitFor(() => {
+        expect(el.textContent).toBe("Recovered page");
+        expect(el.querySelector('[role="alert"]')).toBeNull();
+      }, { timeout: 20_000 });
+    } finally {
+      await act(async () => root.unmount()); el.remove();
+      actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+      consoleError.mockRestore();
+    }
   });
 
   it("draws a page whose chunk came in after the render that mounted it and before its commit", async () => {

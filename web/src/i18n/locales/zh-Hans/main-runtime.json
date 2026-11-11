@@ -1,0 +1,14 @@
+{
+  "main": "主会话",
+  "not_started": "主会话尚未启动",
+  "starting": "主会话 · 启动中…",
+  "unknown": "主会话 · 运行信息未上报",
+  "running": "运行中",
+  "location_unknown": "运行位置未上报",
+  "proxy": "经 {name} 接入（实际位置未上报）",
+  "container": "容器 {name}",
+  "offline": "主会话 · 离线",
+  "stopped": "主会话 · 已停止",
+  "last_location": "上次运行于 {location}",
+  "new_launcher": "新对话将使用：{launcher}"
+}

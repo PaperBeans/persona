@@ -162,17 +162,17 @@ class AssistantSwitcherShotsTest {
         CompositionLocalProvider(LocalManagerRoster provides roster) {
             val choice = persona.core.designsystem.currentAssistant()
             // What the shown assistant's page read: its own conversations (another's has none here).
-            val snapshot = if (choice.id == "assistant") AssistantSnapshot(conversations = listOf(main) + conversations, mainSession = main.key,
+            val snapshot = if (choice.id == "assistant") AssistantSnapshot(conversations = listOf(main) + conversations, mainSession = main.key, leaders = conversations.map { it.sessionId },
                 manager = null, managerId = "assistant") else AssistantSnapshot(manager = choice.id, managerId = choice.id)
             val waiting = roster?.waiting(cards, sessions).orEmpty()
             Box(Modifier.testTag("shot").fillMaxSize().background(PersonaTheme.palette.background)) {
                 JSidebarColumn({
-                    AssistantSidebarContent(snapshot, repository, emptySet(), null, operations, demo = false,
+                    AssistantSidebarContent(snapshot, repository, null, operations, demo = false,
                         onOpen = {}, onAction = {}, onSettings = {}, onInbox = {}, onKnowledge = {}, onTodos = {},
                         todoCount = 2, showTodos = true, inboxCount = if (choice.id == "assistant") 12 else 2,
                         settingsCount = 0, settingsDot = false, settingsBadge = null,
                         pages = listOf(NavItem("machines", stringResource(persona.android.R.string.app_machines), PhIcons.Desktop)),
-                        onPage = {}, onTogglePin = {}, onRetired = {},
+                        onPage = {}, onRetired = {},
                         switcher = { head, trailing, fallback ->
                             AssistantSwitcher(fake, waiting, hubOnline = true, onManage = onManage, headModifier = head,
                                 ticking = false, trailing = trailing, fallback = fallback)
@@ -249,26 +249,26 @@ class AssistantSwitcherShotsTest {
         tap("离线 · 最后同步于 3 小时前")
         tap("管理助手…")
         assertEquals(1, managed)
-        // One installed assistant: restore the product header, never a roster or personal avatar.
+        // One installed assistant keeps its identity and roster entry, without a Default tag.
         AssistantManagerChoice.choose("hub", null, "assistant")
         roster = ManagerRoster(managers.take(1), "assistant")
         rule.waitForIdle()
-        rule.onAllNodesWithText("在线 · server").assertCountEquals(0)
-        rule.onAllNodesWithText("新建助手").assertCountEquals(0)
-        rule.onAllNodesWithText("默认").assertCountEquals(0)
-        rule.onNodeWithText("Persona").assertExists()
+        rule.onNodeWithContentDescription("助手，在线 · server").assertIsDisplayed()
         each("one")
+        tap("在线 · server")
+        rule.onNodeWithText("新建助手").assertIsDisplayed()
+        rule.onAllNodesWithText("默认").assertCountEquals(0)
         assertTrue(out().listFiles().orEmpty().size >= 30)
         scenario.close()
     }
 
     // Taller than the class's screen: the drawer's Health row (#4329) left the conversations below 900dp.
     @Config(qualifiers = "zh-w400dp-h1000dp-xhdpi")
-    @Test fun oneInstalledAssistantIsPixelIdenticalToTheProductSidebarWithoutARoster() {
+    @Test fun oneInstalledAssistantKeepsItsIdentityInEveryStyle() {
         var style by mutableStateOf(AppStyle.Glass)
         var dark by mutableStateOf(false)
         var roster by mutableStateOf<ManagerRoster?>(null)
-        val only = managers.first().copy(name = "Personal assistant name")
+        val only = managers.first().copy(name = "Sample assistant")
         val fake = Fake(listOf(only))
         AssistantManagerChoice.choose("hub", null, "assistant")
         val scenario = launch {
@@ -283,26 +283,54 @@ class AssistantSwitcherShotsTest {
                     "single" to listOf(only),
                     "single-offline" to listOf(only.copy(online = false)),
                     "single-installing" to listOf(only, managers.last()),
-                    "empty" to emptyList(),
                 )) {
                     rule.runOnIdle { roster = ManagerRoster(list, "assistant") }
-                    rule.onAllNodesWithText("Personal assistant name").assertCountEquals(0)
-                    rule.onAllNodesWithText("在线 · server").assertCountEquals(0)
+                    val status = if (case == "single-offline") "离线" else "在线 · server"
+                    rule.onNodeWithContentDescription("Sample assistant，$status").assertIsDisplayed().assertHasClickAction()
+                    rule.onNodeWithText("Sample assistant").assertIsDisplayed()
                     rule.onAllNodesWithText("新建助手").assertCountEquals(0)
                     rule.onAllNodesWithText("管理助手…").assertCountEquals(0)
-                    assertTrue(rule.onAllNodesWithText("Persona").fetchSemanticsNodes().isNotEmpty())
                     rule.onNodeWithText("周报整理").assertIsDisplayed()
                     rule.onNodeWithText("订会议室").assertIsDisplayed()
                     rule.onNodeWithText("12").assertIsDisplayed()
                     val shown = capture("$case-$suffix")
-                    assertTrue("$case changed the product chrome ($suffix)", product.sameAs(shown))
+                    assertTrue("$case lost the assistant identity ($suffix)", !product.sameAs(shown))
                     assertEquals("assistant", AssistantManagerChoice.current.value.shown)
                 }
+                rule.runOnIdle { roster = ManagerRoster(emptyList(), "assistant") }
+                rule.onAllNodesWithText("Sample assistant").assertCountEquals(0)
+                assertTrue("An empty roster must retain the product fallback ($suffix)", product.sameAs(capture("empty-$suffix")))
             }
         } finally { scenario.close() }
     }
 
-    @Test fun anOpenRosterDisappearsWhenOnlyOneInstalledAssistantRemains() {
+    @Config(fontScale = 2f)
+    @Test fun theSingleAssistantAtTheLargestTextSize() {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        val only = ManagerRoster(managers.take(1), "assistant")
+        AssistantManagerChoice.choose("hub", null, "assistant")
+        val scenario = launch {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) { Sidebar(only, Fake(only.managers)) {} }
+        }
+        try {
+            assertEquals(2f, ApplicationProvider.getApplicationContext<Application>().resources.configuration.fontScale)
+            for (s in AppStyle.entries) for (d in listOf(false, true)) {
+                rule.runOnIdle { style = s; dark = d }
+                val suffix = "${s.name.lowercase()}-${if (d) "dark" else "light"}"
+                rule.onNodeWithContentDescription("助手，在线 · server").assertIsDisplayed().assertHasClickAction()
+                capture("single-large-$suffix")
+                tap("在线 · server")
+                rule.onNodeWithText("新建助手").assertIsDisplayed()
+                rule.onNodeWithText("管理助手…").assertIsDisplayed()
+                rule.onAllNodesWithText("默认").assertCountEquals(0)
+                capture("single-large-open-$suffix")
+                rule.onNodeWithContentDescription("助手，在线 · server").performSemanticsAction(SemanticsActions.OnClick)
+            }
+        } finally { scenario.close() }
+    }
+
+    @Test fun anOpenRosterKeepsTheSingleRemainingAssistant() {
         var roster by mutableStateOf(ManagerRoster(managers, "assistant"))
         val fake = Fake(managers)
         AssistantManagerChoice.choose("hub", null, "assistant")
@@ -313,8 +341,11 @@ class AssistantSwitcherShotsTest {
             tap("在线 · server")
             rule.onNodeWithText("新建助手").assertIsDisplayed()
             rule.runOnIdle { roster = ManagerRoster(managers.take(1), "assistant") }
+            rule.onNodeWithText("新建助手").assertIsDisplayed()
+            rule.onNodeWithContentDescription("助手，在线 · server，当前").assertIsDisplayed()
+            rule.onAllNodesWithText("默认").assertCountEquals(0)
+            rule.onNodeWithContentDescription("助手，在线 · server").performSemanticsAction(SemanticsActions.OnClick)
             rule.onAllNodesWithText("新建助手").assertCountEquals(0)
-            rule.onAllNodesWithText("在线 · server").assertCountEquals(0)
             rule.runOnIdle { roster = ManagerRoster(managers.take(3), "assistant") }
             rule.onNodeWithText("在线 · server").assertIsDisplayed()
             rule.onAllNodesWithText("新建助手").assertCountEquals(0)

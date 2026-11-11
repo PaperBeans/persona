@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -218,5 +219,62 @@ func TestModelRefusalScanDoesNotReclassifyOlderSnapshot(t *testing.T) {
 	n.mergeModelFallback(path, &m)
 	if m.modelFallback != nil || m.turnErr.code != "" {
 		t.Fatalf("a later fallback reclassified an earlier failure: %+v", m)
+	}
+}
+
+// A refusal record's fields no one reviewed never leave the node (#2528): not in the session list (a terminal
+// session, a Persona conversation's row), its active fallback, nor the items an app pages through; the record's own
+// fields and words do, and the node still tells one record from another (Raw, kept in memory only).
+func TestModelRefusalNodeOutputsLeaveNothingHidden(t *testing.T) {
+	const marker = "HIDDEN-MARKER-2528-node"
+	refusal := strings.Replace(nodeRefusalFallback, `"retractedMessageUuids":[]`,
+		`"retractedMessageUuids":[],"content":"Synthetic refusal words","syntheticHidden":{"nested":{"deeper":"`+marker+`"}}`, 1)
+	if !strings.Contains(refusal, marker) {
+		t.Fatal("fixture")
+	}
+	const id = "0d000000-0000-4000-8000-000000002528"
+	path := filepath.Join(t.TempDir(), id+".jsonl")
+	writeLines(t, path, []string{nodeRefusalPrompt, refusal, nodeRefusalError})
+	n := rewindNode(t, newClaudeSim(simPrompt{"run the checks", noCode}), "claude", proto.StatusIdle)
+	n.agents = map[string]host.Agent{id: n.agents["s1"]}
+	n.paths, n.metas, n.bgScans = map[string]string{id: path}, map[string]quickMeta{}, map[string]*bgScan{}
+	n.files, n.watches = map[string]*transcript.File{}, map[string]*watch{}
+	clean := func(what string, v any) []byte {
+		t.Helper()
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), marker) || strings.Contains(string(b), "syntheticHidden") || strings.Contains(string(b), `"raw"`) {
+			t.Fatalf("%s carries the record's other fields: %s", what, b)
+		}
+		return b
+	}
+	var row *proto.Session
+	for _, s := range n.sessionList(context.Background(), false) {
+		if s.SessionID == id {
+			row = &s
+		}
+	}
+	if row == nil || row.ModelFallback == nil {
+		t.Fatalf("no fallback row: %+v", row)
+	}
+	b := clean("session list", []proto.Session{*row})
+	for _, want := range []string{`"original_model":"primary-model"`, `"fallback_model":"fallback-model"`, `"category":"synthetic-policy"`,
+		`"scope":"session"`, `"explanation":"Upstream refused the request"`, `"text":"Synthetic refusal words"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("session list lost %s: %s", want, b)
+		}
+	}
+	if row.ModelFallback.Raw != refusal {
+		t.Fatal("the node lost the record it tells records apart by")
+	}
+	out, err := n.handle(context.Background(), "session.items", json.RawMessage(`{"session_id":"`+id+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = clean("session.items", out)
+	if !strings.Contains(string(b), `"text":"Synthetic refusal words"`) || !strings.Contains(string(b), `"model_refusal":{"subtype":"model_refusal_fallback"`) {
+		t.Fatalf("items lost the refusal: %s", b)
 	}
 }

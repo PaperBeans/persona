@@ -246,14 +246,16 @@ internal fun DiffView(diff: ToolDiff, id: String) {
         Column {
             DiffNavigation(diff, list) { expanded = true }
             BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val codeWidth = maxOf(maxWidth - 84.dp, with(density) { measured.toDp() } + Tokens.Space.s)
+                // The sign column as on iOS: dotXL wide, growing with the font, then sm before the code.
+                val signColumn = Tokens.Size.dotXL * density.fontScale + Tokens.Space.sm
+                val codeWidth = maxOf(maxWidth - 64.dp - signColumn, with(density) { measured.toDp() } + Tokens.Space.s)
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp), state = list) {
                     items(lines) { line ->
                         Row(Modifier.fillMaxWidth().background(palette.sunken), verticalAlignment = Alignment.CenterVertically) {
                             Text("${line.old ?: ""}  ${line.new ?: ""}", Modifier.width(64.dp),
                                 style = style, color = PersonaTheme.palette.ink2, maxLines = 1)
                             // A hunk header or a note of a unified diff ('@') reads quietly, with no sign.
-                            Text(if (line.sign == '@') " " else line.sign.toString(), Modifier.width(ContentTokens.legacyXl), style = style,
+                            Text(if (line.sign == '@') " " else line.sign.toString(), Modifier.padding(end = Tokens.Space.sm).width(Tokens.Size.dotXL * density.fontScale), style = style,
                                 color = when (line.sign) { '+' -> palette.diffAdd; '-' -> palette.diffDel; else -> PersonaTheme.palette.ink2 })
                             Box(Modifier.weight(1f).horizontalScroll(horizontal)) {
                                 Text(line.text.replace("\t", "    "), Modifier.width(codeWidth), style = style, softWrap = false,

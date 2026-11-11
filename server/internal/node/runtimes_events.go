@@ -155,7 +155,12 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		}
 		s.PaneID, s.TabID, s.WorkspaceID = "", "", ""
 		switch s.Status {
-		case proto.StatusWorking, proto.StatusBlocked, proto.StatusDone, proto.StatusIdle, proto.StatusOffline:
+		case proto.StatusWorking, proto.StatusDone, proto.StatusIdle, proto.StatusOffline:
+		case proto.StatusBlocked:
+			// A session another one started (is_subagent, parent_session_id) that waits for the user is a row of its
+			// own while it does (#4494): no app leaves out a session that needs the user, whatever it folds under a
+			// parent and whichever rows it counts. Its parent is named again once it was answered.
+			s.IsSubagent, s.ParentSessionID, s.RootSessionID = false, "", ""
 		default:
 			s.Status = proto.StatusUnknown
 		}

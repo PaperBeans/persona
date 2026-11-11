@@ -18,6 +18,7 @@ type InboxDoc struct {
 	Type     string     `json:"type"`           // docx | doc | sheet | base | other
 	Notice   string     `json:"notice"`         // mention | comment | reply | share
 	NoticeID string     `json:"notice_id"`
+	Quote    string     `json:"quote,omitempty"` // passage the comment is attached to; empty means whole document
 	Rows     []DocRow   `json:"rows,omitempty"`
 	Reply    *DocReply  `json:"reply,omitempty"` // where "Send" posts the reply; nil: nowhere
 	Error    string     `json:"error,omitempty"` // the document could not be read

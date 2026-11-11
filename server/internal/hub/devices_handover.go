@@ -93,8 +93,9 @@ func (h *Hub) webURL() string {
 	return ""
 }
 
-// nodePackages is where the manager fetches node builds (hub.json's node_packages): its url, else this build's update
-// URL (a release hub's, a Docker image built with one); "off" none.
+// nodePackages is where the manager fetches node builds (hub.json's node_packages): its url, else the hub's update
+// source (hub.json's update.url, else the build's: a release hub's, a Docker image built with one), then through
+// update.proxy unless node_packages.proxy names one; "off" none.
 func (h *Hub) nodePackages() (url, proxy string) {
 	if h.cfg != nil {
 		url, proxy = h.cfg.NodePackages.URL, h.cfg.NodePackages.Proxy
@@ -103,7 +104,10 @@ func (h *Hub) nodePackages() (url, proxy string) {
 	case "off":
 		return "", ""
 	case "":
-		url = h.build.UpdateURL
+		url = h.updateURL()
+		if strings.TrimSpace(proxy) == "" && h.cfg != nil {
+			proxy = h.cfg.Update.Proxy // as written: the manager's netproxy refuses one that does not read, never goes around it
+		}
 	}
 	return strings.TrimRight(strings.TrimSpace(url), "/"), proxy
 }

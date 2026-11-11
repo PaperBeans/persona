@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/connector"
 	larkcliconnector "github.com/nwverse/persona/server/internal/connector/larkcli"
 	larkcliadapter "github.com/nwverse/persona/server/internal/larkcli"
 )
@@ -191,6 +192,24 @@ func larkCLIBrand(domain string) string {
 	return "feishu"
 }
 
+// newLarkCLIConnector builds the connector for an effective profile with its
+// Inbox wiring (state store, gateway preference), so a rebuild after a profile
+// change keeps the chat Inbox working.
+func (h *Manager) newLarkCLIConnector(profile string) *larkcliconnector.Connector {
+	cli := h.cfg.Lark.CLI
+	lc := larkcliconnector.New(larkcliadapter.Config{Bin: cli.Bin, Profile: profile,
+		InboxPoll: cli.InboxPoll(), InboxPageLimit: cli.InboxPageLimit})
+	lc.SetStateStore(h.store)
+	lc.SetInboxSource(h.cfg.Lark.Prefer, func(ctx context.Context) bool {
+		gateway := h.connectors.Get(connector.Lark)
+		if gateway == nil {
+			return false
+		}
+		return connector.StatusOf(ctx, gateway).State == connector.StateOK
+	})
+	return lc
+}
+
 // refreshLarkCLIConnector applies a profile change to the live registry. The
 // registry's Remove/Add pair preserves the user's enabled switch and cancels a
 // pending login through the connector lifecycle.
@@ -205,8 +224,7 @@ func (h *Manager) refreshLarkCLIConnector(ctx context.Context) {
 		}
 		h.connectors.Remove(larkcliconnector.ID)
 	}
-	cli := h.cfg.Lark.CLI
-	if err := h.addConnector(larkcliconnector.New(larkcliadapter.Config{Bin: cli.Bin, Profile: profile})); err != nil {
+	if err := h.addConnector(h.newLarkCLIConnector(profile)); err != nil {
 		h.logf("larkcli connector: %v", err)
 	}
 }

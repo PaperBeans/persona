@@ -84,8 +84,8 @@ struct ManagersModelTests {
     }
 
     @Test func deleteIsOffForTheHubsOwnAndTheDefault() {
-        #expect(ManagersText.deleteBlocked(HubManager(id: "a", name: "a", online: true, isDefault: true, builtin: true)) == "hub 自己运行的管理者不能删除")
-        #expect(ManagersText.deleteBlocked(HubManager(id: "b", name: "b", online: true, isDefault: true)) == "默认管理者不能删除，先把别的设为默认")
+        #expect(ManagersText.deleteBlocked(HubManager(id: "a", name: "a", online: true, isDefault: true, builtin: true)) == "hub 自己运行的助手不能删除")
+        #expect(ManagersText.deleteBlocked(HubManager(id: "b", name: "b", online: true, isDefault: true)) == "默认助手不能删除，先把别的设为默认")
         #expect(ManagersText.deleteBlocked(HubManager(id: "c", name: "c", online: false)) == nil)
     }
 
@@ -170,7 +170,7 @@ struct ManagersModelTests {
         let page = model(hub)
         await page.load()
         #expect(await page.newCode(try #require(page.manager("m-1"))) == false)
-        #expect(page.failure == "这个管理者已经不在了")
+        #expect(page.failure == "这个助手已经不在了")
         #expect(hub.sent("POST", "/api/v1/managers").isEmpty)
     }
 
@@ -199,10 +199,10 @@ struct ManagersModelTests {
         let page = model(hub)
         await page.load()
         #expect(await page.delete(try #require(page.manager("m-1"))) == false)
-        #expect(page.failure == "这是默认管理者，先把别的设为默认再删除")
+        #expect(page.failure == "这是默认助手，先把别的设为默认再删除")
         let say = { (status: Int, code: String?) in ManagersText.failure(APIError(status: status, message: "raw", fields: code.map { ["code": $0] } ?? [:])) }
-        #expect(say(409, "builtin_manager") == "这是 hub 自己运行的管理者，不能删除或换地方装")
-        #expect(say(404, "no_manager") == "这个管理者已经不在了")
+        #expect(say(409, "builtin_manager") == "这是 hub 自己运行的助手，不能删除或换地方装")
+        #expect(say(404, "no_manager") == "这个助手已经不在了")
         #expect(say(409, "installing") == "它还没装好，装好后才能改名或设为默认")
         #expect(say(400, nil) == "名字要 1 到 40 个字")
         #expect(say(403, nil) == "这台设备没有修改权限")

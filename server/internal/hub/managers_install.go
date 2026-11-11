@@ -294,7 +294,7 @@ func (h *Hub) serveInstallScript(w http.ResponseWriter, r *http.Request, docker 
 		h.upd.freshRelease(r.Context()) // the sums of the release the download will be
 		version, sums := h.releaseSums()
 		script = managerInstallScript(managerScript{ID: c.ManagerID, Name: c.Name, Hub: base, Code: code,
-			Fingerprint: fp, DL: strings.TrimRight(h.build.UpdateURL, "/"), Version: version, Sums: sums,
+			Fingerprint: fp, DL: h.updateURL(), Version: version, Sums: sums,
 			HubVersion: h.build.Version})
 	}
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")

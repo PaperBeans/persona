@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A new agent's own worktree (#4532): iOS AgentWorktree words. -->
+<resources>
+    <string name="agents_worktree_title">Worktree</string>
+    <string name="agents_worktree_switch">In a new worktree</string>
+    <string name="agents_worktree_branch">Branch</string>
+    <string name="agents_worktree_footer">A branch and a checkout of its own: the agent changes code there, and this folder stays as it is.</string>
+    <string name="agents_worktree_checks_out">Checks out to %1$s</string>
+    <string name="agents_worktree_add_failed">Couldn’t create the worktree: %1$s</string>
+</resources>

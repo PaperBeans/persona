@@ -38,6 +38,14 @@ type claudeSim struct {
 	quoteOther string
 	// boxAfter is what the box holds after a rewind instead of the prompt (something typed at the computer).
 	boxAfter string
+	// restoreNothing leaves the box empty after a rewind, as when Claude has no prompt to restore.
+	restoreNothing bool
+	// restoreGate holds the restored prompt back after the panel closes. restoreSeenEmpty is closed by the first read
+	// of that temporarily empty box; together they reproduce Claude restoring the prompt a moment after answering.
+	restoreGate      chan struct{}
+	restoreSeenEmpty chan struct{}
+	restorePending   bool
+	pendingBox       string
 	// ansiReads counts the reads with colors.
 	ansiReads int
 }
@@ -116,9 +124,18 @@ func (c *claudeSim) key(k string) {
 					return
 				}
 				c.rewound, c.restored = c.cursor, label
-				c.box = c.prompts[c.cursor].text
+				c.pendingBox = c.prompts[c.cursor].text
 				if c.boxAfter != "" {
-					c.box = c.boxAfter
+					c.pendingBox = c.boxAfter
+				}
+				if c.restoreNothing {
+					c.pendingBox = ""
+				}
+				if c.restoreGate != nil {
+					c.restorePending = true
+					c.box = ""
+				} else {
+					c.box = c.pendingBox
 				}
 				c.prompts = c.prompts[:c.cursor]
 				c.mode = "idle"
@@ -223,6 +240,18 @@ func (c *claudeSim) panel() []string {
 
 // screen is what the pane shows.
 func (c *claudeSim) screen() string {
+	if c.restorePending {
+		select {
+		case <-c.restoreGate:
+			c.box = c.pendingBox
+			c.restorePending = false
+		default:
+		}
+	}
+	if c.mode == "idle" && c.rewound >= 0 && c.box == "" && c.restoreSeenEmpty != nil {
+		close(c.restoreSeenEmpty)
+		c.restoreSeenEmpty = nil
+	}
 	var rows []string
 	for _, p := range c.prompts {
 		rows = append(rows, "❯ "+p.text, "● ok", "")

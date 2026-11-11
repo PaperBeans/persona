@@ -98,6 +98,24 @@ func (t *typingLocks) lock(id string) func() {
 	return l.Unlock
 }
 
+// tryLock is lock without waiting: ok is false when another holds it.
+func (t *typingLocks) tryLock(id string) (unlock func(), ok bool) {
+	t.mu.Lock()
+	if t.locks == nil {
+		t.locks = map[string]*sync.Mutex{}
+	}
+	l := t.locks[id]
+	if l == nil {
+		l = &sync.Mutex{}
+		t.locks[id] = l
+	}
+	t.mu.Unlock()
+	if !l.TryLock() {
+		return nil, false
+	}
+	return l.Unlock, true
+}
+
 func (t *typingLocks) typed(pane, text string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

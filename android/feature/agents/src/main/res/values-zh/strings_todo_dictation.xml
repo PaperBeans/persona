@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dictating a to-do's notes (#4636). -->
+<resources>
+    <string name="agents_todo_notes_dictate">口述备注</string>
+    <string name="agents_todo_notes_dictation_prompt">说吧，说完会放进备注</string>
+</resources>

@@ -364,7 +364,10 @@ func TestTaskTrust(t *testing.T) {
 	}
 	h := newServiceOn(t, newFakeHub(), database)
 	h.trustKinds(context.Background(), []PlanTask{{Machine: "box", Cwd: "/code/app"}, {Machine: "box", Cwd: "/code/docs", Readonly: true}})
-	list := h.trustList(context.Background())
+	list, err := h.trustList(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) != 2 || list[0].Key != "box|/code/app|edit" || list[1].Readonly != true {
 		t.Fatalf("list = %+v", list)
 	}
@@ -1240,8 +1243,8 @@ func TestSnapshotListsPlansWaitingToStart(t *testing.T) {
 	}
 }
 
-// A task opened from a side conversation (neither quiet nor supervised) pushes a failure notification
-// when its agent cannot start, with reason and next steps, unless muted (#5081).
+// A task opened from a side conversation (not quiet; supervised by the main conversation since #4669) pushes a
+// failure notification when its agent cannot start, with reason and next steps, unless muted (#5081).
 func TestSideConversationTaskFailedToStartPushes(t *testing.T) {
 	ctx := context.Background()
 	s, f := newTaskService(t)

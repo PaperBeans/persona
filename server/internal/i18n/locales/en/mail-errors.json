@@ -1,3 +1,4 @@
 {
-  "account_unknown": "The mail account \"{account}\" isn't connected to this assistant any more."
+  "account_unknown": "The mail account \"{account}\" isn't connected to this assistant any more.",
+  "search_incomplete": "Couldn't load mail from every account. Check the accounts and try again."
 }

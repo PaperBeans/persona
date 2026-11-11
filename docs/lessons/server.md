@@ -1,5 +1,14 @@
 # Lessons: hub / node and networking
 
+## Virtual-file sizes and EOF (#4425)
+
+Some Linux sysfs attributes report a stable page-sized length even when their readable contents are shorter. A short
+read must end pagination only after a real EOF, filesystem identification on the opened descriptor, and checks that
+the opened object and guarded path still have the same identity and metadata. An ordinary file truncated during a read
+and a non-EOF I/O failure must remain errors; a zero-byte device must not be read as an open-ended virtual file. The
+size and modification-time revision cannot detect virtual values that change without metadata changing, or a writer
+that restores metadata, so these checks do not make pages from separate requests an atomic snapshot.
+
 ## A shared package that imports a manager's drags it into the hub (2026-11-11, #4371, #4446)
 
 `persona-hub` links every package a shared one (`depguard.Shared`) imports, so one import of a manager-side package in
@@ -291,6 +300,16 @@ A custom `http.Transport.DialContext` conservatively disables Go's automatic HTT
 A failing step reports what it actually changed: `copyFile` writes `.new` and renames, so a failed swap changed nothing (the zero `Swapped`, which `RestoreAll` skips) or only wrote `.prev` (putting that back is harmless).
 Don't add a `pending.json` field for it: older edges and watchdogs read the same file and know only `Prev == ""`.
 
+## Migrating a long-poll channel without duplicate consumers (#2020)
+
+A connector switch alone does not free a built-in extension ID for installation: the registry must explicitly
+opt into `Registry.Yields` for the approved handoff. Keep sealed connector state under the unchanged connector
+ID and finish stopping the old process before starting the replacement; two long-pollers with the same token
+can consume each other's messages. Publish the extension and signed catalog, verify an isolated hub with
+synthetic state, and approve the production handoff before removing the built-in. Never copy production
+tokens into a test hub. Retired artifact-name parsers may remain for old releases, but a new manifest must
+not republish a retired program merely because its old artifact was left in the build directory.
+
 ## Extension public identity is not storage or token authority (#1493)
 
 - An ID rename is not uninstall/reinstall: deleting the old row cascades secrets and node data. Keep the original storage primary key and directories, and commit public names, aliases, version and previous provenance atomically with compare-and-swap guards.
@@ -493,6 +512,12 @@ Splitting a registry at its first colon reads `[::1]:5000` as `[`, selecting HTT
 - The node writes `initialize` to `lcu`'s stdin right after starting it. If the process has already ended, the write fails with "broken pipe", or with "file already closed" once `cmd.Wait` has closed the pipe. That can happen before the goroutine that waits for the process reports the exit. So the caller got a raw pipe error or "the process ended", depending on which came first. `TestLCUProcessThatDiesOnStartFailsAtOnce` failed this way in 16 of 500 runs with `-race`.
 - Classify the write error instead of waiting for the exit (`writeFailed`). A closed pipe (`EPIPE`, `os.ErrClosed`, `io.ErrClosedPipe`) is the process's end: mark the session failed, so the next call starts a new process, and return the end at once, wrapping the write's error. Any other write error stays itself.
 - Waiting for the exit is a trap. A child of `lcu` can keep its stdout open, so the exit isn't seen for as long as the child runs. A first version that waited up to 2 s held the call lock that long and still returned the raw error, and never restarted `lcu`. The tests now cover that case and a write error that isn't a closed pipe. Tests compare with `errors.Is`, so an error that always says "ended" can't pass them.
+
+## LCU release layout is part of its integrity check (#4435)
+
+- A release bundle records regular-file modes and symbolic-link targets as well as hashes. Creating every file as 0644 or omitting links breaks that layout; even a restrictive process umask must not change the recorded executable modes. One valid release link is initially dangling and becomes usable only when its in-tree target exists.
+- Create ordinary files before links in an empty private staging directory, then validate the complete relative-link graph against the staging filesystem after creating links. A lexical check of each target alone misses an escape through another link followed by `..`, and a case-sensitive map misses aliases on a case-insensitive filesystem. Reject collisions, cycles, privileged permission bits, group- or other-writable files and unsupported archive entry types. Link mode bits do not grant file write permission. A synthetic manifest and a read-only comparison with the public archive exercise the layout without running its installer.
+- A shell wrapper may forward the runtime-only argument to an adjacent installer without containing that literal itself. The supported wrapper is pinned to its reviewed v0.13.6 bytes; its adjacent regular installer is checked for the expected tokenized runtime-only option, argument binding and return before setup, so some unrelated target changes do not require a new hash. The bounded token check ignores comments and string contents and fails closed on slash operators, including division and regular-expression literals. It cannot prove arbitrary JavaScript control flow or the behavior of imports. The fixed invocation still supplies runtime-only and yes, but a same-origin release checksum is not an independent signature, and the legacy direct-script marker is a heuristic too. Verify both forms with synthetic, unexecuted installers and compare the public wrapper and target without invoking them.
 
 ## Separately bundled component pages and callback results (#6129)
 
@@ -875,11 +900,25 @@ back) and only keeps the entry. Tell them apart by git's `CONFLICT` lines plus `
 
 ## Knowledge base (docs/assistant/knowledge.md)
 
+- An ascending GitHub search cursor cannot use `updated_at` alone when a page ends inside one second (#4461). Keep the
+  completed thread identities at that boundary, resume an unfinished thread across restarts, and rescan a tied boundary
+  instead of trusting a page number across reordered results. Checkpoint matching-generation scans across quota windows,
+  verify every ID again immediately before moving on, and retry a changing search. More than 1,000 threads in one second,
+  or repeatedly lacking enough quota for that final check, is an explicit retryable limit. Search has no atomic snapshot:
+  a result indexed only after the final check cannot be guaranteed. Test the actual connector against synthetic HTTP,
+  including insertions, reordering, cancellation, repeated limited quota windows and retries.
+
+- A Messages ROWID can be associated with more than one chat (#4440). Deduplicate by canonical conversation and ROWID,
+  before page and search limits, and count unread messages by that same identity. A numeric changes cursor can only
+  advance after every selected ROWID's associations are read; select the boundary and expand it in one SQLite snapshot,
+  bound the expansion, and fail without returning a cursor when it cannot fit. A previously advanced cursor cannot
+  reconstruct associations already skipped by older code.
 - Forever is a sentinel, not zero days (#3780, #3862). Preserve `minutes_days: 0` before applying the transcript-retention floor, calculating an expiry date or confirming an echoed setting. A trimmed recording's metadata proves it has retained minutes even if `minutes.json` cannot be read; a parse failure must not turn forever retention into deletion. Test repeated sweeps, unreadable trimmed minutes, switching back to finite retention and explicit user deletion.
 - A meeting answer may be spoken in front of others (#3862). Until private meetings can be marked, gate earlier minutes, their linked projects and action-item states together before retrieval; a prompt warning cannot hide material already sent to the model. Keep opt-in retrieval tests as well as a default-off test that checks the model input and returned citations.
 
 - Deleting a connector is broader than deleting an archive namespace (#1836): include its alternate chat sources, posts and items, plus indexes and project references. Record the connector at ingestion, separately from a chat's namespace, and stamp item ownership before the unchanged-item fast path. Never infer legacy ownership from an item ID, title or a shared archive alias; use explicit provenance or a known source chat, leaving ambiguous records intact. Deletion tests need another connector's records, shared aliases and unowned legacy data, not only a single source.
 - A connector's knowledge-base switch must gate every ingestion path (#1835): conversations, items (documents, meetings and events), document-title lookups and program-initiated posts. Filtering the source list alone leaves direct calls open after a switch changes. Check both the feed and the main switch at the call boundary too; a shared extension process may keep running after its connector is disabled. `Registry.Feeds` does not include `Registry.Enabled`. Test both switches independently, with a connector that still answers calls, and assert that neither source reads nor post forwarding occur while off.
+- An archive switch must fence the commit as well as the source read (#4500). A response can already have crossed the manager boundary when the user turns the source off. Admit each page under a source generation, reserve the write and cursor together, retire the generation on off, and wait for already reserved commits before reporting success. A failed write can leave a journal that publishes data during recovery: settle it before releasing the reservation. Treat a lost reservation acknowledgement and an unreadable reservation record as uncertain, preserve them across source-manager restart, and test off/on, failure, cancellation, multiple pages and both local and bus adapters. The assistant also needs its own durable begin/settle/end journal with the token, generation and exact source/chat pairs: a replacement must recover it before new reads, never clear unrelated reservations, and fail closed when it cannot be loaded (#4732). The guarantee needs one authoritative source manager and cannot cover legacy work that never used the protocol.
 - An asynchronous dedupe answer must recheck a user's split, record its verdict and merge under the same project-mutation lock as unmerge. The verdict-file mutex prevents lost JSON updates but cannot stop an already queued merge from reversing a completed split. A verdict write failure must stop the merge.
 - A checkpoint after append is a replay window (#1343): connector pages can repeat after a cursor failure, a later batch failure or a process interruption.
   Preserve stable message IDs scoped by exact source and chat, including IDs such as `body` reused across threads. Formatted-text matching loses distinct messages;
@@ -1432,6 +1471,10 @@ Some apps still recognize a timeout by the summary's words, not its code: iOS `A
 - Socket reads on the local node get a deadline (`launchNodeWait`, 10 s for `launch`): a node that accepts and never answers (restarting, stuck, a stale socket held by another process) otherwise blocks forever. Say which socket timed out and point at `personad node doctor`.
 - Test a signal while the child is actually waiting: signal only after the fake node has read the request, not after a fixed sleep. A child inherits an ignored SIGINT (tests run in the background), so skip when `signal.Ignored` reports it (`cmd/personad/launch_test.go`).
 
+## Deadline cancellation can still exit zero (#2841)
+
+A shell may handle SIGTERM and exit 0. Keep the recorded cancellation when classifying its timeout so the command list stops, while ordinary success before cancellation remains successful. A public `secret.run` regression can block on a FIFO, observe ready/TERM markers and check that no next command runs, without sleeps or busy waiting.
+
 ## An empty Git file list is still authoritative (#6056)
 
 A successful `git ls-files` can return no files when the requested directory contains only ignored output. Falling back to a filesystem walk on an empty result discards Git's ignore rules and lists that output. Use the result's availability, not its length, to choose the fallback; test an ignored directory that actually contains a file.
@@ -1796,6 +1839,13 @@ On TestFlight 224 an extension's **Review** spun for two minutes and then failed
 - When a budget is over by one size-class step per row it keeps, or by rows × a few bytes, compare the row type's `unsafe.Sizeof` at both commits before hunting for new copies.
 - Make room before raising a budget. The 17 bools sat in 10 separate words, 63 bytes of padding; moving bools beside other bools brought the row back to 1,528 bytes without dropping a field. Reordering fields reorders the reflect encoder's keys, so `appendSession` and `sessionWireLayout` follow, and byte goldens change only in key order (check that every line decodes to the same object). `TestSessionFitsItsSizeClass` now fails in `proto`, listing the bools that sit alone, instead of in another package's budgets.
 
+## What the port relay costs, hop by hop (2026-11-10, #3067)
+
+`server/cmd/vncbench relay` puts an echo server behind `…/ports/{port}/connect`. With everything on the hub machine
+(client, hub, manager, its own node) a small message's round trip is 1.6 ms, 0.8 ms more than a WebSocket ping to the
+hub, and a download runs at 88 MB/s: the hub, the bus, the manager and the stream mux are not where a live screen's
+latency goes. The hub → node leg (`ssh -T` over Tailscale on the LAN) is where it varies; plain `ssh host cat` shows the
+same spread, and the Mac's `sshd-session` already has TCP_NODELAY (lsof `-T f`: TF flag 0x4), so it is not Nagle.
 ## A child in its own process group outlives a node killed by `exec.CommandContext` (2026-11-11, #4259)
 
 - The manager ran the hub machine's node (`node --stdio`) with `exec.CommandContext` and the default `Cancel`, a SIGKILL. The node puts each assistant process in its own group (`Setpgid`, so `stop()` can end its background tasks), and nothing ties that group to the node: a SIGKILLed node leaves its conversations running. Before blue-green switching, the systemd restart's cgroup kill hid this; a switch keeps the unit, so the old Claude processes went on beside the ones the next node resumed for the same conversations, and the next node rightly refused them the assistant's tools.
@@ -1809,6 +1859,42 @@ The hub copies sessions by value (decorated lists, readers that keep rows), and 
 One `int` took a 1,528-byte `Session` to 1,536, and those readers went 5 to 12% over. Small fields fit in the padding instead
 (between the bools and the next 8-byte field): check the layout with `reflect` field offsets and keep the size unchanged.
 A new field type also needs wire samples in `session_wire_test.go`.
+
+## Fleet events: bytes checked again on the bus, every machine built to read one (2026-11-12, #3197)
+
+Measured with the fleet soak (`docs/operations/testing.md` "Fleet soak": 10 computers x 50 sessions, a change per
+computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a minute; the shares below are of those.
+
+- `publishList` and `tellLive` handed `Tell` the bytes `json.Marshal` had just written as `json.RawMessage`, so the
+  bus's envelope encoder checked, compacted and copied each list again: 9.6% of the manager's CPU. Bytes that are
+  `json.Marshal`'s go as `rpc.Marshaled`. Prove the wire, not the type: write every told value both ways and compare
+  the lines (`TestFleetEventsGoOutAsTheSameLine`), with HTML characters, U+2028, control characters and invalid UTF-8
+  in the rows, and a list that does not encode (a time past the year 9999), which still goes out as `null`.
+- An allocation ceiling taken with the GC off cannot see a copy that lands in a pooled buffer. Told either way, a
+  200-session list allocated the same 663 KB once json's encoder had grown its `sync.Pool` buffers; in a busy manager
+  a GC empties those pools every few lists. Take such a bound cold: two `runtime.GC()` calls before each run (the pool
+  has two generations) and none during it. The two ways are then 708,868 and 1,224,668 bytes, to the byte
+  (`toldAllocation`), and a second test keeps the old way failing the same limit.
+- A lookup that builds the collection pays for every element's derived fields. `fleetMachine(id)` built every
+  machine's summary (`Devices.List`: each one's trust from all its paths, whether it is reachable) to read one, several
+  times for each list a node sends: 5.2% of the manager's allocation. Ask the owner for the one (`Devices.Summary`,
+  8 bytes where the list of ten was 4,080), build it with the function the list uses, and compare the two in every
+  state the list can be in: before the first regroup, with absorbed and derived machines, and while the entries and
+  the listed order disagree (`TestSummaryIsListsEntry`).
+- The micro benchmarks did not show either share: the fake hub writes no bus line and the fake devices' list is free.
+  A benchmark of a path has to end where production ends (`lineHub` writes the line as `BusHub.Tell` does), and the
+  shares come from profiles of the real programs: the soak lays a sampler over `cmd/personad` at build time
+  (`go build -overlay`), so nothing in the shipped program changes to measure it.
+- CPU time per minute moved by a factor of two and more with the machine's state (an Apple Silicon Mac moves a
+  process between fast and slow cores; a whole run on the slow ones used 3.5 s a minute for the work that took 1.7 s
+  on a quiet minute before), while bytes allocated per minute stayed within 1.5% and repeated within 0.1% between
+  runs. Soaks run one after the other said -3%, +68% and +30% for three changes that each save CPU; even the same
+  function's samples cannot be compared across runs, since code that copies memory slowed 2.3 times where a `write`
+  slowed 1.06. Dividing by the hub's CPU time in the same minute helped, and was still 3 points apart between two
+  sessions. What worked was running the trees at the same time, each with its own hub, manager and database: every
+  minute is then the same machine for all of them, and the head's CPU time over the base's in the same minute came
+  out at 0.943 with every one of the 20 minutes below 1, the unchanged hub's at 0.983 (`pairedCPU`). Measure a noisy
+  quantity against a reference that sees the same noise at the same moment.
 
 ## `exec.CommandContext` cancels only while the process runs (2026-11-11, #4363)
 

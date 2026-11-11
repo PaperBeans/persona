@@ -519,6 +519,9 @@ func TestFakeCodexAppServer(t *testing.T) {
 		}
 		var result any = map[string]any{}
 		if m.Method == "thread/start" {
+			if record := os.Getenv("PERSONA_FAKE_CODEX_START"); record != "" {
+				_ = os.WriteFile(record, append([]byte(nil), sc.Bytes()...), 0o600)
+			}
 			result = map[string]any{"thread": map[string]any{"id": thread, "path": ""}}
 		}
 		b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": result})

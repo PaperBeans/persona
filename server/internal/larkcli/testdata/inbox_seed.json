@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "data": {
+    "messages": [
+      {
+        "message_id": "om_example_seed",
+        "msg_type": "text",
+        "create_time": "2030-01-01T11:59:00Z",
+        "sender": {"id": "ou_example_user", "sender_type": "user", "name": "Example User"},
+        "content": "{\"text\":\"I started topic two\"}",
+        "chat_id": "oc_example_group",
+        "chat_name": "Example Group",
+        "chat_type": "group",
+        "thread_id": "omt_topic_two"
+      }
+    ],
+    "total": 1,
+    "has_more": false
+  }
+}

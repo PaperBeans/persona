@@ -1,0 +1,677 @@
+{
+  "$description": "The iPhone's icon meanings (Theme.Icon) and the Phosphor glyph Android draws for each; see README.md",
+  "meanings": {
+    "add": {
+      "sf": "plus",
+      "phosphor": "plus"
+    },
+    "addedReminder": {
+      "sf": "checklist.checked",
+      "phosphor": "list-checks"
+    },
+    "agentChat": {
+      "sf": "bubble.left.and.text.bubble.right",
+      "phosphor": "chats"
+    },
+    "agents": {
+      "sf": "chevron.left.forwardslash.chevron.right",
+      "phosphor": "code"
+    },
+    "ai": {
+      "sf": "sparkles",
+      "phosphor": "sparkle"
+    },
+    "allMachines": {
+      "sf": "square.grid.2x2",
+      "phosphor": "squares-four"
+    },
+    "allowEverything": {
+      "sf": "exclamationmark.shield",
+      "phosphor": "shield-warning"
+    },
+    "archive": {
+      "sf": "archivebox",
+      "phosphor": "archive"
+    },
+    "askFirst": {
+      "sf": "hand.raised",
+      "phosphor": "hand"
+    },
+    "attachment": {
+      "sf": "paperclip",
+      "phosphor": "paperclip"
+    },
+    "back": {
+      "sf": "chevron.left",
+      "phosphor": "caret-left"
+    },
+    "backgroundWaiting": {
+      "sf": "clock.fill",
+      "phosphor": "clock"
+    },
+    "byApp": {
+      "sf": "macwindow",
+      "phosphor": "app-window"
+    },
+    "calendarView": {
+      "sf": "calendar",
+      "phosphor": "calendar-blank"
+    },
+    "camera": {
+      "sf": "camera",
+      "phosphor": "camera"
+    },
+    "channels": {
+      "sf": "ellipsis.bubble",
+      "phosphor": "chat-circle-dots"
+    },
+    "childSpaces": {
+      "sf": "square.3.layers.3d.down.right",
+      "phosphor": "stack"
+    },
+    "clear": {
+      "sf": "xmark.circle.fill",
+      "phosphor": "x-circle"
+    },
+    "close": {
+      "sf": "xmark",
+      "phosphor": "x"
+    },
+    "collapse": {
+      "sf": "chevron.up",
+      "phosphor": "caret-up"
+    },
+    "collapseMessage": {
+      "sf": "arrow.up.right.and.arrow.down.left",
+      "phosphor": "arrows-in-simple"
+    },
+    "compose": {
+      "sf": "square.and.pencil",
+      "phosphor": "note-pencil"
+    },
+    "context": {
+      "sf": "gauge.with.dots.needle.33percent",
+      "phosphor": "gauge"
+    },
+    "conversation": {
+      "sf": "text.bubble",
+      "phosphor": "chat-teardrop-text"
+    },
+    "copy": {
+      "sf": "doc.on.doc",
+      "phosphor": "copy"
+    },
+    "cpu": {
+      "sf": "cpu",
+      "phosphor": "cpu"
+    },
+    "credentials": {
+      "sf": "key",
+      "phosphor": "key"
+    },
+    "darkMode": {
+      "sf": "moon",
+      "phosphor": "moon"
+    },
+    "delete": {
+      "sf": "trash",
+      "phosphor": "trash"
+    },
+    "dictate": {
+      "sf": "mic",
+      "phosphor": "microphone"
+    },
+    "dictating": {
+      "sf": "mic.fill",
+      "phosphor": "microphone"
+    },
+    "disclosure": {
+      "sf": "chevron.right",
+      "phosphor": "caret-right"
+    },
+    "document": {
+      "sf": "doc.text",
+      "phosphor": "file-text"
+    },
+    "done": {
+      "sf": "checkmark",
+      "phosphor": "check"
+    },
+    "down": {
+      "sf": "arrow.down",
+      "phosphor": "arrow-down"
+    },
+    "edit": {
+      "sf": "pencil",
+      "phosphor": "pencil-simple"
+    },
+    "editFile": {
+      "sf": "pencil.line",
+      "phosphor": "pencil-simple"
+    },
+    "effort": {
+      "sf": "gauge.with.dots.needle.50percent",
+      "phosphor": "gauge"
+    },
+    "effortAuto": {
+      "sf": "gauge.with.dots.needle.bottom.50percent",
+      "phosphor": "gauge"
+    },
+    "end": {
+      "sf": "xmark.circle",
+      "phosphor": "x-circle"
+    },
+    "error": {
+      "sf": "exclamationmark.triangle",
+      "phosphor": "warning"
+    },
+    "errorFilled": {
+      "sf": "exclamationmark.triangle.fill",
+      "phosphor": "warning"
+    },
+    "expand": {
+      "sf": "chevron.down",
+      "phosphor": "caret-down"
+    },
+    "expandMessage": {
+      "sf": "arrow.down.left.and.arrow.up.right",
+      "phosphor": "arrows-out-simple"
+    },
+    "feishuChats": {
+      "sf": "bubble.left.and.bubble.right",
+      "phosphor": "chats"
+    },
+    "file": {
+      "sf": "doc",
+      "phosphor": "file"
+    },
+    "fileImage": {
+      "sf": "photo.fill",
+      "phosphor": "image"
+    },
+    "fileOther": {
+      "sf": "doc.fill",
+      "phosphor": "file"
+    },
+    "fileText": {
+      "sf": "doc.text.fill",
+      "phosphor": "file-text"
+    },
+    "filter": {
+      "sf": "line.3.horizontal.decrease.circle",
+      "phosphor": "funnel-simple"
+    },
+    "filterActive": {
+      "sf": "line.3.horizontal.decrease.circle.fill",
+      "phosphor": "funnel-simple"
+    },
+    "folder": {
+      "sf": "folder",
+      "phosphor": "folder"
+    },
+    "folderFilled": {
+      "sf": "folder.fill",
+      "phosphor": "folder"
+    },
+    "forkChat": {
+      "sf": "arrow.branch",
+      "phosphor": "git-branch"
+    },
+    "forward": {
+      "sf": "chevron.forward",
+      "phosphor": "caret-right"
+    },
+    "gitBranch": {
+      "sf": "arrow.triangle.branch",
+      "phosphor": "git-branch"
+    },
+    "gitUpstream": {
+      "sf": "cloud",
+      "phosphor": "cloud"
+    },
+    "goal": {
+      "sf": "target",
+      "phosphor": "target"
+    },
+    "handToAI": {
+      "sf": "paperplane",
+      "phosphor": "paper-plane-tilt"
+    },
+    "health": {
+      "sf": "heart",
+      "phosphor": "heart"
+    },
+    "healthFilled": {
+      "sf": "heart.fill",
+      "phosphor": "heart"
+    },
+    "healthTrends": {
+      "sf": "chart.line.uptrend.xyaxis",
+      "phosphor": "chart-line"
+    },
+    "help": {
+      "sf": "questionmark.circle",
+      "phosphor": "question"
+    },
+    "highPriority": {
+      "sf": "flag.fill",
+      "phosphor": "flag"
+    },
+    "home": {
+      "sf": "house",
+      "phosphor": "house"
+    },
+    "hostKeyTrusted": {
+      "sf": "touchid",
+      "phosphor": "fingerprint"
+    },
+    "id": {
+      "sf": "number",
+      "phosphor": "hash"
+    },
+    "idleFold": {
+      "sf": "chevron.down.circle",
+      "phosphor": "caret-down"
+    },
+    "inProgress": {
+      "sf": "arrow.triangle.2.circlepath",
+      "phosphor": "arrows-clockwise"
+    },
+    "inbox": {
+      "sf": "tray.full",
+      "phosphor": "tray"
+    },
+    "info": {
+      "sf": "info.circle",
+      "phosphor": "info"
+    },
+    "infoFilled": {
+      "sf": "info.circle.fill",
+      "phosphor": "info"
+    },
+    "insert": {
+      "sf": "text.cursor",
+      "phosphor": "cursor-text"
+    },
+    "interrupt": {
+      "sf": "stop.fill",
+      "phosphor": "stop"
+    },
+    "keyPoint": {
+      "sf": "text.bubble.fill",
+      "phosphor": "chat-teardrop-text"
+    },
+    "keyboard": {
+      "sf": "keyboard",
+      "phosphor": "keyboard"
+    },
+    "laptop": {
+      "sf": "laptopcomputer",
+      "phosphor": "laptop"
+    },
+    "lightMode": {
+      "sf": "sun.max",
+      "phosphor": "sun"
+    },
+    "link": {
+      "sf": "link",
+      "phosphor": "link-simple"
+    },
+    "locked": {
+      "sf": "lock",
+      "phosphor": "lock-simple"
+    },
+    "machine": {
+      "sf": "desktopcomputer",
+      "phosphor": "desktop"
+    },
+    "mail": {
+      "sf": "envelope",
+      "phosphor": "envelope-simple"
+    },
+    "mailAccounts": {
+      "sf": "envelope.badge",
+      "phosphor": "envelope-simple"
+    },
+    "mailFilled": {
+      "sf": "envelope.fill",
+      "phosphor": "envelope-simple"
+    },
+    "makeDefault": {
+      "sf": "star.circle",
+      "phosphor": "star"
+    },
+    "memory": {
+      "sf": "brain",
+      "phosphor": "brain"
+    },
+    "mention": {
+      "sf": "at",
+      "phosphor": "at"
+    },
+    "message": {
+      "sf": "bubble.left.fill",
+      "phosphor": "chat-circle"
+    },
+    "messagesApp": {
+      "sf": "message.fill",
+      "phosphor": "chat-circle"
+    },
+    "model": {
+      "sf": "cube",
+      "phosphor": "cube"
+    },
+    "more": {
+      "sf": "ellipsis",
+      "phosphor": "dots-three"
+    },
+    "moreMenu": {
+      "sf": "ellipsis.circle",
+      "phosphor": "dots-three"
+    },
+    "music": {
+      "sf": "music.note",
+      "phosphor": "music-note"
+    },
+    "notChecked": {
+      "sf": "minus",
+      "phosphor": "minus"
+    },
+    "notification": {
+      "sf": "bell.fill",
+      "phosphor": "bell-simple"
+    },
+    "notifications": {
+      "sf": "bell.badge",
+      "phosphor": "bell-simple"
+    },
+    "offline": {
+      "sf": "wifi.exclamationmark",
+      "phosphor": "wifi-slash"
+    },
+    "openDocument": {
+      "sf": "arrow.up.forward.square",
+      "phosphor": "arrow-square-out"
+    },
+    "openExternal": {
+      "sf": "arrow.up.forward.app",
+      "phosphor": "arrow-square-out"
+    },
+    "options": {
+      "sf": "slider.horizontal.3",
+      "phosphor": "sliders-horizontal"
+    },
+    "pause": {
+      "sf": "pause.fill",
+      "phosphor": "pause"
+    },
+    "person": {
+      "sf": "person.crop.circle",
+      "phosphor": "user-circle"
+    },
+    "persona": {
+      "sf": "sparkle",
+      "phosphor": "sparkle"
+    },
+    "phone": {
+      "sf": "iphone",
+      "phosphor": "device-mobile"
+    },
+    "photo": {
+      "sf": "photo",
+      "phosphor": "image"
+    },
+    "pin": {
+      "sf": "pin",
+      "phosphor": "push-pin"
+    },
+    "pinned": {
+      "sf": "pin.fill",
+      "phosphor": "push-pin"
+    },
+    "place": {
+      "sf": "mappin.and.ellipse",
+      "phosphor": "map-pin"
+    },
+    "playMedia": {
+      "sf": "play.circle.fill",
+      "phosphor": "play"
+    },
+    "pluginChart": {
+      "sf": "chart.bar",
+      "phosphor": "chart-bar"
+    },
+    "pluginGauge": {
+      "sf": "gauge.with.needle",
+      "phosphor": "gauge"
+    },
+    "pluginStar": {
+      "sf": "star",
+      "phosphor": "star"
+    },
+    "plugins": {
+      "sf": "powerplug",
+      "phosphor": "plug"
+    },
+    "privacy": {
+      "sf": "checkmark.shield",
+      "phosphor": "shield-check"
+    },
+    "protection": {
+      "sf": "shield",
+      "phosphor": "shield"
+    },
+    "queueDown": {
+      "sf": "arrowshape.down",
+      "phosphor": "arrow-down"
+    },
+    "queueUp": {
+      "sf": "arrowshape.up",
+      "phosphor": "arrow-up"
+    },
+    "quietHours": {
+      "sf": "moon.zzz.fill",
+      "phosphor": "moon-stars"
+    },
+    "quote": {
+      "sf": "text.quote",
+      "phosphor": "quotes"
+    },
+    "recording": {
+      "sf": "waveform.circle",
+      "phosphor": "waveform"
+    },
+    "reminder": {
+      "sf": "bell.circle",
+      "phosphor": "bell-simple"
+    },
+    "repair": {
+      "sf": "wrench.adjustable",
+      "phosphor": "wrench"
+    },
+    "reply": {
+      "sf": "arrowshape.turn.up.left",
+      "phosphor": "arrow-bend-up-left"
+    },
+    "retry": {
+      "sf": "arrow.clockwise",
+      "phosphor": "arrow-clockwise"
+    },
+    "run": {
+      "sf": "play.fill",
+      "phosphor": "play"
+    },
+    "screen": {
+      "sf": "display",
+      "phosphor": "monitor"
+    },
+    "search": {
+      "sf": "magnifyingglass",
+      "phosphor": "magnifying-glass"
+    },
+    "send": {
+      "sf": "arrow.up",
+      "phosphor": "arrow-up"
+    },
+    "sendMail": {
+      "sf": "paperplane.fill",
+      "phosphor": "paper-plane-tilt"
+    },
+    "sentAsYou": {
+      "sf": "paperplane.circle",
+      "phosphor": "paper-plane-tilt"
+    },
+    "servedPage": {
+      "sf": "globe",
+      "phosphor": "globe-simple"
+    },
+    "server": {
+      "sf": "server.rack",
+      "phosphor": "hard-drives"
+    },
+    "settings": {
+      "sf": "gearshape",
+      "phosphor": "gear"
+    },
+    "share": {
+      "sf": "square.and.arrow.up",
+      "phosphor": "share-network"
+    },
+    "sidebar": {
+      "sf": "sidebar.left",
+      "phosphor": "sidebar-simple"
+    },
+    "skills": {
+      "sf": "puzzlepiece.extension",
+      "phosphor": "puzzle-piece"
+    },
+    "space": {
+      "sf": "square.stack.3d.up",
+      "phosphor": "stack"
+    },
+    "spaceFilled": {
+      "sf": "square.stack.3d.up.fill",
+      "phosphor": "stack"
+    },
+    "sshKey": {
+      "sf": "key.horizontal",
+      "phosphor": "key"
+    },
+    "stopLoop": {
+      "sf": "stop.circle",
+      "phosphor": "stop"
+    },
+    "submit": {
+      "sf": "arrow.up.circle.fill",
+      "phosphor": "arrow-up"
+    },
+    "success": {
+      "sf": "checkmark.circle",
+      "phosphor": "check-circle"
+    },
+    "successFilled": {
+      "sf": "checkmark.circle.fill",
+      "phosphor": "check-circle"
+    },
+    "terminal": {
+      "sf": "terminal",
+      "phosphor": "terminal-window"
+    },
+    "terminalFilled": {
+      "sf": "terminal.fill",
+      "phosphor": "terminal-window"
+    },
+    "thisDevice": {
+      "sf": "iphone.gen3",
+      "phosphor": "device-mobile"
+    },
+    "time": {
+      "sf": "clock",
+      "phosphor": "clock"
+    },
+    "today": {
+      "sf": "sun.max.fill",
+      "phosphor": "sun"
+    },
+    "todo": {
+      "sf": "checklist",
+      "phosphor": "list-checks"
+    },
+    "translate": {
+      "sf": "translate",
+      "phosphor": "translate"
+    },
+    "undo": {
+      "sf": "arrow.uturn.backward",
+      "phosphor": "arrow-u-up-left"
+    },
+    "unmute": {
+      "sf": "bell",
+      "phosphor": "bell-simple"
+    },
+    "user": {
+      "sf": "person.fill",
+      "phosphor": "user"
+    },
+    "video": {
+      "sf": "video",
+      "phosphor": "video-camera"
+    },
+    "view": {
+      "sf": "eye",
+      "phosphor": "eye"
+    },
+    "voiceConnecting": {
+      "sf": "antenna.radiowaves.left.and.right",
+      "phosphor": "broadcast"
+    },
+    "voiceEnd": {
+      "sf": "phone.down.fill",
+      "phosphor": "phone-disconnect"
+    },
+    "voiceEnded": {
+      "sf": "phone.down",
+      "phosphor": "phone-disconnect"
+    },
+    "voiceMessage": {
+      "sf": "waveform",
+      "phosphor": "waveform"
+    },
+    "voiceMute": {
+      "sf": "mic.slash",
+      "phosphor": "microphone-slash"
+    },
+    "voiceResume": {
+      "sf": "mic.circle.fill",
+      "phosphor": "microphone"
+    },
+    "voiceSpeaking": {
+      "sf": "speaker.wave.2.fill",
+      "phosphor": "speaker-high"
+    },
+    "voiceUnmute": {
+      "sf": "mic.slash.fill",
+      "phosphor": "microphone-slash"
+    },
+    "voiceWorking": {
+      "sf": "hourglass",
+      "phosphor": "hourglass-medium"
+    },
+    "waitsForYou": {
+      "sf": "hand.raised.fill",
+      "phosphor": "hand"
+    },
+    "wakeUp": {
+      "sf": "bell.and.waves.left.and.right",
+      "phosphor": "bell-ringing"
+    },
+    "workflow": {
+      "sf": "flowchart",
+      "phosphor": "tree-structure"
+    },
+    "working": {
+      "sf": "gearshape.fill",
+      "phosphor": "gear"
+    }
+  }
+}

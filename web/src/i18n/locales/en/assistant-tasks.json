@@ -12,6 +12,8 @@
   "workspace_engine_path": "The machine's workspace engine chooses the path. Edit the branch to preview again.",
   "tray_needs_you": "Needs you",
   "tray_running": "In progress",
+  "tray_expand": "Expand",
+  "tray_restore": "Restore size",
   "background_tasks_running": "Background tasks running: {count}",
   "subagents_count_running": "Subagents running: {count}",
   "background_running": "Background work is running",
@@ -226,5 +228,6 @@
   "interrupt_batch_title_on_other": "{cause} on {machine}: {count} tasks interrupted",
   "interrupt_batch_counts": "→ {resolved} handled / {pending} pending",
   "interrupt_batch_all": "→ all handled",
-  "needs_group_another": "Another conversation"
+  "needs_group_another": "Another conversation",
+  "new_agent_started": "Started a new Agent for this task"
 }

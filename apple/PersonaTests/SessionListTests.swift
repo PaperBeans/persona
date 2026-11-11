@@ -156,6 +156,65 @@ import Testing
         #expect(calls <= 4)
     }
 
+    /// Reaching the end of a list open longer than the hub keeps its frozen window: the list used to start over from
+    /// its first 50 rows, and the scroll view put the reader near the top.
+    @Test func expiredCursorAtTheEndKeepsTheScrolledRows() async throws {
+        var expired = false
+        var requests: [String?] = []
+        let list = model { _, cursor, _ in
+            requests.append(cursor)
+            if expired, cursor == "100" { throw APIError(status: 409, message: "expired", fields: ["code": "cursor_expired"]) }
+            let offset = cursor.flatMap { Int($0.trimmingCharacters(in: .letters)) } ?? 0
+            let end = min(offset + 50, 400)
+            let prefix = expired ? "f" : ""
+            return SessionListPage(sessions: try (offset..<end).map { try row($0) }, remove: [], hasMore: end < 400,
+                                   nextCursor: end < 400 ? prefix + String(end) : nil, revision: expired ? "r1" : "r0", total: 400)
+        }
+        await list.load()
+        await list.next()
+        #expect(list.rows.count == 100)
+        var lengths: [Int] = []
+        list.changed = { lengths.append($0.count) }
+        expired = true
+        requests = []
+        await list.next()
+        #expect(requests == ["100", nil, "f50", "f100"])
+        #expect(lengths.allSatisfy { $0 >= 100 })
+        #expect(list.rows.count == 150)
+        #expect(list.rows.map(\.sessionID) == (0..<150).map { "s\($0)" })
+        #expect(list.revision == "r1")
+        #expect(list.error == nil)
+        #expect(list.hasMore)
+        await list.next()
+        #expect(requests.last == "f150")
+        #expect(list.rows.count == 200)
+    }
+
+    /// The fresh window changing mid-read fails the read once and keeps the rows; it never starts over from 50.
+    @Test func revisionChangeWhileRereadingKeepsTheRows() async throws {
+        var expired = false
+        var freshReads = 0
+        let list = model { _, cursor, _ in
+            if expired, cursor == "100" { throw APIError(status: 409, message: "expired", fields: ["code": "cursor_expired"]) }
+            let offset = cursor.flatMap { Int($0.trimmingCharacters(in: .letters)) } ?? 0
+            let end = min(offset + 50, 400)
+            var revision = "r0"
+            if expired { freshReads += 1; revision = freshReads == 1 ? "r1" : "r2" }
+            let prefix = expired ? "f" : ""
+            return SessionListPage(sessions: try (offset..<end).map { try row($0) }, remove: [], hasMore: end < 400,
+                                   nextCursor: end < 400 ? prefix + String(end) : nil, revision: revision, total: 400)
+        }
+        await list.load()
+        await list.next()
+        var lengths: [Int] = []
+        list.changed = { lengths.append($0.count) }
+        expired = true
+        await list.next()
+        #expect(lengths.allSatisfy { $0 >= 100 })
+        #expect(list.rows.count == 100)
+        #expect(list.error != nil)
+    }
+
     @Test func queryChangeFencesLateAnswers() async throws {
         let list = model { q, _, _ in
             if q.text == "old" { try? await Task.sleep(for: .milliseconds(100)) }

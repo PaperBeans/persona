@@ -2,10 +2,11 @@ package iphonectl
 
 import (
 	"math"
-	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/nwverse/persona/server/internal/lazyre"
 )
 
 // Sensitivity is a kind of step the owner approves before it is done.
@@ -96,7 +97,7 @@ var (
 )
 
 // price is a label that is an amount of money ($4.99, ¥12, 12.00 €), what store buttons say.
-var price = regexp.MustCompile(`^\s*(?:[$€£¥₩₹]\s?\d|\d+(?:[.,]\d{1,2})?\s?(?:€|£|元|円|usd|eur|cny|jpy)(?:[^a-z]|$))`)
+var price = lazyre.New(`^\s*(?:[$€£¥₩₹]\s?\d|\d+(?:[.,]\d{1,2})?\s?(?:€|£|元|円|usd|eur|cny|jpy)(?:[^a-z]|$))`)
 
 // matches says whether label is one of phrases or starts with one.
 func matches(label string, phrases []string) (string, bool) {

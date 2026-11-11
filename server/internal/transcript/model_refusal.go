@@ -33,11 +33,12 @@ func (m *Meta) claudeModelRefusal(subtype string, line []byte, it proto.Item) []
 		Scope         string `json:"scope"`
 		Explanation   string `json:"apiRefusalExplanation"`
 	}
-	// Malformed or future fields still leave the original record in the notice.
+	// Malformed or future fields keep the notice, with what could be read.
 	err := unmarshalLine(line, &fields)
 	r := &proto.ModelRefusal{Subtype: subtype, OriginalModel: fields.OriginalModel, FallbackModel: fields.FallbackModel,
-		Category: fields.Category, Scope: fields.Scope, Explanation: fields.Explanation, Raw: string(line)}
-	it.ModelRefusal, it.Text = r, r.Raw
+		Category: fields.Category, Scope: fields.Scope, Explanation: fields.Explanation, Text: refusalWords(line), Raw: string(line)}
+	// The notice says the refusal's own words, never the line (#2528): the rest of the record is not for clients.
+	it.ModelRefusal, it.Text = r, refusalNoticeText(r)
 	if err == nil && subtype == "model_refusal_fallback" && r.FallbackModel != "" {
 		m.ModelFallback, m.ModelFallbackObserved = r, true
 	}
@@ -57,4 +58,29 @@ func (m *Meta) observeReplyModel(model string) {
 	if m.ModelFallback == nil || m.ModelFallback.FallbackModel != model {
 		m.clearModelFallback()
 	}
+}
+
+// refusalWords is the record's own refusal text: its content when that is a string (a structured content is not
+// shown: its parts are not known to be meant for anyone).
+func refusalWords(line []byte) string {
+	var c struct {
+		Content any `json:"content"`
+	}
+	if unmarshalLine(line, &c) != nil {
+		return ""
+	}
+	s, _ := c.Content.(string)
+	return s
+}
+
+// refusalNoticeText is a refusal notice's text: its words, else its explanation, else its subtype. Clients draw the
+// fields; the hub writes the text again in the reader's language (hub/transcript_text.go).
+func refusalNoticeText(r *proto.ModelRefusal) string {
+	switch {
+	case r.Text != "":
+		return r.Text
+	case r.Explanation != "":
+		return r.Explanation
+	}
+	return r.Subtype
 }

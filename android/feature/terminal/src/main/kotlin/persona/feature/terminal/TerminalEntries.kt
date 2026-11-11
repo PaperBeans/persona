@@ -28,14 +28,14 @@ interface TerminalServices { fun terminal(): TerminalTransport }
  */
 fun EntryProviderScope<NavKey>.terminalEntries(navigator: Navigator, transport: TerminalTransport? = null, title: (SessionKey) -> String? = { null },
                                                panes: TerminalPanes? = null, sessions: SessionsRepository? = null,
-                                               routed: (SessionKey) -> TerminalTransport? = { null }) {
+                                               routed: (SessionKey) -> TerminalTransport? = { null }, resumer: TerminalResumer? = null) {
     entry<TerminalRoute> { route ->
         val context = LocalContext.current.applicationContext
         val services = remember(context, transport) { if (transport == null) EntryPointAccessors.fromApplication(context, TerminalServices::class.java) else null }
         val model = viewModel {
             val key = SessionKey(route.machineId, route.sessionId)
             TerminalViewModel(key, routed(key) ?: transport ?: requireNotNull(services).terminal(),
-                preferences = SharedTerminalPreferences(context))
+                preferences = SharedTerminalPreferences(context), resumer = resumer)
         }
         TerminalScreen(model, navigator::back, route.title.ifEmpty { null } ?: title(model.key) ?: model.key.sessionId)
     }

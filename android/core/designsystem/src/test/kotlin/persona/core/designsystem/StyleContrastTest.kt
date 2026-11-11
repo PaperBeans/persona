@@ -10,9 +10,9 @@ import kotlin.math.pow
  * StylesTest, iOS's StyleSpecTests). Glass draws translucent fills: they are laid over the page background before
  * the contrast is measured.
  *
- * The first tests have no exceptions: body text on every surface, the solid action, the highlighter, the count
- * badge, the accent as a link and the user's own bubble. The last one also checks quieter words and marks (status
- * words, tertiary ink, words on a status mark and Board glyphs). All text meets AA; there are no shortfall exemptions.
+ * Brief and Board hold every word to AA (4.5:1). Glass holds the iPhone's floors instead (decision 2 of #4194, iOS
+ * `PersonaPalette`): white on the accent 3.5:1, the accent as a link 3:1, words on the bubble 4.5:1, body ink 4.5:1. Its
+ * other WCAG checks (secondary and status words) are printed, not failed, as `spec/tokens/rules.json` reports them.
  */
 class StyleContrastTest {
     private fun channel(c: Float): Double = if (c <= 0.04045f) c / 12.92 else ((c + 0.055) / 1.055).pow(2.4)
@@ -34,7 +34,13 @@ class StyleContrastTest {
         return maxOf(x, y) / minOf(x, y)
     }
 
-    private class Check(val name: String, val text: Color, val fill: Color, val floor: Double)
+    /** [glass] is the floor in Glass; null: Glass only reports it. */
+    private class Check(val name: String, val text: Color, val fill: Color, val floor: Double, val glass: Double? = floor)
+
+    private fun floor(style: AppStyle, check: Check): Double? = if (style == AppStyle.Glass) check.glass else check.floor
+
+    private fun report(style: AppStyle, dark: Boolean, check: Check, r: Double) =
+        println("reported, not failed: ${label(style, dark, check)}: ${"%.2f".format(r)} < ${check.floor}")
 
     private fun each(block: (style: AppStyle, dark: Boolean, palette: PersonaPalette) -> Unit) {
         for (style in AppStyle.entries) for (dark in listOf(false, true)) block(style, dark, Palettes.of(style, dark))
@@ -47,7 +53,9 @@ class StyleContrastTest {
         each { style, dark, palette ->
             checks(palette).forEach { check ->
                 val r = ratio(check.text, check.fill, palette.background)
-                if (r < check.floor) found += "${label(style, dark, check)}: ${"%.2f".format(r)} < ${check.floor}"
+                val floor = floor(style, check)
+                if (floor == null) { if (r < check.floor) report(style, dark, check, r) }
+                else if (r < floor) found += "${label(style, dark, check)}: ${"%.2f".format(r)} < $floor"
             }
         }
         return found
@@ -62,7 +70,7 @@ class StyleContrastTest {
     @Test fun bodyTextOnEverySurface() {
         val found = below { p ->
             surfaces(p).flatMap { (name, fill) ->
-                listOf(Check("ink on $name", p.ink, fill, 4.5), Check("ink2 on $name", p.ink2, fill, 4.5))
+                listOf(Check("ink on $name", p.ink, fill, 4.5), Check("ink2 on $name", p.ink2, fill, 4.5, glass = null))
             }
         }
         assertTrue("body text under 4.5:1: $found", found.isEmpty())
@@ -73,7 +81,7 @@ class StyleContrastTest {
             listOf(
                 Check("onAction on action", p.onAction, p.action, 4.5),
                 Check("onMarker on marker", p.onMarker, p.marker, 4.5),
-                Check("needsYou.onDot on needsYou.dot (count badges)", p.needsYou.onDot, p.needsYou.dot, 4.5),
+                Check("needsYou.onDot on needsYou.dot (count badges)", p.needsYou.onDot, p.needsYou.dot, 4.5, glass = 3.5),
             )
         }
         assertTrue("words on a solid fill under 4.5:1: $found", found.isEmpty())
@@ -86,8 +94,8 @@ class StyleContrastTest {
     }
 
     @Test fun theAccentAsALink() {
-        val found = below { p -> listOf(Check("accent on background", p.accent, p.background, 4.5), Check("accent on surface", p.accent, p.surface, 4.5),
-            Check("accent on statusSurface", p.accent, p.statusSurface, 4.5)) }
+        val found = below { p -> listOf(Check("accent on background", p.accent, p.background, 4.5, glass = 3.0),
+            Check("accent on surface", p.accent, p.surface, 4.5, glass = 3.0), Check("accent on statusSurface", p.accent, p.statusSurface, 4.5, glass = 3.0)) }
         assertTrue("the accent under 4.5:1: $found", found.isEmpty())
     }
 
@@ -101,7 +109,8 @@ class StyleContrastTest {
                 if (r < 4.5) problems += "${style.key} dark=$dark $name: $r"
             }
             val r = ratio(p.onAccent, p.accent, p.background)
-            if (r < 4.5) problems += "${style.key} dark=$dark onAccent: $r"
+            val onAccent = if (style == AppStyle.Glass) 3.5 else 4.5
+            if (r < onAccent) problems += "${style.key} dark=$dark onAccent: $r"
         }
         assertTrue(problems.joinToString("\n"), problems.isEmpty())
     }
@@ -122,7 +131,13 @@ class StyleContrastTest {
                 "surface" to p.surface, "opaque" to p.surfaceOpaque, "strong" to p.surfaceStrong,
                 "sunken" to p.sunken, "status" to p.statusSurface)) for ((word, ink) in words) {
                 val r = ratio(ink, fill, background)
-                if (r < 4.5) problems += "${style.key} dark=$dark $word on $name: ${"%.2f".format(r)}"
+                val floor = when {
+                    style != AppStyle.Glass || word == "ink" -> 4.5
+                    word == "accent" -> 3.0
+                    else -> null
+                }
+                if (floor == null) { if (r < 4.5) println("reported, not failed: ${style.key} dark=$dark $word on $name: ${"%.2f".format(r)}") }
+                else if (r < floor) problems += "${style.key} dark=$dark $word on $name: ${"%.2f".format(r)}"
             }
         }
         assertTrue(problems.distinct().joinToString("\n"), problems.isEmpty())
@@ -135,7 +150,7 @@ class StyleContrastTest {
                 val r = ratio(p.ink, bubble, p.background)
                 if (r < 4.5) found += "${style.name} ${if (dark) "dark" else "light"} $name: ${"%.2f".format(r)}"
                 val link = ratio(p.accent, bubble, p.background)
-                if (link < 4.5) found += "${style.name} ${if (dark) "dark" else "light"} $name link: ${"%.2f".format(link)}"
+                if (link < (if (style == AppStyle.Glass) 3.0 else 4.5)) found += "${style.name} ${if (dark) "dark" else "light"} $name link: ${"%.2f".format(link)}"
             }
         }
         assertTrue("words and links on neutral bubbles under 4.5:1: $found", found.isEmpty())
@@ -150,18 +165,18 @@ class StyleContrastTest {
             Triple("needsYou", p.needsYou, 4.5), Triple("working", p.working, 4.5), Triple("done", p.done, 4.5),
             Triple("danger", p.danger, 4.5), Triple("idle", p.idle, 4.5), Triple("offline", p.offline, 4.5),
         )) {
-            add(Check("$name.text on background", colors.text, p.background, floor))
-            add(Check("$name.text on surface", colors.text, p.surface, floor))
+            add(Check("$name.text on background", colors.text, p.background, floor, glass = null))
+            add(Check("$name.text on surface", colors.text, p.surface, floor, glass = null))
         }
-        add(Check("ink3 on background", p.ink3, p.background, 4.5))
-        add(Check("ink3 on surface", p.ink3, p.surface, 4.5))
-        add(Check("ink3 on statusSurface", p.ink3, p.statusSurface, 4.5))
+        add(Check("ink3 on background", p.ink3, p.background, 4.5, glass = null))
+        add(Check("ink3 on surface", p.ink3, p.surface, 4.5, glass = null))
+        add(Check("ink3 on statusSurface", p.ink3, p.statusSurface, 4.5, glass = null))
         for ((name, colors) in listOf("needsYou" to p.needsYou, "working" to p.working, "done" to p.done,
             "idle" to p.idle, "offline" to p.offline, "danger" to p.danger)) {
-            add(Check("$name.text on statusSurface", colors.text, p.statusSurface, 4.5))
+            add(Check("$name.text on statusSurface", colors.text, p.statusSurface, 4.5, glass = null))
         }
         for ((name, colors) in listOf("danger" to p.danger, "done" to p.done, "working" to p.working)) {
-            add(Check("$name.onDot on $name.dot", colors.onDot, colors.dot, 4.5))
+            add(Check("$name.onDot on $name.dot", colors.onDot, colors.dot, 4.5, glass = null))
         }
         if (style == AppStyle.Board) for ((name, colors) in listOf(
             "needsYou" to p.needsYou, "working" to p.working, "done" to p.done, "idle" to p.idle, "offline" to p.offline,
@@ -173,7 +188,9 @@ class StyleContrastTest {
         each { style, dark, palette ->
             quieter(style, palette).forEach { check ->
                 val r = ratio(check.text, check.fill, palette.background)
-                if (r < check.floor) problems += "${label(style, dark, check)}: ${"%.2f".format(r)} < ${check.floor}"
+                val floor = floor(style, check)
+                if (floor == null) { if (r < check.floor) report(style, dark, check, r) }
+                else if (r < floor) problems += "${label(style, dark, check)}: ${"%.2f".format(r)} < $floor"
             }
         }
         assertTrue(problems.joinToString("\n"), problems.isEmpty())

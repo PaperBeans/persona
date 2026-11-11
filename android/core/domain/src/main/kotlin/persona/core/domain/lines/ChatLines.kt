@@ -233,7 +233,12 @@ internal fun buildBlocks(rows: List<ChatRow>): List<Block> {
                     reopenedAt = lastIndex
                     current = lastRaw
                 }
-                if (wake && current != null) {
+                if (item.item.modelRefusal != null) {
+                    // #2528: an upstream refusal (and the model Claude Code moved to) is a line of its own after the
+                    // exchange, never folded into the work row where it would go unseen (web buildBlocks)
+                    if (current == null) current = RawTurn(row.id)
+                    current!!.trailing += row
+                } else if (wake && current != null) {
                     current!!.wakes += item
                     current!!.process += row
                     current!!.ordered += row

@@ -388,7 +388,21 @@ func activeLines(l i18n.Lang, s Snapshot, st *link.Status) []Line {
 	if st.Retry != nil {
 		title = i18n.T(l, "link-tray.with_retry", i18n.Args{"state": title, "retry": Until(l, st.Retry.Sub(s.Now))})
 	}
-	out := append([]Line{{Icon: "offline", Text: title, Primary: true, Tone: ToneDanger}}, failures(st.Error)...)
+	errText := st.Error
+	var extra []Line
+	if st.SSHError != nil {
+		defText := st.SSHError.Text(i18n.Default)
+		locText := st.SSHError.Text(l)
+		switch {
+		case errText == "":
+			errText = locText
+		case defText != "" && strings.Contains(errText, defText):
+			errText = strings.Replace(errText, defText, locText, 1)
+		case !strings.Contains(errText, locText):
+			extra = []Line{{Icon: "x", Text: locText}}
+		}
+	}
+	out := append(append([]Line{{Icon: "offline", Text: title, Primary: true, Tone: ToneDanger}}, failures(errText)...), extra...)
 	return append(append(out, hub...), machine...)
 }
 

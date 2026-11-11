@@ -14,7 +14,7 @@ import (
 // loop checks for releases (a minute after starting, then every hour) and installs one when updating itself is
 // on and the release is newer and not a build that went back.
 func (u *updater) loop(ctx context.Context) {
-	if !u.h.build.SelfUpdates() && u.h.build.Channel != update.Docker {
+	if !u.h.selfUpdates() && u.h.build.Channel != update.Docker {
 		return
 	}
 	wait := updateFirstCheck
@@ -88,13 +88,14 @@ func (u *updater) check(ctx context.Context) (*update.Published, error) {
 	if u.h.build.Channel == update.Docker {
 		return nil, u.checkImage(ctx)
 	}
-	if u.h.build.UpdateURL == "" {
+	source := u.h.updateURL()
+	if source == "" {
 		return nil, errNotRelease
 	}
 	u.setCheckState("checking", "")
 	cctx, cancel := context.WithTimeout(ctx, updateRequestLimit)
 	defer cancel()
-	r, err := update.Check(cctx, u.client, u.h.build.UpdateURL)
+	r, err := update.Check(cctx, u.client, source)
 	var blocked error
 	if err == nil {
 		blocked = u.unreplaced(r.Manifest)
@@ -140,7 +141,11 @@ func (u *updater) setCheckState(state, errText string) {
 // most once every releaseRefreshEvery across requests; when it fails the release the hub had stays. Nothing for a
 // Docker hub or a build with nowhere to look.
 func (u *updater) freshRelease(ctx context.Context) {
-	if u == nil || u.h.build.Channel == update.Docker || u.h.build.UpdateURL == "" {
+	if u == nil || u.h.build.Channel == update.Docker {
+		return
+	}
+	source := u.h.updateURL()
+	if source == "" {
 		return
 	}
 	u.refreshing.Lock()
@@ -157,7 +162,7 @@ func (u *updater) freshRelease(ctx context.Context) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, releaseRefreshLimit)
 	defer cancel()
-	r, err := update.Check(cctx, u.client, u.h.build.UpdateURL)
+	r, err := update.Check(cctx, u.client, source)
 	if err != nil {
 		u.h.logf("update: reading the release for an install script: %v (keeping the one read before)", err)
 		return

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/connector"
@@ -73,7 +74,17 @@ func (s *Service) settleConnector(ctx context.Context, id string) []*InboxItem {
 // applyConnector turns a connector's things into items, under b.mu: one open item per thread gathers its later
 // moves until it is done; a move after that starts a new item; a thing that is over closes its open item.
 func (b *inboxBook) applyConnector(id, name string, things []connector.InboxThing, now time.Time) []*InboxItem {
-	var changed []*InboxItem
+	var changed, renamed []*InboxItem
+	if name != "" {
+		// A connector renamed (a new localized name, say) renames its items too, not only the ones that move next.
+		for _, it := range b.items {
+			if it.Source == id && it.Connector != nil && it.AccountName != name {
+				b.roundWrite(it)
+				it.AccountName = name
+				renamed = append(renamed, it)
+			}
+		}
+	}
 	index := b.threads(func(it *InboxItem) (string, bool) {
 		if it.Source != id || it.Connector == nil {
 			return "", false
@@ -145,6 +156,11 @@ func (b *inboxBook) applyConnector(id, name string, things []connector.InboxThin
 		index.note(it)
 		changed = append(changed, it)
 	}
+	for _, it := range renamed {
+		if !containsItem(changed, it) {
+			changed = append(changed, it)
+		}
+	}
 	return changed
 }
 
@@ -174,6 +190,14 @@ func (b *inboxBook) settleThing(open *InboxItem, t connector.InboxThing, now tim
 func fillConnectorItem(it *InboxItem, t connector.InboxThing) {
 	it.Kind, it.Title, it.Sender, it.Preview, it.Context = t.Kind, t.Title, t.Sender, t.Preview, t.Context
 	it.UpdatedAt, it.Last, it.Rules = t.At, t.Last, t.Rules
+	// A connector may use the existing document block while it is still a
+	// generic connector source (lark-cli does this for read-only comments). The
+	// generic connector block remains present for source/thread bookkeeping, but
+	// clients render the document block first and can open its comment link.
+	it.Doc = nil
+	if t.Extra != nil && len(t.Extra.Doc) > 0 {
+		_ = json.Unmarshal(t.Extra.Doc, &it.Doc)
+	}
 	rule := t.Tier
 	if rule == "" && t.Extra != nil && connector.Tier(t.Extra.RuleTier).Known() {
 		rule = connector.Tier(t.Extra.RuleTier) // its fallback (capability fallback): the model still sorts it first

@@ -47,6 +47,7 @@ final class MeetingAttendanceUITests: XCTestCase {
         XCTAssertTrue(role.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(waitFor { roleText(role).contains("旁听") }, "the hub's default: \(app.debugDescription)")
         let attendee = app.buttons["meeting-attendee"]
+        scrollTo(attendee, in: app)
         XCTAssertTrue(attendee.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(waitFor { attendee.label.contains("主对话") }, "the main chat attends until another is picked: \(attendee.label)")
 
@@ -75,7 +76,8 @@ final class MeetingAttendanceUITests: XCTestCase {
     }
 
     /// Listening in: the notice, the upload with the role and the meeting's lines reach the hub, and a typed question is
-    /// answered on screen by the hub.
+    /// answered on screen by the hub. The question is typed in the bar's own row (#4486), never a system alert: Send waits
+    /// for words, Cancel drops what was typed, Send or Return asks and closes the row.
     @MainActor func testListeningInAnswersATypedQuestion() throws {
         let hub = try mockHub()
         try attendance(hub, on: true)
@@ -88,23 +90,53 @@ final class MeetingAttendanceUITests: XCTestCase {
         XCTAssertTrue(waitFor(20) { (try? self.meeting(hub))?.lines(self.live).count == 2 }, "the meeting's lines reached …/live")
         try shot(app, "listening")
 
-        let type = app.buttons["meeting-ask-type"]
-        scrollTo(type, in: app)
-        type.tap()
-        let field = app.alerts.firstMatch.textFields.firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(app.alerts.firstMatch.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "在屏幕上回答")).firstMatch.exists,
-                      app.debugDescription)
-        field.typeText("上次评审定的导出上限是多少？")
+        // Cancel drops the draft and closes the row.
+        let (field, largeType) = openQuestion(app)
+        field.typeText("草稿")
+        let cancel = app.buttons["meeting-ask-cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5), app.debugDescription)
+        cancel.tap()
+        XCTAssertTrue(waitFor(5) { !field.exists }, "Cancel closes the row")
+
+        // Opened again: empty, in the bar, the hint and the timeline in sight, Send waiting for words.
+        let reopened = openQuestion(app).field
+        XCTAssertEqual(app.alerts.count, 0, "no system alert: \(app.debugDescription)")
+        XCTAssertFalse((reopened.value as? String ?? "").contains("草稿"), "Cancel dropped what was typed")
+        // The hint over the field; at accessibility sizes it gives its lines back to the timeline while the keyboard is up.
+        let hint = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "在屏幕上回答")).firstMatch
+        XCTAssertEqual(hint.exists, !largeType, app.debugDescription)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "上周定的长录音测试谁负责")).firstMatch.exists,
+                      "the meeting's lines stay on screen while typing: \(app.debugDescription)")
+        let send = app.buttons["meeting-ask-send"].firstMatch
+        XCTAssertTrue(send.exists, app.debugDescription)
+        XCTAssertFalse(send.isEnabled, "nothing typed")
+        try shot(app, "ask-open")
+        reopened.typeText("  ")
+        XCTAssertFalse(send.isEnabled, "spaces alone ask nothing")
+        reopened.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 2))
+        reopened.typeText("上次评审定的导出上限是多少？导出的文件超过上限时，应该拆成几份，还是直接提示用户缩小范围？")
+        XCTAssertTrue(waitFor(5) { send.isEnabled }, "a question can go")
         try shot(app, "ask-typed")
-        app.alerts.firstMatch.buttons.matching(NSPredicate(format: "label == %@", "提问")).firstMatch.tap()
+        send.tap()
+        XCTAssertTrue(waitFor(5) { !reopened.exists }, "sent: the row closes")
         let answer = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "回归测试由 Bo 负责")).firstMatch
         scrollTo(answer, in: app)
         XCTAssertTrue(answer.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertFalse(app.buttons["meeting-stop-speaking"].exists, "listening in, nothing is said aloud")
         // The newest question: the mock keeps a recording's questions from earlier tests.
-        XCTAssertEqual(try meeting(hub).asks(live).last?["question_source"] as? String, "typed")
+        let typed = try XCTUnwrap(try meeting(hub).asks(live).last)
+        XCTAssertEqual(typed["question_source"] as? String, "typed")
+        XCTAssertEqual(typed["question"] as? String, "上次评审定的导出上限是多少？导出的文件超过上限时，应该拆成几份，还是直接提示用户缩小范围？")
         try shot(app, "answered-on-screen")
+
+        // Return asks too, through the same path; the field is empty again after a send.
+        let asked = try meeting(hub).asks(live).count
+        let again = openQuestion(app).field
+        XCTAssertFalse((again.value as? String ?? "").contains("导出上限"), "the sent question is cleared")
+        again.typeText("回归测试谁负责？\n")
+        XCTAssertTrue(waitFor(20) { ((try? self.meeting(hub))?.asks(self.live).count ?? 0) > asked }, "Return asked: \(again.exists ? String(describing: again.value) : "the row closed")")
+        XCTAssertEqual(try meeting(hub).asks(live).last?["question"] as? String, "回归测试谁负责？")
+        XCTAssertTrue(waitFor(5) { !again.exists }, "sent with Return: the row closes")
     }
 
     /// Taking part: one tap asks about what was just said; the hub hears the question from the live lines, and the answer
@@ -133,6 +165,56 @@ final class MeetingAttendanceUITests: XCTestCase {
         XCTAssertEqual(asked["question_source"] as? String, "heard")
         XCTAssertEqual(asked["speak"] as? Bool, true)
         try shot(app, "answered-aloud")
+    }
+
+    /// Taking part with the hub's realtime voice (#5004; needs the mock with MOCK_VOICE=1): the answer goes to the voice
+    /// extension's `speak` with the model of `plugin.voice` and the voice picked in Settings, and plays in that voice. When
+    /// the extension refuses, the phone's on-device voice says it; an older extension without `speak` is never asked.
+    @MainActor func testTakingPartTheAnswerIsSaidInTheRealtimeVoice() throws {
+        let hub = try mockHub()
+        try voiceMock(hub, speak: "ok")
+        try attendance(hub, on: true)
+        // The voice picked in Settings › Extensions › the voice extension.
+        var app = launch(hub, ["-tab", "settings", "-openExtension", "voice"])
+        let picker = app.buttons["voice-timbre-setting"].firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 30), "no Voice row:\n\(app.debugDescription)")
+        picker.tap()
+        let calm = app.buttons["沉稳"].firstMatch
+        XCTAssertTrue(calm.waitForExistence(timeout: 10), app.debugDescription)
+        calm.tap()
+        app.terminate()
+
+        app = launch(hub, ["-openShellPage", "recordings", "-showMeetingSample", "taking-part"])
+        let before = try speaks(hub).count
+        askAndWaitForTheAnswer(app, hub)
+        XCTAssertTrue(waitFor(20) { ((try? self.speaks(hub)) ?? []).count > before }, "the realtime voice was not asked")
+        let asked = try XCTUnwrap(try speaks(hub).last)
+        XCTAssertTrue((asked["text"] as? String)?.contains("回归测试由 Bo 负责") == true, "\(asked)")
+        XCTAssertEqual(asked["voice"] as? String, "calm", "the voice picked in Settings")
+        XCTAssertEqual(asked["model"] as? String, "voice-deep", "the model of plugin.voice")
+        let realtime = app.descendants(matching: .any)["meeting-speaking-realtime"].firstMatch
+        XCTAssertTrue(realtime.waitForExistence(timeout: 15), "not said in the realtime voice:\n\(app.debugDescription)")
+        XCTAssertTrue(app.buttons["meeting-stop-speaking"].exists, "Stop Speaking while it plays")
+        try shot(app, "answered-realtime")
+
+        // The extension refuses (its service is down): the phone's own voice says the next answer.
+        try voiceMock(hub, speak: "fail")
+        let refused = try speaks(hub).count
+        askAndWaitForTheAnswer(app, hub, waitForAnswer: false)
+        XCTAssertTrue(waitFor(30) { ((try? self.speaks(hub)) ?? []).count > refused }, "the realtime voice was not asked")
+        let device = app.descendants(matching: .any)["meeting-speaking-device"].firstMatch
+        XCTAssertTrue(device.waitForExistence(timeout: 15), "the on-device voice did not take over:\n\(app.debugDescription)")
+        app.terminate()
+
+        // An older voice extension (no speak in /info): never asked, the phone's own voice says it.
+        try voiceMock(hub, speak: "off")
+        app = launch(hub, ["-openShellPage", "recordings", "-showMeetingSample", "taking-part"])
+        let older = try speaks(hub).count
+        askAndWaitForTheAnswer(app, hub)
+        XCTAssertTrue(app.descendants(matching: .any)["meeting-speaking-device"].firstMatch.waitForExistence(timeout: 15),
+                      "the on-device voice did not say it:\n\(app.debugDescription)")
+        XCTAssertEqual(try speaks(hub).count, older, "an extension without speak is never asked")
+        try voiceMock(hub, speak: "ok")
     }
 
     /// The answers so far with the newest being said (a made-up meeting, for the screenshot of it).
@@ -188,6 +270,36 @@ final class MeetingAttendanceUITests: XCTestCase {
         wait(for: [done], timeout: 5)
     }
 
+    /// Taps Ask Persona in the made-up meeting Persona takes part in, and (unless told not to) waits for its answer.
+    @MainActor private func askAndWaitForTheAnswer(_ app: XCUIApplication, _ hub: String, waitForAnswer: Bool = true) {
+        let notice = app.descendants(matching: .any)["meeting-attending"].firstMatch
+        scrollTo(notice, in: app)
+        XCTAssertTrue(notice.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(waitFor(20) { (try? self.meeting(hub))?.role(self.live) == "participant" }, "the upload carried the role")
+        let ask = app.buttons["meeting-ask"]
+        scrollTo(ask, in: app)
+        XCTAssertTrue(waitFor(20) { ask.isEnabled }, "no question is being answered")
+        ask.tap()
+        guard waitForAnswer else { return }
+        let answer = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "回归测试由 Bo 负责")).firstMatch
+        scrollTo(answer, in: app)
+        XCTAssertTrue(answer.waitForExistence(timeout: 25), app.debugDescription)
+    }
+
+    /// The mock's voice extension (MOCK_VOICE): how its `speak` answers from now on (`ok`, `fail`, `slow`, `off`).
+    private func voiceMock(_ hub: String, speak mode: String) throws {
+        guard let data = try? Data(contentsOf: URL(string: hub + "/mock/voice2?speak=" + mode)!),
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], json["speak_mode"] as? String == mode else {
+            throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_VOICE=1")
+        }
+    }
+
+    /// What the app asked the mock's voice extension to say (`GET /mock/voice2` `speaks`), oldest first.
+    private func speaks(_ hub: String) throws -> [[String: Any]] {
+        let data = try Data(contentsOf: URL(string: hub + "/mock/voice2")!)
+        return (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["speaks"] as? [[String: Any]] ?? []
+    }
+
     /// What the mock hub holds about meetings (`GET /mock/meeting_attendance`): each recording's role, live log and asks.
     private struct Meeting {
         var json: [String: Any]
@@ -208,6 +320,25 @@ final class MeetingAttendanceUITests: XCTestCase {
         for _ in 0..<5 where !(element.exists && element.isHittable) {
             app.swipeUp()
         }
+    }
+
+    /// Opens the bar's question row (the keyboard button, or More at accessibility sizes) and returns its field, which
+    /// has the keyboard, and whether the bar is in its accessibility-size layout (Type is in More).
+    @MainActor @discardableResult private func openQuestion(_ app: XCUIApplication) -> (field: XCUIElement, largeType: Bool) {
+        let type = app.buttons["meeting-ask-type"].firstMatch
+        let largeType = !type.waitForExistence(timeout: 3)
+        if largeType {
+            let more = app.buttons["recording-more"].firstMatch
+            XCTAssertTrue(more.waitForExistence(timeout: 10), app.debugDescription)
+            more.tap()
+        }
+        XCTAssertTrue(type.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitFor(10) { type.isEnabled }, "no question is being answered")
+        type.tap()
+        let field = app.descendants(matching: .any)["meeting-ask-field"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitFor(5) { app.keyboards.count > 0 || (field.value(forKey: "hasKeyboardFocus") as? Bool) == true }, "the field has the keyboard")
+        return (field, largeType)
     }
 
     /// The role menu's picked value: its label and value, whichever the menu puts it in.

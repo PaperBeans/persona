@@ -374,6 +374,43 @@ func TestMigrateRenumbered(t *testing.T) {
 	}
 }
 
+// The hub's client_password migration was merged as 0492, a number the manager's agent_shares already had. On a
+// database both sides share, its record moves to 0505 and the manager's 0492 stays; a build from before the move that
+// ran it again (it is idempotent) leaves both records, and the old one goes.
+func TestMigrateRenumberedSharedNumber(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		sql  string
+	}{
+		{"the old number only", `UPDATE schema_migrations SET version = 492, name = '0492_client_password.sql' WHERE name = '0505_client_password.sql'`},
+		{"both numbers", `INSERT INTO schema_migrations (version, name, part) VALUES (492, '0492_client_password.sql', 'hub')`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			url := freshDatabase(t)
+			d, err := Open(ctx, url, AllSets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := records(t, d)
+			if !slices.Contains(want, "0492_agent_shares.sql manager") || !slices.Contains(want, "0505_client_password.sql hub") {
+				t.Fatalf("records %v: want the manager's 0492 and the hub's 0505", want)
+			}
+			if _, err := d.pool.Exec(ctx, c.sql); err != nil {
+				t.Fatal(err)
+			}
+			d.Close()
+			if d, err = Open(ctx, url, AllSets); err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			if got := records(t, d); !slices.Equal(got, want) {
+				t.Fatalf("records %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 // A database migrated before the split (the hub and its default manager on one) runs nothing again, whichever side
 // opens it first; one left at an older state gets the rest of both sets; and a binary from before the split still
 // reads and adds records.

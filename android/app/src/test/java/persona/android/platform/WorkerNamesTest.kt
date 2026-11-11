@@ -48,7 +48,9 @@ class WorkerNamesTest {
                 .filter { it.first.isNotEmpty() }
         }
         assertEquals(persona.core.contracts.ProtocolCompatibility.appSchemes.flatMap { scheme ->
-            listOf(scheme to "pair", scheme to "open")
+            listOf(scheme to "pair") +
+                (if (scheme == "persona") listOf(scheme to "password-login") else emptyList()) +
+                listOf(scheme to "open")
         }, routes)
         assertTrue(activity.getAttributeNS(namespace, "exported").toBoolean())
     }

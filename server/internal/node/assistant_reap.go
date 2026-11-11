@@ -130,6 +130,22 @@ func (p *assistantProc) idleCompactable() bool {
 // compactIdle sends /compact to an idle process. It is not a turn: the conversation stays as it was in the app (the
 // transcript shows a notice), and the process is let go when idle again.
 func (n *Node) compactIdle(p *assistantProc) {
+	// Not while a send, a restore or the user's compaction has this conversation (assistantLife), and only on the same
+	// process, still idle: the next sweep tries again.
+	unlock, ok := n.assistantLife.tryLock(p.id)
+	if !ok {
+		return
+	}
+	defer unlock()
+	n.mu.Lock()
+	same := n.procs[p.id] == p
+	n.mu.Unlock()
+	p.mu.Lock()
+	idle := !p.busy && !p.compacting && !p.manual
+	p.mu.Unlock()
+	if !same || !idle {
+		return
+	}
 	line, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "/compact"}})
 	p.mu.Lock()
 	tokens := p.context

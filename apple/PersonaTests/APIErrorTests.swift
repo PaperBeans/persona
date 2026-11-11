@@ -5,10 +5,10 @@ import Testing
 struct APIErrorTests {
     @Test func knowledgeRefusalsKeepTheirMeaningAndDiagnostics() {
         for (status, code, text) in [
-            (503, "kb_disabled", String(localized: "This manager has turned off the knowledge base. Enable it in the manager configuration to use it.")),
+            (503, "kb_disabled", String(localized: "This assistant has turned off the knowledge base. Enable it in the assistant's configuration to use it.")),
             (503, "kb_unavailable", String(localized: "The knowledge base isn't ready yet. Try again shortly.")),
-            (403, "kb_read_only", String(localized: "The knowledge base is read-only. Change the manager configuration before editing or syncing recordings.")),
-            (503, "assistant_offline", String(localized: "The manager is offline or restarting. Try again shortly."))
+            (403, "kb_read_only", String(localized: "The knowledge base is read-only. Change the assistant's configuration before editing or syncing recordings.")),
+            (503, "assistant_offline", String(localized: "The assistant is offline or restarting. Try again shortly."))
         ] {
             let error = APIError(status: status, message: "Request failed: timeout", fields: ["code": code, "detail": "private diagnostic"], requestID: "request-1")
             #expect(error.errorDescription?.hasPrefix(text) == true)

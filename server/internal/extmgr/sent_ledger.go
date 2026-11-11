@@ -483,7 +483,7 @@ var nodeWriteMethods = map[string]bool{"POST": true, "PUT": true, "PATCH": true,
 // nodeLetThrough is a row's let_through for how a node's gate let a write through: a rule of the gate (written as the
 // connector_gate rule it came from: connector "lark", the action as "<METHOD> <path>" or "*", the body's fields as
 // match), "conversation_always" (the user had allowed that route for the conversation, so no card was shown), or the
-// card with its id and who answered it.
+// card with its id and who answered it, or the conversation's bypass permission mode.
 func nodeLetThrough(t proto.LarkLetThrough) (map[string]any, error) {
 	through := map[string]any{"kind": t.Kind}
 	switch t.Kind {
@@ -505,7 +505,7 @@ func nodeLetThrough(t proto.LarkLetThrough) (map[string]any, error) {
 			rule["match"] = match
 		}
 		through["rule"] = rule
-	case proto.LarkThroughAlways:
+	case proto.LarkThroughAlways, proto.LarkThroughBypass:
 	case proto.LarkThroughCard:
 		if v := cutRunes(strings.TrimSpace(cleanText(t.InteractionID)), sentValueMost); v != "" {
 			through["interaction_id"] = v
@@ -514,7 +514,7 @@ func nodeLetThrough(t proto.LarkLetThrough) (map[string]any, error) {
 			}
 		}
 	default:
-		return nil, fmt.Errorf("let_through: kind %q is not rule, conversation_always or card", t.Kind)
+		return nil, fmt.Errorf("let_through: unsupported kind %q", t.Kind)
 	}
 	return through, nil
 }

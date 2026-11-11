@@ -64,6 +64,8 @@ export interface Context {
   title?: string;
   url?: string;
   text: string;
+  /** Its other attributes as written (a forward's `msg` and metadata, a workspace's `machine`); absent when it has none. */
+  attrs?: Record<string, string>;
 }
 
 export interface Segment {
@@ -190,8 +192,8 @@ export function parseUserText(raw: string): { text: string; contexts: Context[];
   const files: AttachedFile[] = [];
   const photos: string[] = [];
   let text = withoutViewErrors(raw).replace(CONTEXT_RE, (_, attrs: string, body: string) => {
-    const a = tagAttrs(attrs);
-    contexts.push({ kind: a.kind ?? "context", title: a.title, url: a.url, text: body.trim() });
+    const { kind, title, url, ...rest } = tagAttrs(attrs);
+    contexts.push({ kind: kind ?? "context", title, url, text: body.trim(), ...(Object.keys(rest).length ? { attrs: rest } : {}) });
     return "";
   });
   text = text.replace(FILE_RE, (_, attrs: string) => {
@@ -802,6 +804,13 @@ export function buildBlocks(items: Item[], background = false): Block[] {
     if (it.kind === "recap") {
       close();
       blocks.push({ kind: "row", item: it });
+      continue;
+    }
+    if (it.kind === "notice" && it.model_refusal) {
+      // #2528: an upstream refusal (and the model Claude Code moved to) is a line of its own after the exchange, never
+      // folded into the work row where it would go unseen
+      if (!cur) cur = newTurn(it.id);
+      cur.trailing.push(it);
       continue;
     }
     if (it.kind === "notice") {

@@ -45,3 +45,27 @@ func setContext(s *proto.Session, m quickMeta) {
 	s.ContextTokens = m.contextTokens
 	s.ContextWindow = contextWindowOf(m.model, m.contextWindow, m.contextTokens)
 }
+
+// setRuntimeContext is setContext for a runtime's session whose conversation is a transcript here (Paseo). The model
+// the runtime runs it as decides the window when it names the 1M variant: the transcript records the id without the
+// suffix, and behind a gateway another id altogether, so such a session read as 200k, or as no window at all, until
+// a reply passed 200k (#4496). A window the transcript records itself stays, and so does the transcript's word while
+// the session answers as another model: a refusal's fallback, or a reply from a Claude model that is not the one the
+// runtime names (an overload fallback).
+func setRuntimeContext(s *proto.Session, m quickMeta) {
+	setContext(s, m)
+	if s.ContextTokens == 0 || m.contextWindow > 0 || m.modelFallback != nil {
+		return
+	}
+	run := strings.ToLower(strings.TrimSpace(s.Model))
+	if !strings.HasSuffix(run, oneMillionSuffix) {
+		return
+	}
+	run = strings.TrimSuffix(run, oneMillionSuffix)
+	said := strings.ToLower(strings.TrimSpace(m.model))
+	// Two Claude ids that are not one model (neither begins the other: a transcript may add the model's date).
+	if strings.HasPrefix(run, "claude-") && strings.HasPrefix(said, "claude-") && !strings.HasPrefix(said, run) && !strings.HasPrefix(run, said) {
+		return
+	}
+	s.ContextWindow = claudeWindow1M
+}

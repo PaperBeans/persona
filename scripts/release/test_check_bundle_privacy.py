@@ -221,11 +221,13 @@ class PinnedPublicJSTests(unittest.TestCase):
     filename = "mermaid.min.js"
     fixture = b'const label = "remarkable";\n'
 
-    def scan(self, data, words=("mark",), filename=None, pin=None, extra=None):
+    def scan(self, data, words=("mark",), filename=None, pin=None, extra=None, hermes=None):
         with tempfile.TemporaryDirectory(prefix="bundle-privacy-js-") as directory:
             (Path(directory) / (filename or self.filename)).write_bytes(data)
             if extra is not None:
                 (Path(directory) / "private.js").write_bytes(extra)
+            if hermes is not None:
+                (Path(directory) / "Persona").write_bytes(hermes)
             output = io.StringIO()
             pins = {self.filename: pin or hashlib.sha256(self.fixture).hexdigest()}
             with patch.object(sys, "argv", ["check_bundle_privacy.py", directory]), \
@@ -289,6 +291,24 @@ class PinnedPublicJSTests(unittest.TestCase):
         self.assertIn("private IP", output)
         self.assertNotIn(EMAIL, output)
         self.assertNotIn(address, output)
+
+    def test_hermes_tokens_share_the_pinned_resource_boundary(self):
+        # A longer JavaScript token contains the short fragment, but a complete short word still fails.
+        code, output = self.scan(self.fixture, hermes=b'["remarkable", (e) => { call(e); }]')
+        self.assertEqual(code, 0, output)
+        code, output = self.scan(self.fixture, hermes=b'["mark", "remarkable"]')
+        self.assertNotEqual(code, 0)
+        self.assertIn("Persona: private value (4 chars)", output)
+
+    def test_hermes_boundary_requires_the_unmodified_resource(self):
+        for data in (self.fixture + b" ", self.fixture[:-1], b"unrelated"):
+            with self.subTest(bytes=len(data)):
+                code, output = self.scan(data, hermes=b'["remarkable"]')
+                self.assertNotEqual(code, 0)
+                self.assertIn("Persona: private value (4 chars)", output)
+        code, output = self.scan(self.fixture, pin="0" * 64, hermes=b'["remarkable"]')
+        self.assertNotEqual(code, 0)
+        self.assertIn("Persona: private value (4 chars)", output)
 
     def test_other_files_remain_strict_even_next_to_a_pinned_resource(self):
         code, output = self.scan(self.fixture, extra=self.fixture)
@@ -527,6 +547,20 @@ class BundleScanIntegrationTests(unittest.TestCase):
             with self.subTest(site=bad):
                 code, _ = self.scan(bad + "/dl", words=(bad + "/dl",), config={"publish": {"site_url": bad}})
                 self.assertNotEqual(code, 0)
+
+    def test_published_binary_accepts_only_the_exact_configured_update_url(self):
+        # publish.update_url (#4522): the binaries carry it instead of <site>/dl, exactly as configured.
+        url = "https://releases.example.test/owner/repo/releases/latest/download"
+        words = ("releases.example.test",)
+        config = {"publish": {"site_url": "https://site.example.test", "update_url": url + "/"}}
+        code, output = self.scan(url, words=words, config=config)
+        self.assertEqual(code, 0, output)
+        for text in (url + "/private", url + "?token=placeholder", "https://releases.example.test/owner",
+                     "https://site.example.test/dl", "person@releases.example.test"):
+            with self.subTest(text=text):
+                code, output = self.scan(text, words=words + ("site.example.test",), config=config)
+                self.assertNotEqual(code, 0)
+                self.assertIn("private value", output)
 
     def test_the_app_ssh_algorithm_names_are_not_emails(self):
         names = "\n".join(a + "@" + d for a, d in (("aes256-gcm", "openssh.com"), ("curve25519-sha256", "libssh.org"),

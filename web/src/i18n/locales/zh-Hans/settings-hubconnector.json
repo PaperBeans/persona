@@ -62,5 +62,18 @@
   "extension_title": "连接器 {name}",
   "extension_inbox_on": "{name} 的新条目进收件箱。和连接器页上的「进收件箱」是同一个开关。",
   "extension_open": "连接器设置",
-  "extension_open_hint": "登录、状态和更多收件箱设置"
+  "extension_open_hint": "登录、状态和更多收件箱设置",
+  "lark_docs": "关注的文档",
+  "lark_docs_footer": "关注的文档里 @你的评论、以及你参与过的评论下的新回复会进收件箱。每 2 分钟检查一次。 你自己的文档不用加：在飞书弹窗里打开「我拥有的文档收全部评论」。",
+  "lark_docs_links": "文档链接",
+  "lark_docs_link_placeholder": "粘贴飞书文档、表格或多维表格链接",
+  "lark_docs_spaces": "知识库空间",
+  "lark_docs_space_placeholder": "粘贴知识库空间链接（整个空间的文档）",
+  "lark_docs_owned": "我拥有的文档收全部评论",
+  "lark_docs_owned_sub": "你是所有者、最近 30 天编辑或打开过的文档（最多 50 篇），别人的新评论和回复都进收件箱，不必 @你，也不用逐篇添加。",
+  "lark_docs_remove": "不再关注 {link}",
+  "lark_triage": "收件箱分拣规则",
+  "lark_triage_footer": "用一句或几句话说明飞书里什么算「需要你」、什么算「知悉」或「折叠」。留空用收件箱默认的判断；写了就只按这里的规则分拣飞书内容。",
+  "lark_triage_placeholder": "例如：机器人发的构建、发布和告警通知算知悉，除非点名要我处理；有人问我问题或请我评审算需要你。",
+  "lark_triage_save": "保存规则"
 }

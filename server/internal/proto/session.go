@@ -65,7 +65,7 @@ type Session struct {
 	SourceThreadID   string               `json:"source_thread_id,omitempty"`
 	SourceInstanceID string               `json:"source_instance_id,omitempty"`
 	ParentThreadID   string               `json:"parent_thread_id,omitempty"`
-	ParentSessionID  string               `json:"parent_session_id,omitempty"` // Public ID scoped to the Codex home on this machine.
+	ParentSessionID  string               `json:"parent_session_id,omitempty"` // The session that started it: a Codex parent's public ID (scoped to the Codex home on this machine), or a runtime's own session (#4494, #4495).
 	RootSessionID    string               `json:"root_session_id,omitempty"`
 	ReadOnlyReason   string               `json:"read_only_reason,omitempty"`
 	Capabilities     *SessionCapabilities `json:"capabilities,omitempty"`
@@ -91,7 +91,9 @@ type Session struct {
 	// Worktree is the top of the git working tree Cwd is in (RepoRoot itself for the main checkout, a linked worktree's
 	// own folder otherwise) and Branch the branch checked out there ("" when detached or unknown). The node reads both,
 	// and RepoRoot when no host names it, off the filesystem (node/gitplace.go): the apps list machine → project
-	// (RepoRoot) → worktree (Worktree, labelled Branch) → sessions, as Orca does (#1805).
+	// (RepoRoot) → worktree (Worktree, labelled Branch) → sessions, as Orca does (#1805). RepoRoot and Worktree are
+	// physical directories (symbolic links resolved, #4492), however Cwd is written and however a host wrote the
+	// RepoRoot it named: the apps compare them as strings.
 	Worktree    string `json:"worktree,omitempty"`
 	Branch      string `json:"branch,omitempty"`
 	Status      string `json:"status"`
@@ -199,6 +201,20 @@ type Session struct {
 	// "Waiting in the background" apart from Working (lighter, not in the Working count); State stays working, so an
 	// older app shows Working. The node says whether its background commands wait; the manager keeps it only so.
 	BackgroundWaiting bool `json:"background_waiting,omitempty"`
+	// The fields from BackgroundWorking to QueuedRelayed sit together, not beside the ones they go with: with Go's
+	// 8-byte allocation header a Session must stay at most 1,528 bytes to keep its 1,536-byte size class, and every
+	// row the manager copies out of a node's list pays the next class's 256 bytes otherwise (internal/assistant's
+	// TestSessionReadersCopyNoList, #2528). Mind the padding when adding a field.
+	// WokeByTask: the latest turn was started by a background task reporting back, not by the user; finishing
+	// it sends no push (the user did not ask for anything).
+	WokeByTask bool `json:"woke_by_task,omitempty"`
+	// Starting: Persona is opening its tab and waiting for claude (node/starting.go); messages sent now go in once it is
+	// ready.
+	Starting bool `json:"starting,omitempty"`
+	// Quiet: the agent works (or worked) for a quiet task, one the main conversation opened while the user wanted
+	// those told only there (#1731): set by the hub, also once the task is done. Clients leave it out of task
+	// notifications and global badges; the Agents page shows it as always.
+	Quiet bool `json:"quiet,omitempty"`
 	// QueuedRelayed: the last this many of Queued are messages from other conversations that an assistant
 	// conversation's manager holds until its turn ends (docs/assistant/assistant.md "Queue while running"); the apps
 	// show them but take back, delete, move and send now only the others (#4342). A uint16 here sits in the padding
@@ -269,6 +285,9 @@ type Session struct {
 	TurnErrorCode string `json:"turn_error_code,omitempty"`
 	// ModelFallback is the refusal fallback still active in this session, as the runtime recorded it.
 	ModelFallback *ModelRefusal `json:"model_fallback,omitempty"`
+	// ModelRestore: "back to the configured model" was asked for this session's refusal fallback (#2528) and no newer
+	// model evidence has come since. Not proof the configured model runs: only a newer reply says that.
+	ModelRestore *ModelRestore `json:"model_restore,omitempty"`
 	// Work is where the session stands in its work (docs/assistant/agent-work.md): working, blocked on a named precondition, or
 	// done, with a line saying what it waits for or what it concluded. Set by the hub; absent before the hub has
 	// triaged a stopped session's turn.
@@ -280,18 +299,8 @@ type Session struct {
 	ActivityAt *time.Time `json:"activity_at,omitempty"`
 	// Rev changes whenever the transcript does (its size): the app pulls new items for every session whose rev
 	// differs from what it has, without opening it. Changes travel as the light `revs` event.
-	Rev int64 `json:"rev,omitempty"`
-	// WokeByTask: the latest turn was started by a background task reporting back, not by the user; finishing
-	// it sends no push (the user did not ask for anything).
-	WokeByTask bool `json:"woke_by_task,omitempty"`
-	// Starting: Persona is opening its tab and waiting for claude (node/starting.go); messages sent now go in once it is
-	// ready.
-	Starting bool `json:"starting,omitempty"`
-	// Quiet: the agent works (or worked) for a quiet task, one the main conversation opened while the user wanted
-	// those told only there (#1731): set by the hub, also once the task is done. Clients leave it out of task
-	// notifications and global badges; the Agents page shows it as always.
-	Quiet               bool `json:"quiet,omitempty"`
-	PendingInteractions int  `json:"pending_interactions"`
+	Rev                 int64 `json:"rev,omitempty"`
+	PendingInteractions int   `json:"pending_interactions"`
 	// Suggestion is the next message Claude Code proposes after a turn (grey in its empty input box), read off the
 	// screen; gone once the agent works again or a message is sent.
 	Suggestion string `json:"suggestion,omitempty"`

@@ -3,6 +3,7 @@ package node
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -174,7 +175,7 @@ func (n *Node) isAssistantSessionIn(id string, pass *codexListPass) bool {
 	if a.PaneID != "" {
 		return false
 	}
-	if st, ok := n.state.get(id); ok && identity.IsAssistantDir(st.Cwd) {
+	if st, ok := n.state.get(id); ok && (identity.IsAssistantDir(st.Cwd) || n.roomState(st)) {
 		return true
 	}
 	if p := n.transcriptPathIn(id, pass); p != "" && (compat.IsAssistantTranscript(filepath.Base(filepath.Dir(p))) ||
@@ -260,16 +261,35 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		isMain = st.IsMain
 	}
 	// A guest conversation (assistant_guest.go): a new one asked for, or one that is.
-	guest := st.Guest
+	guest, guestKind := st.Guest, st.GuestKind
 	if !resume {
-		guest = guestFrom(ctx)
+		guest, guestKind = guestFrom(ctx), guestKindFrom(ctx)
+	} else if n.roomState(st) {
+		// A meeting's room: never resumed without its tools (its record lost them: refused), nor without its kind
+		// (lost by a manager that did not keep it: its directory says, and the record has it again).
+		if guest == nil {
+			return "", errRoomRecord
+		}
+		if guestKind != guestMeeting {
+			guestKind, st.GuestKind = guestMeeting, guestMeeting
+			n.state.put(id, st)
+		}
+	}
+	if mode == "" && guest == nil {
+		mode = st.AppMode
+		if mode == "" {
+			mode = n.assistantModeOf(id)
+		}
+		if mode == "" {
+			mode = proto.ModeBypass
+		}
 	}
 	if guest != nil {
 		if resume {
 			launcher, options = "", nil // it keeps what it started on (the hub sends none either)
 		}
 		for i := range options {
-			if options[i].Runtime != "" {
+			if options[i].Runtime != "" && (options[i].Runtime != proto.AssistantRuntimeAgentSDK || guestKind == guestMeeting) {
 				return "", errGuestAgent
 			}
 		}
@@ -334,11 +354,12 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	if err != nil {
 		return "", err
 	}
-	if guest != nil && (agent != "claude" || execution.Runtime != "") {
+	if guest != nil && (agent != "claude" || execution.Runtime != "" && (execution.Runtime != proto.AssistantRuntimeAgentSDK || guestKind == guestMeeting)) {
 		return "", errGuestAgent
 	}
 	if agent == "claude" {
-		execution.ConfigDir, err = n.assistantProfileSelection(ctx, id, launcher, execution.Runtime, executionOption(options).ConfigDir, resume)
+		asked := n.startProfile(executionOption(options).ConfigDir, guestKind, resume)
+		execution.ConfigDir, err = n.assistantProfileSelection(ctx, id, launcher, execution.Runtime, asked, resume)
 		if err != nil {
 			return "", err
 		}
@@ -348,8 +369,11 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	var p *assistantProc
 	if id == "" && guest != nil {
 		// Never the warm spare: it was started with the assistant's tools. Its process reads Guest from the state.
-		id = newUUID()
-		n.state.put(id, sessionState{Launcher: launcher, Cwd: cwd, Guest: guest})
+		// Under the id the hub asked for when it gave one (a meeting's room: made once, also across a restart).
+		id = cmp.Or(newIDFrom(ctx), newUUID())
+		n.state.put(id, sessionState{Launcher: launcher, Cwd: cwd, Guest: guest, GuestKind: guestKind})
+	} else if id == "" && newIDFrom(ctx) != "" && agent == "claude" {
+		id = newIDFrom(ctx) // never the spare either: it has an id of its own
 	} else if id == "" {
 		// The spare was started without --permission-mode, and bypassPermissions can't be switched to later.
 		if p = n.adoptSpareFor(cwd, launcher, mode, execution); p != nil {
@@ -370,12 +394,15 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		go func(id string) { snapc <- n.assistantContext(id) }(id)
 	}
 	if id == "" { // a new Codex conversation: the thread's id is Codex's to pick
-		if p, err = n.spawnCodex("", cwd, launcher, false, false, execution); err != nil {
+		if p, err = n.spawnCodexWithMode("", cwd, launcher, false, false, mode, execution); err != nil {
 			return "", err
 		}
 		id = p.id
 	}
 
+	// One at a time with restoreModel and compactions on this conversation's process (model_restore.go): a restore
+	// either sees the process this send made busy, or this send starts a new one after the restore closed it.
+	defer n.assistantLife.lock(id)()
 	n.mu.Lock()
 	p = n.procs[id]
 	n.mu.Unlock()
@@ -409,9 +436,6 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		}
 	}
 	n.noteModes(id, mode, effort)
-	if !resume {
-		n.persistModes(id, mode, effort) // the mode a new conversation was started in, as if set from the app
-	}
 	fresh := p == nil
 	if p == nil {
 		if p, err = n.spawnAssistant(id, cwd, launcher, resume && n.transcriptPath(id) != "", false, execution); err != nil {
@@ -430,6 +454,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		n.state.put(id, st)
 	}
 
+	n.persistModes(id, mode, effort) // after saving state, including defaults filled on resume
 	n.noteAssistantRecoveryProcess(ctx, p)
 	live, commit := n.turnContext(id, <-snapc)
 	if p.agent == "codex" {
@@ -451,12 +476,13 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	}
 
 	interject = interject && !fresh && p.interjects()
+	midTurn := !fresh && p.midTurn()
 	content := []map[string]any{}
 	if live != "" {
 		content = append(content, map[string]any{"type": "text", "text": live})
 	}
-	if interject {
-		content = append(content, interjectNote())
+	if midTurn {
+		content = append(content, interjectNote(interject))
 	}
 	for _, img := range images {
 		content = append(content, map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": img.Mime, "data": img.Data}})
@@ -723,6 +749,12 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 			p.compacting = false
 			if !recovering {
 				p.busy = false
+				// A failed turn (is_error, or an answer that is only an auth / upstream error) is the session's turn
+				// error, as Codex's is: the apps show it failed and the push says so (#4669). The transcript may hold no
+				// line for it at all (a start refused before the model ran).
+				if text, kind := claudeTurnFailure(ev.IsError, ev.Result, kinds); text != "" {
+					p.turnError, p.turnErrorKind = text, kind
+				}
 			}
 			p.lastActive = time.Now()
 			p.partial.Reset()
@@ -867,6 +899,7 @@ func (n *Node) assistantSessions() []proto.Session {
 				// they start, and a list shows them (channel.Background).
 				n.setBackground(&s, m)
 				s.ModelFallback = m.modelFallback
+				n.setModelRestore(&s, path, m)
 				untitled(&s, m)
 				if !busy {
 					s.UpdatedAt = lastUsed(m, st)

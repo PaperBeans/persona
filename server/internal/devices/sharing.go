@@ -569,7 +569,7 @@ func (d *Devices) acknowledged(ctx context.Context, t *db.ShareTx, ack shareAck,
 // original input is sanitized before persistence; reserved creation fields are
 // always removed even for system callers. Nodes never accept owner UUIDs.
 func (d *Devices) prepareShareCall(ctx context.Context, p devicewire.NodeCall, params json.RawMessage) (json.RawMessage, string, error) {
-	if p.Method != "session.start" && p.Method != "session.send" {
+	if !devicewire.IsSessionStart(p.Method) && p.Method != "session.send" {
 		return params, "", nil
 	}
 	var fields map[string]json.RawMessage
@@ -588,7 +588,7 @@ func (d *Devices) prepareShareCall(ctx context.Context, p devicewire.NodeCall, p
 	if store != nil && p.Caller != nil && p.Authority != nil && p.Caller.Kind == "device" && p.Caller.OwnerSubject != "" {
 		current, ok := d.currentShareAuthority(p.MachineID)
 		if ok && current == *p.Authority {
-			if p.Method == "session.start" {
+			if devicewire.IsSessionStart(p.Method) {
 				var resume string
 				_ = json.Unmarshal(fields["resume_session_id"], &resume)
 				creationCapable := false
@@ -641,7 +641,7 @@ func (d *Devices) finishShareCall(ctx context.Context, p devicewire.NodeCall, id
 	}
 	_ = json.Unmarshal(p.Params, &fields)
 	session = fields.SessionID
-	if p.Method == "session.start" {
+	if devicewire.IsSessionStart(p.Method) {
 		var res struct {
 			Session struct {
 				ID       string `json:"session_id"`

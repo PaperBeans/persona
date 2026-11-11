@@ -10,7 +10,7 @@ import (
 // adapter accepts. Keep this pinned and raise it only with fixture updates.
 const MinimumVersion = "1.0.72"
 
-// AuthStatus is the user identity reported by `lark-cli auth status --json`.
+// AuthStatus is the user identity and bound app reported by `lark-cli auth status --json`.
 // GrantedScopes and MissingScopes are best-effort because older CLI releases did
 // not include both fields.
 type AuthStatus struct {
@@ -103,6 +103,7 @@ type Sender struct {
 	ID              string            `json:"id,omitempty"`
 	IDType          string            `json:"id_type,omitempty"`
 	SenderType      string            `json:"sender_type,omitempty"`
+	AppID           string            `json:"app_id,omitempty"`
 	Name            string            `json:"name,omitempty"`
 	OpenBotID       string            `json:"open_bot_id,omitempty"`
 	SenderI18nNames map[string]string `json:"sender_i18n_names,omitempty"`
@@ -121,6 +122,7 @@ type Message struct {
 	ChatID      string          `json:"chat_id,omitempty"`
 	ChatName    string          `json:"chat_name,omitempty"`
 	ChatType    string          `json:"chat_type,omitempty"`
+	ChatMode    string          `json:"chat_mode,omitempty"`
 	ChatPartner json.RawMessage `json:"chat_partner,omitempty"`
 	Deleted     bool            `json:"deleted,omitempty"`
 	Updated     bool            `json:"updated,omitempty"`
@@ -149,6 +151,96 @@ type SearchOptions struct {
 	AtMe      bool
 	Limit     int
 	PageToken string
+}
+
+// Document is the small metadata record returned by drive +inspect. The CLI
+// accepts both ordinary document links and wiki links; URL is kept as the link
+// the user chose while CanonicalURL is the underlying Drive document when the
+// CLI supplies it.
+type Document struct {
+	URL          string `json:"url,omitempty"`
+	CanonicalURL string `json:"canonical_url,omitempty"`
+	Token        string `json:"token,omitempty"`
+	Type         string `json:"type,omitempty"`
+	Title        string `json:"title,omitempty"`
+}
+
+// CommentPage is the normalized output of drive +list-comments. Cursor is an
+// opaque CLI page token and is only meaningful while HasMore is true.
+type CommentPage struct {
+	Comments  []Comment `json:"comments"`
+	HasMore   bool      `json:"has_more,omitempty"`
+	PageToken string    `json:"page_token,omitempty"`
+}
+
+// Comment is one unresolved document comment thread. The API calls the
+// comment body a reply: the first reply on the first replies page is the root
+// comment, followed by ordinary replies.
+type Comment struct {
+	ID         string          `json:"comment_id"`
+	UserID     string          `json:"user_id,omitempty"`
+	CreateTime json.RawMessage `json:"create_time,omitempty"`
+	UpdateTime json.RawMessage `json:"update_time,omitempty"`
+	Solved     bool            `json:"is_solved,omitempty"`
+	Whole      bool            `json:"is_whole,omitempty"`
+	Quote      string          `json:"quote,omitempty"`
+	Content    json.RawMessage `json:"content,omitempty"`
+	ReplyList  ReplyList       `json:"reply_list,omitempty"`
+	ReplyMore  bool            `json:"has_more,omitempty"`
+	ReplyToken string          `json:"page_token,omitempty"`
+}
+
+type ReplyList struct {
+	Replies   []Reply `json:"replies,omitempty"`
+	HasMore   bool    `json:"has_more,omitempty"`
+	PageToken string  `json:"page_token,omitempty"`
+}
+
+// Reply is a comment body or a reply. Content is kept raw because Lark uses a
+// structured elements array for mentions and text.
+type Reply struct {
+	ID         string          `json:"reply_id,omitempty"`
+	UserID     string          `json:"user_id,omitempty"`
+	CreateTime json.RawMessage `json:"create_time,omitempty"`
+	UpdateTime json.RawMessage `json:"update_time,omitempty"`
+	Content    json.RawMessage `json:"content,omitempty"`
+}
+
+type ReplyPage struct {
+	Replies   []Reply `json:"replies"`
+	HasMore   bool    `json:"has_more,omitempty"`
+	PageToken string  `json:"page_token,omitempty"`
+}
+
+// WikiSpace and WikiNode are the bounded expansion records used by the
+// connector's document watch list. The CLI has returned both camelCase and
+// snake_case spellings across releases, so the adapter normalizes both.
+type WikiSpace struct {
+	ID   string `json:"space_id,omitempty"`
+	Name string `json:"name,omitempty"`
+	URL  string `json:"url,omitempty"`
+}
+
+type WikiSpaceList struct {
+	Spaces    []WikiSpace `json:"spaces"`
+	HasMore   bool        `json:"has_more,omitempty"`
+	PageToken string      `json:"page_token,omitempty"`
+}
+
+type WikiNode struct {
+	NodeToken       string `json:"node_token,omitempty"`
+	ObjectToken     string `json:"obj_token,omitempty"`
+	ObjectType      string `json:"obj_type,omitempty"`
+	Title           string `json:"title,omitempty"`
+	URL             string `json:"url,omitempty"`
+	HasChild        bool   `json:"has_child,omitempty"`
+	ParentNodeToken string `json:"parent_node_token,omitempty"`
+}
+
+type WikiNodeList struct {
+	Nodes     []WikiNode `json:"nodes"`
+	HasMore   bool       `json:"has_more,omitempty"`
+	PageToken string     `json:"page_token,omitempty"`
 }
 
 func (o SearchOptions) normalizedLimit() int {

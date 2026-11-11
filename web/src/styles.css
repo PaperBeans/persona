@@ -13,8 +13,16 @@
   scroll-padding-top: calc(var(--sidebar-sticky-top, 0px) + var(--sidebar-controls-height, 0px) + var(--sidebar-row));
 }
 
-/* Assistant trays share the dock's bounded height; count meters use the small line token. */
-.assistant-action-tray { max-height: var(--assistant-tray-max); }
+/* Assistant trays (#4656): an open one lets the dock (ChatView's DOCK_MAX) take most of what is visible, the chat above
+   giving up the room, and fills only what it needs; expanded, it fills the chat column and the chat steps aside. Count
+   meters use the small line token. */
+[data-chat-dock]:has(.assistant-action-tray) { max-height: var(--assistant-dock-open-max); }
+[data-chat-dock]:has(.assistant-action-tray[data-expanded]) { height: var(--kb-h); max-height: none; min-height: 0; }
+[data-chat-dock]:has(.assistant-action-tray[data-expanded]) > [data-chat-dock-above],
+[data-assistant-actionbar]:has(> .assistant-action-tray[data-expanded]),
+.assistant-action-tray[data-expanded] { flex-grow: 1; }
+/* a plan card's Start row, stuck to the tray's bottom edge, keeps a hairline over what scrolls under it */
+.assistant-action-tray [data-plan-actions] { box-shadow: 0 -1px 0 var(--line); }
 .task-count-meter { height: var(--task-count-meter-height); }
 @media (forced-colors: active) {
   .task-count-meter { border: 1px solid CanvasText; }
@@ -25,7 +33,7 @@
  * Copyright (c) 2026 Shane Levine; see THIRD_PARTY_NOTICES.md). Every view reads colors through these.
  * Text tokens (--ink, --ink-2, --ink-3, --accent-ink) keep WCAG AA 4.5:1 on every background token (#2804, theme-contrast.test.ts). */
 :root {
-  --assistant-tray-max: min(20rem, 40dvh);
+  --assistant-dock-open-max: calc(var(--kb-h) * 0.82);
   --task-count-meter-height: 0.25rem;
   --page: #fafafb;
   --canvas: #f1f2f3;
@@ -75,6 +83,9 @@
   --mark-green: #34c759;
   --mark-blue: #007aff;
   --mark-white: #fff;
+  /* Public package artwork may contain a transparent black mark: keep its backing light in both schemes. */
+  --extension-logo-backing: var(--mark-white);
+  --extension-meta-size: 11px;
   --mark-black: #000;
   --shadow-hairline: 0 0 0 1px var(--line);
   --shadow-btn: 0 0 0 1px var(--line-strong), 0 1px 2px #1018280d;
@@ -309,6 +320,21 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 @layer base { * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; } }
 /* A row that scrolls sideways without a bar (still by wheel, trackpad and touch); WebKit before 18.2 needs the pseudo. */
 @utility scrollbar-none { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
+/* Conversation chrome: retain the native hit strip and drag behavior, with no opaque track or layout shift.
+   Only enhanced browsers fade the thumb; forced colors and unsupported browsers keep the native bar. */
+:root { --chat-scrollbar-fade: 220ms; }
+@media (forced-colors: none) {
+  [data-chat-scroll][data-chat-scrollbar="native"] {
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color var(--chat-scrollbar-fade) ease-out;
+  }
+  [data-chat-scroll][data-scrollbar-visible="true"] { scrollbar-color: var(--ink-3) transparent; }
+}
+/* The navigator's measured clearance grows only where the centered column's existing margin is insufficient. */
+[data-chat-scroll] > [data-chat-content] { padding-right: max(calc(var(--spacing) * 5), var(--chat-nav-clearance, 0px)); }
+@media (min-width: 640px) {
+  [data-chat-scroll] > [data-chat-content] { padding-right: max(calc(var(--spacing) * 8), var(--chat-nav-clearance, 0px)); }
+}
 button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }
 /* Blue bubbles need stronger muted text in dark mode and a readable focus indicator in both schemes.
    Keep this local: page text and extension accent colors are unchanged. */

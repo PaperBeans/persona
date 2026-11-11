@@ -19,7 +19,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -274,7 +273,7 @@ fun ChatLinkHost(
                                 stringResource(if (drag.currentValue == LinkDetent.Full) R.string.chat_link_peek else R.string.chat_link_full),
                                 { scope.launch { drag.animateTo(if (drag.currentValue == LinkDetent.Full) LinkDetent.Peek else LinkDetent.Full) } })
                             Box {
-                                val clipboard = LocalClipboardManager.current
+                                val copy = rememberCopy()
                                 val page = { view?.currentUrl?.let { ChatLinks.webUrl(it) } ?: target }
                                 JIconButton(PhIcons.DotsThree, stringResource(R.string.chat_link_actions), { menu = true })
                                 val copied = stringResource(R.string.chat_link_copied)
@@ -282,7 +281,7 @@ fun ChatLinkHost(
                                 // A forwarded port's address is the phone's own loopback: no other app could open it.
                                 JMenu(menu, { menu = false }, listOfNotNull(
                                     JAction(stringResource(R.string.chat_link_copy), PhIcons.LinkSimple) {
-                                        clipboard.setText(AnnotatedString(page())); feedback?.notice(copied)
+                                        copy(page(), copied)
                                     }.takeIf { forwarded == null },
                                     JAction(stringResource(R.string.chat_link_reload), PhIcons.ArrowClockwise, enabled = nativeShown || view?.gone == false) {
                                         if (nativeShown) nativeRefresh++ else view?.reload()

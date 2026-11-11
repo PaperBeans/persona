@@ -39,6 +39,10 @@ export function ResizeHandle(props: {
 
   const start = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || release.current) return;
+    // Resizing can put a sidebar link under the mouse before its compatibility mousedown arrives.
+    // Suppress native link/text dragging, which otherwise cancels the resize pointer in Chrome.
+    e.preventDefault();
+    e.currentTarget.focus({ preventScroll: true });
     const id = e.pointerId;
     const x = e.clientX;
     // from the width drawn, so a drag starts where the edge is

@@ -44,7 +44,12 @@
     <string name="terminal_select_empty_body">Come back once the terminal shows something.</string>
     <string name="terminal_screen_description">Terminal screen</string>
     <string name="terminal_note_offline">Can\'t reach the hub; showing the last screen</string>
-    <string name="terminal_note_no_terminal">No terminal: it shows once the session is resumed</string>
+    <string name="terminal_note_no_terminal">This session isn\'t running on its computer. Send it a message to resume it.</string>
+    <string name="terminal_no_terminal_title">No terminal</string>
+    <string name="terminal_note_no_terminal_resume">This session isn\'t running on its computer. Resume it to open its terminal.</string>
+    <string name="terminal_resume">Resume session</string>
+    <string name="terminal_resuming">Resuming…</string>
+    <string name="terminal_resume_failed">Couldn\'t resume the session</string>
     <string name="terminal_note_read_failed">Couldn\'t read the terminal; retrying</string>
     <string name="terminal_note_disconnected">Disconnected; what you just typed wasn\'t sent</string>
     <string name="terminal_note_stream_stopped">The terminal stream stopped; retrying</string>

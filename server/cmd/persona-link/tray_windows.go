@@ -152,15 +152,35 @@ func (h trayHost) InstallService() error {
 	return nil
 }
 
-func (h trayHost) Pair(raw, machine string) (string, error) {
+func (h trayHost) Pair(raw, machine string, ssh *link.SSH) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	c, err := link.Pair(ctx, strings.TrimSpace(raw), strings.TrimSpace(machine), "", h.e.configPath())
+	c, err := link.PairWithSSH(ctx, strings.TrimSpace(raw), strings.TrimSpace(machine), "", h.e.configPath(), ssh, h.e.sshBin)
 	if err != nil {
 		return "", pairError(err)
 	}
-	_ = link.Poke(h.e.configPath(), link.PokeCheck) // a running persona-link moves to the new credential within seconds anyway, connected or not
+	_ = link.Poke(h.e.configPath(), link.PokeRedial) // a running persona-link moves to the new credential and tunnel right away
 	return c.Machine, nil
+}
+
+func (h trayHost) SetSSH(ssh *link.SSH) (*link.SSH, error) {
+	saved, err := link.SetSSH(h.e.configPath(), ssh)
+	if err != nil {
+		return nil, pairError(err)
+	}
+	_ = link.Poke(h.e.configPath(), link.PokeRedial)
+	return saved, nil
+}
+
+func (h trayHost) TestSSH(ssh link.SSH, rawLink string) (*link.SSH, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c, _ := link.Read(h.e.configPath())
+	norm, err := link.TestSSH(ctx, ssh, strings.TrimSpace(rawLink), c, h.e.sshBin)
+	if err != nil {
+		return nil, pairError(err)
+	}
+	return norm, nil
 }
 
 func (h trayHost) PairListen(listen string) (linktray.Invitation, error) {

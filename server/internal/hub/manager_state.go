@@ -123,7 +123,7 @@ func (h *Hub) mayClaim(id, mid string) bool {
 // mainOf: session on machine is some manager's main conversation, as it reported (the assistant's as the hub kept
 // it), on a machine of that manager's own.
 func (h *Hub) mainOf(machine, session string) bool {
-	if p := h.assistantProfile(); p.Main != "" && p.Main == session && p.MachineID == machine && h.mayClaim(assistantwire.AssistantID, machine) {
+	if p := h.assistantProfile(); p.Main != "" && p.Main == session && p.MainRouteMachine() == machine && h.mayClaim(assistantwire.AssistantID, machine) {
 		return true
 	}
 	for _, id := range h.managerStateIDs()[1:] {
@@ -131,7 +131,7 @@ func (h *Hub) mainOf(machine, session string) bool {
 		a.mu.RLock()
 		p := a.profile
 		a.mu.RUnlock()
-		if p != nil && p.Main != "" && p.Main == session && p.MachineID == machine && h.mayClaim(id, machine) {
+		if p != nil && p.Main != "" && p.Main == session && p.MainRouteMachine() == machine && h.mayClaim(id, machine) {
 			return true
 		}
 	}

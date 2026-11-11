@@ -6,11 +6,12 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/link"
 )
 
 // The small phrases the lines are built from (Mac: LinkText), one place for each so every line says it the same way.
 
-// KindText names a kind of hub address (link.KindOf): LAN, public IPv6, domain, public IPv4.
+// KindText names a kind of hub address (link.KindOf): LAN, public IPv6, domain, public IPv4, SSH.
 func KindText(l i18n.Lang, kind string) string {
 	switch kind {
 	case "lan":
@@ -21,6 +22,8 @@ func KindText(l i18n.Lang, kind string) string {
 		return i18n.T(l, "link-tray.kind_name")
 	case "ipv4":
 		return i18n.T(l, "link-tray.kind_ipv4")
+	case link.KindSSH:
+		return i18n.T(l, "link-tray.kind_ssh")
 	}
 	return i18n.T(l, "link-tray.kind_other")
 }

@@ -193,6 +193,7 @@ export function useTranscript(mid: string, sid: string, opts: { starting?: boole
         return;
       }
       const want = liveRaw.current && unlandedLive(liveRaw.current, latest);
+      if (!want) liveRaw.current = "";
       if (want === liveShown.current) return;
       liveShown.current = want;
       if (!want || batch) deltas.current.flush(want); // the end, and what items took off, at once

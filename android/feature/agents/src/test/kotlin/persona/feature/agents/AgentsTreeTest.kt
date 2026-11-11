@@ -5,7 +5,7 @@ import persona.core.domain.sort.*
 import org.junit.Assert.*
 import org.junit.Test
 
-/** The "By computer and space" tree these tests were written for (the default grouping is now "By repository"). */
+/** The "By project" tree (stored as MachineSpace) these tests were written for (the default grouping is now "By repository"). */
 private val MachineSpaceTree = AgentListSettings(grouping = AgentGrouping.MachineSpace)
 
 class AgentsTreeTest {
@@ -37,7 +37,8 @@ class AgentsTreeTest {
 
     @Test fun searchingOpensQuietSpacesAndFoldingAComputerLeavesOnlyItsHeading() {
         val searched = agentTreeEntries(buildAgentList(rows, machines, settings = AgentListSettings(grouping = AgentGrouping.MachineSpace, query = "notes")), "")
-        assertEquals(listOf("machine-header:machine/mac", "group:mac/notes", "session:mac/c", "session:mac/d"), searched.map { it.key })
+        // One computer left: no heading over its own list, as iOS (#4338 A7).
+        assertEquals(listOf("group:mac/notes", "session:mac/c", "session:mac/d"), searched.map { it.key })
         val rowsOfNotes = searched.filterIsInstance<TreeRowEntry>()
         assertEquals(listOf(true, false), rowsOfNotes.map { it.first })
         assertEquals(listOf(false, true), rowsOfNotes.map { it.last })
@@ -85,37 +86,30 @@ class AgentsTreeTest {
         val entries = agentTreeEntries(list, "")
         assertTrue(entries.none { it is TreeMachineEntry })
         val groups = entries.filterIsInstance<TreeGroupEntry>()
-        // project › to-do › Agent (#3156): sessions without a cwd are in the project "Other"; "No to-do" is open (one there needs you)
-        assertEquals(listOf("todo-project/-", "todo/todo_1", "todo/none", "todo-loose/todo/none/-"), groups.map { it.group.id })
-        assertEquals(listOf(0, 1, 0, 1), groups.map { it.depth })
-        assertEquals("其他", groups[0].group.title.shown)
-        assertEquals("待办一", groups[1].group.title.shown)
-        assertEquals("没有待办", groups[2].group.title.shown)
+        // As iOS (#4338 A5): a section per to-do, then "No to-do", open here (one there needs you)
+        assertEquals(listOf("todo/todo_1", "todo/none"), groups.map { it.group.id })
+        assertEquals(listOf(0, 0), groups.map { it.depth })
+        assertEquals("待办一", groups[0].group.title.shown)
+        assertEquals("没有待办", groups[1].group.title.shown)
         val rowsInTodo1 = entries.filterIsInstance<TreeRowEntry>().filter { it.row.session.sessionId == "a" }
         assertEquals(1, rowsInTodo1.size)
-        assertEquals(1, rowsInTodo1.single().depth)
+        assertEquals(0, rowsInTodo1.single().depth)
         assertTrue("todo rows still say where they run", rowsInTodo1.single().located)
     }
 
-    @Test fun byTodoProjectsHoldTheirTodosAndFoldThem() {
+    @Test fun byTodoIsOneSectionPerTodoAndFoldsThem() {
         fun at(id: String, cwd: String, state: String) = AgentSession(Session(machineId = "mac", sessionId = id, state = state, cwd = cwd,
             updatedAt = "2026-01-01T00:00:00Z"))
         val sessions = listOf(at("a", "/code/app", "working"), at("b", "/code/app/.worktrees/fix", "idle"), at("c", "/code/api", "needs_you"),
             at("d", "/code/api", "idle"))
         val todos = listOf(Todo(id = "t1", title = "修登录", agents = listOf(TodoAgent("mac", "a"), TodoAgent("mac", "b"))),
             Todo(id = "t2", title = "改接口", agents = listOf(TodoAgent("mac", "c"))))
-        fun ids(folded: Set<String> = emptySet()) = agentTreeEntries(buildAgentList(sessions, machines,
-            settings = AgentListSettings(grouping = AgentGrouping.Todo, folded = folded), todos = todos), "")
-            .filterIsInstance<TreeGroupEntry>().map { it.group.id }
-        // the project with an agent waiting for you first; a worktree belongs to its repository; "No to-do" folded under to-dos
-        assertEquals(listOf("todo-project/api", "todo/t2", "todo-project/app", "todo/t1", "todo/none"), ids())
-        assertEquals(listOf("todo-project/api", "todo-project/app", "todo/t1", "todo/none"), ids(setOf("todo-project/api")))
-    }
-
-    @Test fun aTodoBelongsToTheRepositoryMostOfItsAgentsWorkIn() {
-        assertEquals("app", todoProjectOf(listOf("/code/app", "/x/api", "/code/app/.claude/worktrees/fix")))
-        assertEquals("api", todoProjectOf(listOf("/code/app", "/x/api")))
-        assertEquals("", todoProjectOf(listOf("", "")))
+        fun keys(folded: Set<String> = emptySet()) = agentTreeEntries(buildAgentList(sessions, machines,
+            settings = AgentListSettings(grouping = AgentGrouping.Todo, folded = folded), todos = todos), "").map { it.key }
+        // As iOS (#4338 A5): the to-do with an agent waiting for you first, each a flat list whatever repository its agents
+        // work in; "No to-do" folded under the to-dos while nothing in it waits.
+        assertEquals(listOf("group:todo/t2", "session:mac/c", "group:todo/t1", "session:mac/a", "session:mac/b", "group:todo/none"), keys())
+        assertEquals(listOf("group:todo/t2", "group:todo/t1", "session:mac/a", "session:mac/b", "group:todo/none"), keys(setOf("todo/t2")))
     }
 
     @Test fun byRepositoryTreesSitAStepInsideTheirRepositoryAndFoldWithIt() {
@@ -137,6 +131,27 @@ class AgentsTreeTest {
             .single { it.first == persona.core.designsystem.Status.NeedsYou }.second)
         val folded = agentTreeEntries(buildAgentList(repoRows, machines, settings = byRepo.copy(machineFilter = "mac", folded = setOf("repo/mac//code/app"))), "mac")
         assertEquals(listOf("group:repo/mac//code/app", "group:tree/mac//code/notes"), folded.take(2).map { it.key })
+    }
+
+    @Test fun aSharedCheckoutPathKeepsEachRepositoryAndItsSessionsInTheTree() {
+        val path = "/home/user"
+        fun at(id: String, repo: String) = AgentSession(Session(machineId = "mac", sessionId = id,
+            state = "working", cwd = "$path/project", repoRoot = repo, worktree = path))
+        val sessions = listOf(at("main", path), at("first", "/code/first"), at("second", "/code/second"))
+        val settings = AgentListSettings(grouping = AgentGrouping.Repo)
+        fun entries(rows: List<AgentSession>) = agentTreeEntries(buildAgentList(rows, machines, settings = settings), "")
+        val all = entries(sessions)
+        assertEquals(all.size, all.map { it.key }.toSet().size)
+        assertEquals(setOf("main", "first", "second"), all.filterIsInstance<TreeRowEntry>().map { it.row.session.sessionId }.toSet())
+        val groups = all.filterIsInstance<TreeGroupEntry>().filter { it.group.rows.isNotEmpty() }.map { it.group }
+        val main = groups.single { it.rows.single().session.sessionId == "main" }
+        assertEquals("tree/mac/$path", main.id)
+        for (session in sessions.drop(1)) {
+            val group = groups.single { it.rows.single().id == session.id }
+            assertEquals("repo/mac/${session.session.repoRoot}", group.under)
+            val filtered = entries(listOf(session)).filterIsInstance<TreeGroupEntry>().single { it.group.rows.isNotEmpty() }
+            assertEquals(group.id, filtered.group.id)
+        }
     }
 
     // #2320: a herdr tab holding the launcher and two panes it split off, beside a tab of one agent and a tab of two peers
@@ -184,5 +199,23 @@ class AgentsTreeTest {
         // one agent of the tab left under a quick filter: a row of its own
         val needs = agentTreeEntries(buildAgentList(panes, machines, settings = MachineSpaceTree.copy(quick = AgentQuickFilter.NeedsYou)), "mac", tabs = true)
         assertTrue(needs.none { it is TreeTabEntry })
+    }
+
+    // #4338 A11, as iOS's `cappedRows`: a long section shows 20 rows, then "Show All N"; open, "Collapse" at its end.
+    @Test fun aLongSectionShowsTwentyRowsThenShowAll() {
+        val many = (1..30).map { session("box", "s$it", "working", "api") }
+        val byStatus = AgentListSettings(grouping = AgentGrouping.State)
+        val list = buildAgentList(many, machines, settings = byStatus)
+        fun entries(showAll: Set<String>?, of: AgentListResult = list) = agentTreeEntries(of, "", showAll = showAll)
+        val capped = entries(emptySet())
+        assertEquals(20, capped.count { it is TreeRowEntry })
+        assertEquals(TreeShowAllEntry(list.groups.single(), 30, 0, expanded = false), capped.last())
+        val open = entries(setOf(AgentRowCap.key("state/working")))
+        assertEquals(30, open.count { it is TreeRowEntry })
+        assertTrue((open.last() as TreeShowAllEntry).expanded)
+        // A search, a quick filter or a paged list shows every row (null); a run only a few over the cap shows them all.
+        assertEquals(30, entries(null).count { it is TreeRowEntry })
+        assertTrue(entries(null).none { it is TreeShowAllEntry })
+        assertTrue(entries(emptySet(), buildAgentList(many.take(25), machines, settings = byStatus)).none { it is TreeShowAllEntry })
     }
 }

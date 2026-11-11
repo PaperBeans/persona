@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A to-do's due date, reminder and priority in its detail (#4636): iOS TodoPlanSection words. -->
+<resources>
+    <string name="agents_todo_plan_due">Due date</string>
+    <string name="agents_todo_plan_all_day">All day</string>
+    <string name="agents_todo_plan_date">Date</string>
+    <string name="agents_todo_plan_time">Time</string>
+    <string name="agents_todo_plan_remind">Remind me</string>
+    <string name="agents_todo_plan_remind_at">Remind at</string>
+    <string name="agents_todo_plan_reminded">Reminded %1$s</string>
+    <string name="agents_todo_plan_priority">Priority</string>
+    <string name="agents_todo_plan_high">High</string>
+    <string name="agents_todo_plan_normal">Normal</string>
+    <string name="agents_todo_plan_low">Low</string>
+</resources>

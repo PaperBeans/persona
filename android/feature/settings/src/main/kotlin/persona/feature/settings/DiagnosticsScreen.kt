@@ -1,8 +1,5 @@
 package persona.feature.settings
 
-import android.content.ClipData
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.LocalClipboard
 import persona.core.designsystem.resolve
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListScope
@@ -34,7 +31,7 @@ internal fun DiagnosticsScreen(services: SettingsServices, onBack: (() -> Unit)?
     val context = LocalContext.current
     val resources = context.resources
     val scope = rememberCoroutineScope()
-    val clipboard = LocalClipboard.current
+    val copy = rememberCopy()
     var background by remember { mutableStateOf(BackgroundDiagnostics.read(context)) }
     var backgroundCopied by remember { mutableStateOf(false) }
     val controller = remember(services) {
@@ -94,11 +91,7 @@ internal fun DiagnosticsScreen(services: SettingsServices, onBack: (() -> Unit)?
             note = resources.getString(R.string.settings_background_note))
         item {
             JButton(stringResource(if (backgroundCopied) R.string.settings_background_copied else R.string.settings_background_copy), {
-                val report = background.copyText(resources)
-                scope.launch {
-                    clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(resources.getString(R.string.settings_background_title), report)))
-                    backgroundCopied = true
-                }
+                if (copy(background.copyText(resources), null)) backgroundCopied = true
             }, Modifier.fillMaxWidth(), kind = JButtonKind.Secondary, size = JButtonSize.Small)
         }
         fun seconds(value: Int?) = value?.let { resources.getQuantityString(R.plurals.settings_seconds, it, it) }

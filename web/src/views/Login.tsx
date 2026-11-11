@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { ApiError, errorText } from "../lib/api";
 import { pair } from "../lib/auth";
 import { here, rememberHub } from "../lib/hubs";
@@ -8,6 +8,9 @@ import { Icon } from "../ui/icons";
 import { OtherHubs } from "./Hubs";
 import { t } from "../i18n";
 import { tRich } from "../i18n/rich";
+import type { PasswordState } from "../lib/password";
+
+const PasswordLogin = lazy(() => import("./PasswordLogin").then((m) => ({ default: m.PasswordLogin })));
 
 const code = "whitespace-nowrap rounded-[5px] bg-field px-1 py-0.5 font-mono text-[11.5px] text-ink-2 shadow-hairline";
 
@@ -16,6 +19,12 @@ const code = "whitespace-nowrap rounded-[5px] bg-field px-1 py-0.5 font-mono tex
 // pasted pairing / login link. The hub's own token and the commands that print it are folded under "Advanced". `error` is
 // what went wrong with a token that came in the link.
 export function Login({ onDone, error: linkError = "" }: { onDone: () => void; error?: string }) {
+  const [passwordMode, setPasswordMode] = useState(false);
+  useEffect(() => {
+    let live = true;
+    import("../lib/password").then((m) => m.passwordApi<PasswordState>("/state")).then((s) => { if (live) setPasswordMode(s.enabled); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
   const [link, setLink] = useState("");
   const [master, setMaster] = useState("");
   const [busy, setBusy] = useState<"" | "link" | "master">("");
@@ -44,6 +53,8 @@ export function Login({ onDone, error: linkError = "" }: { onDone: () => void; e
 
   const field = "flex h-10 items-center gap-2 rounded-control bg-inset px-3 shadow-hairline focus-within:shadow-[0_0_0_1px_var(--line-strong)]";
   const input = "min-w-0 flex-1 bg-transparent font-mono text-[13px] text-ink outline-none placeholder:font-sans placeholder:text-ink-3";
+
+  if (passwordMode) return <div><Suspense fallback={<Spinner />}><PasswordLogin onDone={onDone} error={linkError} /></Suspense><button type="button" onClick={() => setPasswordMode(false)} className="mx-auto mb-6 block text-ink-2">{t("login.password_pairing")}</button></div>;
 
   return (
     <div className="flex min-h-full items-center justify-center bg-page px-5 py-16">

@@ -17,19 +17,20 @@ const Module = "github.com/nwverse/persona/server/"
 var Platforms = []string{"linux/amd64", "linux/arm64", "darwin/arm64", "darwin/amd64", "windows/amd64"}
 
 // HubOwn are the hub's own packages: persona-manager links none of them. A contract between the hub and a helper of
-// its own (relayproto with the push relay, shareproof with the sharing ingress) is the hub's too.
+// its own (relayproto with the push relay, shareproof with the sharing ingress, passwordpake with the web app's
+// password WASM) is the hub's too.
 var HubOwn = []string{"cmd/persona-hub", "internal/hub", "internal/hubcli", "internal/hubedge", "internal/apns",
-	"internal/mdns", "internal/proxyproto", "internal/pushcrypto", "internal/relay", "internal/relayproto",
-	"internal/shareproof", "internal/webasset"}
+	"internal/mdns", "internal/passwordpake", "internal/proxyproto", "internal/pushcrypto", "internal/relay",
+	"internal/relayproto", "internal/shareproof", "internal/webasset"}
 
 // Shared are the packages both programs link (the wire types, the database, the configuration, identity, the update
-// code): the hub links these and its own, nothing else; a new package the hub needs is put in one of the two lists on
-// purpose, never one of the manager's.
+// code and its proxy, netproxy): the hub links these and its own, nothing else; a new package the hub needs is put in
+// one of the two lists on purpose, never one of the manager's.
 var Shared = []string{"internal/acceptloop", "internal/aiwire", "internal/apierr", "internal/assistantwire",
 	"internal/bus", "internal/channel", "internal/clitext", "internal/compat", "internal/connectorwire", "internal/db",
 	"internal/devicewire", "internal/dialogwire", "internal/errreport", "internal/extwire", "internal/i18n",
 	"internal/identity", "internal/kbwire", "internal/lazyre", "internal/link", "internal/managerconf", "internal/netaddr",
-	"internal/nodeproto", "internal/osproc", "internal/pgdocker", "internal/preview", "internal/procinfo", "internal/prompts",
+	"internal/netproxy", "internal/nodeproto", "internal/osproc", "internal/pgdocker", "internal/preview", "internal/procinfo", "internal/prompts",
 	"internal/proto", "internal/rpc", "internal/screen", "internal/secretkey", "internal/sessionlist", "internal/sessionorigin", "internal/streams",
 	"internal/textfmt", "internal/transcript", "internal/update", "internal/workspaceboard"}
 

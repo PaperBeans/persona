@@ -327,6 +327,7 @@ func (n *Node) handleHook(ctx context.Context, req sockRequest) (any, error) {
 	if json.Unmarshal(req.Input, &in) != nil {
 		return nil, nil
 	}
+	defer n.hookFlights.enter(in.SessionID)() // its process waits on this call: not idle (model_restore.go)
 	if req.ReportOnly && !n.takesReport(in) {
 		return nil, nil // before the counters: a session the plugin reports for would count each prompt twice
 	}

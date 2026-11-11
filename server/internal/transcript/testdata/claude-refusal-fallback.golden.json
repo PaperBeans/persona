@@ -22,15 +22,14 @@
       "ts": "2026-01-01T00:00:02Z",
       "role": "system",
       "kind": "notice",
-      "text": "{\"type\":\"system\",\"subtype\":\"model_refusal_fallback\",\"uuid\":\"synthetic-fallback\",\"parentUuid\":\"synthetic-answer\",\"timestamp\":\"2026-01-01T00:00:02Z\",\"trigger\":\"refusal\",\"direction\":\"retry\",\"scope\":\"session\",\"originalModel\":\"primary-model\",\"fallbackModel\":\"fallback-model\",\"requestId\":\"synthetic-request\",\"apiRefusalCategory\":\"synthetic-policy\",\"apiRefusalExplanation\":\"Upstream refused the request\",\"refusedUserMessageUuid\":\"synthetic-user\",\"retractedMessageUuids\":[]}",
+      "text": "Upstream refused the request",
       "model_refusal": {
         "subtype": "model_refusal_fallback",
         "original_model": "primary-model",
         "fallback_model": "fallback-model",
         "category": "synthetic-policy",
         "scope": "session",
-        "explanation": "Upstream refused the request",
-        "raw": "{\"type\":\"system\",\"subtype\":\"model_refusal_fallback\",\"uuid\":\"synthetic-fallback\",\"parentUuid\":\"synthetic-answer\",\"timestamp\":\"2026-01-01T00:00:02Z\",\"trigger\":\"refusal\",\"direction\":\"retry\",\"scope\":\"session\",\"originalModel\":\"primary-model\",\"fallbackModel\":\"fallback-model\",\"requestId\":\"synthetic-request\",\"apiRefusalCategory\":\"synthetic-policy\",\"apiRefusalExplanation\":\"Upstream refused the request\",\"refusedUserMessageUuid\":\"synthetic-user\",\"retractedMessageUuids\":[]}"
+        "explanation": "Upstream refused the request"
       }
     },
     {
@@ -88,8 +87,7 @@
       "fallback_model": "fallback-model",
       "category": "synthetic-policy",
       "scope": "session",
-      "explanation": "Upstream refused the request",
-      "raw": "{\"type\":\"system\",\"subtype\":\"model_refusal_fallback\",\"uuid\":\"synthetic-fallback\",\"parentUuid\":\"synthetic-answer\",\"timestamp\":\"2026-01-01T00:00:02Z\",\"trigger\":\"refusal\",\"direction\":\"retry\",\"scope\":\"session\",\"originalModel\":\"primary-model\",\"fallbackModel\":\"fallback-model\",\"requestId\":\"synthetic-request\",\"apiRefusalCategory\":\"synthetic-policy\",\"apiRefusalExplanation\":\"Upstream refused the request\",\"refusedUserMessageUuid\":\"synthetic-user\",\"retractedMessageUuids\":[]}"
+      "explanation": "Upstream refused the request"
     },
     "last_activity": "2026-01-01T00:00:06Z"
   }

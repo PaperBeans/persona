@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -96,6 +95,7 @@ class AgentTabShotsTest {
                                 launcher = entry.launcher, branch = entry.branch)
                             is TreeChildrenEntry -> error("Fixture has no Codex subtasks")
                             is TreeIdleEntry -> AgentIdleRow(entry.hidden, {}, depth = entry.depth)
+                            is TreeShowAllEntry -> AgentShowAllRow(entry.count, entry.expanded, {}, depth = entry.depth)
                         }
                     }
                 }
@@ -121,7 +121,7 @@ class AgentTabShotsTest {
             PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
                 Box(Modifier.testTag("shot").size(400.dp, 900.dp).background(PersonaTheme.palette.background)) {
                     SpaceScreen(space, machines, emptyList(), AgentsPreferencesSnapshot(), busy = false, canStart = true,
-                        snackbar = SnackbarHostState(), now = now, onDismiss = {}, onOpen = {}, onNewTab = {},
+                        toast = JToastState(), now = now, onDismiss = {}, onOpen = {}, onNewTab = {},
                         spaceMenu = {}, sessionMenu = { emptyList() })
                 }
             }

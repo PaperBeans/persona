@@ -47,7 +47,8 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, http.StatusBadRequest, errors.New("task_workspace_preference must be prefer-existing or prefer-new"))
 		return
 	}
-	machine := s.settings(ctx).MachineID
+	before := s.settings(ctx)
+	machine := before.MachineID
 	if in.MachineID != "" {
 		if _, ok := s.device(ctx, in.MachineID); !ok {
 			apierr.Write(w, http.StatusBadRequest, errors.New("unknown machine"))
@@ -117,6 +118,17 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	launcher := s.launcherNow(ctx)
+	var mainMachine string
+	if in.Main != "" && in.Main != "-" && in.Main != before.Main {
+		mainMachine = s.confirmedMainMachine(ctx, Settings{Main: in.Main, MachineID: machine})
+	} else if (in.MachineID != "" || in.Main != "") && in.Main != "-" {
+		mainMachine = s.confirmedMainMachine(ctx, before)
+		if mainMachine == "" && before.Main != "" && in.MachineID != "" {
+			// Keep the legacy route while its inventory is missing. This is a
+			// routing hint only; the node must still attest actual execution.
+			mainMachine = before.MachineID
+		}
+	}
 	if _, err := s.updateSettings(ctx, func(v *Settings) error {
 		*v = s.effective(ctx, *v) // saved as they are in effect, as the hub saved them
 		v.MachineID, v.Launcher = machine, launcher
@@ -124,12 +136,15 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 			v.Launcher = in.Launcher
 		}
 		if in.Main == "-" {
-			v.Main = ""
-		} else if in.Main != "" {
-			v.Main = in.Main
+			v.Main, v.MainMachineID = "", ""
+		} else if in.Main != "" && in.Main != before.Main {
+			v.Main, v.MainMachineID = in.Main, mainMachine
+		} else if v.Main == before.Main && v.MainMachineID == "" {
+			v.MainMachineID = mainMachine
 		}
-		if in.Timezone != "" {
-			v.Timezone = in.Timezone
+		v.Timezone = zoneWritten(*v, in.Timezone, in.TimezonePicked)
+		if in.TimezonePicked != nil {
+			v.TimezonePicked = in.TimezonePicked
 		}
 		if in.Notes != nil {
 			v.Notes = in.Notes
@@ -228,4 +243,14 @@ func (s *Service) runtimeAssistantLauncher(ctx context.Context, machine, launche
 		return false
 	}
 	return slices.ContainsFunc(res.Launchers, func(l proto.Launcher) bool { return l.Name == launcher && l.Assistant })
+}
+
+// zoneWritten is the zone a settings write leaves (#1855): one the user picked (`timezone_picked` true) or a device's
+// own once the user goes back to following the devices (false); without `timezone_picked` the write is a device syncing
+// its zone, as apps did before picking was kept, and it lands only while no zone was picked. An empty zone changes nothing.
+func zoneWritten(saved Settings, zone string, picked *bool) string {
+	if zone == "" || (picked == nil && saved.TimezonePicked != nil && *saved.TimezonePicked) {
+		return saved.Timezone
+	}
+	return zone
 }

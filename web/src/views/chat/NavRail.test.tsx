@@ -63,6 +63,40 @@ afterEach(() => {
 });
 
 describe("NavRail", () => {
+  it("keeps global input ordinals in labels and keyboard announcements for a 50-mark window", async () => {
+    const ticks = Array.from({ length: 50 }, (_, i) => ({ ...tick(i), ordinal: 629 + i }));
+    act(() => root.render(<NavRail ticks={ticks} total={678} scroller={scrollerWith(1000, 800)} onJump={() => {}} reset="example/global" />));
+    await settle();
+    const marks = host.querySelectorAll("button[data-tick]");
+    expect(marks).toHaveLength(50);
+    expect(marks[0].getAttribute("aria-label")).toContain("629");
+    expect(marks[49].getAttribute("aria-label")).toContain("678");
+    const rail = host.querySelector<HTMLElement>("[data-nav-rail]")!;
+    act(() => rail.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })));
+    expect(host.querySelector('[aria-live="polite"]')?.textContent).toContain("629");
+    expect(host.querySelector('[aria-live="polite"]')?.textContent).toContain("678");
+  });
+
+  it("separates the hit strip from native and overlay scrollbars and clears narrow content padding on unmount", async () => {
+    const sc = scrollerWith(500, 600);
+    Object.defineProperty(sc, "offsetWidth", { value: 510 });
+    const content = document.createElement("div");
+    content.dataset.chatContent = "";
+    Object.defineProperty(content, "clientWidth", { value: 500 });
+    sc.append(content);
+    act(() => root.render(<NavRail ticks={[tick(1), tick(2)]} scroller={sc} onJump={() => {}} reset="example/gutter" />));
+    await settle();
+    expect(host.querySelector<HTMLElement>("[data-nav-rail]")!.style.right).toBe(`${10 + M.edgeGap}px`);
+    expect(sc.style.getPropertyValue("--chat-nav-clearance")).toBe(`${M.width + M.edgeGap + M.endInset}px`);
+    act(() => root.render(null));
+    expect(sc.style.getPropertyValue("--chat-nav-clearance")).toBe("");
+    const overlay = scrollerWith(500, 600);
+    Object.defineProperty(overlay, "offsetWidth", { value: 500 });
+    act(() => root.render(<NavRail ticks={[tick(1), tick(2)]} scroller={overlay} onJump={() => {}} reset="example/overlay" />));
+    await settle();
+    expect(host.querySelector<HTMLElement>("[data-nav-rail]")!.style.right).toBe(`${M.edgeGap}px`);
+  });
+
   it("rearms a frame cancelled by StrictMode's initial effect replay", async () => {
     const sc = scrollerWith(700, 600);
     act(() => root.render(<StrictMode><NavRail ticks={[]} scroller={sc} onJump={() => {}} reset="example/strict" /></StrictMode>));
@@ -108,7 +142,9 @@ describe("NavRail", () => {
     const button = host.querySelector('[data-tick="1"]')!;
     act(() => button.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })));
     expect(marks()[1].style.width).toBe(`${M.hoverWidth}px`);
-    expect(marks()[0].style.width).toBe(`${M.currentWidth}px`);
+    expect(parseFloat(marks()[0].style.width)).toBeCloseTo(M.tickWidth + (M.hoverWidth - M.tickWidth) * Math.exp(-0.5));
+    expect(marks()[0].classList.contains("bg-ink")).toBe(true);
+    expect(host.querySelector('[data-tick="0"]')?.getAttribute("aria-current")).toBe("true");
     act(() => button.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));
     expect(host.querySelector("[data-nav-preview]")).toBeNull();
     short();

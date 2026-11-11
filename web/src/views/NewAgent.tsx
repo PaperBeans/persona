@@ -7,6 +7,10 @@ import { hubLabel } from "../lib/mesh";
 import { api, ApiError, credentialOwner, enc, errorText, getToken, isAbort, subscribeCredentialOwner } from "../lib/api";
 import { defaultManager, useKnownDefault } from "../lib/manager-choice";
 import { pickAttachment, releaseAttachments, type LocalAttachment } from "../lib/attachments";
+import type { DraftImage } from "../lib/drafts";
+import { withContexts } from "../lib/context-xml";
+import type { ContextRef } from "../lib/links";
+import { ForwardBar } from "./chat/ForwardBar";
 import { browserStartKeys, launchAgent, presetPrompt, type NewAgentPreset } from "../lib/new-agent";
 import type { WorkspaceTarget } from "../lib/workspace-target";
 import { AttachmentTray } from "../ui/AttachmentTray";
@@ -38,6 +42,15 @@ import { initialLauncher, launcherBlock } from "../lib/launcher-health";
 import { navigate } from "../lib/router";
 import { settingsHref } from "./settings/nav";
 import { LauncherBlockedHelp } from "./LauncherBlockedHelp";
+import { WorkSessionForm } from "./WorkSessionForm";
+
+/** A forwarded picture (lib/drafts.ts DraftImage, base64) as a file for the first message's tray. */
+function draftImageFile(img: DraftImage): File {
+  const bin = atob(img.data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new File([bytes], img.name, { type: img.mime });
+}
 
 interface Dirs {
   path: string;
@@ -46,7 +59,14 @@ interface Dirs {
   recent?: { path: string; name: string; last_used?: string }[];
 }
 
-export function NewAgent({ open, onClose, preset }: { open: boolean; onClose: () => void; /** Filled in when another page opens it (the knowledge base's "Open agent"). */ preset?: NewAgentPreset | null }) {
+type NewAgentProps = { open: boolean; onClose: () => void; preset?: NewAgentPreset | null };
+
+export function NewAgent(props: NewAgentProps) {
+  if (props.preset?.workSession) return <WorkSessionForm open={props.open} onClose={props.onClose} />;
+  return <AgentForm {...props} />;
+}
+
+function AgentForm({ open, onClose, preset }: NewAgentProps) {
   // with several assistants, the current one's computers: the agent started here shows in its list (docs/assistant/managers.md "Clients")
   const machines = useScopedMachines();
   const online = useMemo(() => machines.filter((m) => m.online), [machines]);
@@ -95,6 +115,8 @@ export function NewAgent({ open, onClose, preset }: { open: boolean; onClose: ()
   const [prompt, setPrompt] = useState(() => localStorage.getItem("draft:new-agent") ?? "");
   const keys = useMemo(browserStartKeys, []);
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
+  // a message forwarded to a new Agent (#3899, lib/forward.ts): its card over the first message, which carries it in front
+  const [forward, setForward] = useState<ContextRef | null>(null);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const submitted = useRef(false);
@@ -133,7 +155,10 @@ export function NewAgent({ open, onClose, preset }: { open: boolean; onClose: ()
   attachmentsRef.current = attachments;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setForward(null); // a forward goes with the sheet it came in, not into the next one
+      return;
+    }
     submitted.current = false;
     setEffort("");
     setTier(null);
@@ -180,6 +205,15 @@ export function NewAgent({ open, onClose, preset }: { open: boolean; onClose: ()
     if (preset.prompt) {
       promptRevision.current++;
       setPrompt((draft) => presetPrompt(preset.prompt, draft));
+    }
+    if (preset.forward) setForward(preset.forward);
+    if (preset.images?.length) {
+      const picked: LocalAttachment[] = [];
+      for (const img of preset.images) {
+        try { picked.push(pickAttachment(draftImageFile(img))); }
+        catch (e) { toast(errorText(e), "error"); }
+      }
+      setAttachments((current) => [...current, ...picked]);
     }
     const target = preset.workspace;
     setWorkspace(target ? { ...target, owner: target.owner ?? credentialOwner(),
@@ -432,7 +466,8 @@ export function NewAgent({ open, onClose, preset }: { open: boolean; onClose: ()
     const owner = credentialOwner();
     const token = getToken();
     const revision = promptRevision.current;
-    const snapshot = { text: prompt.trim(), attachments: [...attachments] };
+    const sent = forward ? withContexts([forward], prompt, attachments.some((a) => a.mime.startsWith("image/"))) : prompt.trim();
+    const snapshot = { text: sent, attachments: [...attachments] };
     const current = () => preparation.current === controller && !controller.signal.aborted && owner === credentialOwner()
       && getState().machines.some((m) => m.id === mid && m.online)
       && manager === (getState().machines.find((m) => m.id === mid)?.manager || defaultManager());
@@ -463,6 +498,7 @@ export function NewAgent({ open, onClose, preset }: { open: boolean; onClose: ()
       attachmentsRef.current = attachmentsRef.current.filter((a) => !ids.has(a.id));
       setAttachments(attachmentsRef.current);
       if (promptRevision.current === revision) setPrompt("");
+      setForward(null);
       dismiss();
     };
     // in a worktree of its own (#6115): made first; a failure says why here, and nothing starts
@@ -877,6 +913,7 @@ export function NewAgent({ open, onClose, preset }: { open: boolean; onClose: ()
               onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragging(true); } }}
               onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
               onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}>
+              {forward && <div className="px-2 pt-2" data-new-agent-forward><ForwardBar forward={forward} onRemove={() => setForward(null)} /></div>}
               {attachments.length > 0 && <div className="px-3 pt-2"><AttachmentTray attachments={attachments} onRemove={(id) => {
                 releaseAttachments(attachments.filter((a) => a.id === id));
                 setAttachments((current) => current.filter((a) => a.id !== id));

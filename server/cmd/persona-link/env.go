@@ -35,6 +35,8 @@ type env struct {
 	sleep       func(time.Duration)
 	// wait is how long install waits for the link to come up (a setting).
 	wait time.Duration
+	// sshBin overrides the system ssh executable in tests; "" uses "ssh" from PATH.
+	sshBin string
 	// tray is the Windows tray's registry entries and process (tray.go).
 	tray trayControl
 }

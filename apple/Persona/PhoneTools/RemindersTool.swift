@@ -47,14 +47,7 @@ enum RemindersTool {
                     ], required: ["title"])
                 ),
                 source: .reminders,
-                confirmation: { args in
-                    let title = ToolArgs.string(args, "title") ?? String(localized: "(Untitled)")
-                    var summary = String(localized: "New reminder “\(title)”")
-                    if let due = ToolArgs.string(args, "due") { summary += String(localized: "\\nDue: \(due)") }
-                    if let place = try? PlaceTrigger.parse(args["location"]) { summary += place.summary }
-                    if let list = ToolArgs.string(args, "list") { summary += String(localized: "\\nList: \(list)") }
-                    return summary
-                },
+                confirmation: { args in createConfirmation(args) },
                 run: { args in try await create(args) }
             ),
             PhoneTool(
@@ -200,6 +193,38 @@ enum RemindersTool {
 
     // MARK: - Creating
 
+    /// The approval card and the write share the same exact-then-containing list match. A failed lookup leaves
+    /// the requested name in the card; the write then reports its existing error instead of promising a save.
+    static func createConfirmation(_ args: JSONValue) -> String {
+        let store = EKEventStore()
+        var list = ToolArgs.string(args, "list")
+        if let wanted = list {
+            list = (try? reminderList(named: wanted, in: store))?.title ?? wanted
+        } else {
+            list = store.defaultCalendarForNewReminders()?.title
+        }
+        return createSummary(args, list: list)
+    }
+
+    /// Pure formatting half of `createConfirmation`: every field the write uses, including notes and priority.
+    static func createSummary(_ args: JSONValue, list: String?) -> String {
+        let title = ToolArgs.string(args, "title") ?? String(localized: "(Untitled)")
+        var summary = String(localized: "New reminder “\(title)”")
+        if let due = ToolArgs.string(args, "due") {
+            let shown = (try? ToolDate.parse(due)).map { CardTime.text($0) } ?? due
+            summary += String(localized: "\\nDue: \(shown)")
+        }
+        if let place = try? PlaceTrigger.parse(args["location"]) { summary += place.summary }
+        if let list { summary += String(localized: "\\nList: \(list)") }
+        if let notes = ToolArgs.string(args, "notes") {
+            summary += "\n" + String(localized: "Notes: \(String(notes.prefix(200)))")
+        }
+        if let priority = ToolArgs.int(args, "priority") {
+            summary += "\n" + String(localized: "Priority: \(priorityName(priority))")
+        }
+        return summary
+    }
+
     static func create(_ args: JSONValue) async throws -> [ToolContent] {
         try CalendarAccess.requireReminders()
         guard let title = ToolArgs.string(args, "title") else {
@@ -217,14 +242,8 @@ enum RemindersTool {
             reminder.dueDateComponents = parts
         }
         if let place = try PlaceTrigger.parse(args["location"]) { place.apply(to: reminder) }
-        if let wanted = ToolArgs.string(args, "list")?.lowercased() {
-            let lists = store.calendars(for: .reminder)
-            guard let match = lists.first(where: { $0.title.lowercased() == wanted })
-                ?? lists.first(where: { $0.title.lowercased().contains(wanted) }) else {
-                let names = lists.map(\.title).sorted().joined(separator: ", ")
-                throw ToolFailure(.invalidArgument, "no reminder list named \"\(wanted)\"; available lists: \(names)")
-            }
-            reminder.calendar = match
+        if let wanted = ToolArgs.string(args, "list") {
+            reminder.calendar = try reminderList(named: wanted, in: store)
         } else if let fallback = store.defaultCalendarForNewReminders() {
             reminder.calendar = fallback
         }

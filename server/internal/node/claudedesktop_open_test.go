@@ -85,7 +85,7 @@ func TestADesktopSessionNothingRunsIsOpenedInTheApp(t *testing.T) {
 		writeDesktopEntry(t, dir, desktopLocal, sidA, false, nil, "")
 		inbox := newFakeInbox(t, p)
 		started := make(chan struct{})
-		links := recordDesktopLinks(t, nil, func() { time.Sleep(300 * time.Millisecond); close(started) })
+		links := recordDesktopLinks(t, nil, func() { time.Sleep(300 * time.Millisecond); close(started) }) // sleep-ok: the desktop app takes a moment to open the link
 		f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
 		f.reset()
 		done := sendWithin(context.Background(), n, sidA, "go on with the plan")
@@ -135,11 +135,11 @@ func TestADesktopSessionThatGoesOnInANewTranscriptIsFollowed(t *testing.T) {
 	writeDesktopEntry(t, first, desktopLocal, sidA, false, nil, "")
 	inbox := newFakeInbox(t, pb)
 	moved := make(chan struct{})
-	recordDesktopLinks(t, nil, func() { time.Sleep(200 * time.Millisecond); close(moved) })
+	recordDesktopLinks(t, nil, func() { time.Sleep(200 * time.Millisecond); close(moved) }) // sleep-ok: the desktop app takes a moment to open the link
 	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
 	done := sendWithin(context.Background(), n, sidA, "go on")
 	<-moved
-	time.Sleep(20 * time.Millisecond) // the entry's file must look changed for the index to read it again
+	time.Sleep(20 * time.Millisecond) // sleep-ok: the entry's file must look changed (a newer mtime) for the index to read it again
 	writeDesktopEntry(t, first, desktopLocal, sidB, false, []string{sidA}, `,"title":"plan, again"`)
 	writeOutsideClaude(t, home, sidB, "claude-desktop-3p", "idle", inbox, nil)
 	if err := waitSend(t, done); err != nil {
@@ -165,7 +165,7 @@ func TestADesktopClaudeThatNamesItsInboxLateIsWaitedFor(t *testing.T) {
 	done := sendWithin(context.Background(), n, sidA, "go on")
 	<-opened
 	writeOutsideClaude(t, home, sidA, "claude-desktop-3p", "busy", nil, nil) // starting: no inbox yet
-	time.Sleep(1200 * time.Millisecond)
+	time.Sleep(1200 * time.Millisecond)                                      // sleep-ok: the app's claude stays busy without an inbox for longer than one poll
 	writeOutsideClaude(t, home, sidA, "claude-desktop-3p", "idle", inbox, nil)
 	if err := waitSend(t, done); err != nil {
 		t.Fatalf("send: %v", err)

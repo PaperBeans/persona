@@ -2,7 +2,7 @@
 // AssistantMemoryView, Android's assistant settings): what Persona does on its own (a line into "Scheduled tasks"), what it knows about you
 // ("About me" = `notes`, saved on "Save" or when leaving; "Memory" = its memory files: read, edit the whole file, delete), and where
 // it runs (read-only here). Its model is Settings › Models › Main chat, not here (#1291).
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 import { BASE } from "../../lib/base";
 import { settingsHref } from "./nav";
@@ -21,8 +21,13 @@ import { Icon } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
 import { Group, Pill, Row, settingsInputClass, Switch } from "../settings/SettingsParts";
 import { SkillsGroup } from "./Skills";
+import { lazyPage } from "../../lib/lazy-page";
 import { Tag, textareaClass } from "../assistant/parts";
 import { PersonaAvatar, usePersona } from "../assistant/Persona";
+import { TaskTrust } from "./TaskTrust";
+import { PageBoundary } from "../PageBoundary";
+
+const StandingAuthorizations = lazyPage(() => import("./StandingAuthorizations").then((m) => m.StandingAuthorizations));
 
 interface AssistantState {
   manager?: string;
@@ -57,10 +62,15 @@ interface AssistantState {
   /** Days a closed session stays listed before it archives itself (#3618, docs/assistant/todos.md "Closed sessions
    *  archive themselves"): 0 is never, at most 3650; unset from a hub before it. */
   archive_closed_days?: number;
+  /** Hours an idle Agent Persona started runs before Persona stops it (#4754, docs/integrations/engines.md "Agents run
+   *  in a terminal"); its terminal stays. 0 is never, at most 8760; unset from a hub before it. */
+  idle_close_hours?: number;
 }
 
 /** `archive_closed_days`' upper bound, the hub's (assistant/profile_write.go). */
 const MAX_ARCHIVE_DAYS = 3650;
+/** `idle_close_hours`' upper bound, the hub's (assistant/tasks_idle.go). */
+const MAX_IDLE_HOURS = 8760;
 
 /** `meeting_attendance_default`'s values, in the picker's order. */
 const MEETING_ROLES = ["off", "listener", "participant"] as const;
@@ -169,16 +179,16 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
 
   const [agentsBusy, setAgentsBusy] = useState(false);
   // One field of the Agents group (#3617, #3618, #4293): shown as chosen at once, taken back with the reason when the hub refuses.
-  const setAgents = async (patch: { agent_tasks: boolean } | { inbox_signals: boolean } | { archive_closed_days: number }) => {
+  const setAgents = async (patch: { agent_tasks: boolean } | { inbox_signals: boolean } | { archive_closed_days: number } | { idle_close_hours: number }) => {
     const before = info;
     setAgentsBusy(true);
     setInfo((i) => (i ? { ...i, ...patch } : i));
     try {
       const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: patch });
       // what the hub saved, when it says
-      setInfo((i) => (i ? { ...i, agent_tasks: r.agent_tasks ?? i.agent_tasks, inbox_signals: r.inbox_signals ?? i.inbox_signals, archive_closed_days: r.archive_closed_days ?? i.archive_closed_days } : i));
+      setInfo((i) => (i ? { ...i, agent_tasks: r.agent_tasks ?? i.agent_tasks, inbox_signals: r.inbox_signals ?? i.inbox_signals, archive_closed_days: r.archive_closed_days ?? i.archive_closed_days, idle_close_hours: r.idle_close_hours ?? i.idle_close_hours } : i));
     } catch (e) {
-      setInfo((i) => (i && before ? { ...i, agent_tasks: before.agent_tasks, inbox_signals: before.inbox_signals, archive_closed_days: before.archive_closed_days } : i));
+      setInfo((i) => (i && before ? { ...i, agent_tasks: before.agent_tasks, inbox_signals: before.inbox_signals, archive_closed_days: before.archive_closed_days, idle_close_hours: before.idle_close_hours } : i));
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally {
       setAgentsBusy(false);
@@ -284,10 +294,11 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
             <option value="prefer-new">{t("settings-assistantsettings.workspace_prefer_new")}</option>
           </select>
         </Row>
+        <TaskTrust manager={manager} machineName={(id) => machines.find((machine) => machine.id === id)?.name || id} />
       </Group>
 
-      {/* Following up agents, their tasks' new messages and tidying closed ones (#3617, #4293, #3618): each row only from a hub that has its setting */}
-      {(typeof info?.agent_tasks === "boolean" || typeof info?.inbox_signals === "boolean" || typeof info?.archive_closed_days === "number") && (
+      {/* Following up agents, their tasks' new messages, stopping idle ones and tidying closed ones (#3617, #4293, #4754, #3618): each row only from a hub that has its setting */}
+      {(typeof info?.agent_tasks === "boolean" || typeof info?.inbox_signals === "boolean" || typeof info?.idle_close_hours === "number" || typeof info?.archive_closed_days === "number") && (
         <Group anchor="agents" title={t("settings-assistantsettings.agents_title")}>
           {typeof info.agent_tasks === "boolean" && (
             <Row label={t("settings-assistantsettings.agent_tasks")} hint={t("settings-assistantsettings.agent_tasks_hint")} wrapHint>
@@ -297,6 +308,12 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
           {typeof info.inbox_signals === "boolean" && (
             <Row label={t("settings-assistantsettings.inbox_signals")} hint={t("settings-assistantsettings.inbox_signals_hint")} wrapHint>
               <Switch on={info.inbox_signals} onChange={(on) => void setAgents({ inbox_signals: on })} disabled={agentsBusy} label={t("settings-assistantsettings.inbox_signals")} />
+            </Row>
+          )}
+          {typeof info.idle_close_hours === "number" && (
+            <Row label={t("settings-assistantsettings.idle_close")} hint={t("settings-assistantsettings.idle_close_hint")} wrapHint>
+              <DaysField value={info.idle_close_hours} max={MAX_IDLE_HOURS} disabled={agentsBusy} label={t("settings-assistantsettings.idle_close")} onCommit={(hours) => void setAgents({ idle_close_hours: hours })} />
+              <span className="whitespace-nowrap">{t("settings-assistantsettings.idle_close_unit")}</span>
             </Row>
           )}
           {typeof info.archive_closed_days === "number" && (
@@ -327,6 +344,12 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
           </select>
         </Row>
       </Group>
+
+      <PageBoundary page="standing-authorizations">
+        <Suspense fallback={<Group anchor="standing-authorizations" title={t("settings-standing.title")}><Loading /></Group>}>
+          <StandingAuthorizations manager={manager} />
+        </Suspense>
+      </PageBoundary>
 
       {typeof info?.meeting_attendance_default === "string" && (
         <Group anchor="meetings" title={t("settings-assistantsettings.meetings_title")} footer={t("settings-assistantsettings.meeting_attendance_footer")}>
@@ -411,9 +434,9 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
   );
 }
 
-/** A whole number of days, 0 to `MAX_ARCHIVE_DAYS`: saved when the field is left or Enter is pressed, and only when it
- *  changed; anything else goes back to the saved value. */
-function DaysField({ value, disabled, label, onCommit }: { value: number; disabled?: boolean; label: string; onCommit: (days: number) => void }) {
+/** A whole number (days, or hours), 0 to `max` (`MAX_ARCHIVE_DAYS` by default): saved when the field is left or Enter is
+ *  pressed, and only when it changed; anything else goes back to the saved value. */
+function DaysField({ value, max = MAX_ARCHIVE_DAYS, disabled, label, onCommit }: { value: number; max?: number; disabled?: boolean; label: string; onCommit: (days: number) => void }) {
   const [draft, setDraft] = useState(String(value));
   const [was, setWas] = useState(value);
   if (was !== value) {
@@ -423,7 +446,7 @@ function DaysField({ value, disabled, label, onCommit }: { value: number; disabl
   }
   const commit = () => {
     const days = Number(draft);
-    if (draft.trim() === "" || !Number.isInteger(days) || days < 0 || days > MAX_ARCHIVE_DAYS) return setDraft(String(value));
+    if (draft.trim() === "" || !Number.isInteger(days) || days < 0 || days > max) return setDraft(String(value));
     if (days !== value) onCommit(days);
   };
   return (
@@ -431,7 +454,7 @@ function DaysField({ value, disabled, label, onCommit }: { value: number; disabl
       type="number"
       inputMode="numeric"
       min={0}
-      max={MAX_ARCHIVE_DAYS}
+      max={max}
       step={1}
       aria-label={label}
       value={draft}

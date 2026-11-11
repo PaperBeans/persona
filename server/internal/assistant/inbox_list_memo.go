@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +51,16 @@ type inboxListed struct {
 	tok uint64
 }
 
+// inboxListOrder is the list's order: newest first, and by id among items of the same moment (mail and Feishu items
+// are often filed together). The items come from a map: without the id, the same list came out in another order on
+// every request, so the merged answer's validator never matched (#4739).
+func inboxListOrder(at1 time.Time, id1 string, at2 time.Time, id2 string) int {
+	if c := at2.Compare(at1); c != 0 {
+		return c
+	}
+	return strings.Compare(id1, id2)
+}
+
 // forgetListed drops the kept bytes of the items changed, under b.mu.
 func (b *inboxBook) forgetListed(changed []*InboxItem) {
 	for _, it := range changed {
@@ -69,6 +80,17 @@ type inboxListRow struct {
 // inboxListRaw is inboxListAt as GET /api/v1/inbox writes it: each item's JSON, newest first, and as_of. Only the
 // items without kept bytes are copied (under b.mu) and encoded (after it). False when an item cannot be encoded.
 func (s *Service) inboxListRaw(all bool) ([][]byte, time.Time, bool) {
+	out, _, now, ok := s.inboxListBytes(all, false)
+	return out, now, ok
+}
+
+// inboxListRawIDs is inboxListRaw with each item's id beside its bytes (GET /api/v1/inbox?since, inbox_delta.go).
+func (s *Service) inboxListRawIDs(all bool) ([][]byte, []string, time.Time, bool) {
+	return s.inboxListBytes(all, true)
+}
+
+// inboxListBytes is inboxListRaw, with the ids too when withIDs (a plain GET allocates nothing more for them).
+func (s *Service) inboxListBytes(all, withIDs bool) ([][]byte, []string, time.Time, bool) {
 	b := &s.inbox
 	m := &b.listMemo
 	b.mu.Lock()
@@ -107,13 +129,20 @@ func (s *Service) inboxListRaw(all bool) ([][]byte, time.Time, bool) {
 		}
 	}
 	b.mu.Unlock()
-	slices.SortFunc(rows, func(x, y inboxListRow) int { return y.at.Compare(x.at) })
+	slices.SortFunc(rows, func(x, y inboxListRow) int { return inboxListOrder(x.at, x.it.ID, y.at, y.it.ID) })
 	out := make([][]byte, len(rows))
+	var ids []string
+	if withIDs {
+		ids = make([]string, len(rows))
+	}
 	for i := range rows {
+		if withIDs {
+			ids[i] = rows[i].it.ID
+		}
 		if rows[i].c != nil {
 			raw, err := json.Marshal(rows[i].c) // by pointer, as an element of the []InboxItem it was encoded in
 			if err != nil {
-				return nil, now, false
+				return nil, nil, now, false
 			}
 			rows[i].raw = raw
 		}
@@ -132,7 +161,7 @@ func (s *Service) inboxListRaw(all bool) ([][]byte, time.Time, bool) {
 		m.encoded += misses
 		b.mu.Unlock()
 	}
-	return out, now, true
+	return out, ids, now, true
 }
 
 // writeInboxList writes GET /api/v1/inbox's answer for all (and POST /api/v1/inbox/refresh's): the bytes

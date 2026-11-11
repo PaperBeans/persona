@@ -251,3 +251,20 @@ A view that fetches once per id cannot recover when the store puts the same id b
 - The hub's `traffic` journal lines count by route template, not query, so a complete list and a small delta look the
   same there; divide `body_bytes` by `count` to tell them apart. On the mock, `GET /mock/sessions_reads` counts by kind
   of read (`docs/operations/testing.md`, "Session list reads").
+
+## A directory behind a symbolic link is written two ways (2026-11-11, #4492)
+
+- On a computer whose home is on another mount (`/home/me` → `/data/home/me`; macOS's `/tmp` → `/private/tmp` is the
+  same case), the records of one repository's sessions do not agree on its path. Claude Code records the physical
+  directory as `cwd`, Codex the directory it was started in, and git the physical one, so a host that asks git for the
+  project (Paseo) names that. A linked worktree's `.git` file keeps the spelling `git worktree add` was run with.
+- The apps compare `repo_root` and `worktree` as strings: By Repository groups on `repo_root`, and `worktree ==
+  repo_root` is the main checkout. Read as written, one repository was two projects of the same name (91 sessions under
+  one and 56 under the other on a real hub), and a main checkout whose host named its project was a linked worktree of
+  itself.
+- Resolve the directory first and then walk up to `.git`, as git does (`physicalGitPlace` in `node/gitplace.go`):
+  walking up the path as written puts a link into a repository (`~/.config/nvim` → `~/dotfiles/nvim`) in no project,
+  and a link that leads out of one in the wrong project. Resolve what a host names too: only one side resolved is the
+  same split again. Leave `cwd` as recorded: it is what the session's own record says.
+- A test that makes a repository under `t.TempDir()` and compares paths needs the physical temporary directory
+  (`physicalTempDir`): macOS's is behind a link, so the test passes on Linux and fails on a Mac.

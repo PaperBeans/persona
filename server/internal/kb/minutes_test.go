@@ -71,7 +71,7 @@ const minutesReply = `{
 
 // A meeting's minutes: every item at the time of the line it cites (others dropped), a person only when named in the
 // transcript or the calendar, a due date only when it is a real day from the meeting on; stored next to the recording,
-// readable from Get, searchable, told once.
+// readable from Get, searchable, told once. A photo is a line of the input of its own, by its words.
 func TestMinutesWritten(t *testing.T) {
 	m := &captureModel{reply: minutesReply}
 	e := goldenEngine(t, m)
@@ -81,10 +81,13 @@ func TestMinutesWritten(t *testing.T) {
 	start := time.Date(2026, 11, 10, 14, 0, 0, 0, goldenZone)
 	u := meetingUpload(1, start, "大家好，今天评审导出", "Ada 说导出超过 4 MB 的条目会被丢掉", "那这一版先保留上限", "Bo 你周五前补上回归测试", "上限按条还是按录音算还没定")
 	u.Calendar = &RecordingCalendar{Title: " 发布评审 ", Attendees: []string{"Ada", " Cy ", "Ada", ""}, Location: ""}
+	ended := start.Add(50 * time.Second)
+	u.EndedAt = &ended
 	putRecording(t, e, recID, u, now)
 	if r := recordingNow(t, e, recID); r.MinutesState != MinutesPending || r.Name != "发布评审" || r.Kind != RecordingMeeting {
 		t.Fatalf("after upload: state %q name %q kind %q", r.MinutesState, r.Name, r.Kind)
 	}
+	addPhoto(t, e, recID, photoUpload(1, 25, "白板", "导出上限：每条 4 MB"), false)
 	if n := e.WriteMinutes(context.Background(), 2); n != 1 {
 		t.Fatalf("wrote %d", n)
 	}
@@ -95,6 +98,10 @@ func TestMinutesWritten(t *testing.T) {
 	}
 	if got.Version != 1 || got.Revision != 1 || got.Title != "发布评审" || got.When != "2026-11-10 14:00–14:01" {
 		t.Errorf("head %+v", got)
+	}
+	// The same span for clients to format themselves (#4713), in the user's zone, to the second.
+	if got.Start.Format(time.RFC3339Nano) != start.Format(time.RFC3339) || !got.End.Equal(start.Add(time.Minute)) {
+		t.Errorf("span %s – %s", got.Start.Format(time.RFC3339Nano), got.End.Format(time.RFC3339Nano))
 	}
 	// Calendar attendees first; the model's only when the transcript names them (Zed is not).
 	if strings.Join(got.Attendees, ",") != "Ada,Cy,Bo" {
@@ -440,8 +447,9 @@ func TestGoldenMinutesMerge(t *testing.T) {
 				Points:    []prompts.KBMinutesNote{{Line: 3, Text: "导出超过 4 MB 的条目会被丢掉", Who: "Ada"}},
 				Decisions: []prompts.KBMinutesNote{{Line: 40, Text: "这一版先保留上限"}}},
 			{Part: 2, From: "15:00:00", To: "15:59:50", Where: "三号会议室",
-				Actions: []prompts.KBMinutesNote{{Line: 410, Text: "补上回归测试", Who: "Bo", By: "周五前", DueDate: "2026-11-13"}},
-				Open:    []prompts.KBMinutesNote{{Line: 700, Text: "上限按条还是按录音"}}},
+				Decisions: []prompts.KBMinutesNote{{Photo: 2, Text: "白板上的排期照此执行"}},
+				Actions:   []prompts.KBMinutesNote{{Line: 410, Text: "补上回归测试", Who: "Bo", By: "周五前", DueDate: "2026-11-13"}},
+				Open:      []prompts.KBMinutesNote{{Line: 700, Text: "上限按条还是按录音"}}},
 		},
 	}
 	golden(t, "minutes_merge.system", prompts.RenderKBMinutesMerge(prompts.KBOwner{Owner: "示例用户"}))
@@ -620,5 +628,34 @@ func TestMinutesNoLongerMeetingAndRoundBound(t *testing.T) {
 	e.WriteMinutes(context.Background(), 2)
 	if got := len(model.calls) - calls; got != 2 {
 		t.Fatalf("%d tried in a round, want 2", got)
+	}
+}
+
+// Minutes written before they carried start and end (#4713) get them from their recording in a recording's detail;
+// every other field stays as stored, and minutes that have them are sent as they are.
+func TestMinutesWithSpan(t *testing.T) {
+	zone := time.FixedZone("UTC+8", 8*3600)
+	started := time.Date(2026, 11, 10, 6, 0, 0, 500_000_000, time.UTC)
+	ended := started.Add(70 * time.Minute)
+	r := &Recording{StartedAt: started, EndedAt: &ended}
+	old := []byte(`{"version":2,"title":"Design review","when":"2026-11-10 14:00–15:10","markdown":"# x","future":{"kept":true}}`)
+	var got map[string]any
+	if err := json.Unmarshal(minutesWithSpan(old, r, zone), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["start"] != "2026-11-10T14:00:00+08:00" || got["end"] != "2026-11-10T15:10:00+08:00" {
+		t.Errorf("span %v – %v", got["start"], got["end"])
+	}
+	if got["version"] != float64(2) || got["when"] != "2026-11-10 14:00–15:10" || got["markdown"] != "# x" || got["future"] == nil {
+		t.Errorf("stored fields changed: %v", got)
+	}
+	current := []byte(`{"version":3,"when":"x","start":"2026-11-10T14:00:00+08:00","end":"2026-11-10T15:10:00+08:00"}`)
+	for name, c := range map[string]struct {
+		raw []byte
+		r   *Recording
+	}{"has its span": {current, r}, "no recording": {old, nil}, "recording without a start": {old, &Recording{}}, "not JSON": {[]byte("{"), r}} {
+		if out := minutesWithSpan(c.raw, c.r, zone); string(out) != string(c.raw) {
+			t.Errorf("%s: %s", name, out)
+		}
 	}
 }

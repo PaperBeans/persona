@@ -13,7 +13,7 @@
 #
 # Path mapping (diff mode):
 #   web/**                     npm ci (only with no node_modules or a changed package.json/package-lock.json),
-#                              typecheck, vitest run
+#                              node_modules against package-lock.json, typecheck, vitest run
 #   schema/extension/**, spec/fixtures/injected/**, spec/fixtures/sync/**, spec/fixtures/attention/**,
 #   scripts/mock/inbox_events.json
 #                              also the web check: web/src and its vitest suite read these files. They are the inputs
@@ -318,6 +318,8 @@ job_web() {  # $1 = ci when npm ci must run first
     in_dir web step "$TIMEOUT_NPM_CI" "web: npm ci" npm ci || return $?
     JOB_HINT=""
   fi
+  # A node_modules from before the last lock bump runs old packages: stop with the list instead (#4776).
+  in_dir web step "$TIMEOUT_OTHER" "web: node_modules matches package-lock.json" npm run check:deps || return $?
   in_dir web step "$TIMEOUT_OTHER" "web: tsc -b (typecheck)" npm run typecheck || return $?
   in_dir web step "$TIMEOUT_WEB_TEST" "web: vitest run" npm test
 }
@@ -620,7 +622,7 @@ else
         arr_has "$_p" "${INTEG[@]:-}" || INTEG+=("$_p") ;;
       sdk/ts/*) SDKTS=1 ;;
       spec/fixtures/*) ;;  # read by server tests: the reader packages are collected in a pass below
-      spec/tokens/*) ;;  # test_gen_tokens.py, added with the scripts/ unittests below
+      spec/tokens/*|spec/icons/*) ;;  # test_gen_tokens.py / test_gen_icon_meanings.py, added with the scripts/ unittests below
       server/*)
         _rest=${f#server/}
         case "$_rest" in
@@ -775,6 +777,11 @@ else
     case "$f" in
       spec/tokens/*|apple/Shared/Design/*|android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt)
         script_test_add scripts/assets/test_gen_tokens.py ;;
+    esac
+    # test_gen_icon_meanings.py checks spec/icons against Theme.Icon and the Phosphor glyphs, and PersonaIcons.kt.
+    case "$f" in
+      spec/icons/*|apple/Shared/Design/Icons.swift|android/core/designsystem/src/main/kotlin/persona/core/designsystem/icons/*)
+        script_test_add scripts/assets/test_gen_icon_meanings.py ;;
     esac
     # Suites whose names do not match the file they test: test_privacy_check.py copies scripts/hooks into its temp
     # repositories and runs the hooks there; check_bundle_privacy.py imports privacy_check; test_merge_pr_sh.py

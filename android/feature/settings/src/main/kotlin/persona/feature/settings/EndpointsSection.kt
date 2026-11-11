@@ -1,6 +1,5 @@
 package persona.feature.settings
 
-import android.content.ClipData
 import android.content.res.Resources
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
@@ -24,8 +23,6 @@ import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -257,10 +254,9 @@ private fun turn(row: EndpointRow): String =
 @Composable
 internal fun EndpointOverlays(snapshot: EndpointsSnapshot) {
     val scope = rememberCoroutineScope()
-    val clipboard = LocalClipboard.current
+    val copy = rememberCopy()
     val editor = snapshot.editor
     val ui = snapshot.ui
-    val clipLabel = stringResource(R.string.settings_endpoint_clip_label)
     ui.actions?.let { url ->
         val row = snapshot.rows.firstOrNull { it.url == url }
         if (row == null) LaunchedEffect(url) { editor.closeActions() }
@@ -270,7 +266,7 @@ internal fun EndpointOverlays(snapshot: EndpointsSnapshot) {
             onMoveUp = { scope.launch { editor.moveUp(url) } },
             onMoveDown = { scope.launch { editor.moveDown(url) } },
             onToggle = { scope.launch { editor.setEnabled(url, !row.entry.enabled) } },
-            onCopy = { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(clipLabel, url))) } },
+            onCopy = { copy(url, null) },
             onEdit = { editor.startEditing(url) },
             onDelete = { editor.askDelete(url) },
         )

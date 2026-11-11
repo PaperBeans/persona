@@ -11,6 +11,7 @@ data class PairingRequest(
     val alt: List<String> = emptyList(),
     /** A Cloudflare Access service token entered before pairing: the pairing's own requests already carry it. */
     val access: HubAccess? = null,
+    val deviceId: String? = null,
 ) {
     override fun toString() = "PairingRequest(credentials=redacted)"
 }
@@ -35,6 +36,10 @@ class PairingException(val reason: PairingFailure, val address: String? = null) 
 
 interface PairingService {
     val isPaired: StateFlow<Boolean>
+    /** Opens the hub's HTTPS OPAQUE page; passwords never pass through the native API. */
+    suspend fun passwordLogin(address: String, progress: (PairingProgress) -> Unit) {
+        throw PairingException(PairingFailure.Incompatible)
+    }
     suspend fun pair(request: PairingRequest)
     /** Implementations must report actual stages and verify identity before exchanging credentials. */
     suspend fun pair(request: PairingRequest, progress: (PairingProgress) -> Unit) {

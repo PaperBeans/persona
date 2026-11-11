@@ -1,4 +1,7 @@
 {
+  "package_downloads": "パッケージのダウンロード {downloads} 回",
+  "package_downloads_label": "パッケージのダウンロード数",
+  "package_downloads_definition": "拡張機能パッケージの全バージョンの累計ダウンロード数です。ユーザー数やPersonaでのインストール数ではありません。",
   "redraw": "再描画",
   "intro": "拡張機能は、新しいコネクタや音声チャットなどの機能を Persona に追加します。ハブに組み込みのもの、manager.json に書かれたもの、ハブのマシンにインストールされたものがすべてここに表示されます。",
   "title": "拡張機能",
@@ -118,7 +121,7 @@
   "up_to_date": "新しいバージョンは見つかりませんでした",
   "check_updates": "更新を確認",
   "check_updates_hint": "マーケットで新しいバージョンを確認します。確認前にインストールされることはありません。",
-  "global_upgrade_off": "このアシスタントでは自動アップグレードがオフです。この拡張機能の設定は保持されます。",
+  "global_upgrade_off": "このアシスタントで拡張機能の自動アップデートがオフのため、自動アップグレードは一時停止しています。設定は保持され、自動アップデートをオンに戻すと再び適用されます。",
   "not_provided": "未提供",
   "reported_version": "プログラムの申告バージョン（未承認）",
   "extension_id": "拡張機能ID",
@@ -128,5 +131,20 @@
   "local_source": "マーケット外でインストール",
   "runtime": "実行方式",
   "manager_offline": "この拡張機能のアシスタントはオフラインです。操作するには再接続してください。",
-  "warning": "注意"
+  "warning": "注意",
+  "use_reference": "参照を使う",
+  "reference_placeholder": "op://vault/item/field",
+  "reference_hint": "この拡張機能が必要なときにプロバイダーが値を渡します。Persona は参照だけを保存します。",
+  "secret_reference_saved": "{title}は参照を使うようになりました",
+  "users_title": "使用中",
+  "users_footer": "この参照を保存している設定です。それぞれがその設定への継続的な承認です。",
+  "user_launcher": "{name}のキー",
+  "user_launcher_machine": "{machine}の{name}のキー",
+  "rules_title": "Agent に常に渡す",
+  "rules_footer": "このコンピュータでこのランチャーを使い、あなたが自分で始めた Agent は確認なしで値を受け取ります。",
+  "rule_label": "{machine}の{launcher}",
+  "rule_remove": "削除",
+  "rule_remove_title": "このルールを削除しますか？",
+  "rule_remove_body": "次に{machine}の{launcher}が必要とするとき、もう一度承認します。",
+  "rule_removed": "ルールを削除しました"
 }

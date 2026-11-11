@@ -168,6 +168,9 @@ data class Todo(
     /** When it is due (#1683): a moment, or a day ("yyyy-MM-dd", due by its end in the user's zone); at most one. */
     @WireTime @SerialName("due_at") val dueAt: String? = null,
     @SerialName("due_date") val dueDate: String? = null,
+    /** Where its work stands (#2776, docs/assistant/todos.md "Delivery"): plan, develop, review, merge, deploy or verify; the hub
+     *  merges it from `assistant.todo_stages`. Null when none, and a name this build doesn't know draws nothing. */
+    val stage: String? = null,
     /** When the phone is pushed about it, and when that was done. */
     @WireTime @SerialName("remind_at") val remindAt: String? = null,
     @WireTime @SerialName("reminded_at") val remindedAt: String? = null,
@@ -218,6 +221,12 @@ sealed interface TodoDue {
     data class At(val at: Instant) : TodoDue
     data class Day(val day: LocalDate) : TodoDue
 }
+
+/**
+ * A to-do's due date, reminder and priority as the detail page sets them together (#4636, iOS `TodoPlanChange`,
+ * docs/assistant/todos.md PATCH): [due] null clears it, [remindAt] null clears it, [priority] "" normal, "high" or "low".
+ */
+data class TodoPlan(val due: TodoDue?, val remindAt: Instant?, val priority: String)
 
 /**
  * Why an open to-do has nobody working on it (docs/assistant/todos.md "Nobody is working on this"): [reason] error (closed

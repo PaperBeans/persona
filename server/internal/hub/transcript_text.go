@@ -77,14 +77,21 @@ func localizedItem(l i18n.Lang, it proto.Item) (proto.Item, bool) {
 	return it, changed
 }
 
-// The explanation is localized, but Claude Code's refusal signal and unknown fields remain verbatim.
+// The explanation is localized; Claude Code's refusal signal (the record's fields and its own words) stays verbatim.
+// The record's line itself is never part of it (#2528), whatever an older node sent as the notice's text.
 func modelRefusalText(l i18n.Lang, r *proto.ModelRefusal) string {
 	key := "model_refusal"
 	if r.Subtype == "model_refusal_fallback" && r.FallbackModel != "" {
 		key = "model_refusal_fallback"
 	}
-	return tt(l, key, i18n.Args{"subtype": r.Subtype, "original": r.OriginalModel,
-		"fallback": r.FallbackModel, "category": r.Category, "scope": r.Scope}) + "\n" + r.Raw
+	text := tt(l, key, i18n.Args{"subtype": r.Subtype, "original": r.OriginalModel,
+		"fallback": r.FallbackModel, "category": r.Category, "scope": r.Scope})
+	for _, words := range []string{r.Explanation, r.Text} {
+		if words != "" {
+			text += "\n" + words
+		}
+	}
+	return text
 }
 
 // ---- notices ----

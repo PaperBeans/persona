@@ -1,3 +1,6 @@
 node_modules
 dist
 *.tsbuildinfo
+/public/pake/client.wasm
+/public/pake/wasm_exec.js
+/public/pake/THIRD_PARTY_NOTICES.txt

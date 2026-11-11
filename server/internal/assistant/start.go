@@ -237,6 +237,9 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	}
 	if p.PermissionMode == "" && p.GuestTools == nil {
 		p.PermissionMode = s.settings(ctx).DefaultPermissionMode
+		if p.PermissionMode == "" {
+			p.PermissionMode = proto.ModeBypass
+		}
 	}
 	var cwd string
 	var err error
@@ -256,6 +259,12 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	if p.GuestTools != nil {
 		// The node starts it with no built-in tools and only these of Persona's (node/assistant_guest.go).
 		params["guest"] = map[string]any{"tools": p.GuestTools}
+	}
+	if p.NewSessionID != "" {
+		params["new_session_id"] = p.NewSessionID // node/assistant_guest.go: under this id, once
+	}
+	if p.ClientMsgID != "" {
+		params["client_msg_id"] = p.ClientMsgID // its first message's (node/node.go assistant.send)
 	}
 	purpose := p.Purpose
 	if purpose == "" {
@@ -311,7 +320,7 @@ func (s *Service) start(ctx context.Context, p StartParams) (proto.Session, erro
 	return s.startConversationOn(ctx, p, false)
 }
 
-func (s *Service) startConversationOn(ctx context.Context, p StartParams, main bool) (proto.Session, error) {
+func (s *Service) startConversationOn(ctx context.Context, p StartParams, main bool) (sess proto.Session, err error) {
 	machine := p.MachineID
 	if machine == "" {
 		machine = s.settings(ctx).MachineID
@@ -326,18 +335,36 @@ func (s *Service) startConversationOn(ctx context.Context, p StartParams, main b
 	// manager's authorization until the resulting conversation's origin is recorded.
 	finishStart := s.beginAssistantStart(machine)
 	defer finishStart()
-	sess, err := s.startOn(ctx, machine, p, main)
+	guestID := ""
+	if p.GuestTools != nil {
+		if p.NewSessionID != "" {
+			guestID = p.NewSessionID
+		} else {
+			guestID = newGuestSessionID()
+			p.NewSessionID = guestID
+		}
+		// The Agent SDK bridge discovers its tools before assistant.send returns. Register the guest's restriction
+		// first, as roomCreate does, so that first discovery is the declared list rather than an empty one.
+		if err := s.guestSet(ctx, machine, guestID, p.GuestTools); err != nil {
+			return proto.Session{}, err
+		}
+		defer func() {
+			if sess.SessionID != guestID {
+				if err := s.guestDrop(context.WithoutCancel(ctx), guestID); err != nil {
+					s.logf("assistant: forget an unstarted guest conversation %s: %v", short(guestID), err)
+				}
+			}
+		}()
+	}
+	sess, err = s.startOn(ctx, machine, p, main)
 	if errors.Is(err, ErrNoDevice) && p.MachineID == "" {
 		return proto.Session{}, s.missingAssistantMachine(ctx)
 	}
 	if err != nil {
 		return sess, err
 	}
-	if p.GuestTools != nil {
-		if err := s.guestSet(ctx, sess.MachineID, sess.SessionID, p.GuestTools); err != nil {
-			// The node runs it restricted either way; here its calls are refused until the store is readable again.
-			s.logf("assistant: note guest conversation %s: %v", short(sess.SessionID), err)
-		}
+	if guestID != "" && sess.SessionID != guestID {
+		return sess, errors.New("the node did not start the guest under its registered session id")
 	}
 	sess.Origin, sess.OriginRef, sess.OpenedBy = firstNonEmpty(p.Origin, OriginUser), p.OriginRef, p.OpenedBy
 	s.originSet(ctx, sess.MachineID, sess.SessionID, sess.Origin, sess.OriginRef, sess.OpenedBy)
@@ -390,8 +417,9 @@ type mainHandoff struct {
 
 // mainBook holds the main conversation still while it changes, and the handoff with no database.
 type mainBook struct {
-	mu      sync.Mutex
-	handoff mainHandoff
+	mu        sync.Mutex
+	handoff   mainHandoff
+	execution mainExecutionBook
 }
 
 func (s *Service) loadHandoff(ctx context.Context) mainHandoff {
@@ -431,7 +459,7 @@ func (s *Service) startMain(ctx context.Context, p StartParams) (proto.Session, 
 	}
 	if _, err := s.updateSettings(ctx, func(v *Settings) error {
 		*v = s.effective(ctx, *v)
-		v.Main = sess.SessionID
+		v.Main, v.MainMachineID = sess.SessionID, sess.MachineID
 		return nil
 	}); err != nil {
 		s.logf("assistant: save main: %v", err)
@@ -463,12 +491,12 @@ func (s *Service) newMain(ctx context.Context, carry bool, expect string) (strin
 	if old == "" {
 		return "", false, nil
 	}
-	machine, c, found := s.findSession(ctx, old, cfg.MachineID)
+	machine, c, found := s.findSession(ctx, old, cfg.mainRouteMachine())
 	if found && (c.Status == proto.StatusWorking || (c.Compaction != nil && c.Compaction.State == proto.CompactionRunning)) {
 		return "", false, &rpc.Error{Code: "busy", Message: i18n.T(s.lang(ctx), "assistant-start.main_busy")}
 	}
 	if !found {
-		machine = cfg.MachineID
+		machine = cfg.mainRouteMachine()
 	}
 	now := time.Now().UTC()
 	handoff := mainHandoff{From: old, MachineID: machine, Until: now}
@@ -488,7 +516,7 @@ func (s *Service) newMain(ctx context.Context, carry bool, expect string) (strin
 	}
 	if _, err := s.updateSettings(ctx, func(v *Settings) error {
 		*v = s.effective(ctx, *v)
-		v.Main = ""
+		v.Main, v.MainMachineID = "", ""
 		v.Former = slices.DeleteFunc(v.Former, func(f FormerMain) bool { return f.SessionID == old })
 		v.Former = append([]FormerMain{{MachineID: machine, SessionID: old, Until: now}}, v.Former...)
 		if len(v.Former) > maxFormerMains {
@@ -737,7 +765,13 @@ func (s *Service) SendParams(ctx context.Context, p SendParams) (map[string]any,
 	if text, ok := p.Params["text"].(string); ok {
 		p.Params["text"] = prompts.ProtectUserMessage(text)
 	}
-	return s.sendParams(ctx, p)
+	sent, _ := p.Params["text"].(string)
+	out, err := s.sendParams(ctx, p)
+	if err == nil && p.Human { // the hub's word: a person's own app sent it (secret_handoff.go handoffUserTurn)
+		id, _ := p.Params["client_msg_id"].(string)
+		s.humanSent.note(p.SessionID, id, sent)
+	}
+	return out, err
 }
 
 // sendParams also serves manager-generated notices, which must not be marked as
@@ -748,6 +782,9 @@ func (s *Service) sendParams(ctx context.Context, p SendParams) (map[string]any,
 		params = map[string]any{}
 	}
 	params["is_main"] = false
+	if err := s.roomRefusesSend(ctx, p.MachineID, p.SessionID, p.Lang); err != nil {
+		return nil, err // an ended room: 409 meeting_ended (meeting_room.go)
+	}
 	if s.isGuest(ctx, p.MachineID, p.SessionID) {
 		// A guest conversation keeps what it started on: no launcher, model, runtime or mode picked for a message
 		// (the node refuses a change too, node/assistant_guest.go).
@@ -757,13 +794,17 @@ func (s *Service) sendParams(ctx context.Context, p SendParams) (map[string]any,
 		return params, nil
 	}
 	cfg := s.settings(ctx)
-	main := cfg.Main != "" && cfg.Main == p.SessionID && cfg.MachineID == p.MachineID
+	main := cfg.Main != "" && cfg.Main == p.SessionID && cfg.mainRouteMachine() == p.MachineID
 	if !main {
 		if _, known := s.session(ctx, p.MachineID, p.SessionID); !known {
 			return params, nil
 		}
 	}
 	if err := s.sendModel(ctx, p.MachineID, p.SessionID, params); err != nil {
+		var other *launcherOtherKind
+		if errors.As(err, &other) {
+			return nil, other.rpcError(s.appLang(ctx, p.Lang)) // 409 launcher_other_kind, with the kinds for the app
+		}
 		return nil, badRequest(err, s.appLang(ctx, p.Lang)) // a typed model that is no id is the app's user's to read
 	}
 	if text, ok := params["text"].(string); ok {
@@ -789,11 +830,11 @@ func (s *Service) sendParams(ctx context.Context, p SendParams) (map[string]any,
 // ids typed for that launcher before), so a model the gateway dropped does not fail every later turn.
 func (s *Service) sendModel(ctx context.Context, machine, sid string, p map[string]any) error {
 	cfg := s.settings(ctx)
-	p["is_main"] = cfg.Main != "" && cfg.Main == sid && cfg.MachineID == machine
+	p["is_main"] = cfg.Main != "" && cfg.Main == sid && cfg.mainRouteMachine() == machine
 	if cfg.InterjectBackground != nil && *cfg.InterjectBackground {
 		p["interject_background"] = true
 	}
-	followsSetting := cfg.Main != "" && cfg.Main == sid && cfg.MachineID == machine || s.isTaskConversation(ctx, machine, sid)
+	followsSetting := cfg.Main != "" && cfg.Main == sid && cfg.mainRouteMachine() == machine || s.isTaskConversation(ctx, machine, sid)
 	picked := false // a model picked with this message
 	if m, ok := p["model"].(string); ok && strings.TrimSpace(m) != "" {
 		m = strings.TrimSpace(m)
@@ -804,6 +845,11 @@ func (s *Service) sendModel(ctx context.Context, machine, sid string, p map[stri
 	}
 	l, _ := p["launcher"].(string)
 	asked := l != "" // picked in the chat's menu for this message
+	if asked {
+		if err := s.otherKindPick(ctx, machine, sid, l); err != nil {
+			return err // another agent kind can't resume this conversation: refused, not swapped on the node
+		}
+	}
 	if l == "" && !followsSetting {
 		if c, known := s.session(ctx, machine, sid); known {
 			l = c.Launcher // no launcher picked: the one this conversation runs

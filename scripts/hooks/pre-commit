@@ -1,6 +1,7 @@
 #!/bin/bash
-# Refuse a commit that would record private values (scripts/privacy_check.py), or that leaves the design tokens out of
-# step with spec/tokens and the iOS values (scripts/assets/gen_tokens.py). Install: git config core.hooksPath scripts/hooks
+# Refuse a commit that would record private values (scripts/privacy_check.py), or that leaves the design tokens or the
+# icon meanings out of step with spec/ and the iOS values (scripts/assets/gen_tokens.py, gen_icon_meanings.py).
+# Install: git config core.hooksPath scripts/hooks
 set -e
 root=$(git rev-parse --show-toplevel)
 python3 "$root/scripts/privacy_check.py" --staged
@@ -8,4 +9,7 @@ if git diff --cached --name-only | grep -qE '^(spec/tokens/|apple/Shared/Design/
   python3 -B "$root/scripts/assets/gen_tokens.py" --check \
     --kotlin "$root/android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt" >/dev/null
   (cd "$root/scripts/assets" && python3 -B -m unittest -q test_gen_tokens.RepositoryTests)
+fi
+if git diff --cached --name-only | grep -qE '^(spec/icons/|apple/Shared/Design/Icons\.swift$|scripts/assets/(test_)?gen_(icon_meanings|phosphor_icons)\.py$|android/core/designsystem/src/main/kotlin/persona/core/designsystem/icons/)'; then
+  (cd "$root/scripts/assets" && python3 -B -m unittest -q test_gen_icon_meanings.RepositoryTests)
 fi

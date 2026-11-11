@@ -121,6 +121,15 @@ struct PathMarkdownTests {
         #expect(p.paths.isEmpty)
     }
 
+    /// Where code is drawn in the body's color (iOS, #2984), a path's code span is linked as its words, so it stays blue.
+    @Test func aCodeSpanLinkedAsItsWords() {
+        let md = "见 `src/__init__.py:3` 和 `~/notes/a[1].md`。"
+        let p = PathMarkdown(md)
+        let out = p.linked(plainCode: true) { _ in true }.markdown
+        #expect(out == "见 [src/\\_\\_init\\_\\_.py:3](\(link("src/__init__.py", 3))) 和 [\\~/notes/a\\[1\\].md](\(link("~/notes/a[1].md")))。")
+        #expect(p.linked { _ in true }.markdown.contains("[`src/__init__.py:3`]"))
+    }
+
     @Test func aWholeSpanWithChineseAndSpaces() {
         let md = "生成了 `~/报告/第四季度 终稿.docx`。"
         let out = PathMarkdown(md).linked { $0 == "~/报告/第四季度 终稿.docx" }

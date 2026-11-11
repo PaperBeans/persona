@@ -14,7 +14,7 @@ fun JSidebarNewChat(text: String, onClick: () -> Unit, modifier: Modifier = Modi
     val palette = PersonaTheme.palette
     val compact = LocalHomeDrawer.current && PersonaTheme.style == AppStyle.Glass
     val fill = if (compact) sidebarActionFill(palette) else palette.accent
-    CompositionLocalProvider(LocalPalette provides if (compact) palette.copy(action = fill, onAction = ExtensionThemeColors.on(fill)) else palette) {
+    CompositionLocalProvider(LocalPalette provides if (compact) palette.copy(action = fill, onAction = palette.onAccentFill(fill)) else palette) {
         JButton(text, onClick, modifier, icon = PhIcons.NotePencil)
     }
 }
@@ -28,9 +28,11 @@ fun JSidebarHistoryRow(
     onClick: () -> Unit,
     onMenu: () -> Unit,
     menuLabel: String,
+    /** The line under the title (a leader conversation's open tasks, #4331); null: one line only. */
+    hint: String? = null,
     titleAccessory: (@Composable () -> Unit)? = null,
 ) {
-    JRow(title, onClick = onClick, onLongClick = onMenu, selected = selected, chevron = false,
+    JRow(title, onClick = onClick, onLongClick = onMenu, selected = selected, chevron = false, subtitle = hint,
         titleAccessory = titleAccessory, trailing = {
             if (status == Status.NeedsYou || status == Status.Working || status == Status.Unread) JStatusDot(status)
             JIconButton(PhIcons.DotsThree, menuLabel, onMenu)

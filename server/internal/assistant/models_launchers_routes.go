@@ -373,9 +373,9 @@ type pickerTier struct {
 }
 
 // pickerTiers are the presets the New Agent form offers on a machine with these launchers: the tiers of the profile
-// in use, by name, but those whose launcher the machine does not have (a direct API provider is in no machine's list;
-// one whose check failed there is offered, the form marks it). None when no profile is in use or it cannot be read:
-// the form then has no preset row.
+// in use, by name, but those whose launcher the machine does not have (a direct API provider is in no machine's list)
+// or the list leaves out because its latest check failed. None when no profile is in use or it cannot be read: the
+// form then has no preset row.
 func (s *Service) pickerTiers(ctx context.Context, launchers []ConfiguredLauncher) (*ModelProfile, []pickerTier) {
 	p, _, err := s.activeModelProfile(ctx)
 	if err != nil || p == nil {
@@ -411,9 +411,18 @@ func (s *Service) machineLauncherRoutes() {
 			apierr.Call(w, err)
 			return
 		}
-		out := map[string]any{"launchers": s.withHealth(ctx, mid, list), "default": s.pickerDefault(ctx, r)}
+		// A launcher whose latest check failed is left out of the pickers and of the presets that name it; the launcher
+		// the configuration runs with no pick stays, with its record, so the form can still say why this start may fail.
+		def := s.pickerDefault(ctx, r)
+		keep, _ := def["provider"].(string)
+		shown := s.withHealth(ctx, mid, list, keep)
+		out := map[string]any{"launchers": shown, "default": def}
 		if purpose := r.URL.Query().Get("purpose"); purpose == "" || purpose == "agent.new" {
-			if p, tiers := s.pickerTiers(ctx, list); len(tiers) > 0 {
+			usable := make([]ConfiguredLauncher, 0, len(shown))
+			for _, l := range shown {
+				usable = append(usable, l.ConfiguredLauncher)
+			}
+			if p, tiers := s.pickerTiers(ctx, usable); len(tiers) > 0 {
 				out["tiers"], out["tiers_profile"] = tiers, map[string]string{"id": p.ID, "name": p.Name}
 			}
 		}

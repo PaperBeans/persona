@@ -44,6 +44,7 @@ class AgentsPreferences @Inject constructor(private val store: DataStore<Prefere
             sort = AgentSort.fromPreference(p[stringPreferencesKey("sort")]),
             hideBotmux = p[booleanPreferencesKey("hide-botmux")] ?: false,
             foldedTabs = p[foldedTabsKey].orEmpty(),
+            folds = AgentGrouping.entries.associateWith { p[foldsKey(it)].orEmpty() },
             pins = AgentPreferences(remote.pins.spaces, remote.pins.sessions, remote.pins.allowed),
             mutes = AgentPreferences(remote.mutes.spaces, remote.mutes.sessions, remote.mutes.allowed),
             seen = remote.seen,
@@ -73,6 +74,8 @@ class AgentsPreferences @Inject constructor(private val store: DataStore<Prefere
     suspend fun foldTab(key: String, folded: Boolean) {
         store.edit { it[foldedTabsKey] = it[foldedTabsKey].orEmpty().let { keys -> if (folded) keys + key else keys - key } }
     }
+    /** The list's folded sections for [grouping], kept on this phone through relaunches, as iOS keeps them (#4338 A6). */
+    suspend fun folds(grouping: AgentGrouping, folded: Set<String>) { store.edit { it[foldsKey(grouping)] = folded } }
     /** "Expand all" opens every tab group too, as it opens every space (#2792). */
     suspend fun openAllTabs() { store.edit { it.remove(foldedTabsKey) } }
     suspend fun togglePin(id: String) = hub.togglePin(id)
@@ -83,6 +86,7 @@ class AgentsPreferences @Inject constructor(private val store: DataStore<Prefere
 }
 
 private val foldedTabsKey = stringSetPreferencesKey("folded-tabs")
+private fun foldsKey(grouping: AgentGrouping) = stringSetPreferencesKey("folds-${grouping.name}")
 
 data class AgentsPreferencesSnapshot(
     val grouping: AgentGrouping = AgentGrouping.Repo,
@@ -92,6 +96,8 @@ data class AgentsPreferencesSnapshot(
     val hideBotmux: Boolean = false,
     /** The herdr tabs whose agents the list folds to the tab's row ([AgentTab.foldKey]); every other tab is open. */
     val foldedTabs: Set<String> = emptySet(),
+    /** Each grouping's folded sections and computers ([AgentsPreferences.folds]). */
+    val folds: Map<AgentGrouping, Set<String>> = emptyMap(),
     val pins: AgentPreferences = AgentPreferences(),
     val mutes: AgentPreferences = AgentPreferences(),
     val seen: Map<String, String> = emptyMap(),
@@ -127,6 +133,15 @@ fun Session.listSession(preferences: AgentsPreferencesSnapshot): AgentSession {
     val visible = if (agentState == AgentState.Unread && preferences.seen[key.path] == readVersion) copy(state = "idle") else this
     return AgentSession(visible, stateSince, (runningSubagents ?: subagents.orEmpty().count { it.running == true }) > 0)
 }
+
+/**
+ * The [kept] rows [previous] drew as rows of their own. They stay so while the quick filter remains selected: a subtask
+ * that needed the user, opened and answered, would otherwise hang under its parent again and leave the list at once
+ * (#4494), where [retainOpenedRows] keeps every other opened row. One opened from under "Subtasks" stays there.
+ */
+internal fun openedRowsOfTheirOwn(previous: AgentListResult?, kept: Set<String>): Set<String> =
+    if (previous == null || kept.isEmpty()) emptySet()
+    else previous.groups.flatMapTo(HashSet()) { group -> group.rows.mapNotNull { row -> row.id.takeIf { it in kept } } }
 
 /** Keep opened rows in their old group and slot while the quick filter remains selected. */
 internal fun retainOpenedRows(

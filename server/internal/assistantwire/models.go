@@ -155,6 +155,7 @@ var modelRoutes = []string{
 	"GET /api/v1/launchers/presets",
 	"POST /api/v1/launchers/test",
 	"POST /api/v1/launchers/discover",
+	"POST /api/v1/launchers/catalog",
 	"GET /api/v1/launchers/import",
 	"POST /api/v1/launchers/import",
 	"GET /api/v1/launchers/{name}",
@@ -168,6 +169,7 @@ var modelRoutes = []string{
 	"GET /api/v1/launchers/{name}/quota",
 	"GET /api/v1/machines/{mid}/launchers",
 	"GET /api/v1/machines/{mid}/launchers/{name}/models",
+	"GET /api/v1/machines/{mid}/launchers/{name}/start-options",
 	"DELETE /api/v1/machines/{mid}/launchers/{name}/models/custom", // ?model=: forget a typed id (#1644)
 	// Model profiles (model_profiles.go there, docs/assistant/model-profiles.md).
 	"GET /api/v1/model-profiles",

@@ -1,6 +1,7 @@
 // Older pages of a Feishu chat, loaded as the list nears its top (iOS LarkHistoryPaging, #1033), and where the list
 // stands against its newest end for "Back to latest" (iOS LarkFollow / LarkPager.latest, #1034). Pure logic; LarkThread wires it.
-import type { LarkMessage, LarkPage } from "./inbox";
+import { comparePosition, type LarkMessage, type LarkPage } from "./inbox";
+import type { LarkConversation } from "./lark-chats";
 
 /** Why older paging stopped: it waits for a click on the header line. */
 export type HistoryProblem = "failed" | "stopped" | "account_changed" | "signed_out";
@@ -90,4 +91,51 @@ export function latestOf(page: LarkPage): LarkPage {
   const cut = messages.length < page.messages.length;
   return { ...page, messages, has_newer: false, newer_cursor: undefined, has_older: page.has_older || cut,
     older_cursor: cut ? messages[0]?.position : page.older_cursor };
+}
+
+/** The position after `p`: Feishu positions count up by one per message. */
+export function nextPosition(p: string): string {
+  if (!/^\d+$/.test(p)) return p;
+  return (BigInt(p) + 1n).toString();
+}
+
+/** Where a chat opened from "Messages" lands and what it can jump back to. */
+export interface LarkEntry {
+  /** The first unread message: the one after Feishu's read position. */
+  unreadFrom?: string;
+  /** An unread @me past the read position. */
+  mention?: string;
+}
+
+/** Where a chat opened from its row in "Messages" lands, as Feishu, iOS (LarkChatView.load) and Android
+ * (larkListTarget) open it: an unread chat at its first unread message, with its unread @me kept for a jump; a read
+ * chat, a row not loaded yet or a topic group (its read state is per topic) at the newest. */
+export function entryOf(row: Pick<LarkConversation, "unread" | "read_position" | "mention_position" | "is_topic"> | undefined): LarkEntry {
+  const read = row?.read_position;
+  if (!row || row.is_topic || !(row.unread > 0) || !read || !/^\d+$/.test(read)) return {};
+  const mention = row.mention_position && comparePosition(row.mention_position, read) > 0 ? row.mention_position : undefined;
+  return { unreadFrom: nextPosition(read), ...(mention ? { mention } : {}) };
+}
+
+/** The first message at or after `position` in a window, or undefined when the window does not reach it. */
+export function firstAtOrAfter(messages: LarkMessage[], position: string | undefined): LarkMessage | undefined {
+  return position ? messages.find((m) => comparePosition(m.position, position) >= 0) : undefined;
+}
+
+/** The message the New messages line goes above: the first at or after `position`, when the window shows what came
+ * before it (a window that starts later, as after "Back to latest", has no line). */
+export function newMessagesLineAt(page: Pick<LarkPage, "messages" | "has_older">, position: string | undefined): string | undefined {
+  const m = firstAtOrAfter(page.messages, position);
+  if (!m) return undefined;
+  return m !== page.messages[0] || !page.has_older ? m.id : undefined;
+}
+
+/** A jump pill above the list ("First unread", "Mentioned") shows while its message is not on screen and lies above
+ * it: before a window that has older pages, or loaded but scrolled past. `rowTop` is that message's top against the
+ * list's viewport, undefined when it is not drawn. */
+export function showsJumpUp(target: string | undefined, page: Pick<LarkPage, "messages" | "has_older">, rowTop: number | undefined): boolean {
+  const first = page.messages[0];
+  if (!target || !first) return false;
+  if (comparePosition(target, first.position) < 0) return Boolean(page.has_older);
+  return rowTop !== undefined && rowTop < 0;
 }

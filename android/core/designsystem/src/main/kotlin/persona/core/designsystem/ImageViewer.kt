@@ -34,8 +34,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -217,7 +215,8 @@ private fun ViewerBody(
     var pull by remember { mutableFloatStateOf(0f) }
     var settle by remember { mutableStateOf<Job?>(null) }
     var running by remember { mutableStateOf<Int?>(null) }
-    val snackbar = remember { SnackbarHostState() }
+    // The viewer is its own window, so it draws its own toast (the app's can't reach over it).
+    val toast = rememberToastState()
     val scope = rememberCoroutineScope()
     // The controls float over the picture: their glass samples the pager, not the page under this window.
     val haze = remember { HazeState() }
@@ -258,10 +257,7 @@ private fun ViewerBody(
             } finally {
                 running = null
             }
-            if (notice != null) scope.launch {
-                snackbar.currentSnackbarData?.dismiss()
-                snackbar.showSnackbar(notice)
-            }
+            if (notice != null) toast.show(FeedbackNotice(notice, style = if (notice == actionFailed) FeedbackStyle.Error else FeedbackStyle.Success))
         }
     }
 
@@ -307,8 +303,9 @@ private fun ViewerBody(
                     )
                 }
             }
+            // Below the top bar's buttons, so the toast never covers Close.
+            JToastHost(toast, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = Tokens.Space.xxl + Tokens.Space.xxl))
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                SnackbarHost(snackbar)
                 if (actions.isNotEmpty()) AnimatedVisibility(showChrome, enter = fade, exit = vanish) {
                     ViewerBar {
                         ViewerActionRow(actions, enabled = ready[page] != null && running == null, running = running, onAction = ::perform)

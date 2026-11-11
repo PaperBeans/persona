@@ -3,8 +3,8 @@ package node
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -40,13 +40,23 @@ const queuedScreenCtrlEnter = `  Running build.sh in the foreground · 10s
 ─────────────────────────────────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt`
 
-// A Claude Code whose send-now names keys Persona does not know (made up).
+// A Claude Code whose send-now names keys a terminal can't press (made up: cmd is the Mac's command key).
 const queuedScreenOtherKeys = `❯ Also run the linter at the end.
-  ctrl+x ctrl+q to send now
+  cmd+enter to send now
 
 ✻ Waddling… (12s · ↓ 120 tokens)
 ────────────────────────────────────────
 ❯ Press up to edit queued messages`
+
+// claudeScreen is a Claude Code screen read off a real pane (testdata/claude-<version>-<what>.txt).
+func claudeScreen(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "claude-"+name+".txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
 
 // A message queued with no send-now hint beside it at all.
 const queuedScreenNoHint = `❯ Also run the linter at the end.
@@ -61,15 +71,17 @@ const idleScreen = `⏺ All tests pass.
 ────────────────────────────────────────
   ? for shortcuts`
 
-// queueHost shows its queued screen (queuedScreen when none is given) until a send-now key is pressed (unless stuck),
-// then the screen with nothing queued.
+// queueHost shows its scrolled screen, if any, until ctrl+end is pressed, then its queued screen (queuedScreen when
+// none is given) until a send-now key is pressed (unless stuck), then the screen with nothing queued.
 type queueHost struct {
 	bareHost
-	mu     sync.Mutex
-	queued string
-	sent   bool
-	stuck  bool
-	first  string
+	mu       sync.Mutex
+	scrolled string
+	atEnd    bool
+	queued   string
+	sent     bool
+	stuck    bool
+	first    string
 }
 
 func (h *queueHost) Read(context.Context, host.PaneRef, host.ReadOpts) (string, error) {
@@ -77,6 +89,9 @@ func (h *queueHost) Read(context.Context, host.PaneRef, host.ReadOpts) (string, 
 	defer h.mu.Unlock()
 	if h.first != "" {
 		return h.first, nil
+	}
+	if h.scrolled != "" && !h.atEnd {
+		return h.scrolled, nil
 	}
 	if h.sent && !h.stuck {
 		return idleScreen, nil
@@ -89,8 +104,12 @@ func (h *queueHost) Read(context.Context, host.PaneRef, host.ReadOpts) (string, 
 
 func (h *queueHost) SendKeys(ctx context.Context, p host.PaneRef, keys ...string) error {
 	h.mu.Lock()
-	if slices.Contains(keys, "ctrl+s") || slices.Contains(keys, "ctrl+enter") {
-		h.sent = true
+	for _, k := range keys {
+		if k == "ctrl+end" {
+			h.atEnd = true
+		} else {
+			h.sent = true
+		}
 	}
 	h.mu.Unlock()
 	return h.bareHost.SendKeys(ctx, p, keys...)
@@ -113,7 +132,14 @@ func TestSendQueuedNow(t *testing.T) {
 		return &Node{hosts: host.NewRegistry(h), agents: map[string]host.Agent{"s1": {Agent: agent, PaneID: "orca:t1:l1"}}, paths: map[string]string{}, metas: map[string]quickMeta{}, bgScans: map[string]*bgScan{}}
 	}
 
-	for screen, want := range map[string]string{queuedScreen: "ctrl+x ctrl+s", queuedScreenCtrlEnter: "ctrl+enter"} {
+	for screen, want := range map[string]string{
+		queuedScreen:          "ctrl+x ctrl+s",
+		queuedScreenCtrlEnter: "ctrl+enter",
+		claudeScreen(t, "2.1.321-send-now-herdr"): "ctrl+enter",
+		claudeScreen(t, "2.1.321-send-now-tmux"):  "ctrl+x ctrl+s",
+		// another binding, as the hint names it: pressed as named
+		"❯ Also run the linter.\n  ctrl+x ctrl+q to send now\n❯ Press up to edit queued messages": "ctrl+x ctrl+q",
+	} {
 		h := &queueHost{bareHost: bareHost{kind: host.Orca}, queued: screen}
 		if err := node(h, "claude").sendQueuedNow(context.Background(), "s1"); err != nil {
 			t.Fatalf("send now with %q: %v", want, err)
@@ -144,9 +170,9 @@ func TestSendQueuedNow(t *testing.T) {
 	}
 }
 
-// A queue whose send-now hint Persona does not recognize is refused as that, with nothing pressed and no word of
-// updating Claude Code: a hint naming other keys is quoted, and a queue the transcript has with no hint on the screen
-// is refused the same way.
+// A queue whose send-now hint Persona can't press is refused as unrecognized, with nothing pressed and no word of
+// updating Claude Code: a hint naming keys a terminal can't send, or only a click, is quoted, and a queue the
+// transcript has with no hint on the screen is refused the same way.
 func TestSendQueuedNowUnrecognized(t *testing.T) {
 	node := func(h *queueHost) *Node {
 		return &Node{hosts: host.NewRegistry(h), agents: map[string]host.Agent{"s1": {Agent: "claude", PaneID: "orca:t1:l1"}}, paths: map[string]string{}, metas: map[string]quickMeta{}, bgScans: map[string]*bgScan{}}
@@ -158,11 +184,17 @@ func TestSendQueuedNowUnrecognized(t *testing.T) {
 	if !errors.As(err, &re) || re.Code != "send_now_unrecognized" || len(h.keys) != 0 {
 		t.Fatalf("other keys: %v, keys %q", err, h.keys)
 	}
-	if !strings.Contains(re.Message, `"ctrl+x ctrl+q to send now"`) || strings.Contains(re.Message, "update") {
+	if !strings.Contains(re.Message, `"cmd+enter to send now"`) || strings.Contains(re.Message, "update") {
 		t.Fatalf("message %q should quote the hint and not ask for an update", re.Message)
 	}
 	if !strings.Contains(string(re.Data), `"delivered":"none"`) {
 		t.Fatalf("data %s", re.Data)
+	}
+
+	h = &queueHost{bareHost: bareHost{kind: host.Orca}, first: "❯ Also run the linter at the end.\n  click to send now"}
+	err = node(h).sendQueuedNow(context.Background(), "s1")
+	if !errors.As(err, &re) || re.Code != "send_now_unrecognized" || len(h.keys) != 0 || !strings.Contains(re.Message, `"click to send now"`) {
+		t.Fatalf("a click: %v, keys %q", err, h.keys)
 	}
 
 	h = &queueHost{bareHost: bareHost{kind: host.Orca}, first: queuedScreenNoHint}
@@ -185,21 +217,114 @@ func TestSendQueuedNowUnrecognized(t *testing.T) {
 	}
 }
 
+// A fullscreen Claude Code scrolled up has its queued message and hint off screen (#4537, the screens read off
+// 2.1.321): the node scrolls back to the end with Claude Code's own key, finds the hint there and presses its keys.
+// When the end shows no hint either, nothing but the scroll key went in.
+func TestSendQueuedNowScrolledUp(t *testing.T) {
+	defer func(d, s time.Duration) { sendNowWait, sendNowScrollWait = d, s }(sendNowWait, sendNowScrollWait)
+	sendNowWait, sendNowScrollWait = 600*time.Millisecond, 300*time.Millisecond
+	node := func(h *queueHost) *Node {
+		return &Node{hosts: host.NewRegistry(h), agents: map[string]host.Agent{"s1": {Agent: "claude", PaneID: "orca:t1:l1"}}, paths: map[string]string{}, metas: map[string]quickMeta{}, bgScans: map[string]*bgScan{}}
+	}
+	scrolled := claudeScreen(t, "2.1.321-send-now-scrolled")
+	if hint, _ := sendNowOffer(scrolled); hint != "" {
+		t.Fatalf("the scrolled screen has no hint, got %q", hint)
+	}
+
+	h := &queueHost{bareHost: bareHost{kind: host.Orca}, scrolled: scrolled, queued: claudeScreen(t, "2.1.321-send-now-back-at-end")}
+	if err := node(h).sendQueuedNow(context.Background(), "s1"); err != nil {
+		t.Fatalf("scrolled up: %v", err)
+	}
+	if got := strings.Join(h.keys, " "); got != "ctrl+end ctrl+enter" {
+		t.Fatalf("keys %q, want the scroll back, then the hint's ctrl+enter", got)
+	}
+
+	// macOS names no key in the pill: Claude Code's own ctrl+end all the same
+	mac := strings.Replace(scrolled, "Jump to bottom (ctrl+End) ↓", "Jump to bottom (click) ↓", 1)
+	h = &queueHost{bareHost: bareHost{kind: host.Orca}, scrolled: mac, queued: claudeScreen(t, "2.1.321-send-now-back-at-end")}
+	if err := node(h).sendQueuedNow(context.Background(), "s1"); err != nil || strings.Join(h.keys, " ") != "ctrl+end ctrl+enter" {
+		t.Fatalf("macOS pill: %v, keys %q", err, h.keys)
+	}
+
+	// older output scrolled into view quotes a hint: not the queue's, the one at the end is pressed
+	quoting := strings.Replace(scrolled, "  Ran 1 shell command", "  ⎿  ctrl+x ctrl+q to send now", 1)
+	if hint, _ := sendNowOffer(quoting); hint != "ctrl+x ctrl+q to send now" {
+		t.Fatalf("the quoting screen should hold a hint-shaped line, got %q", hint)
+	}
+	h = &queueHost{bareHost: bareHost{kind: host.Orca}, scrolled: quoting, queued: claudeScreen(t, "2.1.321-send-now-back-at-end")}
+	if err := node(h).sendQueuedNow(context.Background(), "s1"); err != nil || strings.Join(h.keys, " ") != "ctrl+end ctrl+enter" {
+		t.Fatalf("a quoted hint above: %v, keys %q", err, h.keys)
+	}
+
+	// still no hint at the end, with the queue in the transcript: refused, only the scroll key pressed
+	h = &queueHost{bareHost: bareHost{kind: host.Orca}, first: scrolled}
+	n := node(h)
+	p := filepath.Join(t.TempDir(), "s1.jsonl")
+	writeLines(t, p, []string{`{"type":"queue-operation","operation":"enqueue","content":"third queued probe: reply THIRD-OK"}`})
+	n.paths["s1"] = p
+	if err := n.sendQueuedNow(context.Background(), "s1"); codeOf(err) != "send_now_unrecognized" || strings.Join(h.keys, " ") != "ctrl+end" {
+		t.Fatalf("no hint at the end: %v, keys %q", err, h.keys)
+	}
+}
+
+func TestScrolledUp(t *testing.T) {
+	for screen, want := range map[string]string{
+		"✻ Brewed for 7s                Jump to bottom (ctrl+End) ↓": "ctrl+end",
+		"✻ Brewed for 7s                Jump to bottom (click) ↓":    "ctrl+end",
+		"✻ Brewed for 7s     Jump to bottom: fn+↓ to scroll":         "ctrl+end",
+		"✻ Brewed for 7s     3 new messages (ctrl+End) ↓":            "ctrl+end",
+		"✻ Brewed for 7s     Jump to bottom (ctrl+g) ↓":              "ctrl+g", // a rebound scroll:bottom
+	} {
+		if keys, ok := scrolledUp(screen); !ok || strings.Join(keys, " ") != want {
+			t.Errorf("%q: %q %v, want %q", screen, keys, ok, want)
+		}
+	}
+	for _, screen := range []string{idleScreen, queuedScreenCtrlEnter, "● Scroll down to jump to bottom."} {
+		if keys, ok := scrolledUp(screen); ok {
+			t.Errorf("not scrolled up: %q gave %q", screen, keys)
+		}
+	}
+}
+
 func TestSendNowOffer(t *testing.T) {
 	for screen, want := range map[string]string{
 		queuedScreen:          "ctrl+x ctrl+s",
 		queuedScreenCtrlEnter: "ctrl+enter",
 		"❯ x\n   ctrl+x   ctrl+s  to send   now": "ctrl+x ctrl+s", // spacing as the terminal lays it out
 		"❯ x\n  ctrl+enter\n  to send now":       "ctrl+enter",
+		// the same keys, worded or cased otherwise
+		"❯ x\n  Ctrl+Enter to send now":                 "ctrl+enter",
+		"❯ x\n  (ctrl+enter to send now)":               "ctrl+enter",
+		"❯ x\n  ctrl+enter · send now":                  "ctrl+enter",
+		"❯ x\n  ctrl+enter: send now":                   "ctrl+enter",
+		"❯ x\n  ctrl+enter send now":                    "ctrl+enter",
+		"❯ x\n  ⌃⏎ to send now":                         "ctrl+enter",
+		"❯ x\n  ^X ^S to send now":                      "ctrl+x ctrl+s",
+		"❯ x\n  opt+enter to send now":                  "alt+enter",
+		"❯ x\n  ctrl+shift+s to send now":               "ctrl+shift+s",
+		"❯ x\n  ctrl+enter to send now · esc to cancel": "ctrl+enter",
+		// the message ends in key names: only the hint's own keys
+		"❯ stop it with ctrl+c   ctrl+enter to send now":  "ctrl+enter",
+		"❯ stop it with ctrl+c\n  ctrl+enter to send now": "ctrl+enter",
+		// output above quotes an older hint: the lowest is the one beside the queue
+		"  ⎿  ctrl+x ctrl+s to send now\n❯ x\n  ctrl+enter to send now": "ctrl+enter",
 	} {
 		if _, keys := sendNowOffer(screen); strings.Join(keys, " ") != want {
 			t.Errorf("keys %q, want %q in\n%s", keys, want, screen)
 		}
 	}
-	if hint, keys := sendNowOffer(queuedScreenOtherKeys); hint != "ctrl+x ctrl+q to send now" || keys != nil {
-		t.Errorf("other keys: %q %q", hint, keys)
+	for screen, want := range map[string]string{
+		queuedScreenOtherKeys:             "cmd+enter to send now",
+		"❯ x\n  click to send now":        "click to send now",
+		"❯ x\n  fn+enter to send now":     "fn+enter to send now",
+		"❯ x\n  ctrl+x cmd+s to send now": "ctrl+x cmd+s to send now",
+	} {
+		if hint, keys := sendNowOffer(screen); hint != want || keys != nil {
+			t.Errorf("unpressable: %q %q, want %q and no keys", hint, keys, want)
+		}
 	}
-	for _, screen := range []string{idleScreen, queuedScreenNoHint, "⏺ I am going to send now."} {
+	for _, screen := range []string{idleScreen, queuedScreenNoHint, "⏺ I am going to send now.",
+		"● Press ctrl+enter to send now", "● Use ctrl+enter to send now.", "❯ x\n  to send now", "❯ x\n  the end to send now"} {
 		if hint, keys := sendNowOffer(screen); hint != "" || keys != nil {
 			t.Errorf("no hint in %q: %q %q", screen, hint, keys)
 		}

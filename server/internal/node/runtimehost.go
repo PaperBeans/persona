@@ -234,12 +234,15 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		// resume_argv: a session listed offline with resume_argv is resumed in the terminal engine (pi.go).
 		// handover: a send refused with the handover code goes to the runtime that takes the session over (handOver).
 		// transcript: a session listed with a Claude transcript has its content read from it here (runtimetranscript.go).
+		// codex_thread: a session listed with the Codex thread it is has that thread listed once (runtimecodex.go).
+		// unlisted_transcripts: the transcripts a list names as the runtime's own sessions it no longer lists stay among
+		// the sessions not running (runtimeunlisted.go).
 		// launchers: hello's launchers and runtime.launchers are offered; start_params: session.start carries the
 		// launcher picked and the form's model, permission mode, effort and space; modes: session.modes reaches a
 		// runtime with caps.modes; resume: a runtime with caps.resume that is the machine's engine is asked to take
 		// sessions over (runtimecontrol.go).
 		res := map[string]any{"protocol": RuntimeProtocol, "node_version": rh.version, "hub": rh.current() != nil,
-			"features": []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume"}}
+			"features": []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts"}}
 		if offer := rh.packageOffer(h, hello); offer != nil {
 			res["update"] = offer
 		}
@@ -343,13 +346,18 @@ func (rh *RuntimeHost) event(h *runtimeConn, event string, params json.RawMessag
 		}
 		var moved []string
 		if !h.isDaemon() { // a daemon's offline sessions are not resumed in this machine's terminal engine
-			resume, ts := runtimeRowExtras(params)
-			h.setResume(resume)
+			x := runtimeRowExtras(params, len(p.Sessions))
+			h.setResume(x.resume)
 			// …nor read from this machine's transcripts: a daemon names none (runtimetranscript.go).
+			ts := x.transcripts
 			if n != nil {
 				ts = n.foundTranscripts(ts)
 			}
 			moved = h.setTranscripts(ts)
+			h.setCodexThreads(x.threads) // …nor are its Codex threads this machine's (runtimecodex.go)
+			if x.unlistedSaid && rh.reg.setUnlisted(h, x.unlisted) {
+				forgetOfflineScan() // …nor its past sessions' transcripts (runtimeunlisted.go): the next list reads them again
+			}
 		}
 		list := normalizeRuntimeSessions(h, p.Sessions)
 		if cap(list) > 2*len(list)+8 { // the list shrank: keep no array of the old size
@@ -373,30 +381,53 @@ func (rh *RuntimeHost) event(h *runtimeConn, event string, params json.RawMessag
 	}
 }
 
-// runtimeRowExtras is resumeArgvs and runtimeTranscripts of a runtime.sessions push, read in one pass over its rows
-// rather than one each. A push one of the two cannot read (a field of the wrong type) has each read on its own, as
-// before: the other may still read.
-func runtimeRowExtras(params json.RawMessage) (map[string][]string, map[string]string) {
+// rowExtras is what a runtime.sessions push says beyond the rows the apps see.
+type rowExtras struct {
+	resume      map[string][]string // session → resume_argv (resumeArgvs)
+	transcripts map[string]string   // session → the Claude transcript its conversation is (runtimeTranscripts)
+	threads     map[string]string   // session → the Codex thread its conversation is (runtimeCodexThreads)
+	// Claude transcripts of sessions of its own it does not list (unlistedTranscripts), when the push says: one
+	// without the field leaves what the runtime named before.
+	unlisted     map[string]bool
+	unlistedSaid bool
+}
+
+// runtimeRowExtras is resumeArgvs, runtimeTranscripts, runtimeCodexThreads and unlistedTranscripts of a
+// runtime.sessions push, read in one pass rather than one each, its rows into a slice of rows rows (the size the
+// push's sessions were decoded into, so it is not grown row by row). A push one of them cannot read (a field of the
+// wrong type) has each read on its own, as before: the others may still read.
+func runtimeRowExtras(params json.RawMessage, rows int) rowExtras {
+	type extras struct {
+		SessionID   string   `json:"session_id"`
+		ResumeArgv  []string `json:"resume_argv"`
+		Transcript  string   `json:"transcript"`
+		CodexThread string   `json:"codex_thread"`
+	}
 	var p struct {
-		Sessions []struct {
-			SessionID  string   `json:"session_id"`
-			ResumeArgv []string `json:"resume_argv"`
-			Transcript string   `json:"transcript"`
-		} `json:"sessions"`
+		Sessions []extras `json:"sessions"`
+		Unlisted []string `json:"unlisted_transcripts"`
 	}
+	p.Sessions = make([]extras, 0, rows)
 	if json.Unmarshal(params, &p) != nil {
-		return resumeArgvs(params), runtimeTranscripts(params)
+		unlisted, said := unlistedTranscripts(params)
+		return rowExtras{resumeArgvs(params), runtimeTranscripts(params), runtimeCodexThreads(params), unlisted, said}
 	}
-	resume, transcripts := map[string][]string{}, map[string]string{}
+	x := rowExtras{resume: map[string][]string{}, transcripts: map[string]string{}, unlisted: unlistedSet(p.Unlisted), unlistedSaid: p.Unlisted != nil}
 	for _, s := range p.Sessions {
 		if resumable(s.SessionID, s.ResumeArgv) {
-			resume[s.SessionID] = s.ResumeArgv
+			x.resume[s.SessionID] = s.ResumeArgv
 		}
 		if namesTranscript(s.SessionID, s.Transcript) {
-			transcripts[s.SessionID] = s.Transcript
+			x.transcripts[s.SessionID] = s.Transcript
+		}
+		if namesCodexThread(s.SessionID, s.CodexThread) {
+			if x.threads == nil { // few runtimes name one: no map until a row does
+				x.threads = map[string]string{}
+			}
+			x.threads[s.SessionID] = s.CodexThread
 		}
 	}
-	return resume, transcripts
+	return x
 }
 
 // resumeArgvs reads the resume_argv of a runtime.sessions push: how the terminal engine resumes a session the runtime

@@ -356,15 +356,12 @@ class RepositoryTests(unittest.TestCase):
             code = gen.main(["--check", "--kotlin", str(self.KOTLIN)])
         self.assertEqual(code, 0, output.getvalue())
 
-    # iOS values the JSON doesn't carry yet, or carries differently, as (iOS, JSON); None is a missing side. Each phase 1 step
-    # of #4209 that aligns a group empties its entry (T2 did spacing; T3 does motion). A Swift change outside this table fails.
+    # iOS values the JSON doesn't carry, as (iOS, JSON); None is a missing side. Spacing is aligned (T2); motion and type have
+    # their own tests below. A Swift change outside this table fails.
     KNOWN_DRIFT = {
         "radius": {"thumbnail": (3, None), "page": (55, None)},
         "space": {},
-        "motion": {"expand": (400, None), "reveal": (280, None), "conceal": (200, None), "reduced": (None, 0)},
     }
-    # The shared motions (phase 1 R3); the rest of Theme.Motion belongs to single components (the composer, attaching, blinks).
-    SHARED_MOTION = ("state", "layout", "expand", "reveal", "conceal")
 
     def swift_enum(self, name):
         theme = (gen.ROOT / "apple/Shared/Design/Theme.swift").read_text()
@@ -393,13 +390,77 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(tokens)
         self.assertEqual({name: ios.get(name) for name in tokens}, tokens, "a size in spec/tokens differs from Theme.Size")
 
-    def test_ios_motion_durations_match(self):
+    def test_ios_type_levels_match(self):
+        # Theme.Font on the iPhone (the #else branch): each name is a Dynamic Type style, maybe with a weight or monospaced,
+        # and Theme.Level gives its size and line height. sectionHeader is the caption level in semibold.
+        font = self.swift_enum("Font")
+        iphone = font[font.index("#else"):font.index("#endif")]
+        styles = dict(re.findall(r'static let (\w+) = SwiftUI\.Font\.(\w+(?:\.[\w(.)]*)?)$', iphone, re.M))
+        theme = (gen.ROOT / "apple/Shared/Design/Theme.swift").read_text()
+        level = theme[theme.index("    enum Level {"):theme.index("var extraLeading")]
+        sizes_block = level[level.index("#else"):level.index("#endif")]
+        heights_block = level[level.index("var lineHeight"):]
+
+        def cases(block):
+            out = {}
+            for names, value in re.findall(r'case ([.\w, ]+): ([0-9.]+)', block):
+                for name in re.findall(r'\.(\w+)', names):
+                    out[name] = float(value)
+            return out
+
+        sizes, heights = cases(sizes_block), cases(heights_block)
+        weights = {"bold()": 700, "weight(.semibold)": 600, "weight(.medium)": 500}
+        expected = {}
+        for name, expr in styles.items():
+            if name in ("scale",) or name.endswith(("Strong", "Heavy", "Medium")):
+                continue
+            style, _, rest = expr.partition(".")
+            weight = weights.get(rest, 600 if style == "headline" else 400)
+            lvl = "caption" if name == "sectionHeader" else name
+            expected[name] = {"size": sizes[lvl], "weight": weight, "lineHeight": heights[lvl], "iosTextStyle": style,
+                              "family": "monospace" if rest == "monospaced()" else "system"}
+        tokens = {}
+        for key, value in self.catalog.values.items():
+            if key.startswith("type."):
+                _, name, part = key.split(".")
+                tokens.setdefault(name, {})[part] = value["value"] if isinstance(value, dict) and "value" in value else value
+        self.assertEqual(len(expected), 9)
+        self.assertEqual(expected, tokens)
+
+    def test_ios_motion_matches(self):
+        # The shared motions (phase 1 R3) as Theme.Motion writes them; the rest of Theme.Motion belongs to single components
+        # (the composer, attaching, blinks). SwiftUI's snappy has a bounce of 0.15, smooth none.
         motion = self.swift_enum("Motion")
-        timed = re.findall(r'static let (\w+) = Animation\.\w+\(duration: ([0-9.]+)\)', motion)
-        timed += re.findall(r'static let (\w+)Time = ([0-9.]+)\n', motion)  # reveal and conceal
-        ios = {name: round(float(seconds) * 1000) for name, seconds in timed if name in self.SHARED_MOTION}
-        self.assertEqual(set(ios), set(self.SHARED_MOTION), "a shared motion is missing from Theme.Motion")
-        self.assert_drift("motion", ios)
+
+        def seconds(pattern):
+            found = re.search(pattern, motion)
+            self.assertIsNotNone(found, pattern)
+            return [float(value) for value in found.groups()]
+
+        bounce = {"snappy": 0.15, "smooth": 0}
+        expected = {}
+        for name in ("state", "layout", "expand"):
+            kind, duration = re.search(rf'static let {name} = Animation\.(snappy|smooth)\(duration: ([0-9.]+)\)', motion).groups()
+            expected[name] = {"duration": round(float(duration) * 1000), "bounce": bounce[kind]}
+        for name, curve in (("reveal", "easeOut"), ("conceal", "easeIn")):
+            self.assertIn(f"static let {name} = Animation.{curve}(duration: {name}Time)", motion)
+            expected[name] = {"duration": round(seconds(rf'static let {name}Time = ([0-9.]+)\n')[0] * 1000), "curve": curve}
+        duration, drawer_bounce = seconds(r'\.interpolatingSpring\(duration: ([0-9.]+), bounce: ([0-9.]+), initialVelocity: velocity\)')
+        expected["drawer"] = {"duration": round(duration * 1000), "bounce": drawer_bounce}
+        duration, back_bounce = seconds(r'static let springBack = Animation\.spring\(duration: ([0-9.]+), bounce: ([0-9.]+)\)')
+        expected["springBack"] = {"duration": round(duration * 1000), "bounce": back_bounce}
+        mass, stiffness, damping = seconds(r'static let keyboard = Animation\.interpolatingSpring\(mass: ([0-9.]+), stiffness: ([0-9.]+), damping: ([0-9.]+)\)')
+        self.assertEqual(mass, 1)
+        expected["keyboard"] = {"stiffness": stiffness, "damping": damping}
+        breath = {part: seconds(rf'static let needsYou{part}(?:: \w+)? = ([0-9.]+)\n')[0] for part in ("BreathDuration", "BreathScale", "RingOpacity")}
+        expected["needsYouBreath"] = {"duration": round(breath["BreathDuration"] * 1000), "scale": breath["BreathScale"], "ringOpacity": breath["RingOpacity"]}
+        tokens = {}
+        for key, value in self.catalog.values.items():
+            parts = key.split(".")
+            if parts[0] == "motion" and len(parts) == 3:
+                tokens.setdefault(parts[1], {})[parts[2]] = value["value"] if isinstance(value, dict) else value
+        self.assertEqual(expected, tokens)
+        self.assertEqual(self.catalog.values["motion.reduced"], {"value": 0, "unit": "ms"})
 
     def test_existing_contrast_conflicts_are_not_silenced(self):
         failures = {(r.style, r.mode, r.rule) for r in self.catalog.contrast_results() if not r.passed}

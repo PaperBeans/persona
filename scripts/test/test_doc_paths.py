@@ -46,6 +46,7 @@ GENERATED = {
     "apple/Persona.xcodeproj",
     "android/app/build/outputs/apk/debug/app-debug.apk",
     "web/dist",
+    "web/public/pake/THIRD_PARTY_NOTICES.txt",  # written by web/scripts/build-pake.mjs (THIRD_PARTY_NOTICES.md)
     "apple/Persona.xcodeproj",  # the kept compatibility symlink to the generated Persona.xcodeproj
 }
 

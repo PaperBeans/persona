@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- New Agent's ultracode switch (#582): iOS UltracodeStartRow words. -->
+<resources>
+    <string name="agents_new_ultracode_subtitle">すべてのタスクをマルチエージェントの workflow で進めます · 使用量を大きく消費 · このセッションのみ</string>
+    <string name="agents_new_ultracode_old">このコンピュータの Claude Code は %1$s です。ultracode には %2$s 以降が必要です</string>
+    <string name="agents_new_ultracode_failed">ultracode をオンにして開始できませんでした：%1$s。再試行すると ultracode なしで開始します</string>
+    <string name="agents_row_ultracode">ultracode オン</string>
+</resources>

@@ -34,7 +34,7 @@
           }
         ],
         "code": "not_logged_in",
-        "detail": "Sign in on 小林的 MacBook, use an API key, or switch the main chat to another launcher on it (Settings › Model).",
+        "detail": "Sign in on 小林的 MacBook, use an API key, or choose another app or setup to run the main chat on that computer in Settings › Model.",
         "id": "model",
         "launcher": "claude",
         "machine": "mbp",
@@ -101,7 +101,7 @@
           }
         ],
         "code": "not_logged_in",
-        "detail": "小林的 MacBook でサインインするか、APIキーを使うか、もしくは 設定・モデル でメインチャットを別のランチャーに切り替えてください。",
+        "detail": "小林的 MacBookでログインするか、APIキーを使うか、設定 › モデルでこのパソコンのメインチャットを実行する別のアプリや設定を選んでください。",
         "id": "model",
         "launcher": "claude",
         "machine": "mbp",
@@ -168,7 +168,7 @@
           }
         ],
         "code": "not_logged_in",
-        "detail": "在 小林的 MacBook 上登录一次、改用 API Key，或在 设置 › 模型 里把主对话切到它上面的另一个启动器。",
+        "detail": "在 小林的 MacBook 上登录，改用 API Key，或在设置 › 模型中选择此电脑上运行主对话的其他应用或配置。",
         "id": "model",
         "launcher": "claude",
         "machine": "mbp",

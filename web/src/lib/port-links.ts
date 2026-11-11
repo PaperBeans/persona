@@ -52,13 +52,15 @@ export function portLink(url: string, hostnames: readonly string[] = []): PortLi
   return { port, path: u.pathname + u.search + u.hash || "/", secure: u.protocol === "https:" };
 }
 
-/** http(s) URLs in prose, Markdown links and <autolinks>: they end at whitespace, quotes, brackets and CJK punctuation. */
+/** Start of an HTTP(S) URL; its whole envelope owns any addresses in its path, query or fragment. */
+const SCHEME_START = /\bhttps?:\/\//gi;
+/** Hard prose boundaries. Balanced ASCII parentheses/brackets belong to the URL instead. */
 // i18n-ignore: CJK punctuation that ends a URL in an agent's reply
-const SCHEME_URL = /\bhttps?:\/\/[^\s<>"'`()[\]{}，。；！？、（）「」]+/gi;
+const URL_BOUNDARY = /[\s<>"'`{}，。；！？、（）「」]/;
 /** Bare `localhost:3000/x`, as servers often print it; not part of a longer name (`mylocalhost:3000`) or path. */
 const BARE = /(^|[^A-Za-z0-9_./:@-])((?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d{1,5}(?:\/[A-Za-z0-9_.~!$&'()*+,;=:@%/?#-]*)?)/g;
-/** Sentence punctuation after a link is not part of it. */
-const TRAILING = /[.,;:!?)]+$/;
+/** Bare links can include the closing parenthesis of the surrounding sentence. */
+const BARE_TRAILING = /[.,;:!?)]+$/;
 
 const same = (a: PortLink, b: PortLink) => a.port === b.port && a.path === b.path && a.secure === b.secure;
 
@@ -70,14 +72,25 @@ export function portLinks(text: string, hostnames: readonly string[] = []): Port
     if (l && out.length < MAX_PORT_LINKS && !out.some((x) => same(x, l))) out.push(l);
   };
   const found: { at: number; end: number; link: PortLink | null }[] = [];
-  for (const m of text.matchAll(SCHEME_URL)) {
-    const s = m[0].replace(TRAILING, "");
-    found.push({ at: m.index, end: m.index + m[0].length, link: portLink(s, hostnames) });
+  let urlEnd = 0;
+  for (const m of text.matchAll(SCHEME_START)) {
+    if (m.index < urlEnd) continue; // a scheme inside another URL is not another link
+    const closers: string[] = [];
+    for (urlEnd = m.index + m[0].length; urlEnd < text.length; urlEnd++) {
+      const ch = text[urlEnd];
+      if (URL_BOUNDARY.test(ch)) break;
+      if (ch === "(") closers.push(")");
+      else if (ch === "[") closers.push("]");
+      else if ((ch === ")" || ch === "]") && closers.pop() !== ch) break;
+    }
+    // Unmatched closing delimiters ended the envelope above; balanced ones are part of its path.
+    const s = text.slice(m.index, urlEnd).replace(/[.,;:!?]+$/, "");
+    found.push({ at: m.index, end: urlEnd, link: portLink(s, hostnames) });
   }
   for (const m of text.matchAll(BARE)) {
     const at = m.index + m[1].length;
     if (found.some((f) => at < f.end && at >= f.at)) continue;
-    found.push({ at, end: at + m[2].length, link: portLink(`http://${m[2].replace(TRAILING, "")}`) });
+    found.push({ at, end: at + m[2].length, link: portLink(`http://${m[2].replace(BARE_TRAILING, "")}`) });
   }
   for (const f of found.sort((a, b) => a.at - b.at)) add(f.link);
   return out;

@@ -6,10 +6,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.*
 import persona.core.designsystem.*
@@ -29,7 +27,7 @@ fun AgentShareSheet(session: SessionKey, api: AgentShares, onDismiss: () -> Unit
 internal fun AgentShareContent(model: AgentShareModel, onDismiss: () -> Unit) {
     var full by remember { mutableStateOf<String?>(null) }
     var confirmRevoke by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
+    val copy = rememberCopy()
     JSheet(onDismiss, title = stringResource(R.string.chat_agent_share_title), scrollable = true) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
             model.notice?.let { JNotice(it.text()) }
@@ -39,7 +37,8 @@ internal fun AgentShareContent(model: AgentShareModel, onDismiss: () -> Unit) {
                 // Shown once, in memory only: closing or leaving this page drops it and nothing persists it.
                 JNotice(stringResource(R.string.chat_agent_share_once), title = stringResource(R.string.chat_agent_share_created), status = Status.NeedsYou)
                 JCodeBlock(link, small = true)
-                JButton(stringResource(R.string.chat_agent_share_copy), { model.copyLink { clipboard.setText(AnnotatedString(it)) } }, Modifier.fillMaxWidth(),
+                // An empty notice: the sheet itself says the link was copied.
+                JButton(stringResource(R.string.chat_agent_share_copy), { model.copyLink { copy(it, "") } }, Modifier.fillMaxWidth(),
                     icon = PhIcons.Copy)
                 JButton(stringResource(R.string.chat_agent_share_existing), model::finishLink, Modifier.fillMaxWidth(), kind = JButtonKind.Secondary, enabled = !model.busy)
             } else when (model.page) {

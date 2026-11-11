@@ -1,0 +1,12 @@
+{
+  "due": "截止日期",
+  "due_today": "今天",
+  "due_tomorrow": "明天",
+  "due_next_week": "下周",
+  "due_pick": "选择日期…",
+  "due_none": "不设截止日期",
+  "remind_hour": "1 小时后",
+  "remind_tomorrow": "明天上午",
+  "remind_none": "不提醒",
+  "hand_over": "交给 Agent…"
+}

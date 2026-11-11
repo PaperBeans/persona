@@ -57,3 +57,45 @@ final class Debouncer {
         }
     }
 }
+
+/// Like `Debouncer`, for a file rewritten on every change of something that changes all the time: one write `first`
+/// after a quiet spell, then at most one every `gap`, the latest work winning; `flush()` writes what is waiting now
+/// (the app leaving the foreground). A trailing debounce wrote the session snapshot every 7 s on a busy hub (#4684).
+@MainActor
+final class Throttle {
+    private var task: Task<Void, Never>?
+    private var work: (@MainActor () -> Void)?
+    private var last: ContinuousClock.Instant?
+    private let first: Duration
+    private let gap: Duration
+
+    init(first: Duration = .seconds(2), gap: Duration) {
+        self.first = first
+        self.gap = gap
+    }
+
+    func run(_ work: @escaping @MainActor () -> Void) {
+        self.work = work
+        guard task == nil else { return }
+        let wait = last.map { max(first, gap - (ContinuousClock.now - $0)) } ?? first
+        task = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled else { return }
+            self?.fire()
+        }
+    }
+
+    func flush() {
+        guard task != nil else { return }
+        task?.cancel()
+        fire()
+    }
+
+    private func fire() {
+        task = nil
+        last = .now
+        let pending = work
+        work = nil
+        pending?()
+    }
+}

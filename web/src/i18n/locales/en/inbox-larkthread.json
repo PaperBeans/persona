@@ -90,6 +90,8 @@
   "older_account_changed": "Lark account changed. Reopen the chat",
   "older_signed_out": "Signed out of Lark. Reconnect it",
   "jump_latest": "Back to latest",
+  "jump_first_unread": "First unread",
+  "jump_mention": "You were mentioned",
   "recalled_mark": "Recalled",
   "edit_history": "Edit history",
   "edit_history_hint": "View kept earlier versions",

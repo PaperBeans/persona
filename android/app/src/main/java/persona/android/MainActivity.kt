@@ -222,6 +222,10 @@ class MainActivity : ComponentActivity() {
             openNavigation.value = { it.parse(RouteInput.Notification(session)) }
         }
         val uri = intent.data ?: return
+        if (uri.host == "password-login") {
+            persona.android.platform.PasswordBrowserLogin.complete(uri)
+            return
+        }
         if (uri.host == "pair") {
             pendingPairLink.value = uri.toString()
             return

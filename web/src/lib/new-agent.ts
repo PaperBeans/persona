@@ -9,6 +9,8 @@ import { currentPlatform, modName, type Platform } from "./shortcuts";
 import { href, navigate } from "./router";
 import { getState, putLaunch, upsertSession } from "./store";
 import { ultracodeErrorText, ultracodeRefused } from "./ultracode";
+import type { DraftImage } from "./drafts";
+import type { ContextRef } from "./links";
 import type { Session } from "./types";
 import type { WorkspaceTarget } from "./workspace-target";
 
@@ -19,6 +21,10 @@ export interface AgentLaunch {
   machineId: string;
   cwd: string;
   launcher: string;
+  agentType?: string;
+  workSession?: boolean;
+  /** Start with the first message when this harness takes it as part of creation. */
+  inlinePrompt?: boolean;
   /** Picked in "New agent" for this start only (launcher-models.ts startPicks); none: the launcher's own. */
   model?: string;
   effort?: string;
@@ -45,13 +51,13 @@ export interface AgentLaunch {
   messageId: string;
   /** The hub answered that it doesn't know how this went: only the person can say whether to go on. */
   uncertain?: boolean;
-  /** The start failed in a gap and the hub may have it: Retry repeats it unchanged, under the same op id. */
+  /** The target is locked on retry: work-session choices or a start that the hub may already have. */
   repeatOnly?: boolean;
   clearable?: string;
   draft?: string;
 }
 
-export function launchAgent(input: Pick<AgentLaunch, "machineId" | "cwd" | "workspaceId" | "launcher" | "model" | "effort" | "permissionMode" | "host" | "ultracode" | "text" | "attachments" | "todoId">) {
+export function launchAgent(input: Pick<AgentLaunch, "machineId" | "cwd" | "workspaceId" | "launcher" | "agentType" | "workSession" | "inlinePrompt" | "model" | "effort" | "permissionMode" | "host" | "ultracode" | "text" | "attachments" | "todoId">) {
   const launch: AgentLaunch = { ...input, id: `local-${uuid()}`, phase: "creating", uploaded: {}, ...launchOpIds() };
   putLaunch(launch);
   navigate({ name: "session", mid: launch.machineId, sid: launch.id });
@@ -101,18 +107,32 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
     const imageBytes = launch.attachments.filter((a) => a.mime.startsWith("image/")).reduce((total, a) => total + Math.ceil(a.file.size / 3) * 4, 0);
     if (imageBytes + new TextEncoder().encode(launch.text).byteLength > 31 * 1024 * 1024) throw new Error(t("lib-new-agent.attachments_too_large_start"));
     if (!launch.session) {
-      let session: Session;
-      try {
-        const r = await launchOp<{ session: Session }>("/sessions", launch.startOpId, controller.signal, { machine_id: launch.machineId, cwd: launch.cwd, workspace_id: launch.workspaceId || undefined, launcher: launch.launcher || undefined, model: launch.model || undefined, effort: launch.effort || undefined, permission_mode: launch.permissionMode || undefined, host: launch.host || undefined, ultracode: launch.ultracode === true ? true : undefined, async: true, name_hint: launch.text || undefined, todo_id: launch.todoId || undefined });
-        session = r.session;
-      } catch (e) {
-        if (!(e instanceof ApiError) || e.code !== "codex_needs_prompt") throw e;
+      const target = {
+        machine_id: launch.machineId, cwd: launch.cwd, workspace_id: launch.workspaceId || undefined,
+        launcher: launch.launcher || undefined, agent_type: launch.agentType, work_session: launch.workSession,
+        model: launch.model || undefined, host: launch.host || undefined, todo_id: launch.todoId || undefined,
+      };
+      const startWithPrompt = async (required: boolean) => {
         if (launch.attachments.length) throw new Error(t("lib-new-agent.launcher_no_attachments"));
-        if (!launch.text) throw new Error(t("lib-new-agent.launcher_needs_text"));
-        // A Codex start takes the picked model but no effort.
-        const r = await launchOp<{ session: Session }>("/sessions", launch.startPromptOpId, controller.signal, { machine_id: launch.machineId, cwd: launch.cwd, workspace_id: launch.workspaceId || undefined, launcher: launch.launcher || undefined, model: launch.model || undefined, host: launch.host || undefined, prompt: launch.text, todo_id: launch.todoId || undefined });
-        session = r.session;
+        if (required && !launch.text) throw new Error(t("lib-new-agent.launcher_needs_text"));
+        const r = await launchOp<{ session: Session }>("/sessions", launch.startPromptOpId, controller.signal, { ...target, prompt: launch.text });
         update({ outgoing: { text: "", images: [] } });
+        return r.session;
+      };
+      let session: Session;
+      if (launch.inlinePrompt) {
+        session = await startWithPrompt(launch.agentType === "codex");
+      } else {
+        try {
+          const r = await launchOp<{ session: Session }>("/sessions", launch.startOpId, controller.signal, {
+            ...target, effort: launch.effort || undefined, permission_mode: launch.permissionMode || undefined,
+            ultracode: launch.ultracode === true ? true : undefined, async: true, name_hint: launch.text || undefined,
+          });
+          session = r.session;
+        } catch (e) {
+          if (!(e instanceof ApiError) || e.code !== "codex_needs_prompt") throw e;
+          session = await startWithPrompt(true);
+        }
       }
       if (!getState().launches[id]) return;
       update({ session });
@@ -161,7 +181,7 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
     // the hub won't start it with ultracode here (an old node, a CLI or engine that can't take it): asking again would
     // get the same answer, so "Retry" starts it without, and the card says so (#3428)
     const noUltracode = creating && launch.ultracode === true && ultracodeRefused(e);
-    update({ phase: "failed", uncertain, repeatOnly: creating && gap, ...(gap ? {} : launchOpIds()),
+    update({ phase: "failed", uncertain, repeatOnly: creating && (gap || launch.workSession === true), ...(gap ? {} : launchOpIds()),
       ...(noUltracode ? { ultracode: undefined } : {}),
       error: noUltracode ? t("ultracode.start_refused", { error: ultracodeErrorText(e) }) : t(creating ? "lib-new-agent.start_failed" : sending ? "lib-new-agent.first_message_failed" : "lib-new-agent.attachments_failed", { error: errorText(e) }),
       clearable: e instanceof ApiError && e.code === "input_draft" && typeof e.body.clearable === "string" ? e.body.clearable : undefined,
@@ -177,9 +197,15 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
 
 /** What "New agent" opens with when another page opens it ("Knowledge"'s "Start agent"): the first message, and where if known. */
 export interface NewAgentPreset {
+  /** Open the work-session picker from the main conversation. */
+  workSession?: boolean;
   prompt?: string;
   machineId?: string;
   cwd?: string;
+  /** A message forwarded to a new Agent (#3899): its card over the first message, which carries it in front; and the
+   *  pictures it had, attached. */
+  forward?: ContextRef;
+  images?: DraftImage[];
   /** An exact workspace destination takes precedence over the legacy machine/folder preset. */
   workspace?: WorkspaceTarget;
 }

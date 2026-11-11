@@ -433,7 +433,7 @@ enum ToolRunSummary {
 
     private static func chip(_ kind: Kind, _ calls: [ToolCall]) -> ToolChipGroup.Chip {
         let first = calls[0]
-        let error = calls.contains(where: \.isError)
+        let error = calls.contains(where: \.failed)
         let one = calls.count == 1
         let subject = ToolPresentation.subject(first)
         let ascii = subject.unicodeScalars.allSatisfy(\.isASCII)
@@ -578,7 +578,7 @@ struct ToolCallRow: View {
         grouped ? EdgeInsets(top: 5, leading: 9, bottom: 5, trailing: 9) : EdgeInsets(top: 2, leading: 7, bottom: 2, trailing: 7)
     }
 
-    private var tint: Color { call.isError ? Theme.danger : call.isRunning ? Theme.busy : .secondary }
+    private var tint: Color { call.failed ? Theme.danger : call.isRunning ? Theme.busy : .secondary }
 
     /// The row's head: a round kind icon, the verb, the subject, a background task's badge and the chevron.
     private func header(_ base: String) -> some View {
@@ -616,7 +616,7 @@ struct ToolCallRow: View {
                     Spacer(minLength: 4)
                     taskBadge
                 }
-                if call.isError { ThemedIcon(Theme.Icon.errorFilled).foregroundStyle(Theme.danger).font(Theme.Font.label) }
+                ToolOutcomeMark(call: call)
                 ThemedIcon(Theme.Icon.disclosure)
                     .font(Theme.Font.labelStrong)
                     .foregroundStyle(.tertiary)
@@ -651,7 +651,7 @@ struct ToolCallRow: View {
             ToolChipRow(chip(subject), isOpen: isOpen, isRunning: call.isRunning, chipStyle: subject.isEmpty ? .plain : .boxed,
                         action: tapped) {
                 if !stacked { taskBadge }
-                if call.isError { ThemedIcon(Theme.Icon.errorFilled).foregroundStyle(Theme.danger).font(Theme.Font.label) }
+                ToolOutcomeMark(call: call)
             }
             .accessibilityIdentifier(headerID)
             // At the accessibility sizes the badge, which keeps its width, left the verb nothing beside it: it gets a
@@ -776,13 +776,15 @@ struct ToolDetail: View {
             if (base == "Agent" || base == "Task"), !call.results.isEmpty {
                 let reports = call.results.filter { !SubagentDelivery.isReceipt($0) && !($0.text ?? "").isEmpty }
                 ForEach(reports) { report in
-                    ResultBlock(text: report.cutText, isError: report.isError ?? false, cut: report.fullSize.map { (report.id, $0) })
+                    ResultBlock(text: report.cutText, isError: report.isError ?? false, cut: report.fullSize.map { (report.id, $0) },
+                                outcome: report.outcome)
                 }
                 if reports.isEmpty, let result = call.result {
-                    ResultBlock(text: "", isError: result.isError ?? false)
+                    ResultBlock(text: "", isError: result.isError ?? false, outcome: result.outcome)
                 }
             } else if let result = call.result, (base != "Edit" && base != "ask_user" && base != SecretRun.tool) || result.isError == true {
-                ResultBlock(text: result.cutText, isError: result.isError ?? false, cut: result.fullSize.map { (result.id, $0) })
+                ResultBlock(text: result.cutText, isError: result.isError ?? false, cut: result.fullSize.map { (result.id, $0) },
+                            outcome: result.outcome)
                 if base == "Bash" || base == "PowerShell" { PortChips(text: result.cutText) } // a dev server saying where it listens
             } else if call.isRunning {
                 HStack(spacing: Theme.Space.sm) {
@@ -794,28 +796,9 @@ struct ToolDetail: View {
         }
     }
 
-    /// The file a diff is in: name, folder, +N −N; a tap opens it.
     @ViewBuilder private func diffHeader(_ p: String?, _ diffs: [DiffView]) -> some View {
         if let p, !p.isEmpty {
-            let adds = diffs.reduce(0) { $0 + $1.adds }, dels = diffs.reduce(0) { $0 + $1.dels }
-            let header = HStack(spacing: Theme.Space.sm) {
-                ThemedIcon(FileViewer.symbol(for: p)).font(Theme.Font.label).foregroundStyle(.secondary)
-                Text((p as NSString).lastPathComponent).font(Theme.Font.captionStrong).foregroundStyle(.primary).lineLimit(1)
-                Text((p as NSString).deletingLastPathComponent).font(Theme.Font.caption).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.head)
-                Spacer(minLength: 4)
-                if adds > 0 { Text("+\(adds)").foregroundStyle(Theme.Diff.add) }
-                if dels > 0 { Text("−\(dels)").foregroundStyle(Theme.Diff.del) }
-                if openFile != nil { ThemedIcon(Theme.Icon.openDocument).font(Theme.Font.label).foregroundStyle(Theme.accent) }
-            }
-            .font(Theme.Font.captionStrong.monospacedDigit())
-            if let openFile {
-                Button { openFile(p) } label: { header.contentShape(.rect) }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("View file \((p as NSString).lastPathComponent), \(adds) added, \(dels) removed")
-            } else {
-                header
-            }
+            DiffFileHeader(path: p, adds: diffs.reduce(0) { $0 + $1.adds }, dels: diffs.reduce(0) { $0 + $1.dels })
         }
     }
 
@@ -1072,6 +1055,8 @@ struct ResultBlock: View {
     var isError: Bool
     /// The page carries only the start of a long output: its item id and whole size.
     var cut: (id: String, size: Int)? = nil
+    /// What the call came to, when the node said: the line over the output, and a cut output's end.
+    var outcome: ToolOutcome? = nil
     @Environment(\.loadFullText) private var loadFullText
     @State private var showFull = false
 
@@ -1085,16 +1070,29 @@ struct ResultBlock: View {
     #endif
 
     var body: some View {
+        let head = ToolOutcomeText.headline(outcome)
         if text.isEmpty && cut == nil {
-            Text(isError ? String(localized: "Failed") : String(localized: "Done, no output")).font(Theme.Font.label).foregroundStyle(isError ? Theme.danger : .secondary)
+            let failed = head?.failed ?? (head == nil && isError)
+            Text(head?.text ?? (isError ? String(localized: "Failed") : String(localized: "Done, no output")))
+                .font(Theme.Font.label).foregroundStyle(failed ? Theme.danger : .secondary)
         } else {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 // Above the output: over it, the mark covered the end of the first line.
-                if isError {
+                if let head {
+                    Label(head.text, systemImage: head.symbol).font(Theme.Font.labelStrong)
+                        .foregroundStyle(head.failed ? Theme.danger : .secondary)
+                        .lineLimit(1)
+                } else if isError {
                     Label("Something Went Wrong", systemImage: Theme.Icon.errorFilled).font(Theme.Font.labelStrong).foregroundStyle(Theme.danger)
                         .lineLimit(1)
                 }
                 CodeBlock(text: text, maxLines: 10)
+                // The page kept the output's start; why a command failed is usually at its end.
+                if cut != nil, let tail = outcome?.tail, !tail.isEmpty {
+                    Text("End of output").font(Theme.Font.labelMedium).foregroundStyle(.secondary)
+                        .padding(.top, Theme.Space.xs)
+                    CodeBlock(text: tail, maxLines: 10, keepsEnd: true)
+                }
                 if let cut {
                     Button { showFull = true } label: {
                         Label("Truncated. View full text (\(Int64(cut.size).storageText))",
@@ -1177,6 +1175,37 @@ struct FullOutputSheet: View {
                 try? itemID.write(to: dir.appending(path: "full-output-id.txt"), atomically: true, encoding: .utf8)
             }
             #endif
+        }
+    }
+}
+
+/// The file a diff is in: name, folder, +N −N; a tap opens it where the page opens files (`openFile`). The chat's edits
+/// (`ToolDetail`) and a file tool's permission card (`PermissionDiffView`) draw the same one.
+struct DiffFileHeader: View {
+    var path: String
+    var adds: Int
+    var dels: Int
+    @Environment(\.openFile) private var openFile
+
+    var body: some View {
+        let header = HStack(spacing: Theme.Space.sm) {
+            ThemedIcon(FileViewer.symbol(for: path)).font(Theme.Font.label).foregroundStyle(.secondary)
+            Text((path as NSString).lastPathComponent).font(Theme.Font.captionStrong).foregroundStyle(.primary).lineLimit(1)
+                .layoutPriority(1) // the folder gives way first: at the largest sizes the two cut each other to a letter
+            Text((path as NSString).deletingLastPathComponent).font(Theme.Font.caption).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.head)
+            Spacer(minLength: 4)
+            if adds > 0 { Text("+\(adds)").foregroundStyle(Theme.Diff.add) }
+            if dels > 0 { Text("−\(dels)").foregroundStyle(Theme.Diff.del) }
+            if openFile != nil { ThemedIcon(Theme.Icon.openDocument).font(Theme.Font.label).foregroundStyle(Theme.accent) }
+        }
+        .font(Theme.Font.captionStrong.monospacedDigit())
+        if let openFile {
+            Button { openFile(path) } label: { header.contentShape(.rect) }
+                .buttonStyle(.plain)
+                .accessibilityLabel("View file \((path as NSString).lastPathComponent), \(adds) added, \(dels) removed")
+        } else {
+            header
         }
     }
 }
@@ -1305,6 +1334,8 @@ struct DiffView: View {
     var lines: [DiffText.Line]
     /// Until Show All (`ToolDiffMemo.Content.short`), at most `maxLines` of it.
     var short: [DiffText.Line]
+    /// The chat's tool rows show 40 rows until Show All; a permission card fewer, so its buttons stay in view.
+    var maxLines = 40
     var adds: Int
     var dels: Int
     /// What the chat's pin knows it by (`chatPinned`): Show All keeps its top where it is on screen.
@@ -1312,7 +1343,6 @@ struct DiffView: View {
     @Environment(\.chatPin) private var pin
     @State private var full = false
     @State private var moreRight = false
-    private static let maxLines = 40
 
     /// Old and new text compared (`LineDiff`): unchanged lines as context, a stretch of more than a few of them folded
     /// into one row until Show All, removed lines before added ones, and in a line changed rather than rewritten, the
@@ -1326,16 +1356,17 @@ struct DiffView: View {
         self.init(ToolDiffMemo.unified(diff), pinKey: pinKey)
     }
 
-    private init(_ content: ToolDiffMemo.Content, pinKey: String) {
+    init(_ content: ToolDiffMemo.Content, pinKey: String, maxLines: Int = 40) {
         lines = content.lines
         short = content.short
         adds = content.adds
         dels = content.dels
         self.pinKey = pinKey
+        self.maxLines = maxLines
     }
 
     var body: some View {
-        let shown = full ? lines : Array(short.prefix(Self.maxLines))
+        let shown = full ? lines : Array(short.prefix(maxLines))
         // Something is left out: lines past the cap, or a folded stretch (folding always takes away a row).
         let clipped = shown.count < lines.count
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -1622,15 +1653,19 @@ struct ComputerToolDetail: View {
                 Text(ComputerSteps.describe(call.name, input: call.input)).font(Theme.Font.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } icon: {
-                if call.isRunning { ProgressView().controlSize(.mini) } else {
-                    ThemedIcon(call.isError ? Theme.Icon.error : Theme.Icon.success)
-                        .foregroundStyle(call.isError ? Theme.danger : Theme.positive)
+                if call.isRunning { ProgressView().controlSize(.mini) } else if call.failed {
+                    ThemedIcon(Theme.Icon.error).foregroundStyle(Theme.danger)
+                } else if call.outcome?.stopped == true, let head = ToolOutcomeText.headline(call.outcome) {
+                    ThemedIcon(head.symbol).foregroundStyle(.secondary)
+                } else {
+                    ThemedIcon(Theme.Icon.success).foregroundStyle(Theme.positive)
                 }
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("computer-steps")
             if let result = call.result, result.isError == true {
-                Text(ToolPresentation.firstLine(result.cutText)).font(Theme.Font.label).foregroundStyle(Theme.danger).lineLimit(3)
+                Text(ToolPresentation.firstLine(result.cutText)).font(Theme.Font.label).foregroundStyle(call.failed ? Theme.danger : .secondary)
+                    .lineLimit(3)
             }
             ForEach(Array(call.images.enumerated()), id: \.offset) { i, img in Base64Image(payload: img, gallery: call.images, index: i) }
             ScreenEntry(call: call)
@@ -1638,7 +1673,8 @@ struct ComputerToolDetail: View {
             if raw {
                 CodeBlock(text: input, maxLines: 14)
                 if let result = call.result {
-                    ResultBlock(text: result.cutText, isError: result.isError ?? false, cut: result.fullSize.map { (result.id, $0) })
+                    ResultBlock(text: result.cutText, isError: result.isError ?? false, cut: result.fullSize.map { (result.id, $0) },
+                                outcome: result.outcome)
                 }
             }
         }

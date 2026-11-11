@@ -1,5 +1,12 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- A task trust key combines a machine and directory with an unescaped delimiter (#4421). Either field can contain
+  that delimiter, and an old ID need not obey current registration rules, so a split can assign the rule to the wrong
+  place. Keep its exact key for matching and deletion; mark an ambiguous listing and give older clients the key as a
+  path-escaped identifier, so a path-component title retains it. A failed settings read is not an empty list:
+  propagate it to the list caller while retaining the fail-closed admission and no-overwrite behavior of writers.
+  Exercise the handler after service reconstruction.
+
 - Reusing a topic to-do must retire the previous plan's execution binding (#3985). Released or dismissed Agents let
   a later plan take over the same to-do, while the old plans stay in storage. A historical `TodoID` match cannot
   impose that plan's read-only constraint on the current session. Clear old execution bindings under the takeover
@@ -311,3 +318,14 @@ grant after condition reads and serialize its final answer against deletion in t
 its task decision together before sending it to a hook. A plan approval must select `default` explicitly: an empty
 mode can fall back to bypass permissions on the node. Count confirmation dispatch at `tellUser`, not interaction
 creation or app presentation; quiet tasks and supervisor routing also show cards without ringing the user.
+
+## A card the chat waits on must be in the chat (#4883)
+
+A Persona conversation's first Bash waited three and a half minutes for approval while its card was only inside the
+closed Needs you tray on the web (Android too) and on the Home overview; the owner typed "what happened?" twice and
+thought the assistant had hung. A request that blocks the turn is drawn above the composer on every client, like an
+Agent's; a tray or overview may count it and link to it, never be its only place. The same incident: a message typed
+mid-turn got no reply for minutes because the mid-turn note went in only with the optional background setting on, and
+the only line between tool calls was English to a Chinese owner. The node now always adds the note to a busy Claude
+(`midTurn`), asking for one sentence in the user's language before the next tool call, and the CLAUDE.md asks for the
+user's language in process text too.

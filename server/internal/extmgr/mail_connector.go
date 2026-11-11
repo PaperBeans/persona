@@ -47,8 +47,9 @@ const (
 // skipped this time.
 //
 // The cursor is {"<account>": uid}, as mail-cursors.json always was, plus per account (absent when zero):
-// "<account>#v" the mailbox's UIDVALIDITY, "<account>#t" the newest archived mail's time (unix seconds), and a hole
-// "<account>#f" < UID < "<account>#h" still to archive. The hole is what lies between the old cursor and the newest
+// "<account>#v" the mailbox's UIDVALIDITY, "<account>#e" the identity epoch after a known validity change,
+// "<account>#t" the newest archived mail's time (unix seconds), and a hole "<account>#f" < UID < "<account>#h"
+// still to archive. The hole is what lies between the old cursor and the newest
 // page when more than a page came since (the hub was down, the account failed for a while): it is read page by page
 // downwards, more is true until it is filled. A changed UIDVALIDITY means the server numbered the mailbox anew:
 // the UIDs kept mean nothing, so it starts again from the newest page, with only mail newer than "<account>#t".
@@ -65,7 +66,10 @@ func (c mailConnector) Changes(ctx context.Context, cursor string, _ int) ([]con
 	reads, more := 0, false
 	for _, a := range accounts {
 		st := loadMailCursor(cursors, a.ID)
-		msgs, ok := c.mailChanges(ctx, a.ID, &st)
+		msgs, ok, err := c.mailChanges(ctx, a.ID, &st)
+		if err != nil {
+			return nil, cursor, false, err
+		}
 		if !ok {
 			continue
 		}
@@ -83,9 +87,15 @@ func (c mailConnector) Changes(ctx context.Context, cursor string, _ int) ([]con
 			if name == "" {
 				name = addr
 			}
+			id := fmt.Sprint(m.UID)
+			if st.epoch != 0 {
+				// Include validity as well as the epoch: another renumbering can happen
+				// after ingestion succeeds but before this cursor is published.
+				id = fmt.Sprintf("v%d-e%d:%d", st.validity, st.epoch, m.UID)
+			}
 			batches = append(batches, connector.ChatBatch{
 				Chat: kb.SourceChat{ID: a.ID + "-" + addr, Name: name + " · 邮件", Kind: "mail"},
-				Messages: []kb.SourceMessage{{ID: fmt.Sprint(m.UID), SenderID: addr, SenderName: name, At: at, Type: "TEXT",
+				Messages: []kb.SourceMessage{{ID: id, SenderID: addr, SenderName: name, At: at, Type: "TEXT",
 					SenderHandles: []kb.Handle{{Kind: kb.HandleEmail, Value: addr}},
 					Mine:          strings.EqualFold(addr, a.Email),
 					Text:          "【" + m.Subject + "】" + clip(strings.TrimSpace(text), 4000)}},
@@ -102,6 +112,7 @@ func (c mailConnector) Changes(ctx context.Context, cursor string, _ int) ([]con
 type mailCursor struct {
 	top       uint32 // newest UID archived
 	validity  uint32 // UIDVALIDITY the UIDs belong to, 0 unknown (a cursor from before it was kept)
+	epoch     uint32 // identity generation; 0 retains legacy decimal receipt IDs
 	newest    uint32 // newest archived mail's time, unix seconds
 	holeFloor uint32 // with holeTop != 0: UIDs holeFloor < uid < holeTop are not archived yet
 	holeTop   uint32
@@ -109,13 +120,13 @@ type mailCursor struct {
 }
 
 func loadMailCursor(cursors map[string]uint32, id string) mailCursor {
-	return mailCursor{top: cursors[id], validity: cursors[id+"#v"], newest: cursors[id+"#t"],
+	return mailCursor{top: cursors[id], validity: cursors[id+"#v"], epoch: cursors[id+"#e"], newest: cursors[id+"#t"],
 		holeFloor: cursors[id+"#f"], holeTop: cursors[id+"#h"]}
 }
 
 func (st mailCursor) store(cursors map[string]uint32, id string) {
 	cursors[id] = st.top
-	for key, v := range map[string]uint32{"#v": st.validity, "#t": st.newest, "#f": st.holeFloor, "#h": st.holeTop} {
+	for key, v := range map[string]uint32{"#v": st.validity, "#e": st.epoch, "#t": st.newest, "#f": st.holeFloor, "#h": st.holeTop} {
 		if v == 0 {
 			delete(cursors, id+key)
 		} else {
@@ -126,17 +137,23 @@ func (st mailCursor) store(cursors map[string]uint32, id string) {
 
 // mailChanges is the account's inbox mail to archive now, oldest first, moving st past it; ok is false when the
 // inbox could not be read (st is left as it was).
-func (c mailConnector) mailChanges(ctx context.Context, account string, st *mailCursor) ([]mail.MailSummary, bool) {
+func (c mailConnector) mailChanges(ctx context.Context, account string, st *mailCursor) ([]mail.MailSummary, bool, error) {
+	if st.epoch != 0 && st.validity == 0 {
+		return nil, false, errors.New("mail archive identity epoch has no known validity")
+	}
 	res, err := c.h.mail.ListMessages(ctx, mail.ListOptions{AccountID: account, Limit: mailArchivePage})
 	if err != nil {
-		return nil, false
+		return nil, false, nil
 	}
 	var after time.Time // only mail newer than this, after a renumbering
 	if st.validity != 0 && res.UIDValidity != 0 && st.validity != res.UIDValidity {
+		if st.epoch == ^uint32(0) {
+			return nil, false, errors.New("mail archive identity epoch exhausted")
+		}
 		if st.newest != 0 {
 			after = time.Unix(int64(st.newest), 0)
 		}
-		*st = mailCursor{newest: st.newest}
+		*st = mailCursor{newest: st.newest, epoch: st.epoch + 1}
 	}
 	if res.UIDValidity != 0 {
 		st.validity = res.UIDValidity
@@ -193,7 +210,7 @@ func (c mailConnector) mailChanges(ctx context.Context, account string, st *mail
 	}
 	fill() // the hole the newest page left, with the pages still left
 	slices.SortFunc(out, func(a, b mail.MailSummary) int { return cmp.Compare(a.UID, b.UID) })
-	return out, true
+	return out, true, nil
 }
 
 // pageReaches says a page (newest first, down from its before_uid) holds every UID above floor up to it.

@@ -24,6 +24,7 @@ import { hubHas, refreshAssistant, useStore } from "../../lib/store";
 import type { Item, Session } from "../../lib/types";
 import { Button, copyText, Dialog, IconButton, Menu, Spinner, toast, useMenu, type MenuItem } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
+import { ModelFallbackCard } from "../chat/ModelFallbackCard";
 import { Chip } from "../chat/SessionDialogs";
 import { Switch } from "./parts";
 import { PersonaDot, usePersona } from "./Persona";
@@ -242,7 +243,7 @@ export function StarterLauncherChip() {
   const label = defaultLabel(def ?? { provider: assistant.launcher });
   return (
     <>
-      <Chip label={picked ? `${current} · ${oneOff()}` : label} onClick={menu.open} active={Boolean(menu.anchor)} title={t("assistant-assistantchat.new_chat_launcher_title")} />
+      <Chip label={t("main-runtime.new_launcher", { launcher: picked ? `${current} · ${oneOff()}` : label })} onClick={menu.open} active={Boolean(menu.anchor)} title={t("assistant-assistantchat.new_chat_launcher_title")} />
       {menu.anchor && (
         <Menu
           anchor={menu.anchor}
@@ -333,7 +334,23 @@ export function CompactionStrip({ session }: { session: Session }) {
   return (
     <>
       {session.runtime_fallback && <RuntimeFallbackNote reason={session.runtime_fallback} />}
+      {session.model_fallback && <AssistantModelFallback session={session} />}
       <Compaction session={session} />
+    </>
+  );
+}
+
+/** The refusal fallback's card in a Persona conversation (#2528): "Back to the configured model", and in the main
+ *  conversation the existing "New main chat" too (the same dialog as the menu's). */
+function AssistantModelFallback({ session }: { session: Session }) {
+  const isMain = useStore((s) => s.assistant?.main === session.session_id);
+  const canNewMain = useStore((s) => hubHas(s.features, NEW_MAIN_FEATURE));
+  const [open, setOpen] = useState(false);
+  const offer = isMain && canNewMain;
+  return (
+    <>
+      <ModelFallbackCard session={session} headless onNewMain={offer ? () => setOpen(true) : undefined} />
+      {offer && <NewMainDialog open={open} onClose={() => setOpen(false)} session={session} />}
     </>
   );
 }

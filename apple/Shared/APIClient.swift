@@ -96,10 +96,10 @@ nonisolated struct APIError: LocalizedError, Sendable {
     /// Business codes precede status and free-form server wording. Raw fields remain available for diagnostics.
     var businessMessage: String? {
         switch code {
-        case "kb_disabled": String(localized: "This manager has turned off the knowledge base. Enable it in the manager configuration to use it.")
+        case "kb_disabled": String(localized: "This assistant has turned off the knowledge base. Enable it in the assistant's configuration to use it.")
         case "kb_unavailable": String(localized: "The knowledge base isn't ready yet. Try again shortly.")
-        case "kb_read_only": String(localized: "The knowledge base is read-only. Change the manager configuration before editing or syncing recordings.")
-        case "assistant_offline": String(localized: "The manager is offline or restarting. Try again shortly.")
+        case "kb_read_only": String(localized: "The knowledge base is read-only. Change the assistant's configuration before editing or syncing recordings.")
+        case "assistant_offline": String(localized: "The assistant is offline or restarting. Try again shortly.")
         case "node_unreachable":
             fields["delivered"] == "none"
                 ? String(localized: "This computer is offline: Persona Link isn't running, or the computer is asleep.")
@@ -357,6 +357,37 @@ nonisolated struct APIClient: Sendable {
         let http = resp as? HTTPURLResponse
         if http?.statusCode == 304 { return (nil, etag) }
         return (try checked(data, resp, requestID: requestID, path: path), http?.value(forHTTPHeaderField: "ETag"))
+    }
+
+    /// A request whose answer is read as it arrives (the realtime voice saying a text, `voiceSpeak`): the response once
+    /// its headers are in, then its bytes. A status outside 2xx throws as `request` does, with the body it came with.
+    /// Neither the fake transport nor Demo Mode streams: it throws there, and callers do what they do without it.
+    func streamed(_ method: String, _ path: String, body: (any Encodable)? = nil,
+                  timeout: TimeInterval = 30) async throws -> (HTTPURLResponse, URLSession.AsyncBytes) {
+        if transport != nil || config.isDemo { throw APIError(status: 501, message: "Streaming isn't available here") }
+        var req = URLRequest(url: url(path, query: [:]), timeoutInterval: timeout)
+        req.httpMethod = method
+        config.authorize(&req)
+        req.setValue(LanguageStore.shared.launched, forHTTPHeaderField: "Accept-Language")
+        clientMetadata.apply(to: &req)
+        let requestID = String(UUID().uuidString.prefix(8)).lowercased()
+        req.setValue(requestID, forHTTPHeaderField: "X-Client-Request-Id")
+        for (name, value) in routing(path, [:]) { req.setValue(value, forHTTPHeaderField: name) }
+        if let body {
+            req.httpBody = try JSON.encoder.encode(AnyEncodable(body))
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        let (bytes, resp) = try await session.bytes(for: req, delegate: HubRedirects.shared)
+        guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        if !(200..<300).contains(http.statusCode) {
+            var data = Data()
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count >= 16 << 10 { break }
+            }
+            _ = try checked(data, resp, requestID: requestID, path: path)
+        }
+        return (http, bytes)
     }
 
     /// A bounded, staged attachment sent from disk. The fake transport reads it only in tests.
@@ -758,6 +789,13 @@ nonisolated struct APIClient: Sendable {
 
     private func sp(_ k: SessionKey) -> String { "/api/v1/sessions/\(k.machineID)/\(k.sessionID)" }
 
+    /// Genuine user-input identities and full-history ordinals, without loading transcript bodies.
+    func userInputIndex(_ k: SessionKey) async throws -> ChatUserInputIndex {
+        let index = try await getDecodedOffMain(sp(k) + "/items", query: ["user_inputs": "1", "lazy_images": "1"], as: ChatUserInputIndex.self)
+        guard index.isValid else { throw APIError(status: 0, message: "incomplete user input index") }
+        return index
+    }
+
     /// A page of history going back `turns` whole exchanges (user prompt + answer) before beforeSeq (nil: the latest
     /// page, with no before_seq at all: an empty one reached runtimes as 0, which some refuse).
     func items(_ k: SessionKey, beforeSeq: Int?, turns: Int = 2) async throws -> ItemsResponse {
@@ -1075,10 +1113,14 @@ nonisolated struct APIClient: Sendable {
     }
 
     struct QueueEdit: Encodable { var keep: [Int] }
-    struct QueueResponse: Decodable { var queue: [String] }
+    struct QueueResponse: Decodable {
+        var queue: [String]
+        /// Photos for each returned queue item; a Persona chat includes them so take-back can restore the composer.
+        var images: [[ImagePayload]]?
+    }
     /// Pulls the queued input back out of claude and re-queues the indexes in `keep`; returns what was queued.
-    func editQueue(_ k: SessionKey, keep: [Int]) async throws -> [String] {
-        try await post(sp(k) + "/queue", body: QueueEdit(keep: keep), as: QueueResponse.self).queue
+    func editQueue(_ k: SessionKey, keep: [Int]) async throws -> QueueResponse {
+        try await post(sp(k) + "/queue", body: QueueEdit(keep: keep), as: QueueResponse.self)
     }
 
     /// Gives the agent what waits in its queue now (#6088, Claude Code's own send-now: a command it runs moves to the
@@ -1097,6 +1139,9 @@ nonisolated struct APIClient: Sendable {
         /// What the assistant is told about the user (Settings › Assistant › About Me).
         var notes: String?
         var timezone: String?
+        /// The user picked `timezone` by hand (#1855, Android's Time zone without Match phone): devices then leave it. nil
+        /// from a hub that was never told, or one without picking.
+        var timezonePicked: Bool?
         /// The main conversation's session id (the Persona tab opens it); nil until there is one.
         var main: String?
         /// Notify Main-Chat Tasks Only in the Main Chat (#1731): tasks the main conversation starts are quiet (`TodoItem.quiet`). The
@@ -1117,7 +1162,7 @@ nonisolated struct APIClient: Sendable {
             case launcher, cwd, conversations, timezone, main, leaders
             case machineID = "machine_id", notes = "notes_effective", mainTasksQuiet = "main_tasks_quiet"
             case mainBackgroundFolded = "main_background_folded"
-            case meetingAttendanceDefault = "meeting_attendance_default"
+            case meetingAttendanceDefault = "meeting_attendance_default", timezonePicked = "timezone_picked"
         }
 
         /// Whether the main conversation folds its background rounds: on unless the hub says off (an older hub omits it).
@@ -1131,17 +1176,78 @@ nonisolated struct APIClient: Sendable {
         var name: String?
         var ended: Bool?
     }
-    /// The directions' names by leader conversation id: the current ones with a name (ended ones left out).
-    func directionNames() async throws -> [String: String] {
+    /// The direction tree (#4352, `GET /api/v1/assistant/directions/tree`): every current direction with the open tasks
+    /// it supervises, then the secretary group. Clients read the names, the counts and the order here; no client works
+    /// out the grouping itself.
+    struct DirectionsTree: Decodable, Sendable, Equatable {
+        var directions: [TreeDirection]
+    }
+    /// One direction of the tree, or its secretary group (`secretary`: the main conversation's, not a direction the
+    /// sidebar lists).
+    struct TreeDirection: Decodable, Sendable, Equatable {
+        var id: String
+        var name: String?
+        var secretary: Bool?
+        var counts: DirectionCounts?
+    }
+    /// How many of a direction's listed tasks are in each state (#4352): its row reads the first two as
+    /// "N working · N need you".
+    struct DirectionCounts: Codable, Sendable, Equatable {
+        var working: Int
+        var needsYou: Int
+        enum CodingKeys: String, CodingKey { case working, needsYou = "needs_you" }
+        init(working: Int = 0, needsYou: Int = 0) {
+            self.working = working
+            self.needsYou = needsYou
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            working = try c.decodeIfPresent(Int.self, forKey: .working) ?? 0
+            needsYou = try c.decodeIfPresent(Int.self, forKey: .needsYou) ?? 0
+        }
+    }
+    /// Makes a conversation a direction (#4331, `POST /api/v1/assistant/directions/{id}/make`): its work is led from
+    /// there from now on.
+    func makeDirection(_ id: String) async throws {
+        _ = try await request("POST", "/api/v1/assistant/directions/\(id)/make", body: [String: String]())
+    }
+    /// Ends a direction (#4331, `POST /api/v1/assistant/directions/{id}/end`): its tasks keep their supervisor.
+    func endDirection(_ id: String) async throws {
+        _ = try await request("POST", "/api/v1/assistant/directions/\(id)/end")
+    }
+    /// The directions as `GET /api/v1/assistant/leaders` lists them: current ones only (#4331).
+    func leaders() async throws -> [LeaderInfo] {
         struct Body: Decodable { var leaders: [LeaderInfo]? }
         let body = try await get("/api/v1/assistant/leaders", as: Body.self)
-        return Self.directionNames(body.leaders ?? [])
+        return body.leaders ?? []
     }
     static func directionNames(_ list: [LeaderInfo]) -> [String: String] {
         var out: [String: String] = [:]
         for l in list where !(l.ended ?? false) && !l.id.isEmpty {
             if let name = l.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty { out[l.id] = name }
         }
+        return out
+    }
+    /// The direction tree (#4352): a hub older than it answers 404, and the caller keeps what `leaders()` gave it.
+    func directionsTree() async throws -> DirectionsTree {
+        try await get("/api/v1/assistant/directions/tree", as: DirectionsTree.self)
+    }
+    /// The tree's current directions, its secretary group left out, in its order.
+    static func directions(_ tree: DirectionsTree) -> [TreeDirection] {
+        tree.directions.filter { $0.secretary != true && !$0.id.isEmpty }
+    }
+    /// The directions' names from the tree, by leader conversation id.
+    static func directionNames(_ tree: DirectionsTree) -> [String: String] {
+        var out: [String: String] = [:]
+        for d in directions(tree) {
+            if let name = d.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty { out[d.id] = name }
+        }
+        return out
+    }
+    /// The directions' counts from the tree, by leader conversation id.
+    static func directionCounts(_ tree: DirectionsTree) -> [String: DirectionCounts] {
+        var out: [String: DirectionCounts] = [:]
+        for d in directions(tree) { if let counts = d.counts { out[d.id] = counts } }
         return out
     }
     /// `st` with its conversations stamped with the manager this client named: the hub relays another manager's answer as

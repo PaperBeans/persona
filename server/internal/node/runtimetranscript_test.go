@@ -258,6 +258,62 @@ func TestRuntimeTranscriptSubagent(t *testing.T) {
 	}
 }
 
+// The background work a runtime lists for a session stays when its conversation is a transcript here, beside what the
+// transcript lists: the agents a Paseo agent created are Paseo's to know, not Claude Code's. Their own rows name the
+// session as their parent, and the list gives them its root (#4494).
+func TestRuntimeTranscriptKeepsTheRuntimesBackground(t *testing.T) {
+	n, _ := runtimeNode(t)
+	t.Cleanup(freshOffline)
+	now := time.Now().UTC().Format(time.RFC3339)
+	writeTranscript(t, n.home, "/w/app", sdkSession, time.Now(),
+		`{"type":"user","uuid":"u1","timestamp":"`+now+`","cwd":"/w/app","message":{"role":"user","content":"fix the build"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"`+now+`","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"make watch","run_in_background":true}}]}}`,
+		`{"type":"user","uuid":"u2","timestamp":"`+now+`","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"Command running in background with ID: b1. Output is being written to: /tmp/tasks/b1.output"}]}}`,
+		strings.Repeat(" ", 4096))
+	host := dialRuntime(t, n, paseoHello())
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+		{"session_id": "paseo-a5", "transcript": sdkSession, "agent": "claude", "title": "Fix the build", "cwd": "/w/app",
+			"status": "idle", "space_id": "prj_1", "space_name": "app",
+			"background": []map[string]any{{"id": "paseo-b5", "kind": "agent", "description": "Review the fix"}}},
+		{"session_id": "paseo-b5", "agent": "codex", "title": "Review the fix", "cwd": "/w/app", "status": "working",
+			"space_id": "prj_1", "space_name": "app", "is_subagent": true, "parent_session_id": "paseo-a5"},
+	}})
+	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["paseo-b5"]; return ok })
+	got := listed(t, n)
+	var tasks []string
+	for _, b := range got["paseo-a5"].Background {
+		tasks = append(tasks, b.Kind+" "+b.ID+" "+b.Description)
+	}
+	if !slices.Equal(tasks, []string{"shell b1 ", "agent paseo-b5 Review the fix"}) {
+		t.Fatalf("background %q", tasks)
+	}
+	child := got["paseo-b5"]
+	if !child.IsSubagent || child.ParentSessionID != "paseo-a5" || child.RootSessionID != "paseo-a5" ||
+		child.SourceKind != proto.SourceRuntime || child.ParentThreadID != "" {
+		t.Fatalf("the agent it created: %+v", child)
+	}
+	if parent := got["paseo-a5"]; parent.IsSubagent || parent.ParentSessionID != "" || parent.RootSessionID != "" {
+		t.Fatalf("its creator: %+v", parent)
+	}
+}
+
+// A runtime's session that runs as a 1M variant has the 1M window from its first reply, not from the first one past
+// 200k: the transcript records the model without the suffix (#4496).
+func TestRuntimeTranscriptWindowIsTheRunAsModels(t *testing.T) {
+	n, _ := runtimeNode(t)
+	t.Cleanup(freshOffline)
+	writeTranscript(t, n.home, "/w/app", sdkSession, time.Now().Add(-time.Minute),
+		`{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/w/app","message":{"role":"user","content":"fix the build"}}`,
+		ctxReply("msg_1", 2, 80_000, 1_000), strings.Repeat(" ", 4096))
+	host := dialRuntime(t, n, paseoHello())
+	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
+		{"session_id": "paseo-a6", "transcript": sdkSession, "agent": "claude", "model": "claude-opus-5-5[1m]", "status": "idle"}}})
+	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["paseo-a6"]; return ok })
+	if s := listed(t, n)["paseo-a6"]; s.Model != "claude-opus-5-5[1m]" || s.ContextTokens != 81_002 || s.ContextWindow != 1_000_000 {
+		t.Fatalf("listed with %q %d / %d", s.Model, s.ContextTokens, s.ContextWindow)
+	}
+}
+
 // A runtime running several agents: each session's card is its own agent's (Claude Code's for a Claude session).
 func TestRuntimeCardIsTheSessionsAgent(t *testing.T) {
 	n, hub := runtimeNode(t)

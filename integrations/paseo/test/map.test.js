@@ -1,8 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  agentRoot, agentRow, defaultProvider, interactionOf, launchersOf, linkedWorktree, paseoMode, providerRoots, responseOf,
-  rowStatus, projectSpaces, sessionIdOf, slotNameOf, spaceIdOf, strayRecord, timelineItems, toolCall, transcriptOf,
+  agentRoot, agentRow, archivedUnderOwnId, codexThreadOf, backgroundOf, defaultProvider, interactionOf, launchersOf, linkedWorktree,
+  parentAgentId, paseoMode, providerRoots, responseOf, rowStatus, projectSpaces, sessionIdOf, slotNameOf, spaceIdOf, strayRecord,
+  timelineItems, toolCall, transcriptOf,
 } from '../lib/map.js'
 import { agentSnapshot, entry } from './fake-paseo.js'
 
@@ -44,6 +45,15 @@ test("an agent's id: Persona's label, else Claude's session for Claude Code, els
   const codex = agentSnapshot({ id: 'c0ffee', provider: 'my-codex', persistence: { sessionId: '0199-thread' } })
   assert.equal(sessionIdOf(codex, roots), 'paseo-c0ffee')
   assert.equal(transcriptOf(codex, roots), undefined, 'only Claude Code has a transcript the node reads')
+  // A Codex agent names the thread its conversation is: the node lists it once, not again from its rollout (#4495).
+  const THREAD = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0001'
+  assert.equal(codexThreadOf(codex, roots), undefined, 'no thread id yet (Codex still starting): nothing named')
+  const threaded = agentSnapshot({ id: 'c0ffee', provider: 'my-codex', persistence: { sessionId: THREAD, metadata: { provider: 'codex', threadId: THREAD } } })
+  assert.equal(codexThreadOf(threaded, roots), THREAD)
+  assert.equal(codexThreadOf(agentSnapshot({ provider: 'my-codex', runtimeInfo: { sessionId: THREAD } }), roots), THREAD, 'not persisted yet: the one its runtime runs')
+  assert.equal(codexThreadOf(claude, roots), undefined, 'an agent of Claude Code has a transcript, no thread')
+  assert.deepEqual([agentRow(threaded, { roots }).codex_thread, agentRow(codex, { roots }).codex_thread, agentRow(claude, { roots }).codex_thread],
+    [THREAD, undefined, undefined])
   assert.equal(sessionIdOf(agentSnapshot({ provider: 'grok', labels: { 'persona.session': '../bad' } }), roots).startsWith('paseo-'), true, 'a bad label is not an id')
 })
 
@@ -75,7 +85,7 @@ test('a row: its space, the agent the apps know, model, modes and transcript', (
   const row = agentRow(a, { roots, project: { projectKey: 'prj', projectName: 'proj', workspaceName: '登录修复' } })
   assert.deepEqual(row, {
     session_id: CLAUDE_SID, title: '修登录', cwd: '/w/proj', status: 'idle', updated_at: '2026-11-04T10:00:00.000Z',
-    rev: Date.parse('2026-11-04T10:00:00.000Z'), space_id: 'prj', space_name: 'proj', slot_id: 'wks_9', slot_name: '登录修复',
+    rev: Date.parse('2026-11-04T10:00:00.000Z'), space_id: 'prj', space_name: 'proj', slot_name: '登录修复',
     agent: 'claude', launcher: 'my-claude',
     model: 'claude-x[1m]', permission_mode: 'acceptEdits', effort: 'max', transcript: CLAUDE_SID,
   })
@@ -89,6 +99,69 @@ test('a row: its space, the agent the apps know, model, modes and transcript', (
   assert.equal(agentRow(agentSnapshot({ provider: 'grok', archivedAt: '2026-01-01T00:00:00Z' }), { roots }), undefined)
 })
 
+test("an archived agent keeps its row when its id is not its transcript's: a session Persona started, not one of Paseo's own (#4771)", () => {
+  const roots = providerRoots(CONFIG)
+  const at = '2026-11-04T10:00:00.000Z'
+  const claude = (fields) => agentSnapshot({ provider: 'my-claude', cwd: '/w/proj', title: 'T', status: 'closed', archivedAt: at, updatedAt: at,
+    persistence: { provider: 'my-claude', sessionId: CLAUDE_SID, metadata: { provider: 'claude' } }, ...fields })
+  const started = claude({ id: 'a1', labels: { 'persona.session': 'paseo-a1' } })
+  assert.equal(archivedUnderOwnId(started, roots), true, 'started from Persona: paseo-<agent id>, its transcript another id')
+  assert.equal(archivedUnderOwnId(claude({}), roots), false, "started in Paseo: its id is its transcript's, which the node lists")
+  assert.equal(archivedUnderOwnId(claude({ labels: { 'persona.session': CLAUDE_SID } }), roots), false, 'taken over: the same id either way')
+  assert.equal(archivedUnderOwnId({ ...started, archivedAt: null }, roots), false, 'not archived: a row as any other')
+  assert.equal(archivedUnderOwnId(claude({ labels: { 'persona.session': 'paseo-a1', 'paseo.parent-agent-id': 'boss' } }), roots), false,
+    "another agent created it: its creator's conversation says what it did")
+  assert.equal(archivedUnderOwnId({ ...started, persistence: null }, roots), false, 'no transcript: nothing to read')
+  assert.equal(archivedUnderOwnId(agentSnapshot({ id: 'c1', provider: 'my-codex', archivedAt: at, labels: { 'persona.session': 'paseo-c1' } }), roots),
+    false, 'not Claude Code: no transcript the node reads')
+  // Its row: the session's own id, not running, its transcript the conversation.
+  const row = agentRow(started, { roots, project: { projectKey: 'prj', projectName: 'proj' }, archived: true })
+  assert.deepEqual([row.session_id, row.status, row.transcript, row.title, row.space_id, row.updated_at], ['paseo-a1', 'offline', CLAUDE_SID, 'T', 'prj', at])
+  assert.equal(agentRow({ ...started, status: 'idle' }, { roots, archived: true }).status, 'offline', 'whatever its record says')
+  assert.equal(agentRow(started, { roots }), undefined, 'without archived: no row, as before')
+})
+
+test("a delegated agent is its creator's subtask: its parent, no waiting to be looked at; the unfinished ones are the creator's background work", () => {
+  const roots = providerRoots(CONFIG)
+  const child = (o = {}) => agentSnapshot({ id: 'kid-1', provider: 'my-codex', cwd: '/w/proj', title: '评审 E5（GPT）', createdAt: '2026-11-04T09:00:00.000Z',
+    labels: { 'paseo.parent-agent-id': ' boss-1 ', 'paseo.parent-server-id': 'srv_1' }, ...o })
+  assert.equal(parentAgentId(child()), 'boss-1')
+  assert.deepEqual([parentAgentId(agentSnapshot()), parentAgentId({ labels: { 'paseo.parent-agent-id': '  ' } }), parentAgentId(undefined)], [undefined, undefined, undefined])
+  // Paseo sets the flag on a delegated agent too, but shows it on no workspace, and nobody opens it there: left to
+  // the flag it would stay "done, not looked at" for good. The bridge says which agents are quiet that way.
+  const ran = '2026-11-04T09:30:00.000Z'
+  const quiet = { quiet: true }
+  assert.equal(rowStatus(child({ status: 'idle', lastUserMessageAt: ran, requiresAttention: true, attentionReason: 'finished' }), quiet), 'idle')
+  assert.equal(rowStatus(child({ status: 'error', requiresAttention: true, attentionReason: 'error' }), quiet), 'idle')
+  assert.equal(rowStatus(child({ status: 'idle', lastUserMessageAt: ran }), quiet), 'idle', 'a Paseo without the flag too')
+  assert.deepEqual([rowStatus(child({ status: 'running' }), quiet), rowStatus(child({ status: 'closed', requiresAttention: true }), quiet),
+    rowStatus(child({ status: 'idle', pendingPermissions: [{ id: 'p' }] }), quiet)], ['working', 'offline', 'blocked'], 'what it does now is still said')
+  assert.equal(rowStatus(child({ status: 'idle', lastUserMessageAt: ran, requiresAttention: true })), 'done',
+    "not for its label alone: one created from another workspace is that workspace's own, looked at like any agent")
+
+  const row = agentRow(child({ status: 'running' }), { roots, parent: CLAUDE_SID, quiet: true })
+  assert.deepEqual([row.is_subagent, row.parent_session_id, row.status], [true, CLAUDE_SID, 'working'])
+  assert.equal(agentRow(child({ status: 'idle', requiresAttention: true }), { roots, parent: CLAUDE_SID, quiet: true }).status, 'idle')
+  const own = agentRow(child({ status: 'running' }), { roots })
+  assert.deepEqual([own.is_subagent, own.parent_session_id], [undefined, undefined], 'its creator is not listed beside it: a row of its own')
+
+  const boss = agentSnapshot({ id: 'boss-1', provider: 'my-claude', cwd: '/w/proj', status: 'idle', requiresAttention: true,
+    persistence: { sessionId: CLAUDE_SID, metadata: { provider: 'claude' } } })
+  const led = agentRow(boss, { roots, fleet: [child({ status: 'running' }), child({ id: 'kid-2', title: '  ', status: 'running' })] })
+  assert.deepEqual(led.background, [
+    { id: 'paseo-kid-1', kind: 'agent', description: '评审 E5（GPT）', started_at: '2026-11-04T09:00:00.000Z' },
+    { id: 'paseo-kid-2', kind: 'agent', started_at: '2026-11-04T09:00:00.000Z' },
+  ])
+  assert.equal(led.status, 'done', "its own turn ended; the hub counts it as working while they run")
+  assert.equal(agentRow(boss, { roots, fleet: [] }).background, undefined)
+  // Paseo let its process go while they still run: their reports wake it, so it is not "Offline" (which a list of
+  // what runs leaves out, with them under it). With none left, it is.
+  const let_go = { ...boss, status: 'closed' }
+  assert.deepEqual([agentRow(let_go, { roots, fleet: [child({ status: 'running' })] }).status, agentRow(let_go, { roots }).status,
+    rowStatus(let_go, { fleet: true }), rowStatus(let_go)], ['idle', 'offline', 'idle', 'offline'])
+  assert.equal(backgroundOf({ title: 'no id' }), undefined)
+})
+
 test("a Codex row: Paseo's full-access is Persona's bypassPermissions, the other Codex modes are not reported", () => {
   const roots = providerRoots(CONFIG)
   const row = (currentModeId) => agentRow(agentSnapshot({ provider: 'my-codex', cwd: '/w/x', currentModeId }), { roots })
@@ -100,7 +173,7 @@ test("a Codex row: Paseo's full-access is Persona's bypassPermissions, the other
   assert.equal(paseoMode('acp', 'bypassPermissions'), undefined)
 })
 
-test("spaces: a project's checkout and its worktrees are one space, Paseo's workspaces its slots", () => {
+test("spaces: a project's checkout and its worktrees are one space; a workspace names where an agent is, and is no slot", () => {
   // The placement's projectKey is Paseo's project record id.
   const at = (dir, o = {}) => ({ cwd: dir, isGit: true, currentBranch: o.branch ?? null, remoteUrl: null, worktreeRoot: dir,
     isPaseoOwnedWorktree: o.paseo ?? false, mainRepoRoot: o.main ?? null })
@@ -135,10 +208,13 @@ test("spaces: a project's checkout and its worktrees are one space, Paseo's work
     { roots, project, spaceId: s.idOf(project), spaceName: s.names.get(s.idOf(project)) })
   const rows = [row('wks_main', main), row('wks_wt', wt), row('wks_stray', stray)]
   assert.deepEqual(rows.map((r) => [r.space_id, r.space_name, r.slot_id, r.slot_name]), [
-    ['prj_app', 'app', 'wks_main', '主线'], ['prj_app', 'app', 'wks_wt', '修登录'], ['prj_app', 'app', 'wks_stray', 'fix-login'],
-  ])
+    ['prj_app', 'app', undefined, '主线'], ['prj_app', 'app', undefined, '修登录'], ['prj_app', 'app', undefined, 'fix-login'],
+  ], "no slot id: the apps draw the agents of one slot as one tab's panes (#4493)")
   assert.deepEqual(rows.map((r) => r.repo_root), ['/w/app', '/w/app', '/w/app'], "按仓库: the repository's main checkout (#2840)")
   assert.equal(row('wks_notes', folder).repo_root, undefined, 'not a git repository: the path says enough')
+  const physical = agentRow(agentSnapshot({ provider: 'grok', cwd: main.checkout.cwd, workspaceId: 'wks_main' }),
+    { roots, project: main, canon: (path) => `/data${path}` })
+  assert.equal(physical.repo_root, '/data/w/app', 'by its physical directory, as the bridge resolves it (#4492)')
   const bare = agentRow(agentSnapshot({ provider: 'grok', cwd: '/w/x', workspaceId: 'wks_x' }), { roots })
   assert.deepEqual([bare.space_id, bare.space_name, bare.slot_id], ['wks_x', 'x', undefined], 'no placement: its workspace, as before')
 })

@@ -42,6 +42,43 @@ func TestFleetCountsCodexRootsOnly(t *testing.T) {
 	}
 }
 
+// A runtime's session that another of its sessions started (an agent another Paseo agent created, #4494) is its
+// parent's subtask whichever agent it runs: the parent's row stands for it. Unlike a Codex subagent it can need the
+// user, and then it counts and is listed like any session.
+func TestFleetCountsARuntimeSubtaskOnlyWhileItNeedsYou(t *testing.T) {
+	lead := proto.Session{MachineID: "box", SessionID: "lead", Agent: "claude", SourceKind: proto.SourceRuntime, State: proto.StateWorking}
+	delegated := func(id, agent, state string) fleetInput {
+		return fleetInput{Session: &proto.Session{MachineID: "box", SessionID: id, Agent: agent, SourceKind: proto.SourceRuntime,
+			IsSubagent: true, ParentSessionID: "lead", RootSessionID: "lead", State: state}}
+	}
+	for _, state := range []string{proto.StateWorking, proto.StateUnread, proto.StateIdle} {
+		st := buildFleet([]fleetInput{{Session: &lead}, delegated("review", "codex", state), delegated("tests", "claude", state)}, nil)
+		if st.Working != 1 || st.NeedsYou+st.Unread != 0 || len(st.Items) != 1 || st.Items[0].ID != "box/lead" {
+			t.Fatalf("%s: the agents it created counted beside it: %+v", state, st)
+		}
+	}
+	// One waits for the user: by its row's state, and by a card that reached the hub before that row did.
+	card := []proto.Interaction{{ID: "ix-1", MachineID: "box", SessionID: "tests", Kind: proto.IxPermission}}
+	for name, c := range map[string]struct {
+		asking fleetInput
+		cards  []proto.Interaction
+	}{
+		"its row says so": {delegated("tests", "claude", proto.StateNeedsYou), nil},
+		"with its card":   {delegated("tests", "claude", proto.StateNeedsYou), card},
+	} {
+		st := buildFleet([]fleetInput{{Session: &lead}, delegated("review", "codex", proto.StateWorking), c.asking}, c.cards)
+		if st.NeedsYou != 1 || st.Working != 1 || len(st.Items) != 2 || st.Items[0].ID != "box/tests" {
+			t.Fatalf("%s: %+v", name, st)
+		}
+	}
+	// A session no runtime lists keeps what it had: ancestry on a Claude row is not a subtask, on a Codex row it is.
+	if (proto.Session{Agent: "claude", IsSubagent: true, ParentSessionID: "lead"}).IsSubtask() ||
+		!(proto.Session{Agent: "codex", ParentSessionID: "lead", State: proto.StateNeedsYou}).IsSubtask() ||
+		(proto.Session{SourceKind: proto.SourceRuntime, Agent: "codex"}).IsSubtask() {
+		t.Fatal("IsSubtask outside a runtime's own sessions")
+	}
+}
+
 func TestFleetDecorationPreservesCodexHierarchy(t *testing.T) {
 	ft := newFleetTestNoStore(t)
 	child := proto.Session{SessionID: "child", Agent: "codex", SourceKind: "codex_app_server", Status: proto.StatusWorking,

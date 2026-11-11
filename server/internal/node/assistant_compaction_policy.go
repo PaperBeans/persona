@@ -292,7 +292,7 @@ func (n *Node) assistantCompactionSettings(id, cwd, settings string, c assistant
 	s["env"] = env
 
 	// Keep the assistant's project/user instructions, data skills and auto-memory. Only the development workflows and
-	// providers it does not use are hidden; bundled-skill and per-skill switches leave the explicit Persona plugins alone.
+	// providers it does not use are hidden; bundled-skill and per-skill switches preserve explicitly enabled integrations.
 	env["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] = "1"
 	plugins, _ := s["enabledPlugins"].(map[string]any)
 	if plugins == nil {

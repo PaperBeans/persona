@@ -7,10 +7,10 @@ vi.mock("./api", () => ({
     if (init?.token !== calls.good) throw new Error("invalid token");
     return path === "/auth/tokens" ? { token: "jd_browser", id: "dev1" } : { machines: [] };
   }),
-  setToken: vi.fn(),
+  setPairedToken: vi.fn(),
 }));
 
-import { setToken } from "./api";
+import { setPairedToken } from "./api";
 import { storeCredentials } from "./compatibility";
 import { deviceName, pair, pairToken, takeToken } from "./auth";
 
@@ -40,8 +40,8 @@ describe("pair", () => {
   beforeEach(() => {
     calls.list = [];
     stored = {};
-    vi.mocked(setToken).mockClear();
-    vi.mocked(setToken).mockImplementation((token, id) => storeCredentials(token, id));
+    vi.mocked(setPairedToken).mockClear();
+    vi.mocked(setPairedToken).mockImplementation((token, id) => storeCredentials(token, id));
     vi.stubGlobal("localStorage", { getItem: (k: string) => stored[k] ?? null, setItem: (k: string, v: string) => void (stored[k] = v), removeItem: (k: string) => void delete stored[k] });
     vi.stubGlobal("navigator", { userAgent: "" });
   });
@@ -68,18 +68,18 @@ describe("pair", () => {
       ["/machines", "jp_example"],
       ["/auth/tokens", "jp_example"],
     ]);
-    expect(setToken).toHaveBeenCalledWith("jd_browser", "dev1");
+    expect(setPairedToken).toHaveBeenCalledWith("jd_browser", "dev1");
   });
   it("keeps a device token without trading it", async () => {
     calls.good = "jd_device";
     await pair("jd_device");
     expect(calls.list.map((c) => c.path)).toEqual(["/machines"]);
-    expect(setToken).toHaveBeenCalledWith("jd_device");
+    expect(setPairedToken).toHaveBeenCalledWith("jd_device");
   });
   it("throws what the hub said for a link without a token", async () => {
     calls.good = "jp_example";
     await expect(pair("persona://pair?url=http%3A%2F%2Fhub.example")).rejects.toThrow("invalid token");
-    expect(setToken).not.toHaveBeenCalled();
+    expect(setPairedToken).not.toHaveBeenCalled();
   });
 });
 

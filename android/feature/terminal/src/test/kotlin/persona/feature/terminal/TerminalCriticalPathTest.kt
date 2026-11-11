@@ -61,6 +61,57 @@ class TerminalCriticalPathTest {
         } finally { Dispatchers.resetMain() }
     }
 
+    @Test fun resumeSessionBringsBackASessionThatIsNotRunning() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        try {
+            val transport = FakeTerminal()
+            val resumer = FakeResumer()
+            val model = TerminalViewModel(SessionKey("machine", "session"), transport, dispatcher, resumer = resumer)
+            val failures = mutableListOf<String?>()
+            val collecting = launch { model.resumeFailures.collect { failures += it } }
+            val run = launch { model.run() }
+            runCurrent(); model.grid(TerminalSize(40, 20)); advanceTimeBy(250); runCurrent()
+            suspend fun notRunning() { transport.events.emit(TerminalEvent("machine", "session", error = "session not running")); advanceTimeBy(250); runCurrent() }
+            notRunning()
+            assertEquals(TerminalNote.NoTerminal, model.state.value.note)
+            assertTrue(model.state.value.resumable)
+            // The hub refused: its words are shown and the note stays.
+            resumer.failure = TerminalResumeFailed("no such directory")
+            model.resume(); runCurrent()
+            assertEquals(listOf<String?>("no such directory"), failures)
+            assertFalse(model.state.value.resuming)
+            assertEquals(TerminalNote.NoTerminal, model.state.value.note)
+            // On its way: one request at a time, then the terminal connects at once instead of after the back-off.
+            resumer.failure = null; resumer.gate = CompletableDeferred()
+            model.resume(); model.resume(); runCurrent()
+            assertTrue(model.state.value.resuming)
+            assertEquals(2, resumer.calls)
+            val subscriptions = transport.subscriptions.size
+            resumer.gate!!.complete(Unit); runCurrent()
+            assertFalse(model.state.value.resuming)
+            assertNull(model.state.value.note)
+            advanceTimeBy(250); runCurrent()
+            assertEquals(subscriptions + 1, transport.subscriptions.size)
+            assertFalse(model.state.value.resumable)
+            // A session a message resumes (Codex): no Resume session.
+            resumer.can = false
+            notRunning()
+            assertEquals(TerminalNote.NoTerminal, model.state.value.note)
+            assertFalse(model.state.value.resumable)
+            run.cancelAndJoin(); collecting.cancel()
+        } finally { Dispatchers.resetMain() }
+    }
+
+    private class FakeResumer : TerminalResumer {
+        var can = true
+        var failure: Exception? = null
+        var gate: CompletableDeferred<Unit>? = null
+        var calls = 0
+        override fun canResume(key: SessionKey) = can
+        override suspend fun resume(key: SessionKey) { calls++; gate?.await(); failure?.let { throw it } }
+    }
+
     @Test fun compositionCommitsOnceAndModifiersCoverTapLockAndHold() {
         val sent = mutableListOf<String>()
         val marked = mutableListOf<String>()

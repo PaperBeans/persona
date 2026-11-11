@@ -366,3 +366,32 @@ func TestMigratedThingsWithoutABlockAreGeneric(t *testing.T) {
 		t.Fatalf("rule tier %s", h.inbox.ruleTier(items[0]))
 	}
 }
+
+func TestRenamedConnectorRenamesItsItems(t *testing.T) {
+	h := newInboxHub(t)
+	now := time.Now()
+	apply := func(name string, things ...connector.InboxThing) []*InboxItem {
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		return h.inbox.applyConnector("example", name, things, now)
+	}
+	other := thing("b1", now.Add(-time.Hour))
+	other.Thread = "example-org/example-repo#13"
+	apply("Old name", thing("a1", now.Add(-time.Hour)), other)
+	// One thread moves in the same round as the rename: it is listed once.
+	moved := thing("a2", now)
+	ch := apply("New name", moved)
+	if len(ch) != 2 {
+		t.Fatalf("changed %d, want both items once", len(ch))
+	}
+	h.inbox.mu.Lock()
+	for _, it := range h.inbox.items {
+		if it.Source == "example" && it.AccountName != "New name" {
+			t.Errorf("%s keeps account name %q", it.ID, it.AccountName)
+		}
+	}
+	h.inbox.mu.Unlock()
+	if ch := apply("New name"); len(ch) != 0 {
+		t.Fatalf("an unchanged name changed %d items", len(ch))
+	}
+}

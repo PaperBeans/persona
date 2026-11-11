@@ -88,6 +88,8 @@
   "older_account_changed": "飞书账号已切换，请重新打开会话",
   "older_signed_out": "飞书已退出登录，请重新连接",
   "jump_latest": "回到最新",
+  "jump_first_unread": "第一条未读",
+  "jump_mention": "有人@你",
   "recalled_mark": "已撤回",
   "edit_history": "编辑历史",
   "edit_history_hint": "查看已留存的旧版本",

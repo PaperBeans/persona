@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keep or remove the worktree Persona made, in Close Agent and Delete Chat (#4532): iOS AgentWorktree words. -->
+<resources>
+    <string name="chat_worktree_made">このエージェントは Persona が作った worktree で作業していました</string>
+    <string name="chat_worktree_keep">worktree を残す</string>
+    <string name="chat_worktree_remove">削除する</string>
+    <string name="chat_worktree_delete_branch">ブランチ %1$s も削除する</string>
+    <string name="chat_worktree_confirm_loss">これらの変更が失われることを理解しています</string>
+    <string name="chat_worktree_removed">worktree を削除しました</string>
+    <string name="chat_worktree_removed_branch">worktree とブランチを削除しました</string>
+    <string name="chat_worktree_remove_failed">worktree を削除できませんでした：%1$s</string>
+    <plurals name="chat_worktree_dirty">
+        <item quantity="other">コミットされていない変更が %d ファイルあります。worktree を削除すると失われます。</item>
+    </plurals>
+    <plurals name="chat_worktree_unmerged">
+        <item quantity="other">ブランチに %2$s にないコミットが %1$d 件あります。ブランチを削除すると失われます。</item>
+    </plurals>
+</resources>

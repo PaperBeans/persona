@@ -103,7 +103,9 @@ internal fun ExtensionsPage(extensions: ExtensionManagement?, onBack: () -> Unit
                     "plugin-${it.manager.orEmpty()}-${it.id}" + if ((it.manager.orEmpty() to it.id) in repeated) "-$index" else ""
                 }) { index, extension ->
                     JGroupItem(GroupPosition.of(index, shown.size)) {
-                        JRow(extension.name.ifBlank { extension.id }, subtitle = ExtensionText.listLine(res, extension), leadingIcon = PhIcons.PuzzlePiece,
+                        val downloads = catalogDownloads(res, extension.downloads)
+                        val subtitle = listOfNotNull(ExtensionText.listLine(res, extension), downloads).joinToString("\n")
+                        JRow(extension.name.ifBlank { extension.id }, subtitle = subtitle, subtitleLines = installedSubtitleLines(downloads), leading = { ExtensionLogo(extension.iconUrl) },
                             trailing = { ExtensionStateMark(extension) }, chevron = true,
                             selected = (detail as? ExtensionRoute)?.let { it.extensionId == extension.id && roster.ownerOrDefault(it.manager) == roster.ownerOrDefault(extension.manager) } == true,
                             onClick = { onExtension(extension.id, extension.manager?.takeIf { it != roster?.defaultManagerId }) })
@@ -120,6 +122,9 @@ internal fun ExtensionsPage(extensions: ExtensionManagement?, onBack: () -> Unit
         }
     }
 }
+
+/** Legacy installed rows keep JRow's two-line subtitle unless a real count needs another line. */
+internal fun installedSubtitleLines(downloads: String?): Int = if (downloads == null) 2 else 3
 
 /** The mark beside an extension's state: the style's status dot, or a warning in the danger colour when it is broken. */
 @Composable
@@ -348,8 +353,11 @@ private fun LazyListScope.header(id: String, state: ExtensionState, res: Resourc
     val extension = state.detail?.extension
     item("header") {
         JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.s)) {
-            JRow(extension?.name?.ifBlank { null } ?: id, subtitle = extension?.let { ExtensionText.stateLine(res, it) } ?: stringResource(if (state.loading) R.string.settings_ext_loading else R.string.settings_ext_unavailable),
-                leadingIcon = PhIcons.PuzzlePiece, trailing = { if (extension == null && state.loading) JSpinner() else ExtensionStateMark(extension) })
+            val line = extension?.let { ExtensionText.stateLine(res, it) } ?: stringResource(if (state.loading) R.string.settings_ext_loading else R.string.settings_ext_unavailable)
+            val downloads = catalogDownloads(res, extension?.downloads)
+            val subtitle = listOfNotNull(line, downloads).joinToString("\n")
+            JRow(extension?.name?.ifBlank { null } ?: id, subtitle = subtitle, subtitleLines = installedSubtitleLines(downloads),
+                leading = { ExtensionLogo(extension?.iconUrl) }, trailing = { if (extension == null && state.loading) JSpinner() else ExtensionStateMark(extension) })
         }
     }
     extension?.description?.takeIf { it.isNotBlank() }?.let { item("description") { Note(it) } }

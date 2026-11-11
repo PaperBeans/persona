@@ -1,6 +1,10 @@
 package linktray
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/nwverse/persona/server/internal/link"
+)
 
 // Host is what the tray asks of the program it runs in (cmd/persona-link): reading the state and doing what the
 // panel's buttons say. The tray never touches link.json, the scheduled task or the hub itself, so the command line
@@ -20,8 +24,12 @@ type Host interface {
 	Reconnect() error
 	RestartService() error
 	InstallService() error
-	// Pair redeems an active-mode pairing link and says what this computer is called on the hub.
-	Pair(raw, machine string) (string, error)
+	// Pair redeems an active-mode pairing link (over ssh when non-nil) and says what this computer is called on the hub.
+	Pair(raw, machine string, ssh *link.SSH) (string, error)
+	// SetSSH saves or removes (nil) the SSH tunnel in link.json and asks a running persona-link to redial.
+	SetSSH(ssh *link.SSH) (*link.SSH, error)
+	// TestSSH checks that ssh reaches a Persona hub (against rawLink when given, else link.json).
+	TestSSH(ssh link.SSH, rawLink string) (*link.SSH, error)
 	// PairListen makes a passive-mode pairing link for the hub's admin page.
 	PairListen(listen string) (Invitation, error)
 	SetMode(mode string) error

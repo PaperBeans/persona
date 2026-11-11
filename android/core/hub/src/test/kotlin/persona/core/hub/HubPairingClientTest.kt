@@ -16,6 +16,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HubPairingClientTest {
+    @Test fun passwordCredentialReusesIssuedDeviceWithoutAnotherExchange() = runBlocking {
+        MockWebServer().use { server ->
+            server.start(InetAddress.getLoopbackAddress(), 0)
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
+                    "/api/v1/health" -> MockResponse().setBody("""{"ok":true,"hub_id":"test-hub"}""")
+                    "/api/v1/machines" -> {
+                        assertEquals("Bearer jd_password-device", request.getHeader("Authorization"))
+                        MockResponse().setBody("""{"machines":[]}""")
+                    }
+                    "/api/v1/auth/tokens" -> error("Password login must reuse the credential already issued")
+                    else -> MockResponse().setResponseCode(404)
+                }
+            }
+            HubPairingClient("test-hub", null, listOf(server.url("/").toString()), "test").use { client ->
+                val paired = client.pair("jd_password-device", "Phone", "dev_password-device") {}
+                assertEquals("jd_password-device", paired.token)
+                assertEquals("dev_password-device", paired.deviceId)
+                assertEquals("test-hub", paired.hubId)
+            }
+        }
+    }
+
     @Test fun pinnedPairingExchangesCredentialsAndDownloadsVerifiedApk() = runBlocking {
         val certificate = HeldCertificate.Builder().commonName("example.com").build()
         val fingerprint = Base64.getUrlEncoder().withoutPadding().encodeToString(

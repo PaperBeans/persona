@@ -377,19 +377,66 @@ func TestResumableSurvivesAManagerRestart(t *testing.T) {
 	}
 }
 
-// restoreMem is the interactions table as the next manager reads it: the resumable ones still pending.
+// restoreMem is the interactions table as the next manager reads it: the resumable ones still pending, the others
+// cancelled (db ExpireStaleInteractions).
 type restoreMem struct{ *fleetMem }
 
-func (r *restoreMem) ExpireStaleInteractions(context.Context) ([]proto.Interaction, error) {
+func (r *restoreMem) ExpireStaleInteractions(context.Context) ([]proto.Interaction, []string, error) {
 	r.fmu.Lock()
 	defer r.fmu.Unlock()
 	var out []proto.Interaction
+	var cancelled []string
 	for _, rec := range r.recs {
-		if r.status[rec.Interaction.ID] == "pending" && rec.Interaction.Resumable {
+		switch id := rec.Interaction.ID; {
+		case r.status[id] != "pending":
+		case rec.Interaction.Resumable:
 			out = append(out, rec.Interaction)
+		default:
+			r.status[id] = "cancelled"
+			cancelled = append(cancelled, id)
 		}
 	}
-	return out, nil
+	return out, cancelled, nil
+}
+
+// The assistant's question that a hub switch took its manager away from (#4568): the next manager cancels it, as no
+// tool call waits on it any more, and tells the hub it is over, so an app that resumed its event stream across the
+// switch drops the card instead of showing it next to the question the assistant asks again.
+func TestRestartResolvesTheCardsTheLastManagerLeft(t *testing.T) {
+	ft := newFleetTest(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel) // the first manager's call: it is gone with its process, nobody ends it
+	go func() {
+		_, _ = ft.s.toolAskUser(ctx, "mac", "s1", json.RawMessage(`{"questions":[{"header":"Merge","question":"Merge it?",
+			"options":[{"label":"Merge"},{"label":"Not yet"}]}]}`))
+	}()
+	asked := ft.waitPending(1)[0]
+	if asked.ToolName != "ask_user" {
+		t.Fatalf("pending %+v", asked)
+	}
+
+	// The next manager, on the same table.
+	st := &restoreMem{fleetMem: ft.st}
+	f2 := newFakeHub()
+	s2 := New(Options{Hub: f2, Store: func() Store { return st }, Logf: t.Logf, Devices: ft.d})
+	s2.FleetUp(context.Background())
+	if status, _, _ := st.InteractionOutcome(context.Background(), asked.ID); status != "cancelled" {
+		t.Fatalf("status %q", status)
+	}
+	var resolved []string
+	for _, tl := range f2.told {
+		var p assistantwire.FleetResolved
+		if tl.event == assistantwire.EventFleetResolved && json.Unmarshal(tl.params, &p) == nil {
+			resolved = append(resolved, p.ID)
+		}
+		var full assistantwire.FleetInteractions
+		if tl.event == assistantwire.EventFleetInteractions && json.Unmarshal(tl.params, &full) == nil && len(full.Interactions) != 0 {
+			t.Fatalf("the hub's full list = %+v", full.Interactions)
+		}
+	}
+	if !slices.Equal(resolved, []string{asked.ID}) {
+		t.Fatalf("resolved for the hub = %v, want [%s]", resolved, asked.ID)
+	}
 }
 
 // A node's interaction.create through the manager (devices.Options.Answer): the node's connection ending ends the

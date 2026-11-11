@@ -1090,3 +1090,79 @@ describe("generation isolation and inflight coalescing", () => {
     expect(list.getSnapshot().loading).toBe(false);
   });
 });
+
+describe("counts read with the page (sessions_page_counts, #4858)", () => {
+  const withCounts = (sessions: Row[], patch: Partial<ListPage<Row>> = {}, revision = "page") => page(sessions, { counts: counts(revision), ...patch });
+
+  it("reads a first page and each delta in one request, the counts riding on the page", async () => {
+    pages.mockResolvedValueOnce(withCounts(rows(50), { has_more: true, next_cursor: "frozen/one+" }, "first"));
+    const list = make(undefined, { pageCounts: () => true });
+    expect(list.usesPageCounts()).toBe(true);
+    await list.load();
+    expect(list.getSnapshot()).toMatchObject({ loaded: true, total: 8_000, counts: counts("first") });
+    pages.mockResolvedValueOnce(withCounts([row("new", 20_000)], { revision: "next" }, "next"));
+    await list.load();
+    expect(ids(list)[0]).toBe("new");
+    expect(list.getSnapshot().counts).toEqual(counts("next"));
+    expect(requestParams()).toEqual([
+      { summary: "1", limit: "50", with_counts: "1" },
+      { summary: "1", limit: "50", since: "baseline", with_counts: "1" },
+    ]);
+    expect(aggregates).not.toHaveBeenCalled();
+    expect(api).toHaveBeenCalledTimes(2);
+  });
+
+  it("takes two requests per refresh without the feature, as before", async () => {
+    const list = make();
+    expect(list.usesPageCounts()).toBe(false);
+    await list.load();
+    pages.mockResolvedValueOnce(page([row("new", 20_000)], { revision: "next" }));
+    await list.load();
+    expect(api).toHaveBeenCalledTimes(4);
+    expect(requestParams().every((query) => !("with_counts" in query))).toBe(true);
+    expect(aggregates).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks for counts on a delta's first page only, with the filters it reads", async () => {
+    const list = make(undefined, { pageCounts: () => true });
+    pages.mockResolvedValueOnce(withCounts(rows(50)));
+    await list.setFilters({ state: "working" });
+    pages
+      .mockResolvedValueOnce(withCounts([row("a", 20_000)], { revision: "next", has_more: true, next_cursor: "delta/two" }, "next"))
+      .mockResolvedValueOnce(page([row("b", 19_999)], { revision: "next" }));
+    await list.load();
+    expect(ids(list).slice(0, 2)).toEqual(["a", "b"]);
+    expect(requestParams().slice(1)).toEqual([
+      { state: "working", summary: "1", limit: "50", since: "baseline", with_counts: "1" },
+      { state: "working", summary: "1", limit: "50", since: "baseline", cursor: "delta/two" },
+    ]);
+    expect(list.getSnapshot().counts).toEqual(counts("next"));
+    expect(aggregates).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the separate counts read when a page comes back without valid counts", async () => {
+    const list = make(undefined, { pageCounts: () => true });
+    pages.mockResolvedValueOnce(page(rows(10)));
+    await list.load();
+    expect(list.getSnapshot()).toMatchObject({ loaded: true, counts: counts() });
+    pages.mockResolvedValueOnce(page([], { revision: "next", counts: { total: 1 } as ListCounts }));
+    aggregates.mockResolvedValueOnce(counts("separate"));
+    await list.load();
+    expect(list.getSnapshot().counts).toEqual(counts("separate"));
+    expect(aggregates.mock.calls.map(([path]) => Object.fromEntries(params(path)))).toEqual([{ counts: "1" }, { counts: "1" }]);
+  });
+
+  it("keeps a failed page's checkpoint so the retry sees the same changes", async () => {
+    const list = make(undefined, { pageCounts: () => true });
+    pages.mockResolvedValueOnce(withCounts(rows(10)));
+    await list.load();
+    pages.mockRejectedValueOnce(new Error("offline"));
+    await expect(list.load()).rejects.toThrow("offline");
+    expect(list.getSnapshot()).toMatchObject({ error: "offline", counts: counts("page") });
+    pages.mockResolvedValueOnce(withCounts([row("new", 20_000)], { revision: "next" }, "next"));
+    await list.retry();
+    expect(requestParams().slice(1).map((query) => query.since)).toEqual(["baseline", "baseline"]);
+    expect(list.getSnapshot()).toMatchObject({ error: null, counts: counts("next") });
+    expect(aggregates).not.toHaveBeenCalled();
+  });
+});

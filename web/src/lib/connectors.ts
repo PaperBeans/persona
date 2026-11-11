@@ -371,6 +371,26 @@ export function githubOptions(raw: unknown): GitHubInboxOptions | null {
   return { ci: o.ci, muted_repos: strings(o.muted_repos) ?? [], ignore_branches: strings(o.ignore_branches) };
 }
 
+/** lark-cli's Inbox options: group chats taken whole, watched documents and Wiki spaces, and whether every comment on
+ * a watched document the user owns comes in (PUT …/larkcli/settings {options}, sent whole). */
+export interface LarkCLIInboxOptions {
+  inbox_all_chats: string[];
+  documents: string[];
+  wiki_spaces: string[];
+  owned_all_comments: boolean;
+  /** What counts as Needs you / FYI / Collapsed for these items, in the user's words (empty: the Inbox's own rules). */
+  triage_rules: string;
+}
+
+/** lark-cli's options as the hub gives them, or null when it gives none (or not that shape). */
+export function larkcliOptions(raw: unknown): LarkCLIInboxOptions | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (!Array.isArray(o.documents)) return null;
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  return { inbox_all_chats: strings(o.inbox_all_chats), documents: strings(o.documents), wiki_spaces: strings(o.wiki_spaces), owned_all_comments: o.owned_all_comments === true, triage_rules: typeof o.triage_rules === "string" ? o.triage_rules : "" };
+}
+
 /** The CI choices, most quiet first. */
 export const CI_MODES: { value: string; label: string }[] = [
   { value: "off", label: t("lib-connectors.ci_mode_off") },

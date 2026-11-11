@@ -275,7 +275,7 @@ internal fun ProviderDetailPage(providers: ProviderSetup?, name: String, machine
                 }
                 state.notice?.let { notice -> item("notice") { JNotice(notice.text(), Modifier.padding(top = Tokens.Space.m), status = Status.NeedsYou) } }
                 item("action") {
-                    Box(Modifier.padding(top = ContentTokens.legacyXl)) {
+                    Box(Modifier.padding(top = Tokens.Space.section)) {
                         if (l.hidden) JButton(stringResource(R.string.settings_providers_restore), { scope.launch { model.restore() } }, Modifier.fillMaxWidth(),
                             kind = JButtonKind.Secondary, enabled = !state.busy, loading = state.busy)
                         else JButton(stringResource(if (l.managed) R.string.settings_providers_delete else R.string.settings_providers_hide_long), { confirm = true },

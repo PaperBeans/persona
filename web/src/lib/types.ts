@@ -285,8 +285,14 @@ export interface Session {
    *  or "usage_limit" (a subscription limit, until it resets). */
   turn_error_kind?: string;
   /** What is wrong, when the hub can tell from turn_error (docs/assistant/onboarding.md 5.2): not_logged_in / auth_failed /
-   *  model_route / rate_limited. */
+   *  model_route / rate_limited / model_fallback_unavailable (the model Claude Code fell back to after a refusal can't
+   *  be used: no "Continue"). */
   turn_error_code?: string;
+  /** The refusal fallback still active in this session, as Claude Code recorded it (#2289). */
+  model_fallback?: ModelRefusal;
+  /** "Back to the configured model" was asked and no newer reply has come yet (#2528): the next start asks for `to`. Not
+   *  proof the configured model runs. */
+  model_restore?: ModelRestore;
   /** When turn_error_kind is "usage_limit": when that subscription limit resets. Absent when it is not known. */
   turn_error_resets_at?: string;
   /** The CLI continues by itself once the usage limit resets. */
@@ -535,12 +541,34 @@ export interface Item {
   client_msg_id?: string;
   /** This notice is where the context was compacted (Claude Code's compact_boundary). */
   compact?: CompactInfo;
+  /** A notice for a Claude Code model_refusal_* record (#2289), kept as recorded. */
+  model_refusal?: ModelRefusal;
   /** A message Persona typed in for the model (a task's notice, a scheduled run…), not by you (lib/injected.ts). */
   injected?: Injected;
   /** Display provenance, independent of the model-facing role. Unknown kinds remain non-user sources. */
   source?: MessageSource;
   /** Client-only promotion evidence transferred from a removed Fold.supervision_user during an overlapping merge. */
   supervisionUser?: boolean;
+}
+
+/** A Claude Code model_refusal_* record (server proto.ModelRefusal) as the hub gives it: its known fields, values as
+ *  recorded (unknown ones included), and `text`, the refusal's own words. Never the record's line (#2528). */
+export interface ModelRefusal {
+  subtype: string;
+  original_model?: string;
+  fallback_model?: string;
+  category?: string;
+  scope?: string;
+  explanation?: string;
+  text?: string;
+}
+
+/** A pending "back to the configured model" (server proto.ModelRestore): "next_start" — the idle headless process was
+ *  closed (or none ran), so the next start asks for `to`. */
+export interface ModelRestore {
+  state: "next_start" | (string & {});
+  to?: string;
+  at: string;
 }
 
 /** Message provenance supplied by the assistant, not a group-chat member or a model role. */
@@ -705,6 +733,7 @@ export interface LauncherHealth {
 
 export interface AssistantInfo {
   machine_id: string;
+  main_machine_id?: string;
   launcher?: string;
   cwd?: string;
   main?: string;

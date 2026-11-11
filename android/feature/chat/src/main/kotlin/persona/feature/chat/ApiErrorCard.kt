@@ -17,10 +17,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import android.content.res.Resources
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import persona.core.contracts.Item
 import persona.core.contracts.parseTime
 import persona.core.designsystem.ChatNoteChip
@@ -36,7 +34,7 @@ import persona.core.designsystem.JIconButton
 import persona.core.designsystem.JSheet
 import persona.core.designsystem.JTextButton
 import persona.core.designsystem.PersonaTheme
-import persona.core.designsystem.LocalAppFeedback
+import persona.core.designsystem.rememberCopy
 import persona.core.designsystem.LocalizedFormats
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
@@ -55,27 +53,22 @@ internal fun ApiErrorLine(line: ChatLine.ApiError) {
     val actions = LocalChatRowActions.current
     val info = line.info
     var open by rememberSaveable(line.id) { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
-    val feedback = LocalAppFeedback.current
+    val copy = rememberCopy()
     val palette = PersonaTheme.palette
     val resources = LocalResources.current
-    fun copy(text: String) {
-        clipboard.setText(AnnotatedString(text))
-        feedback?.notice(resources.getString(R.string.chat_api_error_copied))
-    }
     val retry = actions?.takeIf { it.retryLineId == line.id }?.onRetry
     ErrorCard(
         info.reason.text(), apiErrorTags(info, line.count, resources), open, { open = !open },
         action = if (retry != null) ({ JButton(stringResource(R.string.chat_api_error_retry), retry, kind = JButtonKind.Secondary, size = JButtonSize.Medium, icon = PhIcons.ArrowClockwise) }) else null,
     ) {
-        info.requestId?.let { id -> DetailField(stringResource(R.string.chat_api_error_request_id), id) { JIconButton(PhIcons.Copy, stringResource(R.string.chat_api_error_copy_request_id), { copy(id) }) } }
-        info.session?.let { session -> DetailField(stringResource(R.string.chat_api_error_session), session) { JIconButton(PhIcons.Copy, stringResource(R.string.chat_api_error_copy_session), { copy(session) }) } }
+        info.requestId?.let { id -> DetailField(stringResource(R.string.chat_api_error_request_id), id) { JIconButton(PhIcons.Copy, stringResource(R.string.chat_api_error_copy_request_id), { copy(id, null) }) } }
+        info.session?.let { session -> DetailField(stringResource(R.string.chat_api_error_session), session) { JIconButton(PhIcons.Copy, stringResource(R.string.chat_api_error_copy_session), { copy(session, null) }) } }
         apiErrorTime(line.item.item.ts, resources)?.let { DetailField(stringResource(R.string.chat_api_error_time), it, mono = false) }
         SelectionContainer {
             Text(info.raw, style = PersonaTheme.type.code, color = palette.ink,
                 modifier = Modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).background(palette.sunken).padding(Tokens.Space.m))
         }
-        JTextButton(stringResource(R.string.chat_api_error_copy_raw), { copy(info.raw) }, icon = PhIcons.Copy)
+        JTextButton(stringResource(R.string.chat_api_error_copy_raw), { copy(info.raw, null) }, icon = PhIcons.Copy)
     }
 }
 

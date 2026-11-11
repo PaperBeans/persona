@@ -246,6 +246,7 @@ var renumbered = []struct{ from, to string }{
 	{"0071_pair_tokens.sql", "0111_pair_tokens.sql"},             // 0071 is sent_messages
 	{"0081_device_push_relay.sql", "0141_device_push_relay.sql"}, // 0081 is device_sessions
 	{"0428_todo_source.sql", "0429_todo_source.sql"},             // 0428 is manager_moved
+	{"0492_client_password.sql", "0505_client_password.sql"},     // 0492 is the manager's agent_shares
 }
 
 // lastUnified is the last migration from before the split: a NULL-part row up to it stands for both sets.

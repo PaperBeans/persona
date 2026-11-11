@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The refusal fallback (#2528): the same words as web/src/i18n/locales/*/chat-modelfallback.json. -->
+<resources>
+    <string name="chat_model_fallback_title">After an upstream refusal, this session switched to a fallback model</string>
+    <string name="chat_model_fallback_original">Originally requested model: %1$s</string>
+    <string name="chat_model_fallback_fallback">Fallback model: %1$s</string>
+    <string name="chat_model_fallback_error_after">Error since: %1$s</string>
+    <string name="chat_model_fallback_pending_title">The next start will use the configured model</string>
+    <string name="chat_model_fallback_pending_target">Configured model: %1$s</string>
+    <string name="chat_model_fallback_unverified">Which model actually runs is only known from this session\'s next reply.</string>
+    <string name="chat_model_fallback_no_promise">No message is resent; the same request may be refused again.</string>
+    <string name="chat_model_fallback_restore">Back to configured model</string>
+    <string name="chat_model_fallback_new_main">New main chat</string>
+    <string name="chat_model_fallback_terminal_hint">For a terminal session, type /model in Claude Code yourself; it may also change the default model for new sessions.</string>
+    <string name="chat_model_fallback_err_busy">This conversation is working, so nothing was closed. Try again once it stops.</string>
+    <string name="chat_model_fallback_err_unsupported">This session can\'t go back to the configured model from here. Use /model in its terminal.</string>
+    <string name="chat_model_fallback_err_nothing">This session no longer runs on a fallback model.</string>
+    <string name="chat_model_fallback_err_unknown">Persona can\'t tell right now which model this session uses or is configured with, so nothing was closed. Try again later.</string>
+    <string name="chat_model_fallback_err_outdated">personad on this computer is too old to go back to the configured model. Update it.</string>
+    <string name="chat_model_fallback_refusal_title">The upstream refused this request</string>
+    <string name="chat_model_fallback_refusal_fallback">Claude Code switched from %1$s to %2$s on its own</string>
+    <string name="chat_model_fallback_refusal_session">Later turns of this session may keep using it</string>
+    <string name="chat_model_fallback_refusal_no_switch">The record doesn\'t say another model was used</string>
+    <string name="chat_model_fallback_refusal_category">Category: %1$s</string>
+    <string name="chat_model_fallback_refusal_explanation">Explanation: %1$s</string>
+    <string name="chat_model_fallback_refusal_text">Refusal text</string>
+</resources>

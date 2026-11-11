@@ -1,0 +1,10 @@
+{
+  "description": "Official-market UI fixture. Download totals are synthetic test data, not production statistics. Logos use public HTTPS publisher avatars.",
+  "downloads_updated_at": "2026-11-11T12:00:00Z",
+  "extensions": [
+    {"market":"3f2a9c1d0b","id":"github","name":"GitHub","version":"1.0.0","description":"Review pull requests, browse repositories and keep up with issues.","publisher":"GitHub","tags":["Code","Reviews"],"permissions":[],"contributes":{},"icon_url":"https://github.com/github.png?size=128","downloads":12345},
+    {"market":"3f2a9c1d0b","id":"gitlab","name":"GitLab","version":"1.0.0","description":"Follow merge requests, pipelines and project activity.","publisher":"GitLab","tags":["Code","Reviews"],"permissions":[],"contributes":{},"icon_url":"https://github.com/gitlabhq.png?size=128","downloads":2345},
+    {"market":"3f2a9c1d0b","id":"telegram","name":"Telegram","version":"1.0.0","description":"Chat with Persona and receive updates through Telegram.","publisher":"Telegram","tags":["Messages"],"permissions":[],"contributes":{},"icon_url":"https://github.com/telegramdesktop.png?size=128","downloads":54321},
+    {"market":"3f2a9c1d0b","id":"notes","name":"Notes","version":"1.0.0","description":"A legacy package without artwork or a download total.","tags":["Knowledge"],"permissions":[],"contributes":{}}
+  ]
+}

@@ -50,6 +50,9 @@ func listKeySized(list []proto.Session, size int) string {
 		if s.ModelFallback != nil || s.TurnErrorCode != "" {
 			fmt.Fprintf(&w.b, "model-fallback:%+v/%q\n", s.ModelFallback, s.TurnErrorCode)
 		}
+		if s.ModelRestore != nil { // a restore asked (model_restore.go): no new revision says so
+			fmt.Fprintf(&w.b, "model-restore:%+v\n", *s.ModelRestore)
+		}
 		if s.Activity != "" { // a new step shows at once, not with the next 10 s of updated_at
 			w.b.WriteString("activity:")
 			w.str(s.Activity, '/')

@@ -17,6 +17,7 @@ import { INPUT_MAX } from "./dock";
 import { imagePayload, MAX_IMAGE, quotePath, releaseAttachments, sendFile } from "../../lib/attachments";
 import { activateComposer, addContext, getContexts, newContext, registerComposer, removeContext, useContexts, withContexts, type ComposerHandle } from "../../lib/links";
 import { addQuote, applyDraft, getQuotes, onDraftEvent, parseQuotes, removeQuote, replaceNeedsConfirm, sendDraft, setQuotes, splitQuotes, storeDraft, useQuotes, withQuoteBlock, withUnsent, type DraftImage } from "../../lib/drafts";
+import type { EditedImage } from "../../lib/image-edit";
 import { browseTarget, mentionAt, replaceToken, sessionQuote, workspaceContext } from "../../lib/mentions";
 import { machineWithHub } from "../../lib/mesh";
 import { getState } from "../../lib/store";
@@ -24,12 +25,14 @@ import { AttachmentTray } from "../../ui/AttachmentTray";
 import { cx, EASE, Spinner, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { ContextChips } from "../link/ContextChips";
+import { ForwardBars } from "./ForwardCard";
 import { QuoteBars } from "./Quote";
 import { MentionMenu, useMentionRows, type MentionRow, type MentionSource } from "./MentionMenu";
 import { HistorySearch } from "./HistorySearch";
 import { useSendHistory } from "./useSendHistory";
 import { isModelCommand, requestModelPicker } from "../../lib/model-switch";
 import { MAX_IMAGES } from "../../lib/composer-commands";
+import { escapeCancelsEdit, escapeCountsForEdit, upStartsEdit, type EditLastBox } from "../../lib/edit-last-key";
 import { t } from "../../i18n";
 import type { VoiceOffer } from "./voice/VoiceParts";
 
@@ -44,11 +47,26 @@ export interface Attachment {
   mime: string;
   data: string; // base64
   url: string; // object URL for the preview
+  /** Set once the picture has been through the image editor: its source, edits and history (lib/image-edit.ts), so
+   *  its tile opens it where the editor stopped; freed with the picture (releaseAttachments). */
+  edited?: EditedImage;
 }
 
 export interface Outgoing {
   text: string;
   images: { mime: string; data: string }[];
+  /** An edit of the last message, sent after its rewind (#4605): the old prompt, which Claude may have put back in its
+   *  box, cleared exactly before typing. A refusal leaves the edit in the box unsent, not as a failed bubble. */
+  edit?: { clearDraft: string };
+}
+
+/** The box is editing the last message (#4503; ChatView.editLastMessage). */
+export interface EditingLast {
+  /** Runs before the edit is sent: the rewind to before the old message. False: it did not happen, the edit stays.
+   *  `clearDraft`: the old prompt the send asks the node to clear from Claude's box (#4605). */
+  commit: () => Promise<boolean | { clearDraft: string }>;
+  /** The edit was cancelled, or the box moved on to other words. */
+  cancel: () => void;
 }
 
 export const AGENT_COMMANDS: Command[] = [
@@ -71,11 +89,11 @@ async function readImage(file: File): Promise<Attachment> {
   return { ...await imagePayload(file), id: uuid(), name: file.name || "image.png", url: URL.createObjectURL(file) };
 }
 
-function fromDraftImage(img: DraftImage, id = uuid()): Attachment {
+function fromDraftImage(img: DraftImage, id = uuid(), edited?: EditedImage): Attachment {
   const bin = atob(img.data);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return { ...img, id, url: URL.createObjectURL(new Blob([bytes], { type: img.mime })) };
+  return { ...img, id, url: URL.createObjectURL(new Blob([bytes], { type: img.mime })), ...(edited ? { edited } : {}) };
 }
 
 // memo: a chat renders again for each transcript item, and this box takes none of them (ChatView keeps its props stable)
@@ -91,6 +109,7 @@ export const Composer = memo(function Composer({
   onSend,
   onStop,
   onEditLastMessage,
+  editingLast,
   loadingDraft,
   stopping,
   autoFocus,
@@ -115,8 +134,10 @@ export const Composer = memo(function Composer({
    *  back into the box. */
   onSend: (m: Outgoing) => Promise<boolean>;
   onStop?: () => void;
-  /** Rewind the last Claude prompt into this empty composer, for explicit editing and resending. */
+  /** Starts editing the last Claude prompt in this box (↑ in it while empty, Esc twice; #4503, #2945). */
   onEditLastMessage?: () => void;
+  /** Set while the box edits the last message: a bar says so, Esc or × cancels, and a send rewinds first. */
+  editingLast?: EditingLast;
   /** A rewind is fetching the draft: keep receiving draft events but prevent typing or sending until it finishes. */
   loadingDraft?: boolean;
   /** A stop is on its way: the button shows it and takes no more presses. */
@@ -164,6 +185,9 @@ export const Composer = memo(function Composer({
   }, [nudge]);
   const input = useRef<HTMLTextAreaElement>(null);
   const lastEscape = useRef<number | null>(null);
+  // the edit now, for the draft events' and the send's closures
+  const editNow = useRef(editingLast);
+  editNow.current = editingLast;
   useEffect(() => { lastEscape.current = null; }, [draftKey, working, disabled, onEditLastMessage]);
   const box = useRef<HTMLDivElement>(null);
   // Phones (#5688): the box grows to a line limit from the visible height, then scrolls and offers Expand, the draft
@@ -243,7 +267,7 @@ export const Composer = memo(function Composer({
             refuseImages();
             return;
           }
-          appendImage(fromDraftImage(e.image));
+          appendImage(fromDraftImage(e.image, uuid(), e.edited));
           input.current?.focus({ preventScroll: true });
           return;
         }
@@ -253,6 +277,9 @@ export const Composer = memo(function Composer({
           requestAnimationFrame(() => input.current?.focus({ preventScroll: true }));
           return;
         }
+        // other words in place of an edit's (Edit as new, a rewind's message): no longer an edit
+        const startsEdit = e.type === "replace" && Boolean(e.edit);
+        if (e.type === "replace" && !startsEdit) editNow.current?.cancel();
         // "Edit" a message sent with a quote: the quote goes back to the bar, the words to the input
         const split = e.type === "replace" ? splitQuotes(e.text) : null;
         const nextQuotes = e.type === "replace" ? (split ? parseQuotes(split.quotes) : []) : null;
@@ -270,6 +297,7 @@ export const Composer = memo(function Composer({
           toast(t("chat-composer.replaced"), "ok", {
             label: t("chat-composer.undo"),
             run: () => {
+              if (startsEdit) editNow.current?.cancel();
               setQuotes(draftKey, kept.quotes);
               // the box went away or shows another conversation: the words go back to this one's stored draft
               if (!mounted.current || keyNow.current !== draftKey) {
@@ -396,8 +424,52 @@ export const Composer = memo(function Composer({
     if (el) setCaret(el.selectionStart);
   };
 
+  // Editing the last message (#4503): the words the box got when it began, so an untouched edit counts as the history
+  // entry shown (↑ goes on to older messages, ↓ back to an empty box); each of those ends the edit, its quotes with it.
+  const editStart = useRef<string | null>(null);
+  if (!editingLast) editStart.current = null;
+  else if (editStart.current === null) editStart.current = draft;
+  const leaveEdit = () => {
+    if (!editNow.current) return;
+    setQuotes(draftKey, []);
+    editNow.current.cancel();
+  };
   // ↑ / ↓ recall and Ctrl+R search of what was sent (useSendHistory.ts); desktop only
-  const history = useSendHistory({ draftKey, draft, setDraft, setCaret, input, disabled });
+  const history = useSendHistory({
+    draftKey,
+    draft,
+    setDraft: (text) => {
+      leaveEdit();
+      setDraft(text);
+    },
+    setCaret,
+    input,
+    disabled,
+    editing: editStart.current,
+  });
+  // Esc or × while editing: the box as it was before, empty; nothing was asked of the computer
+  const cancelEdit = () => {
+    const edit = editNow.current;
+    if (!edit) return;
+    setDraft("");
+    draftNow.current = "";
+    unsaved.current = null;
+    storeDraft(draftKey, "");
+    setQuotes(draftKey, []);
+    getContexts(draftKey).forEach((r) => removeContext(draftKey, r.id));
+    releaseAttachments(attsNow.current);
+    attsNow.current = [];
+    setAtts([]);
+    edit.cancel();
+    requestAnimationFrame(() => input.current?.focus({ preventScroll: true }));
+  };
+  // what ↑ and Esc Esc may start an edit from (lib/edit-last-key.ts); the page's dialogs are looked up only for those keys
+  const editBox = (): EditLastBox => ({
+    offered: Boolean(onEditLastMessage),
+    busy: Boolean(working || needsYou || disabled || blocked || loadingDraft),
+    holds: Boolean(draft || atts.length || uploading || reading.current || contexts.length || quotes.length),
+    menu: Boolean(rows.length || mOpen || history.searching || document.querySelector("[role=dialog],[role=menu]")),
+  });
 
   const pickMention = (r: MentionRow) => {
     if (!token) return;
@@ -533,7 +605,7 @@ export const Composer = memo(function Composer({
   // Claude's suggested next message (iOS SuggestionPill): while the box is empty and the agent waits for a message
   // (not working, not on a card); a tap fills it
   // in, "Send now" sends it as it is (the node drops it once the agent works again)
-  const pill = suggestion && suggestion !== sentPill && !blocked && !draft && !atts.length && !contexts.length && !quote && !working && !needsYou && !disabled ? suggestion : null;
+  const pill = suggestion && suggestion !== sentPill && !editingLast && !blocked && !draft && !atts.length && !contexts.length && !quote && !working && !needsYou && !disabled ? suggestion : null;
   const fillSuggestion = (text: string) => {
     setDraft(text);
     setDismissed(true);
@@ -553,6 +625,17 @@ export const Composer = memo(function Composer({
     const refs = getContexts(draftKey);
     const q = getQuotes(draftKey).list;
     if (disabled || blocked || loadingDraft || (!text.trim() && !atts.length && !refs.length && !q.length)) return;
+    // An edit of the last message: the rewind to before the old one first, the box kept as it is (read-only meanwhile).
+    // Refused or not possible: nothing changed on the computer, and the edit stays in the box (ChatView says why).
+    const edit = editNow.current;
+    let committed: Outgoing["edit"];
+    if (edit) {
+      const done = await edit.commit();
+      if (!done) return;
+      if (typeof done === "object") committed = done;
+      // the box went away or shows another conversation: the words wait in this one's stored draft
+      if (!mounted.current || keyNow.current !== draftKey) return;
+    }
     // The message shows in the chat at once (a sending bubble), so the box empties at once too: waiting for the hub to
     // hand it to the agent (seconds when it starts up) left the same words in both places. A send that never went
     // (onSend false) puts them back; one that failed stays in the chat as a failed bubble.
@@ -570,7 +653,7 @@ export const Composer = memo(function Composer({
     const at = document.activeElement;
     if (hasFinePointer() && (!at || at === document.body || box.current?.contains(at))) input.current?.focus({ preventScroll: true });
     // picked contexts ride in front as <persona-context> tags (docs/protocol/protocol.md "Tags in messages"), the quote as `> ` lines
-    const ok = await onSend({ text: withContexts(refs, withQuoteBlock(q, text), sent.length > 0), images: sent.map((a) => ({ mime: a.mime, data: a.data })) });
+    const ok = await onSend({ text: withContexts(refs, withQuoteBlock(q, text), sent.length > 0), images: sent.map((a) => ({ mime: a.mime, data: a.data })), ...(committed ? { edit: committed } : {}) });
     if (ok) {
       history.record(text);
       releaseAttachments(sent);
@@ -658,7 +741,26 @@ export const Composer = memo(function Composer({
           dragging ? "border-accent shadow-[0_0_0_3px_var(--accent-tint)]" : "border-line",
         )}
       >
+        {editingLast && (
+          <div role="status" data-testid="composer-editing" className="flex min-w-0 items-center gap-1.5 pt-0.5 pr-0.5 pl-2 text-[11.5px] whitespace-nowrap" style={{ animation: "fade-in 160ms ease-out both" }}>
+            <Icon name="pencil" size={12} stroke={2.2} className="shrink-0 text-accent-ink" />
+            <span className="shrink-0 font-medium text-ink-2">{t("rewind.editing")}</span>
+            {hasFinePointer() && <span className="min-w-0 truncate text-ink-3">{t("rewind.editing_hint")}</span>}
+            <span className="flex-1" />
+            <button
+              type="button"
+              aria-label={t("rewind.cancel_editing")}
+              title={t("rewind.cancel_editing")}
+              disabled={loadingDraft}
+              onClick={cancelEdit}
+              className="touch-hit flex size-6 shrink-0 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink-2"
+            >
+              <Icon name="x" size={12} stroke={2.4} />
+            </button>
+          </div>
+        )}
         <ContextChips draftKey={draftKey} />
+        <ForwardBars draftKey={draftKey} onRemove={() => input.current?.focus()} />
         {quote && (
           <QuoteBars
             draftKey={draftKey}
@@ -673,7 +775,8 @@ export const Composer = memo(function Composer({
           <div className="px-0.5 pt-0.5">
             <AttachmentTray attachments={atts} onOpen={(id) => setEditing(atts.find((a) => a.id === id) ?? null)} onRemove={(id) => {
               const att = atts.find((a) => a.id === id);
-              if (att) URL.revokeObjectURL(att.url);
+              // an edited picture's source and edits go with it
+              if (att) releaseAttachments([att]);
               setAtts((cur) => cur.filter((a) => a.id !== id));
             }} />
           </div>
@@ -731,6 +834,12 @@ export const Composer = memo(function Composer({
               setDraft("");
               return;
             }
+            // ↑ in an empty box edits the last message where Edit last message is on offer (#4503); else the history's
+            if (e.key === "ArrowUp" && onEditLastMessage && upStartsEdit(e, editBox())) {
+              e.preventDefault();
+              onEditLastMessage();
+              return;
+            }
             if (history.onKeyDown(e)) return;
             if (mOpen) {
               if ((e.key === "ArrowDown" || e.key === "ArrowUp") && mRows.length) {
@@ -769,10 +878,14 @@ export const Composer = memo(function Composer({
                 return;
               }
             }
-            if (e.key === "Escape" && !e.repeat && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey &&
-                onEditLastMessage && !working && !needsYou && !disabled && !blocked && !loadingDraft && !draft &&
-                !atts.length && !uploading && !reading.current && !contexts.length && !quotes.length &&
-                !document.querySelector("[role=dialog],[role=menu]")) {
+            // Esc while editing cancels it; kept from ChatView's interrupt on the window
+            if (escapeCancelsEdit(e, Boolean(editingLast))) {
+              e.preventDefault();
+              e.stopPropagation();
+              cancelEdit();
+              return;
+            }
+            if (e.key === "Escape" && onEditLastMessage && escapeCountsForEdit(e, editBox())) {
               e.preventDefault();
               e.stopPropagation();
               const now = performance.now();
@@ -799,7 +912,7 @@ export const Composer = memo(function Composer({
           }}
           placeholder={pill && hasFinePointer() ? t("chat-composer.suggestion", { suggestion: pill }) : placeholder}
           aria-label={t("chat-composer.message")}
-          title={hasFinePointer() ? t("composer.history_hint") : undefined}
+          title={hasFinePointer() ? (onEditLastMessage ? t("composer.history_hint_edit") : t("composer.history_hint")) : undefined}
           style={{ maxHeight: compact && grow.line ? `${grow.limit * grow.line + grow.pad}px` : INPUT_MAX }}
           className={cx("min-h-6 w-full resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-[14px] leading-[21px] text-ink outline-none [@media(pointer:coarse)]:text-[16px] [@media(pointer:coarse)]:leading-[24px] [overflow-wrap:anywhere] placeholder:text-ink-3 disabled:opacity-50", showExpand && "pr-8")}
         />
@@ -960,13 +1073,16 @@ export const Composer = memo(function Composer({
       {editing && (
         <Suspense fallback={null}>
           <ImageEditor
-            src={editing.url}
+            src={editing.edited?.source ?? editing.url}
+            start={editing.edited}
             onCancel={() => setEditing(null)}
-            onDone={(img) => {
+            onDone={(img, state) => {
               const old = editing;
               setEditing(null);
-              setAtts((cur) => cur.map((a) => (a.id === old.id ? fromDraftImage(img, a.id) : a)));
-              URL.revokeObjectURL(old.url);
+              // the picture as it came stays the source (the first edit's tile URL, kept); the earlier result goes
+              const source = old.edited?.source ?? old.url;
+              setAtts((cur) => cur.map((a) => (a.id === old.id ? fromDraftImage(img, a.id, { source, ...state }) : a)));
+              if (old.url !== source) URL.revokeObjectURL(old.url);
             }}
           />
         </Suspense>

@@ -30,7 +30,7 @@ final class TelegramConnectorTests: XCTestCase {
         shot(app, "settings")
         row.tap()
 
-        // Off: its switch, not 「登录在管理者的配置里设置」 (the hub does not know yet that it signs in here).
+        // Off: its switch, not 「登录在助手的配置里设置」 (the hub does not know yet that it signs in here).
         let toggle = app.switches["connector.enabled"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 15), "no switch while off:\n\(app.debugDescription)")
         XCTAssertEqual(toggle.value as? String, "0")

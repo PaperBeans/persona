@@ -38,6 +38,8 @@ type Options struct {
 	// SecretKey is the path of the key the model providers' keys are sealed with (the manager's own secret.key,
 	// models_launchers.go); "" makes one for this run only (tests).
 	SecretKey string
+	// Build is this manager's version, kept with what the north star records (north_star.go); "" in tests.
+	Build string
 	// ID is the manager this assistant is ("" and assistantwire.AssistantID: the built-in one). Its directories on a
 	// computer are named after it (identity.AssistantDirName, docs/assistant/managers.md "Directories on a computer").
 	ID string
@@ -47,6 +49,10 @@ type Options struct {
 type Service struct {
 	// id is Options.ID: the manager this assistant is.
 	id string
+	// build is Options.Build.
+	build string
+	// northStarOn: the north star's recording start is saved (north_star.go).
+	northStarOn atomic.Bool
 	// nodeAnswering: the computers' requests being answered now, but the ones that wait on a person (idle.go).
 	nodeAnswering atomic.Int64
 	// taskStarting counts queued and running task starts through linking or failure bookkeeping (idle.go).
@@ -57,6 +63,8 @@ type Service struct {
 	ext ExtensionTools
 	// refs is the provider extensions' values for launcher keys that are references (launcher_secrets.go); nil: none.
 	refs launcherSecrets
+	// humanSent: the messages a person's own app sent, as the hub vouched (secret_handoff.go).
+	humanSent humanSends
 
 	hub   Hub
 	store func() Store
@@ -82,7 +90,8 @@ type Service struct {
 	mux    *http.ServeMux
 	routes []string
 
-	standingMu sync.Mutex // standing_authorizations.go: revocation and automatic answers serialize
+	standingJudgeModel jsonModel  // nil: the configured agent.delegate model; tests can supply a deterministic model.
+	standingMu         sync.Mutex // standing_authorizations.go: revocation and automatic answers serialize
 
 	// prepared is what this hub last gave a machine's node for a directory (key: machine id NUL directory), the
 	// CLAUDE.md and the plugin skills, by prepareSpaceIf; refreshInstructions gives again what differs.
@@ -123,6 +132,8 @@ type Service struct {
 	placeBook      placeBook      // places.go
 	accept         acceptBook     // acceptance.go
 	deploy         deployProbe    // deploy_check.go: is the work in the running hub
+
+	reviewDismissals taskReviewDismissalBook // task_review_dismissals.go
 	// ownerVerifiesAll: every deployed task asks the owner to verify, not only the big ones (ownerVerifies; tests).
 	ownerVerifiesAll bool
 	later            laterBook    // later.go: questions that can wait for a briefing
@@ -138,6 +149,10 @@ type Service struct {
 	// confirmation at a time reads and records what the others made.
 	minutesMu  sync.Mutex
 	attend     attendState       // meeting_feed.go: feeding the meetings Persona attends, and their turns
+	room       roomState         // meeting_room_tools.go: the meetings' rooms, their asks and sources
+	meetLive   meetingLiveEvents // meeting_events.go: the meeting_live events, at most one a second per recording
+	justMe     justMeBook        // meeting_justme.go: the Just me turns
+	meetLocks  meetingLocks      // meeting_followup.go: one creation at a time per recording
 	live       contextState      // context.go
 	todos      todoBook          // todos.go
 	work       workBook          // agents_work.go: the Agents business
@@ -148,6 +163,7 @@ type Service struct {
 	tevents    todoEvents        // todo_events.go: what the extensions are told of the todos
 	directions directionBook     // directions.go: the leaders' records and what the extensions were told of them
 	lreports   leaderReportBook  // leader_reports.go: what the leaders' tasks were reported as
+	dtree      directionTreeBook // direction_tree.go: the direction tree the apps were last told of
 	offers     routeBook         // route.go: the directions offered for New chats
 	standing   standingBoard     // feishu_board.go: the standing "waiting for you" card
 	workbench  workbenchState    // feishu_workbench_pin.go: the pinned workbench
@@ -191,7 +207,7 @@ var _ Handler = (*Service)(nil)
 // New makes the assistant; nothing runs until the hub calls it.
 func New(o Options) *Service {
 	s := &Service{hub: o.Hub, store: o.Store, logf: o.Logf, mux: http.NewServeMux(), epoch: randomHex(8), tasks: newTasksState(),
-		devs: o.Devices, trustSrc: o.Trust, id: o.ID}
+		devs: o.Devices, trustSrc: o.Trust, id: o.ID, build: o.Build}
 	s.inbox.lang = func() i18n.Lang { return s.lang(context.Background()) }
 	if s.store == nil {
 		s.store = func() Store { return nil }
@@ -205,8 +221,10 @@ func New(o Options) *Service {
 	s.agentArchiveRoutes()
 	s.alwaysRoutes()
 	s.standingAuthorizationRoutes()
+	s.northStarRoutes()
 	s.reporterRoutes()
 	s.directionRoutes()
+	s.directionTreeRoutes()
 	s.routeRoutes()
 	s.agentRouteRoutes()
 	s.directionNameRoutes()
@@ -233,8 +251,10 @@ func New(o Options) *Service {
 	s.modelProfileRoutes()
 	s.launcherRoutes()
 	s.machineLauncherRoutes()
+	s.workSessionStartRoutes()
 	s.launcherQuotaRoutes()
 	s.providerProbeRoutes()
+	s.providerCatalogRoutes()
 	s.launcherImportRoutes()
 	s.launcherHealthRoutes()
 	return s
@@ -308,14 +328,6 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 			}
 		}
 	}
-	if p, ok := params.(map[string]any); ok && startScopeMethods[method] {
-		// A Persona-managed provider out of this computer's scope does not run there (models_launchers_scope.go).
-		if name, _ := p["launcher"].(string); name != "" {
-			if err := s.launcherScopeErr(ctx, device, name); err != nil {
-				return err
-			}
-		}
-	}
 	if p, ok := params.(map[string]any); ok && method == DeviceAssistantSend {
 		// The node reads a missing is_main as false, and is_main is part of what a process runs: a relay into the main
 		// conversation (deliverRelay) without it started that conversation, or restarted it when idle, on the ordinary
@@ -323,10 +335,21 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 		if _, set := p["is_main"]; !set {
 			id, _ := p["session_id"].(string)
 			cfg := s.settings(ctx)
-			p["is_main"] = id != "" && cfg.Main == id && cfg.MachineID == device
+			p["is_main"] = id != "" && cfg.Main == id && cfg.mainRouteMachine() == device
 		}
 		if _, set := p["interject_background"]; !set && s.interjectBackground(ctx) {
 			p["interject_background"] = true // what the node does with a message that comes while it answers
+		}
+	}
+	if p, ok := params.(map[string]any); ok && startScopeMethods[method] {
+		// A Persona-managed provider out of this computer's scope does not run there (models_launchers_scope.go).
+		if name, _ := p["launcher"].(string); name != "" {
+			if err := s.launcherScopeErr(ctx, device, name); err != nil {
+				if method == DeviceAssistantSend {
+					s.recordManagerSend(device, p, nil, err) // a failed start or resume all the same (north_star.go)
+				}
+				return err
+			}
 		}
 	}
 	if p, ok := params.(map[string]any); ok && method == DeviceAssistantSend && p[holdPushesParam] != true && !meetingSource(p) {
@@ -343,6 +366,9 @@ func (s *Service) call(ctx context.Context, device, method string, params, out a
 	res, ok, err := s.localFleetDeviceCall(ctx, p) // what the hub answered before the nodes' events were the manager's
 	if !ok {
 		res, err = s.hub.DeviceCall(ctx, p)
+	}
+	if sent, ok := params.(map[string]any); ok && method == DeviceAssistantSend {
+		s.recordManagerSend(device, sent, res, err) // the north star's availability (north_star.go)
 	}
 	if err != nil || out == nil || len(res) == 0 {
 		return err
@@ -480,7 +506,8 @@ func (s *Service) publish(ctx context.Context) {
 	if _, err := s.hub.Snapshot(ctx, snap); err != nil && !errors.Is(err, ErrStaleSnapshot) {
 		s.logf("assistant: snapshot: %v", err)
 	}
-	s.directionsSoon() // a leader, its title or its tasks may have changed (directions.go)
+	s.directionsSoon()    // a leader, its title or its tasks may have changed (directions.go)
+	s.directionTreeSoon() // and so may the direction tree (direction_tree.go)
 }
 
 func (s *Service) Resync(ctx context.Context) { s.publish(ctx) }
@@ -604,6 +631,10 @@ func (s *Service) turnEnded(ctx context.Context, r SessionRef, meeting bool) {
 	// A usage limit marks the launcher there until it resets (launcher_health.go).
 	s.afterSettle(context.WithoutCancel(ctx), s.launcherLimitTurnSettled, r.MachineID, r.SessionID)
 	if !meeting {
+		// An assistant turn that failed is logged; a conversation conversation_new opened tells its parent (spawned.go).
+		s.afterSettle(context.WithoutCancel(ctx), s.assistantTurnSettled, r.MachineID, r.SessionID)
+	}
+	if !meeting {
 		s.titleAfterTurn(ctx, r.MachineID, r.SessionID)
 	}
 }
@@ -649,6 +680,7 @@ func (s *Service) SessionsChanged(ctx context.Context, d DeviceSessions) {
 	s.taskStageSessions(ctx, d)
 	s.nativeArchivesListed(d.MachineID) // agent_archive_native.go
 	s.followStarts(ctx, d)              // the app's starts, for launcher health (launcher_health_starts.go)
+	s.directionTreeSessions(d)          // an Agent of the direction tree may have moved (direction_tree.go)
 }
 
 func randomHex(n int) string {

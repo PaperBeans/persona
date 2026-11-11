@@ -54,9 +54,21 @@ export function QuoteBar({ quote, onRemove }: { quote: DraftQuote; onRemove: () 
 /** Everything waiting above the input: the message quote (at most one), then the comments numbered in order. */
 export function QuoteBars({ draftKey, quotes, onRemove }: { draftKey: string; quotes: readonly DraftQuote[]; onRemove: (id: string) => void }) {
   const { editing } = useQuotes(draftKey);
+  const list = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const scroller = list.current;
+    const note = scroller?.querySelector("textarea");
+    if (!scroller || !note) return;
+    // CommentCard focuses without scrolling the page; reveal its note only within this bounded list.
+    let top = 0;
+    for (let el: HTMLElement | null = note; el && el !== scroller; el = el.offsetParent as HTMLElement | null) top += el.offsetTop;
+    const bottom = top + note.offsetHeight;
+    if (bottom > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom - scroller.clientHeight;
+    else if (top < scroller.scrollTop) scroller.scrollTop = top;
+  }, [editing]);
   let n = 0;
   return (
-    <div className="flex flex-col gap-1.5 px-0.5 pt-0.5" data-quotes>
+    <div ref={list} className="relative flex max-h-[25dvh] flex-col gap-1.5 overflow-y-auto overscroll-contain px-0.5 pt-0.5 [&>div]:shrink-0" data-quotes data-scroll-box>
       {quotes.map((q) =>
         q.comment ? (
           <CommentCard key={q.id} draftKey={draftKey} quote={q} n={++n} editing={editing === q.id} onRemove={() => onRemove(q.id!)} />

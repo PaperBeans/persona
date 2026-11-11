@@ -715,6 +715,29 @@ func TestNodeSessionsStartedIndexed(t *testing.T) {
 	}
 }
 
+// A guest conversation keeps its tools and kind across a node's restart (state.put, then state.load): a meeting's
+// room resumed after it still runs as a room.
+func TestNodeSessionsGuest(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	room := NodeSession{Launcher: "claude", Cwd: "/home/me/.persona/guest-meeting/r1", Guest: []string{"meeting_lines", "meeting_earlier"}, GuestKind: "meeting"}
+	if err := d.PutNodeSession(ctx, "server", "room", room); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.PutNodeSession(ctx, "server", "plain", NodeSession{Launcher: "claude", Cwd: "/x"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.NodeSessions(ctx, "server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := got["room"]; !slices.Equal(r.Guest, room.Guest) || r.GuestKind != "meeting" {
+		t.Fatalf("room = %+v", r)
+	}
+	if p := got["plain"]; p.Guest != nil || p.GuestKind != "" {
+		t.Fatalf("plain = %+v", p)
+	}
+}
+
 // A session without its node_model settings row still loads, with the model fields empty.
 func TestNodeSessionsModelRow(t *testing.T) {
 	d, ctx := open(t), context.Background()
@@ -819,9 +842,13 @@ func TestInteractions(t *testing.T) {
 		Work: proto.WorkState{Phase: proto.WorkBlocked, On: proto.WaitUser, InteractionID: "work_1"}}); err != nil {
 		t.Fatal(err)
 	}
-	kept, err := d.ExpireStaleInteractions(ctx)
+	kept, cancelled, err := d.ExpireStaleInteractions(ctx)
 	if err != nil || len(kept) != 1 || kept[0].ID != "ix3" || !kept[0].Resumable {
 		t.Fatalf("kept %+v, %v", kept, err)
+	}
+	// The ones it cancelled come back by id: the apps are told they are over (#4568).
+	if slices.Sort(cancelled); !slices.Equal(cancelled, []string{"ix2", "ix4"}) {
+		t.Fatalf("cancelled %v", cancelled)
 	}
 	recs, err := d.Interactions(ctx, "server", "s", 10)
 	if err != nil || len(recs) != 5 {
@@ -867,7 +894,7 @@ func TestLoopInteractionRestart(t *testing.T) {
 		var value any
 		_, _ = d.TakeSetting(ctx, "agents.tool_loops", &value)
 	}()
-	if _, err := d.ExpireStaleInteractions(ctx); err != nil {
+	if _, _, err := d.ExpireStaleInteractions(ctx); err != nil {
 		t.Fatal(err)
 	}
 	for id, want := range map[string]string{"tool_loop_kept": "pending", "tool_loop_expiring": "pending", "tool_loop_orphan": "cancelled"} {

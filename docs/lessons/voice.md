@@ -516,3 +516,14 @@ Measured against a gateway's `/v1/realtime` (`gpt-realtime-1.5`, the GA Realtime
 - A gateway that falls back from a Codex `/v1/live` session onto the Realtime wire and forwards the `codex` dialect's
   `session.update` as it is gets `Missing required parameter: 'session.type'` (and then `Unknown parameter:
   'session.delegation'`). Point such an upstream at the gateway's `/v1/realtime` with the `realtime` dialect instead.
+
+## The app's player needs a jitter buffer (#4430, 2026-11-11)
+
+- The extension relays the upstream's audio deltas as they come, and the app used to schedule each one the moment it
+  arrived. A delta that reached the player after the one before it had finished left a gap, so the voice played a
+  couple of characters, stopped, and went on. The deltas are late more often than the upstream's speed suggests: they
+  cross the internet and the hub's extension tunnel, and iOS hands every frame to the main actor before reading the
+  next, so a busy main thread holds the audio back as well.
+- iOS holds the voice while nothing is playing until 200 ms has gathered, or the first piece has waited 300 ms, then
+  plays it all at once (`VoicePlayout`); a player that runs dry mid-reply gathers again. A service that sends faster
+  than it plays fills the lead almost at once, so this adds next to no latency there.

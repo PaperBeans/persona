@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/link"
 )
 
 func (a *app) openPair(prefill, tab string) {
@@ -94,6 +95,7 @@ func (a *app) pairMessage(r request) {
 	w := a.pair
 	var args struct {
 		Raw, Machine, Listen, Mode, URL string
+		SSH                             *link.SSH
 	}
 	_ = json.Unmarshal(r.Args, &args)
 	reply := func(data any, err error) {
@@ -106,12 +108,36 @@ func (a *app) pairMessage(r request) {
 	case "parse_link":
 		w.reply(r.ID, ParseLink(a.lang, args.Raw), nil)
 	case "pair":
-		background(a, func() (string, error) { return a.host.Pair(args.Raw, args.Machine) }, func(machine string, err error) {
+		background(a, func() (string, error) { return a.host.Pair(args.Raw, args.Machine, args.SSH) }, func(machine string, err error) {
 			if err != nil {
 				reply(nil, err)
 				return
 			}
 			reply(map[string]string{"text": i18n.T(a.lang, "link-tray.paired_ok", i18n.Args{"name": machine})}, nil)
+		})
+	case "ssh_test":
+		var req link.SSH
+		if args.SSH != nil {
+			req = *args.SSH
+		}
+		background(a, func() (*link.SSH, error) { return a.host.TestSSH(req, args.Raw) }, func(norm *link.SSH, err error) {
+			if err != nil {
+				reply(nil, err)
+				return
+			}
+			reply(map[string]any{"text": SSHTestOKText(a.lang, norm.Target), "ssh": norm}, nil)
+		})
+	case "ssh_set":
+		background(a, func() (*link.SSH, error) { return a.host.SetSSH(args.SSH) }, func(saved *link.SSH, err error) {
+			if err != nil {
+				reply(nil, err)
+				return
+			}
+			text := SSHRemovedText(a.lang)
+			if saved != nil {
+				text = SSHSavedText(a.lang)
+			}
+			reply(map[string]any{"text": text, "ssh": saved}, nil)
 		})
 	case "pair_listen":
 		background(a, func() (Invitation, error) { return a.host.PairListen(args.Listen) }, func(inv Invitation, err error) {

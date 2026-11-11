@@ -6,8 +6,9 @@ import { getState } from "./store";
 import { ApiError } from "./api";
 import { parseAPIError } from "./api-errors";
 import { providerName } from "./model-config";
+import { initI18n } from "../i18n";
 import {
-  blockingStep, claudeMissing, readinessChanged, refreshReadiness, resetReadiness, retryWhileBlocked, claudeWorks, codedFailure, helpTopic, knownAction, passesBySelf, providersPath, runAction, sendLabel, turnErrorFix, type Readiness,
+  actionLabel, blockingStep, claudeMissing, readinessChanged, refreshReadiness, resetReadiness, retryWhileBlocked, claudeWorks, codedFailure, helpTopic, knownAction, passesBySelf, providersPath, runAction, sendLabel, turnErrorFix, type Readiness,
   type ReadinessStep,
 } from "./readiness";
 
@@ -80,6 +81,29 @@ describe("actions and help", () => {
   it("opens the provider wizard or one provider", () => {
     expect(providersPath()).toBe("/settings?tab=models&add=1");
     expect(providersPath("my key")).toBe("/settings?tab=models&launcher=my%20key");
+  });
+
+  it("offers another app or setup and opens model settings in every language", async () => {
+    const labels = {
+      en: "Choose another app or setup",
+      "zh-Hans": "选择其他应用或配置",
+      ja: "別のアプリや設定を選ぶ",
+    };
+    const onHelp = vi.fn();
+    try {
+      for (const [lang, label] of Object.entries(labels)) {
+        await initI18n(lang);
+        history.replaceState(null, "", "/");
+        expect(knownAction("main_chat_model")).toBe(true);
+        expect(actionLabel("main_chat_model")).toBe(label);
+        runAction("main_chat_model", { onHelp });
+        expect(location.pathname + location.search).toBe("/settings?tab=models");
+        expect(onHelp).not.toHaveBeenCalled();
+      }
+    } finally {
+      history.replaceState(null, "", "/");
+      await initI18n("zh-Hans");
+    }
   });
 
   it("opens the computer flows through the page: add as help (the page picks the flow), confirm in place", () => {

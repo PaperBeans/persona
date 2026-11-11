@@ -207,6 +207,30 @@ class SigningProfileConfigTests(unittest.TestCase):
                 self.exported({'app': {'bundle_id': self.bid}, 'app_store': {'provisioning_profiles': overrides}})
 
 
+class UpdateURLConfigTests(unittest.TestCase):
+    # What personad is built to look for updates at (-X main.updateURL, #4522): publish.update_url as configured, so
+    # a GitHub repository's releases/latest/download needs no /dl added; else publish.site_url's dl/ as before.
+    def test_update_url_defaults_to_the_site_and_takes_a_release_base_as_is(self):
+        github = 'https://github.com/nwverse/persona/releases/latest/download'
+        cases = {
+            'nothing': ({}, ''),
+            'site': ({'publish': {'site_url': 'https://site.example.test/'}}, 'https://site.example.test/dl'),
+            'release base': ({'publish': {'site_url': 'https://site.example.test', 'update_url': github + '/'}}, github),
+            'file copy': ({'publish': {'update_url': 'file:///srv/persona/dl'}}, 'file:///srv/persona/dl'),
+        }
+        for name, (cfg, expected) in cases.items():
+            with self.subTest(case=name):
+                generated = config.env(cfg)
+                self.assertEqual(generated['PERSONA_UPDATE_URL'], expected)
+                self.assertEqual(generated[PersonaConfigTests.former_prefix + 'UPDATE_URL'], expected)
+
+    def test_update_url_refuses_what_a_hub_could_not_use(self):
+        for value in ('http://site.example.test/dl', 'https://user:pw@site.example.test/dl', 'https://site.example.test/dl?x=1',
+                      'https://site.example.test/dl#x', 'https://site.example.test/dl/latest.json', 'site.example.test/dl', 7, []):
+            with self.subTest(value=value), self.assertRaises(SystemExit):
+                config.update_url({'publish': {'update_url': value}})
+
+
 class MetaWearablesConfigTests(unittest.TestCase):
     def test_env_enables_the_meta_wearables_include_only_when_configured(self):
         cases = {

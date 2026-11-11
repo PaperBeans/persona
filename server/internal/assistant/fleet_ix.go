@@ -229,6 +229,9 @@ func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (pr
 // (the manager restarted with it on the phone) is shown again without a second push.
 func (s *Service) waitInteraction(ctx context.Context, ix proto.Interaction) (proto.Resolution, error) {
 	ix = cleanTitle(ix)
+	// A Just me turn's card, the node's or the manager's own (ask_user, a confirmation): pushed without its content,
+	// never to Lark or a channel (meeting_justme.go).
+	ix.Private = ix.Private || s.justMeNow(ix.MachineID, ix.SessionID)
 	if ix.ExpiresAt.IsZero() {
 		ix.ExpiresAt = time.Now().Add(s.notifyTimings().hookTimeout()).UTC()
 	}
@@ -482,8 +485,24 @@ func (s *Service) resolveRemembered(id string, r proto.Resolution, remember bool
 }
 
 func (s *Service) resolveWithStanding(id string, r proto.Resolution, remember bool, authorization *standingResolution) error {
+	return s.resolveAnswer(id, r, remember, authorization, nil)
+}
+
+// resolveApproved is resolve for an app's answer the hub relayed, with the device it vouched may approve a hand-off
+// card (nil: none). Only this way does a hand-off card take more than a no (secret_handoff.go).
+func (s *Service) resolveApproved(id string, r proto.Resolution, approver *assistantwire.HandoffApprover) error {
+	return s.resolveAnswer(id, r, true, nil, approver)
+}
+
+func (s *Service) resolveAnswer(id string, r proto.Resolution, remember bool, authorization *standingResolution,
+	approver *assistantwire.HandoffApprover) error {
 	s.fleet.mu.Lock()
 	p := s.fleet.interactions[id]
+	handoff := p != nil && p.ix.ToolName == proto.SecretHandoffTool
+	if handoff && !proto.SecretHandoffDeclines(r) && (approver == nil || approver.DeviceID == "" || authorization != nil) {
+		s.fleet.mu.Unlock()
+		return errHandoffElsewhere // a channel, the assistant, a remembered answer, an older hub: a no only
+	}
 	if p != nil && r.Cancel && (!p.ix.CanCancel || p.ix.Kind != proto.IxQuestion || !r.IsQuestionCancel()) {
 		s.fleet.mu.Unlock()
 		return errInvalidQuestionCancel
@@ -551,6 +570,9 @@ func (s *Service) resolveWithStanding(id string, r proto.Resolution, remember bo
 		if p.resolved == nil {
 			p.resolved = make(chan struct{})
 		}
+	}
+	if p != nil && handoff {
+		s.claimHandoffLocked(id, r, approver) // claimed with this answer: an approval, and who gave it
 	}
 	if p != nil {
 		p.answeredBy, p.answeredReason = r.AnsweredBy, r.Reason // read by finished(), under this lock
@@ -807,12 +829,15 @@ func (s *Service) expireLoop(ctx context.Context) {
 }
 
 // errReservedCard: a card from a node (a hook, a runtime, a daemon, a Codex list) or an extension may not pass for the
-// password card: only the assistant's secret_run tool makes one (secret_run.go), and the clients show it as that card,
-// with no Agent's name on it.
-var errReservedCard = errors.New("the tool name " + proto.SecretRunTool + " is reserved for the assistant's password card")
+// password card or the hand-off card: only the assistant's secret_run tool makes the one (secret_run.go) and only the
+// manager's Agent start the other, and the clients show them as those cards, the password card with no Agent's name on it.
+var errReservedCard = errors.New("the tool names " + proto.SecretRunTool + " and " + proto.SecretHandoffTool +
+	" are reserved for the manager's password and hand-off cards")
 
-// reservedCard: ix calls itself the password card.
-func reservedCard(ix proto.Interaction) bool { return ix.ToolName == proto.SecretRunTool }
+// reservedCard: ix calls itself the password card or the hand-off card.
+func reservedCard(ix proto.Interaction) bool {
+	return ix.ToolName == proto.SecretRunTool || ix.ToolName == proto.SecretHandoffTool
+}
 
 // askHub is fleet.ask: a card one of the hub's own features asks (a mail send, Cua's apps, persona_settings),
 // waited for like a hook's.
@@ -988,22 +1013,27 @@ func (s *Service) cancelMachineInteractions(machineID string) {
 
 // restoreInteractions takes back, as the manager starts, the resumable cards the last one left pending: their hooks
 // reconnect through the next node and claim them again (waitInteraction), without a second push; the others it left
-// are over (cancelled in the history). A card that was on its way up to the user finds its route again (restoreRoute);
-// one the assistant was deciding on goes on (resumeDelegations). Both before the hub gets the full list (FleetUp).
+// are over (cancelled in the history), and the hub is told so: a hub that took over from the one they were shown by
+// does not know them, and an app that resumed its event stream across the switch would keep them up, next to the
+// question asked again (#4568). A card that was on its way up to the user finds its route again (restoreRoute); one
+// the assistant was deciding on goes on (resumeDelegations). Both before the hub gets the full list (FleetUp).
 func (s *Service) restoreInteractions(ctx context.Context) {
 	st, ok := s.store().(interface {
-		ExpireStaleInteractions(ctx context.Context) ([]proto.Interaction, error)
+		ExpireStaleInteractions(ctx context.Context) ([]proto.Interaction, []string, error)
 	})
 	if !ok {
 		return
 	}
-	resumable, err := func() (out []proto.Interaction, err error) {
+	resumable, cancelled, err := func() (out []proto.Interaction, cancelled []string, err error) {
 		defer guard(&err) // a test's store may not keep the table
 		return st.ExpireStaleInteractions(ctx)
 	}()
 	if err != nil {
 		s.logf("expire stale interactions: %v", err)
 		return
+	}
+	for _, id := range cancelled {
+		s.hub.Tell(assistantwire.EventFleetResolved, assistantwire.FleetResolved{ID: id})
 	}
 	var back []proto.Interaction
 	s.fleet.mu.Lock()

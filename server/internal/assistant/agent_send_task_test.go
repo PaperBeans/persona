@@ -637,9 +637,7 @@ func TestAgentSendExitRecheckedAfterThePhone(t *testing.T) {
 				out, isErr = spaceTool(t, s, "sleep-000-0000", tc.tool, tc.args)
 			}()
 			var qs []proto.Interaction
-			for deadline := time.Now().Add(5 * time.Second); len(qs) == 0 && time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
-				qs = s.pendingQuestions()
-			}
+			waitFor(t, "the card on the phone", func() bool { qs = s.pendingQuestions(); return len(qs) > 0 })
 			if len(qs) != 1 {
 				t.Fatalf("no card on the phone: %+v", qs)
 			}

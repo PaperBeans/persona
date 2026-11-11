@@ -164,7 +164,8 @@ extension Session {
         case .errors:
             fields = [startError ?? "", turnError ?? "", failureReason ?? "", attentionReason ?? "", work?.line ?? "", title]
         case .all:
-            fields = [title, cwd, repoRoot ?? "", lastText ?? "", asks ?? "", spaceName ?? "", slotName ?? "", agentLabel, model ?? "", launcher ?? "", startError ?? "", turnError ?? ""]
+            // The branch too, as the web, Android and the hub's paged list search it (#4770).
+            fields = [title, cwd, repoRoot ?? "", branch ?? "", lastText ?? "", asks ?? "", spaceName ?? "", slotName ?? "", agentLabel, model ?? "", launcher ?? "", startError ?? "", turnError ?? ""]
         }
         return terms.allSatisfy { term in
             fields.contains { $0.localizedCaseInsensitiveContains(term) }
@@ -297,7 +298,15 @@ nonisolated struct AgentListProjection: Sendable {
     var busyRepositories: [String: [RepoTree.Repo]] = [:]
     var quietRepositories: [String: [SpaceGroup]] = [:]
     var rows: [String: Rows] = [:]
+    /// A listed Codex chat's subagents (`CodexTasks.flattened`): behind its Subtasks row, not rows or counts of the list.
+    var tasks: [SessionKey: [CodexTasks.Task]] = [:]
+    /// Searching: the subagents the search finds under each chat, and the ones they hang off; empty otherwise.
+    var taskMatches: [SessionKey: [CodexTasks.Task]] = [:]
+    /// The listed chats' subagents that pass the list's filters: one waiting for the user is in Needs You.
+    var admittedTasks: [Session] = []
     var quietWorktrees: [String: Bool] = [:]
+    /// By App's sections, their projects in them (`AppGroups`); empty under any other grouping.
+    var apps: [AppGroup] = []
     var menuSections: [String] = []
     var searchPlan = AgentSearchPlan(code: "session.where(s => true)", parsed: .init())
     /// Searching can match an Agent-free worktree even when no session matches the query.
@@ -312,7 +321,9 @@ nonisolated struct AgentListProjection: Sendable {
         let parsed = plan.parsed
         result.sessionsByKey = Dictionary(input.sessions.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         result.machinesByRef = Dictionary(input.machines.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
-        result.base = input.sessions.filter { session in
+        // Codex subagents go under their chat, as in the Codex App: the list and its counts are the chats'.
+        let forest = CodexTasks.build(input.sessions)
+        let admits: (Session) -> Bool = { session in
             guard !session.assistant else { return false }
             guard settings.machine.isEmpty || session.machineRef.path == settings.machine else { return false }
             guard !settings.multiHub || HubFilter.matches(settings.hub, session.group) else { return false }
@@ -348,8 +359,20 @@ nonisolated struct AgentListProjection: Sendable {
             if settings.pagedGroups.contains(session.group) && parsed.terms.isEmpty && settings.searchScope == .all { return true }
             return session.matchesScope(settings.searchScope, terms: parsed.terms)
         }
+        // A chat whose subagent matches stays, so that subagent can still be reached (Android's `searchSettings`).
+        result.base = forest.roots.filter { root in
+            guard forest.children[root.key] != nil else { return admits(root) }
+            let tasks = forest.flattened(under: root.key)
+            let passing = tasks.filter { admits($0.session) }
+            guard admits(root) || !passing.isEmpty else { return false }
+            result.tasks[root.key] = tasks
+            result.admittedTasks += passing.map(\.session)
+            if !settings.query.isEmpty { result.taskMatches[root.key] = CodexTasks.kept(tasks, passing: admits) }
+            return true
+        }
         for filter in AgentFilter.allCases where filter != .all {
-            result.filterCounts[filter] = result.base.count { filter.matches($0, muted: settings.muted($0)) }
+            // A subagent whose chat is not listed is a row of its own, not an agent counted (Android, the hub's Fleet counts).
+            result.filterCounts[filter] = result.base.count { !$0.isCodexSubagent && filter.matches($0, muted: settings.muted($0)) }
         }
         if settings.filter != .all {
             result.matching = Set(result.base.filter { settings.filter.matches($0, muted: settings.muted($0)) }.map(\.key))
@@ -434,7 +457,8 @@ nonisolated struct AgentListProjection: Sendable {
             }
             result.menuSections = result.tree.flatMap(\.repos).filter { result.repositories[$0.id]?.quiet != true }.map(\.id)
         } else if settings.grouping == "app" {
-            result.menuSections = AppGroups.build(result.unpinned).map(\.id)
+            result.apps = AppGroups.build(result.unpinned) // the list's sections, built once (`AppGroups`)
+            result.menuSections = result.apps.map(\.id)
         } else if settings.grouping != "recent" && settings.grouping != "todo" {
             result.menuSections = order.sectionIDs(result.unpinned, byMachine: settings.grouping == "machine")
         }

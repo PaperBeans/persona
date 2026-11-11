@@ -65,7 +65,7 @@ fun JTimePickerDialog(initial: LocalTime?, onPick: (LocalTime) -> Unit, onDismis
         TimePicker(state, colors = TimePickerDefaults.colors(clockDialColor = palette.sunken, selectorColor = palette.accent,
             containerColor = palette.surfaceOpaque, timeSelectorSelectedContainerColor = palette.accentSoft,
             timeSelectorUnselectedContainerColor = palette.sunken, timeSelectorSelectedContentColor = palette.ink,
-            timeSelectorUnselectedContentColor = palette.ink2, clockDialSelectedContentColor = ExtensionThemeColors.on(palette.accent),
+            timeSelectorUnselectedContentColor = palette.ink2, clockDialSelectedContentColor = palette.onAccent,
             clockDialUnselectedContentColor = palette.ink))
     }
 }

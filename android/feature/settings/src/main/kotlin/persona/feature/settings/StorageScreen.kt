@@ -151,7 +151,7 @@ internal fun StoragePage(onBack: () -> Unit, clearCacheFiles: ((List<File>) -> U
         }
         item("clear-all") {
             JButton(stringResource(R.string.settings_storage_clear_all), { confirm = StorageKind.entries.filter { it.clearable }.toSet() },
-                Modifier.fillMaxWidth().padding(top = ContentTokens.legacyXl), kind = JButtonKind.Destructive,
+                Modifier.fillMaxWidth().padding(top = Tokens.Space.section), kind = JButtonKind.Destructive,
                 enabled = sizes != null && !clearing && cacheTotal > 0, loading = clearing)
         }
         item("footer") { footer() }

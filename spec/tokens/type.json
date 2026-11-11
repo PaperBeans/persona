@@ -1,69 +1,93 @@
 {
   "type": {
-    "panelTitle": {
+    "display": {
       "size": {
         "$type": "dimension",
         "$value": {
-          "value": 20,
+          "value": 28,
           "unit": "px"
         },
-        "$description": "Theme.Font.panelTitle 的默认字号；Android 用 sp，跟随字体缩放"
+        "$description": "Theme.Font.display: the home greeting and the welcome page; the iPhone's size at the default text size (Theme.Level.size); sp on Android, so it follows the font scale"
       },
       "weight": {
         "$type": "fontWeight",
-        "$value": 600,
-        "$description": "Theme.Font.panelTitle 的字重"
+        "$value": 700,
+        "$description": "Theme.Font.display's weight"
       },
       "lineHeight": {
-        "$type": "dimension",
-        "$value": {
-          "value": 25,
-          "unit": "px"
-        },
-        "$description": "跨端默认行高，按文本角色补齐；Theme.Font 未固定行高，非设备采样"
+        "$type": "number",
+        "$value": 1.2,
+        "$description": "Theme.Level.lineHeight: line height as a multiple of the size, for content text (iOS adds it as line spacing)"
       },
       "iosTextStyle": {
         "$type": "string",
-        "$value": "title3",
-        "$description": "Theme.Font.panelTitle 的动态文本样式；string 为仓库扩展"
+        "$value": "title",
+        "$description": "the Dynamic Type style Theme.Font.display is built on"
       },
       "family": {
         "$type": "string",
         "$value": "system",
-        "$description": "Theme.Font 等宽角色；黏土使用圆体设计，平台选择实际字体"
+        "$description": "system or monospace; each platform picks the actual font"
       }
     },
-    "rowTitle": {
+    "title": {
+      "size": {
+        "$type": "dimension",
+        "$value": {
+          "value": 22,
+          "unit": "px"
+        },
+        "$description": "Theme.Font.title: a detail page's or a sheet's title; the iPhone's size at the default text size (Theme.Level.size); sp on Android, so it follows the font scale"
+      },
+      "weight": {
+        "$type": "fontWeight",
+        "$value": 600,
+        "$description": "Theme.Font.title's weight"
+      },
+      "lineHeight": {
+        "$type": "number",
+        "$value": 1.25,
+        "$description": "Theme.Level.lineHeight: line height as a multiple of the size, for content text (iOS adds it as line spacing)"
+      },
+      "iosTextStyle": {
+        "$type": "string",
+        "$value": "title2",
+        "$description": "the Dynamic Type style Theme.Font.title is built on"
+      },
+      "family": {
+        "$type": "string",
+        "$value": "system",
+        "$description": "system or monospace; each platform picks the actual font"
+      }
+    },
+    "heading": {
       "size": {
         "$type": "dimension",
         "$value": {
           "value": 17,
           "unit": "px"
         },
-        "$description": "Theme.Font.rowTitle 的默认字号；Android 用 sp，跟随字体缩放"
+        "$description": "Theme.Font.heading: titles of rows, cards and panels; the iPhone's size at the default text size (Theme.Level.size); sp on Android, so it follows the font scale"
       },
       "weight": {
         "$type": "fontWeight",
         "$value": 600,
-        "$description": "Theme.Font.rowTitle 的字重"
+        "$description": "Theme.Font.heading's weight"
       },
       "lineHeight": {
-        "$type": "dimension",
-        "$value": {
-          "value": 22,
-          "unit": "px"
-        },
-        "$description": "跨端默认行高，按文本角色补齐；Theme.Font 未固定行高，非设备采样"
+        "$type": "number",
+        "$value": 1.3,
+        "$description": "Theme.Level.lineHeight: line height as a multiple of the size, for content text (iOS adds it as line spacing)"
       },
       "iosTextStyle": {
         "$type": "string",
         "$value": "headline",
-        "$description": "Theme.Font.rowTitle 的动态文本样式；string 为仓库扩展"
+        "$description": "the Dynamic Type style Theme.Font.heading is built on"
       },
       "family": {
         "$type": "string",
         "$value": "system",
-        "$description": "Theme.Font 等宽角色；黏土使用圆体设计，平台选择实际字体"
+        "$description": "system or monospace; each platform picks the actual font"
       }
     },
     "body": {
@@ -73,195 +97,147 @@
           "value": 17,
           "unit": "px"
         },
-        "$description": "Theme.Font.body 的默认字号；Android 用 sp，跟随字体缩放"
+        "$description": "Theme.Font.body: messages, replies, mail and documents; the iPhone's size at the default text size (Theme.Level.size); sp on Android, so it follows the font scale"
       },
       "weight": {
         "$type": "fontWeight",
         "$value": 400,
-        "$description": "Theme.Font.body 的字重"
+        "$description": "Theme.Font.body's weight"
       },
       "lineHeight": {
-        "$type": "dimension",
-        "$value": {
-          "value": 22,
-          "unit": "px"
-        },
-        "$description": "跨端默认行高，按文本角色补齐；Theme.Font 未固定行高，非设备采样"
+        "$type": "number",
+        "$value": 1.45,
+        "$description": "Theme.Level.lineHeight: line height as a multiple of the size, for content text (iOS adds it as line spacing)"
       },
       "iosTextStyle": {
         "$type": "string",
         "$value": "body",
-        "$description": "Theme.Font.body 的动态文本样式；string 为仓库扩展"
+        "$description": "the Dynamic Type style Theme.Font.body is built on"
       },
       "family": {
         "$type": "string",
         "$value": "system",
-        "$description": "Theme.Font 等宽角色；黏土使用圆体设计，平台选择实际字体"
+        "$description": "system or monospace; each platform picks the actual font"
       }
     },
-    "cardBody": {
-      "size": {
-        "$type": "dimension",
-        "$value": {
-          "value": 16,
-          "unit": "px"
-        },
-        "$description": "Theme.Font.cardBody 的默认字号；Android 用 sp，跟随字体缩放"
-      },
-      "weight": {
-        "$type": "fontWeight",
-        "$value": 400,
-        "$description": "Theme.Font.cardBody 的字重"
-      },
-      "lineHeight": {
-        "$type": "dimension",
-        "$value": {
-          "value": 21,
-          "unit": "px"
-        },
-        "$description": "跨端默认行高，按文本角色补齐；Theme.Font 未固定行高，非设备采样"
-      },
-      "iosTextStyle": {
-        "$type": "string",
-        "$value": "callout",
-        "$description": "Theme.Font.cardBody 的动态文本样式；string 为仓库扩展"
-      },
-      "family": {
-        "$type": "string",
-        "$value": "system",
-        "$description": "Theme.Font 等宽角色；黏土使用圆体设计，平台选择实际字体"
-      }
-    },
-    "preview": {
+    "secondary": {
       "size": {
         "$type": "dimension",
         "$value": {
           "value": 15,
           "unit": "px"
         },
-        "$description": "Theme.Font.preview 的默认字号；Android 用 sp，跟随字体缩放"
+        "$description": "Theme.Font.secondary: previews, subtitles, descriptions in cards; the iPhone's size at the default text size (Theme.Level.size); sp on Android, so it follows the font scale"
       },
       "weight": {
         "$type": "fontWeight",
         "$value": 400,
-        "$description": "Theme.Font.preview 的字重"
+        "$description": "Theme.Font.secondary's weight"
       },
       "lineHeight": {
-        "$type": "dimension",
-        "$value": {
-          "value": 20,
-          "unit": "px"
-        },
-        "$description": "跨端默认行高，按文本角色补齐；Theme.Font 未固定行高，非设备采样"
+        "$type": "number",
+        "$value": 1.4,
+        "$description": "Theme.Level.lineHeight: line height as a multiple of the size, for content text (iOS adds it as line spacing)"
       },
       "iosTextStyle": {
         "$type": "string",
         "$value": "subheadline",
-        "$description": "Theme.Font.preview 的动态文本样式；string 为仓库扩展"
+        "$description": "the Dynamic Type style Theme.Font.secondary is built on"
       },
       "family": {
         "$type": "string",
         "$value": "system",
-        "$description": "Theme.Font 等宽角色；黏土使用圆体设计，平台选择实际字体"
+        "$description": "system or monospace; each platform picks the actual font"
       }
     },
-    "meta": {
+    "caption": {
       "size": {
         "$type": "dimension",
         "$value": {
           "value": 13,
           "unit": "px"
         },
-        "$description": "Theme.Font.meta 的默认字号；Android 用 sp，跟随字体缩放"
+        "$description": "Theme.Font.caption: times, places, states, meta lines; the iPhone's size at the default text size (Theme.Level.size); sp on Android, so it follows the font scale"
       },
       "weight": {
         "$type": "fontWeight",
         "$value": 400,
-        "$description": "Theme.Font.meta 的字重"
+        "$description": "Theme.Font.caption's weight"
       },
       "lineHeight": {
-        "$type": "dimension",
-        "$value": {
-          "value": 18,
-          "unit": "px"
-        },
-        "$description": "跨端默认行高，按文本角色补齐；Theme.Font 未固定行高，非设备采样"
+        "$type": "number",
+        "$value": 1.35,
+        "$description": "Theme.Level.lineHeight: line height as a multiple of the size, for content text (iOS adds it as line spacing)"
       },
       "iosTextStyle": {
         "$type": "string",
         "$value": "footnote",
-        "$description": "Theme.Font.meta 的动态文本样式；string 为仓库扩展"
+        "$description": "the Dynamic Type style Theme.Font.caption is built on"
       },
       "family": {
         "$type": "string",
         "$value": "system",
-        "$description": "Theme.Font 等宽角色；黏土使用圆体设计，平台选择实际字体"
+        "$description": "system or monospace; each platform picks the actual font"
       }
     },
-    "chip": {
+    "sectionHeader": {
+      "size": {
+        "$type": "dimension",
+        "$value": {
+          "value": 13,
+          "unit": "px"
+        },
+        "$description": "Theme.Font.sectionHeader: a list's section header, the caption level in semibold; the iPhone's size at the default text size (Theme.Level.size); sp on Android, so it follows the font scale"
+      },
+      "weight": {
+        "$type": "fontWeight",
+        "$value": 600,
+        "$description": "Theme.Font.sectionHeader's weight"
+      },
+      "lineHeight": {
+        "$type": "number",
+        "$value": 1.35,
+        "$description": "Theme.Level.lineHeight: line height as a multiple of the size, for content text (iOS adds it as line spacing)"
+      },
+      "iosTextStyle": {
+        "$type": "string",
+        "$value": "footnote",
+        "$description": "the Dynamic Type style Theme.Font.sectionHeader is built on"
+      },
+      "family": {
+        "$type": "string",
+        "$value": "system",
+        "$description": "system or monospace; each platform picks the actual font"
+      }
+    },
+    "label": {
       "size": {
         "$type": "dimension",
         "$value": {
           "value": 12,
           "unit": "px"
         },
-        "$description": "Theme.Font.chip 的默认字号；Android 用 sp，跟随字体缩放"
-      },
-      "weight": {
-        "$type": "fontWeight",
-        "$value": 500,
-        "$description": "Theme.Font.chip 的字重"
-      },
-      "lineHeight": {
-        "$type": "dimension",
-        "$value": {
-          "value": 16,
-          "unit": "px"
-        },
-        "$description": "跨端默认行高，按文本角色补齐；Theme.Font 未固定行高，非设备采样"
-      },
-      "iosTextStyle": {
-        "$type": "string",
-        "$value": "caption",
-        "$description": "Theme.Font.chip 的动态文本样式；string 为仓库扩展"
-      },
-      "family": {
-        "$type": "string",
-        "$value": "system",
-        "$description": "Theme.Font 等宽角色；黏土使用圆体设计，平台选择实际字体"
-      }
-    },
-    "micro": {
-      "size": {
-        "$type": "dimension",
-        "$value": {
-          "value": 11,
-          "unit": "px"
-        },
-        "$description": "Theme.Font.micro 的默认字号；Android 用 sp，跟随字体缩放"
+        "$description": "Theme.Font.label: chips, badges, counts, small labels on controls; the iPhone's size at the default text size (Theme.Level.size); sp on Android, so it follows the font scale"
       },
       "weight": {
         "$type": "fontWeight",
         "$value": 400,
-        "$description": "Theme.Font.micro 的字重"
+        "$description": "Theme.Font.label's weight"
       },
       "lineHeight": {
-        "$type": "dimension",
-        "$value": {
-          "value": 13,
-          "unit": "px"
-        },
-        "$description": "跨端默认行高，按文本角色补齐；Theme.Font 未固定行高，非设备采样"
+        "$type": "number",
+        "$value": 1.3,
+        "$description": "Theme.Level.lineHeight: line height as a multiple of the size, for content text (iOS adds it as line spacing)"
       },
       "iosTextStyle": {
         "$type": "string",
-        "$value": "caption2",
-        "$description": "Theme.Font.micro 的动态文本样式；string 为仓库扩展"
+        "$value": "caption",
+        "$description": "the Dynamic Type style Theme.Font.label is built on"
       },
       "family": {
         "$type": "string",
         "$value": "system",
-        "$description": "Theme.Font 等宽角色；黏土使用圆体设计，平台选择实际字体"
+        "$description": "system or monospace; each platform picks the actual font"
       }
     },
     "code": {
@@ -271,96 +247,27 @@
           "value": 13,
           "unit": "px"
         },
-        "$description": "Theme.Font.code 的默认字号；Android 用 sp，跟随字体缩放"
+        "$description": "Theme.Font.code: code, diffs, paths, terminal snippets; the iPhone's size at the default text size (Theme.Level.size); sp on Android, so it follows the font scale"
       },
       "weight": {
         "$type": "fontWeight",
         "$value": 400,
-        "$description": "Theme.Font.code 的字重"
+        "$description": "Theme.Font.code's weight"
       },
       "lineHeight": {
-        "$type": "dimension",
-        "$value": {
-          "value": 18,
-          "unit": "px"
-        },
-        "$description": "跨端默认行高，按文本角色补齐；Theme.Font 未固定行高，非设备采样"
+        "$type": "number",
+        "$value": 1.35,
+        "$description": "Theme.Level.lineHeight: line height as a multiple of the size, for content text (iOS adds it as line spacing)"
       },
       "iosTextStyle": {
         "$type": "string",
         "$value": "footnote",
-        "$description": "Theme.Font.code 的动态文本样式；string 为仓库扩展"
+        "$description": "the Dynamic Type style Theme.Font.code is built on"
       },
       "family": {
         "$type": "string",
         "$value": "monospace",
-        "$description": "Theme.Font 等宽角色；黏土使用圆体设计，平台选择实际字体"
-      }
-    },
-    "codeSmall": {
-      "size": {
-        "$type": "dimension",
-        "$value": {
-          "value": 12,
-          "unit": "px"
-        },
-        "$description": "Theme.Font.codeSmall 的默认字号；Android 用 sp，跟随字体缩放"
-      },
-      "weight": {
-        "$type": "fontWeight",
-        "$value": 400,
-        "$description": "Theme.Font.codeSmall 的字重"
-      },
-      "lineHeight": {
-        "$type": "dimension",
-        "$value": {
-          "value": 16,
-          "unit": "px"
-        },
-        "$description": "跨端默认行高，按文本角色补齐；Theme.Font 未固定行高，非设备采样"
-      },
-      "iosTextStyle": {
-        "$type": "string",
-        "$value": "caption",
-        "$description": "Theme.Font.codeSmall 的动态文本样式；string 为仓库扩展"
-      },
-      "family": {
-        "$type": "string",
-        "$value": "monospace",
-        "$description": "Theme.Font 等宽角色；黏土使用圆体设计，平台选择实际字体"
-      }
-    },
-    "greeting": {
-      "size": {
-        "$type": "dimension",
-        "$value": {
-          "value": 34,
-          "unit": "px"
-        },
-        "$description": "Theme.Font.greeting 的默认字号；Android 用 sp，跟随字体缩放"
-      },
-      "weight": {
-        "$type": "fontWeight",
-        "$value": 700,
-        "$description": "Theme.Font.greeting 的字重"
-      },
-      "lineHeight": {
-        "$type": "dimension",
-        "$value": {
-          "value": 41,
-          "unit": "px"
-        },
-        "$description": "跨端默认行高，按文本角色补齐；Theme.Font 未固定行高，非设备采样"
-      },
-      "iosTextStyle": {
-        "$type": "string",
-        "$value": "largeTitle",
-        "$description": "Theme.Font.greeting 的动态文本样式；string 为仓库扩展"
-      },
-      "family": {
-        "$type": "string",
-        "$value": "system",
-        "$description": "Theme.Font 等宽角色；黏土使用圆体设计，平台选择实际字体"
+        "$description": "system or monospace; each platform picks the actual font"
       }
     }
   }

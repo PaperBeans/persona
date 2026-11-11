@@ -32,6 +32,9 @@ server/internal/hub/webdist/*
 !server/internal/hub/webdist/README.md
 web/node_modules/
 web/dist/
+web/public/pake/client.wasm
+web/public/pake/wasm_exec.js
+web/public/pake/THIRD_PARTY_NOTICES.txt
 # A hub run from this folder: its secrets and data (docs/operations/docker.md).
 deploy/docker/.env
 deploy/docker/data/

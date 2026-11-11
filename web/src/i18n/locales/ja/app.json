@@ -11,7 +11,6 @@
   "title_workspace_board": "ワークフローボード",
   "title_todos": "ToDo",
   "title_machines": "マシン",
-  "title_terminal": "ターミナル",
   "title_settings": "設定",
   "title_agents": "個人エージェント",
   "title_extension": "拡張機能",
@@ -29,5 +28,7 @@
   "session_choices_other": "IDが{sid}で始まるセッションが{count}件あります。開くものを選んでください",
   "title_health": "ヘルスケア",
   "title_agent_archives": "アーカイブしたエージェント",
-  "title_subscriptions": "購読"
+  "title_subscriptions": "購読",
+  "new_version": "新しいバージョンがあります",
+  "new_version_reload": "再読み込み"
 }

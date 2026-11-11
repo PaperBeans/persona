@@ -424,9 +424,9 @@ func (h *Hub) revokeComputer(ctx context.Context, id string) (int, error) {
 }
 
 // siteURL is where this hub's build was published (the site serving install.sh: the config's publish.site_url, the
-// build's update URL without its dl/); "" when it was not (a local or Docker build).
+// update source without its dl/: the build's, or hub.json's update.url); "" when it was not (a local or Docker build).
 func (h *Hub) siteURL() string {
-	raw := strings.TrimRight(h.build.UpdateURL, "/")
+	raw := h.updateURL()
 	if raw == "" {
 		return ""
 	}

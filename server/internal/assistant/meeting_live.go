@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
@@ -31,6 +32,10 @@ const (
 	codeOpIDReused        = "op_id_reused"
 	codeAsksFull          = "asks_full"
 	codeAskBusy           = "ask_busy"
+	codeMeetingEnded      = "meeting_ended" // the room ended: ask in the follow-up
+	codeNotMeeting        = "not_meeting"
+	codeMeetingRunning    = "meeting_running"
+	codeNoMaterial        = "no_material"
 )
 
 // The bodies the attending routes read at most.
@@ -100,9 +105,19 @@ func (s *Service) meetingRoutes() {
 		for _, a := range l.Asks {
 			asks = append(asks, viewAsk(a))
 		}
-		apierr.WriteJSON(w, s.liveView(r.Context(), l, rec, asks))
+		view := s.liveView(r.Context(), l, rec, asks)
+		if rev := e.PhotosRev(rec.ID); rev > 0 { // photos has a revision and no field: GET …/photos reads them
+			view.Revs[kb.PartPhotos] = rev
+		}
+		if parts := r.URL.Query().Get("parts"); parts != "" {
+			apierr.WriteJSON(w, view.only(strings.Split(parts, ",")))
+			return
+		}
+		apierr.WriteJSON(w, view)
 	})
 	s.askRoute()
+	s.meetingConversationRoutes()
+	s.meetingPhotoRoutes()
 }
 
 // meetingCaller: the request carries full credentials; anything else has been answered 403 forbidden.
@@ -158,7 +173,8 @@ func meetingRecording(w http.ResponseWriter, e *kb.Engine, id string) (kb.Live, 
 	return l, rec, true
 }
 
-// writeMeetingError answers the knowledge base's refusals of an attending route as the contract codes them.
+// writeMeetingError answers the knowledge base's refusals of a meeting route as the contract codes them (the photos'
+// too, meeting_photos.go).
 func writeMeetingError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, kb.ErrRecordingDeleted):
@@ -169,8 +185,20 @@ func writeMeetingError(w http.ResponseWriter, err error) {
 		apierr.WriteCode(w, http.StatusForbidden, assistantwire.CodeKBReadOnly, i18n.Err("assistant-kb_routes.read_only"))
 	case errors.Is(err, kb.ErrNotAttending):
 		apierr.WriteCode(w, http.StatusConflict, codeNotAttending, i18n.Err("assistant-meeting.not_attending"))
-	case errors.Is(err, kb.ErrBadLive):
+	case errors.Is(err, kb.ErrBadLive), errors.Is(err, kb.ErrBadPhoto):
 		apierr.Write(w, http.StatusBadRequest, err)
+	case errors.Is(err, kb.ErrNotMeeting):
+		apierr.WriteCode(w, http.StatusConflict, codeNotMeeting, i18n.Err("assistant-meeting.not_meeting"))
+	case errors.Is(err, kb.ErrTranscriptExpired):
+		apierr.WriteCode(w, http.StatusConflict, codeTranscriptExpired, i18n.Err("assistant-meeting.transcript_expired"))
+	case errors.Is(err, kb.ErrPhotoNotFound):
+		apierr.WriteCode(w, http.StatusNotFound, codePhotoNotFound, i18n.Err("assistant-meeting.photo_not_found"))
+	case errors.Is(err, kb.ErrPhotoDeleted):
+		apierr.WriteCode(w, http.StatusGone, codePhotoDeleted, i18n.Err("assistant-meeting.photo_deleted"))
+	case errors.Is(err, kb.ErrOpIDReused):
+		apierr.WriteCode(w, http.StatusConflict, codeOpIDReused, i18n.Err("assistant-meeting.photo_id_reused"))
+	case errors.Is(err, kb.ErrPhotosFull):
+		apierr.WriteCode(w, http.StatusRequestEntityTooLarge, codePhotosFull, i18n.Err("assistant-meeting.photos_full", i18n.Args{"max": kb.MaxPhotos}))
 	default:
 		apierr.Write(w, http.StatusInternalServerError, err)
 	}
@@ -244,6 +272,48 @@ type meetingLiveView struct {
 	Fed              int           `json:"fed"`
 	Problem          string        `json:"problem,omitempty"`
 	Asks             *[]askView    `json:"asks,omitempty"` // GET only
+	// The meeting conversation (#3862): the private mark (absent until chosen), a room meeting's room, the follow-up
+	// once made, and each part's revision (GET only).
+	Private  *bool            `json:"private,omitempty"`
+	Room     *kb.RoomView     `json:"room,omitempty"`
+	Followup *kb.ConvView     `json:"followup,omitempty"`
+	Revs     map[string]int64 `json:"revs,omitempty"`
+}
+
+// only is v cut to parts (GET …/live?parts=asks,room): those of them it has, with their revisions.
+func (v meetingLiveView) only(parts []string) map[string]any {
+	out := map[string]any{}
+	revs := map[string]int64{}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		switch p {
+		case kb.PartAsks:
+			if v.Asks != nil {
+				out[p] = *v.Asks
+			}
+		case kb.PartRoom:
+			if v.Room != nil {
+				out[p] = v.Room
+			}
+		case kb.PartPrivate:
+			if v.Private != nil {
+				out[p] = *v.Private
+			}
+		case kb.PartFollowup:
+			if v.Followup != nil {
+				out[p] = v.Followup
+			}
+		case kb.PartPhotos:
+			// Only its revision: the photos are read with GET …/photos.
+		default:
+			continue
+		}
+		if rev, ok := v.Revs[p]; ok {
+			revs[p] = rev
+		}
+	}
+	out["revs"] = revs
+	return out
 }
 
 // attendeeView is the session an attended meeting is fed to; Main says it is the main chat.
@@ -259,7 +329,25 @@ func (s *Service) liveView(ctx context.Context, l kb.Live, rec kb.Recording, ask
 	if asks != nil {
 		out.Asks = &asks
 	}
-	if rec.Attendance == "" {
+	out.Revs = map[string]int64{kb.PartAsks: l.AsksRev}
+	if m := rec.Conv; m != nil {
+		out.Private, out.Room, out.Followup = m.Private, m.RoomView(), m.FollowupView()
+		for _, p := range []string{kb.PartRoom, kb.PartPrivate, kb.PartFollowup} {
+			if rev, ok := m.Revs[p]; ok {
+				out.Revs[p] = rev
+			}
+		}
+	}
+	if asks == nil {
+		out.Revs = nil // POST …/live: GET reads them
+	}
+	if rec.RoomMeeting() {
+		if l.Full { // the room's own problems are its room's
+			out.Problem = codeLiveFull
+		}
+		return out
+	}
+	if !rec.Attending() {
 		return out
 	}
 	if ref, main, ok := s.meetingAttendee(ctx, rec); ok {

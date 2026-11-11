@@ -20,6 +20,19 @@ func putMeetingMinutes(t *testing.T, e *Engine, id string, m Minutes) {
 // changeRecording rewrites recording id's meta.json with fn applied.
 func changeRecording(t *testing.T, e *Engine, id string, fn func(r *Recording)) {
 	t.Helper()
+	changeRecordingMeta(t, e, id, fn)
+}
+
+// markPrivate sets recording id's private mark.
+func markPrivate(t *testing.T, e *Engine, id string, private bool) {
+	t.Helper()
+	if _, err := e.SetPrivate(id, private); err != nil {
+		t.Fatalf("mark %s: %v", id, err)
+	}
+}
+
+func changeRecordingMeta(t *testing.T, e *Engine, id string, fn func(r *Recording)) {
+	t.Helper()
 	r := recordingNow(t, e, id)
 	fn(r)
 	if err := e.Store.putEntity(KindRecording, id, r, &r.Tagging, false); err != nil {
@@ -131,6 +144,28 @@ func TestMeetingMaterialOnlyMeetingMaterial(t *testing.T) {
 	putRecording(t, e, plain, recUpload(1, now.Add(-day), true, "SECRET-PLAIN-NOTE"), now)
 	bare := "66666666-6666-4666-8666-666666666666"
 	putRecording(t, e, bare, meetingUpload(1, now.Add(-day), "SECRET-BARE-MEETING"), now)
+	// Never either: a meeting with minutes marked private, one with no mark (from before the mark, a #3746 phone, the
+	// watch), and one whose upload said it is private as it started.
+	for i, mark := range []*bool{new(true), nil, nil} {
+		id := fmt.Sprintf("8888888%d-8888-4888-8888-888888888888", i)
+		mu := meetingUpload(1, now.Add(-time.Duration(i+1)*time.Hour), "SECRET-PRIVATE-TRANSCRIPT")
+		if i == 2 {
+			mu.Private = new(true)
+		}
+		putRecording(t, e, id, mu, now)
+		putMeetingMinutes(t, e, id, Minutes{Version: 1, Title: "SECRET-PRIVATE-MINUTES export cap", When: "z",
+			Decisions: []MinutesItem{{Text: "SECRET-PRIVATE-DECISION export cap"}}})
+		if mark != nil {
+			markPrivate(t, e, id, *mark)
+		}
+	}
+	// Marked not private: material.
+	markPrivate(t, e, earlier, false)
+	markPrivate(t, e, asked, false)
+	if _, err := e.SetPrivate(overlap, false); !errors.Is(err, ErrNotMeeting) {
+		t.Errorf("a recording that is not a meeting takes no mark: %v", err)
+	}
+	markPrivate(t, e, bare, false) // no minutes: still nothing
 
 	// The rest of the knowledge base.
 	chat := &Chat{ID: "lark-team", Source: "lark", SourceID: "team", Kind: "group", Name: "SECRET-CHAT-NAME"}
@@ -186,6 +221,10 @@ func TestMeetingMaterialOnlyMeetingMaterial(t *testing.T) {
 	if first.Name != "Design review" || first.When != "2026-11-03 14:00–15:10" {
 		t.Errorf("named %q at %q", first.Name, first.When)
 	}
+	// Its minutes have no span of their own (written before #4713): the recording's.
+	if er := recordingNow(t, e, earlier); !first.Start.Equal(er.StartedAt.Truncate(time.Second)) || !first.End.Equal(recordingEnd(er).Truncate(time.Second)) {
+		t.Errorf("span %s – %s", first.Start, first.End)
+	}
 	want := Minutes{Title: "Design review", When: "2026-11-03 14:00–15:10", Attendees: []string{"Ada", "Bo"},
 		Points:    []MinutesPoint{{Text: "Exports over 4 MB are dropped.", Who: "Ada"}},
 		Decisions: []MinutesItem{{Text: "Keep the cap for this release."}},
@@ -229,6 +268,7 @@ func TestMeetingMaterialRanking(t *testing.T) {
 	for i := range ids {
 		ids[i] = fmt.Sprintf("%08d-0000-4000-8000-000000000000", i+1)
 		putRecording(t, e, ids[i], meetingUpload(1, now.Add(-time.Duration(i+1)*time.Hour), "text"), now)
+		markPrivate(t, e, ids[i], false)
 	}
 	minutes := func(title string, attendees []string, decision string) Minutes {
 		return Minutes{Version: 1, Title: title, When: title, Attendees: attendees, Decisions: []MinutesItem{{Text: decision}}}

@@ -47,7 +47,10 @@ type Question struct {
 
 type Interaction struct {
 	// Manager is the manager it belongs to (docs/assistant/managers.md, "Ownership"); the hub stamps it on what it sends the apps.
-	Manager         string          `json:"manager,omitempty"`
+	Manager string `json:"manager,omitempty"`
+	// Private: a Just me turn raised it (docs/assistant/meeting-minutes.md "Just me"): its push and the Fleet Live
+	// Activity say nothing of what it asks, as a health conversation's card, and it never goes to Lark or a channel.
+	Private         bool            `json:"private,omitempty"`
 	ID              string          `json:"id"`
 	MachineID       string          `json:"machine_id"`
 	SessionID       string          `json:"session_id"`

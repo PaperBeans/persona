@@ -72,7 +72,10 @@ nonisolated final class MainThreadWatchdog: @unchecked Sendable {
         generation += 1
         let generation = self.generation
         mainThread = pthread_mach_thread_np(pthread_self())
-        let thread = Thread { @Sendable [self] in run(threshold: threshold, interval: interval, generation: generation) }
+        // A typed value, not a literal: some batch builds import `Thread(block:)`'s block as `@MainActor`, and a literal
+        // takes that isolation despite `@Sendable`, so the loop trapped on its own thread (#4703).
+        let body: @Sendable () -> Void = { [self] in run(threshold: threshold, interval: interval, generation: generation) }
+        let thread = Thread(block: body)
         worker = thread
         lock.unlock()
         thread.start()

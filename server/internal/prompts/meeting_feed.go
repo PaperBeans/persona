@@ -18,6 +18,9 @@ type MeetingFeed struct {
 	Lines   []MeetingFeedLine
 	Asks    []MeetingFeedAsk
 	Ended   bool // the end batch: the meeting is over
+	// Room: the batch goes to the meeting's own room conversation (docs/assistant/meeting-minutes.md "The room
+	// conversation"), which writes nothing after it.
+	Room bool
 }
 
 // MeetingFeedLine is one live sentence and when it was said (HH:MM).

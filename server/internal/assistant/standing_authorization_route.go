@@ -5,27 +5,39 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
+	"io"
+	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// Only complete, single-action confirmation requests have a deterministic interpretation. General plans and choices
-// keep their ordinary route: finding one authorized verb somewhere in a plan does not authorize the whole plan.
-var standingRequest = regexp.MustCompile(`(?i)^(?:(?:should|may|can) i |please |是否|可以|请)?(merge|push|deploy-test|deploy-production|send|delete|spend|合并|推送|部署测试|部署生产|发送|删除|花钱)(?:\s+(?:(?:the|this) )?(?:pr|branch|changes|message|files|money))?(?:\s+(https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*))?\s*(?:now|现在)?[?.？。!！]?$`) // i18n-ignore: matched requests
+// The small deterministic fast path avoids a model call for plain confirmations. Natural cards use the complete-action judge.
+var standingRequest = lazyre.New(`(?i)^(?:(?:should|may|can) i |please |是否|可以|请)?(merge|push|deploy-test|deploy-production|send|delete|spend|合并|推送|部署测试|部署生产|发送|删除|花钱)(?:\s+(?:(?:the|this) )?(?:pr|branch|changes|message|files|money))?(?:\s+(https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*))?\s*(?:now|现在)?[?.？。!！]?$`) // i18n-ignore: matched requests
 
-var standingConfirmationLabel = regexp.MustCompile(`(?i)^(yes|no|continue|not now|cancel|approve|proceed|是|否|继续|暂不|取消|批准|はい|いいえ|続行|キャンセル)(?: \(recommended\))?$`) // i18n-ignore: matched option labels
+var standingConfirmationLabel = lazyre.New(`(?i)^(yes|no|continue|not now|cancel|approve|proceed|是|否|继续|暂不|取消|批准|はい|いいえ|続行|キャンセル)(?: \(recommended\))?$`) // i18n-ignore: matched option labels
 
-var standingConfirmationHeader = regexp.MustCompile(`(?i)^(confirm|confirmation|approval|merge|push|确认|审批|合并|推送|確認|承認)$`) // i18n-ignore: matched question headers
+var standingConfirmationHeader = lazyre.New(`(?i)^(confirm|confirmation|approval|merge|push|确认|审批|合并|推送|確認|承認)$`) // i18n-ignore: matched question headers
 
-func standingInteractionAction(ix proto.Interaction) (action, target, question string, ok bool) {
+func standingCardCandidate(ix proto.Interaction) bool {
+	if ix.Kind != proto.IxQuestion && ix.Kind != proto.IxPlan {
+		return false
+	}
+	if ix.Kind == proto.IxQuestion && (len(ix.Questions) == 0 || ix.ToolName == "ask_user" || proto.HasDuplicateQuestionText(ix.Questions)) {
+		return false
+	}
+	if ix.Kind == proto.IxPlan && strings.TrimSpace(ix.Plan) == "" {
+		return false
+	}
 	if ix.Secret || len(ix.Fields) > 0 || ix.Elicitation != nil {
-		return
+		return false
 	}
 	if len(ix.ToolInput) > 0 {
 		var input struct {
@@ -40,11 +52,11 @@ func standingInteractionAction(ix proto.Interaction) (action, target, question s
 		}
 		decoder := json.NewDecoder(bytes.NewReader(ix.ToolInput))
 		decoder.DisallowUnknownFields()
-		if decoder.Decode(&input) != nil {
-			return
+		if decoder.Decode(&input) != nil || decoder.Decode(new(any)) != io.EOF {
+			return false
 		}
 		if ix.Kind == proto.IxPlan && input.Plan != ix.Plan {
-			return
+			return false
 		}
 		if ix.Kind == proto.IxQuestion {
 			questions := make([]proto.Question, 0, len(input.Questions))
@@ -55,7 +67,7 @@ func standingInteractionAction(ix proto.Interaction) (action, target, question s
 				}
 				if q.MultiSelectWire != nil {
 					if q.MultiSelect != nil && *q.MultiSelect != *q.MultiSelectWire {
-						return
+						return false
 					}
 					multiple = *q.MultiSelectWire
 				}
@@ -64,9 +76,16 @@ func standingInteractionAction(ix proto.Interaction) (action, target, question s
 			a, _ := json.Marshal(questions)
 			b, _ := json.Marshal(ix.Questions)
 			if !bytes.Equal(a, b) {
-				return
+				return false
 			}
 		}
+	}
+	return true
+}
+
+func standingInteractionAction(ix proto.Interaction) (action, target, question string, ok bool) {
+	if !standingCardCandidate(ix) {
+		return
 	}
 	switch ix.Kind {
 	case proto.IxQuestion:
@@ -129,8 +148,7 @@ type standingInteractionStore interface {
 }
 
 func (s *Service) approveStandingInteraction(ix proto.Interaction) bool {
-	action, target, question, ok := standingInteractionAction(ix)
-	if !ok {
+	if !standingCardCandidate(ix) {
 		return false
 	}
 	// Runtime-owned local dialogs cannot atomically persist their node-side effect with the manager's decision.
@@ -145,7 +163,7 @@ func (s *Service) approveStandingInteraction(ix proto.Interaction) bool {
 	if !ok {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, guest, err := s.guestOf(ctx, ix.MachineID, ix.SessionID)
 	if err != nil || guest {
@@ -160,9 +178,6 @@ func (s *Service) approveStandingInteraction(ix proto.Interaction) bool {
 		return false
 	}
 	task.Title, task.Notes, task.PlanID = taskRow.Title, taskRow.Notes, taskRow.PlanID
-	if !s.standingTaskAllows(ctx, task, action) {
-		return false
-	}
 	session, ok := s.session(ctx, ix.MachineID, ix.SessionID)
 	if !ok || session.Assistant {
 		return false
@@ -184,17 +199,40 @@ func (s *Service) approveStandingInteraction(ix proto.Interaction) bool {
 			break
 		}
 	}
+	if len(grants) == 0 {
+		return false
+	}
+	directories := []string{cwd}
 	for _, grant := range grants {
-		if taskCwd != grant.Directory && !strings.HasPrefix(taskCwd, grant.Directory+"/") {
+		directories = append(directories, grant.Directory)
+	}
+	assessment, err := s.assessStandingInteraction(ctx, ix, task.Title+"\n"+task.Notes, directories...)
+	if err != nil || !assessment.WithinTask || !assessment.Complete || !assessment.Proceed {
+		return false
+	}
+	for _, action := range assessment.Actions {
+		if !s.standingTaskAllows(ctx, task, action) {
+			return false
+		}
+	}
+	target, targetsOK := standingCardTarget(ix)
+	if !targetsOK {
+		return false
+	}
+	question := ix.Plan
+	if ix.Kind == proto.IxQuestion {
+		var questions []string
+		for _, q := range ix.Questions {
+			questions = append(questions, q.Question)
+		}
+		question = strings.Join(questions, "\n")
+	}
+	for _, grant := range grants {
+		matches, matchErr := s.standingScopeMatches(ctx, ix.MachineID, grant.Directory, taskCwd)
+		if matchErr != nil || !matches || !standingAssessmentAllowed(grant, assessment, ix) || !s.standingCardDirectoriesMatch(ctx, ix.MachineID, grant.Directory, cwd, ix) {
 			continue
 		}
-		if !slices.Contains(grant.Actions, action) {
-			continue
-		}
-		if slices.Contains([]string{"deploy-production", "send", "delete", "spend"}, action) && !grant.Reversible {
-			continue
-		}
-		if !s.standingConditions(ctx, ix.MachineID, cwd, action, target, grant.Conditions) {
+		if !s.standingConditions(ctx, ix.MachineID, cwd, strings.Join(assessment.Actions, ","), target, grant.Conditions) {
 			continue
 		}
 		s.standingMu.Lock()
@@ -208,9 +246,15 @@ func (s *Service) approveStandingInteraction(ix proto.Interaction) bool {
 		l := s.lang(ctx)
 		reason := i18n.T(l, "assistant-standing_authorizations.basis", i18n.Args{"id": grant.ID, "quote": grant.Quote, "source": grant.Source})
 		answer := i18n.T(l, "assistant-standing_authorizations.continue")
-		r := proto.Resolution{AnsweredBy: proto.AnsweredByAssistant, Reason: reason}
+		r := proto.Resolution{AnsweredBy: proto.AnsweredByAssistant, Reason: answer + "\n" + reason}
 		if ix.Kind == proto.IxQuestion {
-			r.Answers = map[string]string{question: answer + "\n" + reason}
+			r.Answers = make(map[string]string, len(assessment.Answers))
+			for q, picked := range assessment.Answers {
+				if picked == "" || standingQuestionHasNoOptions(ix, q) {
+					picked = answer + "\n" + reason
+				}
+				r.Answers[q] = picked
+			}
 		} else {
 			yes := true
 			r.Approve = &yes
@@ -228,10 +272,117 @@ func (s *Service) approveStandingInteraction(ix proto.Interaction) bool {
 			return false
 		}
 		s.decisionsChanged(ctx, task.ID, at)
-		s.workEvent(ix.MachineID, ix.SessionID, "standing_authorized", map[string]any{"todo": task.ID, "authorization": grant.ID, "action": action, "interaction": ix.ID})
+		s.workEvent(ix.MachineID, ix.SessionID, "standing_authorized", map[string]any{"todo": task.ID, "authorization": grant.ID, "actions": assessment.Actions, "interaction": ix.ID})
 		return true
 	}
 	return false
+}
+
+func standingQuestionHasNoOptions(ix proto.Interaction, question string) bool {
+	for _, q := range ix.Questions {
+		if q.Question == question {
+			return len(q.Options) == 0
+		}
+	}
+	return false
+}
+
+// Quoted paths stay whole: unsupported quoting, shell expansion and ambiguous paths remain manual.
+var standingPathToken = lazyre.New("\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\s\"'`()<>;,!?。；，！？]+") // i18n-ignore: punctuation separates paths in incoming text
+
+func standingCardPaths(ix proto.Interaction) ([]string, bool) {
+	texts := []string{ix.Plan, ix.Summary, ix.Reason}
+	for _, q := range ix.Questions {
+		texts = append(texts, q.Question, q.Header)
+		for _, option := range q.Options {
+			texts = append(texts, option.Label, option.Description, option.Action)
+		}
+	}
+	var paths []string
+	for _, text := range texts {
+		for _, token := range standingPathToken.FindAllString(text, -1) {
+			if strings.ContainsAny(token[:1], "\"'`") && strings.ContainsAny(token, "~$") {
+				return nil, false
+			}
+			token = strings.Trim(token, "\"'`")
+			if strings.HasPrefix(token, "https://") || strings.HasPrefix(token, "http://") {
+				if strings.ContainsAny(token, "$;|&`\\*?[]<>(){}") || strings.IndexFunc(token, unicode.IsSpace) >= 0 {
+					return nil, false
+				}
+				continue
+			}
+			if !strings.ContainsAny(token, "/~$\\") && token != "." && token != ".." {
+				continue
+			}
+			// Do not interpret shell operators, globs, assignments, or a partial quoted path.
+			if strings.ContainsAny(token, "\\*?[];|&<>=()") || strings.IndexFunc(token, unicode.IsSpace) >= 0 {
+				return nil, false
+			}
+			paths = append(paths, token)
+		}
+	}
+	return paths, true
+}
+
+func (s *Service) standingCardDirectoriesMatch(ctx context.Context, machine, directory, cwd string, ix proto.Interaction) bool {
+	paths, ok := standingCardPaths(ix)
+	if !ok || !path.IsAbs(cwd) {
+		return false
+	}
+	for _, token := range paths {
+		// Session variables are not the hub's environment. Only these known directory
+		// variables can be resolved without evaluating agent-supplied shell code.
+		for _, variable := range []struct{ name, value string }{
+			{"${HOME}", "~"}, {"$HOME", "~"}, {"${PWD}", cwd}, {"$PWD", cwd},
+		} {
+			if token == variable.name || strings.HasPrefix(token, variable.name+"/") {
+				token = variable.value + strings.TrimPrefix(token, variable.name)
+				break
+			}
+		}
+		if strings.ContainsAny(token, "$\\{}") || strings.Contains(token, "~") && token != "~" && !strings.HasPrefix(token, "~/") {
+			return false
+		}
+		if !path.IsAbs(token) && token != "~" && !strings.HasPrefix(token, "~/") {
+			token = cwd + "/" + token
+		}
+		// Resolve on the session's node, including home and symlinks. An old or
+		// unavailable node cannot prove scope and must retain manual confirmation.
+		var identity proto.RepositoryIdentity
+		if s.call(ctx, machine, "git.status", map[string]any{"cwd": token, "identity_only": true}, &identity) != nil || identity.Version != 1 || !identity.PathResolved || !path.IsAbs(identity.Cwd) {
+			return false
+		}
+		matches, err := s.standingScopeMatches(ctx, machine, directory, identity.Cwd)
+		if err != nil || !matches {
+			return false
+		}
+	}
+	return true
+}
+
+var standingPRReference = lazyre.New(`(?i)https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*|(?:\bPR\s*#?|#)([1-9][0-9]*)`)
+
+func standingCardTarget(ix proto.Interaction) (string, bool) {
+	var target string
+	for _, match := range standingPRReference.FindAllStringSubmatch(standingCardText(ix), -1) {
+		next := match[0]
+		if match[1] != "" {
+			next = "#" + match[1]
+		}
+		if target != "" && target != next {
+			// A URL and its matching short reference identify the same target.
+			if strings.HasSuffix(target, "/pull/"+strings.TrimPrefix(next, "#")) {
+				continue
+			}
+			if strings.HasSuffix(next, "/pull/"+strings.TrimPrefix(target, "#")) {
+				target = next
+				continue
+			}
+			return "", false
+		}
+		target = next
+	}
+	return target, true
 }
 
 // Conditions are checked against the current branch's complete PR snapshot, never statements in the asking card.
@@ -245,12 +396,10 @@ func (s *Service) standingConditions(ctx context.Context, machine, cwd, action, 
 	if len(conditions) == 0 && target == "" {
 		return true
 	}
-	if action != "merge" && len(conditions) > 0 {
-		return false
-	}
 	var snapshot struct {
 		PR *struct {
 			URL            string `json:"url"`
+			Number         int    `json:"number"`
 			HeadOID        string `json:"head_oid"`
 			State          string `json:"state"`
 			Draft          bool   `json:"draft"`
@@ -265,7 +414,7 @@ func (s *Service) standingConditions(ctx context.Context, machine, cwd, action, 
 		return false
 	}
 	pr := snapshot.PR
-	if target != "" && pr.URL != target {
+	if target != "" && pr.URL != target && "#"+strconv.Itoa(pr.Number) != target {
 		return false
 	}
 	if len(conditions) == 0 {
@@ -273,6 +422,12 @@ func (s *Service) standingConditions(ctx context.Context, machine, cwd, action, 
 	}
 	if pr.HeadOID == "" || pr.Draft || pr.State != "OPEN" {
 		return false
+	}
+	if slices.Contains(strings.Split(action, ","), "push") || slices.Contains(strings.Split(action, ","), "deploy-test") {
+		var identity proto.RepositoryIdentity
+		if err := s.call(ctx, machine, "git.status", map[string]any{"cwd": cwd, "identity_only": true}, &identity); err != nil || identity.Version != 1 || identity.HeadOID == "" || identity.HeadOID != pr.HeadOID {
+			return false
+		}
 	}
 	for _, c := range conditions {
 		switch c {
@@ -308,17 +463,20 @@ func (s *Service) persistStandingInteraction(p *pending, r proto.Resolution, a *
 }
 
 // Explicit task limits are narrower than a standing grant. Unclear prohibitions keep approval manual.
-var standingTaskReadonly = regexp.MustCompile(`(?i)read[- ]only|只读|読み取り専用`)                             // i18n-ignore: task constraints
-var standingTaskNegation = regexp.MustCompile(`(?i)\b(?:no|not|never|don't|without)\b|不|别|勿|禁止|しない|せず`) // i18n-ignore: task constraints
-var standingStopAtPR = regexp.MustCompile(`(?i)stop at (?:a |the )?pr|停在.*pr|只.*pr`)                    // i18n-ignore: task constraints
-var standingTaskClauses = regexp.MustCompile(`[.;!?\n。；！？]`)                                            // i18n-ignore: clause punctuation
-var standingNoConflicts = regexp.MustCompile(`(?i)no (?:merge )?conflicts|without (?:asking|confirmation|further review)`)
+var standingTaskReadonly = lazyre.New(`(?i)read[- ]only|只读|読み取り専用`)                             // i18n-ignore: task constraints
+var standingTaskNegation = lazyre.New(`(?i)\b(?:no|not|never|don't|without)\b|不|别|勿|禁止|しない|せず`) // i18n-ignore: task constraints
+var standingStopAtPR = lazyre.New(`(?i)stop at (?:a |the )?pr|停在.*pr|只.*pr`)                    // i18n-ignore: task constraints
+var standingTaskClauses = lazyre.New(`[.;!?\n。；！？]`)                                            // i18n-ignore: clause punctuation
+var standingNoConflicts = lazyre.New(`(?i)no (?:merge )?conflicts|without (?:asking|confirmation|further review)`)
 
 func standingTaskForbids(text, action string) bool {
 	if standingTaskReadonly.MatchString(text) || action != "push" && standingStopAtPR.MatchString(text) {
 		return true
 	}
 	words := map[string][]string{
+		"read":              {"read", "inspect", "读取", "查看", "読み"},                                         // i18n-ignore: matched actions
+		"verify":            {"verify", "test", "check", "验证", "测试", "確認", "テスト"},                          // i18n-ignore: matched actions
+		"edit":              {"edit", "modify", "write", "change", "编辑", "修改", "写入", "変更"},                 // i18n-ignore: matched actions
 		"merge":             {"merge", "合并", "合入", "マージ"},                                                  // i18n-ignore: matched actions
 		"push":              {"push", "推送", "推到", "プッシュ"},                                                  // i18n-ignore: matched actions
 		"deploy-test":       {"deploy", "test", "部署", "发布", "测试", "テスト", "デプロイ"},                           // i18n-ignore: matched actions

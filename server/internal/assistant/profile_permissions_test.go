@@ -100,14 +100,18 @@ func TestDefaultPermissionNewConversationInheritance(t *testing.T) {
 			f := newFakeHub().withMachine()
 			s := newTestService(t, f)
 			setSettings(t, s, func(v *Settings) { v.DefaultPermissionMode = mode })
+			wantMode := mode
+			if wantMode == "" {
+				wantMode = proto.ModeBypass
+			}
 			for _, p := range []StartParams{{}, {Main: true}, {Space: SpaceHealth}, {Purpose: "assistant"}} {
 				p.Untitled = true
 				sess, err := s.Start(context.Background(), p)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if sent := f.sends[len(f.sends)-1]; sent["permission_mode"] != mode || sess.PermissionMode != mode {
-					t.Fatalf("%+v inherited %v / %s, want %s", p, sent, sess.PermissionMode, mode)
+				if sent := f.sends[len(f.sends)-1]; sent["permission_mode"] != wantMode || sess.PermissionMode != wantMode {
+					t.Fatalf("%+v inherited %v / %s, want %s", p, sent, sess.PermissionMode, wantMode)
 				}
 			}
 			for _, override := range proto.PermissionModes {
@@ -137,7 +141,7 @@ func TestDefaultPermissionNewConversationInheritance(t *testing.T) {
 				t.Fatalf("main/new started a turn: %d %s", w.Code, w.Body)
 			}
 			_, err := s.Start(context.Background(), StartParams{Main: true, Untitled: true})
-			if err != nil || f.sends[len(f.sends)-1]["permission_mode"] != mode {
+			if err != nil || f.sends[len(f.sends)-1]["permission_mode"] != wantMode {
 				t.Fatalf("replacement main lost default: %v", err)
 			}
 		})

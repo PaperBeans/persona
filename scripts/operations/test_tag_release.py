@@ -151,6 +151,100 @@ class TagReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(tag_release.ConfigError, "verification"):
                 tag_release.upload("example/project", "v1.0.0", assets)
 
+    def release_receipt(self, build=202611110749, binary_builds=None):
+        """A hub receipt as publish.sh leaves it: personad for this machine (a script answering version -v), one for
+        another platform (bytes with its build number, as -X main.build leaves it) and latest.json over them.
+        binary_builds gives a download another build (the earlier run's)."""
+        import gzip
+        binary_builds = binary_builds or {}
+        here = tag_release.host_platform()
+        other = "linux-arm64" if here == "linux-amd64" else "linux-amd64"
+        directory = self.root / "receipt"
+        directory.mkdir(exist_ok=True)
+        files = {}
+        for plat in (here, other):
+            name = "personad-%s.gz" % plat
+            n = binary_builds.get(name, build)
+            body = (("#!/bin/sh\necho 0.2.1\necho 'channel release, build %d'\n" % n) if plat == here
+                    else "\x7fELF\x00main.build\x00%d\x00the rest" % n).encode()
+            (directory / name).write_bytes(gzip.compress(body, mtime=0))
+            data = (directory / name).read_bytes()
+            files[plat] = {"name": name, "size": len(data), "sha256": tag_release.hashlib.sha256(data).hexdigest(),
+                           "binary_sha256": tag_release.hashlib.sha256(body).hexdigest()}
+        (directory / "latest.json").write_text(json.dumps({"version": "0.2.1", "build": build, "files": files}))
+        return [{"path": str(path), "name": path.name} for path in sorted(directory.iterdir())]
+
+    def test_release_manifest_must_be_its_binaries_build(self):
+        # v0.2.1 (#4522): latest.json said build 202611110749, its binaries were 202611110745 (an earlier run).
+        tag_release.check_release_manifest(self.release_receipt())
+        here = "personad-%s.gz" % tag_release.host_platform()
+        with self.assertRaisesRegex(tag_release.ConfigError, "says .*another build"):
+            tag_release.check_release_manifest(self.release_receipt(binary_builds={here: 202611110745}))
+        other = next(item["name"] for item in self.release_receipt() if item["name"] not in (here, "latest.json"))
+        with self.assertRaisesRegex(tag_release.ConfigError, "is not build 202611110749"):
+            tag_release.check_release_manifest(self.release_receipt(binary_builds={other: 202611110745}))
+        assets = self.release_receipt()
+        Path(next(item["path"] for item in assets if item["name"] == other)).write_bytes(b"replaced")
+        with self.assertRaisesRegex(tag_release.ConfigError, "size or sha256"):
+            tag_release.check_release_manifest(assets)
+        with self.assertRaisesRegex(tag_release.ConfigError, "not in the receipt"):
+            tag_release.check_release_manifest([item for item in self.release_receipt() if item["name"] != other])
+        # Another platform's receipt, without latest.json, is not a release manifest to check.
+        tag_release.check_release_manifest([item for item in self.release_receipt() if item["name"] != "latest.json"])
+
+    def test_build_number_stands_alone_wherever_the_stream_is_cut(self):
+        import gzip
+        for body, want in ((b"202611110749", True), (b"x202611110749\x00", True), (b"1202611110749", False),
+                           (b"2026111107490", False), (b"202611110745", False), (b"12026111107490 202611110749", True)):
+            for size in (1, 5, 13, 1 << 20):
+                with self.subTest(body=body, size=size):
+                    path = self.root / "stamp.gz"
+                    path.write_bytes(gzip.compress(body))
+                    real_open = gzip.open
+
+                    def chunked(*args, **kwargs):
+                        stream = real_open(*args, **kwargs)
+                        read = stream.read
+                        stream.read = lambda n=-1: read(min(n, size) if n and n > 0 else size)
+                        return stream
+
+                    with patch.object(tag_release.gzip, "open", side_effect=chunked):
+                        self.assertEqual(tag_release.scan_gzip(path, b"202611110749")[1], want)
+
+    def test_index_files_go_up_after_the_downloads_they_list(self):
+        assets = self.release_receipt()
+        directory = Path(assets[0]["path"]).parent
+        (directory / "SHA256SUMS").write_text("sums\n")
+        assets.append({"path": str(directory / "SHA256SUMS"), "name": "SHA256SUMS"})
+        uploads = []
+
+        def run(command, **kwargs):
+            uploads.append([Path(arg).name for arg in command[6:]])
+            return subprocess.CompletedProcess(command, 0)
+
+        remote = [{"name": item["name"], "digest": "sha256:" + tag_release.hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest()}
+                  for item in assets]
+        with patch.object(tag_release.subprocess, "run", side_effect=run), patch.object(tag_release.subprocess, "check_output", side_effect=[
+                json.dumps({"tagName": "v0.2.1", "isDraft": False, "assets": []}), json.dumps(remote)]):
+            tag_release.upload("example/project", "v0.2.1", assets)
+        self.assertEqual(uploads[-2:], [["SHA256SUMS"], ["latest.json"]])
+        self.assertEqual(sorted(uploads[0]), sorted(item["name"] for item in assets if item["name"].endswith(".gz")))
+
+    def test_mismatched_release_manifest_is_never_uploaded(self):
+        data = json.loads(self.config_path.read_text())
+        data["platform"] = "hub"
+        self.config_path.write_text(json.dumps(data))
+        config = self.config()
+        assets = self.release_receipt(binary_builds={"personad-%s.gz" % tag_release.host_platform(): 202611110745})
+        receipt = Path(config["receipt"])
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(json.dumps({"commit": self.commit, "assets": assets}))
+        with patch.object(tag_release, "prepare_worktree", side_effect=lambda config, commit: config["worktree"].mkdir()), patch.object(tag_release, "upload") as upload:
+            with self.assertRaisesRegex(tag_release.ConfigError, "another build"):
+                tag_release.publish_once(config, "v0.2.1", self.commit)
+            upload.assert_not_called()
+        self.assertEqual(json.loads((config["state_dir"] / "state.json").read_text())["phase"], "publishing")
+
     def test_failed_command_never_uploads_or_marks_complete(self):
         data = json.loads(self.config_path.read_text())
         data["command"] = ["/usr/bin/false"]

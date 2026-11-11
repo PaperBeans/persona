@@ -99,6 +99,12 @@ func (s *Service) attendeeRef(ctx context.Context, r kb.Recording) (kb.SessionRe
 
 // attendeeCheck checks ref for a batch now: the target, and attendeeVerdict's word.
 func (s *Service) attendeeCheck(ctx context.Context, ref kb.SessionRef, now time.Time) (attendeeTarget, string) {
+	return s.attendeeCheckFor(ctx, ref, now, "")
+}
+
+// attendeeCheckFor is attendeeCheck for recording's meeting: its own room is exempt from "Sessions that never
+// attend", which refuses every guest conversation; any other meeting's room is refused all the same.
+func (s *Service) attendeeCheckFor(ctx context.Context, ref kb.SessionRef, now time.Time, recording string) (attendeeTarget, string) {
 	if s.devs != nil {
 		ref.MachineID = s.devs.Canonical(ref.MachineID) // an id another one absorbed: that one
 	}
@@ -120,10 +126,16 @@ func (s *Service) attendeeCheck(ctx context.Context, ref kb.SessionRef, now time
 	if found && sess.Assistant {
 		_, guest, err := s.guestOf(ctx, machine, ref.SessionID)
 		f.guest, f.unknown = guest, err != nil
+		if rec, room, rerr := s.roomOf(ctx, machine, ref.SessionID); guest && rerr == nil && room && recording != "" && rec == recording {
+			f.guest = false // the meeting's own room: it has no tool that acts
+		}
 		if origins, ok := s.conversationOrigins(); !ok {
 			f.unknown = true
 		} else if o, ok := origins[ref.SessionID]; ok {
 			sess.Origin, sess.OpenedBy = o.origin, o.ext // the book is where the lists' fields come from
+		}
+		if sess.Origin == OriginMeeting && !f.guest && recording == "" {
+			f.guest = true // a room, whatever the book says: never the attendee of another meeting
 		}
 	}
 	if found {

@@ -89,7 +89,9 @@ struct HubsView: View {
         let members = model.registry.members(g)
         let on = model.socket(g)?.currentConfig
         ForEach(members) { h in
-            hubRow(h, inUse: h.config == on && model.isLive(g), signingOut: model.hubSignOut == .hub(h.id))
+            // At any of its addresses; the row shows the one in use.
+            let at = model.isLive(g) ? h.configs.first { $0.url == on?.url }?.url : nil
+            hubRow(h, at: at, signingOut: model.hubSignOut == .hub(h.id))
                 .contextMenu {
                     if members.count > 1 {
                         Button(role: .destructive) { removingHub = h } label: { Label("Disconnect This Hub", systemImage: Theme.Icon.end) }
@@ -101,6 +103,16 @@ struct HubsView: View {
         ForEach(meshOnly(g), id: \.hubID) { m in
             meshRow(m, inUse: model.isLive(g) && on.map { cfg in m.endpoints?.contains { $0.hasPrefix(cfg.url.absoluteString) } == true } == true)
         }
+        // Each paired hub's addresses (#4670, docs/operations/network.md "Client-added candidates"), keyed apart like the
+        // SSH ones.
+        ForEach(members, id: \.addressesRowID) { h in
+            NavigationLink(value: SettingsPage.hubAddresses(h.id)) {
+                SettingsRow(title: members.count > 1 ? String(localized: "Addresses · \(h.displayName)") : String(localized: "Addresses"),
+                            symbol: Theme.Icon.hubAddresses, tint: Theme.Hue.blue, value: "\(h.configs.count)", look: .oneLine)
+            }
+            .accessibilityIdentifier("hubs.addresses.\(h.id)")
+        }
+        .bareListRow()
         // Each paired hub's Cloudflare Access service token (docs/operations/network.md "Behind Cloudflare Access"), keyed
         // apart from its other rows like the SSH ones.
         ForEach(members, id: \.accessRowID) { h in
@@ -153,6 +165,12 @@ struct HubsView: View {
                     .lineLimit(1).formButton()
                     .accessibilityIdentifier("hubs.rename.\(g)")
                 if model.hubSignOut == .group(g) { RowProgress() }
+                if model.socket(g)?.rejected == true {
+                    Button("Pair Again") { showPair = true }
+                        .lineLimit(1).formButton()
+                        .disabled(model.hubSignOut != nil)
+                        .accessibilityIdentifier("hubs.repair.\(g)")
+                }
                 Button(model.groupIDs.count > 1 ? String(localized: "Disconnect This Group…") : String(localized: "Disconnect and Forget Server…"), role: .destructive) { removingGroup = g }
                     .lineLimit(1).formButton()
                     .disabled(model.hubSignOut != nil)
@@ -170,6 +188,15 @@ struct HubsView: View {
             }
             .modifier(SettingsButtonLook())
             .accessibilityIdentifier("hubs.rename.\(g)")
+            if model.socket(g)?.rejected == true {
+                Button { showPair = true } label: {
+                    SettingsRow(title: String(localized: "Pair Again"), symbol: Theme.Icon.pairing, tint: Theme.accent)
+                        .lineLimit(1)
+                }
+                .modifier(SettingsButtonLook())
+                .disabled(model.hubSignOut != nil)
+                .accessibilityIdentifier("hubs.repair.\(g)")
+            }
             Button(role: .destructive) { removingGroup = g } label: {
                 SettingsRow(title: model.groupIDs.count > 1 ? String(localized: "Disconnect This Group") : String(localized: "Disconnect and Forget Server"), symbol: Theme.Icon.end, tint: Theme.danger)
                     .trailingProgress(model.hubSignOut == .group(g))
@@ -219,14 +246,18 @@ struct HubsView: View {
         let inApp = model.inAppTunnelState(g).flatMap { $0.routed ? $0.route.title : nil }
             ?? (model.localProxyState(g)?.routed == true ? String(localized: "Local Proxy") : nil)
         let routed = model.tunnel(g)?.routed == true
-        let state = model.isLive(g)
+        let rejected = model.socket(g)?.rejected == true
+        let state = rejected
+            ? String(localized: "Pairing Expired")
+            : model.isLive(g)
             ? (inApp.map { String(localized: "Connected (via \($0))") } ?? (routed ? String(localized: "Connected (via SSH tunnel)") : String(localized: "Connected [V N C Page 5be032]")))
             : model.socket(g)?.state == .connecting
             ? (inApp.map { String(localized: "Connecting (via \($0))") } ?? (routed ? String(localized: "Connecting (via SSH tunnel)") : String(localized: "Connecting")))
             : String(localized: "Not Connected")
+        let reason = rejected ? " " + ConnectionDetails.explanation(.rejected, stalled: false) : ""
         let group = n > 1 ? String(localized: "\(n) linked hubs in this group; you see the whole group's machines. If the connected one drops, another in the group takes over. ") : ""
         let current = model.isMultiHub && model.hub?.group == g ? String(localized: "Persona, the Inbox, and hub settings use this group.") : ""
-        return String(localized: "\(state)。", comment: "Sentence end after the connection state; more sentences may follow") + group + current
+        return String(localized: "\(state)。", comment: "Sentence end after the connection state; more sentences may follow") + reason + group + current
     }
 
     private func meshOnly(_ g: String) -> [MeshHub] {
@@ -244,7 +275,8 @@ struct HubsView: View {
         return out
     }
 
-    private func hubRow(_ h: PairedHub, inUse: Bool, signingOut: Bool) -> some View {
+    /// `at`: the hub's address the group's socket is on, nil when it is not on this hub.
+    private func hubRow(_ h: PairedHub, at: URL?, signingOut: Bool) -> some View {
         HStack(spacing: Theme.Space.m) {
             ThemedIcon(Theme.Icon.server)
                 .scaledFrame(width: Theme.Size.icon)
@@ -252,12 +284,12 @@ struct HubsView: View {
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                 HStack(spacing: Theme.Space.sm) {
                     Text(h.displayName).lineLimit(1)
-                    if inUse { Chip(text: String(localized: "In Use [Hubs View 564c83]"), look: .outline) }
+                    if at != nil { Chip(text: String(localized: "In Use [Hubs View 564c83]"), look: .outline) }
                     if SSHTunnels.shared.routed.contains(h.id) { Chip(text: "SSH", look: .neutral) }
                     if LocalProxies.shared.routed.contains(h.id) { Chip(text: String(localized: "Proxy"), look: .neutral) }
                     if InAppTunnels.shared.routed.contains(h.id) { Chip(text: String(localized: "Tunnel [Hubs View 55d2d3]"), look: .neutral) }
                 }
-                Text(h.config.url.absoluteString).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
+                Text((at ?? h.config.url).absoluteString).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
             if signingOut { RowProgress() } // Disconnect This Hub
@@ -294,4 +326,6 @@ private extension PairedHub {
     var localProxyRowID: String { "proxy." + id }
     /// The Cloudflare Access row's identity.
     var accessRowID: String { "access." + id }
+    /// The Addresses row's identity.
+    var addressesRowID: String { "addresses." + id }
 }

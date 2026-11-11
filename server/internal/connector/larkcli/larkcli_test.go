@@ -259,6 +259,263 @@ func TestReadToolsCallTheAdapter(t *testing.T) {
 	}
 }
 
+func inboxTestConnector(t *testing.T, scenario string) *Connector {
+	t.Helper()
+	c := testConnector(t, scenario)
+	c.SetInboxSource("cli", nil)
+	c.SetPollInterval(time.Minute)
+	return c
+}
+
+func inboxThings(t *testing.T, c *Connector) map[string]connector.InboxThing {
+	t.Helper()
+	items, err := c.Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]connector.InboxThing{}
+	for _, item := range items {
+		out[item.Thread] = item
+	}
+	return out
+}
+
+func TestInboxPollKeepsRulesGroupsAndDetectsOwnReply(t *testing.T) {
+	c := inboxTestConnector(t, "inbox")
+	moved, err := c.Poll(context.Background())
+	if err != nil || !moved {
+		t.Fatalf("poll = moved=%v err=%v", moved, err)
+	}
+	items := inboxThings(t, c)
+	if len(items) != 3 {
+		t.Fatalf("items = %#v", items)
+	}
+	group := items["larkcli:chat:oc_example_group:thread:omt_topic_one"]
+	if group.Thread == "" || !strings.Contains(group.Context, "A second line") || group.Done != connector.DoneReplied {
+		t.Fatalf("group item = %+v", group)
+	}
+	if dm := items["larkcli:chat:oc_example_dm"]; dm.Tier != "" || dm.Done != "" { // the Inbox triage tiers it
+		t.Fatalf("direct item = %+v", dm)
+	}
+	if group.Kind != "mention" || group.Title != "Example Group" || len(group.Tags) != 2 ||
+		group.Tags[0].Key != connector.TagChat || group.Tags[0].Name != "Example Group" ||
+		group.Tags[1].Key != connector.TagSender || group.Tags[1].Value != "ou_example_peer" || group.Tags[1].Name != "Example Peer" {
+		t.Fatalf("group title/tag changed = %+v", group)
+	}
+	if topic := items["larkcli:chat:oc_example_group:thread:omt_topic_two"]; topic.Thread == "" {
+		t.Fatal("seeded topic reply was dropped")
+	}
+	if _, ok := items["larkcli:chat:oc_example_group:thread:omt_topic_three"]; ok {
+		t.Fatal("unmentioned topic and own-only message entered the Inbox")
+	}
+}
+
+func TestInboxP2PTitleUsesOtherSender(t *testing.T) {
+	c := inboxTestConnector(t, "inbox_p2p")
+	if _, err := c.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	items := inboxThings(t, c)
+	dm, ok := items["larkcli:chat:oc_example_dm"]
+	if !ok {
+		t.Fatalf("direct item missing: %#v", items)
+	}
+	if dm.Kind != "dm" || dm.Title != "Example Peer" || len(dm.Tags) != 2 || dm.Tags[0].Name != "Example Peer" ||
+		dm.Tags[1].Key != connector.TagSender || dm.Tags[1].Value != "ou_example_peer" || dm.Tags[1].Name != "Example Peer" {
+		t.Fatalf("direct title/tag = %+v", dm)
+	}
+	if dm.Done != connector.DoneReplied {
+		t.Fatalf("own reply was not observed = %+v", dm)
+	}
+}
+
+func TestInboxDropsBoundAppMessagesButKeepsOtherBots(t *testing.T) {
+	c := inboxTestConnector(t, "inbox_bot_loop")
+	moved, err := c.Poll(context.Background())
+	if err != nil || !moved {
+		t.Fatalf("poll = moved=%v err=%v", moved, err)
+	}
+	items := inboxThings(t, c)
+	if _, ok := items["larkcli:chat:oc_example_bound_dm"]; ok {
+		t.Fatalf("bound app message entered Inbox: %#v", items)
+	}
+	bot, ok := items["larkcli:chat:oc_example_other_dm"]
+	if !ok || bot.Kind != "bot" || bot.Tier != "" { // triage decides, not a fixed tier
+		t.Fatalf("other app bot = %+v", bot)
+	}
+	if bot.Tags[1].Key != connector.TagSender || bot.Tags[1].Value != "cli_other" {
+		t.Fatalf("other app sender tag = %+v", bot.Tags)
+	}
+	c.inboxMu.Lock()
+	_, seen := c.inboxSeen["om_example_bound_app"]
+	c.inboxMu.Unlock()
+	if !seen {
+		t.Fatal("bound app message was not marked seen")
+	}
+	moved, err = c.Poll(context.Background())
+	if err != nil || moved {
+		t.Fatalf("second poll = moved=%v err=%v", moved, err)
+	}
+}
+
+func TestP2PTitleUsesChatPartnerWhenBatchHasOnlyOwnMessages(t *testing.T) {
+	partner := json.RawMessage(`{"open_id":"ou_example_peer","name":"Example Partner","sender_type":"user"}`)
+	group := &inboxGroup{chatID: "oc_example_dm", messages: []adapter.Message{{
+		MessageID: "om_example_mine", ChatID: "oc_example_dm", ChatType: "p2p", Sender: adapter.Sender{ID: "ou_example_user", Name: "Example User"}, ChatPartner: partner,
+	}}}
+	if got := p2pTitle(group, nil, "ou_example_user"); got != "Example Partner" {
+		t.Fatalf("title = %q", got)
+	}
+}
+
+func TestInboxCursorOverlapDedupAndPageCap(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "args.log")
+	t.Setenv("LARKCLI_FAKE_LOG", logPath)
+	c := inboxTestConnector(t, "inbox_pages")
+	c.inboxPageLimit = 1
+	if _, err := c.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := inboxThings(t, c)
+	if len(first) != 1 {
+		t.Fatalf("first page items = %d", len(first))
+	}
+	state := c.inboxStateForTests()
+	if state.Cursor == "" {
+		t.Fatal("cursor did not advance")
+	}
+	if _, err := c.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	second := inboxThings(t, c)
+	if len(second) != 1 {
+		t.Fatalf("overlap or capped page duplicated items: %#v", second)
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(b), "+messages-search") < 3 { // bounded seed plus one page per round
+		t.Fatalf("search calls were not paged: %q", b)
+	}
+}
+
+func TestInboxCoexistsWithGateway(t *testing.T) {
+	c := inboxTestConnector(t, "inbox")
+	c.SetInboxSource("", func(context.Context) bool { return true })
+	moved, err := c.Poll(context.Background())
+	if err != nil || moved {
+		t.Fatalf("gateway-primary poll = moved=%v err=%v", moved, err)
+	}
+	items, _ := c.Collect(context.Background())
+	if len(items) != 0 {
+		t.Fatalf("CLI collected while gateway was primary: %+v", items)
+	}
+	c.SetInboxSource("cli", func(context.Context) bool { return true })
+	moved, err = c.Poll(context.Background())
+	if err != nil || !moved {
+		t.Fatalf("CLI-primary poll = moved=%v err=%v", moved, err)
+	}
+}
+
+func TestInboxReplyUsesBot(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "args.log")
+	t.Setenv("LARKCLI_FAKE_LOG", logPath)
+	c := inboxTestConnector(t, "inbox")
+	if err := c.Reply(context.Background(), connector.InboxReply{Thread: "larkcli:chat:oc_example_group:thread:omt_topic_one", Last: "om_example_mention_one", Text: "Received", ClientID: "reply-1"}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "+messages-reply --message-id om_example_mention_one --text Received --idempotency-key reply-1 --reply-in-thread --as bot --format json") {
+		t.Fatalf("reply command = %q", b)
+	}
+}
+
+func TestInboxAllChatsOptionIsOptIn(t *testing.T) {
+	c := inboxTestConnector(t, "inbox")
+	var defaults InboxOptions
+	if err := json.Unmarshal(c.Options(), &defaults); err != nil {
+		t.Fatal(err)
+	}
+	if len(defaults.InboxAllChats) != 0 || len(defaults.Documents) != 0 || len(defaults.WikiSpaces) != 0 {
+		t.Fatalf("default options = %+v", defaults)
+	}
+	if err := c.SetOptions(json.RawMessage(`{"inbox_all_chats":["oc_example_group"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	var options InboxOptions
+	if err := json.Unmarshal(c.Options(), &options); err != nil {
+		t.Fatal(err)
+	}
+	if len(options.InboxAllChats) != 1 || options.InboxAllChats[0] != "oc_example_group" || len(options.Documents) != 0 || len(options.WikiSpaces) != 0 {
+		t.Fatalf("options = %+v", options)
+	}
+	if _, err := c.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	items := inboxThings(t, c)
+	if _, ok := items["larkcli:chat:oc_example_group:thread:omt_topic_three"]; !ok {
+		t.Fatalf("selected chat did not admit its ordinary message: %#v", items)
+	}
+	if err := c.SetOptions(json.RawMessage(`{"inbox_all_chats":[""]}`)); err == nil {
+		t.Fatal("empty chat id accepted")
+	}
+}
+
+func TestInboxWatchSignalsChanged(t *testing.T) {
+	c := inboxTestConnector(t, "inbox")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var scope connector.Scope
+	err := c.Watch(ctx, func(got connector.Scope) {
+		scope = got
+		cancel()
+	})
+	if err != nil || scope != connector.ScopeInbox {
+		t.Fatalf("watch = scope=%q err=%v", scope, err)
+	}
+}
+
+type inboxStateStore struct{ raw json.RawMessage }
+
+func (s *inboxStateStore) Setting(_ context.Context, _ string, out any) (bool, error) {
+	if len(s.raw) == 0 {
+		return false, nil
+	}
+	return true, json.Unmarshal(s.raw, out)
+}
+
+func (s *inboxStateStore) PutSetting(_ context.Context, _ string, value any) error {
+	b, err := json.Marshal(value)
+	s.raw = b
+	return err
+}
+
+func TestInboxCursorAndTopicsPersistInStore(t *testing.T) {
+	store := &inboxStateStore{}
+	c1 := inboxTestConnector(t, "inbox")
+	c1.SetStateStore(store)
+	if _, err := c1.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	state := c1.inboxStateForTests()
+	if state.Cursor == "" || len(state.Topics) == 0 {
+		t.Fatalf("state was not saved: %+v", state)
+	}
+	c2 := inboxTestConnector(t, "inbox")
+	c2.SetStateStore(store)
+	if _, err := c2.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	loaded := c2.inboxStateForTests()
+	if loaded.Cursor == "" || len(loaded.Topics) == 0 || !loaded.TopicsSeeded {
+		t.Fatalf("state was not restored: %+v", loaded)
+	}
+}
+
 func TestDisplayNameFollowsLanguage(t *testing.T) {
 	c := New(adapter.Config{Bin: "lark-cli"})
 	if got := connector.DisplayName(i18n.With(context.Background(), i18n.ZhHans), c); got != "飞书 · 我的消息" { // i18n-ignore: the zh-Hans catalog entry under test
@@ -269,5 +526,35 @@ func TestDisplayNameFollowsLanguage(t *testing.T) {
 	}
 	if c.Name() != Name {
 		t.Fatalf("stable name changed: %q", c.Name())
+	}
+}
+
+func TestMessageTimeReadsLarkCLIWallClockMinutes(t *testing.T) {
+	// lark-cli prints "2006-01-02 15:04" in the local time zone; RFC 3339 and Unix times still work.
+	want := time.Date(2030, 1, 1, 15, 14, 0, 0, time.Local).UTC()
+	if got := messageTime(adapter.Message{CreateTime: "2030-01-01 15:14"}); !got.Equal(want) {
+		t.Fatalf("wall-clock minute = %v, want %v", got, want)
+	}
+	if got := messageTime(adapter.Message{CreateTime: "2030-01-01 15:14:30"}); !got.Equal(want.Add(30 * time.Second)) {
+		t.Fatalf("wall-clock second = %v", got)
+	}
+	if got := messageTime(adapter.Message{CreateTime: "2030-01-01T12:00:00Z"}); !got.Equal(time.Date(2030, 1, 1, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("RFC 3339 = %v", got)
+	}
+	if got := messageTime(adapter.Message{CreateTime: "not a time"}); !got.IsZero() {
+		t.Fatalf("garbage = %v", got)
+	}
+}
+
+func TestCardTextReadsAsPlainText(t *testing.T) {
+	in := "<card title=\"Merge Request Merged\">\n  Example change was merged\n</card>"
+	if got := cardText(in); got != "Merge Request Merged\nExample change was merged" {
+		t.Fatalf("card = %q", got)
+	}
+	if got := cardText("<card>\n:OK:\n</card>"); got != ":OK:" {
+		t.Fatalf("untitled card = %q", got)
+	}
+	if got := cardText("plain <b>text</b>"); got != "plain <b>text</b>" {
+		t.Fatalf("plain text changed: %q", got)
 	}
 }

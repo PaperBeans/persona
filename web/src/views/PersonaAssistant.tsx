@@ -6,7 +6,7 @@ import { api, errorText } from "../lib/api";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MentionSource } from "./chat/MentionMenu";
 import { startConversation } from "../lib/assistant-start";
-import { feedCacheScope, readFeedCache } from "../lib/feed-cache";
+import { feedCacheScope, mainConversationMachine, readFeedCache } from "../lib/feed-cache";
 import { startOfDay } from "../lib/feed";
 import { ago, uuid } from "../lib/format";
 import { codedFailure, helpTopic, passesBySelf, refreshReadiness, type CodedFailure } from "../lib/readiness";
@@ -18,6 +18,7 @@ import { adoptedConversation, noteSent, outboxMessage } from "../lib/outbox";
 import { Button, cx, EASE, IconButton, Loading } from "../ui/atoms";
 import { Icon } from "../ui/icons";
 import { ChatView, Header } from "./chat/ChatView";
+import { MainRuntimeSlot } from "./assistant/MainRuntimeSlot";
 import { UserBubble } from "./chat/SegmentView";
 import { Composer, type Outgoing } from "./chat/Composer";
 import { StarterLauncherChip } from "./assistant/AssistantChat";
@@ -25,6 +26,7 @@ import { PersonaAvatar, usePersona } from "./assistant/Persona";
 import { ChatOnlyNote, FailureCard, ReadinessCard, useReadinessGate } from "./assistant/Readiness";
 import { DayLine } from "./assistant/Tasks";
 import { ShellHeaderSlots, ShellSwitch } from "./ShellSwitch";
+import { StartSessionButton } from "./StartSessionButton";
 import { conversationTitle } from "./assistant/conversations";
 import { formatList, t } from "../i18n";
 import { useAssistantTitle, useShownOffline } from "./ManagerParts";
@@ -149,7 +151,7 @@ export function PersonaAssistant({ sid, fresh, routed, onToggleSidebar }: { sid?
     return page && (page.manager ?? "") === manager ? page : null;
   }, [scope, manager, sid, fresh, assistant]);
   const main = assistant?.main ?? cached?.sessionID;
-  const machine = home ? homeMachine || read.machine : (assistant?.machine_id ?? cached?.machineID);
+  const machine = home ? homeMachine || read.machine : ((sid && sid !== main ? assistant?.machine_id : mainConversationMachine(assistant)) ?? cached?.machineID);
   if (fresh) return <Starter onToggleSidebar={onToggleSidebar} />;
   const id = sid ?? main;
   if (id) {
@@ -173,6 +175,7 @@ export function PersonaAssistant({ sid, fresh, routed, onToggleSidebar }: { sid?
         starting={starting.has(id)}
         onToggleSidebar={onToggleSidebar}
         topCenter={topCenter}
+        headerActions={id === main ? <StartSessionButton compact /> : undefined}
         mainCache={id === main && scope ? { scope, manager } : undefined}
         refreshError={id === main ? assistantError ?? undefined : undefined}
         onRefresh={id === main ? () => void refreshAssistant().catch(() => {}) : undefined}
@@ -329,21 +332,24 @@ function Starter({ main, onToggleSidebar }: { main?: boolean; onToggleSidebar: (
           onInterrupt={noop}
           onStopLoop={noop}
           topCenter={main ? <ShellSwitch page="assistant" /> : undefined}
+          actions={main ? <StartSessionButton compact /> : undefined}
         />
       ) : (
       <header className="flex h-14 shrink-0 items-center gap-2 px-3 sm:px-4">
         {/* a phone's assistant page: "Assistant | Agents" between the same side slots as ChatView's and the Agents page's */}
         {main ? (
-          <ShellHeaderSlots page="assistant" onToggleSidebar={onToggleSidebar} end={<IconButton icon="info" label={t("personaassistant.profile")} onClick={() => navigate({ name: "profile" })} />} />
+          <ShellHeaderSlots page="assistant" onToggleSidebar={onToggleSidebar} end={<><StartSessionButton compact /><IconButton icon="info" label={t("personaassistant.profile")} onClick={() => navigate({ name: "profile" })} /></>} />
         ) : (
           <IconButton icon="sidebar" label={t("personaassistant.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
         )}
         <span className={cx("flex-1", main && "max-lg:hidden")} />
+        {main && <StartSessionButton className="max-lg:hidden" />}
         <button type="button" onClick={() => navigate({ name: "profile" })} className={cx("flex h-7 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium whitespace-nowrap text-ink-2 shadow-btn hover:bg-hover hover:text-ink", main && "max-lg:hidden")}>
           <PersonaAvatar size={16} fallback={<Icon name="info" size={13} />} /> {t("personaassistant.profile")}
         </button>
       </header>
       )}
+      <MainRuntimeSlot starting={Boolean(main && sending)} />
       <div className={sending ? "flex min-h-0 flex-1 flex-col" : "flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 pb-[10vh]"}>
         <div className={sending ? "contents" : "w-full max-w-[640px]"} style={sending ? undefined : { animation: `fade-up 450ms ${EASE} both` }}>
           {sending ? (

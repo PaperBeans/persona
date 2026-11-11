@@ -125,8 +125,10 @@ type sdkStart struct {
 	configDir                      string
 	resume                         bool
 	mcp                            map[string]any // --mcp-config's {"mcpServers": …}
+	guestMCP                       map[string]any // a guest's stdio config, proxied through an in-process SDK server
 	allowedTools                   string         // --allowedTools
 	tools                          string         // --tools: built-ins only; MCP tools stay available
+	strictMCP                      bool           // --strict-mcp-config: no user/extension MCP servers
 	deny                           []string       // permission rules denied whatever allows them (healthdeny.go)
 	settings                       string         // --settings: a file, or ""
 	plugin                         string         // --plugin-dir, or ""
@@ -143,11 +145,17 @@ func (s sdkStart) options(claude string) (map[string]any, error) {
 		"includePartialMessages":     true,
 		"pathToClaudeCodeExecutable": claude,
 	}
+	if s.guestMCP != nil {
+		o["guestMcpServers"] = s.guestMCP
+	}
 	if tools := strings.Split(s.allowedTools, ","); s.allowedTools != "" {
 		o["allowedTools"] = tools
 	}
 	if s.tools != "" {
 		o["tools"] = strings.Split(s.tools, ",")
+	}
+	if s.strictMCP {
+		o["strictMcpConfig"] = true
 	}
 	if s.model != "" {
 		o["model"] = s.model
@@ -252,7 +260,11 @@ func (n *Node) sdkCommand(b sdkBridge, launcher string, s sdkStart, base []strin
 	if l, managed := n.managedLauncher(launcher); managed {
 		// the main conversation's provider env (launcherenv.go); its values hold the key: never logged
 		s.env, s.launcherArgs = providerEnv(l, s.model, "", true), l.Args
-		s.env["CLAUDE_CONFIG_DIR"] = configDir
+		if configDir != "" {
+			s.env["CLAUDE_CONFIG_DIR"] = configDir
+		} else {
+			delete(s.env, "CLAUDE_CONFIG_DIR") // "default": unset, as claudeProcessEnv does
+		}
 		if mergesNoProxy(l) {
 			// As `personad launch` and its settings file do (#6238): the provider's hosts are added to the bypass lists
 			// this claude would read without it, the user's settings env's (applied over the environment), else the node's.
@@ -274,9 +286,16 @@ func (n *Node) sdkCommand(b sdkBridge, launcher string, s sdkStart, base []strin
 	if s.env == nil {
 		s.env = map[string]string{}
 	}
-	s.env["CLAUDE_CONFIG_DIR"] = configDir
+	if configDir != "" {
+		s.env["CLAUDE_CONFIG_DIR"] = configDir
+	} else {
+		delete(s.env, "CLAUDE_CONFIG_DIR") // "default": unset, as claudeProcessEnv does
+	}
 	if s.compaction != nil {
 		base = identity.Environment(base, s.compaction.env()...)
+	}
+	if claudeDir := filepath.Dir(b.claude); claudeDir != "" && claudeDir != "." {
+		base = prependEnvPath(base, claudeDir)
 	}
 	opts, err := s.options(b.claude)
 	if err != nil {
@@ -324,4 +343,30 @@ func (n *Node) sdkBridgeEvent(p *assistantProc, line []byte) bool {
 		n.logger.Printf("assistant %s: agent sdk bridge exiting", short(p.id))
 	}
 	return true
+}
+
+// prependEnvPath puts dir first on PATH, for an npm shim that runs `env node`.
+func prependEnvPath(env []string, dir string) []string {
+	if dir == "" || dir == "." {
+		return env
+	}
+	found := false
+	out := make([]string, len(env))
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			out[i] = "PATH=" + dir + string(os.PathListSeparator) + strings.TrimPrefix(kv, "PATH=")
+			found = true
+		} else {
+			out[i] = kv
+		}
+	}
+	if !found {
+		p := os.Getenv("PATH")
+		if p == "" {
+			out = append(out, "PATH="+dir)
+		} else {
+			out = append(out, "PATH="+dir+string(os.PathListSeparator)+p)
+		}
+	}
+	return out
 }

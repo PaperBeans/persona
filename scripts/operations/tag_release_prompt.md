@@ -64,7 +64,11 @@ explicit prerequisite error.
 For `hub`, use the existing publication script and its deployment lock. Publish
 its verified multi-platform binary, web, node, and connector downloads under
 this version tag. Do not manually deploy a Worker or bypass its live-readback
-checks.
+checks. Build the binaries and write `latest.json` in one run with one build
+number: never write a manifest over binaries an earlier attempt left behind.
+The coordinator refuses a receipt whose `latest.json` does not describe its
+binaries (sizes, sha256s, build number, and this machine's `personad version
+-v`), and uploads `latest.json` after the files it lists.
 
 For `web`, use the existing hub/web publication receipt. A successful artifact
 upload does not by itself establish that a separate production deployment is

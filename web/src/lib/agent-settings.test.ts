@@ -168,6 +168,22 @@ describe("mail account form", () => {
     expect(mailCodeGuide({ ...EMPTY_MAIL_FORM, email: "me@qq.com", imapHost: "imap.example.com" })).toBeNull();
   });
 
+  it("chooses SMTP security from the parsed port (#4879)", () => {
+    const form = { ...EMPTY_MAIL_FORM, email: "me@example.com", password: "pw", smtpHost: "smtp.example.com" };
+    for (const smtpPort of ["0587", "587", " 0587 ", "587.0", "5.87e2"]) {
+      expect(mailErrors({ ...form, smtpPort })).toEqual({});
+      expect(mailRequest({ ...form, smtpPort })).toMatchObject({ smtp_port: 587, smtp_security: "starttls" });
+    }
+    for (const smtpPort of ["465", "0465", "2525"]) {
+      expect(mailErrors({ ...form, smtpPort })).toEqual({});
+      expect(mailRequest({ ...form, smtpPort })).toMatchObject({ smtp_port: Number(smtpPort), smtp_security: "tls" });
+    }
+    for (const smtpPort of ["abc", "", "0", "65536", "587.5"]) expect(mailErrors({ ...form, smtpPort }).smtpPort).toBeTruthy();
+    const omitted = { ...form, smtpHost: " ", smtpPort: "abc" };
+    expect(mailErrors(omitted)).toEqual({});
+    expect(mailRequest(omitted)).toEqual({ name: "me@example.com", email: "me@example.com", provider: "imap", auth: "password", password: "pw" });
+  });
+
   it("builds the hub's request", () => {
     expect(mailRequest({ ...EMPTY_MAIL_FORM, kind: "gmail" })).toBeNull();
     expect(mailRequest({ ...EMPTY_MAIL_FORM, kind: "outlook", email: "me@example.com", password: "pw" })).toBeNull();

@@ -22,7 +22,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -148,7 +147,6 @@ fun LarkMessageActionMenu(
     onAddPin: (() -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
-    val clipboard = LocalClipboardManager.current
     val res = LocalResources.current
     val moreLabel = stringResource(R.string.inbox_lark_more_emoji)
     // The menu rows' icons, one size.

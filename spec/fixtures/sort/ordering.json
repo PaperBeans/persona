@@ -4,7 +4,7 @@
   "cases": [
     {
       "name": "rank_all_states_and_mutes",
-      "description": "需要你即使屏蔽仍在最前，屏蔽的已看会话仍归已看。",
+      "description": "需要你即使屏蔽仍在最前，屏蔽的已看会话仍归已看；已看默认折叠。",
       "source": [
         "ios/Persona/Views/Chats/ChatsView.swift: base, body, counts(_:), rank(_:), ordered(_:), stateSections(_:), machineSections(_:), spaceSection(_:)",
         "ios/Shared/Models.swift: Session.sortDate",
@@ -143,7 +143,8 @@
         "counts": {
           "needsYou": 1,
           "unread": 1,
-          "working": 2
+          "working": 2,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -209,7 +210,7 @@
               "machine-a/g"
             ],
             "visible_rows": [],
-            "folded": false
+            "folded": true
           }
         ],
         "unread_shown": [
@@ -322,7 +323,8 @@
         "counts": {
           "needsYou": 0,
           "unread": 1,
-          "working": 4
+          "working": 4,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -464,7 +466,8 @@
         "counts": {
           "needsYou": 0,
           "unread": 1,
-          "working": 4
+          "working": 4,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -608,7 +611,8 @@
         "counts": {
           "needsYou": 0,
           "unread": 1,
-          "working": 4
+          "working": 4,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -639,7 +643,7 @@
     },
     {
       "name": "mute_allow_and_explicit_override",
-      "description": "空间屏蔽可被单会话允许覆盖，但显式屏蔽仍优先。",
+      "description": "空间屏蔽可被单会话允许覆盖，但显式屏蔽仍优先；已看默认折叠。",
       "source": [
         "ios/Persona/Views/Chats/ChatsView.swift: base, body, counts(_:), rank(_:), ordered(_:), stateSections(_:), machineSections(_:), spaceSection(_:)",
         "ios/Shared/Models.swift: Session.sortDate",
@@ -744,7 +748,8 @@
         "counts": {
           "needsYou": 1,
           "unread": 1,
-          "working": 1
+          "working": 1,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -789,7 +794,7 @@
               "machine-a/d"
             ],
             "visible_rows": [],
-            "folded": false
+            "folded": true
           }
         ],
         "unread_shown": [
@@ -901,7 +906,8 @@
         "counts": {
           "needsYou": 1,
           "unread": 1,
-          "working": 1
+          "working": 1,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -1026,7 +1032,8 @@
         "counts": {
           "needsYou": 0,
           "unread": 0,
-          "working": 1
+          "working": 1,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -1121,7 +1128,8 @@
         "counts": {
           "needsYou": 0,
           "unread": 0,
-          "working": 2
+          "working": 2,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -1229,7 +1237,8 @@
         "counts": {
           "needsYou": 0,
           "unread": 0,
-          "working": 2
+          "working": 2,
+          "backgroundWaiting": 0
         },
         "groups": [
           {

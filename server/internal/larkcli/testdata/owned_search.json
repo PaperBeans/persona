@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "data": {
+    "has_more": false,
+    "page_token": "",
+    "results": [
+      {
+        "entity_type": "DOC",
+        "title_highlighted": "Example <em>launch</em> plan",
+        "result_meta": {
+          "url": "https://example.feishu.cn/docx/doc_owned",
+          "token": "doc_owned",
+          "doc_types": "DOCX",
+          "owner_id": "ou_example_user",
+          "update_time": 1892419200,
+          "last_open_time": 1890777600
+        }
+      },
+      {
+        "entity_type": "DOC",
+        "title_highlighted": "Example old notes",
+        "result_meta": {
+          "url": "https://example.feishu.cn/docx/doc_old",
+          "token": "doc_old",
+          "doc_types": "DOCX",
+          "owner_id": "ou_example_user",
+          "update_time": 1874966400,
+          "last_open_time": 1874966400
+        }
+      }
+    ]
+  }
+}

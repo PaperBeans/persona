@@ -37,7 +37,7 @@ func viewErrorsClaude(t *testing.T, n *Node, stdin interface {
 	Close() error
 }) *assistantProc {
 	p := &assistantProc{id: testThread, agent: "claude", launcher: "claude", cwd: t.TempDir(), stdin: stdin, cmd: &exec.Cmd{}, exited: make(chan struct{}), born: time.Now(),
-		lastActive: time.Now(), fingerprint: n.executionFingerprint("claude", modelExecution{})}
+		lastActive: time.Now(), canBypass: true, mode: proto.ModeBypass, fingerprint: n.executionFingerprint("claude", modelExecution{})}
 	n.mu.Lock()
 	n.procs[testThread] = p
 	n.mu.Unlock()

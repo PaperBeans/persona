@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,13 +33,10 @@ func sessionRow(t *testing.T, n *Node, id string) proto.Session {
 
 func waitSession(t *testing.T, n *Node, id, status, reason string) {
 	t.Helper()
-	var s proto.Session
-	for end := time.Now().Add(3 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
-		if s = sessionRow(t, n, id); s.Status == status && s.AttentionReason == reason {
-			return
-		}
-	}
-	t.Fatalf("never %s %q: %s %q", status, reason, s.Status, s.AttentionReason)
+	waitWithin(t, 3*time.Second, status+" "+strconv.Quote(reason), func() bool {
+		s := sessionRow(t, n, id)
+		return s.Status == status && s.AttentionReason == reason
+	})
 }
 
 // #3752: Claude Code 2.1.322 runs the PermissionRequest hooks for its own safety checks but ignores an allow for them.

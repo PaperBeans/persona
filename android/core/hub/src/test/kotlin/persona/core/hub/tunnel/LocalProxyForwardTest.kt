@@ -26,6 +26,15 @@ import persona.core.hub.closedPort
 class LocalProxyForwardTest {
     private val LoopbackHub.port get() = URI(paired).port
 
+    /**
+     * A free port below every system's ephemeral range (Linux 32768-60999, macOS and Windows 49152-65535). A port bound to 0
+     * is an ephemeral one: once closed, the system can give it to any process's next outgoing connection, so a test that
+     * closes it and asks for it back fails whenever something else on the machine connects in between (#3189).
+     */
+    private fun listenablePort(): Int = (20_000 until 32_000).shuffled().first { port ->
+        runCatching { ServerSocket().use { it.reuseAddress = true; it.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port)) } }.isSuccess
+    }
+
     private fun problem(block: () -> Unit): TunnelProblem {
         try { block() } catch (error: TunnelException) { return error.problem }
         fail("No TunnelException")
@@ -103,7 +112,7 @@ class LocalProxyForwardTest {
                 val dial = LocalProxyForward.Dial.of(LocalProxyRoute(port = proxy.port), hub.paired)
                 val client = OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY).build()
                 val port = LocalProxyForward(dial).use { forward ->
-                    val port = forward.listen()
+                    val port = forward.listen(preferred = listenablePort())
                     repeat(3) {
                         val request = Request.Builder().url("http://127.0.0.1:$port/api/v1/health").header("Connection", "close").build()
                         client.newCall(request).execute().use { response -> assertEquals(200, response.code) }

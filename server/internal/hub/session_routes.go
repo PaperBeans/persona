@@ -17,6 +17,8 @@ func (h *Hub) sessionRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/keys", h.proxyBody("session.keys"))
 	// #2436: rewind a Claude session to before one of its messages (rewind.go); a full device only, it restores files
 	api.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/rewind", h.withClientOp("rewind", h.withMachine(h.rewindSession)))
+	// #2528: back to the configured model after a refusal fallback (restore_model.go); a full device only, a relay
+	api.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/restore-model", h.withClientOp("restore_model", h.withMachine(h.restoreSessionModel)))
 	api.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/fork", h.withClientOp("fork", h.proxyBody("session.fork"))) // "Branch to new chat" (node/fork.go)
 	api.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/close", h.withClientOp("close", h.proxyBody("session.close")))
 	api.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/queue", h.withoutTerminalControls(h.proxyBody("session.queue.edit")))

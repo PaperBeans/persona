@@ -55,6 +55,8 @@ const usage = `usage:
                            unless hub.json says assistant.external (token: stdin or PERSONA_ASSISTANT_TOKEN)
   personad assistant drop-shared-tables [--yes]  drop the built-in manager's old tables from the hub's database, once
                            its data moved into its own (without --yes: list them)
+  personad assistant north-star [--date YYYY-MM-DD] [--split RFC3339] [--tz Area/City] [--brief en]
+                           read the interruption and availability north star from the databases, read-only
   personad manager join|run|install|uninstall|status
                            another manager made in the app: trade its install code, run it, install it as a service
                            (docs/assistant/managers.md; personad manager for the details)
@@ -72,7 +74,7 @@ const usage = `usage:
                            secret, uninstall, markets (docs/extensions/extensions.md "Command line"; personad extension for the details;
                            also personad ext …, and personad plugin … as before)
 ` + nodecmd.SysmonUsage + `
-  personad release manifest|check-next …
+  personad release manifest|verify|check-next …
                            the publisher's release manifest and checks (scripts/release/publish.sh, docs/operations/hub-update.md "Public publishing")
   personad update-watch <pending>
                            the watchdog the hub starts over its own update (docs/operations/hub-update.md "Updating")

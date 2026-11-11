@@ -17,12 +17,16 @@ import {
   asksFirst, changed, checkError, choiceLabel, clearedSecrets, clearExtensionSecret, compact, configError, fieldLabel, fieldTitle, isDirty, listItems, listExtensionsInfo, listSummary, numberProblems,
   placeholder, extensionDetail, extensionState, extensionTone, pointText, readNumber, rebaseDraft, runNote, same, secretState, setAt, setContribution, setExtensionConfig, setExtensionEnabled,
   channelOf, machineStatus, nodeProgramStatus, pickerChoices, sandboxEgress, sandboxState, saveFooter, setExtensionAutoUpgrade, setExtensionSecret, sourceText, stateLine, valueAt,
+  removeHandoffRule, setExtensionSecretReference, type HandoffRule, type SecretUser,
   type HubExtension, type HubExtensionDetail, type Json, type JsonObject, type ExtensionField, type ExtensionNodeState, type ExtensionSandbox, type ExtensionSecret,
   type PickerLauncher,
 } from "../../lib/extensions";
 import { loadLaunchers } from "../../lib/launcher-list";
+import { hubHasExt } from "../../lib/extension-api";
 import { Button, cx, Dialog, EASE, IconButton, Loading, Spinner, toast } from "../../ui/atoms";
 import { TriageRuleField } from "../../ui/TriageRuleField";
+import { ExtensionLogo } from "../../ui/ExtensionLogo";
+import { ExtensionDownloads, packageDownloads } from "../../ui/ExtensionDownloads";
 import { Icon } from "../../ui/icons";
 import { ChannelLink } from "./Channels";
 import { MarketCatalog, MarketItem, Markets, PackMemberRow, UninstallDialog, useInstalledNames } from "./ExtensionMarket";
@@ -273,9 +277,7 @@ function ExtensionList({ onOpen, onMarket, onMarkets }: { onOpen: (id: string) =
               className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-hover"
               style={{ animation: `fade-up 320ms ${EASE} ${Math.min(i, 8) * 30}ms both` }}
             >
-              <span className={cx("flex size-8 shrink-0 items-center justify-center rounded-[8px]", TILE[extensionTone(p)])}>
-                <Icon name="extension" size={15} />
-              </span>
+              <ExtensionLogo url={p.icon_url} iconSize={15} className={cx("flex size-8 shrink-0 items-center justify-center rounded-[8px]", TILE[extensionTone(p)])} />
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-[13px] text-ink">{p.name}</span>
@@ -286,6 +288,7 @@ function ExtensionList({ onOpen, onMarket, onMarkets }: { onOpen: (id: string) =
                     {note}
                   </div>
                 )}
+                {packageDownloads(p.downloads) !== null && <div className="mt-0.5"><ExtensionDownloads downloads={p.downloads} /></div>}
               </div>
               <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12px] text-ink-2">
                 <StateDot extension={p} />
@@ -661,9 +664,7 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
       {/* what it is and how it is doing */}
       <section className="mb-6 overflow-hidden rounded-card bg-surface shadow-card">
         <div className="flex items-center gap-3 px-4 py-3.5">
-          <span className={cx("flex size-11 shrink-0 items-center justify-center rounded-[11px]", TILE[extensionTone(p)])}>
-            <Icon name="extension" size={20} />
-          </span>
+          <ExtensionLogo url={p?.icon_url} iconSize={20} className={cx("flex size-11 shrink-0 items-center justify-center rounded-[11px]", TILE[extensionTone(p)])} />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-[15px] font-semibold text-ink">{p?.name ?? id}</h2>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] text-ink-3">
@@ -758,7 +759,7 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
                       {s.title}
                     </span>
                   }
-                  hint={s.description}
+                  hint={s.reference ? s.reference.title || s.reference.reference : s.description}
                   onClick={() => setSecret(s)}
                 >
                   <span className={cx(!s.set && s.required && "text-orange")}>{secretState(s)}</span>
@@ -769,6 +770,7 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
 
           </>}
           information={<>
+          <SecretProviderGroups extension={id} users={p.secret_users} rules={p.handoff_rules} editable={editable} onStart={secretStart} onDone={secretDone} />
           {!!p.depends?.length && (
             <Group title={t("settings-extensions.depends_title")} footer={t("settings-extensions.depends_footer")}>
               {p.depends.map((d) => <Row key={d.id} label={d.name || d.id} hint={d.version}><span className={cx(d.state !== "ok" && "text-orange")}>{dependencyText(d)}</span></Row>)}
@@ -1201,7 +1203,10 @@ function ListControl({ field: f, path, draft, onEdit, id, ring }: Pick<FieldProp
 
 /** Sets one secret: typed in hidden, saved to the hub, never shown again; one that is set can be cleared. */
 function SecretDialog({ extension, secret, onClose, onStart, onDone }: { extension: string; secret: ExtensionSecret; onClose: () => void; onStart: () => number; onDone: (n: number, d: HubExtensionDetail) => void }) {
-  const [value, setValue] = useState("");
+  // a provider's reference in place of the value (docs/extensions/secret-providers.md), where the hub takes one
+  const references = useStore((s) => hubHasExt(s.features, "secret_references"));
+  const [byRef, setByRef] = useState(!!secret.reference);
+  const [value, setValue] = useState(secret.reference?.reference ?? "");
   // shown while typing, to check what was pasted (a token cut short is a common mistake); a saved one is never shown
   const [shown, setShown] = useState(false);
   const [busy, setBusy] = useState<"" | "save" | "clear">("");
@@ -1220,11 +1225,12 @@ function SecretDialog({ extension, secret, onClose, onStart, onDone }: { extensi
     setError("");
     try {
       const n = onStart();
-      const d = kind === "save" ? await setExtensionSecret(extension, secret.name, v) : await clearExtensionSecret(extension, secret.name);
+      const d = kind === "clear" ? await clearExtensionSecret(extension, secret.name)
+        : byRef ? await setExtensionSecretReference(extension, secret.name, v) : await setExtensionSecret(extension, secret.name, v);
       // a saved value leaves the page: nothing keeps it once the hub has it
       setValue("");
       onDone(n, d);
-      toast(t(kind === "save" ? "settings-extensions.secret_saved" : "settings-extensions.secret_cleared", { title: secret.title }), "ok");
+      toast(t(kind === "clear" ? "settings-extensions.secret_cleared" : byRef ? "settings-extensions.secret_reference_saved" : "settings-extensions.secret_saved", { title: secret.title }), "ok");
       onClose();
     } catch (e) {
       setError(errorText(e));
@@ -1273,37 +1279,138 @@ function SecretDialog({ extension, secret, onClose, onStart, onDone }: { extensi
           <Icon name="lock" size={13} className="shrink-0" />
           {secretState(secret)}
         </div>
+        {references && (
+          <div className="flex items-center justify-between gap-2 text-[13px] text-ink-2">
+            <span>{t("settings-extensions.use_reference")}</span>
+            <Switch
+              label={t("settings-extensions.use_reference")}
+              on={byRef}
+              disabled={!!busy}
+              onChange={(on) => {
+                setByRef(on);
+                setValue(on ? (secret.reference?.reference ?? "") : "");
+                setError("");
+              }}
+            />
+          </div>
+        )}
         <div className="flex items-center gap-1.5">
           <input
             ref={input}
-            type={shown ? "text" : "password"}
+            type={byRef || shown ? "text" : "password"}
             value={value}
             onChange={(e) => (setValue(e.target.value), setError(""))}
             autoFocus
-            autoComplete="new-password"
+            autoComplete={byRef ? "off" : "new-password"}
             spellCheck={false}
-            placeholder={secret.set ? t("settings-extensions.secret_replace_placeholder") : t("settings-extensions.secret_placeholder")}
+            placeholder={byRef ? t("settings-extensions.reference_placeholder") : secret.set ? t("settings-extensions.secret_replace_placeholder") : t("settings-extensions.secret_placeholder")}
             aria-label={secret.title}
             aria-invalid={!!error || undefined}
             aria-describedby={error ? errorId : undefined}
             disabled={!!busy}
             className={cx(inputClass, "h-9 min-w-0 flex-1 font-mono shadow-inset-field")}
           />
-          <IconButton
-            icon={shown ? "eyeOff" : "eye"}
-            label={shown ? t("settings-extensions.secret_hide") : t("settings-extensions.secret_show")}
-            onClick={() => setShown((x) => !x)}
-            disabled={!!busy}
-          />
+          {!byRef && (
+            <IconButton
+              icon={shown ? "eyeOff" : "eye"}
+              label={shown ? t("settings-extensions.secret_hide") : t("settings-extensions.secret_show")}
+              onClick={() => setShown((x) => !x)}
+              disabled={!!busy}
+            />
+          )}
         </div>
         {error && (
           <p id={errorId} role="alert" className="rounded-[8px] bg-red-tint px-2.5 py-1.5 text-[12px] break-words text-red select-text">
             {t("settings-extensions.not_saved", { error })}
           </p>
         )}
-        <p className="text-[11.5px] leading-relaxed text-ink-3">{secret.description || t("settings-extensions.secret_hint")}</p>
+        <p className="text-[11.5px] leading-relaxed text-ink-3">{byRef ? t("settings-extensions.reference_hint") : secret.description || t("settings-extensions.secret_hint")}</p>
         <button type="submit" hidden />
       </form>
     </Dialog>
+  );
+}
+
+/**
+ * A secret provider's page (docs/extensions/secret-providers.md): the settings that hold its references, each the
+ * user's standing approval, and the Always rules of hand-offs to Agents, each removable (the next hand-off asks again).
+ */
+function SecretProviderGroups({ extension, users, rules, editable, onStart, onDone }: {
+  extension: string;
+  users?: SecretUser[];
+  rules?: HandoffRule[];
+  editable: boolean;
+  onStart: () => number;
+  onDone: (n: number, d: HubExtensionDetail) => void;
+}) {
+  const machines = useStore((s) => s.machines);
+  const [removing, setRemoving] = useState<HandoffRule | null>(null);
+  const [busy, setBusy] = useState(false);
+  const machineName = (id: string) => machines.find((m) => m.id === id)?.name || id;
+  const remove = async (rule: HandoffRule) => {
+    setBusy(true);
+    try {
+      const n = onStart();
+      onDone(n, await removeHandoffRule(extension, rule.id));
+      toast(t("settings-extensions.rule_removed"), "ok");
+      setRemoving(null);
+    } catch (e) {
+      toast(errorText(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const userLabel = (u: SecretUser) =>
+    u.kind === "launcher"
+      ? u.machine
+        ? t("settings-extensions.user_launcher_machine", { name: u.launcher_name || u.launcher || "", machine: machineName(u.machine) })
+        : t("settings-extensions.user_launcher", { name: u.launcher_name || u.launcher || "" })
+      : `${u.extension_name || u.extension || ""} › ${u.secret_title || u.secret || ""}`;
+  return (
+    <>
+      {!!users?.length && (
+        <div data-secret-users>
+          <Group title={t("settings-extensions.users_title")} footer={t("settings-extensions.users_footer")}>
+            {users.map((u, i) => (
+              <Row key={`${u.kind}/${u.extension ?? u.launcher}/${u.secret ?? u.machine ?? ""}/${i}`} label={userLabel(u)} hint={u.reference} />
+            ))}
+          </Group>
+        </div>
+      )}
+      {!!rules?.length && (
+        <div data-handoff-rules>
+          <Group title={t("settings-extensions.rules_title")} footer={t("settings-extensions.rules_footer")}>
+            {rules.map((r) => (
+              <Row key={r.id} label={t("settings-extensions.rule_label", { launcher: r.launcher, machine: machineName(r.machine) })} hint={r.reference}>
+                {editable && (
+                  <Button tone="quiet" disabled={busy} onClick={() => setRemoving(r)}>
+                    {t("settings-extensions.rule_remove")}
+                  </Button>
+                )}
+              </Row>
+            ))}
+          </Group>
+        </div>
+      )}
+      {removing && (
+        <Dialog
+          open
+          title={t("settings-extensions.rule_remove_title")}
+          onClose={() => !busy && setRemoving(null)}
+          footer={
+            <>
+              <Button tone="quiet" disabled={busy} onClick={() => setRemoving(null)}>
+                {t("common.cancel")}
+              </Button>
+              <Button tone="danger" busy={busy} onClick={() => void remove(removing)}>
+                {t("settings-extensions.rule_remove")}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-ink-2">{t("settings-extensions.rule_remove_body", { launcher: removing.launcher, machine: machineName(removing.machine) })}</p>
+        </Dialog>
+      )}
+    </>
   );
 }

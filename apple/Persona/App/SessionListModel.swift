@@ -159,7 +159,19 @@ import Observation
         let work = Task { [weak self] in
             guard let self else { return }
             do {
-                var page = try await self.fetch(self.query, first ? nil : self.cursor, nil)
+                var page: Page
+                if first { page = try await self.fetch(self.query, nil, nil) }
+                else {
+                    do { page = try await self.fetch(self.query, self.cursor, nil) }
+                    catch let expired as APIError where expired.status == 409 {
+                        // The hub keeps a frozen window 5 minutes (fewer when newer ones push it out), so reaching
+                        // the end of a list open that long always lands here. Starting over from the first page cut
+                        // the list back to 50 rows and the scroll view put the reader near the top; keep the rows and
+                        // read a fresh window as deep as they have scrolled, plus a page.
+                        try await self.rebaseline(depth: self.rows.count + 1, generation: gen)
+                        return
+                    }
+                }
                 try Task.checkCancellation()
                 guard self.generation == gen else { return }
                 let complete = first && self.query.legacy && page.isPaged
@@ -316,6 +328,44 @@ import Observation
         if dirty {
             dirty = false
             if !loaded { await run(first: true) } else { await synchronizeRead() }
+        }
+    }
+
+    /// A fresh frozen window at least `depth` rows deep (or all there is), swapped in at once: the rows on screen stay
+    /// until then.
+    private func rebaseline(depth: Int, generation gen: Int) async throws {
+        let first = try await fetch(query, nil, nil)
+        try Task.checkCancellation()
+        guard generation == gen else { return }
+        var fresh = unique(first.sessions)
+        var page = first
+        while fresh.count < depth, page.hasMore == true, let next = page.nextCursor {
+            page = try await fetch(query, next, nil)
+            try Task.checkCancellation()
+            guard generation == gen else { return }
+            // Not a 409: the recovery below would start over from the first page and shrink the list after all.
+            guard page.revision == first.revision else { throw APIError(status: 0, message: "List snapshot changed") }
+            let seen = Set(fresh.map(id))
+            fresh += unique(page.sessions.filter { !seen.contains(id($0)) })
+        }
+        rows = fresh
+        paged = first.isPaged
+        snapshotRevision = first.revision
+        revision = first.revision
+        total = first.total ?? fresh.count
+        cursor = page.nextCursor
+        hasMore = page.hasMore == true && page.nextCursor != nil
+        overlays = [:]
+        removed = []
+        loaded = true
+        error = nil
+        recoveries = 0
+        changed?(rows)
+        if paged {
+            let counts = try await fetchCounts(query)
+            try Task.checkCancellation()
+            guard generation == gen else { return }
+            self.counts = counts
         }
     }
 

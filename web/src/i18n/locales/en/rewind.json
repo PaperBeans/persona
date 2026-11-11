@@ -11,5 +11,10 @@
   "done_no_code_changes": "Conversation rewound (no code changed after this message)",
   "no_text": "This message has no text, so it can't be rewound to.",
   "input_kept": "Rewound, but Claude's input on the computer still holds this message.",
-  "edit_last": "Edit last message"
+  "edit_last": "Edit last message",
+  "editing": "Editing last message",
+  "editing_hint": "Enter rewinds the chat to before it and sends this · Esc cancels",
+  "cancel_editing": "Cancel editing",
+  "edit_ended": "Your last message changed, so this is no longer an edit: it will go as a new message.",
+  "edit_wait": "Can't rewind the chat right now ({reason}). Your edit is still in the box."
 }

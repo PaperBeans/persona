@@ -158,6 +158,7 @@ func TestLauncherHealthUsageLimitWaitsForTheReset(t *testing.T) {
 	if alt, note, moved := s.healthDetour(ctx, Device{ID: "l4"}, "work"); !moved || alt.ID != "server" || !strings.Contains(note, resets) {
 		t.Fatalf("detour: %s %q %v", alt.ID, note, moved)
 	}
+	// At the limit the configured default still tells its reset, because the next Start uses it (#4437).
 	var route struct {
 		Launchers []launcherWithHealth `json:"launchers"`
 	}
@@ -197,6 +198,10 @@ func TestLauncherHealthUsageLimitWaitsForTheReset(t *testing.T) {
 	r = healthState(s, "l4", "work")
 	if checkedCount(f, "l4/work") != n+2 || r.State != healthOK || r.Kind != "" || r.ResetsAt != nil || r.Fails != 0 {
 		t.Fatalf("after the reset: %d checks, %+v", checkedCount(f, "l4/work"), r)
+	}
+	// ...and the record it carries is a passing one again.
+	if names := launcherNamesAt(t, s, "/api/v1/machines/l4/launchers"); !slices.Contains(names, "work") {
+		t.Fatalf("picker still hides a launcher that works again: %v", names)
 	}
 	if len(f.pushes) != 0 {
 		t.Fatalf("pushed: %+v", f.pushes)
