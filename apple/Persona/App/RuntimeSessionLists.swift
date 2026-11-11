@@ -179,10 +179,11 @@ import Observation
         }
     }
 
-    func invalidate(_ group: String) {
-        lists[group]?.invalidate()
-        for (scope, page) in sections where scope.hub == group { page.invalidate() }
-        let scopes = aggregates.keys.filter { $0.hub == group }
+    /// A `sessions_list` hint: `revision` is the hub's list revision it carries; what already holds it reads nothing.
+    func invalidate(_ group: String, revision: String? = nil) {
+        lists[group]?.invalidate(revision: revision)
+        for (scope, page) in sections where scope.hub == group { page.invalidate(revision: revision) }
+        let scopes = aggregates.keys.filter { $0.hub == group && (revision == nil || aggregates[$0]?.revision != revision) }
         for scope in scopes {
             aggregates[scope] = nil
             Task { await loadCounts(scope) }

@@ -26,7 +26,7 @@ vi.mock("./views/Home", () => ({
 }));
 vi.mock("./views/Palette", () => ({ Palette: () => null }));
 vi.mock("./views/NewAgent", () => ({ NewAgent: () => null }));
-vi.mock("./views/NewWorktree", () => ({ NewWorktreeHost: () => null }));
+vi.mock("./views/NewWorktreeHost", () => ({ NewWorktreeHost: () => null }));
 vi.mock("./views/SidePanel", () => ({ SidePanel: () => null }));
 vi.mock("./views/ShortcutHelp", () => ({ ShortcutHelp: () => null }));
 vi.mock("./lib/store", async (load) => ({ ...(await load<typeof import("./lib/store")>()), connect: () => {}, disconnect: () => {} }));

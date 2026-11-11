@@ -177,6 +177,8 @@ nonisolated struct APIClient: Sendable {
     var personaNaming = false
     /// The hub's hello has `sessions_lookup`: one session's complete row can be asked for by machine and id.
     var sessionLookup = false
+    /// The hub's hello has `sessions_list`: session lists come in pages with a revision that `since` follows.
+    var sessionList = false
     /// Execution surface is diagnostic only; authorization still uses the paired hub credential.
     var clientMetadata: RequestClientMetadata = .current
     /// Answers the demo config's requests (DemoHub registers it at launch); every endpoint goes through `request`.

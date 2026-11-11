@@ -644,6 +644,10 @@ Same shape as Moshi `worktree/prepare` + `worktree/create`.
   `node/hostorca_worktree_test.go` (real Git + a fake Orca whose `worktree.create` behaves like Orca 1.4: Orca's default folder; a new branch from the source workspace's branch, under it, not activated, to the terminal Orca opened; an existing branch without a base; a detached HEAD's commit; a branch in use and an existing empty folder refused without asking Orca; Orca's own folder taken as it is; a renamed branch is an error; a workspace Orca does not list),
   `herdr/worktrees_test.go` (config parsing, slug, folder name, socket args, CLI fallback), `hub/panes_test.go` (permissions, named fields only), `web/src/lib/worktree.test.ts`, `node-actions.test.ts`, `node-palette.test.ts`, `views/NewWorktree.test.tsx`.
 
+### Advanced Orca worktree actions
+
+The local Orca adapter also provides a capability-gated composer, GitHub issue/PR source lookup, sparse presets and preview-confirmed workspace removal. The exact HTTP fields, adapter/runtime capability distinction, receipt handling and deletion reconciliation are specified in [the protocol](../protocol/protocol.md#orca-worktree-composer-and-removal). Legacy branch/path creation remains available. Removal keeps branches by default, unregisters folder workspaces without deleting their directories, and requires a fresh instance-bound preview when identity or dirty content changes. A background acknowledgement is not completion; clients reconcile without automatically repeating the destructive request.
+
 ### A new agent in a worktree (#6115)
 
 A new agent can start in a Git worktree of its own, so agents on the same repository don't step on each other (after Claude Desktop, which gives each session a worktree under the repository and asks to keep or discard it on archive).

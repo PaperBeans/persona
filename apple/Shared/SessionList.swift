@@ -3,7 +3,10 @@ import Foundation
 /// The bounded list contract. Tokens are opaque and page cursors never stand in for delta checkpoints.
 nonisolated struct SessionListQuery: Hashable, Sendable {
     static let pageSize = 50
-    /// Client-only selection of the no-opt-in full collection; never sent as a made-up server filter.
+    /// The hub's largest page: a complete copy of a few hundred sessions is two requests.
+    static let completePageSize = 200
+    /// Client-only selection of the complete collection (the view groups, filters and sorts every row itself); never
+    /// sent as a made-up server filter. On a paging hub it is read as complete pages and then followed by `since`.
     var legacy = false
     var state: String = ""
     var machine: String = ""
@@ -48,10 +51,16 @@ nonisolated struct SessionListCounts: Decodable, Equatable, Sendable {
 
 extension APIClient {
     func sessionListPage(_ query: SessionListQuery, cursor: String? = nil, since: String? = nil) async throws -> SessionListPage<Session> {
-        if query.legacy {
-            return SessionListPage(sessions: try await sessions(), remove: [], hasMore: nil, nextCursor: nil, revision: nil, total: nil)
-        }
         var parameters = query.parameters
+        if query.legacy {
+            // A paging hub pushes no rows, only a hint for each change. Reading the whole list again for every hint was
+            // hundreds of KB about once a second while agents worked (#3759): complete pages (no filters, the view
+            // applies its own) give a baseline with a revision that `since` then follows.
+            guard sessionList else {
+                return SessionListPage(sessions: try await sessions(), remove: [], hasMore: nil, nextCursor: nil, revision: nil, total: nil)
+            }
+            parameters = ["summary": "0", "limit": String(SessionListQuery.completePageSize)]
+        }
         if let cursor { parameters["cursor"] = cursor }
         if let since { parameters["since"] = since }
         let data = try await request("GET", "/api/v1/sessions", query: parameters)

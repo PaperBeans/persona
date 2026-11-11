@@ -1,0 +1,13 @@
+{
+  "infer": "Cannot infer the task workspace on {machine}; choose a workspace explicitly",
+  "resolve": "Cannot resolve the task workspace {path}",
+  "unavailable": "Workspace {path} is not an available absolute directory",
+  "list": "Cannot list existing workspaces on {machine}",
+  "catalog_unavailable": "Workspace {workspace} is unavailable on {machine}",
+  "not_found": "Workspace {workspace} was not found on {machine}; select a workspace there or enter an absolute path",
+  "prepare": "Cannot prepare a new task workspace on {machine}; no agent was started",
+  "engine_path": "The workspace engine returned no absolute checkout path; no agent was started",
+  "busy": "Workspace is occupied by task {id} ({title}); wait for it to finish or choose a new workspace (machine {machine}, path {path})",
+  "machine_local": "The task workspace was created on {from}; it cannot move to {to}",
+  "create": "The new task workspace was not made; no agent was started"
+}

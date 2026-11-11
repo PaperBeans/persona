@@ -43,6 +43,10 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 	if in.Permission != nil && !s.explicitSettingsTarget(w, r) {
 		return
 	}
+	if in.TaskWorkspacePreference != "" && !validWorkspacePreference(in.TaskWorkspacePreference) {
+		apierr.Write(w, http.StatusBadRequest, errors.New("task_workspace_preference must be prefer-existing or prefer-new"))
+		return
+	}
 	machine := s.settings(ctx).MachineID
 	if in.MachineID != "" {
 		if _, ok := s.device(ctx, in.MachineID); !ok {
@@ -138,6 +142,9 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.StartRequestedTasks != nil {
 			v.StartRequestedTasks = in.StartRequestedTasks
+		}
+		if in.TaskWorkspacePreference != "" {
+			v.TaskWorkspacePreference = in.TaskWorkspacePreference
 		}
 		if in.RecordingDays != nil {
 			v.RecordingDays = in.RecordingDays

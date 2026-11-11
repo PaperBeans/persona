@@ -254,9 +254,9 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	if hooks != "" {
 		args = append(args, "--plugin-dir", hooks)
 	}
-	// Snapshot the connection capability once for both runtime paths and their permission lists. Historical jarvis
-	// tool_use blocks remain valid on a resume with only Persona offered (verified on Claude Code 2.1.322); an old hub
-	// that still addresses the legacy namespace keeps the alias.
+	// Snapshot the connection capability once for both runtime paths and their permission lists. Historical tool_use
+	// blocks under the old namespace remain valid on a resume with only Persona offered (verified on Claude Code 2.1.322);
+	// an old hub that still addresses the legacy namespace keeps the alias.
 	legacyMCP := !n.hubSupportsPersonaContracts()
 	_, toolFlags := n.claudeAssistantMCPAndTools(id, cwd, legacyMCP)
 	args = append(args, toolFlags...)

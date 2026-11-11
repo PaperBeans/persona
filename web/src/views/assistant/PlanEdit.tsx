@@ -7,6 +7,7 @@ import { machineStartBlocked, ULTRACODE_FEATURE } from "../../lib/ultracode";
 import { Button, Dialog } from "../../ui/atoms";
 import { UltracodeStartRow } from "../chat/Ultracode";
 import { t } from "../../i18n";
+import { TaskWorkspaceEditor } from "./TaskWorkspace";
 
 const FIELD = "w-full rounded-control border border-line bg-canvas px-3 py-1.5 text-[13.5px] text-ink outline-none focus:border-accent";
 const LABEL = "mb-1 block text-[12px] font-medium text-ink-2";
@@ -97,6 +98,8 @@ export function PlanEditDialog({ plan, ultracode, onClose, onStart }: { plan: Ta
                 <label htmlFor={`${id}-cwd`} className={LABEL}>{t("assistant-tasks.plan_edit_cwd")}</label>
                 <input id={`${id}-cwd`} value={task.cwd} spellCheck={false} autoCapitalize="off" autoCorrect="off" onChange={(e) => set(i, { cwd: e.target.value })} className={`${FIELD} font-mono text-[12.5px]`} />
               </div>
+              <TaskWorkspaceEditor plan={{ ...plan, tasks: plan.tasks.map((t, j) => ({ ...t, ...tasks[j], workspace_resolved: undefined })) }} index={i}
+                onChange={(workspace) => set(i, { workspace })} />
               <div>
                 <label htmlFor={`${id}-model`} className={LABEL}>{t("assistant-tasks.plan_edit_model")}</label>
                 <input id={`${id}-model`} value={task.model ?? ""} spellCheck={false} autoCapitalize="off" autoCorrect="off" placeholder={modelPlaceholder(plan.tasks[i]?.model, plan.tasks[i]?.tier)} onChange={(e) => set(i, { model: e.target.value })} className={FIELD} />

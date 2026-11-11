@@ -30,9 +30,9 @@ func TestFakeStoppingNode(t *testing.T) {
 	}
 	_ = p.Serve(context.Background(), os.Stdin)
 	if os.Getenv("PERSONA_FAKE_NODE_HANG") == "1" {
-		time.Sleep(time.Hour)
+		select {} // hangs until the node kills it
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond) // sleep-ok: the fake node takes a moment to exit, which the test measures
 	_ = os.WriteFile(mark, []byte("stopped"), 0o600)
 	os.Exit(0)
 }
@@ -53,7 +53,9 @@ func stoppingNode(t *testing.T, hang bool) (pid int, mark string, stop context.C
 	}
 	stop = runMachine(t, m)
 	var err error
-	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); <-tick.C {
 		var out struct {
 			PID int `json:"pid"`
 		}
@@ -74,7 +76,9 @@ func stoppingNode(t *testing.T, hang bool) (pid int, mark string, stop context.C
 func TestLocalNodeEndsOnEOFNotKilled(t *testing.T) {
 	_, mark, stop := stoppingNode(t, false)
 	stop()
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); <-tick.C {
 		if _, err := os.Stat(mark); err == nil {
 			return
 		}
@@ -89,7 +93,9 @@ func TestLocalNodeThatHangsIsKilledAfterTheGrace(t *testing.T) {
 	t.Cleanup(func() { localNodeStopGrace = old })
 	pid, _, stop := stoppingNode(t, true)
 	stop()
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); <-tick.C {
 		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
 			return
 		}

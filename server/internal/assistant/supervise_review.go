@@ -146,6 +146,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	}
 	over, refused, parks := false, false, 0
 	var waiting *OwnerWait // accepted while the work stopped on the owner's decision: refused, nothing written (#1277)
+	judgedDone := false    // it was waiting for review: the judge had found it done
 	var v Supervision
 	if ledger {
 		v, _, err = s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
@@ -154,6 +155,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				waiting = &w
 				return false
 			}
+			judgedDone = v.State == reviewPending
 			if isMain && !s.isLeader(ctx, v.Supervisor) && !s.isLeaderRef(v.Supervisor) {
 				v.Supervisor = self // the main conversation takes over an old main conversation's task, not a leader's
 			} else if v.Supervisor == "" {
@@ -209,6 +211,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	}
 	if waiting != nil {
 		return "", ownerWaitError(t.ID, waiting)
+	}
+	if a.Verdict == reviewRework { // after the judge's done, a wrong "done" in the work stats (agents_work_wrong_done.go)
+		s.workEvent("", "", reviewReworkEvent, map[string]any{"todo": t.ID, "judged_done": judgedDone})
 	}
 	if verdict == reviewRework || verdict == reviewNeedsUser || a.UserCheck || a.Outcome == outcomeCannot {
 		s.setTaskStageKind(ctx, t.ID, "unverified", "", "", false)

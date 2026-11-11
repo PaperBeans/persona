@@ -47,6 +47,7 @@ final class HubLink: Identifiable {
         c.extensionsAPI = hello.features.isEmpty ? Self.remembersExtensions(group) : features.contains("extensions")
         c.personaNaming = live.personaContracts
         c.sessionLookup = features.contains("sessions_lookup")
+        c.sessionList = features.contains("sessions_list")
         #if DEBUG
         c.transport = transportForTests
         #endif

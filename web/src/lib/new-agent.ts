@@ -10,6 +10,9 @@ import { href, navigate } from "./router";
 import { getState, putLaunch, upsertSession } from "./store";
 import { ultracodeErrorText, ultracodeRefused } from "./ultracode";
 import type { Session } from "./types";
+import type { WorkspaceTarget } from "./workspace-target";
+
+export type { WorkspaceTarget } from "./workspace-target";
 
 export interface AgentLaunch {
   id: string;
@@ -21,7 +24,9 @@ export interface AgentLaunch {
   effort?: string;
   /** Claude Code's permission mode for this start ("New agent"'s "Permission mode"); none: the launcher's own. */
   permissionMode?: string;
-  /** The engine host to open in (#2576), when the user picked one other than the machine's default; none: the default. */
+  /** The exact runtime workspace, scoped to machine and host; absent for an ordinary folder start. */
+  workspaceId?: string;
+  /** An explicit host stays explicit even when it equals the machine's default; none: follow the default. */
   host?: string;
   /** Turn ultracode on once Claude is up (#3428); only ever true: off is what a new Claude is (docs/protocol/protocol.md). */
   ultracode?: boolean;
@@ -46,7 +51,7 @@ export interface AgentLaunch {
   draft?: string;
 }
 
-export function launchAgent(input: Pick<AgentLaunch, "machineId" | "cwd" | "launcher" | "model" | "effort" | "permissionMode" | "host" | "ultracode" | "text" | "attachments" | "todoId">) {
+export function launchAgent(input: Pick<AgentLaunch, "machineId" | "cwd" | "workspaceId" | "launcher" | "model" | "effort" | "permissionMode" | "host" | "ultracode" | "text" | "attachments" | "todoId">) {
   const launch: AgentLaunch = { ...input, id: `local-${uuid()}`, phase: "creating", uploaded: {}, ...launchOpIds() };
   putLaunch(launch);
   navigate({ name: "session", mid: launch.machineId, sid: launch.id });
@@ -98,14 +103,14 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
     if (!launch.session) {
       let session: Session;
       try {
-        const r = await launchOp<{ session: Session }>("/sessions", launch.startOpId, controller.signal, { machine_id: launch.machineId, cwd: launch.cwd, launcher: launch.launcher || undefined, model: launch.model || undefined, effort: launch.effort || undefined, permission_mode: launch.permissionMode || undefined, host: launch.host || undefined, ultracode: launch.ultracode === true ? true : undefined, async: true, name_hint: launch.text || undefined, todo_id: launch.todoId || undefined });
+        const r = await launchOp<{ session: Session }>("/sessions", launch.startOpId, controller.signal, { machine_id: launch.machineId, cwd: launch.cwd, workspace_id: launch.workspaceId || undefined, launcher: launch.launcher || undefined, model: launch.model || undefined, effort: launch.effort || undefined, permission_mode: launch.permissionMode || undefined, host: launch.host || undefined, ultracode: launch.ultracode === true ? true : undefined, async: true, name_hint: launch.text || undefined, todo_id: launch.todoId || undefined });
         session = r.session;
       } catch (e) {
         if (!(e instanceof ApiError) || e.code !== "codex_needs_prompt") throw e;
         if (launch.attachments.length) throw new Error(t("lib-new-agent.launcher_no_attachments"));
         if (!launch.text) throw new Error(t("lib-new-agent.launcher_needs_text"));
         // A Codex start takes the picked model but no effort.
-        const r = await launchOp<{ session: Session }>("/sessions", launch.startPromptOpId, controller.signal, { machine_id: launch.machineId, cwd: launch.cwd, launcher: launch.launcher || undefined, model: launch.model || undefined, host: launch.host || undefined, prompt: launch.text, todo_id: launch.todoId || undefined });
+        const r = await launchOp<{ session: Session }>("/sessions", launch.startPromptOpId, controller.signal, { machine_id: launch.machineId, cwd: launch.cwd, workspace_id: launch.workspaceId || undefined, launcher: launch.launcher || undefined, model: launch.model || undefined, host: launch.host || undefined, prompt: launch.text, todo_id: launch.todoId || undefined });
         session = r.session;
         update({ outgoing: { text: "", images: [] } });
       }
@@ -175,6 +180,8 @@ export interface NewAgentPreset {
   prompt?: string;
   machineId?: string;
   cwd?: string;
+  /** An exact workspace destination takes precedence over the legacy machine/folder preset. */
+  workspace?: WorkspaceTarget;
 }
 
 const openers = new Set<(preset: NewAgentPreset) => void>();

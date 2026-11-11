@@ -14,12 +14,13 @@
   "branch_edges": "分支名的开头或结尾不合法",
   "branch_parts": "分支名的每一段都不能以 . 开头或以 .lock 结尾",
   "created": "已新建 worktree",
-  "create_open": "创建并打开",
   "repo_on_branch": "{repo} · 当前分支 {branch}",
   "repo_detached": "{repo} · 未在任何分支上",
   "branch_label": "分支",
   "branch_placeholder": "新分支名，或已有的本地分支",
   "path_label": "检出路径",
   "path_hint": "跟着分支名走；改过之后不再跟，清空后恢复",
-  "note": "新分支从这个工作区当前的提交开始；已有的本地分支直接检出。"
+  "note": "新分支从这个工作区当前的提交开始；已有的本地分支直接检出。",
+  "owner_changed": "连接或管理器已变更。请从工作区列表重新打开创建界面。",
+  "unknown": "结果尚未确认。请先检查原请求，再在此创建其他工作树。"
 }

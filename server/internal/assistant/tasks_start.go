@@ -60,6 +60,9 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if !s.placeTask(ctx, &p.Tasks[i]) {
 			return nil, i18n.Err("assistant-tasks.task_no_machine", i18n.Args{"task": p.Tasks[i].Title, "machine": strconv.Quote(p.Tasks[i].Machine)})
 		}
+		if err := s.resolveTaskWorkspace(ctx, &p.Tasks[i]); err != nil {
+			return nil, planInvalid{err}
+		}
 	}
 	p.State = planStarted
 	ok, err := s.movePlan(ctx, p, planOpen)
@@ -89,7 +92,7 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 			}
 		} else {
 			title, retitle := s.taskTitle(ctx, t.Title, t.Prompt) // the assistant's own title stays when it is a real one
-			todo, err = s.createTaskTodo(ctx, title, t.Prompt, p.Conversation, p.ID, t.Project)
+			todo, err = s.createTaskTodoAs(ctx, t.ReservedTodoID, title, t.Prompt, p.Conversation, p.ID, t.Project)
 			if err != nil {
 				t.Error = err.Error()
 				continue
@@ -258,6 +261,8 @@ func (s *Service) startPlanTaskAsync(planID, conversation string, i int, t PlanT
 
 // runPlanTaskStart is the shared start body; its caller owns the idle reservation through every return path.
 func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTask, retry bool) {
+	t.planID, t.planIndex = planID, i
+	defer s.releaseTaskWorkspace(t.TodoID)
 	ctx, cancel := context.WithTimeout(context.Background(), taskStartTimeout)
 	defer cancel()
 	placed, placedWhy := t.Machine, t.Why
@@ -291,7 +296,7 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 			}
 		}
 	}
-	if t.Machine != placed || t.Why != placedWhy { // the card shows where it runs, and on what (launcher_fit.go)
+	if t.Machine != placed || t.Why != placedWhy { // workspace admission already persisted the actual checkout
 		s.updatePlanTask(ctx, planID, i, t)
 	}
 	if err == nil {

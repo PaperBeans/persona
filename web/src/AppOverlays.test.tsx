@@ -30,7 +30,7 @@ vi.mock("./views/NewAgent", () => ({
 }));
 vi.mock("./views/Sidebar", () => ({ Sidebar: () => null, SidebarRail: () => null }));
 vi.mock("./views/Home", () => ({ Home: () => null }));
-vi.mock("./views/NewWorktree", () => ({ NewWorktreeHost: () => null }));
+vi.mock("./views/NewWorktreeHost", () => ({ NewWorktreeHost: () => null }));
 vi.mock("./views/SidePanel", () => ({ SidePanel: () => null }));
 vi.mock("./views/ShortcutHelp", () => ({ ShortcutHelp: () => null }));
 const reported = vi.hoisted(() => ({ list: [] as { boundary: string; chunk: boolean }[] }));

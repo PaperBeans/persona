@@ -1,4 +1,9 @@
 {
+  "workspace_preference": "派发任务时优先使用",
+  "workspace_prefer_existing": "优先已有工作区",
+  "workspace_prefer_new": "优先新建工作区",
+  "workspace_hint": "只读任务不新建；已有目录被占用时新建隔离工作区。每个计划可单独修改。",
+  "workspace_unconfirmed": "助手没有确认工作区偏好，请重试。",
   "retry": "重试",
   "save_failed": "没改成：{error}",
   "subtitle": "你的私人助手",

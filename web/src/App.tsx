@@ -34,7 +34,12 @@ import { RequestPage } from "./views/RequestPage";
 import { Home } from "./views/Home";
 import { PersonaAssistant } from "./views/PersonaAssistant";
 import { Login } from "./views/Login";
-import { NewWorktreeHost } from "./views/NewWorktree";
+import { NewWorktreeHost } from "./views/NewWorktreeHost";
+import { WorktreeActionsHost } from "./views/WorktreeActions";
+import { openWorktreeActions } from "./lib/worktree-actions";
+import { selectWorkspace } from "./lib/workspace-selection";
+import { setAgentGrouping } from "./lib/sidebar-api";
+import type { WorkspaceTarget } from "./lib/workspace-target";
 import { onOpenNewAgent, type NewAgentPreset } from "./lib/new-agent";
 import { StartingAgent } from "./views/StartingAgent";
 import { ShortcutHelp } from "./views/ShortcutHelp";
@@ -84,6 +89,13 @@ const carried = typeof window === "undefined" ? null : takeHubs(window.location.
 if (carried) {
   acceptHubs(carried.hubs, carried.removed);
   window.history.replaceState(window.history.state, "", carried.rest);
+}
+
+const workspaceActions = { onWorkspaceMenu: openWorktreeActions };
+function openWorkspaceInTree(target: WorkspaceTarget) {
+  selectWorkspace(target);
+  setAgentGrouping("repo");
+  navigate({ name: "agent-list" });
 }
 
 export function App() {
@@ -375,7 +387,7 @@ function Shell() {
       main = <AgentsView key={route.id ?? ""} id={route.id} onToggleSidebar={toggle} />;
       break;
     case "agent-list":
-      main = <AgentsPage route={route} onToggleSidebar={toggle} onNewAgent={openNewAgent} />;
+      main = <AgentsPage route={route} onToggleSidebar={toggle} onNewAgent={openNewAgent} workspaceActions={workspaceActions} />;
       break;
     case "agent-archives":
       main = <AgentArchives onToggleSidebar={toggle} />;
@@ -425,7 +437,7 @@ function Shell() {
         )}
         style={{ transitionTimingFunction: EASE }}
       >
-        {rail ? <SidebarRail route={route} onSearch={() => openPalette("jump")} onNewAgent={openNewAgent} /> : <Sidebar route={route} onSearch={() => openPalette("jump")} onNewAgent={openNewAgent} onNavigate={close} />}
+        {rail ? <SidebarRail route={route} onSearch={() => openPalette("jump")} onNewAgent={openNewAgent} /> : <Sidebar route={route} onSearch={() => openPalette("jump")} onNewAgent={openNewAgent} onNavigate={close} workspaceActions={workspaceActions} />}
         {!narrow && !rail && <SidebarResize column={sidebarId} />}
       </div>
       {/* the scrim fades out as well as in; a drag sets its opacity as it goes (lib/drawer.ts) */}
@@ -462,6 +474,7 @@ function Shell() {
         </OverlayBoundary>
       )}
       <NewWorktreeHost />
+      <WorktreeActionsHost onOpenWorkspace={openWorkspaceInTree} />
       {/* tab title with the "Needs you" count, favicon badge, optional sounds (#2332): a leaf, so a sessions push re-renders
           only it, not the whole shell */}
       <AttentionSignals label={title} pane={pane} />

@@ -1,14 +1,20 @@
-// "New worktree…" (#2431): the dialog's logic. A workspace's repository is read on the computer (worktree/prepare), the
-// branch and the checkout path are typed, and the computer makes the worktree and opens it as a workspace
-// (worktree/create). The path follows the branch until it is edited by hand, the way Moshi's dialog does. Both routes
-// are for a full device only (server/internal/hub/panes.go).
+// Worktree creation transport and legacy terminal-menu helpers. Advanced choices require the owner’s advertised capabilities.
 import { t as tr } from "../i18n";
-import { api, ApiError, enc, errorText } from "./api";
+import { api, ApiError, credentialOwner, enc, errorText } from "./api";
 import type { MenuNode } from "./node-actions";
 import { navigate } from "./router";
+import { defaultManager, MANAGER_HEADER } from "./manager-choice";
+import { getState } from "./store";
+import type { WorkspaceTarget } from "./workspace-target";
 
-/** What worktree/prepare says of the workspace's repository (server/internal/proto/panes.go WorktreePrepare). */
+export interface SparsePreset { id: string; name?: string; directories: string[] }
+export interface WorktreeSource { type: "pr" | "issue"; number: number; title: string; url: string; branchName?: string; baseRefName?: string; isCrossRepository?: boolean }
+export interface ComposerOptions { project: string; base_ref: string; refs: string[]; presets: SparsePreset[]; capabilities: string[] }
+/** Repository metadata and capabilities returned by worktree/prepare. */
 export interface WorktreePrepare {
+  composer?: ComposerOptions;
+  choose_parent?: boolean;
+  automatic_name?: boolean;
   root: string;
   repoName: string;
   /** The branch checked out in the workspace; "" on a detached HEAD. */
@@ -19,6 +25,7 @@ export interface WorktreePrepare {
 
 /** What worktree/create opened. */
 export interface WorktreeCreated {
+  parent_workspace_id?: string;
   workspace_id: string;
   tab_id?: string;
   pane?: string;
@@ -101,6 +108,9 @@ export function worktreeProblem(e: unknown, what: string): { text: string; needs
 }
 
 export interface WorktreeTarget {
+  owner?: string;
+  manager?: string;
+  cwd?: string;
   mid: string;
   workspaceId: string;
   /** The host kind of the workspace ("herdr"); unset: the computer's own. */
@@ -110,15 +120,57 @@ export interface WorktreeTarget {
 
 const kindOf = (t: WorktreeTarget) => (t.host ? { kind: t.host } : {});
 
-export function prepareWorktree(t: WorktreeTarget): Promise<WorktreePrepare> {
-  return api<WorktreePrepare>(`/machines/${enc(t.mid)}/worktree/prepare`, { method: "POST", json: { workspace_id: t.workspaceId, ...kindOf(t) } });
+/** Every composer request stays bound to its original credentials and discovery manager. */
+export function worktreeAdmission(target: WorktreeTarget): boolean {
+  return (!target.owner || target.owner === credentialOwner())
+    && (!target.manager || target.manager === (getState().machines.find((m) => m.id === target.mid)?.manager || defaultManager()));
 }
 
-export function createWorktree(t: WorktreeTarget, form: WorktreeForm): Promise<WorktreeCreated> {
-  return api<WorktreeCreated>(`/machines/${enc(t.mid)}/worktree/create`, {
-    method: "POST",
-    json: { workspace_id: t.workspaceId, branch: form.branch.trim(), path: form.path.trim(), ...kindOf(t) },
+export function worktreeHeaders(target: WorktreeTarget): Record<string, string> {
+  if (!worktreeAdmission(target)) throw new Error(tr("worktree.owner_changed"));
+  return { [MANAGER_HEADER]: target.manager || getState().machines.find((m) => m.id === target.mid)?.manager || defaultManager() };
+}
+
+export function prepareWorktree(t: WorktreeTarget, options: { composer?: boolean; signal?: AbortSignal } = {}): Promise<WorktreePrepare> {
+  return api<WorktreePrepare>(`/machines/${enc(t.mid)}/worktree/prepare`, { method: "POST", signal: options.signal, timeout: 45_000,
+    headers: worktreeHeaders(t), json: { workspace_id: t.workspaceId, ...kindOf(t), ...(options.composer !== undefined && t.host === "orca" ? { composer: options.composer } : {}) } });
+}
+
+export function worktreeSources(t: WorktreeTarget, query: string, signal?: AbortSignal) {
+  return api<{ items: WorktreeSource[]; errors?: string[] | Record<string, { message?: string }>; warning?: string }>(`/machines/${enc(t.mid)}/worktree/source`, {
+    method: "POST", headers: worktreeHeaders(t), signal, timeout: 45_000, json: { workspace_id: t.workspaceId, ...kindOf(t), query },
   });
+}
+
+export function saveWorktreePreset(t: WorktreeTarget, name: string, directories: string) {
+  return api<{ preset: SparsePreset }>(`/machines/${enc(t.mid)}/worktree/preset`, {
+    method: "POST", headers: worktreeHeaders(t), timeout: 45_000, json: { workspace_id: t.workspaceId, ...kindOf(t), name, directories },
+  });
+}
+
+export type WorktreeCreateBody = { workspace_id: string; kind?: string; composer?: true; branch?: string; path?: string; auto_name?: true;
+  name?: string; branch_override?: string; base_ref?: string; parent_workspace_id?: string; no_parent?: true; note?: string;
+  sparse_preset_id?: string; source_id?: string; source_url?: string };
+export type CreateOutcome = WorktreeCreated | { state: "pending" | "unknown" };
+
+export function worktreeReceipt(t: WorktreeTarget, opId: string) {
+  return api<{ state: string }>(`/ops/${enc(opId)}`, { headers: worktreeHeaders(t) });
+}
+
+export function sendWorktreeCreate(t: WorktreeTarget, body: WorktreeCreateBody, opId?: string): Promise<CreateOutcome> {
+  return api<CreateOutcome>(`/machines/${enc(t.mid)}/worktree/create`, { method: "POST", timeout: 165_000,
+    headers: { ...worktreeHeaders(t), ...(opId ? { "X-Persona-Op-Id": opId } : {}) }, json: body });
+}
+
+export async function createWorktree(t: WorktreeTarget, form: WorktreeForm): Promise<WorktreeCreated> {
+  const result = await sendWorktreeCreate(t, { workspace_id: t.workspaceId, branch: form.branch.trim(), path: form.path.trim(), ...kindOf(t) });
+  if (!isWorktreeCreated(result)) throw new Error(tr("worktree.unknown"));
+  return result;
+}
+
+export function isWorktreeCreated(result: CreateOutcome): result is WorktreeCreated {
+  return !("state" in result) && typeof result.workspace_id === "string" && Boolean(result.workspace_id)
+    && typeof result.path === "string" && Boolean(result.path) && typeof result.branch === "string";
 }
 
 /** Opens the new workspace on the "Terminal" page (its first pane, else the machine's list). */
@@ -132,6 +184,10 @@ export interface WorktreeRequest {
   target: WorktreeTarget;
   /** The computer's tree changed (the new workspace is in it): read it again. */
   changed: () => void;
+  source?: WorkspaceTarget;
+  /** Undefined follows the source; null requests a top-level workspace. */
+  parent?: WorkspaceTarget | null;
+  onCreated?: (created: WorktreeCreated, target: WorkspaceTarget) => void;
 }
 
 const openers = new Set<(r: WorktreeRequest) => void>();
@@ -140,6 +196,11 @@ const openers = new Set<(r: WorktreeRequest) => void>();
 export function openNewWorktree(node: Pick<MenuNode, "mid" | "workspaceId" | "host" | "label">, changed: () => void = () => {}) {
   if (!node.workspaceId) return;
   const request = { target: { mid: node.mid, workspaceId: node.workspaceId, host: node.host, label: node.label }, changed };
+  openers.forEach((l) => l(request));
+}
+
+/** Delivers an already assembled creation request to the app shell. */
+export function emitWorktreeRequest(request: WorktreeRequest) {
   openers.forEach((l) => l(request));
 }
 

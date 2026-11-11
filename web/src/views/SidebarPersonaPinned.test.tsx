@@ -65,24 +65,6 @@ describe("the pinned Persona row", () => {
     expect(list.className).not.toContain("scroll-pt-12");
   });
 
-  it("shows the fog under it only once the list has scrolled", async () => {
-    act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));
-    await flush();
-    const list = host.querySelector<HTMLElement>("[data-sidebar-rows]")!;
-    const fog = host.querySelector<HTMLElement>("[data-persona-fog]")!;
-    expect(fog.className).toContain("opacity-0");
-    act(() => {
-      list.scrollTop = 120;
-      list.dispatchEvent(new Event("scroll"));
-    });
-    expect(fog.className).toContain("opacity-100");
-    act(() => {
-      list.scrollTop = 0;
-      list.dispatchEvent(new Event("scroll"));
-    });
-    expect(fog.className).toContain("opacity-0");
-  });
-
   it("keeps its selected state and its own hover fill (the gliding highlight passes under the pinned box)", async () => {
     act(() => root.render(<Sidebar route={{ name: "persona" }} onSearch={() => {}} onNewAgent={() => {}} />));
     await flush();

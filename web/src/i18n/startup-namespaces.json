@@ -175,5 +175,7 @@
   "usage",
   "voice",
   "workspace-board",
-  "worktree"
+  "workspace-tree",
+  "worktree",
+  "worktree-actions"
 ]

@@ -46,13 +46,16 @@ func orcaWorktreeNode(t *testing.T) *orcaWorktreeFixture {
 	o.SetWorktrees(src)
 	o.Handle("worktree.create", func(p map[string]any) any {
 		name, branch, base := str(p["name"]), str(p["branchNameOverride"]), str(p["baseBranch"])
-		if p["nameWasGenerated"] == true && branch == "" {
+		if branch == "" {
 			branch = "devuser/" + name
 		}
 		path := filepath.Join(w.dir, name)
 		at, _ := branchCheckedOutAt(t.Context(), repo, branch)
 		if _, err := os.Lstat(path); err == nil || at != "" {
-			path, branch = path+"-2", branch+"-2" // Orca's way out of a taken folder or branch
+			path = path + "-2"
+			if p["branchIntent"] != "open-existing-v2" && p["branchIntent"] != "open-existing" {
+				branch += "-2"
+			} // Legacy naming may suffix the branch too.
 		}
 		args := []string{"worktree", "add", "-b", branch, "--", path}
 		if base != "" {

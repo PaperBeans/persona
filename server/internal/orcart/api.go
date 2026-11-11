@@ -123,6 +123,12 @@ func (n *layoutNode) tabs(worktree string, out *[]Tab) {
 
 // Worktree is one worktree of worktree.ps.
 type Worktree struct {
+	ChildWorktreeIDs []string `json:"childWorktreeIds"`
+	WorkspaceLineage *struct {
+		ParentWorkspaceKey string `json:"parentWorkspaceKey"`
+	} `json:"workspaceLineage"`
+	InstanceID    string `json:"worktreeInstanceId"`
+	Removing      bool   `json:"removing"`
 	WorktreeID    string `json:"worktreeId"`
 	HostID        string `json:"hostId"`
 	Path          string `json:"path"`

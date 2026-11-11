@@ -849,6 +849,34 @@ is not done), so the owner saw one task out of four and asked what the others we
 other way and listed every slot ever dispatched, closed ones included. "Open" is a property of the task (`done_at`,
 `start_error`, an open plan), not of its agent: filter on that, sort what needs the user first, and fold the closed ones.
 
+## Workspace identity outlives its Agents
+
+An Agent collection cannot serve as a workspace inventory: empty ancestors disappear, and pinning or filtering can remove the only row carrying a parent edge. Keep discovery independent of the board and count actual Agents separately from catalog containers. Bind actions to credential generation, manager, computer, host and runtime workspace ID; matching paths do not grant ownership. A combined browser fixture must stamp its sessions and discovery with the same manager, or it correctly exercises isolation instead of navigation.
+
+The current assistant and the roster's default are different scopes. Workspace discovery and management entry points follow `shownManager`, while an item without a manager still belongs to `defaultManager`. A choice change must cancel reads and invalidate deletion previews immediately, even if the user switches back before a response arrives; subscribing only to changes of the roster's default misses that transition.
+
+## Preserve referenced design section numbers during integration
+
+When parallel design additions occupy the same section number, keep the upstream
+section and its references together. Move the feature section to the next free
+number instead of replacing either contract (#3223). The pending-request rules
+remain section 4.8; workspace selection and management follow in section 4.10.
+
+## Keep workspace action resolution behind its lazy entry
+
+A lazy menu still adds to the first screen when its always-mounted opener imports
+its permission and catalog resolvers. Keep only request routing and immediate scope
+invalidation in that opener module; import resolution and child-request assembly
+from the lazy menu (#3223).
+Check the real production bundle against the fixed main baseline and retain the
+same owner, manager, host and workspace safety checks.
+
+## Preserve workspace controls when adopting shared fold motion
+
+A workspace row has separate disclosure, selection and action controls. When merging shared sidebar fold timing, keep that structure and apply `sidebarFoldMotion` to its disclosure chevron and `sidebarFold` to the matching `Collapse`. Choosing either side wholesale drops either workspace controls or the shared timing; child-workspace folds need the same motion contract.
+
+The first screen also counts startup translations. Keep generic request-owner and uncertain-creation errors in the existing worktree catalog; load the advanced composer catalog with the composer. A pair of eager error labels should not make every advanced-field description part of the first screen.
+
 ## Archive refusals must roll back optimistic removal (#4277)
 
 A connected delta hub keeps its pushed session rows during REST refresh. Refresh cannot restore a row the page

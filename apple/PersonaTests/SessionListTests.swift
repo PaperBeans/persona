@@ -380,4 +380,129 @@ import Testing
         #expect(SessionListIdentity.runtime(#"["machine/with/slashes","session/with/slashes"]"#, group: "other") ==
                 SessionKey(group: "other", machineID: "machine/with/slashes", sessionID: "session/with/slashes"))
     }
+
+    /// A paging hub's fake for the complete fallback (#3759): `count` rows in pages of up to 200 under revision
+    /// `r<epoch>.<n>`; `since` answers what `change` did after that revision; an old epoch (a hub restart) is 409.
+    @MainActor private final class CompleteHub {
+        let hub = FakeHub()
+        var rows: [String] = []
+        var epoch = 0
+        var n = 0
+        var changed: [String] = []
+        var removed: [String] = []
+        var baselines = 0, deltas = 0, legacy = 0, counts = 0
+        var revision: String { "r\(epoch).\(n)" }
+        init(count: Int) {
+            rows = (0..<count).map { Self.row($0, "idle") }
+            hub.on("GET", "/api/v1/sessions") { [unowned self] request in try self.answer(request.query) }
+        }
+        static func row(_ n: Int, _ text: String) -> String {
+            #"{"machine_id":"demo","session_id":"s\#(n)","title":"Agent \#(n)","state":"idle","last_text":"\#(text)"}"#
+        }
+        var client: APIClient { var c = hub.client; c.sessionList = true; return c }
+        /// One hint's worth of change: a row's new line (and a new or a gone session now and then).
+        func change(_ k: Int) {
+            n += 1
+            let row = Self.row(k % 10, "round \(k)")
+            rows[k % 10] = row
+            changed = [row]
+            removed = []
+            if k % 20 == 7 { let new = Self.row(1000 + k, "started"); rows.append(new); changed.append(new) }
+            if k % 30 == 11, let gone = try? JSON.decoder.decode(Session.self, from: Data(rows.removeLast().utf8)) {
+                removed = [#"["demo","\#(gone.sessionID)"]"#]
+            }
+        }
+        private func answer(_ q: [String: String]) throws -> Data {
+            if q.isEmpty { legacy += 1; return Data(#"{"sessions":[\#(rows.joined(separator: ","))]}"#.utf8) }
+            if q["counts"] == "1" { counts += 1 }
+            #expect(q["summary"] == "0" && q["limit"] == "200", "complete rows in the largest pages")
+            #expect(q["state"] == nil && q["q"] == nil && q["machine_id"] == nil, "the view filters by itself")
+            if let since = q["since"] {
+                deltas += 1
+                guard since.hasPrefix("r\(epoch).") else {
+                    throw APIError(status: 409, message: "expired", fields: ["code": "revision_expired"])
+                }
+                let removes = removed.map { "\"\($0.replacingOccurrences(of: "\"", with: "\\\""))\"" }
+                let json = #"{"sessions":[\#(since == revision ? "" : changed.joined(separator: ","))],"remove":[\#(since == revision ? "" : removes.joined(separator: ","))],"has_more":false,"revision":"\#(revision)","total":\#(rows.count)}"#
+                return Data(json.utf8)
+            }
+            baselines += 1
+            let start = Int(q["cursor"] ?? "0") ?? 0
+            let end = min(start + 200, rows.count)
+            let more = end < rows.count
+            return Data(#"{"sessions":[\#(rows[start..<end].joined(separator: ","))],"remove":[],"has_more":\#(more),\#(more ? #""next_cursor":"\#(end)","# : "")"revision":"\#(revision)","total":\#(rows.count)}"#.utf8)
+        }
+    }
+
+    /// Decoding a baseline runs off the main actor: wait by time, not by a number of yields.
+    private func waitForList(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(2)) }
+        try #require(condition(), "the list did not reach the expected state")
+    }
+
+    private func complete(_ fake: CompleteHub) -> SessionListModel<Session> {
+        let client = fake.client
+        return SessionListModel<Session>(id: { $0.id }, removalID: { SessionListIdentity.runtime($0, group: "")?.path },
+            fetch: { try await client.sessionListPage($0, cursor: $1, since: $2) },
+            counts: { _ in fake.counts += 1; return SessionListCounts(total: 0, machine: [:], project: [:], group: [:], state: [:], revision: "") },
+            waitForHints: {})
+    }
+
+    /// #3759: the grouped (default) Agents list re-read the whole list for every `sessions_list` hint, about once a
+    /// second while agents worked. A minute of hints after the first load now reads no complete list at all.
+    @Test func aMinuteOfHintsReadsTheCompleteListOnlyOnce() async throws {
+        let fake = CompleteHub(count: 266)
+        let list = complete(fake)
+        var landed: [[Session]] = []
+        list.changed = { landed.append($0) }
+        await list.select(SessionListQuery(legacy: true))
+        #expect(list.rows.count == 266 && list.complete && !list.paged && !list.hasMore)
+        #expect(fake.baselines == 2, "one complete baseline: two pages of 200")
+        for k in 0..<120 { // two hints a second
+            fake.change(k)
+            list.invalidate(revision: fake.revision)
+            try await waitForList { list.revision == fake.revision && !list.loading }
+            list.invalidate(revision: fake.revision) // the same revision again (a burst's repeat, a reconnect)
+        }
+        try await waitForList { fake.deltas == 120 }
+        for _ in 0..<20 { await Task.yield() }
+        #expect(fake.baselines == 2, "no complete read after the first")
+        #expect(fake.legacy == 0, "never the no-query list")
+        #expect(fake.deltas == 120, "one small read a hint; a held revision reads nothing")
+        #expect(fake.counts == 0, "a complete copy counts its own rows")
+        #expect(list.rows.count == fake.rows.count)
+        #expect(Set(list.rows.map(\.sessionID)) == Set(fake.rows.compactMap { try? JSON.decoder.decode(Session.self, from: Data($0.utf8)).sessionID }))
+        #expect(list.rows.first { $0.sessionID == "s9" }?.lastText == "round 119")
+        #expect(landed.last?.count == list.rows.count, "the app gets the complete list after each change")
+    }
+
+    /// Each hub restart expires the revision. The baseline is rebuilt every time, not only after the first restart.
+    @Test func everyHubRestartRebuildsTheCompleteCopy() async throws {
+        let fake = CompleteHub(count: 250)
+        let list = complete(fake)
+        await list.select(SessionListQuery(legacy: true))
+        for restart in 1...3 {
+            fake.epoch = restart
+            fake.change(restart)
+            list.invalidate(revision: fake.revision)
+            try await waitForList { list.revision == fake.revision && !list.loading }
+            #expect(list.error == nil)
+            #expect(fake.baselines == 2 * (restart + 1))
+        }
+        fake.change(40)
+        list.invalidate(revision: fake.revision)
+        try await waitForList { list.revision == fake.revision && !list.loading }
+        #expect(fake.baselines == 8, "after the restarts, a hint is a small read again")
+        #expect(list.rows.first { $0.sessionID == "s0" }?.lastText == "round 40")
+    }
+
+    /// A hub without `sessions_list` (no hints, whole lists over the socket) keeps the one no-query read.
+    @Test func aHubWithoutPagingKeepsTheNoQueryCompleteList() async throws {
+        let fake = CompleteHub(count: 3)
+        var client = fake.client
+        client.sessionList = false
+        let page = try await client.sessionListPage(SessionListQuery(legacy: true, state: "working", text: "x"))
+        #expect(!page.isPaged && page.sessions.count == 3 && fake.legacy == 1)
+    }
 }

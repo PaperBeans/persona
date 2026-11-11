@@ -2,6 +2,17 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Shared by every sidebar grouping, below the measured Persona row. */
+.sidebar-group-heading {
+  position: sticky;
+  z-index: 20;
+  background: var(--sidebar-group-bg, var(--page));
+}
+[data-sidebar-rows] {
+  --sidebar-group-bg: var(--canvas);
+  scroll-padding-top: calc(var(--sidebar-sticky-top, 0px) + var(--sidebar-controls-height, 0px) + var(--sidebar-row));
+}
+
 /* Assistant trays share the dock's bounded height; count meters use the small line token. */
 .assistant-action-tray { max-height: var(--assistant-tray-max); }
 .task-count-meter { height: var(--task-count-meter-height); }

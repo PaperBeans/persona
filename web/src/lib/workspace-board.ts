@@ -8,10 +8,9 @@ export interface BoardCard {
   id: string; machine_id: string; workspace_id: string; title: string; cwd: string;
   source: string; source_id?: string; branch?: string; column_id: string; pinned: boolean; archived: boolean;
 }
-export interface Workspace {
-  id: string; machine_id: string; source: string; source_id: string; title: string; cwd: string;
-  branch?: string; online?: boolean; available?: boolean; last_seen?: string;
-}
+/** Compatible board name for the shared discovery wire type. */
+export type { HostWorkspace as Workspace } from "./workspace-catalog";
+import type { HostWorkspace as Workspace } from "./workspace-catalog";
 export interface BoardState { revision: number; columns: BoardColumn[]; cards: BoardCard[]; can_write?: boolean }
 export interface WorkspaceList { workspaces: Workspace[]; errors?: { machine_id: string; error: string }[] }
 export interface BoardMutation {

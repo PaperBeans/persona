@@ -1,0 +1,13 @@
+{
+  "infer": "无法推断 {machine} 上的任务工作区；请显式选择工作区",
+  "resolve": "无法解析任务工作区 {path}",
+  "unavailable": "工作区 {path} 不是可用的绝对目录",
+  "list": "无法列出 {machine} 上的已有工作区",
+  "catalog_unavailable": "工作区 {workspace} 在 {machine} 上不可用",
+  "not_found": "在 {machine} 上找不到工作区 {workspace}；请选择该电脑的工作区或输入绝对路径",
+  "prepare": "无法在 {machine} 上准备新任务工作区；未启动 Agent",
+  "engine_path": "工作区引擎未返回绝对检出路径；未启动 Agent",
+  "busy": "工作区被任务 {id}（{title}）占用；请等待其结束或选择新建工作区（电脑 {machine}，路径 {path}）",
+  "machine_local": "任务工作区已在 {from} 上创建，不能迁移到 {to}",
+  "create": "新任务工作区未创建成功；未启动 Agent"
+}

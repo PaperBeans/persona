@@ -403,6 +403,10 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		}
 		f.guestPrepared = append(f.guestPrepared, a)
 		return json.Marshal(map[string]any{"cwd": "/home/me/.persona/guest"})
+	case "worktree.status":
+		return json.Marshal(proto.WorktreeStatus{})
+	case "workspace.resolve":
+		return json.Marshal(proto.Workspace{Cwd: a["path"].(string), Available: true})
 	case DeviceWorktreePrepare, DeviceWorktreeCreate: // the machine's engine: checkouts under /wt/<repo>
 		a["method"] = p.Method
 		f.worktrees = append(f.worktrees, a)

@@ -1,4 +1,6 @@
 {
+  "title_task_workspace_preference": "Task workspace preference",
+  "change_task_workspace_preference": "Task workspace preference: {before} → {after}",
   "title_notes": "About me",
   "title_main_tasks_quiet": "Notify tasks from the main chat only in the main chat",
   "title_start_requested_tasks": "Start what I asked for in the chat right away",

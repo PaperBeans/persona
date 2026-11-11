@@ -1,0 +1,6 @@
+{
+  "destination": "Workspace",
+  "existing_hint": "Start in this existing workspace.",
+  "choose_folder": "Choose a folder instead",
+  "owner_changed": "This workspace belongs to a previous connection or manager. Select it again from the workspace list."
+}

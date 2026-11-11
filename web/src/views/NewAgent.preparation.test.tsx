@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 // Exercise the real component, launchAgent/deliverLaunch and REST client with synthetic, abort-ignoring HTTP.
-import { act, useState } from "react";
+import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyMachine, getState } from "../lib/store";
-import { handleUnauthorized, setToken } from "../lib/api";
+import { credentialOwner, handleUnauthorized, setToken } from "../lib/api";
+import { onOpenNewAgent, openNewAgent, type NewAgentPreset, type WorkspaceTarget } from "../lib/new-agent";
 import { resetManagerChoice, setRosterDefault } from "../lib/manager-choice";
 import { NewAgent } from "./NewAgent";
 import { Toasts } from "../ui/atoms";
@@ -41,8 +42,18 @@ const type = (text: string) => input(textarea(), text);
 const click = (text: string) => act(async () => button(text).click());
 function Harness() {
   const [open, setOpen] = useState(true);
+  const [preset, setPreset] = useState<NewAgentPreset>();
+  useEffect(() => onOpenNewAgent((next) => { setPreset(next); setOpen(true); }), []);
   return <><button onClick={() => setOpen(true)}>Reopen start</button><button onClick={() => setOpen(false)}>Close externally</button>
-    <NewAgent open={open} onClose={() => { closes++; setOpen(false); }} /><Toasts /></>;
+    <NewAgent open={open} preset={preset} onClose={() => { closes++; setOpen(false); }} /><Toasts /></>;
+}
+const workspace = (overrides: Partial<WorkspaceTarget> = {}): WorkspaceTarget => ({
+  machineId: "computer", workspaceId: "nested-empty", host: "orca", cwd: "/projects/demo",
+  label: "Empty nested workspace", owner: credentialOwner(), manager: "assistant", ...overrides,
+});
+async function target(next: WorkspaceTarget) {
+  await act(async () => openNewAgent({ workspace: next }));
+  await flush();
 }
 async function prepare() {
   await tick(401);
@@ -288,5 +299,118 @@ describe("New Agent preparation ownership", () => {
     expect(starts()).toHaveLength(1); expect(starts()[0].body).toMatchObject({ cwd: "/projects/demo", launcher: "claude", async: true });
     expect(messages()[0].body!.text).toBe("Submitted task\n/uploads/submitted.txt");
     expect(localStorage.getItem("draft:new-agent")).toBeNull();
+  });
+});
+
+describe("New Agent exact workspace destinations", () => {
+  it.each([
+    { host: "orca", initial: "herdr", current: "herdr" },
+    { host: "herdr", initial: "herdr", current: "orca" },
+    { host: "herdr-core", initial: "herdr-core", current: "herdr-core" },
+  ])("retains $host when the machine default goes from $initial to $current", async ({ host, initial, current }) => {
+    await act(async () => applyMachine({ id: "computer", name: "Synthetic computer", online: true, engine_hosts: ["herdr", "herdr-core", "orca"], engine_default: initial }));
+    const selected = workspace({ host });
+    await target(selected);
+    const card = document.querySelector('[data-testid="new-agent-workspace"]')!;
+    expect(card.textContent).toContain(selected.label);
+    expect(card.textContent).toContain(selected.cwd);
+    expect(card.textContent).not.toContain(selected.workspaceId);
+    expect(card.textContent).not.toContain(selected.owner);
+    expect(document.querySelector('input[placeholder="' + t("newagent.folder_placeholder") + '"]')).toBeNull();
+    expect(document.querySelector('[data-testid="start-host"]')).toBeNull();
+    expect(button("Second computer").disabled).toBe(true);
+    await tick(401);
+    expect(document.querySelector('[data-testid="new-agent-worktree"]')).toBeNull();
+    expect(calls.filter((c) => c.url.endsWith("/worktree/status"))).toHaveLength(0);
+    await act(async () => applyMachine({ id: "computer", name: "Synthetic computer", online: true, engine_hosts: ["herdr", "herdr-core", "orca"], engine_default: current }));
+    await click(t("newagent.start")); await tick();
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0].body).toMatchObject({ machine_id: "computer", cwd: selected.cwd, workspace_id: selected.workspaceId, host, launcher: "claude", async: true });
+    expect(pending).toHaveLength(0);
+    expect(messages()[0].body!.text).toBe("Submitted task");
+  });
+
+  it("replaces the exact workspace identity when two workspaces share a directory", async () => {
+    await target(workspace({ workspaceId: "parent", label: "Parent workspace" }));
+    await target(workspace({ workspaceId: "nested-empty", label: "Empty nested workspace" }));
+    expect(document.querySelector('[data-testid="new-agent-workspace"]')!.textContent).not.toContain("Parent workspace");
+    await click(t("newagent.start")); await tick();
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0].body).toMatchObject({ workspace_id: "nested-empty", host: "orca", cwd: "/projects/demo" });
+  });
+
+  it("uses the workspace's machine and directory over legacy preset fields", async () => {
+    const selected = workspace({ machineId: "second", cwd: "/projects/child" });
+    await act(async () => openNewAgent({ machineId: "computer", cwd: "/ignored", workspace: selected }));
+    await flush();
+    await click(t("newagent.start")); await tick();
+    expect(starts()[0].body).toMatchObject({ machine_id: "second", cwd: selected.cwd, workspace_id: selected.workspaceId, host: "orca" });
+  });
+
+  it("refreshes Git eligibility when folder mode clears an unchanged directory's target", async () => {
+    await target(workspace());
+    await tick(401);
+    expect(calls.filter((c) => c.url.endsWith("/worktree/status"))).toHaveLength(0);
+    await click(t("newagent-workspace.choose_folder"));
+    expect(document.querySelector('[data-testid="new-agent-workspace"]')).toBeNull();
+    expect(button("Second computer").disabled).toBe(false);
+    expect(document.querySelector<HTMLInputElement>('input[spellcheck="false"]')!.value).toBe("/projects/demo");
+    await answer(await prepare());
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0].body).toMatchObject({ cwd: worktree.path });
+    expect(starts()[0].body).not.toHaveProperty("workspace_id");
+    expect(starts()[0].body).not.toHaveProperty("host");
+  });
+
+  it.each(["owner", "manager", "credential change", "machine manager change", "default manager change"])("blocks a stale %s while retaining the draft", async (change) => {
+    await target(workspace(change === "owner" ? { owner: "retired-owner" } : change === "manager" ? { manager: "retired-manager" } : {}));
+    if (change === "credential change") await act(async () => setToken("synthetic-credential-b"));
+    if (change === "machine manager change") await act(async () => applyMachine({ id: "computer", name: "Synthetic computer", online: true, manager: "other-manager" }));
+    if (change === "default manager change") await act(async () => setRosterDefault("other-manager"));
+    await flush();
+    expect(button(t("newagent.start")).disabled).toBe(true);
+    expect(document.querySelector('[role="alert"]')!.textContent).toBe(t("newagent-workspace.owner_changed"));
+    await act(async () => textarea().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true })));
+    await tick();
+    expect(starts()).toHaveLength(0);
+    expect(textarea().value).toBe("Submitted task");
+  });
+
+  it("keeps an offline destination selected instead of substituting another machine", async () => {
+    await target(workspace({ machineId: "second" }));
+    await act(async () => applyMachine({ id: "second", name: "Second computer", online: false }));
+    await flush();
+    expect(button(t("newagent.start")).disabled).toBe(true);
+    expect(document.querySelector('[data-testid="new-agent-workspace"]')!.textContent).toContain("Empty nested workspace");
+    expect(starts()).toHaveLength(0);
+  });
+
+  it.each(["credential", "manager"])("checks a changed %s synchronously before keyboard admission", async (change) => {
+    await target(workspace());
+    await act(async () => {
+      if (change === "credential") setToken("synthetic-credential-b");
+      else setRosterDefault("other-manager");
+      textarea().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
+    });
+    await tick();
+    expect(starts()).toHaveLength(0);
+    expect(localStorage.getItem("draft:new-agent")).toBe("Submitted task");
+  });
+
+  it("retires folder preparation before changing target without erasing the next draft or attachments", async () => {
+    const old = await prepare();
+    await target(workspace());
+    await type("Next task"); await attach("next.txt");
+    await answer(old);
+    expect(old.signal?.aborted).toBe(true);
+    expect(starts()).toHaveLength(0);
+    expect(textarea().value).toBe("Next task");
+    expect(localStorage.getItem("draft:new-agent")).toBe("Next task");
+    expect(document.body.textContent).toContain("next.txt");
+    expect(closes).toBe(0);
+    await click(t("newagent.start")); await tick();
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0].body).toMatchObject({ workspace_id: "nested-empty", host: "orca", cwd: "/projects/demo" });
+    expect(messages()[0].body!.text).toBe("Next task\n/uploads/submitted.txt");
   });
 });

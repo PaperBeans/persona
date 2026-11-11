@@ -279,6 +279,15 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "docs/assistant/assistant.md": {
+      "reason": "Published compatibility documentation naming exact historical MCP tool and settings aliases.",
+      "tokens": [
+        "jarvis_settings",
+        "mcp__jarvis__"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "docs/assistant/managers.md": {
       "reason": "Published upgrade, storage identity or compatibility documentation retained for existing installations.",
       "tokens": [
@@ -391,6 +400,8 @@
         "jarvisd-wechat",
         "jarvisd-wechat-",
         "mcp__jarvis__",
+        "mcp__jarvis__X",
+        "mcp__jarvis__todo_decisions",
         "plugin_jarvis",
         "split.jarvis",
         "started_by_jarvis"
@@ -416,6 +427,14 @@
         ".jarvis",
         "jarvisd",
         "options.jarvisdBin"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "integrations/paseo/test/bridge.test.js": {
+      "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
+      "tokens": [
+        "mcp__jarvis__report_to_supervisor"
       ],
       "path_tokens": [],
       "external_refs": []
@@ -792,6 +811,59 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "server/internal/assistant/settings_alias_test.go": {
+      "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
+      "tokens": [
+        "jarvis_settings"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "server/internal/assistant/tasks_readonly_report_test.go": {
+      "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
+      "tokens": [
+        "mcp__jarvis__report_to_supervisor",
+        "mcp__jarvis__todo_decision_add"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "server/internal/assistant/testdata/prompts/assistant_claude_md.bare.golden": {
+      "reason": "Generated assistant-instruction golden for exact legacy tool-name migration guidance.",
+      "tokens": [
+        "jarvis_settings",
+        "mcp__jarvis__X"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "server/internal/assistant/testdata/prompts/assistant_claude_md.full.golden": {
+      "reason": "Generated assistant-instruction golden for exact legacy tool-name migration guidance.",
+      "tokens": [
+        "jarvis_settings",
+        "mcp__jarvis__X"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "server/internal/assistant/testdata/prompts/assistant_claude_md.lark_cli.golden": {
+      "reason": "Generated assistant-instruction golden for exact legacy tool-name migration guidance.",
+      "tokens": [
+        "jarvis_settings",
+        "mcp__jarvis__X"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "server/internal/assistant/testdata/prompts/assistant_claude_md.persona_view.golden": {
+      "reason": "Generated assistant-instruction golden for exact legacy tool-name migration guidance.",
+      "tokens": [
+        "jarvis_settings",
+        "mcp__jarvis__X"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "server/internal/compat/legacy.go": {
       "reason": "Dedicated adapter for a versioned runtime, protocol or persisted identity.",
       "tokens": [
@@ -893,30 +965,6 @@
       "path_tokens": [],
       "external_refs": []
     },
-    "server/internal/hub/testdata/prompts/mcp_tools.assistant.golden": {
-      "reason": "Generated tool-list golden for the exact builtin settings alias, with unchanged schema and approval gate.",
-      "tokens": [
-        "jarvis_settings"
-      ],
-      "path_tokens": [],
-      "external_refs": []
-    },
-    "server/internal/hub/testdata/prompts/mcp_tools.assistant_with_github.golden": {
-      "reason": "Generated tool-list golden for the exact builtin settings alias, with unchanged schema and approval gate.",
-      "tokens": [
-        "jarvis_settings"
-      ],
-      "path_tokens": [],
-      "external_refs": []
-    },
-    "server/internal/hub/testdata/prompts/mcp_tools.assistant_with_imessage.golden": {
-      "reason": "Generated tool-list golden for the exact builtin settings alias, with unchanged schema and approval gate.",
-      "tokens": [
-        "jarvis_settings"
-      ],
-      "path_tokens": [],
-      "external_refs": []
-    },
     "server/internal/link/compat.go": {
       "reason": "Dedicated adapter for a versioned runtime, protocol or persisted identity.",
       "tokens": [
@@ -974,6 +1022,15 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "server/internal/prompts/assistant/claude_md.md": {
+      "reason": "Assistant instructions translating exact historical tool and settings aliases to their canonical names.",
+      "tokens": [
+        "jarvis_settings",
+        "mcp__jarvis__X"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "server/internal/proto/compatibility.go": {
       "reason": "Dedicated adapter for a versioned runtime, protocol or persisted identity.",
       "tokens": [
@@ -997,6 +1054,14 @@
       "tokens": [
         "jarvis",
         "jarvis_wake"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "server/internal/shareproxy/shareproxy_test.go": {
+      "reason": "Regression fixture asserting that both historical and canonical credential headers are stripped.",
+      "tokens": [
+        "X-Jarvis-CSRF"
       ],
       "path_tokens": [],
       "external_refs": []

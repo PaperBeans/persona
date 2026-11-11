@@ -3,8 +3,9 @@ import { cx, Switch as AtomSwitch } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import { SegmentedTrack } from "../../ui/Segmented";
 
-export const inputClass =
-  "h-9 w-full rounded-control bg-field px-3 text-[13px] text-ink shadow-inset-field outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";
+export const fieldClass =
+  "h-9 rounded-control bg-field px-3 text-[13px] text-ink shadow-inset-field outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";
+export const inputClass = `w-full ${fieldClass}`;
 
 export const textareaClass =
   "w-full resize-y rounded-control bg-field px-3 py-2 text-[13px] leading-relaxed text-ink shadow-inset-field outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";

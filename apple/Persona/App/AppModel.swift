@@ -1809,8 +1809,8 @@ final class AppModel {
                     socket(group)?.send(subscribeMessage(key))
                 }
             }
-        case .sessionsList:
-            sessionLists.invalidate(group)
+        case .sessionsList(let revision):
+            sessionLists.invalidate(group, revision: revision)
             for key in subscribers.keys where key.group == group { Task { await refreshSessionDetail(key) } }
         case .sessions(let machineID, let list):
             // A busy hub sends each machine's list on its own, one after another: they are applied together a moment

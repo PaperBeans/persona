@@ -4,8 +4,9 @@
 // old starts it without; a hub without ultracode shows nothing. To-do cards, lines and rows carry the Agent list row's mark.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanTask, TaskPlan } from "../../lib/feed";
+import { loadPages } from "../../lib/lazy-page";
 import type { Todo } from "../../lib/todos";
 import type { Session } from "../../lib/types";
 
@@ -18,6 +19,7 @@ vi.mock("../../lib/feed", async (orig) => ({
 const { getState } = await import("../../lib/store");
 const { PlanCard, TaskCard, TaskLine } = await import("./Tasks");
 const { TodosView } = await import("../Todos");
+beforeAll(() => loadPages(), 60_000);
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

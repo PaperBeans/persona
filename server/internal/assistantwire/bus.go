@@ -142,6 +142,7 @@ var Routes = []string{
 	"DELETE /api/v1/assistant/followups/{id}",
 	"GET /api/v1/task-plans/{id}",
 	"POST /api/v1/task-plans/{id}/start",
+	"POST /api/v1/task-plans/{id}/workspace-preview",
 	"POST /api/v1/task-plans/{id}/dismiss",
 	"GET /api/v1/task-trust",
 	"DELETE /api/v1/task-trust",

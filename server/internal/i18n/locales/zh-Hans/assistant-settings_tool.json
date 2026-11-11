@@ -1,4 +1,6 @@
 {
+  "title_task_workspace_preference": "派发任务时优先使用",
+  "change_task_workspace_preference": "派发任务时优先使用：{before} → {after}",
   "title_notes": "关于我",
   "title_main_tasks_quiet": "主对话派的任务只在主对话里通知",
   "title_start_requested_tasks": "我在对话里说过的，直接开始",

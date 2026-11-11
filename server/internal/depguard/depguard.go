@@ -25,7 +25,7 @@ var HubOwn = []string{"cmd/persona-hub", "internal/hub", "internal/hubcli", "int
 // code): the hub links these and its own, nothing else; a new package the hub needs is put in one of the two lists on
 // purpose, never one of the manager's.
 var Shared = []string{"internal/acceptloop", "internal/aiwire", "internal/apierr", "internal/assistantwire",
-	"internal/bus", "internal/channel", "internal/clitext", "internal/compat", "internal/connectorwire", "internal/db",
+	"internal/bus", "internal/channel", "internal/clitext", "internal/closeout", "internal/compat", "internal/connectorwire", "internal/db",
 	"internal/devicewire", "internal/dialogwire", "internal/errreport", "internal/extwire", "internal/i18n",
 	"internal/identity", "internal/kbwire", "internal/lazyre", "internal/link", "internal/managerconf", "internal/netaddr",
 	"internal/nodeproto", "internal/osproc", "internal/pgdocker", "internal/preview", "internal/procinfo", "internal/prompts",

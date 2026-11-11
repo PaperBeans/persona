@@ -144,6 +144,9 @@ var actionBodies = map[string]string{
 	"tabs/close":       `{"tab_id":"w1:t2"}`,
 	"tabs/rename":      `{"tab_id":"w1:t2","label":"build"}`,
 	"worktree/prepare": `{"workspace_id":"w1"}`,
+	"worktree/source":  `{"workspace_id":"w1","kind":"orca"}`,
+	"worktree/preset":  `{"workspace_id":"w1","kind":"orca","name":"UI","directories":"src"}`,
+	"worktree/delete":  `{"workspace_id":"w1","kind":"orca","preview":true}`,
 	"worktree/rename":  `{"workspace_id":"w1","kind":"orca","name":"Renamed tree"}`,
 	"worktree/create":  `{"workspace_id":"w1","branch":"feat/x","path":"/tmp/wt/feat-x"}`,
 	"worktree/add":     `{"cwd":"/tmp/proj","name_hint":"fix the crash"}`,
@@ -198,7 +201,7 @@ func TestNodeActionsNeedAFullDevice(t *testing.T) {
 		}
 	}
 	want := map[string]bool{"panes.close": true, "panes.split": true, "panes.agent": true, "panes.git": true, "tabs.close": true, "tabs.rename": true,
-		"worktree.prepare": true, "worktree.create": true, "worktree.add": true, "worktree.status": true, "worktree.remove": true}
+		"worktree.source": true, "worktree.preset": true, "worktree.delete": true, "worktree.rename": true, "worktree.prepare": true, "worktree.create": true, "worktree.add": true, "worktree.status": true, "worktree.remove": true}
 	for _, m := range tn.await(t, len(want)) {
 		delete(want, m)
 	}

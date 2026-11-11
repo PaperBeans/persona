@@ -1157,8 +1157,29 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		}
 		return n.gitOp(ctx, dir, p.Op)
 	case "worktree.prepare": // "New worktree…": what the dialog starts from (worktree.go)
+		var in struct {
+			Composer bool `json:"composer"`
+		}
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, err
+		}
+		if in.Composer {
+			return n.worktreeComposerPrepare(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID)
+		}
 		return n.worktreePrepare(ctx, p.Kind, p.WorkspaceID, p.Cwd)
 	case "worktree.create": // a Git worktree of a workspace's repository, opened as a workspace (worktree.go)
+		var in struct {
+			Composer bool `json:"composer"`
+		}
+		if err := json.Unmarshal(params, &in); err != nil {
+			return nil, err
+		}
+		if in.Composer {
+			return n.worktreeCompose(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, params)
+		}
+		if err := rejectComposerFields(ctx, params); err != nil {
+			return nil, err
+		}
 		if p.AutoName {
 			if strings.TrimSpace(p.Branch) != "" || strings.TrimSpace(p.Path) != "" {
 				return nil, errors.New("Choose automatic naming or an explicit branch and path")
@@ -1166,6 +1187,12 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			return n.worktreeCreateAutomatic(ctx, p.Kind, p.WorkspaceID, p.Cwd, p.ParentWorkspaceID)
 		}
 		return n.worktreeCreate(ctx, p.Kind, p.WorkspaceID, p.Cwd, p.Branch, p.Path, p.ParentWorkspaceID)
+	case "worktree.source":
+		return n.worktreeSources(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, params)
+	case "worktree.preset":
+		return n.worktreeSavePreset(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, params)
+	case "worktree.delete":
+		return n.worktreeDelete(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, params)
 	case "worktree.add", "worktree.status", "worktree.remove": // a new agent's own worktree (agentworktree.go, #6115)
 		var a struct {
 			NameHint     string `json:"name_hint"`

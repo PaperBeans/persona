@@ -14,6 +14,8 @@ import { stateOf } from "../../lib/format";
 import { usageLimitLabel } from "../../lib/usage-limit";
 import { href, type Route } from "../../lib/router";
 import { t } from "../../i18n";
+import { useFeed } from "../../lib/feed";
+import { TaskWorkspaceLine } from "./TaskWorkspace";
 
 /** ⋯'s "Open in new window": the page the panel shows, as its own tab (⌘-click on the link does the same). */
 function openInWindow(to: Route): MenuItem {
@@ -26,6 +28,7 @@ export function TaskPanel({ todoId, onClose }: { todoId: string; onClose: () => 
   const sessions = useStore((s) => s.sessions);
   const [picked, setPicked] = useState<string | null>(null);
   const retrying = useRetrying(todoId);
+  const planned = useFeed((s) => Object.values(s.plans).flatMap((p) => p.tasks).find((t) => t.todo_id === todoId));
   if (!todo || !st) {
     return (
       <>
@@ -63,8 +66,9 @@ export function TaskPanel({ todoId, onClose }: { todoId: string; onClose: () => 
           panel={{ onClose, title: todo.title, sub: subtitle, items: taskItems, agents: switcher }}
           // what the task's result waits on from the user (#2056), and what its agent last reported, as it wrote it (#3181),
           // over its agent's chat
-          banner={openAsk(todo) || reportText(todo.supervision) ? (
+          banner={openAsk(todo) || reportText(todo.supervision) || planned?.workspace ? (
             <>
+              {planned?.workspace && <div className="border-b border-line px-4 py-2"><TaskWorkspaceLine task={planned} /></div>}
               {openAsk(todo) && <TodoAskLine todo={todo} className="border-b border-line bg-inset px-4 py-2.5" />}
               <LatestReport todo={todo} banner />
             </>
@@ -77,6 +81,7 @@ export function TaskPanel({ todoId, onClose }: { todoId: string; onClose: () => 
     <>
       <PanelHeader icon="todo" title={todo.title} subtitle={subtitle} actions={<PanelMore items={taskItems} />} onClose={onClose} />
       <div className="flex min-h-0 flex-1 flex-col">
+        {planned?.workspace && <div className="border-b border-line px-4 py-2"><TaskWorkspaceLine task={planned} /></div>}
         {st.failure || todo.agents?.some((a) => a.start_error) ? (
           <div className="flex flex-col items-start gap-3 p-6 text-[13px]">
             <div className="font-semibold text-red">{t("assistant-taskpanel.start_failed")}</div>

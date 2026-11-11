@@ -387,4 +387,3 @@ and node-side `node/launcherquota.go`.
 - App: `LauncherQuotaSection`, above “Availability” (same on web, `web/src/views/settings/LauncherQuota.tsx`; Android places it on the launcher page reached from Machines, passing that computer as `machine=`, see `docs/android/android.md`, “Extension UI and marketplace”). Title: “Quota · <gateway name>,” using the report's `gateway_name` (fallback to `gateway` for old hubs). The app hardcodes no gateway names.
   Usage ≥ 70% is orange, ≥ 90% or exhausted is red; refresh at the top right. DEBUG `-openLauncherPage <name>` opens it directly.
   Fake hub's `cc_main` and `cc_team` carry quota from two example gateways (`示例网关`, “Example gateway,” and `示例中转`, “Example relay”) for screenshots.
-

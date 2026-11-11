@@ -41,6 +41,67 @@ The prototype is the UI and interaction standard; compare screen by screen durin
 - Read-only tasks always retain `permission: plan`, including after card edits and on retries. Health-space plans still wait for Start. Runtime support and the current card labels are described in [To-dos](todos.md#read-only-planned-tasks).
 - `task_plan` **does not block**: once the plan is handed to you, the turn ends immediately and you can continue talking about something else. When you tap Start, hub starts the Agents directly; Persona sees the result in the next message's live snapshot.
 
+### Task workspace policy (#3659)
+
+`task_plan.tasks[].workspace` is a task-level choice, separate from `cwd` (the source directory before dispatch):
+
+| Request | Meaning |
+| --- | --- |
+| `"new"` | Create a checkout through the machine's existing herdr/Orca workspace engine |
+| `{"new":{"branch":"task/fix-login"}}` | Create through that engine, with an explicit branch |
+| `{"existing":"/code/app"}` | Reuse an existing directory (`~/…` is expanded on the selected machine) |
+| `{"existing":"ws_…"}` | Select a workspace from that machine's catalog; node-local and board-qualified IDs are accepted |
+| `"none"` | Create no workspace; run at `cwd` (the default for read-only/non-Git tasks) |
+
+Settings › Assistant › Dispatch tasks offers **When dispatching tasks, prefer**:
+`task_workspace_preference: "prefer-existing"` (default) reuses an available source directory;
+`"prefer-new"` gives each writable Git task a new checkout. A read-only task defaults to `none`.
+A writable Git task whose directory is occupied defaults to `new`, regardless of preference.
+An explicit `workspace` overrides inference. When a caller means a particular branch/PR/checkout, it should name that checkout with `existing`.
+Inference uses the node's `worktree.status`; if the node cannot answer, the plan reports the error and asks for an explicit choice.
+The same preference is available through `persona_settings` as `assistant.task_workspace_preference`.
+
+The open web plan card has New / Use existing / Not needed, a machine-local workspace picker, manual existing path/ID,
+an optional new branch, and the resolved absolute path. “Edit” also supports changing machine/cwd and recomputes the preview.
+`POST /api/v1/task-plans/{id}/workspace-preview` applies editable fields to the saved plan without saving or creating anything.
+Start sends those choices through the existing `/start` request; clients cannot supply trusted resolution metadata.
+Task details and the started plan show the chosen policy and actual path, read-only.
+
+For a new checkout, the default branch is `task/<todo id>`: the plan reserves that ID for a stable preview but does not create
+the todo or workspace until Start. The path comes only from the machine engine:
+`WorktreePrepare.Path` plus `herdr.WorktreeDirName(branch)`, exactly as `agent_start` does.
+There is no new workspace-root/template setting or arbitrary new-path override. Dispatch rechecks on the final machine,
+calls `newWorktree`, uses the engine's returned path/host workspace ID, and stores the actual `cwd` in the plan and the unchanged
+`todo_agents.cwd` column. A retry uses the created checkout rather than creating another one; a created checkout stays on its machine.
+Creation/lookup failures prevent Agent launch and appear on the task as failed dispatch with the underlying reason.
+
+An existing workspace on the same machine and canonical path cannot be reused while another unfinished task holds it.
+The refusal names that task's ID/title and suggests waiting or choosing New (v1 has no queue).
+Admission also covers concurrent starts before the agent link exists. Ended/released tasks do not retain a claim.
+Read-only tasks using `none` do not claim a workspace.
+
+The saved `PlanTask.workspace_resolved` is a hub-owned object, separate from the policy, so future repository entries can be
+added without overloading `cwd`. Examples below omit the other task fields and unrelated response fields; the paths are illustrative
+engine answers, not a required directory layout.
+
+`task_plan` itself still returns a textual plan/dispatch acknowledgement. The response fragments are saved tasks read from
+`GET /api/v1/task-plans/{id}` or the conversation feed **after dispatch completes**, not confirmation from the initial queued reply:
+
+```json
+{"workspace":"new","cwd":"/code/app"}
+{"workspace":"new","cwd":"/wt/app/task-todo_example","workspace_resolved":{"machine":"box","path":"/wt/app/task-todo_example","branch":"task/todo_example","workspace_id":"host-space","created":true}}
+
+{"workspace":{"existing":"/code/app"},"cwd":"/code/app"}
+{"workspace":{"existing":"/code/app"},"cwd":"/code/app","workspace_resolved":{"machine":"box","path":"/code/app"}}
+
+{"workspace":"none","cwd":"/code/app","readonly":true}
+{"workspace":"none","cwd":"/code/app","workspace_resolved":{"machine":"box","path":"/code/app"}}
+```
+
+The engine registers new workspaces in the existing App/catalog/board view, with its existing project/branch/kind metadata.
+This v1 does not add multi-repository entries, change `agent_start`, or change acceptance semantics.
+After acceptance, workspaces are **silently retained**: no cleanup, recycling, or migration.
+
 ### Needs you and In progress: each thing once (#3387)
 
 Above the Assistant's composer there are two entries. **Needs you** lists everything the user has to act on; **In

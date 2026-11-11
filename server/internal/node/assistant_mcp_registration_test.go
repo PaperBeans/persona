@@ -156,9 +156,9 @@ func TestCodexAssistantMCPRegistrationAtStart(t *testing.T) {
 				n.hubPersonaContracts.Store(!tc.persona)
 				joined := strings.Join(args, " ")
 				persona := strings.Contains(joined, "mcp_servers.persona.command")
-				jarvis := strings.Contains(joined, "mcp_servers."+compat.MCPServer+".command")
-				if started != tc.persona || !persona || jarvis != !tc.persona {
-					t.Fatalf("started=%v persona=%v jarvis=%v, negotiated=%v: %s", started, persona, jarvis, tc.persona, joined)
+				legacy := strings.Contains(joined, "mcp_servers."+compat.MCPServer+".command")
+				if started != tc.persona || !persona || legacy != !tc.persona {
+					t.Fatalf("started=%v persona=%v legacy=%v, negotiated=%v: %s", started, persona, legacy, tc.persona, joined)
 				}
 			})
 		}

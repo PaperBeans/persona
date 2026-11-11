@@ -1,4 +1,9 @@
 {
+  "workspace_preference": "When dispatching tasks, prefer",
+  "workspace_prefer_existing": "Existing workspaces",
+  "workspace_prefer_new": "New workspaces",
+  "workspace_hint": "Read-only tasks need no new workspace. Busy directories get an isolated checkout. Each plan can override this.",
+  "workspace_unconfirmed": "The assistant did not confirm the workspace preference. Please retry.",
   "retry": "Retry",
   "save_failed": "Couldn't save: {error}",
   "subtitle": "Your personal assistant",

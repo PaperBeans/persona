@@ -4,7 +4,8 @@
 // todos page's "To-dos" back on a narrow screen popping the entry a row click pushed. The hub is faked; the data made up.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadPages } from "../lib/lazy-page";
 import type { Task } from "../lib/routines";
 import type { Todo } from "../lib/todos";
 
@@ -41,6 +42,7 @@ const { getState } = await import("../lib/store");
 const { Routines } = await import("./assistant/Routines");
 const { FeedLineView, PlanCard, TaskDock } = await import("./assistant/Tasks");
 const { TodosView } = await import("./Todos");
+beforeAll(() => loadPages(), 60_000);
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

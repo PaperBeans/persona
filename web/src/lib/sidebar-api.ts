@@ -56,11 +56,16 @@ export function nextGrouping(current: AgentGrouping, offered: readonly AgentGrou
   return offered[(i + 1) % offered.length] ?? current;
 }
 
+/** Choose a grouping from another navigation surface, keeping mounted sidebar and phone views in sync. */
+export function setAgentGrouping(grouping: AgentGrouping): void {
+  storeValue(GROUPING_KEY, grouping);
+  groupingListeners.forEach((listener) => listener(grouping));
+}
+
 /** Switches the sidebar to its next grouping (kept in this browser, as the menu's choice is); returns it. */
 export function cycleGrouping(offered?: readonly AgentGrouping[]): AgentGrouping {
   const next = nextGrouping(agentGrouping(storedValue(GROUPING_KEY)), offered);
-  storeValue(GROUPING_KEY, next);
-  groupingListeners.forEach((f) => f(next));
+  setAgentGrouping(next);
   return next;
 }
 

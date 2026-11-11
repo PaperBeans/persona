@@ -65,6 +65,11 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.startRequestedTasks(ctx)), nil },
 			set: s.setStartRequestedTasks},
+		{Setting: Setting{Key: "assistant.task_workspace_preference", Title: "Task workspace preference", Actions: getSet,
+			About: "prefer-existing (default): reuse the task directory if free; prefer-new: isolate writable Git tasks. Read-only defaults to none, busy directories to new; explicit task workspace wins. Paths come from the machine engine",
+			Value: "prefer-existing or prefer-new"},
+			get: func(ctx context.Context) (string, error) { return s.taskWorkspacePreference(ctx), nil },
+			set: s.setTaskWorkspacePreference},
 		{Setting: Setting{Key: "assistant.recording_days", Title: "录音在知识库里保留", Actions: getSet,
 			About: "how many days the phone's and watch's recording transcripts stay in the knowledge base (kind recordings); older " +
 				"transcripts are deleted from it, and the phone deletes its local recordings too (audio and text). " +
@@ -268,7 +273,8 @@ func orNone(s string) string {
 // settingTitles are the settings' titles for the card the user approves on, in this file's namespace (Title stays
 // what the assistant reads).
 var settingTitles = map[string]string{"assistant.notes": "title_notes", "assistant.main_tasks_quiet": "title_main_tasks_quiet",
-	"assistant.start_requested_tasks": "title_start_requested_tasks", "assistant.launcher": "title_launcher",
+	"assistant.task_workspace_preference": "title_task_workspace_preference",
+	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
 	"assistant.recording_days": "title_recording_days", "assistant.done_needs_delivery": "title_done_needs_delivery",
 	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders",
 	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "model_profiles.tiers": "title_model_tiers",
@@ -347,6 +353,32 @@ func (s *Service) setStartRequestedTasks(ctx context.Context, v json.RawMessage)
 		return i18n.T(l, "assistant-settings_tool.change_start_requested_tasks", i18n.Args{"before": before, "after": after})
 	}, func(v *Settings) **bool { return &v.StartRequestedTasks },
 		"assistant.start_requested_tasks is %v for plans from now on.")
+}
+
+func (s *Service) setTaskWorkspacePreference(ctx context.Context, raw json.RawMessage) (*ownChange, error) {
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil || !validWorkspacePreference(value) {
+		return nil, fmt.Errorf("value must be prefer-existing or prefer-new")
+	}
+	before := s.taskWorkspacePreference(ctx)
+	if before == value {
+		return &ownChange{summary: "assistant.task_workspace_preference is unchanged"}, nil
+	}
+	if s.store() == nil {
+		return nil, fmt.Errorf("no database on this manager")
+	}
+	return &ownChange{
+		cardText: func(l i18n.Lang) string {
+			return i18n.T(l, "assistant-settings_tool.change_task_workspace_preference", i18n.Args{"before": before, "after": value})
+		},
+		apply: func(ctx context.Context) (string, error) {
+			if _, err := s.updateSettings(ctx, func(v *Settings) error { v.TaskWorkspacePreference = value; return nil }); err != nil {
+				return "", err
+			}
+			s.settingsChanged(ctx)
+			return "assistant.task_workspace_preference is " + value + " for new task plans", nil
+		},
+	}, nil
 }
 
 func (s *Service) setMainBackgroundFolded(ctx context.Context, v json.RawMessage) (*ownChange, error) {

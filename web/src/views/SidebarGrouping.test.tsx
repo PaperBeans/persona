@@ -62,7 +62,7 @@ const grouping = () => host.querySelector<HTMLElement>('[role="radiogroup"][aria
 const segments = () => [...grouping().querySelectorAll<HTMLButtonElement>('[role="radio"]')];
 const checked = () => segments().find((b) => b.getAttribute("aria-checked") === "true")?.getAttribute("aria-label");
 // the Agents block's body: the segments, the quick filter and the groups (the personal agents' Loading... is elsewhere)
-const agentsBlock = () => grouping().parentElement!;
+const agentsBlock = () => grouping().closest<HTMLElement>("[data-sidebar-agents]")!;
 const render = async () => {
   act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));
   await flush();
@@ -145,6 +145,35 @@ describe("按待办 before the todos have loaded", () => {
     expect(checked()).toBe("按机器");
     expect(agentsBlock().textContent).not.toContain("加载中…");
     expect(agentsBlock().textContent).toContain("工作电脑");
+  });
+});
+
+describe("group controls in every Agents view", () => {
+  it.each(["todo", "machine", "repo", "space", "state"])("opens and folds all levels in %s without folding the block", async (mode) => {
+    localStorage.setItem("persona.agentGrouping", mode);
+    vi.stubGlobal("fetch", hub(() => json({ todos: [todo] })));
+    await refresh();
+    await render();
+    const action = (label: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+    const disclosures = () => [...agentsBlock().querySelectorAll<HTMLButtonElement>("[data-sidebar-group-heading] button[aria-expanded]")].filter((b) => !b.closest("[data-sidebar-agents-controls]"));
+    expect(disclosures().length).toBeGreaterThan(0);
+    expect(host.querySelectorAll("[data-sidebar-agents-controls] button[title=\"全部折叠\"], [data-sidebar-agents-controls] button[title=\"全部展开\"]")).toHaveLength(1);
+    await act(async () => { action("全部折叠").click(); await Promise.resolve(); });
+    expect(disclosures().every((b) => b.getAttribute("aria-expanded") === "false")).toBe(true);
+    expect(grouping().closest("[inert]")).toBeNull();
+    await flush();
+    await act(async () => { action("全部展开").click(); await Promise.resolve(); });
+    expect(disclosures().every((b) => b.getAttribute("aria-expanded") === "true")).toBe(true);
+    await flush();
+    const first = disclosures()[0]!;
+    await act(async () => { action("全部折叠").click(); await Promise.resolve(); });
+    await flush();
+    await act(async () => { first.click(); await Promise.resolve(); });
+    await flush();
+    expect(first.getAttribute("aria-expanded")).toBe("true");
+    expect(action("全部折叠")).not.toBeNull();
+    await act(async () => { action("全部折叠").click(); await Promise.resolve(); });
+    expect(first.getAttribute("aria-expanded")).toBe("false");
   });
 });
 

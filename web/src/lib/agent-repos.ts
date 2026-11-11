@@ -1,6 +1,8 @@
 import { byAttention, stateOf } from "./format";
 import { summaryState, type ChildStates } from "./herdr-tree";
 import type { Machine, Session } from "./types";
+import { workspaceKey, workspaceTarget, type HostWorkspace, type WorkspaceTarget } from "./workspace-catalog";
+import { sessionHost } from "./agent-groups";
 
 /** Where a session's cwd sits: the repository it belongs to and the working tree inside it. */
 export type Repo = { repo: string; name: string; worktree: string; main: boolean };
@@ -14,6 +16,12 @@ export type RepoWorktree = {
   path: string;
   main: boolean;
   sessions: Session[];
+  /** Direct navigation candidates, including pinned Agents rendered elsewhere. */
+  directSessions?: Session[];
+  /** Direct navigation candidates throughout the subtree, including pinned Agents. */
+  navigationTree?: Session[];
+  workspace?: HostWorkspace;
+  target?: WorkspaceTarget;
   /** Orca child worktrees, sorted by name. */
   children: RepoWorktree[];
   /** This worktree's own sessions, followed by every descendant's sessions. */
@@ -209,7 +217,7 @@ function nestWorktrees(worktrees: RepoWorktree[], bySpace: ReadonlyMap<string, R
 export function showsWorktreeLevel(tree: RepoTree): boolean {
   if (tree.worktrees.length !== 1) return true;
   const w = tree.worktrees[0]!;
-  return w.children.length > 0 || Boolean(w.branch) || (!w.main && w.name !== tree.name);
+  return Boolean(w.workspace) || w.children.length > 0 || Boolean(w.branch) || (!w.main && w.name !== tree.name);
 }
 
 type RepoBucket = { tree: RepoTree; orca: boolean; git: boolean; bySpace: Map<string, RepoWorktree> };
@@ -281,7 +289,160 @@ function buildRepos(sessions: Session[], machineId: string): RepoTree[] {
  * agent is under the repository its cwd names, that repository's working trees under it: a tree's main checkout comes
  * first, the rest by name, and agents inside a tree keep the sidebar's own order (needs-you first).
  */
-export function buildRepoMachineTree(all: Session[], machines: Machine[]): RepoMachine[] {
+export interface RepoCatalogOptions {
+  workspaces: readonly HostWorkspace[];
+  owner: string;
+  manager: string;
+  /** Same filtered membership as all, plus pinned Agents (which are not drawn twice). */
+  navigationSessions?: readonly Session[];
+  hideEmpty?: boolean;
+  search?: string;
+  compareSessions?: (a: Session, b: Session) => number;
+  hiddenSources?: readonly string[];
+}
+
+/** Exact runtime placement always wins. Directory inference is allowed only for an unbound Agent and a unique
+ *  deepest containing directory. Host-owned bindings never fall through to a different runtime at the same path. */
+export function sessionWorkspace(s: Session, catalog: readonly HostWorkspace[], manager?: string): HostWorkspace | undefined {
+  if (manager && s.manager && s.manager !== manager) return undefined;
+  const local = catalog.filter((w) => w.machine_id === s.machine_id);
+  const host = s.space_kind || s.host || sessionHost(s);
+  const bound = s.workspace_id || s.space_id;
+  if (bound) {
+    const exact = local.filter((w) => w.source_id === bound && (!host || w.source === host));
+    if (exact.length === 1) return exact[0];
+    // Desktop project ids describe an editor project, not a terminal workspace binding.
+    if (exact.length > 1 || s.workspace_id || host !== "codex_app") return undefined;
+  }
+  if (["herdr", "herdr-core", "botmux", "orca", "paseo"].includes(host)) return undefined;
+  for (const raw of [s.cwd, s.workspace_cwd]) {
+    const cwd = catalogPath(raw);
+    if (!cwd) continue;
+    const candidates = local.filter((w) => {
+      const path = catalogPath(w.cwd);
+      if (!path || (cwd !== path && !(path === "/" ? cwd.startsWith("/") : cwd.startsWith(`${path}/`)))) return false;
+      const below = cwd === path ? "" : cwd.slice(path === "/" ? 1 : path.length + 1);
+      return !WORKTREE_SEGMENTS.some(([marker]) => below.startsWith(marker.slice(1)));
+    });
+    const length = Math.max(0, ...candidates.map((w) => catalogPath(w.cwd).length));
+    const deepest = candidates.filter((w) => catalogPath(w.cwd).length === length);
+    if (deepest.length === 1) return deepest[0];
+    if (deepest.length > 1) return undefined;
+  }
+  return undefined;
+}
+const catalogPath = (value?: string) => {
+  const path = (value ?? "").replaceAll("\\", "/");
+  const clean = path.replace(/\/+$/, "") || (path.startsWith("/") ? "/" : "");
+  return /^[a-z]:/i.test(clean) ? clean[0].toLowerCase() + clean.slice(1) : clean;
+};
+
+/** Older hubs still get title navigation for pinned Agents, without rendering or counting them twice. */
+function legacyNavigationRepos(sessions: Session[], machineId: string, options: RepoCatalogOptions): RepoTree[] {
+  if (!options.navigationSessions) return buildRepos(sessions, machineId);
+  const navigation = options.navigationSessions.filter((s) => !s.assistant && s.machine_id === machineId);
+  const drawn = new Set(sessions);
+  const fill = (w: RepoWorktree): Session[] => {
+    w.directSessions = [...w.sessions].sort(options.compareSessions ?? byAttention);
+    w.navigationTree = w.tree;
+    w.sessions = w.sessions.filter((s) => drawn.has(s)).sort(options.compareSessions ?? byAttention);
+    w.tree = [...w.sessions, ...w.children.flatMap(fill)];
+    w.childStates = { needs_you: 0, working: 0, done: 0 };
+    for (const child of w.children) {
+      if (!child.tree.length) continue;
+      const state = summaryState(child.tree);
+      if (state === "needs_you" || state === "working") w.childStates[state]++;
+      else if (state === "unread" || state === "idle") w.childStates.done++;
+    }
+    return w.tree;
+  };
+  return buildRepos(navigation, machineId).map((repo) => ({ ...repo, count: repo.worktrees.flatMap(fill).length }));
+}
+
+function catalogRepos(sessions: Session[], machineId: string, options: RepoCatalogOptions): RepoTree[] {
+  // session-directory rows are the server's compatibility fallback, not host-owned workspaces or action targets.
+  const inventory = options.workspaces.filter((w) => w.machine_id === machineId && w.source !== "session-directory");
+  const catalog = inventory.filter((w) => !options.hiddenSources?.includes(w.source));
+  if (!catalog.length) return legacyNavigationRepos(sessions, machineId, options);
+  const keyOf = (w: HostWorkspace) => workspaceKey(w, options.owner, options.manager);
+  const nodes = new Map<string, RepoWorktree>();
+  for (const w of catalog) {
+    const key = keyOf(w);
+    nodes.set(key, {
+      key, name: w.title || w.branch || baseName(w.cwd) || w.source_id, branch: w.branch,
+      path: w.cwd, main: Boolean(w.is_main), workspace: w,
+      target: workspaceTarget(w, options.owner, options.manager),
+      sessions: [], directSessions: [], children: [], tree: [], childStates: { needs_you: 0, working: 0, done: 0 },
+    });
+  }
+  const loose: Session[] = [];
+  for (const s of sessions) {
+    const w = sessionWorkspace(s, inventory, options.manager);
+    const node = w && nodes.get(keyOf(w));
+    if (node) node.sessions.push(s); else loose.push(s);
+  }
+  for (const s of options.navigationSessions ?? sessions) {
+    if (s.assistant || s.machine_id !== machineId) continue;
+    const w = sessionWorkspace(s, inventory, options.manager);
+    if (w) nodes.get(keyOf(w))?.directSessions!.push(s);
+  }
+  const parentOf = (node: RepoWorktree) => {
+    const w = node.workspace!;
+    return w.parent_source_id ? nodes.get(keyOf({ ...w, source_id: w.parent_source_id })) : undefined;
+  };
+  const top: RepoWorktree[] = [];
+  for (const node of nodes.values()) {
+    const seen = new Set<RepoWorktree>([node]);
+    let cycle = false;
+    for (let parent = parentOf(node); parent; parent = parentOf(parent)) {
+      if (seen.has(parent)) { cycle = true; break; }
+      seen.add(parent);
+    }
+    const parent = !cycle && parentOf(node);
+    if (parent) parent.children.push(node); else top.push(node);
+  }
+  const order = (a: RepoWorktree, b: RepoWorktree) => Number(b.main) - Number(a.main) || a.name.localeCompare(b.name) || a.key.localeCompare(b.key);
+  const query = options.search?.trim().toLocaleLowerCase();
+  const fill = (node: RepoWorktree): boolean => {
+    node.sessions.sort(options.compareSessions ?? byAttention);
+    node.directSessions!.sort(options.compareSessions ?? byAttention);
+    const w = node.workspace!;
+    const matches = !query || [node.name, node.branch, node.path, w.project_name, w.project_path, w.source].join(" ").toLocaleLowerCase().includes(query);
+    if (!matches) {
+      node.sessions = node.sessions.filter((s) => `${s.title} ${s.cwd} ${s.branch ?? ""}`.toLocaleLowerCase().includes(query!));
+      node.directSessions = node.directSessions!.filter((s) => `${s.title} ${s.cwd} ${s.branch ?? ""}`.toLocaleLowerCase().includes(query!));
+    }
+    node.children = node.children.filter(fill).sort(order);
+    node.tree = [...node.sessions, ...node.children.flatMap((c) => c.tree)];
+    node.navigationTree = [...node.directSessions!, ...node.children.flatMap((c) => c.navigationTree ?? [])];
+    for (const c of node.children) {
+      if (!c.tree.length) continue;
+      const state = summaryState(c.tree);
+      if (state === "needs_you" || state === "working") node.childStates[state]++;
+      else if (state === "unread" || state === "idle") node.childStates.done++;
+    }
+    return node.children.length > 0 || node.directSessions!.length > 0 || (!options.hideEmpty && matches);
+  };
+  const repos = new Map<string, RepoTree>();
+  for (const root of top.filter(fill).sort(order)) {
+    const w = root.workspace!;
+    const project = w.project_id || w.project_path || w.source_id;
+    const key = JSON.stringify([options.owner, options.manager, machineId, w.source, project]);
+    let repo = repos.get(key);
+    if (!repo) {
+      repo = { key, machineId, name: w.project_name || baseName(w.project_path || "") || root.name, repo: w.project_path || `${w.source}:${project}`, count: 0, worktrees: [] };
+      repos.set(key, repo);
+    }
+    repo.worktrees.push(root);
+    repo.count += root.tree.length;
+  }
+  const unmatched = query ? loose.filter((s) => `${s.title} ${s.cwd}`.toLocaleLowerCase().includes(query)) : loose;
+  const navigation = options.navigationSessions?.filter((s) => !sessionWorkspace(s, inventory, options.manager)
+    && (!query || `${s.title} ${s.cwd}`.toLocaleLowerCase().includes(query)));
+  return [...repos.values(), ...legacyNavigationRepos(unmatched, machineId, { ...options, navigationSessions: navigation })].sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
+}
+
+export function buildRepoMachineTree(all: Session[], machines: Machine[], options?: RepoCatalogOptions): RepoMachine[] {
   const online = new Set(machines.filter((m) => m.online).map((m) => m.id));
   const byMachine = new Map<string, Session[]>();
   for (const s of all) {
@@ -297,14 +458,18 @@ export function buildRepoMachineTree(all: Session[], machines: Machine[]): RepoM
   const out: RepoMachine[] = [];
   for (const m of machines) {
     const sessions = byMachine.get(m.id);
-    if (!sessions || sessions.length === 0) continue;
+    const workspaces = options?.workspaces.some((w) => w.machine_id === m.id && w.source !== "session-directory");
+    const navigation = m.online && options?.navigationSessions?.some((s) => !s.assistant && s.machine_id === m.id);
+    if ((!sessions || sessions.length === 0) && !workspaces && !navigation) continue;
+    const repos = options ? catalogRepos(sessions ?? [], m.id, options) : buildRepos(sessions!, m.id);
+    if (!repos.length) continue;
     out.push({
       key: `repo-machine:${m.id}`,
       machine: m,
       foldKey: `repo-machine:${m.id}`,
-      repos: buildRepos(sessions, m.id),
-      sessions,
-      needs: sessions.filter((s) => stateOf(s) === "needs_you").length,
+      repos,
+      sessions: sessions ?? [],
+      needs: (sessions ?? []).filter((s) => stateOf(s) === "needs_you").length,
     });
   }
   return out;

@@ -1,4 +1,9 @@
 {
+  "workspace_preference": "タスクの割り当て時に優先する",
+  "workspace_prefer_existing": "既存ワークスペース",
+  "workspace_prefer_new": "新規ワークスペース",
+  "workspace_hint": "読み取り専用タスクは作成不要です。使用中のディレクトリは分離し、計画ごとに変更できます。",
+  "workspace_unconfirmed": "設定の保存を確認できませんでした。再試行してください。",
   "retry": "再試行",
   "save_failed": "変更できませんでした：{error}",
   "subtitle": "あなた専用のアシスタント",

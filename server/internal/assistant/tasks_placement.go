@@ -167,6 +167,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 			})
 		}
 	}
+	if err := s.admitTaskWorkspace(ctx, t); err != nil {
+		return "", "", err
+	}
 	prompt := t.Prompt
 	if len(t.DoneWhen) > 0 { // what the supervisor will check (supervise.go)
 		prompt += "\n\n" + prompts.RenderTaskDoneWhen(t.DoneWhen)
@@ -195,6 +198,9 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 		prompt = withAttachments(prompt, s.handAttachments(ctx, t.AttachFrom, m.ID, t.Attachments, t.Mentioned))
 	}
 	params["cwd"], params["prompt"], params["tab_name"] = t.Cwd, prompt, s.tabName(ctx, t.Title)
+	if t.WorkspaceResolved != nil && t.WorkspaceResolved.WorkspaceID != "" {
+		params["workspace_id"] = t.WorkspaceResolved.WorkspaceID
+	}
 	if t.Model != "" {
 		params["model"] = t.Model
 	}
@@ -253,6 +259,8 @@ func (s *Service) updatePlanTask(ctx context.Context, planID string, i int, t Pl
 	if err := s.patchPlanTask(ctx, planID, i, func(pt *PlanTask) {
 		pt.Machine, pt.Cwd, pt.Why = t.Machine, t.Cwd, t.Why
 		pt.Reroute, pt.Ultracode = t.Reroute, t.Ultracode
+		pt.Workspace, pt.WorkspaceResolved, pt.MachinePolicy = t.Workspace, t.WorkspaceResolved, t.MachinePolicy
+		pt.WorkspaceInferred, pt.ReservedTodoID = t.WorkspaceInferred, t.ReservedTodoID
 		pt.Launcher, pt.Model, pt.Effort, pt.Tier = t.Launcher, t.Model, t.Effort, t.Tier
 	}); err != nil {
 		s.logf("plan %s: %v", planID, err)
