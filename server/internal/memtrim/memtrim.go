@@ -8,7 +8,7 @@ package memtrim
 
 import (
 	"runtime/debug"
-	"sync/atomic"
+	"sync"
 	"time"
 )
 
@@ -18,36 +18,63 @@ const (
 	// Every bounds how often a process does it: a collection that returns every free page costs a few milliseconds
 	// of CPU, and a burst of uploads needs it once.
 	Every = 30 * time.Second
+	// Settle is how long after a body its trim waits: the caller's request ends first (its answer written, its
+	// buffers dropped), so the collection finds them garbage.
+	Settle = time.Second
 )
 
-// last is when the latest trim was claimed, in Unix nanoseconds (0: never).
-var last atomic.Int64
+// trims is one process's schedule. A body asks for a trim Settle after it; the trims run Every apart at the closest,
+// and the last body of a burst still gets its own: one that ends within Every of a trim waits for the next turn,
+// which is started when it asks (none waiting yet) or by the trim that runs before it.
+type trims struct {
+	mu      sync.Mutex
+	want    time.Time // the latest body's: a trim at or after this has it
+	ran     time.Time // the last trim's turn (zero: never)
+	waiting bool      // a trim is scheduled
+	free    func()
+	after   func(time.Duration, func()) // time.AfterFunc
+	now     func() time.Time
+}
 
-// free is what a trim runs, settle after the claim: the caller's request ends first (its answer written, its
-// buffers dropped), so the collection finds them garbage. Variables for the tests.
-var (
-	free   = debug.FreeOSMemory
-	settle = time.Second
-)
+var process = &trims{free: debug.FreeOSMemory, after: func(d time.Duration, f func()) { time.AfterFunc(d, f) }, now: time.Now}
 
-// AfterLarge is called as a request with a body of size bytes ends: from LargeBody up, it starts a trim unless one
-// was started within Every.
+// AfterLarge is called as a request with a body of size bytes ends: from LargeBody up, the memory goes back Settle
+// later, or at the next turn when a trim ran within Every.
 func AfterLarge(size int) {
-	if size >= LargeBody && claim(time.Now()) {
-		time.AfterFunc(settle, free)
+	if size >= LargeBody {
+		process.ask()
 	}
 }
 
-// claim takes the turn at now: false when one was taken within Every before it.
-func claim(now time.Time) bool {
-	t := now.UnixNano()
-	for {
-		prev := last.Load()
-		if prev != 0 && t-prev < int64(Every) {
-			return false
-		}
-		if last.CompareAndSwap(prev, t) {
-			return true
-		}
+func (t *trims) ask() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := t.now()
+	t.want = now.Add(Settle)
+	if !t.waiting {
+		t.waiting = true
+		t.after(t.turn().Sub(now), t.run)
 	}
+}
+
+// turn is when the next trim runs: at want, and no sooner than Every after the last.
+func (t *trims) turn() time.Time {
+	if next := t.ran.Add(Every); !t.ran.IsZero() && next.After(t.want) {
+		return next
+	}
+	return t.want
+}
+
+// run is a trim's turn. A body that ended less than Settle before it may still hold its buffers: it gets the next.
+func (t *trims) run() {
+	t.mu.Lock()
+	now := t.now()
+	t.ran = now
+	if t.want.After(now) {
+		t.after(t.turn().Sub(now), t.run)
+	} else {
+		t.waiting = false
+	}
+	t.mu.Unlock()
+	t.free()
 }
