@@ -1,0 +1,16 @@
+{
+  "appId": "cli_example",
+  "identities": {
+    "user": {
+      "status": "ready",
+      "available": true,
+      "openId": "ou_example_user",
+      "userName": "Example User",
+      "tokenStatus": "valid",
+      "scope": "im:chat:read im:message:readonly im:message.group_msg:get_as_user im:message.p2p_msg:get_as_user im:message.reactions:read search:message search:docs:read contact:user:search docs:document.content:read docs:document.comment:read wiki:space:retrieve wiki:node:retrieve",
+      "expiresAt": "2030-01-02T12:00:00Z",
+      "refreshExpiresAt": "2030-01-03T12:00:00Z"
+    }
+  },
+  "identity": "user"
+}

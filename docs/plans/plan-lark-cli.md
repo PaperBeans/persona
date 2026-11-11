@@ -119,12 +119,11 @@ The "Needs" column: unread = Lark's unread / read position; feed = the conversat
 ```
 
 - `lark.cli.bin`: command name or absolute path, looked up on the login shell's PATH by default (npm global installs often live in the nvm directory). Without `lark.cli` it is not enabled.
-- `lark.cli.profile`: optional lark-cli profile (`--profile`); empty uses its default profile. Every call from the hub and the assistant passes it.
+- `lark.cli.profile`: optional explicit lark-cli profile (`--profile`); it always wins. When empty and the built-in Lark bot has credentials, the manager uses managed profile `persona`: it reads `lark-cli --profile persona config show`, and only when `appId` is missing or differs runs `lark-cli config init --name persona --app-id <id> --app-secret-stdin --brand <feishu|lark>` with the bot secret on stdin. The secret never enters argv, logs, errors or status. With no bot credentials, empty uses lark-cli's default profile. The effective profile is passed to every hub call, the connector runner and the assistant wrapper.
 - `lark.prefer`: which source is primary when both are configured: unset (default, the Lark gateway) or `cli`; any other value is passed as-is to the extension that provides Lark (see "Shape").
 - App credentials do not go into `hub.json`: lark-cli uses the app bound in its own `config`.
-- **Enable every permission that can be enabled** (user decision 2026-11-03): log in with `lark-cli auth login --domain all` (user permissions for all domains; on machines without a browser add `--no-wait --json` to use Device Flow
-  and authorize by tapping a link on the phone). Permissions that need admin approval are unavailable until approved: the settings page lists what is missing with `auth check`, and a missing feature says which permission it needs, instead of being reported as a connection failure.
-- Settings › Connectors › Lark: shows the status of each source, which one is currently primary, the account lark-cli is logged in as, when the token expires, and missing permissions; when it has expired, it says to run `lark-cli auth login` on the hub machine.
+- **Enable every permission that can be enabled** (historical user decision 2026-11-03): Settings › Connectors › Lark used to start `lark-cli auth login --domain all` as a blocking background process. The current app rule is narrower: sign-in passes `--scope` with the connector's exported read-as-me scope list, covering only the commands the connector uses (messages, the message Inbox path, user display lookup when needed, document comments, and Wiki discovery). The App polls until it exits. The terminal command remains a secondary hint, and `--domain all` is still an optional manual step for people who want the assistant wrapper to reach more of Lark. Permissions that need admin approval are unavailable until approved: the settings page lists what is missing with `auth check`, and a missing feature says which permission it needs, instead of being reported as a connection failure. Missing scopes include the bound app's Open Platform permission page.
+- Settings › Connectors › Lark: shows the status of each source, which one is currently primary, the account lark-cli is logged in as, when the token expires, and missing permissions; the lark-cli status lives in the Lark group, and when it has expired, it says to run `lark-cli auth login` on the hub machine.
 
 ## What the Inbox collects (lark-cli source)
 
@@ -165,7 +164,7 @@ Codex app-server approvals use the same `larkCheck`.
   no separate built-in skill: for domain guides the Agent reads the ones built into the CLI with `lark-cli skills read`) say which source to use based on what is configured; `docs/extensions/feishu.md`, `docs/operations/config.md`,
   `docs/assistant/assistant.md` ("Lark: lark-cli"), documenting `auth login --domain all`.
   Acceptance: the assistant can look up recent messages, documents and calendar; sending a message shows a confirmation card and nothing is sent after denial; hubs with the Lark gateway behave the same (existing goldens unchanged).
-- [ ] **L2 Connector skeleton**: the `internal/larkcli` adapter layer + the `larkcli` connector's `Accounts` (`auth status`, expiry reminders, wired to the settings page) and `ReadTools` (lark-cli versions of `lark_chats` / `lark_messages` / `lark_search`).
+- [x] **L2 Connector skeleton**: added the subprocess-only `internal/larkcli` adapter, version and auth/status checks, and the `larkcli` connector with Settings status plus `larkcli_chats`, `larkcli_messages`, and `larkcli_search` read tools.
 - [ ] **L3 Knowledge base**: `Archive` (conversations, messages, people, groups: search polling + backfill; attachments), `Items` (calendar, meetings, Minutes, document titles). Acceptance: the knowledge base has Lark conversations and people, in the same format as the Lark gateway source.
 - [ ] **L4 Inbox**: `Inbox`: @me, direct chats, replies in topics I take part in ("What the Inbox collects"); when coexisting with the Lark gateway, collect only from the primary source; replies go through `Actions`, the gate and the phone card.
 - [ ] **L5 `/agent`**: recognize requests by search polling, reactions, context, replies; `/agent` in document comments is not done.
@@ -180,7 +179,7 @@ One PR per step; all existing tests for hubs with the Lark gateway pass.
 | One source per hub, or both side by side | **Both may coexist**: one primary source per capability (`lark.prefer`), switching to the other when the primary is unavailable; the Inbox and knowledge base collect from only one source at a time ("Shape") |
 | What the Inbox collects from the lark-cli source | **@me, my direct chats, and new replies in topics I take part in within topic groups** ("What the Inbox collects") |
 | Polling frequency | **As proposed for now**: Inbox and archiving every 2 minutes, `/agent` every 20 seconds; adjust after measuring Open Platform rate limits in L3 |
-| Permissions | **Enable everything possible**: `lark-cli auth login --domain all`; permissions needing admin approval are listed on the settings page ("Configuration") |
+| Permissions | **Enable everything possible**: `lark-cli auth login --domain all` (or `lark-cli --profile <profile> auth login --domain all` for a configured profile); permissions needing admin approval are listed on the settings page ("Configuration") |
 | Whose identity sends messages (2026-11-04) | **The bot**: sending and replying use `--as bot`, and the phone card says "as the bot"; all other reads and writes still use the user identity |
 
 ## Risks

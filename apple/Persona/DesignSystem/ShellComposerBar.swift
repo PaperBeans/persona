@@ -261,6 +261,9 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
+        #if DEBUG
+        .background { if ScreenProbe.enabled { ComposerLinesProbe(maximumLines: maximumLines, viewport: viewportHeight, line: lineHeight) } }
+        #endif
         .animation(Theme.Motion.state, value: offersEnlarge)
         .onChange(of: focused.wrappedValue) { _, wants in
             // The box asked for while the page is up: the page takes it, the hidden box under the sheet does not.
@@ -649,3 +652,79 @@ private struct ComposerPageEditor: View {
     }
 }
 #endif
+
+#if DEBUG && os(iOS)
+/// `probe.composer-lines` (`-probes YES`): whether the focused text view cuts a line at its top or its foot, for a test
+/// that the composer shows whole lines while typing (#3703). Read from the text's line fragments (TextKit 2 only:
+/// asking a TextKit 2 view for its layout manager would turn it into a TextKit 1 one).
+private struct ComposerLinesProbe: View {
+    var maximumLines: Int
+    var viewport: CGFloat
+    var line: CGFloat
+    @State private var lines = ComposerLines()
+
+    var body: some View {
+        Color.clear
+            .scaledFrame(width: Theme.Size.nonvisualProbe, height: Theme.Size.nonvisualProbe)
+            .task {
+                while !Task.isCancelled {
+                    if let view = FirstResponder.current as? UITextView, let read = ComposerLines(view) { lines = read }
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
+            }
+            .screenProbe("composer-lines", lines.sized(maximumLines: maximumLines, viewport: viewport, line: line))
+    }
+}
+
+struct ComposerLines: Encodable, Equatable {
+    /// Lines of text, and whether one is cut by the text view's top or foot edge (part of it shows, part does not).
+    var count = 0
+    var cutTop = false
+    var cutFoot = false
+    var visible = 0.0
+    var offset = 0.0
+    /// What the box was sized by: its line limit, the height it measured above the keyboard, a line's height.
+    var maximumLines = 0
+    var viewport = 0.0
+    var line = 0.0
+
+    init() {}
+
+    func sized(maximumLines: Int, viewport: CGFloat, line: CGFloat) -> ComposerLines {
+        var sized = self
+        sized.maximumLines = maximumLines
+        sized.viewport = viewport.rounded()
+        sized.line = line.rounded()
+        return sized
+    }
+
+    @MainActor init?(_ view: UITextView) {
+        guard let layout = view.textLayoutManager, let range = layout.textContentManager?.documentRange else { return nil }
+        layout.ensureLayout(for: range)
+        var lines: [CGRect] = []
+        layout.enumerateTextLayoutFragments(from: range.location, options: [.ensuresLayout]) { fragment in
+            let origin = fragment.layoutFragmentFrame.origin
+            for line in fragment.textLineFragments {
+                lines.append(line.typographicBounds.offsetBy(dx: origin.x, dy: origin.y))
+            }
+            return true
+        }
+        // What the view's bounds show (it clips to them), in the text container's coordinates.
+        let container = view.textContainerInset
+        let top = view.contentOffset.y - container.top
+        let foot = view.contentOffset.y + view.bounds.height - container.top
+        count = lines.count
+        // Cut: more than a quarter of the line on each side of the edge. A sliver of a line's leading past the edge (a
+        // scroll to the caret leaves a few points) shows no glyph.
+        func cut(_ line: CGRect, at edge: CGFloat) -> Bool {
+            let quarter = line.height / 4
+            return edge - line.minY > quarter && line.maxY - edge > quarter
+        }
+        cutTop = lines.contains { cut($0, at: top) }
+        cutFoot = lines.contains { cut($0, at: foot) }
+        visible = (foot - top).rounded()
+        offset = top.rounded()
+    }
+}
+#endif
+

@@ -316,6 +316,19 @@
     <!-- Removing from the extension's own page -->
     <string name="settings_ext_market_installed_note">この拡張機能はマーケットからインストールされました。アンインストール後もマーケットから再インストールできます。</string>
     <string name="settings_ext_keep_data_hint">再インストールしたときに続きから使えます。</string>
+    <string name="settings_ext_uninstall_members">パックのメンバーも一緒にアンインストール</string>
+    <string name="settings_ext_uninstall_members_hint">%1$s。チェックしない場合はそのまま残ります。</string>
+    <string name="settings_ext_uninstalled_with_members">%1$sとメンバーをアンインストールしました</string>
+    <string name="settings_ext_uninstalled_members_unknown">%1$sをアンインストールしました。メンバーの結果は返されませんでした</string>
+    <string name="settings_ext_partial_title">パックの一部だけアンインストールされました</string>
+    <string name="settings_ext_partial_text">%1$sはまだインストールされています。アンインストール済みのメンバーは元に戻りません。もう一度お試しください。</string>
+    <string name="settings_ext_partial_removed">アンインストール済み：%1$s</string>
+    <string name="settings_ext_partial_failed">アンインストールできなかったもの：%1$s</string>
+    <string name="settings_ext_partial_failed_item">%1$s（%2$s）</string>
+    <string name="settings_ext_partial_remaining">未処理でインストールされたまま：%1$s</string>
+    <plurals name="settings_ext_uninstalled_members">
+        <item quantity="other">%1$sをアンインストールしました。メンバー%2$d件もアンインストールしました</item>
+    </plurals>
     <!-- The machine list (format machine) -->
     <string name="settings_ext_machine_online">オンライン</string>
     <string name="settings_ext_machine_offline">オフライン</string>

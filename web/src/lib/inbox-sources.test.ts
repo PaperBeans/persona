@@ -12,6 +12,11 @@ describe("inboxSources", () => {
     expect(r.offers[2]!.href).toBe("/settings?tab=connectors&connector=telegram");
   });
 
+  it("links a sign-in to the copy of the assistant that listed it, when that is not the default's", () => {
+    const r = inboxSources({ mail: 0, connectors: [c({ manager: "m-1" })] });
+    expect(decodeURIComponent(r.offers[1]!.href)).toBe("/settings?tab=connectors&connector=telegram@m-1");
+  });
+
   it("is connected by a mail account, Feishu set up, or a signed-in connector that brings items in", () => {
     expect(inboxSources({ mail: 1, connectors: [] }).connected).toBe(true);
     expect(inboxSources({ mail: 0, lark: true, connectors: [] }).connected).toBe(true);

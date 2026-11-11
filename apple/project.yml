@@ -761,6 +761,7 @@ targets:
       - path: PersonaTests/PushCryptoTests.swift
       - path: PersonaTests/UsageWindowsTests.swift
       - path: PersonaTests/SessionListTests.swift
+      - path: PersonaTests/AssistantIdentityTests.swift
       - path: PersonaTests/AssistantTrayActivityTests.swift
       - path: PersonaTests/AssistantEntriesFixtureTests.swift
       - path: PersonaTests/AgentListFallbackTests.swift
@@ -790,6 +791,9 @@ targets:
       - path: PersonaTests/TodoDecisionCompletionTests.swift
       - path: PersonaTests/TaskSheetExpandTests.swift
       - path: PersonaTests/DispatchedTasksTests.swift
+      - path: PersonaTests/MessageCardStateTests.swift
+      - path: PersonaTests/MessageDraftActionsTests.swift
+      - path: PersonaTests/DraftFeedCursorTests.swift
       - path: PersonaTests/FakeHub.swift
     dependencies:
       - target: PersonaMac
@@ -810,6 +814,7 @@ targets:
       - path: PersonaUITests/SentNavigationUITests.swift
       - path: PersonaUITests/ReportEvidenceUITests.swift
       - path: PersonaUITests/AssistantTrayActivityUITests.swift
+      - path: PersonaUITests/MessageCardStateUITests.swift
       - path: PersonaUITests/UITestStyle.swift
     dependencies:
       - target: PersonaMac

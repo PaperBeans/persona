@@ -31,5 +31,4 @@
     <string name="settings_update_v7_system_failed">システムによるインストールが完了しませんでした。再試行してください。</string>
     <string name="settings_update_v7_native_title">標準でネイティブチャットを開く</string>
     <string name="settings_update_v7_native_subtitle">オンの場合はチャット、オフの場合は拡張機能のイベント詳細を表示します。次に項目を開くときに反映されます。</string>
-    <string name="settings_update_v7_native_section">受信トレイ</string>
 </resources>

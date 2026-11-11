@@ -28,6 +28,15 @@ type (
 	CatalogResult      = wire.ConnectorCatalog
 )
 
+// ReadJSON is optional for a connector whose catalog comes from its ReadTools (docs/extensions/subscriptions.md
+// "Existing connectors"). CallCatalog calls CallJSON first: a read tool answers subscriptions with JSON, a list of
+// items with stable ids that they can follow item by item, while the models keep the text Call gives them. ok is
+// false for a tool without a JSON answer, and CallCatalog calls Call instead. It is not a capability: nothing else
+// asks for it.
+type ReadJSON interface {
+	CallJSON(ctx context.Context, name string, args json.RawMessage) (out json.RawMessage, ok bool, err error)
+}
+
 type CatalogQuery struct {
 	Source string          `json:"source"`
 	Tool   string          `json:"tool"`
@@ -113,7 +122,13 @@ func CallCatalog(ctx context.Context, c Connector, q CatalogQuery) (string, erro
 	if !ok {
 		return "", notReadOnly()
 	}
-	return tools.Call(ctx, c.ID()+"_"+q.Tool, q.Args)
+	name := c.ID() + "_" + q.Tool
+	if j, ok := c.(ReadJSON); ok {
+		if out, ok, err := j.CallJSON(ctx, name, q.Args); ok {
+			return string(out), err
+		}
+	}
+	return tools.Call(ctx, name, q.Args)
 }
 
 func notReadOnly() error {

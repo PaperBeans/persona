@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -179,12 +180,16 @@ fun LarkVoiceView(
     }
 
     val shape = RoundedCornerShape(Tokens.Radius.control)
+    // The play / pause icon carries the name, not the bubble: a content description on the merging bubble would
+    // replace its merged duration text, and TalkBack would stop reading the length (#3904, #4085).
+    val voiceLabel = stringResource(R.string.inbox_lark_audio)
+    val toggleLabel = stringResource(if (isPlaying) R.string.inbox_lark_media_pause else R.string.inbox_lark_media_play)
 
     Row(
         modifier
             .clip(shape)
             .background(palette.ink.copy(alpha = 0.06f))
-            .clickable { isPlaying = !isPlaying }
+            .clickable(role = Role.Button, onClickLabel = toggleLabel) { isPlaying = !isPlaying }
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)
@@ -199,6 +204,7 @@ fun LarkVoiceView(
         ) {
             JIcon(
                 if (isPlaying) PhIcons.Pause else PhIcons.Play,
+                contentDescription = voiceLabel,
                 modifier = Modifier.size(Tokens.Space.l),
                 tint = palette.onAccent
             )
@@ -248,13 +254,18 @@ fun LarkVideoView(
         "%02d:%02d".format(s / 60, s % 60)
     }
 
+    // The play icon carries the name, not the preview: a content description on the merging preview would replace
+    // its merged duration badge, and TalkBack would stop reading the length (#3904, #4085).
+    val videoLabel = stringResource(R.string.inbox_lark_video)
+    val playLabel = stringResource(R.string.inbox_lark_media_play)
+
     Box(
         modifier
             .fillMaxWidth()
             .heightIn(min = ContentTokens.mediaPreviewMinHeight, max = ContentTokens.mediaPreviewMaxHeight)
             .clip(shape)
             .background(palette.mediaScrim)
-            .clickable(onClick = onPlay),
+            .clickable(role = Role.Button, onClickLabel = playLabel, onClick = onPlay),
         contentAlignment = Alignment.Center
     ) {
         // Play icon in center
@@ -265,7 +276,12 @@ fun LarkVideoView(
                 .background(palette.mediaControlFill),
             contentAlignment = Alignment.Center
         ) {
-            JIcon(PhIcons.Play, modifier = Modifier.size(Tokens.Space.xxl), tint = palette.onMediaBackdrop)
+            JIcon(
+                PhIcons.Play,
+                contentDescription = videoLabel,
+                modifier = Modifier.size(Tokens.Space.xxl),
+                tint = palette.onMediaBackdrop
+            )
         }
 
         // Duration badge

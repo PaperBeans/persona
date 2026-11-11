@@ -14,7 +14,10 @@
     <string name="settings_background_restricted">Restricted</string>
     <string name="settings_background_not_restricted">Not restricted by this system setting</string>
     <string name="settings_background_history">Recent main process exits</string>
-    <string name="settings_background_history_count">%1$d system records</string>
+    <plurals name="settings_background_history_count">
+        <item quantity="one">%1$d system record</item>
+        <item quantity="other">%1$d system records</item>
+    </plurals>
     <string name="settings_background_no_history">Not obtained: no main-process exit in the recent system records</string>
     <string name="settings_background_unavailable">Not obtained: unable to read</string>
     <string name="settings_background_exit">Exit record %1$d</string>

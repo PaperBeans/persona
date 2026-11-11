@@ -99,7 +99,7 @@ internal data class NewProviderState(
     /** Why the presets could not be read (the pick list still offers the gateway typed in). */
     val presetsError: ResText? = null,
     val keyTest: KeyTest? = null,
-    /** "Use it for the main conversation and new Agents"; null: not touched, so it follows the readiness (off while Claude Code already answers). */
+    /** "Use it for the main conversation and new agents"; null: not touched, so it follows the readiness (off while Claude Code already answers). */
     val assignSet: Boolean? = null,
     /** The main conversation's readiness, asked when the page opens and again after saving; null without it. */
     val readiness: AssistantReadiness? = null,
@@ -367,7 +367,7 @@ internal class NewProviderModel(
 
     /**
      * ② saved: a Claude-compatible preset takes `assign` when asked (after the readiness answer) and refreshes readiness
-     * for ③. A direct API cannot run the main conversation or Agents, so neither readiness nor assign concerns it.
+     * for ③. A direct API cannot run the main conversation or agents, so neither readiness nor assign concerns it.
      */
     suspend fun saveKey(): Boolean {
         val current = state.value

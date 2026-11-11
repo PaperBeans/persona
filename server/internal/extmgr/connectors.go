@@ -16,7 +16,9 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/connector/github"
+	larkcliconnector "github.com/nwverse/persona/server/internal/connector/larkcli"
 	"github.com/nwverse/persona/server/internal/i18n"
+	larkcliadapter "github.com/nwverse/persona/server/internal/larkcli"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -597,6 +599,17 @@ func (h *Manager) registerConnectors() {
 	ghc.UseSecrets(h.secretsFor("github"))
 	if err := h.addConnector(ghc); err != nil {
 		h.logf("github connector: %v", err)
+	}
+	// lark-cli is a separate source from the optional Lark gateway extension. It
+	// is deliberately absent when lark.cli is unset, preserving existing hubs.
+	if h.cfg.Lark.CLI != nil {
+		if err := h.syncLarkCLIProfile(context.Background()); err != nil {
+			h.logf("larkcli profile sync: %v", err)
+		}
+		lc := larkcliconnector.New(larkcliadapter.Config{Bin: h.cfg.Lark.CLI.Bin, Profile: h.effectiveLarkCLIProfile(context.Background())})
+		if err := h.addConnector(lc); err != nil {
+			h.logf("larkcli connector: %v", err)
+		}
 	}
 	// Messages (imessage) is registered once the extensions are there: its Mac is the extension's, else manager.json's
 	// (applyIMessage, startConnectors).

@@ -1,0 +1,16 @@
+{
+  "appId": "cli_example",
+  "brand": "lark",
+  "missingScopes": ["search:message"],
+  "identities": {
+    "user": {
+      "status": "ready",
+      "available": true,
+      "openId": "ou_example_user",
+      "userName": "Example User",
+      "tokenStatus": "valid",
+      "scope": "im:chat:read"
+    }
+  },
+  "identity": "user"
+}

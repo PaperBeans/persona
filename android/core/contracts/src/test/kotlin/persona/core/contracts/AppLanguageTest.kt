@@ -42,6 +42,20 @@ class AppLanguageTest {
             assertEquals("en", (ClientLanguage.tag).zhAny())
         } finally { ClientLanguage.current = AppLanguage.En }
     }
+    // Extensions are told the app's language, not the phone's, with the phone's region (docs/protocol/i18n.md "Protocol").
+    @Test fun theExtensionLocaleIsTheShownLanguageWithThePhonesRegion() {
+        try {
+            ClientLanguage.current = AppLanguage.Ja
+            assertEquals("ja-US", ClientLanguage.localeTag(Locale.forLanguageTag("en-US")))
+            ClientLanguage.current = AppLanguage.En
+            assertEquals("en-GB", ClientLanguage.localeTag(Locale.forLanguageTag("en-GB")))
+            ClientLanguage.current = AppLanguage.ZhHans
+            assertEquals("zh-Hans-CN", ClientLanguage.localeTag(Locale.forLanguageTag("zh-CN")))
+            assertEquals("zh-Hans-TW", ClientLanguage.localeTag(Locale.forLanguageTag("zh-Hant-TW")))
+            assertEquals("zh-Hans", ClientLanguage.localeTag(Locale.forLanguageTag("fr")))
+        } finally { ClientLanguage.current = AppLanguage.En }
+    }
+
     @Test fun generatedLanguagesMatchTheirTagsAndHaveNames() {
         AppLanguage.entries.filter { it != AppLanguage.System }.forEach { language ->
             assertEquals(language, AppLanguage.of(Locale.forLanguageTag(language.tag)))

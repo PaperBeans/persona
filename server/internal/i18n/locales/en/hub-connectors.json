@@ -1,5 +1,20 @@
 {
   "program_missing": "Can’t find {name}’s program ({path})",
   "program_fails": "{name}’s program won’t run: {err}",
-  "program_version": "{name}’s program isn’t the same version as the hub ({got} / {want})"
+  "program_version": "{name}’s program isn’t the same version as the hub ({got} / {want})",
+  "not_installed": "lark-cli is not installed on the hub machine",
+  "install_guide": "Install lark-cli on the hub machine, or set lark.cli.bin to its executable",
+  "old_version": "lark-cli {got} is too old; Persona needs {want} or newer",
+  "not_signed_in": "lark-cli is not signed in",
+  "expired": "The lark-cli login has expired",
+  "login_guide": "Sign in from this page. You can also run {command} on the hub machine",
+  "login_restart": "Start sign-in again from this page",
+  "login_failed": "The lark-cli sign-in failed; start again from this page",
+  "login_timeout": "The lark-cli sign-in timed out; start again from this page",
+  "login_not_complete": "lark-cli did not finish signing in; start again from this page",
+  "missing_permission": "lark-cli is missing permission: {scope}",
+  "rate_limited": "lark-cli is rate limited; try again later",
+  "error": "lark-cli could not read Lark",
+  "expiry_reminder": "Login expires in {count} day(s); run {command} on the hub machine",
+  "larkcli_name": "Lark · my messages"
 }

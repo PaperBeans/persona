@@ -37,14 +37,14 @@ describe("连接器的状态", () => {
   });
 
   it("leaves mail and Feishu to their own groups", () => {
-    const list = [conn("ok", { id: "lark" }), conn("ok", { id: "mail" }), conn("ok"), conn("ok", { id: "telegram" })];
+    const list = [conn("ok", { id: "lark" }), conn("ok", { id: "larkcli" }), conn("ok", { id: "mail" }), conn("ok"), conn("ok", { id: "telegram" })];
     expect(otherConnectors(list).map((c) => c.id)).toEqual(["github", "telegram"]);
-    // no Lark group (a hub without lark): a connector named lark is listed with the rest
+    // no Lark gateway group (a hub without lark): the gateway connector is listed with the rest, but lark-cli stays in the bot group
     expect(otherConnectors(list, false).map((c) => c.id)).toEqual(["lark", "github", "telegram"]);
   });
 
   it("has a mark only for the connectors that have one; the rest draw the generic icon", () => {
-    expect(["github", "telegram", "lark"].map(connectorBrand)).toEqual(["github", "telegram", "lark"]);
+    expect(["github", "telegram", "lark", "larkcli"].map(connectorBrand)).toEqual(["github", "telegram", "lark", "lark"]);
     // an extension's connector draws the generic icon; a plugin's id may also be an Object.prototype name
     expect(["examplechat", "example", "constructor"].map(connectorBrand)).toEqual([undefined, undefined, undefined]);
   });

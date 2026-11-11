@@ -289,6 +289,9 @@ export function EmojiImage({ name, size, catalog }: { name: string; size: number
   const e = catalog?.emojis[name.toLowerCase()];
   const src = e?.url?.startsWith("/api/") ? withToken(withManager(e.url, manager)) : e?.url && /^https:/i.test(e.url) ? e.url : undefined;
   if (src) return <img src={src} alt={e?.label || name} width={size} height={size} className="shrink-0 object-contain" style={{ width: size, height: size }} />;
+  // The catalogue is still loading (its fetch only starts once reactions draw): reserve a neutral dot instead of
+  // flashing the raw "[key]" text, which made the reaction row jump when the picture replaced it.
+  if (!catalog) return <span aria-hidden className="inline-block shrink-0 rounded-full bg-field" style={{ width: size, height: size }} />;
   return <span className="text-[11px] text-ink-2">{emojiLabel(name)}</span>;
 }
 

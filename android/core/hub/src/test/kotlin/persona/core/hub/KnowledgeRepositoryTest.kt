@@ -124,6 +124,28 @@ class KnowledgeRepositoryTest {
         }
     }
 
+    /** An entry's page pins the assistant it was opened for: its reads and saves name it, whatever is current. */
+    @Test fun aPagesPinNamesItsAssistantOnReadsAndSaves() = runBlocking {
+        try {
+            persona.core.contracts.api.AssistantManagerChoice.choose("hub", null, "assistant")
+            MockWebServer().use { server ->
+                val repository = HttpKnowledgeRepository(HubScope("demo", "generation"), server.url("/").toString(),
+                    "fixture-token", OkHttpClient(), { true })
+                val pins = persona.core.contracts.api.ManagerPins.of(listOf(listOf("kb"), listOf("kb-search")), "m-work", "hub")!!
+                server.enqueue(MockResponse().setBody("""{"detail":{"kind":"projects","id":"weather","path":"data/projects/weather"}}"""))
+                kotlinx.coroutines.withContext(pins) { repository.entry(KnowledgeKind.Projects, "weather") }
+                assertEquals("/api/v1/kb/projects/weather?manager=m-work", server.takeRequest().path)
+                server.enqueue(MockResponse().setBody("{}"))
+                kotlinx.coroutines.withContext(pins) { repository.update(KnowledgeKind.Projects, "weather", KnowledgeUpdate(tags = emptyList())) }
+                assertEquals("/api/v1/kb/projects/weather?manager=m-work", server.takeRequest().path)
+                // Outside the page nothing is pinned: the hub client names the current assistant as before.
+                server.enqueue(MockResponse().setBody("""{"items":[]}"""))
+                repository.list(KnowledgeKind.Projects)
+                assertEquals("/api/v1/kb/projects", server.takeRequest().path)
+            }
+        } finally { persona.core.contracts.api.AssistantManagerChoice.reset() }
+    }
+
     @Test fun recordingDetailKeepsItsSegments() = runBlocking {
         MockWebServer().use { server ->
             val repository = HttpKnowledgeRepository(HubScope("demo", "generation"), server.url("/").toString(),
@@ -137,6 +159,54 @@ class KnowledgeRepositoryTest {
             val detail = repository.detail(KnowledgeKind.Recordings, "r1")
             assertEquals(listOf(0.5 to "你好"), detail.segments.orEmpty().map { it.start to it.text })
             assertEquals("/api/v1/kb/recordings/r1", server.takeRequest().path)
+        }
+    }
+
+    /** A recording's minutes (#2738): read with its detail; Make minutes and Add to to-dos post to the hub's recordings routes. */
+    @Test fun recordingMinutesDecodeAndWritesPostTheirBodies() = runBlocking {
+        MockWebServer().use { server ->
+            val repository = HttpKnowledgeRepository(HubScope("demo", "generation"), server.url("/").toString(),
+                "fixture-token", OkHttpClient(), { true })
+            server.enqueue(MockResponse().setBody("""{"detail":{"kind":"recordings","id":"r1","path":"data/recordings/r1",
+                "meta":{"kind":"meeting","minutes_state":"ready"},"segments":[],
+                "minutes":{"version":3,"revision":2,"title":"Weekly sync","when":"Tue 14:00","where":"Room A","attendees":["Alex","Sam"],
+                "points":[{"text":"Ship on Friday","at":62.5,"who":"Alex"}],"decisions":[{"text":"Keep the beta"}],
+                "actions":[{"id":"a1","who":"Sam","what":"Write the notes","by":"Friday","due_date":"2026-11-14","at":90,"todo_id":"t9"},
+                {"id":"a2","what":"Book a room"}],"open":[],"partial":true,"markdown":"# Weekly sync","future":1}}}"""))
+            val minutes = repository.detail(KnowledgeKind.Recordings, "r1").minutes!!
+            assertEquals(3, minutes.version)
+            assertEquals("Tue 14:00", minutes.time)
+            assertEquals("Room A", minutes.where)
+            assertEquals(listOf("Alex", "Sam"), minutes.attendees)
+            assertEquals(62.5, minutes.points.single().at!!, 0.0)
+            assertNull(minutes.decisions.single().at)
+            assertEquals(listOf("2026-11-14" to true, null to false), minutes.actions.map { it.dueDate to it.added })
+            assertTrue(minutes.partial)
+            assertFalse(minutes.isEmpty)
+            server.takeRequest()
+
+            server.enqueue(MockResponse().setResponseCode(202).setBody("""{"state":"pending"}"""))
+            repository.makeMinutes("r 1/x")
+            val make = server.takeRequest()
+            assertEquals("POST", make.method)
+            assertEquals("/api/v1/recordings/r%201%2Fx/minutes", make.path)
+            assertEquals("Bearer fixture-token", make.getHeader("Authorization"))
+            assertEquals("{}", make.body.readUtf8())
+
+            server.enqueue(MockResponse().setBody("""{"todos":[]}"""))
+            repository.addMinutesTodos("r1", 3, listOf("a1", "a2"))
+            val add = server.takeRequest()
+            assertEquals("/api/v1/recordings/r1/minutes/todos", add.path)
+            assertEquals("""{"version":3,"actions":["a1","a2"]}""", add.body.readUtf8())
+
+            server.enqueue(MockResponse().setResponseCode(409).setBody("""{"error":"The minutes changed","code":"minutes_stale"}"""))
+            val stale = runCatching { repository.addMinutesTodos("r1", 2, listOf("a1")) }.exceptionOrNull() as HubFailure
+            assertEquals("minutes_stale", stale.code)
+            assertEquals(409, stale.status)
+            server.takeRequest()
+            assertTrue(runCatching { repository.makeMinutes("..") }.exceptionOrNull() is IllegalArgumentException)
+            assertTrue(runCatching { repository.addMinutesTodos("r1", 3, emptyList()) }.exceptionOrNull() is IllegalArgumentException)
+            assertEquals(4, server.requestCount)
         }
     }
 }

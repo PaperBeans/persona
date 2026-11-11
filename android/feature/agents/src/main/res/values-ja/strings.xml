@@ -346,6 +346,7 @@
     <string name="agents_todo_delete_action">削除</string>
     <string name="agents_todo_done_failed">ToDoを完了できませんでした：%1$s</string>
     <string name="agents_todo_delete_failed">ToDoを削除できませんでした：%1$s</string>
+    <string name="agents_todo_state_didnt_start">起動失敗</string>
     <string name="agents_todo_start_failed">起動できませんでした：%1$s</string>
     <string name="agents_todo_in_progress">進行中</string>
     <plurals name="agents_todo_agents">
@@ -477,8 +478,8 @@
     <string name="agents_empty_machine_title">このコンピューターにはセッションがありません</string>
     <string name="agents_empty_first_hint">どのパソコンでもセッションを始めると、ここでリアルタイムに見て、いつでも引き継げます。</string>
     <string name="agents_empty_filter_title">%1$sのセッションはありません</string>
-    <string name="agents_empty_filter_hint">各コンピューターの Agent に動きがあるとここに表示されます。</string>
-    <string name="agents_empty_filter_machine_hint">このコンピューターの Agent に動きがあるとここに表示されます。</string>
+    <string name="agents_empty_filter_hint">各コンピューターのエージェントに動きがあるとここに表示されます。</string>
+    <string name="agents_empty_filter_machine_hint">このコンピューターのエージェントに動きがあるとここに表示されます。</string>
     <string name="agents_empty_show_all">すべて表示</string>
     <string name="agents_herdr_failure">起動しませんでした：%1$s</string>
     <string name="agents_herdr_copy_detail">詳細をコピー</string>
@@ -495,7 +496,9 @@
     <string name="agents_herdr_why_timeout">herdr の起動に時間がかかっています。しばらくしてからもう一度確認してください</string>
     <string name="agents_empty_no_computer_title">まだパソコンがありません</string>
     <string name="agents_empty_no_computer_hint">1 台追加すると、Persona がそのパソコンで作業できます。</string>
-    <string name="agents_page_loaded">%2$d 件中 %1$d 件を読み込み済み</string>
+    <plurals name="agents_page_loaded">
+        <item quantity="other">%2$d 件中 %1$d 件を読み込み済み</item>
+    </plurals>
     <string name="agents_page_more">さらに読み込む</string>
     <string name="agents_page_previous">前のセッションを読み込む</string>
     <!-- To-do status sections (#3206, docs/assistant/todo-status-sop.md) -->
@@ -505,7 +508,28 @@
     <string name="agents_todos_section_pr">マージ待ちの PR</string>
     <string name="agents_todos_section_other">その他の未完了</string>
     <string name="agents_todos_section_shelved">保留中</string>
-    <string name="agents_todos_summary">未完了 %1$d · 保留 %2$d · 完了 %3$d</string>
+    <string name="agents_todos_filter_button">絞り込みと並べ替え</string>
+    <string name="agents_todos_filter_show">表示</string>
+    <string name="agents_todos_sort_by">並べ替え</string>
+    <string name="agents_todos_filter_all">すべて</string>
+    <string name="agents_todos_filter_no_due">期限なし</string>
+    <string name="agents_todos_filter_today">今日</string>
+    <string name="agents_todos_filter_week">今週</string>
+    <string name="agents_todos_filter_month">今月</string>
+    <string name="agents_todos_sort_recent">最近の動き</string>
+    <string name="agents_todos_sort_due">期限</string>
+    <string name="agents_todos_sort_priority">優先度</string>
+    <string name="agents_todos_filter_clear">「%1$s」の絞り込みを解除</string>
+    <string name="agents_todos_filter_hidden_waiting">ほかに %1$d 件が対応待ち（「%2$s」の対象外）</string>
+    <string name="agents_todos_filter_show_all">すべて表示</string>
+    <string name="agents_todos_filter_empty_today">今日が期限のToDoはありません</string>
+    <string name="agents_todos_filter_empty_week">今週が期限のToDoはありません</string>
+    <string name="agents_todos_filter_empty_month">今月が期限のToDoはありません</string>
+    <string name="agents_todos_filter_empty_no_due">すべてのToDoに期限があります</string>
+    <string name="agents_todos_filter_empty_hint">別の絞り込みを試してください。</string>
+    <plurals name="agents_todos_filter_count">
+        <item quantity="other">%d 件</item>
+    </plurals>
     <string name="agents_todo_restore">戻す</string>
     <string name="agents_todo_pr_moved">%1$s · %2$sに更新</string>
     <string name="agents_todo_pr">PR</string>

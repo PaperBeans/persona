@@ -28,8 +28,12 @@ class HttpComputerPairing internal constructor(
 ) {
     constructor(connection: OkHttpHubConnection) : this({ path, method, body -> connection.request(path, method, body) })
 
-    suspend fun add(name: String, os: ComputerOs): ComputerCode = code(buildJsonObject {
-        putJsonObject("add") { put("name", name.trim()); put("os", os.wire) }
+    /** [manager]: the manager the computer is for (`add.manager`, its id as the roster has it); null names none. */
+    suspend fun add(name: String, os: ComputerOs, manager: String? = null): ComputerCode = code(buildJsonObject {
+        putJsonObject("add") {
+            put("name", name.trim()); put("os", os.wire)
+            manager?.takeIf { it.isNotBlank() }?.let { put("manager", it) }
+        }
     })
 
     suspend fun again(machineId: String): ComputerCode = code(buildJsonObject { put("machine", machineId) })
@@ -50,7 +54,7 @@ class HttpComputerPairing internal constructor(
         val pairUrl = data.text("pair_url") ?: throw HubFailure(HubError.Protocol)
         return ComputerCode(machine, data.text("name") ?: machine, pairUrl, HttpDeviceSettings.wireMillis(data.text("expires_at")),
             trust = data.text("trust") ?: "pending", added = (data["added"] as? JsonPrimitive)?.booleanOrNull == true,
-            command = data.text("command"), linuxInstall = (data["install"] as? JsonObject)?.text("linux"))
+            command = data.text("command"), linuxInstall = (data["install"] as? JsonObject)?.text("linux"), manager = data.text("manager"))
     }
 
     private fun path(machineId: String, action: String): String {

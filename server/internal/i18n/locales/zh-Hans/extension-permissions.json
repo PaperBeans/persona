@@ -95,5 +95,8 @@
   "network_config_title": "访问你在设置里填的地址",
   "network_config_detail": "设置「{field}」里填的地址（当前：{host}），只连这一个主机和端口，只用 https",
   "network_config_detail_http": "设置「{field}」里填的地址（当前：{host}），只连这一个主机和端口；允许不加密的 http",
-  "network_config_unset": "未填"
+  "network_config_unset": "未填",
+  "secret_provider_title": "提供密钥的值",
+  "secret_provider_more_title": "提供密钥的值（新增）",
+  "secret_provider_detail": "你的设置里填了 {schemes} 引用，或你在手机上批准把某个引用交给 Agent 时，Persona 向它要值。它会知道用的是哪个引用、用在哪里，看不到你别的密钥"
 }

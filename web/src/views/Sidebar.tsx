@@ -20,6 +20,7 @@ import { firstAndCurrent } from "../lib/persona-nav";
 import { pinOrder, sidebarConversations, usePinnedConversations } from "../lib/conversation-pins";
 import { autoConversations, autoOrigin, isAutoConversation, originLabel, type AutoOrigin, type OriginTally } from "../lib/conversation-origins";
 import { ConversationRowMenu, pinnedSectionItems } from "./ConversationMenu";
+import { conversationPage } from "../lib/conversation-page";
 import { href, navigate, type Route } from "../lib/router";
 import { useAgentSessions, useFullAgentSessions } from "../lib/sessions";
 import { refresh, useStore } from "../lib/store";
@@ -319,7 +320,7 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate }: { route: Ro
             <NavRow k="j:new" reg={reg} hover={hover} active={activeKey === "j:new"} to={{ name: "persona-new" }} go={go} icon="compose" label={t("sidebar.new_chat")} />
             {pinnedConvs.length > 0 && <PinnedHeading onMenu={localPinned ? (at) => setChatsMenu(at) : undefined} />}
             {convs.map((c) => (
-              <SessionRow key={c.session_id} s={c} k={`j:${c.session_id}`} reg={reg} hover={hover} active={activeKey === `j:${c.session_id}`} to={{ name: "persona", sid: c.session_id }} go={go} label={conversationTitle(c)} showState={false} icon={pinnedIds.includes(c.session_id) ? "pin" : undefined} hint={isLeader(c.session_id) ? t("sidebar.leader") : undefined} onMenu={onConvMenu} menuLabel={t("conversation-menu.actions")} />
+              <SessionRow key={c.session_id} s={c} k={`j:${c.session_id}`} reg={reg} hover={hover} active={activeKey === `j:${c.session_id}`} to={conversationPage(c.session_id, c.machine_id, c.manager)} go={go} label={conversationTitle(c)} showState={false} icon={pinnedIds.includes(c.session_id) ? "pin" : undefined} hint={isLeader(c.session_id) ? t("sidebar.leader") : undefined} onMenu={onConvMenu} menuLabel={t("conversation-menu.actions")} />
             ))}
             {assistant && <AutoConversations conversations={assistant.conversations} main={assistant.main} shown={convs} activeKey={activeKey} holds={autoHolds} reg={reg} hover={hover} go={go} />}
             {assistant && <NavRow k="history" reg={reg} hover={hover} active={activeKey === "history"} to={{ name: "history" }} go={go} icon="list" label={t("sidebar.all_chats")} hint={assistant.conversations.length > convs.length ? String(assistant.conversations.length) : undefined} />}

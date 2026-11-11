@@ -93,6 +93,9 @@ class ModelsTest {
         assertEquals(listOf("tool:Bash"), bash.alwaysKeys)
         val legacy = JsonCodec.decodeFromString<Interaction>("""{"id":"ix_legacy","machine_id":"computer","session_id":"chat","kind":"permission","tool_name":"Bash"}""")
         assertEquals(null, legacy.alwaysKeys)
+        assertEquals(null, legacy.alwaysHonored)
+        val own = JsonCodec.decodeFromString<Interaction>("""{"id":"ix_own","machine_id":"computer","session_id":"chat","kind":"permission","tool_name":"iphone_do","always_honored":false}""")
+        assertEquals(false, own.alwaysHonored)
     }
 
     @Test fun interactionNamesItsAgentAndWhatAlwaysAllows() {

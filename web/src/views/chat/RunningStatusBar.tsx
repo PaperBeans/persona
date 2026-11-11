@@ -7,8 +7,8 @@
 // Once the turn is over and a workflow keeps the agent working (#3434, `background_working`), it says what runs:
 // "Background workflow · Verify · 169/185+", timed from the workflow's start (the turn's own time read as if the agent
 // were still at it). The count stays whole on a narrow screen: the words before it give way first. An agent whose
-// background commands only wait (#6045, `background_waiting`) gets a still line instead: "Waiting in the background ·
-// what it waits on", timed from when it started waiting, with no breath and no tokens. With the hub out of reach the
+// background commands only wait (#6045, `background_waiting`) gets a still line instead: what it waits on (the header
+// says the state, #3956), timed from when it started waiting, with no breath and no tokens. With the hub out of reach the
 // bar says so in front of the last state it knew, and its clock stands still (nothing new can have arrived).
 import { useEffect, useRef, useState } from "react";
 import { duration } from "../../lib/format";
@@ -69,7 +69,9 @@ function Disconnected() {
 export function WaitingView({ wait, offline }: { wait: WaitLine; offline?: boolean }) {
   const now = useNow(1000, !offline);
   const since = wait.since ? Date.parse(wait.since) : NaN;
-  const words = [stateName("bg_waiting"), wait.what, wait.more > 0 ? t("chat-runningstatusbar.more_waits", { count: wait.more }) : ""].filter(Boolean).join(" · ");
+  // what it waits on: the header's title line says the state ("Waiting in the background"), once (#3956); the state's name
+  // only stands in when the wait has no words of its own
+  const words = [wait.what || stateName("bg_waiting"), wait.more > 0 ? t("chat-runningstatusbar.more_waits", { count: wait.more }) : ""].filter(Boolean).join(" · ");
   return (
     <div data-running-status="on" data-running-background="waiting" className="flex select-none items-center justify-between gap-3 px-2 py-1.5 text-[13px] font-medium">
       <div className="flex min-w-0 items-center gap-1.5 text-status-waiting">

@@ -4,6 +4,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import persona.core.contracts.CoreText
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.ConnectionDiagnostics
@@ -12,6 +15,8 @@ import persona.core.contracts.api.DeliveryState
 import persona.core.contracts.api.OutboxMessage
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.ZoneId
+import java.util.Locale
 
 class ConnectionDetailsTest {
     private val now = Instant.parse("2026-11-05T10:00:00Z")
@@ -84,5 +89,37 @@ class ConnectionDetailsTest {
         gate.notice("plain")
         collector.cancel()
         assertEquals(listOf(Haptic.Error, Haptic.Attention, null), seen.map { it.haptic })
+    }
+}
+
+/** "Last online" past the first hour, in the app's language even when the system's is another (#4103). */
+@RunWith(AndroidJUnit4::class)
+@Config(sdk = [35])
+class ConnectionTimeLanguageTest {
+    private val zone = ZoneId.of("UTC")
+    private val now = Instant.parse("2026-11-05T20:00:00Z")
+    private val today = Instant.parse("2026-11-05T18:00:00Z")
+    private val earlier = Instant.parse("2026-11-04T18:00:00Z")
+
+    private fun withSystem(locale: Locale, block: () -> Unit) {
+        val saved = Locale.getDefault()
+        Locale.setDefault(locale)
+        try { block() } finally { Locale.setDefault(saved) }
+    }
+
+    @Test fun japaneseAppOnAnEnglishPhone() = withSystem(Locale.US) {
+        assertEquals("18:00", clockOrDate(today, now, Locale.JAPANESE, zone))
+        assertEquals("2026年11月4日", clockOrDate(earlier, now, Locale.JAPANESE, zone))
+    }
+
+    @Test fun chineseAppOnAnEnglishPhone() = withSystem(Locale.US) {
+        assertEquals("2026年11月4日", clockOrDate(earlier, now, Locale.SIMPLIFIED_CHINESE, zone))
+        assertFalse(clockOrDate(today, now, Locale.SIMPLIFIED_CHINESE, zone).contains("PM"))
+    }
+
+    @Test fun englishAppOnAJapanesePhone() = withSystem(Locale.JAPAN) {
+        assertEquals("Nov 4, 2026", clockOrDate(earlier, now, Locale.ENGLISH, zone))
+        val time = clockOrDate(today, now, Locale.US, zone)
+        assertTrue(time, time.startsWith("6:00") && time.endsWith("PM"))
     }
 }

@@ -4,7 +4,9 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Machine } from "../lib/types";
+import type { Machine, MachineMetrics } from "../lib/types";
+import { chooseManager, resetManagerChoice } from "../lib/manager-choice";
+import { currentRoster, resetRoster, setRoster } from "../lib/managers";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -25,15 +27,18 @@ const { Machines } = await import("./Machines");
 
 let replies: number[] = [];
 let posts: string[] = [];
+let metricsReplies: Record<string, MachineMetrics[] | number> = {};
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
 function hub(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const path = String(input).split("?")[0]!;
   if (init?.method === "POST") posts.push(path);
   if (path.endsWith("/confirm") || path.endsWith("/reject")) return Promise.resolve(json({ ok: true }));
   if (path.endsWith("/reconnect")) return Promise.resolve(json({ ok: true }));
+  if (path === "/api/v1/managers" && currentRoster()) return Promise.resolve(json(currentRoster()));
   if (path !== "/api/v1/metrics") return Promise.resolve(json({ error: "not found" }, 404));
-  const status = replies.length > 1 ? replies.shift()! : replies[0] ?? 200;
-  return Promise.resolve(status === 200 ? json({ machines: [] }) : json({ error: "unavailable" }, status));
+  const reply = metricsReplies[String(input)];
+  const status = typeof reply === "number" ? reply : replies.length > 1 ? replies.shift()! : replies[0] ?? 200;
+  return Promise.resolve(status === 200 ? json({ machines: Array.isArray(reply) ? reply : [] }) : json({ error: "unavailable" }, status));
 }
 
 let host: HTMLDivElement;
@@ -45,6 +50,9 @@ const alert = () => host.querySelector('[role="alert"]');
 const buttons = (label: string) => [...host.querySelectorAll("button")].filter((b) => b.textContent?.trim() === label);
 
 beforeEach(() => {
+  resetRoster();
+  resetManagerChoice();
+  metricsReplies = {};
   fake.machines = [];
   fake.features = [];
   replies = [];
@@ -202,6 +210,115 @@ describe("Machines", () => {
     await flush();
     expect(host.querySelector('[data-error-code="link_offline"]')?.textContent).toContain("Persona Link 没在运行");
     expect(host.textContent).not.toContain("failed to get reader");
+  });
+});
+
+describe("Machines metrics across managers", () => {
+  const roster = {
+    default: "assistant",
+    managers: [
+      { id: "m-1", name: "Other assistant", online: true },
+      { id: "assistant", name: "Default assistant", online: true },
+    ],
+  };
+  const first: MachineMetrics = { machine_id: "mac", online: true, points: [], latest: { t: 1, cpu: 11, mem_used: 25, mem_total: 100, disk_used: 40, disk_total: 100 } };
+  const second: MachineMetrics = { machine_id: "nas", online: true, points: [], latest: { t: 1, cpu: 62, mem_used: 50, mem_total: 100, disk_used: 75, disk_total: 100 } };
+  const reads = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input)).filter((url) => url.startsWith("/api/v1/metrics"));
+  const showManager = async (id: string) => {
+    act(() => chooseManager(id));
+    await flush();
+  };
+
+  beforeEach(() => {
+    setRoster(roster);
+    fake.machines = [
+      { id: "mac", name: "Computer A", online: true },
+      { id: "nas", name: "Computer B", online: true, manager: "m-1" },
+    ];
+    metricsReplies = { "/api/v1/metrics": [first], "/api/v1/metrics?manager=m-1": [second] };
+  });
+
+  it("loads both managers' CPU, memory and disk, keeping the first machine ID", async () => {
+    metricsReplies["/api/v1/metrics?manager=m-1"] = [second, { ...first, latest: { t: 1, cpu: 99 } }];
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    for (const value of ["11%", "25%", "40%"]) expect(host.textContent).toContain(value);
+    expect(host.textContent).not.toContain("99%");
+    await showManager("m-1");
+    for (const value of ["62%", "50%", "75%"]) expect(host.textContent).toContain(value);
+    expect(reads()).toEqual(["/api/v1/metrics", "/api/v1/metrics?manager=m-1"]);
+    expect(alert()).toBeNull();
+  });
+
+  it.each(["assistant", "m-1"])("still loads the other manager when %s fails on the first load", async (failed) => {
+    metricsReplies[failed === "assistant" ? "/api/v1/metrics" : "/api/v1/metrics?manager=m-1"] = 503;
+    chooseManager(failed === "assistant" ? "m-1" : "assistant");
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    for (const value of failed === "assistant" ? ["62%", "50%", "75%"] : ["11%", "25%", "40%"]) expect(host.textContent).toContain(value);
+    expect(alert()).toBeNull();
+  });
+
+  it("keeps a failed manager's numbers while refreshing the other, and reports only total failure", async () => {
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    metricsReplies["/api/v1/metrics"] = [{ ...first, latest: { ...first.latest!, cpu: 23 } }];
+    metricsReplies["/api/v1/metrics?manager=m-1"] = 503;
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    await flush();
+    expect(host.textContent).toContain("23%");
+    await showManager("m-1");
+    for (const value of ["62%", "50%", "75%"]) expect(host.textContent).toContain(value);
+    expect(alert()).toBeNull();
+
+    metricsReplies["/api/v1/metrics"] = 503;
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    await flush();
+    expect(alert()?.textContent).toContain("显示的是上次的数据");
+    expect(host.textContent).toContain("62%");
+    await showManager("assistant");
+    expect(host.textContent).toContain("23%");
+
+    metricsReplies["/api/v1/metrics?manager=m-1"] = [];
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    await flush();
+    expect(alert()).toBeNull();
+    expect(host.textContent).toContain("23%");
+    await showManager("m-1");
+    expect(host.textContent).not.toContain("62%");
+  });
+
+  it("reads the latest roster on the next poll without polling on every roster push", async () => {
+    setRoster({ ...roster, managers: roster.managers.map((m) => ({ ...m, online: m.id === "assistant" })) });
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    expect(reads()).toEqual(["/api/v1/metrics"]);
+    const next = { ...roster, managers: [...roster.managers, { id: "installing", name: "Installing", online: true, installing: "2099-01-01T00:00:00Z" }] };
+    act(() => setRoster(next));
+    act(() => setRoster({ ...next, managers: next.managers.map((m) => ({ ...m, inbox_needs_you: 1 })) }));
+    await flush();
+    expect(reads()).toHaveLength(1);
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    await flush();
+    expect(reads()).toEqual(["/api/v1/metrics", "/api/v1/metrics", "/api/v1/metrics?manager=m-1"]);
+    await showManager("m-1");
+    expect(host.textContent).toContain("62%");
+  });
+
+  it("keeps a single bare request with one installed manager", async () => {
+    setRoster({ default: "m-1", managers: [roster.managers[0], { id: "installing", name: "Installing", online: false, installing: "2099-01-01T00:00:00Z" }] });
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    expect(reads()).toEqual(["/api/v1/metrics"]);
+    expect(alert()).toBeNull();
+  });
+
+  it("does not request offline managers or report a failure when none is online", async () => {
+    setRoster({ ...roster, managers: roster.managers.map((m) => ({ ...m, online: false })) });
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    expect(reads()).toEqual([]);
+    expect(alert()).toBeNull();
   });
 });
 

@@ -14,7 +14,8 @@ import (
 // tmuxHost is a pane of a tmux server Persona did not open: a Claude Code the user started in tmux (#2562). Only what
 // an approval needs — read the pane's screen and press keys in it. The pane is named by tmux itself ("%11"), as
 // Claude Code wrote it down in sessions/<pid>.json ("tmux": "orc:@11.%11"). A pane id repeats across servers, so the
-// server travels in the id too: "%11" for the default one, "<socket>|%11" for a server started with -L or -S. The
+// server travels in the id too, as the claude process's own TMUX names it (claudebg.go outsidePane): "%11" for the
+// default one, "<socket>|%11" for a server started with -L or -S. The node's own TMUX plays no part. The
 // layout is not read and no space, slot or agent comes from here: the session that runs there is listed by
 // claudebg.go, on its own pid file.
 type tmuxHost struct {
@@ -58,7 +59,7 @@ func (h *tmuxHost) Agent(context.Context, host.PaneRef) (*host.Agent, error) {
 
 func (h *tmuxHost) Read(ctx context.Context, pane host.PaneRef, o host.ReadOpts) (string, error) {
 	socket, id := splitTmuxPane(pane.ID)
-	text, err := h.client(socket).Capture(ctx, id, o.Lines, o.ANSI)
+	text, err := h.client(socket).Capture(ctx, id, o.Source, o.Lines, o.ANSI)
 	return text, tmuxErr(err)
 }
 

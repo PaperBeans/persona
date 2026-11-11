@@ -72,6 +72,9 @@ class CoreTextShotsTest {
         assertEquals("1 needs you", FleetText.headline(FleetState("needsYou", needsYou = 1)).resolve(context))
         assertEquals("3 working · 1 done", FleetText.rest(FleetState("needsYou", needsYou = 2, working = 3, unread = 1)).resolve(context))
         assertEquals("Context above compacted · Manual · 180.9K tokens before", Compaction("manual", 180_902).label.resolve(context))
+        assertEquals("Context above compacted · Manual · 999.9K tokens before", Compaction("manual", 999_949).label.resolve(context))
+        assertEquals("Context above compacted · Manual · 1M tokens before", Compaction("manual", 999_950).label.resolve(context))
+        assertEquals("Context above compacted · Manual · 1.2M tokens before", Compaction("manual", 1_200_000).label.resolve(context))
         assertEquals("Expires in 5 min", RequestExpiry.label(Instant.EPOCH.plusSeconds(300).toString(), Instant.EPOCH)!!.resolve(context))
     }
 
@@ -80,6 +83,7 @@ class CoreTextShotsTest {
         val context = rule.activity
         assertEquals("承認：Bash: go test", FleetText.line(FleetItem("a/b", kind = "permission", detail = "Bash: go test")).resolve(context))
         assertEquals("ここまでのコンテキストを圧縮しました · 手動 · 圧縮前18.1万トークン", Compaction("manual", 180_902).label.resolve(context))
+        assertEquals("ここまでのコンテキストを圧縮しました · 手動 · 圧縮前120万トークン", Compaction("manual", 1_200_000).label.resolve(context))
     }
 
     private val fleet = FleetState("needsYou", needsYou = 2, working = 3, unread = 1, items = listOf(

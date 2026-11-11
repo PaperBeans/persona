@@ -21,7 +21,7 @@ func TestStalledStartKeepsTaskAndLauncherHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := PlanTask{Title: "Inspect files", Prompt: "Inspect files", Machine: "l4", Cwd: "/home/me/project", Launcher: "work", MachinePolicy: machineFlexible, TodoID: todo.ID}
+	task := PlanTask{Title: "Inspect files", Prompt: "Inspect files", Machine: "l4", Cwd: "/home/me/project", Launcher: "work", MachinePolicy: machineFlexible, Permission: "bypassPermissions", TodoID: todo.ID}
 	p := &TaskPlan{ID: "plan_stalled", Conversation: "conv1", State: planStarted, Tasks: []PlanTask{task}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	if err := s.savePlan(ctx, p); err != nil {
 		t.Fatal(err)

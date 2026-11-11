@@ -10,7 +10,6 @@
     <plurals name="designsystem_manager_hours_ago">
         <item quantity="other">%1$d 小时前</item>
     </plurals>
-    <string name="designsystem_manager_chip_offline">%1$s，离线</string>
     <string name="designsystem_manager_offline_note">%1$s · %2$s</string>
     <string name="designsystem_manager_current">当前</string>
     <string name="designsystem_manager_others_waiting">别的助手有事等你处理</string>

@@ -1,0 +1,32 @@
+{
+  "kind": "issues",
+  "total": 2,
+  "more": false,
+  "items": [
+    {
+      "id": "example-org/example-repo#12",
+      "repo": "example-org/example-repo",
+      "number": 12,
+      "type": "pr",
+      "state": "open",
+      "title": "Add the example",
+      "author": "alice",
+      "time": "2026-01-02T03:04:05Z",
+      "comments": 3,
+      "link": "https://github.com/example-org/example-repo/pull/12"
+    },
+    {
+      "id": "example-org/example-repo#7",
+      "repo": "example-org/example-repo",
+      "number": 7,
+      "type": "issue",
+      "state": "closed",
+      "title": "Example bug",
+      "author": "bob",
+      "time": "2026-01-01T00:00:00Z",
+      "closed": "2026-01-01T00:00:00Z",
+      "comments": 0,
+      "link": "https://github.com/example-org/example-repo/issues/7"
+    }
+  ]
+}

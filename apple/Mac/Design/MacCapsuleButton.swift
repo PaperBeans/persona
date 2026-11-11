@@ -8,6 +8,8 @@ import SwiftUI
 /// backdrop. Follows the tint (Interrupt sets red) and the control size.
 struct MacCapsuleButton: ButtonStyle {
     var prominent: Bool
+    /// Pending decisions can request a larger target without changing existing utility buttons.
+    var minimumHeight: CGFloat? = nil
     @Environment(\.isEnabled) private var enabled
     @Environment(\.controlSize) private var size
 
@@ -15,6 +17,7 @@ struct MacCapsuleButton: ButtonStyle {
         let label = configuration.label
             .padding(.horizontal, horizontal)
             .padding(.vertical, vertical)
+            .scaledFrame(minHeight: minimumHeight)
             .foregroundStyle(prominent ? AnyShapeStyle(Theme.macOnTint) : AnyShapeStyle(.tint))
             .contentShape(.capsule)
         Group {

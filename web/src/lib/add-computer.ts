@@ -3,6 +3,7 @@
 // it to come online and then says whether it is the user's (POST /api/v1/machines/{id}/confirm | reject).
 import { t } from "../i18n";
 import { ApiError, errorText } from "./api";
+import { BUILTIN_MANAGER } from "./manager-choice";
 import { hubHas } from "./store";
 import type { Machine } from "./types";
 
@@ -66,6 +67,8 @@ export interface ComputerCodeReply {
   command?: string;
   /** One line that installs and pairs; only when the hub knows the site it was published from. */
   install?: { linux?: string };
+  /** The manager the computer belongs to now; a hub from before `add.manager` leaves it out. */
+  manager?: string;
 }
 
 /** Whether this hub lets a signed-in device add a computer; an old hub (or one that sent no features) does not. */
@@ -78,8 +81,22 @@ export function canConfirmComputer(features: string[]): boolean {
   return hubHas(features, MACHINE_TRUST_FEATURE, false);
 }
 
-export function addBody(name: string, os: ComputerOS) {
-  return { add: { name: name.trim(), os } };
+/** A new computer's request: its name and system, and the manager it is for (the current assistant's real id, the
+ *  default's too) when the roster said which that is; none leaves it to the hub as before (docs/protocol/protocol.md
+ *  "Computer pairing codes"). */
+export function addBody(name: string, os: ComputerOS, manager?: string) {
+  return { add: { name: name.trim(), os, ...(manager ? { manager } : {}) } };
+}
+
+/**
+ * The manager a computer went to when that is not the one its code asked for, else null (nothing asked: null too).
+ * The reply's `manager` says it; a hub from before `add.manager` leaves it out and puts a computer it added under its
+ * own assistant, while one it reused stays where it was (`listed`: the manager the machines list has it under).
+ */
+export function addedUnder(asked: string | undefined, reply: Pick<ComputerCodeReply, "manager" | "added">, listed?: string): string | null {
+  if (!asked) return null;
+  const owner = reply.manager || (reply.added ? BUILTIN_MANAGER : listed || BUILTIN_MANAGER);
+  return owner === asked ? null : owner;
 }
 
 /** The line that pairs an installed persona-link; the reply's own when the hub gave one. */
@@ -172,6 +189,15 @@ export function addErrorText(e: unknown): string {
       return t("lib-add-computer.err_forbidden");
     case "invalid_name":
       return t("lib-add-computer.err_invalid_name");
+    // add.manager's own refusals (docs/protocol/protocol.md "Computer pairing codes"): the hub says which assistant and
+    // why in the request's language, which the generic words for the status would hide
+    case "no_manager":
+    case "installing":
+    case "assistant_offline":
+    case "owners_unknown": {
+      const said = (e as ApiError).body.error;
+      return typeof said === "string" && said ? said : errorText(e);
+    }
     default:
       return errorText(e);
   }

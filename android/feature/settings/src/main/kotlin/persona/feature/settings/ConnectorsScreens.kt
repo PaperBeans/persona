@@ -146,6 +146,8 @@ internal fun MailAccountsPage(
                                 feedback?.notice(res.getString(R.string.settings_src_mail_test_unreachable, r?.error ?: res.getString(R.string.settings_src_unknown_error)))
                             }
                             load()
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             feedback?.notice(e.message ?: res.getString(R.string.settings_src_mail_test_failed))
                         } finally {
@@ -178,6 +180,8 @@ internal fun MailAccountsPage(
                         connectors?.deleteMailAccount(targetId)
                         load()
                         feedback?.notice(res.getString(R.string.settings_src_deleted))
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         feedback?.notice(res.getString(R.string.settings_src_mail_delete_failed, e.message.orEmpty()))
                     }

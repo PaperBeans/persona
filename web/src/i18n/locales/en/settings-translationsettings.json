@@ -2,6 +2,7 @@
   "footer": "Content not in the target language is translated automatically; you can switch back to the original any time. The translation model in Models does the work.",
   "auto": "Auto-translate",
   "model": "Translation model",
+  "model_default_note": "Translation uses the model of the default assistant “{name}”, not the current assistant's.",
   "target": "Target language",
   "scope": "What to translate",
   "scope_footer": "Lark has a lot of messages, so they aren't translated by default. Only others' messages in the chats picked here are translated.",

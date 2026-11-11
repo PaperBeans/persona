@@ -7,6 +7,8 @@ import { useEffect, useMemo, useState } from "react";
 import { t } from "../../i18n";
 import { errorText, getToken } from "../../lib/api";
 import { modelPurpose, modelSummary, type ModelPurposeBody } from "../../lib/model-config";
+import { managerOf, useRoster } from "../../lib/managers";
+import { otherManager, useChosenManager } from "../../lib/manager-choice";
 import { useLarkOn } from "../../lib/store";
 import { LANGUAGES, larkChatChoices, setTranslatePrefs, useTranslatePrefs, type TranslateChat } from "../../lib/translate";
 import { Button, cx, Dialog, IconButton, Loading } from "../../ui/atoms";
@@ -21,6 +23,11 @@ export function TranslationSettings({ onConfigure }: { onConfigure: () => void }
   const [model, setModel] = useState<ModelPurposeBody | null>(null);
   const [picking, setPicking] = useState(false);
   const lark = useLarkOn();
+  // The model shown is the default assistant's (the request names none). Its row opens Models, which edits the current
+  // assistant's: with another assistant current the row doesn't go there, and says whose model it is.
+  const roster = useRoster();
+  const other = otherManager(useChosenManager() ?? undefined);
+  const defaultName = other ? managerOf(roster, roster?.default ?? "")?.name ?? "" : "";
 
   useEffect(() => {
     modelPurpose("translate").then(setModel, () => {});
@@ -29,11 +36,11 @@ export function TranslationSettings({ onConfigure }: { onConfigure: () => void }
   return (
     <>
       <h2 className="mb-3 px-1 text-[15px] font-semibold text-ink">{t("settings-nav.tab_translate")}</h2>
-      <Group footer={t("settings-translationsettings.footer")}>
+      <Group footer={other ? `${t("settings-translationsettings.footer")} ${t("settings-translationsettings.model_default_note", { name: defaultName })}` : t("settings-translationsettings.footer")}>
         <Row label={<span className="flex items-center gap-2"><Icon name="translate" size={14} className="text-ink-3" />{t("settings-translationsettings.auto")}</span>}>
           <Switch on={prefs.enabled} onChange={(on) => setTranslatePrefs({ enabled: on })} label={t("settings-translationsettings.auto")} />
         </Row>
-        <Row label={t("settings-translationsettings.model")} hint={model ? modelSummary(model.purpose, model.providers) : undefined} onClick={onConfigure} />
+        <Row label={t("settings-translationsettings.model")} hint={model ? modelSummary(model.purpose, model.providers) : undefined} onClick={other ? undefined : onConfigure} />
       </Group>
       {prefs.enabled && (
         <>

@@ -307,6 +307,27 @@ class ChannelsStateTest {
         assertEquals(listOf<Pair<String?, Map<String, String>?>>(null to null, "scan" to null, "scan" to null), api.steps)
     }
 
+    /** Back in front after the page was away (#4133): the QR code on screen is asked once at once. */
+    @Test fun backInFrontTheQrCodeIsAskedOnceAtOnce() = runBlocking {
+        val api = FakeChannels(ChannelDetail(wechat.copy(state = "not_connected", account = null)))
+        val model = ChannelModel(api, "wechat")
+        model.load()
+        assertFalse(model.catchUp()) // nothing on screen: nothing asked
+        assertTrue(api.steps.isEmpty())
+        api.prompts += BindPrompt(step = "scan", kind = "qr", interval = 2, qr = BindQrCode(2, listOf("10", "01")))
+        assertTrue(model.startBind())
+
+        // Scanned with WeChat while the page was away: one ask, no values, and the binding shows as done.
+        api.prompts += BindPrompt(done = true, account = "微信用户 a1b2c3")
+        assertTrue(model.catchUp())
+        assertEquals(listOf<Pair<String?, Map<String, String>?>>(null to null, "scan" to null), api.steps)
+        assertFalse(model.state.value.bind.active)
+        assertEquals("微信用户 a1b2c3", model.state.value.boundAs)
+        assertEquals("connected", model.state.value.channel?.state)
+        assertFalse(model.catchUp()) // done: nothing more to ask
+        assertEquals(2, api.steps.size)
+    }
+
     @Test fun aFailedFirstStepSaysWhyAndUnbindingClearsTheBinding() = runBlocking {
         val api = FakeChannels(ChannelDetail(feishu))
         val model = ChannelModel(api, "feishu")

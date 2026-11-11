@@ -91,7 +91,11 @@ describe("the bar of an agent waiting in the background (#6045)", () => {
   it("is still: what it waits on, the time since it began, no breath and no tokens", () => {
     const html = renderToStaticMarkup(<WaitingView wait={{ what: "等 PR #7 的检查跑完", more: 2, since: new Date(Date.now() - 90_000).toISOString() }} />);
     expect(html).toContain('data-running-background="waiting"');
-    expect(html).toContain("后台等待中 · 等 PR #7 的检查跑完 · 还有 2 个");
+    // the header's title line says the state: the line says what it waits on (#3956)
+    expect(html).toContain("等 PR #7 的检查跑完 · 还有 2 个");
+    expect(html).not.toContain("后台等待中");
+    // a wait without words of its own still says what it is
+    expect(renderToStaticMarkup(<WaitingView wait={{ what: "", more: 0 }} />)).toContain("后台等待中");
     expect(html).toMatch(/data-running-elapsed[^>]*>1 分/);
     expect(html).not.toContain("tokens");
     expect(html).not.toContain("status-breath");

@@ -83,6 +83,43 @@ class SessionItemsCacheTest {
         assertEquals(true to null, ledger.needsScan(a, 1, Long.MAX_VALUE) to ledger.total)
     }
 
+    /** Opening and closing a chat scan the whole cache only when that can evict something (#4045). */
+    @Test fun opensAndClosesScanOnlyWhileTheTotalIsUnknownOrOverBudget() = runBlocking {
+        val chat = listOf(Item("1#0", 1, role = "user", kind = "text", text = "q".repeat(400)),
+            Item("2#0", 2, role = "assistant", kind = "text", text = "a".repeat(400)))
+        val bytes = chat.sumOf { JsonCodec.encodeToString(it).toByteArray().size }.toLong()
+        val cache = SessionItemsCache(database, scope, budget = bytes * 5 / 2)
+        val (a, b, c) = listOf("a", "b", "c").map { SessionKey("m", it) }
+        suspend fun cached() = database.items().sizes(scope.path).map { it.session }.sorted()
+
+        // A new cache does not know its total: the first open scans and learns it.
+        cache.retain(a)
+        cache.load(a)
+        assertEquals(1, cache.scans)
+        // All three on screen and over budget together: the save that goes over scans, and can evict nothing.
+        cache.retain(b)
+        cache.retain(c)
+        listOf(a, b, c).forEach { cache.save(it, chat) }
+        assertEquals(2, cache.scans)
+        assertEquals(listOf("a", "b", "c"), cached())
+        // Still over budget: an open scans, and closing c lets it go.
+        cache.load(a)
+        assertEquals(3, cache.scans)
+        cache.release(c)
+        assertEquals(4, cache.scans)
+        assertEquals(listOf("a", "b"), cached())
+        // Within budget again: opening and closing chats read no other session's rows.
+        repeat(5) {
+            for (session in listOf(a, b, c)) {
+                cache.retain(session)
+                cache.load(session)
+                cache.release(session)
+            }
+        }
+        assertEquals(4, cache.scans)
+        assertEquals(bytes * 2, cache.ledgerTotal)
+    }
+
     @Test fun overBudgetSavesEvictTheOldestUnpinnedSessionsAsTheFullScanDid() = runBlocking {
         val chat = listOf(Item("1#0", 1, role = "user", kind = "text", text = "q".repeat(400)),
             Item("2#0", 2, role = "assistant", kind = "text", text = "a".repeat(400)))

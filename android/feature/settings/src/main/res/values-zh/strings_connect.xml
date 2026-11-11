@@ -76,6 +76,8 @@
     <string name="settings_pairing_failure_timeout">连不上 hub。在家里，确认手机和 hub 所在的电脑连着同一个网络；在外面，确认家里的路由器允许从外网连进来。</string>
     <string name="settings_pairing_failure_local">在家里连 hub，需要允许 Persona 访问本地网络。</string>
     <string name="settings_pairing_failure_certificate">证书或 hub 身份不符。如果 hub 是你重装的，在已登录的设备上重新出一个码，再扫一次。</string>
+    <string name="settings_pairing_failure_proxy_certificate">%1$s 的证书这台手机不信任。这个地址经过反向代理或隧道，请检查它的证书是否对这个域名有效；hub 本身没问题，重新生成配对码也没用。</string>
+    <string name="settings_pairing_failure_proxy_this_address">这个地址</string>
     <string name="settings_pairing_failure_expired">这个码过期了或已经用过了，在已登录的设备上重新出一个码。</string>
     <string name="settings_pairing_failure_incompatible">当前连接组件或 hub 不支持这种配对方式，请更新后重试。</string>
     <string name="settings_pairing_failure_tls_required">这个地址需要加密连接，请使用 HTTPS 地址重新配对。</string>

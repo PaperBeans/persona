@@ -23,7 +23,8 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var in struct {
 		Settings
-		Permission json.RawMessage `json:"default_permission_mode"`
+		Permission       json.RawMessage `json:"default_permission_mode"`
+		MinutesRetention json.RawMessage `json:"minutes_days"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		apierr.Write(w, http.StatusBadRequest, err)
@@ -63,6 +64,13 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 	if d := in.RecordingDays; d != nil && (*d < minRecordingDays || *d > maxRecordingDays) {
 		apierr.Write(w, http.StatusBadRequest, errors.New("recording_days must be 1–365"))
 		return
+	}
+	if in.MinutesRetention != nil {
+		if err := json.Unmarshal(in.MinutesRetention, &in.MinutesDays); err != nil || in.MinutesDays == nil ||
+			*in.MinutesDays < minMinutesDays || *in.MinutesDays > maxMinutesDays {
+			apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-profile.bad_minutes_days"))
+			return
+		}
 	}
 	if m := in.MeetingAttendanceDefault; m != nil && !slices.Contains(meetingRoles, *m) {
 		apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-meeting.bad_default_role"))
@@ -133,6 +141,12 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.RecordingDays != nil {
 			v.RecordingDays = in.RecordingDays
+		}
+		if in.MinutesDays != nil {
+			v.MinutesDays = in.MinutesDays
+		}
+		if in.KBTopics != nil {
+			v.KBTopics = in.KBTopics
 		}
 		if in.MeetingAttendanceDefault != nil {
 			v.MeetingAttendanceDefault = in.MeetingAttendanceDefault

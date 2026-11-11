@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { initI18n } from "../i18n";
-import { dependencyText, dependentError, previewBlocked, previewConsent } from "./extension-model";
+import { dependencyText, dependentError, partialUninstall, previewBlocked, previewConsent } from "./extension-model";
 
 describe("extension model consent", () => {
   const pv = { preview_id: "main", permissions_digest: "main-digest", expires_at: "2026-11-05T12:00:00Z" };
@@ -34,6 +34,11 @@ describe("extension model consent", () => {
   it("reads the dependent conflict without assuming an API error class", () => {
     expect(dependentError({ body: { code: "has_dependents", dependents: [{ id: "notes", name: "笔记" }, { id: 123 }] } })).toEqual([{ id: "notes", name: "笔记" }]);
     expect(dependentError(new Error("no"))).toBeNull();
+    // A pack uninstalled part way (#4072): the three groups, with odd entries left out.
+    expect(partialUninstall({ body: { code: "partial_uninstall", removed_members: ["a", 1], failed_members: [{ id: "b", error: "busy" }, { id: "c" }, { error: "x" }], remaining_members: ["d"] } }))
+      .toEqual({ removed: ["a"], failed: [{ id: "b", error: "busy" }, { id: "c", error: "" }], remaining: ["d"] });
+    expect(partialUninstall({ body: { code: "has_dependents" } })).toBeNull();
+    expect(partialUninstall(new Error("no"))).toBeNull();
     expect(dependencyText({ id: "notes", state: "old", version: ">=2.0.0", installed: "1.0.0" })).toContain(">=2.0.0");
   });
 });

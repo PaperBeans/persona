@@ -470,26 +470,25 @@ type realtimeWire struct{}
 func (realtimeWire) url(base, model string) (string, error) { return (codexWire{}).url(base, model) }
 func (realtimeWire) header() http.Header                    { return http.Header{} }
 
+// start is the GA session.update: type is required, the audio formats go under audio.input and audio.output, and the
+// voice only in audio.output (session.audio.format and session.voice are refused as unknown parameters).
 func (realtimeWire) start(s session) any {
 	rate := s.InputRate
 	if rate <= 0 {
 		rate = 24000
 	}
-	output := map[string]any{"format": map[string]any{"type": "audio/pcm", "rate": rate}}
+	format := map[string]any{"type": "audio/pcm", "rate": rate}
+	output := map[string]any{"format": map[string]any{"type": "audio/pcm", "rate": 24000}}
 	if s.Voice != "" {
 		output["voice"] = s.Voice
 	}
 	audio := map[string]any{
-		"format": map[string]any{"type": "audio/pcm", "rate": rate},
-		"input":  map[string]any{"transcription": map[string]any{"model": "gpt-4o-mini-transcribe"}},
+		"input":  map[string]any{"format": format, "transcription": map[string]any{"model": "gpt-4o-mini-transcribe"}},
 		"output": output,
 	}
 	sess := map[string]any{"type": "realtime", "audio": audio}
 	if s.Instructions != "" {
 		sess["instructions"] = s.Instructions
-	}
-	if s.Voice != "" {
-		sess["voice"] = s.Voice
 	}
 	if len(s.Tools) > 0 {
 		sess["tools"] = s.Tools
@@ -550,12 +549,9 @@ func (realtimeWire) decode(raw []byte) []event {
 		CallID     string `json:"call_id"`
 		Name       string `json:"name"`
 		Arguments  string `json:"arguments"`
-		Item       struct {
-			Type      string `json:"type"`
-			CallID    string `json:"call_id"`
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		} `json:"item"`
+		Response   struct {
+			ID string `json:"id"`
+		} `json:"response"`
 		Error struct {
 			Message string `json:"message"`
 			Code    string `json:"code"`
@@ -580,14 +576,17 @@ func (realtimeWire) decode(raw []byte) []event {
 		return []event{{kind: evUser, text: f.Transcript, replace: true, final: true}}
 	case "response.audio_transcript.delta", "response.output_audio_transcript.delta":
 		return []event{{kind: evAssistant, text: f.Delta, name: "transcript"}}
+	// A response's id is in response.id (response_id is for the events within it).
 	case "response.created":
-		return []event{{kind: evReply, id: f.ResponseID}}
+		return []event{{kind: evReply, id: firstNonEmpty(f.Response.ID, f.ResponseID)}}
 	case "response.done", "response.completed":
-		return []event{{kind: evTurnEnd, id: f.ResponseID}}
-	case "response.output_item.done":
-		if f.Item.Type == "function_call" && f.Item.CallID != "" && f.Item.Name != "" {
-			return []event{{kind: evDelegation, id: f.Item.CallID}, {kind: evToolCall, id: f.Item.CallID, callID: f.Item.CallID, name: f.Item.Name, args: f.Item.Arguments}}
-		}
+		return []event{{kind: evTurnEnd, id: firstNonEmpty(f.Response.ID, f.ResponseID)}}
+	// The service's VAD heard the user: it cancels the response under way (interrupt_response), and the app drops
+	// what it has not played of it.
+	case "input_audio_buffer.speech_started":
+		return []event{{kind: evInterrupted}}
+	// A function call is taken from its arguments' done only: response.output_item.done repeats it, and a second
+	// evToolCall would hand the same call over twice.
 	case "response.function_call_arguments.done":
 		if f.CallID == "" || f.Name == "" {
 			return nil

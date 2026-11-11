@@ -55,6 +55,13 @@ func listKeySized(list []proto.Session, size int) string {
 			w.str(s.Activity, '/')
 			w.int(unixOf(s.ActivityAt), '\n')
 		}
+		// Restored runtime metadata changes assistant classification without a new runtime event.
+		if s.SourceKind == "runtime" {
+			w.b.WriteString("runtime-state:")
+			w.quote(s.Cwd, '/')
+			w.quote(s.Launcher, '/')
+			w.str(strconv.FormatBool(s.StartedByPersona), '\n')
+		}
 		// A new reason or link alone is a change.
 		w.b.WriteString("attention:")
 		w.quote(s.AttentionReason, '/')

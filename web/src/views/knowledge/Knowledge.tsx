@@ -11,6 +11,7 @@ import { cx } from "../../ui/atoms";
 import { remember, searches } from "./cache";
 import { EmptyDetail, EntryDetail } from "./KBDetail";
 import { ListPane } from "./KBList";
+import { KnowledgeMap } from "./KnowledgeMap";
 
 export function Knowledge({ kind, id, onToggleSidebar }: { kind?: string; id?: string; onToggleSidebar: () => void }) {
   const detailOpen = Boolean(kind && id);
@@ -39,6 +40,9 @@ export function Knowledge({ kind, id, onToggleSidebar }: { kind?: string; id?: s
     searches.clear();
     setReloadKey((k) => k + 1);
   };
+
+  // /kb/map: the knowledge map (topics and projects as a mind map), a page of its own.
+  if (kind === "map") return <KnowledgeMap onToggleSidebar={onToggleSidebar} />;
 
   return (
     <div className="@container flex h-full min-w-0">

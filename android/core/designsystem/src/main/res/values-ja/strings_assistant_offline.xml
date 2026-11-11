@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The current assistant offline, in place of a list's empty state (JAssistantOffline). -->
+    <string name="designsystem_assistant_offline_title">%1$s はオフラインです</string>
+    <string name="designsystem_assistant_offline_text">最終同期 %1$s。オンラインに戻ると更新されます。</string>
+    <string name="designsystem_assistant_offline_text_never">オンラインに戻ると更新されます。</string>
+</resources>

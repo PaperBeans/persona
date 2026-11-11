@@ -51,6 +51,9 @@ func (s *Service) healthyPlace(ctx context.Context, t *PlanTask) bool {
 		return false
 	}
 	alt, note, moved := s.healthDetour(ctx, m, s.startLauncher(ctx, t.Launcher), func(alt Device) bool {
+		if t.Role == roleLeader && s.isWorkMachine(alt.ID) { // a task leader never lands on a work-trust computer
+			return false
+		}
 		return s.taskDirectoryExists(ctx, alt.ID, rehome(t.Cwd, m, alt))
 	})
 	t.noteWhy(note)
@@ -65,6 +68,16 @@ func (s *Service) healthyPlace(ctx context.Context, t *PlanTask) bool {
 		t.Machine, t.Cwd = alt.ID, rehome(t.Cwd, m, alt)
 	}
 	return moved
+}
+
+// leaderOnWorkMachine refuses a task leader placed on a work-trust computer: its agents there get only the reporting
+// tools, so the role could not work, and the privacy boundary is not widened for it.
+func (s *Service) leaderOnWorkMachine(t *PlanTask, m Device) error {
+	if t.Role == roleLeader && s.isWorkMachine(m.ID) {
+		return fmt.Errorf("role \"leader\" cannot run on %s: a work-trust computer gives its agents only the reporting tools, so it could "+
+			"not supervise workers. Put the task leader on a computer you own", m.Name)
+	}
+	return nil
 }
 
 // noteWhy adds note to t's why (once), in brackets after the assistant's reason: the card shows it.
@@ -130,6 +143,11 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if !ok {
 		return "", "", fmt.Errorf("unknown machine %q", t.Machine)
 	}
+	// The last look, on the machine it will really start on (a retry, a remedy, a recovered start and a flexible task moved
+	// by the health check all pass here): a task leader never starts on a work-trust computer.
+	if err := s.leaderOnWorkMachine(t, m); err != nil {
+		return "", "", err
+	}
 	if !m.Reachable {
 		return "", "", machineOffline(m.Name)
 	}
@@ -152,6 +170,12 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	prompt := t.Prompt
 	if len(t.DoneWhen) > 0 { // what the supervisor will check (supervise.go)
 		prompt += "\n\n" + prompts.RenderTaskDoneWhen(t.DoneWhen)
+	}
+	switch {
+	case t.Role == roleLeader: // what it may hand out, and how its workers reach it (task_leader.go)
+		prompt += "\n\n" + prompts.RenderTaskLeader()
+	case t.Parent != "":
+		prompt += "\n\n" + prompts.RenderTaskWorker()
 	}
 	// The closeout's form, up front (agents_closeout_brief.go): after the delivery line when both are asked for.
 	delivery := !t.Readonly && s.doneNeedsDelivery(ctx)

@@ -536,6 +536,7 @@ type SuperviseEntry struct {
 	Minutes         int                // how long it has waited (needs_you) or not moved (stalled)
 	Ask             string             // needs_you: what it asks
 	Recommend       string             // escalated: the option the leader recommends
+	LeaderGone      bool               // decide: its task leader agent cannot be reached, so the supervisor takes the task over
 	DoneWhen        []string           // what done means
 	Round           int                // reworks so far
 	Machine         string             // where its agent runs (a name)

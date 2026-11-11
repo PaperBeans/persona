@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  entities, fieldValue, forwardCount, forwardedMessages, forwardedText, forwardPreviews, hubMediaURL, meetingNumber,
+  entities, fieldValue, forwardCount, forwardedMessages, forwardedText, forwardPreviews, hubMediaURL, larkStaticResourceKey, meetingNumber,
   stripHTML, summaryFields, summaryTone, summaryVariant, voteOptions,
 } from "./lark-summary";
 
@@ -43,6 +43,19 @@ describe("lark summary cards", () => {
     expect(hubMediaURL("https://cdn.example.com/a.png")).toBe("https://cdn.example.com/a.png");
     expect(hubMediaURL("/api/v1/lark/media/x")).toBe("/api/v1/lark/media/x");
     expect(hubMediaURL(undefined)).toBeUndefined();
+  });
+
+  it("rewrites a signed Lark CDN static-resource link onto the hub media route", () => {
+    expect(
+      hubMediaURL("https://s1-imfile.feishucdn.com/static-resource/v1/v2_b12d2dcd-9f41-465a-9797-5c02003aab6g~?image_size=noop&format=image"),
+    ).toBe("/api/v1/lark/media/v2_b12d2dcd-9f41-465a-9797-5c02003aab6g");
+    expect(hubMediaURL("https://example.larksuite.com/static-resource/v1/abc%2Fdef?x=1")).toBe("/api/v1/lark/media/abc%2Fdef");
+    // only Lark's own CDN hosts are rewritten, and only over https
+    expect(hubMediaURL("https://evil.feishucdn.com.attacker.example/static-resource/v1/x")).toBe(
+      "https://evil.feishucdn.com.attacker.example/static-resource/v1/x",
+    );
+    expect(hubMediaURL("http://s1-imfile.feishucdn.com/static-resource/v1/x")).toBe("http://s1-imfile.feishucdn.com/static-resource/v1/x");
+    expect(larkStaticResourceKey("https://s1-imfile.feishucdn.com/other/v1/x")).toBeUndefined();
   });
 
   it("colors, meeting numbers and votes", () => {

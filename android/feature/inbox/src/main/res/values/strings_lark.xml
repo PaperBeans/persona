@@ -30,6 +30,8 @@
     <string name="inbox_lark_file_failed">Couldn\'t open the file. Try again, or install an app that can open it.</string>
     <string name="inbox_lark_video">Video</string>
     <string name="inbox_lark_audio">Voice</string>
+    <string name="inbox_lark_media_play">Play</string>
+    <string name="inbox_lark_media_pause">Pause</string>
     <string name="inbox_lark_card">Card</string>
     <string name="inbox_lark_cannot_open">Can\'t launch Lark. Make sure Lark is installed.</string>
     <string name="inbox_lark_conversation">Lark chat</string>

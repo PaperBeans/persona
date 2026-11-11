@@ -17,6 +17,7 @@ import persona.core.designsystem.*
 @Config(sdk = [35], qualifiers = "en-w400dp-h1800dp")
 class AssistantSettingsManagerTest {
     @get:Rule val rule = createComposeRule()
+    @org.junit.After fun reset() = AssistantManagerChoice.reset()
 
     internal class Hub(
         private val values: MutableMap<String, AssistantConfig>,
@@ -62,7 +63,8 @@ class AssistantSettingsManagerTest {
             }
         }
         rule.waitForIdle()
-        rule.onAllNodesWithText("Work").onLast().performClick()
+        // The page is the current assistant's (picked in the sidebar's switcher): Work's once it is current.
+        rule.runOnIdle { AssistantManagerChoice.choose("hub", "work", "assistant") }
         rule.waitForIdle()
         rule.onAllNodesWithText("New conversation permissions").onLast().assertIsNotEnabled()
         rule.onNodeWithText("Unavailable until this assistant can confirm support for permission defaults. Other settings remain available.").assertExists()
@@ -77,7 +79,7 @@ class AssistantSettingsManagerTest {
         rule.waitForIdle()
         assertEquals("task.daily" to "work", opened)
     }
-    @Test fun supportedManagersCanSaveThroughProductionAdapterAndKeepSwitcher() {
+    @Test fun theCurrentAssistantsProfileSavesToItAndFollowsASwitch() {
         val values = mutableMapOf(
             "assistant" to AssistantConfig(manager = "assistant", defaultPermissionMode = "default", main = "personal-history",
                 permissionDefaults = AssistantPermissionDefaults(1, "assistant", AssistantPermissionDefaults.MODES)),
@@ -93,21 +95,24 @@ class AssistantSettingsManagerTest {
                 }
             }
         }
+        AssistantManagerChoice.choose("hub", null, "assistant")
         rule.waitForIdle()
-        // Exactly one title and one chip per manager; there is no separate owner row.
-        rule.onAllNodesWithText("Personal").assertCountEquals(1)
-        rule.onAllNodesWithText("Work").assertCountEquals(1)
+        // No assistant picker on the page (the sidebar's switcher picks), and no separate owner row.
+        rule.onAllNodesWithText("Personal").assertCountEquals(0)
+        rule.onAllNodesWithText("Work").assertCountEquals(0)
         rule.onAllNodesWithText("New conversation permissions").onLast().assertIsEnabled().performClick()
         rule.onNodeWithText("Allow edits").performClick()
         rule.waitForIdle()
         assertEquals("acceptEdits", values.getValue("assistant").defaultPermissionMode)
-        rule.onNodeWithText("Work").performClick()
+        // Another assistant current: the page reads and writes that one's.
+        rule.runOnIdle { AssistantManagerChoice.pick("work") }
         rule.waitForIdle()
         rule.onAllNodesWithText("New conversation permissions").onLast().assertIsEnabled().performClick()
         rule.onNodeWithText("Full access").performClick()
         rule.waitForIdle()
         assertEquals("bypassPermissions", values.getValue("work").defaultPermissionMode)
-        rule.onNodeWithText("Personal").performClick()
+        assertEquals("acceptEdits", values.getValue("assistant").defaultPermissionMode)
+        rule.runOnIdle { AssistantManagerChoice.pick(null) }
         rule.waitForIdle()
         rule.onNodeWithText("Allow edits").assertExists()
         assertEquals("personal-history", values.getValue("assistant").main)

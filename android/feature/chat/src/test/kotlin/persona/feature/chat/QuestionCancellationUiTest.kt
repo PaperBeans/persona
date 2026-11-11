@@ -61,6 +61,41 @@ class QuestionCancellationUiTest {
         assertEquals(2, sent.size)
     }
 
+    @Test fun cardInViewStaysWhenAnEarlierCardLeaves() {
+        fun card(id: String, text: String) = question.copy(id = id,
+            questions = listOf(Question(text, options = listOf(QuestionOption("JSON"), QuestionOption("CSV")))))
+        val first = card("first", "First card?")
+        val second = card("second", "Second card?")
+        val third = card("third", "Third card?")
+        var requests by mutableStateOf(listOf(first, second, third))
+        val sent = mutableListOf<String>()
+        rule.setContent {
+            PersonaTheme(reduceMotion = true) {
+                InteractionPanel(requests, null, 600.dp, null, emptySet(), { ix, _ -> sent += ix.id }, null, {})
+            }
+        }
+        rule.onNodeWithText("Next").performClick()
+        rule.onAllNodesWithText("Second card?").onFirst().assertIsDisplayed()
+        // answered on another device: the card in view stays, it does not hand its place to the third
+        requests = listOf(second, third)
+        rule.onAllNodesWithText("Second card?").onFirst().assertIsDisplayed()
+        rule.onAllNodesWithText("Third card?").assertCountEquals(0)
+        rule.onNodeWithText("1 / 2").assertIsDisplayed()
+        // a card sorted in front of it does not take its place either
+        requests = listOf(first, second, third)
+        rule.onAllNodesWithText("Second card?").onFirst().assertIsDisplayed()
+        rule.onNodeWithText("2 / 3").assertIsDisplayed()
+        rule.onNodeWithText("1. JSON").performClick()
+        assertEquals(listOf("second"), sent)
+        // once it leaves, the card that took its place is shown
+        requests = listOf(first, third)
+        rule.onAllNodesWithText("Third card?").onFirst().assertIsDisplayed()
+        rule.onNodeWithText("2 / 2").assertIsDisplayed()
+        assertEquals(1, requestIndex(listOf(first, third), "second", 1))
+        assertEquals(0, requestIndex(listOf(third), "second", 1))
+        assertEquals(1, requestIndex(listOf(first, second), "second", 0))
+    }
+
     @Test fun triageCollapseDoesNotSubmitAndLaterKeepsOriginalAnswerForServerIntent() {
         var collapsed by mutableStateOf(false)
         val sent = mutableListOf<Resolution>()

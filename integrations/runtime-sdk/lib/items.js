@@ -41,8 +41,8 @@ export function light(item) {
 const minInputShare = 256 // shorter strings, keys and other values stay whole
 const clipNoteRoom = 48 // room for clipTo's note, as JSON
 
-// Count what this runtime sends. Unlike Go's json.Marshal, JSON.stringify does not escape < > & or U+2028/U+2029,
-// so the budget and the decision to cut must use its own encoded UTF-8 size.
+// Count what this runtime sends. Like the hub's clipJSON, JSON.stringify leaves < > & raw; unlike it, it does not
+// escape U+2028/U+2029, so the budget and the decision to cut must use its own encoded UTF-8 size.
 function jsonLen(value) {
   return Buffer.byteLength(JSON.stringify(value), 'utf8')
 }

@@ -178,8 +178,8 @@ func (s *Service) kbOpenLocked(ctx context.Context, set assistantwire.KBSettings
 		if err != nil {
 			return nil, err
 		}
-		e := &kb.Engine{Store: st, TextDays: set.TextDays, AttachmentDays: set.AttachmentDays, AttachmentDaysBySource: set.AttachmentDaysBySource, RecordingDaysFunc: s.recordingDaysNow, ExtraDirs: kbReadDirs(set.ExtraDirs),
-			Selection: s.kbSelectionNow}
+		e := &kb.Engine{Store: st, TextDays: set.TextDays, AttachmentDays: set.AttachmentDays, AttachmentDaysBySource: set.AttachmentDaysBySource, RecordingDaysFunc: s.recordingDaysNow, MinutesDaysFunc: s.minutesDaysNow, ExtraDirs: kbReadDirs(set.ExtraDirs),
+			Selection: s.kbSelectionNow, TopicsOn: s.kbTopicsNow}
 		k.cur.Store(&kbOpened{eng: e, set: set})
 		return e, nil
 	}
@@ -214,8 +214,8 @@ func (s *Service) kbOpenLocked(ctx context.Context, set assistantwire.KBSettings
 	}
 	s.kbRezone(k.store, loc)
 	e := &kb.Engine{Store: k.store, Model: s.kbModel("inbox.triage"), ModelFor: func(id string) kb.Model { return s.kbModel(id) },
-		Owner: s.owner(ctx), Logf: s.logf, TextDays: set.TextDays, AttachmentDays: set.AttachmentDays, AttachmentDaysBySource: set.AttachmentDaysBySource, HandleKey: k.key, Index: s.kbIndexEntity, Unindex: s.kbUnindex, RecordingDaysFunc: s.recordingDaysNow, MinutesWritten: s.minutesWritten, LiveChanged: s.meetingKick, Changed: s.kbChanged, MineObserved: s.kbObserveOwner,
-		Selection: s.kbSelectionNow}
+		Owner: s.owner(ctx), Logf: s.logf, TextDays: set.TextDays, AttachmentDays: set.AttachmentDays, AttachmentDaysBySource: set.AttachmentDaysBySource, HandleKey: k.key, Index: s.kbIndexEntity, Unindex: s.kbUnindex, RecordingDaysFunc: s.recordingDaysNow, MinutesDaysFunc: s.minutesDaysNow, MinutesWritten: s.minutesWritten, LiveChanged: s.meetingKick, Changed: s.kbChanged, MineObserved: s.kbObserveOwner,
+		Selection: s.kbSelectionNow, TopicsOn: s.kbTopicsNow}
 	e.ObserveChanges()
 	e.ExtraDirs = kbReadDirs(set.ExtraDirs)
 	if !k.passed {
@@ -458,8 +458,13 @@ func (s *Service) kbRound(ctx context.Context, e *kb.Engine, r *kbRounds) {
 		}
 	}
 	e.RefreshProjects(ctx, 3)
-	// Recordings: those past recording_days go (every round: the setting may just have shortened), complete ones get
-	// their summary, meetings their minutes (kb/minutes.go).
+	// Knowledge points by topic (kb/topics.go; assistant.kb_topics): a couple of distill calls, then a couple of merges.
+	s.kbRun(ctx, func() {
+		e.DistillTopics(ctx, 2)
+		e.RefreshTopics(ctx, 2)
+	})
+	// Recordings: those past recording_days go, or keep only their minutes until minutes_days (every round: a setting
+	// may just have shortened), complete ones get their summary, meetings their minutes (kb/minutes.go).
 	s.kbRun(ctx, func() {
 		if n := e.PruneRecordings(time.Now()); n > 0 {
 			s.logf("kb: pruned %d recording(s)", n)

@@ -41,6 +41,10 @@ interface AssistantState {
   /** The role a meeting recording pre-selects (#2981, docs/assistant/meeting-minutes.md "Attendance fields"); only from a hub
    *  that attends meetings. */
   meeting_attendance_default?: string;
+  /** How many days recordings stay in the knowledge base (#3235), in effect; the phone drops its own older ones too. */
+  recording_days?: number;
+  /** How many days a meeting's minutes stay once its transcript went (#3780), in effect: 0 means forever; finite windows never below `recording_days`. */
+  minutes_days?: number;
   /** "Follow up every agent Persona starts" (#3617, docs/assistant/unified-entry.md "Agent tasks"): off by default; unset
    *  from a hub before it. */
   agent_tasks?: boolean;
@@ -54,6 +58,10 @@ const MAX_ARCHIVE_DAYS = 3650;
 
 /** `meeting_attendance_default`'s values, in the picker's order. */
 const MEETING_ROLES = ["off", "listener", "participant"] as const;
+
+/** Finite day bounds (docs/protocol/protocol.md). Minutes also accept 0, selected as Forever rather than typed. */
+const RETENTION = { recording_days: { min: 1, max: 365 }, minutes_days: { min: 1, max: 3650 } } as const;
+type Retention = keyof typeof RETENTION;
 
 export function AssistantSettings({ bare }: { /** Without its header (the profile page has its own). */ bare?: boolean } = {}) {
   const owner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner);
@@ -94,6 +102,21 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
     } catch (e) {
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally { setMeetingBusy(false); }
+  };
+
+  const [retentionBusy, setRetentionBusy] = useState(false);
+  const [retentionTries, setRetentionTries] = useState(0);
+  // Confirmed by the echo: the hub answers the days in effect (minutes never fewer than the recordings' own).
+  const setRetention = async (field: Retention, days: number) => {
+    setRetentionBusy(true);
+    try {
+      const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: { [field]: days } });
+      const want = field === "minutes_days" && days !== 0 ? Math.max(days, r.recording_days ?? days) : days;
+      if (r.manager !== manager || r[field] !== want) throw new Error(t("settings-assistantsettings.retention_unconfirmed"));
+      setInfo((i) => i ? { ...i, recording_days: r.recording_days, minutes_days: r.minutes_days } : i);
+    } catch (e) {
+      toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
+    } finally { setRetentionBusy(false); setRetentionTries((n) => n + 1); }
   };
 
   const setQuiet = async (on: boolean) => {
@@ -232,10 +255,10 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
       )}
 
       <Group title={t("settings-nav.tab_model_config")}>
-        <a href={BASE + settingsHref("models", "agent.new", false, manager, "model-config")} className="flex items-center justify-between px-4 py-3 text-[13px] text-ink hover:bg-hover">
+        <a href={BASE + settingsHref("models", "agent.new", false, null, "model-config")} className="flex items-center justify-between px-4 py-3 text-[13px] text-ink hover:bg-hover">
           <span>{t("settings-assistantsettings.task_models")}</span><Icon name="chevronRight" size={12} className="text-ink-3" />
         </a>
-        <a href={BASE + settingsHref("models", "assistant", false, manager, "model-config")} className="flex items-center justify-between px-4 py-3 text-[13px] text-ink hover:bg-hover">
+        <a href={BASE + settingsHref("models", "assistant", false, null, "model-config")} className="flex items-center justify-between px-4 py-3 text-[13px] text-ink hover:bg-hover">
           <span>{t("settings-assistantsettings.main_chat_model")}</span><Icon name="chevronRight" size={12} className="text-ink-3" />
         </a>
       </Group>
@@ -262,6 +285,18 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
               {MEETING_ROLES.map((role) => <option key={role} value={role}>{t(`settings-assistantsettings.meeting_attendance_${role}`)}</option>)}
             </select>
           </Row>
+        </Group>
+      )}
+
+      {typeof info?.recording_days === "number" && (
+        // A manager from before minutes_days (#3780) deletes a recording's minutes with it: only one that says the minutes'
+        // days promises they stay longer.
+        <Group anchor="recordings" title={t("settings-assistantsettings.recordings_title")}
+          footer={t(typeof info.minutes_days === "number" ? "settings-assistantsettings.recordings_footer" : "settings-assistantsettings.recordings_footer_with_minutes")}>
+          <DaysRow field="recording_days" label={t("settings-assistantsettings.recording_days")} value={info.recording_days} tries={retentionTries}
+            disabled={info.manager !== manager || retentionBusy} onSave={(days) => void setRetention("recording_days", days)} />
+          {typeof info.minutes_days === "number" && <DaysRow field="minutes_days" label={t("settings-assistantsettings.minutes_days")} value={info.minutes_days} tries={retentionTries}
+            disabled={info.manager !== manager || retentionBusy} onSave={(days) => void setRetention("minutes_days", days)} />}
         </Group>
       )}
 
@@ -427,6 +462,48 @@ function AboutMe({ notesSaves, info, onSaved }: { notesSaves: ReturnType<typeof 
         <Button tone="primary" busy={busy} disabled={!changed} onClick={() => void save()}>{t("common.save")}</Button>
       </div>
     </div>
+  );
+}
+
+/** One retention in days (#3780): saved on Enter or on leaving the field, and only as a whole number within the hub's
+ *  bounds (said under it otherwise). The field shows the hub's value again after every try (`tries`), so a refused,
+ *  unconfirmed or raised one (minutes never below the recordings' days) shows what is in effect. */
+function DaysRow({ field, label, value, tries, disabled, onSave }: { field: Retention; label: string; value: number; tries: number; disabled: boolean; onSave: (days: number) => void }) {
+  const { min, max } = RETENTION[field];
+  const savedForever = field === "minutes_days" && value === 0;
+  const [forever, setForever] = useState(savedForever);
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => { setDraft(String(value)); setForever(savedForever); }, [value, tries, savedForever]);
+  const reset = () => { setDraft(String(value)); setForever(savedForever); };
+  const days = Number(draft.trim());
+  const valid = forever || /^\d+$/.test(draft.trim()) && days >= min && days <= max;
+  const commit = () => {
+    if (forever || !valid || disabled) return;
+    if (days !== value) onSave(days);
+    else setDraft(String(value));
+  };
+  return (
+    <Row label={label} hint={valid ? undefined : t("settings-assistantsettings.days_range", { min, max })}>
+      {field === "minutes_days" && <select aria-label={label} value={forever ? "forever" : "days"} disabled={disabled}
+        className={settingsInputClass} onChange={(e) => {
+          if (e.target.value === "forever") {
+            if (!savedForever) onSave(0);
+            else reset();
+          } else {
+            // Exposing the editor must not shorten retention before the user commits their intended days.
+            setDraft(String(value || 365));
+            setForever(false);
+          }
+        }}>
+        <option value="forever">{t("settings-assistantsettings.forever")}</option>
+        <option value="days">{t("settings-assistantsettings.days_unit")}</option>
+      </select>}
+      {!forever && <input type="number" inputMode="numeric" min={min} max={max} step={1} aria-label={label} aria-invalid={!valid || undefined}
+        value={draft} disabled={disabled} onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); else if (e.key === "Escape") reset(); }}
+        className={`${settingsInputClass} max-w-20 text-right tabular-nums`} />}
+      {field === "recording_days" && <span>{t("settings-assistantsettings.days_unit")}</span>}
+    </Row>
   );
 }
 

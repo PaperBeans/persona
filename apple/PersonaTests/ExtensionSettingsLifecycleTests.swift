@@ -137,6 +137,95 @@ struct ExtensionSettingsLifecycleTests {
         #expect(hub.sent("POST", "/api/v1/plugins/p/-/upgrade").count == 1, "the installed extension is upgraded under its own ID")
     }
 
+    // MARK: - a hub that runs operations (#3692)
+
+    private static func op(_ state: String, id: String = "op1", step: String = "download", updated: String = "2026-11-10T08:00:05Z",
+                           previewID: String? = nil, retryable: Bool = false) -> String {
+        let failed = state == "failed"
+        return #"""
+        {"id":"\#(id)","kind":"upgrade","extension":"p","name":"P","version":"2","from":"1","market":"m1","state":"\#(state)",
+         "step":"\#(step)","retryable":\#(retryable),"preview_id":\#(previewID.map { "\"\($0)\"" } ?? "null"),
+         "error":\#(failed ? #""包下载停滞，请重试。""# : "null"),"error_code":\#(failed ? #""download_stalled""# : "null"),
+         "steps":[{"id":"download","state":"\#(step == "download" ? (failed ? "failed" : "running") : "done")","bytes":4537677,"total":13008756},
+                  {"id":"consent","state":"\#(state == "needs_consent" ? "running" : step == "download" ? "pending" : "done")"},
+                  {"id":"install","state":"\#(state == "succeeded" ? "done" : "pending")"}],
+         "started_at":"2026-11-10T08:00:00Z","updated_at":"\#(updated)"}
+        """#
+    }
+
+    private static func waiting(_ id: String = "op1", updated: String = "2026-11-10T08:00:06Z") -> String {
+        String(op("needs_consent", id: id, step: "consent", updated: updated, previewID: "pv").dropLast()) + #","preview":"# + preview + "}"
+    }
+
+    private func stepped(_ hub: FakeHub) -> ExtensionOperations {
+        ExtensionOperations(deps: .init(api: { hub.client }, features: { ["extension_operations"] }, hub: { "fake" }, poll: .milliseconds(10)))
+    }
+
+    /// Review previews in the background: the page stays usable and shows the operation while the package downloads
+    /// (a phone's request no longer waits on a slow download until it times out), the sheet opens once it waits for
+    /// consent, and Update goes on with the same operation, every request to the extension's manager.
+    @Test func reviewPreviewsAsAnOperationAndGoesOnWithIt() async throws {
+        let hub = FakeHub()
+        configure(hub)
+        var previewBody: JSONValue?
+        var whileDownloading: (busy: Bool, previewing: Bool, canReview: Bool, state: ExtensionOperation.State?)?
+        let lifecycle = ExtensionSettingsLifecycle(id: "p", manager: "assistant", deps: .init(api: { hub.client }, operations: stepped(hub)))
+        hub.on("POST", "/api/v1/plugins/-/catalog/preview") { req in
+            previewBody = try JSON.decoder.decode(JSONValue.self, from: req.body ?? Data())
+            return Data((#"{"operation":"# + Self.op("running") + "}").utf8)
+        }
+        hub.on("GET", "/api/v1/plugins/-/operations/op1") { _ in
+            whileDownloading = whileDownloading ?? (lifecycle.busy, lifecycle.previewing, lifecycle.canReview, lifecycle.operation?.state)
+            return Data(Self.waiting().utf8)
+        }
+        var upgradeBody: JSONValue?
+        hub.on("POST", "/api/v1/plugins/p/-/upgrade") { req in
+            upgradeBody = try JSON.decoder.decode(JSONValue.self, from: req.body ?? Data())
+            hub.on("GET", "/api/v1/plugins/-/operations/op1", json: Self.op("succeeded", step: "install", updated: "2026-11-10T08:00:09Z"))
+            return Data((#"{"operation":"# + Self.op("running", step: "install", updated: "2026-11-10T08:00:07Z") + "}").utf8)
+        }
+        await lifecycle.loadMetadata(detail: try decode())
+        await lifecycle.prepareUpgrade()
+        #expect(previewBody?["async"] == .bool(true) && previewBody?["market"] == .string("m1"))
+        let during = try #require(whileDownloading)
+        #expect(!during.busy && during.previewing && !during.canReview && during.state == .running,
+                "the form stays usable, Review waits, the card shows the download")
+        let shown = try #require(lifecycle.preview, "the sheet opens once the operation waits for consent")
+        #expect(shown.morePermissions == true && lifecycle.operation?.state == .needsConsent && !lifecycle.previewing)
+        let consent = lifecycle.takeConsent()
+        #expect(consent == "op1")
+        lifecycle.dismissPreview() // the sheet closing after Update does not cancel it
+        #expect(await lifecycle.confirmUpgrade(shown, consent: consent))
+        #expect(upgradeBody?["preview_id"] == .string("pv") && upgradeBody?["async"] == .bool(true))
+        #expect(hub.sent("DELETE", "/api/v1/plugins/-/operations/op1").isEmpty)
+        #expect(lifecycle.operation == nil && lifecycle.operationState == .succeeded && lifecycle.candidate == nil)
+        #expect(hub.requests.allSatisfy { $0.headers[APIClient.managerHeader] == "assistant" })
+    }
+
+    /// A download that fails says why on the card (not under the button), Review can start again, Retry goes back to
+    /// the hub, and closing the sheet it opens cancels that operation.
+    @Test func aFailedReviewShowsWhyAndRetries() async throws {
+        let hub = FakeHub()
+        configure(hub)
+        hub.on("POST", "/api/v1/plugins/-/catalog/preview", json: #"{"operation":"# + Self.op("running") + "}")
+        hub.on("GET", "/api/v1/plugins/-/operations/op1", json: Self.op("failed", updated: "2026-11-10T08:00:30Z", retryable: true))
+        hub.on("POST", "/api/v1/plugins/-/operations/op1/retry", json: #"{"operation":"# + Self.op("running", id: "op2", updated: "2026-11-10T08:00:31Z") + "}")
+        hub.on("GET", "/api/v1/plugins/-/operations/op2", json: Self.waiting("op2", updated: "2026-11-10T08:00:40Z"))
+        hub.on("DELETE", "/api/v1/plugins/-/operations/op2") { _ in Data() }
+        let lifecycle = ExtensionSettingsLifecycle(id: "p", deps: .init(api: { hub.client }, operations: stepped(hub)))
+        await lifecycle.loadMetadata(detail: try decode())
+        await lifecycle.prepareUpgrade()
+        let failed = try #require(lifecycle.operation)
+        #expect(failed.state == .failed && failed.failedStep?.id == "download" && failed.error == "包下载停滞，请重试。")
+        #expect(lifecycle.error == nil && lifecycle.preview == nil && lifecycle.canReview, "the card says why; nothing spins")
+        #expect(await lifecycle.retry() == false)
+        #expect(hub.sent("POST", "/api/v1/plugins/-/operations/op1/retry").count == 1)
+        #expect(lifecycle.preview?.previewID == "pv" && lifecycle.operation?.id == "op2")
+        lifecycle.dismissPreview()
+        for _ in 0..<50 where hub.sent("DELETE", "/api/v1/plugins/-/operations/op2").isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(hub.sent("DELETE", "/api/v1/plugins/-/operations/op2").count == 1, "closed without Update: canceled")
+    }
+
     @Test func busyPreventsReentrantRequests() async throws {
         let hub = FakeHub()
         configure(hub)

@@ -110,9 +110,9 @@ func (s *Service) launcherHTTP(ctx context.Context, name, machine string, r *quo
 				}
 				return map[string]any{"base_url": l.BaseURL, "machine": local}, nil
 			}
-			key, err := s.openKey(l.KeySealed)
+			key, err := s.openLauncherKey(ctx, l.KeySealed, l.Name, "")
 			if err != nil {
-				return nil, errors.New(i18n.T(s.lang(ctx), "assistant-models.err_key_decrypt"))
+				return nil, errors.New(i18n.Localize(err, s.lang(ctx)))
 			}
 			return quota.Do(ctx, &http.Client{Timeout: 25 * time.Second}, l.BaseURL, key, *r)
 		}

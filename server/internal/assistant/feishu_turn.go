@@ -173,7 +173,8 @@ func (f feishuSink) recalled(ctx context.Context, m channel.Folded) {
 // answer writes the answer into the progress card (more cards when long), and marks the messages DONE. When nothing
 // of it got out because the hub could not be reached it says so (tried again later); once a piece is out, the rest
 // is best effort (a card sent twice would show twice). The card's last line says how the run ended; a quiet end
-// still turns the progress card into that line, so it never stays on "Working".
+// still turns the progress card into that line — and, when the run gave its card back on a held wait, posts it as a
+// card of its own — so the chat never stays on "Working" and is never left silent.
 func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note string, took time.Duration, final, quiet bool, end channel.End) error {
 	s := f.s
 	l := s.botLang(ctx)
@@ -189,7 +190,7 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 	}
 	card := r.Ext["card"]
 	cards := answerCards(l, answer, quiet, steps, foot)
-	if quiet && card != "" {
+	if quiet {
 		c := feishubot.NewCard("", "", foot)
 		processPanel(l, c, steps)
 		cards = []botAnswerCard{{card: c.Note(foot)}}
@@ -212,8 +213,21 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 			endHeader(l, c, end)
 		}
 		if quiet && i == 0 {
-			if err := s.botUpdateAnswerCard(ctx, card, c); err != nil {
-				s.logf("bots: the progress card's end: %v", err)
+			var err error
+			switch {
+			case card != "":
+				err = s.botUpdateAnswerCard(ctx, card, c)
+			case end == channel.EndDone:
+				// A held run has no card left (it gave it back with its message): the ending goes out as a card of its
+				// own, so the follow-up it was told to expect is never left silent. A recalled message says nothing.
+				var mid string
+				mid, err = s.botPostTo(ctx, to, r.ReplyTo, c, foot, "")
+				if err == nil && to.ChatID == "" {
+					s.rememberBotThread(mid, botTargetOf(r), r.Label)
+				}
+			}
+			if err != nil {
+				s.logf("bots: the run's quiet ending: %v", err)
 			}
 			break
 		}

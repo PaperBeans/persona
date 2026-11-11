@@ -60,12 +60,14 @@ internal class BudgetFileCache(
     private val protected: (File) -> Boolean = { false },
 ) {
     init { require(limit >= 0) }
+    /**
+     * A hit only moves the file to the front of the LRU. It adds no bytes, so it does not trim: walking the whole
+     * directory on every hit, under the app-wide cache lock, made each image of a chat wait for the others (#4047).
+     * Writes trim; a cache left over budget by files that were in use catches up at the next write or [trim].
+     */
     fun read(name: String): File? = synchronized(CacheFiles.lock) {
         val file = File(directory, name)
-        if (!file.isFile) null else file.also {
-            it.setLastModified(System.currentTimeMillis())
-            trim(it)
-        }
+        if (!file.isFile) null else file.also { it.setLastModified(System.currentTimeMillis()) }
     }
 
     fun readPinned(name: String): BudgetFileLease? = synchronized(CacheFiles.lock) {

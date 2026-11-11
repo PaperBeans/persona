@@ -1,0 +1,75 @@
+{
+  "more": false,
+  "chats": [
+    {
+      "id": "imessage-000000000001@2026-10-30T08:59:00Z",
+      "thread": "imessage-000000000001",
+      "title": "张三",
+      "members": [
+        {
+          "handle": "+15550100",
+          "name": "张三"
+        }
+      ],
+      "time": "2026-10-30T08:59:00Z",
+      "unread": 2,
+      "body": "示例：验证码 •••• 别告诉别人"
+    },
+    {
+      "id": "imessage-000000000002@2026-10-30T08:00:00Z",
+      "thread": "imessage-000000000002",
+      "title": "周末徒步",
+      "group": true,
+      "members": [
+        {
+          "handle": "+15550100",
+          "name": "张三"
+        }
+      ],
+      "time": "2026-10-30T08:00:00Z",
+      "unread": 1,
+      "body": "张三：我也去"
+    },
+    {
+      "id": "imessage-000000000003@2026-10-30T07:00:00Z",
+      "thread": "imessage-000000000003",
+      "title": "Alice Example",
+      "members": [
+        {
+          "handle": "alice@example.com",
+          "name": "Alice Example"
+        }
+      ],
+      "time": "2026-10-30T07:00:00Z",
+      "from_me": true,
+      "body": "好的"
+    },
+    {
+      "id": "imessage-000000000004@2026-10-30T06:00:00Z",
+      "thread": "imessage-000000000004",
+      "title": "李四",
+      "members": [
+        {
+          "handle": "+15550101",
+          "name": "李四"
+        }
+      ],
+      "time": "2026-10-30T06:00:00Z",
+      "body": "收到"
+    },
+    {
+      "id": "imessage-000000000005@2026-10-20T09:00:00Z",
+      "thread": "imessage-000000000005",
+      "title": "王五",
+      "members": [
+        {
+          "handle": "+15550103",
+          "name": "王五"
+        }
+      ],
+      "time": "2026-10-20T09:00:00Z",
+      "unread": 1,
+      "body": "很久以前"
+    }
+  ]
+}

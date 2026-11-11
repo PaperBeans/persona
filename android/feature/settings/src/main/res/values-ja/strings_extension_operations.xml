@@ -17,7 +17,9 @@
     <string name="settings_ext_op_step_remove">削除</string>
     <string name="settings_ext_op_cached">ローカルのキャッシュ</string>
     <string name="settings_ext_op_bytes_of">%1$s / %2$s</string>
-    <string name="settings_ext_op_machines">%1$d / %2$d 台</string>
+    <plurals name="settings_ext_op_machines">
+        <item quantity="other">%1$d / %2$d 台</item>
+    </plurals>
     <string name="settings_ext_op_needs_consent">権限の確認を待っています</string>
     <string name="settings_ext_op_failed_at">「%1$s」で止まりました</string>
     <string name="settings_ext_op_canceled">キャンセルしました</string>

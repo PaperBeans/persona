@@ -143,12 +143,94 @@ type codexItem struct {
 	} `json:"results"`
 }
 
-// isCodexLine tells a rollout line from a Claude transcript line: only rollouts wrap everything in "payload".
+// isCodexLine tells a rollout line from a Claude transcript line: only rollouts wrap everything in "payload" under a
+// top-level rollout type. The substring test rejects almost every Claude line cheaply; the scan then checks that the
+// type and payload are the line's own, not those of a Claude tool input shaped like a rollout line, which used to
+// switch the rest of the session to the Codex parser.
 func isCodexLine(line []byte) bool {
-	return bytes.Contains(line, []byte(`"payload"`)) &&
-		(bytes.Contains(line, []byte(`"type":"session_meta"`)) || bytes.Contains(line, []byte(`"type":"event_msg"`)) ||
+	if !bytes.Contains(line, []byte(`"payload"`)) ||
+		!(bytes.Contains(line, []byte(`"type":"session_meta"`)) || bytes.Contains(line, []byte(`"type":"event_msg"`)) ||
 			bytes.Contains(line, []byte(`"type":"response_item"`)) || bytes.Contains(line, []byte(`"type":"turn_context"`)) ||
-			bytes.Contains(line, []byte(`"type":"history_mutation"`)))
+			bytes.Contains(line, []byte(`"type":"history_mutation"`))) {
+		return false
+	}
+	typ, payload := rolloutHead(line)
+	if !payload {
+		return false
+	}
+	switch string(typ) {
+	case "session_meta", "event_msg", "response_item", "turn_context", "history_mutation":
+		return true
+	}
+	return false
+}
+
+// rolloutHead scans a JSON object's top-level keys without decoding it: the value of "type" (as written, when it is a
+// string) and whether there is a "payload". Nested objects, arrays and strings are stepped over byte by byte.
+func rolloutHead(line []byte) (typ []byte, payload bool) {
+	depth, key := 0, false
+	for i := 0; i < len(line); i++ {
+		switch c := line[i]; c {
+		case '"':
+			end := jsonStringEnd(line, i)
+			if end < 0 {
+				return typ, payload
+			}
+			if depth != 1 || !key {
+				i = end
+				continue
+			}
+			key = false
+			name := line[i+1 : end]
+			j := skipJSONSpace(line, end+1)
+			if j >= len(line) || line[j] != ':' {
+				return typ, payload
+			}
+			j = skipJSONSpace(line, j+1)
+			switch string(name) {
+			case "payload":
+				payload = true
+			case "type":
+				if j < len(line) && line[j] == '"' {
+					if e := jsonStringEnd(line, j); e >= 0 {
+						typ, j = line[j+1:e], e+1
+					}
+				}
+			}
+			if typ != nil && payload {
+				return typ, payload
+			}
+			i = j - 1 // the value is read from j on
+		case '{', '[':
+			depth++
+			key = c == '{' && depth == 1
+		case '}', ']':
+			depth--
+		case ',':
+			key = depth == 1
+		}
+	}
+	return typ, payload
+}
+
+// jsonStringEnd is the index of the quote that ends the JSON string starting at line[i], or -1.
+func jsonStringEnd(line []byte, i int) int {
+	for j := i + 1; j < len(line); j++ {
+		switch line[j] {
+		case '\\':
+			j++
+		case '"':
+			return j
+		}
+	}
+	return -1
+}
+
+func skipJSONSpace(line []byte, i int) int {
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t' || line[i] == '\n' || line[i] == '\r') {
+		i++
+	}
+	return i
 }
 
 // historyMutation is the newer rollout format (a compatible CLI, a Codex fork): the conversation's messages arrive as
@@ -229,6 +311,7 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		meta.clearTurnError()
 		meta.turnWorked = false
 		meta.turnParts = nil
+		meta.codexSeen = nil // an item repeats only within its turn: a long rollout keeps no ids of the turns before
 		return nil
 	case "task_complete":
 		meta.TurnOpen, meta.TurnClosed = false, true

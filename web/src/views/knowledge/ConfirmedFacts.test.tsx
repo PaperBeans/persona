@@ -16,7 +16,11 @@ let root: Root;
 const saved = vi.fn();
 const unauthorized = vi.fn();
 const detail = (kind = "people", id = "example", pinned?: string): KBDetailResponse => ({
-  detail: { kind, id, path: "", meta: { name: "Example entry", pinned, tags: ["existing"], importance: "P1", locked_fields: ["name"] }, summary: "# Example entry\n\nInferred profile." },
+  detail: {
+    kind, id, path: "", meta: { name: "Example entry", pinned, tags: ["existing"], importance: "P1", locked_fields: ["name"] }, summary: "# Example entry\n\nInferred profile.",
+    // A topic shows its knowledge points rather than the summary rendered from them: the inferred text is a point there.
+    ...(kind === "topics" ? { points: [{ id: "p1", kind: "fact", text: "Inferred profile." }] } : {}),
+  },
 });
 const render = (kind = "people", id = "example", reloadKey = 0) => act(() => root.render(
   <EntryDetail kind={kind} id={id} reloadKey={reloadKey} onToggleSidebar={() => {}} onBack={() => {}} onOpen={() => {}} onSaved={saved} />,

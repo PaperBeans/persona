@@ -51,4 +51,7 @@
     <string name="chat_tray_done">Completed</string>
     <string name="chat_tray_accepted">Accepted</string>
     <string name="chat_tray_in_progress">In progress</string>
+    <string name="chat_tasks_dismiss_draft">Don\'t handle</string>
+    <string name="chat_tasks_draft_dismissed">Draft dismissed; nothing was sent</string>
+    <string name="chat_tasks_undo_draft">Undo</string>
 </resources>

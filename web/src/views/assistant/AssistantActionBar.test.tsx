@@ -222,9 +222,18 @@ describe("Assistant Needs you / In progress trays", () => {
     getFeedState().feeds[conversation] = [...feed, draft];
     act(() => putTodo({ ...todo, supervision: { ...todo.supervision!, state: "needs_user" } }));
     expect(entries().map((button) => button.textContent)).toEqual([`${label.needs}2`, label.running]);
-    act(() => entry("needs").click());
+    await act(async () => {
+      entry("needs").click();
+      await import("./MessageDraft");
+    });
     expect(host.querySelector('[data-testid="message-card"]')).not.toBeNull();
     expect(host.textContent).toContain(t("assistant-tasks.review_needs_user"));
+    const draftCard = host.querySelector('[data-testid="message-card"]')!;
+    const actions = [...draftCard.querySelectorAll("button")];
+    expect(actions.map((button) => button.textContent)).toEqual([t("assistant-tasks.send"), t("assistant-tasks.later"), t("assistant-tasks.dismiss_draft")]);
+    act(() => actions[1].click());
+    expect(host.querySelector('[data-testid="message-card"]')).toBeNull();
+    expect(entries().map((button) => button.textContent)).toEqual([`${label.needs}1`, label.running]);
     act(() => entry("running").click());
     expect(host.querySelector("[data-task-slot]")).toBeNull();
     expect(writes).toEqual([]);

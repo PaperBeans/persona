@@ -20,29 +20,28 @@ import kotlinx.coroutines.launch
 
 /**
  * Settings › Model configuration (docs/assistant/model-config.md): each AI use of the hub with what is in effect for it. The hub owns the
- * catalog; a row opens that use's page.
+ * catalog; a row opens that use's page. The current assistant's (docs/assistant/managers.md "Clients"): another one current, the
+ * page reads that one's.
  */
 @Composable
 internal fun ModelConfigurationPage(models: ModelConfiguration?, onBack: () -> Unit, onPurpose: (String, String) -> Unit, providers: ProviderSetup? = null) {
-    val roster = LocalManagerRoster.current
-    var owner by androidx.compose.runtime.saveable.rememberSaveable(LocalManagerGroup.current) {
-        mutableStateOf(roster?.defaultManagerId ?: persona.core.contracts.api.ManagerRoster.ASSISTANT_MANAGER)
-    }
+    val owner = currentAssistant().id
+    val default = LocalManagerRoster.current?.defaultManagerId
     key(models, owner) {
         ModelConfigurationDetails(models, onBack, { onPurpose(it, owner) },
-            remember(providers, owner) { providers?.forManager(owner) }, owner,
-            switcher = { JManagerSwitcher(roster, owner, { owner = it }) })
+            remember(providers, owner, default) { providers?.namingOwner(owner, default) }, owner)
     }
 }
 
 @Composable
 private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () -> Unit, onPurpose: (String) -> Unit,
-    providers: ProviderSetup?, owner: String, switcher: @Composable () -> Unit) {
+    providers: ProviderSetup?, owner: String) {
     if (models == null) {
         JListPage(title = stringResource(R.string.settings_src_model_title), onBack = onBack) { item { JNotice(stringResource(R.string.settings_src_model_demo)) } }
         return
     }
-    val model = remember(models, owner) { ModelCatalogModel(models.forManager(owner)) }
+    val default = LocalManagerRoster.current?.defaultManagerId
+    val model = remember(models, owner, default) { ModelCatalogModel(models.namingOwner(owner, default)) }
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
@@ -63,7 +62,7 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
             if (providers != null) JIconButton(PhIcons.Plus, stringResource(R.string.settings_src_provider_new), { adding = "manual" })
             JIconButton(PhIcons.ArrowClockwise, stringResource(R.string.settings_src_refresh), { scope.launch { model.load() } }, enabled = !state.loading)
         }) {
-        item("manager") { ModelConfigurationOwner(owner); switcher() }
+        item("manager") { ModelConfigurationOwner(owner) }
         item("search") {
             Column(Modifier.padding(top = Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                 JSearchField(query, { query = it }, stringResource(R.string.settings_src_model_search))
@@ -101,8 +100,9 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
 fun ModelPurposePage(models: ModelConfiguration?, purposeId: String, onBack: () -> Unit, providers: ProviderSetup? = null, manager: String? = null) {
     val owner = manager?.takeIf(String::isNotBlank) ?: LocalManagerRoster.current?.defaultManagerId
         ?: persona.core.contracts.api.ManagerRoster.ASSISTANT_MANAGER
+    val default = LocalManagerRoster.current?.defaultManagerId
     key(models, purposeId, owner) {
-        ModelPurposeDetails(models, purposeId, onBack, remember(providers, owner) { providers?.forManager(owner) }, owner)
+        ModelPurposeDetails(models, purposeId, onBack, remember(providers, owner, default) { providers?.namingOwner(owner, default) }, owner)
     }
 }
 
@@ -112,7 +112,8 @@ private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, 
         JListPage(title = stringResource(R.string.settings_src_model_title), onBack = onBack) { item { JNotice(stringResource(R.string.settings_src_model_demo)) } }
         return
     }
-    val model = remember(models, purposeId, owner) { ModelPurposeModel(models.forManager(owner), purposeId) }
+    val default = LocalManagerRoster.current?.defaultManagerId
+    val model = remember(models, purposeId, owner, default) { ModelPurposeModel(models.namingOwner(owner, default), purposeId) }
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
     val feedback = LocalAppFeedback.current
@@ -265,3 +266,14 @@ internal fun ModelConfigurationOwner(owner: String) {
         JRow(stringResource(R.string.settings_model_assistant), value = name, chevron = false)
     }
 }
+
+/**
+ * [this] naming [owner] on its requests; the default assistant's, and any on a hub without a roster ([default] null), name
+ * none, the requests the hub always got (docs/assistant/managers.md "Clients").
+ */
+internal fun ModelConfiguration.namingOwner(owner: String, default: String?): ModelConfiguration =
+    if (default == null || owner.isBlank() || owner == default) this else forManager(owner)
+
+/** [ModelConfiguration.namingOwner] for model providers. */
+internal fun ProviderSetup.namingOwner(owner: String, default: String?): ProviderSetup =
+    if (default == null || owner.isBlank() || owner == default) this else forManager(owner)

@@ -17,6 +17,7 @@ import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
@@ -146,6 +147,94 @@ class InboxManagersShotsTest {
         see("周报", "项目群", "发布检查", "物业通知")
         gone("助手")
     }
+
+    /**
+     * The hub's merged list leaves out an assistant that is offline (docs/protocol/protocol.md "Per-manager routing"): its
+     * inbox says it is offline and when it last synced, not "empty" or how to set sources up. An online one with nothing,
+     * and one assistant, read as before.
+     */
+    @Test fun anOfflineAssistantsInboxSaysSoInsteadOfEmpty() {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        var shown by mutableStateOf<ManagerRoster?>(roster)
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                CompositionLocalProvider(LocalManagerRoster provides shown) {
+                    Box(Modifier.testTag("shot").width(400.dp).height(900.dp).background(PersonaTheme.palette.background)) {
+                        // 家里's items are not in the list: the hub could not ask it.
+                        InboxScreen(OneInbox(InboxSnapshot(records = records.filter { it.manager != "m-8b04d2" && it.manager != "m-3fa21c" })), navigator)
+                    }
+                }
+            }
+        }
+        val dir = File(System.getProperty("persona.shots") ?: "build/managers-shots").also { it.mkdirs() }
+        AssistantManagerChoice.pick("m-8b04d2")
+        rule.waitForIdle()
+        see("家里 离线", "最后同步于 3 小时前。它上线后这里会更新。")
+        gone("收件箱是空的", "都看完了")
+        for (s in AppStyle.entries) for (d in listOf(false, true)) {
+            style = s; dark = d
+            rule.waitForIdle()
+            val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+            File(dir, "inbox-offline-${s.key}-${if (d) "dark" else "light"}.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        // Online with nothing of its own: empty, as before.
+        AssistantManagerChoice.pick("m-3fa21c")
+        rule.waitForIdle()
+        see("收件箱是空的")
+        gone("家里 离线", "工作 离线")
+        // One assistant, offline: as before (nothing to tell apart).
+        AssistantManagerChoice.reset()
+        shown = ManagerRoster(listOf(HubManager("assistant", "助手", online = false, isDefault = true, builtin = true)), "assistant")
+        rule.waitForIdle()
+        see("周报")
+        gone("助手 离线")
+    }
+
+    /** An offline assistant whose items the list still has: a search that finds none says "no results", not "offline". */
+    @Test fun aSearchOverAnOfflineAssistantsKeptItemsFindsNoneNotOffline() {
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true) {
+                CompositionLocalProvider(LocalManagerRoster provides roster) {
+                    Box(Modifier.testTag("shot").width(400.dp).height(900.dp).background(PersonaTheme.palette.background)) {
+                        InboxScreen(OneInbox(InboxSnapshot(records = records)), navigator)
+                    }
+                }
+            }
+        }
+        AssistantManagerChoice.pick("m-8b04d2")
+        rule.waitForIdle()
+        see("物业通知")
+        rule.onNode(androidx.compose.ui.test.hasSetTextAction()).performTextInput("zzzz")
+        rule.waitForIdle()
+        see("没有找到")
+        gone("家里 离线")
+    }
+
+    /** The same in English and Japanese (the words every client shares), Glass light: `inbox-offline-<language>.png`. */
+    private fun offlineWords(language: String, vararg words: String) {
+        AssistantManagerChoice.choose("hub", "m-8b04d2", "assistant")
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true) {
+                CompositionLocalProvider(LocalManagerRoster provides roster) {
+                    Box(Modifier.testTag("shot").width(400.dp).height(900.dp).background(PersonaTheme.palette.background)) {
+                        InboxScreen(OneInbox(InboxSnapshot()), navigator)
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        see(*words)
+        val dir = File(System.getProperty("persona.shots") ?: "build/managers-shots").also { it.mkdirs() }
+        val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+        File(dir, "inbox-offline-$language.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h900dp-xhdpi")
+    @Test fun anOfflineAssistantsInboxInEnglish() = offlineWords("en", "家里 is offline", "Last synced 3 hours ago. This updates when it's back online.")
+
+    @Config(sdk = [35], qualifiers = "ja-w400dp-h900dp-xhdpi")
+    @Test fun anOfflineAssistantsInboxInJapanese() = offlineWords("ja", "家里 はオフラインです", "最終同期 3時間前。オンラインに戻ると更新されます。")
 
     /** Each manager's own rules and mutes: 工作's and the default's, 家里 offline. */
     private class ManagerLists : InboxRepository by OneInbox(InboxSnapshot()) {

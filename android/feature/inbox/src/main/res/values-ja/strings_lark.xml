@@ -29,6 +29,8 @@
     <string name="inbox_lark_file_failed">ファイルを開けませんでした。もう一度試すか、このファイルを開けるアプリをインストールしてください。</string>
     <string name="inbox_lark_video">動画</string>
     <string name="inbox_lark_audio">音声</string>
+    <string name="inbox_lark_media_play">再生</string>
+    <string name="inbox_lark_media_pause">一時停止</string>
     <string name="inbox_lark_card">カード</string>
     <string name="inbox_lark_cannot_open">Larkを開けません。Larkがインストールされているか確認してください。</string>
     <string name="inbox_lark_conversation">Larkのチャット</string>

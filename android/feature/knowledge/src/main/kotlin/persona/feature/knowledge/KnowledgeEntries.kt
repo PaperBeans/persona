@@ -15,7 +15,12 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 
 @Serializable @SerialName("persona.feature.knowledge.KnowledgeRoute") data object KnowledgeRoute : NavKey
-@Serializable @SerialName("persona.feature.knowledge.KnowledgeDetailRoute") data class KnowledgeDetailRoute(val kind: KnowledgeKind, val id: String) : NavKey
+/**
+ * An entry of [manager]'s knowledge base (the assistant current when it was opened; null from a page saved before it was
+ * kept: the one current when it opens again). Its page stays that assistant's (docs/assistant/managers.md "Clients").
+ */
+@Serializable @SerialName("persona.feature.knowledge.KnowledgeDetailRoute")
+data class KnowledgeDetailRoute(val kind: KnowledgeKind, val id: String, val manager: String? = null) : NavKey
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -31,7 +36,7 @@ interface KnowledgeSendingEntryPoint {
 fun EntryProviderScope<NavKey>.knowledgeEntries(
     navigator: Navigator,
     connection: KnowledgeConnection,
-    @Suppress("UNUSED_PARAMETER") assistant: AssistantConversations,
+    assistant: AssistantConversations,
     sender: MessageSender,
     openLinkInApp: (String) -> Unit,
     onNewAgent: ((KnowledgeAgentStart) -> Unit)? = null,
@@ -50,8 +55,11 @@ fun EntryProviderScope<NavKey>.knowledgeEntries(
                 context, KnowledgeSendingEntryPoint::class.java,
             ).mainConversationSender()
         }
-        val model = viewModel(key = "knowledge/${route.kind.wire}/${route.id}") {
-            KnowledgeDetailViewModel(route.kind, route.id, connection, mainSender)
+        // The assistant it was opened for, kept for good: switching while it is open leaves it that one's.
+        val current = persona.core.designsystem.currentAssistant().id
+        val owner = route.manager ?: androidx.compose.runtime.saveable.rememberSaveable { current }
+        val model = viewModel(key = "knowledge/$owner/${route.kind.wire}/${route.id}") {
+            KnowledgeDetailViewModel(route.kind, route.id, connection, mainSender, owner, assistant, sender)
         }
         KnowledgeDetailScreen(model, navigator, openLinkInApp, onNewAgent)
     }

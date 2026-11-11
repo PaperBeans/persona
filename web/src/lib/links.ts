@@ -33,7 +33,7 @@ export type LinkRoute =
   | { kind: "session"; mid: string; sid: string } // persona://session/<machine>/<session>: that conversation
   | { kind: "agent"; mid: string; sid: string } // this hub's /s/<machine>/<session>: that agent's chat in the panel
   | { kind: "task"; id: string } // this hub's /todos?id=<todo>: that task in the panel
-  | { kind: "conversation"; sid: string } // this hub's /persona/<id>: that assistant conversation, in place
+  | { kind: "conversation"; sid: string; mid?: string; manager?: string } // this hub's /persona/<id>: that assistant conversation, in place (with the computer and manager its address names)
   | { kind: "web" } // any other http(s) page: a new tab
   | { kind: "system" } // mailto: / tel:: the browser hands it to the system
   | { kind: "none" }; // anything else (javascript:, other apps' schemes, not a URL): not followed
@@ -137,7 +137,11 @@ function hubPage(u: URL, origin: string | string[], base: string): LinkRoute | n
     return null;
   }
   if (p[0] === "s" && p[1] && p[2] && p.length === 3) return { kind: "agent", mid: p[1], sid: p[2] };
-  if (assistantPath(p[0]) && p[1] && p[1] !== "new" && p.length === 2) return { kind: "conversation", sid: p[1] };
+  if (assistantPath(p[0]) && p[1] && p[1] !== "new" && p.length === 2) {
+    const mid = u.searchParams.get("machine");
+    const manager = u.searchParams.get("manager");
+    return { kind: "conversation", sid: p[1], ...(mid ? { mid } : {}), ...(manager ? { manager } : {}) };
+  }
   if (p[0] === "todos" && p.length <= 2) {
     const id = p[1] || u.searchParams.get("id");
     if (id) return { kind: "task", id };
@@ -252,7 +256,7 @@ export function openLink(url: string, title?: string, manager?: string) {
       else openPanel({ kind: "task", todo: r.id });
       return;
     case "conversation":
-      navigate({ name: "persona", sid: r.sid });
+      navigate({ name: "persona", sid: r.sid, ...(r.mid ? { mid: r.mid } : {}), ...(r.manager ? { manager: r.manager } : {}) });
       return;
     case "doc":
     case "moments":

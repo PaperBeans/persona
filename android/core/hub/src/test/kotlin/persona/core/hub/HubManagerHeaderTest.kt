@@ -144,6 +144,11 @@ class HubManagerHeaderTest {
         // a new one is the current assistant's
         assertEquals("m-3", api.createTodo("new").manager)
         assertEquals("m-3", AssistantManagerChoice.itemHeader(listOf("todos", "t9")))
+        // one made for an agent of another assistant is that one's (the default's: none), whichever is current
+        assertEquals("m-2", withContext(RequestManager("m-2")) { api.createTodo("new") }.manager)
+        assertEquals("m-2", AssistantManagerChoice.itemHeader(listOf("todos", "t9")))
+        assertNull(withContext(RequestManager("")) { api.createTodo("new") }.manager)
+        assertNull(AssistantManagerChoice.itemHeader(listOf("todos", "t9")))
     }
 
     @Test fun assistantPaths() {

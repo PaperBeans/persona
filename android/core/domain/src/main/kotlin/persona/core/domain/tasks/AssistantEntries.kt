@@ -98,12 +98,14 @@ fun assistantEntries(
     val open = mutableListOf<Pair<RunningEntry.Task, Int>>()
     val shelved = mutableListOf<RunningEntry.Task>()
     val folded = mutableSetOf<SessionKey>()
+    // failed starts whose work finished in a related to-do: closed, as the To-dos page has them (#3713)
+    val superseded = supersededFailedStarts(todos)
     // the main conversation watches every task (docs/assistant/unified-entry.md); another one the tasks it dispatched
     for (todo in todos.filter { isMain || it.origin == conversation }) {
         val status = todo.triageStatus(lookup)
         val active = if (todo.isDone) emptyList() else todo.activeAgents
         val asks = active.flatMap { asksOf[GroupKeys.rawKey(it.key)].orEmpty() }
-        val bucket = todo.bucket(lookup, now, restored[todo.id] ?: 0L)
+        val bucket = todo.bucket(lookup, now, restored[todo.id] ?: 0L, superseded = todo.id in superseded)
         // a failed start carries done_at (the hub ends it), yet it is the user's to retry while its bucket says open
         val waits = if (status == TriageStatus.Failed) bucket == TodoBucket.Open
             else !todo.isDone && (status == TriageStatus.NeedsYou || status == TriageStatus.Interrupted)

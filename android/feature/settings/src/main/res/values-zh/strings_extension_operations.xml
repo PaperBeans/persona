@@ -17,7 +17,9 @@
     <string name="settings_ext_op_step_remove">删除</string>
     <string name="settings_ext_op_cached">用本机缓存</string>
     <string name="settings_ext_op_bytes_of">%1$s / %2$s</string>
-    <string name="settings_ext_op_machines">%1$d / %2$d 台</string>
+    <plurals name="settings_ext_op_machines">
+        <item quantity="other">%1$d / %2$d 台</item>
+    </plurals>
     <string name="settings_ext_op_needs_consent">等你确认权限</string>
     <string name="settings_ext_op_failed_at">卡在「%1$s」</string>
     <string name="settings_ext_op_canceled">已取消</string>

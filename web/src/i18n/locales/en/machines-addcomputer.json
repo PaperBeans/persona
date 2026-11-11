@@ -52,5 +52,7 @@
   "too_many_waiting": "{count} computers are already waiting: remove the ones that never connected, and confirm the ones that did, then add a new one.",
   "never_connected": "Never connected",
   "waiting_confirm": "Waiting for you",
-  "offline_short": "Offline"
+  "offline_short": "Offline",
+  "added_under": "This computer was added under {name}.",
+  "assistant_offline": "{name} is offline, so a computer can't be added to it right now."
 }

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api, ApiError, enc, errorText } from "../../lib/api";
-import { recordingClock, transcriptTarget, type KBDetail, type MinutesPoint, type RecordingView } from "../../lib/kb";
+import { minutesKeptUntil, recordingClock, transcriptTarget, type KBDetail, type MinutesPoint, type RecordingView } from "../../lib/kb";
 import { documentPage, visiblePoll } from "../../lib/visible-poll";
 import { Button, copyText, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
@@ -17,7 +17,8 @@ type Props = {
   onJump: (id: string) => void;
 };
 
-/** Minutes are retained during regeneration; suggested actions become to-dos only on explicit confirmation. */
+/** Minutes are retained during regeneration; suggested actions become to-dos only on explicit confirmation. A trimmed
+ *  recording (its transcript expired, #3780) keeps its minutes and their to-dos, but they can't be made again. */
 export function RecordingMinutes({ detail, rec, auth, current, refresh, onSaved, onJump }: Props) {
   const heading = useId();
   const [busy, setBusy] = useState(false);
@@ -29,6 +30,16 @@ export function RecordingMinutes({ detail, rec, auth, current, refresh, onSaved,
   const minutes = detail.minutes;
   const state = detail.meta?.minutes_state;
   const remaining = minutes?.actions?.filter((action) => !action.todo_id) ?? [];
+
+  // Until when a trimmed one's minutes stay: the assistant's minutes_days in effect, when its hub says.
+  const [minutesDays, setMinutesDays] = useState<unknown>();
+  useEffect(() => {
+    if (!rec.trimmedAt) return;
+    let live = true;
+    api<{ minutes_days?: unknown }>("/assistant", auth).then((a) => { if (live && current()) setMinutesDays(a.minutes_days); }, () => {});
+    return () => { live = false; };
+  }, [rec.trimmedAt, auth, current]);
+  const keptUntil = rec.trimmedAt ? minutesKeptUntil(rec.startedAt, minutesDays) : undefined;
 
   useEffect(() => {
     if (state !== "pending") return;
@@ -80,7 +91,7 @@ export function RecordingMinutes({ detail, rec, auth, current, refresh, onSaved,
 
   if (detail.meta?.kind !== "meeting" && rec.partial) return null;
   const disabled = busy || needsRefresh;
-  const canGenerate = !!minutes || state === "failed" || (!rec.partial && !state);
+  const canGenerate = !rec.trimmedAt && (!!minutes || state === "failed" || (!rec.partial && !state));
   const time = (at: number) => {
     const clock = recordingClock(rec.startedAt, at);
     const target = transcriptTarget(rec.lines, at);
@@ -121,7 +132,10 @@ export function RecordingMinutes({ detail, rec, auth, current, refresh, onSaved,
           </Button>}
         </div>
       } />
-      {(state === "pending" || state === "failed") && <p role="status" className="mb-2 px-1 text-[12.5px] leading-relaxed text-ink-3">
+      {rec.trimmedAt && <p data-minutes-kept className="mb-2 px-1 text-[12.5px] leading-relaxed text-ink-3">
+        {minutesDays === 0 ? t("knowledge-kbdetail.minutes_kept_forever") : keptUntil ? t("knowledge-kbdetail.minutes_kept_until", { date: keptUntil }) : t("knowledge-kbdetail.minutes_transcript_expired")}
+      </p>}
+      {!rec.trimmedAt && (state === "pending" || state === "failed") && <p role="status" className="mb-2 px-1 text-[12.5px] leading-relaxed text-ink-3">
         {t(state === "failed" ? "knowledge-kbdetail.minutes_failed" : minutes ? "knowledge-kbdetail.minutes_updating" : "knowledge-kbdetail.minutes_writing")}
       </p>}
       {!minutes && !state && rec.partial && <p className="px-1 text-[12.5px] text-ink-3">{t("knowledge-kbdetail.minutes_waiting")}</p>}

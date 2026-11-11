@@ -1,5 +1,8 @@
-"""Beta group lookup in asc_testflight.py: duplicates, flaky listings, and when a group may be created (#945)."""
+"""asc_testflight.py: beta group lookup (duplicates, flaky listings, when a group may be created, #945) and the review
+submission limit (#4034)."""
 import atexit
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -78,6 +81,62 @@ class FindGroupTests(unittest.TestCase):
         with patch.object(tf, "get_all", return_value=[INTERNAL]), patch.object(tf, "request") as request:
             tf.share_external({"id": "b", "attributes": {"version": "1"}})
         request.assert_not_called()
+
+
+LIMIT = tf.APIError(422, json.dumps({"errors": [{"status": "422", "code": "ENTITY_UNPROCESSABLE.SUBMISSION_LIMIT_REACHED",
+                                                 "title": "Submission limit has been reached."}]}))
+BUILD = {"id": "b226", "attributes": {"version": "226"}}
+
+
+class SubmissionLimitTests(unittest.TestCase):
+    """422 SUBMISSION_LIMIT_REACHED is a wait for a later catch-up round, not a failure, and is never asked again (#4034)."""
+
+    def setUp(self):
+        for patcher in (patch.object(tf, "external_state", return_value="READY_FOR_BETA_SUBMISSION"),
+                        patch.object(tf, "external_group_id", return_value="friends"),
+                        patch.object(tf, "get_all", return_value=[{"id": "b226"}]),
+                        patch.object(tf, "write_review_details", return_value=True),
+                        patch.object(tf, "add_tester"),
+                        patch.dict(tf.EXTERNAL, {"group": "Friends", "testers": [{"email": "friend@example.com"}]})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def submissions(self, request):
+        return [c for c in request.call_args_list if c.args[:2] == ("POST", "/v1/betaAppReviewSubmissions")]
+
+    def test_one_line_and_no_second_try(self):
+        out = io.StringIO()
+        with patch.object(tf, "request", side_effect=LIMIT) as request, contextlib.redirect_stdout(out):
+            self.assertFalse(tf.submit_for_review(BUILD))
+        self.assertEqual(len(self.submissions(request)), 1)
+        lines = out.getvalue().strip().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn("submission limit is used up", lines[0])
+        self.assertIn("catch-up", lines[0])
+
+    def test_catch_up_waits_instead_of_failing(self):
+        with patch.object(tf, "newest_valid", return_value=BUILD), patch.object(tf, "request", side_effect=LIMIT), \
+                contextlib.redirect_stdout(io.StringIO()):
+            tf.catch_up()  # returns: auto-tf's catch-up step no longer exits 1
+        tf.add_tester.assert_not_called()  # testers wait for the build that is submitted
+
+    def test_release_wait_does_not_suggest_running_external_again(self):
+        out = io.StringIO()
+        with patch.object(tf, "request", side_effect=LIMIT), contextlib.redirect_stdout(out):
+            tf.share_external(BUILD)
+        self.assertNotIn("retry: python3", out.getvalue())
+        self.assertIn("submission limit is used up", out.getvalue())
+
+    def test_other_422s_still_fail(self):
+        other = tf.APIError(422, '{"errors": [{"code": "ENTITY_UNPROCESSABLE.ANOTHER_BUILD_IN_REVIEW"}]}')
+        with patch.object(tf, "request", side_effect=other), self.assertRaises(tf.APIError):
+            tf.submit_for_review(BUILD)
+
+    def test_submitted_build_invites_testers(self):
+        with patch.object(tf, "request", return_value={"data": {}}), contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(tf.submit_for_review(BUILD))
+            tf.share(BUILD)
+        tf.add_tester.assert_called_once()
 
 
 if __name__ == "__main__":

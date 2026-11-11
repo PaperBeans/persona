@@ -270,7 +270,11 @@ func (ps *extensions) packMembersOn(p *extension.Extension) []DependentView {
 // modelChanged follows a change of one extension through the others: the ones depending on it start or wait
 // (Missing), and the extensions it contributes to hear of their contributions (extension.contributions_changed).
 func (ps *extensions) modelChanged(ctx context.Context, c extension.Change) []*extension.Extension {
-	affected := ps.reg.DependencyOrder(c.ID)
+	ids := []string{c.ID}
+	if c.Old != nil { // a provider removed or replaced: the extensions holding its references are applied again
+		ids = append(ids, ps.reg.ReferenceHolders(c.Old.Full.Schemes())...)
+	}
+	affected := ps.reg.DependencyOrder(ids...)
 	var to []string
 	for _, p := range affected {
 		if p.Record.ID != c.ID {

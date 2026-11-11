@@ -152,6 +152,8 @@ func (s *Service) inboxRoutes() {
 		switch {
 		case errors.Is(err, errMailReplyTargetChanged):
 			apierr.WriteBody(w, http.StatusConflict, map[string]any{"code": "mail_reply_target_changed", "error": i18n.T(i18n.OfWriter(w), "assistant-inbox.mail_target_changed"), "retryable": false, "delivered": "none"})
+		case errors.Is(err, errDraftDismissed):
+			apierr.WriteBody(w, http.StatusConflict, map[string]any{"code": "task_draft_dismissed", "error": i18n.T(i18n.OfWriter(w), "assistant-tasks.draft_dismissed"), "retryable": false, "delivered": "none"})
 		case errors.Is(err, errInboxItemDone):
 			apierr.WriteBody(w, http.StatusConflict, map[string]any{"code": "inbox_item_done", "error": i18n.T(i18n.OfWriter(w), "assistant-inbox.item_done"), "retryable": false, "delivered": "none"})
 		case errors.Is(err, errNoInboxItem):

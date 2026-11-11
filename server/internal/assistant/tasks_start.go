@@ -48,6 +48,15 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if err := checkModelID(p.Tasks[i].Model); err != nil { // typed on the card (#1644): refused before anything starts
 			return nil, planInvalid{err}
 		}
+		// A plan saved before the rule, or edited on the card, is held to it too (task_plan checks it as it makes a plan).
+		p.Tasks[i].Permission = strings.TrimSpace(p.Tasks[i].Permission)
+		if err := p.Tasks[i].checkWritablePermission(); err != nil {
+			return nil, planInvalid{fmt.Errorf("task %d: %w. Nothing was started", i+1, err)}
+		}
+		if m, ok := s.machineByName(ctx, p.Tasks[i].Machine); ok && p.Tasks[i].Role == roleLeader && s.isWorkMachine(m.ID) {
+			return nil, planInvalid{fmt.Errorf("task %d: role \"leader\" cannot run on %s: a work-trust computer gives its agents only "+
+				"the reporting tools, so it could not supervise workers. Put the task leader on a computer you own", i+1, m.Name)}
+		}
 		if !s.placeTask(ctx, &p.Tasks[i]) {
 			return nil, i18n.Err("assistant-tasks.task_no_machine", i18n.Args{"task": p.Tasks[i].Title, "machine": strconv.Quote(p.Tasks[i].Machine)})
 		}
@@ -66,7 +75,7 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if t.ReuseTodo != "" {
 			// The todo is already there with its own title, notes and task card in the conversation's feed (a Lark topic
 			// opened it): the task runs on it, and nothing is made or shown twice.
-			todo, err = s.takeTodoForTask(p.Conversation, t.ReuseTodo)
+			todo, err = s.takeTodoForTask(ctx, p.ID, p.Conversation, t.ReuseTodo)
 			if err != nil {
 				t.Error = err.Error()
 				continue
@@ -102,6 +111,10 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 				}
 			}
 			s.superviseTodo(ctx, todo.ID, sup, t.DoneWhen, t.ExpectMinutes)
+		}
+		if t.Parent != "" { // a task leader's worker: supervised by its leader's agent, with no conversation to show a card in
+			s.superviseTodo(ctx, todo.ID, p.Conversation, t.DoneWhen, t.ExpectMinutes)
+			continue
 		}
 		if t.ReuseTodo != "" {
 			continue
@@ -164,7 +177,7 @@ func (s *Service) reusableTodo(conversation, id string, taking bool) error {
 
 // takeTodoForTask is the todo a started plan's task runs on (PlanTask.ReuseTodo), checked again now (it may have been
 // closed or taken since the plan was made) and held until the task's agent is linked (releaseTakenTodo).
-func (s *Service) takeTodoForTask(conversation, id string) (Todo, error) {
+func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation, id string) (Todo, error) {
 	s.tasks.mu.Lock()
 	if s.tasks.reusing[id] {
 		s.tasks.mu.Unlock()
@@ -175,6 +188,27 @@ func (s *Service) takeTodoForTask(conversation, id string) (Todo, error) {
 	if err := s.reusableTodo(conversation, id, true); err != nil {
 		s.releaseTakenTodo(id)
 		return Todo{}, err
+	}
+	// TodoID is the execution binding; ReuseTodo preserves each historical plan's intended target.
+	// Retire old bindings while this takeover holds the to-do, before the new agent can ask for approval.
+	// Creation order is not start order, and a later retry can change an old plan's UpdatedAt.
+	plans, err := s.conversationPlans(ctx, conversation)
+	if err != nil {
+		s.releaseTakenTodo(id)
+		return Todo{}, err
+	}
+	for _, p := range plans {
+		if p.ID == planID {
+			continue
+		}
+		for i, task := range p.Tasks {
+			if task.TodoID == id {
+				if err := s.patchPlanTask(ctx, p.ID, i, func(t *PlanTask) { t.TodoID = "" }); err != nil {
+					s.releaseTakenTodo(id)
+					return Todo{}, err
+				}
+			}
+		}
 	}
 	t, _ := s.todoNow(id)
 	return formatTodo(t), nil
@@ -227,8 +261,21 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 	ctx, cancel := context.WithTimeout(context.Background(), taskStartTimeout)
 	defer cancel()
 	placed, placedWhy := t.Machine, t.Why
-	mid, sid, err := s.startTaskAgent(ctx, &t, retry)
-	if err != nil && ctx.Err() == nil && !startStalled(err) {
+	if t.Role == roleLeader { // its tools are listed once it is linked: a list asked for meanwhile waits (task_leader.go)
+		s.leaderStarts.Add(1)
+		defer s.leaderStarts.Add(-1)
+	}
+	// The permission rule holds on every start of a plan task, a retry, a remedy or a recovered start included, whatever a
+	// saved plan says: nothing is started and the failure says why (task_plan, startPlan and retryTask also refuse earlier).
+	t.Permission = strings.TrimSpace(t.Permission)
+	var mid, sid string
+	var err error
+	if perr := t.checkWritablePermission(); perr != nil {
+		err = perr
+	} else {
+		mid, sid, err = s.startTaskAgent(ctx, &t, retry)
+	}
+	if err != nil && ctx.Err() == nil && !startStalled(err) && !errors.Is(err, errPermissionRule) {
 		// The machine's link dropped (a node restarting, a tunnel blinking): try once more after a moment. Any other
 		// launcher failure may move a flexible task, after verifying its directory on the destination.
 		shouldRetry := transientStartErr(err)
@@ -248,11 +295,11 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		s.updatePlanTask(ctx, planID, i, t)
 	}
 	if err == nil {
-		err = s.linkTodoAgent(ctx, t.TodoID, mid, sid, t.Title, t.Cwd, "")
+		err = s.linkPlanAgent(ctx, t, mid, sid, false)
 		if errors.Is(err, db.ErrTodoCompleted) {
 			// The user tapped "Done" while the agent was starting (a busy machine takes minutes, #1396). The task stays
 			// done and its agent stays in it: nothing reads failed, and the close loop still finds the agent to retire.
-			err = s.linkTodoAgentOfDoneTask(ctx, t.TodoID, mid, sid, t.Title, t.Cwd, "")
+			err = s.linkPlanAgent(ctx, t, mid, sid, true)
 			if err != nil {
 				s.logf("task %s: link to the finished task: %v", t.TodoID, err)
 			}
@@ -381,9 +428,18 @@ func (s *Service) retryTask(ctx context.Context, todoID string) (json.RawMessage
 	}
 	p.Tasks[i].normalizeReadonlyPermission()
 	t := p.Tasks[i]
+	// A plan saved before task_plan required bypassPermissions of a writable task, or edited since, is held to it here too,
+	// before anything is reopened or started.
+	t.Permission = strings.TrimSpace(t.Permission)
+	if err := t.checkWritablePermission(); err != nil {
+		return nil, fmt.Errorf("%w; nothing was started", err)
+	}
 	m, ok := s.machineByName(ctx, t.Machine)
 	if !ok {
 		return nil, i18n.Err("assistant-tasks.no_machine", i18n.Args{"machine": strconv.Quote(t.Machine)})
+	}
+	if err := s.leaderOnWorkMachine(&t, m); err != nil { // a retry of a leader plan saved on a computer that is work-trust now
+		return nil, fmt.Errorf("%w; nothing was started", err)
 	}
 	if !m.Reachable {
 		return nil, machineOffline(m.Name)

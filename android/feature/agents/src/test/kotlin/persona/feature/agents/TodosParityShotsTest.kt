@@ -69,13 +69,31 @@ class TodosParityShotsTest {
             spaces = emptyList()),
     )
 
+    /** Agents that never started (#3713): one waits on the owner; the other's work finished in a to-do of its plan. */
+    private val failed = todos + listOf(
+        Todo("f1", title = "部署自托管面板", createdAt = ago(200), updatedAt = ago(60), doneAt = ago(60), origin = "conv",
+            startError = "rpc: connection closed", spaces = emptyList()),
+        Todo("f2", title = "修复控制台远程执行漏洞", createdAt = ago(300), updatedAt = ago(150), doneAt = ago(150), origin = "conv",
+            planId = "p", startError = "rpc: connection closed", spaces = emptyList()),
+        Todo("f3", title = "控制台远程执行漏洞：上线验证", createdAt = ago(300), updatedAt = ago(100), doneAt = ago(100), origin = "conv",
+            planId = "p", doneBy = "review", doneReason = "验收通过", spaces = emptyList()),
+    )
+
+    private val offline = persona.core.contracts.api.CurrentAssistant(persona.core.contracts.api.ManagerRoster(listOf(
+        persona.core.contracts.api.HubManager("assistant", "助手", online = true, isDefault = true, builtin = true),
+        persona.core.contracts.api.HubManager("m-8b04d2", "家里", online = false, lastSeen = Instant.now().minusSeconds(3 * 3600).toString()),
+    ), "assistant"), persona.core.contracts.api.AssistantManagerChoice.Choice("hub", "m-8b04d2", "assistant"))
+
     private fun shot(scene: String, style: AppStyle, dark: Boolean, expected: String) {
         rule.setContent {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
                 Box(Modifier.testTag("shot").width(400.dp).height(1400.dp).background(PersonaTheme.palette.background)) {
                     when (scene) {
                         "list" -> TodosScreen(todos, sessions, null, onBack = {}, onOpenTodo = {}, now = now)
+                        "failed" -> TodosScreen(failed, sessions, null, onBack = {}, onOpenTodo = {}, now = now)
                         "empty" -> TodosScreen(emptyList(), emptyList(), null, onBack = {}, onOpenTodo = {}, now = now)
+                        // The current assistant offline (the hub's list leaves it out): offline, not "no to-dos" (#3374 follow-up).
+                        "offline" -> TodosScreen(emptyList(), emptyList(), null, onBack = {}, onOpenTodo = {}, now = now, assistant = offline)
                         "held" -> TodoDetailScreen("t2", todos, machines, sessions, null, onBack = {}, onOpenSession = {}, onHandOff = {}, now = now)
                         "detail" -> TodoDetailScreen("t1", todos, machines, sessions, null, onBack = {}, onOpenSession = {}, onHandOff = {}, now = now)
                         "picker" -> TodoPickerSheet(todos, { k -> sessions.firstOrNull { it.key == k } }, onDismiss = {}, onPick = {},
@@ -114,10 +132,20 @@ class TodosParityShotsTest {
     @Test fun listSectionsGlass() = shot("list", AppStyle.Glass, false, "PR 待合并")
     @Test fun listSectionsGlassDark() = shot("list", AppStyle.Glass, true, "刚做完")
 
+    @Test fun failedGlass() = shot("failed", AppStyle.Glass, false, "部署自托管面板")
+    @Test fun failedGlassDark() = shot("failed", AppStyle.Glass, true, "部署自托管面板")
+    @Test fun failedBrief() = shot("failed", AppStyle.Brief, false, "部署自托管面板")
+    @Test fun failedBriefDark() = shot("failed", AppStyle.Brief, true, "部署自托管面板")
+    @Test fun failedBoard() = shot("failed", AppStyle.Board, false, "部署自托管面板")
+    @Test fun failedBoardDark() = shot("failed", AppStyle.Board, true, "部署自托管面板")
+
     @Test fun emptyGlass() = shot("empty", AppStyle.Glass, false, "新建待办")
     @Test fun emptyGlassDark() = shot("empty", AppStyle.Glass, true, "新建待办")
     @Test fun emptyBrief() = shot("empty", AppStyle.Brief, false, "新建待办")
     @Test fun emptyBoard() = shot("empty", AppStyle.Board, false, "新建待办")
+
+    @Test fun offlineGlass() = shot("offline", AppStyle.Glass, false, "最后同步于 3 小时前。它上线后这里会更新。")
+    @Test fun offlineGlassDark() = shot("offline", AppStyle.Glass, true, "家里 离线")
 
     @Test fun detailGlass() = shot("detail", AppStyle.Glass, false, "由 修登录页 派出")
     @Test fun detailGlassDark() = shot("detail", AppStyle.Glass, true, "由 修登录页 派出")

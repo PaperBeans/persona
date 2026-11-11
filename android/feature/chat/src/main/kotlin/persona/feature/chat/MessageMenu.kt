@@ -15,12 +15,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import persona.core.contracts.Session
 import persona.core.contracts.api.RewindRestore
 import persona.core.domain.rewind.Rewind
@@ -28,6 +26,7 @@ import persona.core.domain.sort.canSend
 import persona.core.designsystem.JAction
 import persona.core.designsystem.JActionSheet
 import persona.core.designsystem.JDialog
+import persona.core.designsystem.copyTextSafely
 import persona.core.designsystem.swipeToReply
 import persona.core.designsystem.icons.PhIcons
 import persona.core.designsystem.onLongPress
@@ -113,15 +112,19 @@ internal fun MessageMenuSheet(
     var rewinding by remember { mutableStateOf<MessageTarget?>(null) }
     var confirmCode by remember { mutableStateOf<MessageTarget?>(null) }
     val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     val target = menu.target
     val resources = LocalResources.current
     val extras = MessageExtras(fork = onFork != null, rewind = rewind != null, rewindBlock = rewind?.block)
     if (target != null) JActionSheet(messageMenuActions(target, writes, onHandToPersona != null, resources, extras) { action ->
         when (action) {
             MessageAction.Copy -> {
-                clipboard.setText(AnnotatedString(target.text))
-                onNotice(resources.getString(R.string.chat_menu_copied))
+                copyTextSafely(
+                    context = context,
+                    text = target.text,
+                    label = "Persona",
+                    onNotice = onNotice,
+                    successNotice = resources.getString(R.string.chat_menu_copied),
+                )
             }
             MessageAction.Select -> { selecting = target.text }
             MessageAction.Quote -> onQuote(target)

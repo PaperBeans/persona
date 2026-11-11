@@ -107,10 +107,11 @@ export function taskMeter(todo?: Todo, lead?: Session): { value: number; total: 
 }
 
 /** Where an In progress row stands, by the To-dos page's rule (lib/todo-triage `todoBucket`, #3331): a task is open,
- *  shelved (folded, not counted) or closed (a task the hub no longer sends counts as closed). A plan task with no to-do
+ *  shelved (folded, not counted) or closed (a task the hub no longer sends counts as closed; a failed start whose work
+ *  finished in a related to-do, `superseded`, #3713). A plan task with no to-do
  *  yet is `start` while its plan waits for the user's Start: its plan is one Needs you row (#3387), so In progress has
  *  none of it. */
-export function cardBucket(card: TaskCardMetadata, todo: Todo | undefined, plans: Record<string, TaskPlan>, lookup: SessionLookup | undefined, now: number, restoredAt = 0): TodoBucket | "start" {
-  if (card.todo_id) return todo ? todoBucket(todo, lookup, now, restoredAt) : "closed";
+export function cardBucket(card: TaskCardMetadata, todo: Todo | undefined, plans: Record<string, TaskPlan>, lookup: SessionLookup | undefined, now: number, restoredAt = 0, superseded = false): TodoBucket | "start" {
+  if (card.todo_id) return todo ? todoBucket(todo, lookup, now, restoredAt, superseded) : "closed";
   return card.plan_id && plans[card.plan_id]?.state === "open" ? "start" : "closed";
 }

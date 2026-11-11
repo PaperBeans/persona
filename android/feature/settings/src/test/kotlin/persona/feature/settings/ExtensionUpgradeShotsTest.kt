@@ -75,7 +75,7 @@ class ExtensionUpgradeShotsTest {
         val api = object : ExtensionApiStub() {
             override suspend fun extension(id: String) = current
             override suspend fun setConfig(id: String, config: JsonObject): ExtensionDetail { configs += config; current = current.copy(config = config); return current }
-            override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean) { removed += keepData }
+            override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean, members: Boolean): ExtensionRemoval { removed += keepData; return ExtensionRemoval() }
         }
         rule.setContent {
             PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
@@ -141,7 +141,7 @@ class ExtensionUpgradeShotsTest {
         val api = object : ExtensionApiStub() {
             override suspend fun extensions() = installed
             override suspend fun extension(id: String) = detail
-            override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean) { installed = installed.filter { it.id != id } }
+            override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean, members: Boolean): ExtensionRemoval { installed = installed.filter { it.id != id }; return ExtensionRemoval() }
         }
         rule.setContent {
             PersonaTheme(style = AppStyle.Glass, darkTheme = false, reduceMotion = true) {

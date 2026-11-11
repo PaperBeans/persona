@@ -5,6 +5,7 @@ import SwiftUI
 struct VoiceTranscriptSheet: View {
     let call: VoiceConversation
     let persona: String
+    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -16,9 +17,11 @@ struct VoiceTranscriptSheet: View {
                         .foregroundStyle(.secondary)
                     ForEach(call.captions) { caption in
                         VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                            Text(caption.isUser ? String(localized: "You") : persona)
-                                .font(Theme.Font.labelStrong)
-                                .foregroundStyle(caption.isUser ? Color.secondary : Theme.persona)
+                            if caption.isUser || model.showsAssistantIdentity {
+                                Text(caption.isUser ? String(localized: "You") : persona)
+                                    .font(Theme.Font.labelStrong)
+                                    .foregroundStyle(caption.isUser ? Color.secondary : Theme.persona)
+                            }
                             Text(caption.text)
                                 .font(Theme.Font.body)
                                 .foregroundStyle(caption.final ? Color.primary : Color.secondary)

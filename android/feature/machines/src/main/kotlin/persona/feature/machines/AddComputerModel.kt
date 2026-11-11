@@ -1,13 +1,19 @@
 package persona.feature.machines
 
 import androidx.annotation.StringRes
+import persona.core.contracts.GroupKeys
 import persona.core.contracts.Machine
 import persona.core.contracts.api.ComputerCode
 import persona.core.contracts.api.ComputerOs
 import persona.core.contracts.api.ComputerPairing
+import persona.core.contracts.api.CurrentAssistant
+import persona.core.contracts.api.HubManager
+import persona.core.contracts.api.ManagerRoster
 import persona.core.contracts.api.hubCodedFailure
 import persona.core.designsystem.UiText
 import persona.core.designsystem.failureReasonText
+import persona.core.designsystem.hubMessage
+import persona.core.designsystem.shownName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,12 +62,46 @@ internal data class AddComputerState(
     val seen: Boolean = false,
     /** It has been online since the code was made: offline after that, it is asleep, not waiting for the link (#5307). */
     val joined: Boolean = false,
+    /** The manager the new computer was asked for (`add.manager`); null when none was named (no roster). */
+    val asked: String? = null,
+    /** The roster when it was asked, to name the assistant the hub put it under. */
+    val roster: ManagerRoster? = null,
+    /** The hub refused a new one while 3 wait (`too_many_pending`): the computers in the way are listed, each with Remove. */
+    val tooMany: Boolean = false,
+    /** The computer in the way being removed. */
+    val removing: String? = null,
 ) {
     val machineId: String? get() = code?.machine ?: confirming
     val secondsLeft: Int get() = code?.let { c -> if (c.expiresAt <= 0) 0 else maxOf(0L, (c.expiresAt - now + 999) / 1000).toInt() } ?: 0
     /** The display name: the hub's, the list's, or what was typed. */
     fun shown(machine: Machine?): String = code?.name?.takeIf { it.isNotBlank() } ?: machine?.displayName ?: confirming ?: name.trim()
 }
+
+/**
+ * The assistant the new computer is under when that is not the one it was asked for (docs/protocol/protocol.md "Computer
+ * pairing codes"): the hub's answer names another, or names none (a hub from before `add.manager` puts a new computer under
+ * its own assistant). Null when it is where it was asked for, when none was asked for, and with one assistant.
+ */
+internal fun AddComputerState.placedUnder(listed: List<Machine> = emptyList(), current: ManagerRoster? = null): String? {
+    val code = code ?: return null
+    val asked = asked ?: return null
+    val roster = (current ?: roster)?.takeIf { it.isMulti } ?: return null
+    // The reply's manager says it; a hub from before add.manager leaves it out and puts a computer it added under its own
+    // assistant, while one it reused stays where it was (the machines list has it under that one).
+    val owner = code.manager?.takeIf { it.isNotBlank() }
+        ?: if (code.added) ManagerRoster.ASSISTANT_MANAGER
+        else listed.firstOrNull { it.id == code.machine }?.manager?.takeIf { it.isNotBlank() } ?: ManagerRoster.ASSISTANT_MANAGER
+    if (owner == asked) return null
+    return roster.manager(owner)?.shownName ?: owner
+}
+
+/** The current assistant when a computer can't be added to it: it is offline (with several; one is never told apart). */
+internal fun CurrentAssistant.offlineForAdding(): HubManager? =
+    manager?.takeIf { roster?.isMulti == true && !it.online && !it.isInstalling }
+
+/** The computers keeping a new one from being added: every waiting one, whichever assistant's (the hub's limit is the hub's). */
+internal fun inTheWay(machines: List<Machine>, group: String? = null): List<Machine> =
+    machines.filter { it.pending && GroupKeys.namespaceOf(it.id) == group }
 
 /** The machine as the WebSocket's list or the polled one has it, whichever has it online first. */
 internal fun AddComputerState.machine(listed: List<Machine>): Machine? {
@@ -109,6 +149,8 @@ internal fun machineErrorText(code: String?): Int? = when (code) {
 
 /** Why the hub made no code for a computer, by its code; the hub's own words for any other. */
 internal fun addErrorText(error: Throwable): UiText = when (hubCodedFailure(error)?.code) {
+    // The assistant asked for (gone, still installing, its computers' owners not known yet): the hub's words.
+    "no_manager", "installing", "assistant_offline", "owners_unknown" -> hubMessage(error)?.let(UiText::Plain) ?: failureReasonText(error)
     "tls_required" -> UiText.Res(R.string.machines_onb_err_tls_required)
     "mesh_member" -> UiText.Res(R.string.machines_onb_err_mesh_member)
     "too_many_pending" -> UiText.Res(R.string.machines_onb_err_too_many_pending)
@@ -166,11 +208,28 @@ internal class AddComputerModel(
     fun setOs(os: ComputerOs) = mutable.update { it.copy(os = os) }
     fun setName(name: String) = mutable.update { it.copy(name = name.take(ComputerNameMax), error = null) }
 
-    /** "Next": the hub adds the computer and gives its code. */
-    suspend fun add() {
+    /**
+     * "Next": the hub adds the computer and gives its code. [assistant] is the current one: the computer is its from the
+     * start; none while it is offline.
+     */
+    suspend fun add(assistant: CurrentAssistant? = null) {
         val s = state.value
-        if (s.busy || s.name.isBlank()) return
-        make { api.add(s.name.trim(), s.os) }
+        if (s.busy || s.name.isBlank() || assistant?.offlineForAdding() != null) return
+        // The roster's id for it (the default's real one too); before the roster is read, a pick of another one this
+        // device kept for the hub (only a hub with several assistants has one); none from a hub without a roster.
+        val manager = assistant?.let { a -> if (a.roster != null) a.id else a.choice.manager ?: a.choice.defaultId.takeIf { it != ManagerRoster.ASSISTANT_MANAGER } }
+        make(asked = manager, roster = assistant?.roster) { api.add(s.name.trim(), s.os, manager) }
+    }
+
+    /** "Remove" on a computer in the way: the hub removes it, and "Next" tries again. */
+    suspend fun remove(machineId: String) {
+        if (state.value.removing != null) return
+        mutable.update { it.copy(removing = machineId) }
+        try {
+            api.reject(machineId)
+            mutable.update { it.copy(removing = null, tooMany = false, error = null) }
+        } catch (cancelled: CancellationException) { mutable.update { it.copy(removing = null) }; throw cancelled }
+        catch (error: Exception) { mutable.update { it.copy(removing = null, tooMany = false, error = failureReasonText(error)) } }
     }
 
     /** A new code for the computer in hand (it never got the link, or the link expired); its old pairing is revoked. */
@@ -180,15 +239,17 @@ internal class AddComputerModel(
         make { api.again(id) }
     }
 
-    private suspend fun make(call: suspend () -> ComputerCode) {
+    // A new code for the same computer ([again]) keeps what the first one was asked for.
+    private suspend fun make(asked: String? = state.value.asked, roster: ManagerRoster? = state.value.roster, call: suspend () -> ComputerCode) {
         val mine = ++seq
-        mutable.update { it.copy(busy = true, error = null) }
+        mutable.update { it.copy(busy = true, error = null, tooMany = false) }
         try {
             val code = call()
             val now = clock()
-            if (mine == seq) mutable.update { it.copy(code = code.copy(expiresAt = localExpiry(code.expiresAt, now)), busy = false, polled = null, seen = false, joined = false, outcome = null, now = now) }
+            if (mine == seq) mutable.update { it.copy(code = code.copy(expiresAt = localExpiry(code.expiresAt, now)), busy = false, polled = null, seen = false, joined = false, outcome = null, now = now,
+                asked = asked, roster = roster) }
         } catch (cancelled: CancellationException) { if (mine == seq) mutable.update { it.copy(busy = false) }; throw cancelled }
-        catch (error: Exception) { if (mine == seq) mutable.update { it.copy(busy = false, error = addErrorText(error)) } }
+        catch (error: Exception) { if (mine == seq) mutable.update { it.copy(busy = false, error = addErrorText(error), tooMany = hubCodedFailure(error)?.code == "too_many_pending") } }
     }
 
     /** "It's mine" / "No, remove" (and "Remove" for one that never came). */

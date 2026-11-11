@@ -33,6 +33,9 @@ func TestMCPCaller(t *testing.T) {
 		{"todo_bind_thread", "", false, "sess-pane"},
 		{"dispatch_start", "", false, "sess-pane"},
 		{"dispatch_read", "", false, "sess-pane"},
+		{"task_plan", "", false, "sess-pane"},
+		{"task_review", "", false, "sess-pane"},
+		{"task_plan", "", true, ""},
 		{"kb_search", "", false, ""},
 		{"todo_decisions", "", true, ""},
 		{"todo_bind_thread", "", true, ""},
@@ -42,4 +45,23 @@ func TestMCPCaller(t *testing.T) {
 			t.Errorf("mcpCaller(%q, %q, assistant=%v) = %q, want %q", c.name, c.session, c.assistant, got, c.want)
 		}
 	}
+}
+
+// An agent's tool list is asked for by its pane: the hub tells a task leader's tools from any other agent's by the
+// session the pane runs. A session the request names is left as it is, and so is a pane no agent runs in.
+func TestMCPToolsNameTheAgentOfThePane(t *testing.T) {
+	n, hub := runtimeNode(t)
+	n.mu.Lock()
+	n.panes = map[string]string{"w1:p1": "sess-pane"}
+	n.mu.Unlock()
+	ask := mcpRelay(t, n, hub)
+	check := func(req map[string]any, want string) {
+		t.Helper()
+		if got := ask(req); got["session_id"] != want {
+			t.Errorf("%v: relayed session %v, want %q", req, got["session_id"], want)
+		}
+	}
+	check(map[string]any{"kind": "mcp.tools", "pane": "w1:p1"}, "sess-pane")
+	check(map[string]any{"kind": "mcp.tools", "pane": "w1:p1", "session_id": "named"}, "named")
+	check(map[string]any{"kind": "mcp.tools", "pane": "w9:p9"}, "")
 }

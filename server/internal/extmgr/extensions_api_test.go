@@ -62,6 +62,7 @@ type extensionStore struct {
 	rows       map[string]extension.Record
 	secrets    map[string]map[string]string
 	audit      []string
+	auditRows  []storeAudit // the same rows, with their details
 	markets    map[string]extension.MarketRecord
 	failDelete string // only this extension's delete fails
 	failPut    bool   // every PutExtension fails (a database that cannot be written)
@@ -134,11 +135,23 @@ func (s *extensionStore) DeleteExtensionSecret(_ context.Context, id, name strin
 	delete(s.secrets[id], name)
 	return nil
 }
-func (s *extensionStore) AddExtensionAudit(_ context.Context, id, action, actor string, _ json.RawMessage) error {
+func (s *extensionStore) AddExtensionAudit(_ context.Context, id, action, actor string, detail json.RawMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.audit = append(s.audit, id+" "+action+" "+actor)
+	s.auditRows = append(s.auditRows, storeAudit{plugin: id, action: action, actor: actor, detail: detail})
 	return nil
+}
+
+type storeAudit struct {
+	plugin, action, actor string
+	detail                json.RawMessage
+}
+
+func (s *extensionStore) audits() []storeAudit {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]storeAudit(nil), s.auditRows...)
 }
 
 // notesPackage writes a plugin package whose program is this test binary serving notesConnector.
@@ -179,6 +192,11 @@ func newExtensionStore() *extensionStore {
 
 // startTestExtensions starts h's connectors and plugins (hub.json's cfgs) on h.store, stopping them when the test ends.
 func startTestExtensions(t *testing.T, h *Manager, cfgs ...ExtensionConfig) {
+	// t.TempDir removes all of a test's temporary directories in one cleanup, added at its first call. Calling it
+	// before adding the cleanup below makes the programs stop before those directories go (cleanups run last added,
+	// first called): a program a test's last change restarted would otherwise still be writing into one while it is
+	// removed ("TempDir RemoveAll cleanup: … directory not empty", #4104).
+	_ = t.TempDir()
 	h.connectors = connector.NewRegistry(nil)
 	h.extensions = newExtensions(h.cfg.dir, cfgs, h.logf)
 	h.extensions.sandboxes.noDefault = true // test programs live outside their packages (extension_sandbox_test.go)

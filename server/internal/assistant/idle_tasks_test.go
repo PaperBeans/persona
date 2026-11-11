@@ -60,7 +60,7 @@ func idleTaskService(t *testing.T, n int) (*Service, *idleTaskHub, *TaskPlan) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		p.Tasks = append(p.Tasks, PlanTask{Title: title, Prompt: todo.Notes, Machine: "box", Cwd: "/code/app", TodoID: todo.ID})
+		p.Tasks = append(p.Tasks, PlanTask{Title: title, Prompt: todo.Notes, Machine: "box", Cwd: "/code/app", Permission: "bypassPermissions", TodoID: todo.ID})
 	}
 	if err := s.savePlan(context.Background(), p); err != nil {
 		t.Fatal(err)

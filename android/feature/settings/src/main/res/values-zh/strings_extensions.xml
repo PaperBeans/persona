@@ -316,6 +316,19 @@
     <!-- Removing from the extension's own page -->
     <string name="settings_ext_market_installed_note">这个扩展是从扩展市场装的：卸载后可以在市场里重新安装。</string>
     <string name="settings_ext_keep_data_hint">以后重装能接着用。</string>
+    <string name="settings_ext_uninstall_members">连合集成员一起卸载</string>
+    <string name="settings_ext_uninstall_members_hint">%1$s。不勾选时它们会保留。</string>
+    <string name="settings_ext_uninstalled_with_members">已卸载 %1$s 及其成员</string>
+    <string name="settings_ext_uninstalled_members_unknown">已卸载 %1$s，成员结果未返回</string>
+    <string name="settings_ext_partial_title">合集只卸载了一部分</string>
+    <string name="settings_ext_partial_text">%1$s 还在。已经卸载的成员不会恢复，可以再试一次。</string>
+    <string name="settings_ext_partial_removed">已卸载：%1$s</string>
+    <string name="settings_ext_partial_failed">未能卸载：%1$s</string>
+    <string name="settings_ext_partial_failed_item">%1$s（%2$s）</string>
+    <string name="settings_ext_partial_remaining">未处理，仍已安装：%1$s</string>
+    <plurals name="settings_ext_uninstalled_members">
+        <item quantity="other">已卸载 %1$s，并卸载了 %2$d 个成员</item>
+    </plurals>
     <!-- The machine list (format machine) -->
     <string name="settings_ext_machine_online">在线</string>
     <string name="settings_ext_machine_offline">离线</string>

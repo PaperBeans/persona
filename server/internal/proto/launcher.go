@@ -215,6 +215,9 @@ type OwnServiceState struct {
 const (
 	CodeLauncherOutOfScope = "launcher_out_of_scope"
 	CodeLauncherOwnService = "launcher_own_service"
+	// CodeLauncherKeyUnresolved: the key that computer uses is a reference its provider extension did not resolve
+	// (off, signed out, not found…); the message is the provider's reason (docs/extensions/secret-providers.md).
+	CodeLauncherKeyUnresolved = "launcher_key_unresolved"
 )
 
 // ProviderModel is one model a provider's gateway serves (cindy's ProviderRuntimeModelConfig, the Anthropic part).

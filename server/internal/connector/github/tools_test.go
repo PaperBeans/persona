@@ -18,7 +18,7 @@ func fakeAPI(t *testing.T) (*Connector, *[]string) {
 			{"number":12,"title":"Add the example","state":"open","user":{"login":"alice"},"html_url":"https://github.com/example-org/example-repo/pull/12",
 			 "repository_url":"https://api.github.com/repos/example-org/example-repo","updated_at":"2026-01-02T03:04:05Z","comments":3,"pull_request":{"merged_at":null}},
 			{"number":7,"title":"Example bug","state":"closed","user":{"login":"bob"},"html_url":"https://github.com/example-org/example-repo/issues/7",
-			 "repository_url":"https://api.github.com/repos/example-org/example-repo","updated_at":"2026-01-01T00:00:00Z","comments":0}]}`,
+			 "repository_url":"https://api.github.com/repos/example-org/example-repo","updated_at":"2026-01-01T00:00:00Z","closed_at":"2026-01-01T00:00:00Z","comments":0}]}`,
 		"/search/code": `{"total_count":1,"items":[{"path":"src/example.go","html_url":"https://github.com/example-org/example-repo/blob/main/src/example.go",
 			"repository":{"full_name":"example-org/example-repo"}}]}`,
 		"/repos/example-org/example-repo/issues/12": `{"number":12,"title":"Add the example","state":"open","user":{"login":"alice"},
@@ -27,19 +27,22 @@ func fakeAPI(t *testing.T) (*Connector, *[]string) {
 		"/repos/example-org/example-repo/pulls/12": `{"head":{"ref":"feat/example","sha":"0123456789abcdef0123456789abcdef01234567"},"base":{"ref":"main"},
 			"mergeable_state":"clean","additions":10,"deletions":2,"changed_files":2,"requested_reviewers":[{"login":"bob"}],"requested_teams":[{"slug":"reviewers"}]}`,
 		"/repos/example-org/example-repo/pulls/12/reviews": `[
-			{"user":{"login":"bob"},"state":"CHANGES_REQUESTED","body":"请改一下示例。","submitted_at":"2026-01-02T01:00:00Z"},
-			{"user":{"login":"bob"},"state":"COMMENTED","body":"","submitted_at":"2026-01-02T01:00:01Z"}]`,
+			{"id":301,"user":{"login":"bob"},"state":"CHANGES_REQUESTED","body":"请改一下示例。","submitted_at":"2026-01-02T01:00:00Z",
+			 "html_url":"https://github.com/example-org/example-repo/pull/12#pullrequestreview-301"},
+			{"id":302,"user":{"login":"bob"},"state":"COMMENTED","body":"","submitted_at":"2026-01-02T01:00:01Z"}]`,
 		"/repos/example-org/example-repo/issues/12/comments": `[
-			{"user":{"login":"ci-bot[bot]","type":"Bot"},"body":"Preview ready.","created_at":"2026-01-01T12:00:00Z"},
-			{"user":{"login":"alice"},"body":"改好了。","created_at":"2026-01-02T03:00:00Z"}]`,
+			{"id":201,"user":{"login":"ci-bot[bot]","type":"Bot"},"body":"Preview ready.","created_at":"2026-01-01T12:00:00Z",
+			 "html_url":"https://github.com/example-org/example-repo/pull/12#issuecomment-201"},
+			{"id":202,"user":{"login":"alice"},"body":"改好了。","created_at":"2026-01-02T03:00:00Z",
+			 "html_url":"https://github.com/example-org/example-repo/pull/12#issuecomment-202"}]`,
 		"/repos/example-org/example-repo/pulls/12/files": `[
 			{"filename":"src/example.go","status":"modified","additions":8,"deletions":2,"patch":"@@ -1 +1 @@\n-old\n+new"},
 			{"filename":"docs/new.md","previous_filename":"docs/old.md","status":"renamed","additions":2,"deletions":0},
 			{"filename":"assets/big.bin","status":"added","additions":0,"deletions":0}]`,
 		"/repos/example-org/example-repo/commits/0123456789abcdef0123456789abcdef01234567/check-runs": `{"total_count":2,"check_runs":[
 			{"id":101,"name":"test","status":"completed","conclusion":"failure","html_url":"https://github.com/example-org/example-repo/actions/runs/1/job/101",
-			 "app":{"slug":"github-actions"},"output":{"title":"Process completed with exit code 1."}},
-			{"id":102,"name":"lint","status":"in_progress","app":{"slug":"github-actions"}}]}`,
+			 "started_at":"2026-01-02T03:05:00Z","completed_at":"2026-01-02T03:09:00Z","app":{"slug":"github-actions"},"output":{"title":"Process completed with exit code 1."}},
+			{"id":102,"name":"lint","status":"in_progress","started_at":"2026-01-02T03:05:00Z","app":{"slug":"github-actions"}}]}`,
 		"/repos/example-org/example-repo/actions/jobs/101/logs": strings.Repeat("setup line\n", 2000) + "--- FAIL: TestExample\nexit status 1\n",
 	}
 	var seen []string

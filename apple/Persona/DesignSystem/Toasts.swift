@@ -54,7 +54,9 @@ struct ToastCapsule: View {
     }
 
     /// How long it stays: an error longer, one with a button (Undo) long enough to reach it.
-    static func shown(_ toast: Toast) -> Duration { .seconds(toast.action != nil ? 5 : toast.style == .error ? 4 : 2.5) }
+    static func shown(_ toast: Toast) -> Duration {
+        toast.duration ?? .seconds(toast.action != nil ? 5 : toast.style == .error ? 4 : 2.5)
+    }
 }
 
 /// The app's toast at the top of what it covers, over the content (it moves nothing), gone after `ToastCapsule.shown`.

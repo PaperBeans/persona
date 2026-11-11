@@ -145,9 +145,20 @@ func Digest(m *Manifest) string {
 		Node        *nodeConsent `json:"node,omitempty"`
 		Tools       []string     `json:"tools,omitempty"`
 		SendsAsUser []string     `json:"sends_as_user,omitempty"`
-	}{m.Runtime != nil, m.Permissions.normalized(), m.Topics(), m.Surfaces(), m.NodeProgram().consent(), m.ToolsConsent(), sendsAsUserIDs(m)})
+		// SecretSchemes: supplying secret values is agreed to like a permission (empty for any other extension, so
+		// their digests are what they were).
+		SecretSchemes []string `json:"secret_schemes,omitempty"`
+	}{m.Runtime != nil, m.Permissions.normalized(), m.Topics(), m.Surfaces(), m.NodeProgram().consent(), m.ToolsConsent(), sendsAsUserIDs(m),
+		sortedSchemes(m)})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// sortedSchemes are the schemes m's secret_providers claim, sorted: what the digest holds of them.
+func sortedSchemes(m *Manifest) []string {
+	out := slices.Clone(m.Schemes())
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // sendsAsUserIDs are the ids of m's connectors that send as the user, sorted: what the digest holds of them.
@@ -221,6 +232,17 @@ func permissionText(l i18n.Lang, key string, args ...i18n.Args) string {
 
 func permissionLine(l i18n.Lang, key string) PermissionLine {
 	return PermissionLine{Key: key, Title: permissionText(l, key+"_title"), Detail: permissionText(l, key+"_detail")}
+}
+
+// secretProviderLine is the line for an extension that supplies the values of references of these schemes
+// (secret_providers): it learns which of its references Persona uses, and for what.
+func secretProviderLine(l i18n.Lang, title string, schemes []string) PermissionLine {
+	shown := make([]string, len(schemes))
+	for i, s := range schemes {
+		shown[i] = s + "://"
+	}
+	return PermissionLine{Key: "secret_provider", Title: permissionText(l, title),
+		Detail: permissionText(l, "secret_provider_detail", i18n.Args{"schemes": strings.Join(shown, permissionText(l, "list_separator"))})}
 }
 
 // nodeRunsCode is the line for a program that runs on the computers the user picks.
@@ -326,6 +348,9 @@ func ExplainWith(l i18n.Lang, m *Manifest, config json.RawMessage) []PermissionL
 	}
 	if m.Permissions.AuthRelay {
 		out = append(out, permissionLine(l, "auth_relay"))
+	}
+	if schemes := m.Schemes(); len(schemes) > 0 {
+		out = append(out, secretProviderLine(l, "secret_provider_title", schemes))
 	}
 	if to := m.ContributesTo(); len(to) > 0 {
 		out = append(out, PermissionLine{Key: "contributes_to", Title: permissionText(l, "contributes_title"),
@@ -449,6 +474,15 @@ func AddedIn(l i18n.Lang, old, m *Manifest) []PermissionLine {
 	}
 	if m.Permissions.AuthRelay && !old.Permissions.AuthRelay {
 		out = append(out, permissionLine(l, "auth_relay"))
+	}
+	var schemes []string
+	for _, s := range m.Schemes() {
+		if !slices.Contains(old.Schemes(), s) {
+			schemes = append(schemes, s)
+		}
+	}
+	if len(schemes) > 0 {
+		out = append(out, secretProviderLine(l, "secret_provider_more_title", schemes))
 	}
 	var to []string
 	for _, owner := range m.ContributesTo() {

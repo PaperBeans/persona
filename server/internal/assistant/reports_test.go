@@ -76,6 +76,27 @@ func TestTaskDoneIsReportedInFeishu(t *testing.T) {
 	}
 }
 
+// A chart in the Agent's answer (persona-card, #3140) is drawn on the report card as its numbers, never cut down to
+// the title alone: the owner reads this card in Lark (#4093).
+func TestTaskReportDrawsAChartAsNumbers(t *testing.T) {
+	s, f, posts := reportService(t, true)
+	startedTask(t, s, f)
+	agentTurn(s, f, proto.StatusWorking, "", 0)
+	agentTurn(s, f, proto.StatusDone, "睡眠这一周\n\n```persona-card\n"+
+		`{"type":"line","title":"Sleep this week","unit":"h","points":[{"label":"Mon","value":7.2},{"label":"Tue","value":6.5}]}`+
+		"\n```\n\n睡得比上周多点。", 0)
+	waitFor(t, "the report", func() bool { return len(posts()) == 1 })
+	card := posts()[0]
+	for _, want := range []string{"Sleep this week", "Mon", "7.2", "Tue", "6.5", "睡得比上周多点"} {
+		if !strings.Contains(card, want) {
+			t.Errorf("the chart is not drawn as numbers: the card lacks %q:\n%s", want, card)
+		}
+	}
+	if strings.Contains(card, "persona-card") || strings.Contains(card, `\"type\"`) {
+		t.Errorf("the chart block is left on the card as it was written:\n%s", card)
+	}
+}
+
 // Changes within the delay are one card, the decision on top with its own answerable card; with reports off nothing
 // is posted.
 func TestTaskReportsMergeAndPutDecisionsFirst(t *testing.T) {

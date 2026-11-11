@@ -95,5 +95,8 @@
   "network_config_title": "Reach the address you enter in its settings",
   "network_config_detail": "The address in the “{field}” setting (now: {host}): that one host and port only, https only",
   "network_config_detail_http": "The address in the “{field}” setting (now: {host}): that one host and port only; unencrypted http allowed",
-  "network_config_unset": "not set"
+  "network_config_unset": "not set",
+  "secret_provider_title": "Supply secret values",
+  "secret_provider_more_title": "Supply secret values (new)",
+  "secret_provider_detail": "When one of your settings holds a {schemes} reference, or you approve handing one to an Agent on the phone, Persona asks it for the value. It learns which reference is used and what for, never your other secrets"
 }

@@ -9,6 +9,19 @@ import persona.core.contracts.api.DeviceNotificationPreferences
 import persona.core.contracts.api.DoneNotification
 import persona.core.contracts.api.InteractionCenter
 import persona.core.contracts.api.SessionsRepository
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.filter
+
+/**
+ * The events [NotificationDelivery.accept] acts on, taken off the hub's event flow at once and handed on in order (#4038).
+ * The merged event flow has no buffer: `emit` returns only after every subscriber took the event, so a subscriber busy
+ * with one (accept reads the preferences and the cards over the network) held up every other live event, chat
+ * streaming included, until it was done.
+ */
+internal fun Flow<ServerEvent>.notificationEvents(): Flow<ServerEvent> =
+    filter { it is NotifyEvent || it is InteractionResolvedEvent }.buffer(Channel.UNLIMITED)
 
 /** Only hub-approved notify events may create alerts; raw interactions are state updates. */
 internal class NotificationDelivery(

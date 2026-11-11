@@ -8,6 +8,10 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -406,6 +410,16 @@ class NativeStreamCoverageTest {
         val raw = Json.parseToJsonElement("""{"sections":[{"items":[{"type":"row","title":"Zero","control":{"kind":"stepper","name":"zero","value":0,"min":0,"max":10,"action":{"id":"step"}}},{"type":"image","key":"image","src":{"url":"https://example.com/a.png","width":1,"height":1},"alt":"Empty caption","caption":"","no_zoom":false}]}]}""").jsonObject
         assertTrue(NativeExtensionProfile.gaps(raw).isEmpty())
         assertEquals(JsonPrimitive(0), raw.getValue("sections").jsonArray[0].jsonObject.getValue("items").jsonArray[0].jsonObject.getValue("control").jsonObject["value"])
+    }
+
+    @Test fun aZoomablePictureSaysATapOpensIt() {
+        val zoomable = """{"type":"image","key":"zoomable","src":{"url":"https://example.com/zoom.png"},"alt":"Zoomable picture"}"""
+        show(snapshot("$image,$zoomable")); mount()
+        rule.onNode(hasClickAction() and hasContentDescription("Zoomable picture")).assert(SemanticsMatcher("a picture a tap views (#4176)") {
+            it.config.getOrNull(SemanticsActions.OnClick)?.label == "View image" && it.config.getOrNull(SemanticsProperties.Role) == Role.Image
+        })
+        rule.onNodeWithContentDescription("Picture unavailable").assert(!hasClickAction())
+        runBlocking { adapter.close() }
     }
 
     @Test fun cancellingConfirmedControlDoesNotLeaveACancelledValueInSubmit() {

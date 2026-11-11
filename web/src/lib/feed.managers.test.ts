@@ -3,7 +3,7 @@
 // and a briefing question's Handled name the conversation's manager, since their routes name no conversation and the
 // hub would otherwise take them to the default; the default's conversation names none, whichever assistant is current.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { conversationHeaders, dismissPlan, handledLater, startPlan, type TaskPlan } from "./feed";
+import { conversationHeaders, dismissPlan, handledLater, loadFeed, startPlan, type TaskPlan } from "./feed";
 import { chooseManager, noteConversation, resetManagerChoice, setRosterDefault } from "./manager-choice";
 import { getState, reset } from "./store";
 import type { Session } from "./types";
@@ -54,5 +54,29 @@ describe("a conversation's plans and questions", () => {
     await startPlan(plan("default-main"), false);
     expect(named("/task-plans/p-default-main/start")).toBeNull();
     expect(conversationHeaders("unknown")).toBeUndefined();
+  });
+});
+
+describe("reading a conversation's feed", () => {
+  const listed = (manager: string) => Object.assign(getState(), { sessions: { hub: [{ machine_id: "hub", session_id: "c1", manager, assistant: true } as Session] } });
+  const feedHeader = () => calls.find((c) => c.url.startsWith("/api/v1/assistant/conversations/c1/feed"))?.header;
+
+  it("names none with one assistant, whose row says it is the default's", async () => {
+    listed("assistant");
+    await loadFeed("c1");
+    expect(feedHeader()).toBeNull();
+  });
+
+  it("names none for the default's conversation among several assistants", async () => {
+    chooseManager("m-work");
+    listed("assistant");
+    await loadFeed("c1");
+    expect(feedHeader()).toBeNull();
+  });
+
+  it("names the manager of another assistant's conversation", async () => {
+    listed("m-home");
+    await loadFeed("c1");
+    expect(feedHeader()).toBe("m-home");
   });
 });

@@ -14,6 +14,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import persona.core.contracts.api.AppPairCode
 import persona.core.contracts.api.DeviceSettings
 import persona.core.designsystem.*
@@ -94,6 +97,22 @@ internal class ConnectDeviceModel(private val api: DeviceSettings, private val c
         return true
     }
 
+    /**
+     * Back in front: reads the device list once, even when the code has expired meanwhile, since a device may have
+     * taken it while the page was stopped (and nothing was polling). Only while a code is shown; true (and [onPaired])
+     * when a new device took it.
+     */
+    suspend fun catchUp(onPaired: () -> Unit): Boolean {
+        val shown = state.value.phase as? ConnectPhase.Showing ?: return false
+        val list = try { api.devices().devices } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { return false }
+        val device = list.firstOrNull { it.id !in known } ?: return false
+        // A new code was asked for while the list was on its way: the device is not this page's answer any more.
+        if (state.value.phase !== shown) return false
+        mutable.update { it.copy(phase = ConnectPhase.Paired(device.name.ifBlank { device.id })) }
+        onPaired()
+        return true
+    }
+
     /** The countdown each second and the device list every three, until the code is used or expires. */
     suspend fun run(onPaired: () -> Unit) {
         var n = 0
@@ -114,7 +133,13 @@ internal fun ConnectDevicePage(api: DeviceSettings, onBack: () -> Unit, onPaired
     var target by rememberSaveable { mutableStateOf(ConnectTarget.App) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(model) { model.make() }
-    LaunchedEffect(model) { model.run(onPaired) }
+    // Only while the page is shown: a hidden tab, the app in the background or the screen off asks the hub nothing.
+    // Back in front, the countdown catches up at once and the device list is read right away, so a device that paired
+    // while the page was stopped is shown even if the code has expired since.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(model, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { model.tick(); model.catchUp(onPaired); model.run(onPaired) }
+    }
     BackHandler(onBack = onBack)
     val context = LocalContext.current
     val feedback = LocalAppFeedback.current

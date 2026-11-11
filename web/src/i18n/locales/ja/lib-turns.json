@@ -1,5 +1,6 @@
 {
   "update_todos": "ToDoを更新",
+  "findings_other": "指摘{count}件",
   "tool": "ツール",
   "tool_run": "実行",
   "tool_read": "読み取り",

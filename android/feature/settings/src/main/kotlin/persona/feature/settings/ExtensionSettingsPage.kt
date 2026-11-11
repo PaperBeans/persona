@@ -39,6 +39,8 @@ internal fun ExtensionSettingsPage(
     updates: ExtensionSettingsUpdates, onEnabled: (Boolean) -> Unit, onAutoUpgrade: (Boolean) -> Unit,
     onCheck: () -> Unit, onUpgrade: ((String, String) -> Unit)?, onUninstall: () -> Unit,
     configuration: LazyListScope.() -> Unit, information: LazyListScope.() -> Unit,
+    /** A pack's members by their installed names (#4122). */
+    memberNames: Map<String, String> = emptyMap(),
 ) {
     JListPage(title = detail?.extension?.name?.ifBlank { null } ?: stringResource(R.string.settings_ext_title),
         onBack = onBack, largeTitle = false, refreshing = refreshing, onRefresh = onRefresh) {
@@ -62,7 +64,7 @@ internal fun ExtensionSettingsPage(
         item("configuration-title") { JSectionHeader(stringResource(R.string.settings_extension_configuration)) }
         configuration()
         hostInformation(detail)
-        installedExtensionModel(detail)
+        installedExtensionModel(detail, memberNames)
         information()
         item("updates-title") { JSectionHeader(stringResource(R.string.settings_extension_updates)) }
         item("updates-check") {

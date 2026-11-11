@@ -381,6 +381,10 @@ internal fun AgentsScreen(
                 // Three cases, as iOS: a search with no result (no New session, which read as if the agents were gone), no
                 // sessions at all, and a quick filter with nothing left (Show all).
                 when {
+                    // An offline assistant with nothing the hub still keeps of it (no agent, no computer): out of reach, not a first run;
+                    // with a computer online it can start a session now.
+                    assistant.offline != null && page.allCount == 0 && page.settings.query.isEmpty() &&
+                        page.machines.isEmpty() && page.settings.machineFilter.isEmpty() -> JAssistantOffline(assistant)
                     page.allCount == 0 && page.settings.query.isNotEmpty() -> JEmptyState(
                         stringResource(R.string.agents_empty_search_title, page.settings.query),
                         stringResource(R.string.agents_empty_search_hint), icon = PhIcons.MagnifyingGlass)
@@ -491,7 +495,7 @@ internal fun AgentsScreen(
             }
             if (page.pagination.paged && !firstPageIncomplete) item("sessions-pagination", contentType = "pagination") {
                 Column(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.m), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(stringResource(R.string.agents_page_loaded, page.sessions.size, page.pagination.total),
+                    Text(pluralStringResource(R.plurals.agents_page_loaded, page.pagination.total, page.sessions.size, page.pagination.total),
                         style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
                     if (page.pagination.loading) JSpinner()
                     else if (page.pagination.hasMore) JTextButton(stringResource(R.string.agents_page_more), model::loadMore)
@@ -572,7 +576,8 @@ internal fun AgentsScreen(
     operationDialog?.let { AgentOperationDialog(it, model, names[it.session.machineId]) { operationDialog = null } }
     pickingTodoForSession?.let { targetSession ->
         TodoPickerSheet(
-            todos = todos,
+            todos = assistant.todosFor(todos, targetSession.machineId,
+                targetSession.manager ?: page.machines.firstOrNull { it.id == targetSession.machineId }?.manager),
             title = stringResource(if (targetSession.todo != null) R.string.agents_todo_move_title else R.string.agents_todo_link_title),
             currentTodoId = targetSession.todo?.id,
             sessionLookup = { k -> page.sessions.firstOrNull { it.key == k } },
@@ -590,7 +595,7 @@ internal fun AgentsScreen(
     pickingTodoForSpace?.let { (machineId, space) ->
         val current = todos.forSpace(machineId, space)
         TodoPickerSheet(
-            todos = todos,
+            todos = assistant.todosFor(todos, machineId, page.machines.firstOrNull { it.id == machineId }?.manager),
             title = stringResource(if (current != null) R.string.agents_space_todo_move else R.string.agents_space_todo_link),
             currentTodoId = current?.id,
             sessionLookup = { k -> page.sessions.firstOrNull { it.key == k } },
@@ -665,6 +670,18 @@ internal fun cardContext(request: Interaction, pageSessions: List<Session>, page
  * The cards the page shows: the current assistant's, of the hub group shown. A card names its manager, else it is its
  * session's (one of a session the list no longer has: its own stamp alone; none: the default's).
  */
+/**
+ * The to-dos an agent (or a project) on computer [machineId] stamped [manager] can be put on: its own assistant's, the
+ * ones a new to-do from the same sheet is made under (AgentsViewModel.todoOwner); every one with one assistant, and for
+ * another group's computer.
+ */
+internal fun persona.core.contracts.api.CurrentAssistant.todosFor(todos: List<persona.core.contracts.Todo>, machineId: String, manager: String?): List<persona.core.contracts.Todo> {
+    val roster = roster?.takeIf { it.isMulti } ?: return todos
+    if (persona.core.contracts.GroupKeys.namespaceOf(machineId) != group) return todos
+    val owner = roster.shownUnder(manager)
+    return todos.filter { roster.shownUnder(it.manager) == owner }
+}
+
 internal fun shownRequests(requests: List<Interaction>, group: GroupFilter?, assistant: persona.core.contracts.api.CurrentAssistant,
     sessions: List<Session>): List<Interaction> {
     val managers = sessions.associate { it.key to it.manager }

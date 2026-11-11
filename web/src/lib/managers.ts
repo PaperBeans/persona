@@ -296,29 +296,6 @@ export function managerOrder(list: ManagerList): Manager[] {
   return d ? [d, ...ms.filter((m) => m !== d)] : ms;
 }
 
-export interface ManagerGroup<T> {
-  manager: Manager;
-  items: T[];
-}
-
-/**
- * Items grouped by the manager they carry (`manager`; none is the default's), in managerOrder, empty groups left out;
- * null with one manager (the page lists them as before). An item of a manager the roster doesn't know goes to the
- * default's group, so nothing is hidden.
- */
-export function groupByManager<T>(items: T[], list: ManagerList | null, of: (x: T) => string | undefined): ManagerGroup<T>[] | null {
-  if (!multiManager(list)) return null;
-  const order = managerOrder(list);
-  const known = new Set(order.map((m) => m.id));
-  const byId = new Map<string, T[]>();
-  for (const x of items) {
-    const id = of(x);
-    const key = id && known.has(id) ? id : list.default;
-    byId.set(key, [...(byId.get(key) ?? []), x]);
-  }
-  return order.flatMap((m) => (byId.get(m.id)?.length ? [{ manager: m, items: byId.get(m.id)! }] : []));
-}
-
 /** The line beside an offline manager's name: "Last synced 3 hours ago"; "" for one online (or never seen). */
 export function lastSyncedText(m: Manager, now = Date.now()): string {
   if (m.online || m.installing) return "";

@@ -1,21 +1,15 @@
 // What the pages show of the managers once there is more than one (docs/assistant/managers.md "Clients"): the assistant page's
-// title, a manager's heading where a list still names whose a thing is, and what an offline manager's assistant page
-// says. With one manager none of it renders, so those pages stay as they were. The switcher itself is the sidebar's
-// head (views/AssistantSwitcher.tsx).
+// title, and what an offline manager's pages say. With one manager none of it renders, so those pages stay as they
+// were. The switcher itself is the sidebar's head (views/AssistantSwitcher.tsx).
 import { useRef, useState } from "react";
 import { t } from "../i18n";
-import { lastSyncedText, managerOrder, multiManager, useRoster, type Manager } from "../lib/managers";
+import { managerOrder, multiManager, useRoster, type Manager } from "../lib/managers";
 import { pickedName, useChosenManager, useShownManager } from "../lib/manager-choice";
 import { ago } from "../lib/format";
 import { api, enc, errorText } from "../lib/api";
 import { Button, cx, Menu, toast, useMenu } from "../ui/atoms";
 import { AssistantAvatar } from "../ui/AssistantAvatar";
 import { MAIN_TITLE } from "./assistant/conversations";
-
-/** The status dot of a manager: green online, grey offline. */
-function Dot({ online }: { online: boolean }) {
-  return <span aria-hidden className={cx("size-1.5 shrink-0 rounded-full", online ? "bg-green" : "bg-line-strong")} />;
-}
 
 /** The assistant page's title: the current assistant's name once there are several (the sidebar's switcher picks it,
  *  views/AssistantSwitcher.tsx), else Persona as before. */
@@ -26,19 +20,6 @@ export function useAssistantTitle(): string {
   // before the roster is read (a reload): a kept pick's name as the roster last gave it
   if (!roster && picked) return pickedName() || MAIN_TITLE;
   return (multiManager(roster) && roster.managers.find((m) => m.id === shown)?.name) || MAIN_TITLE;
-}
-
-/** The heading of one manager's group in a list: its name, and when an offline one last synced. */
-export function ManagerHeading({ manager, count, className }: { manager: Manager; count?: number; className?: string }) {
-  const synced = lastSyncedText(manager);
-  return (
-    <div className={cx("flex min-w-0 items-center gap-2 whitespace-nowrap", className)}>
-      <Dot online={manager.online} />
-      <span className={cx("truncate text-[12.5px] font-semibold", manager.online ? "text-ink-2" : "text-ink-3")}>{manager.name}</span>
-      {count !== undefined && <span className="text-[11.5px] text-ink-3 tabular-nums">{count}</span>}
-      {synced && <span className="ml-auto truncate text-[11.5px] text-ink-3">{synced}</span>}
-    </div>
-  );
 }
 
 /** What a composer says for a conversation of manager id while it is offline (several managers only): "<name> · last

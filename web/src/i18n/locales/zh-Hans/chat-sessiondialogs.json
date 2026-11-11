@@ -74,5 +74,10 @@
   "speed_fast": "Fast 加速",
   "speed_unknown": "未知",
   "speed_standard_detail": "使用标准速度和用量。",
-  "speed_paid_detail": "加快响应，会增加用量或费用。"
+  "speed_paid_detail": "加快响应，会增加用量或费用。",
+  "header_mode": "权限模式：{mode}",
+  "mode_unknown": "未知",
+  "leave_bypass_confirm": "切到 {mode}",
+  "leave_bypass_detail": "这个 Agent 不是以全部放行启动的，切走后在这里切不回来。",
+  "modes_locked": "没在运行：运行中才能改模式"
 }

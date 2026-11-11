@@ -52,5 +52,7 @@
   "too_many_waiting": "已经有 {count} 台电脑在等着：没连上来的可以删掉，连上来的先确认是不是你的，再添加新的。",
   "never_connected": "还没连上来过",
   "waiting_confirm": "等你确认",
-  "offline_short": "离线"
+  "offline_short": "离线",
+  "added_under": "这台电脑加到了「{name}」名下。",
+  "assistant_offline": "「{name}」离线，暂时不能给它添加电脑。"
 }

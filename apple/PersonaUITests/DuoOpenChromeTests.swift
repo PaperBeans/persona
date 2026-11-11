@@ -4,7 +4,8 @@ import XCTest
 /// - the Assistant | Agents switch at the top of the page, with no tab bar down the side;
 /// - the button that folds the sidebar at the sidebar's top;
 /// - Search at its foot, beside Persona's name and where it runs;
-/// - the face's menu (Knowledge, Details, the copies; whose Persona, with several hubs) on the main conversation's long press.
+/// - the face's menu (Knowledge, Details, the copies; whose Persona, with several hubs) on the main conversation's long press;
+/// - the switch over an agent opened on Agents too, and the iPhone's new conversation with Needs You (#3680).
 ///
 /// A phone at regular width only: the Duo simulator opened in Xcode's Device Hub, on its side
 /// (TEST_RUNNER_PERSONA_ORIENTATION=landscape) or upright. The iPad keeps its tab bar (IPadSidebarTests).
@@ -43,7 +44,7 @@ final class DuoOpenChromeTests: XCTestCase {
     }
 
     /// The switch at the top of the page and no tab bar; the fold at the sidebar's top, Search at its foot. Folding the
-    /// sidebar and bringing it back from the page; Search opening its field at the top.
+    /// sidebar and bringing it back from the page; Search opening over the window (`testSearchCoversTheWindow…`).
     @MainActor func testTheSwitchIsOnTopAndSearchAtTheFoot() {
         let assistant = element("shell-assistant"), agents = element("shell-agents")
         XCTAssertTrue(assistant.waitForExistence(timeout: 20), "no switch on the page:\n\(app.debugDescription)")
@@ -69,10 +70,40 @@ final class DuoOpenChromeTests: XCTestCase {
         XCTAssertTrue(collapse.waitForExistence(timeout: 5), "the sidebar did not come back")
 
         search.tap()
-        let field = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "搜索对话")).firstMatch
+        XCTAssertTrue(element("full-search-field").waitForExistence(timeout: 5), "Search opened no field:\n\(app.debugDescription)")
+    }
+
+    /// Search covers the window, as ChatGPT's (#3705): its field at the foot over the keyboard with × beside it, the
+    /// conversations above; what is typed narrows them, a row opens its conversation, × closes.
+    @MainActor func testSearchCoversTheWindowWithItsFieldAtTheFoot() {
+        let search = element("assistant-sidebar-search")
+        XCTAssertTrue(search.waitForExistence(timeout: 20), "no Search at the sidebar's foot:\n\(app.debugDescription)")
+        search.tap()
+        let field = element("full-search-field"), close = app.buttons["full-search-close"].firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5), "Search opened no field:\n\(app.debugDescription)")
-        XCTAssertLessThan(field.frame.maxY, window.minY + 140, "the search field is not at the sidebar's top")
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5), "the field did not take the keyboard")
+        sleep(1)
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(field.frame.minY, window.midY - 100, "the field is not at the foot: \(field.frame) in \(window)")
+        XCTAssertLessThanOrEqual(field.frame.maxY, keyboard.frame.minY + 1, "the field is under the keyboard: \(field.frame), \(keyboard.frame)")
+        XCTAssertTrue(close.exists && close.frame.minX > field.frame.maxX - 1, "no × beside the field")
+        let rows = app.buttons.matching(identifier: "full-search-row")
+        XCTAssertGreaterThan(rows.count, 1, "no conversations above the field:\n\(app.debugDescription)")
+        XCTAssertFalse(element("sidebar-new").isHittable, "the page shows beside the search")
         shot("search")
+        field.typeText("韩梅梅")
+        let hit = rows.firstMatch
+        XCTAssertTrue(hit.waitForExistence(timeout: 5) && hit.label.contains("韩梅梅"), "typing did not narrow the list: \(hit.label)")
+        shot("search-typed")
+        hit.tap()
+        XCTAssertTrue(field.waitForNonExistence(timeout: 5), "a row did not close the search")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "韩梅梅")).firstMatch.waitForExistence(timeout: 10),
+                      "the row did not open its conversation:\n\(app.debugDescription)")
+        search.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "Search did not open again")
+        close.tap()
+        XCTAssertTrue(field.waitForNonExistence(timeout: 5), "× did not close the search")
     }
 
     /// The main conversation's long press holds the face's menu: Knowledge, Details and the copies.
@@ -85,6 +116,17 @@ final class DuoOpenChromeTests: XCTestCase {
             XCTAssertTrue(app.buttons[label].firstMatch.waitForExistence(timeout: 5), "no \(label) in the main row's menu:\n\(app.debugDescription)")
         }
         shot("main-menu")
+    }
+
+    /// A new conversation is the iPhone's (#3680): what needs the user over the composer (Agents waiting, the Inbox's
+    /// Needs You), as `ShellHome` shows it on every iPhone.
+    @MainActor func testTheNewConversationShowsWhatNeedsYou() {
+        let new = app.drawerNewChatButton
+        XCTAssertTrue(new.waitForExistence(timeout: 20), "no New Chat in the sidebar:\n\(app.debugDescription)")
+        new.tap()
+        XCTAssertTrue(element("shell-needs-you").waitForExistence(timeout: 10), "no Needs You over the composer:\n\(app.debugDescription)")
+        XCTAssertTrue(element("assistant-welcome").exists, "no welcome on the new conversation")
+        shot("new-conversation")
     }
 
     /// Settings covers the window, as ChatGPT's account page does there, not a sheet over half of it (#3701): one column
@@ -118,6 +160,25 @@ final class DuoOpenChromeTests: XCTestCase {
         shot("agents")
         let assistant = row.descendants(matching: .any)["shell-assistant"].firstMatch
         XCTAssertTrue(assistant.exists, "no Assistant in Agents' switch")
+        assistant.tap()
+        XCTAssertTrue(element("sidebar-main").waitForExistence(timeout: 10), "the switch did not go back to Assistant")
+    }
+
+    /// An agent opened on Agents keeps the switch over it, and the switch goes back to Assistant (#3680: the row was an
+    /// inset of the column's stack, which reached only the empty page; an opened chat had no way back to Assistant).
+    @MainActor func testTheSwitchStaysOverAnOpenedAgent() {
+        app.terminate()
+        app.launchArguments += ["-openSession", "macbook/a1f3c2d4-0000-4000-8000-000000000002"]
+        app.launchPinned()
+        let title = element("chat.title")
+        XCTAssertTrue(title.waitForExistence(timeout: 20), "the agent did not open:\n\(app.debugDescription)")
+        let row = element("page-tab-switch")
+        XCTAssertTrue(row.waitForExistence(timeout: 5) && row.isHittable, "no switch over the opened agent:\n\(app.debugDescription)")
+        XCTAssertLessThan(row.frame.minY, title.frame.minY, "the switch is not over the chat")
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "page-tab-switch").count, 1, "the switch twice over the chat")
+        shot("agent-open")
+        let assistant = row.descendants(matching: .any)["shell-assistant"].firstMatch
+        XCTAssertTrue(assistant.exists, "no Assistant in the switch over the agent")
         assistant.tap()
         XCTAssertTrue(element("sidebar-main").waitForExistence(timeout: 10), "the switch did not go back to Assistant")
     }

@@ -1,0 +1,12 @@
+{
+  "components": {
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Agents.kt::AgentSpaceHeader": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Controls.kt::JTextField": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/FileCards.kt::FileAttachmentCard": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Lists.kt::JRow": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Managers.kt::JAssistantSwitcherHeader": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Page.kt::JTopBar": 1,
+    "android/core/designsystem/src/main/kotlin/persona/core/designsystem/StatusComponents.kt::StatusLine": 1
+  },
+  "version": 1
+}

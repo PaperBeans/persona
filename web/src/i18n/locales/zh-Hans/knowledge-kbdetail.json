@@ -93,5 +93,9 @@
   "ask_failed_model_error": "没能回答：模型出错了。",
   "ask_failed_model_timeout": "没能回答：模型太久没有回复。",
   "ask_failed_interrupted": "hub 重启，回答中断了。请在手机上再问一次。",
-  "ask_failed_nothing_heard": "点按之前没有听到有人说话。"
+  "ask_failed_nothing_heard": "点按之前没有听到有人说话。",
+  "transcript_expired": "转写已过保留期。",
+  "minutes_kept_until": "转写已过保留期。这份纪要保留到 {date}。",
+  "minutes_transcript_expired": "转写已过保留期，只留下了这份纪要。",
+  "minutes_kept_forever": "转写已过期。这份纪要会一直保留，直到你删除。"
 }

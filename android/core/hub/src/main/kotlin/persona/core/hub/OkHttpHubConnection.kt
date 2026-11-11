@@ -37,6 +37,8 @@ data class HubConnectionConfig(
     val token: String,
     val endpoints: List<Endpoint>,
     val version: String,
+    /** The pairing link's proxied origins, checked with system trust (#2622, [HubHttpClient.systemOrigins]). */
+    val systemOrigins: Set<String> = emptySet(),
     val deviceId: String? = null,
     val build: JsonElement? = null,
     val os: JsonObject? = null,
@@ -66,7 +68,7 @@ class OkHttpHubConnection(
     private val config: HubConnectionConfig,
     initialNetwork: HubNetwork,
     val http: HubHttpClient = HubHttpClient(config.hubId, config.fingerprint, config.version,
-        pins = config.members.mapNotNullTo(LinkedHashSet()) { it.fingerprint }),
+        pins = config.members.mapNotNullTo(LinkedHashSet()) { it.fingerprint }, systemOrigins = config.systemOrigins),
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val onReady: suspend (OkHttpHubConnection) -> Unit = {},
     // Android callers should inject SystemClock.elapsedRealtime, which includes deep sleep.
@@ -1060,13 +1062,15 @@ class OkHttpHubConnection(
 
     /** Pinned health probes; without other hubs exactly the single-hub probe. */
     private suspend fun probe(endpoint: Endpoint): Health {
-        if (members.isEmpty()) return http.health(endpoint)
+        // A replacement tunnel can listen on the same loopback address: never probe it through the old listener's connection.
+        val fresh = endpoint.kind == "ssh" || endpoint.kind == "proxy"
+        if (members.isEmpty()) return http.health(endpoint, fresh = fresh)
         val owner = ownerFor(endpoint)
         // HTTPS without a pin is only checked against the system CAs when the group's own pairing had no fingerprint.
         if (endpoint.baseUrl().isHttps && owner.fingerprint == null && !http.systemTrusted) {
             throw HubFailure(HubError.CertificateMismatch, retryable = false)
         }
-        return http.health(endpoint, expectedHubId = owner.hubId, expectedPin = owner.fingerprint)
+        return http.health(endpoint, fresh = fresh, expectedHubId = owner.hubId, expectedPin = owner.fingerprint)
     }
 
     /** The hub behind a route: id, pin, the credential to send and whether it is that hub's own. */

@@ -64,6 +64,10 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
     /// At rest the strip is on the shell's page anyway.
     private func opensMenu(_ value: AppTab) -> Bool {
         guard chosen == value else { return false }
+        // No menu to open (the switch over a phone's tabs, iPhone Duo open, #3680): the chosen segment is a plain button,
+        // not an empty menu that VoiceOver called List Options.
+        if value == .chats, WorkMenu.self == EmptyView.self { return false }
+        if value == .assistant, ChatMenu.self == EmptyView.self { return false }
         guard let pager = shell?.pager else { return true }
         return !pager.moving
     }
@@ -337,8 +341,17 @@ struct ShellPersonaButton: View {
             Haptics.tap()
             action()
         } label: {
-            PersonaDot(size: Theme.Size.tapTarget * k, state: state)
-                .contentShape(.circle)
+            Group {
+                if model.showsAssistantIdentity {
+                    PersonaDot(size: Theme.Size.tapTarget * k, state: state)
+                } else {
+                    ThemedIcon(Theme.Icon.sidebarMenu)
+                        .font(Theme.Font.heading)
+                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                        .chromeSurface(in: Circle())
+                }
+            }
+            .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .overlay(alignment: .bottomTrailing) {
@@ -348,7 +361,7 @@ struct ShellPersonaButton: View {
             }
         }
         .accessibilityLabel("Chat History [Shell Components 60636b]")
-        .accessibilityValue([String(localized: "\(model.persona.name), \(state.title)"), inbox ? String(localized: "Something in the Inbox needs you") : nil]
+        .accessibilityValue([model.showsAssistantIdentity ? String(localized: "\(model.persona.name), \(state.title)") : state.title, inbox ? String(localized: "Something in the Inbox needs you") : nil]
             .compactMap { $0 }.joined(separator: String(localized: ", ", comment: "List separator")))
         .accessibilityHint("Opens the sidebar")
         .accessibilityIdentifier(id)
