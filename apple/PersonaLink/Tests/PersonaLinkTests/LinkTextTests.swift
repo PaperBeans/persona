@@ -18,4 +18,15 @@ final class LinkTextTests: XCTestCase {
         XCTAssertEqual(LinkText.hub(name: "x", mesh: 2), "hub「x」· 互联组共 2 台 hub")
         XCTAssertTrue(LinkText.hub(name: "x", mesh: 2).contains("互联组共 2 台 hub"))
     }
+
+    func testSSHTextHelpers() throws {
+        XCTAssertEqual(LinkText.kinds["ssh"], "SSH")
+        XCTAssertEqual(LinkText.sshLoginCommand("user@example.com"), "ssh user@example.com")
+        XCTAssertEqual(LinkText.sshLoginCommand("user@example.com:2222"), "ssh -p 2222 user@example.com")
+        XCTAssertEqual(LinkText.sshLoginCommand("user@[2001:db8::1]:2222"), "ssh -p 2222 user@2001:db8::1")
+        for code in ["no_ssh", "auth_refused", "host_key", "forward_refused", "target_unreachable"] {
+            let msg = LinkText.sshError(SSHStatusError(code: code, server: "user@example.com", target: "127.0.0.1:18662"))
+            XCTAssertFalse(msg.isEmpty)
+        }
+    }
 }

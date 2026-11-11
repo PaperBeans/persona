@@ -197,15 +197,28 @@ func unpack(gz, bin, want string) error {
 // CheckBinary runs the new binary's `version -v`: it must say the release's version, the release channel and its
 // build number, or it is not the release's binary for this platform (or does not run here).
 func CheckBinary(ctx context.Context, bin string, m *Manifest) error {
+	got, err := versionOf(ctx, bin)
+	if err != nil {
+		return fmt.Errorf("the new personad does not run here: %w", err)
+	}
+	if want := releaseLine(m); got != want {
+		return fmt.Errorf("the new personad says %q, not %q", got, want)
+	}
+	return nil
+}
+
+// versionOf is what bin's `version -v` says, trimmed.
+func versionOf(ctx context.Context, bin string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, bin, "version", "-v").Output()
 	if err != nil {
-		return fmt.Errorf("the new personad does not run here: %w", err)
+		return "", err
 	}
-	want := fmt.Sprintf("%s\nchannel %s, build %d", m.Version, Release, m.Build)
-	if got := strings.TrimSpace(string(bytes.TrimSpace(out))); got != want {
-		return fmt.Errorf("the new personad says %q, not %q", got, want)
-	}
-	return nil
+	return strings.TrimSpace(string(bytes.TrimSpace(out))), nil
+}
+
+// releaseLine is what `version -v` says for every binary of release m.
+func releaseLine(m *Manifest) string {
+	return fmt.Sprintf("%s\nchannel %s, build %d", m.Version, Release, m.Build)
 }

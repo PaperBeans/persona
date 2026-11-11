@@ -77,7 +77,8 @@ internal class AgentsViewModel(
             // Restored offline history must be discoverable even when the list was showing only running agents.
             previous = null
             groupFilter.value = null
-            settings.update { it.copy(quick = AgentQuickFilter.All, query = "", machineFilter = "", kept = emptySet(), folded = emptySet()) }
+            settings.update { it.copy(quick = AgentQuickFilter.All, query = "", machineFilter = "", kept = emptySet(),
+                folded = if (it.query.isNotEmpty()) stashedFolds ?: it.folded else it.folded).also { stashedFolds = null } }
             preferences.range(pairingScope, AgentRange.All)
         }
         _notice.value = AgentText(if (archived) R.string.agents_notice_archived else R.string.agents_notice_restored)
@@ -206,16 +207,18 @@ internal class AgentsViewModel(
     }
 
     private val todosFlow = tasks?.todos ?: MutableStateFlow(emptyList())
+    private val todosSupportedFlow = tasks?.todosSupported ?: MutableStateFlow(false)
     private val projectedPage = combine(renamer?.project(repository.sessions) ?: repository.sessions, repository.machines,
         preferences.snapshots(pairingScope).combine(repository.listStatus) { prefs, status -> prefs to status },
-        combine(settings, groupFilter, assistant, ::Triple), combine(operationState, todosFlow, ::Pair)) { hubSessions, hubMachines, (localPrefs, pagination), (settings, group, assistant), (ops, todos) ->
+        combine(settings, groupFilter, assistant, ::Triple), combine(operationState, todosFlow, todosSupportedFlow, ::Triple)) { hubSessions, hubMachines, (localPrefs, pagination), (settings, group, assistant), (ops, todos, todosSupported) ->
         // The current assistant's (the hub's lists are every manager's, each row with its own).
         val everySession = if (assistant == null) hubSessions else hubSessions.filter { assistant.ownsOn(it.machineId, it.manager) }
         val everyMachine = if (assistant == null) hubMachines else hubMachines.filter { assistant.ownsOn(it.id, it.manager) }
         val source = if (group == null) everySession else everySession.filter { group.admits(it.machineId) }
         val machines = if (group == null) everyMachine else everyMachine.filter { group.admits(it.id) }
         val sessions = ops.project(source)
-        val prefs = localPrefs.copy(pins = ops.pins?.domain() ?: localPrefs.pins, mutes = ops.mutes?.domain() ?: localPrefs.mutes)
+        val prefs = localPrefs.copy(pins = ops.pins?.domain() ?: localPrefs.pins, mutes = ops.mutes?.domain() ?: localPrefs.mutes,
+            grouping = resolvedGrouping(localPrefs.grouping, todosSupported))
         val rows = sessions.map { it.listSession(prefs) }
         // A partial machine snapshot must not hide sessions in machine grouping.
         val knownMachines = machines + sessions.map { it.machineId }.distinct().filter { id -> machines.none { it.id == id } }
@@ -226,14 +229,14 @@ internal class AgentsViewModel(
         previousContext = context
         // Server row search uses complete index text; searching the truncated summary again would lose matches.
         val projectionSettings = if (pagination.paged) effective.copy(query = "") else effective
-        val sorted = scopedAgentList(rows, knownMachines, prefs, projectionSettings, todos)
+        val sorted = scopedAgentList(rows, knownMachines, prefs, projectionSettings, todos, openedRowsOfTheirOwn(previous, effective.kept))
         val result = retainOpenedRows(sorted, previous, effective.kept).also { previous = it }
         val all = scopedAgentList(rows, knownMachines, prefs,
             projectionSettings.copy(quick = AgentQuickFilter.All, kept = emptySet()), todos)
         // The chips count what each computer would show under the current range, search and quick filter.
         val everywhere = scopedAgentList(rows, knownMachines, prefs, projectionSettings.copy(machineFilter = "", kept = emptySet()), todos)
-            .groups.flatMap { it.rows }.filterNot { it.session.isCodexSubagent }
-        AgentsPageState(sessions, knownMachines, prefs, effective, result, all.groups.sumOf { group -> group.rows.count { !it.session.isCodexSubagent } },
+            .groups.flatMap { it.rows }.filterNot { it.isNestedSubtask }
+        AgentsPageState(sessions, knownMachines, prefs, effective, result, all.groups.sumOf { group -> group.rows.count { !it.isNestedSubtask } },
             machineCounts(knownMachines, everywhere), everywhere.size, groupCounts(everySession, everyMachine, prefs, effective, ops),
             // With botmux shown, "All"'s own "Lark groups" count is it; hidden, counted without a fourth list.
             botmuxCount = if (effective.hideBotmux) botmuxCount(rows, prefs, effective)
@@ -434,10 +437,26 @@ internal class AgentsViewModel(
     }
     fun range(range: AgentRange) = localChange {
         previous = null
-        settings.update { it.copy(quick = AgentQuickFilter.All, kept = emptySet(), folded = emptySet()) }
+        settings.update { it.copy(quick = AgentQuickFilter.All, kept = emptySet()) }
         preferences.range(pairingScope, range)
     }
-    fun query(query: String) { previous = null; settings.update { it.copy(query = query, kept = emptySet(), folded = emptySet()) } }
+    /**
+     * A search opens every fold while it runs (iOS): the list's folds wait in [stashedFolds] and come back as they were when
+     * the query clears; what is folded during the search is forgotten with it (#4338 A6).
+     */
+    fun query(query: String) {
+        previous = null
+        val was = settings.value.query
+        if (was.isEmpty() && query.isNotEmpty()) stashedFolds = settings.value.folded
+        settings.update {
+            when {
+                was.isEmpty() && query.isNotEmpty() -> it.copy(query = query, kept = emptySet(), folded = emptySet())
+                was.isNotEmpty() && query.isEmpty() -> it.copy(query = query, kept = emptySet(), folded = stashedFolds ?: emptySet())
+                else -> it.copy(query = query, kept = emptySet())
+            }
+        }
+        if (query.isEmpty()) stashedFolds = null
+    }
     /** What the list would show for each group (the group chips), like the computer chips count. */
     private fun groupCounts(all: List<Session>, machines: List<Machine>, prefs: AgentsPreferencesSnapshot,
         settings: AgentListSettings, ops: AgentOperationsSnapshot): Map<String?, Int> {
@@ -445,7 +464,7 @@ internal class AgentsViewModel(
         if (machines.none { GroupKeys.namespaceOf(it.id) != null } && all.none { GroupKeys.namespaceOf(it.machineId) != null }) return emptyMap()
         val rows = ops.project(all).map { it.listSession(prefs) }
         return scopedAgentList(rows, machines, prefs, settings.copy(machineFilter = "", kept = emptySet()))
-            .groups.flatMap { it.rows }.filterNot { it.session.isCodexSubagent }.distinctBy { it.id }
+            .groups.flatMap { it.rows }.filterNot { it.isNestedSubtask }.distinctBy { it.id }
             .groupingBy { GroupKeys.namespaceOf(it.session.machineId) }.eachCount()
     }
 
@@ -458,7 +477,7 @@ internal class AgentsViewModel(
     }
     fun grouping(group: AgentGrouping) = localChange {
         previous = null
-        settings.update { it.copy(kept = emptySet(), folded = emptySet()) }
+        settings.update { it.copy(kept = emptySet()) }
         preferences.grouping(group)
     }
     fun compact() = localChange { preferences.compact(!page.value.preferences.compact) }
@@ -480,12 +499,13 @@ internal class AgentsViewModel(
         if (trimmed.isEmpty() || trimmed == session.spaceName) return
         change(session.machineId, R.string.agents_notice_renamed) { it.renameSpace(session, trimmed) }
     }
-    fun close(session: Session) = change(session.machineId) {
+    /** [onDone]: after it went through (the worktree cleanup, #4532). */
+    fun close(session: Session, onDone: () -> Unit = {}) = change(session.machineId, onDone = onDone) {
         it.session(session, AgentSessionEdit(closed = true))
         bindings?.onSessionClosed?.invoke(session.key)
     }
     /** "Delete chat": out of every app's list (the transcript stays); a chat open on it goes. */
-    fun delete(session: Session) = change(session.machineId, R.string.agents_notice_deleted) {
+    fun delete(session: Session, onDone: () -> Unit = {}) = change(session.machineId, R.string.agents_notice_deleted, onDone) {
         it.session(session, AgentSessionEdit(deleted = true))
         bindings?.onSessionClosed?.invoke(session.key)
     }
@@ -536,7 +556,8 @@ internal class AgentsViewModel(
         }
     }
     /** [machineId] is the target's: it goes through its own hub group's connection, as answers do (stateFor). */
-    private fun change(machineId: String, @androidx.annotation.StringRes success: Int = R.string.agents_notice_saved, action: suspend (AgentOperationsState) -> Unit) {
+    private fun change(machineId: String, @androidx.annotation.StringRes success: Int = R.string.agents_notice_saved, onDone: () -> Unit = {},
+                       action: suspend (AgentOperationsState) -> Unit) {
         val operations = operations ?: run { _notice.value = AgentText(R.string.agents_notice_operations_missing); return }
         if (hubGroups.groups.value.stateFor(machineId, connection.state.value) != ConnectionState.Online) { _notice.value = AgentText(R.string.agents_notice_offline); return }
         if (changing) { _notice.value = AgentText(R.string.agents_notice_saving); return }
@@ -547,6 +568,7 @@ internal class AgentsViewModel(
                 action(operations)
                 succeeded = true
                 _notice.value = AgentText(success)
+                onDone()
             } catch (e: CancellationException) { throw e }
             catch (_: OperationsMissing) { _notice.value = AgentText(R.string.agents_notice_operations_missing) }
             catch (_: RenameUnconfirmed) { _notice.value = AgentText(R.string.agents_notice_rename_unconfirmed) }
@@ -569,6 +591,31 @@ internal class AgentsViewModel(
         if (page.value.settings.quick != AgentQuickFilter.All) settings.update { it.copy(kept = it.kept + rows.map { row -> row.id }) }
         preferences.markSeen(rows.map { it.session })
     }
+    /** The grouping whose stored folds [settings] holds; folds are read again only when it changes (#4338 A6). */
+    private var foldsGrouping: AgentGrouping? = null
+    /** The list's folds while a search opens them ([query]). */
+    private var stashedFolds: Set<String>? = null
+
+    init {
+        // Folds come back after a relaunch and with each grouping, as iOS keeps them on the phone.
+        viewModelScope.launch {
+            preferences.snapshots(pairingScope).collect { prefs ->
+                if (prefs.grouping == foldsGrouping) return@collect
+                foldsGrouping = prefs.grouping
+                val stored = prefs.folds[prefs.grouping].orEmpty()
+                if (settings.value.query.isEmpty()) settings.update { it.copy(folded = stored) } else stashedFolds = stored
+            }
+        }
+    }
+
+    /** Keeps the current grouping's folds on this phone; a search's are not kept. */
+    private fun saveFolds() {
+        val grouping = foldsGrouping ?: return
+        if (settings.value.query.isNotEmpty()) return
+        val folded = settings.value.folded
+        localChange { preferences.folds(grouping, folded) }
+    }
+
     fun fold(group: AgentListGroup) {
         settings.update { current ->
             if (group.parent == "quiet") current.copy(
@@ -582,9 +629,11 @@ internal class AgentsViewModel(
             )
             else current.copy(folded = if (group.folded) current.folded - group.id else current.folded + group.id)
         }
+        saveFolds()
     }
     fun fold(machine: AgentMachineGroup) {
         settings.update { it.copy(folded = if (machine.folded) it.folded - machine.id else it.folded + machine.id) }
+        saveFolds()
     }
     fun foldAll(fold: Boolean) {
         previous = null
@@ -592,6 +641,7 @@ internal class AgentsViewModel(
             folded = if (fold) (page.value.list.groups.map { group -> group.id } + page.value.list.machines.map { machine -> machine.id }).toSet() else emptySet(),
             expandedQuiet = if (fold) emptySet() else page.value.list.groups.filter { group -> group.parent == "quiet" }.map { group -> group.id }.toSet(),
         ) }
+        saveFolds()
         if (!fold) localChange { preferences.openAllTabs() }
     }
     fun showIdle(group: AgentListGroup) {

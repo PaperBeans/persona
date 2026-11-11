@@ -14,7 +14,7 @@ fun JSidebarNewChat(text: String, onClick: () -> Unit, modifier: Modifier = Modi
     val palette = PersonaTheme.palette
     val compact = LocalHomeDrawer.current && PersonaTheme.style == AppStyle.Glass
     val fill = if (compact) sidebarActionFill(palette) else palette.accent
-    CompositionLocalProvider(LocalPalette provides if (compact) palette.copy(action = fill, onAction = ExtensionThemeColors.on(fill)) else palette) {
+    CompositionLocalProvider(LocalPalette provides if (compact) palette.copy(action = fill, onAction = palette.onAccentFill(fill)) else palette) {
         JButton(text, onClick, modifier, icon = PhIcons.NotePencil)
     }
 }

@@ -239,6 +239,35 @@ check('a message to it: Paseo takes it over under the same id and it goes on', (
 const back = (await paseo.request('fetch_agent_request', { agentId })).agent
 check('the same Paseo agent, back from the archive', back && !back.archivedAt && back.labels?.['persona.session'] === claudeSid, JSON.stringify(back?.labels))
 
+// ---- agents started in Paseo itself, never driven from the phone ----
+
+// Paseo runs Claude Code's command line itself, so such an agent's transcript reads like a script's one-shot run, which
+// the node leaves out. Archived in Paseo's own app it is a session not running all the same: the bridge names it. One
+// deleted there is gone: Paseo says so only to the client that deleted it (this script's), and the bridge finds out.
+const inPaseo = async () => {
+  const res = await paseo.request('agent.create.request', { agentId: randomUUID(), config: { provider: 'e2e-claude', cwd: work }, initialPrompt: 'Please E2E_HELLO' },
+    { timeoutMs: 60_000 }).catch(() => undefined)
+  const id = res?.agent?.id
+  return until('its first turn over', async () => {
+    const a = id && (await paseo.request('fetch_agent_request', { agentId: id })).agent
+    const claude = a?.persistence?.sessionId ?? a?.runtimeInfo?.sessionId
+    return a?.status === 'idle' && claude ? { id, claude } : undefined
+  }, 60_000).catch(() => undefined)
+}
+const row = (a, runtime) => node.sessions().find((s) => s.session_id === a?.claude && (s.source_kind === 'runtime') === runtime)
+const kept = await inPaseo()
+const gone = await inPaseo()
+await until('both listed', () => row(kept, true) && row(gone, true), 30_000).catch(() => {})
+check('agents started in Paseo are sessions under their Claude ids', kept && gone && row(kept, true) && row(gone, true), `${kept?.claude} ${gone?.claude}`)
+await paseo.request('archive_agent_request', { agentId: kept?.id }).catch(() => {})
+await paseo.request('delete_agent_request', { agentId: gone?.id }).catch(() => {})
+await until('the archived one listed as 未运行', () => !row(kept, true) && row(kept, false)?.status === 'offline', 60_000).catch(() => {})
+check('archived in Paseo\'s own app: its transcript is a session not running (未运行)', !row(kept, true) && row(kept, false)?.status === 'offline', kept?.claude)
+// The node scanned the transcripts afresh to list the archived one: the deleted one's was there to be listed too.
+await until('the deleted one off the list', () => !row(gone, true), 30_000).catch(() => {})
+check('deleted in Paseo: gone from the list, and its transcript is not listed', gone && !node.sessions().some((s) => s.session_id === gone.claude),
+  JSON.stringify(node.sessions().filter((s) => s.session_id === gone?.claude).map((s) => [s.source_kind, s.status])))
+
 // ---- the engine changed: the bridge stops ----
 
 await node.call('engine.use', { engine: 'herdr' })

@@ -96,10 +96,10 @@ nonisolated struct APIError: LocalizedError, Sendable {
     /// Business codes precede status and free-form server wording. Raw fields remain available for diagnostics.
     var businessMessage: String? {
         switch code {
-        case "kb_disabled": String(localized: "This manager has turned off the knowledge base. Enable it in the manager configuration to use it.")
+        case "kb_disabled": String(localized: "This assistant has turned off the knowledge base. Enable it in the assistant's configuration to use it.")
         case "kb_unavailable": String(localized: "The knowledge base isn't ready yet. Try again shortly.")
-        case "kb_read_only": String(localized: "The knowledge base is read-only. Change the manager configuration before editing or syncing recordings.")
-        case "assistant_offline": String(localized: "The manager is offline or restarting. Try again shortly.")
+        case "kb_read_only": String(localized: "The knowledge base is read-only. Change the assistant's configuration before editing or syncing recordings.")
+        case "assistant_offline": String(localized: "The assistant is offline or restarting. Try again shortly.")
         case "node_unreachable":
             fields["delivered"] == "none"
                 ? String(localized: "This computer is offline: Persona Link isn't running, or the computer is asleep.")

@@ -24,7 +24,7 @@ class ThemeColorsTest {
     @Test fun everyAccentMeetsTheLinkFloorOnEveryStyle() {
         val accents = ThemeColor.presets.mapNotNull { it.preset } +
             // A hard one: a pale yellow a package might bring.
-            ThemeAccent(Color(0xFFF2E030), Color(0xFF3A3000))
+            ThemeAccent(LightDark(Color(0xFFF2E030), Color(0xFF3A3000)), fromPackage = true)
         for (accent in accents) for (style in AppStyle.entries) for (dark in listOf(false, true)) {
             val base = Palettes.of(style, dark)
             val p = ThemeColors.palette(base, accent)

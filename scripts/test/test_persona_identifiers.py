@@ -13,7 +13,7 @@ ANDROID_TARGET = '{http://schemas.android.com/apk/res/android}targetActivity'
 class PersonaIdentifiersTest(unittest.TestCase):
     def test_go_commands_have_only_canonical_source_directories(self):
         former = 'jar' + 'vis'
-        for command, retired in (('personad', former + 'd'), ('personad-wechat', former + 'd-wechat')):
+        for command, retired in (('personad', former + 'd'), ('persona-link', former + '-link')):
             target = ROOT / 'server/cmd' / command
             self.assertTrue(target.is_dir())
             self.assertFalse(target.is_symlink())
@@ -50,7 +50,7 @@ class PersonaIdentifiersTest(unittest.TestCase):
             caller = (ROOT / relative).read_text()
             self.assertIn('mainActivityIntent(', caller)
             self.assertNotIn('MainActivity::class.java', caller)
-        self.assertEqual({('persona', 'pair'), ('persona', 'open'),
+        self.assertEqual({('persona', 'pair'), ('persona', 'open'), ('persona', 'password-login'),
                           ('@string/compatibility_legacy_scheme', 'pair'),
                           ('@string/compatibility_legacy_scheme', 'open')}, {
             (data.get('{http://schemas.android.com/apk/res/android}scheme'),

@@ -4,6 +4,11 @@
 // decisions, pure, so they are tested without a DOM.
 import { composing, type KeyLike } from "./send-history";
 
+/** How long an edit's send waits after the rewind (#4605): Claude puts the old prompt back into its input box a moment
+ *  after the node's rewind has answered, and a message typed before that lands glued after it. Live, the prompt was
+ *  back within about 0.3 s. The send also asks the node to clear exactly that prompt first (`clear_draft`). */
+export const EDIT_SEND_SETTLE_MS = 1500;
+
 /** What the composer is showing when a key comes. */
 export interface EditLastBox {
   /** Edit last message is on offer: an idle Claude session whose last prompt can be edited (ChatView). */

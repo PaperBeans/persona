@@ -1,0 +1,12 @@
+{
+  "due": "期限",
+  "due_today": "今日",
+  "due_tomorrow": "明日",
+  "due_next_week": "来週",
+  "due_pick": "日付を選ぶ…",
+  "due_none": "期限なし",
+  "remind_hour": "1時間後",
+  "remind_tomorrow": "明日の朝",
+  "remind_none": "リマインドなし",
+  "hand_over": "エージェントに任せる…"
+}

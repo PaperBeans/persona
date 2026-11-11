@@ -188,6 +188,9 @@ func TestCuaGateHook(t *testing.T) {
 }
 
 func TestCuaOnlyHookTakesOnlyCuaDriverCommands(t *testing.T) {
+	// Restored after RunHook sets it: left behind, the later tests' node.sock would sit under a removed temporary
+	// directory, past macOS's Unix socket path limit (#4581).
+	t.Setenv("PERSONA_HOME", t.TempDir())
 	for input, want := range map[string]bool{
 		`{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "cua-driver call click '{}'"}}`: true,
 		`{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls -la"}}`:                     false,

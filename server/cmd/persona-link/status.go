@@ -29,6 +29,8 @@ type report struct {
 	HubName     string `json:"hub_name,omitempty"`
 	// Endpoints: the candidates in link.json, in the order they are tried.
 	Endpoints []link.Endpoint `json:"endpoints,omitempty"`
+	// SSH: the optional SSH tunnel in link.json.
+	SSH *link.SSH `json:"ssh,omitempty"`
 	// Trust: how the hub is checked, "pin" (its key, from the pairing) | "system" (behind an HTTPS reverse proxy:
 	// the system's CAs and the host name).
 	Trust string `json:"trust,omitempty"`
@@ -80,6 +82,7 @@ func gather(e *env) report {
 	if c, err := link.Load(cfg); err == nil {
 		r.Paired, r.Machine, r.HubID, r.HubName, r.Endpoints = true, c.Machine, c.Hub, c.HubName, link.Ranked(c.Endpoints)
 		r.MachineName = c.MachineName
+		r.SSH = c.SSH
 		r.Trust = "pin"
 		if c.SystemTrust() {
 			r.Trust = link.TrustSystem
@@ -89,6 +92,9 @@ func gather(e *env) report {
 	}
 	if c, err := link.Read(cfg); err == nil {
 		r.Mode = c.CurrentMode()
+		if r.SSH == nil {
+			r.SSH = c.SSH
+		}
 		if p := c.Passive; p != nil || r.Mode == link.ModePassive {
 			pr := &passiveReport{Listen: p.ListenAddr(), Paired: p.Paired()}
 			if p != nil {
@@ -214,21 +220,47 @@ func (r report) text(now time.Time, user string) string {
 		if r.Trust == link.TrustSystem {
 			line("校验：经反向代理 · 系统证书（按系统信任的 CA 和域名，没有钉住 hub 的公钥）")
 		}
-		if len(r.Endpoints) > 0 {
+		if len(r.Endpoints) > 0 || r.SSH != nil {
 			line("候选地址（按尝试顺序）：")
+			sshLine := func() {
+				if r.SSH == nil {
+					return
+				}
+				var notes []string
+				if live && st.State == "connected" && st.Kind == link.KindSSH {
+					notes = append(notes, "在用")
+				}
+				if r.SSH.Always {
+					notes = append(notes, "总是走 SSH")
+				}
+				note := ""
+				if len(notes) > 0 {
+					note = "（" + strings.Join(notes, "，") + "）"
+				}
+				line("  · %s %s → %s%s", kindName(link.KindSSH), r.SSH.Server, r.SSH.Target, note)
+			}
+			if r.SSH != nil && r.SSH.Always {
+				sshLine()
+			}
 			for _, ep := range r.Endpoints {
 				var notes []string
-				if live && st.State == "connected" && st.Address == ep.URL {
+				if live && st.State == "connected" && st.Kind != link.KindSSH && st.Address == ep.URL {
 					notes = append(notes, "在用")
 				}
 				if ep.Manual {
 					notes = append(notes, "手动加的")
+				}
+				if r.SSH != nil && r.SSH.Always {
+					notes = append(notes, "已设总是走 SSH")
 				}
 				note := ""
 				if len(notes) > 0 {
 					note = "（" + strings.Join(notes, "，") + "）"
 				}
 				line("  · %s %s%s", kindName(ep.Kind), ep.URL, note)
+			}
+			if r.SSH != nil && !r.SSH.Always {
+				sshLine()
 			}
 		}
 	}
@@ -350,7 +382,7 @@ func (r report) serviceText(line func(string, ...any), user string) {
 	}
 }
 
-var kindNames = map[string]string{"lan": "内网", "ipv6": "公网 IPv6", "name": "域名", "ipv4": "公网 IPv4"}
+var kindNames = map[string]string{"lan": "内网", "ipv6": "公网 IPv6", "name": "域名", "ipv4": "公网 IPv4", link.KindSSH: "SSH"}
 
 func kindName(kind string) string {
 	if n, ok := kindNames[kind]; ok {

@@ -1,6 +1,5 @@
 package persona.feature.agents
 
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +33,9 @@ import persona.core.navigation.Navigator
 import persona.core.navigation.SpaceRoute
 import kotlinx.coroutines.delay
 import java.time.Instant
+import persona.core.designsystem.FeedbackNotice
+import persona.core.designsystem.FeedbackStyle
+import persona.core.designsystem.rememberToastState
 
 /**
  * The space page as a destination of its own ([SpaceRoute]): in a wide window it opens beside the Agents list (the
@@ -88,7 +90,8 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
     val operations by model.operationState.collectAsStateWithLifecycle()
     val notice by model.notice.collectAsStateWithLifecycle()
     val failure by model.failure.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
+    // A fallback for when no app feedback is provided (previews, tests): the page's own toast, as the root's.
+    val toast = rememberToastState()
     val feedback = LocalAppFeedback.current
     var operationDialog by remember { mutableStateOf<AgentOperationDialog?>(null) }
     var confirmRead by remember { mutableStateOf<List<AgentSession>?>(null) }
@@ -104,13 +107,13 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
     val failureResources = agentResources()
     LaunchedEffect(failure) {
         failure?.let {
-            if (feedback?.failure(it) != true) snackbar.showSnackbar(operationFeedback(it).text.resolve(failureResources))
+            if (feedback?.failure(it) != true) toast.show(FeedbackNotice(operationFeedback(it).text.resolve(failureResources), style = FeedbackStyle.Error))
             model.clearFailure()
         }
     }
     val resources = agentResources()
     LaunchedEffect(notice) {
-        notice?.let { val text = it.resolve(resources); if (feedback?.notice(text) != true) snackbar.showSnackbar(text); model.clearNotice() }
+        notice?.let { val text = it.resolve(resources); if (feedback?.notice(text) != true) toast.show(FeedbackNotice(text)); model.clearNotice() }
     }
     LaunchedEffect(creation?.created) {
         creation?.created?.let { session ->
@@ -140,7 +143,7 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
             onDelete = { operationDialog = AgentOperationDialog.Delete(row.session) })
     }
     SpaceScreen(space, page.machines, pending, page.preferences, operations.busy,
-        canStart = workspace != null && page.machines.any { it.id == space?.machineId && it.online }, snackbar = snackbar, now = now,
+        canStart = workspace != null && page.machines.any { it.id == space?.machineId && it.online }, toast = toast, now = now,
         onDismiss = navigator::back, onOpen = ::openRow,
         onNewTab = { creationModel?.startIn(AgentSpacePreset(it.machineId, requireNotNull(workspace), it.cwd, it.name)); newAgent = true },
         spaceMenu = { shown ->
@@ -156,11 +159,13 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
         loaded = page.sessions.isNotEmpty() || page.machines.isNotEmpty(),
         onClose = { row -> closeSwipe(row, operations.busy) { operationDialog = AgentOperationDialog.Close(row.session) } })
     operationDialog?.let { dialog ->
-        AgentOperationDialog(dialog, model, page.machines.firstOrNull { it.id == dialog.session.machineId }?.displayName) { operationDialog = null }
+        val machine = page.machines.firstOrNull { it.id == dialog.session.machineId }
+        AgentOperationDialog(dialog, model, machine?.displayName, creationModel?.service, machine) { operationDialog = null }
     }
     confirmRead?.let { rows -> MarkAllReadDialog(rows.size, onDismiss = { confirmRead = null }) { model.markRead(rows) } }
     if (newAgent) {
-        if (creationModel != null) NewAgentDialog(creationModel, page.machines, connection == ConnectionState.Online) { newAgent = false }
+        if (creationModel != null) NewAgentDialog(creationModel, page.machines, connection == ConnectionState.Online,
+            onAddProvider = { navigator.navigate(persona.core.navigation.SettingsPageRoute(persona.core.navigation.SettingsPage.Providers)) }) { newAgent = false }
         else JDialog(onDismiss = { newAgent = false }, title = stringResource(R.string.agents_action_new_session),
             text = stringResource(R.string.agents_new_session_unavailable), confirm = stringResource(R.string.agents_close) to { newAgent = false }, dismiss = null)
     }

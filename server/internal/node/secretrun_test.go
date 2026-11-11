@@ -138,6 +138,42 @@ func TestSecretRunStopsAtTheFirstFailure(t *testing.T) {
 	}
 }
 
+// A shell can handle the deadline's TERM by exiting successfully; cancellation still ends the run.
+func TestSecretRunTermTrapZeroExitRemainsTimedOut(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "blocked-input")
+	marker := filepath.Join(dir, "next-command")
+	command := "mkfifo " + shellQuote(fifo) + " || exit 1; exec 3<>" + shellQuote(fifo) + "; trap 'echo term; exit 0' TERM; echo ready; read ignored <&3"
+	ans, err, _ := secretRunCall(t, []string{command, "echo never > " + shellQuote(marker)}, 700*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ans.Results) == 0 || !strings.Contains(ans.Results[0].Output, "ready\n") || !strings.Contains(ans.Results[0].Output, "term\n") {
+		t.Fatalf("TERM fixture did not reach its ready and handler markers: %+v", ans.Results)
+	}
+	if len(ans.Results) != 1 || !ans.Results[0].TimedOut || ans.Results[0].ExitCode != -1 {
+		t.Fatalf("results = %+v, want one timed out with exit -1", ans.Results)
+	}
+	if fileExists(marker) {
+		t.Fatal("the command after the deadline ran")
+	}
+}
+
+func TestSecretRunSuccessfulCommandsBeforeDeadlineStaySuccessful(t *testing.T) {
+	ans, err, _ := secretRunCall(t, []string{"echo first", "echo second"}, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ans.Results) != 2 {
+		t.Fatalf("results = %+v, want both successful commands", ans.Results)
+	}
+	for i, want := range []string{"first\n", "second\n"} {
+		if r := ans.Results[i]; r.ExitCode != 0 || r.TimedOut || r.Output != want {
+			t.Fatalf("result %d = %+v, want success with output %q", i, r, want)
+		}
+	}
+}
+
 // Running out of the run's time kills the command's whole process group, a child it left in the background too.
 func TestSecretRunTimeoutKillsTheGroup(t *testing.T) {
 	start := time.Now()
@@ -151,8 +187,10 @@ func TestSecretRunTimeoutKillsTheGroup(t *testing.T) {
 	if len(ans.Results) != 1 || !ans.Results[0].TimedOut || ans.Results[0].ExitCode != -1 {
 		t.Fatalf("results = %+v, want one timed out with exit -1", ans.Results)
 	}
-	child, err := strconv.Atoi(strings.TrimSpace(ans.Results[0].Output))
-	if err != nil {
+	// Combined stderr may append the shell's child-termination diagnostic after the fixture's first PID line.
+	pidLine, _, _ := strings.Cut(strings.TrimSpace(ans.Results[0].Output), "\n")
+	child, err := strconv.Atoi(pidLine)
+	if err != nil || child <= 0 {
 		t.Fatalf("output %q: %v", ans.Results[0].Output, err)
 	}
 	deadline := time.Now().Add(3 * time.Second)

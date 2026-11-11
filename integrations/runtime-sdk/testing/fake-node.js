@@ -8,11 +8,13 @@ import { Peer, RpcError } from '../lib/wire.js'
 
 /**
  * @param {{ after?: (fn: () => void) => void }} [t] - a node:test context (cleans up after the test), or nothing.
- * @param {{ path?: string, hub?: boolean, features?: string[], tools?: object[] }} [opts] - the socket path (default:
- *   a fresh temp one); whether hello says a hub is connected (default true; setHub changes it and tells the runtime);
- *   the node's features; the hub's tools mcp.tools answers (n.tools changes them).
+ * @param {{ path?: string, hub?: boolean, features?: string[], tools?: object[], strict?: boolean }} [opts] - the socket
+ *   path (default: a fresh temp one); whether hello says a hub is connected (default true; setHub changes it and tells
+ *   the runtime); the node's features; the hub's tools mcp.tools answers (n.tools changes them); strict: a card for a
+ *   session the runtime's last list does not have is refused, as the node refuses it.
  * @returns {Promise<{ path: string, ready: Promise<void>, hello: any, peer: Peer, events: {event: string, params: any}[],
- *   last(event: string): any, all(event: string): any[], asked: any[], resolve: (ix: any) => any, close(): void }>}
+ *   last(event: string): any, all(event: string): any[], asked: any[], refused: any[], resolve: (ix: any) => any,
+ *   close(): void }>}
  *   Also: tools / toolCalls / callTool (how mcp.call answers), refuseHello (an RpcError hello answers with, or none),
  *   holdHello (a promise the next hellos wait on before they are answered, or none),
  *   offer (a package {name, hash, version, files} this node carries: hello offers it to a runtime running another hash
@@ -21,7 +23,7 @@ import { Peer, RpcError } from '../lib/wire.js'
 export async function startFakeNode(t, opts = {}) {
   const dir = opts.path ? undefined : mkdtempSync('/tmp/jrt-') // unix socket paths are short on macOS: not under $TMPDIR
   const path = opts.path ?? join(dir, 'runtime.sock')
-  const n = { path, events: [], hello: undefined, peer: undefined, asked: [], resolve: () => ({ dismiss: true }), hub: opts.hub ?? true, hellos: 0,
+  const n = { path, events: [], hello: undefined, peer: undefined, asked: [], refused: [], resolve: () => ({ dismiss: true }), hub: opts.hub ?? true, hellos: 0,
     tools: opts.tools ?? [], toolCalls: [], callTool: (params) => ({ content: [{ type: 'text', text: `${params.name} ran` }], is_error: false }),
     refuseHello: undefined, offer: undefined, packageCalls: [] }
   let connected
@@ -49,6 +51,11 @@ export async function startFakeNode(t, opts = {}) {
           return n.offer
         }
         if (method === 'interaction.create') {
+          const sid = params.interaction?.session_id
+          if (opts.strict && !n.last('runtime.sessions')?.sessions?.some((s) => s.session_id === sid)) {
+            n.refused.push(params.interaction)
+            throw new Error(`session ${sid} is not listed by this runtime`)
+          }
           n.asked.push(params.interaction)
           return n.resolve(params.interaction)
         }

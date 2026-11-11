@@ -164,6 +164,10 @@ internal object Ultracode {
     fun offered(session: Session?, features: Set<String>): Boolean =
         session != null && FEATURE in features && !session.assistant && !session.hasSource && session.canChangeModes
 
+    /** The after-resume notice is up (iOS `lostShown`): it was on before the agent resumed and nothing turned it back on. */
+    fun lostShown(session: Session?, features: Set<String>): Boolean =
+        offered(session, features) && session?.ultracodeLostAt != null && session.ultracode != true
+
     /** The node saw it on (unknown is not on) and the process still runs: a resume starts it off. */
     fun on(session: Session): Boolean = session.ultracode == true && !session.assistant && session.isClaude && session.isLive
 

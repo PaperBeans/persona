@@ -46,9 +46,9 @@ import persona.core.designsystem.icons.PhIcons
 // apart by indentation, type and hairlines, not by plates: the page background stays whole and only business cards
 // (requests, notices; the board's agent strips) sit on it. Lazy lists give every heading and row its own item.
 
-/** A small mark on a row or a space: pinned, muted, a draft, messages waiting to send. */
+/** A small mark on a row or a space: pinned, muted, a draft, messages waiting to send; [ai] in the AI color (ultracode on, #582). */
 @Immutable
-data class RowFlag(val label: String, val icon: PhIcon, val caution: Boolean = false)
+data class RowFlag(val label: String, val icon: PhIcon, val caution: Boolean = false, val ai: Boolean = false)
 
 /** A short fact under a session row: where it runs, a loop, background work, a draft, messages waiting to go out. */
 @Immutable
@@ -156,7 +156,7 @@ private fun StateCounts(counts: List<Pair<Status, Int>>) {
 @Composable
 fun HeadingAction(icon: PhIcon, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
-        modifier.size(Action).minimumInteractiveComponentSize().clip(CircleShape).clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = label },
+        modifier.size(Action).clip(CircleShape).clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) { JIcon(icon, null, size = Tokens.Size.iconXS, tint = PersonaTheme.palette.ink2) }
 }
@@ -353,7 +353,7 @@ fun AgentRow(
                 if (launcher) { Spacer(Modifier.width(Tokens.Space.s - Tokens.Space.xxs)); JTag(stringResource(R.string.designsystem_tab_launcher)) }
                 flags.forEach { flag ->
                     Spacer(Modifier.width(Tokens.Space.xs))
-                    JIcon(flag.icon, flag.label, size = Caret, tint = if (flag.caution) palette.cautionText else palette.ink3)
+                    JIcon(flag.icon, flag.label, size = Caret, tint = when { flag.caution -> palette.cautionText; flag.ai -> palette.ai; else -> palette.ink3 })
                 }
             }
             agent?.let { Spacer(Modifier.width(Tokens.Space.s)); Text(it, style = type.micro, color = palette.ink2, maxLines = 1) }

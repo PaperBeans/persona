@@ -59,7 +59,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "扫码或 Token"
+            "value": "扫码或其他配对方式"
           }
         },
         "ja": {
@@ -20491,6 +20491,28 @@
       },
       "extractionState": "manual"
     },
+    "Assistant Profile": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant Profile"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アシスタントのプロフィール"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "助手资料"
+          }
+        }
+      }
+    },
     "Assistant idle": {
       "localizations": {
         "en": {
@@ -20582,6 +20604,28 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Assistants": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistants"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アシスタント"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "助手"
+          }
+        }
+      }
     },
     "Attach Live": {
       "localizations": {
@@ -21286,25 +21330,25 @@
         }
       }
     },
-    "Automatic upgrades are paused globally for this manager.": {
+    "Automatic upgrades are paused globally for this assistant.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automatic upgrades are paused globally for this manager."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此管理器的全局自动升级已暂停。"
+            "value": "Automatic upgrades are paused globally for this assistant."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このマネージャーでは自動アップグレードが全体で一時停止しています。"
+            "value": "このアシスタントでは自動アップグレードが全体で一時停止しています。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此助手的全局自动升级已暂停。"
           }
         }
       }
@@ -42818,6 +42862,28 @@
       },
       "extractionState": "manual"
     },
+    "Default Assistant": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default Assistant"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デフォルトのアシスタント"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认助手"
+          }
+        }
+      }
+    },
     "Default Branch Only": {
       "localizations": {
         "en": {
@@ -42840,28 +42906,6 @@
         }
       },
       "extractionState": "manual"
-    },
-    "Default Manager": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Default Manager"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "デフォルトのマネージャー"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "默认管理者"
-          }
-        }
-      }
     },
     "Default Model": {
       "localizations": {
@@ -48117,6 +48161,28 @@
         }
       }
     },
+    "Each assistant is complete on its own, with its own chats, inbox and computers, running wherever you choose.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each assistant is complete on its own, with its own chats, inbox and computers, running wherever you choose."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "各アシスタントはそれぞれ独立していて、自分のチャット、受信トレイ、コンピュータを持ち、どこで動かすかはあなたが決めます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每个助手都是完整独立的，有自己的对话、收件箱和电脑，跑在哪由你定。"
+          }
+        }
+      }
+    },
     "Each chat runs Claude in the background in this directory on %@, outside herdr. Choose the model in Settings › Models › Main Chat; change it for a single chat from that chat's menu.": {
       "localizations": {
         "en": {
@@ -48185,28 +48251,6 @@
         }
       },
       "extractionState": "manual"
-    },
-    "Each manager is a whole assistant, running wherever you choose.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Each manager is a whole assistant, running wherever you choose."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "各マネージャーはそれぞれ完全なアシスタントで、どこで動かすかはあなたが決めます。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "每个管理者是一个完整的助手，跑在哪由你定。"
-          }
-        }
-      }
     },
     "Each meeting recording starts with this. To change it for one meeting, pick another on the Recordings page before you start.": {
       "extractionState": "manual",
@@ -49284,6 +49328,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "结束对话"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "End of output": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "End of output"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出力の末尾"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输出末尾"
           }
         }
       },
@@ -56707,24 +56774,24 @@
         }
       }
     },
-    "Handled by the manager": {
+    "Handled by the assistant": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Handled by the manager"
+            "value": "Handled by the assistant"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "マネージャーが処理済み"
+            "value": "アシスタントが処理済み"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "管理者处理了"
+            "value": "助手处理了"
           }
         }
       },
@@ -60754,6 +60821,28 @@
       },
       "extractionState": "manual"
     },
+    "Install the assistant with this code on the computer that will run it. Once installed, it shows up in the list.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install the assistant with this code on the computer that will run it. Once installed, it shows up in the list."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "動かすコンピュータでこのインストールコードを使ってアシスタントをインストールしてください。インストールが終わると一覧に表示されます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在要运行它的电脑上用这个安装码装好助手，装好后它会出现在列表里。"
+          }
+        }
+      }
+    },
     "Install the latest Persona from TestFlight: this build has the relay's old address.": {
       "extractionState": "manual",
       "localizations": {
@@ -60773,28 +60862,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "从 TestFlight 装最新的 Persona：这个版本里是推送中继的旧地址。"
-          }
-        }
-      }
-    },
-    "Install the manager with this code on the computer that will run it. Once installed, it shows up in the list.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Install the manager with this code on the computer that will run it. Once installed, it shows up in the list."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "動かすコンピュータでこのインストールコードを使ってマネージャーをインストールしてください。インストールが終わると一覧に表示されます。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在要运行它的电脑上用这个安装码装好管理者，装好后它会出现在列表里。"
           }
         }
       }
@@ -61074,24 +61141,24 @@
       },
       "extractionState": "manual"
     },
-    "Installing elsewhere gives you a new install code. Once it's installed with that code, the manager where it ran before stops working right away.": {
+    "Installing elsewhere gives you a new install code. Once it's installed with that code, the assistant where it ran before stops working right away.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Installing elsewhere gives you a new install code. Once it's installed with that code, the manager where it ran before stops working right away."
+            "value": "Installing elsewhere gives you a new install code. Once it's installed with that code, the assistant where it ran before stops working right away."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "別の場所にインストールすると新しいインストールコードが発行されます。そのコードでインストールすると、元の場所のマネージャーはすぐに動かなくなります。"
+            "value": "別の場所にインストールすると新しいインストールコードが発行されます。そのコードでインストールすると、以前の場所のアシスタントはすぐに動作を停止します。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "换个地方装会给一个新的安装码；用它装好后，原来那处的管理者立即停止工作。"
+            "value": "换个地方装会给一个新的安装码；用它装好后，原来那处的助手立即停止工作。"
           }
         }
       }
@@ -62397,6 +62464,29 @@
         }
       }
     },
+    "Its assistant “%@” is offline. It comes back online once the assistant is back.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Its assistant “%@” is offline. It comes back online once the assistant is back."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アシスタント「%@」がオフラインです。アシスタントが戻ると、このコンピューターもオンラインに戻ります"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "它的助手「%@」离线，助手回来后这台电脑会恢复在线。"
+          }
+        }
+      }
+    },
     "Its gateway can't use this model": {
       "extractionState": "manual",
       "localizations": {
@@ -62484,29 +62574,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "它在这台电脑上最近一次检查失败了，自动修复也没修好。"
-          }
-        }
-      }
-    },
-    "Its manager “%@” is offline. It comes back online once the manager is back.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Its manager “%@” is offline. It comes back online once the manager is back."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "它的管理者「%@」离线，管理者回来后这台电脑会恢复在线。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "マネージャー「%@」がオフラインです。マネージャーが戻ると、このコンピューターもオンラインに戻ります。"
           }
         }
       }
@@ -69328,6 +69395,28 @@
       },
       "extractionState": "manual"
     },
+    "Manage Assistants…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manage Assistants…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アシスタントを管理…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理助手…"
+          }
+        }
+      }
+    },
     "Manage Markets": {
       "localizations": {
         "en": {
@@ -69442,28 +69531,6 @@
         }
       },
       "extractionState": "manual"
-    },
-    "Managers": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Managers"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "マネージャー"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "管理者"
-          }
-        }
-      }
     },
     "Manual": {
       "extractionState": "manual",
@@ -75180,6 +75247,28 @@
       },
       "extractionState": "manual"
     },
+    "New Assistant": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Assistant"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新しいアシスタント"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建助手"
+          }
+        }
+      }
+    },
     "New Avatar": {
       "extractionState": "manual",
       "localizations": {
@@ -75546,28 +75635,6 @@
         }
       },
       "extractionState": "manual"
-    },
-    "New Manager": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Manager"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新しいマネージャー"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新建管理者"
-          }
-        }
-      }
     },
     "New Messages": {
       "localizations": {
@@ -86379,24 +86446,24 @@
       },
       "extractionState": "manual"
     },
-    "Once google.client_id is in the manager's manager.json and the hub restarts, “Sign In with Google” appears here (a one-time setup). Until then, add the account with an app password: turn on 2-Step Verification for the Google account, then create a 16-character password under Google Account › Security › App passwords and enter it here (not your Google password).": {
+    "Once google.client_id is in the assistant's manager.json and the hub restarts, “Sign In with Google” appears here (a one-time setup). Until then, add the account with an app password: turn on 2-Step Verification for the Google account, then create a 16-character password under Google Account › Security › App passwords and enter it here (not your Google password).": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Once google.client_id is in the manager's manager.json and the hub restarts, “Sign In with Google” appears here (a one-time setup). Until then, add the account with an app password: turn on 2-Step Verification for the Google account, then create a 16-character password under Google Account › Security › App passwords and enter it here (not your Google password)."
+            "value": "Once google.client_id is in the assistant's manager.json and the hub restarts, “Sign In with Google” appears here (a one-time setup). Until then, add the account with an app password: turn on 2-Step Verification for the Google account, then create a 16-character password under Google Account › Security › App passwords and enter it here (not your Google password)."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "マネージャーの manager.json に google.client_id を追加してハブを再起動すると、ここに「Googleでサインイン」が表示されます（初回のみの設定）。それまではアプリパスワードで追加できます。Google アカウントで 2 段階認証プロセスを有効にし、Google アカウント › セキュリティ › アプリパスワードで 16 文字のパスワードを作成してここに入力してください（Google のログインパスワードではありません）。"
+            "value": "アシスタントの manager.json に google.client_id を追加してハブを再起動すると、ここに「Googleでサインイン」が表示されます（初回のみの設定）。それまではアプリパスワードで追加できます。Google アカウントで 2 段階認証プロセスを有効にし、Google アカウント › セキュリティ › アプリパスワードで 16 文字のパスワードを作成してここに入力してください（Google のログインパスワードではありません）。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在管理者的 manager.json 里写上 google.client_id 并重启 hub 后，这里会出现「使用 Google 账号登录」（一次性配置）。在那之前可以用应用专用密码添加：Google 账号先开两步验证，再到 Google 账号 › 安全性 › 应用专用密码 生成一个 16 位密码填在这里（不是 Google 登录密码）。"
+            "value": "在助手的 manager.json 里写上 google.client_id 并重启 hub 后，这里会出现「使用 Google 账号登录」（一次性配置）。在那之前可以用应用专用密码添加：Google 账号先开两步验证，再到 Google 账号 › 安全性 › 应用专用密码 生成一个 16 位密码填在这里（不是 Google 登录密码）。"
           }
         }
       },
@@ -88841,6 +88908,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "hub 在回答时重启了。再试一次。"
+          }
+        }
+      }
+    },
+    "The hub runs this assistant itself. It can't be deleted or installed elsewhere": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The hub runs this assistant itself. It can't be deleted or installed elsewhere"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "これはハブ自身が動かすアシスタントです。削除や別の場所へのインストールはできません"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这是 hub 自己运行的助手，不能删除或换地方装"
           }
         }
       }
@@ -115369,24 +115458,24 @@
       },
       "extractionState": "manual"
     },
-    "Sign-in is set up in the manager's configuration (manager.json, see docs/operations/config.md); this page only shows the status.": {
+    "Sign-in is set up in the assistant's configuration (manager.json, see docs/operations/config.md); this page only shows the status.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sign-in is set up in the manager's configuration (manager.json, see docs/operations/config.md); this page only shows the status."
+            "value": "Sign-in is set up in the assistant's configuration (manager.json, see docs/operations/config.md); this page only shows the status."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ログインはマネージャーの設定（manager.json、docs/operations/config.mdを参照）で設定します。ここでは状態のみ表示します。"
+            "value": "ログインはアシスタントの設定（manager.json、docs/operations/config.mdを参照）で設定します。ここでは状態のみ表示します。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "登录在管理者的配置里设置（manager.json，见 docs/operations/config.md），这里只看状态。"
+            "value": "登录在助手的配置里设置（manager.json，见 docs/operations/config.md），这里只看状态。"
           }
         }
       },
@@ -120897,6 +120986,28 @@
       },
       "extractionState": "manual"
     },
+    "Switched to %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switched to %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@に切り替えました"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已切换到 %@"
+          }
+        }
+      }
+    },
     "Switched to another voice chat": {
       "localizations": {
         "en": {
@@ -120919,6 +121030,28 @@
         }
       },
       "extractionState": "manual"
+    },
+    "Switches assistants": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switches assistants"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アシスタントを切り替えます"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换助手"
+          }
+        }
+      }
     },
     "Switches in %@ take effect right away. For the rest, tap Save at the end of Extension configuration when you're done; the extension restarts after saving. Empty fields use the extension's defaults.": {
       "extractionState": "manual",
@@ -124661,6 +124794,52 @@
       },
       "extractionState": "manual"
     },
+    "The assistant is offline or restarting. Try again shortly.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant is offline or restarting. Try again shortly."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アシスタントはオフラインか再起動中です。しばらくしてから再試行してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "助手不在线或正在重启，请稍后重试。"
+          }
+        }
+      }
+    },
+    "The assistant is offline. Reconnect to change this extension.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant is offline. Reconnect to change this extension."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アシスタントはオフラインです。この拡張機能を変更するには再接続してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "助手已离线，重新连接后才能修改此扩展。"
+          }
+        }
+      }
+    },
     "The assistant is offline. Try again shortly": {
       "localizations": {
         "en": {
@@ -124683,6 +124862,28 @@
         }
       },
       "extractionState": "manual"
+    },
+    "The assistant the hub runs itself can't be deleted": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant the hub runs itself can't be deleted"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブ自身が動かすアシスタントは削除できません"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 自己运行的助手不能删除"
+          }
+        }
+      }
     },
     "The audio on this device and the text in Knowledge will both be deleted.": {
       "localizations": {
@@ -125357,24 +125558,24 @@
       },
       "extractionState": "manual"
     },
-    "The default manager can't be deleted. Make another one the default first": {
+    "The default assistant can't be deleted. Make another one the default first": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The default manager can't be deleted. Make another one the default first"
+            "value": "The default assistant can't be deleted. Make another one the default first"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "デフォルトのマネージャーは削除できません。先に別のマネージャーをデフォルトにしてください"
+            "value": "デフォルトのアシスタントは削除できません。先に別のアシスタントをデフォルトにしてください"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "默认管理者不能删除，先把别的设为默认"
+            "value": "默认助手不能删除，先把别的设为默认"
           }
         }
       }
@@ -126800,24 +127001,24 @@
       },
       "extractionState": "manual"
     },
-    "The hub isn't connected to Lark yet: run the Lark gateway on the hub machine and add it under lark in the manager's manager.json (docs/extensions/feishu.md).": {
+    "The hub isn't connected to Lark yet: run the Lark gateway on the hub machine and add it under lark in the assistant's manager.json (docs/extensions/feishu.md).": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The hub isn't connected to Lark yet: run the Lark gateway on the hub machine and add it under lark in the manager's manager.json (docs/extensions/feishu.md)."
+            "value": "The hub isn't connected to Lark yet: run the Lark gateway on the hub machine and add it under lark in the assistant's manager.json (docs/extensions/feishu.md)."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ハブはまだLarkに接続されていません。ハブのマシンでLarkゲートウェイを実行し、マネージャーのmanager.jsonのlarkに設定してください（docs/extensions/feishu.md）。"
+            "value": "ハブはまだLarkに接続されていません。ハブのマシンでLarkゲートウェイを実行し、アシスタントのmanager.jsonのlarkに設定してください（docs/extensions/feishu.md）。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "hub 还没接飞书：在 hub 所在的机器上运行飞书网关，并在管理者的 manager.json 的 lark 里填上它（docs/extensions/feishu.md）。"
+            "value": "hub 还没接飞书：在 hub 所在的机器上运行飞书网关，并在助手的 manager.json 的 lark 里填上它（docs/extensions/feishu.md）。"
           }
         }
       },
@@ -126983,28 +127184,6 @@
         }
       },
       "extractionState": "manual"
-    },
-    "The hub runs this manager itself. It can't be deleted or installed elsewhere": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The hub runs this manager itself. It can't be deleted or installed elsewhere"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "これはハブ自身が動かすマネージャーです。削除や別の場所へのインストールはできません"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "这是 hub 自己运行的管理者，不能删除或换地方装"
-          }
-        }
-      }
     },
     "The hub stops reading this market. %lld extensions installed from it stay, but stop upgrading until the market is added again with the same address.": {
       "extractionState": "manual",
@@ -127522,25 +127701,25 @@
         }
       }
     },
-    "The knowledge base is read-only. Change the manager configuration before editing or syncing recordings.": {
+    "The knowledge base is read-only. Change the assistant's configuration before editing or syncing recordings.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The knowledge base is read-only. Change the manager configuration before editing or syncing recordings."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "知识库为只读。请先修改管理者配置，再编辑或同步录音。"
+            "value": "The knowledge base is read-only. Change the assistant's configuration before editing or syncing recordings."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ナレッジは読み取り専用です。編集や録音の同期を行うには、マネージャーの設定を変更してください。"
+            "value": "ナレッジは読み取り専用です。編集や録音の同期を行うには、アシスタントの設定を変更してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "知识库为只读。请先修改助手的配置，再编辑或同步录音。"
           }
         }
       }
@@ -127913,74 +128092,6 @@
         }
       },
       "extractionState": "manual"
-    },
-    "The manager is offline or restarting. Try again shortly.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The manager is offline or restarting. Try again shortly."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "管理者不在线或正在重启，请稍后重试。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "マネージャーはオフラインか再起動中です。しばらくしてから再試行してください。"
-          }
-        }
-      }
-    },
-    "The manager is offline. Reconnect to change this extension.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The manager is offline. Reconnect to change this extension."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "管理器已离线，重新连接后才能修改此扩展。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "マネージャーはオフラインです。この拡張機能を変更するには再接続してください。"
-          }
-        }
-      }
-    },
-    "The manager the hub runs itself can't be deleted": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The manager the hub runs itself can't be deleted"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ハブ自身が動かすマネージャーは削除できません"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "hub 自己运行的管理者不能删除"
-          }
-        }
-      }
     },
     "The message couldn't be sent to the agent": {
       "localizations": {
@@ -131669,6 +131780,120 @@
       },
       "extractionState": "manual"
     },
+    "This assistant does not provide a rollback preview.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This assistant does not provide a rollback preview."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアシスタントはロールバックのプレビューを提供していません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此助手未提供回滚预览。"
+          }
+        }
+      }
+    },
+    "This assistant does not provide a safe uninstall preview. Remove the extension at its source.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This assistant does not provide a safe uninstall preview. Remove the extension at its source."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアシスタントは安全なアンインストールの事前確認を提供していません。提供元で削除してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此助手未提供安全的卸载预检，请在来源处移除扩展。"
+          }
+        }
+      }
+    },
+    "This assistant does not provide this action.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This assistant does not provide this action."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアシスタントはこの操作を提供していません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此助手未提供这项操作。"
+          }
+        }
+      }
+    },
+    "This assistant has turned off the knowledge base. Enable it in the assistant's configuration to use it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This assistant has turned off the knowledge base. Enable it in the assistant's configuration to use it."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアシスタントのナレッジは無効です。利用するにはアシスタントの設定で有効にしてください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此助手已关闭知识库。请在助手的配置中启用后使用。"
+          }
+        }
+      }
+    },
+    "This assistant is no longer there": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This assistant is no longer there"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアシスタントはもうありません"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个助手已经不在了"
+          }
+        }
+      }
+    },
     "This audio format can't play on this device. Convert it to MP3, AAC (M4A), or WAV and try again.": {
       "localizations": {
         "en": {
@@ -133159,24 +133384,24 @@
         }
       }
     },
-    "This extension is set in its manager's manager.json; change its switch and settings there, then restart the manager.": {
+    "This extension is set in its assistant's manager.json; change its switch and settings there, then restart the assistant.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This extension is set in its manager's manager.json; change its switch and settings there, then restart the manager."
+            "value": "This extension is set in its assistant's manager.json; change its switch and settings there, then restart the assistant."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "この拡張機能はマネージャーのmanager.jsonに書かれています。オン/オフや設定はそこで変更し、変更後にマネージャーを再起動してください。"
+            "value": "この拡張機能はアシスタントのmanager.jsonに書かれています。オン/オフや設定はそこで変更し、変更後にアシスタントを再起動してください。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这个扩展写在它所属管理者的 manager.json 里：开关和设置去那里改，改完重启这个管理者。"
+            "value": "这个扩展写在它所属助手的 manager.json 里：开关和设置去那里改，改完重启这个助手。"
           }
         }
       },
@@ -134094,24 +134319,24 @@
       },
       "extractionState": "manual"
     },
-    "This hub's version doesn't support managers yet. Update the hub and come back.": {
+    "This hub's version doesn't support several assistants yet. Update the hub and come back.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This hub's version doesn't support managers yet. Update the hub and come back."
+            "value": "This hub's version doesn't support several assistants yet. Update the hub and come back."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このハブのバージョンはまだマネージャーに対応していません。ハブをアップデートしてからもう一度開いてください。"
+            "value": "このハブのバージョンはまだ複数のアシスタントに対応していません。ハブをアップデートしてからもう一度開いてください。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这台 hub 的版本还不支持管理者，升级 hub 后再来。"
+            "value": "这台 hub 的版本还不支持多个助手，升级 hub 后再来。"
           }
         }
       }
@@ -134437,24 +134662,24 @@
       },
       "extractionState": "manual"
     },
-    "This is the default manager. Make another one the default before deleting it": {
+    "This is the default assistant. Make another one the default before deleting it": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This is the default manager. Make another one the default before deleting it"
+            "value": "This is the default assistant. Make another one the default before deleting it"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "これはデフォルトのマネージャーです。削除する前に別のマネージャーをデフォルトにしてください"
+            "value": "これはデフォルトのアシスタントです。削除する前に別のアシスタントをデフォルトにしてください"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这是默认管理者，先把别的设为默认再删除"
+            "value": "这是默认助手，先把别的设为默认再删除"
           }
         }
       }
@@ -134711,120 +134936,6 @@
         }
       },
       "extractionState": "manual"
-    },
-    "This manager does not provide a rollback preview.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This manager does not provide a rollback preview."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此管理器未提供回滚预览。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "このマネージャーはロールバックのプレビューを提供していません。"
-          }
-        }
-      }
-    },
-    "This manager does not provide a safe uninstall preview. Remove the extension at its source.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This manager does not provide a safe uninstall preview. Remove the extension at its source."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此管理器未提供安全的卸载预检，请在来源处移除扩展。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "このマネージャーは安全なアンインストールの事前確認を提供していません。提供元で削除してください。"
-          }
-        }
-      }
-    },
-    "This manager does not provide this action.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This manager does not provide this action."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此管理器未提供这项操作。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "このマネージャーはこの操作を提供していません。"
-          }
-        }
-      }
-    },
-    "This manager has turned off the knowledge base. Enable it in the manager configuration to use it.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This manager has turned off the knowledge base. Enable it in the manager configuration to use it."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此管理者已关闭知识库。请在管理者配置中启用后使用。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "このマネージャーのナレッジは無効です。利用するにはマネージャーの設定で有効にしてください。"
-          }
-        }
-      }
-    },
-    "This manager is no longer there": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This manager is no longer there"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "このマネージャーはもうありません"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "这个管理者已经不在了"
-          }
-        }
-      }
     },
     "This market has no extensions yet.": {
       "localizations": {
@@ -148331,25 +148442,25 @@
       },
       "extractionState": "manual"
     },
-    "When off, this device gets no notifications from this manager": {
+    "When off, this device gets no notifications from this assistant": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "When off, this device gets no notifications from this manager"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "关掉后，这台设备不再收到这个管理者的推送"
+            "value": "When off, this device gets no notifications from this assistant"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "オフにすると、このデバイスはこのマネージャーからの通知を受け取りません"
+            "value": "オフにすると、このデバイスはこのアシスタントからの通知を受け取りません"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关掉后，这台设备不再收到这个助手的推送"
           }
         }
       }
@@ -158133,7 +158244,7 @@
         }
       }
     },
-  "Stop Recording?": {
+    "Stop Recording?": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158156,7 +158267,7 @@
       }
     }
   },
-  "The audio is saved on this device and its text goes to Knowledge. A stopped recording can't be continued.": {
+    "The audio is saved on this device and its text goes to Knowledge. A stopped recording can't be continued.": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158179,7 +158290,7 @@
       }
     }
   },
-  "Listening… Text appears here about every half minute.": {
+    "Listening… Text appears here about every half minute.": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158202,7 +158313,7 @@
       }
     }
   },
-  "Transcribing the last %lld s": {
+    "Transcribing the last %lld s": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158225,7 +158336,7 @@
       }
     }
   },
-  "%lld new": {
+    "%lld new": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158248,7 +158359,7 @@
       }
     }
   },
-  "%lld new, jump to latest": {
+    "%lld new, jump to latest": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158271,7 +158382,7 @@
       }
     }
   },
-  "Bookmark at %@": {
+    "Bookmark at %@": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158294,7 +158405,7 @@
       }
     }
   },
-  "Persona is off": {
+    "Persona is off": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158317,7 +158428,7 @@
       }
     }
   },
-  "Who Attends…": {
+    "Who Attends…": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158340,7 +158451,7 @@
       }
     }
   },
-  "Type a Question": {
+    "Type a Question": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158363,7 +158474,7 @@
       }
     }
   },
-  "Opens the recording": {
+    "Opens the recording": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158386,7 +158497,7 @@
       }
     }
   },
-  "Recording time": {
+    "Recording time": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158409,7 +158520,7 @@
       }
     }
   },
-  "Recording stopped": {
+    "Recording stopped": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158432,7 +158543,7 @@
       }
     }
   },
-  "Recording continued": {
+    "Recording continued": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158455,7 +158566,7 @@
       }
     }
   },
-  "Recording paused": {
+    "Recording paused": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158478,7 +158589,7 @@
       }
     }
   },
-  "Bookmark added": {
+    "Bookmark added": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158501,7 +158612,7 @@
       }
     }
   },
-  "Starting…": {
+    "Starting…": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158524,7 +158635,7 @@
       }
     }
   },
-  "Transcribed": {
+    "Transcribed": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158547,7 +158658,7 @@
       }
     }
   },
-  "Syncing to Knowledge": {
+    "Syncing to Knowledge": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158570,7 +158681,7 @@
       }
     }
   },
-  "Writing minutes": {
+    "Writing minutes": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158593,7 +158704,7 @@
       }
     }
   },
-  "Waiting for the hub": {
+    "Waiting for the hub": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158616,7 +158727,7 @@
       }
     }
   },
-  "Recorded %@": {
+    "Recorded %@": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158639,7 +158750,7 @@
       }
     }
   },
-  "Open Minutes": {
+    "Open Minutes": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158662,7 +158773,7 @@
       }
     }
   },
-  "Open Recording": {
+    "Open Recording": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158685,7 +158796,7 @@
       }
     }
   },
-  "In progress": {
+    "In progress": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158708,7 +158819,7 @@
       }
     }
   },
-  "Recording saved": {
+    "Recording saved": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158731,7 +158842,7 @@
       }
     }
   },
-  "Recording started": {
+    "Recording started": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158754,7 +158865,7 @@
       }
     }
   },
-  "Minutes written": {
+    "Minutes written": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158777,7 +158888,7 @@
       }
     }
   },
-  "Turn on Persona": {
+    "Turn on Persona": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158800,7 +158911,7 @@
       }
     }
   },
-  "Transcribing the last %lld min": {
+    "Transcribing the last %lld min": {
     "extractionState": "manual",
     "localizations": {
       "en": {
@@ -158823,7 +158934,7 @@
       }
     }
   },
-  "Audio stays on this device. Its text syncs to Knowledge and is kept for %lld days.": {
+    "Audio stays on this device. Its text syncs to Knowledge and is kept for %lld days.": {
     "extractionState": "manual",
     "localizations": {
       "en": {

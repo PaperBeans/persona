@@ -1,7 +1,5 @@
 package persona.feature.settings
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.res.Resources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.Arrangement
@@ -18,7 +16,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.navigation3.runtime.NavKey
@@ -194,20 +191,14 @@ private fun Progress(s: HubUpdateStatus, onNow: () -> Unit) {
 /** A Docker hub updates by a new image: what to run where, each command with a copy button. */
 @Composable
 private fun DockerRows(s: HubUpdateStatus) {
-    val context = LocalContext.current
     val (headline, steps) = HubUpdateText.dockerSteps(s, LocalResources.current)
-    val clipLabel = stringResource(R.string.settings_hub_update_clip_label)
-    val copied = stringResource(R.string.settings_hub_update_copied)
-    val feedback = LocalAppFeedback.current
+    val copy = rememberCopy()
     headline?.let { Text(it, Modifier.padding(horizontal = rowPadding), style = PersonaTheme.type.bodyStrong, color = PersonaTheme.palette.ink, maxLines = 1) }
     steps.forEach { step ->
         Text(step.text, Modifier.padding(horizontal = rowPadding), style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2)
         JGroupItem(GroupPosition.Single) {
             JRow(trailing = {
-                JIconButton(PhIcons.Copy, stringResource(R.string.settings_hub_update_copy), {
-                    context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(clipLabel, step.copy))
-                    feedback?.notice(copied)
-                })
+                JIconButton(PhIcons.Copy, stringResource(R.string.settings_hub_update_copy), { copy(step.copy, null) })
             }) {
                 Text(step.copy, style = PersonaTheme.type.codeSmall, color = PersonaTheme.palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }

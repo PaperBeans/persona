@@ -2,14 +2,13 @@ package persona.feature.chat
 
 import androidx.compose.runtime.*
 import android.content.res.Resources
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import persona.core.contracts.Session
 import persona.core.contracts.api.ChatActions
 import persona.core.designsystem.JAction
 import persona.core.designsystem.JActionSheet
+import persona.core.designsystem.rememberCopy
 import persona.core.designsystem.QueueStrip
 import persona.core.designsystem.icons.PhIcons
 import persona.core.designsystem.operationFeedback
@@ -42,7 +41,7 @@ internal fun ChatQueueStrip(
     val queued = session?.queued.orEmpty()
     if (session == null || queued.isEmpty()) return
     val scope = rememberCoroutineScope()
-    val clipboard = LocalClipboardManager.current
+    val copy = rememberCopy()
     val resources = LocalResources.current
     var busy by remember { mutableStateOf(false) }
     // The row picked, with its words: if the queue moves under the open menu (the agent took one), the menu closes.
@@ -73,7 +72,7 @@ internal fun ChatQueueStrip(
     val (index, text) = picked ?: return
     JActionSheet(listOf(
         JAction(stringResource(R.string.chat_queue_edit), PhIcons.ArrowUUpLeft, enabled = enabled && !busy) { edit(index, delete = false) },
-        JAction(stringResource(R.string.chat_queue_copy), PhIcons.Copy) { clipboard.setText(AnnotatedString(text)); onNotice(resources.getString(R.string.chat_queue_copied)) },
+        JAction(stringResource(R.string.chat_queue_copy), PhIcons.Copy) { copy(text, null) },
         JAction(stringResource(R.string.chat_queue_delete), PhIcons.Trash, destructive = true, enabled = enabled && !busy) { edit(index, delete = true) },
     ), onDismiss = { picked = null }, title = composerMessagePreview(text))
 }

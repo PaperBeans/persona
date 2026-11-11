@@ -21,10 +21,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
@@ -157,7 +155,7 @@ private fun LarkProfileCardContent(
     onDirectChat: ((String) -> Unit)?,
 ) {
     val palette = PersonaTheme.palette
-    val clipboard = LocalClipboardManager.current
+    val copy = rememberCopy()
     var profileData by remember(person) { mutableStateOf<LarkParsedProfile?>(null) }
     var loading by remember(person) { mutableStateOf(true) }
     var error by remember(person) { mutableStateOf<String?>(null) }
@@ -319,7 +317,7 @@ private fun LarkProfileCardContent(
                                         if (field.leaderId != null) {
                                             onOpenPerson(LarkPersonRef(field.leaderId, field.value))
                                         } else {
-                                            clipboard.setText(AnnotatedString(field.value))
+                                            copy(field.value, null)
                                         }
                                     }
                                     .padding(vertical = Tokens.Space.xs),

@@ -1,4 +1,5 @@
 {
   "not_configured": "没有设置「信息」",
-  "ai_on": "先关掉「交给 Persona」再删除"
+  "ai_on": "先关掉「交给 Persona」再删除",
+  "archive_pending": "已关闭「交给 Persona」，但无法确认归档已停止。请重试。"
 }

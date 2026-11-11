@@ -1,5 +1,5 @@
 import { storedCredentials } from "./compatibility";
-import { api, ApiError, setToken } from "./api";
+import { api, ApiError, setPairedToken } from "./api";
 import { formatDate, t } from "../i18n";
 
 function browserName() {
@@ -72,8 +72,8 @@ export async function pair(input: string): Promise<void> {
       if (!(err instanceof ApiError) || err.status !== 404) throw err;
     }
   }
-  if (tokenId === undefined) setToken(use);
-  else setToken(use, tokenId);
+  if (tokenId === undefined) setPairedToken(use);
+  else setPairedToken(use, tokenId);
 }
 
 // takeToken finds a token in a link (`?token=…`, or `#token=…`, which never reaches the server) and returns it with

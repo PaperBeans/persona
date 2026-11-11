@@ -309,7 +309,7 @@ fun JSearchField(query: String, onQueryChange: (String) -> Unit, placeholder: St
     JTextField(
         query, onQueryChange, modifier, placeholder = placeholder, singleLine = true, leading = PhIcons.MagnifyingGlass,
         trailing = if (query.isEmpty()) null else ({
-            Box(Modifier.size(24.dp).minimumInteractiveComponentSize().clip(CircleShape).clickable(role = Role.Button) { onQueryChange("") }.semantics { contentDescription = clear }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(24.dp).clip(CircleShape).clickable(role = Role.Button) { onQueryChange("") }.semantics { contentDescription = clear }, contentAlignment = Alignment.Center) {
                 JIcon(PhIcons.XCircle, null, size = 18.dp, tint = PersonaTheme.palette.ink3, selected = true)
             }
         }),
@@ -335,7 +335,7 @@ fun JSwitch(checked: Boolean, onCheckedChange: ((Boolean) -> Unit)?, modifier: M
     }
     val offset by animateDpAsState(if (checked) width - thumb - 6.dp else 0.dp, label = "thumb")
     Box(
-        modifier.size(width, height).minimumInteractiveComponentSize().clip(RoundedCornerShape(corner)).background(track)
+        modifier.size(width, height).clip(RoundedCornerShape(corner)).background(track)
             .then(if (!checked) Modifier.border(1.dp, palette.line, RoundedCornerShape(corner)) else Modifier)
             .then(if (onCheckedChange != null) Modifier.clickable(enabled = enabled, role = Role.Switch) { onCheckedChange(!checked) } else Modifier)
             .semantics { toggleableState = ToggleableState(checked) }
@@ -562,7 +562,7 @@ fun JBadge(count: Int, modifier: Modifier = Modifier, text: String? = null) {
         Box(modifier.heightIn(min = HomeTokens.sidebarBadgeSize).widthIn(min = HomeTokens.sidebarBadgeSize)
             .clip(CircleShape).background(fill).padding(horizontal = Tokens.Space.xs), contentAlignment = Alignment.Center) {
             Text(label, style = PersonaTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
-                color = ExtensionThemeColors.on(fill), maxLines = 1)
+                color = palette.onAccentFill(fill), maxLines = 1)
         }
         return
     }

@@ -28,6 +28,9 @@ type runtimeRegistry struct {
 	known map[string]knownSession
 	// unclaimed: ids no connected runtime had when asked, and until when not to ask again.
 	unclaimed map[string]time.Time
+	// unlisted: runtime id -> the Claude transcripts it names as sessions of its own that it does not list, kept a
+	// while after it left (runtimeunlisted.go).
+	unlisted map[string]unlistedOf
 	// logf reports what an operator should fix (a launcher two runtimes offer); nil: nowhere. warned: said once each.
 	logf   func(format string, args ...any)
 	warned map[string]bool
@@ -315,9 +318,11 @@ func (b *runtimeRegistry) add(peer *rpc.Peer) *runtimeConn {
 }
 
 func (b *runtimeRegistry) remove(h *runtimeConn) {
+	id := h.id()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.conns, h.serial)
+	b.leftUnlisted(id)
 	b.recomputeOwners()
 }
 

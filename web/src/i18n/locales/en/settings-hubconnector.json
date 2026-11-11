@@ -62,5 +62,18 @@
   "extension_title": "Connector {name}",
   "extension_inbox_on": "New {name} items come into the Inbox. This is the same switch as Add to Inbox on the connector's page.",
   "extension_open": "Connector Settings",
-  "extension_open_hint": "Sign-in, status and more Inbox settings"
+  "extension_open_hint": "Sign-in, status and more Inbox settings",
+  "lark_docs": "Watched documents",
+  "lark_docs_footer": "Comments that mention you on watched documents, and new replies in comment threads you wrote in, come into the Inbox. Checked every 2 minutes. Your own documents need no link: turn on “All comments on documents I own” in the Lark dialog.",
+  "lark_docs_links": "Document links",
+  "lark_docs_link_placeholder": "Paste a Lark doc, sheet or Base link",
+  "lark_docs_spaces": "Wiki spaces",
+  "lark_docs_space_placeholder": "Paste a Wiki space link (every document in it)",
+  "lark_docs_owned": "All comments on documents I own",
+  "lark_docs_owned_sub": "Documents you own that were edited or opened in the last 30 days (up to 50): every new comment and reply from others comes in, without mentioning you and without adding them one by one.",
+  "lark_docs_remove": "Stop watching {link}",
+  "lark_triage": "Inbox triage rules",
+  "lark_triage_footer": "Say in a sentence or two what in Lark is Needs you, FYI or Collapsed. Empty uses the Inbox's default judgment; when set, Lark items are triaged by these rules only.",
+  "lark_triage_placeholder": "For example: build, release and alert bots are FYI unless they ask me to act; questions to me and review requests are Needs you.",
+  "lark_triage_save": "Save rules"
 }

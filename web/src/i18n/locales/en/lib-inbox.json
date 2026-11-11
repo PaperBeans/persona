@@ -111,5 +111,6 @@
   "group_lark": "Lark",
   "group_mail": "Mail · {account}",
   "group_agents": "Agents waiting on you",
-  "folder_failed": "Couldn't move it: {error}"
+  "folder_failed": "Couldn't move it: {error}",
+  "filter_doc": "Doc comments"
 }

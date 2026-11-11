@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -200,9 +201,54 @@ func checkSHA256(archive, sidecar []byte) error {
 	return nil
 }
 
-// extractLCU unpacks the archive and returns the directory that contains scripts/install.sh. Names that leave the
-// destination are refused.
+type lcuArchiveLink struct {
+	name, target string
+}
+
+// The public v0.13.6 wrapper forwards every argument to the adjacent Node installer. Pin its bytes so accepting
+// this form does not turn a marker in an arbitrary shell script into permission to run it. The release checksum is
+// delivered by the same source as the archive, not an independent signature.
+var lcuForwardingWrapperHashes = []string{
+	"7d5791b0df7240df70ff75ea959be70103cc0c40ae405ef06df4a442d3b2b2e4",
+}
+
+// extractLCU unpacks into an empty private staging directory and returns the directory containing scripts/install.sh.
+// Regular files retain their non-privileged permission bits when they are not group- or other-writable. Links are
+// created only after all files and directories, so no archive link can become an ancestor of a write; their complete
+// graph must stay inside the staging root.
 func extractLCU(dir string, archive []byte) (string, error) {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
+		return "", errors.New("LCU staging directory is not private")
+	}
+	stage, err := os.OpenRoot(dir)
+	if err != nil {
+		return "", err
+	}
+	defer stage.Close()
+	stageDir, err := stage.Open(".")
+	if err != nil {
+		return "", err
+	}
+	openedInfo, statErr := stageDir.Stat()
+	names, readErr := stageDir.Readdirnames(1)
+	closeErr := stageDir.Close()
+	if statErr != nil {
+		return "", statErr
+	}
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return "", readErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	if !os.SameFile(info, openedInfo) || len(names) != 0 {
+		return "", errors.New("LCU staging directory changed or is not empty")
+	}
+
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return "", errors.New("安装包不是 gzip")
@@ -210,6 +256,8 @@ func extractLCU(dir string, archive []byte) (string, error) {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	var root string
+	var links []lcuArchiveLink
+	seen := make(map[string]bool)
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -219,44 +267,125 @@ func extractLCU(dir string, archive []byte) (string, error) {
 			return "", err
 		}
 		name := pathClean(h.Name)
-		if name == "" || strings.HasPrefix(name, "..") || filepath.IsAbs(h.Name) {
+		if name == "" || strings.HasPrefix(name, "..") || filepath.IsAbs(h.Name) || strings.Contains(h.Name, `\`) {
 			return "", errors.New("安装包里的路径不安全")
 		}
-		dest := filepath.Join(dir, name)
-		if !strings.HasPrefix(dest, dir+string(os.PathSeparator)) && dest != dir {
-			return "", errors.New("安装包里的路径不安全")
+		if seen[name] {
+			return "", errors.New("LCU archive contains a duplicate path")
 		}
+		seen[name] = true
+		if h.Mode < 0 || h.Mode&^int64(0o777) != 0 {
+			return "", errors.New("LCU archive contains privileged permission bits")
+		}
+		dest := filepath.FromSlash(name)
 		switch h.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(dest, 0o755); err != nil {
+			if err := stage.MkdirAll(dest, 0o755); err != nil {
 				return "", err
 			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		case tar.TypeReg, tar.TypeRegA:
+			if h.Mode&0o022 != 0 {
+				return "", errors.New("LCU archive file is writable by group or others")
+			}
+			if h.Size < 0 || h.Size > lcuArchiveMost {
+				return "", errors.New("An LCU archive file exceeds the size limit")
+			}
+			if err := stage.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 				return "", err
 			}
-			f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
+			f, err := stage.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 			if err != nil {
 				return "", err
 			}
-			if _, err := io.Copy(f, io.LimitReader(tr, lcuArchiveMost)); err != nil {
-				f.Close()
-				return "", err
+			_, copyErr := io.Copy(f, tr)
+			if copyErr == nil {
+				// Chmod the open file so the archive mode is exact even with a restrictive umask.
+				copyErr = f.Chmod(os.FileMode(h.Mode))
 			}
-			if err := f.Close(); err != nil {
-				return "", err
+			if err := f.Close(); copyErr == nil {
+				copyErr = err
+			}
+			if copyErr != nil {
+				return "", copyErr
 			}
 			if strings.HasSuffix(name, "/scripts/install.sh") || name == "scripts/install.sh" {
-				root = filepath.Dir(filepath.Dir(dest))
+				root = filepath.Join(dir, filepath.Dir(filepath.Dir(dest)))
 			}
+		case tar.TypeSymlink:
+			if h.Linkname == "" || path.IsAbs(h.Linkname) || filepath.IsAbs(h.Linkname) ||
+				filepath.VolumeName(h.Linkname) != "" || strings.ContainsAny(h.Linkname, "\\\x00") {
+				return "", errors.New("LCU archive contains an unsafe symlink")
+			}
+			if err := stage.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				return "", err
+			}
+			links = append(links, lcuArchiveLink{name: name, target: h.Linkname})
 		default:
-			// Symlinks and the rest are not needed to run the installer, and are not followed.
+			return "", errors.New("LCU archive contains an unsupported entry type")
 		}
 	}
 	if root == "" {
 		return "", errors.New("安装包里没有 scripts/install.sh")
 	}
+	for _, link := range links {
+		if err := stage.Symlink(link.target, filepath.FromSlash(link.name)); err != nil {
+			return "", fmt.Errorf("Could not create an LCU archive symlink: %w", err)
+		}
+	}
+	if err := checkLCUArchiveLinks(stage, links); err != nil {
+		return "", err
+	}
 	return root, nil
+}
+
+// Resolve components in the completed graph using the staging filesystem's own name matching (including case and
+// Unicode aliases). Missing components stay in the stack: a later-created in-tree target may make a link valid.
+func checkLCUArchiveLinks(stage *os.Root, links []lcuArchiveLink) error {
+	for _, link := range links {
+		var stack []string
+		if parent := path.Dir(link.name); parent != "." {
+			stack = strings.Split(parent, "/")
+		}
+		pending := strings.Split(link.target, "/")
+		followed := 0
+		for len(pending) > 0 {
+			part := pending[0]
+			pending = pending[1:]
+			switch part {
+			case "", ".":
+				continue
+			case "..":
+				if len(stack) == 0 {
+					return errors.New("LCU archive contains an unsafe symlink")
+				}
+				stack = stack[:len(stack)-1]
+			default:
+				stack = append(stack, part)
+				candidate := filepath.FromSlash(strings.Join(stack, "/"))
+				info, err := stage.Lstat(candidate)
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+				if err != nil {
+					return fmt.Errorf("Could not inspect an LCU archive symlink: %w", err)
+				}
+				if info.Mode()&os.ModeSymlink != 0 {
+					followed++
+					if followed > 40 {
+						return errors.New("LCU archive contains a cyclic or overly long symlink")
+					}
+					target, err := stage.Readlink(candidate)
+					if err != nil || target == "" || path.IsAbs(target) || filepath.IsAbs(target) ||
+						filepath.VolumeName(target) != "" || strings.ContainsAny(target, "\\\x00") {
+						return errors.New("LCU archive contains an unsafe symlink")
+					}
+					stack = stack[:len(stack)-1]
+					pending = append(strings.Split(target, "/"), pending...)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func pathClean(name string) string {
@@ -287,10 +416,35 @@ func checkLCUInstaller(path string) error {
 	if !bytes.HasPrefix(b, []byte("#!")) {
 		return errors.New("安装器不是脚本")
 	}
-	if !bytes.Contains(b, []byte("--runtime-only")) {
-		return errors.New("安装器不像 LCU 的 install.sh")
+	if bytes.Contains(b, []byte("--runtime-only")) {
+		return nil
 	}
-	return nil
+	// A known forwarding wrapper has no runtime-only literal itself. Require its adjacent regular installer to
+	// expose the supported source shape; this detects missing interfaces, not arbitrary JavaScript behavior.
+	wrapperSum := sha256.Sum256(b)
+	for _, hash := range lcuForwardingWrapperHashes {
+		if hex.EncodeToString(wrapperSum[:]) != hash {
+			continue
+		}
+		target := filepath.Join(filepath.Dir(path), "install.mjs")
+		info, err := os.Lstat(target)
+		if err != nil || !info.Mode().IsRegular() {
+			break
+		}
+		if info.Size() > lcuInstallerSourceMost {
+			break
+		}
+		f, err := os.Open(target)
+		if err != nil {
+			break
+		}
+		installer, readErr := io.ReadAll(io.LimitReader(f, lcuInstallerSourceMost+1))
+		closeErr := f.Close()
+		if readErr == nil && closeErr == nil && lcuForwardingInstallerCompatible(installer) {
+			return nil
+		}
+	}
+	return errors.New("LCU release installer format is not supported; update Persona and try again")
 }
 
 func lcuLastLines(s string, n int) string {

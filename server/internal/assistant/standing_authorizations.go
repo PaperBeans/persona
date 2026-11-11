@@ -71,8 +71,14 @@ func (s *Service) standingForDirectory(ctx context.Context, machine, cwd string)
 	}
 	cwd = path.Clean(cwd)
 	for _, grant := range list.Authorizations {
-		if grant.MachineID == machine && validStandingDirectory(grant.Directory) &&
-			(cwd == grant.Directory || strings.HasPrefix(cwd, grant.Directory+"/")) {
+		if grant.MachineID != machine {
+			continue
+		}
+		matches, err := s.standingScopeMatches(ctx, machine, grant.Directory, cwd)
+		if err != nil {
+			return nil, err
+		}
+		if matches {
 			out = append(out, grant)
 		}
 	}

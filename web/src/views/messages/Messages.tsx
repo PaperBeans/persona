@@ -6,6 +6,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { shortTime } from "../../lib/inbox";
 import { accountTitle, larkAccounts, useLarkAccounts, type LarkAccountsState } from "../../lib/lark-accounts";
 import { HIDDEN_DISPLAY, summaryText, useLarkDisplayState, type LarkMessageDisplay } from "../../lib/lark-display";
+import { entryOf, type LarkEntry } from "../../lib/lark-history";
 import {
   arrangeConversations, conversationPreview, filterConversations, larkChatsFor, unreadBadge, useLarkChats, useLarkHome, type LarkChatsStore,
   type LarkConversation,
@@ -31,6 +32,22 @@ export function Messages({ id, onToggleSidebar }: { id?: string; onToggleSidebar
   const s = useLarkChats(larkChats);
   const [pins, setPins] = useState(false);
   const chat = useMemo(() => (id ? [...s.pinned, ...s.rows].find((c) => c.id === id) : undefined), [id, s.pinned, s.rows]);
+  // Where the opened chat lands (its first unread message), taken from its row once, when the row (or the list without
+  // it) is first there: reading moves the row's read position, and the chat must not jump to it.
+  const entryKey = `${accounts.request ?? ""}:${id ?? ""}`;
+  // A row the loaded pages do not hold is looked for further down the list first.
+  const [entry, setEntry] = useState<{ key: string; at: LarkEntry } | null>(null);
+  if (id && entry?.key !== entryKey && chat) setEntry({ key: entryKey, at: entryOf(chat) });
+  const missing = Boolean(id) && !chat && s.loaded && entry?.key !== entryKey;
+  useEffect(() => {
+    if (!missing || !id) return;
+    let live = true;
+    void larkChats.find(id).then((row) => live && setEntry((cur) => (cur?.key === entryKey ? cur : { key: entryKey, at: entryOf(row) })));
+    return () => {
+      live = false;
+    };
+  }, [missing, id, entryKey, larkChats]);
+  const landing = entry?.key === entryKey ? entry.at : null;
 
   useEffect(() => setPins(false), [id]);
   useEffect(() => {
@@ -119,8 +136,10 @@ export function Messages({ id, onToggleSidebar }: { id?: string; onToggleSidebar
             <div className="flex h-full min-h-0 flex-col">
               <ChatHeader chat={chat} account={accounts.selectedName} />
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <LarkThread key={`${accounts.request ?? ""}:${id}`} chat={{ feed: id, title: chat?.name || t("messages-messages.lark_chat"), topic: chat?.is_topic, account: accounts.request, group: chat?.is_group }}
-                  pinsOpen={pins} onPinsOpen={setPins} />
+                {landing ? (
+                  <LarkThread key={entryKey} chat={{ feed: id, title: chat?.name || t("messages-messages.lark_chat"), topic: chat?.is_topic, account: accounts.request,
+                    group: chat?.is_group, ...landing }} pinsOpen={pins} onPinsOpen={setPins} />
+                ) : <div className="p-5"><Loading label={t("inbox-larkthread.loading")} /></div>}
               </div>
             </div>
           ) : (

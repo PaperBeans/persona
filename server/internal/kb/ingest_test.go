@@ -293,6 +293,35 @@ func TestIngestFilesystemRecoveryWaitsForRepair(t *testing.T) {
 	assertArchiveCounts(t, s, "example-thread", 1, 1)
 }
 
+func TestSettleIngestWaitsForJournalRecovery(t *testing.T) {
+	s, e := replayStore(t)
+	m := SourceMessage{ID: "one", At: time.Now().Add(-time.Hour), Text: "Synthetic recovery message"}
+	s.ingestWrite = func(path string, raw []byte) error {
+		if filepath.Base(path) == "meta.json" {
+			return errors.New("synthetic metadata write failure")
+		}
+		return archiveWrite(path, raw)
+	}
+	if _, err := e.Ingest(context.Background(), named("example"), SourceChat{ID: "thread"}, []SourceMessage{m}); err == nil {
+		t.Fatal("metadata replacement did not fail")
+	}
+	if err := s.SettleIngest("example", "thread"); err == nil {
+		t.Fatal("settlement ignored the unfinished journal")
+	}
+	if _, err := os.Stat(s.path(KindChat, "example-thread", ingestJournal)); err != nil {
+		t.Fatalf("unfinished journal was lost: %v", err)
+	}
+	s.ingestWrite = nil
+	if err := s.SettleIngest("example", "thread"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SettleIngest("example", "thread"); err != nil {
+		t.Fatalf("settlement should be idempotent: %v", err)
+	}
+	ingestMessages(t, e, "example", "thread", 0, m)
+	assertArchiveCounts(t, s, "example-thread", 1, 1)
+}
+
 func TestIngestOtherPipelineWritersRecoverBeforeCounters(t *testing.T) {
 	for _, writer := range []string{"history", "compression", "prune", "forget"} {
 		t.Run(writer, func(t *testing.T) {

@@ -166,6 +166,23 @@ import SwiftUI
             png(WebAddressView(model: set), dark: dark, to: dir.appendingPathComponent("web-address-set-\(mode).png"))
             png(WebAddressView(model: set, address: "file:///tmp"), dark: dark, to: dir.appendingPathComponent("web-address-invalid-\(mode).png"))
             png(countedIcons(dark: dark), dark: dark, to: dir.appendingPathComponent("icons-count-\(mode).png"), plain: true)
+            // SSH tunnel: pairing window with section open before pairing, paired & connected over SSH, and menu status.
+            let sshOpen = LinkModel()
+            sshOpen.show(LinkStatus(state: "unpaired"))
+            let sshLoopbackLink = "persona://link?url=http%3A%2F%2F127.0.0.1%3A18660&tls=18662&machine=macbook&fp=Wm9vb3ZlcnRoZW1vb24&token=jp_ZXhhbXBsZQ"
+            let sshTestedTarget = "127.0.0.1:18662"
+            png(PairView(model: sshOpen, link: sshLoopbackLink, sshExpanded: true, sshServer: "user@example.com",
+                         sshNotice: (true, linkText("SSH tunnel reached the hub at \(sshTestedTarget)."))),
+                dark: dark, to: dir.appendingPathComponent("pair-ssh-open-\(mode).png"))
+            let sshCfg = SSHConfig(server: "user@example.com", target: sshTestedTarget, always: false)
+            var sshConnected = menus[0].1!
+            sshConnected.address = "user@example.com"
+            sshConnected.kind = "ssh"
+            sshConnected.ssh = sshCfg
+            let sshPaired = LinkModel()
+            sshPaired.show(sshConnected, endpoints: endpoints, machine: "macbook", node: nodeInstalled, ssh: sshCfg)
+            png(PairView(model: sshPaired), dark: dark, to: dir.appendingPathComponent("pair-ssh-paired-\(mode).png"))
+            png(MenuView(model: sshPaired, now: now), dark: dark, to: dir.appendingPathComponent("menu-connected-ssh-\(mode).png"))
         }
     }
 

@@ -28,7 +28,48 @@ interface AgentCreationService {
      * list a while, [refresh] asks the CLI again. Null from hubs without the list (404).
      */
     suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean = false): LauncherModels? = null
+
+    /**
+     * What [cwd] is in Git terms (`POST …/worktree/status`, docs/protocol/protocol.md): null when the computer can't say
+     * (an older node or hub, offline, an error), and then New Agent offers no worktree.
+     */
+    suspend fun worktreeStatus(machineId: String, cwd: String): WorktreeStatus? = null
+
+    /** A worktree for a new agent from the repository [cwd] is in (`…/worktree/add`); an empty [branch] is the node's pick. */
+    suspend fun addWorktree(machineId: String, cwd: String, nameHint: String, branch: String): WorktreeAdded =
+        throw UnsupportedOperationException("Worktrees unavailable")
+
+    /** Removes a worktree Persona made (`…/worktree/remove`); [force] only after the user confirmed what it loses. */
+    suspend fun removeWorktree(machineId: String, path: String, deleteBranch: Boolean, force: Boolean): WorktreeRemoved =
+        throw UnsupportedOperationException("Worktrees unavailable")
 }
+
+/**
+ * What `worktree/status` says of a folder (server proto.WorktreeStatus, #4532): [path] is set for any folder in a
+ * repository (its top level), [worktree] only for a linked worktree, [ours] only for one Persona made; [checkouts] is
+ * where a new agent's worktree of this repository goes ("" from an older node); [dirty] changed files, [unmerged]
+ * commits on its branch that [mainBranch] lacks.
+ */
+@Serializable
+data class WorktreeStatus(
+    val worktree: Boolean = false,
+    val ours: Boolean = false,
+    val path: String = "",
+    val branch: String = "",
+    val root: String = "",
+    @SerialName("main_branch") val mainBranch: String = "",
+    val checkouts: String = "",
+    val dirty: Int = 0,
+    val unmerged: Int = 0,
+)
+
+/** What `worktree/add` made: the checkout the agent starts in. */
+@Serializable
+data class WorktreeAdded(val path: String, val branch: String = "", val root: String? = null)
+
+/** What `worktree/remove` did. */
+@Serializable
+data class WorktreeRemoved(val removed: Boolean = false, @SerialName("branch_deleted") val branchDeleted: Boolean = false)
 
 /** What a launcher's agent lists in its /model menu (`GET …/launchers/{name}/models`). No [models]: it has no list. */
 @Serializable
@@ -76,6 +117,22 @@ data class AgentLauncher(
     @SerialName("base_url") val baseUrl: String? = null,
     val model: String? = null,
     @SerialName("agent_type") val agentType: String = "claude",
+    /** Its health on this computer (docs/server/launcher-health.md); null when never checked or from an older hub. */
+    val health: LauncherHealth? = null,
+)
+
+/**
+ * A launcher's health on one computer as the hub records it (docs/server/launcher-health.md): [state] working, failing,
+ * repairing or blocked; [kind] the failure's class (auth, model_route, cli_outdated, timeout, not_in_terminal…);
+ * [error] the hub's redacted text.
+ */
+@Serializable
+data class LauncherHealth(
+    val state: String = "",
+    val kind: String? = null,
+    val error: String? = null,
+    @SerialName("checked_at") val checkedAt: String? = null,
+    @SerialName("resets_at") val resetsAt: String? = null,
 )
 
 @Serializable
@@ -107,6 +164,8 @@ data class AgentStartRequest(
     @SerialName("resume_session_id") val resumeSessionId: String? = null,
     /** The hub answers at once with a `starting` session and starts the agent in the background. */
     val async: Boolean? = null,
+    /** Start Claude Code with ultracode on (#582, docs/protocol/protocol.md "Claude Code ultracode"); null leaves it off. */
+    val ultracode: Boolean? = null,
     /** What the tab is named after when the first message goes as an ordinary message rather than [prompt]. */
     @SerialName("name_hint") val nameHint: String? = null,
     /** The model picked for this start (an id of [AgentCreationService.launcherModels]); null: the default one. */

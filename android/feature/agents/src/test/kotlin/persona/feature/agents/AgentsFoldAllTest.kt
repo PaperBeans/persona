@@ -88,4 +88,35 @@ class AgentsFoldAllTest {
         val tree = agentTreeEntries(page.list, page.settings.machineFilter, tabs = true, foldedTabs = page.preferences.foldedTabs)
         assertFalse(tree.filterIsInstance<TreeTabEntry>().single().folded)
     }
+
+    // #4338 A6, as iOS: folds stay through a search, a range change and a grouping change, and come back after a relaunch.
+    @Test fun foldsAreKeptThroughSearchRangeGroupingAndRelaunch() = runTest {
+        startModel()
+        val id = model.page.value.list.groups.first().id
+        model.fold(model.page.value.list.groups.first())
+        runCurrent()
+        assertEquals(setOf(id), model.page.value.settings.folded)
+        assertEquals(setOf(id), preferences.snapshots.first().folds[AgentGrouping.MachineSpace])
+        // A search opens every fold while it runs and gives the kept ones back when it clears.
+        model.query("pane")
+        runCurrent()
+        assertTrue(model.page.value.settings.folded.isEmpty())
+        model.query("")
+        runCurrent()
+        assertEquals(setOf(id), model.page.value.settings.folded)
+        model.range(AgentRange.All)
+        runCurrent()
+        assertEquals(setOf(id), model.page.value.settings.folded)
+        // Another grouping has folds of its own; coming back brings these back.
+        model.grouping(AgentGrouping.State)
+        runCurrent()
+        assertFalse(id in model.page.value.settings.folded)
+        model.grouping(AgentGrouping.MachineSpace)
+        runCurrent()
+        assertEquals(setOf(id), model.page.value.settings.folded)
+        // A new model, as after a relaunch, reads them back.
+        model.viewModelScope.cancel()
+        startModel()
+        assertEquals(setOf(id), model.page.value.settings.folded)
+    }
 }

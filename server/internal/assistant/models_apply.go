@@ -16,6 +16,16 @@ import (
 // applyModel fills params (a node call's: session.start, assistant.send…) with what purpose id runs on; a launcher,
 // model or effort already in params is this call's own pick. The permission mode is left as it is.
 func (s *Service) applyModel(ctx context.Context, id string, params map[string]any) error {
+	return s.applyModelOn(ctx, id, params, false)
+}
+
+// applyModelCLI is applyModel on the CLI whatever purpose id's runtime: the purpose's launcher and model for a guest
+// conversation, which never runs on the Agent SDK (its built-in tools cannot be taken away, node/assistant_guest.go).
+func (s *Service) applyModelCLI(ctx context.Context, id string, params map[string]any) error {
+	return s.applyModelOn(ctx, id, params, true)
+}
+
+func (s *Service) applyModelOn(ctx context.Context, id string, params map[string]any, cli bool) error {
 	p, err := s.modelPurposeDef(ctx, id)
 	if err != nil {
 		return err
@@ -41,6 +51,9 @@ func (s *Service) applyModel(ctx context.Context, id string, params map[string]a
 	}
 	if effort, _ := params["effort"].(string); effort != "" {
 		b.Effort = effort
+	}
+	if cli {
+		b.Runtime = ""
 	}
 	return s.finishModel(ctx, id, params, b)
 }

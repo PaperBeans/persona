@@ -5,7 +5,7 @@
 import { ChannelLink } from "./Channels";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorText } from "../../lib/api";
-import { connectorState, connectorSummary, signsInHere, connectorTone, isEnabled, listConnectors, setConnector, type ConnectorTone, type HubConnector } from "../../lib/connectors";
+import { connectorState, connectorSummary, signsInHere, connectorTone, isEnabled, larkcliOptions, listConnectors, setConnector, type ConnectorTone, type HubConnector } from "../../lib/connectors";
 import { t } from "../../i18n";
 import { ago } from "../../lib/format";
 import { documentPage, visiblePoll } from "../../lib/visible-poll";
@@ -455,6 +455,20 @@ function LarkReadSection({ connector, status, reload, onOpen }: { connector: Hub
       setSwitching(false);
     }
   };
+  // "All comments on documents I own" sits here, next to the account, rather than only on the connector's page.
+  const owned = larkcliOptions(connector.options);
+  const setOwned = async (v: boolean) => {
+    if (!owned) return;
+    setSwitching(true);
+    try {
+      await setConnector(connector.id, { options: { ...owned, owned_all_comments: v } });
+      await reload();
+    } catch (e) {
+      toast(t("settings-feishubot.error_with", { what: t("settings-hubconnector.lark_docs_owned"), error: errorText(e) }), "error");
+    } finally {
+      setSwitching(false);
+    }
+  };
   const scopes = missingScopes(connector);
   const link = permissionLink(connector);
   const lacksPermission = connector.status === "no_permission" || scopes.length > 0;
@@ -553,6 +567,11 @@ function LarkReadSection({ connector, status, reload, onOpen }: { connector: Hub
               </option>
             ))}
           </select>
+        </Row>
+      )}
+      {on && owned && (
+        <Row label={t("settings-hubconnector.lark_docs_owned")} hint={t("settings-hubconnector.lark_docs_owned_sub")} wrapHint>
+          <Switch on={owned.owned_all_comments} disabled={switching} label={t("settings-hubconnector.lark_docs_owned")} onChange={(v) => void setOwned(v)} />
         </Row>
       )}
       <Row label={t("settings-feishubot.read_more")} hint={t("settings-feishubot.read_more_hint")} onClick={onOpen} />

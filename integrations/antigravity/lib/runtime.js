@@ -35,6 +35,7 @@ export function createAgyRuntime(options = {}) {
   const maxSessions = options.maxSessions ?? 80
 
   const activeTurns = new Map() // personaId -> { streamingText, startedAt }
+  const promptTurns = new Map() // the prompt executing, before any queued successor
   const createdAt = new Map() // owned sessions remain discoverable before their first transcript export
   const completedTurns = new Set() // owned ACP turns that ended before a native transcript was available
   const sessionTitles = new Map() // agyId -> title
@@ -169,8 +170,10 @@ export function createAgyRuntime(options = {}) {
         if (typeof chunk === 'string' && chunk) {
           const probe = checkTurns.get(rawId)
           if (probe) probe.text += chunk
-          const turn = activeTurns.get(pid)
+          const turn = promptTurns.get(pid)
           if (turn) {
+            if (turn.newMessage) turn.streamingText = ''
+            turn.newMessage = false
             turn.streamingText += chunk
             rt.stream(pid, turn.streamingText)
           }
@@ -179,6 +182,7 @@ export function createAgyRuntime(options = {}) {
       }
       case 'tool_call':
       case 'tool_call_update':
+        if (upd.sessionUpdate === 'tool_call' && promptTurns.has(pid)) promptTurns.get(pid).newMessage = true
         syncTranscriptAppend(rawId)
         break
       default:
@@ -651,27 +655,35 @@ export function createAgyRuntime(options = {}) {
     if (prevTurn?.pollTimer) clearInterval(prevTurn.pollTimer)
     const pollTimer = setInterval(() => syncTranscriptAppend(rawId), 400)
     const turnToken = Symbol('turn')
+    const turn = { streamingText: '', newMessage: false, startedAt: Date.now(), pollTimer, token: turnToken }
     const prevPromise = prevTurn?.promise || Promise.resolve()
     const promise = prevPromise
       .catch(() => {})
       .then(() => {
-        if (!archived.has(rawId)) return acp.prompt(rawId, blocks)
+        if (archived.has(rawId)) return
+        promptTurns.set(pid, turn)
+        rt.streamEnd(pid)
+        return acp.prompt(rawId, blocks)
       })
       .catch((err) => log(`agy prompt error (${pid}): ${err.message}`))
       .finally(() => {
         // The turn is over: a card still waiting has nothing to answer for any more.
         cancelling.delete(rawId)
         withdrawPermissionAsks(rawId, 'the turn ended')
+        if (promptTurns.get(pid) === turn) {
+          promptTurns.delete(pid)
+          rt.streamEnd(pid)
+        }
         if (activeTurns.get(pid)?.token === turnToken) {
           clearInterval(pollTimer)
           activeTurns.delete(pid)
           completedTurns.add(pid)
-          rt.streamEnd(pid)
           syncTranscriptAppend(rawId)
           rt.sessionsChanged()
         }
       })
-    activeTurns.set(pid, { streamingText: '', startedAt: Date.now(), pollTimer, token: turnToken, promise })
+    turn.promise = promise
+    activeTurns.set(pid, turn)
     rt.sessionsChanged()
   }
 
@@ -730,6 +742,7 @@ export function createAgyRuntime(options = {}) {
       // A turn's transcript poll would otherwise keep running; acp.stop() fails the prompts themselves.
       for (const turn of activeTurns.values()) clearInterval(turn.pollTimer)
       activeTurns.clear()
+      promptTurns.clear()
       return acp.stop()
     },
   }

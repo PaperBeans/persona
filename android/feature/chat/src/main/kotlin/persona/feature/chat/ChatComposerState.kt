@@ -87,6 +87,13 @@ class ChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()) {
         if (draft == sent) { value = TextFieldValue(); attachments = emptyList(); sessionVersion = currentSessionVersion }
     }
 
+    /** Fills an empty composer with a stored draft: the composer is drawn before the draft is read (#4045). */
+    internal fun load(draft: ChatComposerDraft) {
+        value = TextFieldValue(draft.text, TextRange(draft.text.length))
+        attachments = draft.attachments
+        sessionVersion = draft.sessionVersion
+    }
+
     fun editMessage(text: String) {
         beginEdit()
         val paths = composerImagePaths(text)

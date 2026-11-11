@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "data": {
+    "items": [
+      {
+        "comment_id": "comment_plain",
+        "create_time": "2030-01-02T11:00:00Z",
+        "update_time": "2030-01-02T11:00:00Z",
+        "is_solved": false,
+        "is_whole": false,
+        "quote": "The rollout plan",
+        "user_id": "ou_example_peer",
+        "reply_list": {
+          "replies": [
+            {
+              "reply_id": "reply_plain",
+              "user_id": "ou_example_peer",
+              "create_time": "2030-01-02T11:00:00Z",
+              "content": {"elements": [{"type": "text_run", "text": "Should this start next week?"}]}
+            }
+          ],
+          "has_more": false
+        }
+      }
+    ],
+    "has_more": false
+  }
+}

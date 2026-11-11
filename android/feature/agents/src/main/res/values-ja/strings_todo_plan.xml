@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A to-do's due date, reminder and priority in its detail (#4636): iOS TodoPlanSection words. -->
+<resources>
+    <string name="agents_todo_plan_due">期限</string>
+    <string name="agents_todo_plan_all_day">終日</string>
+    <string name="agents_todo_plan_date">日付</string>
+    <string name="agents_todo_plan_time">時刻</string>
+    <string name="agents_todo_plan_remind">リマインド</string>
+    <string name="agents_todo_plan_remind_at">リマインド日時</string>
+    <string name="agents_todo_plan_reminded">%1$s にリマインド済み</string>
+    <string name="agents_todo_plan_priority">優先度</string>
+    <string name="agents_todo_plan_high">高</string>
+    <string name="agents_todo_plan_normal">普通</string>
+    <string name="agents_todo_plan_low">低</string>
+</resources>

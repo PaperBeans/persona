@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,7 +75,14 @@ func archiveMail(t *testing.T, m *pagedMail, cursor string, calls int) ([]uint32
 			t.Fatal(err)
 		}
 		for _, b := range batches {
-			uid, _ := strconv.ParseUint(b.Messages[0].ID, 10, 32)
+			id := b.Messages[0].ID
+			if i := strings.LastIndexByte(id, ':'); i >= 0 {
+				id = id[i+1:]
+			}
+			uid, err := strconv.ParseUint(id, 10, 32)
+			if err != nil {
+				t.Fatalf("invalid mail message ID %q: %v", b.Messages[0].ID, err)
+			}
 			uids = append(uids, uint32(uid))
 		}
 		cursor, more = next, again

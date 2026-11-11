@@ -487,8 +487,12 @@ def remove_public_relay_url(text, configured_url, path="/relay"):
 
 
 def public_download_url(cfg):
-    site = persona_config.get(cfg, "publish.site_url", "")
-    return site.rstrip("/") + "/dl" if isinstance(site, str) and site else ""
+    """The update URL every published personad carries and the one path it may have: publish.update_url as configured
+    (a GitHub repository's releases/latest/download, say), else publish.site_url's /dl (persona_config.update_url)."""
+    url = persona_config.update_url(cfg)
+    if url and persona_config.get(cfg, "publish.update_url", "") not in ("", None):
+        return url, urlsplit(url).path
+    return url, "/dl"
 
 
 def main():
@@ -526,7 +530,7 @@ def main():
                     if not whole_short:
                         t = remove_public_relay_url(t, persona_config.get(cfg, "app.push_relay", ""))
                     else:  # the update URL every published personad carries (-X main.updateURL, scripts/release/publish.sh)
-                        t = remove_public_relay_url(t, public_download_url(cfg), "/dl")
+                        t = remove_public_relay_url(t, *public_download_url(cfg))
                     for v in inherent:
                         t = t.replace(v, "")
                     if modules:

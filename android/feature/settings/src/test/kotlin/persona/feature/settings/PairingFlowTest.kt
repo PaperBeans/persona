@@ -73,6 +73,12 @@ class PairingFlowTest {
     private fun back() { rule.runOnUiThread { rule.activity.onBackPressedDispatcher.onBackPressed() }; rule.waitForIdle() }
     private fun failed() = rule.waitUntil(5_000) { rule.onAllNodesWithText(text(R.string.settings_pairing_failed_title)).fetchSemanticsNodes().isNotEmpty() }
 
+    private fun openPairingChoices() {
+        rule.onNodeWithText(text(R.string.settings_password_login_title)).assertExists()
+        rule.onNodeWithText(text(R.string.settings_pairing_scan)).assertDoesNotExist()
+        tap(R.string.settings_password_login_pairing)
+    }
+
     /** From the connect choices into the manual form, filled in. */
     private fun fillManual(address: String) {
         tap(R.string.settings_pairing_manual)
@@ -82,6 +88,7 @@ class PairingFlowTest {
 
     @Test fun aBareAddressGetsItsSchemeAndABadOneStaysInTheForm() {
         show { PairingScreen(FakePairing(), sessions, onReady = {}, onDiagnostics = {}, skipWelcome = true) }
+        openPairingChoices()
         fillManual("127.0.0.1:18760")
         tap(R.string.settings_pairing_next)
         rule.onAllNodesWithText("http://127.0.0.1:18760").onFirst().assertExists()
@@ -107,6 +114,7 @@ class PairingFlowTest {
 
     @Test fun theKeyboardsActionKeysMoveThroughTheForm() {
         show { PairingScreen(FakePairing(), sessions, onReady = {}, onDiagnostics = {}, skipWelcome = true) }
+        openPairingChoices()
         fillManual("127.0.0.1:18760")
         fields()[0].performImeAction()
         fields()[1].assertIsFocused()
@@ -119,6 +127,7 @@ class PairingFlowTest {
     @Test fun theFailurePageShowsNoErrorChainAndCountsRetries() {
         val pairing = FakePairing(error = ConnectException("Failed to connect to /127.0.0.1:1"))
         show { PairingScreen(pairing, sessions, onReady = {}, onDiagnostics = {}, skipWelcome = true) }
+        openPairingChoices()
         fillManual("http://127.0.0.1:1")
         tap(R.string.settings_pairing_next)
         tap(R.string.settings_pairing_confirm)
@@ -153,7 +162,7 @@ class PairingFlowTest {
                 rule.onNodeWithText(text(R.string.settings_pairing_welcome_title)).assertExists()
             },
             // Manual entry › Confirm › failure, back: the form with the address still in it; back again: the connect choices.
-            { fillManual("http://127.0.0.1:1"); tap(R.string.settings_pairing_next); tap(R.string.settings_pairing_confirm); failed() } to {
+            { openPairingChoices(); fillManual("http://127.0.0.1:1"); tap(R.string.settings_pairing_next); tap(R.string.settings_pairing_confirm); failed() } to {
                 rule.onNodeWithText(text(R.string.settings_pairing_failed_title)).assertDoesNotExist()
                 fields()[0].assert(hasText("http://127.0.0.1:1"))
                 back()
@@ -161,7 +170,7 @@ class PairingFlowTest {
                 fields().assertCountEquals(0)
             },
             // Confirm pairing with a hub that doesn't answer, back while connecting: still connecting.
-            { fillManual("http://127.0.0.1:1"); tap(R.string.settings_pairing_next); tap(R.string.settings_pairing_confirm) } to {
+            { openPairingChoices(); fillManual("http://127.0.0.1:1"); tap(R.string.settings_pairing_next); tap(R.string.settings_pairing_confirm) } to {
                 rule.onNodeWithText(text(R.string.settings_pairing_connecting_title)).assertExists()
             },
         )
@@ -191,6 +200,7 @@ class PairingFlowTest {
         for (each in listOf(PairingFailure.Expired, PairingFailure.InvalidCode)) {
             reason = each
             rule.waitForIdle()
+            openPairingChoices()
             fillManual("http://127.0.0.1:18760")
             tap(R.string.settings_pairing_next)
             tap(R.string.settings_pairing_confirm)
@@ -241,6 +251,7 @@ class PairingFlowTest {
                 PairingScreen(FakePairing(paired = true), sessions, onReady = {}, onDiagnostics = {}, skipWelcome = link == null, initialLink = link)
             }
         }
+        openPairingChoices()
         rule.onNodeWithText(text(R.string.settings_pairing_scan)).assertExists()
         rule.onNodeWithText(text(R.string.settings_pairing_manual)).assertExists()
         rule.onAllNodesWithText(text(R.string.settings_ready_title)).assertCountEquals(0)
@@ -280,6 +291,7 @@ class PairingFlowTest {
         for (wiring in listOf(true, false)) {
             routed = wiring; left = 0
             rule.waitForIdle()
+            openPairingChoices()
             rule.onNodeWithText(text(R.string.settings_pairing_scan)).assertExists()
             rule.onNodeWithText(text(R.string.settings_pairing_welcome_title)).assertDoesNotExist()
             // The form, back: the connect choices, and the form again keeps the address. Confirm, back: the form.

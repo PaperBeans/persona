@@ -320,4 +320,5 @@
     <string name="designsystem_stepper_minus">減らす</string>
     <string name="designsystem_stepper_plus">増やす</string>
     <string name="designsystem_copy_too_large">テキストが大きすぎるためコピーできません。共有を使用してください</string>
+    <string name="designsystem_copied">コピーしました</string>
 </resources>

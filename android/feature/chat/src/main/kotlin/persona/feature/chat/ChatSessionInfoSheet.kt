@@ -6,9 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import persona.core.contracts.Machine
 import persona.core.contracts.Session
@@ -93,8 +91,7 @@ internal fun ChatSessionInfoSheet(
     onOpenTodo: ((String) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
-    val clipboard = LocalClipboardManager.current
-    val feedback = LocalAppFeedback.current
+    val copyText = rememberCopy()
     val res = LocalResources.current
     var info by remember(session.key) { mutableStateOf<SessionInfo?>(null) }
     var error by remember(session.key) { mutableStateOf<String?>(null) }
@@ -128,7 +125,7 @@ internal fun ChatSessionInfoSheet(
                             chevron = true, onClick = { onDismiss(); row.onClick.invoke() })
                         else if (copy != null) JRow(row.label, subtitle = value, subtitleLines = 4,
                             trailing = { JIcon(PhIcons.Copy, stringResource(R.string.chat_info_copy_item, copy), tint = PersonaTheme.palette.ink2) }, onClick = {
-                                clipboard.setText(AnnotatedString(value)); feedback?.notice(res.getString(R.string.chat_info_copied_item, copy))
+                                copyText(value, res.getString(R.string.chat_info_copied_item, copy))
                             })
                         else JRow(row.label, value = value)
                     }

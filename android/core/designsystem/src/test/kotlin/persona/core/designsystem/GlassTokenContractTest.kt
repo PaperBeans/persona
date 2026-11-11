@@ -52,21 +52,24 @@ class GlassTokenContractTest {
             assertEquals(if (dark) Color.Black else Color.White, p.background)
             assertEquals(if (dark) Tokens.Semantic.Glass.Dark.card else Tokens.Semantic.Glass.Light.card, p.surfaceOpaque)
             assertEquals(if (dark) Color.White else Color.Black, p.ink)
-            assertEquals(Palettes.glassText(if (dark) Tokens.Semantic.Glass.Dark.secondaryText else Tokens.Semantic.Glass.Light.secondaryText, dark), p.ink2)
+            assertEquals(if (dark) Tokens.Semantic.Glass.Dark.secondaryText else Tokens.Semantic.Glass.Light.secondaryText, p.ink2)
             assertEquals(p.ink2, p.ink3)
             val systemBlue = if (dark) Tokens.Semantic.Glass.Dark.accent else Tokens.Semantic.Glass.Light.accent
-            assertEquals(Palettes.glassText(systemBlue, dark), p.accent)
+            assertEquals(systemBlue, p.accent)
+            // The iPhone's colours as they are (#4209), and white words on the accent, as on iOS.
+            assertEquals(Color.White, p.onAccent)
+            assertEquals(Color.White, p.needsYou.onDot)
             // Needs You is the iPhone blue (#4209), now read from the generated tokens.
             val needsDot = if (dark) Tokens.Status.Dark.NeedsYou.dot else Tokens.Status.Light.NeedsYou.dot
             val needsText = if (dark) Tokens.Status.Dark.NeedsYou.text else Tokens.Status.Light.NeedsYou.text
             assertEquals(systemBlue, needsDot)
             assertEquals(if (dark) Color(0xFF409CFF) else Color(0xFF0064C8), needsText)
             assertEquals(needsDot, p.needsYou.dot)
-            assertEquals(Palettes.glassText(needsText, dark), p.needsYou.text)
+            assertEquals(needsText, p.needsYou.text)
             assertEquals(if (dark) Tokens.Status.Dark.Working.dot else Tokens.Status.Light.Working.dot, p.working.dot)
-            assertEquals(Palettes.glassText(if (dark) Tokens.Status.Dark.Working.text else Tokens.Status.Light.Working.text, dark), p.working.text)
+            assertEquals(if (dark) Tokens.Status.Dark.Working.text else Tokens.Status.Light.Working.text, p.working.text)
             assertEquals(if (dark) Tokens.Status.Dark.Unread.dot else Tokens.Status.Light.Unread.dot, p.done.dot)
-            assertEquals(Palettes.glassText(if (dark) Tokens.Status.Dark.Unread.text else Tokens.Status.Light.Unread.text, dark), p.done.text)
+            assertEquals(if (dark) Tokens.Status.Dark.Unread.text else Tokens.Status.Light.Unread.text, p.done.text)
             val neutralTint = if (dark) Tokens.Status.Dark.Offline.tint else Tokens.Status.Light.Offline.tint
             assertEquals(neutralTint, p.needsYou.tint)
             assertEquals(neutralTint, p.working.tint)
@@ -111,12 +114,13 @@ class GlassTokenContractTest {
         assertEquals(Color(0xB83A3A3C), HomeTokens.chromeDark)
         assertEquals(22.dp, HomeTokens.sidebarBadgeSize)
         for (palette in listOf(Palettes.GlassLight, Palettes.GlassDark)) {
+            // White words on the accent, held to iOS's floor for them (3.5:1, #4209); secondary words are iOS's own gray.
             val fill = sidebarActionFill(palette)
-            assertEquals(Color.White, ExtensionThemeColors.on(fill))
-            assertTrue(ExtensionThemeColors.contrast(Color.White, fill) >= 4.5)
+            assertTrue(palette.whiteOnAccent)
+            assertTrue(ExtensionThemeColors.contrast(Color.White, fill) >= 3.5)
             val chrome = (if (palette.dark) HomeTokens.chromeDark else HomeTokens.chromeLight)
                 .compositeOn(palette.background)
-            assertTrue(ExtensionThemeColors.contrast(palette.ink2, chrome) >= 4.5)
+            assertTrue(ExtensionThemeColors.contrast(palette.ink, chrome) >= 4.5)
         }
     }
 
@@ -142,9 +146,9 @@ class GlassTokenContractTest {
         assertEquals(Color(0xFF2A2A2E), HomeTokens.personaAnswerDark)
         for (palette in listOf(Palettes.GlassLight, Palettes.GlassDark)) {
             val fill = homeAnswerFill(palette)
-            for (ink in listOf(palette.ink, palette.ink2, palette.accent)) {
-                assertTrue(ExtensionThemeColors.contrast(ink, fill) >= 4.5)
-            }
+            // iOS's floors (#4209): body words 4.5:1, the accent as a link 3:1; secondary words are iOS's own gray.
+            assertTrue(ExtensionThemeColors.contrast(palette.ink, fill) >= 4.5)
+            assertTrue(ExtensionThemeColors.contrast(palette.accent, fill) >= 3.0)
             val custom = palette.copy(customRoles = true, surfaceOpaque = palette.background)
             assertEquals(custom.surfaceOpaque, homeAnswerFill(custom))
         }

@@ -1,4 +1,5 @@
 {
   "not_configured": "Messages isn’t set up",
-  "ai_on": "Turn off “Hand to Persona” before deleting"
+  "ai_on": "Turn off “Hand to Persona” before deleting",
+  "archive_pending": "“Hand to Persona” is off, but Persona could not confirm that archiving has stopped. Please try again."
 }

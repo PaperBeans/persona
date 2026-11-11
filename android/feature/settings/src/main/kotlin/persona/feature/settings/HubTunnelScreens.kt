@@ -1,6 +1,5 @@
 package persona.feature.settings
 
-import android.content.ClipData
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -9,8 +8,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -51,16 +48,12 @@ internal fun HubTunnelPage(tunnels: HubTunnelSettings, hubId: String, kind: Tunn
 private fun SshTunnelPage(tunnels: HubTunnelSettings, info: HubTunnelInfo, onBack: () -> Unit) {
     val res = LocalResources.current
     val feedback = LocalAppFeedback.current
-    val clipboard = LocalClipboard.current
+    val copy = rememberCopy()
     val scope = rememberCoroutineScope()
     val model = remember(tunnels, info.hubId) { SshTunnelModel(tunnels, info.hubId, info.ssh) }
     val form by model.state.collectAsState()
     var deleting by remember { mutableStateOf(false) }
     LaunchedEffect(model) { model.loadKey() }
-    fun copy(text: String) = scope.launch {
-        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(res.getString(R.string.settings_tunnel_device_key), text)))
-        feedback?.notice(res.getString(R.string.settings_tunnel_copied))
-    }
     JListPage(title = stringResource(R.string.settings_tunnel_ssh), subtitle = info.name, onBack = onBack, largeTitle = false) {
         item("intro") { SettingsCaption(stringResource(R.string.settings_tunnel_ssh_intro), Modifier.padding(top = Tokens.Space.s)) }
         form.saved?.takeIf { it.usable }?.let { saved -> item("status") { TunnelStatusSection(info, TunnelKind.Ssh, info.sshState, ssh = saved) } }
@@ -75,11 +68,11 @@ private fun SshTunnelPage(tunnels: HubTunnelSettings, info: HubTunnelInfo, onBac
                         }
                     }
                     JGroupItem(GroupPosition(first = false, last = false)) {
-                        JRow(stringResource(R.string.settings_tunnel_copy_key), leadingIcon = PhIcons.Copy, onClick = { copy(key.publicKey) }, chevron = false)
+                        JRow(stringResource(R.string.settings_tunnel_copy_key), leadingIcon = PhIcons.Copy, onClick = { copy(key.publicKey, null) }, chevron = false)
                     }
                     JGroupItem(GroupPosition(first = false, last = true)) {
                         JRow(stringResource(R.string.settings_tunnel_copy_line), leadingIcon = PhIcons.Key,
-                            onClick = { form.authorizedKeysLine?.let(::copy) }, chevron = false)
+                            onClick = { form.authorizedKeysLine?.let { copy(it, null) } }, chevron = false)
                     }
                 } else if (form.keyUnavailable) {
                     JNotice(stringResource(R.string.settings_tunnel_key_unavailable), status = Status.NeedsYou)

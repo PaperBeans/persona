@@ -61,6 +61,9 @@ func (s *Service) feishuCardWanted(ctx context.Context, ix proto.Interaction) bo
 	if !ready || !f.Cards {
 		return false
 	}
+	if ix.Private {
+		return false // a Just me turn's card: never on Lark (meeting_justme.go)
+	}
 	// "All cards" does not take a health conversation's: only one the chat drives itself (health.go).
 	if drives := s.botDrives(ctx, ix.MachineID, ix.SessionID); !drives && (!f.AllCards || s.ixInHealth(ctx, ix)) {
 		return false

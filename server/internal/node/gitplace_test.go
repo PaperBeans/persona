@@ -97,7 +97,7 @@ func TestReadGitPlace(t *testing.T) {
 }
 
 func TestFillGitPlaceKeepsHostRoot(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "app")
+	repo := filepath.Join(physicalTempDir(t), "app")
 	writeGitFile(t, filepath.Join(repo, ".git", "HEAD"), "ref: refs/heads/main\n")
 	awaitGitPlace(t, gitPlaces, repo)
 
@@ -120,6 +120,108 @@ func TestFillGitPlaceKeepsHostRoot(t *testing.T) {
 	if chat.RepoRoot != "" || chat.Worktree != "" || chat.Branch != "" {
 		t.Fatalf("assistant got %q %q %q", chat.RepoRoot, chat.Worktree, chat.Branch)
 	}
+}
+
+// A repository reached through a symbolic link (a home on another mount, /home/me → /data/home/me) is one project
+// whichever way a session's record writes its directory: Claude Code records the physical one, Codex the one it was
+// started in (#4492).
+func TestPhysicalGitPlaceResolvesSymlinks(t *testing.T) {
+	base := physicalTempDir(t)
+	writeGitFile(t, filepath.Join(base, ".git"), "") // stops discovery at the fixture (TestReadGitPlace)
+	home := filepath.Join(base, "data", "home", "me")
+	repo := filepath.Join(home, "projects", "app")
+	writeGitFile(t, filepath.Join(repo, ".git", "HEAD"), "ref: refs/heads/main\n")
+	if err := os.MkdirAll(filepath.Join(repo, "web"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "home-me")
+	if err := os.Symlink(home, link); err != nil {
+		t.Skipf("no symbolic links here: %v", err)
+	}
+	linked := filepath.Join(link, "projects", "app")
+
+	// git -C <link>/projects/app worktree add …: git wrote the gitdir as it was reached, through the link.
+	tree := filepath.Join(home, "trees", "fix")
+	writeGitFile(t, filepath.Join(tree, ".git"), "gitdir: "+filepath.Join(linked, ".git", "worktrees", "fix")+"\n")
+	writeGitFile(t, filepath.Join(repo, ".git", "worktrees", "fix", "commondir"), "../..\n")
+	writeGitFile(t, filepath.Join(repo, ".git", "worktrees", "fix", "HEAD"), "ref: refs/heads/fix\n")
+
+	// A link from outside into the repository, and one inside it that leads out: a session is in the repository its
+	// physical directory is in, as git itself says there.
+	into := filepath.Join(base, "config", "web")
+	out := filepath.Join(repo, "vendor")
+	elsewhere := filepath.Join(base, "elsewhere")
+	for _, dir := range []string{filepath.Dir(into), elsewhere} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(repo, "web"), into); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, out); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range []struct {
+		name, cwd string
+		want      gitPlace
+	}{
+		{"the physical directory", repo, gitPlace{root: repo, worktree: repo, branch: "main"}},
+		{"through the link", linked, gitPlace{root: repo, worktree: repo, branch: "main"}},
+		{"a folder inside, through the link", filepath.Join(linked, "web"), gitPlace{root: repo, worktree: repo, branch: "main"}},
+		{"a linked worktree whose gitdir is written through the link", tree, gitPlace{root: repo, worktree: tree, branch: "fix"}},
+		{"that worktree through the link", filepath.Join(link, "trees", "fix"), gitPlace{root: repo, worktree: tree, branch: "fix"}},
+		{"not a repository", filepath.Join(link, "projects"), gitPlace{}},
+		{"a link into the repository", into, gitPlace{root: repo, worktree: repo, branch: "main"}},
+		{"a link out of the repository", out, gitPlace{}},
+		{"a relative path", "projects/app", gitPlace{}},
+	} {
+		got := physicalGitPlace(c.cwd)
+		if got != c.want {
+			t.Errorf("%s: physicalGitPlace(%q) = %+v, want %+v", c.name, c.cwd, got, c.want)
+		}
+	}
+	// As written, the same repository is two projects: what the sessions' records do not agree on.
+	if got := readGitPlace(linked); got.root != linked || got.worktree != linked {
+		t.Errorf("readGitPlace resolves links itself now: %+v", got)
+	}
+
+	// A host that names the project (Paseo: git's own word, the physical directory; another host may write it as it
+	// was opened, through the link) for a session whose cwd goes through the link: either way its main checkout is
+	// the project itself, not a linked worktree of it.
+	old, oldDirs := gitPlaces, physicalDirs
+	gitPlaces, physicalDirs = newGitPlaceCache(physicalGitPlace), newGitPlaceCache(oldDirs.read)
+	defer func() { gitPlaces, physicalDirs = old, oldDirs }()
+	awaitGitPlace(t, gitPlaces, linked)
+	for _, named := range []string{repo, linked} {
+		awaitGitPlace(t, physicalDirs, named)
+		hosted := proto.Session{Cwd: linked, RepoRoot: named}
+		fillGitPlace(&hosted)
+		if hosted.RepoRoot != repo || hosted.Worktree != repo || hosted.Branch != "main" {
+			t.Fatalf("hosted through the link, its root named %q: %q %q %q", named, hosted.RepoRoot, hosted.Worktree, hosted.Branch)
+		}
+	}
+	// A root the host names that is not on this computer stays as it says, and so does a relative one.
+	awaitGitPlace(t, physicalDirs, "/elsewhere/app")
+	for _, named := range []string{"/elsewhere/app", "app"} {
+		far := proto.Session{Cwd: linked, RepoRoot: named}
+		fillGitPlace(&far)
+		if far.RepoRoot != named || far.Worktree != repo {
+			t.Fatalf("a root named %q: %q %q", named, far.RepoRoot, far.Worktree)
+		}
+	}
+}
+
+// physicalTempDir is t.TempDir() by its physical path, which is how a Git place names a directory (physicalGitPlace):
+// macOS's own temporary directory is behind a symbolic link.
+func physicalTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 func awaitGitPlace(t *testing.T, cache *gitPlaceCache, cwd string) gitPlace {

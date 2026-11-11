@@ -471,7 +471,7 @@ type hubPush struct {
 // a cold Git lookup can produce an unrelated sessions.changed on the next tick.
 func pollRepo(t *testing.T) string {
 	t.Helper()
-	cwd := t.TempDir()
+	cwd := physicalTempDir(t)
 	writeGitFile(t, filepath.Join(cwd, ".git", "HEAD"), "ref: refs/heads/main\n")
 	if got := awaitGitPlace(t, gitPlaces, cwd); got != (gitPlace{cwd, cwd, "main"}) {
 		t.Fatalf("poll repository: %+v", got)

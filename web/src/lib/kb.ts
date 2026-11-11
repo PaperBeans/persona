@@ -140,6 +140,26 @@ export interface RecordingAsk {
   error?: string;
   asked_at: string;
   answered_at?: string;
+  /** A room meeting's (#3862, "Asking the room"): how it is answered once its first attempt went out (`room` or
+   *  `material`), and the lines a heard question was made of. */
+  via?: string;
+  heard?: KBSegment[] | null;
+}
+
+/** A room meeting's room conversation as `GET …/live` and `detail.meta` give it (docs/assistant/meeting-minutes.md
+ *  "Fields on `GET …/live` and `detail.meta`", #3862). `state` and `problem` are open sets: an unknown state reads as
+ *  `starting`; the ids come once it has started. */
+export interface MeetingRoom {
+  state: string;
+  machine_id?: string;
+  session_id?: string;
+  problem?: string;
+}
+
+/** One of a meeting's conversations (its follow-up), by ids. */
+export interface MeetingConversation {
+  machine_id: string;
+  session_id: string;
 }
 
 /** `GET /api/v1/recordings/{id}/live`: how far the attending session has been fed, and the meeting's questions. */
@@ -151,6 +171,52 @@ export interface RecordingLive {
   /** Open set: attendee_unavailable, attendee_not_allowed, live_full today. */
   problem?: string;
   asks?: RecordingAsk[] | null;
+  /** The meeting conversation (#3862): the private mark (absent until chosen), a room meeting's room, the follow-up once
+   *  made, and each part's revision (`room`, `asks`, `private`, `followup`; numbers that only go up). */
+  private?: boolean;
+  room?: MeetingRoom;
+  followup?: MeetingConversation;
+  revs?: Record<string, number>;
+}
+
+/** What `detail.meta` (or a `GET …/live`) says of a recording's meeting conversation (#3862): well-formed values only. */
+export interface MeetingMeta {
+  room?: MeetingRoom;
+  followup?: MeetingConversation;
+  private?: boolean;
+}
+
+/** The room, follow-up and private mark a recording's metadata carries, read defensively. */
+export function meetingMeta(meta?: Record<string, unknown> | null): MeetingMeta {
+  const out: MeetingMeta = {};
+  const room = meetingRoom(meta?.room);
+  if (room) out.room = room;
+  const followup = meetingConversation(meta?.followup);
+  if (followup) out.followup = followup;
+  if (typeof meta?.private === "boolean") out.private = meta.private;
+  return out;
+}
+
+/** A room as the apps read it: an object with a string state; its ids only both together, its problem only when given. */
+export function meetingRoom(v: unknown): MeetingRoom | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const r = v as Record<string, unknown>;
+  if (typeof r.state !== "string") return undefined;
+  return { state: r.state, ...meetingConversation(r), ...(typeof r.problem === "string" && r.problem ? { problem: r.problem } : {}) };
+}
+
+/** A conversation's ids, both non-empty strings, or nothing. */
+export function meetingConversation(v: unknown): MeetingConversation | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const r = v as Record<string, unknown>;
+  return typeof r.machine_id === "string" && r.machine_id && typeof r.session_id === "string" && r.session_id
+    ? { machine_id: r.machine_id, session_id: r.session_id } : undefined;
+}
+
+/** Whether a recording is a meeting as #2981 counts them (`kind: meeting` or minutes asked for): only those take the
+ *  private mark (docs/assistant/meeting-minutes.md "The private mark"). */
+export function countsAsMeeting(meta?: Record<string, unknown> | null): boolean {
+  return str(meta?.kind)?.trim().toLowerCase() === "meeting" || meta?.minutes_asked === true;
 }
 
 /** A line a search found: `path` relative to the data dir, `n` its line number in that file. */

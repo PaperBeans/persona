@@ -85,6 +85,9 @@ func (h *Hub) assistantRoutesRelayed(api *http.ServeMux) {
 		if slices.Contains(storedTerminalTexts, pattern) {
 			relay = h.withoutTerminalControls(relay)
 		}
+		if kind, ok := meetingReceiptRoutes[pattern]; ok {
+			relay = h.withBodyIDReceipt(kind, relay) // meeting_receipts.go
+		}
 		api.HandleFunc(pattern, relay)
 	}
 }

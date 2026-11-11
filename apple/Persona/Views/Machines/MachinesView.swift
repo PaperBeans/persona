@@ -328,7 +328,7 @@ struct MachineCard: View {
                 .layoutPriority(1)
             } else if let manager = model.offlineManager(of: machine, group: machine.group) {
                 // Offline with its manager on a hub with several (#1919): the hub's words would blame the computer.
-                Text("Its manager “\(manager.name)” is offline. It comes back online once the manager is back.")
+                Text("Its assistant “\(manager.name)” is offline. It comes back online once the assistant is back.")
                     .font(Theme.Font.label).foregroundStyle(Color.secondary).lineLimit(3)
                     .accessibilityIdentifier("machine.managerOffline")
             } else if let lines = AddComputerText.machineLines(machine) {

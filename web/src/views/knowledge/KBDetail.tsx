@@ -7,6 +7,7 @@ import { MANAGER_HEADER, shownManager, useChosenManager, useKnownDefault } from 
 import { ConfirmedFacts } from "./ConfirmedFacts";
 import { RecordingMinutes } from "./RecordingMinutes";
 import { RecordingAsks } from "./RecordingAsks";
+import { MeetingPrivate, RecordingConversation, useRecordingMeeting } from "./RecordingConversation";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { Relationships } from "./Relationships";
 import { TopicPoints } from "./TopicPoints";
@@ -179,6 +180,8 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
 
   const facts = d ? factsOf(d.kind, d.meta) : null;
   const rec = d ? recordingView(d.kind, d.meta, d.segments) : null;
+  // The meeting conversation (#3862): its private mark, room and follow-up, on a hub that lists meeting_conversation.
+  const meeting = useRecordingMeeting(d, rec, auth, current, manager);
   const log = timeline(d?.log);
   // A topic's summary is its points as Markdown (for search and Persona): the page shows the points themselves.
   const prof = d?.kind === "topics" ? "" : profile(d?.summary, e.one_line, e.name);
@@ -270,7 +273,8 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
                 </section>
               )}
 
-              {rec && <RecordingFacts rec={rec} />}
+              {rec && <RecordingFacts rec={rec} roomMeeting={meeting.roomMeeting} />}
+              {rec && <MeetingPrivate meeting={meeting} />}
               {rec && <RecordingMinutes
                 detail={d}
                 rec={rec}
@@ -280,7 +284,9 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
                 onSaved={onSaved}
                 onJump={jumpToTranscript}
               />}
-              {rec && <RecordingAsks
+              {rec && <RecordingConversation detail={d} rec={rec} meeting={meeting} auth={auth} current={current} manager={manager} />}
+              {/* A room meeting's questions are in its thread; a #2981 meeting's stay here. */}
+              {rec && !meeting.roomMeeting && <RecordingAsks
                 detail={d}
                 rec={rec}
                 auth={{ token, tokenOwner: owner, headers: { [MANAGER_HEADER]: manager } }}
@@ -561,8 +567,9 @@ function Agents({ agents }: { agents: Session[] }) {
   );
 }
 
-/** A recording's when, how long, where it was made; and whether its transcript is still coming. */
-function RecordingFacts({ rec }: { rec: RecordingView }) {
+/** A recording's when, how long, where it was made; and whether its transcript is still coming. A room meeting (#3862) is
+ *  attended by its own room, which its Conversation section shows, not by a session named here. */
+function RecordingFacts({ rec, roomMeeting }: { rec: RecordingView; roomMeeting: boolean }) {
   const rows: [string, string][] = [];
   if (rec.startedAt) rows.push([t("knowledge-kbdetail.recording_started"), formatAt(rec.startedAt)]);
   if (rec.duration) rows.push([t("knowledge-kbdetail.recording_duration"), rec.duration]);
@@ -578,7 +585,7 @@ function RecordingFacts({ rec }: { rec: RecordingView }) {
             <span className="whitespace-nowrap text-ink tabular-nums">{v}</span>
           </div>
         ))}
-        {rec.attendance && (
+        {rec.attendance && !roomMeeting && (
           <div className="flex items-center gap-3 px-4 py-2.5 text-[13px]">
             <span className="flex-1 whitespace-nowrap text-ink-2">{t("knowledge-kbdetail.recording_attending")}</span>
             <AttendingSession session={rec.attendingSession} />

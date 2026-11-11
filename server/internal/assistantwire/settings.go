@@ -10,8 +10,9 @@ import "github.com/nwverse/persona/server/internal/proto"
 // the assistant's own). The hub keeps the last
 // one; before one came in it goes by hub.json's assistant section, its own time zone and no main conversation.
 type Profile struct {
-	MachineID string `json:"machine_id"` // where its conversations run
-	Main      string `json:"main,omitempty"`
+	MachineID     string `json:"machine_id"` // where its conversations run
+	Main          string `json:"main,omitempty"`
+	MainMachineID string `json:"main_machine_id,omitempty"` // confirmed route of Main, independent of the default
 	// Launcher is the one it runs on when "Models" › main chat names none (its own setting, else hub.json's, else claude):
 	// that purpose's default.
 	Launcher string `json:"launcher"`
@@ -19,6 +20,14 @@ type Profile struct {
 	// Keep are the conversations their machines list however long they are quiet: the main one, the main ones it
 	// replaced, scheduled tasks' own (node.configure keep_sessions: a busy machine's newest transcripts crowd them out).
 	Keep []SessionRef `json:"keep"`
+}
+
+// MainRouteMachine keeps legacy profiles usable while preferring the confirmed main binding.
+func (p Profile) MainRouteMachine() string {
+	if p.MainMachineID != "" {
+		return p.MainMachineID
+	}
+	return p.MachineID
 }
 
 // The hub asks the assistant (Handler) for what its own features need of the assistant's conversations.
@@ -38,11 +47,17 @@ const (
 // (docs/protocol/protocol.md "hub ↔ node"), passed through by the hub's device.call like the others.
 const (
 	// DeviceAssistantPrepare: {dir, claude_md, connectors, clis, plugin_skills} → {cwd, plugin_skills_need}.
-	DeviceAssistantPrepare = "assistant.prepare"
+	DeviceAssistantPrepare   = "assistant.prepare"
+	DeviceAssistantExecution = "assistant.execution" // {session_id} → proto.AssistantExecution
 	// DeviceAssistantGuestPrepare: {dir, claude_md} → {cwd}: a guest conversation's directory (assistant/guest.go), only
 	// its CLAUDE.md / AGENTS.md written; the assistant's connectors, CLIs and skills are left as they are. A node without
 	// it answers "unknown method": no guest conversation starts there.
 	DeviceAssistantGuestPrepare = "assistant.guest_prepare"
+	// DeviceAssistantGuestDelete: {dir, session_id} → {deleted}: a meeting's room removed at its transcript's cut or
+	// with its recording (docs/assistant/meeting-minutes.md "Deletion"): its process, transcript and directory. With
+	// kind meeting, assistant.guest_prepare answers {cwd, kind, start_ids} on a node that starts rooms; an older node
+	// answers {cwd} only, or "unknown method" for this one.
+	DeviceAssistantGuestDelete = "assistant.guest_delete"
 	// DeviceAssistantWarm: {cwd, launcher, …model} → {}: a process ready for the next new conversation.
 	DeviceAssistantWarm = "assistant.warm"
 	// DeviceAssistantMemory: {op, cwd, name?, content?} → the memory files (op list) or {}.
@@ -84,6 +99,12 @@ type StartParams struct {
 	// GuestTools: a guest conversation (assistant/guest.go) that may use only these connector tools; nil is an
 	// ordinary one.
 	GuestTools []string `json:"guest_tools,omitempty"`
+	// NewSessionID: start it under this session id (a meeting's follow-up, made once also across a restart); a node
+	// that cannot picks its own. Never over the bus.
+	NewSessionID string `json:"-"`
+	// ClientMsgID: the first message's client_msg_id (with NewSessionID: the node sends it once and its transcript
+	// item carries it, as a send's). Never over the bus.
+	ClientMsgID string `json:"-"`
 }
 
 // SendParams is assistant.send_params's params: Params are the node's assistant.send / session.send params. Lang is

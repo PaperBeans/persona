@@ -12,6 +12,8 @@
   "workspace_engine_path": "The machine's workspace engine chooses the path. Edit the branch to preview again.",
   "tray_needs_you": "Needs you",
   "tray_running": "In progress",
+  "tray_expand": "Expand",
+  "tray_restore": "Restore size",
   "background_tasks_running": "Background tasks running: {count}",
   "subagents_count_running": "Subagents running: {count}",
   "background_running": "Background work is running",

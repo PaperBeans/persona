@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keep or remove the worktree Persona made, in Close Agent and Delete Chat (#4532): iOS AgentWorktree words. -->
+<resources>
+    <string name="chat_worktree_made">这个 Agent 在 Persona 建的 worktree 里干活</string>
+    <string name="chat_worktree_keep">保留 worktree</string>
+    <string name="chat_worktree_remove">移除</string>
+    <string name="chat_worktree_delete_branch">同时删除分支 %1$s</string>
+    <string name="chat_worktree_confirm_loss">我知道这些改动会丢失</string>
+    <string name="chat_worktree_removed">已移除 worktree</string>
+    <string name="chat_worktree_removed_branch">已移除 worktree 和分支</string>
+    <string name="chat_worktree_remove_failed">没能移除 worktree：%1$s</string>
+    <plurals name="chat_worktree_dirty">
+        <item quantity="other">有 %d 个文件的改动没提交，移除 worktree 会丢掉。</item>
+    </plurals>
+    <plurals name="chat_worktree_unmerged">
+        <item quantity="other">分支上有 %1$d 个提交不在 %2$s 上，删除分支会丢掉。</item>
+    </plurals>
+</resources>

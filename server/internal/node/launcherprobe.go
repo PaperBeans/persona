@@ -191,7 +191,7 @@ func (n *Node) launcherProbe(ctx context.Context, name string, args ...string) (
 	if p.File != "" { // a file on PATH the list does not have as a wrapper script (yet): read, never run
 		sp, err := scriptProbe(p.File, args)
 		if err != nil {
-			return Probe{}, err
+			return p, err
 		}
 		return withSettingsEnv(sp, n.home), nil
 	}

@@ -83,12 +83,12 @@ const daemonMaxMessage = 64 << 20
 
 // daemonCaps are the capabilities a daemon may declare; anything a later protocol adds is off for daemons until it is
 // allowed here on purpose.
-var daemonCaps = []string{"start", "send", "interrupt", "rename", "close"}
+var daemonCaps = []string{"start", "send", "interrupt", "rename", "close", "execution"}
 
 // daemonMethods are the node → runtime calls a link forwards to its daemon.
 var daemonMethods = map[string]bool{"session.items": true, "session.image": true, "session.item": true, "session.watch": true,
 	"session.unwatch": true, "session.send": true, "session.interrupt": true, "session.rename": true, "session.close": true,
-	"session.start": true}
+	"session.start": true, "session.execution": true}
 
 // daemonConfig is one daemon in daemons.json.
 type daemonConfig struct {
@@ -563,14 +563,15 @@ func (l *daemonLink) fromDaemon(ctx context.Context, method string, params json.
 			}
 			return nil, err
 		}
-		// resume_argv, handover and transcript are for runtimes on the socket: what a daemon lists offline is not
-		// resumed in a terminal here, a send it refuses is not handed to another runtime (the link turns that code
-		// away), and its sessions are not read from this machine's transcripts. launchers, modes and resume need what
-		// the link does not pass on (more launchers than the config's one, caps beyond daemonCaps).
+		// resume_argv, handover, transcript, codex_thread and unlisted_transcripts are for runtimes on the socket: what
+		// a daemon lists offline is not resumed in a terminal here, a send it refuses is not handed to another runtime
+		// (the link turns that code away), and its sessions are not read from this machine's transcripts, nor are its
+		// Codex threads or its past sessions' transcripts this machine's. launchers, modes and resume need what the link
+		// does not pass on (more launchers than the config's one, caps beyond daemonCaps).
 		if f, ok := res["features"].([]any); ok {
 			kept := []any{}
 			for _, x := range f {
-				if !slices.Contains([]any{"resume_argv", runtimeHandover, "transcript", "launchers", "modes", "resume"}, x) {
+				if !slices.Contains([]any{"resume_argv", runtimeHandover, "transcript", "launchers", "modes", "resume", "codex_thread", "unlisted_transcripts"}, x) {
 					kept = append(kept, x)
 				}
 			}
@@ -664,12 +665,27 @@ func (l *daemonLink) row(s map[string]json.RawMessage) (map[string]json.RawMessa
 	}
 	s["session_id"] = rawJSON(outer)
 	// No terminal of this machine's, and no name but the config's (the node labels its sessions).
-	for _, k := range []string{"pane_id", "resume_argv", "transcript", "tab_id", "workspace_id", "agent_label"} {
+	for _, k := range []string{"pane_id", "resume_argv", "transcript", "codex_thread", "tab_id", "workspace_id", "agent_label"} {
 		delete(s, k)
 	}
 	var space string
 	if json.Unmarshal(s["space_id"], &space) == nil && space != "" {
 		s["space_id"] = rawJSON(l.cfg.ID + ":" + space) // the apps group by space id: not with another runtime's
+	}
+	// The session that started it (docs/integrations/runtimes.md, a row of its own with a parent) is another of the
+	// daemon's: named by its id here too, or not at all.
+	for _, k := range []string{"parent_session_id", "root_session_id"} {
+		if _, named := s[k]; !named {
+			continue
+		}
+		var ref string
+		if json.Unmarshal(s[k], &ref) == nil && ref != "" {
+			if o, ok := l.outer(ref); ok {
+				s[k] = rawJSON(o)
+				continue
+			}
+		}
+		delete(s, k)
 	}
 	return s, true
 }

@@ -28,17 +28,18 @@ import (
 var version = "dev"
 
 const usage = `用法：
-  persona-link pair [--machine <id>] [<配对链接>|-]  主动模式（我去连 hub）：用 personad hub pair 给的链接配对，凭据写进
+  persona-link pair [--machine <id>] [--ssh <服务器> [--ssh-target <地址:端口>] [--ssh-always|--no-ssh-always]] [<配对链接>|-]
+                                                 主动模式（我去连 hub）：用 personad hub pair 给的链接配对，凭据写进
                                                  ~/.persona/link.json；不给链接或给 - 时从标准输入读（终端里会提示粘贴）；
-                                                 链接里没带机器 id 时用 --machine 指定
+                                                 链接里没带机器 id 时用 --machine 指定；hub 只开了 SSH 时加 --ssh 走隧道
   persona-link pair --listen [<监听地址>] [--addr <地址>]…
                                                  被动模式（让 hub 来连）：在本机监听（默认 :18663），打印给 hub 管理界面
                                                  粘贴的链接（10 分钟内有效，只能用一次）；--addr 指定链接里给 hub 的地址
   persona-link mode [active|passive] [--listen <监听地址>]
                                                  看 / 切换模式：active 我去连 hub，passive 让 hub 来连；
                                                  两种模式的配对各自留着，切回去不用重新配对
-  persona-link install [--pair <链接>|-] [--machine <id>] [--listen [<监听地址>]] [--addr <地址>]…
-                    [--node-bin <路径> | --personad <路径>] [--no-node] [--no-tray]
+  persona-link install [--pair <链接>|-] [--machine <id>] [--ssh <服务器> [--ssh-target <地址:端口>] [--ssh-always|--no-ssh-always]]
+                    [--listen [<监听地址>]] [--addr <地址>]… [--node-bin <路径> | --personad <路径>] [--no-node] [--no-tray]
                                                  Linux：装成 systemd 用户服务并启动，等它连上 hub（被动模式：等它开始监听）；
                                                  --pair 先配对（主动），--listen 改成被动模式、还没配对时打印配对链接；
                                                  常驻 node 的服务没装时一起装上（--no-node 不装）。
@@ -66,6 +67,10 @@ const usage = `用法：
                                                  会在登录时自己启动）；--open 打开配对窗口并填上这条链接
   persona-link name [<新名字>|--reset]           看 / 改这台电脑在 hub 上的名字（App、网页和管理界面里显示的那个；id 不变）：
                                                  请正在运行、连着 hub 的 persona-link 去问 hub；--reset 改回 id
+  persona-link ssh [<服务器> | --off] [--target <地址:端口>] [--always|--no-always] [--test]
+                                                 看 / 设 / 移除主动模式连 hub 用的 SSH 隧道（[user@]host[:port] 或
+                                                 ~/.ssh/config 别名；默认转发到配对链接里的 127.0.0.1:<TLS 端口>）；
+                                                 --always 只走隧道，--off 移除隧道，--test 测试连接
   persona-link address add <地址>                 手动加一个 hub 的候选地址（https://域名:端口，或 域名）
   persona-link address remove <地址>              去掉手动加的地址
   persona-link version
@@ -117,6 +122,8 @@ func main() {
 		err = supervise(e, args)
 	case "tray":
 		err = trayCmd(e, args)
+	case "ssh":
+		err = sshCmd(e, args)
 	case "address":
 		err = address(args)
 	case "name":
@@ -146,8 +153,8 @@ var errUsage = errors.New("usage")
 
 // helpTopics are the subcommands `<sub> -h` answers for (supervise is not for people: its -h shows the whole usage).
 var helpTopics = map[string]bool{"pair": true, "mode": true, "node": true, "discover": true, "install": true,
-	"uninstall": true, "status": true, "logs": true, "log": true, "run": true, "supervise": true, "address": true,
-	"tray": true, "name": true}
+	"uninstall": true, "status": true, "logs": true, "log": true, "run": true, "supervise": true, "ssh": true,
+	"address": true, "tray": true, "name": true}
 
 // wantsHelp says whether args ask for help (-h, -help or --help anywhere).
 func wantsHelp(args []string) bool {
@@ -218,10 +225,18 @@ func optionalValue(args []string, i int, name string) (value string, next int, o
 func pairCmd(e *env, args []string) error {
 	var machine, raw, listen string
 	var addrs []string
+	var sshFlags sshPairFlags
 	seen, passive := false, false
 	for i := 0; i < len(args); i++ {
 		if v, next, ok := optionalValue(args, i, "--listen"); ok {
 			passive, listen, i = true, v, next
+			continue
+		}
+		if next, ok, err := sshFlags.consume(args, i); ok || err != nil {
+			if err != nil {
+				return err
+			}
+			i = next
 			continue
 		}
 		v, next, ok, err := flagValue(args, i, "--machine")
@@ -243,15 +258,19 @@ func pairCmd(e *env, args []string) error {
 		}
 	}
 	if passive || len(addrs) > 0 {
+		if sshFlags.any() {
+			return errors.New("pair --listen 不要 --ssh：SSH 隧道只在主动模式（我去连 hub）下用")
+		}
 		if seen || machine != "" {
 			return errors.New("pair --listen 不要配对链接和 --machine：被动模式的链接是这台电脑给 hub 的，机器 id 由 hub 定")
 		}
 		return pairListen(e, listen, addrs)
 	}
-	c, err := pair(e, raw, machine)
+	c, err := pairWithSSH(e, raw, machine, sshFlags)
 	if err != nil {
 		return err
 	}
+	pokeRunning(e.configPath())
 	fmt.Fprintf(e.stdout, "配对好了：这台是 hub 上的「%s」，凭据存在 %s。\n", cmp.Or(c.MachineName, c.Machine), e.configPath())
 	switch {
 	case link.Running(e.configPath()):
@@ -264,6 +283,10 @@ func pairCmd(e *env, args []string) error {
 
 // pair redeems a pairing link: raw, or read from stdin when raw is "" or "-" (with a prompt on a terminal).
 func pair(e *env, raw, machine string) (*link.Config, error) {
+	return pairWithSSH(e, raw, machine, sshPairFlags{})
+}
+
+func pairWithSSH(e *env, raw, machine string, sshFlags sshPairFlags) (*link.Config, error) {
 	if raw == "" || raw == "-" {
 		in := bufio.NewReader(io.LimitReader(e.stdin, 16<<10))
 		if e.stdinIsTerminal() {
@@ -286,9 +309,13 @@ func pair(e *env, raw, machine string) (*link.Config, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, errors.New("没有配对链接：在 hub 机器上运行 personad hub pair --machine <这台的 id> --add，把拿到的链接给我")
 	}
+	sshCfg, err := sshFlags.build(raw)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	return link.Pair(ctx, raw, strings.TrimSpace(machine), "", e.configPath())
+	return link.PairWithSSH(ctx, raw, strings.TrimSpace(machine), "", e.configPath(), sshCfg, e.sshBin)
 }
 
 func address(args []string) error {
@@ -425,7 +452,7 @@ func keepLink(ctx context.Context, path, logPath string, stdout io.Writer, app *
 	defer mu.Unlock()
 	ended = true
 	save(link.Status{State: "stopped", Mode: last.Mode, Machine: last.Machine, HubName: last.HubName, Endpoints: last.Endpoints,
-		Listen: last.Listen, LastSeen: last.LastSeen, From: last.From})
+		SSH: last.SSH, Listen: last.Listen, LastSeen: last.LastSeen, From: last.From})
 	log.Printf("persona-link stopped")
 	return err
 }

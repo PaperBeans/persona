@@ -111,11 +111,13 @@ describe("筛选和分段", () => {
     expect(sections(items, { ...all, source: "acc2" }).tiers.action).toEqual([]);
   });
 
-  it("@我 含文档和 @我 的公司圈，群聊含机器人，Agent 不含任何一件", () => {
+  it("@我 含文档和 @我 的公司圈，群聊不含机器人（机器人单独一类），Agent 不含任何一件", () => {
     const m = sections(items, { ...all, kind: "mention" });
     expect([...ids(m.tiers.action), ...ids(m.tiers.fyi)].sort()).toEqual([atAll.id, comment.id, doc.id, mention.id, moment.id].sort());
     const g = sections(items, { ...all, kind: "group" });
-    expect([...ids(g.tiers.fyi), ...ids(g.tiers.noise)].sort()).toEqual([bot.id, group.id].sort());
+    expect([...ids(g.tiers.fyi), ...ids(g.tiers.noise)]).toEqual([group.id]);
+    const b = sections(items, { ...all, kind: "bot" });
+    expect([...ids(b.tiers.fyi), ...ids(b.tiers.noise)]).toEqual([bot.id]);
     const a = sections(items, { ...all, kind: "agent" });
     expect([...a.tiers.action, ...a.tiers.fyi, ...a.tiers.noise, ...a.done]).toEqual([]);
   });

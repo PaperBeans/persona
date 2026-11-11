@@ -341,17 +341,8 @@ struct ShellPersonaButton: View {
             Haptics.tap()
             action()
         } label: {
-            Group {
-                if model.showsAssistantIdentity {
-                    PersonaDot(size: Theme.Size.tapTarget * k, state: state)
-                } else {
-                    ThemedIcon(Theme.Icon.sidebarMenu)
-                        .font(Theme.Font.heading)
-                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
-                        .chromeSurface(in: Circle())
-                }
-            }
-            .contentShape(.circle)
+            PersonaDot(size: Theme.Size.tapTarget * k, state: state)
+                .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .overlay(alignment: .bottomTrailing) {
@@ -361,7 +352,7 @@ struct ShellPersonaButton: View {
             }
         }
         .accessibilityLabel("Chat History [Shell Components 60636b]")
-        .accessibilityValue([model.showsAssistantIdentity ? String(localized: "\(model.persona.name), \(state.title)") : state.title, inbox ? String(localized: "Something in the Inbox needs you") : nil]
+        .accessibilityValue([String(localized: "\(model.persona.name), \(state.title)"), inbox ? String(localized: "Something in the Inbox needs you") : nil]
             .compactMap { $0 }.joined(separator: String(localized: ", ", comment: "List separator")))
         .accessibilityHint("Opens the sidebar")
         .accessibilityIdentifier(id)

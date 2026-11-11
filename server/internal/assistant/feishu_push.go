@@ -68,6 +68,9 @@ func (s *Service) feishuPush(machine, session, title, body string) {
 // feishuMirror sends a turn that ended without being asked for in Feishu: the main conversation's when sync is on
 // (what was said in the app, a scheduled task's run), a scheduled task's own conversation's when pushes is on.
 func (s *Service) feishuMirror(ctx context.Context, machine, session string) {
+	if s.justMeNow(machine, session) {
+		return // a Just me turn stays off Feishu (meeting_justme.go)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	f, ready := s.feishuFeatures(ctx)

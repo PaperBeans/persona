@@ -84,7 +84,7 @@ The same persona-link supports both, selected during pairing and changeable anyt
 
 | Mode | Who connects to whom | Best for | Requirements |
 | --- | --- | --- | --- |
-| **Active** (connect to the hub) | persona-link dials the hub's WSS `/api/v1/link` ("Link" below) | Laptops, computers behind NAT or frequently changing networks | The hub has a TLS port (`public.tls_listen`) or sits behind an HTTPS reverse proxy ("[Hub behind a reverse proxy](#hub-behind-a-reverse-proxy)" below); this computer can reach the hub |
+| **Active** (connect to the hub) | persona-link dials the hub's WSS `/api/v1/link` ("Link" below) | Laptops, computers behind NAT or frequently changing networks | The hub has a TLS port (`public.tls_listen`) or sits behind an HTTPS reverse proxy ("[Hub behind a reverse proxy](#hub-behind-a-reverse-proxy)" below); this computer can reach the hub directly or through an SSH tunnel ("[SSH tunnel](#ssh-tunnel)" below) |
 | **Passive** (let the hub connect) | The hub dials the TLS port persona-link listens on locally ("Passive mode" below) | Computers with stable addresses reachable by the hub: servers, development workstations, home desktops | The hub can reach this computer's port (directly or through a SOCKS proxy); the computer's firewall opens this port only to the hub |
 
 Choosing: the computer can reach the hub but the hub can't reach it (a laptop, a computer on a company intranet connecting to a home hub) → active; the hub can reach it but it can't reach the hub (the hub is somewhere unreachable from the public internet,
@@ -190,6 +190,7 @@ Both sides ignore a message type they don't know.
 - Candidate addresses are ordered "LAN → public IPv6 → domain → public IPv4", with manually added addresses first within their category.
 - Starts trying the next candidate every 300 ms, several concurrently; the first connection wins and late successes are closed. Each candidate has an 8-second timeout.
 - Away from home, even if LAN addresses fail or hang, it waits only another 300 ms before trying the next. These are configured values, not measured results.
+- With an optional SSH tunnel (`ssh` in `link.json`, see "[SSH tunnel](#ssh-tunnel)" below): **Always use SSH** dials only the tunnel; otherwise direct candidates are raced first and the tunnel is used if all fail (and tried first on the next reconnect when the tunnel was the last working route, while probing direct candidates every 2 minutes to switch back).
 
 **Hub name and linked group**
 - The hub includes `hub_name` in `endpoints`: `name` from hub.json, otherwise the short hostname of the hub machine; in Docker (where the hostname is a container id), `hub-<first 6 characters of hub_id>`
@@ -254,7 +255,7 @@ Both sides ignore a message type they don't know.
   | Credentials rejected (401 / 403) or revoked (4002) | 5 minutes, or retry within 2 seconds when link.json changes (re-pairing) |
   | Hub restarts (1001) | Normal backoff |
   | Manual **Reconnect now** | No wait |
-  | Paired again while connected (new token, pin, trust or machine in link.json) | No wait: the link ends as with **Reconnect now** and comes back with the new pairing within about 2 seconds |
+  | Paired again or SSH tunnel edited while connected (new token, pin, trust, machine or `ssh` in link.json) | No wait: the link ends as with **Reconnect now** and comes back with the new configuration within about 2 seconds |
 
 - Any wait ends within 2 seconds when link.json changes (re-paired, an address added). The change counts from when the attempt read link.json, so a new credential written while the hub was refusing the old one is tried at the next check, not after 5 minutes; while a link is up, only a new credential counts (the link writes the hub's addresses and names into link.json itself).
 - While connected, persona-link looks at link.json every 2 seconds when its modification time changed and compares the pairing itself (token, pin, trust, machine), not just the time: the hub's endpoints and renames rewrite link.json with the same pairing and leave the link alone.
@@ -322,6 +323,55 @@ location /<prefix>/ {
 **Trade-off**: pinning trusts one hub public key; system trust trusts every CA in the system. Any CA that signs for this domain (a compromised or mistaken CA, or device management able to install roots on this computer) can impersonate the hub,
 obtain this computer's link credentials and connect hub streams to its resident node. This is the same as accessing the web app in a browser: better than plaintext, weaker than pinning. The proxy-to-hub hop is plaintext and must be on a trusted network (same machine or LAN).
 Prefer the hub's own TLS and fingerprint when possible; when hub TLS is enabled, pairing links always carry `fp` and won't use system trust.
+
+## SSH tunnel
+
+When a hub machine exposes only SSH (port 22) — its HTTP and TLS ports listen on `127.0.0.1` only, with no open public port or reverse proxy — active-mode Persona Link can reach the hub's TLS port through an SSH tunnel (#3775), matching the apps' SSH tunnel ([network.md](network.md), "Connecting to hub through SSH").
+
+> **How this fits the "No SSH" decision at the top of this page.** "No SSH" there is about the hub SSH-ing into computers, which requires inbound reachability and gives the hub shell-level permission on the computer. Here the computer still dials out as before; SSH is only an optional transport to reach the hub's TLS port, and the hub gains no access to the computer.
+
+### Setting up an SSH-only hub
+
+1. Keep the hub's HTTP and TLS listeners on loopback in `hub.json` (for example `listen` `127.0.0.1:18660`, `public.tls_listen` `127.0.0.1:18662`).
+2. Generate the pairing link on the hub machine:
+   ```sh
+   personad hub pair --machine <id> --add --name "<display name>"
+   ```
+   The resulting `persona://link?…` carries `url=http://127.0.0.1:18660`, `tls=18662` and `fp=<hub fingerprint>`.
+3. Optionally dedicate an SSH key to Persona Link and restrict it in `~/.ssh/authorized_keys` on the SSH server so it can forward only to the hub's loopback TLS port and cannot open a shell:
+   ```text
+   restrict,port-forwarding,permitopen="127.0.0.1:18662" ssh-ed25519 AAAA... persona-link
+   ```
+   Replace `18662` with the hub's TLS port (`public.tls_listen`).
+
+### Pairing window and CLI
+
+- **Pairing window (Mac menu bar App and Windows tray)**: under **Connect to hub** (active mode), an **SSH tunnel** disclosure section sits below the pairing link. It stays closed by default until opened or until a tunnel is saved, and can be filled in **before** pairing so the pairing request itself travels through the tunnel:
+  - **SSH server**: `[user@]host[:port]`, or a host alias from `~/.ssh/config`.
+  - **Hub address as that server sees it**: defaults to `127.0.0.1:<TLS port in the pairing link>`; with no link and no saved address yet, to `127.0.0.1:18662`, the TLS port `personad hub setup` uses.
+  - **Always use SSH**: uses only the tunnel. Enabled automatically when the pairing link names only loopback addresses; otherwise off so direct addresses are tried first.
+  - **Test connection**: opens a one-off tunnel, verifies TLS against the hub, and shows the result in plain words.
+  - After pairing, the same section edits, switches **Always use SSH**, or removes the tunnel (**Remove tunnel**) without pairing again; the running link reconnects within about 2 seconds.
+- **Command line** (Linux, scripts, or the helper called by the GUI windows):
+  ```sh
+  persona-link pair --ssh user@example.com [--ssh-target 127.0.0.1:18662] [--ssh-always | --no-ssh-always] '<link>'
+  persona-link ssh                                      # Show saved tunnel
+  persona-link ssh user@example.com [--target host:port] [--always | --no-always]
+  persona-link ssh --test [--link '<link>']             # Test tunnel end to end
+  persona-link ssh --off                                # Remove tunnel without unpairing
+  ```
+  `persona-link install --pair '<link>' --ssh user@example.com …` accepts the same `--ssh*` flags during installation.
+- **`link.json`**: stored alongside `endpoints` as `"ssh": {"server": "user@example.com", "target": "127.0.0.1:18662", "always": true}` (`always` omitted when false).
+
+### Transport, TLS, routing and errors
+
+- **System `ssh` client**: `persona-link` runs the system `ssh` binary (`-N -L 127.0.0.1:<ephemeral>:<target> -o BatchMode=yes -o ExitOnForwardFailure=yes`, plus `-p <port>` when specified). It uses the keys, `ssh-agent`, `ProxyJump` and `known_hosts` the user already configured, stores no SSH key or password, and never prompts interactively.
+- **One SSH session for the link and all streams**: the active link WebSocket (`/api/v1/link`) and every Agent stream (`/api/v1/link/stream`) dial through the same local forward on that single `ssh` process, so opening Agent sessions triggers no extra SSH authentication or hardware-key touch. Killing `ssh` or losing the network drops the link and reconnects automatically; quitting, switching to passive mode, switching back to a direct route, or unpairing terminates the `ssh` process cleanly.
+- **End-to-end TLS unchanged**: the TLS handshake (pinned to `fp`, or checked against system CAs and hostname when `trust` is `system`) still runs end to end through the tunnel to the hub's TLS port; a wrong hub key is refused identically to a direct connection. Over the tunnel, `hello.address` is left empty so the hub does not record the SSH server string as one of its own HTTPS URLs.
+- **Routing order**:
+  - **Always use SSH** on: only the tunnel is dialed; direct hub candidates are skipped.
+  - **Always use SSH** off: direct candidates are raced first, and the tunnel is dialed when all of them fail. When the last working connection used the tunnel, the next reconnect dials the tunnel immediately instead of waiting for direct candidates to fail again, while probing direct candidates every 2 minutes (`link.DirectRetryEvery`) and on network changes to switch back and close the tunnel once a direct address answers.
+- **Status and plain-word errors**: when connected through the tunnel, status reports `"kind": "ssh"` and `"address": "<server>"`, labelled **SSH** in `en`, `zh-Hans` and `ja` across `persona-link status`, the Mac menu bar App and the Windows tray (and marked **In use** in the address list). Five failure modes each produce a distinct single-sentence explanation (`ssh_error` in the status line): no `ssh` command installed, authentication refused, server host key not trusted yet (with `ssh [-p <port>] <server>` to accept it once in a terminal), port forwarding refused by the server (`AllowTcpForwarding` / `permitopen`), and the hub not answering at `<target>`.
 
 ## Passive mode (the hub connects)
 
@@ -631,7 +681,7 @@ For Linux see "Linux (headless)" below: build `persona-link`, then `persona-link
 
 **Menu**
 - Second line is the mode: **Connect to hub (active)** or **Let hub connect (passive) · Listening :18663**.
-- Active: selected address (LAN / public IPv6 / domain), connection duration, disconnect reason (one line per candidate), local node online state.
+- Active: selected address (LAN / public IPv6 / domain / SSH), connection duration, disconnect reason (one line per candidate or plain-word SSH tunnel failure), local node online state.
 - Passive: hub connected (source address, duration, local node state); or listening (when and where the hub last connected); or waiting for pairing (remaining validity of the pairing link);
   or unable to listen (port occupied, etc., retry delay).
 - Connected hub and group size: "hub ‘Home’ · 3 hubs in linked group", or "hub ‘Home’ · Not linked to other hubs" when alone; disconnected shows only the name.
@@ -681,7 +731,7 @@ For Linux see "Linux (headless)" below: build `persona-link`, then `persona-link
 - Active: paste the pairing link from **Add Computer** on the phone or web, or open it directly (the URL scheme opens and prefills the window). **Never pairs automatically**: first shows the destination hub (`url` host),
   "Security fingerprint included" when `fp` is present, and this computer's name on the hub. Pairing runs only after the user taps **Pair**: a forwarded or forged link cannot hand this computer to someone else's hub on its own.
   Only accepts host `link`; other links such as `persona://pair?…` show "This link is for the phone / Mac App", without prefilling or taking further action.
-  Machine id is under **Advanced** (only when the link lacks `machine`, such as `personad hub pair` without `--machine`). The App calls `persona-link pair`, displaying success or errors in the window. Lists candidate addresses and marks the selected one **In use**;
+  Machine id is under **Advanced** (only when the link lacks `machine`, such as `personad hub pair` without `--machine`). **SSH tunnel** is a closed-by-default disclosure section below the pairing link for setting, testing, editing or removing an SSH tunnel before or after pairing (see "[SSH tunnel](#ssh-tunnel)" above). The App calls `persona-link pair` (and `persona-link ssh`), displaying success or errors in the window. Lists candidate addresses (including an **SSH** row when a tunnel is configured) and marks the selected one **In use**;
   manual addresses can be added (`persona-link address add`) and removed.
 - Passive: enter listen address (default `:18663`); **Generate pairing link** calls `persona-link pair --listen`, showing the selectable link with **Copy**, its addresses and firewall guidance;
   if already paired, shows which hub and this computer's name.
@@ -707,7 +757,8 @@ For Linux see "Linux (headless)" below: build `persona-link`, then `persona-link
   `code_expires` (expiration of the `pair --listen` code).
 - `node`: `online` / `offline` / `unknown`, reason in `node_error`.
 - `pending` (planned, #4655): `true` means the hub is waiting for the user to confirm this computer in the App; absent means confirmed.
-- `waiting` / `refused` include `error` (candidate failures separated by "；", a full-width semicolon) and `retry` (next attempt time).
+- `waiting` / `refused` include `error` (candidate failures separated by "；", a full-width semicolon) and `retry` (next attempt time); when an SSH tunnel attempt failed, `ssh_error` carries `{code, server, target}` so localized surfaces render the sentence in `en`, `zh-Hans` or `ja`.
+- `ssh`: the active-mode SSH tunnel from `link.json` (`{server, target, always?}`), when configured; while connected through the tunnel, `kind` is `ssh` and `address` is `<server>`.
 - `hub_name`, `mesh_hubs`: see "Hub name and linked group"; absent with old hubs.
 - `machine_name`: what the hub calls this computer (see "The computer's name"); absent with old hubs. `rename`: how the last rename asked of this persona-link went: `{id, name}` or `{id, code, error}`.
 - `pending`: meaningful only when `connected`; `true` means the hub is waiting for the user to confirm this computer (see "Pending confirmation"); absent or `false` means confirmed.
@@ -828,11 +879,12 @@ Two things to know about a node without systemd:
 | Command | Action |
 | --- | --- |
 | `persona-link status` | Mode, link (address, duration; candidate failure reasons when disconnected), hub name and group size, local node, this computer's name on the hub (its id in parentheses when they differ), candidate addresses, systemd service (active / enabled / linger), pid and version, log location. Passive mode instead shows: listen address, listening or hub connected, paired hub and pairing time, hub's last visit time and address, helper fingerprint, local addresses usable by hub. Exit 0 when connected (also listening in passive mode), otherwise 1 |
-| `persona-link status --json` | Same for scripts: `running`, `mode`, `paired`, `machine`, `machine_name`, `hub_id`, `hub_name`, `endpoints`, `trust` (`pin` / `system`), `link` (last reported status), `passive` (`listen`, `paired`, `hub_id`, `hub_name`, `machine`, `machine_name`, `paired_at`, `code_expires`, `fp`), `service`, `config`, `log`; `error` if link.json can't be read; no credential or hash |
+| `persona-link status --json` | Same for scripts: `running`, `mode`, `paired`, `machine`, `machine_name`, `hub_id`, `hub_name`, `endpoints`, `ssh`, `trust` (`pin` / `system`), `link` (last reported status), `passive` (`listen`, `paired`, `hub_id`, `hub_name`, `machine`, `machine_name`, `paired_at`, `code_expires`, `fp`), `service`, `config`, `log`; `error` if link.json can't be read; no credential or hash |
 | `persona-link logs [-f] [-n lines]` | Last 100 lines of `~/.persona/link.log` (change with `-n` / `--lines`); `-f` / `--follow` keeps following, including rotation; without a log file but with an installed service, reads journal. `log` is the same command |
 | `persona-link uninstall` | Stop, disable and delete systemd user service (Windows: scheduled task), preserving credentials. Linux / Mac resident-node service remains (`node uninstall` removes it); on Windows the node shares the task and stops too, but `personad.exe` remains |
 | `persona-link uninstall --purge` | Also remove credentials (link.json and `.lock` / `.run`), status, logs (including `link.log.1`), passive TLS identity `link-tls/`, `~/.persona/bin/persona-link`, and install-script `persona-link` alias (only if truly an alias); refuses while another persona-link is running (menu bar App, manually started). Revoke hub-side credentials in App **Settings › Devices** |
-| `persona-link pair [--machine <id>] [<link>\|-]` | Active pairing, credentials saved to `~/.persona/link.json`. No link or `-` reads stdin; prompts to paste in a terminal and reads one line on Enter. If the link lacks a machine id (normal App code), specify `--machine` |
+| `persona-link pair [--machine <id>] [--ssh <server> [--ssh-target <host:port>] [--ssh-always \| --no-ssh-always]] [<link>\|-]` | Active pairing, credentials (and optional SSH tunnel) saved to `~/.persona/link.json`. No link or `-` reads stdin; prompts to paste in a terminal and reads one line on Enter. If the link lacks a machine id (normal App code), specify `--machine` |
+| `persona-link ssh [<server> \| --off] [--target <host:port>] [--always \| --no-always] [--test [--link <link>]] [--json]` | Show, configure, test or remove (`--off`) the active-mode SSH tunnel in `link.json` without re-pairing; see "[SSH tunnel](#ssh-tunnel)" |
 | `persona-link pair --listen [<listen address>] [--addr <address>]…` | Passive pairing link (only link on stdout, for piping); default listen `:18663`; can't combine with pairing link or `--machine` |
 | `persona-link mode [active\|passive] [--listen <address>]` | No arguments: display current mode (with passive listen address); supplied mode: switch, retaining both pairings; `--listen` alone changes passive listen address without switching mode |
 | `persona-link node install [--node-bin <path> \| --personad <path>]` / `node switch [--to personad]` / `node status [--json]` / `node uninstall` | Resident node service (Linux systemd `personad-node`, Mac launchd `com.persona.node`); a new one runs `~/.persona/bin/persona-node` when there is one (else personad, and always on a computer that runs a hub or a manager), existing services stay unchanged; `--node-bin` puts the given program in under its own name. `switch` moves an existing service to persona-node (`--to personad`: back), whole or not at all ("The device's program" above). `uninstall` deletes neither program. On Windows the node shares persona-link's task; only `node status` exists |

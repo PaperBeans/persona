@@ -55,7 +55,8 @@ type Settings struct {
 	// OwnerAliases are the names the user explicitly adds for kb.owner; an empty list clears them.
 	OwnerAliases []string `json:"owner_aliases,omitempty"`
 	// Main is the main conversation (the Persona tab opens it): one long-running conversation, the others are side ones.
-	Main string `json:"main,omitempty"`
+	Main          string `json:"main,omitempty"`
+	MainMachineID string `json:"main_machine_id,omitempty"` // confirmed routing device of Main
 	// Former are the main conversations replaced since (newest first, POST /api/v1/assistant/main/new): their machine
 	// keeps listing them, archived, however long they are quiet.
 	Former []FormerMain `json:"former_main,omitempty"`
@@ -370,7 +371,7 @@ func (s *Service) profile(ctx context.Context, tasks []TaskView, todos *TodoRepo
 		return nil
 	}
 	v := s.effective(ctx, saved)
-	p := &Profile{MachineID: v.MachineID, Main: v.Main, Launcher: v.Launcher, Timezone: v.Timezone}
+	p := &Profile{MachineID: v.MachineID, Main: v.Main, MainMachineID: v.MainMachineID, Launcher: v.Launcher, Timezone: v.Timezone}
 	if tasks != nil && todos != nil {
 		p.Keep = keptSessions(v, tasks, todos.Links)
 	}
@@ -390,7 +391,7 @@ func keptSessions(v Settings, tasks []TaskView, links []TodoLink) []SessionRef {
 			out = append(out, SessionRef{MachineID: machine, SessionID: id})
 		}
 	}
-	add(v.MachineID, v.Main)
+	add(v.mainRouteMachine(), v.Main)
 	for _, f := range v.Former { // archived, still to be found
 		add(f.MachineID, f.SessionID)
 	}
@@ -473,6 +474,9 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		sp = space[0]
 	}
 	v := s.settings(ctx)
+	if sp == "" {
+		v.MainMachineID = s.confirmedMainMachine(ctx, v)
+	}
 	v.Launcher = s.launcherNow(ctx)
 	out := assistantView{Settings: v, Manager: s.managerIdentity(), PermissionDefaults: s.permissionDefaults(), Conversations: []proto.Session{}, NotesEffective: s.notes(ctx), MainTasksQuiet: quietOn(v.MainTasksQuiet),
 		StartRequestedTasks: quietOn(v.StartRequestedTasks), RecordingDays: recordingDaysOf(v), MinutesDays: kb.MinutesDaysFor(minutesDaysSetting(v), recordingDaysOf(v)),
@@ -503,11 +507,20 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 			}
 		}
 	}
+	if sp == "" && v.MainMachineID != "" && v.MainMachineID != v.MachineID {
+		if c, ok := s.session(ctx, v.MainMachineID, v.Main); ok && c.Assistant && spaceOf(c) == "" {
+			out.Conversations = append(out.Conversations, c)
+		}
+	}
 	return out
 }
 
 func (s *Service) profileRoutes() {
 	s.handle("GET /api/v1/assistant", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("view") == "main-runtime" {
+			apierr.WriteJSON(w, s.mainExecution(r.Context()))
+			return
+		}
 		archived := r.URL.Query().Get("archived")
 		space := r.URL.Query().Get("space")
 		if !validSpace(space) {

@@ -7,10 +7,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import persona.core.contracts.*
 import persona.core.contracts.api.*
@@ -37,6 +35,7 @@ internal fun ChatHeader(
     statusState: StatusLineState = StatusLineState(), onDetails: () -> Unit = {},
     onOpenTodo: ((String) -> Unit)? = null,
     agentShares: (() -> AgentShares)? = null,
+    worktrees: (() -> persona.core.contracts.api.AgentCreationService?)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -44,7 +43,7 @@ internal fun ChatHeader(
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     var title by rememberSaveable { mutableStateOf("") }
     var tabName by rememberSaveable { mutableStateOf("") }
-    val clipboard = LocalClipboardManager.current
+    val copy = rememberCopy()
     val peers = remember(session, sessions) { spaceCompanions(session, sessions) }
     val places = remember(session, peers) { companionPlaces(session, peers) }
     val children = session?.subagents.orEmpty().filter { it.running && it.sessionId.isNotBlank() }
@@ -122,7 +121,7 @@ internal fun ChatHeader(
         // Only a session in a terminal resumes there; a Codex thread by its own thread id.
         session?.resumeCommand()?.let { command ->
             add(JAction(stringResource(R.string.chat_chrome_copy_resume), enabled = !readOnly) {
-                clipboard.setText(AnnotatedString(command)); state.notice = resumeCopied
+                copy(command, resumeCopied)
             })
         }
         // Persona's conversations are not agents in a pane, and a session without a terminal has no pane to close.
@@ -156,15 +155,22 @@ internal fun ChatHeader(
                 }
             })
         // The same words as the Agents list's long press and swipe (core:domain closeConfirmation).
-        "close" -> session?.let { target ->
-            val confirmation = target.closeConfirmation(machine?.displayName)
+        // Keep or remove the worktree Persona made for it, when it worked in one (#4532); removed once it is gone.
+        "close", "delete" -> session?.let { target ->
+            val closing = dialog == "close"
+            val confirmation = if (closing) target.closeConfirmation(machine?.displayName) else target.deleteConfirmation(machine?.displayName)
+            val service = remember(worktrees) { worktrees?.invoke() }
+            val rawMachine = persona.core.contracts.GroupKeys.raw(target.machineId)
+            val worktree = rememberOurWorktree(service, rawMachine, target.cwd, machine?.online == true)
+            var cleanup by remember(target.key) { mutableStateOf(WorktreeCleanup()) }
+            val res = androidx.compose.ui.platform.LocalResources.current
             JDialog(onDismiss = { dialog = null }, title = confirmation.title.text(), text = confirmation.message.text(),
-                confirm = stringResource(R.string.chat_chrome_close_agent) to { dialog = null; state.run(target, ChatAction.Close) }, destructive = true, confirmEnabled = canAct)
-        }
-        "delete" -> session?.let { target ->
-            val confirmation = target.deleteConfirmation(machine?.displayName)
-            JDialog(onDismiss = { dialog = null }, title = confirmation.title.text(), text = confirmation.message.text(),
-                confirm = stringResource(R.string.chat_chrome_delete) to { dialog = null; state.run(target, ChatAction.Delete) }, destructive = true, confirmEnabled = canAct)
+                confirm = stringResource(if (closing) R.string.chat_chrome_close_agent else R.string.chat_chrome_delete) to {
+                    dialog = null
+                    state.run(target, if (closing) ChatAction.Close else ChatAction.Delete) { done -> if (done && service != null && worktree != null)
+                        WorktreeCleanups.cleanUp(service, rawMachine, worktree, cleanup, feedback, res) }
+                }, destructive = true, confirmEnabled = canAct && WorktreeCleanups.ready(worktree, cleanup),
+                content = worktree?.let { st -> { WorktreeCleanupSection(st, cleanup, { cleanup = it }, machine?.home) } })
         }
         "info" -> session?.let { target -> ChatSessionInfoSheet(target, machine, state, onOpenTodo = onOpenTodo, onDismiss = { dialog = null }) }
         "peers" -> JSheet(onDismiss = { dialog = null }, title = stringResource(R.string.chat_chrome_peers_title)) {

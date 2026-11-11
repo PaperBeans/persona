@@ -52,7 +52,7 @@ type rewindOpts struct {
 // How long the steps wait for the TUI. Variables so the tests need not wait.
 var (
 	rewindTick       = 40 * time.Millisecond
-	rewindStepWait   = 900 * time.Millisecond // a key's effect on screen
+	rewindStepWait   = 900 * time.Millisecond // a key's effect on screen, and an empty box with nothing restored
 	rewindOpenWait   = 5 * time.Second        // /rewind opening, its confirmation screen
 	rewindDoneWait   = 10 * time.Second       // the panel closing after the final enter
 	rewindDraftWait  = 3 * time.Second        // the prompt back in the box, and out of it again
@@ -413,22 +413,35 @@ func (r *rewindRun) clearBox(ctx context.Context) {
 
 // takePromptOutOfBox: Claude puts the rewound prompt back into its input box; the app puts it into its own, so the
 // box is emptied (the keys are pressed once and only on a box that holds the prompt, as the box was empty when the rewind
-// began). It reports whether the box is empty in the end.
+// began). The panel can close before that restore arrives, so an empty box is final only after the clear was pressed,
+// or after staying empty for one key-effect grace. It reports whether the box is empty in the end.
 func (r *rewindRun) takePromptOutOfBox(ctx context.Context, prompt string) bool {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rewindDraftWait+rewindCleanWait)
 	defer cancel()
 	end := time.Now().Add(rewindDraftWait)
 	pressed := false
+	var emptySince time.Time
 	for {
 		s, err := r.readInput(ctx)
 		if err != nil {
 			return false
 		}
+		now := time.Now()
 		switch in := screen.ClaudeInput(s); {
 		case !in.Box:
+			emptySince = time.Time{}
 		case !in.Draft:
-			return true
+			if pressed {
+				return true
+			}
+			if emptySince.IsZero() {
+				emptySince = now
+			}
+			if now.Sub(emptySince) >= rewindStepWait {
+				return true // Claude restored nothing during the grace
+			}
 		case !pressed && screen.RewindDraftIs(in.Text, prompt):
+			emptySince = time.Time{}
 			// A one-row box is emptied the way a send clears a draft (no hint on screen); a taller one only by Ctrl+C.
 			keys := []string{"ctrl+c"}
 			if in.Clearable != "" {
@@ -441,9 +454,13 @@ func (r *rewindRun) takePromptOutOfBox(ctx context.Context, prompt string) bool 
 		case !pressed:
 			return false // something else is in the box: not ours to clear
 		}
-		if time.Now().After(end) {
+		if now.After(end) {
 			return false
 		}
-		time.Sleep(rewindTick)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(rewindTick):
+		}
 	}
 }

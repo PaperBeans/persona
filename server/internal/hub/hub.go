@@ -245,6 +245,7 @@ func runHub(ctx context.Context, b update.Build, cfg *Config, budget *shutdownBu
 	h.live = newLiveActivities(h)
 	h.upd = newUpdater(h)
 	h.upd.confirmed = !updating // an update under way is confirmed by this process (its watchdog waits for that)
+	h.upd.logSource()
 	database, err := db.Open(ctx, cfg.DatabaseURL, db.HubSet)
 	if err != nil {
 		return err

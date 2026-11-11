@@ -3,6 +3,7 @@ package node
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -174,7 +175,7 @@ func (n *Node) isAssistantSessionIn(id string, pass *codexListPass) bool {
 	if a.PaneID != "" {
 		return false
 	}
-	if st, ok := n.state.get(id); ok && identity.IsAssistantDir(st.Cwd) {
+	if st, ok := n.state.get(id); ok && (identity.IsAssistantDir(st.Cwd) || n.roomState(st)) {
 		return true
 	}
 	if p := n.transcriptPathIn(id, pass); p != "" && (compat.IsAssistantTranscript(filepath.Base(filepath.Dir(p))) ||
@@ -260,9 +261,19 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		isMain = st.IsMain
 	}
 	// A guest conversation (assistant_guest.go): a new one asked for, or one that is.
-	guest := st.Guest
+	guest, guestKind := st.Guest, st.GuestKind
 	if !resume {
-		guest = guestFrom(ctx)
+		guest, guestKind = guestFrom(ctx), guestKindFrom(ctx)
+	} else if n.roomState(st) {
+		// A meeting's room: never resumed without its tools (its record lost them: refused), nor without its kind
+		// (lost by a manager that did not keep it: its directory says, and the record has it again).
+		if guest == nil {
+			return "", errRoomRecord
+		}
+		if guestKind != guestMeeting {
+			guestKind, st.GuestKind = guestMeeting, guestMeeting
+			n.state.put(id, st)
+		}
 	}
 	if mode == "" && guest == nil {
 		mode = st.AppMode
@@ -347,7 +358,8 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		return "", errGuestAgent
 	}
 	if agent == "claude" {
-		execution.ConfigDir, err = n.assistantProfileSelection(ctx, id, launcher, execution.Runtime, executionOption(options).ConfigDir, resume)
+		asked := n.startProfile(executionOption(options).ConfigDir, guestKind, resume)
+		execution.ConfigDir, err = n.assistantProfileSelection(ctx, id, launcher, execution.Runtime, asked, resume)
 		if err != nil {
 			return "", err
 		}
@@ -357,8 +369,11 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	var p *assistantProc
 	if id == "" && guest != nil {
 		// Never the warm spare: it was started with the assistant's tools. Its process reads Guest from the state.
-		id = newUUID()
-		n.state.put(id, sessionState{Launcher: launcher, Cwd: cwd, Guest: guest})
+		// Under the id the hub asked for when it gave one (a meeting's room: made once, also across a restart).
+		id = cmp.Or(newIDFrom(ctx), newUUID())
+		n.state.put(id, sessionState{Launcher: launcher, Cwd: cwd, Guest: guest, GuestKind: guestKind})
+	} else if id == "" && newIDFrom(ctx) != "" && agent == "claude" {
+		id = newIDFrom(ctx) // never the spare either: it has an id of its own
 	} else if id == "" {
 		// The spare was started without --permission-mode, and bypassPermissions can't be switched to later.
 		if p = n.adoptSpareFor(cwd, launcher, mode, execution); p != nil {

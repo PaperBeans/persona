@@ -20,7 +20,8 @@ vi.mock("react-dom", async (importOriginal) => ({
 }));
 
 const { TodosView } = await import("./Todos");
-const { PlanCard, TaskBoard } = await import("./assistant/Tasks");
+const { PlanCard } = await import("./assistant/Tasks");
+const { TaskBoard } = await import("./assistant/TaskBoard");
 
 const hour = 3600_000;
 const iso = (agoMs: number) => new Date(Date.now() - agoMs).toISOString();

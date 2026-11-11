@@ -1,6 +1,5 @@
 package persona.feature.files
 
-import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListScope
@@ -12,7 +11,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -92,9 +90,8 @@ private fun FilesBrowser(
     onBackToChat: () -> Unit,
     onInsertPath: (String) -> Unit,
 ) {
-    val context = LocalContext.current
-    val resources = LocalResources.current
-    val feedback = LocalAppFeedback.current
+    val copy = rememberCopy()
+    val pathCopied = stringResource(R.string.files_path_copied)
     var hidden by rememberShowHidden()
     var menu by remember { mutableStateOf(false) }
     val here = state.here
@@ -128,7 +125,7 @@ private fun FilesBrowser(
     if (menu) JActionSheet(buildList {
         add(JAction(stringResource(R.string.files_show_hidden), PhIcons.Eye, checked = hidden) { hidden = !hidden })
         state.parent?.let { add(JAction(stringResource(R.string.files_parent_folder), PhIcons.ArrowUp) { controller.up() }) }
-        add(JAction(stringResource(R.string.files_copy_folder), PhIcons.Copy) { copyText(context, here, feedback, resources.getString(R.string.files_path_copied)) })
+        add(JAction(stringResource(R.string.files_copy_folder), PhIcons.Copy) { copy(here, pathCopied) })
         add(JAction(stringResource(R.string.files_insert_folder), PhIcons.CursorText) { onInsertPath(here) })
     }, { menu = false }, title = stringResource(R.string.files_folder_actions))
 }
@@ -164,16 +161,15 @@ private fun LazyListScope.filesBrowser(state: FilesState, controller: FilesContr
             }
             val now = Instant.now()
             itemsIndexed(entries, key = { _, it -> "entry:${it.name}" }, contentType = { _, _ -> "entry" }) { index, entry ->
-                val context = LocalContext.current
-                val resources = LocalResources.current
-                val feedback = LocalAppFeedback.current
+                val copyText = rememberCopy()
+                val pathCopied = stringResource(R.string.files_path_copied)
                 val path = joinRemotePath(listing.path.ifEmpty { state.here }, entry.name)
                 JGroupItem(GroupPosition.of(index, entries.size)) {
                     // Pictures, documents and videos show the machine's thumbnail in place of the icon (iOS FilesPane, #1370).
                     val thumbnail = if (!entry.dir && FileThumbnails.wanted(entry.name, entry.size)) controller.thumbnail(path, entry.size, entry.mtime) else null
                     FileRow(entry, gitChange(state.git, path, entry.dir), now, thumbnail = thumbnail,
                         open = { if (entry.dir) controller.directory(path) else controller.push(FileSelection.File(path)) },
-                        copy = { copyText(context, path, feedback, resources.getString(R.string.files_path_copied)) }, insert = { insert(path) })
+                        copy = { copyText(path, pathCopied) }, insert = { insert(path) })
                 }
             }
             if (listing.truncated) item { Notice(stringResource(R.string.files_too_many, LocalizedFormats.number(MAX_LISTED, currentLocale)), padded = false) }
@@ -238,8 +234,3 @@ internal fun fileIcon(name: String): PhIcon = when (FilesPaths.extension(name)) 
 
 /** The most entries a folder listing brings (the node cuts it there and says it's truncated). */
 private const val MAX_LISTED = 2000
-
-/** Copies [text] and says so through the app's one notice line. */
-internal fun copyText(context: Context, text: String, feedback: AppFeedback?, notice: String) {
-    copyTextSafely(context = context, text = text, label = "Persona", feedback = feedback, successNotice = notice)
-}

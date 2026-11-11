@@ -2,6 +2,8 @@ package persona.core.hub
 
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
@@ -90,6 +92,9 @@ class HttpTasksApi internal constructor(
             notes?.let { put("notes", it) }
             done?.let { put("done", it) }
         })["todo"] ?: error("no todo in the answer")))
+
+    override suspend fun setTodoPlan(id: String, plan: persona.core.contracts.TodoPlan): Todo =
+        stamped(JsonCodec.decodeFromJsonElement(call(path("todos", id), "PATCH", todoPlanBody(plan))["todo"] ?: error("no todo in the answer")))
 
     override suspend fun setTodoDue(id: String, due: TodoDue): Todo =
         stamped(JsonCodec.decodeFromJsonElement(call(path("todos", id), "PATCH", buildJsonObject {
@@ -269,4 +274,15 @@ class HttpTasksApi internal constructor(
 
     private fun plan(o: JsonObject): TaskPlan = JsonCodec.decodeFromJsonElement(o["plan"] ?: error("no plan in the answer"))
     private fun item(o: JsonObject): FeedItem = JsonCodec.decodeFromJsonElement(o["item"] ?: error("no item in the answer"))
+}
+
+/** The PATCH body of a to-do's plan (#4636), as iOS `TodoPlanChange` encodes it: every field sent, null clears. */
+internal fun todoPlanBody(plan: persona.core.contracts.TodoPlan) = buildJsonObject {
+    when (val due = plan.due) {
+        null -> put("due_at", JsonNull)
+        is TodoDue.At -> put("due_at", due.at.toString())
+        is TodoDue.Day -> put("due_date", due.day.toString())
+    }
+    put("remind_at", plan.remindAt?.toString()?.let(::JsonPrimitive) ?: JsonNull)
+    put("priority", plan.priority)
 }

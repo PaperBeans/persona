@@ -1,0 +1,39 @@
+ ▐▛███▛█   Claude Code v2.1.321
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   /tmp/sendnow-probe/work
+
+
+❯ Run ./build.sh with the Bash tool in the foreground (timeout 300000 ms) and wait for it to finish.
+
+● Running the build script · 5s
+  ⎿  $ ./build.sh (5s · 2 lines)
+     (ctrl+b ctrl+b (twice) to run in background)
+
+❯ tmux queued probe: reply TMUX-OK
+  ctrl+x ctrl+s to send now
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+· Whatchamacalliting… (9s · ↓ 100 tokens)
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Press up to edit queued messages
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt
+[probe] 0:2.1.321*                                                              "✳ build.sh foreground" 10:01 11-Nov-26

@@ -1,0 +1,14 @@
+{
+  "main": "Main conversation",
+  "not_started": "Main conversation has not started",
+  "starting": "Main conversation · Starting…",
+  "unknown": "Main conversation · Runtime not reported",
+  "running": "Running",
+  "location_unknown": "Location not reported",
+  "proxy": "Via {name} (execution location not reported)",
+  "container": "Container {name}",
+  "offline": "Main conversation · Offline",
+  "stopped": "Main conversation · Stopped",
+  "last_location": "Last ran on {location}",
+  "new_launcher": "New conversation will use: {launcher}"
+}

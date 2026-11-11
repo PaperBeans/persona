@@ -172,6 +172,9 @@ func writeAssistantErr(w http.ResponseWriter, err error) {
 		case assistantwire.CodeBadRequest:
 			writeErr(w, http.StatusBadRequest, errors.New(re.Message))
 			return
+		case assistantwire.CodeMeetingEnded: // a message into a meeting's room that ended: write in its follow-up
+			writeErrCode(w, http.StatusConflict, assistantwire.CodeMeetingEnded, errors.New(re.Message))
+			return
 		case assistantwire.CodeMachineOffline: // as the hub's own call to that machine would answer
 			callErr(w, fmt.Errorf("%s: %w", re.Message, errOffline))
 			return

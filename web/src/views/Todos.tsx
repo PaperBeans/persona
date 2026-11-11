@@ -2380,7 +2380,7 @@ function TodoDueDialog({ todo, onClose, onSave }: { todo: Todo; onClose: () => v
     else setBusy(false);
   };
   return (
-    <Dialog open onClose={onClose} title={t("todos.menu_due")}>
+    <Dialog open onClose={onClose} title={t("todos-menu.due")}>
       <form onSubmit={submit} className="flex flex-col gap-3.5">
         <div>
           <label htmlFor="todo-due-pick" className="mb-1 block text-[12px] font-medium text-ink-2">{t("todos.due_label")}</label>

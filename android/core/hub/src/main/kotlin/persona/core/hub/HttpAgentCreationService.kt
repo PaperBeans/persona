@@ -110,6 +110,30 @@ class HttpAgentCreationService(
         // Hubs without the list: no model picker, the launcher's own model as before.
         if (failure.status == 404) null else throw failure
     }
+    override suspend fun worktreeStatus(machineId: String, cwd: String): WorktreeStatus? = try {
+        JsonCodec.decodeFromJsonElement<WorktreeStatus>(worktree(machineId, "status", buildJsonObject { put("cwd", cwd) }))
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) { null } // an older node or hub, offline, an error: no worktree offered
+
+    override suspend fun addWorktree(machineId: String, cwd: String, nameHint: String, branch: String): WorktreeAdded =
+        JsonCodec.decodeFromJsonElement(worktree(machineId, "add", buildJsonObject {
+            put("cwd", cwd)
+            if (nameHint.isNotEmpty()) put("name_hint", nameHint)
+            branch.trim().takeIf(String::isNotEmpty)?.let { put("branch", it) }
+        }))
+
+    override suspend fun removeWorktree(machineId: String, path: String, deleteBranch: Boolean, force: Boolean): WorktreeRemoved =
+        JsonCodec.decodeFromJsonElement(worktree(machineId, "remove", buildJsonObject {
+            put("path", path)
+            if (deleteBranch) put("delete_branch", true)
+            if (force) put("force", true)
+        }))
+
+    // git can take a while on a big repository: the start's budget, not the list's.
+    private suspend fun worktree(machineId: String, action: String, body: JsonObject) = read(
+        request("api", "v1", "machines", machineId, "worktree", action).post(body.toString().toRequestBody("application/json".toMediaType())).build(),
+        startHttp)
+
     private fun outcome(body: JsonObject): AgentStartResult {
         val session = body["session"] as? JsonObject
         if (session != null) {
@@ -120,6 +144,8 @@ class HttpAgentCreationService(
     }
     private companion object {
         /** A provider outside the computer's scope, or skipped there for its own service: nothing was started. */
-        val ScopeRefusals = setOf("launcher_out_of_scope", "launcher_own_service")
+        val ScopeRefusals = setOf("launcher_out_of_scope", "launcher_own_service",
+            // a start that asked for ultracode where it can't run (#582): nothing started; the words say why
+            "node_outdated", "ultracode_unsupported")
     }
 }

@@ -1,0 +1,5 @@
+Someone in the room just asked a question. Answer the latest question in these lines that is addressed to Persona or to Ada; if they hold none, say in one sentence that you did not catch a question.
+
+<persona-context kind="context" title="What was just said (30:34)" url="">
+[30:02] Persona, what did we decide last time?
+</persona-context>

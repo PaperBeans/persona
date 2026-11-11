@@ -158,7 +158,7 @@ func runSecretCommand(ctx context.Context, home, command string, password []byte
 	if cmd.ProcessState != nil {
 		res.ExitCode = cmd.ProcessState.ExitCode() // -1: ended by a signal
 	}
-	if res.ExitCode != 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) { // stopped at the timeout, whatever it then exited with
+	if (res.ExitCode != 0 || stopped.Load() != 0) && errors.Is(ctx.Err(), context.DeadlineExceeded) { // stopped at the timeout, whatever it then exited with
 		res.TimedOut, res.ExitCode = true, -1
 	}
 	out.release(true) // Wait read the output to its end

@@ -7,8 +7,7 @@ import { loginWithPassword, passwordApi, readNativeLogin, type NativeLogin, type
 import { Button, Spinner } from "../ui/atoms";
 import { Icon } from "../ui/icons";
 
-// Pair with the hub's token (`jarvisd hub pair` prints it) or a device token (lib/auth.ts). `error` is what went
-// wrong with a token that came in the link.
+// Sign in with a connection password or pair with a hub or device token. `linkError` reports an invalid token from a link.
 export function PasswordLogin({ onDone, error: linkError = "", native = null }: { onDone: () => void; error?: string; native?: NativeLogin | null }) {
   const [token, setTok] = useState("");
   const [passwordEnabled, setPasswordEnabled] = useState(false);

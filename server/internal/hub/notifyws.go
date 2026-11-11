@@ -70,8 +70,12 @@ func (h *Hub) notifyDecide(owner, machineID, machine, sessionID, title, text str
 // (assistantwire.Notification.LinkCovered).
 func (h *Hub) notifyInteraction(owner string, ix proto.Interaction, machine string, linkCovered bool) {
 	build := func(l i18n.Lang) map[string]any { return interactionPayloadIn(l, ix, machine) }
+	summary := ix.Summary
+	if ix.Private { // a Just me turn's card: what it asks stays in the app
+		summary = ""
+	}
 	h.emitToExtensions(owner, "agent.needs_you", map[string]any{"machine_id": ix.MachineID, "machine": machine, "session_id": ix.SessionID,
-		"interaction_id": ix.ID, "kind": ix.Kind, "summary": ix.Summary})
+		"interaction_id": ix.ID, "kind": ix.Kind, "summary": summary})
 	wants := pushWants{Kind: "input"}
 	if ix.Kind == proto.IxElicitation {
 		// Only what can show an MCP form or link: the phones that registered for one (#2433; a tap opens the card,

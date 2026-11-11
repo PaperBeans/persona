@@ -335,26 +335,29 @@ func (a Attachment) placeholder() string {
 
 // unread counts each conversation's messages from others not read yet, by index in convs.
 func (r *Reader) unread(ctx context.Context, convs []*conversation) (map[int]int, error) {
-	var chats []int64
-	index := map[int64]int{}
+	var owners []string
 	for i, cv := range convs {
 		for _, id := range cv.chats {
-			chats = append(chats, id)
-			index[id] = i
+			owners = append(owners, fmt.Sprintf("(%d,%d)", id, i))
 		}
 	}
-	var rows []struct {
-		Chat int64 `json:"chat"`
-		N    int   `json:"n"`
+	out := map[int]int{}
+	if len(owners) == 0 {
+		return out, nil
 	}
-	if err := r.query(ctx, r.chatDB(), `SELECT j.chat_id AS chat, count(*) AS n FROM chat_message_join j JOIN message m ON m.ROWID = j.message_id
-WHERE j.chat_id IN (`+ints(chats)+`) AND m.is_read = 0 AND m.is_from_me = 0 AND m.item_type = 0 AND m.associated_message_type = 0
-GROUP BY j.chat_id`, &rows); err != nil {
+	var rows []struct {
+		Conv int `json:"conv"`
+		N    int `json:"n"`
+	}
+	if err := r.query(ctx, r.chatDB(), `WITH owners(chat, conv) AS (VALUES `+strings.Join(owners, ",")+`)
+SELECT o.conv AS conv, count(DISTINCT m.ROWID) AS n FROM owners o
+JOIN chat_message_join j ON j.chat_id = o.chat JOIN message m ON m.ROWID = j.message_id
+WHERE m.is_read = 0 AND m.is_from_me = 0 AND m.item_type = 0 AND m.associated_message_type = 0
+GROUP BY o.conv`, &rows); err != nil {
 		return nil, err
 	}
-	out := map[int]int{}
 	for _, row := range rows {
-		out[index[row.Chat]] += row.N
+		out[row.Conv] = row.N
 	}
 	return out, nil
 }

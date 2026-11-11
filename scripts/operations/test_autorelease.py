@@ -56,7 +56,7 @@ if mode == "timeout":
         "Path(__import__('sys').argv[1]).write_text(str(__import__('os').getpid())); time.sleep(60)",
         mode_path + ".pid"])
     time.sleep(60)
-if mode == "wait":
+if mode in ("wait", "wait-stale"):
     deadline = time.monotonic() + 10
     while not Path(mode_path + ".gate").exists():
         if time.monotonic() >= deadline:
@@ -67,6 +67,17 @@ if mode == "dirty":
 if mode == "change-head":
     subprocess.check_call(["git", "checkout", "--detach", "HEAD~1"], stdout=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL)
+if mode.startswith("reason-"):
+    print("error: " + mode + " EXAMPLE_SECRET_SENTINEL", file=sys.stderr, flush=True)
+    sys.exit(9)
+if mode in ("stale", "stale-wrong-code", "wait-stale"):
+    print("deploy: this checkout (abcdef123) is missing commits on origin/main (987654abc).",
+          file=sys.stderr, flush=True)
+    sys.exit(9 if mode == "stale-wrong-code" else 2)
+if mode == "exit-two":
+    print("deploy: could not fetch origin/main to check this checkout is up to date",
+          file=sys.stderr, flush=True)
+    sys.exit(2)
 if mode == "fail":
     sys.exit(9)
 if mode == "busy":
@@ -247,7 +258,7 @@ class AutoreleaseTests(unittest.TestCase):
         self.assertIn("result=halted", result.stderr)
         self.assertEqual(len(self.actions()), 2)
         self.assertEqual((self.state_dir / "state.json").read_bytes(), before)
-        self.assertEqual(len(self.entries(self.notify_log)), 2)
+        self.assertEqual(len(self.entries(self.notify_log)), 1)
         self.commit({"server/a.go": "intermediate"})
         newest = self.commit({"server/a.go": "latest"})
         self.invoke(code=1)
@@ -259,6 +270,247 @@ class AutoreleaseTests(unittest.TestCase):
         self.invoke()
         self.assertEqual(self.state()["targets"]["hub"]["last_success"], newest)
         self.assertEqual(self.state()["targets"]["hub"]["failures"], 0)
+
+    def test_failure_dedupe_survives_new_commits_and_resets_on_success(self):
+        self.modes["hub"].write_text("reason-one")
+        self.invoke(code=1)
+        fingerprint = self.state()["notified_failures"]["hub"]
+        self.invoke(code=1)
+        self.commit({"server/a.go": "new head, same failure"})
+        self.invoke(code=1)
+        self.assertEqual(len(self.entries(self.notify_log)), 1)
+        self.assertEqual(self.state()["notified_failures"]["hub"], fingerprint)
+        self.modes["hub"].write_text("reason-two")
+        self.invoke(code=1)
+        self.assertEqual(len(self.entries(self.notify_log)), 2)
+        self.assertNotEqual(self.state()["notified_failures"]["hub"], fingerprint)
+        self.commit({"server/a.go": "recovery"})
+        self.modes["hub"].write_text("success")
+        result = self.invoke()
+        self.assertIn("result=recovered", result.stderr)
+        self.assertNotIn("hub", self.state()["notified_failures"])
+        self.commit({"server/a.go": "new incident"})
+        self.modes["hub"].write_text("reason-one")
+        self.invoke(code=1)
+        self.assertEqual(len(self.entries(self.notify_log)), 3)
+        self.assertNotIn("EXAMPLE_SECRET_SENTINEL", (self.state_dir / "state.json").read_text())
+        self.assertNotIn("EXAMPLE_SECRET_SENTINEL", (self.state_dir / "worker.log").read_text())
+        self.assertFalse((self.state_dir / "logs").exists())
+
+    def test_same_reason_at_different_targets_notifies_independently(self):
+        self.target("web", ["web/"])
+        self.modes["hub"].write_text("reason-one")
+        self.modes["web"].write_text("reason-one")
+        self.invoke(code=1)
+        self.invoke(code=1)
+        self.assertEqual(len(self.entries(self.notify_log)), 2)
+        self.assertEqual(set(self.state()["notified_failures"]), {"hub", "web"})
+
+    def test_pending_notification_is_not_enqueued_again_for_duplicate_failure(self):
+        self.modes["hub"].write_text("reason-one")
+        self.notify_mode.write_text("fail")
+        self.invoke(code=1)
+        pending = self.state()["outbox"]
+        self.invoke(code=1)
+        self.assertEqual(self.state()["outbox"], pending)
+        self.assertEqual(len(self.entries(self.notify_log)), 2)
+        self.commit({"server/a.go": "same failure on new head"})
+        self.notify_mode.write_text("success")
+        self.invoke(code=1)
+        self.assertEqual(self.state()["outbox"], [])
+        self.assertEqual(len(self.entries(self.notify_log)), 3)
+
+    def test_preflight_failure_dedupe_and_recovery(self):
+        self.invoke()
+        self.git(self.repo, "remote", "set-url", "origin", str(self.root / "missing-origin"))
+        self.invoke(code=1)
+        self.invoke(code=1)
+        self.assertEqual(len(self.entries(self.notify_log)), 1)
+        self.assertIn("worker", self.state()["notified_failures"])
+        self.git(self.repo, "remote", "set-url", "origin", str(self.origin))
+        self.invoke()
+        self.assertNotIn("worker", self.state()["notified_failures"])
+        self.git(self.repo, "remote", "set-url", "origin", str(self.root / "missing-origin"))
+        self.invoke(code=1)
+        self.assertEqual(len(self.entries(self.notify_log)), 2)
+
+    def test_stale_checkout_defers_without_budget_or_notification_and_uses_next_head(self):
+        self.target("web", ["web/"])
+        self.modes["hub"].write_text("stale")
+        self.invoke()
+        self.invoke()
+        self.invoke()
+        record = self.state()["targets"]["hub"]
+        self.assertEqual(record["failures"], 0)
+        self.assertNotIn("last_success", record)
+        self.assertFalse(self.notify_log.exists())
+        self.assertEqual(len(self.actions("hub")), 3)
+        self.assertEqual(len(self.actions("web")), 1)
+        self.assertEqual(len({e["args"][2] for e in self.actions("hub")}), 1)
+        newest = self.commit({"server/a.go": "next head"})
+        self.modes["hub"].write_text("success")
+        self.invoke()
+        self.assertEqual(self.actions("hub")[-1]["head"], newest)
+        self.assertEqual(self.state()["targets"]["hub"]["last_success"], newest)
+
+    def test_remote_advancing_during_action_is_picked_up_next_round(self):
+        self.modes["hub"].write_text("wait-stale")
+        process = self.launch()
+        self.wait_for(lambda: len(self.actions()) == 1)
+        newest = self.commit({"server/a.go": "merged during deployment"})
+        Path(str(self.modes["hub"]) + ".gate").write_text("release")
+        stdout, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, stdout + stderr)
+        self.assertIn("result=checkout-stale-deferred", stderr)
+        self.assertEqual(self.state()["targets"]["hub"]["failures"], 0)
+        self.assertFalse(self.notify_log.exists())
+        self.modes["hub"].write_text("success")
+        self.invoke()
+        self.assertEqual(self.actions()[-1]["head"], newest)
+        self.assertEqual(self.state()["targets"]["hub"]["last_success"], newest)
+
+    def test_stale_checkout_between_failures_preserves_incident(self):
+        self.modes["hub"].write_text("reason-one")
+        self.invoke(code=1)
+        fingerprint = self.state()["notified_failures"]["hub"]
+        self.modes["hub"].write_text("stale")
+        result = self.invoke()
+        self.assertIn("result=checkout-stale-deferred", result.stderr)
+        self.assertEqual(self.state()["targets"]["hub"]["failures"], 1)
+        self.assertEqual(self.state()["notified_failures"]["hub"], fingerprint)
+        self.modes["hub"].write_text("reason-one")
+        self.invoke(code=1)
+        self.assertEqual(len(self.entries(self.notify_log)), 1)
+
+    def test_retained_logs_inspect_only_current_attempt(self):
+        self.config["targets"]["hub"]["log_output"] = True
+        self.modes["hub"].write_text("stale")
+        self.invoke()
+        self.modes["hub"].write_text("exit-two")
+        self.invoke(code=1)
+        self.assertEqual(self.state()["targets"]["hub"]["failures"], 1)
+        logs = list((self.state_dir / "logs").glob("*.log"))
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(logs[0].stat().st_mode & 0o777, 0o600)
+        self.modes["hub"].write_text("reason-one")
+        self.invoke(code=1)
+        self.assertEqual(len(self.entries(self.notify_log)), 2)
+
+    def test_stale_text_requires_exit_two_and_configured_branch(self):
+        self.modes["hub"].write_text("stale-wrong-code")
+        self.invoke(code=1)
+        self.assertEqual(self.state()["targets"]["hub"]["failures"], 1)
+        self.config["branch"] = "release"
+        self.git(self.repo, "push", "origin", "main:release")
+        self.config["state_dir"] = str(self.root / "branch-state")
+        self.state_dir = self.root / "branch-state"
+        self.modes["hub"].write_text("stale")
+        self.invoke(code=1)
+        self.assertEqual(self.state()["targets"]["hub"]["failures"], 1)
+
+    def test_invalid_notification_identity_is_rejected_without_leaking_it(self):
+        self.invoke()
+        baseline = self.state()
+        for identities in ({"hub": "EXAMPLE_SECRET_SENTINEL"}, {"unknown": "a" * 64}, [],
+                           {"hub": 1}):
+            state = dict(baseline, notified_failures=identities)
+            autorelease.atomic_json(self.state_dir / "state.json", state)
+            self.invoke(code=1)
+        self.assertFalse(self.notify_log.exists())
+        self.assertEqual(len(self.actions()), 1)
+
+    def test_action_summary_normalizes_revisions_and_bounds_long_lines(self):
+        with tempfile.TemporaryFile(mode="w+b") as stream:
+            stream.write(b"x" * 10000 + b"\nerror: failed for abcdef123\n")
+            first, stale = autorelease.action_summary(stream, 0, "main")
+            self.assertFalse(stale)
+            stream.seek(0)
+            stream.truncate()
+            stream.write(b"banner\nerror: failed for 987654abc\n")
+            second, _ = autorelease.action_summary(stream, 0, "main")
+            self.assertEqual(first, second)
+
+    def test_timestamp_banners_do_not_hide_or_change_failure_summary(self):
+        for timestamped_error in (False, True):
+            fingerprints = []
+            for stamp in ("2026-11-11T12:01:02Z", "2026-11-11T13:02:03Z"):
+                with tempfile.TemporaryFile(mode="w+b") as stream:
+                    diagnostic = (stamp + " " if timestamped_error else "") + "error: credential expired"
+                    stream.write((stamp + " preparing release\n" + diagnostic + "\n").encode())
+                    fingerprint, _ = autorelease.action_summary(stream, 0, "main")
+                    fingerprints.append(fingerprint)
+            self.assertEqual(fingerprints[0], fingerprints[1])
+
+    def test_surviving_writers_are_killed_before_output_is_rewound(self):
+        code = (
+            "import subprocess,sys,time; from pathlib import Path; "
+            "child=subprocess.Popen([sys.executable,'-c',"
+            "'import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(60)']); "
+            "Path(sys.argv[1]).write_text(str(child.pid)); "
+            "print('error: original cause',flush=True); sys.exit(9)"
+        )
+        summary = autorelease.action_summary
+        events = []
+        real_kill = autorelease.kill_group
+
+        def kill(pid, sig):
+            events.append(sig)
+            real_kill(pid, sig)
+
+        def inspect(stream, start, branch):
+            self.assertIn(autorelease.signal.SIGKILL, events)
+            return summary(stream, start, branch)
+
+        pid_file = self.root / "writer.pid"
+        with patch.object(autorelease, "kill_group", side_effect=kill), \
+                patch.object(autorelease, "action_summary", side_effect=inspect):
+            with self.assertRaises(autorelease.WorkerError) as failure:
+                autorelease.execute([sys.executable, "-c", code, str(pid_file)], self.root,
+                                    self.env, 3, action_branch="main")
+        expected = autorelease.hashlib.sha256(b"error: original cause").hexdigest()
+        self.assertEqual(failure.exception.summary_hash, expected)
+        pid = int(pid_file.read_text())
+
+        def gone():
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return True
+            status = Path(f"/proc/{pid}/stat")
+            return status.exists() and status.read_text().split()[2] == "Z"
+
+        self.wait_for(gone)
+
+    def test_worker_recovery_is_durable_before_interrupted_action(self):
+        config = autorelease.load_config(self.config_path)
+        autorelease.run(config)
+        self.git(self.repo, "remote", "set-url", "origin", str(self.root / "missing-origin"))
+        self.assertEqual(autorelease.run(config), 1)
+        self.git(self.repo, "remote", "set-url", "origin", str(self.origin))
+        self.commit({"server/a.go": "needs deployment"})
+        execute = autorelease.execute
+
+        def interrupt(*args, **kwargs):
+            if kwargs.get("action_branch") is not None:
+                raise InterruptedError()
+            return execute(*args, **kwargs)
+
+        with patch.object(autorelease, "execute", side_effect=interrupt):
+            with self.assertRaises(InterruptedError):
+                autorelease.run(config)
+        self.assertNotIn("worker", self.state()["notified_failures"])
+        self.git(self.repo, "remote", "set-url", "origin", str(self.root / "missing-origin"))
+        self.assertEqual(autorelease.run(config), 1)
+        self.assertEqual(len(self.entries(self.notify_log)), 2)
+
+    def test_missing_baseline_incident_is_not_cleared_before_diff_preflight(self):
+        self.invoke()
+        state = self.state()
+        state["targets"]["hub"]["last_success"] = "f" * 40
+        autorelease.atomic_json(self.state_dir / "state.json", state)
+        self.invoke(code=1)
+        self.invoke(code=1)
+        self.assertEqual(len(self.entries(self.notify_log)), 1)
 
     def test_failure_continues_other_targets_and_all_steps_must_succeed(self):
         self.target("web", ["web/"])
@@ -574,7 +826,7 @@ class AutoreleaseTests(unittest.TestCase):
         self.assertEqual(self.state()["targets"]["hub"]["failures"], 2)
         self.invoke(code=1)
         self.assertEqual(len(self.actions()), 4)
-        self.assertEqual(len(self.entries(self.notify_log)), 2)
+        self.assertEqual(len(self.entries(self.notify_log)), 1)
 
     def test_fetch_failure_does_not_run_actions_or_charge_budget(self):
         self.invoke()

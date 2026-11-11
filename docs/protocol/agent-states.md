@@ -195,7 +195,8 @@ DSH (`docs/integrations/dsh.md`): `space_kind` is `dsh`, the space is the sessio
 state comes from the plugin: running → working, a permission / question waiting → blocked, otherwise done (the hub splits it into Unread / Seen by whether it's been seen, as usual).
 
 Paseo (`docs/integrations/paseo.md` ("Which sessions appear")): `space_kind` is `paseo`, the space is a Paseo project (`space_id` = project record id, `space_name` = project name);
-a repository's main checkout and its worktrees share a space; the slot is a Paseo workspace (`slot_id` = workspace id, `slot_name` = workspace title).
+a repository's main checkout and its worktrees share a space. No slots (#4493): a workspace's Agents are separate conversations, not the panes of one tab;
+`slot_name` alone carries the Paseo workspace's title, as the Agent's place label.
 
 opencode (`docs/integrations/opencode.md`): those in herdr panes are herdr sessions (`space_kind` is `herdr`); those outside herdr (web, other terminals) are runtime sessions,
 `space_kind` is `opencode`, the space is the session's directory, no slots, and state comes from the plugin (running → working, waiting on a permission → blocked, otherwise done / idle depending on whether there's an assistant message).

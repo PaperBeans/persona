@@ -2,8 +2,6 @@ package persona.feature.agents
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,7 +21,7 @@ import java.time.Instant
 @Composable
 internal fun SpaceScreen(
     space: AgentSpace?, machines: List<Machine>, pending: List<Interaction>, preferences: AgentsPreferencesSnapshot,
-    busy: Boolean, canStart: Boolean, snackbar: SnackbarHostState, now: Instant,
+    busy: Boolean, canStart: Boolean, toast: JToastState, now: Instant,
     onDismiss: () -> Unit, onOpen: (AgentSession) -> Unit, onNewTab: (AgentSpace) -> Unit,
     spaceMenu: @Composable (AgentSpace) -> Unit, sessionMenu: @Composable (AgentSession) -> List<JAction>,
     /** The swipe that closes a row's agent, when it can be closed (as in the list). */
@@ -68,6 +66,6 @@ internal fun SpaceScreen(
                 }
             }
         }
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+        JToastHost(toast, Modifier.align(Alignment.TopCenter).statusBarsPadding())
     }
 }

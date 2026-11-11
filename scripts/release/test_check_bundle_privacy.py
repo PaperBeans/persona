@@ -528,6 +528,20 @@ class BundleScanIntegrationTests(unittest.TestCase):
                 code, _ = self.scan(bad + "/dl", words=(bad + "/dl",), config={"publish": {"site_url": bad}})
                 self.assertNotEqual(code, 0)
 
+    def test_published_binary_accepts_only_the_exact_configured_update_url(self):
+        # publish.update_url (#4522): the binaries carry it instead of <site>/dl, exactly as configured.
+        url = "https://releases.example.test/owner/repo/releases/latest/download"
+        words = ("releases.example.test",)
+        config = {"publish": {"site_url": "https://site.example.test", "update_url": url + "/"}}
+        code, output = self.scan(url, words=words, config=config)
+        self.assertEqual(code, 0, output)
+        for text in (url + "/private", url + "?token=placeholder", "https://releases.example.test/owner",
+                     "https://site.example.test/dl", "person@releases.example.test"):
+            with self.subTest(text=text):
+                code, output = self.scan(text, words=words + ("site.example.test",), config=config)
+                self.assertNotEqual(code, 0)
+                self.assertIn("private value", output)
+
     def test_the_app_ssh_algorithm_names_are_not_emails(self):
         names = "\n".join(a + "@" + d for a, d in (("aes256-gcm", "openssh.com"), ("curve25519-sha256", "libssh.org"),
                                                     ("ssh-ed25519-cert-v01", "openssh.com")))

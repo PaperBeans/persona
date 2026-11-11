@@ -307,6 +307,9 @@ func pathWithin(dir, root string) bool {
 	return dir == root || strings.HasPrefix(dir, root+string(filepath.Separator))
 }
 
+// inNoProject: the App keeps chat thread in no project (its sidebar's chats outside every project).
+func (a *codexAppState) inNoProject(thread string) bool { return a != nil && a.projectless[thread] }
+
 // listed: the thread is one of the App's sidebar chats (put in a project, or a chat without one). Other tools that
 // run the App's own codex binary write "Codex Desktop" rollouts too; the App does not list those.
 func (a *codexAppState) listed(thread string) bool {

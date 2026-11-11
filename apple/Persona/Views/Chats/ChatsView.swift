@@ -1309,7 +1309,7 @@ private struct AgentsList: View {
             shown = rows.todos(groups) { g in g.todoID == nil ? isFolded(g.key, otherwise: g.folded) : isFolded(g.key) }
         case .state: shown = rows.states(live)
         case .machine: shown = rows.machines(live, order: machineOrder(live).map(\.ref))
-        case .app: shown = rows.apps(AppGroups.build(unpinned))
+        case .app: shown = rows.apps(lookup.projection?.apps ?? AppGroups.build(unpinned))
         case .repo: shown = rows.repos(tree, byHost: byHost)
         case .space:
             let hosts = byHost ? RepoTree.hostOrder(Set((active + quiet).map(\.machineRef)), machines: machines.map(\.ref)) : nil
@@ -2311,14 +2311,28 @@ private struct AgentsList: View {
             .joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label"))
     }
 
-    /// By App (#3756): a section per app (`AppGroups`) with its running and offline agents, the latest first; each folds
+    /// By App (#3756): a section per app (`AppGroups`) with its running and offline agents by project, the latest first; each folds
     /// as a machine's section does, its state counts on its title.
     @ViewBuilder private func appSections(_ sessions: [Session]) -> some View {
-        ForEach(AppGroups.build(sessions)) { app in
+        ForEach(lookup.projection?.apps ?? AppGroups.build(sessions)) { app in
+            let machines = Set(app.projects.compactMap(\.machine))
             let group = SpaceGroup(id: app.id, machineID: "", spaceID: "-", name: app.title, index: 0, sessions: app.sessions)
             listSection {
                 if !isFolded(app.id) {
-                    cappedRows(app.sessions, key: app.id) { s in slotRow(s, context: true) }
+                    if app.showsProjects {
+                        // As the desktop apps' sidebars: a project, then its sessions a level in (`AppGroups.projects`).
+                        ForEach(app.projects) { project in
+                            appProjectRow(project, machine: machines.count > 1 ? project.machine.flatMap { machine($0)?.title ?? $0.id } : nil)
+                            if !isFolded(project.id) {
+                                // Other's agents keep where they run on their rows: they share no folder.
+                                cappedRows(project.sessions, key: project.id, depth: 1, cap: AgentRowCap.projectRows) { s in
+                                    slotRow(s, context: project.isOther, depth: 1)
+                                }
+                            }
+                        }
+                    } else {
+                        cappedRows(app.sessions, key: app.id) { s in slotRow(s, context: true) }
+                    }
                 }
             } header: {
                 FoldButton(title: app.title, folded: isFolded(app.id), detail: Self.appDetail(group)) { toggleFold(app.id) } label: {
@@ -2327,6 +2341,19 @@ private struct AgentsList: View {
             }
             .listSectionSpacing(isFolded(app.id) ? .custom(0) : .default)
         }
+    }
+
+    /// A project's heading in a By App section (`AppProjectRow`): tap to fold its sessions.
+    private func appProjectRow(_ project: AppProject, machine: String?) -> some View {
+        Button { toggleFold(project.id) } label: {
+            AppProjectRow(project: project, folded: isFolded(project.id), machine: machine)
+        }
+        .buttonStyle(.plain)
+        .modifier(FoldAnchor(id: project.id, reader: feed.reader)) // stays put as it folds, as a tab's row
+        .listRowInsets(compact ? rowInsets(level: 0) : floating ? Self.tabCapsuleInsets(level: 0) : nil)
+        .listRowBackground(floating ? AnyView(Color.clear) : nil)
+        .listRowSeparator(floating ? .hidden : .automatic)
+        .accessibilityIdentifier("agents.appProject")
     }
 
     /// One section per machine, its agents by state; idle ones fold like in a space.
@@ -2356,11 +2383,11 @@ private struct AgentsList: View {
     }
 
     /// A long run of rows: the first `rowCap`, then "Show All N" (open until the list's view is rebuilt).
-    @ViewBuilder private func cappedRows<Item: Identifiable, Row: View>(_ items: [Item], key: String, depth: Int = 0,
+    @ViewBuilder private func cappedRows<Item: Identifiable, Row: View>(_ items: [Item], key: String, depth: Int = 0, cap: Int = AgentRowCap.rows,
                                                                        @ViewBuilder row: @escaping (Item) -> Row) -> some View {
         let key = "all:" + key
         // Under a quick filter or a search every row it leaves shows: what was asked for, and already few.
-        if let cap = AgentRowCap.capped(items.count), query.isEmpty, quick == .all, !model.sessionLists.paged {
+        if let cap = AgentRowCap.capped(items.count, cap: cap), query.isEmpty, quick == .all, !model.sessionLists.paged {
             if expandedIdle.contains(key) {
                 ForEach(items) { row($0) }
                 collapseRow(String(localized: "Collapse"), key: key, depth: depth)

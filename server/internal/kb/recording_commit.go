@@ -262,8 +262,9 @@ func (s *Store) commitRecording(r *Recording, segs []RecordingSegment) (err erro
 		return err
 	}
 	syncRecordingDir(s.path(KindRecording, r.ID))
+	conv := r.Conv // meeting.json's, never in meta.json
 	*r = Recording{}
 	_ = json.Unmarshal(meta, r)
-	r.persisted = true
+	r.persisted, r.Conv = true, conv
 	return nil
 }

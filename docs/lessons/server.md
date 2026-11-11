@@ -300,6 +300,16 @@ A custom `http.Transport.DialContext` conservatively disables Go's automatic HTT
 A failing step reports what it actually changed: `copyFile` writes `.new` and renames, so a failed swap changed nothing (the zero `Swapped`, which `RestoreAll` skips) or only wrote `.prev` (putting that back is harmless).
 Don't add a `pending.json` field for it: older edges and watchdogs read the same file and know only `Prev == ""`.
 
+## Migrating a long-poll channel without duplicate consumers (#2020)
+
+A connector switch alone does not free a built-in extension ID for installation: the registry must explicitly
+opt into `Registry.Yields` for the approved handoff. Keep sealed connector state under the unchanged connector
+ID and finish stopping the old process before starting the replacement; two long-pollers with the same token
+can consume each other's messages. Publish the extension and signed catalog, verify an isolated hub with
+synthetic state, and approve the production handoff before removing the built-in. Never copy production
+tokens into a test hub. Retired artifact-name parsers may remain for old releases, but a new manifest must
+not republish a retired program merely because its old artifact was left in the build directory.
+
 ## Extension public identity is not storage or token authority (#1493)
 
 - An ID rename is not uninstall/reinstall: deleting the old row cascades secrets and node data. Keep the original storage primary key and directories, and commit public names, aliases, version and previous provenance atomically with compare-and-swap guards.
@@ -502,6 +512,12 @@ Splitting a registry at its first colon reads `[::1]:5000` as `[`, selecting HTT
 - The node writes `initialize` to `lcu`'s stdin right after starting it. If the process has already ended, the write fails with "broken pipe", or with "file already closed" once `cmd.Wait` has closed the pipe. That can happen before the goroutine that waits for the process reports the exit. So the caller got a raw pipe error or "the process ended", depending on which came first. `TestLCUProcessThatDiesOnStartFailsAtOnce` failed this way in 16 of 500 runs with `-race`.
 - Classify the write error instead of waiting for the exit (`writeFailed`). A closed pipe (`EPIPE`, `os.ErrClosed`, `io.ErrClosedPipe`) is the process's end: mark the session failed, so the next call starts a new process, and return the end at once, wrapping the write's error. Any other write error stays itself.
 - Waiting for the exit is a trap. A child of `lcu` can keep its stdout open, so the exit isn't seen for as long as the child runs. A first version that waited up to 2 s held the call lock that long and still returned the raw error, and never restarted `lcu`. The tests now cover that case and a write error that isn't a closed pipe. Tests compare with `errors.Is`, so an error that always says "ended" can't pass them.
+
+## LCU release layout is part of its integrity check (#4435)
+
+- A release bundle records regular-file modes and symbolic-link targets as well as hashes. Creating every file as 0644 or omitting links breaks that layout; even a restrictive process umask must not change the recorded executable modes. One valid release link is initially dangling and becomes usable only when its in-tree target exists.
+- Create ordinary files before links in an empty private staging directory, then validate the complete relative-link graph against the staging filesystem after creating links. A lexical check of each target alone misses an escape through another link followed by `..`, and a case-sensitive map misses aliases on a case-insensitive filesystem. Reject collisions, cycles, privileged permission bits, group- or other-writable files and unsupported archive entry types. Link mode bits do not grant file write permission. A synthetic manifest and a read-only comparison with the public archive exercise the layout without running its installer.
+- A shell wrapper may forward the runtime-only argument to an adjacent installer without containing that literal itself. The supported wrapper is pinned to its reviewed v0.13.6 bytes; its adjacent regular installer is checked for the expected tokenized runtime-only option, argument binding and return before setup, so some unrelated target changes do not require a new hash. The bounded token check ignores comments and string contents and fails closed on slash operators, including division and regular-expression literals. It cannot prove arbitrary JavaScript control flow or the behavior of imports. The fixed invocation still supplies runtime-only and yes, but a same-origin release checksum is not an independent signature, and the legacy direct-script marker is a heuristic too. Verify both forms with synthetic, unexecuted installers and compare the public wrapper and target without invoking them.
 
 ## Separately bundled component pages and callback results (#6129)
 
@@ -884,11 +900,17 @@ back) and only keeps the entry. Tell them apart by git's `CONFLICT` lines plus `
 
 ## Knowledge base (docs/assistant/knowledge.md)
 
+- A Messages ROWID can be associated with more than one chat (#4440). Deduplicate by canonical conversation and ROWID,
+  before page and search limits, and count unread messages by that same identity. A numeric changes cursor can only
+  advance after every selected ROWID's associations are read; select the boundary and expand it in one SQLite snapshot,
+  bound the expansion, and fail without returning a cursor when it cannot fit. A previously advanced cursor cannot
+  reconstruct associations already skipped by older code.
 - Forever is a sentinel, not zero days (#3780, #3862). Preserve `minutes_days: 0` before applying the transcript-retention floor, calculating an expiry date or confirming an echoed setting. A trimmed recording's metadata proves it has retained minutes even if `minutes.json` cannot be read; a parse failure must not turn forever retention into deletion. Test repeated sweeps, unreadable trimmed minutes, switching back to finite retention and explicit user deletion.
 - A meeting answer may be spoken in front of others (#3862). Until private meetings can be marked, gate earlier minutes, their linked projects and action-item states together before retrieval; a prompt warning cannot hide material already sent to the model. Keep opt-in retrieval tests as well as a default-off test that checks the model input and returned citations.
 
 - Deleting a connector is broader than deleting an archive namespace (#1836): include its alternate chat sources, posts and items, plus indexes and project references. Record the connector at ingestion, separately from a chat's namespace, and stamp item ownership before the unchanged-item fast path. Never infer legacy ownership from an item ID, title or a shared archive alias; use explicit provenance or a known source chat, leaving ambiguous records intact. Deletion tests need another connector's records, shared aliases and unowned legacy data, not only a single source.
 - A connector's knowledge-base switch must gate every ingestion path (#1835): conversations, items (documents, meetings and events), document-title lookups and program-initiated posts. Filtering the source list alone leaves direct calls open after a switch changes. Check both the feed and the main switch at the call boundary too; a shared extension process may keep running after its connector is disabled. `Registry.Feeds` does not include `Registry.Enabled`. Test both switches independently, with a connector that still answers calls, and assert that neither source reads nor post forwarding occur while off.
+- An archive switch must fence the commit as well as the source read (#4500). A response can already have crossed the manager boundary when the user turns the source off. Admit each page under a source generation, reserve the write and cursor together, retire the generation on off, and wait for already reserved commits before reporting success. A failed write can leave a journal that publishes data during recovery: settle it before releasing the reservation. Treat a lost reservation acknowledgement and an unreadable reservation record as uncertain, preserve them across source-manager restart, and test off/on, failure, cancellation, multiple pages and both local and bus adapters. The guarantee needs one authoritative source manager and cannot cover legacy work that never used the protocol.
 - An asynchronous dedupe answer must recheck a user's split, record its verdict and merge under the same project-mutation lock as unmerge. The verdict-file mutex prevents lost JSON updates but cannot stop an already queued merge from reversing a completed split. A verdict write failure must stop the merge.
 - A checkpoint after append is a replay window (#1343): connector pages can repeat after a cursor failure, a later batch failure or a process interruption.
   Preserve stable message IDs scoped by exact source and chat, including IDs such as `body` reused across threads. Formatted-text matching loses distinct messages;
@@ -1440,6 +1462,10 @@ Some apps still recognize a timeout by the summary's words, not its code: iOS `A
   `launch` calls the `stop` from `signal.NotifyContext` first: with no channel left for the signal, Go puts back the handling the process inherited at start (normally terminate; ignored stays ignored), then waits.
 - Socket reads on the local node get a deadline (`launchNodeWait`, 10 s for `launch`): a node that accepts and never answers (restarting, stuck, a stale socket held by another process) otherwise blocks forever. Say which socket timed out and point at `personad node doctor`.
 - Test a signal while the child is actually waiting: signal only after the fake node has read the request, not after a fixed sleep. A child inherits an ignored SIGINT (tests run in the background), so skip when `signal.Ignored` reports it (`cmd/personad/launch_test.go`).
+
+## Deadline cancellation can still exit zero (#2841)
+
+A shell may handle SIGTERM and exit 0. Keep the recorded cancellation when classifying its timeout so the command list stops, while ordinary success before cancellation remains successful. A public `secret.run` regression can block on a FIFO, observe ready/TERM markers and check that no next command runs, without sleeps or busy waiting.
 
 ## An empty Git file list is still authoritative (#6056)
 

@@ -13,6 +13,7 @@ import (
 	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
+	"github.com/nwverse/persona/server/internal/connector/imessage"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/kbwire"
 	"github.com/nwverse/persona/server/internal/managerconf"
@@ -36,6 +37,7 @@ const (
 func (s *Service) kbConnectors(ctx context.Context, e *kb.Engine) {
 	s.kb.sourceWrites.Lock()
 	defer s.kb.sourceWrites.Unlock()
+	failedCleanup := s.retryArchiveReservations(ctx)
 	if !s.kbWritable(ctx) {
 		return
 	}
@@ -47,6 +49,13 @@ func (s *Service) kbConnectors(ctx context.Context, e *kb.Engine) {
 	for _, src := range list.Archives {
 		if ctx.Err() != nil {
 			return
+		}
+		if failedCleanup[src.ID] {
+			continue
+		}
+		if src.ID == imessage.ID && src.FenceVersion != assistantwire.ArchiveFenceV1 {
+			s.logf("kb: iMessage archive requires a manager with commit fencing")
+			continue
 		}
 		every := kbConnectorPoll
 		if src.PollMS > 0 {
@@ -66,9 +75,9 @@ func (s *Service) kbConnectors(ctx context.Context, e *kb.Engine) {
 		if !due {
 			continue
 		}
-		var a connector.Archive = busArchive{s: s, id: src.ID}
+		var a connector.Archive = busArchive{s: s, id: src.ID, fenceVersion: src.FenceVersion}
 		if src.Media {
-			a = busArchiveMedia{busArchive{s: s, id: src.ID}}
+			a = busArchiveMedia{busArchive{s: s, id: src.ID, fenceVersion: src.FenceVersion}}
 		}
 		if _, err := archiveConnector(ctx, e, src.ID, a, src.Sources...); err != nil {
 			s.logf("kb: %s: %v", src.ID, err)
@@ -122,20 +131,131 @@ func (s *Service) tagItems(ctx context.Context, e *kb.Engine) (more bool) {
 
 // busArchive is a connector's archive read through the hub (connectors.changes).
 type busArchive struct {
-	s  *Service
-	id string
+	s            *Service
+	id           string
+	fenceVersion int
 }
 
 func (b busArchive) Changes(ctx context.Context, cursor string, limit int) ([]connector.ChatBatch, string, bool, error) {
-	if b.s.kbReadOnly(ctx) {
-		return nil, cursor, false, kb.ErrReadOnly
-	}
-	var out assistantwire.ChangesResult
-	err := b.s.appCall(ctx, AppConnectors, assistantwire.ConnectorsChanges, map[string]any{"id": b.id, "cursor": cursor, "limit": limit}, &out)
+	out, err := b.page(ctx, cursor, limit)
 	if err != nil {
 		return nil, cursor, false, err
 	}
-	return out.Batches, out.Next, out.More, nil
+	return out.Batches, out.Next, out.More, err
+}
+
+func (b busArchive) page(ctx context.Context, cursor string, limit int) (assistantwire.ChangesResult, error) {
+	if b.s.kbReadOnly(ctx) {
+		return assistantwire.ChangesResult{}, kb.ErrReadOnly
+	}
+	var out assistantwire.ChangesResult
+	params := map[string]any{"id": b.id, "cursor": cursor, "limit": limit}
+	if b.fenceVersion != 0 {
+		params["fence_version"] = b.fenceVersion
+	}
+	err := b.s.appCall(ctx, AppConnectors, assistantwire.ConnectorsChanges, params, &out)
+	if err != nil {
+		return assistantwire.ChangesResult{}, err
+	}
+	if b.fenceVersion != 0 && out.Generation == "" {
+		return assistantwire.ChangesResult{}, errors.New("archive source did not return a generation")
+	}
+	return out, nil
+}
+
+// commit reserves one page at its source manager. Ending a reservation uses a
+// separate deadline even when the archive round was cancelled. A failed end
+// remains reserved there, so disable cannot falsely report success.
+func (b busArchive) commit(ctx context.Context, generation string, write, settle func() error) (retErr error) {
+	if b.fenceVersion == 0 {
+		return write()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	req := assistantwire.ArchiveFence{ID: b.id, Generation: generation, Token: randomHex(16)}
+	var answer assistantwire.ArchiveFenceResult
+	err := b.s.appCall(ctx, AppConnectors, assistantwire.ConnectorsArchiveBegin, req, &answer)
+	if err != nil || !answer.Acquired {
+		if err == nil {
+			err = errors.New("archive source did not grant a commit reservation")
+		}
+		return errors.Join(err, b.finishReservation(assistantwire.ConnectorsArchiveAbort, req, nil))
+	}
+	finished := false
+	defer func() {
+		var recovery func() error
+		if !finished || retErr != nil {
+			recovery = settle
+		}
+		retErr = errors.Join(retErr, b.finishReservation(assistantwire.ConnectorsArchiveEnd, req, recovery))
+	}()
+	retErr = write()
+	finished = true
+	return retErr
+}
+
+type archiveReservation struct {
+	method string
+	req    assistantwire.ArchiveFence
+	settle func() error
+}
+
+func (b busArchive) finishReservation(method string, req assistantwire.ArchiveFence, settle func() error) error {
+	pending := archiveReservation{method: method, req: req, settle: settle}
+	b.s.kb.archiveCleanupMu.Lock()
+	if b.s.kb.archiveCleanup == nil {
+		b.s.kb.archiveCleanup = make(map[string]archiveReservation)
+	}
+	b.s.kb.archiveCleanup[req.Token] = pending
+	b.s.kb.archiveCleanupMu.Unlock()
+	return b.s.sendArchiveReservation(context.Background(), pending)
+}
+
+func (s *Service) sendArchiveReservation(parent context.Context, pending archiveReservation) error {
+	if err := parent.Err(); err != nil {
+		return err
+	}
+	if pending.settle != nil {
+		if !s.kbWritable(parent) {
+			return kb.ErrReadOnly
+		}
+		if err := pending.settle(); err != nil {
+			return err
+		}
+	}
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	var answer assistantwire.ArchiveFenceResult
+	if err := s.appCall(ctx, AppConnectors, pending.method, pending.req, &answer); err != nil {
+		return err
+	}
+	if !answer.Acquired {
+		return errors.New("archive source did not acknowledge the reservation")
+	}
+	s.kb.archiveCleanupMu.Lock()
+	delete(s.kb.archiveCleanup, pending.req.Token)
+	s.kb.archiveCleanupMu.Unlock()
+	return nil
+}
+
+// Retry uncertain ends and aborts before reading that source again. Other
+// connectors can still run while its source manager is unavailable.
+func (s *Service) retryArchiveReservations(ctx context.Context) map[string]bool {
+	s.kb.archiveCleanupMu.Lock()
+	pending := make([]archiveReservation, 0, len(s.kb.archiveCleanup))
+	for _, p := range s.kb.archiveCleanup {
+		pending = append(pending, p)
+	}
+	s.kb.archiveCleanupMu.Unlock()
+	failed := make(map[string]bool)
+	for _, p := range pending {
+		if err := s.sendArchiveReservation(ctx, p); err != nil {
+			failed[p.req.ID] = true
+			s.logf("kb: %s: archive reservation cleanup: %v", p.req.ID, err)
+		}
+	}
+	return failed
 }
 
 // busArchiveMedia is one whose messages' attachments the hub hands over too (connectors.archive_media).
@@ -249,37 +369,84 @@ func archiveConnector(ctx context.Context, e *kb.Engine, id string, a connector.
 		}
 	}
 	total := 0
+	var generation string
+	guard, guarded := a.(interface {
+		page(context.Context, string, int) (assistantwire.ChangesResult, error)
+		commit(context.Context, string, func() error, func() error) error
+	})
 	for page := 0; page < kbConnectorPages; page++ {
-		batches, next, more, err := a.Changes(ctx, cur.Cursor, kbConnectorLimit)
+		var result assistantwire.ChangesResult
+		var err error
+		if guarded {
+			result, err = guard.page(ctx, cur.Cursor, kbConnectorLimit)
+		} else {
+			result.Batches, result.Next, result.More, err = a.Changes(ctx, cur.Cursor, kbConnectorLimit)
+		}
 		if err != nil {
 			return total, err
 		}
-		for _, b := range batches {
-			s := src
-			if b.Source != "" && b.Source != id {
-				if !slices.Contains(sources, b.Source) {
-					if e.Logf != nil {
-						e.Logf("kb: %s: a batch under %q, not one of its archive sources (dropped)", id, b.Source)
+		if page == 0 {
+			generation = result.Generation
+		} else if generation != result.Generation {
+			return total, errors.New("archive generation changed during a round")
+		}
+		write := func() error {
+			for _, b := range result.Batches {
+				s := src
+				if b.Source != "" && b.Source != id {
+					if !slices.Contains(sources, b.Source) {
+						if e.Logf != nil {
+							e.Logf("kb: %s: a batch under %q, not one of its archive sources (dropped)", id, b.Source)
+						}
+						continue
 					}
-					continue
+					s.id = b.Source
 				}
-				s.id = b.Source
+				n, err := e.Ingest(ctx, s, b.Chat, b.Messages)
+				if err != nil {
+					return err
+				}
+				total += n
 			}
-			n, err := e.Ingest(ctx, s, b.Chat, b.Messages)
-			if err != nil {
-				return total, err
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-			total += n
+			cur.Cursor = result.Next
+			if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+				return err
+			}
+			raw, _ := json.Marshal(cur)
+			if err := managerconf.WriteFileAtomic(file, raw, 0o600); err != nil {
+				return err
+			}
+			return nil
 		}
-		cur.Cursor = next
-		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		// A failed ingest may have installed a journal that a later store open
+		// completes. Keep the reservation until every affected chat is settled.
+		settle := func() error {
+			for _, b := range result.Batches {
+				source := id
+				if b.Source != "" && b.Source != id {
+					if !slices.Contains(sources, b.Source) {
+						continue
+					}
+					source = b.Source
+				}
+				if err := e.Store.SettleIngest(source, b.Chat.ID); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if guarded {
+			err = guard.commit(ctx, generation, write, settle)
+		} else {
+			err = write()
+		}
+		if err != nil {
 			return total, err
 		}
-		raw, _ := json.Marshal(cur)
-		if err := managerconf.WriteFileAtomic(file, raw, 0o600); err != nil {
-			return total, err
-		}
-		if !more {
+		if !result.More {
 			break
 		}
 	}

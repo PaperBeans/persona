@@ -1,0 +1,86 @@
+{
+  "ok": true,
+  "data": {
+    "messages": [
+      {
+        "message_id": "om_example_mention_one",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:00:00Z",
+        "sender": {"id": "ou_example_peer", "sender_type": "user", "name": "Example Peer"},
+        "content": "{\"text\":\"Please review this\"}",
+        "chat_id": "oc_example_group",
+        "chat_name": "Example Group",
+        "chat_type": "group",
+        "thread_id": "omt_topic_one",
+        "mentions": [{"id": "ou_example_user", "id_type": "open_id", "key": "@_user_1", "name": "Example User"}]
+      },
+      {
+        "message_id": "om_example_mention_two",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:01:00Z",
+        "sender": {"id": "ou_example_peer", "sender_type": "user", "name": "Example Peer"},
+        "content": "{\"text\":\"A second line\"}",
+        "chat_id": "oc_example_group",
+        "chat_name": "Example Group",
+        "chat_type": "group",
+        "thread_id": "omt_topic_one"
+      },
+      {
+        "message_id": "om_example_direct",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:02:00Z",
+        "sender": {"id": "ou_example_peer", "sender_type": "user", "name": "Example Peer"},
+        "content": "{\"text\":\"Direct question\"}",
+        "chat_id": "oc_example_dm",
+        "chat_name": "Example Peer",
+        "chat_type": "p2p"
+      },
+      {
+        "message_id": "om_example_topic",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:03:00Z",
+        "sender": {"id": "ou_example_peer", "sender_type": "user", "name": "Example Peer"},
+        "content": "{\"text\":\"Topic two reply\"}",
+        "chat_id": "oc_example_group",
+        "chat_name": "Example Group",
+        "chat_type": "group",
+        "thread_id": "omt_topic_two"
+      },
+      {
+        "message_id": "om_example_drop",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:04:00Z",
+        "sender": {"id": "ou_example_peer", "sender_type": "user", "name": "Example Peer"},
+        "content": "{\"text\":\"Unrelated group message\"}",
+        "chat_id": "oc_example_group",
+        "chat_name": "Example Group",
+        "chat_type": "group",
+        "thread_id": "omt_topic_three"
+      },
+      {
+        "message_id": "om_example_mine",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:05:00Z",
+        "sender": {"id": "ou_example_user", "sender_type": "user", "name": "Example User"},
+        "content": "{\"text\":\"I replied\"}",
+        "chat_id": "oc_example_group",
+        "chat_name": "Example Group",
+        "chat_type": "group",
+        "thread_id": "omt_topic_one"
+      },
+      {
+        "message_id": "om_example_mine_only",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:06:00Z",
+        "sender": {"id": "ou_example_user", "sender_type": "user", "name": "Example User"},
+        "content": "{\"text\":\"My own message\"}",
+        "chat_id": "oc_example_group",
+        "chat_name": "Example Group",
+        "chat_type": "group",
+        "thread_id": "omt_topic_three"
+      }
+    ],
+    "total": 7,
+    "has_more": false
+  }
+}

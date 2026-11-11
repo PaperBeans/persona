@@ -166,6 +166,11 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Title+a.Body) == "" {
 			return "", fmt.Errorf("title and body are required")
 		}
+		if s.justMeNow(machine, self) {
+			// A Just me turn (meeting_justme.go): no push and no copy anywhere; the text stays in the conversation,
+			// which the meeting page shows.
+			return justMeNotice(s.lang(ctx)), nil
+		}
 		if s.inHealth(ctx, self) { // the lock screen and the channels hear there is news, not what it is (health.go)
 			a.Title, a.Body = healthNotice(s.lang(ctx))
 		}

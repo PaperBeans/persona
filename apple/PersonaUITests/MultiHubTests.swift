@@ -21,7 +21,7 @@ final class MultiHubTests: XCTestCase {
 
     private func launch(_ h: Hubs, _ args: [String]) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-pairURL", pair(h.a), "-pairURL2", pair(h.b), "-pairURL3", pair(h.c),
+        app.launchArguments = ["--", "-pairURL", pair(h.a), "-pairURL2", pair(h.b), "-pairURL3", pair(h.c),
                                "-openAgentsFresh", "YES", "-openChatsFresh", "YES", "-dev.openChat", ""] + args
         app.launchPinned()
         dismissNotificationPrompt()
@@ -49,6 +49,12 @@ final class MultiHubTests: XCTestCase {
     }
 
     private func shot(_ name: String) {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for label in ["好", "OK"] where springboard.alerts.buttons[label].waitForExistence(timeout: 1) {
+            springboard.alerts.buttons[label].tap()
+            _ = springboard.alerts.firstMatch.waitForNonExistence(timeout: 2)
+            break
+        }
         let s = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         s.name = name
         s.lifetime = .keepAlways
@@ -247,5 +253,33 @@ final class MultiHubTests: XCTestCase {
         waitForExpectations(timeout: 30)
         shot("moved")
         _ = mock(down, "/mock/down?s=0")
+    }
+
+    /// A rejected credential belongs to one group, not to the merged title while another group remains online (#1872).
+    /// Both hubs of the work group refuse the device so its route cannot recover through the other member.
+    @MainActor func testRevokedGroupSaysPairingExpiredAndOffersPairAgain() throws {
+        let h = try hubs()
+        let scheme = ProcessInfo.processInfo.environment["PERSONA_SCHEME"] ?? "light"
+        let app = launch(h, ["-tab", "settings", "-openHubs", "YES", "-ui.scheme", scheme])
+        defer { for hub in [h.b, h.c] { _ = mock(hub, "/mock/reject?s=0") } }
+        XCTAssertTrue(app.navigationBars["hub"].waitForExistence(timeout: 20), "no hub page:\n\(app.debugDescription)")
+        XCTAssertTrue(text(app, containing: "公司 2").waitForExistence(timeout: 15), "B and C did not become one group:\n\(app.debugDescription)")
+
+        for hub in [h.b, h.c] { _ = mock(hub, "/mock/reject?s=30") }
+        XCTAssertTrue(text(app, containing: "公司、在用").waitForNonExistence(timeout: 10), "the rejected group stayed in use")
+        XCTAssertTrue(text(app, containing: "家里、在用").exists, "the other group was rejected too")
+        shot("revoked group header \(scheme)")
+        let expired = text(app, containing: "配对已失效")
+        let deadline = Date.now.addingTimeInterval(15)
+        while Date.now < deadline, !expired.exists {
+            app.swipeUp()
+            _ = expired.waitForExistence(timeout: 1)
+        }
+        XCTAssertTrue(expired.exists, "the revoked group looks merely offline:\n\(app.debugDescription)")
+        let repair = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'hubs.repair.'")).firstMatch
+        XCTAssertTrue(repair.waitForExistence(timeout: 5), "no Pair Again for the revoked group:\n\(app.debugDescription)")
+        shot("revoked group \(scheme)")
+        repair.tap()
+        XCTAssertTrue(app.navigationBars["连接 hub"].waitForExistence(timeout: 5), "Pair Again did not open the pairing sheet")
     }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LarkMessage } from "./inbox";
-import { historyProblem, LATEST_KEPT, latestOf, nearTop, OlderPaging, screensFromEnd, showsJumpToLatest } from "./lark-history";
+import { entryOf, firstAtOrAfter, newMessagesLineAt, historyProblem, LATEST_KEPT, latestOf, nearTop, nextPosition, OlderPaging, screensFromEnd, showsJumpToLatest, showsJumpUp } from "./lark-history";
 
 const msg = (i: number): LarkMessage => ({ id: `m${i}`, position: String(i), text: `${i}` });
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => msg(a + i));
@@ -111,5 +111,61 @@ describe("latestOf", () => {
     const kept = latestOf({ messages: range(1, 10), has_older: true, older_cursor: "1" });
     expect(kept.messages.length).toBe(10);
     expect(kept.older_cursor).toBe("1");
+  });
+});
+
+describe("where a chat opened from Messages lands", () => {
+  const row = (unread: number, read_position?: string, mention_position?: string, is_topic = false) => ({ unread, read_position, mention_position, is_topic });
+
+  it("counts positions up past JavaScript's safe integers", () => {
+    expect(nextPosition("164574")).toBe("164575");
+    expect(nextPosition("9007199254740993")).toBe("9007199254740994");
+  });
+
+  it("opens an unread chat at the message after Feishu's read position, keeping a later @me", () => {
+    expect(entryOf(row(2940, "164574"))).toEqual({ unreadFrom: "164575" });
+    expect(entryOf(row(445, "4387", "4792"))).toEqual({ unreadFrom: "4388", mention: "4792" });
+  });
+
+  it("drops an @me at or before the read position: it was read", () => {
+    expect(entryOf(row(3, "120", "120"))).toEqual({ unreadFrom: "121" });
+  });
+
+  it("opens a read chat, a missing row, an unknown read state or a topic group at the newest", () => {
+    expect(entryOf(row(0, "500"))).toEqual({});
+    expect(entryOf(undefined)).toEqual({});
+    expect(entryOf(row(12))).toEqual({});
+    expect(entryOf(row(2066, "0", "19087", true))).toEqual({});
+  });
+});
+
+describe("jumping back up to the first unread or an @me", () => {
+  const page = (a: number, b: number, has_older = true) => ({ messages: range(a, b), has_older });
+
+  it("finds the first message at or after a position the window holds", () => {
+    expect(firstAtOrAfter(range(10, 14), "12")?.id).toBe("m12");
+    expect(firstAtOrAfter([msg(10), msg(13)], "11")?.id).toBe("m13");
+    expect(firstAtOrAfter(range(10, 14), "20")).toBeUndefined();
+    expect(firstAtOrAfter(range(10, 14), undefined)).toBeUndefined();
+  });
+
+  it("draws the New messages line only where the window shows what came before the first unread", () => {
+    expect(newMessagesLineAt(page(30, 60), "40")).toBe("m40");
+    expect(newMessagesLineAt(page(30, 60), "30")).toBeUndefined();
+    expect(newMessagesLineAt(page(1, 20, false), "1")).toBe("m1");
+    expect(newMessagesLineAt(page(100, 130), "40")).toBeUndefined();
+    expect(newMessagesLineAt(page(30, 60), "70")).toBeUndefined();
+  });
+
+  it("shows while the message is before the window or scrolled past above the screen", () => {
+    expect(showsJumpUp("5", page(10, 40), undefined)).toBe(true);
+    expect(showsJumpUp("12", page(10, 40), -300)).toBe(true);
+  });
+
+  it("hides while the message is on screen, below it, absent from the chat or not asked for", () => {
+    expect(showsJumpUp("12", page(10, 40), 120)).toBe(false);
+    expect(showsJumpUp("5", page(10, 40, false), undefined)).toBe(false);
+    expect(showsJumpUp(undefined, page(10, 40), undefined)).toBe(false);
+    expect(showsJumpUp("12", { messages: [], has_older: true }, undefined)).toBe(false);
   });
 });

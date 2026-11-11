@@ -12,6 +12,7 @@ The config lives outside the repository so clean worktrees (releases) see it too
 import json
 import os
 import plistlib
+import re
 import shlex
 import sys
 
@@ -69,6 +70,8 @@ def env(cfg: dict) -> dict:
         "PERSONA_SIM": cfg.get("simulator", ""),
         # Where scripts/release/publish.sh puts personad and install.sh (the site/ worker's domain), and the wrangler to run.
         "PERSONA_PUBLISH_URL": get(cfg, "publish.site_url", "").rstrip("/"),
+        # Where the personad built here looks for its updates (-X main.updateURL): publish.update_url, else <site_url>/dl.
+        "PERSONA_UPDATE_URL": update_url(cfg),
         "PERSONA_WRANGLER": os.path.expanduser(get(cfg, "publish.wrangler", "")),
         # Meta glasses (docs/apple/meta-glasses.md): the project.yml include that adds the Meta Wearables SDK is on only for YES.
         "PERSONA_META_WEARABLES": "YES" if get(cfg, "app.meta_wearables.enabled", False) is True else "NO",
@@ -81,6 +84,21 @@ def env(cfg: dict) -> dict:
         if key.startswith("PERSONA_"):
             out[LEGACY_PREFIX + key[8:]] = default
     return out
+
+
+def update_url(cfg: dict) -> str:
+    """The update source built into personad (-X main.updateURL, docs/operations/hub-update.md "Update source"):
+    publish.update_url as given (the directory latest.json is in, e.g. a GitHub repository's releases/latest/download),
+    else publish.site_url's dl/, else none. A hub's hub.json update.url still replaces it at run time."""
+    value = get(cfg, "publish.update_url", "")
+    if value in ("", None):
+        site = get(cfg, "publish.site_url", "")
+        return site.rstrip("/") + "/dl" if isinstance(site, str) and site.strip() else ""
+    if (not isinstance(value, str) or not re.fullmatch(r"(https://[^/\s?#@]+|file://)(/[^\s?#]*)?", value.strip())
+            or value.strip().rstrip("/").endswith("/latest.json")):
+        sys.exit("publish.update_url must be an https:// (or file:///) directory without a user, query or fragment: "
+                 "the one latest.json is in (docs/operations/config.md)")
+    return value.strip().rstrip("/")
 
 
 def app_group(cfg: dict) -> str:

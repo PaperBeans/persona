@@ -1,0 +1,31 @@
+{
+  "ok": true,
+  "data": {
+    "messages": [
+      {
+        "message_id": "om_example_bound_app",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:00:00Z",
+        "sender": {"id": "cli_example", "id_type": "app_id", "sender_type": "app", "name": "Example Persona Bot", "open_bot_id": "ou_example_persona_bot"},
+        "chat_partner": {"open_id": "ou_example_user", "id_type": "open_id", "name": "Example User", "sender_type": "user"},
+        "content": "{\"text\":\"Persona reply\"}",
+        "chat_id": "oc_example_bound_dm",
+        "chat_name": "Example User",
+        "chat_type": "p2p"
+      },
+      {
+        "message_id": "om_example_other_app",
+        "msg_type": "text",
+        "create_time": "2030-01-01T12:01:00Z",
+        "sender": {"id": "cli_other", "id_type": "app_id", "sender_type": "app", "name": "Example Other Bot", "open_bot_id": "ou_example_other_bot"},
+        "chat_partner": {"open_id": "ou_example_user", "id_type": "open_id", "name": "Example User", "sender_type": "user"},
+        "content": "{\"text\":\"Other bot question\"}",
+        "chat_id": "oc_example_other_dm",
+        "chat_name": "Example Other Bot",
+        "chat_type": "p2p"
+      }
+    ],
+    "total": 2,
+    "has_more": false
+  }
+}

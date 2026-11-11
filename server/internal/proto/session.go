@@ -65,7 +65,7 @@ type Session struct {
 	SourceThreadID   string               `json:"source_thread_id,omitempty"`
 	SourceInstanceID string               `json:"source_instance_id,omitempty"`
 	ParentThreadID   string               `json:"parent_thread_id,omitempty"`
-	ParentSessionID  string               `json:"parent_session_id,omitempty"` // Public ID scoped to the Codex home on this machine.
+	ParentSessionID  string               `json:"parent_session_id,omitempty"` // The session that started it: a Codex parent's public ID (scoped to the Codex home on this machine), or a runtime's own session (#4494, #4495).
 	RootSessionID    string               `json:"root_session_id,omitempty"`
 	ReadOnlyReason   string               `json:"read_only_reason,omitempty"`
 	Capabilities     *SessionCapabilities `json:"capabilities,omitempty"`
@@ -91,7 +91,9 @@ type Session struct {
 	// Worktree is the top of the git working tree Cwd is in (RepoRoot itself for the main checkout, a linked worktree's
 	// own folder otherwise) and Branch the branch checked out there ("" when detached or unknown). The node reads both,
 	// and RepoRoot when no host names it, off the filesystem (node/gitplace.go): the apps list machine → project
-	// (RepoRoot) → worktree (Worktree, labelled Branch) → sessions, as Orca does (#1805).
+	// (RepoRoot) → worktree (Worktree, labelled Branch) → sessions, as Orca does (#1805). RepoRoot and Worktree are
+	// physical directories (symbolic links resolved, #4492), however Cwd is written and however a host wrote the
+	// RepoRoot it named: the apps compare them as strings.
 	Worktree    string `json:"worktree,omitempty"`
 	Branch      string `json:"branch,omitempty"`
 	Status      string `json:"status"`

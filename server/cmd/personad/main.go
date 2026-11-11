@@ -72,7 +72,7 @@ const usage = `usage:
                            secret, uninstall, markets (docs/extensions/extensions.md "Command line"; personad extension for the details;
                            also personad ext …, and personad plugin … as before)
 ` + nodecmd.SysmonUsage + `
-  personad release manifest|check-next …
+  personad release manifest|verify|check-next …
                            the publisher's release manifest and checks (scripts/release/publish.sh, docs/operations/hub-update.md "Public publishing")
   personad update-watch <pending>
                            the watchdog the hub starts over its own update (docs/operations/hub-update.md "Updating")

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The refusal fallback (#2528): the same words as web/src/i18n/locales/*/chat-modelfallback.json. -->
+<resources>
+    <string name="chat_model_fallback_title">上流で拒否されたため、このセッションはフォールバックモデルに切り替わりました</string>
+    <string name="chat_model_fallback_original">元のリクエストのモデル：%1$s</string>
+    <string name="chat_model_fallback_fallback">フォールバックモデル：%1$s</string>
+    <string name="chat_model_fallback_error_after">その後のエラー：%1$s</string>
+    <string name="chat_model_fallback_pending_title">次回の起動では設定済みのモデルを使います</string>
+    <string name="chat_model_fallback_pending_target">設定済みのモデル：%1$s</string>
+    <string name="chat_model_fallback_unverified">実際にどのモデルが使われるかは、このセッションの次の返信で分かります。</string>
+    <string name="chat_model_fallback_no_promise">メッセージは再送しません。同じリクエストが再び拒否されることがあります。</string>
+    <string name="chat_model_fallback_restore">設定済みのモデルに戻す</string>
+    <string name="chat_model_fallback_new_main">新しいメイン会話</string>
+    <string name="chat_model_fallback_terminal_hint">ターミナルのセッションでは、Claude Code で /model を自分で入力してください。新しいセッションの既定モデルも変わることがあります。</string>
+    <string name="chat_model_fallback_err_busy">この会話は作業中のため、何も閉じていません。止まってからもう一度お試しください。</string>
+    <string name="chat_model_fallback_err_unsupported">このセッションはここから設定済みのモデルに戻せません。ターミナルで /model を使ってください。</string>
+    <string name="chat_model_fallback_err_nothing">このセッションはもうフォールバックモデルを使っていません。</string>
+    <string name="chat_model_fallback_err_unknown">Persona は、このセッションが使っているモデルまたは設定済みのモデルを今は読み取れないため、何も閉じていません。後でもう一度お試しください。</string>
+    <string name="chat_model_fallback_err_outdated">このコンピューターの personad は古いため、設定済みのモデルに戻せません。更新してください。</string>
+    <string name="chat_model_fallback_refusal_title">上流がこのリクエストを拒否しました</string>
+    <string name="chat_model_fallback_refusal_fallback">Claude Code が %1$s から %2$s に自動で切り替えました</string>
+    <string name="chat_model_fallback_refusal_session">この会話の後のターンもそれを使うことがあります</string>
+    <string name="chat_model_fallback_refusal_no_switch">記録には別のモデルを使ったとは書かれていません</string>
+    <string name="chat_model_fallback_refusal_category">カテゴリ：%1$s</string>
+    <string name="chat_model_fallback_refusal_explanation">説明：%1$s</string>
+    <string name="chat_model_fallback_refusal_text">拒否の原文</string>
+</resources>

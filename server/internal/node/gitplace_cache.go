@@ -26,7 +26,11 @@ type gitPlaceCache struct {
 	read    func(string) gitPlace
 }
 
-var gitPlaces = newGitPlaceCache(readGitPlace)
+var gitPlaces = newGitPlaceCache(physicalGitPlace)
+
+// physicalDirs is a directory's physical path (realPath), kept in a gitPlace's root, through the same cache: a host
+// names its project's root on every list, and resolving a path can wait on a mount as reading a .git can.
+var physicalDirs = newGitPlaceCache(func(dir string) gitPlace { return gitPlace{root: realPath(dir)} })
 
 func newGitPlaceCache(read func(string) gitPlace) *gitPlaceCache {
 	return &gitPlaceCache{entries: make(map[string]*gitPlaceEntry), read: read}

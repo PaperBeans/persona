@@ -1,6 +1,7 @@
 package link
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -57,6 +58,8 @@ var (
 	errRedial = errors.New("手动重连")
 	// errRepaired: link.json was paired again while the link was up; it reconnects at once with the new pairing.
 	errRepaired = errors.New("重新配对了，用新凭据重连")
+	// errDirectReady: while connected over SSH without Always, a direct hub address answered again.
+	errDirectReady = errors.New("直连地址通了，切回直连")
 )
 
 // Status is what persona-link reports: Run hands one to Options.Status every time something changes, and
@@ -91,10 +94,13 @@ type Status struct {
 	Node      string `json:"node,omitempty"`
 	NodeError string `json:"node_error,omitempty"`
 	// waiting, refused: why the last attempt or link failed, and when the next attempt is.
-	Error string     `json:"error,omitempty"`
-	Retry *time.Time `json:"retry,omitempty"`
+	Error    string          `json:"error,omitempty"`
+	SSHError *SSHStatusError `json:"ssh_error,omitempty"`
+	Retry    *time.Time      `json:"retry,omitempty"`
 	// The candidates, best first; never the credential.
 	Endpoints []Endpoint `json:"endpoints,omitempty"`
+	// SSH: the optional SSH tunnel configured in link.json.
+	SSH *SSH `json:"ssh,omitempty"`
 	// Attention is the hub's latest "Needs you" summary (attention.go), as it sent it: active mode while this link is
 	// up, passive mode while the paired hub keeps coming in. Missing before the first one, and with older hubs.
 	Attention *Attention `json:"attention,omitempty"`
@@ -127,6 +133,10 @@ type Options struct {
 	// PingEvery, PingTimeout replace the defaults (tests). A hub that says its own heartbeat (endpoints, PingHeader) is
 	// followed on that link or stream instead.
 	PingEvery, PingTimeout time.Duration
+	// DirectRetryEvery, PairCheck and SSHBin replace the defaults in tests.
+	DirectRetryEvery time.Duration
+	PairCheck        time.Duration
+	SSHBin           string
 	// limiter replaces passive mode's (tests).
 	limiter *authLimiter
 }
@@ -266,10 +276,14 @@ func watchMode(ctx context.Context, path, mode string, cancel context.CancelFunc
 func runActive(ctx context.Context, o Options, rep *reporter) {
 	rep.switchTo(ModeActive)
 	var b backoff
+	var lastSSH bool
+	var lastToken string
+	var lastSSHConfig *SSH
 	for ctx.Err() == nil {
 		was := stampOf(o.Path) // a change from here on (paired again, an address added) cuts the wait below short
 		c, err := Load(o.Path)
 		if err != nil {
+			lastSSH, lastToken, lastSSHConfig = false, "", nil
 			if errors.Is(err, os.ErrNotExist) {
 				rep.set(func(s *Status) { *s = Status{State: "unpaired"} })
 			} else {
@@ -278,16 +292,22 @@ func runActive(ctx context.Context, o Options, rep *reporter) {
 			o.wait(ctx, time.Hour, was)
 			continue
 		}
+		if c.Token != lastToken || !c.SSH.Equal(lastSSHConfig) {
+			lastSSH = false
+			lastToken = c.Token
+			lastSSHConfig = cloneSSH(c.SSH)
+		}
 		rep.set(func(s *Status) {
 			*s = Status{State: "connecting", Machine: c.Machine, HubName: c.HubName, MachineName: c.MachineName, Trust: trustOf(c),
-				Endpoints: ranked(c.Endpoints)}
+				Endpoints: ranked(c.Endpoints), SSH: cloneSSH(c.SSH)}
 		})
-		l, err := dial(ctx, c)
+		l, err := dialActive(ctx, c, o.SSHBin, lastSSH)
 		var end error
 		state := "waiting"
 		if err != nil {
 			end = err
 		} else {
+			lastSSH = l.ep.Kind == KindSSH
 			start := time.Now()
 			rep.links++
 			l.gen = rep.links
@@ -295,11 +315,11 @@ func runActive(ctx context.Context, o Options, rep *reporter) {
 			if time.Since(start) > time.Minute {
 				b = backoff{}
 			}
-			// The link writes link.json itself (the hub's addresses and names): from here only a new credential, written
-			// while the link was up, counts as a change since it was read. The stamp is taken before the read, so a
-			// pairing written in between still counts.
+			// The link writes link.json itself (the hub's addresses and names): from here only a new credential or tunnel
+			// change, written while the link was up, counts as a change since it was read. The stamp is taken before the
+			// read, so a change written in between still counts.
 			now := stampOf(o.Path)
-			if f, err := Read(o.Path); err != nil || f.Token == c.Token {
+			if f, err := Read(o.Path); err != nil || (f.Token == c.Token && f.SSH.Equal(c.SSH)) {
 				was = now
 			}
 		}
@@ -309,6 +329,9 @@ func runActive(ctx context.Context, o Options, rep *reporter) {
 		wait := b.next()
 		var he *httpError
 		switch {
+		case errors.Is(end, errDirectReady):
+			lastSSH = false
+			b, wait = backoff{}, 0
 		case errors.Is(end, errRedial), errors.Is(end, errRepaired):
 			b, wait = backoff{}, 0
 		case errors.As(end, &he) && (he.status == http.StatusUnauthorized || he.status == http.StatusForbidden):
@@ -326,10 +349,43 @@ func runActive(ctx context.Context, o Options, rep *reporter) {
 		retry := time.Now().Add(wait)
 		o.Logf("link: %v; next attempt in %s", end, wait.Round(time.Second))
 		rep.set(func(s *Status) {
-			*s = Status{State: state, Machine: c.Machine, HubName: c.HubName, MachineName: c.MachineName, Error: summary(end), Retry: &retry,
-				Trust: trustOf(c), Endpoints: ranked(c.Endpoints)}
+			*s = Status{State: state, Machine: c.Machine, HubName: c.HubName, MachineName: c.MachineName, Error: summary(end),
+				SSHError: sshStatusOf(end), Retry: &retry, Trust: trustOf(c), Endpoints: ranked(c.Endpoints), SSH: cloneSSH(c.SSH)}
 		})
 		o.wait(ctx, wait, was)
+	}
+}
+
+func dialActive(ctx context.Context, c *Config, sshBin string, preferSSH bool) (*link, error) {
+	switch {
+	case c.SSH == nil:
+		return dial(ctx, c)
+	case c.SSH.Always || len(c.Endpoints) == 0:
+		return dialSSH(ctx, c, sshBin)
+	case preferSSH:
+		l, sshErr := dialSSH(ctx, c, sshBin)
+		if sshErr == nil || ctx.Err() != nil {
+			return l, sshErr
+		}
+		l, directErr := dial(ctx, c)
+		if directErr == nil {
+			return l, nil
+		}
+		return nil, errors.Join(sshErr, directErr)
+	default:
+		l, directErr := dial(ctx, c)
+		if directErr == nil || ctx.Err() != nil {
+			return l, directErr
+		}
+		var he *httpError
+		if c.FP != "" && errors.As(directErr, &he) && (he.status == http.StatusUnauthorized || he.status == http.StatusForbidden) {
+			return nil, directErr
+		}
+		l, sshErr := dialSSH(ctx, c, sshBin)
+		if sshErr == nil {
+			return l, nil
+		}
+		return nil, errors.Join(directErr, sshErr)
 	}
 }
 
@@ -339,7 +395,7 @@ func runActive(ctx context.Context, o Options, rep *reporter) {
 func (o Options) wait(ctx context.Context, d time.Duration, was time.Time) {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
-	poll := time.NewTicker(2 * time.Second)
+	poll := time.NewTicker(cmp.Or(o.PairCheck, 2*time.Second))
 	defer poll.Stop()
 	for {
 		select {

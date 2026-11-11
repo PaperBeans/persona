@@ -232,15 +232,5 @@
   "related": "{count} related",
   "pr_idle": "last moved {age}",
   "restore": "Restore",
-  "restored": "Back in the list",
-  "menu_due": "Due date",
-  "menu_due_today": "Today",
-  "menu_due_tomorrow": "Tomorrow",
-  "menu_due_next_week": "Next week",
-  "menu_due_pick": "Pick a date…",
-  "menu_due_none": "No due date",
-  "menu_remind_hour": "In 1 hour",
-  "menu_remind_tomorrow": "Tomorrow morning",
-  "menu_remind_none": "No reminder",
-  "menu_hand_over": "Hand to agent…"
+  "restored": "Back in the list"
 }

@@ -23,6 +23,90 @@ test('hello names the runtime and declares only the caps whose driver methods ex
   assert.throws(() => createRuntime(minimal(), {}), /runtime id/)
 })
 
+test('a list carries the transcripts the runtime names as its own though it does not list them', async (t) => {
+  const n = await startFakeNode(t)
+  let past = ['aaaaaaaa-0000-4000-8000-0000000000a1']
+  const rt = createRuntime(minimal({ unlistedTranscripts: async () => past }), { runtime: 'toy', socketPath: n.path, retryMs: 20, pushDelayMs: 5, refreshMs: 0 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await until('the list', () => n.last('runtime.sessions'))
+  assert.deepEqual(n.last('runtime.sessions'), { sessions: [{ session_id: 's1', status: 'idle' }], unlisted_transcripts: past })
+  past = []
+  rt.sessionsChanged()
+  await until('none any more: the list says so', () => n.all('runtime.sessions').length >= 2 && n.last('runtime.sessions').unlisted_transcripts?.length === 0)
+  // It cannot say now (its archive is being read again): the field is left out, and the node keeps what it was told.
+  past = undefined
+  rt.sessionsChanged()
+  await until('listed again', () => n.all('runtime.sessions').length >= 3)
+  assert.deepEqual(n.last('runtime.sessions').unlisted_transcripts, [], 'what it named last')
+  // One that has never said sends the rows alone.
+  const q = await startFakeNode(t)
+  const unsure = createRuntime(minimal({ unlistedTranscripts: () => undefined }), { runtime: 'toy', socketPath: q.path, retryMs: 20 })
+  t.after(() => unsure.stop())
+  unsure.start()
+  await until('its list', () => q.last('runtime.sessions'))
+  assert.deepEqual(q.last('runtime.sessions'), { sessions: [{ session_id: 's1', status: 'idle' }] })
+  // A runtime without the method sends the rows alone, as before.
+  const m = await startFakeNode(t)
+  const plain = createRuntime(minimal(), { runtime: 'toy', socketPath: m.path, retryMs: 20 })
+  t.after(() => plain.stop())
+  plain.start()
+  await until('its list', () => m.last('runtime.sessions'))
+  assert.deepEqual(m.last('runtime.sessions'), { sessions: [{ session_id: 's1', status: 'idle' }] })
+})
+
+test('a driver that cannot name its transcripts now still lists its sessions, with the ones it named last', async (t) => {
+  const n = await startFakeNode(t)
+  const past = ['aaaaaaaa-0000-4000-8000-0000000000a1']
+  let fail = false
+  const logs = []
+  const unlistedTranscripts = () => {
+    if (fail) throw new Error('boom')
+    return [...past, '', 7] // only ids go out
+  }
+  const rt = createRuntime(minimal({ unlistedTranscripts }), { runtime: 'toy', socketPath: n.path, retryMs: 20, pushDelayMs: 5, refreshMs: 0, log: (m) => logs.push(m) })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await until('the list', () => n.last('runtime.sessions'))
+  assert.deepEqual(n.last('runtime.sessions').unlisted_transcripts, past)
+  fail = true
+  rt.sessionsChanged()
+  await until('listed again', () => n.all('runtime.sessions').length >= 2)
+  assert.deepEqual(n.last('runtime.sessions'), { sessions: [{ session_id: 's1', status: 'idle' }], unlisted_transcripts: past })
+  assert.ok(logs.some((l) => /unlisted transcripts: boom/.test(l)), 'and the log says why')
+})
+
+test('a card for a session new in the list waits for that list, however long the driver takes to name its transcripts', async (t) => {
+  const n = await startFakeNode(t, { strict: true })
+  n.resolve = () => ({ allow: true })
+  let rows = [{ session_id: 's1', status: 'idle' }]
+  let naming = 0
+  let named = () => {}
+  const unlistedTranscripts = async () => {
+    if (++naming > 1) await new Promise((r) => { named = r }) // the second list on: as slow as the test says
+    return []
+  }
+  const rt = createRuntime(minimal({ listSessions: async () => rows, unlistedTranscripts }), { runtime: 'toy', socketPath: n.path, retryMs: 20, pushDelayMs: 5, refreshMs: 0 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await until('the first list', () => n.last('runtime.sessions'))
+  rows = [...rows, { session_id: 'new', status: 'working' }]
+  rt.sessionsChanged()
+  await until('the driver asked for its transcripts', () => naming === 2)
+  // The list with the new session is read but not sent yet: its card must not be sent now (the node refuses a card for
+  // a session it has not been told of).
+  const asking = rt.ask({ id: 'toy-new', kind: 'permission', session_id: 'new', tool_name: 'Bash', tool_input: {} })
+  await new Promise((r) => setTimeout(r, 30))
+  assert.equal(n.asked.length + n.refused.length, 0, 'held until the list is out')
+  const release = setInterval(() => named(), 5) // every list from here on
+  t.after(() => clearInterval(release))
+  assert.deepEqual(await asking, { allow: true })
+  assert.equal(n.refused.length, 0)
+})
+
 test('appended content goes out as continuous batches, and a gap says where it starts', async (t) => {
   const n = await startFakeNode(t)
   const rt = createRuntime(minimal({ cursor: async () => 10 }), { runtime: 'toy', socketPath: n.path, retryMs: 20 })

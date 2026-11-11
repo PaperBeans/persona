@@ -15,9 +15,12 @@ import (
 // pairing link. Anything else is printed as it was.
 func explain(err error) string {
 	raw := err.Error()
+	var se *link.SSHError
 	switch {
 	case rejected(err):
 		return "hub 不认这条配对链接（过期了、用过了或被撤销了）：在 hub 机器上运行 personad hub pair --machine <这台的 id> --add 拿一条新链接，再 persona-link pair '<链接>'\n（原始错误：" + raw + "）"
+	case errors.As(err, &se):
+		return se.Error()
 	case unreachable(err):
 		return "连不上 hub（" + strings.Join(hostsOf(err), "、") + "）：检查 hub 在不在跑、地址对不对、这台电脑的网络通不通，再试一次\n（原始错误：" + raw + "）"
 	}

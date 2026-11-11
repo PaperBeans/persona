@@ -6,9 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.CompositionLocalProvider
@@ -66,6 +63,7 @@ import persona.core.designsystem.FeedbackAction
 import persona.core.designsystem.LocalAppFeedback
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.tasks.TasksStore
+import androidx.compose.runtime.setValue
 
 /** Native JVM snapshots of the real feed card and the standard application snackbar; not emulator captures. */
 @RunWith(AndroidJUnit4::class)
@@ -143,14 +141,9 @@ class MessageDraftCardTest {
                 PersonaTheme(style = appearance.value.first, darkTheme = appearance.value.second, reduceMotion = true) {
                     val feeds by store.feeds.collectAsState()
                     val pending by feedback.pending.collectAsState()
-                    val snackbar = remember { SnackbarHostState() }
-                    LaunchedEffect(pending) {
-                        pending?.let { notice ->
-                            // Freeze only the timeout for the image matrix; Root uses the same host with Short duration.
-                            val result = snackbar.showSnackbar(notice.message, actionLabel = notice.action?.label, duration = SnackbarDuration.Indefinite)
-                            if (result == SnackbarResult.ActionPerformed) notice.action?.run?.invoke()
-                        }
-                    }
+                    // The app's toast, kept up for the image matrix (the host times it out); its Undo runs the action.
+                    var shown by remember { mutableStateOf<persona.core.designsystem.FeedbackNotice?>(null) }
+                    LaunchedEffect(pending) { pending?.let { shown = it } }
                     val host = AssistantTaskHost(store, original.conversation, emptyList(), { it }, {}, { throw it }, {})
                     Column(Modifier.fillMaxWidth().background(PersonaTheme.palette.background).testTag("draft-scene"),
                         verticalArrangement = Arrangement.spacedBy(persona.core.designsystem.Tokens.Space.s)) {
@@ -159,7 +152,7 @@ class MessageDraftCardTest {
                                 AssistantExtraLine(persona.core.domain.tasks.AssistantExtra.Feed(it), host)
                             }
                         }
-                        persona.core.designsystem.JAppSnackbarHost(snackbar, Modifier.testTag("draft-undo-snackbar"))
+                        shown?.let { persona.core.designsystem.JToast(it, dismiss = { shown = null }, modifier = Modifier.testTag("draft-undo-snackbar")) }
                     }
                 }
             }

@@ -21,7 +21,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -124,9 +123,8 @@ internal fun SheetGrid(sheets: List<TableSheet>, truncated: Boolean, contentPadd
             }
         }
     }
-    val context = LocalContext.current
     val resources = LocalResources.current
-    val feedback = LocalAppFeedback.current
+    val copy = rememberCopy()
     val palette = PersonaTheme.palette
     Column(Modifier.fillMaxSize().padding(top = contentPadding.calculateTopPadding()).testTag("sheet")) {
         if (sheets.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = pagePadding, vertical = Tokens.Space.s),
@@ -156,13 +154,13 @@ internal fun SheetGrid(sheets: List<TableSheet>, truncated: Boolean, contentPadd
             }
         }
         SheetFooter(sheet, selected, truncated, Modifier.background(palette.surfaceOpaque).padding(bottom = contentPadding.calculateBottomPadding())) {
-            copyText(context, it, feedback, resources.getString(R.string.files_cell_copied))
+            copy(it, resources.getString(R.string.files_cell_copied))
         }
     }
     menu?.let { (r, c) ->
         JActionSheet(listOf(
-            JAction(stringResource(R.string.files_copy_cell), PhIcons.Copy) { copyText(context, sheet[r, c], feedback, resources.getString(R.string.files_cell_copied)) },
-            JAction(stringResource(R.string.files_copy_row), PhIcons.Copy) { copyText(context, sheet.rowText(r), feedback, resources.getString(R.string.files_row_copied)) },
+            JAction(stringResource(R.string.files_copy_cell), PhIcons.Copy) { copy(sheet[r, c], resources.getString(R.string.files_cell_copied)) },
+            JAction(stringResource(R.string.files_copy_row), PhIcons.Copy) { copy(sheet.rowText(r), resources.getString(R.string.files_row_copied)) },
         ), { menu = null }, TableSheet.columnName(c) + (r + 1))
     }
 }

@@ -11,7 +11,7 @@ import { arrangePages, useSidebarPrefs } from "../lib/sidebar-pages";
 import { useExtensionSlot } from "../lib/extension-slots";
 import { toneOf } from "../lib/extension-ui";
 import { BADGE_TONE, navIcon, pageRoute } from "./extensions/ExtensionSlots";
-import { href, navigate, type Route } from "../lib/router";
+import { href, inWorkView, navigate, type Route } from "../lib/router";
 import { useAgentSessions } from "../lib/sessions";
 import { scoped, useScope, useScopedCounts, useScopedTodos } from "../lib/current-assistant";
 import { triageTodos } from "../lib/todo-triage";
@@ -41,7 +41,7 @@ export function useActiveKey(route: Route): string {
   const tabPath = route.name === "tab" ? href(route) : "";
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `route` is parsed anew each render; its path says it all
   const tabPane = useMemo(() => (route.name === "tab" ? resolveTab(all, route) : undefined), [all, tabPath]);
-  return route.name === "tab" ? (tabPane ? rowKey(tabPane) : "") : sidebarActiveKey(route, assistant?.main);
+  return inWorkView(route) ? "terminal" : route.name === "tab" ? (tabPane ? rowKey(tabPane) : "") : sidebarActiveKey(route, assistant?.main);
 }
 
 // One function for the component's life, so the rows given it skip a re-render (memo); a click still calls the
@@ -74,8 +74,6 @@ export function useNavPages() {
   const scope = useScope();
   const online = useStore((s) => scoped(s.machines, scope).filter((m) => m.online).length);
   const total = useStore((s) => scoped(s.machines, scope).length);
-  // "Terminal" (docs/integrations/terminal.md "Standalone terminal") is there where the hub can list panes
-  const terminalPanes = useStore((s) => s.features.includes("terminal_panes"));
   const assistant = useStore((s) => s.assistant);
   const todos = useScopedTodos();
   const todosSupported = useStore((s) => s.todosSupported);
@@ -105,7 +103,7 @@ export function useNavPages() {
     routines: { k: "routines", to: { name: "routines" }, icon: "clock", label: t("sidebar.nav_routines"), short: t("sidebar.nav_routines_short") },
     kb: { k: "kb", to: { name: "kb" }, icon: "book", label: t("sidebar.nav_kb"), short: t("sidebar.nav_kb_short") },
     machines: { k: "machines", to: { name: "machines" }, icon: "machine", label: t("sidebar.nav_machines"), short: t("sidebar.nav_machines_short"), hint: total ? `${online}/${total}` : undefined },
-    terminal: terminalPanes && { k: "terminal", to: { name: "terminal" }, icon: "terminal", label: t("sidebar.nav_terminal") },
+    terminal: { k: "terminal", to: { name: "terminal" }, icon: "terminal", label: t("work-entry.title"), short: t("work-entry.short") },
     settings: { k: "settings", to: { name: "settings" }, icon: "gear", label: t("sidebar.nav_settings") },
   };
   const all = NAV_PAGES.flatMap((k): NavPage[] => [

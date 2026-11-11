@@ -238,8 +238,9 @@ func needsYou(agents []fleetInput, ixs []proto.Interaction, counts func(fleetInp
 	return out
 }
 
-// liveCounts: the agent is on the Live Activity at all (muted agents and Codex sub-agents are not).
-func liveCounts(a fleetInput) bool { return !a.Session.IsCodexSubagent() && !a.Muted }
+// liveCounts: the agent is on the Live Activity at all (muted agents and subtasks are not: Codex sub-agents, and a
+// runtime's session another one started, which its parent's row stands for until it needs the user).
+func liveCounts(a fleetInput) bool { return !a.Session.IsSubtask() && !a.Muted }
 
 // cardStands: the card may stand for its agent (on the Live Activity and in Persona Link's summary). An elicitation
 // does not: the Fleet is shared with legacy clients, whose terminal fallback stays (the agent shows as in a dialog).
@@ -340,6 +341,9 @@ func needItem(l i18n.Lang, n needer) FleetItem {
 		Place: agentPlace(n.agent.Machine, sess, fleetPlaceMax), Kind: proto.IxScreen, Detail: i18n.T(l, "hub-liveactivity.screen")}
 	if ix := n.card; ix != nil {
 		item.Kind, item.Detail = ix.Kind, clip(oneLine(interactionDetail(l, *ix)), fleetDetailMax)
+		if ix.Private { // a Just me turn's card: the Live Activity shows it without its text
+			item.Detail = i18n.T(l, "push.private_card")
+		}
 		item.Interaction, item.Since = ix.ID, unixSeconds(ix.CreatedAt)
 		if len(ix.Fields) > 0 {
 			item.Interaction = "" // what it asks for (a password) is filled in in the app: no Allow / Deny on the activity

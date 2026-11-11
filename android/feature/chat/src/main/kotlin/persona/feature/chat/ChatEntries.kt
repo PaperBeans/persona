@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.runtime.snapshots.SnapshotApplyConflictException
 import persona.core.contracts.api.*
 import persona.core.navigation.SettingsPageRoute
 import persona.core.navigation.SettingsPage
@@ -58,6 +60,8 @@ data class ChatAppBindings(
     /** Tasks from the assistant's conversations (docs/assistant/unified-entry.md); null where the hub group has none. */
     val tasks: persona.core.domain.tasks.TasksStore? = null,
     val agentShares: AgentSharesProvider? = null,
+    /** Worktree status and removal by this group's own machine ids (#4532); built per call for the current route. */
+    val worktrees: (() -> persona.core.contracts.api.AgentCreationService?)? = null,
 )
 
 interface ChatWiringSource {
@@ -80,22 +84,40 @@ class ChatDraftEditor(
     constructor(bindings: ChatAppBindings, session: SessionKey) :
         this(bindings.drafts, bindings.coroutineScope, DraftKey.Chat(session), bindings.draftVersions(session))
 
-    val composer = MutableStateFlow<ChatComposerState?>(null)
+    /**
+     * There at once, so the chat draws while its draft is read from the database (#4045); the draft fills this same
+     * composer when it arrives.
+     */
+    val composer = MutableStateFlow<ChatComposerState?>(ChatComposerState())
     /** Why the draft could not be read or saved, as a string resource. */
     val error = MutableStateFlow<Int?>(null)
     private val changes = Channel<ChatComposerDraft>(Channel.CONFLATED)
+    /** The draft has been read (or could not be): until then what the page reports must never be saved over it. */
+    val ready = MutableStateFlow(false)
+    /** The composer changed before the draft arrived (typed, or typed and sent): the draft no longer goes into it. */
+    @Volatile private var touched = false
     init {
         scope.launch {
             var saved: DraftSnapshot? = null
+            val state = checkNotNull(composer.value)
             try {
-                saved = repository.read(key)
-                composer.value = if (saved.attachments.isEmpty()) ChatComposerState().apply {
-                    editMessage(saved.text)
-                    sessionVersion = saved.sessionVersion
-                } else ChatComposerState(saved.composerDraft())
+                val read = repository.read(key)
+                saved = read
+                // In one snapshot, so it can't land half-way through the page's own edits: something typed in the moment
+                // before keeps its place (a write that collides with typing is dropped, and the typing wins).
+                try {
+                    Snapshot.withMutableSnapshot {
+                        if (!touched && !state.hasContent) {
+                            if (read.attachments.isEmpty()) state.editMessage(read.text) else state.load(read.composerDraft())
+                            state.sessionVersion = read.sessionVersion
+                        }
+                    }
+                } catch (_: SnapshotApplyConflictException) { }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { error.value = R.string.chat_draft_read_failed }
-            if (composer.value == null) composer.value = ChatComposerState()
+            ready.value = true
+            // What was typed before the draft arrived was not saved then: it is now (it replaces the draft).
+            if (touched) changes.trySend(state.draft)
             val versions = sessionVersions?.let { flow -> launch {
                 flow.collect { version ->
                     composer.value?.let { state ->
@@ -123,7 +145,11 @@ class ChatDraftEditor(
             } finally { versions?.cancel() }
         }
     }
-    fun changed(draft: ChatComposerDraft) { changes.trySend(draft) }
+    /** A report from before the draft was read, or one already overtaken by the composer, is not saved. */
+    fun changed(draft: ChatComposerDraft) {
+        if (!ready.value) { if (draft != ChatComposerDraft()) touched = true; return }
+        if (draft == composer.value?.draft) changes.trySend(draft)
+    }
     fun close() { composer.value?.draft?.let(::changed); changes.close() }
 }
 
@@ -171,11 +197,11 @@ fun ChatDestination(
     val handToPersona = rememberHandToPersona(wiring?.mainSender?.takeIf { style != ChatRenderStyle.Assistant }, navigator)
     val composer by (editor?.composer ?: remember { MutableStateFlow<ChatComposerState?>(null) }).collectAsStateWithLifecycle()
     val error by (editor?.error ?: remember { MutableStateFlow<Int?>(null) }).collectAsStateWithLifecycle()
-    if (editor != null && composer == null) return
     ChatScreen(session, services.chats(), services.messages(),
         services.interactions(), services.sessions(), onBack = onHistoryBack ?: navigator::back,
         onTerminal = onTerminal ?: { navigator.navigate(TerminalRoute(it.machineId, it.sessionId)) },
         chrome = ChatChromeBindings(actions = wiring?.actions.takeUnless { historyReadOnly }, connection = wiring?.connection,
+            worktrees = wiring?.worktrees.takeUnless { historyReadOnly },
             onOpenSession = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) },
             onOpenAssistant = { navigator.navigate(conversationRoute(it, assistant = true)) },
             onConnectionDetails = { navigator.navigate(SettingsPageRoute(SettingsPage.Diagnostics)) },

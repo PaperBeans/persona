@@ -20,10 +20,20 @@ export interface Uploaded {
   size: number;
 }
 
-/** In-memory authorization captured when the file is admitted, never rendered or persisted. */
-export interface UploadCredential {
+/** In-memory authorization captured when an action is admitted, never rendered or persisted. */
+export interface FileCredential {
   owner: string;
   token: string;
+  isAuthContextCurrent?: () => boolean;
+}
+export type UploadCredential = FileCredential;
+
+function mutationAuth(credential?: FileCredential): { token?: string; tokenOwner?: string; isAuthContextCurrent?: () => boolean } {
+  if (!credential) return {};
+  if (!credential.token || credential.owner !== credentialOwner() || credential.token !== getToken() || credential.isAuthContextCurrent?.() === false) {
+    throw new DOMException("aborted", "AbortError");
+  }
+  return { token: credential.token, tokenOwner: credential.owner, isAuthContextCurrent: credential.isAuthContextCurrent };
 }
 
 /**
@@ -99,29 +109,30 @@ export function uploadToDir(
 }
 
 /** Renames `path` to `name` in the same folder; resolves to its new path. */
-export async function renameEntry(mid: string, path: string, cwd: string, name: string): Promise<string> {
-  const r = await api<{ path: string }>(`/machines/${enc(mid)}/files/rename`, { method: "POST", json: { path, cwd, name } });
+export async function renameEntry(mid: string, path: string, cwd: string, name: string, credential?: FileCredential): Promise<string> {
+  const r = await api<{ path: string }>(`/machines/${enc(mid)}/files/rename`, { method: "POST", json: { path, cwd, name }, ...mutationAuth(credential) });
   return r.path;
 }
 
 /** Moves `paths` into folder `dir`. */
-export async function moveEntries(mid: string, paths: string[], cwd: string, dir: string, conflict?: Conflict): Promise<{ from: string; to: string }[]> {
+export async function moveEntries(mid: string, paths: string[], cwd: string, dir: string, conflict?: Conflict, credential?: FileCredential): Promise<{ from: string; to: string }[]> {
   const r = await api<{ moved?: { from: string; to: string }[] }>(`/machines/${enc(mid)}/files/move`, {
     method: "POST",
     json: { paths, cwd, dir, ...(conflict ? { conflict } : {}) },
+    ...mutationAuth(credential),
   });
   return r.moved ?? [];
 }
 
 /** Moves `paths` to the machine's trash; resolves to what puts each back (restoreEntries). */
-export async function trashEntries(mid: string, paths: string[], cwd: string): Promise<{ path: string; trash_id: string }[]> {
-  const r = await api<{ trashed?: { path: string; trash_id: string }[] }>(`/machines/${enc(mid)}/files/trash`, { method: "POST", json: { paths, cwd } });
+export async function trashEntries(mid: string, paths: string[], cwd: string, credential?: FileCredential): Promise<{ path: string; trash_id: string }[]> {
+  const r = await api<{ trashed?: { path: string; trash_id: string }[] }>(`/machines/${enc(mid)}/files/trash`, { method: "POST", json: { paths, cwd }, ...mutationAuth(credential) });
   return r.trashed ?? [];
 }
 
 /** Puts what trashEntries moved back where it was (Undo). */
-export async function restoreEntries(mid: string, trashIds: string[]): Promise<string[]> {
-  const r = await api<{ restored?: { path: string }[] }>(`/machines/${enc(mid)}/files/restore`, { method: "POST", json: { trash_ids: trashIds } });
+export async function restoreEntries(mid: string, trashIds: string[], credential?: FileCredential): Promise<string[]> {
+  const r = await api<{ restored?: { path: string }[] }>(`/machines/${enc(mid)}/files/restore`, { method: "POST", json: { trash_ids: trashIds }, ...mutationAuth(credential) });
   return (r.restored ?? []).map((x) => x.path);
 }
 

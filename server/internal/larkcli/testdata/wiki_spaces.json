@@ -1,0 +1,7 @@
+{
+  "ok": true,
+  "data": {
+    "items": [{"space_id": "space_example", "name": "Example space", "url": "https://example.feishu.cn/wiki/space_example"}],
+    "has_more": false
+  }
+}

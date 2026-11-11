@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
+import androidx.compose.ui.draw.alpha
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -20,13 +21,20 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import persona.core.contracts.Machine
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import java.net.URI
 
 @Composable
-internal fun NewAgentDialog(model: NewAgentViewModel, machines: List<Machine>, online: Boolean, onDismiss: () -> Unit) {
+internal fun NewAgentDialog(
+    model: NewAgentViewModel, machines: List<Machine>, online: Boolean,
+    /** Settings › Model providers, for a launcher the terminal can't run (#4530); null where none can be added. */
+    onAddProvider: (() -> Unit)? = null,
+    onDismiss: () -> Unit,
+) {
     val state by model.state.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
+    var helping by remember { mutableStateOf<persona.core.contracts.api.AgentLauncher?>(null) }
     // Outside the list: the model list stays open whatever the form below it scrolls away.
     var picking by remember { mutableStateOf(false) }
     val list = rememberLazyListState()
@@ -36,12 +44,28 @@ internal fun NewAgentDialog(model: NewAgentViewModel, machines: List<Machine>, o
         BackHandler(onBack = close)
         Column(Modifier.fillMaxWidth().weight(1f).imePadding()) {
             LazyColumn(Modifier.weight(1f), list, contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt)
+                newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt, onBlocked = { helping = it })
             }
             NewAgentFooter(state, model, machines, online, Modifier.fillMaxWidth().padding(top = 8.dp))
         }
         if (picking) NewAgentModelSheet(state, model::pickModel, model::reloadModels, onDismiss = { picking = false })
+        LauncherHelp(helping, state, model, onAddProvider?.let { add -> { helping = null; onDismiss(); add() } }) { helping = null }
     }
+}
+
+/** The help of the blocked launcher chosen ([launcher]); Try Anyway picks it after all. */
+@Composable
+private fun LauncherHelp(
+    launcher: persona.core.contracts.api.AgentLauncher?, state: NewAgentState, model: NewAgentViewModel,
+    onAddProvider: (() -> Unit)?, onDismiss: () -> Unit,
+) {
+    val block = launcher?.block ?: return
+    // ponytail: a provider added in Settings goes to the primary group's hub; other groups' computers only get the words.
+    val adds = onAddProvider.takeIf { persona.core.contracts.GroupKeys.namespaceOf(state.machineId) == null }
+    LauncherBlockedSheet(launcher, block, adds, onTryAnyway = {
+        model.selection(state.selection.copy(launcher = launcher.name))
+        onDismiss()
+    }, onDismiss = onDismiss)
 }
 
 /**
@@ -53,9 +77,12 @@ internal fun NewAgentPage(
     model: NewAgentViewModel, machines: List<Machine>, online: Boolean, onBack: () -> Unit,
     /** Opens the model list at once, searching for this (captures). */
     initialModelQuery: String? = null,
+    /** Settings › Model providers, for a launcher the terminal can't run (#4530). */
+    onAddProvider: (() -> Unit)? = null,
 ) {
     val state by model.state.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
+    var helping by remember { mutableStateOf<persona.core.contracts.api.AgentLauncher?>(null) }
     var picking by remember(initialModelQuery) { mutableStateOf(initialModelQuery != null) }
     val list = rememberLazyListState()
     val prompt = rememberPromptFocus(state, list)
@@ -64,10 +91,11 @@ internal fun NewAgentPage(
     JListPage(title = stringResource(R.string.agents_action_new_session), onBack = close, largeTitle = false, state = list, bottomBar = {
         NewAgentFooter(state, model, machines, online, Modifier.fillMaxWidth().padding(horizontal = pagePadding, vertical = Tokens.Space.s))
     }) {
-        newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt)
+        newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt, onBlocked = { helping = it })
     }
     if (picking) NewAgentModelSheet(state, model::pickModel, model::reloadModels, onDismiss = { picking = false },
         initialQuery = initialModelQuery.orEmpty())
+    LauncherHelp(helping, state, model, onAddProvider?.let { add -> { helping = null; add() } }) { helping = null }
 }
 
 /**
@@ -90,7 +118,7 @@ private fun rememberPromptFocus(state: NewAgentState, list: LazyListState): Focu
 
 private fun LazyListScope.newAgentItems(
     state: NewAgentState, model: NewAgentViewModel, machines: List<Machine>, query: String, onQuery: (String) -> Unit, close: () -> Unit,
-    onModels: () -> Unit, prompt: FocusRequester,
+    onModels: () -> Unit, prompt: FocusRequester, onBlocked: (persona.core.contracts.api.AgentLauncher) -> Unit,
 ) {
     val editable = !state.locked && !state.loading
     if (state.loading) item("loading") { JLinearProgress(null) }
@@ -160,6 +188,29 @@ private fun LazyListScope.newAgentItems(
             }
         }
     }
+    // A branch and a checkout of its own (#4532, iOS NewAgentWorktreeSection), for a folder in a Git repository.
+    state.repo?.takeIf { state.worktreeOffered }?.let { repo -> item("worktree") {
+        val suggested = AgentWorktree.branch(AgentWorktree.nameHint(state.prompt, state.selection.cwd))
+        JSectionHeader(stringResource(R.string.agents_worktree_title))
+        JGroupItem(GroupPosition.of(0, if (state.inWorktree) 2 else 1)) {
+            JSwitchRow(stringResource(R.string.agents_worktree_switch), state.inWorktree, model::inWorktree,
+                leadingIcon = PersonaIcons.gitBranch, enabled = editable)
+        }
+        if (state.inWorktree) JGroupItem(GroupPosition.of(1, 2)) {
+            JTextField(state.worktreeBranch, model::worktreeBranch, placeholder = suggested,
+                label = stringResource(R.string.agents_worktree_branch), singleLine = true, enabled = editable,
+                modifier = Modifier.fillMaxWidth().padding(Tokens.Space.s))
+        }
+        Text(stringResource(R.string.agents_worktree_footer), Modifier.padding(top = Tokens.Space.xs),
+            style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+        val path = AgentWorktree.checkout(repo, state.worktreeBranch.trim().ifEmpty { suggested })
+        if (state.inWorktree && path.isNotEmpty()) {
+            val home = machines.firstOrNull { it.id == state.machineId }?.home
+            Text(stringResource(R.string.agents_worktree_checks_out, home?.takeIf { it.isNotEmpty() && path.startsWith("$it/") }
+                ?.let { "~" + path.removePrefix(it) } ?: path), maxLines = 2,
+                style = PersonaTheme.type.codeSmall, color = PersonaTheme.palette.ink2)
+        }
+    } }
     item("agent-types-title") { JSectionHeader(stringResource(R.string.agents_new_agent_type)) }
     val types = state.launchers.map { it.agentType }.distinct()
     val selectedType = state.agentType.takeIf { state.following || state.selection.launcher.isNotEmpty() }
@@ -168,7 +219,8 @@ private fun LazyListScope.newAgentItems(
             JRow(type.agentLabel(), leading = { JRadio(selectedType == type, null, enabled = editable) }, enabled = editable,
                 // The type the configuration already starts keeps following it; another type picks its first launcher.
                 onClick = { if (!(state.following && state.agentType == type))
-                    model.selection(state.selection.copy(launcher = state.launchers.first { it.agentType == type }.name)) }, chevron = false)
+                    model.selection(state.selection.copy(launcher = initialLauncher(null, state.launchers.filter { it.agentType == type }))) },
+                chevron = false)
         }
     }
     item("launcher-search") {
@@ -192,10 +244,17 @@ private fun LazyListScope.newAgentItems(
     }
     itemsIndexed(launchers, key = { _, launcher -> "launcher:${launcher.name}" }) { index, launcher ->
         val host = launcher.baseUrl?.let { runCatching { URI(it).host }.getOrNull() }
+        // Blocked on this computer (#4530, iOS): listed grayed with why; choosing it opens its help instead of picking it.
+        val block = launcher.block
+        val reason = block?.let { stringResource(it.reason) }
         JGroupItem(GroupPosition.of(index + rows - launchers.size, rows)) {
-            JRow(launcher.name, subtitle = listOfNotNull(launcher.agentType.agentLabel(), launcher.model, host).joinToString("\n"),
-                subtitleLines = 3, leading = { JRadio(state.selection.launcher == launcher.name, null, enabled = editable) },
-                enabled = editable, onClick = { model.selection(state.selection.copy(launcher = launcher.name)) }, chevron = false)
+            JRow(launcher.name, Modifier.alpha(if (block != null && state.selection.launcher != launcher.name) 0.5f else 1f),
+                subtitle = listOfNotNull(reason, launcher.agentType.agentLabel(), launcher.model, host).joinToString("\n"),
+                subtitleLines = 4, leading = { JRadio(state.selection.launcher == launcher.name, null, enabled = editable) },
+                enabled = editable, onClick = {
+                    if (block != null && state.selection.launcher != launcher.name) onBlocked(launcher)
+                    else model.selection(state.selection.copy(launcher = launcher.name))
+                }, chevron = false)
         }
     }
     newAgentModelItems(state, editable, onModels, model::reloadModels)
@@ -206,6 +265,16 @@ private fun LazyListScope.newAgentItems(
         val efforts = state.modelEfforts
         if (efforts?.isEmpty() == true) JRow(stringResource(R.string.agents_new_effort), subtitle = stringResource(R.string.agents_new_no_effort), enabled = false)
         else ChoiceMenu(stringResource(R.string.agents_new_effort), state.selection.effort, effortChoices(efforts), editable) { model.selection(state.selection.copy(effort = it)) }
+        // Claude Code's ultracode for this start (#582, iOS UltracodeStartRow): off each time, never saved; a known CLI
+        // too old for it says so and can't be switched on.
+        val shown = NewAgentUltracode.offered(LocalHubFeatures.current, state.agentType, efforts)
+        val version = machines.firstOrNull { it.id == state.machineId }?.claudeVersion?.trim()
+        val blocked = version?.takeIf { shown && NewAgentUltracode.tooOld(it) }
+        LaunchedEffect(shown, blocked) { if (!shown || blocked != null) model.ultracode(false) }
+        if (shown) JSwitchRow("ultracode", state.ultracode && blocked == null, model::ultracode, // i18n-ignore: a proper name, never translated
+            subtitle = blocked?.let { stringResource(R.string.agents_new_ultracode_old, it, NewAgentUltracode.MIN_VERSION.joinToString(".")) }
+                ?: stringResource(R.string.agents_new_ultracode_subtitle),
+            enabled = editable && blocked == null, subtitleLines = Int.MAX_VALUE)
     }
     item("prompt") {
         JTextField(state.prompt, model::prompt, enabled = !state.locked,
@@ -221,7 +290,9 @@ private fun followSummary(res: Resources, state: NewAgentState): String {
         .ifEmpty { res.getString(R.string.agents_new_not_configured) }
     val provider = detail.purpose.effective.provider.orEmpty()
     val missing = provider.startsWith("launcher.") && state.launchers.isNotEmpty() && state.configuredLauncher == null
-    return if (missing) res.getString(R.string.agents_new_launcher_missing, summary) else summary
+    val text = if (missing) res.getString(R.string.agents_new_launcher_missing, summary) else summary
+    // The configured launcher is blocked here (#4530, iOS LauncherBlockLine): said under it; Start stays possible.
+    return state.configuredLauncher?.block?.let { text + "\n" + res.getString(it.reason) } ?: text
 }
 
 @Composable

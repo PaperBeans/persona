@@ -12,6 +12,8 @@
   "workspace_engine_path": "パスはマシンのエンジンが決定します。ブランチを変更すると再表示します。",
   "tray_needs_you": "要対応",
   "tray_running": "進行中",
+  "tray_expand": "拡大",
+  "tray_restore": "元のサイズ",
   "background_tasks_running": "バックグラウンドタスク {count} 件が実行中",
   "subagents_count_running": "サブエージェント {count} 件が実行中",
   "background_running": "バックグラウンドで作業中",

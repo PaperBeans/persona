@@ -166,6 +166,9 @@ export interface LarkChatsState {
   moreProblem?: string;
 }
 
+/** How many pages past the loaded ones `find` reads for a chat before giving up. */
+const FIND_PAGES = 20;
+
 export interface LarkChatsDeps {
   page: (cursor: string | undefined, account: string | undefined) => Promise<LarkConversationPage>;
   pinned: (account: string | undefined) => Promise<LarkConversationPage>;
@@ -273,6 +276,28 @@ export class LarkChatsStore {
         this.set({ loading: false, loaded: true, problem });
       }
     } while (this.again);
+  }
+
+  /** A chat the loaded list does not hold (a link opened it, or it moved past the pages read), looked for in the pages
+   * after them (Android larkListNavigation), without adding them to the list; undefined when it is not found within
+   * FIND_PAGES pages or a read fails. */
+  async find(id: string): Promise<LarkConversation | undefined> {
+    const { account } = this.s;
+    let cursor = this.s.cursor;
+    const seen = new Set<string>();
+    for (let i = 0; cursor && i < FIND_PAGES; i++) {
+      seen.add(cursor);
+      let p: LarkConversationPage;
+      try {
+        p = await this.deps.page(cursor, account);
+      } catch {
+        return undefined;
+      }
+      const row = (p.conversations ?? []).find((c) => c.id === id);
+      if (row) return row;
+      cursor = p.next_cursor && !seen.has(p.next_cursor) ? p.next_cursor : undefined;
+    }
+    return undefined;
   }
 
   async more(): Promise<void> {

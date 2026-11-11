@@ -70,6 +70,7 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.Status
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.WorkflowIcon
+import persona.core.designsystem.rememberCopy
 import persona.core.domain.sort.WorkflowSummary
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
@@ -338,10 +339,10 @@ internal fun SentLine(item: FeedItem, title: String, onOpenTask: (() -> Unit)?) 
 /** The whole text Persona sent, newlines kept and selectable, with Copy under it. */
 @Composable
 private fun SentText(text: String, modifier: Modifier = Modifier) {
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val copy = rememberCopy()
     Column(modifier.fillMaxWidth().testTag("sent-detail"), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
         SelectionContainer { Text(text, style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink) }
-        JButton(stringResource(R.string.chat_menu_copy), { clipboard.setText(androidx.compose.ui.text.AnnotatedString(text)) },
+        JButton(stringResource(R.string.chat_menu_copy), { copy(text, null) },
             kind = JButtonKind.Quiet, size = JButtonSize.Small, icon = PhIcons.Copy)
     }
 }

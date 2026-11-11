@@ -1,0 +1,160 @@
+package persona.feature.chat
+
+import android.content.res.Resources
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import persona.core.contracts.Item
+import persona.core.contracts.ModelRefusal
+import persona.core.contracts.Session
+import persona.core.contracts.api.ChatActions
+import persona.core.contracts.api.hubCodedFailure
+import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
+
+// A refusal fallback (#2289, #2528; web lib/model-fallback.ts): the upstream refused a request and Claude Code answered
+// it with another model on its own, keeping the session there. The transcript shows the refusal as a line of its own;
+// above the composer a card names both models and offers the ways back. "Back to the configured model" closes a Persona
+// conversation's idle headless process so its next start uses the configured model; it sends nothing, and whether that
+// model then runs is only known from a newer reply, so nothing here says it was restored.
+
+/** The turn_error_code of a turn that failed on the missing fallback model: the user's to act on, never "Continue". */
+internal const val FALLBACK_UNAVAILABLE = "model_fallback_unavailable"
+
+/**
+ * "New main chat" for the fallback card: the assistant page provides it around the main conversation when the hub can
+ * make one (its own dialog), and nothing anywhere else.
+ */
+val LocalNewMainChat = compositionLocalOf<(() -> Unit)?> { null }
+
+/** What the card shows: the models as recorded, the error since, and a pending restore's configured model. */
+internal data class FallbackView(val original: String, val fallback: String, val error: String, val pending: Boolean, val target: String)
+
+/** The card for [session], or null when it has no active refusal fallback. */
+internal fun fallbackView(session: Session): FallbackView? {
+    val f = session.modelFallback ?: return null
+    if (f.subtype != "model_refusal_fallback" || f.fallbackModel.isNullOrEmpty()) return null
+    val pending = session.modelRestore?.state == "next_start"
+    return FallbackView(f.originalModel.orEmpty(), f.fallbackModel!!, session.turnError.orEmpty(), pending,
+        if (pending) session.modelRestore?.to.orEmpty() else "")
+}
+
+/** A refused restore in the app's language by its code (web `restoreErrorText`); otherwise the usual failure words. */
+internal fun restoreErrorText(resources: Resources, error: Throwable): String =
+    when (hubCodedFailure(error)?.code) {
+        "restore_busy" -> resources.getString(R.string.chat_model_fallback_err_busy)
+        "restore_unsupported" -> resources.getString(R.string.chat_model_fallback_err_unsupported)
+        "restore_nothing" -> resources.getString(R.string.chat_model_fallback_err_nothing)
+        "restore_unknown" -> resources.getString(R.string.chat_model_fallback_err_unknown)
+        "node_outdated" -> resources.getString(R.string.chat_model_fallback_err_outdated)
+        else -> operationFeedback(error).text.resolve(resources)
+    }
+
+/**
+ * Above the composer while [session] runs on the model Claude Code fell back to (web ModelFallbackCard). A Persona
+ * conversation ([Session.assistant], headless) offers "Back to configured model" and, in the main conversation,
+ * [LocalNewMainChat]; a terminal session gets the manual `/model` step only. While a restore waits for a newer reply
+ * the card says only that the next start will use the configured model.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun ModelFallbackCard(session: Session, actions: ChatActions?, modifier: Modifier = Modifier) {
+    val view = fallbackView(session) ?: return
+    val resources = LocalResources.current
+    val scope = rememberCoroutineScope()
+    val newMain = LocalNewMainChat.current.takeIf { session.assistant }
+    var busy by remember(session.key) { mutableStateOf(false) }
+    var error by remember(session.key) { mutableStateOf<String?>(null) }
+    val headless = session.assistant
+    val canRestore = headless && !view.pending && actions != null
+    val palette = PersonaTheme.palette
+    Column(
+        modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs)
+            .clip(PersonaTheme.shapes.controlShape).background(palette.statusSurface)
+            .padding(horizontal = 12.dp, vertical = 8.dp).testTag("model-fallback"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+            JIcon(PersonaIcons.error, null, size = 16.dp, tint = palette.caution, modifier = Modifier.padding(top = 1.dp))
+            Column(Modifier.weight(1f).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                val line = PersonaTheme.type.caption
+                Text(stringResource(if (view.pending) R.string.chat_model_fallback_pending_title else R.string.chat_model_fallback_title),
+                    style = line.copy(fontWeight = FontWeight.SemiBold), color = palette.ink)
+                if (view.original.isNotEmpty()) Text(stringResource(R.string.chat_model_fallback_original, view.original), style = line, color = palette.ink2)
+                Text(stringResource(R.string.chat_model_fallback_fallback, view.fallback), style = line, color = palette.ink2)
+                if (view.pending && view.target.isNotEmpty())
+                    Text(stringResource(R.string.chat_model_fallback_pending_target, view.target), style = line, color = palette.ink)
+                if (view.error.isNotEmpty()) Text(stringResource(R.string.chat_model_fallback_error_after, view.error), style = line, color = palette.ink2)
+                if (view.pending) Text(stringResource(R.string.chat_model_fallback_unverified), style = line, color = palette.ink2)
+                Text(stringResource(if (headless) R.string.chat_model_fallback_no_promise else R.string.chat_model_fallback_terminal_hint),
+                    style = line, color = palette.ink3)
+                error?.let { Text(it, style = line, color = palette.danger.text) }
+            }
+        }
+        if (canRestore || newMain != null) FlowRow(Modifier.padding(start = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (canRestore) JButton(stringResource(R.string.chat_model_fallback_restore), {
+                if (busy) return@JButton
+                busy = true
+                error = null
+                scope.launch {
+                    // the session's next push carries model_restore; nothing is claimed before it
+                    try { actions!!.restoreModel(session) }
+                    catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { error = restoreErrorText(resources, e) }
+                    finally { busy = false }
+                }
+            }, kind = JButtonKind.Primary, size = JButtonSize.Small, enabled = session.status != "working" && !busy, loading = busy)
+            if (newMain != null) JButton(stringResource(R.string.chat_model_fallback_new_main), newMain,
+                kind = JButtonKind.Secondary, size = JButtonSize.Small)
+        }
+    }
+}
+
+/**
+ * A Claude Code model_refusal_* record in the transcript (web RefusalNotice): the refused model and the one Claude Code
+ * switched to, the category and scope as recorded, and the refusal's own words verbatim. Never the record's line.
+ */
+@Composable
+internal fun RefusalNotice(refusal: ModelRefusal) {
+    val palette = PersonaTheme.palette
+    val line = PersonaTheme.type.caption
+    val fallback = refusal.subtype == "model_refusal_fallback" && !refusal.fallbackModel.isNullOrEmpty()
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(PersonaTheme.shapes.controlShape).background(palette.statusSurface)
+            .padding(horizontal = 12.dp, vertical = 8.dp).semantics(mergeDescendants = true) {}.testTag("refusal-notice"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top,
+    ) {
+        JIcon(PersonaIcons.error, null, size = 16.dp, tint = palette.caution, modifier = Modifier.padding(top = 1.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(stringResource(R.string.chat_model_fallback_refusal_title), style = line.copy(fontWeight = FontWeight.SemiBold), color = palette.ink)
+            Text(if (fallback) stringResource(R.string.chat_model_fallback_refusal_fallback, refusal.originalModel?.ifEmpty { null } ?: "?", refusal.fallbackModel!!)
+                else stringResource(R.string.chat_model_fallback_refusal_no_switch), style = line, color = palette.ink2)
+            if (fallback && refusal.scope == "session") Text(stringResource(R.string.chat_model_fallback_refusal_session), style = line, color = palette.ink2)
+            refusal.category?.takeIf(String::isNotEmpty)?.let { Text(stringResource(R.string.chat_model_fallback_refusal_category, it), style = line, color = palette.ink2) }
+            refusal.explanation?.takeIf(String::isNotEmpty)?.let { Text(stringResource(R.string.chat_model_fallback_refusal_explanation, it), style = line, color = palette.ink2) }
+            refusal.text?.takeIf(String::isNotBlank)?.let {
+                Text(stringResource(R.string.chat_model_fallback_refusal_text), style = line, color = palette.ink3)
+                Text(it, style = line, color = palette.ink2)
+            }
+        }
+    }
+}
+
+/** The refusal record of a transcript notice, when it is one. */
+internal val Item.refusal: ModelRefusal? get() = modelRefusal?.takeIf { kind == "notice" }

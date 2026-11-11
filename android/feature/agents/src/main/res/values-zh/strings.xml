@@ -69,10 +69,12 @@
     <string name="agents_range_all">全部</string>
     <string name="agents_range_history">历史</string>
     <string name="agents_grouping_current">分组：%1$s</string>
+    <string name="agents_only_machine">只看 %1$s</string>
+    <string name="agents_only_machine_hint">显示全部机器</string>
     <string name="agents_grouping_repo">按仓库</string>
     <string name="agents_grouping_state">按状态</string>
     <string name="agents_grouping_todo">按待办</string>
-    <string name="agents_grouping_machine_space">按电脑和空间</string>
+    <string name="agents_grouping_project">按项目</string>
     <string name="agents_menu_compact">细列表</string>
     <string name="agents_menu_detailed">详细列表</string>
     <string name="agents_menu_collapse_all">全部折叠</string>

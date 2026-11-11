@@ -81,7 +81,6 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
     fun open(p: FilesPane, path: String? = null, line: Int? = null) {
         insertionFocused = composer.focused; focus.clearFocus(); openedPath = path; openedLine = line; pane = p
     }
-    if (editor != null && storedComposer == null) return
     Box(Modifier.fillMaxSize()) {
         // Keep the composer and conversation mounted while browsing the session directory.
         ChatScreen(key, session.chats, session.sender, session.interactions, session.sessions, { if (!closed) navigator.back() },
@@ -91,6 +90,7 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
                 onGit = if (filesAvailable && git?.isRepo == true) ({ open(FilesPane.Git) }) else null,
                 gitLabel = "Git${git?.files?.size?.takeIf { it > 0 }?.let { " · $it" }.orEmpty()}",
                 actions = actions, connection = wiring?.connection ?: session.connection, requestId = requestId, covered = pane != null,
+                worktrees = wiring?.worktrees,
                 onOpenSession = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) },
                 waiting = waiting,
                 onOpenRequest = { chat, request ->

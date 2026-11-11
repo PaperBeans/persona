@@ -29,6 +29,7 @@ require (
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 	golang.org/x/text v0.42.0
+	mvdan.cc/sh/v3 v3.7.0
 	rsc.io/qr v0.2.0
 	tailscale.com v1.103.0-pre.0.20260916030321-a2263542f260
 )

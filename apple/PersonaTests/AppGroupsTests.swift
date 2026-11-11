@@ -39,6 +39,108 @@ struct AppGroupsTests {
         #expect(groups[4].kind == nil && groups[4].title == String(localized: "Other"))
     }
 
+    private static func placed(_ id: String, agent: String = "claude", cwd: String, updated: TimeInterval, machine: String = "m",
+                               extra: [String: Any] = [:]) -> Session {
+        var fields: [String: Any] = ["machine_id": machine, "session_id": id, "title": id, "cwd": cwd, "status": "idle", "state": "idle",
+                                     "agent": agent, "agent_surface": "desktop",
+                                     "updated_at": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: updated))]
+        fields.merge(extra) { _, new in new }
+        do { return try JSON.decoder.decode(Session.self, from: JSONSerialization.data(withJSONObject: fields)) }
+        catch { fatalError("bad fixture: \(error)") }
+    }
+
+    /// As the desktop apps' sidebars: an app's agents by project, the latest project first, each project's agents the
+    /// latest first; the repository's main checkout names a worktree's project; a home directory is no project (Other,
+    /// last); the same folder on another machine is another project.
+    @Test func anAppsAgentsGoByProject() {
+        let sessions = [
+            Self.placed("gateway-old", cwd: "/Users/me/code/gateway", updated: 10),
+            Self.placed("app-new", cwd: "/Users/me/code/app", updated: 50),
+            Self.placed("gateway-new", cwd: "/Users/me/code/gateway/", updated: 40),
+            Self.placed("app-worktree", cwd: "/Users/me/code/app/.claude/worktrees/fix", updated: 20,
+                        extra: ["repo_root": "/Users/me/code/app"]),
+            Self.placed("at-home", cwd: "/Users/me", updated: 60),
+            Self.placed("no-dir", cwd: "", updated: 5),
+            Self.placed("gateway-elsewhere", cwd: "/Users/me/code/gateway", updated: 30, machine: "other-mac"),
+        ]
+        let app = AppGroups.build(sessions)[0]
+        #expect(app.showsProjects)
+        #expect(app.projects.map(\.title) == ["app", "gateway", "gateway", String(localized: "Other")])
+        #expect(app.projects.map { $0.sessions.map(\.sessionID) } == [
+            ["app-new", "app-worktree"], ["gateway-new", "gateway-old"], ["gateway-elsewhere"], ["at-home", "no-dir"],
+        ])
+        #expect(app.projects.last?.isOther == true && app.projects.last?.id == app.id + "/project/other#")
+        #expect(app.projects.first?.machine == sessions[1].machineRef && app.projects.last?.machine == nil)
+        #expect(Set(app.projects.map(\.id)).count == app.projects.count)
+        #expect(app.sessions.count == sessions.count) // the section counts them all
+    }
+
+    /// The Codex App's chats go by the App's projects, with the node's spaces: `codex-project:<root>`. A chat in no project
+    /// is in Other, as in the App's sidebar: the App keeps it in <home>/Documents/Codex/<date>/<name>, and the node names
+    /// one with no folder `codex-chats:`.
+    @Test func codexAppChatsGoByTheAppsProjects() {
+        func chat(_ id: String, root: String?, name: String, updated: TimeInterval) -> Session {
+            Self.placed(id, agent: "codex", cwd: root ?? "", updated: updated,
+                        extra: ["space_kind": "codex_app", "space_id": root.map { "codex-project:" + $0 } ?? "codex-chats:/Users/me/.codex",
+                                "space_name": name, "repo_root": root ?? ""])
+        }
+        let app = AppGroups.build([
+            chat("csv", root: "/Users/me/code/billing", name: "billing", updated: 30),
+            chat("pages", root: "/Users/me/code/billing", name: "billing", updated: 10),
+            chat("scratch", root: "/Users/me/Documents/Codex/2026-11-06/w-i", name: "w-i", updated: 50),
+            chat("no-folder", root: nil, name: "Codex chats", updated: 40),
+            chat("at-home", root: "/Users/me", name: "me", updated: 20),
+        ])[0]
+        #expect(app.projects.map(\.title) == ["billing", String(localized: "Other")])
+        #expect(app.projects.map { $0.sessions.map(\.sessionID) } == [["csv", "pages"], ["scratch", "no-folder", "at-home"]])
+        #expect(AppGroups.isCodexChatFolder("/Users/me/Documents/Codex/2026-10-27/pei-z"))
+        #expect(AppGroups.isCodexChatFolder("C:\\Users\\me\\Documents\\Codex\\2026-10-27\\pei-z"))
+        #expect(!AppGroups.isCodexChatFolder("/Users/me/Documents/Codex/notes/pei-z"))
+        #expect(!AppGroups.isCodexChatFolder("/Users/me/Documents/ChatGPT/botmux"))
+    }
+
+    /// A working tree's project is its repository's, from its path when an older node says nothing; when the home
+    /// directory is a repository itself, a session's own folder is its project; one hub's folder is not another hub's.
+    @Test func projectsFromRepositoriesAndHubs() {
+        let tree = Self.placed("tree", cwd: "/Users/me/code/app/.claude/worktrees/fix", updated: 3)
+        #expect(AppGroups.project(of: tree)?.name == "app")
+        let underHomeRepo = Self.placed("notes", cwd: "/Users/me/notes", updated: 2,
+                                        extra: ["repo_root": "/Users/me", "worktree": "/Users/me"])
+        #expect(AppGroups.project(of: underHomeRepo)?.name == "notes")
+        var otherHub = Self.placed("hub2", cwd: "/Users/me/code/app", updated: 1)
+        otherHub.group = "second-hub"
+        #expect(AppGroups.project(of: otherHub)?.key != AppGroups.project(of: Self.placed("hub1", cwd: "/Users/me/code/app", updated: 1))?.key)
+    }
+
+    /// Other's section (terminals and the like) is not by project: its agents are listed as before.
+    @Test func otherIsNotByProject() {
+        let other = AppGroups.build([Self.session("t", agent: "claude", surface: "cli", updated: 1)])[0]
+        #expect(other.kind == nil && other.projects.isEmpty && !other.showsProjects)
+    }
+
+    /// Every agent in Other: no headings, the section lists them as before.
+    @Test func noProjectsNoHeadings() {
+        let app = AppGroups.build([Self.placed("a", cwd: "/Users/me", updated: 1), Self.placed("b", cwd: "/home/me/", updated: 2)])[0]
+        #expect(!app.showsProjects && app.projects.count == 1)
+        for home in ["/", "~", "/root", "/Users/me", "/home/me", "C:\\Users\\me", "C:\\"] {
+            #expect(AppGroups.isHome(home), "\(home)")
+        }
+        for project in ["/Users/me/code", "/srv/app", "/home/me/work", "C:\\Users\\me\\code"] {
+            #expect(!AppGroups.isHome(project), "\(project)")
+        }
+    }
+
+    /// The Mac's ↑ / ↓ go over what is shown: an open section's open projects, in their order.
+    @MainActor @Test func theMacsRowsFollowTheProjectsAndTheirFolds() throws {
+        let groups = AppGroups.build([
+            Self.placed("a1", cwd: "/x/a", updated: 30), Self.placed("b1", cwd: "/x/b", updated: 20), Self.placed("a2", cwd: "/x/a", updated: 10),
+        ])
+        let folded = try #require(groups.first?.projects.dropFirst().first).id
+        let rows = AgentListRows(order: AgentListOrder(isPinned: { _ in false }, isMuted: { _ in false }), grouping: .app,
+                                 isFolded: { $0 == folded })
+        #expect(rows.apps(groups).map(\.sessionID) == ["a1", "a2"])
+    }
+
     @Test func claudeWhenTheAgentIsUnnamedAndCodexByItsSourceKind() {
         let unnamed = Self.session("unnamed", agent: "", surface: "desktop", updated: 2)
         var byKind = Self.session("by-kind", agent: "", surface: "desktop", updated: 1)

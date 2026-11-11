@@ -12,8 +12,12 @@ an argv array with {message}. Optional environment is a string-to-string map;
 git_timeout and notify_timeout default to 120 and 30 seconds. lock_busy_exit_code
 defaults to 75. An action exiting 75 means an external operation lock is busy:
 other targets still run, with no failure notification or failure-budget charge.
-No shell is involved. Child output is discarded unless a target explicitly sets
-log_output=true, which retains it in private, mode-0600 per-step logs.
+No shell is involved. Action output is inspected privately for a failure summary;
+only its hash is persisted for notification deduplication. Output is discarded
+unless log_output=true retains it in private, mode-0600 per-step logs. Repeated
+failures at the same target with the same summary notify once, even across new
+commits; success clears that target's notification identity. A deployment's
+explicit stale-checkout guard (exit 2) is deferred without charging the budget.
 
 The worktree must be absent or a clean, detached, linked worktree of repo. The
 worker never resets/cleans it or changes the shared checkout's HEAD/index/files.
@@ -62,7 +66,15 @@ GIT_LOCATORS = {
 
 
 class WorkerError(Exception):
-    """An intentionally non-sensitive failure reason."""
+    """An intentionally non-sensitive failure reason with an optional summary hash."""
+
+    def __init__(self, reason, summary_hash=""):
+        super().__init__(reason)
+        self.summary_hash = summary_hash
+
+
+class StaleCheckout(Exception):
+    pass
 
 
 class Busy(Exception):
@@ -178,13 +190,55 @@ def kill_group(pid, sig):
         pass
 
 
-def execute(argv, cwd, env, timeout, capture=False, output_path=None):
-    """Bound every child session; optionally retain output in private action logs."""
+def action_summary(stream, start, branch):
+    """Inspect only this attempt, with bounded line memory; never expose raw output."""
+    end = stream.seek(0, os.SEEK_END)
+    stream.seek(start)
+    first = diagnostic = ""
+    stale = False
+    guard = re.compile(
+        r"deploy: this checkout \([0-9a-f]{7,64}\) is missing commits on origin/"
+        + re.escape(branch) + r" \([0-9a-f]{7,64}\)\.")
+    while True:
+        raw = stream.readline(min(4096, end - stream.tell()))
+        if not raw:
+            break
+        # Discard the rest of oversized lines rather than treating chunks as lines.
+        complete = raw.endswith(b"\n") or len(raw) < 4096
+        line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", raw.decode("utf-8", "replace")).strip()
+        if complete and guard.fullmatch(line):
+            stale = True
+        if line and not first:
+            first = line
+        if not diagnostic and re.search(
+                r"\b(error|fatal|failed|failure|panic|undefined)\b|\.[A-Za-z]+:\d+(?::\d+)?:",
+                line, re.I):
+            if not re.fullmatch(r"error during build:", line, re.I):
+                diagnostic = line
+        if not complete:
+            while raw and not raw.endswith(b"\n"):
+                raw = stream.readline(min(4096, end - stream.tell()))
+    summary = diagnostic or first
+    # Revision identifiers and log timestamps change even when the cause does not.
+    summary = re.sub(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?",
+                     "<timestamp>", summary)
+    summary = re.sub(r"\b\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\b", "<time>", summary)
+    summary = re.sub(r"\b[0-9a-f]{7,64}\b", "<revision>", summary)
+    summary = " ".join(summary.split())
+    return hashlib.sha256(summary.encode()).hexdigest() if summary else "", stale
+
+
+def execute(argv, cwd, env, timeout, capture=False, output_path=None, action_branch=None):
+    """Bound every child session; inspect action output without keeping it in RAM."""
     output_stream = None
+    start = 0
     try:
         if output_path is not None:
-            fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            output_stream = os.fdopen(fd, "ab")
+            fd = os.open(output_path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
+            output_stream = os.fdopen(fd, "a+b")
+            start = output_stream.seek(0, os.SEEK_END)
+        elif action_branch is not None:
+            output_stream = tempfile.TemporaryFile(mode="w+b")
         process = subprocess.Popen(
             argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE if capture else output_stream or subprocess.DEVNULL,
@@ -208,7 +262,15 @@ def execute(argv, cwd, env, timeout, capture=False, output_path=None):
             process.communicate()
             raise WorkerError("timeout") from None
         if process.returncode:
-            raise WorkerError(f"exit-{process.returncode}")
+            # Descendants inherited the output's file offset. Stop every writer
+            # before rewinding it, even when the command's leader already exited.
+            kill_group(process.pid, signal.SIGTERM)
+            kill_group(process.pid, signal.SIGKILL)
+            summary_hash, stale = (action_summary(output_stream, start, action_branch)
+                                   if action_branch is not None else ("", False))
+            if process.returncode == 2 and stale:
+                raise StaleCheckout() from None
+            raise WorkerError(f"exit-{process.returncode}", summary_hash)
         return output or b""
     finally:
         # Let operation-lock wrappers terminate their nested child groups before
@@ -332,6 +394,11 @@ def read_state(path, identity=None):
                     raise WorkerError("invalid-state")
                 if "build" in record and (type(record["build"]) is not int or record["build"] < 1):
                     raise WorkerError("invalid-state")
+            notified = state.get("notified_failures", {})
+            if (not isinstance(notified, dict) or not notified.keys() <= TARGETS | {"worker"}
+                    or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+                           for value in notified.values())):
+                raise WorkerError("invalid-state")
             # Validate persisted messages before allowing them to enter logs/notifications.
             for message in state["outbox"]:
                 if (not isinstance(message, str) or not re.fullmatch(
@@ -369,10 +436,25 @@ class Worker:
         for message in list(self.state["outbox"]):
             self.deliver(message)
 
-    def failure(self, target, commit, result):
+    def recovered(self, target):
+        notified = self.state.get("notified_failures", {})
+        if target in notified:
+            del notified[target]
+            log(target, "-", "recovered")
+
+    def failure(self, target, commit, result, summary_hash=""):
         log(target, commit, result)
+        fingerprint = hashlib.sha256((result + "\0" + summary_hash).encode()).hexdigest()
+        notified = self.state.setdefault("notified_failures", {})
+        if notified.get(target) == fingerprint:
+            # Persist the action's budget even when no new notification is queued.
+            self.save()
+            log(target, commit, "failure-notification-suppressed")
+            return
+        notified[target] = fingerprint
         message = f"autorelease target={target} commit={commit} result={result}"
-        self.state["outbox"].append(message)
+        if message not in self.state["outbox"]:
+            self.state["outbox"].append(message)
         self.save()
         self.deliver(message)
 
@@ -396,13 +478,20 @@ class Worker:
         return False
 
     def run_targets(self, head, dry_run=False):
+        # Baseline diffs are preflight too: a missing commit must not clear a
+        # continuing worker incident. Persist recovery before any long action.
+        relevance = {name: self.relevant(target, self.state["targets"].get(name, {}).get("last_success"), head)
+                     for name, target in self.config["targets"].items()}
+        if not dry_run:
+            self.recovered("worker")
+            self.save()
         failed = False
         deferred = False
         for name, target in self.config["targets"].items():
             record = self.state["targets"].setdefault(name, {})
             if record.get("budget_commit") != head:
                 record.update(budget_commit=head, failures=0)
-            if not self.relevant(target, record.get("last_success"), head):
+            if not relevance[name]:
                 record["last_checked"] = head
                 if not dry_run:
                     self.save()
@@ -442,23 +531,28 @@ class Worker:
                             logs.mkdir(parents=True, exist_ok=True, mode=0o700)
                             output_path = logs / f"{name}-{head}-{record['build']}-step-{index}.log"
                         execute([arg.format(**values) for arg in step], self.config["worktree"],
-                                env, target["timeout"], output_path=output_path)
+                                env, target["timeout"], output_path=output_path,
+                                action_branch=self.config["branch"])
                         validate_worktree(self.config, head)
                     except WorkerError as error:
                         if str(error) == "exit-75":
                             raise Busy() from None
-                        raise WorkerError(f"step-{index}-{error}") from None
+                        raise WorkerError(f"step-{index}-{error}", error.summary_hash) from None
                     log(name, head, f"step-{index}-success")
             except Busy:
                 deferred = True
                 log(name, head, "action-lock-busy")
                 continue
+            except StaleCheckout:
+                log(name, head, "checkout-stale-deferred")
+                continue
             except WorkerError as error:
                 failed = True
                 record["failures"] += 1
-                self.failure(name, head, str(error))
+                self.failure(name, head, str(error), error.summary_hash)
                 continue
             record.update(last_success=head, failures=0)
+            self.recovered(name)
             self.save()
             log(name, head, "success")
         return failed, deferred
@@ -485,6 +579,8 @@ def run(config, dry_run=False, inject_failure=False):
         if inject_failure:
             worker = Worker(config, read_state(directory / "injection.json"), directory / "injection.json")
             worker.retry_outbox()
+            # An explicit injection is a delivery test, not a continuing incident.
+            worker.recovered("worker")
             worker.failure("worker", "-", "injected-failure")
             return 1
         validate_repo(config)

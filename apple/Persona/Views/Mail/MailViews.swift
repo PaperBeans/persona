@@ -594,7 +594,7 @@ struct AddMailAccountView: View {
                         TextField(String(localized: "Gmail address"), text: $form.email).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
                         SecretField(String(localized: "App password"), filled: String(localized: "Filled in. Tap Connect."), text: $form.password, identifier: "mail.password")
                     } footer: {
-                        Text("Once google.client_id is in the manager's manager.json and the hub restarts, “Sign In with Google” appears here (a one-time setup). Until then, add the account with an app password: turn on 2-Step Verification for the Google account, then create a 16-character password under Google Account › Security › App passwords and enter it here (not your Google password).")
+                        Text("Once google.client_id is in the assistant's manager.json and the hub restarts, “Sign In with Google” appears here (a one-time setup). Until then, add the account with an app password: turn on 2-Step Verification for the Google account, then create a 16-character password under Google Account › Security › App passwords and enter it here (not your Google password).")
                     }
                 } else if form.kind == .gmail {
                     Section {

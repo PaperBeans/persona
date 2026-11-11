@@ -940,5 +940,5 @@ var errHandoffRefused = &rpc.Error{Code: devicewire.CodeHandoffRefused, Message:
 
 // refusesHandoff: a hub-relayed call that would stage values or start with a ticket.
 func refusesHandoff(method string, params json.RawMessage) bool {
-	return method == proto.MethodSecretStage || method == "session.start" && startHasSecretTicket(params)
+	return method == proto.MethodSecretStage || devicewire.IsSessionStart(method) && startHasSecretTicket(params)
 }

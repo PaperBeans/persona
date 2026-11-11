@@ -22,6 +22,8 @@ interface TasksApi {
     suspend fun patchTodo(id: String, title: String? = null, notes: String? = null, done: Boolean? = null): Todo = error("patchTodo not implemented")
     /** Moves a to-do's due date (`PATCH /api/v1/todos/{id}` with `due_at` or `due_date`, the other cleared; #2045). */
     suspend fun setTodoDue(id: String, due: persona.core.contracts.TodoDue): Todo = error("setTodoDue not implemented")
+    /** The detail page's due date, reminder and priority, all three in one PATCH (#4636). */
+    suspend fun setTodoPlan(id: String, plan: persona.core.contracts.TodoPlan): Todo = error("setTodoPlan not implemented")
     suspend fun deleteTodo(id: String) = Unit
     suspend fun linkTodoAgent(todoId: String, machineId: String, sessionId: String) = Unit
     suspend fun unlinkTodoAgent(todoId: String, machineId: String, sessionId: String) = Unit

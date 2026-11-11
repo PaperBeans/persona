@@ -10,8 +10,6 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.Text
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -140,7 +138,8 @@ fun AssistantScreen(
     val drawerState: MutableState<Boolean> = sharedSidebar?.opened ?: rememberSaveable { mutableStateOf(false) }
     var drawerOpen by drawerState
     var sidebarVisible by rememberSaveable { mutableStateOf(true) }
-    val snackbar = remember { SnackbarHostState() }
+    // A fallback for when no app feedback is provided (previews, tests): the page's own toast, as the root's.
+    val toast = persona.core.designsystem.rememberToastState()
     val feedback = persona.core.designsystem.LocalAppFeedback.current
     var query by rememberSaveable(managerChoice.hubId, managerChoice.shown) { mutableStateOf("") }
     val transientComposer = key(managerChoice.hubId, managerChoice.shown) { rememberChatComposerState() }
@@ -159,7 +158,8 @@ fun AssistantScreen(
         (draftEditor?.error ?: remember { MutableStateFlow<Int?>(null) }).collectAsStateWithLifecycle()
     }
     val composer = savedComposer ?: transientComposer
-    val draftReady = draftEditor == null || savedComposer != null
+    val draftRead by key(draftEditor) { (draftEditor?.ready ?: remember { MutableStateFlow(true) }).collectAsStateWithLifecycle() }
+    val draftReady = draftEditor == null || draftRead
     LaunchedEffect(draftEditor, savedComposer) {
         savedComposer?.let { state -> snapshotFlow { state.draft }.collect { draftEditor?.changed(it) } }
     }
@@ -196,16 +196,15 @@ fun AssistantScreen(
     var showAllRecent by rememberSaveable { mutableStateOf(false) }
     var autoOpen by rememberAutoOpen() // "Automatic chats", folded until opened (kept on this phone)
     var pinning by remember { mutableStateOf(false) }
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val copy = rememberCopy()
     val resources = androidx.compose.ui.platform.LocalResources.current
     val locale = currentLocale
     val words = conversationWords()
     fun say(message: String) {
-        if (feedback?.notice(message) != true) scope.launch { snackbar.showSnackbar(message) }
+        if (feedback?.notice(message) != true) toast.show(persona.core.designsystem.FeedbackNotice(message))
     }
     fun copyId(key: SessionKey) {
-        clipboard.setText(androidx.compose.ui.text.AnnotatedString(key.sessionId))
-        say(resources.getString(R.string.assistant_copied_session_id))
+        copy(key.sessionId, resources.getString(R.string.assistant_copied_session_id))
     }
     // Pins live on the hub (the Agents list shares them); one change at a time, a failure goes to the usual place.
     fun togglePins(keys: List<SessionKey>) {
@@ -216,7 +215,7 @@ fun AssistantScreen(
             try { keys.forEach { toggle(it) } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
-                if (feedback?.failure(error) != true) snackbar.showSnackbar(persona.core.designsystem.operationFeedback(error).text.resolve(resources))
+                if (feedback?.failure(error) != true) toast.show(persona.core.designsystem.FeedbackNotice(persona.core.designsystem.operationFeedback(error).text.resolve(resources), style = persona.core.designsystem.FeedbackStyle.Error))
             }
             finally { pinning = false }
         }
@@ -367,7 +366,7 @@ fun AssistantScreen(
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 archived = archived - session.key
-                if (feedback?.failure(error) != true) snackbar.showSnackbar(persona.core.designsystem.operationFeedback(error).text.resolve(resources))
+                if (feedback?.failure(error) != true) toast.show(persona.core.designsystem.FeedbackNotice(persona.core.designsystem.operationFeedback(error).text.resolve(resources), style = persona.core.designsystem.FeedbackStyle.Error))
             }
         }
     }
@@ -409,7 +408,7 @@ fun AssistantScreen(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                if (feedback?.failure(error) != true) snackbar.showSnackbar(resources.getString(R.string.assistant_health_load_failed))
+                if (feedback?.failure(error) != true) toast.show(persona.core.designsystem.FeedbackNotice(resources.getString(R.string.assistant_health_load_failed), style = persona.core.designsystem.FeedbackStyle.Error))
             } finally {
                 healthBusy = false
             }
@@ -418,7 +417,8 @@ fun AssistantScreen(
     suspend fun newChatRefused(error: Exception) {
         // A coded refusal (no computer, Claude Code missing…) says what is missing instead of "Can't start a chat right now".
         val coded = persona.core.designsystem.operationFeedback(error).takeIf { it.action.readinessAction() != null }
-        scope.launch { snackbar.showSnackbar(coded?.text?.resolve(context) ?: resources.getString(R.string.assistant_new_conversation_failed)) }
+        val failed = coded?.text?.resolve(context) ?: resources.getString(R.string.assistant_new_conversation_failed)
+        if (feedback?.notice(failed, persona.core.designsystem.FeedbackStyle.Error) != true) toast.show(persona.core.designsystem.FeedbackNotice(failed, style = persona.core.designsystem.FeedbackStyle.Error))
         if (coded != null && readinessOn) mainReadiness.refresh()
     }
     fun submit() {
@@ -489,9 +489,8 @@ fun AssistantScreen(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                if (feedback?.failure(error) != true) scope.launch {
-                    snackbar.showSnackbar(persona.core.designsystem.operationFeedback(error).text.resolve(resources))
-                }
+                if (feedback?.failure(error) != true)
+                    toast.show(persona.core.designsystem.FeedbackNotice(persona.core.designsystem.operationFeedback(error).text.resolve(resources), style = persona.core.designsystem.FeedbackStyle.Error))
             } finally {
                 sending = false
             }
@@ -641,6 +640,7 @@ fun AssistantScreen(
     }
     val body: @Composable (Boolean) -> Unit = { wide ->
         val hasComposer = active == null || !hasChat || demo
+        Box(Modifier.fillMaxSize()) {
         JPage(
             title = LocalPersonaName.current,
             modifier = Modifier.fillMaxSize().imePadding(),
@@ -667,12 +667,8 @@ fun AssistantScreen(
                     )
                 }
             },
-            bottomBar = if (hasComposer || snackbar.currentSnackbarData != null) ({
+            bottomBar = if (hasComposer) ({
                 Column {
-                    SnackbarHost(snackbar) { data ->
-                        JNotice(data.visuals.message, Modifier.padding(horizontal = pagePadding),
-                            actionLabel = stringResource(R.string.assistant_got_it), onAction = { data.dismiss() })
-                    }
                     if (hasComposer && active == null && !viewingMainQueue) {
                         val cardModifier = Modifier.padding(horizontal = pagePadding).padding(bottom = Tokens.Space.s)
                         if (blocking != null) ReadinessStepCard(blocking, { runReadinessAction(it) }, cardModifier,
@@ -695,7 +691,7 @@ fun AssistantScreen(
                             canClear = false, service = composerService?.takeIf { uploadTarget.machineId.isNotBlank() && !healthPage },
                             onSend = ::submit, onCommand = { composer.insert(it, composer.focused) },
                             onNotice = { message ->
-                                if (feedback?.notice(message) != true) scope.launch { snackbar.showSnackbar(message) }
+                                if (feedback?.notice(message) != true) toast.show(persona.core.designsystem.FeedbackNotice(message))
                             }, enabled = draftReady && !sending && managers.offline == null,
                             placeholder = managers.offline ?: if (healthPage) stringResource(R.string.assistant_health_placeholder)
                                 else stringResource(R.string.assistant_composer_placeholder, LocalPersonaName.current),
@@ -725,8 +721,12 @@ fun AssistantScreen(
                     if (demo) AssistantDemoNotice()
                     Box(Modifier.weight(1f)) {
                         CompositionLocalProvider(LocalChromeInsets provides if (demo) host else host.copy(top = padding.calculateTopPadding())) {
-                            if (assistantChatContent != null) assistantChatContent(active, AssistantChatOptions(readOnlyNote = managers.offline))
-                            else chatContent?.invoke(active)
+                            // The refusal fallback card's "New main chat" (#2528): the main conversation's own dialog.
+                            CompositionLocalProvider(persona.feature.chat.LocalNewMainChat provides
+                                (if (onMain && mainActions.newMain) ({ newMainOpen = true }) else null)) {
+                                if (assistantChatContent != null) assistantChatContent(active, AssistantChatOptions(readOnlyNote = managers.offline))
+                                else chatContent?.invoke(active)
+                            }
                         }
                         // A compaction of the main conversation: under the bar, over the conversation.
                         if (onMain) compaction.line?.let { line ->
@@ -761,6 +761,9 @@ fun AssistantScreen(
                     }, needsYou = needsYou, onNeed = onOpenNeed,
                     onMore = onOpenInbox ?: { navigator.navigate(InboxRoute) })
             }
+        }
+            // The page's own toast (no app feedback), at the top, where the root draws the app's.
+            persona.core.designsystem.JToastHost(toast, Modifier.align(Alignment.TopCenter).statusBarsPadding())
         }
     }
     // A run or a follow-up opened from "Proactive" (here or inside the settings page) shows its conversation in place.
@@ -850,7 +853,10 @@ fun AssistantScreen(
                         if (active == session.key) newConversation()
                         assistantAttempt { repository.refresh() }
                     } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { snackbar.showSnackbar(resources.getString(R.string.assistant_end_failed)) }
+                    catch (_: Exception) {
+                        val failed = resources.getString(R.string.assistant_end_failed)
+                        if (feedback?.notice(failed, persona.core.designsystem.FeedbackStyle.Error) != true) toast.show(persona.core.designsystem.FeedbackNotice(failed, style = persona.core.designsystem.FeedbackStyle.Error))
+                    }
                     finally { endingBusy = false }
                 }
             }, dismiss = stringResource(R.string.assistant_cancel) to { if (!endingBusy) ending = null })

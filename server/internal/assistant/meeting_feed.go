@@ -98,6 +98,12 @@ func (s *Service) attendResume(e *kb.Engine) {
 	for _, r := range e.AttendingRecordings() {
 		s.meetingKick(r.ID)
 	}
+	for _, r := range e.RoomMeetings() { // a room to start, settle, end or feed (meeting_room.go)
+		switch r.Conv.Room.State {
+		case kb.RoomStarting, kb.RoomReady, kb.RoomUnavailable:
+			s.meetingKick(r.ID)
+		}
+	}
 }
 
 // attendLookAt has recording id looked at at at, unless a look is due as early already.
@@ -181,10 +187,12 @@ func (s *Service) attendLook(ctx context.Context, id string) time.Time {
 	case err != nil:
 		s.logf("meeting %s: %v", short(id), err)
 		return now.Add(feedRetry)
+	case r.RoomMeeting():
+		return s.roomLook(ctx, e, id, l, r, now) // its own room attends it (meeting_room.go)
 	case l.EndFed:
 		return time.Time{} // later changes are stored but feed nothing
 	}
-	if r.Attendance == "" {
+	if !r.Attending() {
 		// Off: nothing is fed while it is, and turned on again the session gets the meeting so far.
 		s.attendNote(e, id, func(l *kb.Live) { l.FedTo, l.Problem = nil, "" })
 		return time.Time{}
@@ -308,6 +316,7 @@ type feedBatch struct {
 	asks    map[string]bool // their ids, to note as fed
 	soFar   bool
 	end     bool
+	room    bool // to the meeting's own room: no meeting-turn mark, and it writes nothing after it
 }
 
 func (b feedBatch) empty() bool { return len(b.lines) == 0 && len(b.answers) == 0 }
@@ -365,7 +374,8 @@ func feedText(r kb.Recording, b feedBatch, lang string, loc *time.Location) stri
 	at := func(sec float64) string {
 		return r.StartedAt.Add(time.Duration(sec * float64(time.Second))).In(loc).Format("15:04")
 	}
-	d := prompts.MeetingFeed{Lang: lang, Title: feedMeetingName(r, loc), Role: r.Attendance, SoFar: b.soFar, LeftOut: b.leftOut, Ended: b.end}
+	d := prompts.MeetingFeed{Lang: lang, Title: feedMeetingName(r, loc), Role: r.AttendanceRole(), SoFar: b.soFar, LeftOut: b.leftOut,
+		Ended: b.end, Room: b.room}
 	for _, sg := range b.lines {
 		d.Lines = append(d.Lines, prompts.MeetingFeedLine{At: at(sg.Start), Text: sg.Text})
 	}
@@ -388,9 +398,12 @@ func (s *Service) feedSend(ctx context.Context, t attendeeTarget, r kb.Recording
 	loc := s.location(ctx)
 	text := feedText(r, b, string(s.lang(ctx)), loc)
 	source := &proto.MessageSource{Kind: proto.SourceMeeting, Title: feedMeetingName(r, loc)}
-	marked, err := s.meetingTurnSent(t.ref.MachineID, t.ref.SessionID, r.ID, t.persona)
-	if err != nil {
-		return time.Time{}, err
+	var marked time.Time
+	if !b.room { // a room's every turn is a side exchange already (meeting_turns.go): no mark to lift
+		var err error
+		if marked, err = s.meetingTurnSent(t.ref.MachineID, t.ref.SessionID, r.ID, t.persona); err != nil {
+			return time.Time{}, err
+		}
 	}
 	method, params := DeviceSessionSend, map[string]any{"session_id": t.ref.SessionID, "text": text, "message_source": source}
 	if t.persona {
@@ -399,7 +412,7 @@ func (s *Service) feedSend(ctx context.Context, t attendeeTarget, r kb.Recording
 	sctx, cancel := context.WithTimeout(ctx, feedSendWait)
 	defer cancel()
 	if err := s.call(sctx, t.ref.MachineID, method, params, nil); err != nil {
-		if feedRefused(err) || !errors.Is(err, context.DeadlineExceeded) {
+		if !b.room && (feedRefused(err) || !errors.Is(err, context.DeadlineExceeded)) {
 			s.meetingTurnUnsent(t.ref.MachineID, t.ref.SessionID, marked) // no turn comes of it (one that timed out may have gone)
 		}
 		return time.Time{}, err

@@ -54,6 +54,7 @@ class HttpChatActions internal constructor(
                     action.permissionMode?.let { put("permission_mode", it) }
                     action.effort?.let { put("effort", it) }
                     action.ultracode?.let { put("ultracode", it) }
+                    action.dismissUltracodeLost?.let { put("ultracode_dismiss_lost", it) }
                 }
                 else -> buildJsonObject { }
             }
@@ -130,6 +131,13 @@ class HttpChatActions internal constructor(
         else -> failure
     }
 
+    override suspend fun restoreModel(session: Session) {
+        // The hub waits up to 30 s for the node: the slow client's timeout covers it.
+        slow(api("sessions", session.machineId, session.sessionId, "restore-model"), "POST", ByteArray(0).toRequestBody()).use {
+            if (!it.isSuccessful) throw HubFailure.from(it)
+        }
+    }
+
     override suspend fun info(session: Session): SessionInfo =
         request(api("sessions", session.machineId, session.sessionId, "info"), "GET", null).use {
             if (!it.isSuccessful) throw HubFailure.from(it)
@@ -154,7 +162,8 @@ class HttpChatActions internal constructor(
                         (action.permissionMode == null || current.permissionMode == action.permissionMode) &&
                         (action.effort == null || current.effort == action.effort) &&
                         // a queued switch went through too: the node applies it after the turn
-                        (action.ultracode == null || current.ultracode == action.ultracode || current.ultracodePending)
+                        (action.ultracode == null || current.ultracode == action.ultracode || current.ultracodePending) &&
+                        (action.dismissUltracodeLost == null || current.ultracodeLostAt == null)
                     ChatAction.Close -> current == null || !current.isLive
                     ChatAction.Interrupt -> current != null && current.status in listOf("idle", "done", "offline")
                     ChatAction.Attach -> current?.attached == true

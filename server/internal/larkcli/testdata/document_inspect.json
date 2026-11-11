@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "data": {
+    "url": "https://example.feishu.cn/docx/doc_example",
+    "canonical_url": "https://example.feishu.cn/docx/doc_example",
+    "file_token": "doc_example",
+    "file_type": "docx",
+    "title": "Example design document"
+  }
+}

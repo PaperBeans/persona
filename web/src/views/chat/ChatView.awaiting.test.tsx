@@ -88,6 +88,8 @@ describe("editing the last Claude prompt (#2945, #4503)", () => {
     await flush();
   };
   const editButton = () => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === t("rewind.edit_last"));
+  // past EDIT_SEND_SETTLE_MS: the wait for Claude's box after a rewind (#4605)
+  const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 2000)); });
   const rewound = (input_cleared = true) => new Response(JSON.stringify({ prompt, restore: "conversation", input_cleared, code_restored: false }));
 
   it.each(["Esc Esc", "↑"])("%s puts the last prompt in the box to edit; the rewind runs only when the edit is sent", async (how) => {
@@ -118,7 +120,13 @@ describe("editing the last Claude prompt (#2945, #4503)", () => {
     expect(messages()).toHaveLength(0);
     await act(async () => finish());
     await flush();
+    // still read-only while Claude's box settles (#4605), then the message
+    expect(messages()).toHaveLength(0);
+    expect(box().readOnly).toBe(true);
+    await settle();
+    await flush();
     expect(messages()).toHaveLength(1);
+    expect(JSON.parse(messages()[0][1].body).clear_draft).toBe(prompt);
     expect(JSON.parse(messages()[0][1].body).text).toBe("> Quoted text\n\nRevised paragraph");
     expect(box().value).toBe("");
     expect(bar()).toBeNull();
@@ -166,7 +174,7 @@ describe("editing the last Claude prompt (#2945, #4503)", () => {
     expect(bar()).not.toBeNull();
   });
 
-  it("still sends after a rewind that left the old prompt in Claude's input (the node's input_draft card takes it from there)", async () => {
+  it("after a rewind that left the old prompt in Claude's input, sends with that exact prompt to clear (#4605)", async () => {
     fetcher.mockImplementation(async (url) => (String(url).endsWith("/rewind") ? rewound(false) : new Response("{}")));
     await mountError();
     press("ArrowUp");
@@ -174,7 +182,10 @@ describe("editing the last Claude prompt (#2945, #4503)", () => {
     act(() => sendButton().click());
     await flush();
     expect(rewinds()).toHaveLength(1);
+    await settle();
+    await flush();
     expect(messages()).toHaveLength(1);
+    expect(JSON.parse(messages()[0][1].body).clear_draft).toBe(prompt);
   });
 
   it("a newer message ends the edit: the words stay and go as a new message, with no rewind", async () => {
@@ -191,6 +202,74 @@ describe("editing the last Claude prompt (#2945, #4503)", () => {
     await flush();
     expect(rewinds()).toHaveLength(0);
     expect(messages()).toHaveLength(1);
+  });
+
+  // A model of the node and Claude seen live (#4605): the rewind answers at once, and Claude puts the old prompt back into
+  // its input box a moment later. A message typed before that is glued after the old prompt; one typed after it is
+  // refused (input_draft) unless it clears exactly that draft.
+  const nodeModel = (box: { draft: string; refill?: string }) => {
+    const delivered: string[] = [];
+    let refilling = false;
+    fetcher.mockImplementation(async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/rewind")) {
+        refilling = true;
+        setTimeout(() => {
+          refilling = false;
+          box.draft = box.refill ?? prompt;
+        }, 300);
+        return rewound();
+      }
+      if (u.endsWith("/messages")) {
+        const body = JSON.parse(String((init as RequestInit).body));
+        if (refilling) {
+          delivered.push(prompt + body.text);
+          return new Response(JSON.stringify({ ok: true }));
+        }
+        if (box.draft && body.clear_draft !== box.draft) {
+          return new Response(JSON.stringify({ error: "There is a draft in the terminal.", code: "input_draft", delivered: "none", draft: box.draft }), { status: 409 });
+        }
+        box.draft = "";
+        delivered.push(body.text);
+        return new Response(JSON.stringify({ ok: true }));
+      }
+      return new Response("{}");
+    });
+    return delivered;
+  };
+
+  it("sends the edit once Claude's box has settled, clearing exactly the old prompt it put back: never old + new (#4605)", async () => {
+    const delivered = nodeModel({ draft: "" });
+    await mountError();
+    press("ArrowUp");
+    await flush();
+    typeInto("Revised paragraph");
+    act(() => sendButton().click());
+    await flush();
+    expect(rewinds()).toHaveLength(1);
+    await settle();
+    await flush();
+    expect(delivered).toEqual(["> Quoted text\n\nRevised paragraph"]);
+    expect(JSON.parse(messages()[0][1].body).clear_draft).toBe(prompt);
+    expect(box().value).toBe("");
+  });
+
+  it("keeps the edit in the box, unsent, when Claude's box holds something else after the rewind (#4605)", async () => {
+    const delivered = nodeModel({ draft: "", refill: "typed at the computer" });
+    await mountError();
+    press("ArrowUp");
+    await flush();
+    typeInto("Revised paragraph");
+    act(() => sendButton().click());
+    await flush();
+    await settle();
+    await flush();
+    expect(messages()).toHaveLength(1);
+    expect(delivered).toEqual([]);
+    expect(box().value).toBe("Revised paragraph");
+    expect(box().readOnly).toBe(false);
+    expect(bar()).toBeNull();
+    expect(getQuotes("hub/c1").list.map((q) => q.text)).toEqual(["Quoted text"]);
   });
 
   it.each(["codex", "working", "offline", "needs_you", "assistant"] as const)("offers no edit in an unsupported state: %s", async (kind) => {

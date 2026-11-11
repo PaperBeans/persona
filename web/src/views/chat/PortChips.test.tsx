@@ -68,6 +68,18 @@ describe("port chips under an agent's answer", () => {
     expect(request.mock.calls.map((c) => c[0]).sort()).toEqual(["/machines/m1/ports/4000", "/machines/m1/ports/8000"]);
   });
 
+  it.each([
+    "https://example.com/?next=[::1]:4173/app",
+    "https://example.com/path(localhost:4173/app)",
+    "https://example.com/path(http://localhost:4173/app)",
+  ])("offers no chip, local probe or preview for an address inside %s", async (text) => {
+    request.mockResolvedValue({ listening: true, http: true });
+    await render(text);
+    expect(chips()).toHaveLength(0);
+    expect(request).not.toHaveBeenCalled();
+    expect(getPanel()).toBeNull();
+  });
+
   it("asks once while the answer is fresh, however often it is drawn again", async () => {
     await render();
     await render(ANSWER + " ");

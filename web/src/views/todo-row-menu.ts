@@ -95,15 +95,15 @@ export function todoRowMenu(todo: Todo, open: boolean, now: number, act: TodoRow
     },
     {
       key: "due",
-      label: t("todos.menu_due"),
+      label: t("todos-menu.due"),
       icon: "calendar",
       onSelect: () => {},
       children: [
-        dueRow("due-today", t("todos.menu_due_today"), due.today),
-        dueRow("due-tomorrow", t("todos.menu_due_tomorrow"), due.tomorrow),
-        dueRow("due-next-week", t("todos.menu_due_next_week"), due.nextWeek),
-        { key: "due-pick", label: t("todos.menu_due_pick"), onSelect: act.pickDue },
-        { key: "due-none", label: t("todos.menu_due_none"), divider: true, disabled: dueDay === undefined, onSelect: () => act.save({ due_at: null }) },
+        dueRow("due-today", t("todos-menu.due_today"), due.today),
+        dueRow("due-tomorrow", t("todos-menu.due_tomorrow"), due.tomorrow),
+        dueRow("due-next-week", t("todos-menu.due_next_week"), due.nextWeek),
+        { key: "due-pick", label: t("todos-menu.due_pick"), onSelect: act.pickDue },
+        { key: "due-none", label: t("todos-menu.due_none"), divider: true, disabled: dueDay === undefined, onSelect: () => act.save({ due_at: null }) },
       ],
     },
     {
@@ -112,12 +112,12 @@ export function todoRowMenu(todo: Todo, open: boolean, now: number, act: TodoRow
       icon: "bell",
       onSelect: () => {},
       children: [
-        { key: "remind-hour", label: t("todos.menu_remind_hour"), hint: clockTime(remind.inHour), onSelect: () => act.save({ remind_at: new Date(remind.inHour).toISOString() }) },
-        { key: "remind-tomorrow", label: t("todos.menu_remind_tomorrow"), hint: clockTime(remind.tomorrow), onSelect: () => act.save({ remind_at: new Date(remind.tomorrow).toISOString() }) },
-        { key: "remind-none", label: t("todos.menu_remind_none"), divider: true, disabled: !todo.remind_at, onSelect: () => act.save({ remind_at: null }) },
+        { key: "remind-hour", label: t("todos-menu.remind_hour"), hint: clockTime(remind.inHour), onSelect: () => act.save({ remind_at: new Date(remind.inHour).toISOString() }) },
+        { key: "remind-tomorrow", label: t("todos-menu.remind_tomorrow"), hint: clockTime(remind.tomorrow), onSelect: () => act.save({ remind_at: new Date(remind.tomorrow).toISOString() }) },
+        { key: "remind-none", label: t("todos-menu.remind_none"), divider: true, disabled: !todo.remind_at, onSelect: () => act.save({ remind_at: null }) },
       ],
     },
-    ...(todo.done_at ? [] : [{ key: "hand-over", label: t("todos.menu_hand_over"), icon: "hand", divider: true, onSelect: act.handOver } satisfies MenuItem]),
+    ...(todo.done_at ? [] : [{ key: "hand-over", label: t("todos-menu.hand_over"), icon: "hand", divider: true, onSelect: act.handOver } satisfies MenuItem]),
     { key: "delete", label: t("todos.delete_menu"), icon: "trash", danger: true, divider: true, onSelect: act.remove },
   ];
 }

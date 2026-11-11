@@ -237,6 +237,12 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 		return nil, ErrNotFound
 	}
 	d.Meta = raw
+	if kind == KindRecording {
+		e.Store.recFilesMu.RLock()
+		m, _ := e.Store.readMeeting(id)
+		e.Store.recFilesMu.RUnlock()
+		d.Meta = metaWithMeeting(raw, m)
+	}
 	if kind == KindProject {
 		d.Log = e.Store.Log(id, 30)
 		if p, ok := e.Store.Project(id); ok {

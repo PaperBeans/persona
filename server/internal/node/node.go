@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/identity"
 	"io"
 	"log"
@@ -571,6 +572,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		CreationID       string        `json:"creation_id"`
 		Incarnation      string        `json:"incarnation"`
 		Cwd              string        `json:"cwd"`
+		IdentityOnly     bool          `json:"identity_only"`
 		Launcher         string        `json:"launcher"`
 		AgentType        string        `json:"agent_type"`
 		Model            string        `json:"model"`
@@ -627,11 +629,14 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		ResumeOnly     bool            `json:"resume_only"`
 		IsMain         bool            `json:"is_main"`
 		Interject      bool            `json:"interject_background"`
-		AtItemID       string          `json:"at_item_id"` // session.fork: the reply to branch off at
-		Refresh        bool            `json:"refresh"`    // launchers.models: ask again, not the kept list
-		Configured     bool            `json:"configured"` // launchers.models, .probe, .http, .model.check: hub.json names this launcher
-		Guest          *guestParams    `json:"guest"`      // assistant.send: a new guest conversation (assistant_guest.go)
+		AtItemID       string          `json:"at_item_id"`     // session.fork: the reply to branch off at
+		Refresh        bool            `json:"refresh"`        // launchers.models: ask again, not the kept list
+		Configured     bool            `json:"configured"`     // launchers.models, .probe, .http, .model.check: hub.json names this launcher
+		Guest          *guestParams    `json:"guest"`          // assistant.send: a new guest conversation (assistant_guest.go)
+		NewSessionID   string          `json:"new_session_id"` // assistant.send: start the new conversation under this id
 		Raw            json.RawMessage `json:"-"`
+
+		ConfiguredAgent string `json:"configured_agent"` // strict work-session options: hub.json specifies the harness
 
 		ParentWorkspaceID string `json:"parent_workspace_id"` // worktree.create: independent of the Git source
 		AutoName          bool   `json:"auto_name"`           // worktree.create: host-generated branch and path
@@ -644,10 +649,10 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	if n.codexBlocked(p.SessionID) && (strings.HasPrefix(method, "session.") || strings.HasPrefix(method, "terminal.") || method == "assistant.send" || method == "assistant.permissions.reset") {
 		return nil, refusal("identity_conflict", "会话 ID 与另一来源重复，不能判断操作目标；未读取或发送", nil)
 	}
-	if n.codexBlocked(p.ResumeSessionID) && method == "session.start" {
+	if n.codexBlocked(p.ResumeSessionID) && devicewire.IsSessionStart(method) {
 		return nil, refusal("identity_conflict", "会话 ID 与另一来源重复，不能恢复", nil)
 	}
-	if method == "session.start" && n.externalCodex(p.ResumeSessionID) && !n.codexResumable(p.ResumeSessionID) { // codex_resume.go
+	if devicewire.IsSessionStart(method) && n.externalCodex(p.ResumeSessionID) && !n.codexResumable(p.ResumeSessionID) { // codex_resume.go
 		return nil, refusal("codex_read_only", "外部 Codex 会话只能接入原 app-server，不能用启动器恢复", nil)
 	}
 	if n.externalCodex(p.SessionID) {
@@ -923,7 +928,28 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		n.useBotmux(true, true) // and one that lists without saying botmux keeps it, as before (hostbotmux.go)
 		n.sent.answering(ctx)   // the manager may take this list as its own: the next push goes whatever it is
 		return map[string]any{"sessions": n.sessionList(ctx, true)}, nil
-	case "session.start":
+	case "session.start.options":
+		return n.workSessionOptions(ctx, p.Name, p.ConfiguredAgent, "", p.Configured, true)
+	case "session.start", devicewire.MethodStartWorkSession:
+		var work workStartOptions
+		if method == devicewire.MethodStartWorkSession {
+			if p.ResumeSessionID != "" {
+				return nil, workStartRefused("work_target_required", "A work session must be new.")
+			}
+			cwd, _, err := n.checkStart(p.Cwd, p.Launcher, "", p.PermissionMode, p.Effort)
+			if err != nil {
+				return nil, workStartRefused("work_project_unavailable", "The project folder or start options are no longer valid.")
+			}
+			p.Cwd = cwd
+			opts, err := n.workSessionOptions(ctx, p.Launcher, p.ConfiguredAgent, p.Host, p.Configured, p.Model != "")
+			if err != nil {
+				return nil, err
+			}
+			if err := opts.validate(p.AgentType, p.Model, p.Prompt, p.Async); err != nil {
+				return nil, err
+			}
+			work, p.Host = opts, opts.host
+		}
 		if p.CreationID != "" && p.ResumeSessionID == "" && p.SessionID != "" {
 			if _, exists := n.state.get(p.SessionID); exists {
 				return nil, errors.New("creation identifier requires a new session")
@@ -968,7 +994,12 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 				return nil, refusal(secretEnvGoneCode, errSecretTicket.Error(), nil)
 			}
 		}
-		if p.ResumeSessionID == "" {
+		if work.runtime != nil {
+			rp.Model = work.runtimeModel // the runtime's configured default, never a caller override
+			s, err := n.runtimeStartOn(ctx, work.runtime, rp)
+			return n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation)
+		}
+		if method == "session.start" && p.ResumeSessionID == "" {
 			if s, err, ok := n.runtimeStart(ctx, rp); ok { // a runtime's launcher
 				return n.creationResult(s, err, p.ResumeSessionID, p.CreationID, p.Incarnation)
 			}
@@ -996,11 +1027,24 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	case "session.fork": // "Branch to new chat" (fork.go)
 		id, err := n.fork(ctx, p.SessionID, p.AtItemID)
 		return map[string]any{"session_id": id}, err
+	case "assistant.execution":
+		return n.assistantExecution(ctx, p.SessionID), nil
 	case "assistant.send":
 		if p.ResumeOnly && !n.assistantResumable(p.SessionID) {
 			return nil, fmt.Errorf("conversation %s is gone", p.SessionID)
 		}
 		sctx := ctx
+		if p.NewSessionID != "" {
+			// A start under a given id (a meeting's room, its follow-up: made once, also across a restart). One the
+			// node has already is that conversation: nothing is sent again.
+			if p.SessionID != "" || !validID(p.NewSessionID) {
+				return nil, errors.New("bad new_session_id")
+			}
+			if n.knowsConversation(p.NewSessionID) {
+				return map[string]any{"session_id": p.NewSessionID, "existed": true}, nil
+			}
+			sctx = withNewID(sctx, p.NewSessionID)
+		}
 		if p.Guest != nil {
 			if p.SessionID != "" {
 				return nil, errors.New("only a new conversation can be started as a guest")
@@ -1008,12 +1052,39 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			if err := checkGuestTools(p.Guest.Tools); err != nil {
 				return nil, err
 			}
-			sctx = withGuest(ctx, p.Guest.Tools)
+			switch p.Guest.Kind {
+			case "", guestMeeting:
+			default:
+				return nil, fmt.Errorf("unknown guest kind %q", p.Guest.Kind)
+			}
+			sctx = withGuestKind(sctx, p.Guest.Tools, p.Guest.Kind)
 		}
-		id, err := n.assistantSend(sctx, p.SessionID, p.Cwd, p.Launcher, p.Text, p.Images, p.PermissionMode, p.Effort, modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Runtime: assistantRuntimeOf(p.Runtime), IsMain: p.IsMain, ConfigDir: p.ConfigDir, Interject: p.Interject})
+		send := func() (string, error) {
+			return n.assistantSend(sctx, p.SessionID, p.Cwd, p.Launcher, p.Text, p.Images, p.PermissionMode, p.Effort, modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Runtime: assistantRuntimeOf(p.Runtime), IsMain: p.IsMain, ConfigDir: p.ConfigDir, Interject: p.Interject})
+		}
+		var opts sendOpts
+		_ = json.Unmarshal(params, &opts)
+		if p.NewSessionID == "" || opts.ClientMsgID == "" {
+			id, err := send()
+			return map[string]any{"session_id": id}, err
+		}
+		// A start under a given id with its first message's client_msg_id (a meeting's room, its follow-up, Just me's
+		// new main chat): sent once, and its transcript item carries the id, as a session.send's (echo.go).
+		var id string
+		err := n.sends.once(opts.ClientMsgID, func() error {
+			return n.sendEchoed(p.NewSessionID, opts.ClientMsgID, p.Text, len(p.Images), 0, func() (err error) {
+				id, err = send()
+				return err
+			})
+		})
+		if err == nil && id == "" {
+			id = p.NewSessionID // the same start asked again while it went: that conversation
+		}
 		return map[string]any{"session_id": id}, err
 	case "assistant.guest_prepare": // a guest conversation's directory (assistant_guest.go)
 		return n.assistantGuestPrepare(params)
+	case "assistant.guest_delete": // a meeting's room, at its transcript's cut (assistant_guest.go)
+		return n.assistantGuestDelete(params)
 	case "session.modes":
 		return ok(n.setModelAndModes(ctx, p.SessionID, p.Model, p.PermissionMode, p.Effort)) // model: model_switch.go
 	case "assistant.compact": // the user compacting an assistant conversation (assistant_compact.go)
@@ -1473,6 +1544,9 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 	case "fs.watch": // the folders and Git directories the web panels have open (fswatch.go)
 		return n.fsWatch(params)
 	case "git.status":
+		if p.IdentityOnly {
+			return n.gitIdentity(ctx, p.Cwd)
+		}
 		return n.gitStatus(ctx, p.Cwd)
 	case "git.pull":
 		return n.gitPull(ctx, p.Cwd)
@@ -1688,9 +1762,9 @@ func nonNil(items []proto.Item) []proto.Item {
 // managedUser is the launcher a method runs (or asks a CLI about) that may need a managed provider's secrets.
 func managedUser(method, launcher, name string) string {
 	switch method {
-	case "session.start", "assistant.send", "assistant.warm", "session.send":
+	case "session.start", devicewire.MethodStartWorkSession, "assistant.send", "assistant.warm", "session.send":
 		return launcher
-	case "launchers.check", "claude.auth_status", "launchers.models", "launchers.http", "launchers.probe", "launchers.model.check":
+	case "session.start.options", "launchers.check", "claude.auth_status", "launchers.models", "launchers.http", "launchers.probe", "launchers.model.check":
 		return name
 	}
 	return ""

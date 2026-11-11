@@ -97,3 +97,16 @@ describe("Done's groups from the hub's day counts (#2969)", () => {
     expect(sortTimeKeys(["month", "d:2026-11-04", "just", "week", "yesterday", "today", "week"], now)).toEqual(["just", "today", "yesterday", "d:2026-11-04", "week", "month"]);
   });
 });
+
+describe("lark-cli is Lark in the list", () => {
+  it("groups lark-cli's items with Lark's and keeps them out of the connector chips", async () => {
+    const { connectorSources, matches } = await import("./inbox");
+    const cli = { id: "larkcli:1", source: "larkcli", account: "larkcli", account_name: "飞书 · 我的消息", connector: { thread: "t" }, kind: "dm", title: "示例" } as unknown as InboxItem;
+    const gh = { id: "github:1", source: "github", account: "github", account_name: "GitHub", connector: { thread: "g" }, kind: "author", title: "PR" } as unknown as InboxItem;
+    expect(sourceKey(cli)).toBe("lark");
+    expect(groupBySource([cli], ["lark"], (a) => a)[0].title).toBe("飞书");
+    expect(connectorSources([cli, gh]).map((c) => c.id)).toEqual(["github"]);
+    expect(matches(cli, { source: "feishu", kind: "", query: "" })).toBe(true);
+    expect(matches(gh, { source: "feishu", kind: "", query: "" })).toBe(false);
+  });
+});

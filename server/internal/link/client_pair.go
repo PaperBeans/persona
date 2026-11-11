@@ -77,6 +77,12 @@ func proxyEndpoint(raw string) (Endpoint, error) {
 // Pair redeems a pairing link for this computer's credential and writes link.json. machine names the computer in
 // the hub's hub.json when the link does not carry it; name is how the hub lists the credential.
 func Pair(ctx context.Context, raw, machine, name, path string) (*Config, error) {
+	return PairWithSSH(ctx, raw, machine, name, path, nil)
+}
+
+// PairWithSSH is Pair with an optional SSH tunnel: when ssh is non-nil, the pairing request uses the tunnel (alone
+// when ssh.Always, or after direct candidates fail) and saves ssh in link.json alongside the credential.
+func PairWithSSH(ctx context.Context, raw, machine, name, path string, ssh *SSH, sshBin ...string) (*Config, error) {
 	token, c, err := parsePairLink(raw)
 	if err != nil {
 		return nil, err
@@ -90,17 +96,26 @@ func Pair(ctx context.Context, raw, machine, name, path string) (*Config, error)
 	if c.Machine == "" {
 		return nil, errors.New("要填这台电脑在 hub 里的机器 id（hub.json 里 kind 为 link 的那台）")
 	}
+	var bin string
+	if len(sshBin) > 0 {
+		bin = sshBin[0]
+	}
+	if ssh != nil {
+		norm, err := NormalizeSSH(ssh.Server, ssh.Target, ssh.Always, c.Endpoints)
+		if err != nil {
+			return nil, err
+		}
+		c.SSH = norm
+	}
 	// system_name: a hub that has no name of its own for this computer yet names it so (docs/operations/link.md "The
 	// computer's name").
 	body, _ := json.Marshal(map[string]string{"name": name, "kind": "link", "machine": c.Machine, "system_name": SystemName()})
-	client := hubClient(&c, nil)
-	defer client.CloseIdleConnections()
 	type redeemed struct {
 		Token string `json:"token"`
 		Role  string `json:"role"`
 	}
-	got, _, err := race(ctx, c.Endpoints, func(ctx context.Context, ep Endpoint) (redeemed, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.URL+"/api/v1/auth/tokens", bytes.NewReader(body))
+	redeemOne := func(ctx context.Context, client *http.Client, baseURL string) (redeemed, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/v1/auth/tokens", bytes.NewReader(body))
 		if err != nil {
 			return redeemed{}, err
 		}
@@ -133,7 +148,61 @@ func Pair(ctx context.Context, raw, machine, name, path string) (*Config, error)
 			return redeemed{}, errors.New("hub 没给出链路凭据：升级 hub")
 		}
 		return out, nil
-	}, func(redeemed) {})
+	}
+	redeemDirect := func() (redeemed, error) {
+		client := hubClient(&c, nil)
+		defer client.CloseIdleConnections()
+		got, _, err := race(ctx, c.Endpoints, func(ctx context.Context, ep Endpoint) (redeemed, error) {
+			return redeemOne(ctx, client, ep.URL)
+		}, func(redeemed) {})
+		return got, err
+	}
+	redeemSSH := func() (redeemed, error) {
+		for attempt := 0; attempt < 2; attempt++ {
+			t, err := startSSHTunnel(bin, *c.SSH)
+			if err != nil {
+				return redeemed{}, err
+			}
+			client := tunnelClient(&c, t)
+			actx, acancel := context.WithTimeout(ctx, dialTimeout)
+			got, err := redeemOne(actx, client, tunnelBaseURL(&c, *c.SSH))
+			acancel()
+			retryBind := err != nil && attempt == 0 && t.isDone() && t.localBindBusy()
+			client.CloseIdleConnections()
+			t.close()
+			if retryBind {
+				continue
+			}
+			if err != nil {
+				var se *SSHError
+				if errors.As(err, &se) {
+					return redeemed{}, se
+				}
+				return redeemed{}, &attemptError{ep: Endpoint{URL: c.SSH.Server, Kind: KindSSH}, err: err}
+			}
+			return got, nil
+		}
+		return redeemed{}, &SSHError{Code: SSHUnreachable, Server: c.SSH.Server, Target: c.SSH.Target}
+	}
+
+	var got redeemed
+	switch {
+	case c.SSH == nil:
+		got, err = redeemDirect()
+	case c.SSH.Always:
+		got, err = redeemSSH()
+	default:
+		got, err = redeemDirect()
+		if err != nil && ctx.Err() == nil && !pairAnswered(err) {
+			var sshErr error
+			got, sshErr = redeemSSH()
+			if sshErr != nil {
+				err = errors.Join(err, sshErr)
+			} else {
+				err = nil
+			}
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("配对失败：%w", err)
 	}
@@ -149,6 +218,7 @@ func Pair(ctx context.Context, raw, machine, name, path string) (*Config, error)
 		}
 		keep := c
 		keep.Endpoints = append(manual, c.Endpoints...)
+		keep.SSH = cloneSSH(c.SSH)
 		// Pairing with a hub's link means dialing it; what passive mode had stays for switching back.
 		keep.Mode, keep.Passive = ModeActive, old.Passive
 		*old = keep
@@ -158,6 +228,12 @@ func Pair(ctx context.Context, raw, machine, name, path string) (*Config, error)
 		return nil, err
 	}
 	return &c, nil
+}
+
+// pairAnswered reports whether a direct pairing attempt already reached the hub (which refused the token or had the
+// wrong pinned key), so falling back to SSH should not hide a rejected link or wrong hub key.
+func pairAnswered(err error) bool {
+	return errors.Is(err, errPin) || strings.Contains(err.Error(), "hub 拒绝了：")
 }
 
 // AddAddress adds a candidate typed on this computer (a domain name, say); RemoveAddress takes one out again.

@@ -119,9 +119,12 @@ type Manager struct {
 
 	ctx context.Context
 
-	mail       Mail
-	connectors *connector.Registry
-	subs       *subscriptions.Service // source subscriptions (subscriptions.go); nil until Run
+	mail               Mail
+	connectors         *connector.Registry
+	imessageSettingsMu imessageContextLock
+	imessageArchive    imessageArchiveFence
+	imessageAIPending  atomic.Bool
+	subs               *subscriptions.Service // source subscriptions (subscriptions.go); nil until Run
 	// subDrafts are the model drafts the subscription pages started (#2040, subscriptions_ui.go), made on first use.
 	subDrafts     *subscriptionsui.Drafts
 	subDraftsOnce sync.Once

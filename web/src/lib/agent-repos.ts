@@ -9,7 +9,8 @@ export type Repo = { repo: string; name: string; worktree: string; main: boolean
 
 export type RepoWorktree = {
   key: string;
-  /** Its branch when the node says (#1805), else its folder's name (the main checkout: the repository's). */
+  /** Its branch when the node says (#1805), else its folder's name (the main checkout: the repository's). A linked tree
+   *  goes by the name its host gave the place instead, when its sessions agree on one (#4497, `hostPlaceName`). */
   name: string;
   /** The branch checked out there, when the node says. */
   branch?: string;
@@ -85,6 +86,20 @@ export function repoOf(cwd: string, repoRoot?: string): Repo {
 }
 
 const worktreeName = (path: string, repo: string) => (path === repo ? baseName(repo) : baseName(path));
+
+/** The name the host gave the place a working tree's sessions run in (#4497: Paseo sends its workspace's title as
+ *  slot_name, with no slot_id), when every session that gives one gives the same; two different names name nothing.
+ *  A slot_name beside a slot_id is a tab's label (herdr), which names no working tree. */
+function hostPlaceName(sessions: readonly Session[]): string | undefined {
+  let name: string | undefined;
+  for (const s of sessions) {
+    const own = s.slot_id?.trim() ? undefined : s.slot_name?.trim();
+    if (!own) continue;
+    if (name !== undefined && own !== name) return undefined;
+    name = own;
+  }
+  return name;
+}
 
 const trimmed = (path: string | undefined) => (path ?? "").replace(/\/+$/, "");
 
@@ -273,12 +288,17 @@ function buildRepos(sessions: Session[], machineId: string): RepoTree[] {
   }
   return [...repos.values()].map((bucket) => {
     const { tree } = bucket;
+    const orcaTrees = new Set(bucket.bySpace.values());
     for (const w of tree.worktrees) {
       w.sessions.sort(byAttention);
       if (bucket.orca && !bucket.git) w.main = w.sessions.some((s) => (s.repo_root ?? "").replace(/\/+$/, "") === w.path);
+      // A linked tree takes the name its host gave it (#4497), its branch staying beside it; its key stays its path.
+      // The main checkout keeps its name (several workspaces can share it), and Orca's trees keep Orca's naming.
+      if (!w.main && !orcaTrees.has(w)) w.name = hostPlaceName(w.sessions) ?? w.name;
     }
+    // By the name shown, then by the key: two workspaces can have one title, and trees must not swap as sessions move.
     const worktrees = nestWorktrees(tree.worktrees, bucket.bySpace)
-      .sort((a, b) => Number(b.main) - Number(a.main) || a.name.localeCompare(b.name));
+      .sort((a, b) => Number(b.main) - Number(a.main) || a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
     return { ...tree, name: bucket.orca && !bucket.git ? orcaProjectName(tree.worktrees) : tree.name, worktrees };
   }).sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -103,5 +103,6 @@
   "group_lark": "Lark",
   "group_mail": "メール · {account}",
   "group_agents": "あなたを待っている Agent",
-  "folder_failed": "移動できませんでした：{error}"
+  "folder_failed": "移動できませんでした：{error}",
+  "filter_doc": "ドキュメントのコメント"
 }

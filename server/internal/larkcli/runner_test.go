@@ -28,7 +28,7 @@ func TestRunnerSuccessJSONAndProfile(t *testing.T) {
 	ctx := context.Background()
 
 	auth, err := r.AuthStatus(ctx)
-	if err != nil || !auth.LoggedIn || auth.UserName != "Example User" || auth.OpenID != "ou_example_user" || auth.AppID != "cli_example" {
+	if err != nil || !auth.LoggedIn || auth.AppID != "cli_example" || auth.UserName != "Example User" || auth.OpenID != "ou_example_user" {
 		t.Fatalf("auth = %+v, err = %v", auth, err)
 	}
 	if got := auth.GrantedScopes; len(got) < 2 || got[0] != "im:chat:read" || got[1] != "im:message:readonly" {
@@ -60,6 +60,27 @@ func TestRunnerSuccessJSONAndProfile(t *testing.T) {
 	text := string(log)
 	if !strings.Contains(text, "--profile example") || !strings.Contains(text, "--as user --format json") {
 		t.Fatalf("profile or user JSON flags missing from %q", text)
+	}
+}
+
+func TestRunnerWritesUseBotIdentity(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "args.log")
+	t.Setenv("LARKCLI_FAKE_LOG", logPath)
+	r := New(fakeConfig(t, "inbox"))
+	if _, err := r.SendText(context.Background(), "oc_example_dm", "hello", "send-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ReplyText(context.Background(), "om_example_direct", "reply", "send-2", true); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	if !strings.Contains(got, "--as bot --format json") || !strings.Contains(got, "+messages-send --chat-id oc_example_dm --text hello --idempotency-key send-1") ||
+		!strings.Contains(got, "+messages-reply --message-id om_example_direct --text reply --idempotency-key send-2 --reply-in-thread") {
+		t.Fatalf("write args = %q", got)
 	}
 }
 

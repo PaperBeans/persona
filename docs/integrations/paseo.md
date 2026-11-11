@@ -25,7 +25,20 @@ run with `ELECTRON_RUN_AS_NODE=1`. A plain `node` always runs the bridge without
 ## Which sessions appear
 
 - **Listed Agents**: all unarchived Paseo Agents, up to 300. Running Agents and those waiting for you are always included.
-  An Agent visible in Paseo's own App is also visible in Persona; archived Agents are omitted.
+  An Agent visible in Paseo's own App is also visible in Persona; archived Agents are omitted. Your own Agents come first:
+  Agents another Agent created (below) fill what is left of the 300, and one of those that runs or waits for you is listed with
+  every Agent between it and yours, whatever the count.
+- **Archived Agents** (#4521): an archived Agent of yours that ran Claude Code stays in Persona as its transcript, under Not running (the last 7 days), and a message to it has
+  Paseo take it over again. Paseo starts Claude Code's command line itself, so these transcripts read like a script's one-shot `claude -p` runs, which node
+  leaves out; the bridge therefore names the Claude sessions of the Agents archived in the last 8 days to node (`unlisted_transcripts`): an Agent that leaves Paseo's list, once Paseo
+  says it was archived, and after connecting the ones Paseo's directory still has (read newest first, archived Agents included).
+  Not named: an Agent deleted in Paseo (it stays gone), an Agent another Agent created (its creator's chat says what it did), and Paseo's own helper runs, which have no Agent.
+  The transcript is listed under its Claude session ID. An Agent whose row had another ID (`paseo-<agent id>`, below) comes back as a different row: what Persona kept for the old
+  ID (an archive mark, a to-do's link) does not follow it.
+- **Deleted Agents** (#4629): an Agent deleted in Paseo (its App, `paseo delete`) leaves Persona too, and an archived one's Claude session is named no more. Paseo tells a
+  deletion only to the client that asked for it: the bridge sees an Agent that ran since Paseo started go `closed`, and of any other nothing. So it asks Paseo for the Agent
+  (`fetch_agent_request`: a deleted one is `agent: null`): 1 s and 5 s after an Agent that ran is closed, and every 2 minutes for the Agents its directory no longer has (the
+  directory read again, then one question for each Agent missing from it). A deleted Agent is gone within seconds when it had run, within 2 minutes otherwise.
 - **Session IDs**:
   - An Agent running Claude Code (including custom providers with `extends: "claude"`) uses its Claude session ID, the same ID as that chat in herdr or "Not running."
     An Agent created by Paseo itself has no session ID before its first turn, so it is not listed yet.
@@ -37,6 +50,10 @@ run with `ELECTRON_RUN_AS_NODE=1`. A plain `node` always runs the bridge without
     compaction, and "what it is doing" are all available. The same transcript does not produce an extra "Not running" row. If the transcript has not been written yet (the first turn has just started), or node does not recognize its configuration directory,
     content uses Paseo's timeline until the transcript becomes available, then switches automatically.
   - **Other Agents**: content comes from Paseo's timeline, converted to the App's rendering format. Commands, file reads / writes, diffs, search, web access, sub-Agents, and to-dos use Claude Code tool names.
+- **Agents running Codex** (#4495): the row names the Codex thread the Agent runs (`codex_thread`). Node finds that thread's rollout on its own as well; named, the chat is
+  listed once, as the Paseo Agent, not a second time as a read-only Codex history row, and the thread's own Codex sub-Agents hang off the Paseo Agent's row.
+  When another program takes the thread up while the Paseo Agent is not running (the Codex App runs it, a shared app-server has it loaded), that program's row is listed too,
+  with the thread's sub-Agents: a message from the phone goes where the thread is open.
 - **State**:
 
   | In Paseo | In Persona |
@@ -45,22 +62,42 @@ run with `ELECTRON_RUN_AS_NODE=1`. A plain `node` always runs the bridge without
   | `running`, `initializing` | Working |
   | `idle` / `error`, marked for attention by Paseo (`requiresAttention`: finished / errored and not yet viewed in Paseo) | Unread (Seen once viewed in Persona); the final message for an error is its cause |
   | `idle` / `error`, viewed in Paseo | Seen |
+  | `idle` / `error` on an Agent another Agent created in its own workspace (below) | Seen: its creator was told, nobody else has to look |
   | Older Paseo (no `requiresAttention`): `idle` after a turn, `error` | Persona tracks Unread / Seen itself |
   | `idle`: has not run yet | Idle |
-  | `closed`: not running, process exited | Not running (Paseo reloads it when a message is sent) |
+  | `closed`: not running, process exited | Not running (Paseo reloads it when a message is sent). While Agents it created have not finished: Working (background), since their reports wake it |
 
   Read state is one-way, as with herdr (#2831): viewed in Paseo means Seen in Persona; views in Persona are tracked by hub and not written back to Paseo.
 
-- **Spaces and slots** (#2784, #2802): two levels, matching Paseo's sidebar.
+- **Spaces and workspaces** (#2784, #2802, #4493): the space is Paseo's project; the workspace names where in it an Agent is.
   - **A space is a Paseo project**: a repository's main checkout and its worktrees form one group in the App, named after the project.
     The space ID is Paseo's project-record ID: the `projectKey` field in the location information Paseo gives the Agent contains this ID (not the project's own key).
   - **Separate worktree project records are merged into the main repository**: when only a worktree directory is given to Paseo, it creates a separate project record for it
     (named after the worktree directory). These records are grouped with the main repository's project by its path (`checkout.mainRepoRoot`, compared after resolving symlinks).
     If Persona does not yet know the main repository's project (it has no Agents), the record forms its own group, named after the main repository directory.
-  - **A slot is a Paseo workspace**: a worktree, or a task in the same directory. Its name is the workspace title; if absent, the branch name; if that is absent too, the directory name.
-  - Agents without project information from Paseo keep the existing behavior: their workspace is their space, with no slot.
-- **Repository** (#2840): Agents in Git repositories carry `repo_root` (the main repository directory for a worktree, or the checkout itself for a main checkout). "By repository" on all three clients uses it to group
+  - **A Paseo workspace is the Agent's place label, not a slot**: a workspace is a worktree, or a task in the same directory. Its name goes in `slot_name`:
+    the workspace title; if absent, the branch name; if that is absent too, the directory name. The Apps show it beside the Agent ("project › workspace").
+    There is no `slot_id`: a slot is one tab, and the Apps draw the Agents that share one as that tab's panes: one row for all of them, each named
+    by its Agent rather than its title, and one that stopped running shown as replaced by another there. A workspace's Agents are separate conversations,
+    as they are separate tabs in Paseo, so each is a row of its own under the project.
+  - Agents without project information from Paseo keep the existing behavior: their workspace is their space, with no workspace name.
+- **Agents created by another Agent** (#4494): with Paseo's `create_agent` an Agent starts others (an orchestrator and its reviewers). Paseo marks them with the label
+  `paseo.parent-agent-id`, shows them under their creator, notifies nobody when they finish (their creator is told what they did) and archives them with their creator. In Persona:
+  - Such an Agent's row names its creator's session (`is_subagent`, `parent_session_id`) while the creator is listed in the same workspace, however many Agents created one another
+    in a line; an App that folds subtasks lists it under the creator's row. One created from another workspace is that workspace's own Agent, as in Paseo's sidebar: an ordinary row,
+    Unread when it stops. Agents that created one another in a ring, and one whose creator is gone, are rows of their own too.
+  - While it waits for you (a permission, a question, a plan) it is a row of its own: node lists it without its parent, so every App shows it and counts it under Needs you,
+    whatever it folds. Once answered it is under its creator again.
+  - It is never Unread and sends no "done" push: once stopped it is Seen. Paseo sets `requiresAttention` on it as on any Agent, but shows that on no workspace, and nobody opens
+    it there to clear it. It can be opened and sent to like any Agent.
+  - The creator's row lists the ones that have not finished (running, waiting for an answer, or waiting for Agents of their own) as background work (`background`, kind `agent`),
+    so it reads Working (background), and its own "done" push waits until they have reported back.
+  - The hub's fleet counts (the Live Activity, Android's notification and widget) and Android's Agents list count your own Agents; one another Agent created counts while it
+    needs you.
+- **Repository** (#2840): Agents in Git repositories carry `repo_root` (the main repository directory for a worktree, or the checkout itself for a main checkout), as its physical
+  directory (symbolic links resolved, #4492), the way node names a session's working tree. "By repository" on all three clients uses it to group
   Paseo worktrees under the main repository. Paseo worktrees live at `~/.paseo/worktrees/<project hash>/<name>`; the path alone does not identify the repository.
+  On the web and Android, "By repository" names a Paseo worktree by its workspace's title (the `slot_name` its Agents share) instead of its branch; the main checkout keeps its name (#4497).
 - **Streaming**: while the phone is viewing a session, the bridge subscribes to that Agent's timeline and shows text as it is written. Unviewed sessions have no bridge subscription. If a session changes Agents (the original closes and another resumes it), the bridge subscribes to the new one. Non-Claude sessions use the new history to make the phone refetch the whole page.
 
 ## Capabilities
@@ -175,7 +212,6 @@ otherwise use Paseo's default provider (its built-in Claude Code provider if ena
 - The bridge knows only workspaces that still have Agents. After all Agents in a worktree are archived, creating another session in that directory from Persona leaves the bridge unable to find its workspace,
   and Paseo creates another project record (Paseo's creation request can create only a new worktree, not select an existing one). The App still groups it with the main repository.
 - Images in Paseo's timeline are not displayed. Claude Code sessions are unaffected; their images come from the transcript.
-- If Codex history is enabled for the machine, the same Codex chat in Paseo may also appear as an extra read-only Codex history row.
 - Paseo's own plugins, scheduled tasks, and hub execution are not integrated.
 
 ## Verification

@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, copyFileSync, chmodSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { goLicensePath } from "./go-license.mjs";
 
 const server = fileURLToPath(new URL("../../server/", import.meta.url));
 const output = fileURLToPath(new URL("../public/pake/", import.meta.url));
@@ -27,6 +28,6 @@ for (const dependency of dependencies) {
   licenses.set(`${name} ${version}`, readFileSync(resolve(directory, "LICENSE"), "utf8"));
 }
 const toolchain = execFileSync("go", ["env", "GOVERSION"], { cwd: server, encoding: "utf8" }).trim();
-licenses.set(`Go runtime and standard library (${toolchain})`, readFileSync(resolve(goroot, "LICENSE"), "utf8"));
+licenses.set(`Go runtime and standard library (${toolchain})`, readFileSync(goLicensePath(goroot), "utf8"));
 writeFileSync(resolve(output, "THIRD_PARTY_NOTICES.txt"), "Persona password login WebAssembly client\n\n" +
   [...licenses].sort(([a], [b]) => a.localeCompare(b)).map(([name, license]) => `${name}\n${"=".repeat(name.length)}\n\n${license.trim()}\n`).join("\n"));

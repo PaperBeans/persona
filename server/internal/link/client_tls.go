@@ -17,6 +17,25 @@ import (
 // computer dials the hub's public port with (docs/assistant/managers.md).
 func Pinned(fp string) *http.Client { return pinned(fp, nil) }
 
+func pinnedTLSConfig(fp, host string) *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"},
+		InsecureSkipVerify: true, // the pin below is the check
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errPin
+			}
+			sum := sha256.Sum256(cs.PeerCertificates[0].RawSubjectPublicKeyInfo)
+			if base64.RawURLEncoding.EncodeToString(sum[:]) != fp {
+				return errPin
+			}
+			return nil
+		}}
+	if net.ParseIP(host) == nil {
+		cfg.ServerName = host
+	}
+	return cfg
+}
+
 // pinned is an HTTP/1.1 client that only talks to the hub whose TLS key hashes to fp. onConn sees each new
 // connection (the link keeps its local address, to tell when the network under it is gone).
 func pinned(fp string, onConn func(net.Conn)) *http.Client {
@@ -30,22 +49,7 @@ func pinned(fp string, onConn func(net.Conn)) *http.Client {
 					return nil, err
 				}
 				host, _, _ := net.SplitHostPort(addr)
-				cfg := &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"},
-					InsecureSkipVerify: true, // the pin below is the check
-					VerifyConnection: func(cs tls.ConnectionState) error {
-						if len(cs.PeerCertificates) == 0 {
-							return errPin
-						}
-						sum := sha256.Sum256(cs.PeerCertificates[0].RawSubjectPublicKeyInfo)
-						if base64.RawURLEncoding.EncodeToString(sum[:]) != fp {
-							return errPin
-						}
-						return nil
-					}}
-				if net.ParseIP(host) == nil {
-					cfg.ServerName = host
-				}
-				c := tls.Client(raw, cfg)
+				c := tls.Client(raw, pinnedTLSConfig(fp, host))
 				if err := c.HandshakeContext(ctx); err != nil {
 					raw.Close()
 					return nil, err

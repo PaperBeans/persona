@@ -123,6 +123,7 @@ assistant.ask        GET /api/v1/assistant/capabilities
 -                    GET /api/v1/assistant/conversations/{id}/always
 assistant.ask        GET /api/v1/assistant/conversations/{id}/feed
 -                    GET /api/v1/assistant/directions/offers
+-                    GET /api/v1/assistant/directions/tree
 -                    GET /api/v1/assistant/feishu/notices
 -                    GET /api/v1/assistant/followups
 leaders.read         GET /api/v1/assistant/leaders
@@ -239,6 +240,7 @@ machines.read        GET /api/v1/machines/{id}/usage
 -                    GET /api/v1/machines/{mid}/iphone
 -                    GET /api/v1/machines/{mid}/launchers
 -                    GET /api/v1/machines/{mid}/launchers/{name}/models
+-                    GET /api/v1/machines/{mid}/launchers/{name}/start-options
 -                    GET /api/v1/machines/{mid}/omp-settings
 -                    GET /api/v1/machines/{mid}/panes
 -                    GET /api/v1/machines/{mid}/ports/{port}
@@ -475,6 +477,8 @@ notify               POST /api/v1/notify
 -                    POST /api/v1/phone/runtime-cli
 -                    POST /api/v1/phone/write-queue/{id}/cancel
 -                    POST /api/v1/recordings/{id}/ask
+-                    POST /api/v1/recordings/{id}/followup
+-                    POST /api/v1/recordings/{id}/just-me
 -                    POST /api/v1/recordings/{id}/live
 -                    POST /api/v1/recordings/{id}/minutes
 -                    POST /api/v1/recordings/{id}/minutes/todos
@@ -584,6 +588,7 @@ kb.write             PUT /api/v1/kb/{kind}/{id}
 -                    PUT /api/v1/mutes
 -                    PUT /api/v1/pins
 -                    PUT /api/v1/recordings/{id}
+-                    PUT /api/v1/recordings/{id}/private
 -                    PUT /api/v1/subscriptions/{id}
 todos.write          PUT /api/v1/todos/{id}/agents/{mid}/{sid}
 todos.write          PUT /api/v1/todos/{id}/spaces/{mid}/{space...}

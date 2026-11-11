@@ -1,0 +1,7 @@
+{
+  "ok": true,
+  "data": {
+    "items": [{"node_token": "node_example", "obj_token": "doc_example", "obj_type": "docx", "title": "Example wiki document", "url": "https://example.feishu.cn/wiki/node_example", "has_child": false}],
+    "has_more": false
+  }
+}

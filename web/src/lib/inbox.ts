@@ -271,6 +271,12 @@ export function isLark(it: InboxItem): boolean {
   return it.source === "lark";
 }
 
+/** Lark in the filter chips and source groups: the Lark gateway's items and lark-cli's ("Lark · my messages") are one
+ *  "Lark", so the list never shows two Lark sources side by side. */
+export function isLarkSource(it: InboxItem): boolean {
+  return isLark(it) || it.source === "larkcli";
+}
+
 /** The thread as people write it (example-org/example-repo#12), undefined when it is only an id. */
 export function connectorReference(it: InboxItem): string | undefined {
   const t = it.connector?.thread;
@@ -462,6 +468,8 @@ export const KIND_FILTERS: { key: string; label: string }[] = [
   { key: "mention", label: AT_ME },
   { key: "dm", label: t("lib-inbox.kind_dm") },
   { key: "group", label: t("lib-inbox.kind_group") },
+  { key: "bot", label: t("lib-inbox.kind_bot") },
+  { key: "doc", label: t("lib-inbox.filter_doc") },
   { key: "mail", label: t("lib-inbox.kind_mail") },
   { key: "agent", label: "Agent" },
 ];
@@ -472,12 +480,12 @@ function hasText(fields: (string | undefined)[], query: string): boolean {
 }
 
 export function matches(it: InboxItem, f: InboxFilter): boolean {
-  if (f.source === "feishu" && !isLark(it)) return false;
+  if (f.source === "feishu" && !isLarkSource(it)) return false;
   if (f.source && f.source !== "feishu" && it.account !== f.source && it.mail?.account_id !== f.source) return false;
   if (f.kind === "agent") return false; // only the waiting agents
   if (f.folder && !inFolderFilter(it, f.folder)) return false;
   if (f.kind) {
-    const ok = it.kind === f.kind || (f.kind === "group" && it.kind === "bot") || (f.kind === "mention" && (it.kind === "doc" || (it.kind === "moment" && kindLabel(it) === AT_ME)));
+    const ok = it.kind === f.kind || (f.kind === "mention" && (it.kind === "doc" || (it.kind === "moment" && kindLabel(it) === AT_ME)));
     if (!ok) return false;
   }
   return hasText([it.title, it.sender, it.preview, it.summary], f.query);
@@ -513,7 +521,7 @@ export function badgeCount(items: InboxItem[]): number {
 /** The connectors with items in the list (GitHub…), one filter chip each, in the order they first come. */
 export function connectorSources(items: InboxItem[]): { id: string; name: string }[] {
   const seen = new Map<string, string>();
-  for (const it of items) if (it.connector && !seen.has(it.account)) seen.set(it.account, it.account_name || it.source);
+  for (const it of items) if (it.connector && !isLarkSource(it) && !seen.has(it.account)) seen.set(it.account, it.account_name || it.source);
   return [...seen].map(([id, name]) => ({ id, name }));
 }
 

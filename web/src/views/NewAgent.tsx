@@ -38,6 +38,7 @@ import { initialLauncher, launcherBlock } from "../lib/launcher-health";
 import { navigate } from "../lib/router";
 import { settingsHref } from "./settings/nav";
 import { LauncherBlockedHelp } from "./LauncherBlockedHelp";
+import { WorkSessionForm } from "./WorkSessionForm";
 
 interface Dirs {
   path: string;
@@ -46,7 +47,14 @@ interface Dirs {
   recent?: { path: string; name: string; last_used?: string }[];
 }
 
-export function NewAgent({ open, onClose, preset }: { open: boolean; onClose: () => void; /** Filled in when another page opens it (the knowledge base's "Open agent"). */ preset?: NewAgentPreset | null }) {
+type NewAgentProps = { open: boolean; onClose: () => void; preset?: NewAgentPreset | null };
+
+export function NewAgent(props: NewAgentProps) {
+  if (props.preset?.workSession) return <WorkSessionForm open={props.open} onClose={props.onClose} />;
+  return <AgentForm {...props} />;
+}
+
+function AgentForm({ open, onClose, preset }: NewAgentProps) {
   // with several assistants, the current one's computers: the agent started here shows in its list (docs/assistant/managers.md "Clients")
   const machines = useScopedMachines();
   const online = useMemo(() => machines.filter((m) => m.online), [machines]);

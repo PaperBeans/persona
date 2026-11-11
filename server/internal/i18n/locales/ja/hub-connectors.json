@@ -1,7 +1,4 @@
 {
-  "program_missing": "{name}のプログラムが見つかりません（{path}）",
-  "program_fails": "{name}のプログラムを実行できません：{err}",
-  "program_version": "{name}のプログラムとハブのバージョンが一致しません（{got} / {want}）",
   "not_installed": "ハブのマシンに lark-cli がインストールされていません",
   "install_guide": "ハブのマシンに lark-cli をインストールするか、lark.cli.bin に実行ファイルを設定してください",
   "old_version": "lark-cli {got} は古すぎます。Persona には {want} 以降が必要です",
@@ -16,5 +13,11 @@
   "rate_limited": "lark-cli はレート制限中です。後でもう一度お試しください",
   "error": "lark-cli で Lark を読み取れませんでした",
   "expiry_reminder": "ログインはあと {count} 日で期限切れになります。ハブのマシンで {command} を実行してください",
+  "larkcli_message": "Lark メッセージ",
+  "larkcli_direct_message": "Lark ダイレクトメッセージ",
+  "larkcli_mention": "Lark メンション",
+  "watched_doc_unreadable": "監視中のドキュメント「{title}」を現在読み取れません。10 分ごとに再試行します。不要なら設定 › コネクタで削除してください",
+  "doc_comment_label": "ドキュメントのコメント",
+  "doc_comment_rule": "ルール：ドキュメントのコメントでメンションされた、または参加したスレッドへの返信です。",
   "larkcli_name": "Lark · 自分のメッセージ"
 }

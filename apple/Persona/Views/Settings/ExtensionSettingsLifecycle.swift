@@ -16,10 +16,10 @@ nonisolated struct ExtensionSettingsPolicy {
     let market: String?
 
     static var uninstallPreviewGap: String {
-        String(localized: "This manager does not provide a safe uninstall preview. Remove the extension at its source.")
+        String(localized: "This assistant does not provide a safe uninstall preview. Remove the extension at its source.")
     }
     static var rollbackPreviewGap: String {
-        String(localized: "This manager does not provide a rollback preview.")
+        String(localized: "This assistant does not provide a rollback preview.")
     }
 
     init(detail: HubExtensionDetail) {
@@ -60,7 +60,7 @@ nonisolated struct ExtensionSettingsPolicy {
             if marketRemoved {
                 updateReason = String(localized: "Its market was removed. Add the market again with the same address to check for new versions.")
             } else if canCheck && !canAutoUpgrade {
-                updateReason = String(localized: "This manager does not provide this action.")
+                updateReason = String(localized: "This assistant does not provide this action.")
             } else {
                 updateReason = canCheck ? "" : String(localized: "This extension is not managed by an extension market. Update it at its source.")
             }
@@ -236,7 +236,7 @@ nonisolated struct ExtensionSettingsPolicy {
         do {
             let next = try await api().previewCatalogExtension(market: candidate.market, plugin: id)
             guard previewMatches(next, market: candidate.market) else {
-                throw APIError(status: 0, message: String(localized: "This manager does not provide this action."))
+                throw APIError(status: 0, message: String(localized: "This assistant does not provide this action."))
             }
             preview = next
             error = nil
@@ -249,7 +249,7 @@ nonisolated struct ExtensionSettingsPolicy {
               let pv = try await operations.consentPreview(op.id, manager: op.manager) else { return }
         guard previewMatches(pv, market: market) else {
             await operations.dismiss(op.id, manager: op.manager)
-            throw APIError(status: 0, message: String(localized: "This manager does not provide this action."))
+            throw APIError(status: 0, message: String(localized: "This assistant does not provide this action."))
         }
         consentOf = op.id
         preview = pv
@@ -273,7 +273,7 @@ nonisolated struct ExtensionSettingsPolicy {
         guard !busy, let preview = agreed ?? preview, policy?.canCheck == true else { return false }
         if let problem = preview.confirmationProblem(at: .now) { error = problem; return false }
         guard preview.upgrades(id), preview.market == policy?.market, preview.from == detail?.plugin.version else {
-            error = String(localized: "This manager does not provide this action.")
+            error = String(localized: "This assistant does not provide this action.")
             return false
         }
         busy = true
@@ -341,7 +341,7 @@ nonisolated struct ExtensionSettingsPolicy {
 
     private func record(_ error: Error) {
         if let apiError = error as? APIError, [404, 405, 501].contains(apiError.status) {
-            self.error = String(localized: "This manager does not provide this action.")
+            self.error = String(localized: "This assistant does not provide this action.")
         } else { self.error = error.localizedDescription }
     }
 }

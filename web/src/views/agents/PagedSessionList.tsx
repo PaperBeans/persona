@@ -52,7 +52,7 @@ function countsQuery(filters: ListFilters): string {
   return params.toString();
 }
 
-function scrollParent(el: HTMLElement | null): HTMLElement | null {
+export function scrollParent(el: HTMLElement | null): HTMLElement | null {
   for (let p = el?.parentElement; p; p = p.parentElement) {
     if (/auto|scroll/.test(getComputedStyle(p).overflowY)) return p;
   }

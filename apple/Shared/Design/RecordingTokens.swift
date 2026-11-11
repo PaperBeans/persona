@@ -37,6 +37,13 @@ nonisolated extension Theme {
         static let meterRippleSpeed: Double = 9
         /// A paused or ended meter and recording mark: dimmed, never gone.
         static let dimmed: Double = 0.35
+        /// The typed question's field in the live bar (#4486): it grows to this many lines, then scrolls, so the
+        /// timeline above keeps most of the room the keyboard leaves.
+        static let askLines = 5
+        /// The same at accessibility text sizes, where a line is several times taller.
+        static let askLinesLargeType = 2
+        /// Its send button while there are no words to send: there, so the row does not jump, and plainly unavailable.
+        static let askSendIdle: Double = dimmed
         /// A row arriving in the timeline starts this far below its place (the `reveal` curve brings it up).
         static let arrivalOffset: CGFloat = Theme.Space.s
         /// The largest text size the big timer grows to: past it the time stays on one line, readable, instead of

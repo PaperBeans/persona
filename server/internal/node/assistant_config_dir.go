@@ -35,40 +35,76 @@ func (n *Node) assistantProfileSelection(ctx context.Context, id, launcher, runt
 		}
 		return n.sessionScope.claude, nil
 	}
+	// The launcher's own profile when it sets one (a wrapper), normalized; "" when any profile goes.
+	ownProfile := func() (string, error) {
+		if _, managed := n.managedLauncher(launcher); managed {
+			return "", nil
+		}
+		if own := n.assistantLauncherProfile(ctx, launcher, runtime); own != "" {
+			return normalize(own)
+		}
+		return "", nil
+	}
 	selected := ""
 	if resume {
 		st, _ := n.state.get(id)
 		selected = st.ConfigDir
-		if selected == "" {
-			n.mu.Lock()
-			p := n.procs[id]
-			n.mu.Unlock()
-			if p != nil {
-				p.mu.Lock()
+		n.mu.Lock()
+		p := n.procs[id]
+		n.mu.Unlock()
+		running := false
+		if p != nil {
+			p.mu.Lock()
+			if selected == "" {
 				selected = p.model.ConfigDir
-				p.mu.Unlock()
 			}
+			running = p.alive() && p.launcher == launcher && sameAssistantProfile(p.model.ConfigDir, selected)
+			p.mu.Unlock()
 		}
-		// A recorded profile holding no copy of the transcript (a launcher switch, a
-		// rollback that resumed elsewhere) would make Claude answer "No conversation
-		// found": resume where the transcript is. A profile that holds a copy, its
-		// projects/ shared through a symlink included, keeps the conversation.
+		// When one id has several copies, the newest is the conversation (transcriptPath).
+		// A recorded profile holding no copy (a launcher switch) would make Claude answer
+		// "No conversation found": resume where the newest copy is. One holding only an
+		// older copy (a rollback continued the conversation elsewhere) would resume from
+		// the old point and drop the later turns, so it moves too, unless:
+		//   - a live process of the conversation runs in it: the next message goes to
+		//     that process, and the record keeps naming the profile it writes to;
+		//   - the launcher sets its own profile and would refuse the newest copy's: the
+		//     older copy still resumes, a conflict would refuse every message.
+		// A profile whose copy is the newest, its projects/ shared through a symlink
+		// included, keeps the conversation. Copies with the same modification time are
+		// a tie the recorded profile keeps.
 		if path := n.transcriptPath(id); path != "" {
 			project := filepath.Dir(path)
 			projects := filepath.Dir(project)
-			if filepath.Base(projects) == "projects" && (selected == "" ||
-				!fileExists(filepath.Join(n.assistantConfigPath(selected), "projects", filepath.Base(project), filepath.Base(path)))) {
-				selected = filepath.Dir(projects)
+			mine := filepath.Join(n.assistantConfigPath(selected), "projects", filepath.Base(project), filepath.Base(path))
+			copied := selected != "" && fileExists(mine)
+			if filepath.Base(projects) == "projects" && (!copied || !running && !holdsNewestCopy(mine, path)) {
+				newest := filepath.Dir(projects)
 				// The pre-change resolution keeps the conversation when its
 				// projects/ holds the transcript by real path. The path found
 				// need not name it: ~/.claude/projects (or ~/.claude) may be
 				// a symlink to a wrapper's profile, which is the one in use.
 				legacy := n.legacyAssistantProfile(ctx, launcher, runtime)
 				if sameScopePath(projects, filepath.Join(n.assistantConfigPath(legacy), "projects")) {
-					selected = legacy
-				} else if sameScopePath(selected, filepath.Join(n.home, ".claude")) {
+					newest = legacy
+				} else if sameScopePath(newest, filepath.Join(n.home, ".claude")) {
 					// Preserve the old unset-profile global config.
-					selected = "default"
+					newest = "default"
+				}
+				move := !copied
+				if !move {
+					own, err := ownProfile()
+					if err != nil {
+						return "", err
+					}
+					if own == "" {
+						move = true
+					} else if to, err := normalize(newest); err == nil {
+						move = sameAssistantProfile(to, own)
+					}
+				}
+				if move {
+					selected = newest
 				}
 			}
 		}
@@ -102,18 +138,25 @@ func (n *Node) assistantProfileSelection(ctx context.Context, id, launcher, runt
 	}
 	// A wrapper can override a prefix assignment. Refuse a conflicting wrapper
 	// rather than claim to resume one profile while actually opening another.
-	if _, managed := n.managedLauncher(launcher); !managed {
-		if own := n.assistantLauncherProfile(ctx, launcher, runtime); own != "" {
-			own, err = normalize(own)
-			if err != nil {
-				return "", err
-			}
-			if !sameAssistantProfile(selected, own) {
-				return "", errors.New("config_dir conflicts with the launcher's own profile; restore that profile or use a compatible launcher")
-			}
-		}
+	own, err := ownProfile()
+	if err != nil {
+		return "", err
+	}
+	if own != "" && !sameAssistantProfile(selected, own) {
+		return "", errors.New("config_dir conflicts with the launcher's own profile; restore that profile or use a compatible launcher")
 	}
 	return selected, nil
+}
+
+// holdsNewestCopy reports whether copy exists and is no older than newest: the same file reached through a symlink, or
+// an equally recent copy. Comparing times rather than paths also holds when newest came from a stale remembered path.
+func holdsNewestCopy(copy, newest string) bool {
+	c, err := os.Stat(copy)
+	if err != nil {
+		return false
+	}
+	m, err := os.Stat(newest)
+	return err != nil || !m.ModTime().After(c.ModTime())
 }
 
 func sameAssistantProfile(a, b string) bool {

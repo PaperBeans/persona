@@ -232,15 +232,5 @@
   "related": "相关 {count} 项",
   "pr_idle": "{age}动过",
   "restore": "恢复",
-  "restored": "已恢复到列表",
-  "menu_due": "截止日期",
-  "menu_due_today": "今天",
-  "menu_due_tomorrow": "明天",
-  "menu_due_next_week": "下周",
-  "menu_due_pick": "选择日期…",
-  "menu_due_none": "不设截止日期",
-  "menu_remind_hour": "1 小时后",
-  "menu_remind_tomorrow": "明天上午",
-  "menu_remind_none": "不提醒",
-  "menu_hand_over": "交给 Agent…"
+  "restored": "已恢复到列表"
 }

@@ -15,10 +15,12 @@ publication command. Use --once for one scheduler tick; --watch polls forever.
 import argparse
 from contextlib import contextmanager
 import fcntl
+import gzip
 import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import string
 import subprocess
@@ -182,6 +184,88 @@ def read_receipt(path, commit):
     return result
 
 
+# The release index files hubs and install.sh read: uploaded after the downloads they list, latest.json the very last,
+# so a hub never reads a manifest whose files are not there yet (GitHub serves an asset as soon as it is uploaded).
+INDEX_FILES = ("VERSION", "SHA256SUMS", "latest.json")
+
+
+def host_platform():
+    """This machine as a release names its platforms: linux-amd64, darwin-arm64…"""
+    machine = platform.machine().lower()
+    return platform.system().lower() + "-" + {"x86_64": "amd64", "aarch64": "arm64"}.get(machine, machine)
+
+
+def scan_gzip(path, token, out=None):
+    """The sha256 of what the gzip at path unpacks to, and whether it holds token with no digit right before or
+    after it (the build number -X main.build leaves in every binary, whatever its platform). out gets the bytes."""
+    pattern = re.compile(rb"(?<![0-9])" + re.escape(token) + rb"(?![0-9])")
+    digest, carry, found, first = hashlib.sha256(), b"", False, True
+    with gzip.open(path, "rb") as stream:
+        while chunk := stream.read(1 << 20):
+            digest.update(chunk)
+            if out is not None:
+                out.write(chunk)
+            if not found:
+                window = carry + chunk
+                # A match at the window's end waits for the byte after it; one at its start was decided before.
+                found = any(m.end() < len(window) and (m.start() > 0 or first) for m in pattern.finditer(window))
+                carry, first = window[-(len(token) + 1):], first and len(window) <= len(token) + 1
+    found = found or any(m.end() == len(carry) and (m.start() > 0 or first) for m in pattern.finditer(carry))
+    return digest.hexdigest(), found
+
+
+def check_release_manifest(assets):
+    """A receipt with latest.json (the hub's) is what every release hub installs from once it is uploaded: latest.json
+    must describe the downloads uploaded with it, each must be its build, and the personad among them that runs here
+    must say its version and build. v0.2.1's latest.json said another build than its binaries, written by a later run
+    than theirs, and every hub refused it after downloading (#4522)."""
+    by_name = {item["name"]: Path(item["path"]) for item in assets}
+    if "latest.json" not in by_name:
+        return
+    try:
+        manifest = json.loads(by_name["latest.json"].read_text())
+    except (OSError, ValueError) as error:
+        raise ConfigError("latest.json does not read: " + str(error)) from error
+    version, build = manifest.get("version"), manifest.get("build")
+    if not isinstance(version, str) or not version or not isinstance(build, int) or not re.fullmatch(r"[0-9]{12}", str(build)):
+        raise ConfigError("latest.json has no version or build number")
+    listed = [("personad", plat, item) for plat, item in (manifest.get("files") or {}).items()]
+    for group in ("programs", "nodes"):
+        for program, platforms in (manifest.get(group) or {}).items():
+            listed += [(program, plat, item) for plat, item in (platforms or {}).items()]
+    here, ran = host_platform(), False
+    if not any(program == "personad" for program, _, _ in listed):
+        raise ConfigError("latest.json lists no personad")
+    with tempfile.TemporaryDirectory(prefix="persona-release-check-") as directory:
+        for program, plat, item in listed:
+            name = item.get("name") if isinstance(item, dict) else None
+            path = by_name.get(name)
+            if path is None:
+                raise ConfigError("latest.json lists %s, which is not in the receipt" % name)
+            if path.stat().st_size != item.get("size") or hashlib.sha256(path.read_bytes()).hexdigest() != item.get("sha256"):
+                raise ConfigError("%s is not the file latest.json lists (size or sha256)" % name)
+            run = Path(directory) / name.removesuffix(".gz") if program == "personad" and plat == here else None
+            if run is None:
+                inner, stamped = scan_gzip(path, str(build).encode())
+            else:
+                with run.open("wb") as out:
+                    inner, stamped = scan_gzip(path, str(build).encode(), out)
+            if inner != item.get("binary_sha256"):
+                raise ConfigError("%s does not unpack to the binary latest.json lists" % name)
+            if run is None:
+                if not stamped:
+                    raise ConfigError("%s is not build %d: latest.json was written for another build than it" % (name, build))
+                continue
+            run.chmod(0o755)
+            said = subprocess.run([str(run), "version", "-v"], capture_output=True, text=True, timeout=60).stdout.strip()
+            want = "%s\nchannel release, build %d" % (version, build)
+            if said != want:
+                raise ConfigError("%s says %r, not %r: latest.json was written for another build than it" % (name, said, want))
+            ran = True
+    if not ran:
+        raise ConfigError("latest.json has no personad that runs on this machine (%s) to check it with" % here)
+
+
 def upload(repository, tag, assets, gh="gh"):
     # The workflow owns Release creation; never create a tag from this machine.
     release = json.loads(subprocess.check_output(
@@ -217,8 +301,12 @@ def upload(repository, tag, assets, gh="gh"):
             except OSError:
                 import shutil
                 shutil.copyfile(item["path"], destination)
-        subprocess.run([gh, "release", "upload", tag, "--repo", repository,
-                        *(str(staging / item["name"]) for item in pending)], check=True, timeout=1800)
+        # The downloads in one upload (gh sends them side by side), then each index file alone, in INDEX_FILES order.
+        names = [item["name"] for item in pending]
+        batches = [[n for n in names if n not in INDEX_FILES]] + [[n] for n in INDEX_FILES if n in names]
+        for batch in (b for b in batches if b):
+            subprocess.run([gh, "release", "upload", tag, "--repo", repository,
+                            *(str(staging / name) for name in batch)], check=True, timeout=1800)
     remote = json.loads(subprocess.check_output(
         [gh, "release", "view", tag, "--repo", repository, "--json", "assets"], text=True, timeout=60))
     actual = {item["name"]: item for item in remote}
@@ -255,6 +343,7 @@ def publish_once(config, tag, commit):
                PERSONA_RELEASE_PLATFORM=platform, PERSONA_RELEASE_WORKTREE=str(config["worktree"]))
     subprocess.run(command, cwd=config["worktree"], env=env, check=True)
     assets = read_receipt(Path(config["receipt"]).expanduser(), commit)
+    check_release_manifest(assets)
     upload(config["repository"], tag, assets)
     write_state(state, {"tag": tag, "commit": commit, "platform": platform, "phase": "complete", "assets": assets})
     print("Published " + platform + " " + tag, flush=True)

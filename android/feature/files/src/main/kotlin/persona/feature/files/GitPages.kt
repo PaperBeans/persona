@@ -13,7 +13,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -171,13 +170,12 @@ private fun CommitRow(commit: SessionGitCommit, head: Boolean, remote: String, o
 /** One commit: message, author and date, the hash (tap to copy), the files it touched; each opens its part of the diff. */
 @Composable
 internal fun CommitPage(hash: String, state: FilesState, controller: FilesController, back: () -> Unit) {
-    val context = LocalContext.current
     val resources = LocalResources.current
-    val feedback = LocalAppFeedback.current
+    val copy = rememberCopy()
     val show = state.commit
     val commit = show?.commit ?: (state.git?.commits.orEmpty() + state.older).firstOrNull { it.hash == hash } ?: SessionGitCommit(hash)
     var menu by remember { mutableStateOf(false) }
-    val copyHash = { copyText(context, commit.hash, feedback, resources.getString(R.string.files_git_hash_copied)) }
+    val copyHash: () -> Unit = { copy(commit.hash, resources.getString(R.string.files_git_hash_copied)) }
     JListPage(commit.shortHash, subtitle = stringResource(R.string.files_git_commit), onBack = back,
         actions = { JIconButton(PhIcons.DotsThree, stringResource(R.string.files_git_commit_options), { menu = true }) }) {
         item("commit") { CommitCard(commit, copyHash) }
@@ -199,7 +197,7 @@ internal fun CommitPage(hash: String, state: FilesState, controller: FilesContro
     }
     if (menu) JActionSheet(buildList {
         add(JAction(stringResource(R.string.files_git_copy_hash), PhIcons.Hash, onClick = copyHash))
-        show?.diff?.takeIf { it.isNotEmpty() }?.let { diff -> add(JAction(stringResource(R.string.files_copy_diff), PhIcons.Copy) { copyText(context, diff, feedback, resources.getString(R.string.files_diff_copied)) }) }
+        show?.diff?.takeIf { it.isNotEmpty() }?.let { diff -> add(JAction(stringResource(R.string.files_copy_diff), PhIcons.Copy) { copy(diff, resources.getString(R.string.files_diff_copied)) }) }
         add(JAction(stringResource(R.string.files_refresh), PhIcons.ArrowClockwise) { controller.reload() })
     }, { menu = false }, stringResource(R.string.files_git_commit))
 }
@@ -236,9 +234,8 @@ private fun CommitCard(commit: SessionGitCommit, copy: () -> Unit) {
 /** One file of a commit: its part of the commit's diff. */
 @Composable
 internal fun CommitFilePage(selection: FileSelection.CommitFile, state: FilesState, controller: FilesController, back: () -> Unit) {
-    val context = LocalContext.current
     val resources = LocalResources.current
-    val feedback = LocalAppFeedback.current
+    val copy = rememberCopy()
     val file = selection.file
     val show = state.commit
     val part = remember(show, file) { show?.let { GitDiffs.part(it.diff, file) } }
@@ -262,7 +259,7 @@ internal fun CommitFilePage(selection: FileSelection.CommitFile, state: FilesSta
         }
     }
     if (menu) JActionSheet(buildList {
-        part?.diff?.takeIf { it.isNotEmpty() }?.let { diff -> add(JAction(stringResource(R.string.files_copy_diff), PhIcons.Copy) { copyText(context, diff, feedback, resources.getString(R.string.files_diff_copied)) }) }
-        add(JAction(stringResource(R.string.files_copy_path), PhIcons.Copy) { copyText(context, joinRemotePath(root, file.path), feedback, resources.getString(R.string.files_path_copied)) })
+        part?.diff?.takeIf { it.isNotEmpty() }?.let { diff -> add(JAction(stringResource(R.string.files_copy_diff), PhIcons.Copy) { copy(diff, resources.getString(R.string.files_diff_copied)) }) }
+        add(JAction(stringResource(R.string.files_copy_path), PhIcons.Copy) { copy(joinRemotePath(root, file.path), resources.getString(R.string.files_path_copied)) })
     }, { menu = false }, file.name)
 }

@@ -233,6 +233,7 @@ func TestIMessageAISwitch(t *testing.T) {
 // number: no number in an id; the cursor moves on.
 func TestIMessageArchive(t *testing.T) {
 	h := newTestManager(t)
+	h.store = newMemStore()
 	h.connectors = connector.NewRegistry(nil)
 	imessageNode(t, h, func(method string, _ json.RawMessage) (any, error) {
 		switch method {
@@ -265,7 +266,7 @@ func TestIMessageArchive(t *testing.T) {
 		t.Fatalf("archives %+v", archives)
 	}
 	var res assistantwire.ChangesResult
-	_ = json.Unmarshal(ask(assistantwire.ConnectorsChanges, map[string]any{"id": imessage.ID, "cursor": ""}), &res)
+	_ = json.Unmarshal(ask(assistantwire.ConnectorsChanges, map[string]any{"id": imessage.ID, "cursor": "", "fence_version": assistantwire.ArchiveFenceV1}), &res)
 	if res.Next != "9" || len(res.Batches) != 1 {
 		t.Fatalf("changes %+v", res)
 	}

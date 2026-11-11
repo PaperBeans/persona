@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A new agent's own worktree (#4532): iOS AgentWorktree words. -->
+<resources>
+    <string name="agents_worktree_title">Worktree</string>
+    <string name="agents_worktree_switch">新しい worktree で</string>
+    <string name="agents_worktree_branch">ブランチ</string>
+    <string name="agents_worktree_footer">専用のブランチとチェックアウトを作ります。エージェントはそこでコードを変え、このフォルダはそのままです。</string>
+    <string name="agents_worktree_checks_out">チェックアウト先：%1$s</string>
+    <string name="agents_worktree_add_failed">worktree を作れませんでした：%1$s</string>
+</resources>

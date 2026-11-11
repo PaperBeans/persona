@@ -360,4 +360,5 @@
     <string name="designsystem_stepper_minus">Decrease</string>
     <string name="designsystem_stepper_plus">Increase</string>
     <string name="designsystem_copy_too_large">Text too large to copy; use Share instead</string>
+    <string name="designsystem_copied">Copied</string>
 </resources>

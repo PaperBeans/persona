@@ -161,7 +161,7 @@ Risks: Glass leaves line height to the platform on purpose (see `Typography.kt`)
 4. `StyleContrastTest` gets floors per style: Glass fails on the three iOS floors and reports the WCAG checks without failing, as `rules.json` does; Brief and Board keep 4.5:1.
 5. `GlassTokenContractTest`, `docs/android/android-design.md` and rule 7 of `DESIGN_SYSTEM.md` section 6 are updated in the same PR.
 
-**The cost.** Android's Glass text gets lighter: secondary text drops from 4.5:1 to about 3.3:1 to 3.4:1 in light mode, below WCAG AA. That is what decision 2 accepts; the contrast report keeps showing it.
+**The cost.** Android's Glass text gets lighter: secondary text drops from 4.5:1 to about 3.3:1 to 3.4:1 in light mode, below WCAG AA. That is what decision 2 accepts; the contrast report keeps showing it. Done: the extension themes keep their 4.5:1 check, since a theme applies to every style and Brief and Board keep 4.5:1; places that picked black or white by contrast on the accent now use the palette's `onAccent` (white in Glass).
 
 ### T7. Icons by meaning
 
@@ -174,7 +174,7 @@ Risks: Glass leaves line height to the platform on purpose (see `Typography.kt`)
 3. A Python test that every name exists in `Icons.swift` and every glyph in the Phosphor list.
 4. A ratchet in `scripts/app/android_token_baseline.py` that moves pages from `PhIcons.*` to meaning names, file by file.
 
-Several meanings will share a glyph, which is fine. Adding a new glyph stays a local step, since CI has no Phosphor checkout.
+Several meanings will share a glyph, which is fine. Adding a new glyph stays a local step, since CI has no Phosphor checkout. Done: `spec/icons/meanings.json` maps 168 of iOS's meanings (the ones with a fitting glyph among the 170 generated), `PersonaIcons` is generated from it, and the ratchet's `icon` category starts at the 1,190 direct glyph references in pages.
 
 ### T8. Guards
 
@@ -200,6 +200,8 @@ Outside the design system, 151 production files import `androidx.compose.materia
 3. Short rows and headers: `heightIn(min = 48.dp)` with transparent padding.
 
 Risks: layouts grow where these controls sit in rows, so screenshot baselines move. Brief and Board share the components and get the fix too.
+
+Finding (11-11): step 1 as written moved pixels. With `minimumInteractiveComponentSize()` before `size()`, a switch's row grew 12dp next to rows without one, and the Agents computer and space headings grew too (screenshots in #4209). Compose already stretches a small pointer target to the system's 48dp touch area where no other target is closer, so the switch, the search field's clear button and a heading action keep their size, the no-op calls go, and `TouchTargetTest` guards the 48dp reach (the heading action joins its cases; the clear button has its own test, since the text sits on its left). Steps 2 and 3 grow layouts as well; each needs a reason a target is missed (an overlapping neighbour) before it changes how a screen looks.
 
 ### T10. Haptics
 

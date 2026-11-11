@@ -243,7 +243,7 @@ export function StarterLauncherChip() {
   const label = defaultLabel(def ?? { provider: assistant.launcher });
   return (
     <>
-      <Chip label={picked ? `${current} · ${oneOff()}` : label} onClick={menu.open} active={Boolean(menu.anchor)} title={t("assistant-assistantchat.new_chat_launcher_title")} />
+      <Chip label={t("main-runtime.new_launcher", { launcher: picked ? `${current} · ${oneOff()}` : label })} onClick={menu.open} active={Boolean(menu.anchor)} title={t("assistant-assistantchat.new_chat_launcher_title")} />
       {menu.anchor && (
         <Menu
           anchor={menu.anchor}

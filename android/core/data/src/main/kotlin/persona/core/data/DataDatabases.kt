@@ -237,7 +237,7 @@ interface ItemsDao {
     suspend fun insert(items: List<ItemRow>)
 }
 
-@Database(entities = [ItemRow::class, SessionCursorRow::class], version = 3,
+@Database(entities = [ItemRow::class, SessionCursorRow::class], version = 4,
     autoMigrations = [AutoMigration(from = 2, to = 3)], exportSchema = true)
 abstract class ItemsDatabase : RoomDatabase() {
     abstract fun items(): ItemsDao
@@ -248,6 +248,18 @@ abstract class ItemsDatabase : RoomDatabase() {
                 db.execSQL("CREATE TABLE IF NOT EXISTS `cursors` (`scope` TEXT NOT NULL, `machine` TEXT NOT NULL, " +
                     "`session` TEXT NOT NULL, `history` TEXT, `covered` INTEGER NOT NULL, `has_more` INTEGER, " +
                     "PRIMARY KEY(`scope`, `machine`, `session`))")
+            }
+        }
+
+        /**
+         * The same tables; what an older build kept is dropped, since it decoded items without fields added since (a
+         * refusal notice's `model_refusal`, #2528) and the chat keeps a cached item over the hub's newer copy. A cache:
+         * the chats load again from the hub.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DELETE FROM `items`")
+                db.execSQL("DELETE FROM `cursors`")
             }
         }
     }

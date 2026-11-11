@@ -30,7 +30,6 @@ import (
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/rpc"
-	wechat "github.com/nwverse/persona/server/internal/wechat/spec"
 )
 
 // Plugins (docs/extensions/extensions.md): one registry of every plugin — built into personad, written in hub.json, installed on
@@ -461,11 +460,6 @@ func (h *Manager) attachExtensions(ctx context.Context) {
 	reg.Reserve("looks", extension.BuiltinLooks...)
 	reg.Reserve("looks", extension.RetiredLookIDs...)
 	// No agent_sources id is reserved: the hub has no personal agents source of its own (extension_agents.go).
-	if path := siblingProgram(wechat.Program); path != "" {
-		if err := h.addWeChatBuiltin(reg, path); err != nil {
-			h.logf("plugin wechat: %v", err)
-		}
-	}
 	if err := reg.AddBuiltin(cuaManifest(h), "", false); err != nil { // off until the user turns it on (computer.go)
 		h.logf("plugin cua: %v", err)
 	}
@@ -991,7 +985,6 @@ func (ps *extensions) specOf(ctx context.Context, p *extension.Extension, hp *hu
 		}
 		ps.voiceSpec(p, &s) // what the hub.json entry it took over had (voice_extension.go)
 	}
-	builtin := p.Record.Source == extension.SourceBuiltin
 	s.Init = func(ctx context.Context) (extension.InitializeParams, error) {
 		secrets, err := ps.programSecrets(ctx, id)
 		if err != nil {
@@ -1061,9 +1054,6 @@ func (ps *extensions) specOf(ctx context.Context, p *extension.Extension, hp *hu
 			return extension.InitializeParams{}, storeError(ctx, err)
 		}
 		return params, nil
-	}
-	if builtin && id == wechat.ID && ps.h != nil {
-		s.Check = sameBuild(ps.h, p.Manifest.Name, s.Command) // the program must be the hub's build
 	}
 	s.Accept = func(res extension.InitializeResult) error {
 		ps.clearBadges(id)

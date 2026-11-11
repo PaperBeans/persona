@@ -196,7 +196,7 @@ struct InboxEventsTests {
         {\(Self.base),"done_at":"2026-11-05T10:00:00Z","done_by":"manager","chain":[
           {"id":"c1","kind":"done","text":"管理者看完，不用管"}]}
         """)
-        #expect(filed.isDone && InboxEventText.doneBy(filed) == "管理者处理了")
+        #expect(filed.isDone && InboxEventText.doneBy(filed) == "助手处理了")
         #expect(InboxEventText.symbol(filed.chain![0]) == Theme.Icon.done && InboxChainTarget.of(filed.chain![0]) == .nothing)
         let mine = try Self.item("{\(Self.base),\"done_at\":\"2026-11-05T10:00:00Z\",\"done_by\":\"user\"}")
         #expect(InboxEventText.doneBy(mine) == nil)

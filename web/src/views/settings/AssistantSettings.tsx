@@ -2,7 +2,7 @@
 // AssistantMemoryView, Android's assistant settings): what Persona does on its own (a line into "Scheduled tasks"), what it knows about you
 // ("About me" = `notes`, saved on "Save" or when leaving; "Memory" = its memory files: read, edit the whole file, delete), and where
 // it runs (read-only here). Its model is Settings › Models › Main chat, not here (#1291).
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 import { BASE } from "../../lib/base";
 import { settingsHref } from "./nav";
@@ -21,10 +21,13 @@ import { Icon } from "../../ui/icons";
 import { Markdown } from "../../ui/Markdown";
 import { Group, Pill, Row, settingsInputClass, Switch } from "../settings/SettingsParts";
 import { SkillsGroup } from "./Skills";
-import { StandingAuthorizations } from "./StandingAuthorizations";
+import { lazyPage } from "../../lib/lazy-page";
 import { Tag, textareaClass } from "../assistant/parts";
 import { PersonaAvatar, usePersona } from "../assistant/Persona";
 import { TaskTrust } from "./TaskTrust";
+import { PageBoundary } from "../PageBoundary";
+
+const StandingAuthorizations = lazyPage(() => import("./StandingAuthorizations").then((m) => m.StandingAuthorizations));
 
 interface AssistantState {
   manager?: string;
@@ -331,7 +334,11 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         </Row>
       </Group>
 
-      <StandingAuthorizations manager={manager} />
+      <PageBoundary page="standing-authorizations">
+        <Suspense fallback={<Group anchor="standing-authorizations" title={t("settings-standing.title")}><Loading /></Group>}>
+          <StandingAuthorizations manager={manager} />
+        </Suspense>
+      </PageBoundary>
 
       {typeof info?.meeting_attendance_default === "string" && (
         <Group anchor="meetings" title={t("settings-assistantsettings.meetings_title")} footer={t("settings-assistantsettings.meeting_attendance_footer")}>

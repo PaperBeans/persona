@@ -10,9 +10,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -125,7 +122,7 @@ private fun PersonaRootContent(
     onPaired: () -> Unit = {},
 ) {
     val session by shell.session.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
+    val toast = persona.core.designsystem.rememberToastState()
     val scope = rememberCoroutineScope()
     var diagnostics by remember { mutableStateOf(false) }
     // First pairing keeps the pairing flow, including its readiness checklist, until it reports ready.
@@ -135,18 +132,8 @@ private fun PersonaRootContent(
         else if (hub == null) entering = true
     }
     val link = MainActivity.pendingPairLink.value
-    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
-    LaunchedEffect(shell) {
-        shell.feedback.notices.collect { notice ->
-            snackbar.currentSnackbarData?.dismiss()
-            notice.haptic?.let { haptics.play(it) }
-            // A notice with "Undo" waits its own few seconds; collecting the next one dismisses it, as for the others.
-            launch {
-                val result = snackbar.showSnackbar(notice.message, actionLabel = notice.action?.label, duration = SnackbarDuration.Short)
-                if (result == SnackbarResult.ActionPerformed) notice.action?.run?.invoke()
-            }
-        }
-    }
+    // One toast slot for the window, as iOS: the newest notice replaces the one showing; the host plays its haptic.
+    LaunchedEffect(shell) { shell.feedback.notices.collect { toast.show(it) } }
     CompositionLocalProvider(LocalAppFeedback provides shell.feedback) {
         Surface(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize()) {
@@ -211,7 +198,7 @@ private fun PersonaRootContent(
                     }
                     active.phone?.let { PhoneConfirmationHost(it.confirmations) }
                 }
-                persona.core.designsystem.JAppSnackbarHost(snackbar, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(12.dp))
+                persona.core.designsystem.JToastHost(toast, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = Tokens.Space.m))
             }
         }
     }

@@ -19,5 +19,6 @@
   "question_more_options": " 等 {count} 个",
   "question_more_one": "还有 {count} 个问题",
   "question_more_other": "还有 {count} 个问题",
-  "usage_limit": "订阅的用量额度用完了，重置后再让它继续：{error}"
+  "usage_limit": "订阅的用量额度用完了，重置后再让它继续：{error}",
+  "private_card": "Persona 需要你回复，打开 Persona 查看。"
 }

@@ -13,8 +13,16 @@
   scroll-padding-top: calc(var(--sidebar-sticky-top, 0px) + var(--sidebar-controls-height, 0px) + var(--sidebar-row));
 }
 
-/* Assistant trays share the dock's bounded height; count meters use the small line token. */
-.assistant-action-tray { max-height: var(--assistant-tray-max); }
+/* Assistant trays (#4656): an open one lets the dock (ChatView's DOCK_MAX) take most of what is visible, the chat above
+   giving up the room, and fills only what it needs; expanded, it fills the chat column and the chat steps aside. Count
+   meters use the small line token. */
+[data-chat-dock]:has(.assistant-action-tray) { max-height: var(--assistant-dock-open-max); }
+[data-chat-dock]:has(.assistant-action-tray[data-expanded]) { height: var(--kb-h); max-height: none; min-height: 0; }
+[data-chat-dock]:has(.assistant-action-tray[data-expanded]) > [data-chat-dock-above],
+[data-assistant-actionbar]:has(> .assistant-action-tray[data-expanded]),
+.assistant-action-tray[data-expanded] { flex-grow: 1; }
+/* a plan card's Start row, stuck to the tray's bottom edge, keeps a hairline over what scrolls under it */
+.assistant-action-tray [data-plan-actions] { box-shadow: 0 -1px 0 var(--line); }
 .task-count-meter { height: var(--task-count-meter-height); }
 @media (forced-colors: active) {
   .task-count-meter { border: 1px solid CanvasText; }
@@ -25,7 +33,7 @@
  * Copyright (c) 2026 Shane Levine; see THIRD_PARTY_NOTICES.md). Every view reads colors through these.
  * Text tokens (--ink, --ink-2, --ink-3, --accent-ink) keep WCAG AA 4.5:1 on every background token (#2804, theme-contrast.test.ts). */
 :root {
-  --assistant-tray-max: min(20rem, 40dvh);
+  --assistant-dock-open-max: calc(var(--kb-h) * 0.82);
   --task-count-meter-height: 0.25rem;
   --page: #fafafb;
   --canvas: #f1f2f3;

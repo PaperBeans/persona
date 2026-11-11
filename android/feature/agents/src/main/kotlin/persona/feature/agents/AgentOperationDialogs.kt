@@ -26,8 +26,23 @@ internal sealed interface AgentOperationDialog {
 }
 
 @Composable
-internal fun AgentOperationDialog(dialog: AgentOperationDialog, model: AgentsViewModel, machineName: String? = null, dismiss: () -> Unit) {
+internal fun AgentOperationDialog(
+    dialog: AgentOperationDialog, model: AgentsViewModel, machineName: String? = null,
+    /** Worktree status and removal (#4532); null: no keep/remove choice. */
+    worktrees: persona.core.contracts.api.AgentCreationService? = null, machine: persona.core.contracts.Machine? = null,
+    dismiss: () -> Unit,
+) {
     val session = dialog.session
+    // Keep or remove the worktree Persona made for it, when it worked in one (#4532); removed once it is gone.
+    val ending = dialog is AgentOperationDialog.Close || dialog is AgentOperationDialog.Delete
+    val worktree = persona.feature.chat.rememberOurWorktree(worktrees.takeIf { ending }, session.machineId, session.cwd, machine?.online == true)
+    var cleanup by remember(session.key) { mutableStateOf(persona.feature.chat.WorktreeCleanup()) }
+    val feedback = persona.core.designsystem.LocalAppFeedback.current
+    val res = androidx.compose.ui.platform.LocalResources.current
+    fun cleanUp() { if (worktrees != null && worktree != null)
+        persona.feature.chat.WorktreeCleanups.cleanUp(worktrees, session.machineId, worktree, cleanup, feedback, res) }
+    val cleanupSection: (@Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit)? = worktree?.let { st ->
+        { persona.feature.chat.WorktreeCleanupSection(st, cleanup, { cleanup = it }, machine?.home) } }
     when (dialog) {
         // The same words as the chat's menu (core:domain closeConfirmation); long press and swipe both land here.
         is AgentOperationDialog.Close -> {
@@ -36,9 +51,9 @@ internal fun AgentOperationDialog(dialog: AgentOperationDialog, model: AgentsVie
                 onDismiss = dismiss, title = confirmation.title.text(), destructive = true, text = confirmation.message.text(),
                 confirm = stringResource(R.string.agents_action_close_agent) to {
                     // It may have been closed elsewhere since the dialog opened: then there is nothing left to do.
-                    if (model.closable(session)) model.close(session)
+                    if (model.closable(session)) model.close(session, onDone = ::cleanUp)
                     dismiss()
-                },
+                }, confirmEnabled = persona.feature.chat.WorktreeCleanups.ready(worktree, cleanup), content = cleanupSection,
             )
         }
         // The same words as the chat's menu (core:domain deleteConfirmation).
@@ -48,9 +63,9 @@ internal fun AgentOperationDialog(dialog: AgentOperationDialog, model: AgentsVie
                 onDismiss = dismiss, title = confirmation.title.text(), destructive = true, text = confirmation.message.text(),
                 confirm = stringResource(R.string.agents_dialog_delete) to {
                     // It may have started again since the dialog opened: then the hub would refuse it.
-                    if (model.deletable(session)) model.delete(session)
+                    if (model.deletable(session)) model.delete(session, onDone = ::cleanUp)
                     dismiss()
-                },
+                }, confirmEnabled = persona.feature.chat.WorktreeCleanups.ready(worktree, cleanup), content = cleanupSection,
             )
         }
         else -> {

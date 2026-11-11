@@ -12,7 +12,8 @@
       "material3": 3
     },
     "android/app/src/main/java/persona/android/ui/Root.kt": {
-      "dp": 4,
+      "dp": 3,
+      "icon": 6,
       "material3": 2
     },
     "android/core/chatlist/src/main/kotlin/persona/core/chatlist/ChatList.kt": {
@@ -186,10 +187,10 @@
     },
     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/StatusComponents.kt": {
       "color": 2,
-      "dp": 54
+      "dp": 53
     },
     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/StatusPalette.kt": {
-      "color": 234
+      "color": 233
     },
     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/StepProgress.kt": {
       "dp": 4
@@ -221,89 +222,542 @@
       "color": 1,
       "dp": 2
     },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentArchivesScreen.kt": {
+      "icon": 2
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentGroups.kt": {
+      "icon": 1
+    },
     "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentOperationDialogs.kt": {
-      "dp": 1
+      "dp": 1,
+      "icon": 9
     },
     "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentRequests.kt": {
-      "dp": 8
+      "dp": 8,
+      "icon": 1
     },
     "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentsScreen.kt": {
       "dp": 1,
-      "material3": 1
+      "icon": 45
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentsTree.kt": {
+      "icon": 3
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/HerdrNotice.kt": {
+      "icon": 1
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/HubNoticeRow.kt": {
+      "icon": 4
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/LauncherAvailability.kt": {
+      "dp": 5,
+      "icon": 1
     },
     "android/feature/agents/src/main/kotlin/persona/feature/agents/NewAgentDialog.kt": {
-      "dp": 5
+      "dp": 5,
+      "icon": 5
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/NewAgentModelPicker.kt": {
+      "icon": 1
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/NewAgentRecents.kt": {
+      "icon": 5
     },
     "android/feature/agents/src/main/kotlin/persona/feature/agents/SpaceScreen.kt": {
       "dp": 1,
-      "material3": 1
+      "icon": 3
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/TodoCalendar.kt": {
+      "icon": 6
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/TodoDecisions.kt": {
+      "icon": 1
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/TodoDetailScreen.kt": {
+      "icon": 10
     },
     "android/feature/agents/src/main/kotlin/persona/feature/agents/TodoHandOffSheet.kt": {
+      "icon": 5,
       "material3": 6
     },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/TodoListControls.kt": {
+      "icon": 2
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/TodoPickerSheet.kt": {
+      "icon": 3
+    },
+    "android/feature/agents/src/main/kotlin/persona/feature/agents/TodosScreen.kt": {
+      "icon": 12
+    },
     "android/feature/assistant/src/main/kotlin/persona/feature/assistant/AssistantPendingConversation.kt": {
-      "dp": 4
+      "dp": 4,
+      "icon": 1
     },
     "android/feature/assistant/src/main/kotlin/persona/feature/assistant/AssistantScreen.kt": {
       "dp": 19,
-      "material3": 1
+      "icon": 44
+    },
+    "android/feature/assistant/src/main/kotlin/persona/feature/assistant/CompactionStatusLine.kt": {
+      "icon": 1
+    },
+    "android/feature/assistant/src/main/kotlin/persona/feature/assistant/NeedsYou.kt": {
+      "icon": 11
+    },
+    "android/feature/assistant/src/main/kotlin/persona/feature/assistant/StarterLauncher.kt": {
+      "icon": 1
+    },
+    "android/feature/assistant/src/main/kotlin/persona/feature/assistant/proactive/AssistantProactiveScreen.kt": {
+      "icon": 7
+    },
+    "android/feature/assistant/src/main/kotlin/persona/feature/assistant/proactive/ProactiveComponents.kt": {
+      "icon": 9
+    },
+    "android/feature/assistant/src/main/kotlin/persona/feature/assistant/proactive/ProactivePages.kt": {
+      "icon": 10
+    },
+    "android/feature/assistant/src/main/kotlin/persona/feature/assistant/proactive/ProactiveText.kt": {
+      "icon": 12
+    },
+    "android/feature/assistant/src/main/kotlin/persona/feature/assistant/proactive/TaskEditor.kt": {
+      "icon": 14
+    },
+    "android/feature/assistant/src/main/kotlin/persona/feature/assistant/settings/AssistantMemoryFile.kt": {
+      "icon": 3
+    },
+    "android/feature/assistant/src/main/kotlin/persona/feature/assistant/settings/AssistantSettingsScreen.kt": {
+      "icon": 28
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/AgentShareSheet.kt": {
+      "icon": 2
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ApiErrorCard.kt": {
+      "icon": 5
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/AssistantTaskSheets.kt": {
+      "icon": 15
     },
     "android/feature/chat/src/main/kotlin/persona/feature/chat/AssistantTasks.kt": {
+      "icon": 42,
       "material3": 1
     },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/AssistantTrays.kt": {
+      "icon": 6
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/AttachedPhotos.kt": {
+      "icon": 5
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/BriefCard.kt": {
+      "icon": 8
+    },
     "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatChrome.kt": {
-      "dp": 4
+      "dp": 4,
+      "icon": 8
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatComposer.kt": {
+      "icon": 4
     },
     "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatContent.kt": {
-      "dp": 7
+      "dp": 7,
+      "icon": 5
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatGoal.kt": {
+      "icon": 2
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatHostNotes.kt": {
+      "icon": 2
     },
     "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatLinkHost.kt": {
-      "dp": 1
+      "dp": 1,
+      "icon": 10
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatModes.kt": {
+      "icon": 7
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatPortChips.kt": {
+      "icon": 2
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatQueueStrip.kt": {
+      "icon": 3
     },
     "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatScreen.kt": {
-      "dp": 4
+      "dp": 4,
+      "icon": 1
     },
     "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatSearchScreen.kt": {
-      "dp": 1
+      "dp": 1,
+      "icon": 2
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatSessionInfoSheet.kt": {
+      "icon": 2
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatSiblingTabs.kt": {
+      "icon": 1
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatStatusSheet.kt": {
+      "icon": 4
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ChatTasks.kt": {
+      "icon": 3
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/CloseoutCard.kt": {
+      "icon": 14
     },
     "android/feature/chat/src/main/kotlin/persona/feature/chat/ComposerAttachments.kt": {
-      "dp": 1
+      "dp": 1,
+      "icon": 2
     },
     "android/feature/chat/src/main/kotlin/persona/feature/chat/ComposerRefusalActions.kt": {
       "dp": 1
     },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/FileCards.kt": {
+      "icon": 2
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/FullTextReader.kt": {
+      "icon": 7
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/InjectedLine.kt": {
+      "icon": 6
+    },
     "android/feature/chat/src/main/kotlin/persona/feature/chat/InteractionPanel.kt": {
-      "dp": 2
+      "dp": 2,
+      "icon": 2
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/MessageExtras.kt": {
+      "icon": 5
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/MessageMenu.kt": {
+      "icon": 11
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ModelFallback.kt": {
+      "dp": 17
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/NextWaiting.kt": {
+      "icon": 1
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/PersonaTools.kt": {
+      "icon": 11
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ReaderNavigation.kt": {
+      "icon": 1
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ReplyBlocks.kt": {
+      "icon": 4
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ReviewViews.kt": {
+      "icon": 6
     },
     "android/feature/chat/src/main/kotlin/persona/feature/chat/StructuredContent.kt": {
-      "dp": 7
+      "dp": 7,
+      "icon": 18
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/TaskNoteLine.kt": {
+      "icon": 4
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/ToolDetails.kt": {
+      "icon": 5
+    },
+    "android/feature/chat/src/main/kotlin/persona/feature/chat/media/ChatImageViewer.kt": {
+      "icon": 4
+    },
+    "android/feature/files/src/main/kotlin/persona/feature/files/AudioFile.kt": {
+      "icon": 3
+    },
+    "android/feature/files/src/main/kotlin/persona/feature/files/ComparePage.kt": {
+      "icon": 3
+    },
+    "android/feature/files/src/main/kotlin/persona/feature/files/FilePreview.kt": {
+      "icon": 16
     },
     "android/feature/files/src/main/kotlin/persona/feature/files/FileText.kt": {
       "dp": 7
     },
+    "android/feature/files/src/main/kotlin/persona/feature/files/FilesScreen.kt": {
+      "icon": 16
+    },
+    "android/feature/files/src/main/kotlin/persona/feature/files/GitPages.kt": {
+      "icon": 12
+    },
+    "android/feature/files/src/main/kotlin/persona/feature/files/SheetView.kt": {
+      "icon": 3
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/ComposeMail.kt": {
+      "icon": 1
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/ConnectorThread.kt": {
+      "icon": 10
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxAiActions.kt": {
+      "icon": 4
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxAiDraft.kt": {
+      "icon": 2
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxConversationItemRow.kt": {
+      "icon": 4
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxDocDetail.kt": {
+      "icon": 4
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxEventScreen.kt": {
+      "icon": 10
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxEvents.kt": {
+      "icon": 14
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxHandOffSheet.kt": {
+      "icon": 3
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxItemExtensionScreen.kt": {
+      "icon": 2
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxItemRow.kt": {
+      "icon": 5
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxMutes.kt": {
+      "icon": 2
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxPolicies.kt": {
+      "icon": 4
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxScreen.kt": {
+      "icon": 16
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxTopBar.kt": {
+      "icon": 1
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/InboxTriage.kt": {
+      "icon": 2
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/LarkChatExtras.kt": {
+      "icon": 3
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/LarkDocCommentsSheet.kt": {
+      "icon": 5
+    },
     "android/feature/inbox/src/main/kotlin/persona/feature/inbox/LarkDocumentReader.kt": {
-      "dp": 2
+      "dp": 2,
+      "icon": 10
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/LarkMediaComponents.kt": {
+      "icon": 4
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/LarkMoments.kt": {
+      "icon": 7
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/LarkProfileSheet.kt": {
+      "icon": 1
     },
     "android/feature/inbox/src/main/kotlin/persona/feature/inbox/LarkReactions.kt": {
+      "icon": 5,
       "material3": 4
     },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/LarkRichText.kt": {
+      "icon": 1
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/LarkScreen.kt": {
+      "icon": 5
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/MailAttachmentRow.kt": {
+      "icon": 2
+    },
     "android/feature/inbox/src/main/kotlin/persona/feature/inbox/MailScreen.kt": {
-      "dp": 1
+      "dp": 1,
+      "icon": 4
+    },
+    "android/feature/inbox/src/main/kotlin/persona/feature/inbox/TranslationViews.kt": {
+      "icon": 3
+    },
+    "android/feature/knowledge/src/main/kotlin/persona/feature/knowledge/KnowledgeMinutes.kt": {
+      "icon": 8
+    },
+    "android/feature/knowledge/src/main/kotlin/persona/feature/knowledge/KnowledgeScreen.kt": {
+      "icon": 14
+    },
+    "android/feature/machines/src/main/kotlin/persona/feature/machines/AddComputerPage.kt": {
+      "icon": 13
+    },
+    "android/feature/machines/src/main/kotlin/persona/feature/machines/MachineHealthSections.kt": {
+      "icon": 9
+    },
+    "android/feature/machines/src/main/kotlin/persona/feature/machines/MachineManagementSections.kt": {
+      "icon": 5
     },
     "android/feature/machines/src/main/kotlin/persona/feature/machines/MachinesScreen.kt": {
-      "dp": 16
+      "dp": 16,
+      "icon": 6
     },
     "android/feature/machines/src/main/kotlin/persona/feature/machines/MetricCharts.kt": {
       "dp": 13
     },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/AppUpdateNotice.kt": {
+      "icon": 1
+    },
     "android/feature/settings/src/main/kotlin/persona/feature/settings/AppearanceSettings.kt": {
-      "dp": 16
+      "dp": 16,
+      "icon": 4
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/AssistantHtml.kt": {
+      "icon": 3
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/AssistantSwitcher.kt": {
+      "icon": 2
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/AssistantViewCard.kt": {
+      "icon": 3
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/AvatarUpload.kt": {
+      "icon": 1
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/CapsuleSettingsPage.kt": {
+      "icon": 2
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ChannelsScreen.kt": {
+      "icon": 16
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ClaudeSettingsScreen.kt": {
+      "icon": 5
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ConnectDevice.kt": {
+      "icon": 5
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ConnectorsScreens.kt": {
+      "icon": 21
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/DesktopPresence.kt": {
+      "icon": 6
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/DeviceSettingsPages.kt": {
+      "icon": 6
     },
     "android/feature/settings/src/main/kotlin/persona/feature/settings/DiagnosticsScreen.kt": {
       "dp": 1
     },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/EndpointsSection.kt": {
+      "icon": 11
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionCodeReviewUi.kt": {
+      "icon": 12
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionCodeViews.kt": {
+      "icon": 6
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionMarketScreen.kt": {
+      "icon": 19
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionOperationView.kt": {
+      "icon": 4
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionSettingsPage.kt": {
+      "icon": 3
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionSignIn.kt": {
+      "icon": 3
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionSlots.kt": {
+      "icon": 12
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionUiScreen.kt": {
+      "icon": 3
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionViewContent.kt": {
+      "icon": 5
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionViewParts.kt": {
+      "icon": 75
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionViewV6.kt": {
+      "icon": 3
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ExtensionsScreen.kt": {
+      "icon": 11
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/HubConnectorPage.kt": {
+      "icon": 4
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/HubTunnelScreens.kt": {
+      "icon": 6
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/HubUpdateScreen.kt": {
+      "icon": 4
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/HubsScreen.kt": {
+      "icon": 10
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/LanguageSettings.kt": {
+      "icon": 1
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/LauncherQuotaSection.kt": {
+      "icon": 3
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ManagersScreen.kt": {
+      "icon": 8
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/MessagesConnector.kt": {
+      "icon": 15
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ModelConfigurationScreen.kt": {
+      "icon": 6
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/NativeStreamItems.kt": {
+      "icon": 4
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/NewProviderScreen.kt": {
+      "icon": 6
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/OutlookSignIn.kt": {
+      "icon": 1
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/PairingScreen.kt": {
+      "icon": 6
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ProviderEditScreens.kt": {
+      "icon": 9
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ProviderWizardSteps.kt": {
+      "icon": 10
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/ProvidersScreen.kt": {
+      "icon": 15
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/SentScreen.kt": {
+      "icon": 3
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/SettingsScreen.kt": {
+      "icon": 28
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/SignInSteps.kt": {
+      "icon": 3
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/StorageScreen.kt": {
+      "icon": 6
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/SubscriptionsEntry.kt": {
+      "icon": 1
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/TranslationSettingsPage.kt": {
+      "icon": 9
+    },
+    "android/feature/settings/src/main/kotlin/persona/feature/settings/TriageSettingsPage.kt": {
+      "icon": 7
+    },
+    "android/feature/terminal/src/main/kotlin/persona/feature/terminal/TerminalPanesScreen.kt": {
+      "icon": 4
+    },
     "android/feature/terminal/src/main/kotlin/persona/feature/terminal/TerminalScreen.kt": {
-      "dp": 1
+      "dp": 1,
+      "icon": 4
+    },
+    "android/feature/terminal/src/main/kotlin/persona/feature/terminal/TerminalSelectText.kt": {
+      "icon": 1
+    },
+    "android/feature/voice/src/main/kotlin/persona/feature/voice/VoiceScreen.kt": {
+      "icon": 14
+    },
+    "android/platform/capsule/src/main/kotlin/persona/platform/capsule/CapsuleSurface.kt": {
+      "icon": 7
+    },
+    "android/platform/capsule/src/main/kotlin/persona/platform/capsule/CapsuleSurfaceParts.kt": {
+      "icon": 3
     },
     "android/platform/phonetools/src/main/kotlin/persona/platform/phonetools/HealthRationaleActivity.kt": {
       "dp": 5

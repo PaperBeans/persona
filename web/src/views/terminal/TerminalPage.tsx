@@ -1,33 +1,16 @@
-// "Terminal": every computer's terminal panes — agents and plain shells — as machine → workspace → tab → pane, and any of them
-// opened as a terminal (docs/integrations/terminal.md "Standalone terminal", docs/web/web.md). The list is on the left (a page of its own on a
-// phone), the terminal on the right: the session terminal's own panel, kept for the last two panes of each machine so
-// going back is instant, and let go when the page goes to the background or is left.
-import { useEffect, useMemo, useRef, useState } from "react";
+// One browser for work sessions, with standalone shells below it. The session detail still uses the app's /s and /t routes.
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, enc, errorText } from "../../lib/api";
-import { usePanes, type Listing } from "../../lib/terminal-panes";
-import { machineWithHub } from "../../lib/mesh";
-import { composing } from "../../lib/send-history";
+import { useScopedMachines } from "../../lib/current-assistant";
 import { href, navigate, onLinkClick, type Route } from "../../lib/router";
+import { SESSIONS_LIST_FEATURE } from "../../lib/session-list";
 import { openPanel } from "../../lib/panel";
-import { terminalTarget } from "../../lib/session-view";
 import { refresh as refreshSessions, useStore } from "../../lib/store";
-import {
-  buildTerminalTree,
-  filterTerminalTree,
-  keepOnlyShown,
-  keepRecent,
-  paneCwd,
-  paneIds,
-  paneTrail,
-  sameTerminal,
-  type OpenTerminal,
-  type TermSpace,
-  type TermTab,
-} from "../../lib/terminals";
+import { usePanes, type Listing } from "../../lib/terminal-panes";
+import { buildTerminalTree, keepOnlyShown, keepRecent, paneCwd, paneTrail, sameTerminal, type OpenTerminal, type TermSpace } from "../../lib/terminals";
 import type { Machine } from "../../lib/types";
-import { AgentMark } from "../../ui/AgentMark";
-import { Collapse, cx, IconButton, Loading, toast } from "../../ui/atoms";
-import { StatusMark } from "../../ui/StatusMark";
+import { NARROW, useMedia } from "../../lib/viewport";
+import { Collapse, cx, IconButton, toast } from "../../ui/atoms";
 import { contextMenuProps } from "../../ui/context-menu";
 import type { MenuAt } from "../../ui/menu-model";
 import { machineNode, termPaneNode, termSpaceNode, termTabNode, type MenuNode } from "../../lib/node-actions";
@@ -35,41 +18,67 @@ import { useFolded } from "../../lib/use-folded";
 import { NodeMenu } from "../NodeMenu";
 import { onNodeChanged, setKnownTree } from "../../lib/node-palette";
 import { Icon } from "../../ui/icons";
-import { SearchField } from "../../ui/SearchField";
+import { WorkSessionBrowser } from "../agents/WorkSessionBrowser";
+import { AgentsList } from "../Sidebar";
 import { Empty } from "../session/files/parts";
 import { TerminalPanel } from "../session/TerminalPanel";
+import { ShellHeaderSlots } from "../ShellSwitch";
+import { interactiveSessionPane, standaloneShells, type ShellSpace, type ShellTab } from "./work-terminal-layout";
 import { t } from "../../i18n";
 
 type TerminalRoute = Extract<Route, { name: "terminal" }>;
+const browse: TerminalRoute = { name: "terminal" };
 
-export function TerminalPage({ route, onToggleSidebar }: { route: TerminalRoute; onToggleSidebar: () => void }) {
-  const machines = useStore((s) => s.machines);
+export function TerminalPage({ route, onToggleSidebar, onNewAgent, detail, onWorkPane }: {
+  route?: TerminalRoute;
+  onToggleSidebar: () => void;
+  onNewAgent: () => void;
+  detail?: { selected?: { mid: string; sid: string }; render: (terminalAvailable: boolean) => ReactNode };
+  onWorkPane?: (pane?: { mid: string; sid: string }) => void;
+}) {
+  const machines = useScopedMachines();
+  const allMachines = useStore((s) => s.machines);
   const sessions = useStore((s) => s.sessions);
-  const { listing, busy, refresh, reload } = usePanes(machines);
-  const [query, setQuery] = useState("");
+  const panesOn = useStore((s) => s.features.includes("terminal_panes"));
+  const legacyList = useStore((s) => s.loaded && !s.features.includes(SESSIONS_LIST_FEATURE) && !s.features.includes("sessions_dimensions"));
+  const addressed = route?.mid ?? detail?.selected?.mid;
+  // A bookmarked terminal or session may name another assistant's computer. Only the current one's are listed.
+  const targets = addressed && !machines.some((m) => m.id === addressed) ? allMachines.filter((m) => machines.includes(m) || m.id === addressed) : machines;
+  const { listing, busy, refresh, reload } = usePanes(targets, panesOn);
   const [menu, setMenu] = useState<{ node: MenuNode; at: MenuAt; header?: string } | null>(null);
-  const shown: OpenTerminal | undefined = route.mid && route.id ? { mid: route.mid, id: route.id } : undefined;
+  const shown: OpenTerminal | undefined = route?.mid && route.id ? { mid: route.mid, id: route.id } : undefined;
+  const selected = detail?.selected;
+  const terminalAvailable = Boolean(panesOn && selected && targets.some((m) => m.id === selected.mid && m.online) &&
+    interactiveSessionPane(listing[selected.mid], selected.sid));
+  const mid = selected?.mid, sid = selected?.sid;
+  useEffect(() => {
+    onWorkPane?.(terminalAvailable && mid && sid ? { mid, sid } : undefined);
+    return () => onWorkPane?.();
+  }, [mid, sid, onWorkPane, terminalAvailable]);
+  const hasDetail = Boolean(detail || shown);
+  const narrow = useMedia(NARROW);
+  const hideList = hasDetail && narrow;
 
   const trees = useMemo(() => {
     const out: Record<string, TermSpace[]> = {};
-    for (const m of machines) out[m.id] = buildTerminalTree(listing[m.id]?.data, sessions[m.id] ?? []);
+    for (const m of targets) out[m.id] = buildTerminalTree(listing[m.id]?.data, sessions[m.id] ?? []);
     return out;
-  }, [machines, listing, sessions]);
+  }, [targets, listing, sessions]);
 
-  // the palette's node commands (lib/node-palette.ts) read the panes from here, and say when they changed some
+  // Node commands in the palette still see all panes, even when the browser shows only their associated sessions.
   useEffect(() => {
-    for (const m of machines) setKnownTree(m.id, trees[m.id] ?? []);
-  }, [machines, trees]);
-  useEffect(() => onNodeChanged(() => void refresh()), [refresh]);
+    if (!panesOn) return;
+    for (const m of targets) setKnownTree(m.id, trees[m.id] ?? []);
+  }, [panesOn, targets, trees]);
+  useEffect(() => panesOn ? onNodeChanged(() => void refresh()) : undefined, [panesOn, refresh]);
 
-  // ── the terminals kept open: the one on screen and the one before it, per machine ──
+  // Keep standalone terminals mounted as before; switching a session's content is handled by ChatView itself.
   const [open, setOpen] = useState<OpenTerminal[]>([]);
   const shownKey = shown ? `${shown.mid}\n${shown.id}` : "";
   useEffect(() => {
     if (shown) setOpen((list) => keepRecent(list, shown));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `shown` is built anew each render; its key says it all
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the key describes the open terminal
   }, [shownKey]);
-  // in the background only what is on screen stays open; the others give their panes back to the computer
   const current = useRef(shown);
   current.current = shown;
   useEffect(() => {
@@ -77,33 +86,16 @@ export function TerminalPage({ route, onToggleSidebar }: { route: TerminalRoute;
     document.addEventListener("visibilitychange", hide);
     return () => document.removeEventListener("visibilitychange", hide);
   }, []);
-
-  // drawn in the order they were first opened, whatever the recency: moving an xterm in the DOM would be for nothing
   const opened = useRef(new Map<string, number>());
   const stable = [...open].sort((a, b) => {
-    for (const t of [a, b]) if (!opened.current.has(`${t.mid}\n${t.id}`)) opened.current.set(`${t.mid}\n${t.id}`, opened.current.size);
+    for (const item of [a, b]) if (!opened.current.has(`${item.mid}\n${item.id}`)) opened.current.set(`${item.mid}\n${item.id}`, opened.current.size);
     return opened.current.get(`${a.mid}\n${a.id}`)! - opened.current.get(`${b.mid}\n${b.id}`)!;
   });
-
-  const close = (t: OpenTerminal) => {
-    setOpen((list) => list.filter((x) => !sameTerminal(x, t)));
-    if (sameTerminal(t, shown)) navigate({ name: "terminal" });
+  const close = (item: OpenTerminal) => {
+    setOpen((list) => list.filter((x) => !sameTerminal(x, item)));
+    if (sameTerminal(item, shown)) navigate(browse);
   };
-
-  // Jump To: type to narrow the panes of every machine, ↑ ↓ to walk them, Enter to open
-  const visible = useMemo(() => {
-    const out: { mid: string; spaces: TermSpace[] }[] = [];
-    for (const m of machines) {
-      const spaces = filterTerminalTree(trees[m.id] ?? [], query, machineWithHub(m.id, machines));
-      if (spaces.length || !query.trim()) out.push({ mid: m.id, spaces }); // searching: only the machines with a match
-    }
-    return out;
-  }, [machines, trees, query]);
-  const flat = useMemo(() => visible.flatMap((v) => paneIds(v.spaces).map((id) => ({ mid: v.mid, id }))), [visible]);
-  const [active, setActive] = useState(0);
-  useEffect(() => setActive(0), [query]);
-  const activeItem = flat[Math.min(active, flat.length - 1)];
-
+  const [shellsFolded, toggleShells] = useFolded("work-standalone-shells");
   const openShell = async (mid: string, space: TermSpace) => {
     try {
       const r = await api<{ terminal: string }>(`/machines/${enc(mid)}/panes`, { method: "POST", json: { kind: space.host, workspace_id: space.id } });
@@ -114,99 +106,74 @@ export function TerminalPage({ route, onToggleSidebar }: { route: TerminalRoute;
     }
   };
 
-  const trail = (t: OpenTerminal) => paneTrail(trees[t.mid] ?? [], t.id);
-  const cwdOf = (t: OpenTerminal) => paneCwd(trees[t.mid] ?? [], t.id);
-  const listHidden = shown ? "max-lg:hidden" : "";
-  const termHidden = shown ? "" : "max-lg:hidden";
-  const anyPanes = flat.length > 0 || machines.some((m) => (trees[m.id] ?? []).length > 0);
-
   return (
-    <div className="flex h-full flex-col">
-      <header className={cx("flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 sm:px-4", shown && "max-lg:hidden")}>
-        <IconButton icon="sidebar" label={t("terminal-terminalpage.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
-        <h1 className="flex-1 text-[14px] font-semibold text-ink">{t("terminal-terminalpage.title")}</h1>
-        <IconButton icon="retry" label={t("terminal-terminalpage.refresh")} onClick={() => void refresh()} disabled={busy} />
+    <div className="flex h-full min-w-0 flex-col">
+      <header className={cx("flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 sm:px-4", hasDetail && "max-lg:hidden")}>
+        <h1 className="hidden min-w-0 flex-1 truncate text-[14px] font-semibold text-ink lg:block">{t("work-entry.title")}</h1>
+        <ShellHeaderSlots page="agents" onToggleSidebar={onToggleSidebar} endWide end={<IconButton icon="plus" label={t("agentspage.new_agent")} onClick={onNewAgent} />} />
       </header>
-      <div className="flex min-h-0 flex-1">
-        <section aria-label={t("terminal-terminalpage.panes")} className={cx("flex min-h-0 w-full flex-col lg:w-[320px] lg:shrink-0 lg:border-r lg:border-line", listHidden)}>
-          <SearchField
-            tone="inset"
-            className="mx-3 mt-3 mb-1 shrink-0"
-            value={query}
-            onChange={setQuery}
-            onKeyDown={(e) => {
-              if (composing(e.nativeEvent)) return;
-              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                e.preventDefault();
-                if (flat.length) setActive((a) => (Math.min(a, flat.length - 1) + (e.key === "ArrowDown" ? 1 : flat.length - 1)) % flat.length);
-              } else if (e.key === "Enter" && activeItem) {
-                e.preventDefault();
-                navigate(terminalTarget(activeItem.mid, activeItem.id, sessions[activeItem.mid] ?? []));
-              } else if (e.key === "Escape") setQuery("");
-            }}
-            placeholder={t("terminal-terminalpage.search_placeholder")}
-            label={t("terminal-terminalpage.search_label")}
-          />
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-6">
-            {machines.length === 0 && <Empty icon="machine" title={t("terminal-terminalpage.no_computers")} detail={t("terminal-terminalpage.no_computers_detail")} />}
-            {visible.map(({ mid, spaces }) => {
-              const m = machines.find((x) => x.id === mid)!;
-              return (
-                <MachineBlock
-                  key={mid}
-                  machine={m}
-                  named={machines.length > 1}
-                  spaces={spaces}
-                  listing={listing[mid]}
-                  searching={Boolean(query.trim())}
-                  loading={busy}
-                  shown={shown}
-                  activeItem={query.trim() ? activeItem : undefined}
-                  onOpenShell={(sp) => void openShell(mid, sp)}
-                  onRetry={() => void refresh()}
-                  open={(node, at, header, toggle) => setMenu((m) => (toggle && at.anchor && m?.at.anchor === at.anchor ? null : { node, at, header }))}
-                />
-              );
-            })}
-            {query.trim() && flat.length === 0 && machines.length > 0 && <p className="px-3 py-8 text-center text-[12.5px] text-ink-3">{t("terminal-terminalpage.no_results", { query: query.trim() })}</p>}
+      {hasDetail && (
+        <a href={href(browse)} onClick={(e) => onLinkClick(e, browse)} className="touch-hit flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 text-[13px] text-accent-ink lg:hidden">
+          <Icon name="arrowLeft" size={14} />{t("work-entry.back")}
+        </a>
+      )}
+      <div className="relative flex min-h-0 flex-1">
+        <section aria-label={t("work-entry.sessions")} inert={hideList || undefined} className={cx("flex min-h-0 w-full min-w-0 flex-col lg:w-[320px] lg:shrink-0 lg:border-r lg:border-line", hasDetail && "max-lg:invisible max-lg:absolute max-lg:inset-0")}>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3">
+            {legacyList ? <AgentsList route={route ?? browse} onNewAgent={onNewAgent} /> : <WorkSessionBrowser
+              activeSession={selected ? { machineId: selected.mid, sessionId: selected.sid } : undefined}
+              onSelect={(s) => navigate({ name: "session", mid: s.machine_id, sid: s.session_id, work: true })}
+            />}
           </div>
+          {panesOn && machines.length > 0 && (
+            <section aria-label={t("work-entry.shells")} className="flex min-h-0 max-h-[35%] shrink-0 flex-col border-t border-line">
+              <div className="flex shrink-0 items-center gap-1 px-2">
+                <button type="button" aria-expanded={!shellsFolded} onClick={toggleShells} className="touch-hit flex min-h-9 min-w-0 flex-1 items-center gap-2 whitespace-nowrap rounded-control px-2 text-left text-[12px] font-medium text-ink-2 hover:bg-hover">
+                  <Icon name="chevron" size={10} className={shellsFolded ? "-rotate-90" : undefined} />{t("work-entry.shells")}
+                </button>
+                <IconButton icon="retry" label={t("terminal-terminalpage.refresh")} onClick={() => void refresh()} disabled={busy} />
+              </div>
+              {!shellsFolded && (
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3">
+                  {machines.filter((m) => m.online).map((m) => (
+                    <MachineBlock
+                      key={m.id}
+                      machine={m}
+                      named={machines.length > 1}
+                      spaces={listing[m.id]?.error ? [] : standaloneShells(trees[m.id] ?? [])}
+                      listing={listing[m.id]}
+                      loading={busy}
+                      shown={shown}
+                      onOpenShell={(sp) => void openShell(m.id, sp)}
+                      onRetry={() => void refresh()}
+                      open={(node, at, header, toggle) => setMenu((prev) => (toggle && at.anchor && prev?.at.anchor === at.anchor ? null : { node, at, header }))}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
         </section>
         {menu && (
-          <NodeMenu
-            node={menu.node}
-            at={menu.at}
-            header={menu.header}
-            onClose={() => setMenu(null)}
-            changed={() => {
-              void refresh();
-              void refreshSessions().catch(() => {});
-            }}
-          />
+          <NodeMenu node={menu.node} at={menu.at} header={menu.header} onClose={() => setMenu(null)}
+            changed={() => { void refresh(); void refreshSessions().catch(() => {}); }} />
         )}
-        <section aria-label={t("terminal-terminalpage.title")} className={cx("relative flex min-h-0 min-w-0 flex-1 flex-col", termHidden)}>
-          {stable.map((t) => {
-            const on = sameTerminal(t, shown);
+        <section aria-label={t("work-entry.content")} className={cx("relative flex min-h-0 min-w-0 flex-1 flex-col", !hasDetail && "max-lg:hidden")}>
+          {panesOn && stable.map((item) => {
+            const on = sameTerminal(item, shown);
+            const spaces = trees[item.mid] ?? [];
+            const cwd = paneCwd(spaces, item.id);
             return (
-              // A kept terminal stays mounted under the one shown, at the same size, only unseen: its stream goes on and
-              // coming back is instant. Not display:none — a hidden xterm measures its box as 100px and would resize the pane.
-              <div key={`${t.mid}\n${t.id}`} inert={!on || undefined} className={cx("absolute inset-0 flex flex-col", !on && "pointer-events-none invisible")}>
-                <TerminalPanel
-                  mid={t.mid}
-                  sid={t.id}
-                  label={trail(t) || undefined}
-                  cwd={cwdOf(t)}
-                  // a plain shell has no session id; the Files panel only needs the folder
-                  onFiles={() => openPanel({ kind: "files", mid: t.mid, sid: t.id.startsWith("pane:") ? "" : t.id, cwd: cwdOf(t) })}
-                  onClose={() => close(t)}
-                />
+              <div key={`${item.mid}\n${item.id}`} inert={!on || undefined} className={cx("absolute inset-0 flex flex-col", !on && "pointer-events-none invisible")}>
+                <TerminalPanel mid={item.mid} sid={item.id} label={paneTrail(spaces, item.id) || undefined} cwd={cwd}
+                  onFiles={() => openPanel({ kind: "files", mid: item.mid, sid: item.id.startsWith("pane:") ? "" : item.id, cwd })}
+                  onClose={() => close(item)} />
               </div>
             );
           })}
-          {!shown && (
-            <div className="flex min-h-0 flex-1 flex-col">
-              {busy && !anyPanes ? <Loading /> : <Empty icon="terminal" title={t("terminal-terminalpage.pick_pane")} detail={t("terminal-terminalpage.pick_pane_detail")} />}
-            </div>
-          )}
+          {detail ? detail.render(terminalAvailable)
+            : shown ? !panesOn && <Empty icon="terminal" title={t("work-entry.terminal_unavailable")} />
+            : <Empty icon="chat" title={t("work-entry.pick_session")} detail={t("work-entry.pick_session_detail")} />}
         </section>
       </div>
     </div>
@@ -256,29 +223,24 @@ function MachineBlock({
   named,
   spaces,
   listing,
-  searching,
   loading,
   shown,
-  activeItem,
   onOpenShell,
   onRetry,
   open,
 }: {
   machine: Machine;
   named: boolean;
-  spaces: TermSpace[];
+  spaces: ShellSpace[];
   listing?: Listing;
-  searching: boolean;
   loading: boolean;
   shown?: OpenTerminal;
-  activeItem?: OpenTerminal;
   onOpenShell: (space: TermSpace) => void;
   onRetry: () => void;
 } & Menus) {
   const mid = machine.id;
   const [folded, toggle] = useFolded(`term:m:${mid}`);
-  if (searching && spaces.length === 0) return null;
-  const hide = named && folded && !searching; // a search shows what it found, whatever is folded
+  const hide = named && folded;
   const name = machine.name;
   const node = machineNode(machine, { fold: { folded, toggle }, onRefresh: onRetry });
   return (
@@ -297,7 +259,7 @@ function MachineBlock({
       <Collapse open={!hide}>
         <div inert={hide || undefined}>
           {machine.online && !listing && loading && <p className="px-2.5 py-2 text-[12px] text-ink-3">{t("terminal-terminalpage.loading")}</p>}
-          {machine.online && listing?.error && !listing.data && (
+          {machine.online && listing?.error && (
             <p className="flex items-center gap-2 px-2.5 py-2 text-[12px] text-red">
               <span className="min-w-0 flex-1 truncate" title={listing.error}>{listing.error}</span>
               <button type="button" onClick={onRetry} className="shrink-0 whitespace-nowrap rounded-control px-2 py-0.5 text-ink-2 hover:bg-hover hover:text-ink">
@@ -305,9 +267,9 @@ function MachineBlock({
               </button>
             </p>
           )}
-          {machine.online && listing?.data && spaces.length === 0 && !searching && <p className="px-2.5 py-2 text-[12px] text-ink-3">{t("terminal-terminalpage.no_panes")}</p>}
+          {machine.online && listing?.data && !listing.error && spaces.length === 0 && <p className="px-2.5 py-2 text-[12px] text-ink-3">{t("terminal-terminalpage.no_panes")}</p>}
           {spaces.map((sp) => (
-            <SpaceBlock key={`${sp.host}/${sp.id}`} machine={machine} sp={sp} searching={searching} shown={shown} activeItem={activeItem} onOpenShell={onOpenShell} open={open} />
+            <SpaceBlock key={`${sp.host}/${sp.id}`} machine={machine} sp={sp} shown={shown} onOpenShell={onOpenShell} open={open} />
           ))}
         </div>
       </Collapse>
@@ -315,10 +277,10 @@ function MachineBlock({
   );
 }
 
-function SpaceBlock({ machine, sp, searching, shown, activeItem, onOpenShell, open }: { machine: Machine; sp: TermSpace; searching: boolean; shown?: OpenTerminal; activeItem?: OpenTerminal; onOpenShell: (space: TermSpace) => void } & Menus) {
+function SpaceBlock({ machine, sp, shown, onOpenShell, open }: { machine: Machine; sp: ShellSpace; shown?: OpenTerminal; onOpenShell: (space: TermSpace) => void } & Menus) {
   const mid = machine.id;
   const [folded, toggle] = useFolded(`term:w:${mid}/${sp.host}:${sp.label}`);
-  const hide = folded && !searching;
+  const hide = folded;
   const node = termSpaceNode(mid, sp, machine.online, { fold: { folded, toggle }, onOpenShell: sp.canOpen ? () => onOpenShell(sp) : undefined });
   return (
     <div className="mt-1">
@@ -336,7 +298,7 @@ function SpaceBlock({ machine, sp, searching, shown, activeItem, onOpenShell, op
       <Collapse open={!hide}>
         <div inert={hide || undefined}>
           {sp.tabs.map((t) => (
-            <TabBlock key={t.id} machine={machine} sp={sp} t={t} searching={searching} shown={shown} activeItem={activeItem} open={open} />
+            <TabBlock key={t.id} machine={machine} sp={sp} t={t} shown={shown} open={open} />
           ))}
         </div>
       </Collapse>
@@ -344,13 +306,12 @@ function SpaceBlock({ machine, sp, searching, shown, activeItem, onOpenShell, op
   );
 }
 
-function TabBlock({ machine, sp, t: tab, searching, shown, activeItem, open }: { machine: Machine; sp: TermSpace; t: TermTab; searching: boolean; shown?: OpenTerminal; activeItem?: OpenTerminal } & Menus) {
+function TabBlock({ machine, sp, t: tab, shown, open }: { machine: Machine; sp: ShellSpace; t: ShellTab; shown?: OpenTerminal } & Menus) {
   const mid = machine.id;
-  const mySessions = useStore((s) => s.sessions[mid]);
-  const labelled = sp.tabs.length > 1 || tab.panes.length > 1; // the tab's name is shown (and folds) when it tells tabs or panes apart
+  const labelled = sp.tabs.length > 1 || tab.source.panes.length > 1; // the tab's name is shown (and folds) when it tells tabs or panes apart
   const [folded, toggle] = useFolded(`term:t:${mid}/${sp.host}:${sp.label}/${tab.label}`);
-  const hide = labelled && folded && !searching;
-  const tabNode = termTabNode(mid, sp, tab, machine.online, { fold: labelled ? { folded, toggle } : undefined });
+  const hide = labelled && folded;
+  const tabNode = termTabNode(mid, sp, tab.source, machine.online, { fold: labelled ? { folded, toggle } : undefined });
   const tabHeader = t("terminal-terminalpage.tab_header", { name: tab.label });
   return (
     <div>
@@ -360,19 +321,17 @@ function TabBlock({ machine, sp, t: tab, searching, shown, activeItem, open }: {
             {tab.label}
           </button>
           <FoldMark folded={hide} className="top-[calc(50%+2px)] left-4 -translate-y-1/2" />
-          {tab.panes.length > 1 && <MoreButton label={t("terminal-terminalpage.actions_for", { name: tab.label })} onOpen={(el) => open(tabNode, { anchor: el }, tabHeader, true)} />}
+          {tab.source.panes.length > 1 && <MoreButton label={t("terminal-terminalpage.actions_for", { name: tab.label })} onOpen={(el) => open(tabNode, { anchor: el }, tabHeader, true)} />}
         </div>
       )}
       <Collapse open={!hide}>
         <div inert={hide || undefined}>
           {tab.panes.map((p) => {
-            // an agent's pane opens on its own page, in the terminal view; a plain shell here (it has no conversation)
-            const to: Route = terminalTarget(mid, p.id, mySessions ?? []);
+            const to: Route = { name: "terminal", mid, id: p.id };
             const on = sameTerminal(shown, { mid, id: p.id });
-            const hot = sameTerminal(activeItem, { mid, id: p.id });
             // a tab with one pane is that pane: its menu has the tab's rename and close too
-            const node = tab.panes.length === 1 ? termTabNode(mid, sp, tab, machine.online) : termPaneNode(mid, sp, tab, p, machine.online);
-            const header = tab.panes.length === 1 ? tabHeader : p.title;
+            const node = tab.source.panes.length === 1 ? termTabNode(mid, sp, tab.source, machine.online) : termPaneNode(mid, sp, tab.source, p, machine.online);
+            const header = tab.source.panes.length === 1 ? tabHeader : p.title;
             return (
               <div key={p.id} className="group/fold relative">
                 <a
@@ -380,11 +339,10 @@ function TabBlock({ machine, sp, t: tab, searching, shown, activeItem, open }: {
                   onClick={(e) => onLinkClick(e, to)}
                   aria-current={on ? "page" : undefined}
                   {...contextMenuProps((at) => open(node, at, header))}
-                  className={cx("flex min-h-9 items-center gap-2.5 rounded-[7px] py-1 pr-2.5 pl-7 transition-colors", on ? "bg-hover" : "hover:bg-hover", hot && !on && "bg-inset")}
+                  className={cx("flex min-h-9 items-center gap-2.5 rounded-[7px] py-1 pr-2.5 pl-7 transition-colors", on ? "bg-hover" : "hover:bg-hover")}
                 >
-                  {p.state !== "shell" && p.agent && <AgentMark agent={p.agent} surface={p.surface} size={14} />}
                   <span className="flex size-4 shrink-0 items-center justify-center text-ink-3">
-                    {p.state === "shell" ? <Icon name="terminal" size={13} /> : <StatusMark state={p.state} />}
+                    <Icon name="terminal" size={13} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className={cx("block truncate text-[12.5px]", on ? "font-medium text-ink" : "text-ink")}>{p.title}</span>

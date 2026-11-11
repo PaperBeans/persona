@@ -9,6 +9,7 @@ import persona.core.designsystem.UiText
 import persona.core.designsystem.failureReasonText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
@@ -81,8 +82,17 @@ internal data class NewAgentState(
     val pickedSetup: RecentSetup? = null,
     /** Goes up each time a card has filled the form: the form then puts the cursor in the first message. */
     val focusPrompt: Int = 0,
+    /** Claude Code's ultracode for this start (#582, iOS NewChatView): off each time the form opens, never saved. */
+    val ultracode: Boolean = false,
+    /** What `worktree/status` says of the folder picked (#4532); null while asking or when the computer can't say. */
+    val repo: WorktreeStatus? = null,
+    /** Start it in a worktree of its own, on [worktreeBranch] (empty: the node's pick). */
+    val inWorktree: Boolean = false,
+    val worktreeBranch: String = "",
 ) {
     val locked get() = !initialized || starting || pending != null || created != null
+    /** The folder is in a Git repository and this is not a tab in an existing space: the worktree switch shows (#4532). */
+    val worktreeOffered: Boolean get() = space == null && repo?.path?.isNotEmpty() == true
     val follow: ModelPurposeDetail? get() = (modelConfig as? NewAgentModelConfig.Follow)?.detail
     /** An empty launcher follows the model configuration, when the hub has one. */
     val following: Boolean get() = follow != null && selection.launcher.isEmpty()
@@ -131,7 +141,8 @@ private fun NewAgentState.settled(): NewAgentState {
 }
 
 internal class NewAgentViewModel(
-    private val service: AgentCreationService,
+    /** Also the Agents list's way to a worktree's status and removal on Close Agent / Delete Chat (#4532). */
+    internal val service: AgentCreationService,
     private val store: AgentCreationStore,
     private val machines: StateFlow<List<Machine>>,
     /** Sends the first message as an ordinary one once the hub answered an async start; null keeps it in `prompt`. */
@@ -147,6 +158,17 @@ internal class NewAgentViewModel(
     private var browseJob: Job? = null
     private var modelsJob: Job? = null
     init {
+        // Whether the folder is in a Git repository, a moment after it stops changing (iOS `loadRepo`): New Agent's
+        // worktree switch shows only then, and never for a tab in an existing space.
+        viewModelScope.launch {
+            mutable.map { Triple(it.machineId, it.selection.cwd, it.space) }.distinctUntilChanged().collectLatest { (machine, cwd, space) ->
+                mutable.update { it.copy(repo = null) }
+                if (space != null || cwd.isBlank() || machines.value.none { it.id == machine && it.online }) return@collectLatest
+                delay(400)
+                val status = service.worktreeStatus(machine, cwd)
+                mutable.update { if (it.machineId == machine && it.selection.cwd == cwd) it.copy(repo = status) else it }
+            }
+        }
         viewModelScope.launch {
             try {
                 val pending = store.pending(service.scope)
@@ -307,11 +329,16 @@ internal class NewAgentViewModel(
     fun selection(value: AgentDefaults) {
         if (state.value.locked || state.value.loading) return
         // Another launcher has its own models: back to its default, and its list.
-        mutable.update { val next = it.copy(selection = value, error = null, pickedSetup = null)
+        mutable.update { val next = it.copy(selection = value, error = null, pickedSetup = null,
+                // another folder: its repository is asked again (the switch never shows one folder's answer for another)
+                repo = it.repo.takeIf { _ -> value.cwd == it.selection.cwd })
             (if (next.modelLauncher != it.modelLauncher) next.copy(model = "") else next).settled() }
         loadModels()
     }
     fun prompt(value: String) { if (!state.value.locked) mutable.update { it.copy(prompt = value) } }
+    fun ultracode(on: Boolean) { if (!state.value.locked && state.value.ultracode != on) mutable.update { it.copy(ultracode = on, error = null) } }
+    fun inWorktree(on: Boolean) { if (!state.value.locked) mutable.update { it.copy(inWorktree = on, error = null) } }
+    fun worktreeBranch(value: String) { if (!state.value.locked) mutable.update { it.copy(worktreeBranch = value) } }
     fun browse(path: String = state.value.selection.cwd) {
         if (state.value.locked || state.value.space != null) return
         browseJob?.cancel()
@@ -376,7 +403,18 @@ internal class NewAgentViewModel(
         mutable.update { it.copy(starting = true, error = null) }
         viewModelScope.launch {
             try {
-                val operation = previous ?: newOperation(current, agentType)
+                // In a worktree of its own (#4532): made first; a failure says why, and nothing starts.
+                val worktree = if (previous == null && current.worktreeOffered && current.inWorktree) try {
+                    service.addWorktree(current.machineId, current.selection.cwd,
+                        AgentWorktree.nameHint(current.prompt, current.selection.cwd), current.worktreeBranch).path
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    // A refusal says why in the node's words (git's, for worktree_failed), as iOS does; anything else as usual.
+                    val words = e.message?.takeIf { hubCodedFailure(e)?.status == 409 && it.isNotBlank() }
+                    mutable.update { it.copy(error = AgentText(R.string.agents_worktree_add_failed, words ?: persona.core.designsystem.operationFeedback(e).text)) }
+                    return@launch
+                } else null
+                val operation = previous ?: newOperation(current, agentType, worktree)
                 execute(operation, fresh = previous == null)
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { mutable.update { it.copy(error = if (it.pending == null) AgentText(R.string.agents_new_error_save) else AgentText(R.string.agents_new_error_no_result)) } }
@@ -389,20 +427,22 @@ internal class NewAgentViewModel(
      * its id kept with the operation so it is sent once whatever happens to this process. Codex takes its first message
      * with the start, and so does any start without a sender.
      */
-    private fun newOperation(current: NewAgentState, agentType: String): AgentStartOperation {
+    private fun newOperation(current: NewAgentState, agentType: String, worktree: String? = null): AgentStartOperation {
         val first = current.prompt.trim().takeIf { it.isNotEmpty() }
         val async = sender != null && agentType == "claude"
         val efforts = current.modelEfforts
         val request = AgentStartRequest(
-            current.machineId, current.selection.cwd, current.selection.launcher,
+            current.machineId, worktree ?: current.selection.cwd, current.selection.launcher,
             first.takeUnless { async }, current.selection.mode.takeIf { it.isNotEmpty() && agentType == "claude" },
             // Codex starts take no effort; Claude's only one the model that will run takes.
             current.selection.effort.takeIf { it.isNotEmpty() && agentType == "claude" && (efforts == null || it in efforts) },
             current.space?.workspaceId, agentType.takeIf { it != "claude" }, async = true.takeIf { async },
             nameHint = first.takeIf { async }, model = current.sentModel,
+            ultracode = true.takeIf { current.ultracode && agentType == "claude" },
         )
         return AgentStartOperation(UUID.randomUUID().toString(), request,
-            firstMessage = first.takeIf { async }, firstMessageId = UUID.randomUUID().toString().takeIf { async && first != null })
+            firstMessage = first.takeIf { async }, firstMessageId = UUID.randomUUID().toString().takeIf { async && first != null },
+            folder = current.selection.cwd.takeIf { worktree != null })
     }
     private suspend fun execute(operation: AgentStartOperation, fresh: Boolean) {
         if (fresh) {
@@ -413,7 +453,8 @@ internal class NewAgentViewModel(
         when (result) {
             is AgentStartResult.Created -> {
                 require(result.session.machineId == operation.request.machineId && result.session.sessionId.isNotBlank())
-                val request = operation.request
+                // Recents and defaults keep the folder picked, not the worktree made from it (#4532).
+                val request = operation.folder?.let { operation.request.copy(cwd = it) } ?: operation.request
                 val session = result.session
                 try { adopt(session) } catch (e: CancellationException) { throw e } catch (_: Exception) { }
                 val first = operation.firstMessage
@@ -442,7 +483,10 @@ internal class NewAgentViewModel(
             }
             is AgentStartResult.Rejected -> {
                 store.pending(service.scope, null)
-                mutable.update { it.copy(pending = null, error = AgentText.raw(result.message.shown)) }
+                // Refused for ultracode (an old node, a CLI that can't take it): the switch goes off, so Retry starts without it.
+                val ultra = operation.request.ultracode == true
+                mutable.update { it.copy(pending = null, ultracode = it.ultracode && !ultra,
+                    error = if (ultra) AgentText(R.string.agents_new_ultracode_failed, result.message.shown) else AgentText.raw(result.message.shown)) }
             }
             AgentStartResult.Pending -> mutable.update { it.copy(error = AgentText(R.string.agents_new_error_starting)) }
             AgentStartResult.Unknown -> mutable.update { it.copy(error = AgentText(R.string.agents_new_error_unknown)) }
@@ -484,5 +528,6 @@ private fun NewAgentState.filled(setup: RecentSetup): NewAgentState {
  */
 internal fun defaultLauncher(config: NewAgentModelConfig, defaults: AgentDefaults, launchers: List<AgentLauncher>): String = when (config) {
     is NewAgentModelConfig.Follow, is NewAgentModelConfig.Failed -> ""
-    else -> defaults.launcher.takeIf { name -> launchers.any { it.name == name } } ?: launchers.firstOrNull()?.name.orEmpty()
+    // A launcher blocked on this computer is not where the form starts (#4530): the last one used unless it is blocked.
+    else -> initialLauncher(defaults.launcher.takeIf { it.isNotEmpty() }, launchers)
 }

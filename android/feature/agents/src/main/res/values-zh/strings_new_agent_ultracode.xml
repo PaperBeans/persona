@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- New Agent's ultracode switch (#582): iOS UltracodeStartRow words. -->
+<resources>
+    <string name="agents_new_ultracode_subtitle">每个任务都编排多 Agent workflow · 很费额度 · 只对本会话</string>
+    <string name="agents_new_ultracode_old">这台电脑的 Claude Code 是 %1$s，要 %2$s 或更新才能开 ultracode</string>
+    <string name="agents_new_ultracode_failed">没能带 ultracode 开始：%1$s。重试会不带 ultracode</string>
+    <string name="agents_row_ultracode">ultracode 开</string>
+</resources>

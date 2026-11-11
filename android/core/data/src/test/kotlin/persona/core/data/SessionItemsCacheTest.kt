@@ -198,4 +198,37 @@ class SessionItemsCacheTest {
             }
         } finally { reference.close() }
     }
+
+    /** #2528: a refusal notice is kept with the refusal's words as its text, never an older hub's whole line. */
+    @Test fun aRefusalNoticeKeepsOnlyItsWords() = runBlocking {
+        val cache = SessionItemsCache(database, scope)
+        val session = SessionKey("computer", "refused")
+        val line = """{"type":"system","subtype":"model_refusal_fallback","content":"no","secret":"x"}"""
+        fun notice(id: String, seq: Int, r: persona.core.contracts.ModelRefusal) =
+            Item(id, seq, role = "system", kind = "notice", text = line, modelRefusal = r)
+        cache.save(session, listOf(
+            Item("u1", 1, role = "user", kind = "text", text = "go"),
+            notice("words", 2, persona.core.contracts.ModelRefusal("model_refusal_fallback", "a", "b", text = "no")),
+            notice("explained", 3, persona.core.contracts.ModelRefusal("model_refusal_fallback", explanation = "declined")),
+        ))
+        assertEquals(listOf("go", "no", "declined"), cache.load(session).items.map { it.text })
+    }
+
+    /** Version 4 drops what an older build cached (#2528): it was decoded without `model_refusal`. */
+    @Test fun migratingToFourEmptiesTheCache() {
+        val db = androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(
+            androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(RuntimeEnvironment.getApplication()).name(null)
+                .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(3) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE items (scope TEXT, machine TEXT, session TEXT, seq INTEGER, part INTEGER, id TEXT, json TEXT)")
+                        db.execSQL("CREATE TABLE cursors (scope TEXT, machine TEXT, session TEXT)")
+                        db.execSQL("INSERT INTO items VALUES ('s','m','x',1,0,'n','{}')")
+                        db.execSQL("INSERT INTO cursors VALUES ('s','m','x')")
+                    }
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                }).build()).writableDatabase
+        ItemsDatabase.MIGRATION_3_4.migrate(db)
+        db.query("SELECT (SELECT COUNT(*) FROM items) + (SELECT COUNT(*) FROM cursors)").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
+        db.close()
+    }
 }

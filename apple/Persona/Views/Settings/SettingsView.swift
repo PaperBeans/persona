@@ -99,7 +99,7 @@ struct SettingsView: View {
                         .settingsListRow(SettingsPage.modelConfiguration)
                         NavigationLink(value: SettingsPage.assistant) {
                             // No model here: the assistant's model is Model Settings › Main Chat (#1291).
-                            SettingsRow(title: String(localized: "Assistant"), symbol: Theme.Icon.ai, tint: Theme.ai)
+                            SettingsRow(title: String(localized: "Assistant Profile"), symbol: Theme.Icon.ai, tint: Theme.ai)
                         }
                         .settingsListRow(SettingsPage.assistant)
                         .accessibilityIdentifier("settings-assistant")
@@ -221,9 +221,9 @@ struct SettingsView: View {
                             }
                             .settingsListRow(SettingsPage.hub)
                             .accessibilityIdentifier("settings.hub")
-                            // The hub's managers, each a whole assistant (docs/assistant/managers.md).
+                            // The hub's managers, "assistants" in the interface (docs/assistant/managers.md).
                             NavigationLink(value: SettingsPage.managers) {
-                                SettingsRow(title: String(localized: "Managers"), symbol: Theme.Icon.managers, tint: Theme.ai)
+                                SettingsRow(title: String(localized: "Assistants"), symbol: Theme.Icon.managers, tint: Theme.ai)
                             }
                             .settingsListRow(SettingsPage.managers)
                             .accessibilityIdentifier("settings.managers")

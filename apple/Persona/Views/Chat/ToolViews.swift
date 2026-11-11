@@ -433,7 +433,7 @@ enum ToolRunSummary {
 
     private static func chip(_ kind: Kind, _ calls: [ToolCall]) -> ToolChipGroup.Chip {
         let first = calls[0]
-        let error = calls.contains(where: \.isError)
+        let error = calls.contains(where: \.failed)
         let one = calls.count == 1
         let subject = ToolPresentation.subject(first)
         let ascii = subject.unicodeScalars.allSatisfy(\.isASCII)
@@ -578,7 +578,7 @@ struct ToolCallRow: View {
         grouped ? EdgeInsets(top: 5, leading: 9, bottom: 5, trailing: 9) : EdgeInsets(top: 2, leading: 7, bottom: 2, trailing: 7)
     }
 
-    private var tint: Color { call.isError ? Theme.danger : call.isRunning ? Theme.busy : .secondary }
+    private var tint: Color { call.failed ? Theme.danger : call.isRunning ? Theme.busy : .secondary }
 
     /// The row's head: a round kind icon, the verb, the subject, a background task's badge and the chevron.
     private func header(_ base: String) -> some View {
@@ -616,7 +616,7 @@ struct ToolCallRow: View {
                     Spacer(minLength: 4)
                     taskBadge
                 }
-                if call.isError { ThemedIcon(Theme.Icon.errorFilled).foregroundStyle(Theme.danger).font(Theme.Font.label) }
+                ToolOutcomeMark(call: call)
                 ThemedIcon(Theme.Icon.disclosure)
                     .font(Theme.Font.labelStrong)
                     .foregroundStyle(.tertiary)
@@ -651,7 +651,7 @@ struct ToolCallRow: View {
             ToolChipRow(chip(subject), isOpen: isOpen, isRunning: call.isRunning, chipStyle: subject.isEmpty ? .plain : .boxed,
                         action: tapped) {
                 if !stacked { taskBadge }
-                if call.isError { ThemedIcon(Theme.Icon.errorFilled).foregroundStyle(Theme.danger).font(Theme.Font.label) }
+                ToolOutcomeMark(call: call)
             }
             .accessibilityIdentifier(headerID)
             // At the accessibility sizes the badge, which keeps its width, left the verb nothing beside it: it gets a
@@ -776,13 +776,15 @@ struct ToolDetail: View {
             if (base == "Agent" || base == "Task"), !call.results.isEmpty {
                 let reports = call.results.filter { !SubagentDelivery.isReceipt($0) && !($0.text ?? "").isEmpty }
                 ForEach(reports) { report in
-                    ResultBlock(text: report.cutText, isError: report.isError ?? false, cut: report.fullSize.map { (report.id, $0) })
+                    ResultBlock(text: report.cutText, isError: report.isError ?? false, cut: report.fullSize.map { (report.id, $0) },
+                                outcome: report.outcome)
                 }
                 if reports.isEmpty, let result = call.result {
-                    ResultBlock(text: "", isError: result.isError ?? false)
+                    ResultBlock(text: "", isError: result.isError ?? false, outcome: result.outcome)
                 }
             } else if let result = call.result, (base != "Edit" && base != "ask_user" && base != SecretRun.tool) || result.isError == true {
-                ResultBlock(text: result.cutText, isError: result.isError ?? false, cut: result.fullSize.map { (result.id, $0) })
+                ResultBlock(text: result.cutText, isError: result.isError ?? false, cut: result.fullSize.map { (result.id, $0) },
+                            outcome: result.outcome)
                 if base == "Bash" || base == "PowerShell" { PortChips(text: result.cutText) } // a dev server saying where it listens
             } else if call.isRunning {
                 HStack(spacing: Theme.Space.sm) {
@@ -1072,6 +1074,8 @@ struct ResultBlock: View {
     var isError: Bool
     /// The page carries only the start of a long output: its item id and whole size.
     var cut: (id: String, size: Int)? = nil
+    /// What the call came to, when the node said: the line over the output, and a cut output's end.
+    var outcome: ToolOutcome? = nil
     @Environment(\.loadFullText) private var loadFullText
     @State private var showFull = false
 
@@ -1085,16 +1089,29 @@ struct ResultBlock: View {
     #endif
 
     var body: some View {
+        let head = ToolOutcomeText.headline(outcome)
         if text.isEmpty && cut == nil {
-            Text(isError ? String(localized: "Failed") : String(localized: "Done, no output")).font(Theme.Font.label).foregroundStyle(isError ? Theme.danger : .secondary)
+            let failed = head?.failed ?? (head == nil && isError)
+            Text(head?.text ?? (isError ? String(localized: "Failed") : String(localized: "Done, no output")))
+                .font(Theme.Font.label).foregroundStyle(failed ? Theme.danger : .secondary)
         } else {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 // Above the output: over it, the mark covered the end of the first line.
-                if isError {
+                if let head {
+                    Label(head.text, systemImage: head.symbol).font(Theme.Font.labelStrong)
+                        .foregroundStyle(head.failed ? Theme.danger : .secondary)
+                        .lineLimit(1)
+                } else if isError {
                     Label("Something Went Wrong", systemImage: Theme.Icon.errorFilled).font(Theme.Font.labelStrong).foregroundStyle(Theme.danger)
                         .lineLimit(1)
                 }
                 CodeBlock(text: text, maxLines: 10)
+                // The page kept the output's start; why a command failed is usually at its end.
+                if cut != nil, let tail = outcome?.tail, !tail.isEmpty {
+                    Text("End of output").font(Theme.Font.labelMedium).foregroundStyle(.secondary)
+                        .padding(.top, Theme.Space.xs)
+                    CodeBlock(text: tail, maxLines: 10, keepsEnd: true)
+                }
                 if let cut {
                     Button { showFull = true } label: {
                         Label("Truncated. View full text (\(Int64(cut.size).storageText))",
@@ -1622,15 +1639,19 @@ struct ComputerToolDetail: View {
                 Text(ComputerSteps.describe(call.name, input: call.input)).font(Theme.Font.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } icon: {
-                if call.isRunning { ProgressView().controlSize(.mini) } else {
-                    ThemedIcon(call.isError ? Theme.Icon.error : Theme.Icon.success)
-                        .foregroundStyle(call.isError ? Theme.danger : Theme.positive)
+                if call.isRunning { ProgressView().controlSize(.mini) } else if call.failed {
+                    ThemedIcon(Theme.Icon.error).foregroundStyle(Theme.danger)
+                } else if call.outcome?.stopped == true, let head = ToolOutcomeText.headline(call.outcome) {
+                    ThemedIcon(head.symbol).foregroundStyle(.secondary)
+                } else {
+                    ThemedIcon(Theme.Icon.success).foregroundStyle(Theme.positive)
                 }
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("computer-steps")
             if let result = call.result, result.isError == true {
-                Text(ToolPresentation.firstLine(result.cutText)).font(Theme.Font.label).foregroundStyle(Theme.danger).lineLimit(3)
+                Text(ToolPresentation.firstLine(result.cutText)).font(Theme.Font.label).foregroundStyle(call.failed ? Theme.danger : .secondary)
+                    .lineLimit(3)
             }
             ForEach(Array(call.images.enumerated()), id: \.offset) { i, img in Base64Image(payload: img, gallery: call.images, index: i) }
             ScreenEntry(call: call)
@@ -1638,7 +1659,8 @@ struct ComputerToolDetail: View {
             if raw {
                 CodeBlock(text: input, maxLines: 14)
                 if let result = call.result {
-                    ResultBlock(text: result.cutText, isError: result.isError ?? false, cut: result.fullSize.map { (result.id, $0) })
+                    ResultBlock(text: result.cutText, isError: result.isError ?? false, cut: result.fullSize.map { (result.id, $0) },
+                                outcome: result.outcome)
                 }
             }
         }

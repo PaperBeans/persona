@@ -80,10 +80,12 @@
     <string name="agents_range_all">All</string>
     <string name="agents_range_history">History</string>
     <string name="agents_grouping_current">Grouping: %1$s</string>
+    <string name="agents_only_machine">Only %1$s</string>
+    <string name="agents_only_machine_hint">Shows all machines</string>
     <string name="agents_grouping_repo">By repository</string>
     <string name="agents_grouping_state">By status</string>
     <string name="agents_grouping_todo">By to-do</string>
-    <string name="agents_grouping_machine_space">By computer and space</string>
+    <string name="agents_grouping_project">By project</string>
     <string name="agents_menu_compact">Compact list</string>
     <string name="agents_menu_detailed">Detailed list</string>
     <string name="agents_menu_collapse_all">Collapse all</string>

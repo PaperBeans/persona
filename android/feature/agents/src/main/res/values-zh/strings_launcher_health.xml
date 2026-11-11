@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- New Agent: blocked launchers and their help (#4530): iOS LauncherAvailability / LauncherBlockedHelp words. -->
+<resources>
+    <string name="agents_launcher_blocked_not_in_terminal">这台电脑的终端里用不了</string>
+    <string name="agents_launcher_blocked_auth">Key 或登录被拒绝了</string>
+    <string name="agents_launcher_blocked_model_route">网关用不了这个模型</string>
+    <string name="agents_launcher_blocked_cli_outdated">命令行工具版本太旧</string>
+    <string name="agents_launcher_blocked_timeout">上次检查时没有响应</string>
+    <string name="agents_launcher_blocked_other">在这台电脑上的上次检查没通过</string>
+    <string name="agents_launcher_help_title_terminal">终端里用不了</string>
+    <string name="agents_launcher_help_title_computer">这台电脑上用不了</string>
+    <string name="agents_launcher_help_how">怎么修好</string>
+    <string name="agents_launcher_help_fix_startup">在终端的 shell 会读到的启动文件里定义它（bash 是 ~/.bashrc），然后再启动一次。</string>
+    <string name="agents_launcher_help_fix_provider">或者在 Persona 里把它添加为模型供应商：这样在任何终端里都能用。</string>
+    <string name="agents_launcher_help_fix_other">到那台电脑上修好它的 Key、网关或命令行工具，或者换一个启动器。</string>
+    <string name="agents_launcher_help_details">详情</string>
+    <string name="agents_launcher_help_clears_terminal">用它成功启动一次，这条提示就会消失；否则 6 小时后自动消失。</string>
+    <string name="agents_launcher_help_clears">用它检查或启动成功一次，这条提示就会消失。</string>
+    <string name="agents_launcher_help_add_provider">新增供应商</string>
+    <string name="agents_launcher_help_try_anyway">仍然使用</string>
+    <string name="agents_launcher_help_failed">它在这台电脑上最近一次检查失败了，自动修复也没修好。</string>
+    <string name="agents_launcher_help_not_in_terminal">Persona 是在这台电脑的登录 shell 里找到「%1$s」的，但新开的终端标签页运行的 shell 里没有它：可能是另一种 shell、在容器里，或者启动文件提前返回了。新的 Agent 就是在这些标签页里启动的。</string>
+</resources>

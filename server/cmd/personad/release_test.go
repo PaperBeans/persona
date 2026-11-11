@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -72,5 +77,61 @@ func TestReleaseManifestNeedsDirAndOut(t *testing.T) {
 		if err := runRelease(tc.args); !errors.As(err, &ue) || !strings.Contains(err.Error(), tc.flag) {
 			t.Fatalf("%v: want a usage error naming %s, got %v", tc.args, tc.flag, err)
 		}
+	}
+}
+
+// release manifest refuses downloads of another build than the one it is told, and writes nothing: v0.2.1's
+// latest.json said build 202611110749 over binaries of 202611110745, and every hub refused it after downloading
+// (#4522). release verify checks a written latest.json the same way, as publish.sh does before uploading.
+func TestReleaseManifestAndVerifyRefuseAnotherBuild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the binary is a shell script")
+	}
+	commit, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Skip("not in a git checkout:", err)
+	}
+	dir := t.TempDir()
+	writeBinary := func(build string) {
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		fmt.Fprintf(zw, "#!/bin/sh\necho 0.2.1\necho 'channel release, build %s'\n", build)
+		zw.Close()
+		if err := os.WriteFile(filepath.Join(dir, "personad-"+runtime.GOOS+"-"+runtime.GOARCH+".gz"), buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(dir, "latest.json")
+	manifest := func(build string) error {
+		return runRelease([]string{"manifest", "--dir", dir, "--version", "0.2.1", "--build", build,
+			"--commit", strings.TrimSpace(string(commit)), "--out", out})
+	}
+	writeBinary("202611110745")
+	if err := manifest("202611110749"); err == nil || !strings.Contains(err.Error(), "another build") {
+		t.Fatalf("a manifest over another build's binary: %v", err)
+	}
+	if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("latest.json written anyway: %v", err)
+	}
+	writeBinary("202611110749")
+	if err := manifest("202611110749"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRelease([]string{"verify", "--dir", dir}); err != nil {
+		t.Fatalf("the manifest it wrote: %v", err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(out, bytes.Replace(b, []byte("202611110749"), []byte("202611110750"), 1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRelease([]string{"verify", "--dir", dir, "--manifest", out}); err == nil || !strings.Contains(err.Error(), "another build") {
+		t.Fatalf("a latest.json edited to another build: %v", err)
+	}
+	var ue usageError
+	if err := runRelease([]string{"verify"}); !errors.As(err, &ue) || !strings.Contains(err.Error(), "--dir") {
+		t.Fatalf("verify without --dir: %v", err)
 	}
 }

@@ -47,6 +47,19 @@ func Labels(l i18n.Lang) map[string]string {
 		"link-tray.rename_save",
 		"link-tray.rename_saving",
 		"link-tray.rename_cancel",
+		"link-tray.ssh_title",
+		"link-tray.ssh_intro",
+		"link-tray.ssh_server_label",
+		"link-tray.ssh_server_placeholder",
+		"link-tray.ssh_target_label",
+		"link-tray.ssh_target_placeholder",
+		"link-tray.ssh_always_label",
+		"link-tray.ssh_always_hint",
+		"link-tray.ssh_test",
+		"link-tray.ssh_testing",
+		"link-tray.ssh_save",
+		"link-tray.ssh_saving",
+		"link-tray.ssh_remove",
 	}
 	out := make(map[string]string, len(keys))
 	for _, k := range keys {
@@ -65,7 +78,10 @@ func CodeAddrs(l i18n.Lang, addrs []string) string {
 func ErrorText(l i18n.Lang, err error) string {
 	var pe *PairError
 	var re *link.RenameError
+	var se *link.SSHError
 	switch {
+	case errors.As(err, &se):
+		return se.Text(l)
 	case errors.As(err, &re):
 		return re.Text(l)
 	case errors.Is(err, ErrNoService):
@@ -79,6 +95,21 @@ func ErrorText(l i18n.Lang, err error) string {
 		return i18n.T(l, "link-tray.error_pair_unreachable", i18n.Args{"hosts": hosts, "detail": pe.Err.Error()})
 	}
 	return err.Error()
+}
+
+// SSHTestOKText says the SSH tunnel reached the hub at target.
+func SSHTestOKText(l i18n.Lang, target string) string {
+	return i18n.T(l, "link-tray.ssh_test_ok", i18n.Args{"target": target})
+}
+
+// SSHSavedText says the SSH tunnel was saved and the link is reconnecting.
+func SSHSavedText(l i18n.Lang) string {
+	return i18n.T(l, "link-tray.ssh_saved")
+}
+
+// SSHRemovedText says the SSH tunnel was removed.
+func SSHRemovedText(l i18n.Lang) string {
+	return i18n.T(l, "link-tray.ssh_removed")
 }
 
 // FirewallCommand is the PowerShell line that opens the listening port to the hub only. Not translated: it is a

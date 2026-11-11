@@ -38,6 +38,7 @@ internal fun FilePreview(state: FilesState, controller: FilesController, images:
     val context = LocalContext.current
     val resources = LocalResources.current
     val feedback = LocalAppFeedback.current
+    val copy = rememberCopy()
     val scope = rememberCoroutineScope()
     var menu by remember(selection) { mutableStateOf(false) }
     val file = state.content
@@ -111,9 +112,9 @@ internal fun FilePreview(state: FilesState, controller: FilesController, images:
                 add(JAction(stringResource(R.string.files_allow_network), PhIcons.WifiHigh, checked = policy.network) { policy = policy.copy(network = !policy.network) })
             }
         }
-        if (path != null) add(JAction(stringResource(R.string.files_copy_path), PhIcons.Copy) { copyText(context, path, feedback, resources.getString(R.string.files_path_copied)) })
-        file?.text?.let { text -> add(JAction(stringResource(R.string.files_copy_content), PhIcons.Copy) { copyText(context, text, feedback, resources.getString(R.string.files_content_copied)) }) }
-        state.diff?.diff?.takeIf { it.isNotEmpty() }?.let { text -> add(JAction(stringResource(R.string.files_copy_diff), PhIcons.Copy) { copyText(context, text, feedback, resources.getString(R.string.files_diff_copied)) }) }
+        if (path != null) add(JAction(stringResource(R.string.files_copy_path), PhIcons.Copy) { copy(path, resources.getString(R.string.files_path_copied)) })
+        file?.text?.let { text -> add(JAction(stringResource(R.string.files_copy_content), PhIcons.Copy) { copy(text, resources.getString(R.string.files_content_copied)) }) }
+        state.diff?.diff?.takeIf { it.isNotEmpty() }?.let { text -> add(JAction(stringResource(R.string.files_copy_diff), PhIcons.Copy) { copy(text, resources.getString(R.string.files_diff_copied)) }) }
         if (file != null && FileShare.canShare(file)) add(JAction(stringResource(R.string.files_share), PhIcons.ShareNetwork) {
             scope.launch {
                 val shared = runCatching { FileShare.share(context, file, controller::download) }.getOrDefault(false)

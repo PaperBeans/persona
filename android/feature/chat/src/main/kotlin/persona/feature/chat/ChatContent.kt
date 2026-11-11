@@ -18,7 +18,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
@@ -136,7 +135,7 @@ private fun ChatMarkdownBody(text: String, id: String, bodyStyle: TextStyle, col
     // Inline code a tap copies, in the body's color on its well; inside a path's link it stays the link's (#2984).
     val copy = rememberCopy()
     val codeSpan = inlineCodeStyle(color)
-    val annotator = remember(codeSpan, copy) { copyingCode(codeSpan, copy) }
+    val annotator = remember(codeSpan, copy) { copyingCode(codeSpan) { copy(it, null) } }
     CompositionLocalProvider(LocalUriHandler provides uriHandler) {
         if (parsed == null) ChatLinkText(text, Modifier.fillMaxWidth(), bodyStyle.copy(color = color))
         else Markdown(parsed!!, modifier = Modifier.fillMaxWidth(), imageTransformer = rememberMathImages(color, bodyStyle),
@@ -189,11 +188,11 @@ internal fun CodeText(text: String, language: String = "", syntax: Boolean = fal
     val palette = PersonaTheme.palette
     val colour = syntax && language.isNotBlank()
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (bar) CodeBody(preview, language, colour) { CodeBar(language) { copy(text) } }
+        if (bar) CodeBody(preview, language, colour) { CodeBar(language) { copy(text, null) } }
         else {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(language, Modifier.weight(1f), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
-                JTextButton(stringResource(R.string.chat_content_copy), { copy(text) }, icon = PhIcons.Copy)
+                JTextButton(stringResource(R.string.chat_content_copy), { copy(text, null) }, icon = PhIcons.Copy)
             }
             CodeBody(preview, language, colour)
         }
@@ -309,7 +308,8 @@ internal fun ChatLineContent(
             "thinking" -> if (!style.hideThoughts) ThoughtContent(line.row.item?.text.orEmpty(), line.id, style.collapseThoughts)
             "image" -> line.row.item?.item?.let { ChatPicture(session, it, loader) }
             "recap" -> line.row.item?.item?.let { RecapLine(listOf(it)) }
-            else -> line.row.item?.compaction?.let { TimelineMark(it.label.text()) }
+            else -> line.row.item?.item?.refusal?.let { RefusalNotice(it) }
+                ?: line.row.item?.compaction?.let { TimelineMark(it.label.text()) }
                 ?: line.row.item?.takeIf { it.task != null }?.let { TaskNoteLine(it, last = true, onFullText = onFullText) }
                 ?: ChatSystemLine(line.row.item?.text.orEmpty(), line.row.item?.task?.failed == true)
         }

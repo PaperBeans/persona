@@ -55,6 +55,12 @@ func (s *Service) sessionMCPTools(ctx context.Context, machine, session string, 
 		s.logf("mcp tools: %v", err)
 		return []proto.Tool{}
 	}
+	if _, room, err := s.roomOf(ctx, machine, session); guest && err == nil && room {
+		if s.isWorkMachine(machine) {
+			return []proto.Tool{}
+		}
+		return meetingRoomTools() // a meeting's room: its meeting tools only (meeting_room_tools.go)
+	}
 	if !guest {
 		if guestHint {
 			return []proto.Tool{}
@@ -129,6 +135,11 @@ func (s *Service) mcpCall(ctx context.Context, machine, session, name string, ar
 	case name == runtimeCLITool:
 		return proto.TextResult("unknown tool "+name, true)
 	case strings.HasPrefix(name, "phone_"):
+		if name == "phone_notify" && s.justMeNow(machine, session) {
+			// A Just me turn (meeting_justme.go): a phone on the table shows its notifications to the room. As
+			// notify_user's: nothing goes out, the text stays in the conversation, which the meeting page shows.
+			return proto.TextResult(justMeNotice(s.lang(ctx)), false)
+		}
 		if name == "phone_notify" && s.inHealth(ctx, session) {
 			var a map[string]any
 			if err := json.Unmarshal(args, &a); err != nil {

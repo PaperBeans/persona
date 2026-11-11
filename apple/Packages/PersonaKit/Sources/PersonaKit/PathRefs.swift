@@ -205,8 +205,10 @@ public nonisolated struct PathMarkdown: Sendable {
         paths = PathRefs.unique(self.spots.map(\.ref))
     }
 
-    /// The source with the paths `linkable` says yes to as links, and which paths those are.
-    public func linked(_ linkable: (String) -> Bool) -> (markdown: String, paths: Set<String>) {
+    /// The source with the paths `linkable` says yes to as links, and which paths those are. `plainCode`: a whole code
+    /// span is linked as its words (Markdown's marks escaped), not as code: where code is drawn in the body's color
+    /// (iOS, #2984), a path that opens keeps the link's.
+    public func linked(plainCode: Bool = false, _ linkable: (String) -> Bool) -> (markdown: String, paths: Set<String>) {
         let ns = source as NSString
         var out = ""
         var at = 0
@@ -214,7 +216,7 @@ public nonisolated struct PathMarkdown: Sendable {
         for s in spots where s.range.location >= at && linkable(s.ref.path) {
             guard let url = PathLinkURL.make(s.ref.path, line: s.ref.line) else { continue }
             out += ns.substring(with: NSRange(location: at, length: s.range.location - at))
-            out += "[" + ns.substring(with: s.range) + "](" + url.absoluteString + ")"
+            out += "[" + (s.code && plainCode ? Self.words(of: ns.substring(with: s.range)) : ns.substring(with: s.range)) + "](" + url.absoluteString + ")"
             at = NSMaxRange(s.range)
             linked.insert(s.ref.path)
         }
@@ -223,9 +225,24 @@ public nonisolated struct PathMarkdown: Sendable {
         return (out, linked)
     }
 
+    /// A code span's words as Markdown text: the backticks off (and the one space CommonMark takes off each end),
+    /// the marks Markdown reads inside a line escaped.
+    static func words(of span: String) -> String {
+        var inner = span.drop { $0 == "`" }
+        while inner.last == "`" { inner = inner.dropLast() }
+        var text = String(inner)
+        if text.count > 2, text.hasPrefix(" "), text.hasSuffix(" "), !text.allSatisfy({ $0 == " " }) {
+            text = String(text.dropFirst().dropLast())
+        }
+        return text.reduce(into: "") { out, c in
+            if "\\`*_[]()<>!|~#$".contains(c) { out.append("\\") }
+            out.append(c)
+        }
+    }
+
     // Links written ([text](url), images: the formulas are `![tex](persona-math:…)`), reference links, and <autolinks>
     // (bare links are made those by `Links.markdown` first).
-    private static let protected = try! NSRegularExpression(pattern: #"!?\[[^\]\n]*\]\([^)\n]*\)|!?\[[^\]\n]*\]\[[^\]\n]*\]|<[^\s<>]+>|^\s*\[[^\]\n]+\]:.*$"#)
+    static let protected = try! NSRegularExpression(pattern: #"!?\[[^\]\n]*\]\([^)\n]*\)|!?\[[^\]\n]*\]\[[^\]\n]*\]|<[^\s<>]+>|^\s*\[[^\]\n]+\]:.*$"#)
 
     /// The paths of one line (outside a code block).
     private static func spots(in line: String) -> [Spot] {
@@ -250,7 +267,7 @@ public nonisolated struct PathMarkdown: Sendable {
     }
 
     /// A line's code spans: a run of backticks to the next run of the same length (the span, and what is in it).
-    private static func codeSpans(_ u: [UInt16]) -> [(whole: NSRange, inner: NSRange)] {
+    static func codeSpans(_ u: [UInt16]) -> [(whole: NSRange, inner: NSRange)] {
         var spans: [(NSRange, NSRange)] = []
         var i = 0
         while i < u.count {

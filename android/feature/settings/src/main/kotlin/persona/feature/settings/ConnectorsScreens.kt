@@ -1,8 +1,6 @@
 package persona.feature.settings
 
 import persona.core.designsystem.text
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
@@ -619,9 +617,8 @@ internal fun ConnectorSignInStep(
 ) {
     val localScope = rememberCoroutineScope()
     val scope = pageScope ?: localScope
-    val context = LocalContext.current
+    val copy = rememberCopy()
     val res = LocalResources.current
-    val feedback = LocalAppFeedback.current
     val uri = LocalUriHandler.current
     Column(Modifier.fillMaxWidth().padding(top = Tokens.Space.xs), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
         prompt.hint?.takeIf { it.isNotBlank() }?.let {
@@ -651,11 +648,7 @@ internal fun ConnectorSignInStep(
                 if (code.isNotEmpty()) Row(Modifier.padding(start = rowPadding), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                     JCodeDisplay(code, Modifier.weight(1f))
-                    JIconButton(PhIcons.Copy, stringResource(R.string.settings_src_connector_copy_code), {
-                        context.getSystemService(ClipboardManager::class.java)
-                            ?.setPrimaryClip(ClipData.newPlainText(res.getString(R.string.settings_src_connector_code_clip), code))
-                        feedback?.notice(res.getString(R.string.settings_src_copied))
-                    })
+                    JIconButton(PhIcons.Copy, stringResource(R.string.settings_src_connector_copy_code), { copy(code, null) })
                 }
                 if (rows.isNotEmpty()) {
                     JQrCode(rows, Modifier.align(Alignment.CenterHorizontally), label = stringResource(R.string.settings_src_connector_qr_label, name))
@@ -677,11 +670,7 @@ internal fun ConnectorSignInStep(
                 if (code.isNotEmpty()) Row(Modifier.padding(start = rowPadding), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                     JCodeDisplay(code, Modifier.weight(1f))
-                    JIconButton(PhIcons.Copy, stringResource(R.string.settings_src_connector_copy_code), {
-                        context.getSystemService(ClipboardManager::class.java)
-                            ?.setPrimaryClip(ClipData.newPlainText(res.getString(R.string.settings_src_connector_code_clip), code))
-                        feedback?.notice(res.getString(R.string.settings_src_copied))
-                    })
+                    JIconButton(PhIcons.Copy, stringResource(R.string.settings_src_connector_copy_code), { copy(code, null) })
                 }
                 // A pair code is sent to the bot from the chat app, not authorized on a page (as on Settings › Channels).
                 SignInWaiting(if (prompt.kind == "pair_code") stringResource(R.string.settings_src_channel_waiting_send, name)

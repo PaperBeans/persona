@@ -29,12 +29,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -47,35 +45,16 @@ import com.mikepenz.markdown.model.markdownAnnotator
 import org.intellij.markdown.MarkdownElementTypes
 import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.ast.getTextInNode
-import persona.core.designsystem.Haptic
 import persona.core.designsystem.JIcon
 import persona.core.designsystem.JIconButton
 import persona.core.designsystem.JTextButton
-import persona.core.designsystem.LocalAppFeedback
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
-import persona.core.designsystem.rememberHaptics
 
 /** The reply around it is still being written (#2984): its quotes do not fold yet; they would fold and open as the
  *  words came. */
 internal val LocalReplyStreaming = staticCompositionLocalOf { false }
-
-/** Copies text and says so ("Copied") with the success haptic (#2984): a code block's Copy, a tap on inline code. */
-@Composable
-internal fun rememberCopy(): (String) -> Unit {
-    val clipboard = LocalClipboardManager.current
-    val feedback = LocalAppFeedback.current
-    val haptics = rememberHaptics()
-    val copied = stringResource(R.string.chat_content_copied)
-    return remember(clipboard, feedback, haptics, copied) {
-        { text ->
-            clipboard.setText(AnnotatedString(text))
-            haptics(Haptic.Success)
-            feedback?.notice(copied)
-        }
-    }
-}
 
 /** A code block's title bar, as Telegram draws it (#2984): the fence's language on the left (none when it names none),
  *  Copy on the right, which takes the whole block. On the block's own well, so bar and code read as one block. */

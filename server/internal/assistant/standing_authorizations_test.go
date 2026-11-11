@@ -56,7 +56,22 @@ func TestStandingAuthorizationRegistryDatabaseAndRoutes(t *testing.T) {
 	if stored.ID == "" || stored.GrantedAt.Before(start) || stored.GrantedAt.Equal(grant.GrantedAt) {
 		t.Fatalf("server identity/time: %+v", stored)
 	}
-	s2 := newServiceOn(t, newFakeHub().withMachine(), database)
+	f := newFakeHub().withMachine()
+	f.sessions["box"] = nil
+	f.answerNode("git.status", func(_ string, args json.RawMessage) (any, error) {
+		var params struct {
+			Cwd string `json:"cwd"`
+		}
+		if err := json.Unmarshal(args, &params); err != nil {
+			return nil, err
+		}
+		root := params.Cwd
+		if root == "/code/example/server" {
+			root = "/code/example"
+		}
+		return proto.RepositoryIdentity{Version: 1, IsRepo: true, Cwd: params.Cwd, Root: root, CommonDir: root + "/.git"}, nil
+	})
+	s2 := newServiceOn(t, f, database)
 	if got, err := s2.standingAuthorizations(ctx); err != nil || !reflect.DeepEqual(list, got) {
 		t.Fatalf("restart: %+v %v", got, err)
 	}

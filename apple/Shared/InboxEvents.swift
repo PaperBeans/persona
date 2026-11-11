@@ -179,9 +179,9 @@ nonisolated enum InboxEventText {
         return nil
     }
 
-    /// Who filed a done item, where it is told: 「管理者处理了」 for the manager (it read it, nothing to do); nil otherwise.
+    /// Who filed a done item, where it is told: 「助手处理了」 for the manager (it read it, nothing to do); nil otherwise.
     static func doneBy(_ it: InboxItem) -> String? {
-        it.isDone && it.doneBy == "manager" ? String(localized: "Handled by the manager") : nil
+        it.isDone && it.doneBy == "manager" ? String(localized: "Handled by the assistant") : nil
     }
 
     /// The handling state for people; nil when there is nothing to say (done, unknown).

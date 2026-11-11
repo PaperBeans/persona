@@ -14,7 +14,7 @@ type ShellPage = "assistant" | "agents";
 
 const SHELL_PAGES: { page: ShellPage; label: string; to: Route }[] = [
   { page: "assistant", label: t("shellswitch.assistant"), to: { name: "persona" } },
-  { page: "agents", label: t("shellswitch.agents"), to: { name: "agent-list" } },
+  { page: "agents", label: t("work-entry.title"), to: { name: "terminal" } },
 ];
 
 export function ShellSwitch({ page }: { page: ShellPage }) {

@@ -174,3 +174,11 @@ func TestGoldenTodoThreadReply(t *testing.T) {
 	in.Topic = true
 	golden(t, "bot_message.topic", prompts.RenderBotMessage(in))
 }
+
+func TestGoldenStandingActions(t *testing.T) {
+	golden(t, "standing_actions.system", prompts.RenderStandingActions())
+	golden(t, "standing_actions.input", prompts.RenderStandingActionsInput(prompts.StandingActionsInput{
+		Task: "Merge the current pull request after checks pass; verify locally.", Directory: "/code/app",
+		Card: `{"plan":"Merge PR #123, then run local tests."}`,
+	}))
+}

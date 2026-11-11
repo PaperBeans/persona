@@ -479,7 +479,7 @@ func (m *Machine) call(ctx context.Context, method string, params any, out any) 
 	p := m.peer
 	info := m.info
 	m.mu.Unlock()
-	if info.Version != "" && info.EngineHosts == nil && method == "session.start" && proto.StartHost(params) != "" {
+	if info.Version != "" && info.EngineHosts == nil && devicewire.IsSessionStart(method) && proto.StartHost(params) != "" {
 		// An older node ignores host and would start in its engine instead (#2576): refused, nothing started.
 		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_engine_hosts")}
 	}
@@ -490,7 +490,7 @@ func (m *Machine) call(ctx context.Context, method string, params any, out any) 
 		}
 		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), key)}
 	}
-	if !nodeHas(info, nodeproto.ModelConfiguration) && (method == "assistant.send" || method == "assistant.warm" || method == "session.start" || method == "session.send") {
+	if !nodeHas(info, nodeproto.ModelConfiguration) && (method == "assistant.send" || method == "assistant.warm" || devicewire.IsSessionStart(method) || method == "session.send") {
 		raw, _ := json.Marshal(params)
 		var fields struct {
 			Model       string `json:"model"`
@@ -501,7 +501,7 @@ func (m *Machine) call(ctx context.Context, method string, params any, out any) 
 			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_model_config")}
 		}
 	}
-	if method == "session.start" && !nodeHas(info, nodeproto.Ultracode) {
+	if devicewire.IsSessionStart(method) && !nodeHas(info, nodeproto.Ultracode) {
 		raw, _ := json.Marshal(params)
 		var fields struct {
 			Ultracode *bool `json:"ultracode"`
@@ -883,7 +883,7 @@ func (m *Machine) isOnline() bool {
 // secret_env: an older one would answer "unknown method", or start the Agent without the values the card gave it.
 // Announced, never assumed: a node not yet known (no handshake) is refused too.
 func secretEnvRefusal(ctx context.Context, info proto.NodeInfo, method string, params any) error {
-	if method != proto.MethodSecretStage && (method != "session.start" || !startHasSecretTicket(params)) {
+	if method != proto.MethodSecretStage && (!devicewire.IsSessionStart(method) || !startHasSecretTicket(params)) {
 		return nil
 	}
 	if info.Protocol > 0 && slices.Contains(info.Capabilities, nodeproto.SecretEnv) {

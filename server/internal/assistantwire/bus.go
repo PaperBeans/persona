@@ -26,6 +26,11 @@ const (
 	// …/ask and meeting_attendance_default; docs/assistant/meeting-minutes.md "Attending a meeting"). The hub lists the
 	// meeting_attendance feature only while the default manager names it.
 	CapabilityMeetingAttendance = "meeting_attendance"
+	// CapabilityMeetingConversation: the manager takes the meeting conversation's phase 1 (the upload's room and
+	// private, the room conversation, …/ask answered by it, …/just-me, …/private, …/followup, the meeting_live event;
+	// docs/assistant/meeting-minutes.md "Meeting conversation (#3862)"). The hub lists meeting_conversation only while
+	// the default manager names it. A manager that names it names CapabilityMeetingAttendance too.
+	CapabilityMeetingConversation = "meeting_conversation"
 )
 
 // The methods and events, by direction. The assistant's handshake is manager.hello {id, host, os, arch, deploy,
@@ -74,6 +79,9 @@ const (
 	// CodeChatDenied: the hub refused to send into a chat or to reply to a message in one, because the bot may only use
 	// the owner's private chat and the group chats the owner opted in. Nothing was sent.
 	CodeChatDenied = "chat_denied"
+	// CodeMeetingEnded: a message into a meeting's room that ended (docs/assistant/meeting-minutes.md "Messages from
+	// elsewhere"): the hub answers 409 meeting_ended, and the apps write in the follow-up instead.
+	CodeMeetingEnded = "meeting_ended"
 )
 
 // HTTPRequest is http.request's params: an app's request on one of Routes, with an escaped URL path (header without
@@ -112,6 +120,7 @@ var Routes = []string{
 	"POST /api/v1/assistant/conversations/{id}/stop",
 	"GET /api/v1/assistant/reporters",
 	"GET /api/v1/assistant/leaders",
+	"GET /api/v1/assistant/directions/tree",
 	"GET /api/v1/assistant/directions/offers",
 	"DELETE /api/v1/assistant/directions/offers/{id}",
 	"POST /api/v1/assistant/directions/{id}/start",
@@ -221,4 +230,8 @@ var Routes = []string{
 	"POST /api/v1/recordings/{id}/live",
 	"GET /api/v1/recordings/{id}/live",
 	"POST /api/v1/recordings/{id}/ask",
+	// The meeting conversation (meeting_room.go there, docs/assistant/meeting-minutes.md "Meeting conversation (#3862)").
+	"PUT /api/v1/recordings/{id}/private",
+	"POST /api/v1/recordings/{id}/just-me",
+	"POST /api/v1/recordings/{id}/followup",
 }

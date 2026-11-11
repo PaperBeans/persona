@@ -12,7 +12,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -33,10 +32,10 @@ internal fun FullTextReader(text: String, onDismiss: () -> Unit, title: String =
     val snapshot by produceState<ReaderSnapshot?>(null) {
         value = withContext(Dispatchers.Default) { ReaderSnapshot(frozen) }
     }
-    val clipboard = LocalClipboardManager.current
+    val copyText = rememberCopy()
     JFullScreen(onDismiss) {
         val ready = snapshot
-        val copy = { clipboard.setText(AnnotatedString(frozen)) }
+        val copy: () -> Unit = { copyText(frozen, null) }
         if (ready == null) JPage(title, onBack = onDismiss) { padding ->
             LazyColumn(contentPadding = PaddingValues(start = pagePadding, end = pagePadding,
                 top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) { item { JLoading() } }
@@ -147,14 +146,14 @@ internal fun ReaderEntry(text: String, title: String = stringResource(R.string.c
 @Composable
 internal fun ToolReaderActions(input: String?, output: String?, onFullOutput: (() -> Unit)?) {
     var opened by remember { mutableStateOf<Pair<String, String>?>(null) }
-    val clipboard = LocalClipboardManager.current
+    val copy = rememberCopy()
     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
         val rawInput = stringResource(R.string.chat_reader_raw_input)
         val rawOutput = stringResource(R.string.chat_reader_raw_output)
         JTextButton(rawInput, { opened = rawInput to input.orEmpty() }, enabled = input != null)
         JTextButton(if (onFullOutput != null) stringResource(R.string.chat_reader_full_output) else rawOutput, { if (onFullOutput != null) onFullOutput() else opened = rawOutput to output.orEmpty() },
             enabled = output != null || onFullOutput != null)
-        JTextButton(stringResource(R.string.chat_reader_copy_both), { clipboard.setText(AnnotatedString(listOfNotNull(input, output).joinToString("\n\n"))) },
+        JTextButton(stringResource(R.string.chat_reader_copy_both), { copy(listOfNotNull(input, output).joinToString("\n\n"), null) },
             enabled = input != null || output != null)
     }
     opened?.let { (title, text) -> FullTextReader(text, onDismiss = { opened = null }, title = title) }

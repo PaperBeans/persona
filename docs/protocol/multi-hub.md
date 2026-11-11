@@ -58,6 +58,8 @@
   hub-level pages use the current hub (`model.api`).
 - Connection status in titles (`ConnectionStatus`): with one group, rules are unchanged; with multiple groups, show "Connecting…" only when **no group can connect**. A persistently unreachable group (a hub accessible only through a VPN)
   must not make every title spin forever. Check which group is disconnected via **Settings › hub** and the dots on the Machines page.
+- A handshake 401 is a per-group refusal, not an ordinary outage: that group's dot uses the caution color, its Settings footer says **Pairing Expired** with the reason, and its section offers **Pair Again** to open the pairing sheet. Other groups' connection and cached content are unaffected.
+  Apple keeps the refused group's cached sessions and machines, visibly stale until the user pairs again; Android removes the refused group from the device, and the web returns to browser sign-in. This client-behavior difference does not change the hub credential or grouping protocol.
 
 ## Keys (`SessionKey`, `MachineRef`)
 

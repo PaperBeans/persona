@@ -2,8 +2,9 @@
 // chosen, with progress and cancel; a name already there asks replace or keep both), download, rename, move and move
 // to the trash (asked first, then "Moved to trash · Undo"). Both views share it: the drill-in list (FilesPanel) and the
 // tree (FilesTree). Each action shows only when the hub says it can (`upload_dir`, `file_edit`).
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, credentialOwner, enc, errorText, fileDownloadURL, getToken, isAbort, subscribeCredentialOwner } from "../../../lib/api";
+import { onManagerChoice, shownManager, useShownManager } from "../../../lib/manager-choice";
 import { t } from "../../../i18n";
 import {
   FILE_EDIT_FEATURE,
@@ -19,6 +20,7 @@ import {
   uploadToDir,
   within,
   type Conflict,
+  type FileCredential,
   type UploadCredential,
 } from "../../../lib/file-ops";
 import { joinPath, type FsListing } from "../../../lib/files";
@@ -59,7 +61,27 @@ interface NameAsk {
   answer: (c: Conflict | null, all: boolean) => void;
 }
 
+interface WorkspaceOwner {
+  credential: FileCredential;
+  manager: string;
+  mid: string;
+  cwd: string;
+  workspace: string;
+}
+
+interface MutationOwner extends WorkspaceOwner {
+  workspaceOwner: WorkspaceOwner;
+  path: string;
+}
+
+interface MutationIntent {
+  owner: MutationOwner;
+  targets: OpTarget[];
+}
+
 export interface FileOps {
+  /** Identity of this panel's current mutation context, for menus and selections. */
+  scope: object;
   canUpload: boolean;
   canEdit: boolean;
   /** Sends files into `dir` (dropped or chosen). */
@@ -86,7 +108,7 @@ export interface RowOps {
 /** Whether a drag carries files from the computer (not a row of the panel, lib/entry-drag.ts). */
 export const dragHasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
 
-export function useFileOps({ mid, cwd, onChanged }: { mid: string; cwd: string; onChanged: (dirs: string[]) => void }): FileOps {
+export function useFileOps({ mid, cwd, path = cwd, workspace = cwd, onChanged }: { mid: string; cwd: string; path?: string; workspace?: string; onChanged: (dirs: string[]) => void }): FileOps {
   const features = useStore((s) => s.features);
   const canUpload = hubHas(features, UPLOAD_DIR_FEATURE);
   const canEdit = hubHas(features, FILE_EDIT_FEATURE);
@@ -95,6 +117,34 @@ export function useFileOps({ mid, cwd, onChanged }: { mid: string; cwd: string; 
 
   // ── uploads: one at a time, in the order they came ──
   const owner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner);
+  const manager = useShownManager();
+  const [managerRevision, setManagerRevision] = useState(0);
+  const managerSerial = useRef(0);
+  const lastManager = useRef(manager);
+  const workspaceOwner = useMemo<WorkspaceOwner>(() => ({ credential: { owner, token: getToken() }, manager, mid, cwd, workspace }), [owner, manager, managerRevision, mid, cwd, workspace]);
+  const mutationOwner = useMemo<MutationOwner>(() => ({ ...workspaceOwner, workspaceOwner, path }), [workspaceOwner, path]);
+  const liveWorkspace = useRef<WorkspaceOwner | null>(workspaceOwner);
+  const liveOwner = useRef<MutationOwner | null>(mutationOwner);
+  useLayoutEffect(() => {
+    liveWorkspace.current = workspaceOwner;
+    return () => { if (liveWorkspace.current === workspaceOwner) liveWorkspace.current = null; };
+  }, [workspaceOwner]);
+  useLayoutEffect(() => {
+    liveOwner.current = mutationOwner;
+    return () => { if (liveOwner.current === mutationOwner) liveOwner.current = null; };
+  }, [mutationOwner]);
+  useLayoutEffect(() => onManagerChoice(() => {
+    const nextManager = shownManager();
+    if (lastManager.current === nextManager) return;
+    lastManager.current = nextManager;
+    liveWorkspace.current = null;
+    liveOwner.current = null;
+    setManagerRevision(++managerSerial.current);
+  }), []);
+  const currentWorkspace = useCallback((candidate: WorkspaceOwner) => liveWorkspace.current === candidate
+    && candidate.credential.owner === credentialOwner() && Boolean(candidate.credential.token)
+    && candidate.credential.token === getToken() && candidate.manager === shownManager(), []);
+  const currentOwner = useCallback((candidate: MutationOwner) => liveOwner.current === candidate && currentWorkspace(candidate.workspaceOwner), [currentWorkspace]);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const ownedUploads = uploads.filter((u) => u.credential.owner === owner);
   const active = useRef(new Map<number, AbortController>());
@@ -147,7 +197,8 @@ export function useFileOps({ mid, cwd, onChanged }: { mid: string; cwd: string; 
   }, []);
 
   // ── the name question: the first upload waiting on it, else a move's ──
-  const [moveAsk, setMoveAsk] = useState<NameAsk | null>(null);
+  const [moveAsk, setMoveAsk] = useState<{ intent: MutationIntent; ask: NameAsk } | null>(null);
+  const moveQuestion = useRef<NameAsk | null>(null);
   const conflicted = ownedUploads.filter((u) => u.state === "conflict");
   const uploadAsk: NameAsk | null = conflicted.length
     ? {
@@ -161,7 +212,7 @@ export function useFileOps({ mid, cwd, onChanged }: { mid: string; cwd: string; 
         },
       }
     : null;
-  const ask = uploadAsk ?? moveAsk;
+  const ask = uploadAsk ?? (moveAsk?.intent.owner === mutationOwner && currentOwner(moveAsk.intent.owner) ? moveAsk.ask : null);
 
   // ── the chooser ──
   const input = useRef<HTMLInputElement>(null);
@@ -173,75 +224,137 @@ export function useFileOps({ mid, cwd, onChanged }: { mid: string; cwd: string; 
   }, [owner]);
 
   // ── what was done, at the panel's foot: the page's toasts sit over the chat box beside it ──
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [notice, setNotice] = useState<(Notice & { owner: WorkspaceOwner }) | null>(null);
   const noticeId = useRef(0);
-  const say = useCallback((text: string, tone: Notice["tone"], action?: ToastAction) => setNotice({ id: ++noticeId.current, text, tone, action }), []);
+  const say = useCallback((candidate: WorkspaceOwner, text: string, tone: Notice["tone"], action?: ToastAction) => {
+    if (currentWorkspace(candidate)) setNotice({ owner: candidate, id: ++noticeId.current, text, tone, action });
+  }, [currentWorkspace]);
 
   // ── move, trash, download ──
-  const [moving, setMoving] = useState<OpTarget[] | null>(null);
-  const [trashing, setTrashing] = useState<OpTarget[] | null>(null);
-  const [trashBusy, setTrashBusy] = useState(false);
+  const [moving, setMoving] = useState<MutationIntent | null>(null);
+  const [trashing, setTrashing] = useState<MutationIntent | null>(null);
+  const movingRef = useRef<MutationIntent | null>(null);
+  const trashingRef = useRef<MutationIntent | null>(null);
+  const moveRequest = useRef<MutationIntent | null>(null);
+  const moveLocation = useRef<{ intent: MutationIntent; dir: string } | null>(null);
+  const trashRequest = useRef<MutationIntent | null>(null);
+  const [moveBusy, setMoveBusy] = useState<MutationIntent | null>(null);
+  const [moveFailure, setMoveFailure] = useState<{ intent: MutationIntent; text: string } | null>(null);
+  const [trashBusy, setTrashBusy] = useState<MutationIntent | null>(null);
+  const activeMove = useCallback((intent: MutationIntent) => movingRef.current === intent && currentOwner(intent.owner), [currentOwner]);
+  const activeTrash = useCallback((intent: MutationIntent) => trashingRef.current === intent && currentOwner(intent.owner), [currentOwner]);
+  const openMove = useCallback((targets: OpTarget[]) => {
+    if (!targets.length || !currentOwner(mutationOwner)) return;
+    const intent = { owner: mutationOwner, targets: targets.map((target) => ({ ...target })) };
+    movingRef.current = intent;
+    moveLocation.current = null;
+    moveQuestion.current = null;
+    setMoveAsk(null);
+    setMoveFailure(null);
+    setMoving(intent);
+  }, [currentOwner, mutationOwner]);
+  const openTrash = useCallback((targets: OpTarget[]) => {
+    if (!targets.length || !currentOwner(mutationOwner)) return;
+    const intent = { owner: mutationOwner, targets: targets.map((target) => ({ ...target })) };
+    trashingRef.current = intent;
+    setTrashing(intent);
+  }, [currentOwner, mutationOwner]);
+
+  useEffect(() => {
+    setMoving((value) => value?.owner === mutationOwner ? value : null);
+    setTrashing((value) => value?.owner === mutationOwner ? value : null);
+    setMoveAsk((value) => value?.intent.owner === mutationOwner ? value : null);
+    setMoveFailure((value) => value?.intent.owner === mutationOwner ? value : null);
+    setMoveBusy((value) => value?.owner === mutationOwner ? value : null);
+    setTrashBusy((value) => value?.owner === mutationOwner ? value : null);
+  }, [mutationOwner]);
+  useEffect(() => setNotice((value) => value?.owner === workspaceOwner ? value : null), [workspaceOwner]);
 
   const doMove = useCallback(
-    async (targets: OpTarget[], dir: string, conflict?: Conflict) => {
+    async (intent: MutationIntent, dir: string, conflict?: Conflict) => {
+      if (!activeMove(intent) || moveRequest.current === intent) return;
+      moveRequest.current = intent;
+      moveLocation.current = { intent, dir };
+      setMoveBusy(intent);
+      setMoveFailure(null);
+      const { targets, owner: candidate } = intent;
       const from = [...new Set(targets.map((x) => parentOf(x.path)))];
       try {
-        await moveEntries(mid, targets.map((x) => x.path), cwd, dir, conflict);
+        await moveEntries(candidate.mid, targets.map((x) => x.path), candidate.cwd, dir, conflict, { ...candidate.credential, isAuthContextCurrent: () => activeMove(intent) });
+        if (!activeMove(intent)) return;
+        movingRef.current = null;
         setMoving(null);
         changed.current([...from, dir]);
-        say(t("files-ops.moved", { count: targets.length, dir: shortPath(dir) }), "ok");
+        say(candidate.workspaceOwner, t("files-ops.moved", { count: targets.length, dir: shortPath(dir) }), "ok");
       } catch (e) {
+        if (!activeMove(intent)) return;
         if (isNameTaken(e) && !conflict) {
-          setMoveAsk({
+          const question: NameAsk = {
             name: typeof (e as { body?: { name?: unknown } }).body?.name === "string" ? String((e as { body: { name: string } }).body.name) : targets[0].name,
             dir,
             more: 0,
             answer: (c) => {
+              if (!activeMove(intent) || moveQuestion.current !== question) return;
+              moveQuestion.current = null;
               setMoveAsk(null);
-              if (c) void doMove(targets, dir, c);
+              if (c) void doMove(intent, dir, c);
             },
-          });
+          };
+          moveQuestion.current = question;
+          setMoveAsk({ intent, ask: question });
           return;
         }
-        throw e;
+        setMoveFailure({ intent, text: opErrorText(e) });
+      } finally {
+        if (moveRequest.current === intent) moveRequest.current = null;
+        if (activeMove(intent)) setMoveBusy((value) => value === intent ? null : value);
       }
     },
-    [mid, cwd, say],
+    [activeMove, say],
   );
 
-  const doTrash = useCallback(async () => {
-    if (!trashing) return;
-    setTrashBusy(true);
-    const targets = trashing;
+  const doTrash = useCallback(async (intent: MutationIntent) => {
+    if (!activeTrash(intent) || trashRequest.current === intent) return;
+    trashRequest.current = intent;
+    setTrashBusy(intent);
+    const { targets, owner: candidate } = intent;
     try {
-      const done = await trashEntries(mid, targets.map((x) => x.path), cwd);
+      const done = await trashEntries(candidate.mid, targets.map((x) => x.path), candidate.cwd, { ...candidate.credential, isAuthContextCurrent: () => activeTrash(intent) });
+      if (!activeTrash(intent)) return;
+      trashingRef.current = null;
       setTrashing(null);
       const dirs = [...new Set(targets.map((x) => parentOf(x.path)))];
       changed.current(dirs);
       const ids = done.map((d) => d.trash_id).filter(Boolean);
+      let undoStarted = false;
       say(
+        candidate.workspaceOwner,
         targets.length === 1 ? t("files-ops.trashed_named", { name: targets[0].name }) : t("files-ops.trashed", { count: targets.length }),
         "ok",
         ids.length
           ? {
               label: t("files-ops.undo"),
               run: () => {
-                restoreEntries(mid, ids)
+                if (!currentWorkspace(candidate.workspaceOwner) || undoStarted) return;
+                undoStarted = true;
+                restoreEntries(candidate.mid, ids, { ...candidate.credential, isAuthContextCurrent: () => currentWorkspace(candidate.workspaceOwner) })
                   .then(() => {
+                    if (!currentWorkspace(candidate.workspaceOwner)) return;
                     changed.current(dirs);
-                    say(t("files-ops.restored", { count: ids.length }), "ok");
+                    say(candidate.workspaceOwner, t("files-ops.restored", { count: ids.length }), "ok");
                   })
-                  .catch((e) => say(t("files-ops.restore_failed", { error: opErrorText(e) }), "error"));
+                  .catch((e) => { if (currentWorkspace(candidate.workspaceOwner)) say(candidate.workspaceOwner, t("files-ops.restore_failed", { error: opErrorText(e) }), "error"); });
               },
             }
           : undefined,
       );
     } catch (e) {
-      say(t("files-ops.trash_failed", { error: opErrorText(e) }), "error");
+      if (activeTrash(intent)) say(candidate.workspaceOwner, t("files-ops.trash_failed", { error: opErrorText(e) }), "error");
     } finally {
-      setTrashBusy(false);
+      if (trashRequest.current === intent) trashRequest.current = null;
+      if (currentOwner(candidate)) setTrashBusy((value) => value === intent ? null : value);
     }
-  }, [mid, cwd, trashing, say]);
+  }, [activeTrash, currentOwner, currentWorkspace, say]);
 
   const download = useCallback(
     (targets: OpTarget[]) => {
@@ -261,6 +374,7 @@ export function useFileOps({ mid, cwd, onChanged }: { mid: string; cwd: string; 
 
   const rowItems = useCallback(
     (x: OpTarget, open: () => void): MenuItem[] => {
+      let renaming = false;
       const items: MenuItem[] = [{ key: "open", label: x.dir ? t("files-ops.open_folder") : t("files-ops.open"), icon: x.dir ? "folder" : "file", onSelect: open }];
       if (!x.dir) items.push({ key: "download", label: t("files-ops.download"), icon: "download", onSelect: () => download([x]) });
       if (x.dir && canUpload) items.push({ key: "upload", label: t("files-ops.upload_here"), icon: "upload", onSelect: () => choose(x.path) });
@@ -275,26 +389,36 @@ export function useFileOps({ mid, cwd, onChanged }: { mid: string; cwd: string; 
             rename: {
               value: x.name,
               commit: async (name) => {
+                if (!currentOwner(mutationOwner) || renaming) throw new DOMException("aborted", "AbortError");
                 const problem = nameProblem(name);
                 if (problem) throw new Error(problem);
+                renaming = true;
                 try {
-                  await renameEntry(mid, x.path, cwd, name.trim());
+                  await renameEntry(mutationOwner.mid, x.path, mutationOwner.cwd, name.trim(), { ...mutationOwner.credential, isAuthContextCurrent: () => currentOwner(mutationOwner) });
+                  if (!currentOwner(mutationOwner)) throw new DOMException("aborted", "AbortError");
+                  changed.current([parentOf(x.path)]);
                 } catch (e) {
+                  if (!currentOwner(mutationOwner)) throw new DOMException("aborted", "AbortError");
                   throw new Error(opErrorText(e));
+                } finally {
+                  renaming = false;
                 }
-                changed.current([parentOf(x.path)]);
               },
             },
           },
-          { key: "move", label: t("files-ops.move"), icon: "arrowRight", onSelect: () => setMoving([x]) },
+          { key: "move", label: t("files-ops.move"), icon: "arrowRight", onSelect: () => openMove([x]) },
         );
       }
       items.push({ key: "copy", label: t("files-ops.copy_path"), icon: "copy", divider: !canEdit, onSelect: () => copyText(x.path) });
-      if (canEdit) items.push({ key: "trash", label: t("files-ops.trash"), icon: "trash", danger: true, divider: true, onSelect: () => setTrashing([x]) });
+      if (canEdit) items.push({ key: "trash", label: t("files-ops.trash"), icon: "trash", danger: true, divider: true, onSelect: () => openTrash([x]) });
       return items;
     },
-    [mid, cwd, canUpload, canEdit, download, choose],
+    [canUpload, canEdit, download, choose, currentOwner, mutationOwner, openMove, openTrash],
   );
+
+  const visibleMove = moving?.owner === mutationOwner && currentOwner(moving.owner) ? moving : null;
+  const visibleTrash = trashing?.owner === mutationOwner && currentOwner(trashing.owner) ? trashing : null;
+  const visibleNotice = notice?.owner === workspaceOwner && currentWorkspace(notice.owner) ? notice : null;
 
   const ui = (
     <>
@@ -318,14 +442,32 @@ export function useFileOps({ mid, cwd, onChanged }: { mid: string; cwd: string; 
         onCancel={(u) => (u.ac ? u.ac.abort() : setUploads((us) => us.filter((x) => x.id !== u.id)))}
         onRetry={(u) => { if (u.credential.owner === credentialOwner()) patch(u.id, { state: "queued", error: undefined }); }}
       />
-      <PanelNotice notice={notice} onDone={(id) => setNotice((n) => (n?.id === id ? null : n))} />
+      <PanelNotice notice={visibleNotice} onDone={(id) => setNotice((n) => (n?.id === id ? null : n))} />
       <NameDialog ask={ask} />
-      <MoveDialog mid={mid} cwd={cwd} targets={moving} onClose={() => setMoving(null)} onMove={doMove} />
-      <TrashDialog targets={trashing} busy={trashBusy} onClose={() => !trashBusy && setTrashing(null)} onTrash={doTrash} />
+      {visibleMove && moveAsk?.intent !== visibleMove && <MoveDialog
+        intent={visibleMove}
+        initialDir={moveLocation.current?.intent === visibleMove ? moveLocation.current.dir : parentOf(visibleMove.targets[0].path)}
+        current={() => activeMove(visibleMove)}
+        busy={moveBusy === visibleMove}
+        failure={moveFailure?.intent === visibleMove ? moveFailure.text : ""}
+        onClose={() => {
+          if (!activeMove(visibleMove) || moveRequest.current === visibleMove) return;
+          movingRef.current = null;
+          moveQuestion.current = null;
+          setMoveAsk(null);
+          setMoving(null);
+        }}
+        onMove={(dir) => void doMove(visibleMove, dir)}
+      />}
+      {visibleTrash && <TrashDialog targets={visibleTrash.targets} busy={trashBusy === visibleTrash} onClose={() => {
+        if (!activeTrash(visibleTrash) || trashRequest.current === visibleTrash) return;
+        trashingRef.current = null;
+        setTrashing(null);
+      }} onTrash={() => void doTrash(visibleTrash)} />}
     </>
   );
 
-  return { canUpload, canEdit, upload, choose, rowItems, move: setMoving, trash: setTrashing, download, ui };
+  return { scope: mutationOwner, canUpload, canEdit, upload, choose, rowItems, move: openMove, trash: openTrash, download, ui };
 }
 /** The uploads at the panel's foot: each with its progress and a cancel; a failed one says why and can go again. */
 function UploadTray({ uploads, onCancel, onRetry }: { uploads: Upload[]; onCancel: (u: Upload) => void; onRetry: (u: Upload) => void }) {
@@ -465,55 +607,44 @@ function NameDialog({ ask }: { ask: NameAsk | null }) {
 
 /** "Move to...": a folder picker on the machine, from the folder the first one is in; up, into a folder, then move here. */
 function MoveDialog({
-  mid,
-  cwd,
-  targets,
+  intent,
+  initialDir,
+  current,
+  busy,
+  failure,
   onClose,
   onMove,
 }: {
-  mid: string;
-  cwd: string;
-  targets: OpTarget[] | null;
+  intent: MutationIntent;
+  initialDir: string;
+  current: () => boolean;
+  busy: boolean;
+  failure: string;
   onClose: () => void;
-  onMove: (targets: OpTarget[], dir: string) => Promise<void>;
+  onMove: (dir: string) => void;
 }) {
-  const [at, setAt] = useState("");
+  const { targets, owner } = intent;
+  const [at, setAt] = useState(initialDir);
   const [listing, setListing] = useState<{ at: string; dirs?: string[]; error?: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState("");
-  const first = targets?.[0]?.path;
+  const currentRef = useRef(current);
+  currentRef.current = current;
   useEffect(() => {
-    if (first) setAt(parentOf(first));
-    setFailure("");
-  }, [first]);
-  useEffect(() => {
-    if (!targets || !at) return;
+    if (!at || !currentRef.current()) return;
     const ac = new AbortController();
+    let active = true;
     setListing(null);
-    api<FsListing>(`/machines/${enc(mid)}/fs?path=${enc(at)}&cwd=${enc(cwd)}`, { signal: ac.signal })
-      .then((l) => setListing({ at, dirs: l.entries.filter((e) => e.dir && !e.name.startsWith(".")).map((e) => e.name) }))
-      .catch((e) => !isAbort(e) && setListing({ at, error: errorText(e) }));
-    return () => ac.abort();
-  }, [mid, cwd, at, targets]);
-  const sources = useMemo(() => new Set((targets ?? []).map((x) => parentOf(x.path))), [targets]);
+    api<FsListing>(`/machines/${enc(owner.mid)}/fs?path=${enc(at)}&cwd=${enc(owner.cwd)}`, { signal: ac.signal, token: owner.credential.token, tokenOwner: owner.credential.owner, isAuthContextCurrent: () => active && currentRef.current() })
+      .then((l) => { if (active && currentRef.current()) setListing({ at, dirs: l.entries.filter((e) => e.dir && !e.name.startsWith(".")).map((e) => e.name) }); })
+      .catch((e) => { if (active && currentRef.current() && !isAbort(e)) setListing({ at, error: errorText(e) }); });
+    return () => { active = false; ac.abort(); };
+  }, [owner, at]);
+  const sources = useMemo(() => new Set(targets.map((x) => parentOf(x.path))), [targets]);
   // not where they all are already, nor into one of the folders moved
-  const blocked = (targets ?? []).some((x) => x.dir && within(x.path, at)) || (sources.size === 1 && sources.has(at));
-  const move = async () => {
-    if (!targets) return;
-    setBusy(true);
-    setFailure("");
-    try {
-      await onMove(targets, at);
-    } catch (e) {
-      setFailure(opErrorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const title = targets?.length === 1 ? t("files-ops.move_one_title", { name: targets[0].name }) : t("files-ops.move_title", { count: targets?.length ?? 0 });
+  const blocked = targets.some((x) => x.dir && within(x.path, at)) || (sources.size === 1 && sources.has(at));
+  const title = targets.length === 1 ? t("files-ops.move_one_title", { name: targets[0].name }) : t("files-ops.move_title", { count: targets.length });
   return (
     <Dialog
-      open={Boolean(targets)}
+      open
       onClose={() => !busy && onClose()}
       title={title}
       width={420}
@@ -522,7 +653,7 @@ function MoveDialog({
           <Button tone="quiet" onClick={onClose} disabled={busy}>
             {t("files-ops.cancel")}
           </Button>
-          <Button tone="primary" onClick={move} busy={busy} disabled={blocked || !listing?.dirs}>
+          <Button tone="primary" onClick={() => onMove(at)} busy={busy} disabled={blocked || !listing?.dirs}>
             {t("files-ops.move_here")}
           </Button>
         </>
@@ -546,7 +677,7 @@ function MoveDialog({
         ) : (
           listing.dirs!.map((name) => {
             const path = joinPath(at, name);
-            const self = (targets ?? []).some((x) => x.dir && within(x.path, path));
+            const self = targets.some((x) => x.dir && within(x.path, path));
             return (
               <button
                 key={name}

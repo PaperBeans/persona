@@ -226,7 +226,7 @@ func sameDoc(a, b *InboxDoc) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.URL == b.URL && a.Link == b.Link && a.Type == b.Type && a.Notice == b.Notice && a.NoticeID == b.NoticeID &&
+	return a.URL == b.URL && a.Link == b.Link && a.Type == b.Type && a.Notice == b.Notice && a.NoticeID == b.NoticeID && a.Quote == b.Quote &&
 		a.Error == b.Error && sameTime(a.ReadAt, b.ReadAt) && (a.Reply == nil) == (b.Reply == nil) &&
 		(a.Reply == nil || *a.Reply == *b.Reply) && sameList(a.Rows, b.Rows, sameRow)
 }

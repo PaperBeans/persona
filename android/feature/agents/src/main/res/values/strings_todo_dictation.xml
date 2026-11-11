@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dictating a to-do's notes (#4636). -->
+<resources>
+    <string name="agents_todo_notes_dictate">Dictate notes</string>
+    <string name="agents_todo_notes_dictation_prompt">Go ahead; what you say goes into the notes</string>
+</resources>

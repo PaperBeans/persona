@@ -75,18 +75,25 @@ export function useSessionView(mid: string, sid: string, canTerminal: boolean): 
   const route = useRoute();
   const [remembered, setRemembered] = useState(() => readView(mid, sid));
   const onPage = route.name === "session" || route.name === "tab";
+  const work = onPage && route.work === true;
   const view = resolveView(onPage ? route.view : undefined, remembered, canTerminal);
   useEffect(() => {
-    if (!canTerminal) return;
+    if (!canTerminal || work) return;
     rememberView(mid, sid, view);
     setRemembered(view);
-  }, [mid, sid, view, canTerminal]);
+  }, [mid, sid, view, canTerminal, work]);
   // one function for the page's life, reading the address when called: the chat's header is memoized on it
   const at = useRef(route);
   at.current = route;
   const setView = useCallback((v: SessionView) => {
     const now = at.current;
-    if (now.name === "session" || now.name === "tab") navigate({ ...now, view: v }, true);
-  }, []);
+    if (now.name !== "session" && now.name !== "tab") return;
+    // In the browser only a user's mode change is a preference. A pending-card link and a temporary pane loss are not.
+    if (now.work) {
+      rememberView(mid, sid, v);
+      setRemembered(v);
+    }
+    navigate({ ...now, view: v }, true);
+  }, [mid, sid]);
   return [view, setView];
 }

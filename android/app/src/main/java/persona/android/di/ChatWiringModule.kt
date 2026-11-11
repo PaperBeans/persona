@@ -115,6 +115,8 @@ internal suspend fun createChatWiring(
         files = HubSessionFiles(connection),
         ports = HubPortOpener(connection),
         agentShares = ChatWiringModule.agentShares(connection, ::current),
+        worktrees = { connection.route.value?.let { route -> persona.core.hub.HttpAgentCreationService(data.scope.path, route.endpoint.url,
+            connection.token, connection.http.client, isCurrent = { current() && connection.route.value == route }) } },
         tasks = persona.core.domain.tasks.TasksStore(persona.core.hub.HttpTasksApi(connection), group, data.coroutineScope,
             repositories.snapshots.todoCache()))
 }

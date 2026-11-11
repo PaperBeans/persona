@@ -103,5 +103,6 @@
   "group_lark": "飞书",
   "group_mail": "邮件 · {account}",
   "group_agents": "Agent 在等你",
-  "folder_failed": "移动失败：{error}"
+  "folder_failed": "移动失败：{error}",
+  "filter_doc": "文档评论"
 }

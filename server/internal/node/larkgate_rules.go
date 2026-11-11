@@ -127,12 +127,12 @@ var larkActions = []struct {
 }{
 	{lazyre.New(`^CLI /im/messages/delete`), "撤回消息", larkDeletion},
 	{lazyre.New(`^DELETE `), "删除", larkDeletion},
-	{lazyre.New(`^(POST|PUT|PATCH) /.*(?:delete|remove|trash|recall)(?:/|$)`), "删除", larkDeletion},
+	{lazyre.New(`^(?:GET|HEAD|POST|PUT|PATCH|OPTIONS) /.*(?:delete|remove|trash|recall)`), "删除", larkDeletion},
 	{lazyre.New(`^CLI /.*(?:/|\+|-)(?:delete|remove|trash|recall)(?:$|/|-)`), "删除", larkDeletion},
 	{lazyre.New(`^CLI /.*(?:comments|replies)/(?:create|reply)$`), "发表评论", larkOutbound},
 	{lazyre.New(`^CLI /mail/.*(?:send|reply|forward)$`), "发邮件", larkOutbound},
 	{lazyre.New(`^CLI /mail/\+.*(?:send|reply|forward)`), "发邮件", larkOutbound},
-	{lazyre.New(`^(POST|PUT|PATCH) /(?:open-apis/)?im/v[0-9]+/(?:messages|threads)(?:/|$)`), "发消息", larkOutbound},
+	{lazyre.New(`^(POST|PUT|PATCH) /(?:open-apis/)?im/(?:v[0-9]+/)?(?:messages|batch_messages|threads)(?:/|$)`), "发消息", larkOutbound},
 	{lazyre.New(`^POST /(?:conversations/[^/]+/(?:messages|files|images)|messages/[^/]+/(?:reply|forward|recall|reactions))`), "发消息", larkOutbound},
 	{lazyre.New(`^(POST|PUT|PATCH) /.*(?:comments|replies)(?:/|$)`), "发表评论", larkOutbound},
 	{lazyre.New(`^POST /.*(?:mail|mailboxes).*/(?:send|reply|forward)$`), "发邮件", larkOutbound},
@@ -202,14 +202,21 @@ func prettyBody(body string) string {
 	return body
 }
 
+// Only the message send/reply shortcuts are documented to use the bot (plan-lark-cli.md).
+// Raw API calls, mail and comments cannot claim this exemption by passing --as bot.
+var larkBotOutbound = map[string]bool{
+	"/im/+messages-send":  true,
+	"/im/+messages-reply": true,
+}
+
 // larkBypassSafe uses the same action classification as the card. Unknown CLI risk is not an ordinary write.
 func larkBypassSafe(c larkCall) bool {
-	if larkRead(c) {
+	if c.CLI && c.Method == "CLI" && larkRead(c) {
 		return true
 	}
 	for _, action := range larkActions {
 		if action.boundary != larkOrdinary && action.re.MatchString(c.Method+" "+c.Path) {
-			return action.boundary == larkOutbound && c.CLI && flagValue(c.Args, "--as") == "bot"
+			return action.boundary == larkOutbound && c.CLI && c.Method == "CLI" && larkBotOutbound[c.Path] && flagValue(c.Args, "--as") == "bot"
 		}
 	}
 	if c.CLI && c.Method == "CLI" {

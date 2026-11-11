@@ -4,10 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -53,7 +51,7 @@ fun AssistantSidebarContent(
     val base = LocalAssistantHost.current?.management
     val management = remember(base, choice.hubId, choice.shown) { base?.forManager(choice.shown) }
     val resources = LocalResources.current
-    val clipboard = LocalClipboardManager.current
+    val copy = rememberCopy()
     val feedback = LocalAppFeedback.current
     val words = conversationWords()
     var query by rememberSaveable(choice.hubId, choice.shown) { mutableStateOf("") }
@@ -105,7 +103,7 @@ fun AssistantSidebarContent(
                 onInbox = onInbox, inboxCount = inboxCount,
                 onPin = { toggle(listOf(it.key)) },
                 onUnpinAll = { toggle(received.conversations.map { it.key }.distinct().filter { it in pinned && it != received.mainSession }) },
-                onCopy = { clipboard.setText(AnnotatedString(it.sessionId)); feedback?.notice(resources.getString(R.string.assistant_copied_session_id)) },
+                onCopy = { copy(it.sessionId, resources.getString(R.string.assistant_copied_session_id)) },
                 onArchive = management?.takeUnless { demo }?.let { target -> { session: Session ->
                     archived = archived + session.key
                     operationScope.launch {

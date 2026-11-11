@@ -44,7 +44,8 @@ data class AssistantConversation(val foreground: List<ChatLine>, val background:
                 } else if (item.kind == "image" && item.role == "user" && item.toolUseId == null) { background = false; round = null }
                 if (background) quiet += item.id
                 round?.let { id -> roundOf[item.id] = id; rounds.getValue(id).second += item }
-                if (item.role == "system" || item.kind == "notice" || item.kind == "recap") hints += item.id
+                // An upstream refusal (#2528) is the user's to see in Persona's chats too, as on the web.
+                if ((item.role == "system" || item.kind == "notice" || item.kind == "recap") && item.modelRefusal == null) hints += item.id
             }
             val quietGroups = lines.filterIsInstance<ChatLine.Work>().filter { line ->
                 line.id.removePrefix("w-") in quiet || line.steps.any { it.originalId() in quiet }

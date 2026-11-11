@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
@@ -31,6 +32,10 @@ const (
 	codeOpIDReused        = "op_id_reused"
 	codeAsksFull          = "asks_full"
 	codeAskBusy           = "ask_busy"
+	codeMeetingEnded      = "meeting_ended" // the room ended: ask in the follow-up
+	codeNotMeeting        = "not_meeting"
+	codeMeetingRunning    = "meeting_running"
+	codeNoMaterial        = "no_material"
 )
 
 // The bodies the attending routes read at most.
@@ -100,9 +105,15 @@ func (s *Service) meetingRoutes() {
 		for _, a := range l.Asks {
 			asks = append(asks, viewAsk(a))
 		}
-		apierr.WriteJSON(w, s.liveView(r.Context(), l, rec, asks))
+		view := s.liveView(r.Context(), l, rec, asks)
+		if parts := r.URL.Query().Get("parts"); parts != "" {
+			apierr.WriteJSON(w, view.only(strings.Split(parts, ",")))
+			return
+		}
+		apierr.WriteJSON(w, view)
 	})
 	s.askRoute()
+	s.meetingConversationRoutes()
 }
 
 // meetingCaller: the request carries full credentials; anything else has been answered 403 forbidden.
@@ -244,6 +255,46 @@ type meetingLiveView struct {
 	Fed              int           `json:"fed"`
 	Problem          string        `json:"problem,omitempty"`
 	Asks             *[]askView    `json:"asks,omitempty"` // GET only
+	// The meeting conversation (#3862): the private mark (absent until chosen), a room meeting's room, the follow-up
+	// once made, and each part's revision (GET only).
+	Private  *bool            `json:"private,omitempty"`
+	Room     *kb.RoomView     `json:"room,omitempty"`
+	Followup *kb.ConvView     `json:"followup,omitempty"`
+	Revs     map[string]int64 `json:"revs,omitempty"`
+}
+
+// only is v cut to parts (GET …/live?parts=asks,room): those of them it has, with their revisions.
+func (v meetingLiveView) only(parts []string) map[string]any {
+	out := map[string]any{}
+	revs := map[string]int64{}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		switch p {
+		case kb.PartAsks:
+			if v.Asks != nil {
+				out[p] = *v.Asks
+			}
+		case kb.PartRoom:
+			if v.Room != nil {
+				out[p] = v.Room
+			}
+		case kb.PartPrivate:
+			if v.Private != nil {
+				out[p] = *v.Private
+			}
+		case kb.PartFollowup:
+			if v.Followup != nil {
+				out[p] = v.Followup
+			}
+		default:
+			continue
+		}
+		if rev, ok := v.Revs[p]; ok {
+			revs[p] = rev
+		}
+	}
+	out["revs"] = revs
+	return out
 }
 
 // attendeeView is the session an attended meeting is fed to; Main says it is the main chat.
@@ -259,7 +310,25 @@ func (s *Service) liveView(ctx context.Context, l kb.Live, rec kb.Recording, ask
 	if asks != nil {
 		out.Asks = &asks
 	}
-	if rec.Attendance == "" {
+	out.Revs = map[string]int64{kb.PartAsks: l.AsksRev}
+	if m := rec.Conv; m != nil {
+		out.Private, out.Room, out.Followup = m.Private, m.RoomView(), m.FollowupView()
+		for _, p := range []string{kb.PartRoom, kb.PartPrivate, kb.PartFollowup} {
+			if rev, ok := m.Revs[p]; ok {
+				out.Revs[p] = rev
+			}
+		}
+	}
+	if asks == nil {
+		out.Revs = nil // POST …/live: GET reads them
+	}
+	if rec.RoomMeeting() {
+		if l.Full { // the room's own problems are its room's
+			out.Problem = codeLiveFull
+		}
+		return out
+	}
+	if !rec.Attending() {
 		return out
 	}
 	if ref, main, ok := s.meetingAttendee(ctx, rec); ok {

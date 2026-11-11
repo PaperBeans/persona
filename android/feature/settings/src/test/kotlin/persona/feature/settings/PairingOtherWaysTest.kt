@@ -1,5 +1,6 @@
 package persona.feature.settings
 
+import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Rule
@@ -53,6 +55,11 @@ class PairingOtherWaysTest {
                 }
             }
         }
+        rule.onNodeWithText("personad hub pair").assertDoesNotExist()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        rule.onNodeWithText(context.getString(R.string.settings_password_login_title)).assertExists()
+        rule.onNodeWithText(context.getString(R.string.settings_password_login_pairing)).performClick()
+        rule.waitForIdle()
         rule.onNodeWithText("personad hub pair").assertDoesNotExist()
         rule.onNodeWithText("其他方式").performClick()
         rule.waitForIdle()

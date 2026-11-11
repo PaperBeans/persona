@@ -280,24 +280,41 @@ continue,” with the grant ID, original words and source, without showing a pen
 or user. The current task must be open, and both its bound directory and the node's current session directory must match the computer and scope;
 the card's own `cwd` is not trusted. Explicit task prohibitions and read-only launches block this path.
 
-Matching is deliberately deterministic: a complete single-action request such as `Merge?`, `Should I merge this PR?`
-or `Merge PR https://github.com/example/app/pull/12?`, and the corresponding single-action plan. Supported verbs are
-the action names above and their Chinese equivalents. General multi-step plans, unclassified text, multiple questions,
-forms, passwords, assistant `ask_user`, runtime-local dialogs, extra tool-input fields, and options with additional
-instructions keep their existing route. Choice labels must be plain confirmations such as Continue, Yes, No or Cancel.
-A merge grant cannot approve a plan that also deploys or deletes. This is not a model judgment or a substring match.
+Simple single-action confirmations use a deterministic fast path. Natural questions (including PR numbers and
+free-form choice descriptions) and multi-step plans use the existing `agent.delegate` model purpose to classify the
+complete action set and choose exact affirmative labels. The manager checks every action against one grant; local
+read/edit/verification steps may accompany an authorized external action. A merge grant cannot approve a plan that
+also pushes, deploys or deletes. Failed, incomplete or ambiguous classification keeps the original route. Selected
+wait/cancel/defer or runtime-action options are rejected; an unselected defer option does not block a valid answer.
+Forms, passwords, assistant `ask_user`, runtime-local dialogs and extra tool-input fields keep their existing route.
+The judge uses the model configuration for `agent.delegate`, including its selected managed provider and model;
+it never starts an unconfigured CLI. The synchronous authorization attempt has a five-second classification and evidence-read context budget
+(including classification and scope/evidence reads), reduced from sixty seconds so a slow model promptly falls back
+to the normal card route. This favors manual confirmation over waiting for a slow automatic answer; it does not
+introduce background approval or change resolution persistence. If that model is unavailable, the card follows the existing supervisor/user
+route, and counts as a user confirmation only when that route actually notifies the user.
+A conservative code scan adds sensitive effects even if classification misses them; unspecified deployments remain
+production-sensitive. Every explicit card path is independently resolved and checked against repository scope, including relative paths
+(`../other`, `./server`, `server/internal`), `~`, `$HOME` and `$PWD` (including braced forms). Relative paths use the
+node's session directory; home expansion and physical Git identity come from that node. Unknown session variables,
+shell substitutions, globs, quoted variable/home expansions, ambiguous quoting and failed identity reads keep confirmation manual. Paths are kept literally, including trailing dots and parent segments;
+sentence punctuation on an unquoted path may therefore require manual confirmation. A node must advertise
+`path_resolved: true`, proving it resolves symlinks before parent segments; older nodes keep path cards manual.
+Resolution persistence has its own timeout and is outside the five-second classification budget. The judge's
+`within_task` can veto a card but cannot prove that a path is authorized. The model's output never grants tool permissions or replaces condition evidence.
 
 Tool `permission` cards are never approved by standing authorization. Production deployment, external sending,
-deletion and spending each require their own explicit action and `reversible: true`; task notes alone still cannot
+deletion (including force-pushing or replacing remote history) and spending each require their own explicit action and `reversible: true`; task notes alone still cannot
 authorize the `userOnlyWords` actions described above. A plan answer explicitly uses runtime mode `default`, so it
 does not grant bypass permissions. Existing per-session tool grants are separate and unchanged.
 
-`ci_green` and `no_conflicts` apply to merges: the manager reads the current branch through `git.pr`, requires an
-open, non-draft PR with a head commit, and binds an explicit PR URL to the returned PR. CI requires a complete,
+`ci_green` and `no_conflicts` gate every action in the grant: the manager reads the current branch through `git.pr`, requires an
+open, non-draft PR with a head commit, and binds explicit PR URLs or numbers to the returned PR. Multiple distinct PR targets remain manual. CI requires a complete,
 nonempty list of fewer than 100 checks, all passing; pending, failed or skipped checks do not pass. No conflicts
 requires `mergeable: MERGEABLE`. A condition written in other words is saved and injected but remains manual until
 there is an independent verifier for it. A card's claim that checks passed is never evidence. Conditions are checked
-at answer time; this does not replace the repository's merge-time quality gates or protect against a later head change.
+at answer time. Push and test deployment with these conditions also require the node's current local HEAD to match
+the checked PR head, so old remote CI cannot approve new unpushed commits. This does not replace the repository's merge-time quality gates or protect against a later head change.
 
 The registry is re-read after those checks. A database transaction locks the grant against revocation, verifies the
 task is still open and unchanged since the checks started (including its decisions), and commits the interaction resolution, `source: agent` task decision with authority, and automatic

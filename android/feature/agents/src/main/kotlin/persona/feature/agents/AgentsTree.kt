@@ -40,10 +40,11 @@ internal data class TreeGroupEntry(val group: AgentListGroup, val space: Boolean
 /**
  * A session. [located] rows sit outside the computer tree and show where they run. A row under a [TreeTabEntry] says
  * whether it is its tab's [launcher] (the one that started it) or a [branch] the launcher split off, drawn one step further in.
+ * A [nested] row is a subtask drawn under its parent's [TreeChildrenEntry].
  */
 internal data class TreeRowEntry(
     val row: AgentSession, val depth: Int, val first: Boolean, val last: Boolean, val located: Boolean,
-    val launcher: Boolean = false, val branch: Boolean = false,
+    val launcher: Boolean = false, val branch: Boolean = false, val nested: Boolean = false,
 ) : AgentTreeEntry {
     override val key: String get() = "session:${row.id}"
 }
@@ -142,7 +143,7 @@ internal fun agentTreeEntries(
         val expanded = entry.row.id in expandedTasks
         nested += TreeChildrenEntry(entry.row, children.size, entry.depth + 1, expanded)
         if (expanded) children.forEachIndexed { index, child ->
-            append(TreeRowEntry(child, entry.depth + 1, false, index == children.lastIndex, entry.located, branch = true))
+            append(TreeRowEntry(child, entry.depth + 1, false, index == children.lastIndex, entry.located, branch = true, nested = true))
         }
     }
     entries.forEach(::append)
@@ -155,7 +156,7 @@ internal data class MachineCount(val machine: Machine, val count: Int)
 
 /** Every computer, online ones first (the tree's order), with the count the list would show for it. */
 internal fun machineCounts(machines: List<Machine>, rows: List<AgentSession>): List<MachineCount> {
-    val counts = rows.filterNot { it.session.isCodexSubagent }.groupingBy { it.session.machineId }.eachCount()
+    val counts = rows.filterNot { it.isNestedSubtask }.groupingBy { it.session.machineId }.eachCount()
     return machines.sortedBy { !it.online }.map { MachineCount(it, counts[it.id] ?: 0) }
 }
 
@@ -189,5 +190,5 @@ internal val AgentListGroup.headingCounts: List<Pair<Status, Int>>
     get() = listOf(AgentState.NeedsYou, AgentState.Working, AgentState.Unread).map { state ->
         // A repository with working trees holds no rows itself (its trees do): it counts from stateCounts.
         state.designStatus to if (totalCount != null || rows.isEmpty()) stateCounts?.get(state) ?: 0
-            else rows.count { !it.session.isCodexSubagent && it.state == state }
+            else rows.count { !it.isNestedSubtask && it.state == state }
     }

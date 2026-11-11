@@ -196,7 +196,9 @@ class MeetingAttendanceMockTests(Hub, unittest.TestCase):
         self.upload(rid)
         self.assertEqual(self.call("POST", f"/api/v1/recordings/{rid}/live", {"from": 3})[1]["code"], "not_attending")
         live = self.call("GET", f"/api/v1/recordings/{rid}/live")[1]
-        self.assertEqual(live, {"next": 3, "attendance": "off", "fed": 3, "asks": []})
+        # revs: a manager with meeting_conversation (MOCK_NO_MEETING_CONVERSATION=1 is one without it).
+        revs = {} if os.environ.get("MOCK_NO_MEETING_CONVERSATION") == "1" else {"revs": {"asks": 0}}
+        self.assertEqual(live, {"next": 3, "attendance": "off", "fed": 3, "asks": [], **revs})
         self.assertEqual(self.call("GET", f"/api/v1/recordings/{rid}/live", headers={"X-Mock-Role": "watch"})[1]["code"], "forbidden")
         self.call("DELETE", f"/api/v1/recordings/{rid}")
         self.assertEqual(self.call("POST", f"/api/v1/recordings/{rid}/live", {"from": 0})[1]["code"], "recording_deleted")
@@ -204,7 +206,8 @@ class MeetingAttendanceMockTests(Hub, unittest.TestCase):
 
     def test_ask_answers_once_per_id(self):
         earlier = str(uuid.uuid4())
-        self.upload(earlier, complete=True, segments=[{"start": 0, "end": 3, "text": "Keep the cap."}])
+        # Marked not private: with the meeting conversation (#3862) only such a meeting is material for another's answers.
+        self.upload(earlier, complete=True, segments=[{"start": 0, "end": 3, "text": "Keep the cap."}], private=False)
         rid = str(uuid.uuid4())
         self.upload(rid, attendance="participant")
         self.call("POST", f"/api/v1/recordings/{rid}/live", {"from": 0, "segments": [{"start": 1800, "end": 1806, "text": "Did we decide on the cap?"}]})

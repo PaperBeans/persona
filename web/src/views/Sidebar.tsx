@@ -15,7 +15,8 @@ import { keyedRefs } from "../lib/keyed-refs";
 import { buildMachineTree } from "../lib/herdr-tree";
 import { selectSidebarMachines } from "../lib/sidebar-machines";
 import { machineWithHub } from "../lib/mesh";
-import { baseName, tabLabel } from "../lib/format";
+import { baseName, sessionTitle, tabLabel } from "../lib/format";
+import { cardState } from "../lib/card-focus";
 import { agentKey, isSpacePinned, pinnedSessions } from "../lib/pins";
 import { firstAndCurrent } from "../lib/persona-nav";
 import { pinOrder, sidebarConversations, splitDirections, usePinnedConversations } from "../lib/conversation-pins";
@@ -23,7 +24,7 @@ import { directionLabel, useDirectionNames } from "../lib/direction-names";
 import { autoConversations, autoOrigin, isAutoConversation, originLabel, type AutoOrigin, type OriginTally } from "../lib/conversation-origins";
 import { ConversationRowMenu, pinnedSectionItems } from "./ConversationMenu";
 import { conversationPage } from "../lib/conversation-page";
-import { href, navigate, type Route } from "../lib/router";
+import { href, navigate, onLinkClick, showsSession, type Route } from "../lib/router";
 import { useAgentSessions, useFullAgentSessions } from "../lib/sessions";
 import { refresh, useStore } from "../lib/store";
 import { conversationTitle } from "./assistant/conversations";
@@ -62,8 +63,10 @@ import { BADGE_CLASS, DOT_CLASS, type GoFn, GroupCount, holdsRow, morePagesMenu,
 import { NavRow, PersonalAgents, PersonaRow, PinnedHeading, SessionRow, SubHeading } from "./SidebarRows";
 import { LooseSection, MachineSection, RepoMachineSection, SessionTally, type SpaceMenuFn, type WorkspaceTreeActions, SpaceSection, TodoTreeView } from "./SidebarTree";
 import { CollapseButton, PagesTally } from "./SidebarRail";
-import { scoped, useScope, useScoped, useScopedTodos } from "../lib/current-assistant";
+import { scoped, useScope, useScoped, useScopedInteractions, useScopedMachines, useScopedTodos } from "../lib/current-assistant";
 import { AssistantSwitcher } from "./AssistantSwitcher";
+import { sidebarPending } from "./sidebar-pending";
+import { usePendingWorkSessions } from "./sidebar-pending-sessions";
 // Declared in the files split out of this one; re-exported so the files that import them from here stay as they are.
 export { useNavPages, type NavPage } from "./SidebarParts";
 export { AgentRow, PersonaRow, PinnedHeading, SessionRow } from "./SidebarRows";
@@ -257,6 +260,7 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
   // a phone's drawer has the pages as two rows of icons, so its first screen reaches the Agents (#1996)
   const narrow = useMedia(NARROW);
   const activeKey = useActiveKey(route);
+  const workBrowserReady = useStore((s) => s.features.includes("sessions_dimensions"));
   const localPins = usePinnedConversations();
   // the leader conversations are pinned by the hub, first (#3623): not this browser's to unpin
   const leaders = assistant?.leaders;
@@ -305,7 +309,9 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
 
       {/* scroll-pt: a row reached by Tab doesn't stop under the pinned Persona row — about 62px with its 主对话 line
           (4 + 48 + 1 gap + 1 line + 8 margins), 58px on a coarse pointer (44px touch row): 64px covers both */}
-      <div ref={nav} data-sidebar-rows onMouseLeave={() => hover(null)} className="relative min-h-0 flex-1 scroll-pt-16 overflow-y-auto overscroll-contain px-2.5 pb-3">
+      {/* isolate: the rows' own layers (the sticky Persona row and group headers at z-30, chips, segments) stay inside this
+          column, so the usage popover that opens upward over it from the bottom is never drawn under them */}
+      <div ref={nav} data-sidebar-rows onMouseLeave={() => hover(null)} className="relative isolate min-h-0 flex-1 scroll-pt-16 overflow-y-auto overscroll-contain px-2.5 pb-3">
         {highlight}
         {/* the main conversation is the column's first row, Persona with the app's mark, and only there (#2004, #5109); it
             stays at the top while the rest scrolls (#5581), with a solid divider above the sticky groups */}
@@ -343,8 +349,8 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
 
         <PersonalAgents reg={reg} hover={hover} activeKey={activeKey} go={go} />
 
-        {/* the phone's Agents page shows them already: the drawer over it doesn't build them twice */}
-        {!(narrow && route.name === "agent-list") && <AgentsBlock reg={reg} hover={hover} activeKey={activeKey} go={go} onNewAgent={onNewAgent} onNavigate={onNavigate} workspaceActions={workspaceActions} foldable />}
+        {workBrowserReady ? <PendingAgents route={route} reg={reg} hover={hover} go={go} onNewAgent={onNewAgent} onNavigate={onNavigate} />
+          : !(narrow && route.name === "agent-list") && <AgentsBlock reg={reg} hover={hover} activeKey={activeKey} go={go} onNewAgent={onNewAgent} onNavigate={onNavigate} workspaceActions={workspaceActions} foldable />}
       </div>
       {convMenu && <ConversationRowMenu s={convMenu.s} main={convMenu.s.session_id === assistant?.main} pinned={pinnedIds.includes(convMenu.s.session_id)} leader={isLeader(convMenu.s.session_id)} anchor={convMenu.anchor} at={convMenu.at} onClose={() => setConvMenu(null)} />}
       {chatsMenu && <Menu anchor={chatsMenu.anchor ?? null} point={chatsMenu.point} onClose={() => setChatsMenu(null)} align="right" width={200} header={t("sidebar.pinned_section")} items={pinnedSectionItems(localPinned)} />}
@@ -352,6 +358,34 @@ export function Sidebar({ route, onSearch, onNewAgent, onNavigate, workspaceActi
       <SidebarUsage />
       <NodePrompt />
     </aside>
+  );
+}
+
+function PendingAgents({ route, reg, hover, go, onNewAgent, onNavigate }: {
+  route: Route; reg: RegFn; hover: (key: string | null) => void; go: GoFn; onNewAgent: () => void; onNavigate?: () => void;
+}) {
+  const scope = useScope();
+  const { sessions, loaded } = usePendingWorkSessions(scope.several ? scope.id : undefined);
+  const interactions = useScopedInteractions();
+  const answered = useStore((s) => s.answered);
+  const machines = useScopedMachines();
+  const rows = useMemo(() => sidebarPending(sessions, interactions, answered), [sessions, interactions, answered]);
+  const [folded, toggle] = useFolded("work-pending", false, { all: false });
+  return (
+    <Section title={t("work-entry.pending")} folded={folded} onToggle={toggle} right={<SectionAdd label={t("sidebar.new_agent")} onClick={onNewAgent} />}>
+      {loaded && !rows.length && <p className="px-2 py-1.5 text-[12px] text-ink-3">{t("work-entry.pending_empty")}</p>}
+      {rows.map((row) => {
+        const card = row.cards[0];
+        const label = card?.session_title || (row.session && sessionTitle(row.session)) || baseName(card?.cwd) || t("work-entry.pending_request");
+        const active = row.to.name === "request" ? route.name === "request" && route.id === row.to.id
+          : row.to.name === "session" && showsSession(route, row.to.mid, row.to.sid);
+        return <NavRow key={row.key} k={row.key} reg={reg} hover={hover} active={active} to={row.to}
+          go={(to) => (e) => { onLinkClick(e, to, card ? cardState(card.id) : null); if (e.defaultPrevented) onNavigate?.(); }}
+          label={label} title={[label, machineWithHub(row.machineId, machines)].filter(Boolean).join(" · ")} icon="chat" dot="needs_you"
+          badge={row.cards.length > 1 ? row.cards.length : undefined} badgeTone="attention" />;
+      })}
+      <NavRow k="work:all" reg={reg} hover={hover} active={false} to={{ name: "terminal" }} go={go} label={t("work-entry.all")} icon="list" />
+    </Section>
   );
 }
 

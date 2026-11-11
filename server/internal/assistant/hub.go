@@ -209,6 +209,8 @@ const (
 	EventStartEnded          = assistantwire.EventStartEnded
 	CodeNoDevice             = assistantwire.CodeNoDevice
 	CodeMachineOffline       = assistantwire.CodeMachineOffline
+	CodeNodeClosed           = assistantwire.CodeNodeClosed
+	CodeMeetingEnded         = assistantwire.CodeMeetingEnded
 	CodeStaleSnapshot        = assistantwire.CodeStaleSnapshot
 	CodeAssistantOffline     = assistantwire.CodeAssistantOffline
 	DeviceAll                = assistantwire.DeviceAll
@@ -218,8 +220,12 @@ const (
 	AssistantID              = assistantwire.AssistantID
 )
 
-// DeviceAssistantGuestPrepare makes a guest conversation's directory (guest.go).
-const DeviceAssistantGuestPrepare = assistantwire.DeviceAssistantGuestPrepare
+// DeviceAssistantGuestPrepare makes a guest conversation's directory (guest.go); DeviceAssistantGuestDelete removes a
+// meeting's room (meeting_room.go).
+const (
+	DeviceAssistantGuestPrepare = assistantwire.DeviceAssistantGuestPrepare
+	DeviceAssistantGuestDelete  = assistantwire.DeviceAssistantGuestDelete
+)
 
 var (
 	ErrNoDevice      = assistantwire.ErrNoDevice

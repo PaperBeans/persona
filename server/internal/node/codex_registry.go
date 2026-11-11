@@ -418,6 +418,17 @@ type codexListPass struct {
 	desktop map[string]bool      // Codex home → codexDesktopAvailable
 	own     string               // assistantProject, once ownSet
 	ownSet  bool
+	// runtimes is the runtime session each Codex thread is listed as (thread → session, runtimecodex.go): the list
+	// has that session's row, so the thread's own is left out and its subagents hang off the session.
+	runtimes map[string]codexClaim
+}
+
+// runtimeOf is the runtime session that names Codex thread as its conversation; the zero claim when none does.
+func (p *codexListPass) runtimeOf(thread string) codexClaim {
+	if p == nil || thread == "" {
+		return codexClaim{}
+	}
+	return p.runtimes[thread]
 }
 
 type codexStat struct {
@@ -501,11 +512,27 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 	n.codices.mu.Unlock()
 	var out []proto.Session
 	projects := map[string]string{}
+	// Threads a runtime's session names (runtimecodex.go). own: those listed as their own row all the same, because
+	// another program has them now. adopted: subagent rows whose parent or root thread a session names, by their
+	// place in out: they hang off that session unless the thread's own row is listed.
+	own := map[string]bool{}
+	type adoption struct {
+		row          int
+		parent, root string
+	}
+	var adopted []adoption
 	for id, src := range sources {
 		src, visible := n.listedCodexSource(id, src, pass)
 		if !visible || seen[id] || n.isAssistantSessionIn(id, pass) || n.ownedAssistantSource(src.thread) {
 			continue
 		}
+		// A runtime's session is this thread: the conversation is listed once, as that session. While the session
+		// runs, always; once it does not, unless another program has the thread (elsewhere, below).
+		claim := pass.runtimeOf(src.thread)
+		if claim.live {
+			continue
+		}
+		elsewhere := false
 		if n.programRun(id, src, pass) {
 			continue
 		}
@@ -551,6 +578,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			s.ReadOnlyReason = holder + " 正在运行，但未提供共享入口；只能同步本地历史"
 		}
 		if c, t, err := n.codexOwner(id); err == nil {
+			elsewhere = true
 			s.SourceKind, s.SourceInstanceID, s.Status, s.Attached = "codex_app_server", c.spec.ID, t.status, t.joined
 			if t.failure != "" { // turn/completed said it failed: before the rollout read has it
 				reported(t.failure, t.failureKind, m.turnErr).set(&s)
@@ -580,6 +608,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			s.ReadOnlyReason = err.Error()
 		} else if src.path == "" && codexDesktopChatIn(src, pass) {
 			// The App's chat whose rollout is gone: sent to through the App, as one with a rollout.
+			elsewhere = true
 			s.AgentName, s.AgentSurface = "Codex App", transcript.SurfaceDesktop
 			s.Capabilities.Send = true
 			s.ReadOnlyReason = ""
@@ -592,6 +621,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 				n.placeCodexDesktop(&s, src, o.parent, true)
 			case codexDesktopChatIn(src, pass):
 				// The Codex App on this machine runs it (codex_desktop.go): sendable while the App has the thread loaded.
+				elsewhere = true
 				s.AgentName, s.AgentSurface = "Codex App", transcript.SurfaceDesktop
 				s.Capabilities.Send = true
 				s.ReadOnlyReason = ""
@@ -600,7 +630,18 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		} else if o.cli {
 			s.AgentName, s.AgentSurface = "Codex CLI", transcript.SurfaceCLI
 		}
+		if claim.session != "" {
+			if !elsewhere {
+				continue // nothing else has the thread: the runtime's session, though not running, is the conversation
+			}
+			own[src.thread] = true
+		}
 		n.decorateCodexSession(&s, src, cfg.LegacyHome, projects)
+		if s.IsSubagent && pass != nil && len(pass.runtimes) > 0 {
+			if root := readCodexOrigin(src.path).root; pass.runtimeOf(s.ParentThreadID).session != "" || pass.runtimeOf(root).session != "" {
+				adopted = append(adopted, adoption{len(out), s.ParentThreadID, root})
+			}
+		}
 		if s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && n.codexResumableIn(id, pass) {
 			// Nothing has it open: a message resumes it in a new tab (codex_resume.go).
 			s.Capabilities.Send = true
@@ -618,6 +659,16 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		}
 		seen[id] = true
 		out = append(out, s)
+	}
+	// A subagent of a thread a runtime's session is (codex_thread): that session is its parent and its root, in place
+	// of the thread's own row, which is not listed.
+	for _, a := range adopted {
+		if c := pass.runtimeOf(a.parent); c.session != "" && !own[a.parent] {
+			out[a.row].ParentSessionID = c.session
+		}
+		if c := pass.runtimeOf(a.root); c.session != "" && !own[a.root] {
+			out[a.row].RootSessionID = c.session
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].SessionID < out[j].SessionID })
 	resolveCodexHierarchy(out)

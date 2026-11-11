@@ -153,6 +153,12 @@ struct HubsView: View {
                     .lineLimit(1).formButton()
                     .accessibilityIdentifier("hubs.rename.\(g)")
                 if model.hubSignOut == .group(g) { RowProgress() }
+                if model.socket(g)?.rejected == true {
+                    Button("Pair Again") { showPair = true }
+                        .lineLimit(1).formButton()
+                        .disabled(model.hubSignOut != nil)
+                        .accessibilityIdentifier("hubs.repair.\(g)")
+                }
                 Button(model.groupIDs.count > 1 ? String(localized: "Disconnect This Group…") : String(localized: "Disconnect and Forget Server…"), role: .destructive) { removingGroup = g }
                     .lineLimit(1).formButton()
                     .disabled(model.hubSignOut != nil)
@@ -170,6 +176,15 @@ struct HubsView: View {
             }
             .modifier(SettingsButtonLook())
             .accessibilityIdentifier("hubs.rename.\(g)")
+            if model.socket(g)?.rejected == true {
+                Button { showPair = true } label: {
+                    SettingsRow(title: String(localized: "Pair Again"), symbol: Theme.Icon.pairing, tint: Theme.accent)
+                        .lineLimit(1)
+                }
+                .modifier(SettingsButtonLook())
+                .disabled(model.hubSignOut != nil)
+                .accessibilityIdentifier("hubs.repair.\(g)")
+            }
             Button(role: .destructive) { removingGroup = g } label: {
                 SettingsRow(title: model.groupIDs.count > 1 ? String(localized: "Disconnect This Group") : String(localized: "Disconnect and Forget Server"), symbol: Theme.Icon.end, tint: Theme.danger)
                     .trailingProgress(model.hubSignOut == .group(g))
@@ -219,14 +234,18 @@ struct HubsView: View {
         let inApp = model.inAppTunnelState(g).flatMap { $0.routed ? $0.route.title : nil }
             ?? (model.localProxyState(g)?.routed == true ? String(localized: "Local Proxy") : nil)
         let routed = model.tunnel(g)?.routed == true
-        let state = model.isLive(g)
+        let rejected = model.socket(g)?.rejected == true
+        let state = rejected
+            ? String(localized: "Pairing Expired")
+            : model.isLive(g)
             ? (inApp.map { String(localized: "Connected (via \($0))") } ?? (routed ? String(localized: "Connected (via SSH tunnel)") : String(localized: "Connected [V N C Page 5be032]")))
             : model.socket(g)?.state == .connecting
             ? (inApp.map { String(localized: "Connecting (via \($0))") } ?? (routed ? String(localized: "Connecting (via SSH tunnel)") : String(localized: "Connecting")))
             : String(localized: "Not Connected")
+        let reason = rejected ? " " + ConnectionDetails.explanation(.rejected, stalled: false) : ""
         let group = n > 1 ? String(localized: "\(n) linked hubs in this group; you see the whole group's machines. If the connected one drops, another in the group takes over. ") : ""
         let current = model.isMultiHub && model.hub?.group == g ? String(localized: "Persona, the Inbox, and hub settings use this group.") : ""
-        return String(localized: "\(state)。", comment: "Sentence end after the connection state; more sentences may follow") + group + current
+        return String(localized: "\(state)。", comment: "Sentence end after the connection state; more sentences may follow") + reason + group + current
     }
 
     private func meshOnly(_ g: String) -> [MeshHub] {

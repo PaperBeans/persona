@@ -32,6 +32,31 @@ func writeClaudeRun(t *testing.T, dir, id string, age time.Duration, entrypoints
 	return p
 }
 
+// writeRecords appends at least n bytes of the lines Claude Code 2.1.32x writes after a run's last message, none of which
+// carries an entrypoint (#4551).
+func writeRecords(f *os.File, n int) {
+	for written := 0; written < n; {
+		k, _ := fmt.Fprintf(f, `{"type":"api-request-blob","sessionId":"s","blob":%q}`+"\n"+`{"type":"last-prompt","lastPrompt":"summarize the diff"}`+"\n"+`{"type":"mode","mode":"default"}`+"\n", strings.Repeat("b", 4<<10))
+		written += k
+	}
+}
+
+// The last entrypoint is found wherever its key falls against the chunks read back from the end.
+func TestReadEntrypointsAcrossChunks(t *testing.T) {
+	dir := t.TempDir()
+	for pad := oneShotTail - 64; pad <= oneShotTail+64; pad++ {
+		p := filepath.Join(dir, fmt.Sprint(pad)+".jsonl")
+		line := `{"type":"assistant","entrypoint":"sdk-cli"}` + "\n" + `{"type":"api-request-blob","blob":"` + strings.Repeat("b", pad) + `"}` + "\n"
+		if err := os.WriteFile(p, []byte(`{"type":"user","entrypoint":"sdk-cli"}`+"\n"+line), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		st, _ := os.Stat(p)
+		if first, last := readEntrypoints(p, st.Size()); first != "sdk-cli" || last != "sdk-cli" {
+			t.Fatalf("pad %d: first %q last %q", pad, first, last)
+		}
+	}
+}
+
 func listedIDs(n *Node) map[string]bool {
 	got := map[string]bool{}
 	for _, s := range n.scanOffline() {
@@ -44,7 +69,7 @@ func listedIDs(n *Node) map[string]bool {
 // session of the user's: the offline list leaves it out (#3828). Listed as before: a session the user had in a terminal
 // as well (either way round), the Agent SDKs' (an interactive host's, sdk-ts), Persona's own (started under its state
 // directory: this or another manager's assistant, a health space, a guest; one the node keeps state for; a fork; a kept
-// one), and a run whose last entrypoint is not within the tail read.
+// one), and a run whose last entrypoint is not within reach of the end.
 func TestOfflineListLeavesOneShotRunsOut(t *testing.T) {
 	t.Setenv("PERSONA_HOME", "")
 	n, home := testNode(t)
@@ -61,9 +86,10 @@ func TestOfflineListLeavesOneShotRunsOut(t *testing.T) {
 		health    = "5d500000-0000-4000-8000-000000000009" // another manager's health space
 		guest     = "5d500000-0000-4000-8000-00000000000a"
 		driven    = "5d500000-0000-4000-8000-00000000000b" // the node keeps state for it
-		hugeTail  = "5d500000-0000-4000-8000-00000000000c" // a one-shot run whose last line outgrows the tail read
+		hugeTail  = "5d500000-0000-4000-8000-00000000000c" // a one-shot run with more than a tail of Claude Code's records after it
 		cliThenP  = "5d500000-0000-4000-8000-00000000000d" // the user's terminal session, then `claude -p -c`
 		legacy    = "5d500000-0000-4000-8000-00000000000e" // under the older state directory's name
+		farTail   = "5d500000-0000-4000-8000-000000000010" // its last entrypoint is past the reach
 	)
 	n.kept, n.forked = map[string]bool{kept: true}, map[string]bool{fork: true}
 	n.state.Sessions[driven] = sessionState{Cwd: "/src/app"}
@@ -85,10 +111,15 @@ func TestOfflineListLeavesOneShotRunsOut(t *testing.T) {
 	writeClaudeRun(t, dir, driven, 11*time.Minute, "sdk-cli")
 	big := writeClaudeRun(t, dir, hugeTail, 12*time.Minute, "sdk-cli")
 	f, _ := os.OpenFile(big, os.O_APPEND|os.O_WRONLY, 0o600)
-	fmt.Fprintf(f, `{"type":"user","uuid":"r1","message":{"role":"user","content":[{"type":"tool_result","content":%q}]}}`+"\n", strings.Repeat("x", 2*oneShotTail))
+	writeRecords(f, 14<<10)
 	f.Close()
 	_ = os.Chtimes(big, time.Now().Add(-12*time.Minute), time.Now().Add(-12*time.Minute))
 	writeClaudeRun(t, dir, cliThenP, 13*time.Minute, "cli", "sdk-cli")
+	far := writeClaudeRun(t, dir, farTail, 16*time.Minute, "sdk-cli")
+	f, _ = os.OpenFile(far, os.O_APPEND|os.O_WRONLY, 0o600)
+	writeRecords(f, oneShotReach)
+	f.Close()
+	_ = os.Chtimes(far, time.Now().Add(-16*time.Minute), time.Now().Add(-16*time.Minute))
 	writeClaudeRun(t, under(filepath.Join(home, compat.StateDir), "guest"), legacy, 14*time.Minute, "sdk-cli")
 
 	// A program's long prompt pushes its first entrypoint beyond the first tail's worth of bytes.
@@ -100,7 +131,8 @@ func TestOfflineListLeavesOneShotRunsOut(t *testing.T) {
 
 	got := listedIDs(n)
 	for id, want := range map[string]bool{oneShot: false, resumed: true, cli: true, sdkHost: true, kept: true, fork: true,
-		assistant: true, manager: true, health: true, guest: true, driven: true, hugeTail: true, cliThenP: true, legacy: true, longPrompt: false} {
+		assistant: true, manager: true, health: true, guest: true, driven: true, hugeTail: false, cliThenP: true, legacy: true, longPrompt: false,
+		farTail: true} {
 		if got[id] != want {
 			t.Errorf("%s listed=%v, want %v", id, got[id], want)
 		}

@@ -83,7 +83,7 @@ struct AssistantFullSearch: View {
     }
 
     private func row(_ s: Session) -> some View {
-        let title = s.key == model.assistantMain ? AssistantSidebar.shownMainTitle(model.showsAssistantIdentity)
+        let title = s.key == model.assistantMain ? AssistantSidebar.mainTitle
             : s.title.isEmpty || s.title == "Claude Code" ? String(localized: "New Chat [Quick Actions ea4b29]") : s.title
         let preview = s.lastText.map { Fmt.plain($0).replacingOccurrences(of: "\n", with: " ") } ?? ""
         return Button { open(s.key) } label: {

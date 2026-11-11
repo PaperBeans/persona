@@ -4,6 +4,7 @@ import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setToken } from "../../../lib/api";
+import { pair } from "../../../lib/auth";
 import { getState } from "../../../lib/store";
 import { useFileOps, type FileOps } from "./FileOps";
 import { t } from "../../../i18n";
@@ -158,6 +159,31 @@ describe("file upload credential ownership", () => {
     await replace("example-credential-B", false);
     expect(requests()[1].aborted).toBe(true);
     expect(tray()).toBeNull();
+  });
+
+  it("retires an upload queue on a successful same-token pair and accepts a fresh upload", async () => {
+    await replace("jd_synthetic-upload", false);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ machines: [] })));
+    await select(file("in-flight.txt"), file("queued.txt"));
+    const old = requests()[0];
+    old.ignoreAbort = true;
+    await act(async () => pair("jd_synthetic-upload"));
+    await flush();
+    expect(old.aborted).toBe(true);
+    expect(tray()).toBeNull();
+    expect(requests()).toHaveLength(1);
+    const fresh = file("fresh.txt");
+    await select(fresh);
+    expect(requests()).toHaveLength(2);
+    expect(requests()[1].file).toBe(fresh);
+    expect(requests()[1].headers.Authorization).toBe("Bearer jd_synthetic-upload");
+    await act(async () => { old.progress(4); old.answer(); });
+    await flush();
+    expect(changed).not.toHaveBeenCalled();
+    expect(requests()).toHaveLength(2);
+    await act(async () => requests()[1].answer());
+    await flush();
+    expect(changed).toHaveBeenCalledExactlyOnceWith(["/work"]);
   });
 
   it("binds a native chooser to the owner that opened it", async () => {

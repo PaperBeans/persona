@@ -15,7 +15,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontFamily
@@ -257,7 +256,7 @@ sealed interface LarkRichNode {
 /** Renders a syntax-highlighted code block. */
 @Composable
 fun LarkCodeBlock(code: String, language: String, modifier: Modifier = Modifier) {
-    val clipboard = LocalClipboardManager.current
+    val copy = rememberCopy()
     val tokens = remember(code) { LarkSyntax.tokens(code) }
     val palette = PersonaTheme.palette
     val shape = RoundedCornerShape(Tokens.Radius.control)
@@ -283,7 +282,7 @@ fun LarkCodeBlock(code: String, language: String, modifier: Modifier = Modifier)
                 maxLines = 1
             )
             Row(
-                Modifier.clickable { clipboard.setText(AnnotatedString(code)) },
+                Modifier.clickable { copy(code, null) },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)
             ) {

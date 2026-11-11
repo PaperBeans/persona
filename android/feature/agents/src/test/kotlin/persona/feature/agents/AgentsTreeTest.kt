@@ -5,7 +5,7 @@ import persona.core.domain.sort.*
 import org.junit.Assert.*
 import org.junit.Test
 
-/** The "By computer and space" tree these tests were written for (the default grouping is now "By repository"). */
+/** The "By project" tree (stored as MachineSpace) these tests were written for (the default grouping is now "By repository"). */
 private val MachineSpaceTree = AgentListSettings(grouping = AgentGrouping.MachineSpace)
 
 class AgentsTreeTest {

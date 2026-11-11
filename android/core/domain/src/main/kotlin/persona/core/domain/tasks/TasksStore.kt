@@ -234,6 +234,13 @@ class TasksStore(
         }
     }
 
+    /** The detail page's due date, reminder and priority (#4636); the list follows the hub's answer. */
+    suspend fun setTodoPlan(id: String, plan: persona.core.contracts.TodoPlan): Todo {
+        val updated = api.setTodoPlan(id, plan)
+        _todos.update { list -> list.map { if (it.id == updated.id) updated else it } }
+        return updated
+    }
+
     suspend fun updateTodo(id: String, title: String? = null, notes: String? = null): Todo {
         val updated = api.patchTodo(id, title = title, notes = notes)
         _todos.update { list -> list.map { if (it.id == updated.id) updated else it } }

@@ -93,6 +93,25 @@ describe("an agent's live text", () => {
     expect(tr.streaming).toBe("");
   });
 
+  it("retires landed live words before a new user message or later tool result arrives", async () => {
+    await delta("The previous reply.");
+    items([said(6, "The previous reply.")], 5);
+    expect(tr.streaming).toBe("");
+    items([{ ...prompt, id: "u7#0", seq: 7, text: "Check the risks." }, ...call(8)], 6);
+    expect(tr.streaming).toBe("");
+    await delta("The new reply.");
+    expect(tr.streaming).toBe("The new reply.");
+  });
+
+  it("retires a replay that was already landed before its delta arrived", async () => {
+    items([said(6, "The previous reply.")], 5);
+    await delta("The previous reply.");
+    items([{ ...prompt, id: "u7#0", seq: 7, text: "Check the risks." }], 6);
+    expect(tr.streaming).toBe("");
+    await delta("The previous reply.");
+    expect(tr.streaming).toBe("The previous reply.");
+  });
+
   it("shows what goes past the words it has, and the next message", async () => {
     items([said(6, "Block one.")], 5);
     await delta("Block one.\n\nBlock two.\n");

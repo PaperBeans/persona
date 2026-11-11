@@ -1,0 +1,40 @@
+❯ First write the numbers 1 to 60, one per line, as plain text in your reply. Then run sleep 200 with the Bash tool i…
+  36
+  37
+  38
+  39
+  40
+  41
+  42
+  43
+  44
+  45
+  46
+  47
+  48
+  49
+  50
+  51
+  52
+  53
+  54
+  55
+  56
+  57
+  58
+  59
+  60
+
+  Ran 1 shell command
+
+● I didn't run sleep 200. The environment blocks a standalone foreground sleep, and its rules say not to work around
+  that by chaining shorter sleeps. If you want a 200-second wait, I can run it in the background (run_in_background)
+  and tell you when it finishes. If you're waiting for something specific, I can use Monitor to watch until that
+  condition is met.
+
+✻ Brewed for 7s · done 9:54 AM                Jump to bottom (ctrl+End) ↓
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Press up to edit queued messages
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt

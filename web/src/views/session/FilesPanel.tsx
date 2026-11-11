@@ -62,37 +62,36 @@ export function FilesPanel({ mid, sid, cwd, path, file, onClose }: { mid: string
   useEffect(() => notePlace({ mid, sid, cwd }, { path: dir === cwd ? undefined : dir, file: open.at(-1) }), [mid, sid, cwd, dir, open]);
   const menu = useMenu();
 
-  const [selecting, setSelecting] = useState(false);
-  const [selected, setSelected] = useState<Map<string, OpTarget>>(() => new Map());
-  const [rowMenu, setRowMenu] = useState<{ x: OpTarget; at: MenuAt; open: () => void } | null>(null);
+  const [selection, setSelection] = useState<{ scope: object; items: Map<string, OpTarget> } | null>(null);
+  const [rowMenu, setRowMenu] = useState<{ scope: object; x: OpTarget; at: MenuAt; open: () => void } | null>(null);
   const [dropDir, setDropDir] = useState<string | null>(null);
-  const endSelect = useCallback(() => {
-    setSelecting(false);
-    setSelected(new Map());
-  }, []);
+  const endSelect = useCallback(() => setSelection(null), []);
   useEffect(() => endSelect(), [dir, tree, endSelect]); // a selection is of the folder shown
   // Changing files: what changed is listed again (the live watch would too, a moment later), and a selection is done.
   const ops = useFileOps({
     mid,
     cwd,
+    path: tree ? start.root : dir,
+    workspace: JSON.stringify([start.root, path]),
     onChanged: () => {
       setReloads((n) => n + 1);
       endSelect();
     },
   });
+  const selecting = selection?.scope === ops.scope;
+  const selected = selecting ? selection.items : new Map<string, OpTarget>();
   const rowOps: RowOps = {
     selecting,
     isSelected: (p) => selected.has(p),
     toggle: (x) => {
-      setSelecting(true);
-      setSelected((m) => {
-        const n = new Map(m);
+      setSelection((before) => {
+        const n = new Map(before?.scope === ops.scope ? before.items : []);
         if (n.has(x.path)) n.delete(x.path);
         else n.set(x.path, x);
-        return n;
+        return { scope: ops.scope, items: n };
       });
     },
-    menu: (x, at, open) => setRowMenu({ x, at, open }),
+    menu: (x, at, open) => setRowMenu({ scope: ops.scope, x, at, open }),
   };
   useEffect(() => {
     if (!selecting) return;
@@ -185,11 +184,11 @@ export function FilesPanel({ mid, sid, cwd, path, file, onClose }: { mid: string
               { key: "copy", label: t("session-filespanel.copy_path"), icon: "copy", onSelect: () => copyText(tree ? start.root : dir) },
               { key: "reload", label: t("session-filespanel.reload"), icon: "retry", onSelect: () => setReloads((n) => n + 1) },
               ...(ops.canUpload && here_dir ? [{ key: "upload", label: t("files-ops.upload"), icon: "upload" as const, divider: true, onSelect: () => ops.choose(here_dir) }] : []),
-              { key: "select", label: t("files-ops.select"), checked: selecting, divider: !(ops.canUpload && here_dir), onSelect: () => (selecting ? endSelect() : setSelecting(true)) },
+              { key: "select", label: t("files-ops.select"), checked: selecting, divider: !(ops.canUpload && here_dir), onSelect: () => (selecting ? endSelect() : setSelection({ scope: ops.scope, items: new Map() })) },
             ]}
           />
         )}
-        {rowMenu && <Menu items={ops.rowItems(rowMenu.x, rowMenu.open)} anchor={rowMenu.at.anchor ?? null} point={rowMenu.at.point} onClose={() => setRowMenu(null)} align="right" />}
+        {rowMenu?.scope === ops.scope && <Menu items={ops.rowItems(rowMenu.x, rowMenu.open)} anchor={rowMenu.at.anchor ?? null} point={rowMenu.at.point} onClose={() => setRowMenu((current) => current === rowMenu ? null : current)} align="right" />}
         {selecting && <SelectionBar ops={ops} selected={[...selected.values()]} onClear={endSelect} />}
         {!tree && <Crumbs root={start.root} stack={stack} go={go} />}
         <div

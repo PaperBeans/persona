@@ -211,12 +211,16 @@ func (host receiptIntegrationHost) Notify(event string, params any) error {
 }
 
 func TestShareCreationAuthenticatedHTTPReceiptIntegration(t *testing.T) {
-	for _, mode := range []string{"matching", "absent", "unknown", "mismatched"} {
+	for _, mode := range []string{"matching", "absent", "unknown", "mismatched", "work-matching"} {
 		t.Run(mode, func(t *testing.T) { shareCreationHTTPReceiptIntegration(t, mode) })
 	}
 }
 
 func shareCreationHTTPReceiptIntegration(t *testing.T, mode string) {
+	method := "session.start"
+	if mode == "work-matching" {
+		method = devicewire.MethodStartWorkSession
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	store := setupTestDB(t)
@@ -263,6 +267,7 @@ func shareCreationHTTPReceiptIntegration(t *testing.T, mode string) {
 			nodeMu.Lock()
 			node = p
 			nodeMu.Unlock()
+			methodForStart := method
 			p.OnRequest = func(c context.Context, method string, params json.RawMessage) (any, error) {
 				switch method {
 				case "node.info":
@@ -273,7 +278,7 @@ func shareCreationHTTPReceiptIntegration(t *testing.T, mode string) {
 					default:
 					}
 					return map[string]any{"sessions": []proto.Session{}}, nil
-				case "session.start":
+				case methodForStart:
 					var fields map[string]json.RawMessage
 					if json.Unmarshal(params, &fields) != nil {
 						return nil, errors.New("invalid synthetic start")
@@ -323,7 +328,7 @@ func shareCreationHTTPReceiptIntegration(t *testing.T, mode string) {
 			if json.Unmarshal(params, &call) != nil {
 				return nil, errors.New("invalid manager envelope")
 			}
-			if call.Method == "session.start" {
+			if devicewire.IsSessionStart(call.Method) {
 				calls <- call
 			}
 		}
@@ -352,7 +357,11 @@ func shareCreationHTTPReceiptIntegration(t *testing.T, mode string) {
 	h.bus.mu.Lock()
 	h.bus.current = map[string]*busConn{devicesOwner: {peer: hp, presence: busPresence{Capabilities: []string{devicewire.SharingCapability}}}}
 	h.bus.mu.Unlock()
-	body, err := json.Marshal(map[string]any{"machine_id": machine, "cwd": "/synthetic/receipt", "prompt": "Synthetic input", "creation_id": "forged", "incarnation": "forged", "caller": map[string]any{"owner_subject": "forged"}})
+	params := map[string]any{"machine_id": machine, "cwd": "/synthetic/receipt", "prompt": "Synthetic input", "creation_id": "forged", "incarnation": "forged", "caller": map[string]any{"owner_subject": "forged"}}
+	if mode == "work-matching" {
+		params["work_session"], params["launcher"], params["agent_type"] = true, "claude", "claude"
+	}
+	body, err := json.Marshal(params)
 	if err != nil {
 		t.Fatal("synthetic HTTP body encoding failed")
 	}
@@ -387,7 +396,7 @@ func shareCreationHTTPReceiptIntegration(t *testing.T, mode string) {
 	case <-time.After(time.Second):
 		t.Fatal("start envelope absent")
 	}
-	if call.Caller == nil || call.Caller.Kind != "device" || call.Caller.OwnerSubject != subject.Subject || call.Caller.CredentialID != credential || call.Caller.BindingRevision != 1 || call.Caller.Issuer != issuer || call.Authority == nil || *call.Authority != route.Authority {
+	if call.Method != method || call.Caller == nil || call.Caller.Kind != "device" || call.Caller.OwnerSubject != subject.Subject || call.Caller.CredentialID != credential || call.Caller.BindingRevision != 1 || call.Caller.Issuer != issuer || call.Authority == nil || *call.Authority != route.Authority {
 		t.Fatal("trusted caller or routing authority mismatch")
 	}
 	var o observation
@@ -409,7 +418,7 @@ func shareCreationHTTPReceiptIntegration(t *testing.T, mode string) {
 	// An RPC on the same stream fences the preceding state.put: the manager
 	// processes the event before it can answer state.load. No timing inference
 	// or start reply may substitute for a matching persisted receipt.
-	if mode != "matching" {
+	if mode != "matching" && mode != "work-matching" {
 		state := map[string]any{}
 		if mode == "unknown" {
 			state = map[string]any{"creation_id": "synthetic-unknown-creation", "incarnation": o.incarnation}

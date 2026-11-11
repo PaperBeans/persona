@@ -17,9 +17,9 @@ export type Route =
   | { name: "workspace-board" }
   | { name: "persona-new" }
   // `view` is the page's `?view=chat|term`; without it the page shows what it showed last (lib/session-view.ts)
-  | { name: "session"; mid: string; sid: string; view?: SessionView }
+  | { name: "session"; mid: string; sid: string; view?: SessionView; work?: true }
   // one herdr tab (a slot) of a workspace; `sid` picks its pane (lib/herdr-tree.ts resolveTab)
-  | { name: "tab"; mid: string; space: string; slot: string; sid?: string; view?: SessionView }
+  | { name: "tab"; mid: string; space: string; slot: string; sid?: string; view?: SessionView; work?: true }
   // `mid` / `manager`: the computer the conversation runs on and its manager when another than the default
   // (`?machine=…&manager=…`, lib/conversation-page.ts): with several assistants a reload, a new tab or a link finds it
   // where it runs, whichever assistant is current
@@ -73,8 +73,9 @@ export function parse(path: string, search = ""): Route {
   // a malformed escape must still route: parse runs outside every error boundary
   const p = path.split("/").filter(Boolean).map(decodeURIComponentSafe);
   const view = parseView(search);
-  if (p[0] === "s" && p[1] && p[2]) return { name: "session", mid: p[1], sid: p[2], ...(view && { view }) };
-  if (p[0] === "t" && p[1] && p[2] && p[3]) return { name: "tab", mid: p[1], space: p[2], slot: p[3], sid: p[4] || undefined, ...(view && { view }) };
+  const detail = () => ({ ...(view && { view }), ...(new URLSearchParams(search).get("work") === "1" && { work: true as const }) });
+  if (p[0] === "s" && p[1] && p[2]) return { name: "session", mid: p[1], sid: p[2], ...detail() };
+  if (p[0] === "t" && p[1] && p[2] && p[3]) return { name: "tab", mid: p[1], space: p[2], slot: p[3], sid: p[4] || undefined, ...detail() };
   if (!p.length) return { name: "persona" };
   if (assistantPath(p[0])) return p[1] === "new" && !p[2] ? { name: "persona-new" } : p[1] ? { name: "persona", sid: p[1], ...conversationQuery(search) } : { name: "persona" };
   if (p[0] === "workspace-board") return { name: "workspace-board" };
@@ -139,9 +140,9 @@ export function routePath(r: Route): string {
     case "request":
       return `/requests/${encodeURIComponent(r.id)}`;
     case "session":
-      return `/s/${encodeURIComponent(r.mid)}/${encodeURIComponent(r.sid)}${viewQuery(r.view)}`;
+      return `/s/${encodeURIComponent(r.mid)}/${encodeURIComponent(r.sid)}${detailQuery(r)}`;
     case "tab":
-      return ["/t", r.mid, r.space, r.slot, ...(r.sid ? [r.sid] : [])].map((x, i) => (i ? encodeURIComponent(x) : x)).join("/") + viewQuery(r.view);
+      return ["/t", r.mid, r.space, r.slot, ...(r.sid ? [r.sid] : [])].map((x, i) => (i ? encodeURIComponent(x) : x)).join("/") + detailQuery(r);
     case "persona": {
       if (!r.sid) return "/";
       const q = new URLSearchParams();
@@ -204,7 +205,19 @@ export function routePath(r: Route): string {
   }
 }
 
-const viewQuery = (view?: SessionView) => (view ? `?view=${view}` : "");
+function detailQuery({ view, work }: { view?: SessionView; work?: true }): string {
+  const q = [view && `view=${view}`, work && "work=1"].filter(Boolean).join("&");
+  return q ? `?${q}` : "";
+}
+
+export function inWorkView(r: Route): boolean {
+  return (r.name === "session" || r.name === "tab") && r.work === true;
+}
+
+/** Keep the split view when resolving a legacy session address or following a tab inside it. */
+export function withWorkView(r: Route, work: boolean): Route {
+  return work && (r.name === "session" || r.name === "tab") ? { ...r, work: true } : r;
+}
 
 const listeners = new Set<() => void>();
 // The address Back / Forward last landed on, until a page takes it (takeReturn) or the app navigates on: a page that

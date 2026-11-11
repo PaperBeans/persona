@@ -36,6 +36,7 @@ import persona.core.designsystem.*
 import persona.core.domain.answer.askingLine
 import persona.core.domain.answer.firstBySession
 import persona.core.designsystem.icons.PhIcons
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.domain.sort.slotLabel
 import persona.core.domain.tasks.TasksStore
 import persona.core.domain.tasks.TodoDecisionsSource
@@ -262,6 +263,9 @@ fun TodoDetailScreen(
                             )
                         }
 
+                        // Dictated notes (#4636, iOS): the phone's own voice input, what was heard at the end of the notes.
+                        val dictate = persona.feature.chat.rememberDictation({ notesText = persona.feature.chat.withDictation(notesText, it) },
+                            onError, stringResource(R.string.agents_todo_notes_dictation_prompt))
                         if (editingNotes) {
                             JTextField(
                                 notesText,
@@ -269,7 +273,10 @@ fun TodoDetailScreen(
                                 label = stringResource(R.string.agents_todo_notes_label),
                                 placeholder = stringResource(R.string.agents_todo_notes_edit_placeholder),
                                 minLines = 3,
-                                maxLines = 8
+                                maxLines = 8,
+                                trailing = dictate?.let { d -> {
+                                    JIconButton(PersonaIcons.dictate, stringResource(R.string.agents_todo_notes_dictate), d, enabled = !saving)
+                                } },
                             )
                             Row(
                                 Modifier.fillMaxWidth(),
@@ -334,6 +341,13 @@ fun TodoDetailScreen(
                 }
             }
 
+            // Where its work stands (#4636, iOS TodoStageBar): only for a stage this build knows
+            TodoStage.of(todo.stage)?.let { stage -> item(key = "stage") { JCard { TodoStageBar(stage) } } }
+            // Due date, reminder and priority (#4636, iOS TodoPlanSection), saved as they change
+            item(key = "plan") {
+                val feedback = LocalAppFeedback.current
+                JCard { TodoPlanSection(todo, tasks) { feedback?.failure(it) } }
+            }
             // Decisions made on it, under the notes as on iOS and the web (#1618)
             todoDecisionsSection(decisionsState, todo, sessionLookup, now)
 

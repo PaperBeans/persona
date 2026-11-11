@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- New Agent: blocked launchers and their help (#4530): iOS LauncherAvailability / LauncherBlockedHelp words. -->
+<resources>
+    <string name="agents_launcher_blocked_not_in_terminal">このコンピューターのターミナルでは使えません</string>
+    <string name="agents_launcher_blocked_auth">キーまたはサインインが拒否されました</string>
+    <string name="agents_launcher_blocked_model_route">ゲートウェイがこのモデルを使えません</string>
+    <string name="agents_launcher_blocked_cli_outdated">CLI のバージョンが古すぎます</string>
+    <string name="agents_launcher_blocked_timeout">前回のチェックで応答がありませんでした</string>
+    <string name="agents_launcher_blocked_other">このコンピューターでの前回のチェックに失敗しました</string>
+    <string name="agents_launcher_help_title_terminal">ターミナルでは使えません</string>
+    <string name="agents_launcher_help_title_computer">このコンピューターでは使えません</string>
+    <string name="agents_launcher_help_how">直し方</string>
+    <string name="agents_launcher_help_fix_startup">ターミナルのシェルが読む起動ファイル（bash なら ~/.bashrc）で定義してから、もう一度起動してください。</string>
+    <string name="agents_launcher_help_fix_provider">または Persona にモデルプロバイダーとして追加してください。どのターミナルでも使えます。</string>
+    <string name="agents_launcher_help_fix_other">そのコンピューターでキー、ゲートウェイ、CLI を直すか、別のランチャーを選んでください。</string>
+    <string name="agents_launcher_help_details">詳細</string>
+    <string name="agents_launcher_help_clears_terminal">これで起動に一度成功すると、この表示は消えます。そうでなければ 6 時間後に自動で消えます。</string>
+    <string name="agents_launcher_help_clears">チェックか起動に一度成功すると、この表示は消えます。</string>
+    <string name="agents_launcher_help_add_provider">プロバイダーを追加</string>
+    <string name="agents_launcher_help_try_anyway">それでも使う</string>
+    <string name="agents_launcher_help_failed">このコンピューターでの最新のチェックに失敗し、自動修復でも直りませんでした。</string>
+    <string name="agents_launcher_help_not_in_terminal">Persona はこのコンピューターのログインシェルで「%1$s」を見つけましたが、新しいターミナルタブで動くシェルにはありません（別のシェル、コンテナ、途中で終わる起動ファイルなど）。新しい Agent はこれらのタブで起動します。</string>
+</resources>

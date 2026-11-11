@@ -25,6 +25,10 @@ details summary::-webkit-details-marker { display: none; }
 details summary svg.icon { transition: transform var(--motion-normal) var(--ease-out); }
 details[open] summary svg.icon { transform: rotate(90deg); }
 details .textbox { margin-top: var(--space-s); }
+details .ssh-body { margin-top: var(--space-s); }
+details .ssh-body .textbox { margin-top: 0; }
+.ssh-actions { display: flex; flex-wrap: wrap; gap: var(--space-s); align-items: center; }
+.ssh-actions .spacer { flex: 1; }
 </style>
 </head>
 <body>

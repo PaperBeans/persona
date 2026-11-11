@@ -71,6 +71,8 @@ type runtimeHello struct {
 		Close     bool `json:"close"`
 		// Assistant: its launcher may run the Persona assistant (assistant_runtime.go; docs/integrations/runtimes.md "Assistant").
 		Assistant bool `json:"assistant"`
+		// Execution reports the actual per-session execution environment via session.execution.
+		Execution bool `json:"execution"`
 		// Modes: the phone's permission mode and effort for its sessions go to it (session.modes).
 		Modes bool `json:"modes"`
 		// Model permits session.modes model changes. Models provides live launchers.models discovery.
@@ -107,12 +109,14 @@ type runtimeConn struct {
 	sessions []proto.Session // its last runtime.sessions
 	watched  map[string]bool // sessions this connection was asked to watch
 	// What its list said beyond the rows the apps see: the terminal pane a session runs in (pane_id: the extension of a
-	// pi in a herdr pane, pi.go), how the terminal engine resumes one it lists offline (resume_argv), and the Claude
+	// pi in a herdr pane, pi.go), how the terminal engine resumes one it lists offline (resume_argv), the Claude
 	// session whose transcript holds a session's conversation (transcript: a runtime running Claude Code through its
-	// SDK, Paseo; runtimetranscript.go).
-	panes       map[string]string
-	resume      map[string][]string
-	transcripts map[string]string
+	// SDK, Paseo; runtimetranscript.go), and the Codex thread a session's conversation is (codex_thread: a runtime
+	// running Codex, Paseo; runtimecodex.go).
+	panes        map[string]string
+	resume       map[string][]string
+	transcripts  map[string]string
+	codexThreads map[string]string
 	// daemon is its id in daemons.json when the node dialed it (daemons.go), "" for a runtime on the socket.
 	daemon string
 	// pid is the process at the other end of the runtime socket; 0 when not known (a daemon's link, the Orca bridge,

@@ -95,6 +95,8 @@ func searchable(rel string) bool {
 		return false // minutes.md has the minutes' text
 	case len(parts) >= 3 && parts[0] == KindRecording && strings.HasPrefix(parts[2], liveFile):
 		return false // live.json, and its temporary file while it is replaced
+	case len(parts) >= 3 && parts[0] == KindRecording && strings.HasPrefix(parts[2], meetingFile):
+		return false // meeting.json (meeting.go): the manager's bookkeeping of the room and the mark
 	case len(parts) == 3 && parts[0] == KindPerson && parts[2] == "handles.json":
 		return false
 	case len(parts) == 3 && parts[0] == KindProject && parts[2] == "moments-judged.json":

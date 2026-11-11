@@ -114,6 +114,10 @@ func TestCodexAppChatsAreListedLikeTheSidebar(t *testing.T) {
 	if o, ok := rows[appOld]; !ok || o.AgentName != "Codex App" || o.UpdatedAt.Before(updated.Add(-time.Second)) {
 		t.Fatalf("the chat with an old rollout = %+v", o)
 	}
+	// It is in no project in the App: under "Codex chats", not a project named by its folder.
+	if o := rows[appOld]; !strings.HasPrefix(o.SpaceID, "codex-chats:") || o.SpaceName != "Codex 对话" { // i18n-ignore: the node's space name
+		t.Fatalf("the chat in no project is placed in %q %q", o.SpaceID, o.SpaceName)
+	}
 	if src, _ := n.codexSource(rows[appOld].SessionID); src.path != old {
 		t.Fatalf("the old chat reads %q, want its rollout", src.path)
 	}
@@ -179,5 +183,42 @@ func TestCodexAppDBPathTakesTheNewestSchema(t *testing.T) {
 	}
 	if got := codexAppDBPath(t.TempDir()); got != "" {
 		t.Fatalf("db without one = %q", got)
+	}
+}
+
+// A chat the App keeps in no project, in the folder the App made for it, is under "Codex chats" as in the App's sidebar
+// (placeCodexDesktop, docs/integrations/codex.md), and so are its subagents; a chat in a project stays in it.
+func TestCodexAppChatsInNoProjectAreUnderCodexChats(t *testing.T) {
+	n := remoteTestNode(t)
+	home := n.codexHome()
+	project := t.TempDir()
+	scratch := filepath.Join(t.TempDir(), "Documents", "Codex", "2026-11-06", "w-i") // the App's folder for such a chat
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const sub = "019a0000-0000-7000-8000-0000000000c1"
+	now := time.Now().Truncate(time.Second)
+	chat := writeAppRollout(t, home, appOld, scratch, now)
+	subPath := filepath.Join(filepath.Dir(chat), "rollout-"+now.Format("2006-01-02T15-04-05")+"-"+sub+".jsonl")
+	meta := fmt.Sprintf(`{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":%q,"cwd":%q,"originator":"Codex Desktop","source":{"subagent":{"thread_spawn":{"parent_thread_id":%q,"depth":1}}}}}`, sub, scratch, appOld)
+	if err := os.WriteFile(subPath, []byte(meta+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inProject := writeAppRollout(t, home, appChat, project, now)
+	writeCodexApp(t, home, project, codexAppSchema+
+		codexAppRow(appOld, chat, scratch, "Scratch chat", now, 0)+
+		codexAppRow(appChat, inProject, project, "Alpha chat", now, 0))
+
+	rows := rowsByThread(n.codexSessions(map[string]bool{}))
+	for _, id := range []string{appOld, sub} {
+		if r, ok := rows[id]; !ok || !strings.HasPrefix(r.SpaceID, "codex-chats:") || r.SpaceName != "Codex 对话" { // i18n-ignore: the node's space name
+			t.Fatalf("%s placed in %q %q (listed %v), want under Codex chats", id, r.SpaceID, r.SpaceName, ok)
+		}
+	}
+	if !rows[sub].IsSubagent {
+		t.Fatal("the subagent is not marked as one")
+	}
+	if r := rows[appChat]; r.SpaceID != "codex-project:"+realPath(project) {
+		t.Fatalf("the chat in a project is placed in %q", r.SpaceID)
 	}
 }

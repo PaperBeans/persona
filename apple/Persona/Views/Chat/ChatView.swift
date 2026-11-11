@@ -160,7 +160,6 @@ struct ChatView: View {
     /// iPhone Duo's bars down the side: the shell's bar over the Persona conversation is the side rail (`ShellSideRail`).
     @Environment(\.shellRailEdge) private var railEdge
     /// The Persona page's manager switcher under its top bar (several managers).
-    @Environment(\.managerSwitcherRoom) private var switcherRoom
     /// The shell's composer (`ShellComposerBar`): the assistant's conversation and, in the shell, an agent's too, in every
     /// style (#1091). Other platforms retain `ComposerRow` / `PromptComposer` and their mode chips. On the Mac
     /// the card in every style but BeautifulUI's (its prompt bar is already one): the field, and under it Add, the model
@@ -1584,7 +1583,7 @@ struct ChatView: View {
                 try? await Task.sleep(for: .milliseconds(60))
                 if n == 1 { hideChrome() } // once the header has measured itself
                 guard let bottom = scratch.landingMaxY, scratch.listFrame.height > 0 else { continue }
-                let want = scratch.listFrame.minY + (style == .dev ? (sideBars ? sideHeaderHeight : chrome.settledHeight) : AssistantTopBar.room(railEdge) + switcherRoom) + Self.inputTail
+                let want = scratch.listFrame.minY + (style == .dev ? (sideBars ? sideHeaderHeight : chrome.settledHeight) : AssistantTopBar.room(railEdge)) + Self.inputTail
                 let off = want - bottom // > 0: too high; the flipped list scrolls toward older to lower it
                 if abs(off) < 1 { break }
                 scrollList(to: chrome.offset + off)
@@ -1874,9 +1873,9 @@ struct ChatView: View {
     private var headerRoom: CGFloat {
         #if os(macOS)
         // The Mac has no header over the chat (`chrome` stays empty): the row over it is `macChrome`.
-        style == .dev ? macChromeHeight : AssistantTopBar.height + switcherRoom
+        style == .dev ? macChromeHeight : AssistantTopBar.height
         #else
-        style == .dev ? (sideBars ? sideHeaderHeight : chrome.height) : AssistantTopBar.room(railEdge) + switcherRoom
+        style == .dev ? (sideBars ? sideHeaderHeight : chrome.height) : AssistantTopBar.room(railEdge)
         #endif
     }
 
@@ -2293,7 +2292,7 @@ struct ChatView: View {
                 }
                 // The last card was answered: one low-key entry to the next conversation that needs you (#4348).
                 if let next = nextNeedsYouSession {
-                    NextNeedsYouStrip(title: next.assistant ? (next.title.isEmpty ? model.assistantDisplayName : next.title) : next.displayTitle) {
+                    NextNeedsYouStrip(title: next.assistant ? (next.title.isEmpty ? model.persona.name : next.title) : next.displayTitle) {
                         openNext(next)
                     }
                 }
@@ -2315,7 +2314,7 @@ struct ChatView: View {
                 if let s = session, !s.canSend, let reason = s.sourceSubtitle {
                     Text(reason).font(Theme.Font.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Composer(key: key, status: status, placeholder: style == .assistant ? String(localized: "Ask \(model.assistantDisplayName)…") : String(localized: "Message \(session?.agentLabel ?? "Claude") [Chat View c6f021]"),
+                Composer(key: key, status: status, placeholder: style == .assistant ? String(localized: "Ask \(model.persona.name)…") : String(localized: "Message \(session?.agentLabel ?? "Claude") [Chat View c6f021]"),
                          onCleared: { switchTo($0) }, onFocus: { composerTyping = $0 })
                     // The shell's expanding field stays in the page's layout graph; so does BeautifulUI's prompt bar,
                     // whose menus hang above it: an island's hosting view takes no touches outside its bounds.
@@ -2417,7 +2416,7 @@ struct ChatView: View {
             // (`FirstMessagePending`), where the turn's work line comes in. Without it the chat that took over showed
             // the message a line lower, then pushed it up when the turn began (#1911).
             if frozen == nil, startingTurn(pending) {
-                TypingIndicator(text: String(localized: "\(style == .assistant ? model.assistantDisplayName : (session?.agentLabel ?? "Claude")) is getting ready…"))
+                TypingIndicator(text: String(localized: "\(style == .assistant ? model.persona.name : (session?.agentLabel ?? "Claude")) is getting ready…"))
                     .flippedBack()
                     .id("starting-turn")
             }
@@ -4231,7 +4230,11 @@ struct Composer: View, Equatable {
     private var allowsSend: Bool { model.session(key)?.canSend == true && offlineManager == nil }
     /// The manager whose conversation this is, while a hub with several has it offline: nothing goes to it until it is
     /// back; its history reads.
-    private var offlineManager: HubManager? { model.offlineManager(of: model.session(key)) }
+    private var offlineManager: HubManager? {
+        if let s = model.session(key) { return model.offlineManager(of: s) }
+        // Not listed yet: the manager the Persona page opened it for (an inbox item's).
+        return model.assistantItemManagers[key].flatMap { model.managerRosters[key.group]?.offlineManager(of: $0) }
+    }
     /// A health conversation's files go to the health space's reports/ (docs/assistant/health.md「Checkup reports」), not the temp directory.
     private var uploadDest: String? { model.session(key)?.isHealth == true ? Session.healthSpace : nil }
 
@@ -4511,7 +4514,7 @@ struct Composer: View, Equatable {
             } else if usesShellComposer {
                 // The shell's composer (docs/apple/ios.md「New shell」), whatever the style: the assistant's and an agent's (#1091).
                 ShellComposerBar(placeholder: status.isActive ? String(localized: "Add a note (queued)")
-                                     : (suggestion ?? (shellChat ? String(localized: "Ask \(model.assistantDisplayName)") : placeholder ?? String(localized: "Message Claude"))),
+                                     : (suggestion ?? (shellChat ? String(localized: "Ask \(model.persona.name)") : placeholder ?? String(localized: "Message Claude"))),
                                  text: textBinding, selection: $selection, focused: $focused, canSend: canSend,
                                  hasAttachments: hasAttachments,
                                  stop: status.isActive && model.session(key)?.canInterrupt == true ? { Task { await model.interrupt(key) } } : nil,
@@ -5773,6 +5776,12 @@ struct WorkStepView: View, Equatable {
     private(set) lazy var openQuote: (ContextRef) -> Bool = { [weak self] in self?.handlers.openQuote($0) ?? false }
     /// Web links open in the in-app sheet (Feishu docs in the native reader); anything else as before.
     private(set) lazy var openURL = OpenURLAction { [weak self] url in
+        #if os(iOS)
+        if let code = CodeCopyURL.parse(url) { // inline code in a reply: copied (#2984)
+            CodeCopy.copy(code, said: String(localized: "Copied [Mac Hover 07d6bb]"))
+            return .handled
+        }
+        #endif
         if let ref = PathLinkURL.parse(url) { // a path in a message: the file viewer, at its line
             self?.handlers.openFileAt(ref.path, ref.line)
             return .handled

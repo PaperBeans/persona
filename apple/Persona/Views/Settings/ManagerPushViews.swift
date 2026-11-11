@@ -76,7 +76,7 @@ struct ManagerPushSection: View {
                                   isOn: Binding(get: { push.on }, set: { on in Task { await push.set(on) } }))
                     .disabled(push.saving)
             } footer: {
-                Text(push.error ?? String(localized: "When off, this device gets no notifications from this manager"))
+                Text(push.error ?? String(localized: "When off, this device gets no notifications from this assistant"))
             }
         }
     }

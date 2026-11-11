@@ -8,17 +8,25 @@ import { requestCrumb } from "./error-reports";
 import { currentLanguage, t } from "../i18n";
 import type { Item } from "./types";
 import { clearFeedCache } from "./feed-cache";
+import { credentialEpoch, renewCredentialEpoch } from "./credential-epoch";
 
 let ownerToken: string | undefined;
+let ownerEpoch: string | undefined;
 let ownerGeneration = 0;
 const credentialListeners = new Set<(owner: string) => void>();
+function publishCredentialOwner(): string {
+  const owner = `credential-${++ownerGeneration}`;
+  credentialListeners.forEach((listener) => listener(owner));
+  return owner;
+}
 /** Opaque in-memory auth partition; never expose credentials in tree keys or persisted drafts. */
 export function credentialOwner(): string {
   const token = getToken();
-  if (token !== ownerToken) {
+  const epoch = credentialEpoch();
+  if (token !== ownerToken || epoch !== ownerEpoch) {
     ownerToken = token;
-    ownerGeneration++;
-    credentialListeners.forEach((listener) => listener(`credential-${ownerGeneration}`));
+    ownerEpoch = epoch;
+    return publishCredentialOwner();
   }
   return `credential-${ownerGeneration}`;
 }
@@ -45,6 +53,20 @@ export function setToken(token: string, tokenId?: string) {
   if (token !== getToken() || !token) clearFeedCache();
   storeCredentials(token, tokenId);
   credentialOwner();
+}
+
+/** A successful sign-in is a new owner even if the hub returned the same token. */
+export function setPairedToken(token: string, tokenId?: string) {
+  credentialOwner();
+  storeCredentials(token, tokenId);
+  const shared = renewCredentialEpoch();
+  clearFeedCache();
+  if (shared) credentialOwner();
+  else {
+    ownerToken = getToken();
+    ownerEpoch = credentialEpoch();
+    publishCredentialOwner();
+  }
 }
 
 export class ApiError extends Error {

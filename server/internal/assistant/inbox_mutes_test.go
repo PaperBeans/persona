@@ -42,6 +42,10 @@ func TestMutesOf(t *testing.T) {
 			{Key: connector.TagRepo, Value: "example-org/example-repo", Name: "example-org/example-repo"},
 			{Key: connector.TagBranch, Value: "main"}, {Key: connector.TagSender, Value: "alice", Name: "alice"}}}},
 			"[{repo example-org/example-repo example-org/example-repo} {sender alice alice}]"},
+		"larkcli chat and sender": {&InboxItem{Source: "larkcli", Connector: &InboxConnector{Tags: []connector.Tag{
+			{Key: connector.TagChat, Value: "oc_example_chat", Name: "Example Chat"},
+			{Key: connector.TagSender, Value: "ou_example_sender", Name: "Example Sender"}}}},
+			"[{chat oc_example_chat Example Chat} {sender ou_example_sender Example Sender}]"},
 	} {
 		if got := fmt.Sprint(mutesOf(c.it)); got != c.want && !(c.want == "[]" && got == "[]") {
 			t.Errorf("%s: %s, want %s", name, got, c.want)

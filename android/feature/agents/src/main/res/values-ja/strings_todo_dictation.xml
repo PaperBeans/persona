@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dictating a to-do's notes (#4636). -->
+<resources>
+    <string name="agents_todo_notes_dictate">メモを音声入力</string>
+    <string name="agents_todo_notes_dictation_prompt">どうぞ。話した内容はメモに入ります</string>
+</resources>

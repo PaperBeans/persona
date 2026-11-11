@@ -1,7 +1,5 @@
 package persona.feature.settings
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -13,7 +11,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -340,16 +337,11 @@ internal fun ColumnScope.ManagerCodeBody(sheet: ManagerCodeSheet, now: Instant, 
 /** A label with Copy on its right, over the text in the code face. */
 @Composable
 private fun CopyBlock(label: String, text: String, small: Boolean = false) {
-    val context = LocalContext.current
-    val res = LocalResources.current
-    val feedback = LocalAppFeedback.current
+    val copy = rememberCopy()
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             Text(label, Modifier.weight(1f), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            JButton(stringResource(R.string.settings_managers_copy), {
-                context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(label, text))
-                feedback?.notice(res.getString(R.string.settings_src_copied))
-            }, kind = JButtonKind.Quiet, size = JButtonSize.Small, icon = PhIcons.Copy, enabled = text.isNotEmpty())
+            JButton(stringResource(R.string.settings_managers_copy), { copy(text, null) }, kind = JButtonKind.Quiet, size = JButtonSize.Small, icon = PhIcons.Copy, enabled = text.isNotEmpty())
         }
         JCodeBlock(text, Modifier.fillMaxWidth(), small = small)
     }

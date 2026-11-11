@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -55,6 +56,10 @@ func (s *Service) Call(ctx context.Context, name string, args json.RawMessage, a
 	case ToolSearch:
 		res, err := s.search(ctx, args)
 		if err != nil {
+			var incomplete *IncompleteSearchError
+			if errors.As(err, &incomplete) {
+				return proto.TextResult(i18n.Localize(incomplete, i18n.From(ctx)), true)
+			}
 			return proto.TextResult(err.Error(), true)
 		}
 		var b strings.Builder

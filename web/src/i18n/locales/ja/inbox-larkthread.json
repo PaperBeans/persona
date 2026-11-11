@@ -88,6 +88,8 @@
   "older_account_changed": "Lark アカウントが切り替わりました。会話を開き直してください",
   "older_signed_out": "Lark からログアウトしました。再接続してください",
   "jump_latest": "最新へ",
+  "jump_first_unread": "最初の未読",
+  "jump_mention": "メンションあり",
   "recalled_mark": "取り消し済み",
   "edit_history": "編集履歴",
   "edit_history_hint": "保存された以前の版を見る",

@@ -86,12 +86,24 @@ func TestAssistantResumesHomeProfileConversationWithTheVariableUnset(t *testing.
 	}
 }
 
-// A recorded profile that holds no copy of the conversation's transcript (the conversation moved launchers, a rollback
-// resumed it elsewhere) never wins over the transcript. One that holds a copy keeps the conversation, also when the copy
-// is older or its projects/ is a symlink to another profile's.
+// A recorded profile keeps the conversation only when it holds the newest copy of its transcript, its projects/ shared
+// through a symlink included. One with no copy (the conversation moved launchers) or only an older one (a rollback
+// resumed it elsewhere, #4553) gives way to the newest copy: resuming the older one would drop the later turns.
 func TestAssistantResumeFollowsTheTranscriptOverARecordedProfile(t *testing.T) {
+	aged := func(t *testing.T, profile, id string) {
+		t.Helper()
+		old := filepath.Join(profile, "projects", "-assistant", id+".jsonl")
+		if err := os.Chtimes(old, time.Now().Add(-time.Hour), time.Now().Add(-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scenarios := []string{
+		"recorded-lacks-transcript", "recorded-lacks-home-transcript",
+		"recorded-holds-older-copy-than-home", "recorded-holds-older-copy-than-other",
+		"recorded-shares-projects", "recorded-holds-newest-copy",
+	}
 	for _, runtime := range []string{"", proto.AssistantRuntimeAgentSDK} {
-		for _, scenario := range []string{"recorded-lacks-transcript", "recorded-lacks-home-transcript", "recorded-holds-older-copy", "recorded-shares-projects"} {
+		for _, scenario := range scenarios {
 			t.Run(runtime+"/"+scenario, func(t *testing.T) {
 				f, real := resumeTest(t)
 				n := f.n
@@ -108,13 +120,20 @@ func TestAssistantResumeFollowsTheTranscriptOverARecordedProfile(t *testing.T) {
 				case "recorded-lacks-home-transcript": // e.g. a private-profile launcher, then the main chat's
 					want = "default"
 					writeProfileTranscript(t, filepath.Join(real, ".claude"), cwd, id)
-				case "recorded-holds-older-copy":
+				case "recorded-holds-older-copy-than-home": // the rollback continued it in ~/.claude
+					want = "default"
 					writeProfileTranscript(t, private, cwd, id)
-					old := filepath.Join(private, "projects", "-assistant", id+".jsonl")
-					if err := os.Chtimes(old, time.Now().Add(-time.Hour), time.Now().Add(-time.Hour)); err != nil {
-						t.Fatal(err)
-					}
+					aged(t, private, id)
+					writeProfileTranscript(t, filepath.Join(real, ".claude"), cwd, id)
+				case "recorded-holds-older-copy-than-other":
+					want = other
+					writeProfileTranscript(t, private, cwd, id)
+					aged(t, private, id)
 					writeProfileTranscript(t, other, cwd, id)
+				case "recorded-holds-newest-copy":
+					writeProfileTranscript(t, other, cwd, id)
+					aged(t, other, id)
+					writeProfileTranscript(t, private, cwd, id)
 				case "recorded-shares-projects":
 					writeProfileTranscript(t, filepath.Join(real, ".claude"), cwd, id)
 					if err := os.MkdirAll(private, 0o700); err != nil {

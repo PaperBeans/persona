@@ -26,21 +26,53 @@ const (
 // credentials; the adapter delegates all authentication to lark-cli.
 type Connector struct {
 	runner  *adapter.Runner
+	docs    *documentInbox
 	now     func() time.Time
 	profile string
+
+	inboxMu       sync.Mutex
+	inboxThings   map[string]connector.InboxThing
+	inboxSeen     map[string]struct{}
+	inboxTopics   map[string]struct{}
+	inboxAllChats map[string]struct{}
+	// triageRules are the user's triage rules for lark-cli's Inbox items, in their words (options.triage_rules): the
+	// Inbox's triage reads them instead of the global inbox.rules.
+	triageRules      string
+	inboxState       persistedInboxState
+	inboxStateLoaded bool
+	inboxCollecting  bool
+	inboxStore       StateStore
+	inboxPrefer      string
+	gatewayAvailable func(context.Context) bool
+	inboxPoll        time.Duration
+	inboxPageLimit   int
+
 	mu      sync.Mutex
 	pending *adapter.LoginProcess
 }
 
 // New creates the built-in connector from the configured CLI runner.
 func New(cfg adapter.Config) *Connector {
-	return &Connector{runner: adapter.New(cfg), profile: cfg.Profile}
+	c := &Connector{runner: adapter.New(cfg), docs: newDocumentInbox(), profile: cfg.Profile, inboxPoll: cfg.InboxPoll, inboxPageLimit: cfg.InboxPageLimit}
+	if c.inboxPoll <= 0 {
+		c.inboxPoll = inboxPollDefault
+	}
+	if c.inboxPoll < inboxPollMinimum {
+		c.inboxPoll = inboxPollMinimum
+	}
+	if c.inboxPageLimit <= 0 {
+		c.inboxPageLimit = inboxPageLimit
+	}
+	if c.inboxPageLimit > inboxPageLimitMax {
+		c.inboxPageLimit = inboxPageLimitMax
+	}
+	return c
 }
 
 // NewWithRunner is useful for unit tests and embedders that already constructed a
 // runner. The runner still executes the real configured subprocess.
 func NewWithRunner(r *adapter.Runner) *Connector {
-	return &Connector{runner: r, profile: r.Profile()}
+	return &Connector{runner: r, docs: newDocumentInbox(), profile: r.Profile(), inboxPoll: inboxPollDefault, inboxPageLimit: inboxPageLimit}
 }
 
 func (c *Connector) ID() string   { return ID }
@@ -66,7 +98,7 @@ func (c *Connector) Profile() string {
 }
 
 func (c *Connector) Manifest() connector.Manifest {
-	return connector.Manifest{Capabilities: []connector.Capability{connector.CapStatus, connector.CapTools, connector.CapLogin}}
+	return connector.Manifest{Capabilities: []connector.Capability{connector.CapStatus, connector.CapTools, connector.CapEvents, connector.CapInbox, connector.CapOptions, connector.CapLogin}, Kinds: []string{"dm", "bot", "mention", "group", "doc"}}
 }
 
 func (c *Connector) Tools() []proto.Tool {
@@ -105,6 +137,9 @@ func (c *Connector) Status(ctx context.Context) connector.Status {
 	}
 	missing := append([]string(nil), auth.MissingScopes...)
 	missing = append(missing, missingRequiredScopes(auth.GrantedScopes)...)
+	if c.docs != nil {
+		missing = append(missing, c.docs.scopesMissing()...)
+	}
 	if missing = uniqueScopes(missing); len(missing) > 0 {
 		return c.statusMissingScopes(ctx, st, missing, auth.AppID, auth.Brand)
 	}
@@ -115,6 +150,15 @@ func (c *Connector) Status(ctx context.Context) connector.Status {
 			"count":   auth.DaysUntilExpiry(now),
 			"command": c.loginCommand(),
 		})
+	}
+	if c.docs != nil {
+		if warning := c.docs.warning(c.lang(ctx)); warning != "" {
+			if st.Error != "" {
+				st.Error += " · " + warning
+			} else {
+				st.Error = warning
+			}
+		}
 	}
 	return st
 }

@@ -50,12 +50,16 @@ export interface Attachment {
 export interface Outgoing {
   text: string;
   images: { mime: string; data: string }[];
+  /** An edit of the last message, sent after its rewind (#4605): the old prompt, which Claude may have put back in its
+   *  box, cleared exactly before typing. A refusal leaves the edit in the box unsent, not as a failed bubble. */
+  edit?: { clearDraft: string };
 }
 
 /** The box is editing the last message (#4503; ChatView.editLastMessage). */
 export interface EditingLast {
-  /** Runs before the edit is sent: the rewind to before the old message. False: it did not happen, the edit stays. */
-  commit: () => Promise<boolean>;
+  /** Runs before the edit is sent: the rewind to before the old message. False: it did not happen, the edit stays.
+   *  `clearDraft`: the old prompt the send asks the node to clear from Claude's box (#4605). */
+  commit: () => Promise<boolean | { clearDraft: string }>;
   /** The edit was cancelled, or the box moved on to other words. */
   cancel: () => void;
 }
@@ -619,8 +623,11 @@ export const Composer = memo(function Composer({
     // An edit of the last message: the rewind to before the old one first, the box kept as it is (read-only meanwhile).
     // Refused or not possible: nothing changed on the computer, and the edit stays in the box (ChatView says why).
     const edit = editNow.current;
+    let committed: Outgoing["edit"];
     if (edit) {
-      if (!(await edit.commit())) return;
+      const done = await edit.commit();
+      if (!done) return;
+      if (typeof done === "object") committed = done;
       // the box went away or shows another conversation: the words wait in this one's stored draft
       if (!mounted.current || keyNow.current !== draftKey) return;
     }
@@ -641,7 +648,7 @@ export const Composer = memo(function Composer({
     const at = document.activeElement;
     if (hasFinePointer() && (!at || at === document.body || box.current?.contains(at))) input.current?.focus({ preventScroll: true });
     // picked contexts ride in front as <persona-context> tags (docs/protocol/protocol.md "Tags in messages"), the quote as `> ` lines
-    const ok = await onSend({ text: withContexts(refs, withQuoteBlock(q, text), sent.length > 0), images: sent.map((a) => ({ mime: a.mime, data: a.data })) });
+    const ok = await onSend({ text: withContexts(refs, withQuoteBlock(q, text), sent.length > 0), images: sent.map((a) => ({ mime: a.mime, data: a.data })), ...(committed ? { edit: committed } : {}) });
     if (ok) {
       history.record(text);
       releaseAttachments(sent);

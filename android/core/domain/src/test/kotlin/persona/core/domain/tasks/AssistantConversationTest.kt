@@ -181,4 +181,15 @@ class AssistantConversationTest {
         assertEquals(card.at, merged.single().identity.at)
         assertEquals("r", merged.single().receipt?.id)
     }
+
+    /** #2528: Persona's chats hide system notices, but not an upstream refusal. */
+    @Test fun aRefusalNoticeIsShown() {
+        val refusal = Item("n2", 2, role = "system", kind = "notice", text = "no",
+            modelRefusal = persona.core.contracts.ModelRefusal("model_refusal_fallback", "a", "b"))
+        val plain = Item("n3", 3, role = "system", kind = "notice", text = "hint")
+        val ids = project(listOf(user(1, "go"), refusal, plain, reply(4, "API Error: 404 model: b is not available"))).foreground
+            .mapNotNull { (it as? ChatLine.Row)?.row?.id }
+        assertTrue("$ids", "n2" in ids)
+        assertTrue("$ids", "n3" !in ids)
+    }
 }

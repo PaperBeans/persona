@@ -122,4 +122,16 @@ class SessionModesTest {
         assertEquals("全部放行", chatModeHint(session.copy(permissionMode = "bypassPermissions"), res))
         assertEquals("future", chatModeHint(session.copy(permissionMode = "future"), res))
     }
+
+    /** #582: the after-resume notice shows while it was on before a resume and nothing turned it back on. */
+    @Test fun theAfterResumeNoticeShowsUntilItIsOnAgain() {
+        val lost = persona.core.contracts.Session(machineId = "m", sessionId = "s", agent = "claude", status = "idle",
+            ultracode = false, ultracodeLostAt = "2026-11-11T12:00:00Z")
+        val features = setOf(Ultracode.FEATURE)
+        org.junit.Assert.assertTrue(Ultracode.lostShown(lost, features))
+        org.junit.Assert.assertFalse(Ultracode.lostShown(lost.copy(ultracode = true), features))
+        org.junit.Assert.assertFalse(Ultracode.lostShown(lost.copy(ultracodeLostAt = null), features))
+        org.junit.Assert.assertFalse(Ultracode.lostShown(lost, emptySet()))
+        org.junit.Assert.assertFalse(Ultracode.lostShown(lost.copy(assistant = true), features))
+    }
 }

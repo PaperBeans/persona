@@ -367,9 +367,15 @@ final class ReplyBlock: NSObject {
             UIColor(Theme.codeBackground).setFill()
             let box = CGRect(x: x, y: lines.minY - pad, width: width, height: lines.height + 2 * pad)
             UIBezierPath(roundedRect: box, cornerRadius: Theme.Radius.control).fill()
-        case .quote:
-            UIColor(Theme.accent).withAlphaComponent(0.5).setFill()
+        case .quote: // as the chat's quote card (#2984, `ReplyQuote`): the accent bar on a faint accent card
+            let card = UIBezierPath(roundedRect: CGRect(x: x, y: lines.minY, width: width, height: lines.height), cornerRadius: Theme.Radius.badge)
+            UIColor(Theme.quoteBackground).setFill()
+            card.fill()
+            UIGraphicsGetCurrentContext()?.saveGState()
+            card.addClip()
+            UIColor(Theme.accent).setFill()
             UIRectFill(CGRect(x: x, y: lines.minY, width: Theme.Size.bar, height: lines.height))
+            UIGraphicsGetCurrentContext()?.restoreGState()
         case .rule:
             UIColor.separator.setFill()
             UIRectFill(CGRect(x: x, y: lines.midY, width: width, height: Theme.Size.hairline))

@@ -104,11 +104,19 @@ function liveStatus(live: RecordingLive, recording: boolean): string {
   return live.next ? t("knowledge-kbdetail.live_following", { count: live.next }) : t("knowledge-kbdetail.live_waiting");
 }
 
-const ASK_ERRORS = ["model_unavailable", "model_error", "model_timeout", "interrupted", "nothing_heard"];
+// A room meeting's (#3862, "Asking the room") add no_answer and room_unavailable.
+const ASK_ERRORS = ["model_unavailable", "model_error", "model_timeout", "interrupted", "nothing_heard", "no_answer", "room_unavailable"];
 
-function AskRow({ ask, startedAt }: { ask: RecordingAsk; startedAt?: string }) {
+/** Why a question was not answered, in words; an unknown reason generically. */
+export function askFailure(ask: RecordingAsk): string {
+  return t(ask.error && ASK_ERRORS.includes(ask.error) ? `knowledge-kbdetail.ask_failed_${ask.error}` : "knowledge-kbdetail.ask_failed");
+}
+
+export function AskRow({ ask, startedAt }: { ask: RecordingAsk; startedAt?: string }) {
   const heard = ask.question_source === "heard";
-  const source = t(heard ? "knowledge-kbdetail.ask_heard" : "knowledge-kbdetail.ask_typed");
+  // Spoken: transcribed on the phone from what the owner said to Persona (#3862).
+  const spoken = ask.question_source === "spoken";
+  const source = t(heard ? "knowledge-kbdetail.ask_heard" : spoken ? "knowledge-kbdetail.ask_spoken" : "knowledge-kbdetail.ask_typed");
   // At its place in the recording; a typed question sent without one at the clock time it was asked.
   const clock = typeof ask.at === "number" ? recordingClock(startedAt, ask.at) : Number.isFinite(Date.parse(ask.asked_at)) ? recordingClock(ask.asked_at, 0) : "";
   const sources = ask.state === "answered" ? ask.sources ?? [] : [];
@@ -116,7 +124,7 @@ function AskRow({ ask, startedAt }: { ask: RecordingAsk; startedAt?: string }) {
     <li className="px-4 py-3" data-ask={ask.id}>
       <div className="flex items-start gap-2.5">
         <span title={source} className="mt-0.5 shrink-0 text-ink-3">
-          <Icon name={heard ? "mic" : "keyboard"} size={13} />
+          <Icon name={heard ? "mic" : spoken ? "voice" : "keyboard"} size={13} />
           <span className="sr-only">{source}</span>
         </span>
         <p className="min-w-0 flex-1 break-words text-[13px] font-medium leading-relaxed text-ink">{ask.question.trim() || t("knowledge-kbdetail.ask_heard_empty")}</p>
@@ -136,7 +144,7 @@ function AskRow({ ask, startedAt }: { ask: RecordingAsk; startedAt?: string }) {
         ) : ask.state === "pending" ? (
           <p className="text-[12.5px] leading-relaxed text-ink-3">{t("knowledge-kbdetail.ask_pending")}</p>
         ) : ask.state === "failed" ? (
-          <p className="text-[12.5px] leading-relaxed text-red">{t(ask.error && ASK_ERRORS.includes(ask.error) ? `knowledge-kbdetail.ask_failed_${ask.error}` : "knowledge-kbdetail.ask_failed")}</p>
+          <p className="text-[12.5px] leading-relaxed text-red">{askFailure(ask)}</p>
         ) : null}
         {sources.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11.5px] leading-relaxed text-ink-3">

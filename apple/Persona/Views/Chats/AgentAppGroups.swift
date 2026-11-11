@@ -11,6 +11,12 @@ nonisolated struct AppGroup: Identifiable, Sendable {
     /// The app: the agent's mark on its desktop app; nil for Other.
     var kind: AgentKind?
     var sessions: [Session]
+    /// Its agents by project, as the desktop apps' sidebars list them: the latest project first, Other last.
+    var projects: [AppProject] = []
+
+    /// Its projects have headings: a desktop app's section, unless every agent of it is in Other (then they are listed as
+    /// before). Other's section is not by project: its agents are terminals' and the like, not an app's sidebar.
+    var showsProjects: Bool { !projects.isEmpty && !(projects.count == 1 && projects[0].isOther) }
 
     /// The app as the rest of the list names it: "Claude desktop app" (a session's source), "Codex App" (the node's
     /// `agent_name`), else "<agent> desktop app"; "Other".
@@ -51,9 +57,94 @@ nonisolated enum AppGroups {
         return groups.map { group in
             var group = group
             group.sessions = AgentListOrder.recent(group.sessions)
+            group.projects = group.kind == nil ? [] : projects(of: group)
             return group
         }
     }
+
+    /// A desktop app section's agents by project: the repository a session runs in (`RepoPlace`: the node's, else its
+    /// folder, a working tree's main checkout), named as its folder; a Codex App chat's project. An agent without one
+    /// (a home directory, a Codex App chat in no project) is in Other. Projects go by their latest agent, Other last.
+    static func projects(of group: AppGroup) -> [AppProject] {
+        var byKey: [String: AppProject] = [:]
+        var order: [String] = []
+        var other: [Session] = []
+        for s in group.sessions { // the latest first already
+            guard let (key, name) = project(of: s) else {
+                other.append(s)
+                continue
+            }
+            if byKey[key] == nil {
+                // A fixed ending: a fold id that ended as some other fold's suffix would fold by default.
+                byKey[key] = AppProject(id: group.id + "/project/" + key + "#", name: name, machine: s.machineRef, sessions: [])
+                order.append(key)
+            }
+            byKey[key]?.sessions.append(s)
+        }
+        var out = order.compactMap { byKey[$0] }
+        if !other.isEmpty {
+            out.append(AppProject(id: group.id + "/project/other#", name: "", machine: nil, sessions: other))
+        }
+        return out
+    }
+
+    /// Where an agent's project is (a key unique on its hub and machine) and its name; nil for none.
+    static func project(of s: Session) -> (key: String, name: String)? {
+        if s.spaceKind == "codex_app" {
+            // The node names a chat's space by its repository (`codex-project:<root>`), a chat with no folder "Codex chats"
+            // (`codex-chats:`). The App keeps a chat in no project in a folder of its own, <home>/Documents/Codex/<date>/
+            // <name>: such a chat is in Other, as in the App's sidebar.
+            guard let space = s.spaceID, !space.isEmpty, !space.hasPrefix("codex-chats:"), space != "codex-app:chats",
+                  let name = s.spaceName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+            if space.hasPrefix("codex-project:") {
+                let root = String(space.dropFirst("codex-project:".count))
+                if isHome(root) || isCodexChatFolder(root) { return nil }
+            }
+            return (s.machineRef.path + "/" + space, name)
+        }
+        let place = RepoPlace.of(s)
+        var path = place.repo, name = place.name
+        if isHome(path), !isHome(s.cwd) { // the home directory is a repository itself: the folder the session is in
+            path = s.cwd
+            name = ""
+        }
+        while path.count > 1 && (path.hasSuffix("/") || path.hasSuffix("\\")) { path.removeLast() }
+        guard !path.isEmpty, !isHome(path) else { return nil }
+        if name.isEmpty { name = (path.replacingOccurrences(of: "\\", with: "/") as NSString).lastPathComponent }
+        return name.isEmpty ? nil : (s.machineRef.path + "/" + path, name)
+    }
+
+    /// The Codex App's folder for a chat in no project: <home>/Documents/Codex/<yyyy-mm-dd>/<name>.
+    static func isCodexChatFolder(_ path: String) -> Bool {
+        let parts = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).map(String.init)
+        guard parts.count >= 4 else { return false }
+        let n = parts.count
+        let date = parts[n - 2]
+        return parts[n - 4] == "Documents" && parts[n - 3] == "Codex" && date.count == 10 &&
+            date.enumerated().allSatisfy { i, c in i == 4 || i == 7 ? c == "-" : c.isASCII && c.isNumber }
+    }
+
+    /// A home directory (or above one): no project of its own.
+    static func isHome(_ path: String) -> Bool {
+        let parts = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).map(String.init)
+        if parts.isEmpty || path == "~" { return true }
+        if parts.count == 1 { return parts[0] == "root" || parts[0] == "Users" || parts[0] == "home" || parts[0].hasSuffix(":") }
+        if parts.count == 2 { return parts[0] == "Users" || parts[0] == "home" || (parts[0].hasSuffix(":") && parts[1] == "Users") }
+        return parts.count == 3 && parts[0].hasSuffix(":") && parts[1] == "Users" // C:\Users\name
+    }
+}
+
+/// A project of a By App section: the agents of one folder (or Codex App project); Other has no name.
+nonisolated struct AppProject: Identifiable, Sendable {
+    /// "<app id>/project/<hub and machine>/<path>", or "<app id>/project/other": its id and fold key (`dev.folded`).
+    var id: String
+    var name: String
+    /// Its machine (a project is one folder on one machine); nil for Other.
+    var machine: MachineRef?
+    var sessions: [Session]
+
+    var isOther: Bool { name.isEmpty }
+    var title: String { isOther ? String(localized: "Other") : name }
 }
 
 /// A By App section's title, laid out as a machine's (`MachineSectionHeader`): the app's mark (the agents symbol for
@@ -80,5 +171,42 @@ struct AppSectionHeader: View {
             StateCounts(group: counts)
             CountBadge(count: app.sessions.count, look: .tone(StatusPalette.idle))
         }
+    }
+}
+
+/// A project's heading in a By App section, as the desktop apps' sidebars show a project above its sessions: its folder
+/// (the agents symbol for Other), its name, how many agents it holds and the fold chevron. Tap to fold.
+struct AppProjectRow: View {
+    var project: AppProject
+    var folded: Bool
+    /// Its machine's name, when the section holds more than one machine's projects.
+    var machine: String? = nil
+    @Environment(\.compactList) private var compact
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            ThemedIcon(project.isOther ? Theme.Icon.agents : Theme.Icon.folder)
+                .font(compact ? CompactList.metaStrong : Theme.Font.secondaryMedium)
+                .foregroundStyle(.secondary)
+                .scaledFrame(width: compact ? CompactList.mark : Theme.Size.markS)
+            Text(project.title)
+                .font(compact ? CompactList.title : Theme.Font.secondaryMedium)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            if let machine {
+                Text(machine).font(compact ? CompactList.meta : Theme.Font.caption).foregroundStyle(.tertiary).lineLimit(1)
+            }
+            Spacer(minLength: Theme.Space.xs)
+            CountBadge(count: project.sessions.count, look: .tone(StatusPalette.idle))
+            FoldChevron(folded: folded)
+        }
+        .padding(.vertical, compact ? 0 : Theme.Space.xs)
+        .contentShape(.rect)
+        .accessibilityElement(children: .ignore)
+        // As a section's heading reads (`FoldButton`): its name, folded or not, then what it holds.
+        .accessibilityLabel([project.title, machine, folded ? String(localized: "Collapsed [Readiness Card ee6046]") : String(localized: "Expanded"),
+                             String(localized: "\(project.sessions.count) agents")].compactMap { $0 }
+            .joined(separator: String(localized: ", ", comment: "Separator between parts of an accessibility label")))
+        .accessibilityAddTraits(.isButton)
     }
 }

@@ -424,6 +424,9 @@ func (s *Service) channelInteraction(ix proto.Interaction) {
 		if v.Capabilities.Asks != channel.AsksText || !featureOn(v, channel.FeatureAsks) {
 			continue
 		}
+		if ix.Private {
+			continue // a Just me turn's card: never in a channel (meeting_justme.go)
+		}
 		// "All questions" does not take a health conversation's: only one the channel drives itself (health.go).
 		if !s.channelDrives(ctx, v.ID, ix.MachineID, ix.SessionID) && (!featureOn(v, channel.FeatureAllAsks) || s.ixInHealth(ctx, ix)) {
 			continue

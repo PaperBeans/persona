@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A new agent's own worktree (#4532): iOS AgentWorktree words. -->
+<resources>
+    <string name="agents_worktree_title">Worktree</string>
+    <string name="agents_worktree_switch">在新 worktree 里</string>
+    <string name="agents_worktree_branch">分支</string>
+    <string name="agents_worktree_footer">给它单独开一个分支和检出：Agent 在那里改代码，这个文件夹不受影响。</string>
+    <string name="agents_worktree_checks_out">检出到 %1$s</string>
+    <string name="agents_worktree_add_failed">没能建 worktree：%1$s</string>
+</resources>

@@ -4,7 +4,7 @@ import { compatibleEnvelope, setCompatibilityFeatures } from "./compatibility";
 
 import { chosenManager, defaultKnown, defaultManager, fromShownManager, noteConversation, noteItemManager, onDefaultManager, onManagerChoice, shownManager } from "./manager-choice";
 import { BASE } from "./base";
-import { clearMemoryPages, discardFeedCache, feedCacheScope, readFeedCache } from "./feed-cache";
+import { mainConversationMachine, clearMemoryPages, discardFeedCache, feedCacheScope, readFeedCache } from "./feed-cache";
 import { useRef, useSyncExternalStore } from "react";
 import { agentsChanged, refreshAgentPrefs, refreshAgentSessions, resetAgents, setAgentListMode } from "./agents";
 import { onRuntimeChanges, runtimeIdentity, runtimeRemoval, runtimeSessions, SESSIONS_LOOKUP_FEATURE } from "./runtime-list";
@@ -1253,7 +1253,7 @@ export async function refreshAssistant() {
     const assistant = { ...a, conversations: a.conversations ?? [] };
     const scope = feedCacheScope();
     const cached = readFeedCache(scope);
-    if (cached && (cached.manager ?? "") === from && (cached.machineID !== assistant.machine_id || cached.sessionID !== assistant.main)) discardFeedCache(scope);
+    if (cached && (cached.manager ?? "") === from && (cached.machineID !== mainConversationMachine(assistant) || cached.sessionID !== assistant.main)) discardFeedCache(scope);
     assistantByManager.set(cacheKey(), assistant);
     // its conversations' own requests (feed, stop…) go to it, whichever manager the page shows later
     // (the default's are not noted: with no header the hub finds their manager itself)

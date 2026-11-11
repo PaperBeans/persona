@@ -2,12 +2,14 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/proto"
 
 	"github.com/nwverse/persona/server/internal/prompts"
 )
@@ -71,6 +73,19 @@ func TestStandingAuthorizationTaskPlanDispatch(t *testing.T) {
 			saveDispatchAuthorizations(t, database, grant)
 			s, f := newQuietServiceOn(t, database)
 			t.Cleanup(func() { settleService(t, s) })
+			f.answerNode("git.status", func(_ string, args json.RawMessage) (any, error) {
+				var params struct {
+					Cwd string `json:"cwd"`
+				}
+				if err := json.Unmarshal(args, &params); err != nil {
+					return nil, err
+				}
+				root := params.Cwd
+				if root == "/code/app/server" {
+					root = "/code/app"
+				}
+				return proto.RepositoryIdentity{Version: 1, IsRepo: true, Cwd: params.Cwd, Root: root, CommonDir: root + "/.git"}, nil
+			})
 			task := PlanTask{Title: "Fix the login crash", Prompt: "Fix the login crash and test the change.", Machine: "box",
 				Cwd: test.directory, Permission: "bypassPermissions", UserRequested: true}
 			if _, err := s.toolTaskPlan(t.Context(), "conv1", readonlyTaskArgs(t, task)); err != nil {

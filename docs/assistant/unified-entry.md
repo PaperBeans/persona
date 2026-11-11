@@ -557,8 +557,12 @@ Each authorization has `id`, `machine_id`, `directory`, `actions`, `conditions`,
 and `spend`. Conditions retain the user's wording; `ci_green` and `no_conflicts` have independent runtime checks
 (see [Agent work](agent-work.md#standing-authorization-answers)). The original words and source remain inspectable.
 Directories are specific absolute paths on one computer, matched by path segment: `/code/example` includes its
-subdirectories but not `/code/example-copy`. Roots, single-level paths and wildcards are rejected. Linked worktrees
-outside that directory need their own directory grant; repository basenames never establish identity.
+subdirectories but not `/code/example-copy`. Roots, single-level paths and wildcards are rejected. The node verifies repository identity through local Git metadata: matching common Git directories cover linked worktrees outside that path.
+Origin URLs are descriptive metadata, never authorization evidence: an arbitrary `git init` can copy a remote URL.
+Independent clones require separate registration. A subdirectory grant retains its relative directory
+boundary across worktrees. Different common Git directories and similar path prefixes do not match; repository basenames never
+establish identity. If an older or unavailable node cannot return identity, only the exact registered directory
+matches. A child directory may contain an independent repository, so a path prefix alone cannot extend a grant.
 
 At actual `task_plan` dispatch and `agent_send` with `task`, the manager reads matching grants and appends the prompt
 template containing scope, actions, conditions and the user's words. No other repository receives them. Pending plans
@@ -702,6 +706,19 @@ Supervision above covers the tasks the main chat or a leader hands out. An Agent
 - **Closing follows**: these Agents are tasks' Agents, so "Close Agents for completed tasks" (`docs/assistant/todos.md`) closes them after review.
 - **Depth cap unchanged**: an Agent that became a task this way is a worker and hands out no Persona tasks ("Leader conversations" above).
 - **Clients**: none changed. The to-dos carry `quiet` and `supervision` as other tasks do; showing them under their Agents is separate work.
+
+### The direction tree (#4352)
+
+Each direction (a leader conversation) opens into the open tasks it supervises, each task into the Agents doing it, each Agent into the Agents under it. The hub builds this one tree (`server/internal/assistant/direction_tree.go`, `GET /api/v1/assistant/directions/tree`, `docs/protocol/protocol.md`); the sidebar, the To-dos page's grouping by direction and the Agents page's direction grouping on web, iOS and Android all draw it and never work out the grouping or a task's state themselves. The owner-facing name of the group is 常驻 (en "Pinned", ja 常駐); field names, the route and the event keep `direction`.
+
+- **Directions**: every current leader (`assistant.leaders` without the main chat), in the order `GET /api/v1/assistant/leaders` lists the current ones, named as it names them; then the secretary group (书记官, en "Secretary", ja 書記官), always last and always present, with the main chat's id and no name. Ended directions are not listed: their open tasks are the secretary's again, as their signals are (leader reports).
+- **Tasks**: exactly the to-dos the To-dos page counts open (`triageCountsAsOpen`, the #3340 rule; quiet tasks, a failed start still waiting, ask to-dos and concerns included, as the page includes them). Closed, cancelled, accepted, deployed and shelved ones are never listed.
+- **Whose**: the ledger's `supervisor`. A current leader's id → that direction. The main chat's id, `""`, no ledger, an ended or unknown conversation → the secretary. A task leader's Agent (`"machine/session"`, "Task leaders" above) → a worker: it is not listed or counted as a task of its own, and its active Agents are the `children` of that leader Agent inside the leader's task (a leader started again: the current leader Agent of the task its worker row names). When the leader's task is not open, the worker is listed as an ordinary task of the conversation above the leader (`supervisorAboveTask`). Workers whose leaders lead one another in a loop are each listed on their own (the same on every build).
+- **State** (first match wins): `needs_you` — the SOP's Waiting on you (an Agent asks or was interrupted, the owner decides, incl. `needs_user`, a failed start); `review` — waits for acceptance (`pending_review`, or an open acceptance ask) with nothing of it running; `stuck` — the leader reports' stuck rule (`taskStuck`: Waiting on you, PR to merge, Other open or Shelved, nothing moved for 24 h, every machine of its Agents answered); `working` — every other open task (shown as 在做).
+- **Counts**: per direction, how many of its listed tasks are in each state. A direction row shows `counts.working` and `counts.needs_you` as 「在做 N · 等你 N」 (en "Doing N · Needs you N", ja 「作業中 N · あなた待ち N」). The four counts of all groups add up to the To-dos page's open count for the same data, less the worker tasks nested under a leader Agent. The tree is the default manager's alone (it is not merged over managers the way `GET /api/v1/todos` is, `hub/ownership_lists.go`), so on a hub with more than one manager the sum matches only that manager's to-dos.
+- **Order**: tasks needs_you, review, stuck, working; within a state the newest activity first, then id.
+- **Agents**: a task's active Agents (not released, not dismissed); under each, the Agents of the task it spawned (`source: spawned`, `via` its `machine/session`), its workers' Agents, its running in-session sub-agents (`session_id` `"<parent>@<id>"`, title the description, nested by the sub-agent that launched each) and its Codex sub-agent sessions still going. An Agent appears once in its task. Its `state` is its session's as the apps get it on session rows (`""` when the session was not found). The tree asks each computer for its sessions once per build.
+- **Push**: `{"type":"directions"}` whenever the tree's content changed: a to-do, the sessions of a computer one of its Agents is on, a direction, its name or the leader list changed, or (every 10 minutes) a task may have become stuck; gathered for one second, compared with a digest of the last tree told, so an unchanged tree tells nothing. Clients read the tree again on it and on (re)connect; a hub without the route answers 404 and the clients keep the flat direction rows.
 
 ## Data and APIs (hub)
 

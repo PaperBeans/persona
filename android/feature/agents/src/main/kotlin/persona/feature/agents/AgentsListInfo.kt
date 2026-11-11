@@ -13,6 +13,14 @@ import kotlinx.coroutines.flow.*
 import java.time.Instant
 import java.time.ZoneId
 
+/** The groupings the list offers: By To-do only while the hub has to-dos, as iOS's `DevGrouping.offered` (#4338 A5). */
+internal fun offeredGroupings(todosSupported: Boolean): List<AgentGrouping> =
+    if (todosSupported) AgentGrouping.selectable else AgentGrouping.selectable - AgentGrouping.Todo
+
+/** The grouping the list shows: a saved By To-do reads By project on a hub without to-dos, as iOS's `DevGrouping.resolved`. */
+internal fun resolvedGrouping(stored: AgentGrouping, todosSupported: Boolean): AgentGrouping =
+    if (stored == AgentGrouping.Todo && !todosSupported) AgentGrouping.MachineSpace else stored
+
 /** Implement with the shared DraftStore for the active hub scope; never create a second draft store. */
 fun interface AgentsDraftSource {
     fun observe(session: SessionKey): Flow<AgentDraft>
@@ -56,7 +64,7 @@ internal fun visibleAgentRequests(
             (settings.machineFilter.isEmpty() || request.machineId == settings.machineFilter) &&
             (settings.quick == AgentQuickFilter.All || (row?.let { settings.quick.matches(it) || it.id in settings.kept }
                 ?: (settings.quick == AgentQuickFilter.NeedsYou))) &&
-            (settings.query.isEmpty() || (session?.let { listOf(it.title, it.cwd, it.lastText, it.spaceName, it.slotName) }
+            (settings.query.isEmpty() || (session?.let { listOf(it.title, it.cwd, it.lastText, it.spaceName, it.slotName, it.branch) }
                 ?: listOf(request.sessionTitle, request.cwd, request.summary)).any { it?.contains(settings.query, ignoreCase = true) == true })
     }.sortedWith(compareBy<Interaction> { parseTime(it.expiresAt) ?: Instant.MAX }.thenBy { it.id })
 }

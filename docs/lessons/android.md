@@ -571,3 +571,7 @@ On the JVM, closing a server socket with a blocked accept can defer the actual d
 Keep a message's last rendered parse while its next parse runs; switching to raw text for every delta changes list and code-block geometry twice. Reset that retained state when the message identity or cache changes, and include stream completion in the parse effect keys. The Markdown renderer also defaults to a text-size spring: chat text should use its measured size immediately, without animating every line wrap.
 
 Measure pending and parsed frames with the real chat row and reverse list. A fixed scroll index and offset can still accompany visible height oscillation. Replay both Assistant and Agent styles, completion, rapid deltas, history reading and return-to-latest. Check selection and exact copied text in the APK as well. Write a PASS evidence file only after every assertion has completed; cleanup must not turn an earlier failure into a successful verdict.
+
+## Pairing fixtures must follow the default sign-in page (#4623)
+
+Skipping onboarding does not skip password sign-in. Tests of manual or scan pairing must select the localized pairing alternative from that default page before using the existing controls. Keep initial-link fixtures on their direct confirmation path, and retain back-stack, field-retention, invalid-input and screenshot assertions rather than changing the product default to fit older fixtures.

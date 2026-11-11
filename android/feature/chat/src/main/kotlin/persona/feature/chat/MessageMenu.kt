@@ -26,11 +26,11 @@ import persona.core.domain.sort.canSend
 import persona.core.designsystem.JAction
 import persona.core.designsystem.JActionSheet
 import persona.core.designsystem.JDialog
-import persona.core.designsystem.copyTextSafely
 import persona.core.designsystem.swipeToReply
 import persona.core.designsystem.icons.PhIcons
 import persona.core.designsystem.onLongPress
 import persona.core.designsystem.onSecondaryClick
+import persona.core.designsystem.rememberCopy
 import persona.core.designsystem.stableAlpha
 
 /**
@@ -112,20 +112,13 @@ internal fun MessageMenuSheet(
     var rewinding by remember { mutableStateOf<MessageTarget?>(null) }
     var confirmCode by remember { mutableStateOf<MessageTarget?>(null) }
     val context = LocalContext.current
+    val copy = rememberCopy()
     val target = menu.target
     val resources = LocalResources.current
     val extras = MessageExtras(fork = onFork != null, rewind = rewind != null, rewindBlock = rewind?.block)
     if (target != null) JActionSheet(messageMenuActions(target, writes, onHandToPersona != null, resources, extras) { action ->
         when (action) {
-            MessageAction.Copy -> {
-                copyTextSafely(
-                    context = context,
-                    text = target.text,
-                    label = "Persona",
-                    onNotice = onNotice,
-                    successNotice = resources.getString(R.string.chat_menu_copied),
-                )
-            }
+            MessageAction.Copy -> { copy(target.text, null) }
             MessageAction.Select -> { selecting = target.text }
             MessageAction.Quote -> onQuote(target)
             MessageAction.Share -> { if (!shareText(context, target.text)) onNotice(resources.getString(R.string.chat_menu_no_share)) }

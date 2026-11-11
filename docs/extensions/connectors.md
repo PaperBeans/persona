@@ -24,10 +24,13 @@ Discord (the user's own bot, extension, #917): the first step (D1) is the `disco
 | `telegram` | Telegram | Extension `telegram` in the `nwverse/persona-extensions` marketplace (#1704, #2057, code outside this repo), called by the hub over the process extension protocol (`connector/proc`) | `Archive` | Yes | Read-only tools; reads through the `tg` CLI (`Unlisted`) | `telegram_send/forward/react/mark_read` (`tg` CLI, `Unlisted`, gated) | Stepwise `Login` (phone number, code, two-step verification password), session encrypted in `connector_secrets` |
 | `x` | X | Extension `x` in the `nwverse/persona-extensions` marketplace (nwverse/persona-extensions#179, `docs/plans/plan-x.md`), called by the hub over the process extension protocol (`connector/proc`); two optional sources: the X API (the user's own developer app, pay-per-use) or the `grok` CLI on the hub machine (the user's subscription) | None: X's deletion rules keep posts in the extension's data directory with short retention (`docs/plans/plan-x.md` ("X's rules")) | Yes, `mention` (X API source only) | `x_digest/feed/following/post/search` (`x_search` runs a Grok search) | None (read-only) | Stepwise `Login` (one step: the four X API keys), keys encrypted in `connector_secrets`; the Grok source needs no sign-in here (`grok login` on the hub machine) |
 | `discord` | Discord | Extension `discord` in the `nwverse/persona-extensions` marketplace (nwverse/persona-extensions#181, `docs/plans/plan-discord.md`), called by the hub over the process extension protocol (`connector/proc`); reads Discord's REST API as the user's own bot, through the optional `proxy` secret when the hub machine can't reach Discord | `Archive` (the channels, threads and forum posts the bot can read: a first backfill, then what moved, every 5 minutes) | Not yet (D2) | `discord_channels/messages/search` | None (read-only) | Stepwise `Login` (one step: the bot token), token encrypted in `connector_secrets` |
-| `wechat` | WeChat | Separate built-in extension program `personad-wechat` (`docs/extensions/wechat.md`): a bot in WeChat, not a data source but a channel (`docs/extensions/channels.md`); the connector handles only binding and status | None | None | None | None | QR `Login` (`kind: qr`), token encrypted in `connector_secrets` |
+| `wechat` | WeChat | Public marketplace extension `wechat` (`nwverse/persona-extensions`) (`docs/extensions/wechat.md`): a bot in WeChat, not a data source but a channel (`docs/extensions/channels.md`); the connector handles only binding and status | None | None | None | None | QR `Login` (`kind: qr`), token encrypted in `connector_secrets` |
 | `lark` | Lark | Registered by the Lark extension since #1571 (formerly the hub's lark_connector.go wrapping the original Lark gateway code) | `Chats` (one cursor per conversation) + `Items` (documents, meetings, events) | Inbox blocks from the extension (block types in `assistant/inbox_blocks.go`; formerly the hub's inbox_own.go) | `lark_chats/messages/search` | Through the Lark extension's skill + the node's Bash gate (rules below) | Log in through the Lark gateway on the hub machine |
-| `larkcli` | Lark via lark-cli | In the hub (`connector/larkcli`), enabled by `lark.cli` | None in L2 | None in L2 | `larkcli_chats/messages/search` (read-only) | None in L2 | Device-flow `Login` from the App; uses the user's lark-cli login |
+| `larkcli` | Lark via lark-cli | In the hub (`connector/larkcli`), enabled by `lark.cli` | Device-flow `Login` from the App | @me, direct chats and replies in topics the user participates in, plus watched document comments (`kind: "doc"`; #2691), all through bounded polling; the Inbox's triage sets the tier (no fixed tier) | `larkcli_chats/messages/search` (read-only) | Chat Inbox replies use `lark-cli im +messages-reply` / `+messages-send` as the bot; document comments are read-only | Uses the user's lark-cli login on the hub machine |
 | `mail` | Mail | In the hub (`extmgr/mail_connector.go`) | `Archive` (UID per account) | The hub's own Inbox blocks | `mail_accounts/search/read` | `mail_send` (gated) | Its own API: password / Gmail and Outlook OAuth (`/api/v1/mail/…`) |
+
+`larkcli`'s connector options are `inbox_all_chats`, the watched `documents` links, `wiki_spaces`, `owned_all_comments` and `triage_rules` (the user's triage rules for its items, sent as each thing's `rules` so the Inbox's triage uses them instead of `inbox.rules`; edited on the connector's page in Settings, except `owned_all_comments`, a switch in the Lark dialog's "Collect my Lark messages" section). An empty options object
+does not admit every chat or watch any document; the connector's `doc` Inbox items are read-only and use the user's lark-cli identity.
 
 ### Interfaces: one manifest, dispatched by declaration
 
@@ -70,10 +73,22 @@ the hub drops unknown tiers and leaves classification to the model.
   JSON-lines RPC as hub↔node (`internal/rpc`), with methods corresponding to interfaces (`init`, `status`, `archive.changes`, `inbox.collect`, `tools.call`… in `wire.go`).
   The program calls the hub's `secrets.*` in the other direction. At registration the hub gives `proc.Conn` a static manifest (`proc.Config.Manifest`; extensions get it from their
   `persona-plugin.json`), so even connectors that have never started and are off by default can report capabilities and log in/out (#666). The program manifest returned by `init`
-  (`serve.Manifest`, snake_case fields on the wire) is checked against it; mismatches are logged and the static one still wins. Built-in extension programs (the WeChat bot) must come from the same build as the hub (`version -v` matches exactly); the protocol is versioned (v2, `docs/protocol/connector-protocol.md`).
+  (`serve.Manifest`, snake_case fields on the wire) is checked against it; mismatches are logged and the static one still wins. Marketplace extension programs are versioned independently of the hub; the protocol is versioned (v2, `docs/protocol/connector-protocol.md`).
 - **node relay**: data exists only on a Mac (`chat.db`). A `Reader` on the node reads local data; the hub reads through node RPC (`connector.list/chats/older/changes/search`,
   five methods hardcoded in `node/node.go`; new nodes also answer through `plugin.node.call {id: "imessage"}`, see `docs/extensions/extensions.md` ("Built-in node programs"));
   the hub-side `imessage.Remote` is the connector. Choose the Mac in the built-in extension "Messages (iMessage)" (#1830 step 6); without a selection, use `imessage.machine` in the manager's manager.json.
+
+  Messages identifies an entry by its canonical conversation and physical message ROWID. Multiple SMS/iMessage chat
+  associations for that conversation count once in message pages, search results and unread counts; an association to
+  another conversation remains a separate entry. A changes page's limit counts distinct physical messages, so a message
+  belonging to several conversations may produce more entries than that limit. The page selects its boundary and expands
+  all its chat associations in one SQLite snapshot; `more` counts distinct messages and the numeric `next` cursor advances
+  only after the last selected ROWID's associations are processed, including conversations filtered out by the keep rule.
+  History reads reject a conversation with more than 200 associated chats; changes and search reject a read that exceeds
+  10,000 or 40,000 expanded associations respectively. Failed reads return no page cursor. Search considers at most
+  20,000 distinct physical messages before applying its result limit. Existing numeric cursors remain valid, but a cursor
+  already advanced by an older version cannot recover an association that version skipped; no stored state is reset.
+  Message history keeps its existing join-date order and message-date cursor semantics.
 
 ### Gate
 
@@ -141,6 +156,10 @@ The connector provides `InboxThing` (one thing: `Thread` is its key, `Kind` its 
 each round, the hub hands candidates to the manager (`inbox.collected` on the bus, `docs/assistant/inbox.md` ("Who owns what")). The manager (`applyConnector` in `assistant/inbox_connectors.go`)
 merges subsequent activity for the same `Thread` into an open item. Classification, AI twin, completion and retention then belong to the manager and are the same for every source; replies, `Settle` and tools derived from events
 are still dispatched to connectors by the hub (the manager asks through `app.call inbox.*`). Items use a generic block (`InboxConnector`), so the App can render them without knowing the source.
+
+The built-in `larkcli` connector keeps its cursor, bounded message-id overlap set and topic-participation set in the manager's Postgres settings store. Its `inbox.collect` implementation only returns the connector's in-memory round; the subprocess is called by the connector watcher, which emits `changed {scope: inbox}` after a round with a new item. A two-minute poll is the default (configurable under `lark.cli`, never below one minute), and no lark-cli Inbox read runs while an available Lark gateway is the preferred source.
+
+**Maintainer opt-in addition (separate from L4):** `larkcli` exposes the connector option `inbox_all_chats`, a list of chat ids. When the list is non-empty, every new message from those chats is collected in addition to the L4 rules (the user's own messages are still dropped). It is off by default and can be removed independently if broad chat collection proves too noisy.
 
 ### Knowledge-base ingestion
 

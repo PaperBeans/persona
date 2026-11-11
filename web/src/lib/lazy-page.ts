@@ -46,6 +46,7 @@ export function lazyPage<P extends object>(load: () => Promise<ComponentType<P>>
     // in. The server has no second render: there it suspends at once.
     const server = useSyncExternalStore(still, () => false, () => true);
     const [held, hold] = useState(false);
+    const [failure, fail] = useState<{ error: unknown } | null>(null);
     const [, arrived] = useReducer((n: number) => n + 1, 0);
     const drawn = page !== null;
     useLayoutEffect(() => {
@@ -58,11 +59,12 @@ export function lazyPage<P extends object>(load: () => Promise<ComponentType<P>>
       // not a layout effect: the fallback hiding this page runs those down, and this one has to see the chunk come in
       if (page) return;
       let live = true;
-      once().then(() => live && arrived(), () => {});
+      once().then(() => live && arrived(), (error) => live && fail({ error }));
       return () => {
         live = false;
       };
     }, []);
+    if (failure) throw failure.error;
     if (page) return createElement(page, props);
     if (!held && !server) return null;
     return createElement(use(once()), props);

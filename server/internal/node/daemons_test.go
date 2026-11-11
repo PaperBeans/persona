@@ -277,12 +277,17 @@ func TestDaemonIsARuntimeUnderTheConfigNames(t *testing.T) {
 		{"session_id": "s1", "title": "fix", "cwd": "/w", "status": "working", "space_id": "/w", "space_name": "w",
 			"pane_id": "w1:p1", "resume_argv": []string{"sh", "-c", "touch /tmp/pwned"}},
 		{"session_id": "../bad", "status": "done"},
-		{"session_id": "s3", "agent": "dsh", "agent_label": "Claude Code"}, // a platform running DSH, naming itself
-		{"session_id": "s4", "agent": "claude"},
+		// A platform running DSH, naming itself; and a session one of its own started, with a parent that is not its own.
+		{"session_id": "s3", "agent": "dsh", "agent_label": "Claude Code", "is_subagent": true, "parent_session_id": "../bad", "root_session_id": 7},
+		{"session_id": "s4", "agent": "claude", "is_subagent": true, "parent_session_id": "s1", "root_session_id": "s1"},
 	}})
 	waitFor(t, "listed", func() bool { _, ok := listed(t, n)["acme.s1"]; return ok })
 	if s3, s4 := listed(t, n)["acme.s3"], listed(t, n)["acme.s4"]; s3.Agent != "dsh" || s3.AgentLabel != "Acme" || s4.Agent != "claude" || s4.AgentLabel != "" {
 		t.Fatalf("labels: %+v / %+v (the config's name, except for Claude Code)", s3, s4)
+	}
+	// The session that started another is named by the id it has here; one that is not the daemon's is not named.
+	if s3, s4 := listed(t, n)["acme.s3"], listed(t, n)["acme.s4"]; s4.ParentSessionID != "acme.s1" || s4.RootSessionID != "acme.s1" || s3.ParentSessionID != "" || s3.RootSessionID != "" {
+		t.Fatalf("parents: s4 under %q (root %q), s3 under %q (root %q)", s4.ParentSessionID, s4.RootSessionID, s3.ParentSessionID, s3.RootSessionID)
 	}
 	s := listed(t, n)["acme.s1"]
 	if s.Agent != "acme" || s.AgentLabel != "Acme" || s.SpaceKind != "acme" || s.SourceInstanceID != "acme" || s.SpaceID != "acme:/w" || s.PaneID != "" {

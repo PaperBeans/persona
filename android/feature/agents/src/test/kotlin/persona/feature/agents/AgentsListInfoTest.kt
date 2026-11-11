@@ -100,6 +100,25 @@ class AgentsListInfoTest {
         assertEquals("屏幕问题\n完整说明", question.copy(kind = "screen", dialog = ScreenDialog(question = "屏幕问题", detail = "完整说明")).cardSummary(res))
     }
 
+    /** A tree headed by its workspace's title shows its branch nowhere (#4497): a search finds it by the branch, in every range. */
+    @Test fun aSearchForABranchFindsItsSessionsAndTheirCards() {
+        val tree = "/home/me/.paseo/worktrees/abc123/brave-fox"
+        val live = Session(machineId = "machine", sessionId = "live", title = "Add a remember-me option", cwd = tree, state = "needs_you",
+            status = "blocked", worktree = tree, branch = "fix/login", slotName = "Fix the login flow")
+        val old = live.copy(sessionId = "old", state = "offline", status = "offline")
+        val other = Session(machineId = "machine", sessionId = "other", title = "Sort the bug reports", cwd = "/code/app", state = "needs_you",
+            status = "blocked", branch = "main")
+        val sessions = listOf(live, old, other)
+        val settings = AgentListSettings(query = "fix/login")
+        val found = AgentRange.entries.associateWith { range ->
+            scopedAgentList(sessions.map(::AgentSession), listOf(Machine("machine")), AgentsPreferencesSnapshot(range = range), settings)
+                .groups.flatMap { it.rows }.map { it.session.sessionId }.toSet()
+        }
+        assertEquals(mapOf(AgentRange.Running to setOf("live"), AgentRange.All to setOf("live", "old"), AgentRange.History to setOf("old")), found)
+        val requests = sessions.map { Interaction(it.sessionId, it.machineId, it.sessionId, kind = "permission") }
+        assertEquals(listOf("live", "old"), visibleAgentRequests(requests, sessions, AgentPreferences(), settings).map { it.id })
+    }
+
     @Test fun anotherAgentsCardSaysWhoAsks() {
         val claude = Interaction("ix", kind = "permission", toolName = "Bash")
         assertEquals("需要你授权", claude.cardTitle(res))
@@ -112,5 +131,14 @@ class AgentsListInfoTest {
     @Test fun requestCardsPreviewPlansWithoutMarkdownSyntax() {
         assertEquals("支持 HEIC\n1. 用 sips 转成 JPEG\n加粗说明", markdownPreview("## 支持 HEIC\n\n1. 用 `sips` 转成 JPEG\n**加粗**说明\n"))
         assertEquals("普通文字", markdownPreview("普通文字"))
+    }
+
+    @Test fun byToDoIsOfferedOnlyWhileTheHubHasToDos() {
+        assertEquals(listOf(AgentGrouping.Repo, AgentGrouping.MachineSpace, AgentGrouping.State, AgentGrouping.Todo), offeredGroupings(true))
+        assertEquals(listOf(AgentGrouping.Repo, AgentGrouping.MachineSpace, AgentGrouping.State), offeredGroupings(false))
+        // A saved By To-do on a hub without to-dos shows By project; the others stay.
+        assertEquals(AgentGrouping.MachineSpace, resolvedGrouping(AgentGrouping.Todo, false))
+        assertEquals(AgentGrouping.Todo, resolvedGrouping(AgentGrouping.Todo, true))
+        assertEquals(AgentGrouping.State, resolvedGrouping(AgentGrouping.State, false))
     }
 }

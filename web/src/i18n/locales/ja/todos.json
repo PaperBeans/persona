@@ -232,15 +232,5 @@
   "related": "関連 {count} 件",
   "pr_idle": "最終更新 {age}",
   "restore": "戻す",
-  "restored": "リストに戻しました",
-  "menu_due": "期限",
-  "menu_due_today": "今日",
-  "menu_due_tomorrow": "明日",
-  "menu_due_next_week": "来週",
-  "menu_due_pick": "日付を選ぶ…",
-  "menu_due_none": "期限なし",
-  "menu_remind_hour": "1時間後",
-  "menu_remind_tomorrow": "明日の朝",
-  "menu_remind_none": "リマインドなし",
-  "menu_hand_over": "エージェントに任せる…"
+  "restored": "リストに戻しました"
 }

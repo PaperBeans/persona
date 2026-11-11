@@ -40,7 +40,7 @@ struct ExtensionSettingsView<Configuration: View, AdvancedInformation: View>: Vi
     private var busy: Bool {
         offline || lifecycle.busy || page.loading || page.saving || page.changingEnabled || page.changingAutoUpgrade || page.changingContribution != nil
     }
-    private var offlineReason: String { String(localized: "The manager is offline. Reconnect to change this extension.") }
+    private var offlineReason: String { String(localized: "The assistant is offline. Reconnect to change this extension.") }
 
     var body: some View {
         Group {
@@ -92,9 +92,9 @@ struct ExtensionSettingsView<Configuration: View, AdvancedInformation: View>: Vi
             return String(localized: "When off, this extension’s capabilities are unavailable. Your configuration is kept.")
         }
         if detail.readOnly || ["hub.json", "manager.json"].contains(detail.plugin.source ?? "") {
-            return String(localized: "This extension is set in its manager's manager.json; change its switch and settings there, then restart the manager.")
+            return String(localized: "This extension is set in its assistant's manager.json; change its switch and settings there, then restart the assistant.")
         }
-        return String(localized: "This manager does not provide this action.")
+        return String(localized: "This assistant does not provide this action.")
     }
 
     private var information: some View {
@@ -185,7 +185,7 @@ struct ExtensionSettingsView<Configuration: View, AdvancedInformation: View>: Vi
             }
             if let previous = detail.previousVersion, !previous.isEmpty {
                 identity("Previous Version", value: previous)
-                Text("This manager does not provide a rollback preview.").font(Theme.Font.label).foregroundStyle(.secondary)
+                Text("This assistant does not provide a rollback preview.").font(Theme.Font.label).foregroundStyle(.secondary)
             }
             // The operation's card says what is going on once there is one; a spinner only while asking for it (or an
             // older hub's synchronous preview).
@@ -217,7 +217,7 @@ struct ExtensionSettingsView<Configuration: View, AdvancedInformation: View>: Vi
             return String(localized: "Auto-upgrade is paused while this extension is off.")
         }
         if !policy.canAutoUpgrade { return policy.updateReason }
-        if lifecycle.globalAuto == false { return String(localized: "Automatic upgrades are paused globally for this manager.") }
+        if lifecycle.globalAuto == false { return String(localized: "Automatic upgrades are paused globally for this assistant.") }
         return String(localized: "Compatible updates run automatically. Permission changes require review.")
     }
 

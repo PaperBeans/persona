@@ -21,10 +21,15 @@ import (
 //   - only gated calls (and a few output filters): each call goes by its gate's rules (the first match: allow, confirm
 //     on the phone first with method, path and body on the card, or deny; none matching is confirmed); lark-cli's
 //     by its own risk level (larkcligate.go). Assistant bypass skips cards only for classified reads and ordinary
-//     writes; sends as the user, deletion and unknown writes still ask. Explicit deny and health rules take priority.
+//     writes; Lark sends as the user, deletion and calls it cannot classify still ask. Non-Lark commands such as
+//     rm, git and tee remain outside this gate. Opaque execution requires confirmation when the
+//     command text names the CLI (including paths or interpreter code), or an expansion supplies
+//     a command name. A script file with no CLI name in the command text is outside this gate:
+//     its contents may still invoke the CLI. This residual risk is accepted; we do not read scripts.
+//     Explicit deny and health rules take priority.
 //   - anything naming a gate's secret, a process's environ, curl / wget at a gate's API, or curl flags that would
 //     print or redirect the credentials: denied.
-//   - anything else: no decision, the usual permission flow (the phone asks about the whole command).
+//   - anything else: no decision; the usual permission flow applies, including its bypass mode.
 
 // larkCall is one gated command's or lark-cli's invocation read off a Bash command.
 type larkCall struct {
@@ -44,9 +49,9 @@ type larkVerdict struct {
 	calls    []larkCall
 	deny     string // why the command is refused
 	other    bool   // something besides gated calls and filters: the usual permission flow decides
-	unsure   bool   // command substitution / unknown variables: fine for writes (the user sees them), not for reads
+	unsure   bool   // a command substitution prevents bypass and requires whole-command confirmation
 	unparsed bool   // the command could not be split into its parts at all
-	unknown  bool   // a CLI invocation or nested command could not be classified
+	unknown  bool   // a CLI call, indirect execution or redirection could not be classified
 	cliWrite bool   // a lark-cli call that is not a known read, even in a command the gate cannot follow
 }
 
@@ -81,7 +86,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	health := n.gates().healthSession(session) || identity.InHealthSpace(cwd)
 	mode, _ := n.modesOf(session)
 	bypass := !health && mode == proto.ModeBypass && n.isAssistantSession(session) && n.guestOf(session) == nil
-	safe := len(v.calls) > 0 && !v.unparsed && !v.unknown
+	safe := len(v.calls) > 0 && !v.unparsed && !v.unknown && !v.unsure
 	for _, c := range v.calls {
 		if larkDecision(cfg, c) == "deny" {
 			return "deny", "这个操作按配置不允许（" + c.Method + " " + c.Path + "）。", nil
@@ -102,13 +107,15 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 					"或者用 -o 写到 /tmp。这样手机上能逐条确认，确认过的才发得出去。", nil
 			}
 		}
-		// Compound calls bypass confirmation only when every invocation was classified as a read or ordinary write.
+		// Classified reads and ordinary writes can be mixed with non-Lark commands in bypass.
+		// Unknown CLI-related execution or an expanded command name must ask; ordinary
+		// interpreter calls and argument substitutions without a CLI name stay outside this gate.
 		// Proxy-authenticated writes above must remain standalone so their one-use grants cannot be lost.
 		if bypass && safe {
 			return "allow", "Conversation permission mode allows these classified calls.", nil
 		}
 		g, write := gateWrite(cfg.Gates, command)
-		if write || v.cliWrite || larkCLIRe.MatchString(command) && (v.unparsed || v.unknown || !safe) {
+		if write || v.cliWrite || v.unknown || larkCLIRe.MatchString(command) && !safe {
 			title := "飞书" // lark-cli's
 			if write {
 				title = g.Title

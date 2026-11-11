@@ -84,7 +84,11 @@ data class LightDark(val light: Color, val dark: Color) {
  * (a package that only brings a bubble) the style's accent stays.
  */
 @Immutable
-data class ThemeAccent(val accent: LightDark?, val bubble: LightDark? = null, val bubbleText: LightDark? = null) {
+data class ThemeAccent(
+    val accent: LightDark?, val bubble: LightDark? = null, val bubbleText: LightDark? = null,
+    /** From a persona package (not one of the presets): iOS adjusts only these to its floors. */
+    val fromPackage: Boolean = false,
+) {
     constructor(light: Color, dark: Color) : this(LightDark(light, dark))
     /** The accent in this appearance; null when only the bubble changes. */
     fun of(dark: Boolean): Color? = accent?.of(dark)
@@ -115,6 +119,9 @@ object ThemeColors {
     private const val AccentFloor = 4.5
     /** Words on the user's own bubble. */
     private const val TextFloor = 4.5
+    /** iOS's floors (`PersonaPalette`): white words on the accent, the accent as a link. */
+    internal const val OnAccentFloorIos = 3.5
+    internal const val LinkFloorIos = 3.0
     private const val SoftLight = 0.12f
     private const val SoftDark = 0.16f
     private const val BubbleLight = 0.16f
@@ -145,7 +152,7 @@ object ThemeColors {
         val accent = pair("accent")
         val bubble = pair("bubble")
         if (accent == null && bubble == null) return null
-        return ThemeAccent(accent, bubble, bubble?.let { pair("bubble_text") })
+        return ThemeAccent(accent, bubble, bubble?.let { pair("bubble_text") }, fromPackage = true)
     }
 
     /**
@@ -158,7 +165,12 @@ object ThemeColors {
         val raw = accent.of(base.dark)
         var p = base
         if (raw != null) {
-            val color = meeting(raw, base)
+            // Glass as iOS: a preset as it is, a package's colour held to the iPhone's floors; the other styles hold 4.5:1.
+            val color = when {
+                !base.whiteOnAccent -> meeting(raw, base)
+                accent.fromPackage -> iosMeeting(raw, base)
+                else -> raw
+            }
             val soft = color.copy(alpha = if (base.dark) SoftDark else SoftLight)
             val wash = color.copy(alpha = if (base.dark) BubbleDark else BubbleLight).compositeOn(base.surfaceOpaque)
             p = base.copy(accent = color, accentSoft = soft, userBubble = wash,
@@ -194,6 +206,23 @@ object ThemeColors {
             c = mix(c, toward, 0.08f)
         }
         return c
+    }
+
+    /**
+     * iOS `PersonaPalette.meeting`: white words read on it at 3.5:1 and it reads as a link at 3:1, toward black when white
+     * doesn't read, else toward white. Android also checks the link on Glass's cards, not only the page.
+     */
+    internal fun iosMeeting(color: Color, base: PersonaPalette): Color {
+        val white = Tokens.Semantic.Glass.Light.onAccent
+        val surfaces = listOf(base.background, base.surface.compositeOn(base.background), base.surfaceOpaque)
+        fun ok(c: Color) = ExtensionThemeColors.contrast(white, c) >= OnAccentFloorIos &&
+            surfaces.all { ExtensionThemeColors.contrast(c, it) >= LinkFloorIos }
+        if (ok(color)) return color
+        // Black and white: the system's text in light and in dark.
+        val toward = if (ExtensionThemeColors.contrast(white, color) < OnAccentFloorIos) Tokens.Semantic.Glass.Light.text
+            else Tokens.Semantic.Glass.Dark.text
+        for (i in 1..50) mix(color, toward, i / 50f).let { if (ok(it)) return it }
+        return color
     }
 
     private fun mix(a: Color, b: Color, t: Float) =

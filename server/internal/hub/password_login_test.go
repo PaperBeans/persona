@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/passwordpake"
 )
@@ -77,7 +78,7 @@ func passwordTestHub(t *testing.T) (*Hub, *passwordMemStore, *adminClient, *admi
 	s.sessions[sha256Hex(cookie)] = db.AdminSession{IDHash: sha256Hex(cookie), CSRF: "csrf-test", ExpiresAt: time.Now().Add(time.Hour)}
 	// The existing admin guard also requires a configured administrator password.
 	s.hash = "configured-admin-password"
-	admin := &adminClient{t: t, h: h.routes(), remote: "127.0.0.1:1234", tls: true, csrf: "csrf-test", cookie: &http.Cookie{Name: "jarvis_admin_tls", Value: cookie}}
+	admin := &adminClient{t: t, h: h.routes(), remote: "127.0.0.1:1234", tls: true, csrf: "csrf-test", cookie: &http.Cookie{Name: compat.AdminCookieNames(true)[1], Value: cookie}}
 	client := &adminClient{t: t, h: h.routes(), remote: "192.0.2.9:1234", tls: true}
 	return h, s, admin, client
 }
@@ -133,6 +134,25 @@ func passwordProof(t *testing.T, client *adminClient, password, challenge string
 		return start["session"].(string), nil, err
 	}
 	return start["session"].(string), ke3.Serialize(), nil
+}
+
+func TestPasswordLoginAdminCookies(t *testing.T) {
+	_, _, legacy, _ := passwordTestHub(t)
+	names := compat.AdminCookieNames(true)
+	if len(names) != 2 || names[0] != "persona_admin_tls" || names[0] == names[1] {
+		t.Fatalf("unexpected secure admin cookie names: %v", names)
+	}
+	passwordCall(t, legacy, "GET", "/api/v1/admin/password-login", nil, 200)
+	current := *legacy
+	current.cookie = &http.Cookie{Name: names[0], Value: legacy.cookie.Value}
+	passwordCall(t, &current, "GET", "/api/v1/admin/password-login", nil, 200)
+	for _, invalid := range []string{"", "invalid"} {
+		mixed := *legacy
+		mixed.header = http.Header{"Cookie": {(&http.Cookie{Name: names[0], Value: invalid}).String()}}
+		passwordCall(t, &mixed, "GET", "/api/v1/admin/password-login", nil, 401)
+	}
+	current.header = http.Header{"Cookie": {(&http.Cookie{Name: names[1], Value: "invalid"}).String()}}
+	passwordCall(t, &current, "GET", "/api/v1/admin/password-login", nil, 200)
 }
 
 func TestPasswordLoginRegistrationAndDevice(t *testing.T) {

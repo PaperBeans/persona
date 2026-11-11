@@ -97,6 +97,16 @@ type NodePackagesConfig struct {
 	Proxy string `json:"proxy,omitempty"`
 }
 
+// UpdateConfig is where the hub looks for its own releases (docs/operations/hub-update.md "Update source"): URL a
+// release's download directory (latest.json and the files it lists, e.g. a GitHub repository's
+// releases/latest/download) in place of the one the build was made with; "" that one. Proxy an
+// http://[user:pass@]host:port proxy for the update's checks and downloads only (internal/netproxy); "" the
+// environment's, as before.
+type UpdateConfig struct {
+	URL   string `json:"url,omitempty"`
+	Proxy string `json:"proxy,omitempty"`
+}
+
 // TailcatConfig: DERPMapURL is a DERP map of your own relays (a derper) instead of Tailscale's public ones; the nodes
 // were set up with the same (`personad node tailcat init --derp-map-url`).
 type TailcatConfig struct {
@@ -182,6 +192,8 @@ type Config struct {
 	Tailcat TailcatConfig `json:"tailcat,omitempty"`
 	// NodePackages is where node builds the hub has none of come from.
 	NodePackages NodePackagesConfig `json:"node_packages,omitzero"`
+	// Update is where the hub's own releases come from, and through which proxy (selfupdate_source.go).
+	Update UpdateConfig `json:"update,omitzero"`
 	// Mesh tunes the links to other hubs (docs/server/mesh.md, config_mesh.go).
 	Mesh MeshConfig `json:"mesh,omitempty"`
 	// Link tunes the heartbeat with the computers' Persona Links (config_link.go, docs/operations/link.md "Heartbeat").

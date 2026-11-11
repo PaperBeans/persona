@@ -68,6 +68,7 @@ struct HubStatusDot: View {
     }
 
     private var color: Color {
+        if live.rejected { return Theme.caution } // this credential was refused: pairing again, not an ordinary outage
         if live.inGrace { return Theme.positive } // dropped a moment ago and coming back (a hub restart): nothing to say
         return switch live.state {
         case .connected: live.stalled ? Theme.caution : Theme.positive

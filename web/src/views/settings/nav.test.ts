@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
-import { ASSISTANT_TABS, categoryState, FROM_LIST, itemState, NAV_GROUPS, openedFromList, redirectLegacySettings, searchSettings, settingsAt, settingsHref, stepsToList, TAB_INFO, TABS } from "./nav";
+import { searchSettings } from "./search";
+import { ASSISTANT_TABS, categoryState, FROM_LIST, itemState, NAV_GROUPS, openedFromList, redirectLegacySettings, settingsAt, settingsHref, stepsToList, TAB_INFO, TABS } from "./nav";
 
 describe("settings location", () => {
   it("names no category on plain /settings: the phone's list (通用 on a wide screen)", () => {
@@ -102,6 +103,15 @@ describe("settings sidebar groups", () => {
 });
 
 describe("settings search", () => {
+  it.each(["en", "zh-Hans", "ja"])("finds standing authorizations by its localized title in %s", async (lang) => {
+    vi.resetModules();
+    const { initI18n, t } = await import("../../i18n");
+    await initI18n(lang);
+    const { searchSettings } = await import("./search");
+    const title = t("settings-standing.title");
+    expect(title).not.toBe("settings-standing.title");
+    expect(searchSettings(title).groups).toContainEqual({ tab: "persona", anchor: "standing-authorizations", group: title });
+  });
   it("matches a category by label", () => {
     expect(searchSettings("模型").tabs).toContain("models");
     expect(searchSettings("Agent").tabs).toContain("agents");

@@ -306,3 +306,36 @@ describe("startKeys", () => {
     expect(startKeys("other", true)).toBeNull();
   });
 });
+
+describe("work-session delivery", () => {
+  const work = { ...input, launcher: "codex-team", agentType: "codex", model: "model-from-catalog", workSession: true };
+  const target = { machine_id: work.machineId, cwd: work.cwd, launcher: work.launcher, agent_type: work.agentType, model: work.model, work_session: true };
+
+  it("sends the same target with Codex's first message and retries a lost reply under the same operation", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({ code: "codex_needs_prompt" }, 409))
+      .mockRejectedValueOnce(new TypeError("lost response"))
+      .mockResolvedValueOnce(response({ session }));
+    vi.stubGlobal("fetch", fetcher);
+    const id = launchAgent(work);
+    vi.stubGlobal("location", { pathname: `/s/desktop/${id}` });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fetcher.mock.calls.map((c) => [c[0], JSON.parse(c[1].body)])).toEqual([
+      ["/api/v1/sessions", { ...target, async: true, name_hint: work.text }],
+      ["/api/v1/sessions", { ...target, prompt: work.text }],
+      ["/api/v1/sessions", { ...target, prompt: work.text }],
+    ]);
+    expect(fetcher.mock.calls[1][1].headers.get("X-Persona-Op-Id")).toBe(fetcher.mock.calls[2][1].headers.get("X-Persona-Op-Id"));
+    expect(navigate).toHaveBeenLastCalledWith({ name: "session", mid: "desktop", sid: "remote-id" }, true);
+  });
+
+  it("stops after a Codex creation reports an unknown outcome", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(response({ state: "unknown" }, 202));
+    vi.stubGlobal("fetch", fetcher);
+    const id = launchAgent({ ...work, inlinePrompt: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ ...target, prompt: work.text });
+    expect(getState().launches[id]).toMatchObject({ phase: "failed", uncertain: true, repeatOnly: true, model: work.model });
+  });
+});

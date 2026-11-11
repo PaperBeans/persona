@@ -18,6 +18,8 @@ data class ChatChromeBindings(
     val gitLabel: String = "Git",
     val actions: ChatActions? = null,
     val connection: HubConnection? = null,
+    /** Worktree status and removal for Close Agent / Delete Chat (#4532), by the group's own machine ids; null: none offered. */
+    val worktrees: (() -> persona.core.contracts.api.AgentCreationService?)? = null,
     val onOpenSession: ((SessionKey) -> Unit)? = null,
     /**
      * The cards other agents wait on you with, in the Persona home's order, and how one opens: its chat with that card

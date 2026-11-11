@@ -1,0 +1,42 @@
+{
+  "ok": true,
+  "data": {
+    "items": [
+      {
+        "comment_id": "comment_example",
+        "create_time": "2030-01-02T10:00:00Z",
+        "update_time": "2030-01-02T10:00:00Z",
+        "is_solved": false,
+        "is_whole": false,
+        "quote": "The launch checklist",
+        "user_id": "ou_example_peer",
+        "reply_list": {
+          "replies": [
+            {
+              "reply_id": "reply_root",
+              "user_id": "ou_example_peer",
+              "create_time": "2030-01-02T10:00:00Z",
+              "content": {"elements": [{"type": "text_run", "text": "@Example User please review"}, {"type": "mention", "mention_user": {"open_id": "ou_example_user"}}]}
+            },
+            {
+              "reply_id": "reply_me",
+              "user_id": "ou_example_user",
+              "create_time": "2030-01-02T10:01:00Z",
+              "content": {"elements": [{"type": "text_run", "text": "I will check it"}]}
+            }
+          ],
+          "has_more": false
+        }
+      },
+      {
+        "comment_id": "comment_solved",
+        "create_time": "2030-01-02T10:02:00Z",
+        "update_time": "2030-01-02T10:02:00Z",
+        "is_solved": true,
+        "quote": "Resolved text",
+        "user_id": "ou_example_peer"
+      }
+    ],
+    "has_more": false
+  }
+}

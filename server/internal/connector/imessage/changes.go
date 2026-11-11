@@ -2,6 +2,7 @@ package imessage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -35,8 +36,21 @@ const (
 	KeepAll      = "all"
 )
 
-// Changes is what came in after cursor, at most limit messages (tapbacks left out), in the conversations keep lets
-// through, codes masked. The first time (cursor "") it starts at since. Next moves past everything read, kept or not.
+// ErrTooManyAssociations means a read would exceed its bounded expansion of message-to-chat associations.
+var ErrTooManyAssociations = errors.New("too many message-to-chat associations")
+
+// maxChangesAssociations bounds rows returned by sqlite3 even if one message belongs to many chats. A page which
+// cannot fit is an error, not a partial success: its numeric cursor must not skip an association.
+const maxChangesAssociations = 10000
+
+type conversationMessage struct {
+	conversation string
+	rowID        int64
+}
+
+// Changes reads at most limit distinct physical messages (tapbacks left out), in the conversations keep lets
+// through, codes masked. A message in multiple conversations may make the page contain more than limit entries.
+// The first time (cursor "") it starts at since. Next moves past everything read, kept or not.
 func (r *Reader) Changes(ctx context.Context, cursor string, limit int, since time.Time, keep string) (ChangesPage, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 200
@@ -62,17 +76,28 @@ FROM message WHERE date >= %d`, appleNanos(since)), &rows)
 		}
 	}
 	var rows []msgRow
-	if err := r.query(ctx, r.chatDB(), fmt.Sprintf(`SELECT j.chat_id AS chat, %s FROM message m JOIN chat_message_join j ON j.message_id = m.ROWID
-WHERE m.ROWID > %d AND m.associated_message_type = 0 ORDER BY m.ROWID LIMIT %d`, msgColumns, start, limit+1), &rows); err != nil {
+	// Choose the message boundary and expand its associations in one SQLite statement/snapshot. A second sqlite3
+	// invocation could see a different set of associations and advance a saved cursor past an unreturned one.
+	if err := r.query(ctx, r.chatDB(), fmt.Sprintf(`WITH candidates AS (
+  SELECT m.ROWID AS id FROM message m
+  WHERE m.ROWID > %d AND m.associated_message_type = 0
+    AND EXISTS (SELECT 1 FROM chat_message_join j WHERE j.message_id = m.ROWID)
+  ORDER BY m.ROWID LIMIT %d
+), selected AS (SELECT id FROM candidates ORDER BY id LIMIT %d)
+SELECT j.chat_id AS chat, EXISTS(SELECT 1 FROM chat c WHERE c.ROWID = j.chat_id) AS chat_present,
+  %s, EXISTS(SELECT 1 FROM candidates LIMIT 1 OFFSET %d) AS has_more
+FROM selected s JOIN message m ON m.ROWID = s.id JOIN chat_message_join j ON j.message_id = m.ROWID
+ORDER BY m.ROWID, j.chat_id LIMIT %d`, start, limit+1, limit, msgColumns, limit, maxChangesAssociations+1), &rows); err != nil {
 		return ChangesPage{}, err
 	}
-	page := ChangesPage{Batches: []Batch{}, Next: strconv.FormatInt(start, 10)}
-	if len(rows) > limit {
-		rows, page.More = rows[:limit], true
+	if len(rows) > maxChangesAssociations {
+		return ChangesPage{}, ErrTooManyAssociations
 	}
+	page := ChangesPage{Batches: []Batch{}, Next: strconv.FormatInt(start, 10)}
 	if len(rows) == 0 {
 		return page, nil
 	}
+	page.More = rows[0].HasMore != 0
 	page.Next = strconv.FormatInt(rows[len(rows)-1].RowID, 10)
 
 	convs, err := r.conversations(ctx)
@@ -89,11 +114,22 @@ WHERE m.ROWID > %d AND m.associated_message_type = 0 ORDER BY m.ROWID LIMIT %d`,
 	grouped := map[string][]msgRow{}
 	var ids, withFiles []int64
 	var threads []string
+	seen := map[conversationMessage]bool{}
 	for _, m := range rows {
 		cv := byChat[m.ChatRow]
 		if cv == nil {
+			// A chat present in the message snapshot may disappear before conversations is read. Retrying is safer
+			// than advancing past one of the boundary's associations. Old orphan join rows remain filtered out.
+			if m.ChatPresent != 0 {
+				return ChangesPage{}, errors.New("message chat changed while reading")
+			}
 			continue
 		}
+		key := conversationMessage{cv.id, m.RowID}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		if _, ok := grouped[cv.id]; !ok {
 			order = append(order, cv)
 		}
@@ -207,13 +243,20 @@ type Hit struct {
 	Message Message `json:"message"`
 }
 
-// searchScan is how many of the newest messages a search reads: the texts only in attributedBody have to be decoded
-// to be matched, so the matching is here, not in SQL (where the query would have to be spliced in as text).
-const searchScan = 20000
+// searchScan is how many distinct newest messages a search reads: the texts only in attributedBody have to be
+// decoded to be matched, so the matching is here, not in SQL. Expansion to chat associations is bounded separately.
+const (
+	searchScan            = 20000
+	maxSearchAssociations = 40000
+)
 
 // Search finds the newest messages since then whose text contains query (any case), in the conversations keep lets
 // through, at most limit, codes masked.
 func (r *Reader) Search(ctx context.Context, query string, limit int, since time.Time, keep string) ([]Hit, error) {
+	return r.search(ctx, query, limit, since, keep, searchScan)
+}
+
+func (r *Reader) search(ctx context.Context, query string, limit int, since time.Time, keep string, scan int) ([]Hit, error) {
 	q := strings.ToLower(strings.TrimSpace(query))
 	if q == "" {
 		return nil, fmt.Errorf("empty query")
@@ -222,9 +265,19 @@ func (r *Reader) Search(ctx context.Context, query string, limit int, since time
 		limit = 20
 	}
 	var rows []msgRow
-	if err := r.query(ctx, r.chatDB(), fmt.Sprintf(`SELECT j.chat_id AS chat, %s FROM message m JOIN chat_message_join j ON j.message_id = m.ROWID
-WHERE m.date >= %d AND m.associated_message_type = 0 AND m.item_type = 0 ORDER BY m.date DESC LIMIT %d`, msgColumns, appleNanos(since), searchScan), &rows); err != nil {
+	if err := r.query(ctx, r.chatDB(), fmt.Sprintf(`WITH selected AS (
+  SELECT m.ROWID AS id FROM message m
+  WHERE m.date >= %d AND m.associated_message_type = 0 AND m.item_type = 0
+    AND EXISTS (SELECT 1 FROM chat_message_join j WHERE j.message_id = m.ROWID)
+  ORDER BY m.date DESC, m.ROWID DESC LIMIT %d
+)
+SELECT j.chat_id AS chat, %s FROM selected s JOIN message m ON m.ROWID = s.id
+JOIN chat_message_join j ON j.message_id = m.ROWID
+ORDER BY m.date DESC, m.ROWID DESC, j.chat_id LIMIT %d`, appleNanos(since), scan, msgColumns, maxSearchAssociations+1), &rows); err != nil {
 		return nil, err
+	}
+	if len(rows) > maxSearchAssociations {
+		return nil, ErrTooManyAssociations
 	}
 	var found []msgRow
 	for _, m := range rows {
@@ -247,14 +300,23 @@ WHERE m.date >= %d AND m.associated_message_type = 0 AND m.item_type = 0 ORDER B
 	}
 	var hitConvs []*conversation
 	seen := map[string]bool{}
+	seenMessages := map[conversationMessage]bool{}
+	unique := found[:0]
 	var ids []int64
 	for _, m := range found {
-		if cv := byChat[m.ChatRow]; cv != nil && !seen[cv.id] {
+		cv := byChat[m.ChatRow]
+		if cv == nil || seenMessages[conversationMessage{cv.id, m.RowID}] {
+			continue
+		}
+		seenMessages[conversationMessage{cv.id, m.RowID}] = true
+		unique = append(unique, m)
+		if !seen[cv.id] {
 			seen[cv.id] = true
 			hitConvs = append(hitConvs, cv)
 		}
 		ids = append(ids, m.Handle)
 	}
+	found = unique
 	people, err := r.members(ctx, hitConvs)
 	if err != nil {
 		return nil, err

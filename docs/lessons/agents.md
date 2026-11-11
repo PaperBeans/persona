@@ -2,6 +2,17 @@
 
 Pitfalls, odd behavior, and the trade-offs made at the time (formerly in `CLAUDE.md`, index in `docs/lessons/README.md`). Add new lessons to the matching section; create a section if none fits.
 
+## A queued AGY turn cannot own the executing prompt's text (#4564)
+
+The pending-turn record can change before the previous ACP prompt finishes. Keep the executing prompt's stream
+owner separately, clear its text at completion, and publish an empty boundary before the next prompt starts. Text
+chunks separated by a tool call are distinct messages. Accumulating them across the whole turn makes progress and
+final replies appear concatenated in the next exchange. Runtime wire tests cover queued and consecutive prompts.
+
+The web hook must also forget raw live text once its transcript item replaces it. Hiding the derived visible text
+alone retains a copy that can return when a new user message changes the matching transcript tail. A fresh delta
+may legitimately repeat an earlier answer, so retirement follows the landed stream's lifetime.
+
 - A source-search query containing a colon is not necessarily a URL: Go's `url.Parse` treats `bug: login` and `is:open login` as schemes.
   In `server/internal/node/worktree_composer.go`, only an explicit HTTP(S) prefix selects URL validation; other text remains a repository-scoped
   search, even when it contains a URL later in the query. Regress through `worktree.source` and check the exact query sent to `github.listWorkItems`,
@@ -224,6 +235,26 @@ Pitfalls, odd behavior, and the trade-offs made at the time (formerly in `CLAUDE
   (`~/.config/herdr/herdr.sock`) can't see each other. If "sessions opened locally through App remote aren't found", check herdr-core `terminal.list` first, not only the classic socket.
   When using both on a computer, select engine `herdr-both`: node refreshes both hosts in parallel, isolates events per host (`watcherSignals`), and always creates / resumes sessions through classic herdr
   (`docs/integrations/engines.md` ("Host sets"), `docs/plans/plan-orca-support.md` ("Combined engine")). Don't return to "refresh asks every host sequentially": a 2-second herdr-core delay slows herdr too.
+
+## Claude Code writes into its transcript as it exits: delete it after the process (2026-11-11, #4665)
+
+Deleting a meeting room stopped its `claude -p` and removed the transcript at once; a moment later the file was back
+with three lines Claude Code appends on exit (`last-prompt` with the last prompt's text, `atis-latch`, `cost-state`).
+Wait for the process to exit (`stopAndWait`) before removing a conversation's files, and remove its
+`<config dir>/session-env/<session id>` folder with them.
+
+## A new private profile and `--setting-sources project` both drop the login (2026-11-11, #3862)
+
+A meeting room (an assistant guest started with `--setting-sources project` so none of the owner's setup reaches it)
+answered every question "Not logged in · Please run /login" on a machine whose launcher is a shell function and whose
+gateway and token sit in `~/.claude/settings.json`'s `env`. Two things dropped that login: since #4310 a new assistant
+conversation that names no `config_dir` runs in `<PERSONA_HOME>/profiles/<launcher>`, a fresh config directory with no
+credentials and no `settings.json`; and `--setting-sources project` leaves the user's settings file out even in the right
+profile. A conversation that must sign in as the assistant does asks for `config_dir: "legacy"` and, when it limits the
+setting sources, carries the login keys (`env`, `apiKeyHelper`, the AWS and `forceLogin…` keys, `model`) of the profile's
+`settings.json` in its own `--settings`. The synthetic reply is an ordinary assistant text item (`isApiErrorMessage`,
+model `<synthetic>`, error `authentication_failed` only in the transcript); read the session row's `turn_error` before
+taking the turn's last words as an answer.
 
 ## Read colors to determine whether Claude's input box is empty (#1434)
 
@@ -452,7 +483,7 @@ Recorded screens: `server/internal/screen/testdata/claude-2.1.318-rewind-*`; par
 - Enter opens confirmation: `│ ` quotes the full message (wrapped at 109 columns, final row `(47s ago)`), then options. **Options depend on whether code changed after this message**: yes → `Restore code and conversation` / `Restore conversation` / `Restore code` /
   `Summarize from here` / `Summarize up to here` (fifth offscreen, preceded by `↓`); no → `Restore conversation` / both Summarize options / `Never mind`. Numeric selection gets it wrong; select by name.
   The explanation below (`The code will be restored +1 -1 in notes.txt.` / `The code will be unchanged.`) follows the cursor. 2.1.304 wording differs (`The conversation will be forked`); recognize only by title and option names.
-- Esc: confirmation → list (cursor retained) → closed; Enter on `(current)` also closes silently. After confirmation, the panel closes immediately, the input box contains that message (including multiline), and files are restored as selected.
+- Esc: confirmation → list (cursor retained) → closed; Enter on `(current)` also closes silently. After confirmation, the panel can close **before Claude puts the restored prompt into the input box** (#4609): panel closure and the restored draft are not one atomic screen. An app-driven rewind therefore cannot answer on the first empty box, or an immediate send is typed into the prompt when it arrives later. It waits until the matching draft has been cleared; if nothing is restored, the box must stay empty for one ordinary key-effect grace. Files are restored as selected.
 - **Chat history isn't deleted**: the file is a tree; the next message after rewind has `parentUuid` equal to the uuid before the target, and abandoned turns remain. node transcript reading removes them using "two user-authored messages under the same parent abandon the earlier message's whole subtree"
   (`transcript/branch.go`, `docs/protocol/protocol.md` ("Rewinding to a message")). **Don't walk parentUuid backward from the final line**: parallel tool results and attachments are legitimate branches (7681 in a real corpus of 122 files); a compaction `compact_boundary`
   has null `parentUuid`, so walking a chain loses the entire pre-compaction chat. Real corpus (122 local jsonl files, comparing only counts / ids): 3 had such user-message branches; old → new reading removed only abandoned items, every other file matched item-for-item,
@@ -481,8 +512,8 @@ Recorded screens: `server/internal/screen/testdata/claude-2.1.318-rewind-*`; par
   A resend of the same prompt hangs from the prompt's parent, not under it, so it keeps the root. Live (disposable herdr tab, `go test -tags herdrlive -run TestLiveTerminalRewind`, `PERSONA_LIVE_PANE` / `PERSONA_LIVE_SESSION` / `PERSONA_LIVE_TRANSCRIPT`): seen 0.7 s after the panel closed, by `/rewind` and by Esc Esc, with the transcript unchanged.
   Not covered: the marks are not persisted (after a node restart the detector fires again only while the prompt is still in the box), placeholder (paste/image) drafts, a rewind to an earlier prompt than the last, and hosts with plain-only reads.
 - Clear input: single-line uses `ctrl+k ctrl+u` (no notice); multiline needs one `ctrl+c`, which shows `Press Ctrl-C again to exit` below. Press once only, and only after confirming the box holds that message.
-- Tests: `claudeSim` in `node/rewind_sim_test.go` renders the recorded screens, and `TestClaudeSimMatchesRecordedScreens` compares each row, so flow tests use actual screen appearances;
-  live testing ran only in a disposable session (`go test -tags herdrlive -run TestLiveRewind`, `PERSONA_LIVE_PANE` / `PERSONA_LIVE_PROMPT`).
+- Tests: `claudeSim` in `node/rewind_sim_test.go` renders the recorded screens, and `TestClaudeSimMatchesRecordedScreens` compares each row, so flow tests use actual screen appearances. Its restore gate can hold the prompt back after the panel closes, making the late-restore race deterministic instead of relying on a sleep.
+  Live testing runs only in a disposable session (`go test -tags herdrlive -run TestLiveRewind`, `PERSONA_LIVE_PANE` / `PERSONA_LIVE_PROMPT`), with an isolated herdr server and a fresh directory, never the agent's working herdr or a real conversation.
 
 ## herdr reports terminal-blocking Claude notices as done (2026-11-05, #2553)
 
@@ -731,6 +762,22 @@ either one.
 - To check that a key really arrives, run a control: a plain Enter on the empty prompt left the queue as it was, while `ctrl+enter`
   (herdr's key name, or the CSI u bytes `ESC [13;5u`) sent it. Confirm in the transcript (`queue-operation remove`), not only on screen.
 
+## A fullscreen Claude Code scrolled up has its hints off screen (2026-11-11, #4537, 2.1.321)
+
+"Send now" was refused as `send_now_unrecognized` although 2.1.321 still draws `ctrl+enter to send now`. Every machine runs
+Claude Code with `"tui": "fullscreen"`, where the queued message and its hint scroll with the transcript. Scrolled up, the
+screen shows only `Jump to bottom (ctrl+End) ↓` and `❯ Press up to edit queued messages`, so the node, which reads the visible
+screen, saw a queue in the transcript and no hint.
+
+- Before concluding a hint changed, read the version's bundled code and capture the screen. Here the text was built from the
+  binding (`${keys} to send now`) and was unchanged from 2.1.311; what differed was where it was drawn.
+- A screen-reading check has to consider that the user may have scrolled. In fullscreen, Claude Code's own `scroll:bottom`
+  (ctrl+End, the key the pill names on Linux) brings the end back without sending anything, and the node reads again.
+- herdr 0.9's `send-keys` rejects End, Home and the page keys (`invalid_key`). `pane.send_text` writes their xterm bytes as
+  they are (`ESC [1;5F` for ctrl+End), which Claude Code reads as the key.
+- Read a hint by its shape, on its own line or after a gap, never from the screen joined into one line: a queued message
+  that ends in a key name ("…with ctrl+c") would otherwise lend its key to the chord.
+
 ## Antigravity planner message completion can be progress narration (#3389)
 
 A text-only `PLANNER_RESPONSE` with `status: DONE` can precede more reasoning and tools. It closes that message, not the
@@ -802,6 +849,11 @@ refused as `dialog_open` with nothing on the phone to answer.
   decide the state.
 - Measure a hook's effect on a real pty with a throwaway `--settings` hook and an empty config directory, answering both ways: the
   same check that ignored allow honoured deny.
+- `--setting-sources project` does not keep a `--settings` file out: flag settings always load, hooks, plugins and output
+  style included. A launcher alias's `--settings` is a user settings file, so a process that must carry none of the user's
+  setup (a meeting's room, `node/assistant_guest.go` `meetingRoomKeys`) copies only what it needs from it (env, login, model).
+- A node's session state is stored by the hub's manager (`db.NodeSession`): a field it does not keep is gone after the next node
+  restart. Persist what decides how a process runs (a guest's tools and kind), and fail closed when it is missing.
 
 ## A headless Claude's queue is on its stdout, not in its transcript (#4342)
 

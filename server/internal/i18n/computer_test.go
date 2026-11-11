@@ -63,3 +63,30 @@ func TestComputerStatusCopiesAcrossLanguages(t *testing.T) {
 		t.Fatal("nil capability is not nil")
 	}
 }
+
+func TestLCUArchiveErrorsAreLocalized(t *testing.T) {
+	for _, tc := range []struct {
+		text, key string
+		args      Args
+	}{
+		{"LCU staging directory is not private", "rpc_lcu_stage_private", nil},
+		{"LCU staging directory changed or is not empty", "rpc_lcu_stage_empty", nil},
+		{"LCU archive contains a duplicate path", "rpc_lcu_path_duplicate", nil},
+		{"LCU archive contains privileged permission bits", "rpc_lcu_privileged", nil},
+		{"LCU archive file is writable by group or others", "rpc_lcu_file_writable", nil},
+		{"An LCU archive file exceeds the size limit", "rpc_lcu_file_large", nil},
+		{"LCU archive contains an unsafe symlink", "rpc_lcu_link_unsafe", nil},
+		{"LCU archive contains an unsupported entry type", "rpc_lcu_type_unsupported", nil},
+		{"LCU archive contains a cyclic or overly long symlink", "rpc_lcu_link_cycle", nil},
+		{"Could not create an LCU archive symlink: example", "rpc_lcu_link_create", Args{"detail": "example"}},
+		{"Could not inspect an LCU archive symlink: example", "rpc_lcu_link_inspect", Args{"detail": "example"}},
+		{"LCU release installer format is not supported; update Persona and try again", "rpc_lcu_installer_format", nil},
+	} {
+		for _, lang := range []Lang{En, ZhHans, Ja} {
+			want := T(lang, "hub-computer."+tc.key, tc.args)
+			if got := ComputerText(lang, tc.text); got != want {
+				t.Errorf("%s %s: got %q, want %q", lang, tc.key, got, want)
+			}
+		}
+	}
+}

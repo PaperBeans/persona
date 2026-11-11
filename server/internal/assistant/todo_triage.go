@@ -492,6 +492,17 @@ func triageSupersededFailedStarts(list []listedTodo) map[string]bool {
 	return out
 }
 
+// triagePlace places each to-do of list by id, as triageTodos does (a failed start superseded by its row's finished
+// work included); the direction tree reads the same places (direction_tree.go).
+func triagePlace(list []listedTodo, look triageLookup, now time.Time, loc *time.Location) map[string]todoTriage {
+	superseded := triageSupersededFailedStarts(list)
+	placed := make(map[string]todoTriage, len(list))
+	for _, t := range list {
+		placed[t.ID] = triageTodo(t, look, now, time.Time{}, loc, superseded[t.ID])
+	}
+	return placed
+}
+
 // triageTodos places every to-do and merges related ones into rows (the web's triageTodos): closed and open to-dos never
 // share a row; a row takes its lead's section (a superseded failed start never leads); rows go most recently active
 // first. includeQuiet false leaves quiet tasks out, as the sidebar's badge does.
@@ -499,11 +510,7 @@ func triageTodos(list []listedTodo, look triageLookup, now time.Time, loc *time.
 	if !includeQuiet {
 		list = slices.DeleteFunc(slices.Clone(list), func(t listedTodo) bool { return t.Quiet })
 	}
-	superseded := triageSupersededFailedStarts(list)
-	placed := make(map[string]todoTriage, len(list))
-	for _, t := range list {
-		placed[t.ID] = triageTodo(t, look, now, time.Time{}, loc, superseded[t.ID])
-	}
+	placed := triagePlace(list, look, now, loc)
 	find := triageRelatedRoots(list)
 	var roots []string
 	byRoot := map[string][]listedTodo{}

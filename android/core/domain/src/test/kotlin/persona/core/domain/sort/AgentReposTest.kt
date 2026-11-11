@@ -175,4 +175,107 @@ class AgentReposTest {
             gitPlaceOf("/home/u/Code/app", "/home/u/orca/workspaces/app/fix/"))
         assertNull(gitPlaceOf("/code/app", null))
     }
+
+    // A linked worktree named by its host workspace's title (#4497), as on the web.
+    private val appRoot = "/home/me/code/app"
+    private val fox = "/home/me/.paseo/worktrees/abc123/brave-fox"
+    /** Its group id: the path, under the repository its host files it in, which the path does not name (#4505). */
+    private val foxId = "tree/machine-a/$fox\u0000$appRoot"
+
+    /** An agent Paseo placed: the node's git place and branch ([gitTree] off: an older node's), its workspace's title in slot_name, no slot_id. */
+    private fun paseo(id: String, tree: String = fox, branch: String? = "fix/login", workspace: String? = "Fix the login flow",
+        slotId: String? = null, gitTree: Boolean = true) =
+        AgentSession(Session(machineId = "machine-a", sessionId = id, title = id, cwd = tree, state = "working", updatedAt = "2026-01-01T01:00:00Z",
+            repoRoot = appRoot, worktree = tree.takeIf { gitTree }, branch = branch, slotName = workspace, slotId = slotId))
+
+    private fun mainCheckout(id: String, workspace: String? = null) = paseo(id, appRoot, "main", workspace)
+    private fun linked(rows: List<AgentSession>) = agentRepos(rows).single().worktrees.single { !it.main }
+
+    @Test fun aLinkedWorktreeIsNamedByTheTitleItsSessionsShareAndKeepsItsBranch() {
+        val trees = agentRepos(listOf(mainCheckout("main"), paseo("a"), paseo("b"))).single().worktrees
+        assertEquals(listOf(Triple("main", "main", true), Triple("Fix the login flow", "fix/login", false)),
+            trees.map { Triple(it.name, it.branch, it.main) })
+        assertEquals(setOf("a", "b"), trees[1].members.map { it.session.sessionId }.toSet())
+    }
+
+    @Test fun aSessionOfAnotherSourceWithoutASlotNameNeitherVotesNorBlocks() {
+        val cli = AgentSession(Session(machineId = "machine-a", sessionId = "cli", title = "cli", cwd = fox, state = "working",
+            repoRoot = appRoot, worktree = fox, branch = "fix/login"))
+        val tree = linked(listOf(paseo("a"), paseo("b"), cli))
+        assertEquals(listOf("Fix the login flow", "fix/login", 3), listOf(tree.name, tree.branch, tree.members.size))
+    }
+
+    @Test fun twoDifferentTitlesInOneTreeKeepTheBranch() {
+        val tree = linked(listOf(paseo("a"), paseo("b", workspace = "Speed up the importer")))
+        assertEquals(listOf("fix/login", "fix/login"), listOf(tree.name, tree.branch))
+    }
+
+    @Test fun aTabLabelBesideASlotIdKeepsTheBranch() {
+        val tree = linked(listOf(paseo("tab", slotId = "w1:t2")))
+        assertEquals(listOf("fix/login", "fix/login"), listOf(tree.name, tree.branch))
+    }
+
+    @Test fun theMainCheckoutKeepsItsName() {
+        assertEquals(listOf("main"), agentRepos(listOf(mainCheckout("main", "Triage"))).single().worktrees.map { it.name })
+        val older = agentRepos(listOf(AgentSession(Session(machineId = "machine-a", sessionId = "old", title = "old", cwd = appRoot,
+            repoRoot = appRoot, slotName = "Triage")))).single()
+        assertEquals("an older node's main checkout is named after its repository", listOf("app"), older.worktrees.map { it.name })
+        assertTrue(older.flat)
+    }
+
+    @Test fun aTreeWithoutABranchIsNamedByItsTitleElseByItsFolder() {
+        assertEquals("Fix the login flow", linked(listOf(paseo("a", branch = null))).name)
+        assertEquals("brave-fox", linked(listOf(paseo("a", branch = null, workspace = null))).name)
+        assertEquals("brave-fox", linked(listOf(paseo("a", branch = null, workspace = "  "))).name)
+        assertEquals("an older node's tree under the repository its host names", "Fix the login flow",
+            linked(listOf(paseo("a", branch = null, gitTree = false))).name)
+    }
+
+    @Test fun aTreeKeepsItsIdWithAndWithoutTheTitle() {
+        val titled = linked(listOf(paseo("a")))
+        val plain = linked(listOf(paseo("a", workspace = null)))
+        assertEquals(listOf("Fix the login flow", "fix/login"), listOf(titled.name, plain.name))
+        assertEquals(foxId, titled.id)
+        assertEquals(plain.id, titled.id)
+    }
+
+    @Test fun linkedTreesSortByTheNamesTheyShowAfterTheMainCheckout() {
+        val trees = agentRepos(listOf(
+            paseo("readme", "/home/me/.paseo/worktrees/abc123/wise-owl", "docs/readme", "Update the README"),
+            paseo("import", "/home/me/.paseo/worktrees/abc123/calm-otter", "perf/importer", "Speed up the importer"),
+            paseo("login"), mainCheckout("main"))).single().worktrees
+        assertEquals(listOf("main*", "Fix the login flow", "Speed up the importer", "Update the README"),
+            trees.map { it.name + if (it.main) "*" else "" })
+    }
+
+    @Test fun theListHeadsANamedTreeWithItsTitleUnderTheSameId() {
+        val list = buildAgentList(listOf(mainCheckout("main"), paseo("a")), machines, settings = byRepo)
+        assertEquals(listOf("repo/machine-a/$appRoot", "tree/machine-a/$appRoot", foxId), list.machines.single().groups)
+        val tree = list.groups.single { it.id == foxId }
+        assertEquals("Fix the login flow", tree.title.zhAny())
+        assertEquals(RepoLevel.Worktree, tree.repo)
+    }
+
+    @Test fun anOrcaWorktreeKeepsOrcasNaming() {
+        val orcaTree = "/home/me/orca/workspaces/app/fix-login"
+        val orca = AgentSession(Session(machineId = "machine-a", sessionId = "orca", title = "orca", cwd = orcaTree, state = "working",
+            repoRoot = appRoot, worktree = orcaTree, branch = "fix/login", spaceKind = "orca", spaceId = "repo-a::$orcaTree",
+            slotId = "tab1", slotName = "tab tab1"))
+        val tree = linked(listOf(orca, paseo("paseo", orcaTree)))
+        assertEquals(listOf("fix/login", "fix/login"), listOf(tree.name, tree.branch))
+        assertEquals(setOf("orca", "paseo"), tree.members.map { it.session.sessionId }.toSet())
+    }
+
+    @Test fun searchingABranchFindsATreeHeadedByItsTitle() {
+        val rows = listOf(mainCheckout("main"), paseo("a"), paseo("b"),
+            paseo("import", "/home/me/.paseo/worktrees/abc123/calm-otter", "perf/importer", "Speed up the importer"))
+        // The branch is shown nowhere: the tree is headed by its workspace's title.
+        assertEquals("Fix the login flow", buildAgentList(rows, machines, settings = byRepo).groups
+            .single { it.id == foxId }.title.zhAny())
+        val found = buildAgentList(rows, machines, settings = byRepo.copy(query = "FIX/LOGIN"))
+        assertEquals(setOf("a", "b"), found.groups.flatMap { it.rows }.map { it.session.sessionId }.toSet())
+        assertEquals("Fix the login flow", found.groups.single { it.rows.isNotEmpty() }.title.zhAny())
+        assertEquals(listOf("import"), buildAgentList(rows, machines, settings = byRepo.copy(query = "perf/"))
+            .groups.flatMap { it.rows }.map { it.session.sessionId })
+    }
 }

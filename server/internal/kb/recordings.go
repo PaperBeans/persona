@@ -92,9 +92,14 @@ type RecordingUpload struct {
 	// session that attends (nil: the main chat); see normalizeAttendance and live.go.
 	Attendance       string      `json:"attendance,omitempty"`
 	AttendingSession *SessionRef `json:"attending_session,omitempty"`
+	// Private is the meeting's private mark as it starts (meeting.go): taken only while the recording has none.
+	Private *bool `json:"private,omitempty"`
 	// badRole, badSession: the JSON held a value of the wrong type for these two fields (UnmarshalJSON), which
 	// turns attending off rather than failing the upload.
 	badRole, badSession bool
+	// room is the upload's room (meeting.go), nil without one; roomProblem what was wrong with its role.
+	room        *roomUpload
+	roomProblem string
 }
 
 // MeetingRef is the knowledge base's calendar item (meetings or events) a recording overlaps.
@@ -160,6 +165,10 @@ type Recording struct {
 	// (recording_trim.go); nil while it is whole.
 	TrimmedAt *time.Time `json:"trimmed_at,omitempty"`
 	Tagging
+
+	// Conv is the recording's meeting.json (meeting.go: its room, private mark and follow-up), read with it; nil
+	// without one. Never written to meta.json.
+	Conv *Meeting `json:"-"`
 }
 
 // Trimmed: the transcript went with recording_days; only the metadata and the minutes are left.
@@ -192,6 +201,10 @@ type RecordingPut struct {
 	Status            string
 	Attendance        string
 	AttendanceProblem string
+	// Room: the recording is a room meeting (meeting.go), or this upload asked for one; Meeting is its meeting.json
+	// after it (nil without one).
+	Room    bool
+	Meeting *Meeting
 }
 
 var (
@@ -227,6 +240,14 @@ func (s *Store) Recording(id string) (*Recording, bool) {
 		return nil, false
 	}
 	r.persisted = true
+	s.recFilesMu.RLock()
+	m, err := s.readMeeting(id)
+	s.recFilesMu.RUnlock()
+	if err != nil {
+		// Unreadable: as a room meeting whose role is off (it feeds nothing, takes no question), and private.
+		m = &Meeting{Room: &MeetingRoom{State: RoomNone}}
+	}
+	r.Conv = m
 	return &r, true
 }
 
@@ -370,6 +391,7 @@ type recordingPut struct {
 // putRecording is PutRecording; live reports a stored upload the attending feeder should look at.
 func (e *Engine) putRecording(rawID string, u RecordingUpload, now time.Time) (put recordingPut, live bool, err error) {
 	put.Attendance = AttendanceOff
+	put.Room = u.room != nil
 	if e.Store.ReadOnly() {
 		return put, false, ErrReadOnly
 	}
@@ -393,6 +415,9 @@ func (e *Engine) putRecording(rawID string, u RecordingUpload, now time.Time) (p
 		return put, false, nil
 	}
 	r, exists := st.Recording(id)
+	if exists {
+		put.Room, put.Meeting = put.Room || r.RoomMeeting(), r.Conv
+	}
 	if exists && r.Trimmed() {
 		// Its transcript went with the retention (recording_days made longer since lets it back in the window): the
 		// minutes stay what they are, and the hub takes no transcript back.
@@ -403,10 +428,20 @@ func (e *Engine) putRecording(rawID string, u RecordingUpload, now time.Time) (p
 		put.Status, put.Attendance = RecordingStale, r.AttendanceRole()
 		return put, false, nil
 	}
+	wasAttending := exists && r.Attending()
+	meeting, parts, err := e.putMeetingFields(id, &u)
+	if err != nil {
+		return put, false, err
+	}
+	defer e.meetingChanged(id, parts)
+	if meeting != nil && meeting.Room != nil {
+		put.Room, put.AttendanceProblem = true, u.roomProblem
+	}
+	put.Meeting = meeting
 	if !exists {
 		r = &Recording{ID: id}
 	}
-	wasAttending := r.Attendance != ""
+	r.Conv = meeting
 	r.Revision, r.StartedAt, r.EndedAt, r.Duration = u.Revision, u.StartedAt.UTC(), u.EndedAt, u.Duration
 	if r.EndedAt != nil {
 		t := r.EndedAt.UTC()
@@ -414,7 +449,7 @@ func (e *Engine) putRecording(rawID string, u RecordingUpload, now time.Time) (p
 	}
 	r.Language, r.Device, r.Title, r.Bookmarks, r.Complete = u.Language, u.Device, u.Title, u.Bookmarks, u.Complete
 	r.Kind, r.Calendar = u.Kind, u.Calendar
-	r.Attendance, r.AttendingSession = u.Attendance, u.AttendingSession
+	r.Attendance, r.AttendingSession = u.Attendance, u.AttendingSession // never a room meeting's (putMeetingFields)
 	r.Segments, r.Chars = len(u.Segments), 0
 	for _, sg := range u.Segments {
 		r.Chars += len([]rune(sg.Text))
@@ -432,11 +467,11 @@ func (e *Engine) putRecording(rawID string, u RecordingUpload, now time.Time) (p
 	if r.EndedAt != nil {
 		// The end batch is timed from when the hub first saw the end (live.go); the upload stands either way, and the
 		// next one carrying ended_at tries again.
-		if err := st.liveEnded(id, r.Attendance != "", now); err != nil {
+		if err := st.liveEnded(id, r.Attending() || r.RoomMeeting(), now); err != nil {
 			e.logf("recording %s: live end: %v", id, err)
 		}
 	}
-	return put, wasAttending || r.Attendance != "", nil
+	return put, wasAttending || r.Attending() || r.RoomMeeting(), nil
 }
 
 func nonNilSegments(s []RecordingSegment) []RecordingSegment {

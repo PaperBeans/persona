@@ -554,7 +554,7 @@ struct FeishuConnectorView: View {
                 }
             } footer: {
                 Text(status?.configured == false
-                     ? String(localized: "The hub isn't connected to Lark yet: run the Lark gateway on the hub machine and add it under lark in the manager's manager.json (docs/extensions/feishu.md).")
+                     ? String(localized: "The hub isn't connected to Lark yet: run the Lark gateway on the hub machine and add it under lark in the assistant's manager.json (docs/extensions/feishu.md).")
                      : String(localized: "The Lark account is signed in through the Lark gateway on the hub machine. Chats share this account with the Inbox, so there's no need to sign in again."))
             }
 
@@ -726,7 +726,7 @@ struct HubConnectorView: View {
                 }
             } footer: {
                 if let connector, !connector.signsInHere, !connector.undescribed {
-                    Text("Sign-in is set up in the manager's configuration (manager.json, see docs/operations/config.md); this page only shows the status.")
+                    Text("Sign-in is set up in the assistant's configuration (manager.json, see docs/operations/config.md); this page only shows the status.")
                 }
             }
             // Telegram switched off lists nothing until it runs: its switch is here all the same.

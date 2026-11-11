@@ -1,7 +1,5 @@
 package persona.feature.settings
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,7 +18,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -292,16 +289,14 @@ private fun SentRecall(item: SentItem, recalling: Boolean, error: ResText?, onRe
 /** The whole text with Copy text, and a note when the ledger cut it. */
 @Composable
 private fun SentTextSection(text: String) {
-    val context = LocalContext.current
     val res = LocalResources.current
-    val feedback = LocalAppFeedback.current
+    val copy = rememberCopy()
     val palette = PersonaTheme.palette
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.settings_sent_d_text), Modifier.weight(1f), style = PersonaTheme.type.caption, color = palette.ink3)
             if (text.isNotEmpty()) JButton(stringResource(R.string.settings_sent_copy_text), {
-                context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(res.getString(R.string.settings_sent_d_text), text))
-                feedback?.notice(res.getString(R.string.settings_src_copied))
+                copy(text, null)
             }, kind = JButtonKind.Quiet, size = JButtonSize.Small, icon = PhIcons.Copy)
         }
         if (text.isEmpty()) Text(stringResource(R.string.settings_sent_no_text), style = PersonaTheme.type.callout, color = palette.ink3)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/connector/imessage"
@@ -30,20 +31,68 @@ func (h *Manager) addIMessage(cfg imessage.Config) error {
 	}
 	c := imessage.NewRemote(cfg, name, h.imessageCall(cfg.Machine))
 	c.Zone = h.userLocation
-	c.SetAI(h.imessageAI(context.Background()))
+	on, err := h.imessageAI(context.Background())
+	if err != nil {
+		on = false
+		h.imessageAIPending.Store(true)
+	}
+	h.imessageArchive.init(on, h.store)
+	c.SetAI(on)
 	return h.addConnector(c)
 }
 
 // imessageAI is the user's "Hand to Persona" choice: on unless they turned it off.
-func (h *Manager) imessageAI(ctx context.Context) bool {
-	on := true
-	if h.store != nil {
-		var v bool
-		if ok, err := h.store.Setting(ctx, imessageAIKey, &v); err == nil && ok {
-			on = v
+func (h *Manager) imessageAI(ctx context.Context) (bool, error) {
+	if h.store == nil {
+		return true, nil
+	}
+	var on bool
+	ok, err := h.store.Setting(ctx, imessageAIKey, &on)
+	if err != nil {
+		return false, err
+	}
+	return !ok || on, nil
+}
+
+// A failed startup read or an uncertain settings write stays off until the
+// persisted choice can be read again. Serialize recovery with a user's PUT.
+func (h *Manager) reconcileIMessageAI(ctx context.Context) {
+	if !h.imessageAIPending.Load() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := h.imessageSettingsMu.lock(ctx); err != nil {
+		return
+	}
+	defer h.imessageSettingsMu.unlock()
+	if !h.imessageAIPending.Load() {
+		return
+	}
+	c := h.imessage()
+	if c == nil {
+		return
+	}
+	on, err := h.imessageAI(ctx)
+	if err != nil {
+		return
+	}
+	if on {
+		if err := h.imessageArchive.enable(ctx); err != nil {
+			return
+		}
+		c.SetAI(true)
+	} else {
+		c.SetAI(false)
+		if err := h.imessageArchive.disable(ctx); err != nil {
+			return
 		}
 	}
-	return on
+	h.imessageAIPending.Store(false)
+	if on {
+		h.kbKick(c.ID(), connector.ScopeChats)
+		h.kickInbox()
+	}
 }
 
 var errNotAMachine = errors.New("信息's Mac is not a machine of this hub")
@@ -82,6 +131,7 @@ func (h *Manager) imessageRoutes(api *http.ServeMux) {
 	// GET /api/v1/imessage: the status with the steps to fix it (Settings › Connectors › Messages), asked of the Mac
 	// now: the page is opened (or "Check again" is tapped) right after the permission was given.
 	api.HandleFunc("GET /api/v1/imessage", func(w http.ResponseWriter, r *http.Request) {
+		h.reconcileIMessageAI(r.Context())
 		c := h.imessage()
 		if c == nil {
 			writeCode(w, http.StatusNotFound, "not_configured", i18n.Localize(errNoIMessageMac, h.requestLang(r)), nil)
@@ -90,9 +140,16 @@ func (h *Manager) imessageRoutes(api *http.ServeMux) {
 		c.Check(r.Context())
 		writeJSON(w, c.Detail(r.Context()))
 	})
-	// PUT /api/v1/imessage/settings {"ai": bool}: "Hand to Persona" on or off. Off stops what goes to Persona at once;
-	// what the hub already keeps stays until DELETE /api/v1/imessage/data.
+	// PUT /api/v1/imessage/settings {"ai": bool}: a successful off waits for admitted archive commits; retained data
+	// stays until DELETE /api/v1/imessage/data.
 	api.HandleFunc("PUT /api/v1/imessage/settings", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		if err := h.imessageSettingsMu.lock(ctx); err != nil {
+			writeErr(w, http.StatusRequestTimeout, errors.New(http.StatusText(http.StatusRequestTimeout)))
+			return
+		}
+		defer h.imessageSettingsMu.unlock()
 		c := h.imessage()
 		if c == nil {
 			writeCode(w, http.StatusNotFound, "not_configured", i18n.T(h.requestLang(r), "hub-imessage.not_configured"), nil)
@@ -109,11 +166,39 @@ func (h *Manager) imessageRoutes(api *http.ServeMux) {
 			writeErr(w, http.StatusServiceUnavailable, errors.New("no database"))
 			return
 		}
-		if err := h.store.PutSetting(r.Context(), imessageAIKey, *in.AI); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
+		h.imessageAIPending.Store(true)
+		if *in.AI {
+			if err := h.store.PutSetting(ctx, imessageAIKey, true); err != nil {
+				c.SetAI(false)
+				retireCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				_, _ = h.imessageArchive.retire(retireCtx)
+				cancel()
+				writeErr(w, http.StatusInternalServerError, err)
+				return
+			}
+			if err := h.imessageArchive.enable(ctx); err != nil {
+				writeErr(w, http.StatusServiceUnavailable, errors.New(http.StatusText(http.StatusServiceUnavailable)))
+				return
+			}
+			c.SetAI(true)
+		} else {
+			c.SetAI(false)
+			// Retire even an off write whose database acknowledgement is lost.
+			drained, err := h.imessageArchive.retire(ctx)
+			if putErr := h.store.PutSetting(ctx, imessageAIKey, false); putErr != nil {
+				writeErr(w, http.StatusInternalServerError, putErr)
+				return
+			}
+			if err == nil {
+				err = waitIMessageArchive(ctx, drained)
+			}
+			if err != nil {
+				h.logf("imessage: archive disable did not finish: %v", err)
+				writeErrCode(w, http.StatusServiceUnavailable, "imessage_archive_pending", i18n.Err("hub-imessage.archive_pending"))
+				return
+			}
 		}
-		c.SetAI(*in.AI)
+		h.imessageAIPending.Store(false)
 		h.logf("imessage: 交给 Persona %v", *in.AI)
 		if *in.AI {
 			h.kbKick(c.ID(), connector.ScopeChats)
