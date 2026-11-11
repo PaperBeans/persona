@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"runtime"
+	"runtime/debug"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/apierr"
@@ -193,6 +194,7 @@ func TestDecodeLargeBodyCopiesOnce(t *testing.T) {
 	}
 	p := assistantwire.HTTPRequest{Method: http.MethodPost, Path: "/api/v1/assistant/conversations", Body: largeStart(4 << 20)}
 	var least uint64
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // no GC empties a pool in the middle of a run
 	for i := range 3 {
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)

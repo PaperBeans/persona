@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"reflect"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"testing"
@@ -390,12 +391,15 @@ func TestRelayCopiesALargeBodyOnce(t *testing.T) {
 	relayOnce(t, h, body)
 	var before, after runtime.MemStats
 	least := uint64(math.MaxUint64)
-	for range 3 {
-		runtime.ReadMemStats(&before)
-		relayOnce(t, h, body)
-		runtime.ReadMemStats(&after)
-		least = min(least, after.TotalAlloc-before.TotalAlloc)
-	}
+	func() {
+		defer debug.SetGCPercent(debug.SetGCPercent(-1)) // no GC empties a pool in the middle of a run
+		for range 3 {
+			runtime.ReadMemStats(&before)
+			relayOnce(t, h, body)
+			runtime.ReadMemStats(&after)
+			least = min(least, after.TotalAlloc-before.TotalAlloc)
+		}
+	}()
 	if limit := uint64(float64(len(body)+base64.StdEncoding.EncodedLen(len(body)))*1.03) + 256<<10; least > limit {
 		t.Errorf("relaying a %d-byte body allocated %d bytes, over %d (the body and its line)", len(body), least, limit)
 	}
