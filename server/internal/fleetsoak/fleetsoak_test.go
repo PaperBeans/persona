@@ -179,9 +179,10 @@ func TestReadProcessCutsWholeMinutes(t *testing.T) {
 // The comparison prints both runs' medians and how far the second is from the first.
 func TestComparison(t *testing.T) {
 	dir := t.TempDir()
+	started := time.Date(2026, 11, 12, 1, 32, 52, 0, time.UTC)
 	write := func(name string, alloc, cpu float64) string {
 		// The machine was twice as busy in the second minute: both processes used twice the CPU time.
-		r := report{Label: name, Commit: "abc1234", Minutes: 20, Processes: map[string]*processReport{
+		r := report{Label: name, Commit: "abc1234", Minutes: 20, WindowStart: started, Processes: map[string]*processReport{
 			"manager": {AllocMB: spread{Median: alloc, Min: alloc - 1, Max: alloc + 1}, CPUMs: spread{Median: cpu, Min: cpu, Max: cpu},
 				PerMinute: []minuteReport{{CPUMs: cpu}, {CPUMs: 2 * cpu}}},
 			"hub": {PerMinute: []minuteReport{{CPUMs: 1000}, {CPUMs: 2000}}}}}
@@ -197,10 +198,17 @@ func TestComparison(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"| manager allocated MB | 500.0 [499.0..501.0] | 400.0 [399.0..401.0] | -20.0% |", "| manager CPU ms | 2000 [2000..2000] | 1500 [1500..1500] | -25.0% |",
-		"| manager CPU per hub CPU, same minute | 2.000 [2.000..2.000] | 1.500 [1.500..1.500] | -25.0% |"} {
+		"| manager CPU over base's, same minute (run together) | 1 | 0.750 [0.750..0.750] | -25.0% |",
+		"| hub CPU over base's, same minute (run together) | 1 | 1.000 [1.000..1.000] | +0.0% |"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("no %q in\n%s", want, out.String())
 		}
+	}
+	// Soaks run one after the other have no minute in common: no paired row.
+	started = started.Add(22 * time.Minute)
+	out.Reset()
+	if err := printComparison(&out, filepath.Join(dir, "base.json"), write("later", 400, 1500)); err != nil || strings.Contains(out.String(), "run together") {
+		t.Errorf("soaks 22 minutes apart were paired (%v):\n%s", err, out.String())
 	}
 	if err := printComparison(io.Discard, filepath.Join(dir, "none.json"), filepath.Join(dir, "head.json")); err == nil {
 		t.Error("a report that is not there was compared")

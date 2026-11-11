@@ -10,6 +10,9 @@
 //	go run ./internal/fleetsoak -label base -minutes 20 -tree <a worktree of the base commit>/server
 //	go run ./internal/fleetsoak -compare <base out>/report.json <head out>/report.json
 //
+// CPU time follows the machine's state: to compare it, run the two soaks at the same time (each in its own terminal,
+// they share nothing) and -compare prints the second's CPU time over the first's in the same minute.
+//
 // It never reads or writes the machine's own installation: every process it starts gets an environment made here.
 package main
 
@@ -248,6 +251,7 @@ func run(ctx context.Context, o *options) (*report, error) {
 		return nil, err
 	}
 	start := time.Now()
+	rep.WindowStart = start.UTC().Truncate(time.Second)
 	lists, messages := apps.lists.Load(), apps.messages.Load()
 	say("measuring for %d minutes (load %s)", o.minutes, rep.LoadBefore)
 	for minute := 1; minute <= o.minutes; minute++ {
