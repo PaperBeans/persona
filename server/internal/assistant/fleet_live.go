@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -83,16 +85,25 @@ func (s *Service) liveLoop(ctx context.Context) {
 	tick := time.NewTicker(15 * time.Second)
 	defer tick.Stop()
 	sig := s.fleet.live.ch()
+	// Each machine's list as the last round decorated it. While the fleet keeps changing, the next round copies the
+	// rows over them instead of into new arrays: a copy of every machine's list up to ten times a second was half of
+	// what the manager allocated under churn (#3197). The 15 s look takes new arrays and gives these back, so a
+	// fleet gone quiet holds no second copy of its lists.
+	var lists map[string][]proto.Session
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-sig:
 			time.Sleep(100 * time.Millisecond)
+			if lists == nil {
+				lists = map[string][]proto.Session{}
+			}
 		case <-tick.C:
+			lists = nil
 		}
 		l := s.lang(context.Background())
-		agents, ixs, told := s.fleetInputs()
+		agents, ixs, told := s.fleetInputsInto(lists)
 		s.tellLive(buildFleetIn(l, agents, ixs))
 		s.devs.SetAttention(linkAttention(l, agents, ixs, told)) // sent on only when it changed
 	}
@@ -126,12 +137,32 @@ func (s *Service) fleetSnapshot() FleetState {
 // nothing else holds and the fleet only reads: liveLoop builds the fleet up to ten times a second, and a copy of every
 // session per agent (1.5 KB each) was most of what that allocated.
 func (s *Service) fleetInputs() ([]fleetInput, []proto.Interaction, map[string]bool) {
+	return s.fleetInputsInto(nil)
+}
+
+// fleetInputsInto is fleetInputs with each machine's rows copied over the list kept for it in kept (liveLoop's own,
+// from its last round), which then holds this round's lists; nil takes new arrays, as fleetInputs. Every round still
+// copies and decorates every list whole, only into the arrays of the last one. The agents point into kept's lists
+// until the next round: what the fleet makes of them (buildFleetIn, linkAttention) keeps strings and numbers, never a
+// row or a pointer to one.
+func (s *Service) fleetInputsInto(kept map[string][]proto.Session) ([]fleetInput, []proto.Interaction, map[string]bool) {
 	machines := s.fleetMachines()
 	lists := make([][]proto.Session, len(machines))
 	n := 0
 	for i, m := range machines {
-		lists[i] = s.decorated(m.ID)
+		// A machine listed twice would decorate into the same array twice: only its first list is kept.
+		if kept == nil || slices.ContainsFunc(machines[:i], func(o fleetMachine) bool { return o.ID == m.ID }) {
+			lists[i] = s.decorated(m.ID)
+		} else {
+			lists[i] = s.decoratedInto(m.ID, kept[m.ID])
+			keepList(kept, m.ID, lists[i])
+		}
 		n += len(lists[i])
+	}
+	if len(kept) > 0 {
+		maps.DeleteFunc(kept, func(id string, _ []proto.Session) bool { // the machines that went
+			return !slices.ContainsFunc(machines, func(m fleetMachine) bool { return m.ID == id })
+		})
 	}
 	agents := make([]fleetInput, 0, n)
 	turns := s.turnsBook()
@@ -151,6 +182,15 @@ func (s *Service) fleetInputs() ([]fleetInput, []proto.Interaction, map[string]b
 	}
 	ixs, told := s.pendingCards()
 	return agents, ixs, told
+}
+
+// keepList keeps list as the machine's for the next round. A list shorter than the last one is in the same array
+// (it did not outgrow it): the rows it left behind are cleared, so they hold nothing of the node's older lists.
+func keepList(kept map[string][]proto.Session, machine string, list []proto.Session) {
+	if old := kept[machine]; len(list) < len(old) {
+		clear(old[len(list):])
+	}
+	kept[machine] = list
 }
 
 // round2 keeps two significant digits: 12345 → 12000, 987 → 990. The island shows "12k", so finer changes would

@@ -641,6 +641,13 @@ func (m *Machine) sessionList() []proto.Session {
 	return slices.Clone(m.sessions)
 }
 
+// appendSessions appends the machine's sessions to dst (Devices.AppendSessions).
+func (m *Machine) appendSessions(dst []proto.Session) []proto.Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append(dst, m.sessions...)
+}
+
 // sessionsWhere copies out the sessions keep accepts (Devices.SessionsWhere).
 func (m *Machine) sessionsWhere(keep func(*proto.Session) bool) []proto.Session {
 	m.mu.Lock()

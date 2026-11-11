@@ -280,6 +280,22 @@ func (svc *Service) decorated(machine string) []proto.Session {
 	return list
 }
 
+// decoratedInto is decorated with the machine's rows copied into buf's array instead of a new one (liveLoop's own
+// list of the machine from its last round, fleetInputsInto). The node's rows overwrite the array's whole before they
+// are decorated, so nothing of its last decoration stays; the list returned is buf's array unless it outgrew it.
+func (svc *Service) decoratedInto(machine string, buf []proto.Session) []proto.Session {
+	mark := svc.archiveMark() // before the list is read, as archivedInventory
+	list := buf[:0]
+	if svc.devs != nil {
+		list, _ = svc.devs.AppendSessions(list, machine)
+	}
+	list, _, err := svc.archivedSessions(context.Background(), machine, svc.decorateInventory(machine, list, true), mark)
+	if err != nil {
+		svc.logf("load agent archives: %v", err)
+	}
+	return list
+}
+
 func (svc *Service) listArchivedSessions(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), agentArchiveTimeout)
 	defer cancel()

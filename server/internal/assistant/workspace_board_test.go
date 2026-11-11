@@ -121,6 +121,10 @@ func (d *boardDevs) MachineResources(string) (*proto.Machine, *proto.MetricSampl
 	return nil, nil, nil
 }
 
+func (d *boardDevs) AppendSessions(dst []proto.Session, id string) ([]proto.Session, bool) {
+	list, ok := d.Sessions(id)
+	return append(dst, list...), ok
+}
 func (d *boardDevs) Sessions(id string) ([]proto.Session, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
