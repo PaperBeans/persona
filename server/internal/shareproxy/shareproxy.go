@@ -18,8 +18,10 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/shareproof"
 	"golang.org/x/net/netutil"
 )
 
@@ -33,6 +35,7 @@ const (
 // Config pins both the external authority and a literal-loopback upstream. Listen must be unprivileged.
 type Config struct {
 	Listen, Upstream, PublicOrigin string
+	IngressKey                     []byte
 }
 
 func endpoint(raw string) (*url.URL, error) {
@@ -49,6 +52,9 @@ func endpoint(raw string) (*url.URL, error) {
 }
 
 func validate(c Config) (*url.URL, *url.URL, error) {
+	if len(c.IngressKey) != 32 {
+		return nil, nil, errors.New("a private 256-bit sharing ingress key is required")
+	}
 	upstream, err := endpoint(c.Upstream)
 	if err != nil {
 		return nil, nil, err
@@ -154,6 +160,8 @@ func Handler(c Config) (http.Handler, error) {
 	transport := &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 2 * time.Second}).DialContext,
 		DisableCompression: true, MaxConnsPerHost: maxRelays, MaxIdleConnsPerHost: maxRelays,
 		IdleConnTimeout: 30 * time.Second, ResponseHeaderTimeout: 5 * time.Second, MaxResponseHeaderBytes: 16 << 10}
+	c.IngressKey = append([]byte(nil), c.IngressKey...)
+	var lostAuthentication atomic.Bool
 	proxy := &httputil.ReverseProxy{
 		Transport: transport,
 		Rewrite: func(p *httputil.ProxyRequest) {
@@ -167,16 +175,38 @@ func Handler(c Config) (http.Handler, error) {
 			}
 			p.Out.Header.Set("Cache-Control", "no-store")
 			p.Out.Header.Set("User-Agent", "Persona-share-http")
+			if ip, ok := shareproof.Peer(p.In.RemoteAddr); ok {
+				if proof := shareproof.Sign(c.IngressKey, p.Out, ip, time.Now()); proof != "" {
+					p.Out.Header.Set(shareproof.Header, proof)
+				}
+			}
 		},
-		ModifyResponse: boundedResponse,
-		ErrorLog:       log.New(io.Discard, "", 0),
-		ErrorHandler:   func(w http.ResponseWriter, _ *http.Request, _ error) { localError(w, 502, "unavailable") },
+		ModifyResponse: func(r *http.Response) error {
+			if shareproof.Scope(r.Request) && r.Header.Get(shareproof.Acknowledgement) != shareproof.Accepted {
+				lostAuthentication.Store(true)
+				_ = r.Body.Close()
+				return errors.New("sharing ingress authentication lost")
+			}
+			return boundedResponse(r)
+		},
+		ErrorLog:     log.New(io.Discard, "", 0),
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) { localError(w, 502, "unavailable") },
 	}
 	slots := make(chan struct{}, maxRelays)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		headers(w.Header())
 		if r.Method != http.MethodGet || !strings.EqualFold(r.Host, origin.Host) || r.URL.IsAbs() || r.URL.RawPath != "" || r.URL.Opaque != "" || !publicPath(r.URL.Path) || len(r.RequestURI) > 4096 || r.ContentLength != 0 || len(r.TransferEncoding) != 0 || r.Header.Get("Upgrade") != "" {
 			localError(w, 404, "not_found")
+			return
+		}
+		if shareproof.Scope(r) {
+			if _, ok := shareproof.Peer(r.RemoteAddr); !ok {
+				localError(w, 404, "not_found")
+				return
+			}
+		}
+		if shareproof.Scope(r) && lostAuthentication.Load() {
+			localError(w, 502, "unavailable")
 			return
 		}
 		select {
@@ -197,6 +227,9 @@ func Handler(c Config) (http.Handler, error) {
 func Serve(ctx context.Context, c Config) error {
 	h, err := Handler(c)
 	if err != nil {
+		return err
+	}
+	if err := probeIngress(ctx, c); err != nil {
 		return err
 	}
 	listener, err := net.Listen("tcp", c.Listen)
@@ -229,6 +262,8 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 	f := flag.NewFlagSet("share-http", flag.ContinueOnError)
 	f.SetOutput(output)
 	var c Config
+	var configPath string
+	f.StringVar(&configPath, "hub-config", "", "owned mode0600 hub configuration containing sharing.ingress_key")
 	f.StringVar(&c.Listen, "listen", "", "independent unprivileged HTTP listen address")
 	f.StringVar(&c.Upstream, "upstream", "", "literal-loopback HTTP hub origin with explicit port")
 	f.StringVar(&c.PublicOrigin, "public-origin", "", "configured independent HTTP sharing origin with explicit port")
@@ -238,5 +273,10 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 	if f.NArg() != 0 {
 		return errors.New("share-http accepts only its named flags")
 	}
+	key, err := readIngressKey(configPath)
+	if err != nil {
+		return err
+	}
+	c.IngressKey = key
 	return Serve(ctx, c)
 }

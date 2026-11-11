@@ -7,7 +7,8 @@ import androidx.compose.ui.unit.sp
 object ContentTokens {
     val hairline = 1.dp
     val optionOutline = 1.5.dp
-    val tightGap = 6.dp
+    /** The old `Tokens.Space.xl` (20), which iOS's scale doesn't have; each use moves to `Tokens.Space.l` or `xl` (#4209). */
+    val legacyXl = 20.dp
     val rowGap = 10.dp
     val statusIcon = 18.dp
     val smallAvatar = 28.dp

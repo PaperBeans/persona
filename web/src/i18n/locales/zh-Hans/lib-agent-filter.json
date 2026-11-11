@@ -25,5 +25,8 @@
   "role_user": "用户：",
   "role_agent": "Agent：",
   "role_error": "报错：",
-  "role_title": "标题："
+  "role_title": "标题：",
+  "filter": "筛选",
+  "remove_filter": "移除{name}",
+  "search_as_code_off": "关闭代码检索"
 }

@@ -159,6 +159,7 @@ func (f *liveFix) send(t *testing.T, id, launcher, text, effort string, ex model
 
 func (f *liveFix) sendAsync(t *testing.T, id, launcher, text, effort string, ex modelExecution) string {
 	t.Helper()
+	ex.ConfigDir = f.cfg // this fixture's profile is explicit, never selected by the node service's environment
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	got, err := f.n.assistantSend(ctx, id, f.cwd, launcher, text, nil, "", effort, ex)

@@ -338,7 +338,7 @@ private fun LazyListScope.catalogExtensionBody(
             }
         }
     }
-    item("end") { androidx.compose.foundation.layout.Spacer(Modifier.padding(top = Tokens.Space.xxl)) }
+    item("end") { androidx.compose.foundation.layout.Spacer(Modifier.padding(top = Tokens.Space.xl)) }
 }
 
 private fun LazyListScope.permissionRows(key: String, title: String, permissions: List<ExtensionPermission>) {

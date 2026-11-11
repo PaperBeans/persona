@@ -24,6 +24,8 @@ internal class GroupDesktops(scope: CoroutineScope, selected: StateFlow<String?>
 
     fun onDesktops(group: String, desktops: List<HubDesktop>) = byGroup.update { it + (group to desktops) }
 
+    fun online(group: String): Boolean? = byGroup.value[group]?.isNotEmpty()
+
     fun onState(group: String, state: ConnectionState) {
         // Updating is a connected socket catching up (the hub sent the list on connecting).
         if (state != ConnectionState.Online && state != ConnectionState.Updating) byGroup.update { it - group }

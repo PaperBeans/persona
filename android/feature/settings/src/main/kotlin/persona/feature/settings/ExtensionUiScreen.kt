@@ -92,7 +92,7 @@ fun ExtensionUiPage(extensions: ExtensionManagement?, extensionId: String, uiId:
             JEmptyState(stringResource(R.string.settings_ext_page_empty_title), stringResource(R.string.settings_ext_page_empty_text), icon = PhIcons.PuzzlePiece)
         }
         extensionViewItems("page", state, handle)
-        item("page-end") { Spacer(Tokens.Space.xxl) }
+        item("page-end") { Spacer(Tokens.Space.xl) }
     }
 }
 
@@ -213,7 +213,7 @@ fun LauncherPage(machines: MachineManagement?, extensions: ExtensionManagement?,
                 item("places-loading") { JLoading() }
             }
         }
-        item("end") { Spacer(Tokens.Space.xxl) }
+        item("end") { Spacer(Tokens.Space.xl) }
     }
 }
 

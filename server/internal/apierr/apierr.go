@@ -232,6 +232,8 @@ var rpcFailureKeys = map[string]string{
 	"peer_too_long":    "rpc-errors.peer_too_long",
 	"peer_unconfirmed": "rpc-errors.peer_unconfirmed",
 	"peer_command":     "rpc-errors.peer_command",
+	// a desktop app session nothing runs, which the app did not open in time (node/claudedesktop_open.go)
+	"desktop_open_failed": "rpc-errors.desktop_open_failed",
 	// the node menus' Git ▸ Pull / Push / Fetch and the Git pane's Pull (#1888); the *_failed ones carry git's words
 	"no_directory":        "rpc-errors.no_directory",
 	"detached_head":       "rpc-errors.detached_head",

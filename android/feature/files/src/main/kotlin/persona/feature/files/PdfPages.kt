@@ -50,7 +50,7 @@ internal fun PdfPages(file: SessionFileContent, contentPadding: PaddingValues, h
     val side = pagePadding
     LazyColumn(
         Modifier.fillMaxSize().background(PersonaTheme.palette.sunken),
-        contentPadding = PaddingValues(top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding() + Tokens.Space.xxl),
+        contentPadding = PaddingValues(top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding() + Tokens.Space.xl),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
         header()

@@ -18,3 +18,4 @@ The history of the rules in `docs/design/DESIGN_SYSTEM.md`: what was decided, wh
 - **11-10 Who looks at a UI change** (#3186): a person for a large change, the Agent itself for a small one. Rejected: always a person; always the Agent. Where: 1.4.
 - **11-10 By Repository keeps its tree** (#3186): computer, repository, worktree, then session. Rejected: the work-item row in By Repository, which would leave the old view nowhere to be found. Where: 3.4.
 - **11-11 One wording for request titles** (#3690): every client takes the words iOS used ("Plan awaiting approval", "Needs your permission", "{agent} has a question", "Terminal needs you"), in en, zh-Hans and ja. Rejected: titles that say the action ("Wants to run a command", Android's). Where: 4.8, 5.6.
+- **11-11 Needs You is blue on every client** (#4194): the color iOS shows today. Rejected: red, recorded for the chat top bar on 11-06 but never used in code; the web's amber. Where: 2.1.

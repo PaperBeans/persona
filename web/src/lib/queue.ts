@@ -81,22 +81,24 @@ const IMAGES_BLOCK = /<attached_images>([\s\S]*?)<\/attached_images>/g;
  *
  *     Please check these two screens
  *     <attached_images>
- *     path: /Users/me/.persona/uploads/2026-11-10/aaaa1111.jpg
+ *     path:/Users/me/.persona/uploads/2026-11-10/aaaa1111.jpg
  *     </attached_images>
  *
- * The node writes each photo's path twice, the second time after `path: ` (node keepImagePaths); Claude's paste turns
- * the bare one into an `[Image #n]` and keeps the other. Older queues have only the bare lines, or an empty block.
+ * The node writes each photo's path twice, the second time after `path:` (node keepImagePaths); Claude's paste turns
+ * the bare one into an `[Image #n]` and keeps the other. Nodes before #4361 wrote `path: ` with a space; older queues
+ * have only the bare lines, or an empty block.
+ * `photosBeside`: photos that came back beside the words (a Persona chat's, #4342), so stand-in words are dropped too.
  */
-export function parseQueued(raw: string): QueuedParts {
+export function parseQueued(raw: string, photosBeside = 0): QueuedParts {
   const contexts: QueuedContext[] = [];
   let rest = raw.replace(CONTEXT_RE, (_, attrs: string, body: string) => {
     const { kind = "context", title = "", url = "", ...extra } = tagAttrs(attrs);
     contexts.push({ kind, title, url, text: body.trim(), ...(Object.keys(extra).length ? { attrs: extra } : {}) });
     return "";
   });
-  rest = rest.replace(IMAGES_BLOCK, (_, body: string) => `<attached_images>${body.replace(/^\s*path: /gm, "")}</attached_images>`);
+  rest = rest.replace(IMAGES_BLOCK, (_, body: string) => `<attached_images>${body.replace(/^\s*path: ?/gm, "")}</attached_images>`);
   const { text, files, photos } = parseUserText(rest);
-  const carried = photos.length + files.length + contexts.length > 0;
+  const carried = photosBeside + photos.length + files.length + contexts.length > 0;
   return { text: carried && isStandIn(text) ? "" : text, photos, files, contexts };
 }
 
@@ -110,11 +112,12 @@ export function queuedDraft(p: Pick<QueuedParts, "text" | "files">): string {
   return [p.text, ...p.files.map((f) => quotePath(f.path))].filter(Boolean).join(" ");
 }
 
-/** How many of each kind of attachment a queued message carries, for its row's marks (only the kinds it has). */
-export function queuedMarks(p: QueuedParts): { kind: "photo" | "video" | "file" | "context"; count: number }[] {
+/** How many of each kind of attachment a queued message carries, for its row's marks (only the kinds it has);
+ *  `photosBeside` as in parseQueued. */
+export function queuedMarks(p: QueuedParts, photosBeside = 0): { kind: "photo" | "video" | "file" | "context"; count: number }[] {
   const videos = p.files.filter((f) => f.kind === "video").length;
   const marks = [
-    { kind: "photo" as const, count: p.photos.length },
+    { kind: "photo" as const, count: p.photos.length + photosBeside },
     { kind: "video" as const, count: videos },
     { kind: "file" as const, count: p.files.length - videos },
     { kind: "context" as const, count: p.contexts.length },

@@ -18,5 +18,13 @@
   "inconsistent_delta": "ハブから整合性のないセッション更新が返されました。",
   "repeated_cursor": "ハブから同じセッション更新カーソルが繰り返し返されました。",
   "inconsistent_page": "ページ読み込み中にハブのセッションスナップショットが変わりました。",
-  "more": "さらに読み込む"
+  "more": "さらに読み込む",
+  "active_within": "アクティブな期間",
+  "active_within_value": "アクティブな期間：{window}",
+  "window_any": "すべての期間",
+  "window_1d": "過去 24 時間",
+  "window_7d": "過去 7 日間",
+  "window_30d": "過去 30 日間",
+  "earlier": "それ以前",
+  "earlier_hint": "選択した期間（{window}）より前に最後にアクティブだった {count} 件のセッション"
 }

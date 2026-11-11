@@ -189,7 +189,7 @@ class PersonaInstallTests(unittest.TestCase):
                 if terminal:
                     self.assertEqual(os.readlink(state / 'bin' / (FORMER_NAME + 'd')), 'personad')
 
-    def test_publish_fixture_indexes_node_and_compatibility_artifacts(self):
+    def test_publish_fixture_indexes_only_current_product_artifacts(self):
         import shutil
         publisher = (ROOT / 'scripts/release/publish.sh').read_text()
         start = publisher.index('for bin in "$OUT/bin"/personad-*')
@@ -212,12 +212,9 @@ class PersonaInstallTests(unittest.TestCase):
             sums = [line.split() for line in (binaries / 'SHA256SUMS').read_text().splitlines()]
             names = {name for digest, name in sums}
             self.assertIn('persona-node-linux-amd64.gz', names)
-            for current, old in (('personad', FORMER_NAME + 'd'), ('persona-link', FORMER_NAME + '-link')):
-                current_file = binaries / (current + '-linux-amd64.gz')
-                old_file = binaries / (old + '-linux-amd64.gz')
-                self.assertEqual(current_file.read_bytes(), old_file.read_bytes())
-                self.assertIn(current_file.name, names)
-                self.assertIn(old_file.name, names)
+            self.assertEqual({name for name in names if name.startswith(FORMER_NAME)}, set())
+            for current in ('personad', 'persona-link'):
+                self.assertIn(current + '-linux-amd64.gz', names)
             for digest, name in sums:
                 self.assertEqual(hashlib.sha256((binaries / name).read_bytes()).hexdigest(), digest)
 

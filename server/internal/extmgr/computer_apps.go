@@ -20,7 +20,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/protectedapps"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -67,26 +67,10 @@ var askedEveryTimeNames = []string{
 // approval: the plugin's "Ask the first time an app is operated", on unless turned off.
 func (s cuaSettings) approval() bool { return s.AppApproval == nil || *s.AppApproval }
 
-var (
-	getAppLiteral = lazyre.New(`getApp\(\s*(?:"([^"\\]+)"|'([^'\\]+)')\s*\)`)
-	launchLiteral = lazyre.New(`launch\(\s*(?:"([^"\\]+)"|'([^'\\]+)')\s*\)`)
-	// getAppWord and launchWord count every occurrence of the callee's name. A call the literal patterns cannot
-	// read (space or a comment before the parentheses, a computed callee, an argument that is not a plain string)
-	// then makes the script's apps unknown instead of being missed: comparing substring counts of "getApp(" would
-	// miss the same calls the literal pattern misses, and judge the script fully known.
-	getAppWord = lazyre.New(`\bgetApp\b`)
-	launchWord = lazyre.New(`\blaunch\b`)
-)
-
 // callApps is what a computer tool call names: its apps by name (or wholeScreen), and whether that is all it may
 // touch (false: a script naming its apps by expression or none, a step with no app of its own or the call's, a
 // launch_app step naming no app). An app the call opens (launch_app, cua.launch) is one it touches.
 func callApps(name, app, script string, steps json.RawMessage) (apps []string, whole bool) {
-	add := func(a string) {
-		if a = strings.TrimSpace(a); a != "" && !slices.Contains(apps, a) {
-			apps = append(apps, a)
-		}
-	}
 	switch {
 	case name == "computer_state":
 		if app == "" {
@@ -94,80 +78,14 @@ func callApps(name, app, script string, steps json.RawMessage) (apps []string, w
 		}
 		return []string{app}, true
 	case script != "":
-		for _, m := range getAppLiteral.FindAllStringSubmatch(script, -1) {
-			add(m[1] + m[2])
-		}
-		for _, m := range launchLiteral.FindAllStringSubmatch(script, -1) {
-			add(m[1] + m[2])
-		}
-		return apps, len(apps) > 0 && len(getAppWord.FindAllString(script, -1)) == len(getAppLiteral.FindAllString(script, -1)) &&
-			len(launchWord.FindAllString(script, -1)) == len(launchLiteral.FindAllString(script, -1))
+		return protectedapps.ScriptApps(script)
 	}
-	var list []map[string]json.RawMessage
-	_ = json.Unmarshal(steps, &list)
-	whole = len(list) > 0
-	for _, s := range list {
-		if opened, ok := launchTarget(s); ok {
-			if opened == "" {
-				whole = false
-			} else {
-				add(opened)
-			}
-			continue
-		}
-		var named struct {
-			App string `json:"app"`
-		}
-		found := ""
-		for k, raw := range s {
-			if k == "wait_for" || k == "expect" || k == "tool" {
-				continue
-			}
-			if json.Unmarshal(raw, &named) == nil && named.App != "" {
-				found = named.App
-			}
-		}
-		if found == "" {
-			found = app
-		}
-		if found == "" {
-			whole = false
-			continue
-		}
-		add(found)
-	}
-	return apps, whole
-}
-
-// launchTarget is the app a launch_app step opens, {"launch_app": {"name": …}} or {"tool": "launch_app", "args": {…}}:
-// its name or bundle id, "" when it names neither (not the call's default app: what opens then is the backend's
-// choice). ok is false for any other step.
-func launchTarget(s map[string]json.RawMessage) (opened string, ok bool) {
-	var tool string
-	args := s["launch_app"]
-	if raw, has := s["tool"]; has {
-		_ = json.Unmarshal(raw, &tool)
-	}
-	switch {
-	case tool == "launch_app":
-		args = s["args"]
-	case tool != "" || args == nil:
-		return "", false
-	}
-	var a struct {
-		Name     string `json:"name"`
-		BundleID string `json:"bundle_id"`
-	}
-	_ = json.Unmarshal(args, &a)
-	if opened = strings.TrimSpace(a.Name); opened == "" {
-		opened = strings.TrimSpace(a.BundleID)
-	}
-	return opened, true
+	return protectedapps.StepsApps(app, steps)
 }
 
 // appsOn is what m's Cua Driver knows of the apps named: bundle id and name, by the name given (case aside); a name
 // it does not know stands for itself. known is its list when the caller has it already (nil: asked here if needed).
-func (h *Manager) appsOn(ctx context.Context, m *Machine, names []string, known []knownApp) []approvedApp {
+func (h *Manager) appsOn(ctx context.Context, m *Machine, names []string, known []protectedapps.App) []approvedApp {
 	// LCU's own elicitation names the app. Probing list_apps first would start the runtime, and might ask, before
 	// this card exists.
 	if known == nil && h.callBackend(m) != "lcu" && slices.ContainsFunc(names, func(n string) bool { return n != wholeScreen }) {
@@ -246,7 +164,7 @@ func (h *Manager) rememberApps(ctx context.Context, m *Machine, apps []approvedA
 
 // approveApps asks on the phone about the apps this call names that m has not always allowed (or every time: those
 // never remembered, a call whose apps are not all known). asked: a card was shown; ok: go ahead. known: as appsOn.
-func (h *Manager) approveApps(ctx context.Context, m *Machine, by asker, tool string, names []string, whole bool, args json.RawMessage, known []knownApp) (asked, ok bool) {
+func (h *Manager) approveApps(ctx context.Context, m *Machine, by asker, tool string, names []string, whole bool, args json.RawMessage, known []protectedapps.App) (asked, ok bool) {
 	if !h.cua().approval() {
 		return false, true
 	}

@@ -151,6 +151,7 @@ func (h *Hub) securityError(w http.ResponseWriter, r *http.Request, status int, 
 		codeProofBusy:             "too many requests from this manager's extensions just now",
 		codeManagerOffline:        "the manager is not connected to the hub right now: try again shortly",
 		codeAuthorizeUnsure:       "a manager did not answer whose this token is: try again shortly",
+		codeTokenStoreUnavailable: "the hub could not check this token just now: try again shortly",
 	}[code]
 	if message == "" {
 		message = "invalid token"

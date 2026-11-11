@@ -14,6 +14,7 @@
   "launcher_missing_detail": "{machine} でモデルの入口「{launcher}」が見つかりません。削除された可能性があります。",
   "not_logged_in_title": "Claude Code にログインしていません",
   "not_logged_in_detail": "{machine} で一度ログインするか、API キーを使ってください。",
+  "model_not_logged_in_switch_detail": "{machine} でサインインするか、APIキーを使うか、もしくは 設定・モデル でメインチャットを別のランチャーに切り替えてください。",
   "auth_failed_title": "モデルのキーが正しくありません",
   "auth_failed_detail": "モデルのキーが間違っているか期限切れです。使えるキーに替えてください。",
   "model_fallback_unavailable_title": "拒否後に切り替えた代替モデルを利用できません",

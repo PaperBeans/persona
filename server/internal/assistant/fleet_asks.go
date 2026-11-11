@@ -3,17 +3,17 @@ package assistant
 import (
 	"sync"
 
-	"github.com/nwverse/persona/server/internal/transcript"
+	"github.com/nwverse/persona/server/internal/closeout"
 )
 
-// asksMemo keeps what transcript.AskOf found in each session's last words, by machine and session, while those words
+// asksMemo keeps what closeout.AskOf found in each session's last words, by machine and session, while those words
 // stay the same. A machine's list is decorated for every change the manager publishes, and on a machine listing
 // thousands of sessions nearly all are offline transcripts whose node did not read their question (no AsksRead) and
 // whose last words did not change since the list before: reading them again was most of the time the list took.
 type asksMemo struct {
 	mu       sync.Mutex
 	machines map[string]*askBook
-	askOf    func(string) string // transcript.AskOf when nil (tests count the reads)
+	askOf    func(string) string // closeout.AskOf when nil (tests count the reads)
 }
 
 // askBook is one machine's: each session's last words and what they ask, stamped with the round of the latest
@@ -54,11 +54,11 @@ func (m *asksMemo) reader(machine string, complete bool) askReader {
 	return r
 }
 
-// of is what text, session sid's last words, asks: transcript.AskOf(text), read again only when the words changed.
+// of is what text, session sid's last words, asks: closeout.AskOf(text), read again only when the words changed.
 // The lock is held for the lookup only, never while AskOf runs.
 func (r askReader) of(sid, text string) string {
 	if r.b == nil {
-		return transcript.AskOf(text)
+		return closeout.AskOf(text)
 	}
 	r.m.mu.Lock()
 	row, ok := r.b.rows[sid]
@@ -71,7 +71,7 @@ func (r askReader) of(sid, text string) string {
 	askOf := r.m.askOf
 	r.m.mu.Unlock()
 	if askOf == nil {
-		askOf = transcript.AskOf
+		askOf = closeout.AskOf
 	}
 	asks := askOf(text)
 	r.m.mu.Lock()

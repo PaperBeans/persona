@@ -25,5 +25,8 @@
   "role_user": "User:",
   "role_agent": "Agent:",
   "role_error": "Error:",
-  "role_title": "Title:"
+  "role_title": "Title:",
+  "filter": "Filter",
+  "remove_filter": "Remove {name}",
+  "search_as_code_off": "Turn off Search as Code"
 }

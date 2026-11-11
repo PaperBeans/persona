@@ -8,33 +8,45 @@ import Network
 /// machine: its absolute paths, its own WebSocket (HMR), redirects and cookies need nothing rewritten.
 ///
 /// Listeners last while the app runs; one found broken (the app was suspended) is started again when next asked for.
+/// What a connection dials is not fixed when the forward starts (#1886): each one asks for the group's hub, route and
+/// token at that moment, so a page keeps loading after the app moves between a tunnel and a direct address, to another
+/// hub of the group, or pairs again. A group that goes (disconnected, unpaired) takes its forwards with it.
 @MainActor
 final class PortForwarder {
     static let shared = PortForwarder()
 
     struct Key: Hashable, Sendable {
+        /// Machine ids are only unique within a group: two groups' machines with one id get a forward each.
+        var group: String
         var machine: String
         var port: Int
     }
 
+    /// The group's hub as it is now (the one its socket is on), nil when the group is gone.
+    typealias LiveConfig = @MainActor () -> ServerConfig?
+
     private var forwards: [Key: PortForward] = [:]
     private let queue = DispatchQueue(label: "persona.ports")
 
-    /// The phone's port for a machine's port, listening from now on.
-    func localPort(_ key: Key, config: ServerConfig) async throws -> Int {
-        if let f = forwards[key], f.isReady { return f.localPort }
+    /// The phone's port for a machine's port, listening from now on. `config` is asked again for each connection.
+    func localPort(_ key: Key, config: @escaping LiveConfig) async throws -> Int {
+        if let f = forwards[key], f.isReady {
+            f.config = config
+            return f.localPort
+        }
         forwards[key]?.stop()
         forwards[key] = nil
         let taken = Set(forwards.values.map(\.localPort))
-        let f = PortForward(request: Self.connectRequest(key, config: config), queue: queue)
+        let f = PortForward(key: key, config: config, queue: queue)
         try await f.start(preferring: taken.contains(key.port) ? 0 : key.port)
+        forwards[key]?.stop() // another ask for the same port finished first: the last one is kept
         forwards[key] = f
         return f.localPort
     }
 
     /// The address to open a port link at on the phone.
-    func url(for link: PortLink, machine: String, config: ServerConfig) async throws -> URL {
-        let port = try await localPort(Key(machine: machine, port: link.port), config: config)
+    func url(for link: PortLink, machine: MachineRef, config: @escaping LiveConfig) async throws -> URL {
+        let port = try await localPort(Key(group: machine.group, machine: machine.id, port: link.port), config: config)
         guard let url = URL(string: "\(link.secure ? "https" : "http")://localhost:\(port)\(link.path)") else {
             throw URLError(.badURL)
         }
@@ -45,6 +57,23 @@ final class PortForwarder {
     func key(for localURL: URL) -> Key? {
         guard let p = localURL.port, ["localhost", "127.0.0.1"].contains(localURL.host() ?? "") else { return nil }
         return forwards.first { $0.value.localPort == p }?.key
+    }
+
+    /// The forward listening for key, if any.
+    func forward(_ key: Key) -> PortForward? { forwards[key] }
+
+    /// The groups' forwards stop listening (the groups were disconnected or unpaired).
+    func close(groups: Set<String>) {
+        for (key, f) in forwards where groups.contains(key.group) {
+            f.stop()
+            forwards[key] = nil
+        }
+    }
+
+    /// Every forward stops listening (Sign Out of everything).
+    func closeAll() {
+        forwards.values.forEach { $0.stop() }
+        forwards = [:]
     }
 
     static func connectRequest(_ key: Key, config: ServerConfig) -> URLRequest {
@@ -62,18 +91,31 @@ final class PortForwarder {
 
 /// One forwarded port: its listeners and the connections through them.
 nonisolated final class PortForward: @unchecked Sendable {
-    private let request: URLRequest
+    let key: PortForwarder.Key
+    /// Where connections go: read on the main actor as each one is accepted (`PortForwarder.localPort` replaces it).
+    @MainActor var config: PortForwarder.LiveConfig
     private let queue: DispatchQueue
     private let session: URLSession
     private var listeners: [NWListener] = []
     private(set) var localPort = 0
+    #if DEBUG
+    /// Unit tests: each request a browser connection dials, before it goes out.
+    @MainActor var dialedForTests: ((URLRequest) -> Void)?
+    #endif
 
-    init(request: URLRequest, queue: DispatchQueue) {
-        self.request = request
+    @MainActor init(key: PortForwarder.Key, config: @escaping PortForwarder.LiveConfig, queue: DispatchQueue) {
+        self.key = key
+        self.config = config
         self.queue = queue
         let c = URLSessionConfiguration.default
         c.urlCache = nil
         session = URLSession(configuration: c)
+    }
+
+    /// The request the next connection dials: the group's hub, route (`HubTransport`) and token as they are now; nil
+    /// when the group is gone.
+    @MainActor func currentRequest() -> URLRequest? {
+        config().map { PortForwarder.connectRequest(key, config: $0) }
     }
 
     var isReady: Bool { !listeners.isEmpty && listeners.allSatisfy { $0.state == .ready } }
@@ -119,10 +161,19 @@ nonisolated final class PortForward: @unchecked Sendable {
     }
 
     private func accept(_ conn: NWConnection) {
-        let ws = session.webSocketTask(with: request)
-        ws.delegate = HubRedirects.shared
-        ws.maximumMessageSize = 1 << 20
-        Pump(conn: conn, ws: ws, queue: queue).start()
+        Task { @MainActor [self] in
+            guard let request = currentRequest() else {
+                conn.cancel() // the group is gone: nothing to carry the bytes to
+                return
+            }
+            #if DEBUG
+            dialedForTests?(request)
+            #endif
+            let ws = session.webSocketTask(with: request)
+            ws.delegate = HubRedirects.shared
+            ws.maximumMessageSize = 1 << 20
+            Pump(conn: conn, ws: ws, queue: queue).start()
+        }
     }
 }
 

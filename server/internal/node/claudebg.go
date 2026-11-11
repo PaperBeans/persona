@@ -183,10 +183,16 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool) []proto.
 		if s.Cwd == "" {
 			s.Cwd = m.cwd
 		}
-		if s.Title == "" {
+		// The transcript's title first, then a name something chose for this claude, then its first message (untitled)
+		// as for any session. The name Claude derives itself only stands in while there is nothing else: it is the
+		// directory's base name and two hex digits, so the sessions of one directory differed by those alone.
+		if s.Title == "" && c.NameSource != "derived" {
 			s.Title = c.Name
 		}
 		untitled(&s, m)
+		if s.Title == "" {
+			s.Title = c.Name
+		}
 		setContext(&s, m)
 		s.ModelFallback = m.modelFallback
 		s.Activity, s.ActivityAt = m.activityOf()

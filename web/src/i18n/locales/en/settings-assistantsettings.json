@@ -86,6 +86,8 @@
   "agents_title": "Agent follow-up",
   "agent_tasks": "Follow up every agent Persona starts",
   "agent_tasks_hint": "Agents started outside the main chat also get a quiet task with a supervisor, which checks the result and closes them when done. Uses extra model calls",
+  "inbox_signals": "Tell supervisors about new messages",
+  "inbox_signals_hint": "When the Inbox's AI twin links a new message from someone else to a task Persona follows up, the conversation supervising that task hears of it in its next supervision message. Needs the AI twin. Uses extra model calls",
   "archive_closed": "Archive closed sessions after",
   "archive_closed_hint": "A closed session with no open task leaves the lists after this many idle days and stays under Archived. 0 turns it off",
   "archive_closed_unit": "days",

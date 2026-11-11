@@ -171,7 +171,7 @@ private fun SentRow(item: SentItem, now: Instant, onOpen: () -> Unit, onChat: ((
     Column(Modifier.fillMaxWidth().padding(horizontal = rowPadding, vertical = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
         Column(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                Text(name, Modifier.widthIn(max = Tokens.Space.xxxl * 6), style = PersonaTheme.type.bodyStrong, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(name, Modifier.widthIn(max = Tokens.Space.xxl * 6), style = PersonaTheme.type.bodyStrong, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(target, Modifier.weight(1f), style = PersonaTheme.type.callout, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(SentText.ago(res, item.at, now), style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1)
             }
@@ -235,7 +235,7 @@ internal fun ColumnScope.SentDetailBody(
             else Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
                 fields.forEach { field ->
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
-                        Text(field.key, Modifier.width(Tokens.Space.xxxl * 3), style = PersonaTheme.type.codeSmall, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(field.key, Modifier.width(Tokens.Space.xxl * 3), style = PersonaTheme.type.codeSmall, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         JSelectableText(field.value, value, palette.ink, Modifier.weight(1f))
                     }
                 }

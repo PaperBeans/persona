@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -77,6 +78,55 @@ func (n *Node) retire(ctx context.Context, id string) (closed bool, err error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// resumed is what a Claude session that is not running is resumed with: the directory, launcher and model it was
+// started with, the modes it ran in and its title as the tab's name.
+type resumed struct {
+	cwd, launcher, mode, effort, tab string
+	execution                        modelExecution
+}
+
+// resumeWith is how a Claude session that is not running comes back, by a message (send) or by a start that resumes
+// it and leaves these out (session.start, fillResume).
+func (n *Node) resumeWith(id string, opts sendOpts) resumed {
+	st, _ := n.state.get(id)
+	r := resumed{cwd: st.Cwd, tab: n.resumeTabName(id)}
+	r.launcher, r.execution = n.resumeLauncher(st, id, opts)
+	if r.cwd == "" {
+		if p := n.transcriptPath(id); p != "" {
+			if fi, err := os.Stat(p); err == nil {
+				r.cwd = n.meta(p, fi).cwd
+			}
+		}
+	}
+	r.mode, r.effort = n.modesOf(id)
+	return r
+}
+
+// fillResume: a start that resumes a Claude session that is not running (the app's Resume Session, #4328) keeps what
+// the session ran with for whatever the start leaves out (asked), as a message that resumes it does; before, it ran
+// on the launcher's default model and wrote that over the one the session remembered. The model comes along only
+// with the launcher it was picked for. A Codex or compatible thread resumes its own way (codex_resume.go), and a
+// running session is not started again: both keep what was asked.
+func (n *Node) fillResume(id string, asked resumed) resumed {
+	if !validID(id) {
+		return asked
+	}
+	if _, live := n.agent(id); live || n.codexPath(id) != "" || n.traexPath(id) != "" {
+		return asked
+	}
+	r := n.resumeWith(id, sendOpts{})
+	out := asked
+	out.launcher = cmp.Or(asked.launcher, r.launcher)
+	if out.launcher == r.launcher && asked.execution.Model == "" && asked.execution.Fingerprint == "" {
+		out.execution.Model, out.execution.Fingerprint = r.execution.Model, r.execution.Fingerprint
+	}
+	out.cwd = cmp.Or(asked.cwd, r.cwd)
+	out.mode = cmp.Or(asked.mode, r.mode)
+	out.effort = cmp.Or(asked.effort, r.effort)
+	out.tab = cmp.Or(asked.tab, r.tab)
+	return out
 }
 
 // resumeTabName names the tab a session is resumed in: its title (Claude's AI title, or the one it was given), so

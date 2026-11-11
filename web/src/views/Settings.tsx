@@ -715,7 +715,7 @@ function Models() {
   const rc = rcGroups(shown);
   // a wrapper script on PATH or a runtime's launcher (agy, omp): a computer's, but not from an rc file
   const onPath = shown.filter((l) => !managedProvider(l.source) && l.source !== "builtin" && l.source !== "zshrc" && !l.hidden);
-  const hidden = shown.filter((l) => !managedProvider(l.source) && l.source !== "builtin" && l.hidden);
+  const hidden = shown.filter((l) => !managedProvider(l.source) && l.hidden);
   // the machines that did not answer this time, named on the entries they gave before
   const staleMark = (ids?: string[]) =>
     ids?.length ? <Pill tone="orange">{t("settings.stale", { machines: formatList(ids.map(name), { type: "conjunction", style: "narrow" }) })}</Pill> : null;
@@ -770,7 +770,8 @@ function Models() {
       {builtin.length > 0 && (
         <Group title={t("settings.builtin_title", { count: builtin.length })} footer={t("settings.builtin_footer")}>
           {builtin.map((b) => (
-            <div key={`${b.name}/${b.machine}`} className="flex items-center gap-3 px-4 py-2.5">
+            // its page tests it and hides it in Persona (#4384), as an rc-file launcher's does
+            <button key={`${b.name}/${b.machine}`} type="button" onClick={() => setOpen(b.name)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-hover">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-[13px] font-medium text-ink">{t("settings.builtin_row", { name: b.name, machine: name(b.machine) })}</span>
@@ -778,7 +779,8 @@ function Models() {
                 </div>
                 <div className="mt-0.5 truncate font-mono text-[11.5px] text-ink-3">{b.version ? `Claude Code ${b.version}` : "Claude Code"}</div>
               </div>
-            </div>
+              <Icon name="chevronRight" size={12} stroke={2} className="shrink-0 text-ink-3" />
+            </button>
           ))}
         </Group>
       )}

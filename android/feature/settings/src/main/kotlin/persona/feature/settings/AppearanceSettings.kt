@@ -231,7 +231,7 @@ fun PersonaSettings(demo: Boolean, modifier: Modifier = Modifier) {
         (if (demo) listOf(PersonaDesign.Default) else PersonaDesign.entries).forEach { d ->
             PersonaOption(d.title, d.summary, selected = d.id == chosen, tag = stringResource(R.string.settings_default).takeIf { d == PersonaDesign.Default },
                 onClick = { if (!demo) packs?.choose(d) ?: appearance.setFace(d) }) {
-                PersonaFace(PersonaState.Idle, size = Tokens.Space.xxxl * 2, design = d, pack = null)
+                PersonaFace(PersonaState.Idle, size = Tokens.Space.xxl * 2, design = d, pack = null)
             }
             Spacer(Modifier.height(Tokens.Space.m))
         }
@@ -251,8 +251,8 @@ fun PersonaSettings(demo: Boolean, modifier: Modifier = Modifier) {
                     JIconButton(PhIcons.Trash, deleteLabel, { deleting = p }, Modifier.testTag("avatar-delete-${p.id}"), enabled = p.id != deletingNow)
                 }) else null) {
                 Box(contentAlignment = Alignment.Center) {
-                    PackAvatar(packs, p, Tokens.Space.xxxl * 2)
-                    if (busy) JSpinner(Modifier.size(Tokens.Space.xxl))
+                    PackAvatar(packs, p, Tokens.Space.xxl * 2)
+                    if (busy) JSpinner(Modifier.size(Tokens.Space.xl))
                 }
             }
             Spacer(Modifier.height(Tokens.Space.m))
@@ -296,7 +296,7 @@ fun PersonaSettings(demo: Boolean, modifier: Modifier = Modifier) {
         ) {
             PersonaState.entries.forEach { state ->
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                    PersonaFace(state, size = Tokens.Space.xxxl + Tokens.Space.s, design = design, pack = pack)
+                    PersonaFace(state, size = Tokens.Space.xxl + Tokens.Space.s, design = design, pack = pack)
                     Spacer(Modifier.height(Tokens.Space.xs))
                     Text(state.label, style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1)
                 }
@@ -394,7 +394,7 @@ private fun ThemeColorOptions(store: AppStyleStore) {
 @Composable
 private fun ColorSwatch(color: androidx.compose.ui.graphics.Color?) {
     val palette = PersonaTheme.palette
-    Box(Modifier.size(Tokens.Space.xl).clip(CircleShape)
+    Box(Modifier.size(Tokens.Size.iconXS).clip(CircleShape)
         .background(color ?: palette.surfaceStrong)
         .border(Tokens.Space.xxs / 2, if (color == null) palette.accent else palette.line, CircleShape))
 }

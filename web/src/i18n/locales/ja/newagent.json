@@ -47,6 +47,7 @@
   "blocked_other_clears": "チェックか起動に一度成功すると、この表示は消えます。",
   "details": "詳細",
   "add_provider": "モデルプロバイダーを追加",
+  "manage_launchers": "ランチャーを管理",
   "try_anyway": "それでも使う",
   "close_help": "閉じる",
   "forget_failed": "「{id}」を削除できませんでした：{error}",

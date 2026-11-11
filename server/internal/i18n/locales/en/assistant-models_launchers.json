@@ -51,7 +51,6 @@
   "err_tier_model_long": "A tier model name is too long",
   "role_default": "Default model",
   "role_optional": "Optional model",
-  "err_builtin_hide": "The built-in claude is every machine's default launcher and cannot be hidden",
   "err_scope_none": "{provider} stays with the hub: no computer gets its key. Change its Devices in Settings › Model providers, or pick another provider",
   "err_scope_machine": "{provider} is not set up for {machine}. Add this computer to its Devices in Settings › Model providers, or pick another provider",
   "err_scope_work": "{machine} is a work computer: {provider} reaches it only when it is chosen in the provider's Devices (Settings › Model providers)",

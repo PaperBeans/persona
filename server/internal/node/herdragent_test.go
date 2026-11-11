@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // withPaneShell makes the shell herdr opens panes with shell for the test (TestMain: zsh).
@@ -191,5 +192,40 @@ func TestUnrecognisedClaudeIsSaidOnlyOfHerdr(t *testing.T) {
 	_, err := n.waitReady(context.Background(), "orca:t1:l1", nil)
 	if err == nil || !strings.Contains(err.Error(), "the tab's shell had not run it yet") || strings.Contains(err.Error(), "herdr") {
 		t.Fatalf("wait: %v", err)
+	}
+}
+
+// stateless is a screenHost whose engine sees claude in front of every pane but reports no state for it, as an Orca
+// fork does after the tab's rename until claude's first hook (#4438).
+type stateless struct{ screenHost }
+
+func (h *stateless) Agent(context.Context, host.PaneRef) (*host.Agent, error) {
+	return &host.Agent{Agent: "claude", AgentStatus: proto.StatusUnknown}, nil
+}
+
+// With no state from the engine, claude's input box on screen is ready; its trust dialog, a first-run screen or a
+// running turn is not.
+func TestClaudeWithoutEngineStateIsReadyByItsInputBox(t *testing.T) {
+	empty := screenFixture(t, "claude-2.1.312-empty-162.txt")
+	for _, c := range []struct {
+		name, screen string
+		ready        bool
+	}{
+		{"input box", empty, true},
+		{"trust dialog", screenFixture(t, "claude-2.1.312-trust-162.txt"), false},
+		{"security notes", screenFixture(t, "claude-2.1.318-security-notes-120.txt"), false},
+		{"turn running", empty + "\n✻ Working… (3s · esc to interrupt)\n", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			n := &Node{hosts: host.NewRegistry(&stateless{screenHost{bareHost: bareHost{kind: host.Orca}, screen: c.screen}})}
+			withStartWaits(n, time.Second, 2*time.Second)
+			a, err := n.waitReady(context.Background(), "orca:t1:l1", nil)
+			if c.ready && (err != nil || a == nil) {
+				t.Fatalf("not ready: %v", err)
+			}
+			if !c.ready && err == nil {
+				t.Fatalf("ready on %s", c.name)
+			}
+		})
 	}
 }

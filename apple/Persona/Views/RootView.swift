@@ -205,6 +205,9 @@ struct RootView: View {
         // The Theme Color on the windows too, for what UIKit draws in the window's tint (Settings' row icons, `WindowTint`).
         .onChange(of: model.look, initial: true) { WindowTint.apply() }
         #endif
+        #if DEBUG || PERF_SIGNPOST
+        .task { MainThreadWatchdog.shared.start() }
+        #endif
         #if DEBUG
         .overlay(alignment: .bottomTrailing) { PerfCountProbe() }
         // UI tests see the small window (VNC in picture in picture, #1343), which is the system's.

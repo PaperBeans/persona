@@ -84,6 +84,11 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 			return err
 		}
 	} else {
+		// A session of the desktop app's sidebar that nothing runs: the app opens it, and the message goes to its inbox,
+		// not to a claude --resume of ours (claudedesktop_open.go).
+		if handled, err := n.sendThroughDesktopApp(ctx, id, text, images); handled {
+			return err
+		}
 		// On a machine whose default host is a runtime (Paseo) the session is continued there (runtimecontrol.go).
 		if _, ok := engineRuntimes[n.defaultKind()]; ok {
 			return n.continueInRuntime(ctx, id, text, images, opts.ClientMsgID)
@@ -92,18 +97,8 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 			return r
 		}
 		// Offline: resume (with the launcher that started it, see resumeLauncher) and then send.
-		st, _ := n.state.get(id)
-		launcher, execution := n.resumeLauncher(st, id, opts)
-		cwd := st.Cwd
-		if cwd == "" {
-			if p := n.transcriptPath(id); p != "" {
-				if fi, err := os.Stat(p); err == nil {
-					cwd = n.meta(p, fi).cwd
-				}
-			}
-		}
-		mode, effort := n.modesOf(id) // resume with what it ran with: modes, model, and the tab's name from its title
-		s, err := n.start(ctx, cwd, launcher, "", id, "", mode, effort, n.resumeTabName(id), "", "", execution)
+		r := n.resumeWith(id, opts)
+		s, err := n.start(ctx, r.cwd, r.launcher, "", id, "", r.mode, r.effort, r.tab, "", "", r.execution)
 		if err != nil {
 			return err
 		}
@@ -240,14 +235,18 @@ func (n *Node) saveImages(images []proto.Image) ([]string, error) {
 }
 
 // imagePathLine starts the line that repeats a photo's path in an <attached_images> block as text (keepImagePaths).
-const imagePathLine = "path: "
+// No space after the colon: older Claude Code (2.1.296) cuts a pasted line at every space before "/" and attaches each
+// piece that is an image path, so "path: <path>" attached the picture a second time (#4361). Messages sent before
+// still have "path: <path>"; the apps read both.
+const imagePathLine = "path:"
 
 // keepImagePaths gives each path in the <attached_images> block that ends text (the node's own, or one a client wrote
-// after uploading the photos itself, as Android's composer does) a second line, "path: <path>". Claude Code's paste
-// turns a line that is only a path to a readable image into an `[Image #n]` and drops it; a line that starts with a
-// word stays text, so the agent keeps the path. The apps take only lines starting with "/" or "~" as photos. A block
-// with any other line (prose that ends in the tag, or path: lines already added) is left as it is. With words before
-// it, the block makes Claude fold the paste into a `[Pasted text #n]` placeholder (longPaste).
+// after uploading the photos itself, as Android's composer does) a second line, "path:<path>". Claude Code's paste
+// turns a line that is only a path to a readable image into an `[Image #n]` and drops it. The path: line stays text on
+// Claude Code 2.1.316 and later, so the agent keeps the path; older versions drop it without attaching anything (they
+// tell the model the picture's source path themselves). The apps take only lines starting with "/" or "~" as photos. A
+// block with any other line (prose that ends in the tag, or path: lines already added) is left as it is. With words
+// before it, the block makes Claude fold the paste into a `[Pasted text #n]` placeholder (longPaste).
 func keepImagePaths(text string) string {
 	const open = "<attached_images>"
 	rest, ok := strings.CutSuffix(strings.TrimRight(text, " \t\r\n"), "</attached_images>")

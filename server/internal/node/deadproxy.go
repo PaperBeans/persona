@@ -151,10 +151,13 @@ func withoutDeadProxies(env, own []string, base string, warn func(string)) []str
 }
 
 // userSettingsEnv is the env of the user's settings.json, in the Claude config directory the launcher's claude uses
-// (env's CLAUDE_CONFIG_DIR, else the node's): what Claude Code applies over the environment it starts with. nil when
+// (env's CLAUDE_CONFIG_DIR, else the legacy default): what Claude Code applies over the environment it starts with. nil when
 // there is none.
-func (n *Node) userSettingsEnv(env map[string]any) map[string]any {
+func (n *Node) userSettingsEnv(env map[string]any, configDir ...string) map[string]any {
 	dir := n.defaultClaudeDir()
+	if len(configDir) > 0 {
+		dir = configDir[0]
+	}
 	if d, ok := env["CLAUDE_CONFIG_DIR"].(string); ok && d != "" {
 		dir = proto.ExpandHome(d, n.home)
 	}
@@ -173,8 +176,12 @@ func (n *Node) userSettingsEnv(env map[string]any) map[string]any {
 
 // userNoProxy is the bypass lists the user's settings env sets for l's claude, by spelling (userSettingsEnv): what
 // Claude Code applies over the environment it starts with, so they come before the shell's or the node's (#6238).
-func (n *Node) userNoProxy(l proto.ManagedLauncher) map[string]string {
-	user := n.userSettingsEnv(map[string]any{"CLAUDE_CONFIG_DIR": providerEnv(l, "", "", false)["CLAUDE_CONFIG_DIR"]})
+func (n *Node) userNoProxy(l proto.ManagedLauncher, configDir ...string) map[string]string {
+	env := map[string]any{}
+	if len(configDir) == 0 {
+		env["CLAUDE_CONFIG_DIR"] = providerEnv(l, "", "", false)["CLAUDE_CONFIG_DIR"]
+	}
+	user := n.userSettingsEnv(env, configDir...)
 	out := map[string]string{}
 	for _, k := range []string{"NO_PROXY", "no_proxy"} {
 		if v, _ := user[k].(string); v != "" {
@@ -188,8 +195,8 @@ func (n *Node) userNoProxy(l proto.ManagedLauncher) map[string]string {
 // launcher's claude uses, which Claude Code applies over the environment it starts with) names a proxy in that does
 // not answer, for a launcher's settings env that sets none of them itself, when its gateway at base answers without:
 // each to be set empty there (settings env cannot unset).
-func (n *Node) deadSettingsProxies(env map[string]any, base string) []string {
-	user := n.userSettingsEnv(env)
+func (n *Node) deadSettingsProxies(env map[string]any, base string, configDir ...string) []string {
+	user := n.userSettingsEnv(env, configDir...)
 	var dead []string
 	for _, k := range proxyVars {
 		if _, ours := env[k]; ours {

@@ -111,7 +111,7 @@ internal fun ExtensionPicture(src: ExtensionImageSource?, alt: String, handle: E
             else failed = true
         }
         if (failed) Column(Modifier.padding(Tokens.Space.s), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-            JIcon(PhIcons.Image, null, size = Tokens.Space.xl, tint = palette.ink3, decorative = true)
+            JIcon(PhIcons.Image, null, size = Tokens.Size.iconXS, tint = palette.ink3, decorative = true)
             if (showAlt) Text(alt, style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }

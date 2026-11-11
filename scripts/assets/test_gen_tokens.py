@@ -344,6 +344,63 @@ class RepositoryTests(unittest.TestCase):
                 self.assertEqual(self.catalog.values[f"status.{mode}.waiting.text"], self.catalog.values[f"common.{mode}.loop"])
                 self.assertEqual(self.catalog.values[f"status.{mode}.muted.text"], self.catalog.values[f"status.{mode}.idle.text"])
 
+    KOTLIN = gen.ROOT / "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt"
+
+    def test_committed_kotlin_matches_the_generator(self):
+        self.assertEqual(self.KOTLIN.read_text(), gen.render_kotlin(self.catalog, "persona.core.designsystem"),
+                         f"Tokens.kt is stale: run python3 scripts/assets/gen_tokens.py --kotlin {self.KOTLIN.relative_to(gen.ROOT)}")
+
+    def test_repository_tokens_pass_the_check(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            code = gen.main(["--check", "--kotlin", str(self.KOTLIN)])
+        self.assertEqual(code, 0, output.getvalue())
+
+    # iOS values the JSON doesn't carry yet, or carries differently, as (iOS, JSON); None is a missing side. Each phase 1 step
+    # of #4209 that aligns a group empties its entry (T2 did spacing; T3 does motion). A Swift change outside this table fails.
+    KNOWN_DRIFT = {
+        "radius": {"thumbnail": (3, None), "page": (55, None)},
+        "space": {},
+        "motion": {"expand": (400, None), "reveal": (280, None), "conceal": (200, None), "reduced": (None, 0)},
+    }
+    # The shared motions (phase 1 R3); the rest of Theme.Motion belongs to single components (the composer, attaching, blinks).
+    SHARED_MOTION = ("state", "layout", "expand", "reveal", "conceal")
+
+    def swift_enum(self, name):
+        theme = (gen.ROOT / "apple/Shared/Design/Theme.swift").read_text()
+        found = re.search(rf'\n    enum {name} \{{\n(.*?)\n    \}}\n', theme, re.S)
+        self.assertIsNotNone(found, f"Theme.{name} not found in Theme.swift")
+        return found[1]
+
+    def assert_drift(self, group, ios):
+        tokens = {key.removeprefix(f"{group}."): value["value"] for key, value in self.catalog.values.items() if key.startswith(f"{group}.")}
+        drift = {name: (ios.get(name), tokens.get(name)) for name in ios.keys() | tokens.keys() if ios.get(name) != tokens.get(name)}
+        self.assertEqual(drift, self.KNOWN_DRIFT[group], f"Theme.swift and spec/tokens differ in {group}")
+
+    def test_ios_radius_and_spacing_match(self):
+        # A number, or another value of the same enum (Theme.Space.lines = xs).
+        value = r'static let (\w+): CGFloat = ([0-9.]+|[a-z]\w*)$'
+        for group, enum in (("radius", "Radius"), ("space", "Space")):
+            found = dict(re.findall(value, self.swift_enum(enum), re.M))
+            ios = {name: float(found.get(v, v)) for name, v in found.items()}
+            self.assertTrue(ios, f"no Theme.{enum} values found")
+            self.assert_drift(group, ios)
+
+    def test_ios_sizes_match(self):
+        # spec/tokens carries the sizes Android uses, each as Theme.Size has it; the rest of Theme.Size isn't ported.
+        ios = {name: float(value) for name, value in re.findall(r'static let (\w+): CGFloat = ([0-9.]+)$', self.swift_enum("Size"), re.M)}
+        tokens = {key.removeprefix("size."): value["value"] for key, value in self.catalog.values.items() if key.startswith("size.")}
+        self.assertTrue(tokens)
+        self.assertEqual({name: ios.get(name) for name in tokens}, tokens, "a size in spec/tokens differs from Theme.Size")
+
+    def test_ios_motion_durations_match(self):
+        motion = self.swift_enum("Motion")
+        timed = re.findall(r'static let (\w+) = Animation\.\w+\(duration: ([0-9.]+)\)', motion)
+        timed += re.findall(r'static let (\w+)Time = ([0-9.]+)\n', motion)  # reveal and conceal
+        ios = {name: round(float(seconds) * 1000) for name, seconds in timed if name in self.SHARED_MOTION}
+        self.assertEqual(set(ios), set(self.SHARED_MOTION), "a shared motion is missing from Theme.Motion")
+        self.assert_drift("motion", ios)
+
     def test_existing_contrast_conflicts_are_not_silenced(self):
         failures = {(r.style, r.mode, r.rule) for r in self.catalog.contrast_results() if not r.passed}
         self.assertIn(("lark", "dark", "onAccent"), failures)

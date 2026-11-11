@@ -76,6 +76,45 @@ class HubConnectionLivenessTest {
         }
     }
 
+    @Test fun backgroundWakePingsImmediatelyAndKeepsAnAnsweredSocket() = runBlocking {
+        Fixture(appPing = true).use { fixture ->
+            val socket = fixture.start()
+            fixture.connection.setForeground(false)
+            fixture.scheduler.runCurrent()
+            socket.receive("""{"type":"client_hello_ack","heartbeat":{"interval":240,"pong_timeout":15}}""")
+            fixture.scheduler.runCurrent()
+            fixture.advance(60_000)
+            fixture.connection.onWake()
+            fixture.scheduler.runCurrent()
+            assertFalse(socket.cancelled)
+            val ping = socket.sent.last()
+            assertEquals("ping", (ping["type"]?.jsonPrimitive?.content).zhAny())
+            socket.receive(buildJsonObject { put("type", "pong"); put("id", ping.getValue("id")) }.toString())
+            fixture.advance(5_000)
+            assertFalse(socket.cancelled)
+            assertEquals(ConnectionState.Online, fixture.connection.state.value)
+        }
+    }
+
+    @Test fun backgroundWakeReconnectsAfterTheExistingPongTimeout() = runBlocking {
+        Fixture(appPing = true).use { fixture ->
+            val socket = fixture.start()
+            fixture.connection.setForeground(false)
+            fixture.scheduler.runCurrent()
+            socket.receive("""{"type":"client_hello_ack","heartbeat":{"interval":240,"pong_timeout":15}}""")
+            fixture.scheduler.runCurrent()
+            fixture.advance(60_000)
+            fixture.connection.onWake()
+            fixture.scheduler.runCurrent()
+            assertEquals("ping", (socket.sent.last()["type"]?.jsonPrimitive?.content).zhAny())
+            fixture.advance(14_999)
+            assertFalse(socket.cancelled)
+            fixture.advance(1)
+            assertTrue(socket.cancelled)
+            assertEquals(ConnectionState.Connecting, fixture.connection.state.value)
+        }
+    }
+
     @Test fun backgroundUsesAcknowledgedHeartbeatAndRestartsNegotiationOnForeground() = runBlocking {
         Fixture(appPing = true).use { fixture ->
             val socket = fixture.start()

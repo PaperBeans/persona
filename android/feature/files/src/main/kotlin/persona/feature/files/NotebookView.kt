@@ -52,7 +52,7 @@ internal fun NotebookFile(text: String, base: String, contentPadding: PaddingVal
     }
     val side = pagePadding
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = contentPadding.calculateTopPadding(),
-        bottom = contentPadding.calculateBottomPadding() + Tokens.Space.xxl)) {
+        bottom = contentPadding.calculateBottomPadding() + Tokens.Space.xl)) {
         header()
         when (val state = load) {
             NotebookLoad.Reading -> item { JLoading() }

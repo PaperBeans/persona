@@ -50,6 +50,10 @@ describe("builtinRows", () => {
   it("is empty on an older hub", () => {
     expect(builtinRows([rc("a"), { name: "m", source: "persona" }])).toEqual([]);
   });
+
+  it("leaves a hidden built-in claude to the hidden ones", () => {
+    expect(builtinRows([{ name: "claude", source: "builtin", machines: ["m1"], hidden: true }])).toEqual([]);
+  });
 });
 
 describe("syncStateText", () => {

@@ -216,9 +216,6 @@ func (s *Service) validateModel(ctx context.Context, p ModelPurpose, b ModelBind
 				if p.CategoryID == "agent.new" && result.Agent != "claude" && result.Agent != "codex" && result.Agent != "agy" && result.Agent != "omp" {
 					return i18n.Err("assistant-models.err_agent_launcher")
 				}
-				if p.CategoryID == "agent.new" && result.Agent == "codex" && b.Effort != "" {
-					return i18n.Err("assistant-models.err_codex_effort")
-				}
 			}
 		}
 	}

@@ -25,6 +25,7 @@ final class FrameStats: NSObject {
     private var pushAtStart = (passes: 0, ms: 0.0)
 
     func start() {
+        MainThreadWatchdog.shared.reset()
         bodiesAtStart = PerfCount.bodies
         pushAtStart = (PerfCount.passes, PerfCount.totalMS)
         deltas = []
@@ -96,6 +97,7 @@ final class FrameStats: NSObject {
                 if n > 0 { r[kv.key] = n } },
             // Hub pushes applied meanwhile, and the main thread's time for them (until the run loop went idle).
             "push_passes": PerfCount.passes - pushAtStart.passes, "push_ms": PerfCount.totalMS - pushAtStart.ms,
+            "main_thread_blocks": MainThreadWatchdog.shared.report,
             "busy_over_8ms": busy.filter { $0 > 8 }.count, "busy_over_16ms": busy.filter { $0 > 16 }.count,
         ]
         if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,

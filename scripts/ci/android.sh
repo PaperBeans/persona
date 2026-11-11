@@ -133,6 +133,8 @@ if [[ $LANE == full || $LANE == lint-build-test-0 ]]; then
   run_check 'translation resources and literal baseline' python3 -B android_i18n_check.py
   run_check 'design token baseline' python3 -B android_token_baseline.py
   run_check 'design-system slot order' python3 -B android_slot_order.py
+  run_check 'generated design tokens' python3 -B "$ROOT/scripts/assets/gen_tokens.py" --check \
+    --kotlin "$ROOT/android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt"
 fi
 
 cd "$ROOT/android"

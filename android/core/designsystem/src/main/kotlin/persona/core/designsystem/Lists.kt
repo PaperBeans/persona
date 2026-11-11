@@ -236,6 +236,15 @@ fun JGroup(modifier: Modifier = Modifier, rows: List<@Composable () -> Unit>) {
  */
 val rowPadding: Dp @Composable get() = when (PersonaTheme.style) { AppStyle.Glass -> 16.dp; AppStyle.Brief -> 0.dp; AppStyle.Board -> 14.dp }
 
+/** The space between a [JRow]'s leading slot and its title. */
+private val RowLeadingGap = 14.dp
+
+/**
+ * Where a [JRow]'s title starts behind a leading icon of the default size. A line hung under such a row (a state and
+ * its time) starts here, so it sits under the title rather than under the icon in every style.
+ */
+val rowTitleStart: Dp @Composable get() = rowPadding + JIconDefaultSize + RowLeadingGap
+
 /** A settings-style row: optional icon, title and subtitle, a value or trailing control, and a chevron when it navigates. */
 @Composable
 fun JRow(
@@ -264,7 +273,7 @@ fun JRow(
 ) {
     val palette = PersonaTheme.palette
     RowFrame(modifier, onClick, onLongClick, null, enabled, selected, value, trailing, chevron, changingValue, role) {
-        if (leading != null) { leading(); Spacer(Modifier.width(14.dp)) }
+        if (leading != null) { leading(); Spacer(Modifier.width(RowLeadingGap)) }
         else if (leadingIcon != null) {
             JIcon(leadingIcon, null, size = 22.dp, tint = if (destructive) palette.danger.dot else leadingIconTint ?: palette.ink2, decorative = true)
             Spacer(Modifier.width(16.dp))

@@ -16,8 +16,11 @@ import persona.core.domain.answer.AnswerDraft
 import persona.core.domain.answer.AnswerRetry
 import persona.core.domain.answer.RequestExpiry
 import persona.core.domain.answer.needsFieldValues
+import persona.core.contracts.api.QuietHours
 import androidx.annotation.StringRes
+import java.time.DateTimeException
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 internal data class NotificationAction(
@@ -93,6 +96,24 @@ internal object NotificationPolicy {
 
     fun suppressed(session: SessionKey, foreground: Boolean, visibleSession: SessionKey?): Boolean =
         foreground && session == visibleSession
+
+    /**
+     * The same window as the hub's quiet hours, for the one-shot fetch that has no hub-approved event. A null or
+     * unreadable zone falls back to the phone's zone, which it reports as the user's zone, as on the Apple client.
+     */
+    fun hushForCatchUp(
+        quiet: QuietHours?,
+        now: Instant = Instant.now(),
+        fallbackZone: ZoneId = ZoneId.systemDefault(),
+    ): Boolean {
+        if (quiet?.enabled != true) return false
+        val start = QuietHours.minutes(quiet.start) ?: return false
+        val end = QuietHours.minutes(quiet.end) ?: return false
+        if (start == end) return false
+        val zone = try { quiet.tz?.let(ZoneId::of) ?: fallbackZone } catch (_: DateTimeException) { fallbackZone }
+        val minute = now.atZone(zone).let { it.hour * 60 + it.minute }
+        return if (start < end) minute >= start && minute < end else minute >= start || minute < end
+    }
 
     fun channel(event: NotifyEvent): String? = when (event.kind) {
         "done" -> Notifier.CH_DONE

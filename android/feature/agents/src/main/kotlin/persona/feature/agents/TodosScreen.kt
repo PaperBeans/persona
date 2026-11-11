@@ -415,7 +415,7 @@ fun TodosScreen(
                             )
                             if (open) {
                                 for (m in group.members.drop(1)) {
-                                    TodoRelatedLine(m, group.triage.getValue(m.id).section, Modifier.padding(start = Tokens.Space.xxxl)) { onOpenTodo(m.id) }
+                                    TodoRelatedLine(m, group.triage.getValue(m.id).section, Modifier.padding(start = Tokens.Space.xxl)) { onOpenTodo(m.id) }
                                 }
                             }
                         }
@@ -506,7 +506,7 @@ private fun TodoTriageRow(
                     val tickName = stringResource(R.string.agents_todo_done_action)
                     val tickLabel = stringResource(if (finished) R.string.agents_todo_reopen else R.string.agents_todo_done_action)
                     Box(
-                        Modifier.size(Tokens.Space.xxl).clip(CircleShape)
+                        Modifier.size(Tokens.Space.xl).clip(CircleShape)
                             .clickable(onClickLabel = tickLabel, role = Role.Checkbox) { onDone(todo, !finished) }
                             .semantics {
                                 contentDescription = tickName
@@ -542,7 +542,7 @@ private fun TodoTriageRow(
                 if (finished) {
                     todo.autoDoneReason?.let { reason ->
                         Text(reason, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 2,
-                            overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = Tokens.Space.xxxl))
+                            overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = Tokens.Space.xxl))
                     }
                 } else {
                     // One line of what is going on (iOS TodoRow): why it finished on its own, the most urgent
@@ -550,9 +550,9 @@ private fun TodoTriageRow(
                     TodoActivityLine(todo, urgent, urgent?.let { cards[it.agent.key] }, startFailed = todo.startError?.takeIf { it.isNotEmpty() })
                     // Done as asked but not live yet (#3306): where it is held, while its agents are not at it again.
                     todo.hold?.takeIf { state != TodoState.Working && state != TodoState.NeedsYou }?.let {
-                        TodoHoldLine(it, Modifier.padding(start = Tokens.Space.xxxl))
+                        TodoHoldLine(it, Modifier.padding(start = Tokens.Space.xxl))
                     }
-                    TodoPlanLine(todo, Modifier.padding(start = Tokens.Space.xxxl))
+                    TodoPlanLine(todo, Modifier.padding(start = Tokens.Space.xxl))
                 }
                 if (triage.section == TriageSection.Pr) {
                     // PR to merge: the PR, and how long since anything of it moved, however old (#3206)
@@ -564,12 +564,12 @@ private fun TodoTriageRow(
                         color = PersonaTheme.palette.accent,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = Tokens.Space.xxxl)
+                        modifier = Modifier.padding(start = Tokens.Space.xxl)
                             .then(if (url != null) Modifier.clickable { runCatching { links.openUri(url) } } else Modifier),
                     )
                 }
                 Row(
-                    Modifier.fillMaxWidth().padding(start = Tokens.Space.xxxl, top = Tokens.Space.xxs),
+                    Modifier.fillMaxWidth().padding(start = Tokens.Space.xxl, top = Tokens.Space.xxs),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
                 ) {
@@ -717,7 +717,7 @@ private fun TodoActivityLine(todo: Todo, urgent: TodoMostUrgent?, card: Interact
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
-        modifier = Modifier.padding(start = Tokens.Space.xxxl)
+        modifier = Modifier.padding(start = Tokens.Space.xxl)
     ) {
         if (reason == null && orphaned == null && urgent != null) {
             JStatusDot(when (urgent.status) {

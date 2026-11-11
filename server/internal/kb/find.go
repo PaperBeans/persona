@@ -87,7 +87,7 @@ func matcher(query string) func(string) bool {
 func searchable(rel string) bool {
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	switch {
-	case parts[0] == "cursors" || parts[0] == "history" || parts[0] == selectDir:
+	case parts[0] == "cursors" || parts[0] == "history" || parts[0] == selectDir || parts[0] == trashDirName:
 		return false
 	case len(parts) == 3 && parts[0] == KindChat && parts[2] == retentionFile:
 		return false

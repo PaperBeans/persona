@@ -17,34 +17,32 @@ struct RecordingsSection: View {
     @State private var capture = RecordingCapture.shared
 
     var body: some View {
+        // The recording being made is the now-recording card, not a row of the list below it.
+        let capturing = capture.state == .recording || capture.state == .paused
+        let recents = library.entries.filter { !(capturing && $0.id == capture.recordingID) }
         Section {
             RecordingCaptureControls()
         } footer: {
-            Text("Audio stays on this device; watch recordings come back here. After on-device transcription the text syncs to Knowledge automatically and is kept for the last \(sync.store.days) days, so the Assistant and agents can find it with a Knowledge search.")
+            // Read once, before a recording: not under the controls of one that runs.
+            if capture.state == .idle {
+                Text("Audio stays on this device. Its text syncs to Knowledge and is kept for \(sync.store.days) days.")
+            }
         }
-        #if os(iOS)
-        // The meeting being recorded: Persona's part in it, and asking it (#2981). Only with a hub that offers attending,
-        // or a meeting already attended.
-        if capture.state != .idle, let entry = capture.recordingID.flatMap(library.entry), entry.isMeeting, entry.active,
-           entry.source == .phone, entry.attendance != nil || MeetingAttendees.offered(model) {
-            MeetingAttendanceSection(entry: entry)
-        }
-        #endif
         Section {
-            if library.entries.isEmpty {
+            if recents.isEmpty, !capturing {
                 EmptyStateView(symbol: Theme.Icon.recording, title: String(localized: "No Recordings Yet"),
                                message: String(localized: "Record meetings, dictation and on-site notes with your phone or Apple Watch; the transcribed text goes into Knowledge."))
                     .listRowBackground(Color.clear)
             }
-            ForEach(library.entries) { entry in
+            ForEach(recents) { entry in
                 NavigationLink { RecordingDetailView(id: entry.id) } label: { RecordingRow(entry: entry) }
                     .accessibilityIdentifier("recording-row")
             }
         } header: {
-            if !library.entries.isEmpty {
+            if !recents.isEmpty {
                 HStack(spacing: Theme.Space.sm) {
                     Text("Recent Recordings")
-                    Text("\(library.entries.count)").foregroundStyle(Color.secondary.opacity(0.7)).monospacedDigit()
+                    CountBadge(count: recents.count)
                 }
             }
         } footer: {
@@ -112,8 +110,10 @@ struct RecordingStatusText: View {
     }
 }
 
-/// Start / pause / bookmark / stop for a recording on this phone (the watch has its own). Meeting Recording leads: one tap,
-/// named after the calendar event happening now (`MeetingRecorder`, docs/apple/recording.md「Meeting recordings」).
+/// Start a recording on this phone (the watch has its own). Meeting Recording leads: one prominent button, named after the
+/// calendar event happening now (`MeetingRecorder`, docs/apple/recording.md「Meeting recordings」); the options for it are
+/// one row each, and a plain Start Recording is the secondary button under them. While one runs, the controls are one row:
+/// the now-recording card, which opens the live sheet (`RecordingLiveSheet`).
 struct RecordingCaptureControls: View {
     @State private var capture = RecordingCapture.shared
     @State private var library = RecordingLibrary.shared
@@ -125,9 +125,13 @@ struct RecordingCaptureControls: View {
     @State private var meetingNow: RecordingMeeting?
     @State private var calendarAskable = false
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var size
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Persona's part in the next meeting (#2981): the hub's default until one is picked here for it.
     @State private var pickedRole: MeetingAttendance?
     @State private var pickedAttendee: MeetingAttendees.Candidate?
+    /// A start was tapped and recording has not begun (the calendar read, then the microphone): the hero stays, busy.
+    @State private var startRequested = false
     #endif
 
     var body: some View {
@@ -159,54 +163,80 @@ struct RecordingCaptureControls: View {
     }
 
     @ViewBuilder private var controls: some View {
-        if capture.state == .idle {
-            #if os(iOS)
-            meetingStart
-            if MeetingAttendees.offered(model) {
-                MeetingAttendanceStart(role: Binding(get: { pickedRole ?? MeetingAttendees.defaultRole(model) }, set: { pickedRole = $0 }),
-                                       attendee: attendee, pick: { pickedAttendee = $0 })
-            }
-            #endif
-            Picker("Recording Language", selection: $locale) {
-                Text("Chinese").tag("zh-CN")
-                Text("English").tag("en-US")
-                Text("Japanese").tag("ja-JP")
-            }.font(Theme.Font.body)
-            #if os(iOS)
-            if hasBluetooth {
-                Picker("Microphone", selection: $inputRaw) {
-                    ForEach(RecordingInput.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
-                }.font(Theme.Font.body)
-            }
-            #endif
-            Button { let chosen = input; Task { await capture.start(locale: locale, input: chosen) } } label: {
-                Label("Start Recording", systemImage: Theme.Icon.recording).lineLimit(1)
-            }.accessibilityIdentifier("recording-start")
-        } else if capture.state == .starting {
-            ProgressView(String(localized: "Waiting for microphone access")).font(Theme.Font.secondary)
-            Button("Cancel") { capture.cancelStarting() }.lineLimit(1)
+        #if os(iOS)
+        if capture.state == .recording || capture.state == .paused {
+            nowRecording
         } else {
-            recordingNow
+            idleControls
         }
-        if let error = capture.error { Text(error).font(Theme.Font.secondary).foregroundStyle(Theme.danger) }
-        if let notice = capture.notice { Text(notice).font(Theme.Font.secondary).foregroundStyle(.secondary) }
+        banners
+        #else
+        legacyControls
+        #endif
     }
 
     #if os(iOS)
+    // MARK: Idle
+
+    /// Where a start is: tapped and not yet recording, or in the capture's own `.starting`.
+    private var preparing: RecordingPhase {
+        RecordingPhase.derive(.init(startRequested: startRequested, capture: capture.state == .starting ? .starting : .idle))
+    }
+
+    @ViewBuilder private var idleControls: some View {
+        let busy = preparing != .idle
+        hero(busy: busy)
+        if capture.state == .starting { startingRow }
+        // The plain recording is a quiet second way to start, right under the first, before any option.
+        Button { startNote() } label: {
+            Label("Start Recording", systemImage: Theme.Icon.recording).font(Theme.Font.body)
+                .lineLimit(size.isAccessibilitySize ? 3 : 1).minimumScaleFactor(0.6)
+                .frame(maxWidth: .infinity)
+                .scaledFrame(minHeight: Theme.Size.tapTarget)
+        }
+        .buttonStyle(.borderless)
+        .disabled(busy)
+        .accessibilityIdentifier("recording-start")
+        if MeetingAttendees.offered(model) {
+            personaRow.disabled(busy)
+            if role.attends {
+                NavigationLink { MeetingAttendeePicker(selected: attendee?.key) { pickedAttendee = $0 } } label: {
+                    MeetingAttendeeLabel(title: attendee?.title, detail: attendee?.detail)
+                }
+                .disabled(busy)
+                .accessibilityIdentifier("meeting-attendee")
+            }
+        }
+        Picker("Recording Language", selection: $locale) {
+            Text("Chinese").tag("zh-CN")
+            Text("English").tag("en-US")
+            Text("Japanese").tag("ja-JP")
+        }.font(Theme.Font.body).disabled(busy)
+        if hasBluetooth {
+            Picker("Microphone", selection: $inputRaw) {
+                ForEach(RecordingInput.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
+            }.font(Theme.Font.body).disabled(busy)
+        }
+    }
+
     /// Meeting Recording, and what it will be called: the calendar's meeting on now, or a way to let it read the calendar.
-    @ViewBuilder private var meetingStart: some View {
+    /// While the start is in flight the button keeps its label, shows a spinner beside it and is disabled.
+    @ViewBuilder private func hero(busy: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Button {
-                let attendance = startAttendance
-                pickedRole = nil; pickedAttendee = nil
-                Task { await MeetingRecorder.shared.startMeeting(inForeground: true, openPage: false, attendance: attendance) }
-            } label: {
-                Label("Meeting Recording", systemImage: Theme.Icon.recording)
-                    .font(Theme.Font.bodyStrong)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity)
+            Button { startMeeting() } label: {
+                HStack(spacing: Theme.Space.s) {
+                    // At accessibility sizes the icon goes: the words never truncate, they scale down a little instead.
+                    if size.isAccessibilitySize { Text("Meeting Recording") } else { Label("Meeting Recording", systemImage: Theme.Icon.recording) }
+                    if busy { ProgressView() }
+                }
+                .font(Theme.Font.bodyStrong)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .frame(maxWidth: .infinity)
+                .scaledFrame(minHeight: Theme.Size.tapTarget)
             }
             .themedButton(prominent: true)
+            .disabled(busy)
             .accessibilityIdentifier("recording-meeting-start")
             if let meeting = meetingNow, let title = meeting.title {
                 Label(String(localized: "Calendar: \(title) · \(Self.span(meeting))"), systemImage: Theme.Icon.calendarEvent)
@@ -220,7 +250,8 @@ struct RecordingCaptureControls: View {
                         meetingNow = await MeetingCalendar.meetingOffMain()
                     }
                 } label: {
-                    Label("Name Recordings After Calendar Meetings", systemImage: Theme.Icon.calendarEvent).font(Theme.Font.caption).lineLimit(1)
+                    Label("Name Recordings After Calendar Meetings", systemImage: Theme.Icon.calendarEvent).font(Theme.Font.caption)
+                        .lineLimit(size.isAccessibilitySize ? 4 : 1).multilineTextAlignment(.leading)
                 }
                 .buttonStyle(.borderless)
             } else {
@@ -228,6 +259,129 @@ struct RecordingCaptureControls: View {
             }
         }
         .padding(.vertical, Theme.Space.xs)
+    }
+
+    /// The capture is `.starting` (the microphone): Cancel is possible only now. "Waiting for microphone access" is the
+    /// detail line, not the whole block.
+    private var startingRow: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack(spacing: Theme.Space.m) {
+                Text("Starting…").font(Theme.Font.body)
+                Spacer(minLength: Theme.Space.s)
+                Button { capture.cancelStarting() } label: { Text("Cancel").lineLimit(1) }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("recording-start-cancel")
+            }
+            Text("Waiting for microphone access").font(Theme.Font.caption).foregroundStyle(.secondary)
+        }
+        .transition(.opacity)
+    }
+
+    /// Persona's part: one menu, the same control and label as while recording, with what it does under it.
+    private var personaRow: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            Picker(selection: Binding(get: { role }, set: { pickedRole = $0 })) {
+                ForEach(MeetingAttendance.allCases, id: \.self) { Text($0.title).tag($0) }
+            } label: {
+                Label("Persona", systemImage: Theme.Icon.persona)
+            }
+            .pickerStyle(.menu)
+            .font(Theme.Font.body)
+            .accessibilityIdentifier("meeting-attendance-role")
+            if role.attends {
+                Text(role.detail).font(Theme.Font.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("meeting-attendance-detail")
+            }
+        }
+    }
+
+    private var role: MeetingAttendance { pickedRole ?? MeetingAttendees.defaultRole(model) }
+
+    // MARK: Recording
+
+    /// The now-recording card: one tappable row with the recording's mark, title, time and state; it opens the live sheet.
+    @ViewBuilder private var nowRecording: some View {
+        let entry = capture.recordingID.flatMap(library.entry)
+        let paused = capture.state == .paused
+        Button { RecordingLivePresenter.shared.open() } label: {
+            HStack(spacing: Theme.Space.m) {
+                RecordingStateDot(paused: paused).scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
+                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                    Text(entry?.displayTitle ?? String(localized: "Recording")).font(Theme.Font.bodyStrong)
+                        .lineLimit(size.isAccessibilitySize ? 3 : 1)
+                        .accessibilityIdentifier("recording-now-title")
+                    Text(capture.interrupted ? String(localized: "Paused by a call") : paused ? String(localized: "Paused") : String(localized: "Recording [Recordings Section 5254d3]"))
+                        .font(Theme.Font.secondary)
+                        .foregroundStyle(paused ? Color.secondary : Palette.recordingRed)
+                        .accessibilityIdentifier("recording-now-state")
+                    if size.isAccessibilitySize { clock(paused: paused) }
+                }
+                Spacer(minLength: Theme.Space.s)
+                if !size.isAccessibilitySize { clock(paused: paused) }
+                ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.captionStrong).foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(Text("Opens the recording"))
+        .accessibilityIdentifier("recording-now-card")
+        .recordingMotion(reduced: reduceMotion, value: paused)
+    }
+
+    private func clock(paused: Bool) -> some View {
+        RecordingClock(running: !paused, font: Theme.Font.bodyStrong)
+            .foregroundStyle(paused ? Color.secondary : Color.primary)
+    }
+
+    // MARK: Problems
+
+    /// What went wrong, or is worth knowing, as banners: no microphone permission has a way to Settings, not a dead button.
+    @ViewBuilder private var banners: some View {
+        if let error = capture.error {
+            let denied = error == String(localized: "Allow Persona to use the microphone in Settings")
+            Group {
+                if denied {
+                    NoticeBanner(text: error, tone: .danger) {
+                        Button { openSettings() } label: { Text("Open Settings").lineLimit(1) }
+                    }
+                } else {
+                    NoticeBanner(text: error, tone: .danger)
+                }
+            }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets())
+        }
+        if let notice = capture.notice {
+            NoticeBanner(text: notice, tone: .neutral)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+        }
+    }
+
+    private func openSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+    }
+
+    // MARK: Starting
+
+    private func startMeeting() {
+        let attendance = startAttendance
+        pickedRole = nil; pickedAttendee = nil
+        startRequested = true
+        Task {
+            await MeetingRecorder.shared.startMeeting(inForeground: true, openPage: false, attendance: attendance)
+            startRequested = false
+        }
+    }
+
+    private func startNote() {
+        let chosen = input
+        startRequested = true
+        Task {
+            await capture.start(locale: locale, input: chosen)
+            startRequested = false
+        }
     }
 
     /// Who attends the next meeting: the one picked here, else the one picked last (or the main chat).
@@ -250,60 +404,58 @@ struct RecordingCaptureControls: View {
         guard let start = meeting.start, let end = meeting.end else { return "" }
         return (start..<max(end, start)).formatted(.interval.hour().minute())
     }
+
+    private func refreshBluetooth() {
+        hasBluetooth = RecordingInput.bluetoothConnected
+    }
     #endif
 
+    #if os(visionOS)
+    // MARK: visionOS keeps its controls: the live sheet is the phone's.
+
+    @ViewBuilder private var legacyControls: some View {
+        if capture.state == .idle {
+            Picker("Recording Language", selection: $locale) {
+                Text("Chinese").tag("zh-CN")
+                Text("English").tag("en-US")
+                Text("Japanese").tag("ja-JP")
+            }.font(Theme.Font.body)
+            Button { Task { await capture.start(locale: locale, input: .phone) } } label: {
+                Label("Start Recording", systemImage: Theme.Icon.recording).lineLimit(1)
+            }.accessibilityIdentifier("recording-start")
+        } else if capture.state == .starting {
+            ProgressView(String(localized: "Waiting for microphone access")).font(Theme.Font.secondary)
+            Button("Cancel") { capture.cancelStarting() }.lineLimit(1)
+        } else {
+            legacyRecordingNow
+        }
+        if let error = capture.error { Text(error).font(Theme.Font.secondary).foregroundStyle(Theme.danger) }
+        if let notice = capture.notice { Text(notice).font(Theme.Font.secondary).foregroundStyle(.secondary) }
+    }
+
     /// A recording in progress: what it is, its time and state, and pause / bookmark / stop.
-    @ViewBuilder private var recordingNow: some View {
+    @ViewBuilder private var legacyRecordingNow: some View {
         let entry = capture.recordingID.flatMap(library.entry)
         if let entry {
-            HStack(spacing: Theme.Space.s) {
-                if entry.isMeeting { Chip(text: String(localized: "Meeting"), symbol: Theme.Icon.meeting, look: .tint(Theme.accent)) }
-                Text(entry.displayTitle).font(Theme.Font.heading).lineLimit(1)
-            }
-            .accessibilityIdentifier("recording-now-title")
+            Text(entry.displayTitle).font(Theme.Font.heading).lineLimit(1)
+                .accessibilityIdentifier("recording-now-title")
         }
         HStack(spacing: Theme.Space.s) {
             Text(RecordingFormat.clock(capture.elapsed)).font(Theme.Font.title.monospacedDigit())
             Spacer()
-            Text(capture.interrupted ? String(localized: "Paused by a call") : capture.state == .paused ? String(localized: "Paused") : String(localized: "Recording [Recordings Section 5254d3]"))
-                .font(Theme.Font.secondary).foregroundStyle(capture.interrupted ? Theme.cautionText : Theme.danger)
+            Text(capture.state == .paused ? String(localized: "Paused") : String(localized: "Recording [Recordings Section 5254d3]"))
+                .font(Theme.Font.secondary).foregroundStyle(Theme.danger)
                 .accessibilityIdentifier("recording-now-state")
         }
-        if capture.interrupted {
-            Text("It carries on by itself when the call ends, or when you come back to Persona.").font(Theme.Font.caption).foregroundStyle(.secondary)
-        }
-        #if os(iOS)
-        if hasBluetooth, RecordingInput(rawValue: inputRaw) == .bluetooth, let name = capture.inputName {
-            Text("Microphone: \(name)").font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
-        }
-        #endif
         HStack(spacing: Theme.Space.m) {
             Button { capture.togglePause() } label: {
                 Label(capture.state == .paused ? String(localized: "Continue") : String(localized: "Pause"), systemImage: capture.state == .paused ? Theme.Icon.run : Theme.Icon.pause).lineLimit(1)
             }.themedButton()
             Button { capture.addMark() } label: { Label("Bookmark", systemImage: Theme.Icon.pin).lineLimit(1) }.themedButton()
                 .accessibilityIdentifier("recording-bookmark")
-            Button { stop() } label: { Label("Stop [Car Play Voice Screen c7b24e]", systemImage: Theme.Icon.interrupt).lineLimit(1) }
+            Button { _ = capture.stop() } label: { Label("Stop [Car Play Voice Screen c7b24e]", systemImage: Theme.Icon.interrupt).lineLimit(1) }
                 .themedButton().tint(Theme.danger).accessibilityIdentifier("recording-stop")
         }
-        if let marks = entry?.marks, !marks.isEmpty {
-            Label(String(localized: "Bookmarks \(ListFormatter.localizedString(byJoining: marks.map(RecordingFormat.clock)))"), systemImage: Theme.Icon.pin)
-                .font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
-        }
-        Text("Recording continues if you leave this page or lock the screen. Tap End when you're done.").font(Theme.Font.caption).foregroundStyle(.secondary)
-    }
-
-    private func stop() {
-        #if os(iOS)
-        MeetingRecorder.shared.stop(recordingID: nil)
-        #else
-        _ = capture.stop()
-        #endif
-    }
-
-    #if os(iOS)
-    private func refreshBluetooth() {
-        hasBluetooth = RecordingInput.bluetoothConnected
     }
     #endif
 }
@@ -322,6 +474,9 @@ struct RecordingsPage: View {
             .themedPage()
             .navigationTitle(String(localized: "Recordings"))
             .navigationBarTitleDisplayMode(.inline)
+            #if os(iOS)
+            .recordingLiveSheet()
+            #endif
             #if DEBUG
             // `-showMeetingSample minutes|pending`: the made-up finished meeting's page (screenshots, UI tests).
             .navigationDestination(item: $debugRecording) { RecordingDetailView(id: $0) }
@@ -350,6 +505,7 @@ struct RecordingDetailView: View {
     /// The transcript line a timestamp jumped to, lit for a moment.
     @State private var lit: Int?
     @State private var minutes = RecordingMinutesModel()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
@@ -360,7 +516,7 @@ struct RecordingDetailView: View {
         .themedPage()
         // Each new revision (more text, the end) may bring or change the minutes; while they are on their way, ask again.
         .task(id: "\(library.entry(id)?.revision ?? 0)|\(minutes.round)") { await followMinutes() }
-        .navigationTitle("Record [Recordings Section ef2821]")
+        .navigationTitle("Recording")
         .navigationBarTitleDisplayMode(.inline)
         .task {
             if library.entries.contains(where: \.isRolling) {
@@ -406,10 +562,6 @@ struct RecordingDetailView: View {
                         .font(Theme.Font.secondary).foregroundStyle(.secondary)
                 }
                 if transcription.current == id { ProgressView().tint(Theme.accent) }
-            } footer: {
-                Text(entry.isRolling
-                    ? String(localized: "Rolling keeps the last \(Int(RecordingRolling.keepHours)) hours. Pull a range to transcribe it; text syncs into Knowledge. Audio stays on this device.")
-                    : String(localized: "Only the text and timestamps go into Knowledge; the original audio isn't uploaded. After the retention period (\(sync.store.days) days) it's cleared from this device and Knowledge."))
             }
             if entry.isRolling {
                 rollingSections(entry)
@@ -419,12 +571,13 @@ struct RecordingDetailView: View {
                     if entry.sentences.isEmpty {
                         Text("No transcript yet.").font(Theme.Font.secondary).foregroundStyle(.secondary)
                     }
+                    let ids = Self.stableIDs(entry.sentences)
                     ForEach(Array(entry.sentences.enumerated()), id: \.offset) { index, sentence in
                         VStack(alignment: .leading, spacing: Theme.Space.xs) {
                             Text(RecordingFormat.clock(sentence.start)).font(Theme.Font.caption.monospacedDigit()).foregroundStyle(.secondary)
                             Text(sentence.text).font(Theme.Font.body).textSelection(.enabled)
                         }
-                        .id(RecordingDetailView.anchor(index))
+                        .id(ids[index])
                         .listRowBackground(lit == index ? Theme.accentTint : nil)
                         .accessibilityIdentifier(lit == index ? "recording-sentence-lit" : "recording-sentence")
                     }
@@ -450,7 +603,17 @@ struct RecordingDetailView: View {
                         .accessibilityIdentifier("recording-delete")
                 }
             }
+            // The retention text is read once, at the end: not between the header and the minutes.
+            Section {
+                EmptyView()
+            } footer: {
+                Text(entry.isRolling
+                    ? String(localized: "Rolling keeps the last \(Int(RecordingRolling.keepHours)) hours. Pull a range to transcribe it; text syncs into Knowledge. Audio stays on this device.")
+                    : String(localized: "Only the text and timestamps go into Knowledge; the original audio isn't uploaded. After the retention period (\(sync.store.days) days) it's cleared from this device and Knowledge."))
+            }
         }
+        // The minutes unfold when they arrive (Reduce Motion: at once).
+        .animation(reduceMotion ? nil : Theme.Motion.reveal, value: minutes.state)
     }
 
     private func followMinutes() async {
@@ -461,13 +624,23 @@ struct RecordingDetailView: View {
         }
     }
 
-    /// A transcript line's scroll anchor.
-    static func anchor(_ index: Int) -> String { "sentence-\(index)" }
+    /// A transcript line's identity: where it starts, in milliseconds, so a row keeps its identity when text is added before
+    /// or after it (a line at the same start gets a number after it).
+    static func stableIDs(_ sentences: [RecordingSentence]) -> [String] {
+        var seen: [Int: Int] = [:]
+        return sentences.map { sentence in
+            let millis = Int((sentence.start * 1000).rounded())
+            let count = seen[millis, default: 0]
+            seen[millis] = count + 1
+            return count == 0 ? "sentence-\(millis)" : "sentence-\(millis)-\(count)"
+        }
+    }
 
     /// To the transcript line said at `seconds` (a timestamp in the minutes), lit for two seconds.
     private func jump(to seconds: Double, in entry: RecordingEntry, proxy: ScrollViewProxy) {
         guard let index = RecordingMinutes.sentenceIndex(at: seconds, in: entry.sentences) else { return }
-        withAnimation(Theme.Motion.layout) { proxy.scrollTo(Self.anchor(index), anchor: .center) }
+        let ids = Self.stableIDs(entry.sentences)
+        withAnimation(reduceMotion ? nil : Theme.Motion.layout) { proxy.scrollTo(ids[index], anchor: .center) }
         lit = index
         Task {
             try? await Task.sleep(for: .seconds(2))
@@ -571,12 +744,15 @@ struct RecordingMeetingFacts: View {
     var meeting: RecordingMeeting
 
     var body: some View {
-        if let start = meeting.start, let end = meeting.end {
-            Label((start..<max(end, start)).formatted(.interval.month().day().hour().minute()), systemImage: Theme.Icon.calendarEvent)
-                .font(Theme.Font.secondary).foregroundStyle(.secondary)
-        }
-        if let location = meeting.location {
-            Label(location, systemImage: Theme.Icon.place).font(Theme.Font.secondary).foregroundStyle(.secondary).lineLimit(1)
+        // When and where on one line.
+        let when: String? = {
+            guard let start = meeting.start, let end = meeting.end else { return nil }
+            return (start..<max(end, start)).formatted(.interval.month().day().hour().minute())
+        }()
+        let line = [when, meeting.location].compactMap { $0 }.joined(separator: " · ")
+        if !line.isEmpty {
+            Label(line, systemImage: when == nil ? Theme.Icon.place : Theme.Icon.calendarEvent)
+                .font(Theme.Font.secondary).foregroundStyle(.secondary).lineLimit(2)
         }
         if !meeting.attendees.isEmpty {
             Label(ListFormatter.localizedString(byJoining: meeting.attendees), systemImage: Theme.Icon.people)

@@ -180,3 +180,39 @@ func TestParkedPaneShowingItsJob(t *testing.T) {
 		t.Fatalf("keys did not reach the pane: %v", f.trace())
 	}
 }
+
+// A claude in another terminal is titled like any session: by its transcript's title, else by its first message. The
+// name Claude Code derives for it (nameSource "derived": the directory's base name and two hex digits) stands in only
+// while there is neither; a name something chose for it is its title, as before.
+func TestOutsideClaudeTitleNotItsDerivedName(t *testing.T) {
+	n, _, home := herdrNode(t)
+	noPaneEnv(t)
+	writeTranscript(t, home, home, sidA, time.Now(),
+		`{"type":"user","uuid":"u1","timestamp":"2026-11-11T09:00:00Z","cwd":"`+home+`","sessionId":"`+sidA+`","message":{"role":"user","content":"what is this repository for"}}`,
+		strings.Repeat(" ", 4096))
+	proc := map[string]any{"sessionId": sidA, "cwd": home, "kind": "interactive", "entrypoint": "cli", "status": "idle",
+		"name": "home-a8", "nameSource": "derived"}
+	writeClaudeProc(t, home, os.Getpid(), proc)
+	if s := byID(listSessions(t, n))[sidA]; s.SourceKind == "" || s.Title != "what is this repository for" {
+		t.Errorf("derived name over the first message: %q (%+v)", s.Title, s)
+	}
+
+	// A name something chose (claude -n, /rename, a peer, a hook), or one from a Claude Code that does not say where
+	// its name came from.
+	for _, source := range []string{"user", "peer", "auto", ""} {
+		proc["name"], proc["nameSource"] = "release-check", source
+		writeClaudeProc(t, home, os.Getpid(), proc)
+		if s := byID(listSessions(t, n))[sidA]; s.Title != "release-check" {
+			t.Errorf("nameSource %q: title %q", source, s.Title)
+		}
+	}
+
+	// Nothing said yet: the derived name rather than no title.
+	writeTranscript(t, home, home, sidB, time.Now(),
+		`{"type":"permission-mode","permissionMode":"default","sessionId":"`+sidB+`"}`, strings.Repeat(" ", 4096))
+	writeClaudeProc(t, home, os.Getppid(), map[string]any{"sessionId": sidB, "cwd": home, "kind": "interactive",
+		"entrypoint": "cli", "status": "idle", "name": "home-b1", "nameSource": "derived"})
+	if s := byID(listSessions(t, n))[sidB]; s.SourceKind == "" || s.Title != "home-b1" {
+		t.Errorf("a claude that said nothing yet: %q (%+v)", s.Title, s)
+	}
+}

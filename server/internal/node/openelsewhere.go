@@ -41,6 +41,9 @@ type claudeProc struct {
 	Entrypoint string `json:"entrypoint"`
 	Cwd        string `json:"cwd"`
 	Name       string `json:"name"`
+	// NameSource says where Name came from: "derived" is the one Claude Code makes up itself, its directory's base
+	// name and two hex digits ("home-a8"); "user", "peer", "collision", "auto" and "hook" are names something chose.
+	NameSource string `json:"nameSource"`
 	// Kind is "interactive" for a claude in a terminal, "bg" for a background session Claude's daemon runs; Status is
 	// busy, idle or waiting (claudebg.go).
 	Kind   string `json:"kind"`

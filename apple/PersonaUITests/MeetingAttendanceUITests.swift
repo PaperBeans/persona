@@ -17,7 +17,7 @@ final class MeetingAttendanceUITests: XCTestCase {
         let app = launch(hub, ["-openShellPage", "recordings"])
         XCTAssertTrue(app.buttons["recording-meeting-start"].waitForExistence(timeout: 15), app.debugDescription)
         // A launch remembers what the last hub said until this one's hello is in: then the role goes.
-        let role = app.segmentedControls["meeting-attendance-role"]
+        let role = app.descendants(matching: .any)["meeting-attendance-role"].firstMatch
         XCTAssertTrue(waitFor(15) { !role.exists }, "no role from a hub that doesn't offer attending")
         sleep(2)
         XCTAssertFalse(role.exists, "and it stays away")
@@ -30,9 +30,9 @@ final class MeetingAttendanceUITests: XCTestCase {
         let hub = try mockHub()
         try attendance(hub, on: true, default: "off")
         let app = launch(hub, ["-openShellPage", "recordings"])
-        let role = app.segmentedControls["meeting-attendance-role"]
+        let role = app.descendants(matching: .any)["meeting-attendance-role"].firstMatch
         XCTAssertTrue(role.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(waitFor { role.buttons["关"].isSelected }, app.debugDescription)
+        XCTAssertTrue(waitFor { roleText(role).contains("关") }, app.debugDescription)
         XCTAssertFalse(app.buttons["meeting-attendee"].exists, "no one attends while Persona is off")
         XCTAssertTrue(app.buttons["recording-meeting-start"].isHittable)
     }
@@ -43,14 +43,14 @@ final class MeetingAttendanceUITests: XCTestCase {
         let hub = try mockHub()
         try attendance(hub, on: true, default: "listener")
         let app = launch(hub, ["-openShellPage", "recordings"])
-        let role = app.segmentedControls["meeting-attendance-role"]
+        let role = app.descendants(matching: .any)["meeting-attendance-role"].firstMatch
         XCTAssertTrue(role.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(waitFor { role.buttons["旁听"].isSelected }, "the hub's default: \(app.debugDescription)")
+        XCTAssertTrue(waitFor { roleText(role).contains("旁听") }, "the hub's default: \(app.debugDescription)")
         let attendee = app.buttons["meeting-attendee"]
         XCTAssertTrue(attendee.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(waitFor { attendee.label.contains("主对话") }, "the main chat attends until another is picked: \(attendee.label)")
 
-        role.buttons["参会"].tap()
+        role.tap(); app.buttons["参会"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "出声回答")).firstMatch.waitForExistence(timeout: 5),
                       app.debugDescription)
 
@@ -67,10 +67,10 @@ final class MeetingAttendanceUITests: XCTestCase {
         scrollTo(attendee, in: app)
         XCTAssertTrue(attendee.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(waitFor { attendee.label.contains(picked) }, "\(attendee.label) should name \(picked)")
-        XCTAssertTrue(role.buttons["参会"].isSelected, "picking who attends keeps the role picked for this meeting")
+        XCTAssertTrue(roleText(role).contains("参会"), "picking who attends keeps the role picked for this meeting")
         try shot(app, "start-choice")
 
-        role.buttons["关"].tap()
+        role.tap(); app.buttons["关"].firstMatch.tap()
         XCTAssertFalse(app.buttons["meeting-attendee"].waitForExistence(timeout: 2), "no one attends while Persona is off")
     }
 
@@ -102,7 +102,8 @@ final class MeetingAttendanceUITests: XCTestCase {
         scrollTo(answer, in: app)
         XCTAssertTrue(answer.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertFalse(app.buttons["meeting-stop-speaking"].exists, "listening in, nothing is said aloud")
-        XCTAssertEqual(try meeting(hub).asks(live).first?["question_source"] as? String, "typed")
+        // The newest question: the mock keeps a recording's questions from earlier tests.
+        XCTAssertEqual(try meeting(hub).asks(live).last?["question_source"] as? String, "typed")
         try shot(app, "answered-on-screen")
     }
 
@@ -128,7 +129,7 @@ final class MeetingAttendanceUITests: XCTestCase {
         let sources = app.descendants(matching: .any)["meeting-answer-sources"].firstMatch
         XCTAssertTrue(sources.exists, "what the answer drew on")
         scrollTo(sources, in: app)
-        let asked = try XCTUnwrap(try meeting(hub).asks(live).first)
+        let asked = try XCTUnwrap(try meeting(hub).asks(live).last, "the newest question (the mock keeps earlier tests' too)")
         XCTAssertEqual(asked["question_source"] as? String, "heard")
         XCTAssertEqual(asked["speak"] as? Bool, true)
         try shot(app, "answered-aloud")
@@ -208,6 +209,9 @@ final class MeetingAttendanceUITests: XCTestCase {
             app.swipeUp()
         }
     }
+
+    /// The role menu's picked value: its label and value, whichever the menu puts it in.
+    private func roleText(_ role: XCUIElement) -> String { "\(role.label) \(role.value ?? "")" }
 
     private func waitFor(_ seconds: TimeInterval = 10, _ ok: () -> Bool) -> Bool {
         let deadline = Date.now.addingTimeInterval(seconds)

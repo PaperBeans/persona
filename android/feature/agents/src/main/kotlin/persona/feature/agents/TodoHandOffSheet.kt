@@ -270,7 +270,7 @@ internal fun TodoHandOffSheet(
                             .background(PersonaTheme.palette.accent)
                     )
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ContentTokens.tightGap)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.sm)) {
                             JIcon(PhIcons.ListChecks, null, size = Tokens.Space.l, tint = PersonaTheme.palette.accent)
                             Text(
                                 stringResource(R.string.agents_row_todo, todo.title),

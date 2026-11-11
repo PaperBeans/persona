@@ -204,7 +204,7 @@ class AssistantTraysShotsTest {
                 PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
                     Column(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("assistant-page-shot")) {
                         HomeNavigation(listOf(NavItem("assistant", "Assistant", PhIcons.Sparkle), NavItem("agents", "Agents", PhIcons.Robot)), "assistant", {},
-                            leading = { JAppMark(Tokens.Space.xxl) })
+                            leading = { JAppMark(Tokens.Space.xl) })
                         Box(Modifier.weight(1f)) {
                             ChatScreen(main, fixture.chats, fixture.sender, fixture.interactions, fixture.sessions, {},
                                 chrome = ChatChromeBindings(tasks = fixture.tasks, inboxTrays = fixture.inbox, inboxScope = "fixture", onOpenSession = { fixture.opened += it }),
@@ -259,7 +259,7 @@ class AssistantTraysShotsTest {
                 PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
                     Column(Modifier.fillMaxSize().background(PersonaTheme.palette.background).testTag("assistant-page-shot")) {
                         HomeNavigation(listOf(NavItem("assistant", "Assistant", PhIcons.Sparkle), NavItem("agents", "Agents", PhIcons.Robot)), tab,
-                            { tab = it }, leading = { JAppMark(Tokens.Space.xxl) })
+                            { tab = it }, leading = { JAppMark(Tokens.Space.xl) })
                         Box(Modifier.weight(1f)) {
                             ChatScreen(main, fixture.chats, fixture.sender, fixture.interactions, fixture.sessions, {},
                                 chrome = ChatChromeBindings(tasks = if (tab == "assistant") fixture.tasks else null,

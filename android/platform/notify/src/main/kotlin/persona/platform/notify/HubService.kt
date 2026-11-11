@@ -115,7 +115,7 @@ open class HubService : Service() {
             scope.launch {
                 val delivery = NotificationDelivery(interactions, sessions, ::suppressed,
                     notifier::postInteraction, notifier::postNotify, notifier::retract,
-                    notificationPreferences::refreshPreferences)
+                    notificationPreferences::refreshPreferences, notifier::deliveredRequests)
                 Notify.events.notificationEvents().collect { event ->
                     try {
                         // Bound refresh work without terminating observation on a transient HTTP failure.

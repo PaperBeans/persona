@@ -224,8 +224,8 @@ internal fun NewFromPhotoOption(onClick: () -> Unit, enabled: Boolean) {
     val palette = PersonaTheme.palette
     PersonaOption(stringResource(R.string.settings_avatar_new_from_photo), stringResource(R.string.settings_avatar_new_from_photo_detail),
         selected = false, onClick = { if (enabled) onClick() }, radio = false, modifier = Modifier.testTag("avatar-new-from-photo")) {
-        Box(Modifier.size(Tokens.Space.xxxl * 2).clip(CircleShape).background(palette.surfaceStrong), contentAlignment = Alignment.Center) {
-            JIcon(PhIcons.Plus, null, size = Tokens.Space.xxl, tint = palette.accent)
+        Box(Modifier.size(Tokens.Space.xxl * 2).clip(CircleShape).background(palette.surfaceStrong), contentAlignment = Alignment.Center) {
+            JIcon(PhIcons.Plus, null, size = Tokens.Space.xl, tint = palette.accent)
         }
     }
 }

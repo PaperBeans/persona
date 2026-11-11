@@ -7,15 +7,19 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/devices"
 	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -182,4 +186,272 @@ func TestShareTrustedRelayAndAnonymousCenterDispatch(t *testing.T) {
 		t.Fatal("old manager authority served public snapshot")
 	}
 	t.Log("synthetic actual hub RPC relay: fresh enrollment, forged identity stripped, response header allowlist, explicit anonymous direct+center, missing authority, safe errors, revoked credential and machine fence PASS")
+}
+
+// The connection callback supplies empty hub configuration, never creation provenance.
+type receiptIntegrationHost struct{ hub *Hub }
+
+func (receiptIntegrationHost) Call(_ context.Context, _ string, _ any, out any) error {
+	return json.Unmarshal([]byte(`{}`), out)
+}
+func (host receiptIntegrationHost) Notify(event string, params any) error {
+	if event != devicewire.EventState {
+		return nil
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	var states devicewire.States
+	if err := json.Unmarshal(raw, &states); err != nil {
+		return err
+	}
+	host.hub.applyDeviceStatesFrom(devicesOwner, states)
+	return nil
+}
+
+func TestShareCreationAuthenticatedHTTPReceiptIntegration(t *testing.T) {
+	for _, mode := range []string{"matching", "absent", "unknown", "mismatched"} {
+		t.Run(mode, func(t *testing.T) { shareCreationHTTPReceiptIntegration(t, mode) })
+	}
+}
+
+func shareCreationHTTPReceiptIntegration(t *testing.T, mode string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := setupTestDB(t)
+	h := newTestHub(t)
+	h.store = store
+	if err := h.initHubID(ctx); err != nil {
+		t.Fatal("authority initialization failed")
+	}
+	issuer := h.hubID()
+	subject, err := store.CreateOwnerSubject(ctx, issuer, "Synthetic owner", "synthetic-admin", "Receipt integration")
+	if err != nil {
+		t.Fatal("subject creation failed")
+	}
+	token := "synthetic-receipt-device-token-" + mode
+	credential := "synthetic-receipt-device-" + mode
+	if err := store.CreateDeviceToken(ctx, db.DeviceToken{ID: credential, Name: "Synthetic device", Role: roleFull, Kind: "web"}, hashToken(token)); err != nil {
+		t.Fatal("credential creation failed")
+	}
+	if _, err := store.EnrollOwner(ctx, issuer, credential, subject.Subject, "synthetic-admin", "Receipt integration", 0); err != nil {
+		t.Fatal("enrollment failed")
+	}
+	if err := store.SaveBusIdentity(ctx, db.BusIdentity{ID: devicesOwner, Role: "manager", Name: "Synthetic manager"}, "synthetic-manager-hash"); err != nil {
+		t.Fatal("manager registration failed")
+	}
+	machine := "synthetic-receipt-machine-" + mode
+	h.cfg.Machines = []MachineConfig{{ID: machine, Kind: "local"}}
+	h.byID[machine] = &Machine{cfg: MachineConfig{ID: machine}, hub: h}
+	route, err := store.ShareRouting(ctx, issuer, machine, devicesOwner)
+	if err != nil {
+		t.Fatal("routing failed")
+	}
+	type observation struct {
+		creation, incarnation string
+		reservedStripped      bool
+	}
+	observed := make(chan observation, 1)
+	ready := make(chan struct{}, 1)
+	var node *rpc.Peer
+	var nodeMu sync.Mutex
+	d := devices.New(devices.Options{Store: store, Hub: receiptIntegrationHost{hub: h}, DialNode: func(string) func(context.Context) (net.Conn, error) {
+		return func(c context.Context) (net.Conn, error) {
+			managerSide, nodeSide := net.Pipe()
+			p := rpc.New("synthetic-receipt-node", nodeSide)
+			nodeMu.Lock()
+			node = p
+			nodeMu.Unlock()
+			p.OnRequest = func(c context.Context, method string, params json.RawMessage) (any, error) {
+				switch method {
+				case "node.info":
+					return proto.NodeInfo{OS: "linux", Arch: "amd64", Home: "/synthetic", Capabilities: []string{devicewire.CreationCapability, "share_projection.v1"}}, nil
+				case "sessions.list":
+					select {
+					case ready <- struct{}{}:
+					default:
+					}
+					return map[string]any{"sessions": []proto.Session{}}, nil
+				case "session.start":
+					var fields map[string]json.RawMessage
+					if json.Unmarshal(params, &fields) != nil {
+						return nil, errors.New("invalid synthetic start")
+					}
+					var o observation
+					_ = json.Unmarshal(fields["creation_id"], &o.creation)
+					_ = json.Unmarshal(fields["incarnation"], &o.incarnation)
+					o.reservedStripped = fields["caller"] == nil && fields["owner_subject"] == nil && fields["submission"] == nil
+					observed <- o
+					return map[string]any{"session": map[string]any{"session_id": "synthetic-fresh-session", "cwd": "/synthetic/receipt"}}, nil
+				}
+				return map[string]any{}, nil
+			}
+			go func() { _ = p.Serve(c, nodeSide); nodeSide.Close() }()
+			return managerSide, nil
+		}
+	}})
+	rawMachine, _ := json.Marshal(devices.MachineConfig{ID: machine, Kind: "local"})
+	d.Configure(devicewire.Config{Machines: []json.RawMessage{rawMachine}, ShareAuthorities: map[string]devicewire.ShareAuthority{machine: route.Authority}})
+	done := make(chan struct{})
+	go func() { defer close(done); _ = d.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("manager shutdown timed out")
+		}
+	})
+	select {
+	case <-ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("synthetic node connection timed out")
+	}
+	hubIn, managerOut := io.Pipe()
+	managerIn, hubOut := io.Pipe()
+	hp, mp := rpc.New("synthetic-receipt-hub", hubOut), rpc.New("synthetic-receipt-manager", managerOut)
+	calls := make(chan devicewire.NodeCall, 1)
+	metadataSeen := make(chan struct{}, 8)
+	mp.OnRequest = func(c context.Context, method string, params json.RawMessage) (any, error) {
+		select {
+		case metadataSeen <- struct{}{}:
+		default:
+		}
+		if method == devicewire.MethodCall {
+			var call devicewire.NodeCall
+			if json.Unmarshal(params, &call) != nil {
+				return nil, errors.New("invalid manager envelope")
+			}
+			if call.Method == "session.start" {
+				calls <- call
+			}
+		}
+		if method == assistantwire.MethodAgentStartParams {
+			var input assistantwire.AgentStartParams
+			if json.Unmarshal(params, &input) != nil {
+				return nil, errors.New("invalid synthetic start metadata")
+			}
+			return map[string]any{"params": input.Params}, nil
+		}
+		if out, handled, err := d.Request(c, method, params); handled {
+			return out, err
+		}
+		return map[string]any{}, nil
+	}
+	go hp.Serve(ctx, hubIn)
+	go mp.Serve(ctx, managerIn)
+	t.Cleanup(func() {
+		hp.Close(io.EOF)
+		mp.Close(io.EOF)
+		hubIn.Close()
+		managerIn.Close()
+		hubOut.Close()
+		managerOut.Close()
+	})
+	h.bus.mu.Lock()
+	h.bus.current = map[string]*busConn{devicesOwner: {peer: hp, presence: busPresence{Capabilities: []string{devicewire.SharingCapability}}}}
+	h.bus.mu.Unlock()
+	body, err := json.Marshal(map[string]any{"machine_id": machine, "cwd": "/synthetic/receipt", "prompt": "Synthetic input", "creation_id": "forged", "incarnation": "forged", "caller": map[string]any{"owner_subject": "forged"}})
+	if err != nil {
+		t.Fatal("synthetic HTTP body encoding failed")
+	}
+	r := httptest.NewRequest("POST", "/api/v1/sessions", strings.NewReader(string(body)))
+	r.RemoteAddr = "127.0.0.1:12345"
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set(ManagerHeader, devicesOwner)
+	r.Header.Set("Authorization", "Bearer "+token)
+	r.Header.Set("X-Persona-Caller", "forged")
+	w := httptest.NewRecorder()
+	h.routes().ServeHTTP(w, r)
+	if w.Code != 200 {
+		var fault struct {
+			Code  string `json:"code"`
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &fault)
+		t.Fatalf("authenticated start status: %d; upstream_seen=%t offline=%t auth=%t scope=%t manager=%t origin=%t csrf=%t", w.Code, len(metadataSeen) > 0, fault.Code == "assistant_offline", strings.Contains(fault.Error, "token"), strings.Contains(fault.Error, "scope"), strings.Contains(fault.Error, "manager"), strings.Contains(fault.Error, "origin"), strings.Contains(strings.ToLower(fault.Error), "csrf"))
+	}
+	var started struct {
+		Session struct {
+			ID  string `json:"session_id"`
+			Cwd string `json:"cwd"`
+		} `json:"session"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &started) != nil || started.Session.ID != "synthetic-fresh-session" || started.Session.Cwd != "/synthetic/receipt" {
+		t.Fatal("start session or directory mismatch")
+	}
+	var call devicewire.NodeCall
+	select {
+	case call = <-calls:
+	case <-time.After(time.Second):
+		t.Fatal("start envelope absent")
+	}
+	if call.Caller == nil || call.Caller.Kind != "device" || call.Caller.OwnerSubject != subject.Subject || call.Caller.CredentialID != credential || call.Caller.BindingRevision != 1 || call.Caller.Issuer != issuer || call.Authority == nil || *call.Authority != route.Authority {
+		t.Fatal("trusted caller or routing authority mismatch")
+	}
+	var o observation
+	select {
+	case o = <-observed:
+	case <-time.After(time.Second):
+		t.Fatal("node start absent")
+	}
+	if o.creation == "" || o.incarnation == "" || o.creation == "forged" || o.incarnation == "forged" || !o.reservedStripped {
+		t.Fatal("creation intent absent or client provenance accepted")
+	}
+	owner, err := store.SessionShareOwner(ctx, machine, "synthetic-fresh-session")
+	if err != nil || owner != nil {
+		t.Fatal("start reply without durable receipt claimed ownership")
+	}
+	nodeMu.Lock()
+	p := node
+	nodeMu.Unlock()
+	// An RPC on the same stream fences the preceding state.put: the manager
+	// processes the event before it can answer state.load. No timing inference
+	// or start reply may substitute for a matching persisted receipt.
+	if mode != "matching" {
+		state := map[string]any{}
+		if mode == "unknown" {
+			state = map[string]any{"creation_id": "synthetic-unknown-creation", "incarnation": o.incarnation}
+		}
+		if mode == "mismatched" {
+			state = map[string]any{"creation_id": o.creation, "incarnation": "synthetic-wrong-incarnation"}
+		}
+		if err := p.Notify("state.put", map[string]any{"session_id": "synthetic-fresh-session", "state": state}); err != nil {
+			t.Fatal("negative receipt event failed")
+		}
+		var loaded struct {
+			Sessions map[string]db.NodeSession `json:"sessions"`
+		}
+		if err := p.Call(ctx, "state.load", map[string]any{}, &loaded); err != nil {
+			t.Fatal("negative receipt persistence fence failed")
+		}
+		owner, err = store.SessionShareOwner(ctx, machine, "synthetic-fresh-session")
+		if err != nil || owner != nil {
+			t.Fatal("absent or mismatched receipt claimed ownership")
+		}
+		t.Log("absent or mismatched durable receipt remains ownership-unbound PASS")
+		return
+	}
+	if err := p.Notify("state.put", map[string]any{"session_id": "synthetic-fresh-session", "state": map[string]any{"creation_id": o.creation, "incarnation": o.incarnation}}); err != nil {
+		t.Fatal("receipt event failed")
+	}
+	var loaded struct {
+		Sessions map[string]db.NodeSession `json:"sessions"`
+	}
+	if err := p.Call(ctx, "state.load", map[string]any{}, &loaded); err != nil {
+		t.Fatal("matching receipt persistence fence failed")
+	}
+	state, exists := loaded.Sessions["synthetic-fresh-session"]
+	if !exists || state.CreationID != o.creation || state.Incarnation != o.incarnation {
+		t.Fatal("durable receipt reload absent or unequal")
+	}
+	owner, err = store.SessionShareOwner(ctx, machine, "synthetic-fresh-session")
+	if err != nil {
+		t.Fatal("ownership lookup failed")
+	}
+	if owner == nil || owner.Subject != subject.Subject || owner.Issuer != issuer || owner.Incarnation != o.incarnation || owner.Generation != route.Authority.Generation {
+		t.Fatal("persisted receipt ownership absent or unequal")
+	}
+	t.Log("authenticated caller, routing authority, creation intent, node receipt and durable ownership presence/equality PASS")
 }

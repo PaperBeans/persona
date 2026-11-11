@@ -47,6 +47,7 @@
   "blocked_other_clears": "用它检查或启动成功一次，这条提示就会消失。",
   "details": "详情",
   "add_provider": "添加模型供应商",
+  "manage_launchers": "管理启动器",
   "try_anyway": "仍然使用",
   "close_help": "关闭",
   "forget_failed": "没能忘记「{id}」：{error}",

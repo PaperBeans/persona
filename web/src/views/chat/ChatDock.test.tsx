@@ -316,6 +316,27 @@ describe("QueueStrip", () => {
     expect(renderToStaticMarkup(<QueueStrip session={{ ...queued, agent: "claude" }} draftKey="t" canEdit={false} />)).not.toContain("data-send-now");
   });
 
+  it("in a Persona chat offers Send now for the user's own messages, in the persona's name; relayed ones alone get none (#4342)", () => {
+    const persona = { ...queued, agent: undefined, assistant: true, queued: ["顺便把截图换掉", "来自「日报」：今天的汇总"], queued_relayed: 1 } as Session;
+    const html = renderToStaticMarkup(<QueueStrip session={persona} draftKey="t" canEdit persona="Nova" />);
+    expect(html).toContain("data-send-now");
+    expect(html).toContain("Nova 下一步就会依次接收");
+    const relayedOnly = renderToStaticMarkup(<QueueStrip session={{ ...persona, queued_relayed: 2 }} draftKey="t" canEdit persona="Nova" />);
+    expect(relayedOnly).not.toContain("data-send-now");
+    expect(relayedOnly).toContain("Nova 忙完会依次处理");
+    // the relayed one says it arrives when the turn ends; the user's own don't
+    expect(html.match(/data-queue-note/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="排队的第 2 条：来自「日报」：今天的汇总 · 本轮结束后送达"');
+  });
+
+  it("marks the photos a Persona chat's queued message went with when this browser sent it (#4342)", () => {
+    const persona = { ...queued, assistant: true, queued: ["请看图片", "顺便把截图换掉"] } as Session;
+    const html = renderToStaticMarkup(<QueueStrip session={persona} draftKey="t" canEdit persona="Nova" photosOf={(q) => (q === "请看图片" ? 2 : 0)} />);
+    expect(html.match(/data-queue-mark="photo"/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="排队的第 1 条：2 张图片"');
+    expect(html).not.toContain(">请看图片<");
+  });
+
   // made-up words and paths, in the shape Claude Code queues a message sent with photos (#3032)
   const photo = (name: string) => `/Users/me/.persona/uploads/2026-11-10/${name}.jpg`;
   const withPhotos = `[Image #1] [Image #2]\n\n\n把这两张截图对一下\n<attached_images>\npath: ${photo("a1")}\npath: ${photo("b2")}\n</attached_images>`;
@@ -364,6 +385,20 @@ describe("restoreQueued (#3032)", () => {
         { type: "append", text: gone },
       ]);
       expect(getContexts("rq").map(({ kind, title, text, attrs }) => ({ kind, title, text, attrs }))).toEqual([{ kind: "workspace", title: "web", text: "~/code/web", attrs: workspace.attrs }]);
+    } finally {
+      off();
+    }
+  });
+});
+
+describe("restoreQueued in a Persona chat (#4342)", () => {
+  it("puts the photos that came back with the message in the tray, without the stand-in words", async () => {
+    const events: DraftEvent[] = [];
+    const off = onDraftEvent("rqp", (e) => void events.push(e));
+    try {
+      const images = [{ mime: "image/png", data: "AQID" }];
+      await restoreQueued("rqp", session, parseQueued("请看图片", images.length), images);
+      expect(events).toEqual([{ type: "image", image: { name: "photo-1.png", mime: "image/png", data: "AQID" } }]);
     } finally {
       off();
     }

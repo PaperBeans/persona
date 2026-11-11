@@ -143,7 +143,7 @@
   "sidebar_pages_down": "Move {name} down",
   "sidebar_pages_show": "Show {name} in the sidebar",
   "builtin_title": "Built in {count}",
-  "builtin_footer": "Plain claude on each computer, with Claude Code's own sign-in and default model. It can't be hidden.",
+  "builtin_footer": "Plain claude on each computer, with Claude Code's own sign-in and default model. Open it to hide it in Persona.",
   "builtin_row": "Built-in {name} · {machine}",
   "sync_title": "Sync status {count}",
   "sync_footer": "Whether each computer sent its list this time. One that didn't answer shows its last list, marked on the providers.",

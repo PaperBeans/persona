@@ -212,6 +212,9 @@ class ConnectionRuntime @Inject constructor(application: Application) : HubConne
             ?: current.value
     }
 
+    /** Whether the group owning this namespaced machine currently has a desktop app connected. */
+    fun desktopOnline(machineId: String): Boolean? = groupOf(machineId)?.let { groupDesktops.online(it.id) }
+
     /** The group a merged-list machine id belongs to (by its suffix). */
     internal fun groupOf(machineId: String): GroupRuntime? {
         val namespace = GroupKeys.namespaceOf(machineId)
@@ -698,7 +701,9 @@ class ConnectionRuntime @Inject constructor(application: Application) : HubConne
         groups.value.forEach { it.reconnect() }
     }
 
-    override val groupLinks get() = groups.value.map { group -> GroupLink(group.state) { refreshNetwork(); group.reconnect() } }
+    override val groupLinks get() = groups.value.map { group ->
+        GroupLink(group.state, reconnect = { refreshNetwork(); group.reconnect() }, wake = group::onWake)
+    }
 
     override fun send(message: JsonObject): Boolean = selected.value?.connectionOrNull?.send(message) ?: false
 

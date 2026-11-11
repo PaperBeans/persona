@@ -433,6 +433,9 @@ func (h *Manager) bindFeishu(ctx context.Context, step string, values map[string
 		p.Error = errText
 		return p
 	}
+	if step == stepRegister {
+		return h.pollFeishuRegistration(ctx, credentials)
+	}
 	var configNote string
 	if step == "credentials" && values != nil {
 		id, secret, domain := strings.TrimSpace(values["app_id"]), strings.TrimSpace(values["app_secret"]), strings.TrimSpace(values["domain"])
@@ -456,6 +459,14 @@ func (h *Manager) bindFeishu(ctx context.Context, step string, values map[string
 	}
 	v := h.botView(ctx)
 	if !v.HasSecret {
+		// No app yet: create one in a single authorization (bots_register.go); typing the credentials is the way
+		// when the accounts site cannot be reached, and on the Lark bot's settings page.
+		// A private deployment has no accounts site of ours to ask.
+		if feishubot.ConsoleURL(h.cfg.Bots.Feishu.Domain) != "" {
+			if p, ok := h.beginFeishuRegistration(ctx, ""); ok {
+				return p, nil
+			}
+		}
 		return credentials(""), nil
 	}
 	if !v.Enabled {

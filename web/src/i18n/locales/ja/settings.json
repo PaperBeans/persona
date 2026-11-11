@@ -140,7 +140,7 @@
   "sidebar_pages_down": "「{name}」を下へ",
   "sidebar_pages_show": "「{name}」をサイドバーに表示",
   "builtin_title": "内蔵 {count}",
-  "builtin_footer": "各コンピューターでそのまま実行する claude で、Claude Code 自身のログインとデフォルトのモデルを使います。非表示にはできません。",
+  "builtin_footer": "各コンピューターでそのまま実行する claude で、Claude Code 自身のログインとデフォルトのモデルを使います。開くと Persona で非表示にできます。",
   "builtin_row": "内蔵 {name} · {machine}",
   "sync_title": "同期状態 {count}",
   "sync_footer": "各コンピューターが今回リストを返したかどうか。応答しなかったものは前回の結果を表示し、プロバイダーに印を付けます。",

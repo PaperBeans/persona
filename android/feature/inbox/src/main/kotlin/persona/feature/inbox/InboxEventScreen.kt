@@ -129,7 +129,7 @@ fun InboxEventScreen(repository: InboxRepository, route: InboxEventRoute, naviga
                 }
             }
         }
-        item("event-end") { Spacer(Modifier.padding(top = Tokens.Space.xxxl)) }
+        item("event-end") { Spacer(Modifier.padding(top = Tokens.Space.xxl)) }
     }
 }
 

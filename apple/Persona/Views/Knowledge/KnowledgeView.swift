@@ -87,6 +87,9 @@ struct KnowledgeView: View {
             }
         }
         .listStyle(.insetGrouped)
+        #if os(iOS)
+        .recordingLiveSheet() // the live recording sheet opens from here too (`RecordingsSection` is this list's Recordings kind)
+        #endif
         #if os(macOS)
         .modifier(MacBelowTitleRowIfAsked()) // under Knowledge's title in the window: the list starts below it (#1243)
         #endif

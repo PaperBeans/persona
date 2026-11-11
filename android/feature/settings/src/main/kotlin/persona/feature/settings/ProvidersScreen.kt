@@ -212,7 +212,7 @@ internal fun ProviderDetailPage(providers: ProviderSetup?, name: String, machine
                     item("fact-$index") {
                         JGroupItem(GroupPosition.of(index, facts.size)) {
                             JRow(title, trailing = {
-                                Text(value, Modifier.widthIn(max = Tokens.Space.xxxl * 6), style = if (mono) PersonaTheme.type.code else PersonaTheme.type.callout,
+                                Text(value, Modifier.widthIn(max = Tokens.Space.xxl * 6), style = if (mono) PersonaTheme.type.code else PersonaTheme.type.callout,
                                     color = PersonaTheme.palette.ink2, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             })
                         }
@@ -275,7 +275,7 @@ internal fun ProviderDetailPage(providers: ProviderSetup?, name: String, machine
                 }
                 state.notice?.let { notice -> item("notice") { JNotice(notice.text(), Modifier.padding(top = Tokens.Space.m), status = Status.NeedsYou) } }
                 item("action") {
-                    Box(Modifier.padding(top = Tokens.Space.xl)) {
+                    Box(Modifier.padding(top = ContentTokens.legacyXl)) {
                         if (l.hidden) JButton(stringResource(R.string.settings_providers_restore), { scope.launch { model.restore() } }, Modifier.fillMaxWidth(),
                             kind = JButtonKind.Secondary, enabled = !state.busy, loading = state.busy)
                         else JButton(stringResource(if (l.managed) R.string.settings_providers_delete else R.string.settings_providers_hide_long), { confirm = true },

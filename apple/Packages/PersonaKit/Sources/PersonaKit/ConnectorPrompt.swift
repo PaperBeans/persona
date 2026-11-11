@@ -31,6 +31,10 @@ public nonisolated struct ConnectorPrompt: Codable, Equatable, Sendable {
     public var interval: Int?
     /// The QR code's modules, drawn by the hub for a "qr" step.
     public var qr: QRModules?
+    /// Where what the step asks is done, opened outside the app (the Lark bot's registration page: on the phone that
+    /// has Lark, opening it beats scanning it), with the button's label.
+    public var link: String?
+    public var linkText: String?
 
     public nonisolated struct QRModules: Codable, Equatable, Sendable {
         public var size: Int
@@ -40,6 +44,8 @@ public nonisolated struct ConnectorPrompt: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case step, fields, hint, error, done, account, kind, url, interval, qr
         case userCode = "user_code"
+        case link
+        case linkText = "link_text"
     }
 
     /// A code to enter on a web page (GitHub's device flow), asked again until the user has.

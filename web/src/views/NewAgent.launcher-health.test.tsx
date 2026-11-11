@@ -117,6 +117,13 @@ describe("New agent's launcher health", () => {
     expect(navigated).toEqual(["/settings?tab=models&add=1"]);
   });
 
+  it("Manage launchers under the launchers opens Settings › Model providers (#4384)", async () => {
+    await open("m");
+    act(() => q('[data-testid="new-agent-manage-launchers"]')!.click());
+    expect(closed).toBe(1);
+    expect(navigated).toEqual(["/settings?tab=models#settings-providers"]);
+  });
+
   it("lists a lone blocked launcher too, rather than hiding the field", async () => {
     launchers = [BLOCKED];
     await open("d");

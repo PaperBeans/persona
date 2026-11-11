@@ -13,6 +13,11 @@ describe("parseQueued", () => {
     expect(parseQueued(raw)).toEqual({ text: "Please check these two screens", photos: [A, B], files: [], contexts: [] });
   });
 
+  it("reads the path: lines nodes write now, without the space (#4361)", () => {
+    const raw = `[Image #1]\n\n\nPlease check this screen\n<attached_images>\npath:${A}\n</attached_images>`;
+    expect(parseQueued(raw)).toEqual({ text: "Please check this screen", photos: [A], files: [], contexts: [] });
+  });
+
   it("takes bare paths too, once each, and nothing else in the block", () => {
     const raw = `Look\n\n<attached_images>\n${A}\npath: ${A}\n~/Desktop/shot.png\nnot a path\n</attached_images>`;
     expect(parseQueued(raw).photos).toEqual([A, "~/Desktop/shot.png"]);

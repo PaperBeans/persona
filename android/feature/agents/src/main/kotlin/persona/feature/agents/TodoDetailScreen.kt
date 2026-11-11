@@ -419,7 +419,7 @@ fun TodoDetailScreen(
                             )
                             if (!agent.startError.isNullOrBlank()) {
                                 Row(
-                                    Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.l, vertical = ContentTokens.tightGap),
+                                    Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.sm),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(

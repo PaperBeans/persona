@@ -244,7 +244,7 @@ fun JAssistantSwitcherRow(
     JRow(modifier.stableAlpha(if (faded) HomeTokens.assistantOfflineAlpha else 1f).semantics { contentDescription = spoken },
         onClick = onClick, chevron = false,
         selected = current, trailing = if (current || badge > 0) ({
-        if (current) JIcon(persona.core.designsystem.icons.PhIcons.Check, null, size = Tokens.Space.xl, tint = palette.accent, decorative = true)
+        if (current) JIcon(persona.core.designsystem.icons.PhIcons.Check, null, size = Tokens.Size.iconXS, tint = palette.accent, decorative = true)
         else JBadge(badge)
     }) else null) {
         JManagerAvatar(manager, isDefault, size = HomeTokens.assistantAvatarSmall, presence = true)

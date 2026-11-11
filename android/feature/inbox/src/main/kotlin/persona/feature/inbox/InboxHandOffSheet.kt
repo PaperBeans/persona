@@ -153,7 +153,7 @@ internal fun InboxHandOffSheet(
                 Spacer(Modifier.height(Tokens.Space.m))
                 JNotice(it, status = Status.NeedsYou)
             }
-            Spacer(Modifier.height(Tokens.Space.xl))
+            Spacer(Modifier.height(ContentTokens.legacyXl))
             JButton(stringResource(R.string.inbox_send), ::send, Modifier.fillMaxWidth(), icon = PhIcons.PaperPlaneTilt, loading = busy, loadingText = stringResource(R.string.inbox_handoff_sending))
         }
     }

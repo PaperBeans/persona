@@ -29,6 +29,10 @@ export const runtimeOrder = (a: Session, b: Session) => {
   if (aFraction !== bFraction) return aFraction < bFraction ? 1 : -1;
   return compareListIds(runtimeIdentity(a), runtimeIdentity(b));
 };
+/** A row's last activity, the time `runtimeOrder` sorts by (NaN without one: it sorts last and counts as earlier). */
+export const runtimeActiveAt = (s: Session) => Date.parse(s.updated_at ?? "");
+/** Needs the user by the hub's rule for `state.needs_you` counts, not the client's answered-here state. */
+export const runtimeNeedsYou = (s: Session) => s.state === "needs_you";
 export const SESSIONS_LOOKUP_FEATURE = "sessions_lookup";
 const changeListeners = new Set<(upsert: Session[], remove: string[]) => void>();
 export function onRuntimeChanges(listener: (upsert: Session[], remove: string[]) => void) {

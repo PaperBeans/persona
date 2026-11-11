@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/nodeclient"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -47,13 +49,27 @@ func TestHooksPluginsCarryTheSettingsHooks(t *testing.T) {
 			t.Errorf("%s: the plugin's hooks %v, the settings' %v", kind, inPlugin, inSettings)
 		}
 	}
-	// The assistant's have the Feishu gate on Bash; the agents' do not.
-	bash := func(kind string) bool {
+	// The assistant's have the Feishu gate on Bash, every command. The agents' have a Bash hook only on a Mac, and only
+	// for commands running cua-driver (cua_gate.go, #4349).
+	bash := func(kind string) (all, cuaOnly bool) {
 		pre := readSettings(t, filepath.Join(n.dir, kind+"-hooks", "hooks", "hooks.json"))["hooks"].(map[string]any)["PreToolUse"].([]any)
-		return slices.ContainsFunc(pre, func(m any) bool { return m.(map[string]any)["matcher"] == "Bash" })
+		for _, m := range pre {
+			if m.(map[string]any)["matcher"] != "Bash" {
+				continue
+			}
+			cmd, _ := m.(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"].(string)
+			if strings.HasSuffix(cmd, " "+nodeclient.CuaOnlyFlag) {
+				cuaOnly = true
+			} else {
+				all = true
+			}
+		}
+		return all, cuaOnly
 	}
-	if bash("claude") || !bash("assistant") {
-		t.Errorf("the Bash gate: agents %v, assistant %v", bash("claude"), bash("assistant"))
+	agentsAll, agentsCua := bash("claude")
+	assistantAll, assistantCua := bash("assistant")
+	if agentsAll || agentsCua != (runtime.GOOS == "darwin") || !assistantAll || assistantCua {
+		t.Errorf("the Bash gates: agents every command %v / cua-driver only %v, assistant %v / %v", agentsAll, agentsCua, assistantAll, assistantCua)
 	}
 }
 

@@ -173,7 +173,7 @@ private fun ConnectorChat(record: InboxRecord, model: ConnectorThreadModel, stat
                         })
                     } else if (page.messages.isEmpty()) {
                         Text(stringResource(R.string.inbox_connector_empty), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3,
-                            modifier = Modifier.padding(vertical = Tokens.Space.xxl))
+                            modifier = Modifier.padding(vertical = Tokens.Space.xl))
                     }
                     problem?.let { JNotice(it, Modifier.padding(vertical = Tokens.Space.s)) }
                     if (page.chat.reply.isNullOrBlank()) {
@@ -237,7 +237,7 @@ private fun ConnectorMessageRow(
         if (message.mine) UserBubbleFrame(footer = footer) { body() }
         else IncomingBubbleFrame(
             author = message.sender.name.ifBlank { null }, time = time.ifEmpty { null },
-            avatar = { JAvatar(message.sender.name.ifBlank { "?" }, size = Tokens.Space.xxxl) }, footer = footer,
+            avatar = { JAvatar(message.sender.name.ifBlank { "?" }, size = Tokens.Space.xxl) }, footer = footer,
         ) { body() }
     }
 }
@@ -254,7 +254,7 @@ private fun QuoteBlock(from: String?, text: String?, onClick: (() -> Unit)?) {
             .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(Tokens.Space.xxs).height(Tokens.Space.xxl).background(palette.line))
+        Box(Modifier.width(Tokens.Space.xxs).height(Tokens.Space.xl).background(palette.line))
         Spacer(Modifier.width(Tokens.Space.s))
         JIcon(PhIcons.Quotes, null, size = Tokens.Space.l, tint = palette.ink3)
         Spacer(Modifier.width(Tokens.Space.s))

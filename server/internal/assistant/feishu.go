@@ -531,7 +531,7 @@ func (s *Service) FeishuOwner(_ context.Context, p FeishuOwner) {
 		if err != nil {
 			s.feishuUnpaired() // the hub could not be asked: start afresh anyway
 		}
-		if !p.Paired {
+		if !p.Paired || p.Greeted {
 			return
 		}
 		l := s.botLang(ctx)

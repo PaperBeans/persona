@@ -239,7 +239,7 @@ private fun AlwaysSection(title: String, checked: Boolean, enabled: Boolean, foo
 
 @Composable
 private fun SaveSection(problem: ResText?, testing: Boolean, canTest: Boolean, footer: String, deleteLabel: String?, onDelete: () -> Unit, onTest: () -> Unit) {
-    Column(Modifier.padding(top = Tokens.Space.l, bottom = Tokens.Space.xl), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+    Column(Modifier.padding(top = Tokens.Space.l, bottom = ContentTokens.legacyXl), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
         problem?.let { JNotice(it.text(), status = Status.NeedsYou) }
         JButton(stringResource(R.string.settings_tunnel_test_save), onTest, Modifier.fillMaxWidth(), loading = testing,
             loadingText = stringResource(R.string.settings_tunnel_testing), enabled = canTest)

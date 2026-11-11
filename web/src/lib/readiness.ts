@@ -103,7 +103,7 @@ export function helpTopic(id: string): HelpTopic {
 }
 
 /** The action ids a card can draw a button for (5.1); an id this page does not know is text only (5, general rules). */
-const ACTIONS = new Set(["add_computer", "confirm_computer", "wake_computer", "install_claude", "login_claude", "connect_model", "edit_provider", "test_assistant", "enable_tls", "open_admin"]);
+const ACTIONS = new Set(["add_computer", "confirm_computer", "wake_computer", "install_claude", "login_claude", "connect_model", "edit_provider", "test_assistant", "main_chat_model", "enable_tls", "open_admin"]);
 
 export function knownAction(id: string | undefined): boolean {
   return Boolean(id && ACTIONS.has(id));
@@ -127,6 +127,8 @@ export function actionLabel(id: string): string {
       return t("lib-readiness.action_edit_provider");
     case "test_assistant":
       return t("lib-readiness.action_test_assistant");
+    case "main_chat_model":
+      return t("lib-readiness.action_main_chat_model");
     case "enable_tls":
     case "open_admin":
       return t("lib-readiness.action_open_admin");
@@ -161,6 +163,8 @@ export function runAction(id: string, o: { launcher?: string; onHelp: (topic: He
       return navigate(providersPath());
     case "edit_provider":
       return navigate(o.launcher ? providersPath(o.launcher) : "/settings?tab=models");
+    case "main_chat_model": // the Main chat purpose of the model configuration: pick one of the machine's launchers
+      return navigate("/settings?tab=models");
     case "test_assistant":
       void refreshReadiness({ probe: true });
       return;

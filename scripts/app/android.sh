@@ -5,6 +5,8 @@
 #   ./scripts/app/android.sh lint       # Android lint
 #   ./scripts/app/android.sh shots -s <emulator> --out <directory>
 #   ./scripts/app/android.sh apk        # debug APK only (android/app/build/outputs/apk/debug/app-debug.apk)
+#   ./scripts/app/android.sh release    # R8 release APK, checked, aligned and signed for your own phone
+#                                       # (android/app/build/outputs/apk/release/app-release.apk); add -s <phone> to install it
 # shots takes optional environment variables for repeatable, pixel-comparable captures (docs/android/android.md):
 #   SHOTS_STYLE=glass|brief|board  pass debug.style on every launch
 #   SHOTS_PLUGINS=1                the mock hub serves MOCK_EXTENSIONS (Settings › Plugins) and the plugin pages are captured too
@@ -17,6 +19,11 @@
 #   SHOTS_SETTLE=<seconds>         wait after each launch before the capture (default 2)
 # Compare two capture directories with scripts/app/android_shots_diff.py.
 # The application id comes from ~/.config/persona/config.json: android.application_id, else app.bundle_id.
+# release signs with android.release_keystore (and android.release_key_alias, android.release_keystore_password_command,
+# android.release_key_password_command) from the same file; with none configured it uses the SDK's local debug keystore
+# (~/.android/debug.keystore), the key debug builds on this computer are signed with, so it updates one in place.
+# A debug build is debuggable, so ART never compiles it ahead of time, and R8 does not shrink it: use release on the
+# phone you actually use (docs/android/android.md "Debug against release").
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 COMMAND=install
@@ -26,8 +33,8 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     -s|--serial) SERIAL="${2:?需要模拟器序列号}"; shift 2 ;;
     --out) OUTPUT="${2:?需要输出目录}"; shift 2 ;;
-    install|apk|test|lint|shots) COMMAND="$1"; shift ;;
-    *) echo "用法：$0 [install|apk|test|lint|shots] [-s 模拟器] [--out 目录]" >&2; exit 2 ;;
+    install|apk|release|test|lint|shots) COMMAND="$1"; shift ;;
+    *) echo "用法：$0 [install|apk|release|test|lint|shots] [-s 模拟器] [--out 目录]" >&2; exit 2 ;;
   esac
 done
 if [ "$COMMAND" = shots ]; then
@@ -88,6 +95,50 @@ case "$COMMAND" in
   test) ./gradlew -q -PpersonaApplicationId="$APP_ID" test ;;
   lint) ./gradlew -q -PpersonaApplicationId="$APP_ID" lint ;;
   apk) ./gradlew -q -PpersonaApplicationId="$APP_ID" :app:assembleDebug && ls -la app/build/outputs/apk/debug/app-debug.apk ;;
+  release)
+    config() { python3 ../scripts/persona_config.py get "$1" 2>/dev/null || true; }
+    # || true: with no build-tools ls fails, and under pipefail the script would stop here without the message below
+    TOOLS=$( (ls -d "$SDK"/build-tools/*/ 2>/dev/null || true) | sort -V | tail -n 1)
+    [ -x "${TOOLS}apksigner" ] && [ -x "${TOOLS}zipalign" ] || { echo "找不到 build-tools 里的 apksigner / zipalign（$SDK/build-tools）。" >&2; exit 1; }
+    KEYSTORE=$(config android.release_keystore)
+    if [ -n "$KEYSTORE" ]; then
+      KEYSTORE=${KEYSTORE/#\~/$HOME}
+      KEY_ALIAS=$(config android.release_key_alias)
+      STORE_PASSWORD_COMMAND=$(config android.release_keystore_password_command)
+      KEY_PASSWORD_COMMAND=$(config android.release_key_password_command)
+      [ -f "$KEYSTORE" ] || { echo "android.release_keystore 指向的文件不存在：$KEYSTORE" >&2; exit 1; }
+      [ -n "$KEY_ALIAS" ] && [ -n "$STORE_PASSWORD_COMMAND" ] || { echo "配置了 android.release_keystore 时，还需要 android.release_key_alias 和 android.release_keystore_password_command。" >&2; exit 1; }
+      STORE_PASSWORD=$(bash -c "$STORE_PASSWORD_COMMAND")
+      KEY_PASSWORD=$STORE_PASSWORD
+      [ -z "$KEY_PASSWORD_COMMAND" ] || KEY_PASSWORD=$(bash -c "$KEY_PASSWORD_COMMAND")
+    else
+      # The SDK's own debug key: every debug build on this computer has it, so the release updates one in place.
+      KEYSTORE="$HOME/.android/debug.keystore"
+      KEY_ALIAS=androiddebugkey
+      STORE_PASSWORD=android
+      KEY_PASSWORD=android
+      [ -f "$KEYSTORE" ] || { echo "没有配置 android.release_keystore，也没有 $KEYSTORE（先编一次 debug 包会生成它）。" >&2; exit 1; }
+      echo "未配置 android.release_keystore：用本机的 debug 密钥签名，只适合装在自己的手机上。" >&2
+    fi
+    [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ] || { echo "密钥库口令命令没有输出。" >&2; exit 1; }
+    case "$STORE_PASSWORD$KEY_PASSWORD" in *$'\n'*) echo "密钥库口令命令输出了多行。" >&2; exit 1 ;; esac
+    ./gradlew -q -PpersonaApplicationId="$APP_ID" :app:assembleRelease
+    UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
+    SIGNED=app/build/outputs/apk/release/app-release.apk
+    python3 ../scripts/release/check_android_shrink.py "$UNSIGNED" app/build/outputs/mapping/release --build-tools "$TOOLS"
+    rm -f "$SIGNED" "$SIGNED.aligned"
+    "${TOOLS}zipalign" -P 16 -f 4 "$UNSIGNED" "$SIGNED.aligned"
+    # The passwords reach apksigner alone, in its environment: never a command line, never Gradle and its daemons.
+    PERSONA_APK_STORE_PASSWORD="$STORE_PASSWORD" PERSONA_APK_KEY_PASSWORD="$KEY_PASSWORD" "${TOOLS}apksigner" sign \
+      --ks "$KEYSTORE" --ks-key-alias "$KEY_ALIAS" --ks-pass env:PERSONA_APK_STORE_PASSWORD \
+      --key-pass env:PERSONA_APK_KEY_PASSWORD --out "$SIGNED" "$SIGNED.aligned"
+    rm -f "$SIGNED.aligned" "$SIGNED.idsig"
+    "${TOOLS}apksigner" verify "$SIGNED"
+    ls -la "$SIGNED"
+    if [ -n "$SERIAL" ]; then
+      "$ADB" -s "$SERIAL" install -r "$SIGNED"
+      "$ADB" -s "$SERIAL" shell am start -n "$APP_ID/persona.android.MainActivity" >/dev/null
+    fi ;;
   install)
     ./gradlew -q -PpersonaApplicationId="$APP_ID" :app:assembleDebug
     "$ADB" ${ADB_ARGS[@]+"${ADB_ARGS[@]}"} install -r app/build/outputs/apk/debug/app-debug.apk

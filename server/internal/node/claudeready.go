@@ -130,7 +130,11 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 		if a.AgentStatus == proto.StatusBlocked {
 			return a, nil // some other dialog; the phone shows it as a screen interaction
 		}
-		if (a.AgentStatus == proto.StatusIdle || a.AgentStatus == proto.StatusDone) && inputBoxVisible(screen) {
+		// An Orca fork that cannot read claude's title once the tab is renamed reports no state until claude's first hook
+		// (#4438): with claude in front, the screen decides, as long as it does not show a turn running.
+		quiet := a.AgentStatus == proto.StatusIdle || a.AgentStatus == proto.StatusDone ||
+			a.AgentStatus == proto.StatusUnknown && !strings.Contains(screen, "esc to interrupt")
+		if quiet && inputBoxVisible(screen) {
 			readyStreak++
 			if readyStreak >= 2 {
 				return a, nil

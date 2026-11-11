@@ -20,6 +20,7 @@ import persona.core.designsystem.Status
 import persona.core.contracts.Interaction
 import persona.core.contracts.NotifyEvent
 import persona.core.contracts.SessionKey
+import persona.core.contracts.api.DeviceNotificationPreferences
 import persona.core.contracts.api.DoneNotification
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
@@ -38,6 +39,7 @@ class Notifier @Inject constructor(
     private val preferences: NotificationPreferencesSource,
 ) {
     private val manager = NotificationManagerCompat.from(context)
+    private val requestHistory = RequestNotificationHistory(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val showLockDetails get() = preferences.preferences.value?.lockDetails == true
 
@@ -181,11 +183,24 @@ class Notifier @Inject constructor(
     internal fun updateOngoing(status: OngoingStatus) = post(null, ONGOING_ID, ongoing(status))
 
     /** [hushed]: inside this device's quiet hours (the hub's `quiet`), shown without a sound. */
-    fun postInteraction(ix: Interaction, hushed: Boolean = false) { postInteraction(ix, note = null, hushed = hushed) }
+    fun postInteraction(ix: Interaction, hushed: Boolean = false) {
+        postInteraction(ix, note = null, hushed = hushed, deliveryPreferences = null)
+    }
+
+    /** Catch-up supplies its own hub group's preferences; null keeps live delivery's current-preference check. */
+    fun postInteraction(ix: Interaction, hushed: Boolean, deliveryPreferences: DeviceNotificationPreferences?) {
+        postInteraction(ix, note = null, hushed = hushed, deliveryPreferences = deliveryPreferences)
+    }
 
     /** [note] replaces the line under the title and leads the expanded text (#5008). False when nothing was posted. */
-    private fun postInteraction(ix: Interaction, note: String?, hushed: Boolean = false): Boolean {
-        if (preferences.preferences.value?.input != true) return false
+    private fun postInteraction(
+        ix: Interaction,
+        note: String?,
+        hushed: Boolean = false,
+        deliveryPreferences: DeviceNotificationPreferences? = null,
+    ): Boolean {
+        val settings = deliveryPreferences ?: preferences.preferences.value
+        if (settings?.input != true) return false
         if (NotificationPolicy.expired(ix)) { retract(ix.id); return false }
         val assistant = isAssistant(ix.sessionKey)
         val title = if (assistant == true && ix.kind == "question") context.getString(R.string.notify_title_assistant_asks)
@@ -193,7 +208,7 @@ class Notifier @Inject constructor(
         val (line, detail) = requestCopy(context, ix).let { (line, detail) ->
             if (note == null) line to detail else note to "$note\n$detail"
         }
-        val builder = base(CH_INPUT).forSession(ix.sessionKey).setContentTitle(title).setContentText(line)
+        val builder = base(CH_INPUT, settings.lockDetails).forSession(ix.sessionKey).setContentTitle(title).setContentText(line)
             .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_REQUEST, true) })
             .setStyle(NotificationCompat.BigTextStyle().bigText(detail.take(2000)))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -252,7 +267,13 @@ class Notifier @Inject constructor(
             }.build())
     }
 
-    fun retract(id: String) = manager.cancel(interactionTag(id), EVENT_ID)
+    fun retract(id: String) {
+        manager.cancel(interactionTag(id), EVENT_ID)
+        requestHistory.clear(id)
+    }
+
+    /** Every request already posted, including one the user dismissed; a watchdog pass must not post it again. */
+    fun deliveredRequests(): Set<String> = requestHistory.ids()
 
     /**
      * Ids of the request notifications showing now: not the verifying / result notices that reuse their tag (#3401).
@@ -345,6 +366,7 @@ class Notifier @Inject constructor(
     }
 
     fun clear() {
+        requestHistory.clear()
         context.getSystemService(NotificationManager::class.java).activeNotifications
             .filter { it.id == EVENT_ID && it.tag?.let(NotificationPolicy::cleared) == true }
             .forEach { manager.cancel(it.tag, it.id) }
@@ -352,11 +374,11 @@ class Notifier @Inject constructor(
 
     fun dismissStopped() = manager.cancel("stopped", EVENT_ID)
 
-    private fun base(channel: String) = NotificationCompat.Builder(context, channel)
+    private fun base(channel: String, lockDetails: Boolean = showLockDetails) = NotificationCompat.Builder(context, channel)
         .setSmallIcon(persona.core.designsystem.R.drawable.ic_stat)
-        .setVisibility(if (showLockDetails) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_PRIVATE)
+        .setVisibility(if (lockDetails) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_PRIVATE)
         .apply {
-            if (!showLockDetails) setPublicVersion(NotificationCompat.Builder(context, channel)
+            if (!lockDetails) setPublicVersion(NotificationCompat.Builder(context, channel)
                 .setSmallIcon(persona.core.designsystem.R.drawable.ic_stat).setContentTitle(context.getString(R.string.notify_public_title))
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC).build())
         }
@@ -364,7 +386,11 @@ class Notifier @Inject constructor(
     private fun post(tag: String?, id: Int, notification: Notification) {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED) return
-        runCatching { manager.notify(tag, id, notification) }
+        runCatching { manager.notify(tag, id, notification) }.onSuccess {
+            if (notification.extras.getBoolean(EXTRA_REQUEST) && tag?.startsWith(INTERACTION_PREFIX) == true) {
+                requestHistory.mark(tag.removePrefix(INTERACTION_PREFIX))
+            }
+        }
     }
 
     companion object {

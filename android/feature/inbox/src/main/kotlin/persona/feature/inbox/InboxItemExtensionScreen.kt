@@ -102,7 +102,7 @@ fun InboxItemExtensionScreen(
         item("item-gap") { Spacer(Modifier.padding(top = Tokens.Space.m)) }
         if (loading) item("item-body-loading") { JLoading() }
         body()
-        item("item-end") { Spacer(Modifier.padding(top = Tokens.Space.xxl)) }
+        item("item-end") { Spacer(Modifier.padding(top = Tokens.Space.xl)) }
     } }
     if (drafting && record != null) InboxDraftSheet(repository, record,
         composers.get(ReplyTarget.Inbox(record.item.id), record.agent?.takeIf { it.state == "drafted" }?.draft.orEmpty()),

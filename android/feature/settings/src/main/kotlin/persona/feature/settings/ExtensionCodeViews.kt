@@ -92,7 +92,7 @@ internal fun CodeHeader(item: ExtensionViewItem, modifier: Modifier) {
     val type = PersonaTheme.type
     JGroupItem(GroupPosition.Single, modifier) {
         Row(Modifier.fillMaxWidth().padding(horizontal = rowPadding, vertical = Tokens.Space.l), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
-            item.avatar?.let { JAvatar(it.text?.takeIf(String::isNotBlank) ?: item.title.orEmpty().take(1), size = Tokens.Space.xxxl) }
+            item.avatar?.let { JAvatar(it.text?.takeIf(String::isNotBlank) ?: item.title.orEmpty().take(1), size = Tokens.Space.xxl) }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
                 Text(item.title.orEmpty(), style = type.title, color = palette.ink)
                 item.subtitle?.takeIf { it.isNotBlank() }?.let { Text(it, style = type.caption, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis) }
@@ -233,7 +233,7 @@ internal fun CodeFile(item: ExtensionViewItem, state: ExtensionViewState, handle
                 for (i in 0 until shown) {
                     val n = start + i
                     val on = hl != null && n in hl.start..hl.end
-                    Text("$n", Modifier.then(if (on) Modifier.background(palette.statusSurface) else Modifier).widthIn(min = Tokens.Space.xxxl + Tokens.Space.s).padding(horizontal = Tokens.Space.s),
+                    Text("$n", Modifier.then(if (on) Modifier.background(palette.statusSurface) else Modifier).widthIn(min = Tokens.Space.xxl + Tokens.Space.s).padding(horizontal = Tokens.Space.s),
                         style = type.codeSmall, color = palette.ink3, maxLines = 1, textAlign = androidx.compose.ui.text.style.TextAlign.End)
                 }
             }
@@ -280,7 +280,7 @@ internal fun CommentLine(c: ExtensionViewComment) {
         return
     }
     Row(Modifier.fillMaxWidth().padding(horizontal = rowPadding, vertical = Tokens.Space.m), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
-        JAvatar(c.avatar?.text?.takeIf(String::isNotBlank) ?: c.author.take(1), size = Tokens.Space.xxl + Tokens.Space.xs)
+        JAvatar(c.avatar?.text?.takeIf(String::isNotBlank) ?: c.author.take(1), size = Tokens.Space.xl + Tokens.Space.xs)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(c.author, style = type.callout.copy(fontWeight = FontWeight.SemiBold), color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis,

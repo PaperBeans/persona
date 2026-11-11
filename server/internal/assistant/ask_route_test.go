@@ -112,14 +112,25 @@ func (e *routeEnv) pushesOf(ids ...string) int {
 	return n
 }
 
-// lastShown is the card id as the apps were told of it last.
-func (e *routeEnv) lastShown(id string) proto.Interaction {
+// shown is the card id as the apps were told of it last, and whether they were told of it at all: a waitFor check
+// asks this one, as a card not shown yet is "not yet" there, not a failure (#4407).
+func (e *routeEnv) shown(id string) (proto.Interaction, bool) {
 	df := &delegateFleet{fleetTest: e.fleetTest}
 	list := df.shownAs(id)
 	if len(list) == 0 {
+		return proto.Interaction{}, false
+	}
+	return list[len(list)-1], true
+}
+
+// lastShown is the card id as the apps were told of it last, for a card that must have been shown by now.
+func (e *routeEnv) lastShown(id string) proto.Interaction {
+	e.t.Helper()
+	ix, ok := e.shown(id)
+	if !ok {
 		e.t.Fatalf("card %s was never shown", id)
 	}
-	return list[len(list)-1]
+	return ix
 }
 
 // noticeWith waits for a message into conversation to that says want, and answers it.
@@ -548,7 +559,7 @@ func TestRestoredQuestionReachingTheUserDoesNotRing(t *testing.T) {
 	}
 	s2.askTick(time.Now().Add(2 * askHoldFor)) // its leader has had its time
 	s2.askTick(time.Now().Add(3 * askHoldFor)) // the main conversation too
-	waitFor(t, "the card the user's", func() bool { return !e.lastShown("ix1").Delegating })
+	waitFor(t, "the card the user's", func() bool { ix, ok := e.shown("ix1"); return ok && !ix.Delegating })
 	if n := e.pushesOf("ix1"); n != 0 {
 		t.Fatalf("a restored question was pushed again %d times", n)
 	}
@@ -618,7 +629,7 @@ func TestQuietTaskAskIsNotPushedOnTimeout(t *testing.T) {
 		t.Fatalf("the main conversation's message:\n%s", n)
 	}
 	e.s.askTick(time.Now().Add(2 * askHoldFor))
-	waitFor(t, "the card the user's", func() bool { return !e.lastShown("ix1").Delegating })
+	waitFor(t, "the card the user's", func() bool { ix, ok := e.shown("ix1"); return ok && !ix.Delegating })
 	e.settle()
 	if n := e.pushesOf("ix1"); n != 0 {
 		t.Fatalf("a quiet task's card was pushed %d times", n)
@@ -641,7 +652,7 @@ func TestEscalateLeavesADelegatedCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.raise(askQuestion("ix1", "worker-1"))
-	waitFor(t, "the delegation", func() bool { return e.lastShown("ix1").Delegating })
+	waitFor(t, "the delegation", func() bool { ix, ok := e.shown("ix1"); return ok && ix.Delegating })
 	if _, err := runJSON(t, e.s, "lead1", "ask_escalate", map[string]any{"todo_id": e.todo.ID, "reason": "x"}); err == nil {
 		t.Fatal("escalated a card the assistant is deciding on")
 	}

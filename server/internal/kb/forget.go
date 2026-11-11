@@ -157,6 +157,9 @@ func (e *Engine) ForgetSource(source string, archiveSources ...string) (Forgotte
 		}
 		out.Projects = append(out.Projects, p.Slug)
 	}
+	if err := e.forgetTrash(out.Chats, out.People, out.Posts, itemKeys, names); err != nil {
+		return out, err
+	}
 	// Knowledge points from the forgotten chats, or from timeline lines that were theirs, go too (topics.go).
 	topics, err := e.forgetTopicSources(out.Chats, cut)
 	if len(topics) > 0 {

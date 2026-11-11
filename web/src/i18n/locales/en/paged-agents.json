@@ -18,5 +18,13 @@
   "inconsistent_delta": "The hub returned inconsistent session updates.",
   "repeated_cursor": "The hub repeated a session update cursor.",
   "inconsistent_page": "The hub changed the session snapshot while paging.",
-  "more": "Load more"
+  "more": "Load more",
+  "active_within": "Active within",
+  "active_within_value": "Active within: {window}",
+  "window_any": "Any time",
+  "window_1d": "Past 24 hours",
+  "window_7d": "Past 7 days",
+  "window_30d": "Past 30 days",
+  "earlier": "Earlier",
+  "earlier_hint": "{count} sessions last active before this window ({window})"
 }

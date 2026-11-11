@@ -79,7 +79,7 @@ class PerfTestCase: XCTestCase {
     /// by the app's own `FrameStats` (`FrameProbe`, Darwin notifications in, results through the mock hub). After
     /// the iterations the test prints one `perf-frames:` line (medians, the first iteration dropped as XCTest does)
     /// and attaches every iteration as `frames.json`; `scripts/app/perf_report.py` reads both.
-    @MainActor func measureFrames(_ metrics: [XCTMetric], _ block: () -> Void) {
+    @MainActor func measureFrames(_ metrics: [XCTMetric], assertMainThreadBudget: Bool = false, _ block: () -> Void) {
         let name = testName
         mock("frames_label?name=" + name)
         measure(metrics: metrics, options: options) {
@@ -110,6 +110,13 @@ class PerfTestCase: XCTestCase {
                           median("p95_ms"), median("max_ms"), median("busy_p95_ms"), median("busy_over_16ms"))
         print(line)
         XCTAssertFalse(runs.isEmpty, "the app sent no frames (is -showFrameProbe in this build?)")
+        if assertMainThreadBudget {
+            for run in runs {
+                let blocks = run["main_thread_blocks"] as? [String: Any]
+                let count = (blocks?["count"] as? NSNumber)?.intValue
+                XCTAssertEqual(count, 0, "main-thread block over 100 ms: \(blocks ?? [:])")
+            }
+        }
     }
 
     /// A Darwin notification: the runner and the app share the simulator's notification center.
@@ -187,6 +194,7 @@ class PerfTestCase: XCTestCase {
             XCTAssertNil(run["error"], "the app could not run the requested glide: \(run)")
             XCTAssertEqual(run["name"] as? String, testName)
             XCTAssertEqual(run["sample_source"] as? String, "app-list-glide")
+            XCTAssertNotNil(run["main_thread_blocks"] as? [String: Any], "every measured run includes the watchdog report")
             XCTAssertGreaterThan((run["frames"] as? NSNumber)?.doubleValue ?? 0, 0)
             XCTAssertGreaterThan((run["seconds"] as? NSNumber)?.doubleValue ?? 0, 5)
             let viewport = (run["viewport_height_pt"] as? NSNumber)?.doubleValue ?? 0
@@ -218,8 +226,8 @@ class PerfTestCase: XCTestCase {
     }
 
     /// The page sitting still while the hub pushes (`/mock/<what>`, e.g. `churn?n=8&ms=300`), for `seconds`.
-    @MainActor func measureIdle(push what: String, seconds: UInt32 = 4) {
-        measureFrames(metrics()) {
+    @MainActor func measureIdle(push what: String, seconds: UInt32 = 4, assertMainThreadBudget: Bool = false) {
+        measureFrames(metrics(), assertMainThreadBudget: assertMainThreadBudget) {
             _ = mock(what)
             sleep(seconds)
         }

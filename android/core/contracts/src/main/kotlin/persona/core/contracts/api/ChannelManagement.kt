@@ -203,6 +203,9 @@ data class BindPrompt(
     val interval: Int = 0,
     val qr: BindQrCode? = null,
     val hint: String? = null,
+    /** Where what the step asks is done, opened outside the app (the Lark bot's registration page), and its label. */
+    val link: String? = null,
+    @SerialName("link_text") val linkText: String? = null,
     /** What was wrong with the values just given: the same step is asked again. */
     val error: String? = null,
     val done: Boolean = false,

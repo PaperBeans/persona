@@ -24,6 +24,8 @@
   "change_interject_background": "“Move running work to the background when I interject”: {before} → {after}",
   "title_agent_tasks": "Every Agent Persona starts is a supervised task",
   "change_agent_tasks": "“Every Agent Persona starts is a supervised task”: {before} → {after}",
+  "title_inbox_signals": "Tell a task's supervisor about new Inbox messages on it",
+  "change_inbox_signals": "“Tell a task's supervisor about new Inbox messages on it”: {before} → {after}",
   "title_model_tiers": "Agent presets",
   "change_model_tier": "{profile} · {tier}: {before} → {after}",
   "title_review_sample_percent": "Share of finished tasks to spot-check",

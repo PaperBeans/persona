@@ -202,6 +202,9 @@ type ChannelNoted struct {
 // FeishuOwner is feishu.owner's params.
 type FeishuOwner struct {
 	Paired bool `json:"paired"`
+	// Greeted: the hub already greeted the owner in the private chat (an app created and paired in one
+	// authorization, #4347); the assistant starts the chat afresh without its own greeting.
+	Greeted bool `json:"greeted,omitempty"`
 }
 
 // FeishuRecalled is feishu.recalled's params: the message the owner recalled.

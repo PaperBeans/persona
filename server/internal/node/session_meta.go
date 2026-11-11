@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/transcript"
@@ -41,7 +42,7 @@ type quickMeta struct {
 	// answer is the latest turn's answer from its first words on (transcript.Meta.TurnAnswer); "" when the tail read
 	// held none of its words.
 	answer string
-	// asks is what lastText asks the user (transcript.AskOf), when no message came in after it (#5096).
+	// asks is what lastText asks the user (closeout.AskOf), when no message came in after it (#5096).
 	asks string
 	// lastTextAt is when the agent last wrote text (botmux's sentinel included: it said something, it is no probe).
 	lastTextAt time.Time
@@ -301,7 +302,7 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 		}
 	}
 	if !m.lastPromptAt.After(m.lastTextAt) { // a message after the question answered it (#5096)
-		m.asks = transcript.AskOf(m.lastText)
+		m.asks = closeout.AskOf(m.lastText)
 	}
 	if t := tm.LastTool; t != nil {
 		m.doing, m.doingAt = transcript.Activity(t.Name, t.Input), t.At

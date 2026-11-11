@@ -49,6 +49,14 @@
     }
   },
   "space": {
+    "flush": {
+      "$type": "dimension",
+      "$value": {
+        "value": 0,
+        "unit": "px"
+      },
+      "$description": "Theme.Space.flush: parts that touch"
+    },
     "xxs": {
       "$type": "dimension",
       "$value": {
@@ -64,6 +72,14 @@
         "unit": "px"
       },
       "$description": "Theme.Space.xs"
+    },
+    "sm": {
+      "$type": "dimension",
+      "$value": {
+        "value": 6,
+        "unit": "px"
+      },
+      "$description": "Theme.Space.sm"
     },
     "s": {
       "$type": "dimension",
@@ -92,7 +108,7 @@
     "xl": {
       "$type": "dimension",
       "$value": {
-        "value": 20,
+        "value": 24,
         "unit": "px"
       },
       "$description": "Theme.Space.xl"
@@ -100,18 +116,35 @@
     "xxl": {
       "$type": "dimension",
       "$value": {
-        "value": 24,
+        "value": 32,
         "unit": "px"
       },
       "$description": "Theme.Space.xxl"
     },
-    "xxxl": {
+    "lines": {
       "$type": "dimension",
-      "$value": {
-        "value": 32,
-        "unit": "px"
-      },
-      "$description": "Theme.Space.xxxl"
+      "$value": "{space.xs}",
+      "$description": "Theme.Space.lines: between the lines of one row"
+    },
+    "titleToContent": {
+      "$type": "dimension",
+      "$value": "{space.s}",
+      "$description": "Theme.Space.titleToContent: from a title to the content under it"
+    },
+    "block": {
+      "$type": "dimension",
+      "$value": "{space.l}",
+      "$description": "Theme.Space.block: between blocks on a page or in a card"
+    },
+    "section": {
+      "$type": "dimension",
+      "$value": "{space.xl}",
+      "$description": "Theme.Space.section: between sections"
+    },
+    "page": {
+      "$type": "dimension",
+      "$value": "{space.l}",
+      "$description": "Theme.Space.page: a page's left and right edge"
     }
   },
   "minTouch": {
@@ -204,6 +237,32 @@
         "unit": "px"
       },
       "$description": "Theme.Watch.bubblePadding"
+    }
+  },
+  "size": {
+    "iconXS": {
+      "$type": "dimension",
+      "$value": {
+        "value": 20,
+        "unit": "px"
+      },
+      "$description": "Theme.Size.iconXS"
+    },
+    "iconS": {
+      "$type": "dimension",
+      "$value": {
+        "value": 22,
+        "unit": "px"
+      },
+      "$description": "Theme.Size.iconS"
+    },
+    "icon": {
+      "$type": "dimension",
+      "$value": {
+        "value": 24,
+        "unit": "px"
+      },
+      "$description": "Theme.Size.icon"
     }
   }
 }

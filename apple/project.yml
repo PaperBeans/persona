@@ -751,6 +751,7 @@ targets:
       - path: PersonaTests/KnowledgeTests.swift
       - path: PersonaTests/MachineMetricsTests.swift
       - path: PersonaTests/MachineConcernTests.swift
+      - path: PersonaTests/PortForwarderTests.swift
       - path: PersonaTests/AddComputerModelTests.swift
       - path: PersonaTests/NotificationActionsTests.swift
       - path: PersonaTests/NotifyPrefsTests.swift

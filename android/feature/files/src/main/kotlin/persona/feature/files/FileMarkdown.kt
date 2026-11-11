@@ -78,7 +78,7 @@ internal fun FileMarkdown(
                 // reference definition ("[api]: https://…") draws nothing, so it must not add a gap either.
                 val blocks = remember(success) { success.node.children.filter { it.type !in invisibleBlocks } }
                 LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(
-                    top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding() + Tokens.Space.xxl)) {
+                    top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding() + Tokens.Space.xl)) {
                     header()
                     itemsIndexed(blocks, contentType = { _, node -> node.type.name }) { index, node ->
                         // A heading starts a section: a little more room above it than between paragraphs.

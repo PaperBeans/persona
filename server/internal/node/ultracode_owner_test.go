@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -959,6 +960,8 @@ func TestStartUltracodeCommandLeftInTheBoxHoldsTheFirstPrompt(t *testing.T) {
 	}{{"a draft", false}, {"no screen", true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			n, f, home := herdrNode(t)
+			var logs bytes.Buffer
+			n.logger = log.New(&logs, "", 0)
 			cwd := mkdir(t, filepath.Join(home, "project"))
 			plain, ansi := screenFixture(t, "claude-2.1.312-empty-162.txt"), screenFixture(t, "claude-2.1.312-empty-162.ansi")
 			typedTxt, typedANSI := screenFixture(t, "claude-2.1.312-typed-162.txt"), screenFixture(t, "claude-2.1.312-typed-162.ansi")
@@ -991,6 +994,9 @@ func TestStartUltracodeCommandLeftInTheBoxHoldsTheFirstPrompt(t *testing.T) {
 			}
 			if lost, ok := n.lostFirst.get(startedID(f)); !ok || lost.why != lostUltracode {
 				t.Fatalf("lost first prompt: %+v %v", lost, ok)
+			}
+			if got := logs.String(); !strings.Contains(got, "first message held back after ultracode") || !strings.Contains(got, "ultracode: timeout") {
+				t.Fatalf("expected diagnostics through the node's logger, got %q", got)
 			}
 		})
 	}

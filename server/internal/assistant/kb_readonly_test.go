@@ -69,6 +69,8 @@ func TestKBReadOnlyAbsentArchiveAndWriteRefusals(t *testing.T) {
 		{"PUT", "/api/v1/kb/projects/example"},
 		{"PUT", "/api/v1/recordings/example"},
 		{"DELETE", "/api/v1/recordings/example"},
+		{"DELETE", "/api/v1/kb/projects/example"},
+		{"POST", "/api/v1/kb-trash/example-1/restore"},
 	} {
 		r := httptest.NewRecorder()
 		s.ServeHTTP(r, httptest.NewRequest(req.method, req.path, strings.NewReader(`{}`)))

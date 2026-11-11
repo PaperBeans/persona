@@ -210,7 +210,14 @@ func (h *Hub) auth(next http.Handler) http.Handler {
 		if ext {
 			p, ok, p.extOpens, p.extScope, sure = h.authorizeExtension(r.Context(), tok, r)
 		} else {
-			p, ok = h.authenticate(r.Context(), tok)
+			var err error
+			if p, ok, err = h.lookupToken(r.Context(), tok); err != nil {
+				// The token store did not answer: no verdict on the token. A 401 would tell the app its credential is
+				// revoked (Android then forgets the hub), so say "try again" and don't count it against the source.
+				retryAfter(w, 5*time.Second)
+				h.securityError(w, r, http.StatusServiceUnavailable, codeTokenStoreUnavailable, 0)
+				return
+			}
 		}
 		if !ok && ext && !sure && (!public || h.proofVouches(r, proof, tok)) {
 			// A manager did not answer (timed out, not ready yet): no verdict on the token, so neither counted nor

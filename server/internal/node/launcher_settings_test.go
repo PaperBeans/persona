@@ -157,6 +157,22 @@ func TestManagedSettingsCarryTheLaunchersEnv(t *testing.T) {
 	if s["enableArtifact"] != false || env["CLAUDE_CODE_DISABLE_ARTIFACT"] != "1" {
 		t.Errorf("Artifacts are not off for a gateway: enableArtifact %v, env %v", s["enableArtifact"], env["CLAUDE_CODE_DISABLE_ARTIFACT"])
 	}
+	if s["apiKeyHelper"] != "" {
+		t.Errorf("the user-global apiKeyHelper must be disabled for a managed launcher: %v", s["apiKeyHelper"])
+	}
+}
+
+// A managed launcher authenticates with its own gateway key: an apiKeyHelper anywhere in Persona's settings would still
+// run and present another machine's token to the gateway, which rejects it with 401. The merged settings pin it off.
+func TestManagedSettingsDisableTheAPIKeyHelper(t *testing.T) {
+	home := t.TempDir()
+	n := &Node{home: home, dir: filepath.Join(home, ".persona"), logger: log.New(io.Discard, "", 0)}
+	ours := filepath.Join(n.dir, "claude-settings.json")
+	writeFile(t, ours, `{"apiKeyHelper":"/home/me/.cpa/get-key","env":{"ANTHROPIC_API_KEY":"global"}}`)
+	n.setManaged([]proto.ManagedLauncher{{Name: "m", BaseURL: "https://gw.example.com", Model: "m1", APIKey: "k"}})
+	if s := readSettings(t, n.claudeSettings(context.Background(), "m", ours, home)); s["apiKeyHelper"] != "" {
+		t.Errorf("apiKeyHelper %v, want the helper disabled", s["apiKeyHelper"])
+	}
 }
 
 // Persona's own settings not written yet (a test's node; a write that failed): the managed launcher's gateway still
@@ -175,6 +191,9 @@ func TestManagedSettingsWithoutPersonasFile(t *testing.T) {
 	}
 	if readSettings(t, got)["enableArtifact"] != false {
 		t.Error("Artifacts are not off in the env-only settings (the hooks-as-plugin start)")
+	}
+	if readSettings(t, got)["apiKeyHelper"] != "" {
+		t.Error("the apiKeyHelper is not disabled in the env-only settings (the hooks-as-plugin start)")
 	}
 	writeFile(t, ours, `null`)
 	if env, _ := readSettings(t, n.claudeSettings(context.Background(), "m", ours, home))["env"].(map[string]any); env["ANTHROPIC_API_KEY"] != "k" {

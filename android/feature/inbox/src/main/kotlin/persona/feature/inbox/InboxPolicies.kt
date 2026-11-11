@@ -237,7 +237,7 @@ internal fun InboxPolicySheet(repository: InboxRepository, target: InboxPolicyTa
         Text(stringResource(R.string.inbox_policy_twin_note), Modifier.padding(horizontal = rowPadding),
             style = PersonaTheme.type.caption, color = palette.ink3)
         failure?.let { JNotice(it, Modifier.padding(top = Tokens.Space.l), status = Status.NeedsYou) }
-        Spacer(Modifier.height(Tokens.Space.xl))
+        Spacer(Modifier.height(ContentTokens.legacyXl))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
             if (editor.policy != null) JButton(stringResource(R.string.inbox_policy_remove), { send(InboxPolicySend.Remove) },
                 kind = JButtonKind.Quiet, size = JButtonSize.Medium, enabled = !editor.busy, loading = editor.sending == InboxPolicySend.Remove)

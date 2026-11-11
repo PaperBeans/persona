@@ -216,7 +216,7 @@ func (n *Node) claudeAssistantMCPAndTools(id, cwd string, legacyMCP bool) (mcpJS
 // A managed launcher's shell is not wrapped: it runs `personad launch`, which fetches the launcher's settings outside
 // the sandbox and wraps only the agent it execs (launchExec).
 func (n *Node) assistantCLICommand(shell, launcher, cwd string, args, env []string) *exec.Cmd {
-	argv := append([]string{shell, "-ic", n.launcherCommand(launcher) + ` "$@"`, "persona"}, args...)
+	argv := append([]string{shell, "-ic", n.launcherCommandIn(launcher, envValue(env, "CLAUDE_CONFIG_DIR"), shellQuote) + ` "$@"`, "persona"}, args...)
 	if _, managed := n.managedLauncher(launcher); !managed {
 		base := env
 		argv, env, _ = wrapAgent("assistant", n.home, n.dir, cwd, settingsArgs(args),
@@ -235,10 +235,20 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	if err := os.MkdirAll(cwd, 0o700); err != nil {
 		return nil, err
 	}
+	var err error
+	execution.ConfigDir, err = n.assistantProfileSelection(context.Background(), id, launcher, execution.Runtime, execution.ConfigDir, resume)
+	if err != nil {
+		return nil, err
+	}
+	configDir := n.assistantConfigDir(launcher, execution.ConfigDir)
+	configPath := n.assistantConfigPath(execution.ConfigDir)
+	if err := os.MkdirAll(configPath, 0o700); err != nil {
+		return nil, err
+	}
 	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
 		"--include-partial-messages"}
 	// Persona's hooks: a plugin, or in --settings for a claude that loads none (hooksplugin.go).
-	settings, hooks := n.claudeStartSettings(context.Background(), launcher, "assistant", cwd)
+	settings, hooks := n.claudeStartSettings(context.Background(), launcher, "assistant", cwd, configPath)
 	compaction := n.assistantCompactionPolicy(launcher, cwd, settings, execution)
 	if hooks == "" && n.launcherOwnSettings(context.Background(), launcher) != "" {
 		compaction.ownSettings = ""
@@ -264,7 +274,7 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	if model == "" && resume && execution.Fingerprint != "" && n.guestOf(id) == nil {
 		// The model configuration names none: the launcher's default, not the model the session ran on last
 		// (assistant_resume_model.go). A guest keeps what it started on.
-		model = n.resumeModel(launcher, cwd, settings)
+		model = n.resumeModel(launcher, cwd, settings, configPath)
 	}
 	if model != "" {
 		args = append(args, "--model", model)
@@ -284,6 +294,7 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	}
 	// Persona's own tools are few and used all the time: load them up front instead of behind ToolSearch.
 	env := identity.Environment(os.Environ(), append([]string{"PERSONA_ASSISTANT=1", "ENABLE_TOOL_SEARCH=false"}, compaction.env()...)...)
+	env = n.claudeProcessEnv(env, configDir)
 	guest := n.guestOf(id) != nil
 	if guest && execution.Runtime == proto.AssistantRuntimeAgentSDK {
 		return nil, errGuestAgent // the bridge takes no --tools (assistant_guest.go)
@@ -318,7 +329,7 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 			"command": n.bin, "args": []string{"mcp"}, "env": map[string]string{"PERSONA_ASSISTANT": "1", "PERSONA_SESSION_ID": id},
 		}}}
 		compat.MCPRegistrationServers(mcpConfig["mcpServers"].(map[string]any), legacyMCP)
-		start := sdkStart{id: id, cwd: cwd, model: model, permissionMode: startMode, resume: resume, mcp: mcpConfig,
+		start := sdkStart{id: id, cwd: cwd, model: model, configDir: execution.ConfigDir, permissionMode: startMode, resume: resume, mcp: mcpConfig,
 			allowedTools: strings.Join(append([]string{n.assistantTools(legacyMCP)}, healthReportRules(cwd)...), ","), tools: assistantBuiltinTools, deny: n.healthDenyRules(cwd), settings: settings, plugin: hooks, compaction: &compaction}
 		var err error
 		if cmd, first, err = n.sdkCommand(bridge, launcher, start, env); err != nil {

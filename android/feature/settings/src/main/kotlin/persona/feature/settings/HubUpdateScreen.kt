@@ -85,7 +85,7 @@ internal fun HubUpdateContent(
                 update(s, state, resources, onUpdate = { model?.let { m -> scope.launch { m.update(now = false) } } }, onNow = { confirmNow = true })
                 if (s.canUpdate) item("auto") {
                     Column {
-                        JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.xl)) {
+                        JGroupItem(GroupPosition.Single, Modifier.padding(top = ContentTokens.legacyXl)) {
                             JSwitchRow(stringResource(R.string.settings_hub_update_auto), s.auto, { on -> model?.let { m -> scope.launch { m.setAuto(on) } } }, enabled = !state.sending)
                         }
                         Note(stringResource(R.string.settings_hub_update_auto_footer))

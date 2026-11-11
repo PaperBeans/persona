@@ -140,7 +140,7 @@
   "sidebar_pages_down": "把「{name}」下移",
   "sidebar_pages_show": "「{name}」放在侧栏上",
   "builtin_title": "内置 {count}",
-  "builtin_footer": "各台电脑上直接运行的 claude，用 Claude Code 自己的登录和默认模型；不能隐藏。",
+  "builtin_footer": "各台电脑上直接运行的 claude，用 Claude Code 自己的登录和默认模型；点进去可以在 Persona 里隐藏。",
   "builtin_row": "内置 {name} · {machine}",
   "sync_title": "同步状态 {count}",
   "sync_footer": "每台电脑这次有没有把列表发回来；没回应的显示上次的结果，并在供应商上标出来。",

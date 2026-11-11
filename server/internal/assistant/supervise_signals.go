@@ -74,6 +74,8 @@ type superviseSignal struct {
 	// Decision: the decision a recheck or an owner_cannot_answer signal is about, as it was asked (decision.go); for
 	// owner_cannot_answer Detail is the owner's answer (decide_yourself, not_what_i_asked, explain_first).
 	Decision *prompts.SuperviseDecision
+	// Inbox: the Inbox item an inbox signal names, and how many new messages it tells (supervise_inbox.go).
+	Inbox *prompts.SuperviseInbox
 }
 
 const (
@@ -219,6 +221,13 @@ func (s *Service) signal(g superviseSignal) {
 		}
 		if g.Kind == sigReport && cur.Key != g.Key {
 			g = joinReports(cur, g) // two questions before the message went: both are asked
+		}
+		if g.Kind == sigInbox {
+			if cur.Key != g.Key {
+				g = joinInbox(cur, g) // more messages before the message went: the newest, with how many came
+			} else {
+				g.Inbox = cur.Inbox // the same message again: counted once
+			}
 		}
 	}
 	b.pending[g.id()] = g

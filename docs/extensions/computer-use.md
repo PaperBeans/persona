@@ -487,9 +487,16 @@ Flags used:
   - on Cua Driver, any `computer_run` while one has a window on the screen (`list_windows`, each window's pid matched to its bundle id through `list_apps`, so System Settings counts in any language; the prompts by their process names): an element token, a pid or a step naming no app could still reach it. When the windows can't be read, nothing is done;
   - steps naming no app (they act on whatever has the focus) run one `run_steps` call at a time, the screen checked before each, so a prompt that an earlier step brought up stops the rest. The answer lists each step's own answer (`one_by_one`);
   - LCU: a native-app question about one of them is declined without a card (`lcuconfirm.NativeApp`). App-less steps already fail there.
-  The model is told the user does it themselves, on the Mac or through the live screen, and not to retry; the hub log says `refused: protected app <id>` and nothing else of the call. Not covered here, and followed up in #4349: what a script does with a window it finds once it is running, and an Agent's own Cua MCP.
+  The model is told the user does it themselves, on the Mac or through the live screen, and not to retry; the hub log says `refused: protected app <id>` and nothing else of the call.
+  - **The Agents' own Cua Driver** (#4349, `server/internal/node/cua_gate.go`): in the sessions Persona starts on a Mac, a PreToolUse hook on Cua Driver's MCP tools (`mcp__<server>__<tool>`, any server name with "cua" in it) and on Bash commands that run `cua-driver call` applies the same rules on the computer, at once, with no card. The rules and their wording live in `server/internal/protectedapps`, shared with the manager. Reads pass without a look. A call is denied when it names a protected app, aims at one's pid, or acts while one has a window on the screen. A script whose apps can't be read is denied, and so is a `cua-driver call` whose arguments aren't in the command, or one the gate can't follow (a heredoc, a subshell). `cua-driver` counts only where it is the program run (after variable assignments, `env` / `sudo` and the like, or inside `sh -c`), so a `grep` or a commit message that mentions it is no call.
+  - **Not covered**:
+    - what a script does with a window it finds once it is running;
+    - the sessions the user starts themselves (Persona's global hooks only report, `docs/integrations/claude-integration.md` "Global report-only hooks");
+    - Codex Agents' own MCP tools;
+    - any other program a shell can use to drive the screen.
+    Cua Driver 0.38 can't close these itself: its hard invariants protect only its own consent UI, its policy file sees tool names and arguments only, and its capability manifest is an allowlist of apps. macOS's own protections are the backstop there.
 - **With Confirm on Phone Before Acting**: if this call already asked because of an App, don't ask twice; otherwise with confirmation enabled, ask each time as before.
-- **Agent's own Cua MCP** (`mcp__cua-driver__*`): bypasses the hub and still uses the Agent's tool approvals, including the never-operated Apps above (#4349). Integrate allowed Apps later.
+- **Agent's own Cua MCP** (`mcp__cua-driver__*`): bypasses the hub and still uses the Agent's tool approvals, except the never-operated Apps above, which its PreToolUse hook denies (#4349). Integrate allowed Apps later.
 
 ### d) Small settings
 

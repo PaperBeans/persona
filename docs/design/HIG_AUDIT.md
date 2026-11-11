@@ -612,7 +612,7 @@ Each block lists: Severity, Platform, Location, Violates, Problem, Evidence, Fix
 - **Violates**: [Gestures][gest]: consistent, responsive gestures. Alternatives exist (scrim tap, escape action, labeled close handle), so this is consistency only.
 - **Problem**: the lift menu closes at a 44pt downward drag; the terminal cover tracks live with a velocity-aware release (which suits the HIG's guidance to track gestures directly). No shared constant.
 - **Evidence**: `DragGesture(minimumDistance: Theme.Space.l).onEnded { if $0.translation.height > Theme.Size.tapTarget { menu.close() } }`.
-- **Fix**: one shared dismiss-drag constant; optional visible Close in the terminal grab bar.
+- **Fix**: one shared dismiss-drag constant; optional visible Close in the terminal grab bar (the Close is done, #4328: the bar has a 44pt Close in every state).
 
 #### HIG-066 Swipe Close and Delete are tinted, not marked destructive
 - **Severity**: P2. **Platform**: iOS.

@@ -50,8 +50,13 @@ class GlassTokenContractTest {
             assertEquals(p.ink2, p.ink3)
             val systemBlue = if (dark) Tokens.Semantic.Glass.Dark.accent else Tokens.Semantic.Glass.Light.accent
             assertEquals(Palettes.glassText(systemBlue, dark), p.accent)
-            assertEquals(systemBlue, p.needsYou.dot)
-            assertEquals(Palettes.glassText(if (dark) Color(0xFF409CFF) else Color(0xFF0064C8), dark), p.needsYou.text)
+            // Needs You is the iPhone blue (#4209), now read from the generated tokens.
+            val needsDot = if (dark) Tokens.Status.Dark.NeedsYou.dot else Tokens.Status.Light.NeedsYou.dot
+            val needsText = if (dark) Tokens.Status.Dark.NeedsYou.text else Tokens.Status.Light.NeedsYou.text
+            assertEquals(systemBlue, needsDot)
+            assertEquals(if (dark) Color(0xFF409CFF) else Color(0xFF0064C8), needsText)
+            assertEquals(needsDot, p.needsYou.dot)
+            assertEquals(Palettes.glassText(needsText, dark), p.needsYou.text)
             assertEquals(if (dark) Tokens.Status.Dark.Working.dot else Tokens.Status.Light.Working.dot, p.working.dot)
             assertEquals(Palettes.glassText(if (dark) Tokens.Status.Dark.Working.text else Tokens.Status.Light.Working.text, dark), p.working.text)
             assertEquals(if (dark) Tokens.Status.Dark.Unread.dot else Tokens.Status.Light.Unread.dot, p.done.dot)
@@ -70,6 +75,12 @@ class GlassTokenContractTest {
         assertEquals(22.dp, Shapes.Glass.panel)
         assertEquals(10.dp, Shapes.Glass.control)
         assertEquals(20.dp, Tokens.Radius.bubble)
+    }
+
+    @Test fun spacingIsTheIPhoneScale() {
+        val t = Tokens.Space
+        assertEquals(listOf(0, 2, 4, 6, 8, 12, 16, 24, 32).map { it.dp }, listOf(t.flush, t.xxs, t.xs, t.sm, t.s, t.m, t.l, t.xl, t.xxl))
+        assertEquals(listOf(t.xs, t.s, t.l, t.xl, t.l), listOf(t.lines, t.titleToContent, t.block, t.section, t.page))
     }
 
     @Test fun compactChromeAndSidebarBadgesKeepReadableText() {

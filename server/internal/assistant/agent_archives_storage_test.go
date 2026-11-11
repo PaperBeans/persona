@@ -117,7 +117,7 @@ func TestAgentSessionArchiveBoundedStorageAndLock(t *testing.T) {
 			waiter, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
 			defer stop()
 			start := time.Now()
-			if _, _, err := h.archivedSessions(waiter, mid, rows); !errors.Is(err, context.DeadlineExceeded) {
+			if _, _, err := h.archivedSessions(waiter, mid, rows, h.archiveMark()); !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("lock wait: %v", err)
 			}
 			if time.Since(start) > 500*time.Millisecond {

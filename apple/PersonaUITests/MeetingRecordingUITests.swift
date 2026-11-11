@@ -38,7 +38,9 @@ final class MeetingRecordingUITests: XCTestCase {
         let title = app.descendants(matching: .any)["recording-now-title"].firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(app.staticTexts["产品周会"].firstMatch.exists, app.debugDescription)
-        XCTAssertTrue(app.staticTexts["12:34"].exists, app.debugDescription)
+        // The sheet's clock is the system's (`Text(timerInterval:)`): it reads from 12 minutes on (VoiceOver's spoken value).
+        let clock = app.descendants(matching: .any)["recording-live-timer"].firstMatch
+        XCTAssertTrue(clock.exists && "\(clock.value ?? "")".contains("12"), "\(clock.label) \(clock.value ?? "")")
         XCTAssertTrue(app.buttons["recording-stop"].exists)
         XCTAssertTrue(app.buttons["recording-bookmark"].exists)
         try shot(app, "meeting-recording")
@@ -127,6 +129,8 @@ final class MeetingRecordingUITests: XCTestCase {
             let element = app.staticTexts[text].firstMatch
             var swipes = 0
             while !element.exists || !element.isHittable, swipes < 4 { app.swipeUp(); swipes += 1 }
+            // Scrolled past (rows above the screen are not in the tree): back up.
+            while !element.exists || !element.isHittable, swipes < 10 { app.swipeDown(); swipes += 1 }
             XCTAssertTrue(element.exists, "no \(text):\n\(app.debugDescription)")
         }
         // The meeting's fields went up with it.
@@ -167,11 +171,42 @@ final class MeetingRecordingUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-pairURL", pair(hub), "-tab", "assistant", "-openShellPage", "recordings", "-showMeetingSample", "pending"]
         app.launchPinned()
-        let again = app.buttons["再试一次"].firstMatch
+        let again = app.buttons["minutes-retry"].firstMatch
         XCTAssertTrue(again.waitForExistence(timeout: 45), app.debugDescription)
         again.tap()
         XCTAssertTrue(wait(10) { try self.minutesAsked(hub).contains(self.past) }, "Try Again didn't reach the hub")
         XCTAssertTrue(app.descendants(matching: .any)["minutes-waiting"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    /// The live sheet's whole way (#4240): the sheet opens by itself, lines arrive in the timeline, a bookmark lands in it,
+    /// Stop asks first, the wrap-up steps reach the minutes. `-showMeetingSample flow` (no microphone) drives it.
+    @MainActor func testLiveSheetFlowReachesTheMinutes() throws {
+        let hub = try mockHub()
+        try minutesMode(hub, "ready")
+        let app = XCUIApplication()
+        app.launchArguments = ["-pairURL", pair(hub), "-tab", "assistant", "-openShellPage", "recordings", "-showMeetingSample", "flow"]
+        app.launchPinned()
+        let stop = app.buttons["recording-stop"].firstMatch
+        XCTAssertTrue(stop.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["产品周会"].firstMatch.exists, app.debugDescription)
+        // Lines arrive every few seconds.
+        let lines = app.descendants(matching: .any).matching(identifier: "recording-timeline-sentence")
+        XCTAssertTrue(wait(30) { lines.count >= 2 }, "no lines arrived:\n\(app.debugDescription)")
+        try shot(app, "live-sheet")
+        app.buttons["recording-bookmark"].firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["recording-timeline-bookmark"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        // Stop asks first; Cancel keeps recording.
+        stop.tap()
+        let confirm = app.buttons["停止录音"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+        try shot(app, "stop-dialog")
+        confirm.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["recording-wrapup-title"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        let open = app.buttons["recording-wrapup-open"]
+        XCTAssertTrue(wait(60) { open.exists && open.label == "打开纪要" }, "minutes never reached the wrap-up:\n\(app.debugDescription)")
+        try shot(app, "wrap-up")
+        open.tap()
+        XCTAssertTrue(app.buttons["minutes-copy"].waitForExistence(timeout: 10), app.debugDescription)
     }
 
     // MARK: Helpers

@@ -12,17 +12,33 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/shareproof"
 )
 
 const testOrigin = "http://share.example.test:18081"
 
 var testToken = strings.Repeat("A", 64)
+var testIngressKey = shareproof.DecodeKey(strings.Repeat("12", 32))
+
+func acknowledged(t *testing.T, next http.Handler) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if shareproof.Scope(r) {
+			if _, ok := shareproof.Verify(testIngressKey, r, time.Now()); !ok {
+				t.Error("ingress request proof was not authentic")
+			}
+			w.Header().Set(shareproof.Acknowledgement, shareproof.Accepted)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 func testProxy(t *testing.T, upstream http.Handler) http.Handler {
 	t.Helper()
-	s := httptest.NewServer(upstream)
+	s := httptest.NewServer(acknowledged(t, upstream))
 	t.Cleanup(s.Close)
-	h, err := Handler(Config{Listen: ":18081", Upstream: s.URL, PublicOrigin: testOrigin})
+	h, err := Handler(Config{Listen: ":18081", Upstream: s.URL, PublicOrigin: testOrigin, IngressKey: testIngressKey})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +61,7 @@ func assertHeaders(t *testing.T, h http.Header) {
 			t.Errorf("%s = %q", k, h.Get(k))
 		}
 	}
-	for _, k := range []string{"Set-Cookie", "Location", "WWW-Authenticate", "X-Private", "Access-Control-Allow-Origin"} {
+	for _, k := range []string{"Set-Cookie", "Location", "WWW-Authenticate", "X-Private", "Access-Control-Allow-Origin", shareproof.Header, shareproof.Acknowledgement} {
 		if h.Get(k) != "" {
 			t.Errorf("unexpected %s", k)
 		}
@@ -53,7 +69,7 @@ func assertHeaders(t *testing.T, h http.Header) {
 }
 
 func TestConfigFailsClosed(t *testing.T) {
-	valid := Config{Listen: ":18081", Upstream: "http://127.0.0.1:18080", PublicOrigin: testOrigin}
+	valid := Config{Listen: ":18081", Upstream: "http://127.0.0.1:18080", PublicOrigin: testOrigin, IngressKey: testIngressKey}
 	for _, c := range []Config{
 		{}, {Listen: ":80", Upstream: valid.Upstream, PublicOrigin: "http://share.example.test:80"},
 		{Listen: ":18082", Upstream: valid.Upstream, PublicOrigin: testOrigin},
@@ -65,6 +81,7 @@ func TestConfigFailsClosed(t *testing.T) {
 		{Listen: valid.Listen, Upstream: valid.Upstream, PublicOrigin: "http://share.example.test"},
 		{Listen: valid.Listen, Upstream: "http://127.0.0.1:18081", PublicOrigin: "http://127.0.0.1:18081"},
 	} {
+		c.IngressKey = testIngressKey
 		if _, err := Handler(c); err == nil {
 			t.Error("invalid config accepted")
 		}
@@ -138,6 +155,8 @@ func TestExactPathsPinHostAndStripAllCredentials(t *testing.T) {
 		for _, k := range []string{"Authorization", "Proxy-Authorization", "Cookie", "X-Persona-Manager", "X-Jarvis-CSRF", "X-Persona-CSRF", "X-Forwarded-For", "X-Forwarded-Host", "Forwarded", "X-Private"} {
 			r.Header.Set(k, "synthetic-secret")
 		}
+		r.Header.Set(shareproof.Header, "forged-client-proof")
+		r.Header.Set(shareproof.Acknowledgement, "forged-client-acknowledgement")
 		r.Header.Set("Accept-Language", "ja")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -235,10 +254,10 @@ func TestInFlightRelaysAreBounded(t *testing.T) {
 }
 
 func TestRealListenerCancellationLeavesUpstreamAlive(t *testing.T) {
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	up := httptest.NewServer(acknowledged(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, "{}")
-	}))
+	})))
 	defer up.Close()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -251,7 +270,7 @@ func TestRealListenerCancellationLeavesUpstreamAlive(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- Serve(ctx, Config{Listen: address, Upstream: up.URL, PublicOrigin: "http://share.example.test:" + port})
+		done <- Serve(ctx, Config{Listen: address, Upstream: up.URL, PublicOrigin: "http://share.example.test:" + port, IngressKey: testIngressKey})
 	}()
 	client := &http.Client{Timeout: time.Second}
 	deadline := time.Now().Add(5 * time.Second)

@@ -34,7 +34,7 @@ repository's.
 | What | Budget | Measure with |
 | --- | --- | --- |
 | One main-thread work item during scrolling, typing or an animation | ≤ 16 ms (one frame at 60 Hz; 8 ms on 120 Hz ProMotion screens is the goal) | Time Profiler, Animation Hitches, `FrameStats` |
-| Any single main-thread block, anywhere (first tap, page open, push) | < 100 ms; Apple calls a delay over 100 ms noticeable | Time Profiler, Hangs instrument, `sample <pid>` |
+| Any single main-thread block, anywhere (first tap, page open, push) | < 100 ms; Apple calls a delay over 100 ms noticeable | `MainThreadWatchdog`, Time Profiler, Hangs instrument, `sample <pid>` |
 | A hang | none ≥ 250 ms, the point where Apple's tools report a hang; one found is a bug to fix before release | Hangs instrument, Xcode Organizer, MetricKit |
 | Hitch time ratio while scrolling | < 5 ms/s (Apple: good under 5, warning 5–10, critical above 10) | `XCTHitchMetric`, `scripts/app/perf-test.sh` |
 | View bodies per hub push, page at rest | the numbers in `docs/apple/ios-state.md` ("Cost of one push"): Agents list 1 / 2, chats 0 | `RenderBudgetTests` |
@@ -343,14 +343,23 @@ Start from a reproduction, measure the base, change one thing, measure again.
      `#if DEBUG || PERF_SIGNPOST`.
 4. **Count redraws.** Add `PerfTrace.body("ViewName")` at the top of a heavy `body`; launch with `-perfCounts YES`.
    `PerfCount` counts bodies and the main thread's time from each push to the next idle run loop.
-5. **Automate it (the probe-script pattern).** A DEBUG launch argument runs the scenario inside the app and writes its
+5. **Catch main-thread blocks.** DEBUG and PERF_SIGNPOST builds start `MainThreadWatchdog` with the root view. A background
+   thread pings the main run loop every 25 ms. If a ping takes at least 100 ms, the watchdog suspends the main Mach thread,
+   copies its registers and frame-pointer chain, resumes it, and symbolicates the addresses afterwards. Raw addresses and a
+   `PerfTrace.event` are recorded before symbolication, so a persistent hang is visible before the main thread answers again;
+   the answer's own timestamp supplies the final duration without the sampler's overhead. Healthy pings capture no stack and
+   emit no event. A block appears as `main_thread_blocks` in
+   `PerfCount`, and is attached to each `FrameProbe` run in `frames.json`. Reports keep the five longest blocks and 32 frames
+   per stack. `PerfAssistantTests/testWelcomePageIdle` asserts that every measured run has zero such blocks; other suites
+   attach the data without enforcing the budget yet.
+6. **Automate it (the probe-script pattern).** A DEBUG launch argument runs the scenario inside the app and writes its
    numbers to a file (`-showAutoScroll YES` → `Documents/frames.json` from `FrameStats`; `-showPagePerf YES` →
    `frames-page-*.json`); a script launches the app, drives the mock hub (`/mock/churn`, `/mock/say?stream=1`), waits with a
    timeout, reads the file and ends with a one-line verdict. Screen probes (`-probes YES`, `docs/apple/ios-state.md`,
    "Probes and assertions") expose state for UI tests. The suites in `scripts/app/perf-test.sh` (`PerfAgentsTests`,
    `PerfAssistantTests`, `PerfComposerTests`, …) do this with `XCTHitchMetric` and report through
    `scripts/app/perf_report.py`.
-6. **In the field.** TestFlight builds report hangs, launch time and memory to Xcode Organizer. MetricKit is not wired yet
+7. **In the field.** TestFlight builds report hangs, launch time and memory to Xcode Organizer. MetricKit is not wired yet
    (#4265).
 
 Report the device or simulator, OS, build settings, data set, number of runs and the range, and say what was not measured.
@@ -364,7 +373,7 @@ Report the device or simulator, OS, build settings, data set, number of runs and
 | `scripts/app/perf-test.sh` | Scroll, navigation and composer hitches per page | Existing, run by hand |
 | Isolation-aware lint | Flag the patterns above only where the compiler says the call is on the main actor (SwiftSyntax or a SourceKit index over the isolation of the enclosing declaration), so the ratchet can become a hard zero | Proposed, #4262 |
 | `scripts/test/test_apple_state_initial_values.py` | P3 ratchet over Swift under `apple/`, including tests: class construction in `@State` with non-trivial `init` bodies or eager stored-property initial values. Each file/type count (`scripts/test/apple_state_initial_values_baseline.json`) may only go down; new entries start at zero. `--update` lowers the baseline; `--list` prints every counted site and its reason. Automatically discovered by `scripts/ci/python-tests.py` in the scripts lane. | Implemented, #4263 |
-| DEBUG main-thread watchdog | A background thread pings the main run loop and logs a `PerfTrace.event` plus a main-thread sample when it is blocked over 100 ms, so UI tests and runtime CLI scenarios catch blocks without Instruments | Proposed, #4264 |
+| DEBUG main-thread watchdog | A background thread pings the main run loop and logs a `PerfTrace.event` plus a main-thread sample when it is blocked over 100 ms, so UI tests and runtime CLI scenarios catch blocks without Instruments | Implemented, #4264 |
 | MetricKit | Subscribe `MXMetricManager` in TestFlight builds; send hang (`MXHangDiagnostic`), launch and memory payloads into Copy Diagnostics | Proposed, #4265 |
 | Launch metric | A UI test with `XCTApplicationLaunchMetric` in `scripts/app/perf-test.sh` | Proposed, #4266 |
 
@@ -460,7 +469,7 @@ Grep counts are across `apple/` without tests; they are leads to read, not each 
 
 **Instrumentation that exists**
 
-`PerfTrace` / `PerfCount` (`apple/Persona/App/PerfSignpost.swift`), `FrameStats`, `apple/Mac/App/MacPerfHarness.swift`, `apple/PersonaUITests/PerfTestCase.swift` (`XCTHitchMetric`, scroll and navigation signpost metrics, `XCTClockMetric`), `RenderBudgetTests`. No `OSSignposter` intervals, no MetricKit, no hang detector.
+`PerfTrace` / `PerfCount` (`apple/Persona/App/PerfSignpost.swift`), `MainThreadWatchdog`, `FrameStats`, `apple/Mac/App/MacPerfHarness.swift`, `apple/PersonaUITests/PerfTestCase.swift` (`XCTHitchMetric`, scroll and navigation signpost metrics, `XCTClockMetric`), `RenderBudgetTests`. No `OSSignposter` intervals, no MetricKit.
 
 ## Sources
 

@@ -269,7 +269,7 @@ private fun ReviewComment(c: ExtensionViewComment, original: List<String>) {
     val parts = remember(c.body) { ExtensionCodeReview.splitSuggestions(c.body.orEmpty()) }
     if (parts.none { it is BodyPart.Suggestion }) return CommentLine(c)
     CommentLine(c.copy(body = null))
-    Column(Modifier.fillMaxWidth().padding(start = rowPadding + Tokens.Space.xxl + Tokens.Space.m, end = rowPadding, bottom = Tokens.Space.s)) {
+    Column(Modifier.fillMaxWidth().padding(start = rowPadding + Tokens.Space.xl + Tokens.Space.m, end = rowPadding, bottom = Tokens.Space.s)) {
         parts.forEach { p ->
             when (p) {
                 is BodyPart.Text -> ExtensionMarkdown(p.text)
@@ -380,9 +380,9 @@ private fun DiffLine(r: DiffRow, tokens: List<CodeToken>?, spans: List<CharSpan>
         else -> null
     }
     Row(Modifier.fillMaxWidth().then(if (bg != null) Modifier.background(bg) else Modifier).then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier)) {
-        Text(r.old?.toString().orEmpty(), Modifier.widthIn(min = Tokens.Space.xxxl).padding(horizontal = Tokens.Space.xs), style = type.codeSmall, color = palette.ink3,
+        Text(r.old?.toString().orEmpty(), Modifier.widthIn(min = Tokens.Space.xxl).padding(horizontal = Tokens.Space.xs), style = type.codeSmall, color = palette.ink3,
             maxLines = 1, textAlign = TextAlign.End)
-        Text(r.new?.toString().orEmpty(), Modifier.widthIn(min = Tokens.Space.xxxl).padding(horizontal = Tokens.Space.xs), style = type.codeSmall, color = palette.ink3,
+        Text(r.new?.toString().orEmpty(), Modifier.widthIn(min = Tokens.Space.xxl).padding(horizontal = Tokens.Space.xs), style = type.codeSmall, color = palette.ink3,
             maxLines = 1, textAlign = TextAlign.End)
         Text(when (r.kind) { DiffKind.Add -> "+"; DiffKind.Del -> "−"; else -> " " }, Modifier.padding(horizontal = Tokens.Space.xs), style = type.codeSmall,
             color = when (r.kind) { DiffKind.Add -> palette.diffAdd; DiffKind.Del -> palette.diffDel; else -> palette.ink3 })

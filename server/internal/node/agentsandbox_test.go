@@ -90,9 +90,10 @@ func realOf(t *testing.T, p string) string {
 // command, its launcher settings readable, and the environment can turn it off again.
 func TestAssistantCLIInAgentSandbox(t *testing.T) {
 	agentSandboxFakes(t, macSandbox)
-	env := []string{"PATH=/usr/bin:/bin"}
+	profile := t.TempDir()
+	env := []string{"PATH=/usr/bin:/bin", "CLAUDE_CONFIG_DIR=" + profile}
 	plain := func(args []string) []string {
-		return append([]string{"/bin/zsh", "-ic", `claude "$@"`, "persona"}, args...)
+		return append([]string{"/bin/zsh", "-ic", "CLAUDE_CONFIG_DIR=" + shellQuote(profile) + ` claude "$@"`, "persona"}, args...)
 	}
 
 	n := agentNode(t, false)

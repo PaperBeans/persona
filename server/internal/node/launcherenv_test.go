@@ -259,8 +259,8 @@ func TestMainConversationKeepsItsOwnWindowAndLevel(t *testing.T) {
 }
 
 func TestLaunchKeepsTheAssistantsOwnWindowAndLevel(t *testing.T) {
-	clear := []string{"ANTHROPIC_*", "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_EFFORT_LEVEL"}
-	env := []string{"ANTHROPIC_MODEL=m", "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000", "CLAUDE_CODE_EFFORT_LEVEL=high"}
+	clear := []string{"ANTHROPIC_*", "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CONFIG_DIR"}
+	env := []string{"ANTHROPIC_MODEL=m", "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000", "CLAUDE_CODE_EFFORT_LEVEL=high", "CLAUDE_CONFIG_DIR=/tmp/provider-profile"}
 	c, e := launchEnvFor(clear, env, true)
 	if !slices.Equal(c, []string{"ANTHROPIC_*"}) || !slices.Equal(e, []string{"ANTHROPIC_MODEL=m"}) {
 		t.Fatalf("assistant: %v %v", c, e)

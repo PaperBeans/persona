@@ -79,7 +79,14 @@ nonisolated enum PerfTrace {
         #else
         let scroll = ""
         #endif
-        return "{\"bodies\":{\(b)},\"events\":\(events),\"passes\":\(passes),\"ms\":\(String(format: "%.1f", totalMS)),\"max\":\(String(format: "%.1f", maxMS))\(scroll)}"
+        let blocks: String
+        if let data = try? JSONSerialization.data(withJSONObject: MainThreadWatchdog.shared.report, options: [.sortedKeys]),
+           let json = String(data: data, encoding: .utf8) {
+            blocks = ",\"main_thread_blocks\":" + json
+        } else {
+            blocks = ""
+        }
+        return "{\"bodies\":{\(b)},\"events\":\(events),\"passes\":\(passes),\"ms\":\(String(format: "%.1f", totalMS)),\"max\":\(String(format: "%.1f", maxMS))\(blocks)\(scroll)}"
     }
 }
 

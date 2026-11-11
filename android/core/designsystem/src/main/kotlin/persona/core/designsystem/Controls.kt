@@ -26,6 +26,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -33,7 +34,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -61,6 +66,9 @@ import persona.core.designsystem.icons.PhIcons
 
 // ------------------------------------------------------------------ icons
 
+/** A [JIcon]'s size when the caller gives none. */
+internal val JIconDefaultSize: Dp = Tokens.Size.iconS
+
 /**
  * A Phosphor icon in the weight the style uses: regular in glass and brief, bold on the board, filled when
  * [selected]. [decorative] icons (leading icons of settings rows) use the duotone weight in glass.
@@ -70,7 +78,7 @@ fun JIcon(
     icon: PhIcon,
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
-    size: Dp = 22.dp,
+    size: Dp = JIconDefaultSize,
     tint: Color = LocalContentColor.current,
     selected: Boolean = false,
     decorative: Boolean = false,
@@ -95,6 +103,16 @@ fun JIcon(
  * its alpha changes.
  */
 fun Modifier.stableAlpha(alpha: Float): Modifier = graphicsLayer { this.alpha = alpha }
+
+/**
+ * Clips what the rest of the chain draws to [shape], but not where it takes touches. `Modifier.clip` also cuts off
+ * the 48dp touch target Compose gives a smaller child at its own edge: a 36dp segment inside a clipped frame lost the
+ * taps just above it (DS-06, `TouchTargetTest`).
+ */
+internal fun Modifier.clipDrawing(shape: Shape): Modifier = drawWithCache {
+    val outline = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawWithCache)) }
+    onDrawWithContent { clipPath(outline) { this@onDrawWithContent.drawContent() } }
+}
 
 enum class JButtonKind { Primary, Secondary, Quiet, Destructive }
 
@@ -401,7 +419,7 @@ fun JSegmented(options: List<JSegment>, selected: Int, onSelect: (Int) -> Unit, 
     fun text(segment: JSegment) = segment.label + (segment.count?.let { " $it" } ?: "")
     when (PersonaTheme.style) {
         AppStyle.Glass -> Row(
-            modifier.clip(CircleShape).background(palette.surface)
+            modifier.clipDrawing(CircleShape).background(palette.surface)
                 .border(1.dp, Brush.verticalGradient(listOf(palette.strokeTop, palette.strokeBottom)), CircleShape).padding(4.dp),
         ) {
             options.forEachIndexed { index, segment ->
@@ -428,7 +446,7 @@ fun JSegmented(options: List<JSegment>, selected: Int, onSelect: (Int) -> Unit, 
             }
         }
         AppStyle.Board -> Row(
-            modifier.height(IntrinsicSize.Min).clip(RoundedCornerShape(8.dp)).background(palette.surface).border(1.dp, palette.line, RoundedCornerShape(8.dp)),
+            modifier.height(IntrinsicSize.Min).clipDrawing(RoundedCornerShape(8.dp)).background(palette.surface).border(1.dp, palette.line, RoundedCornerShape(8.dp)),
         ) {
             options.forEachIndexed { index, segment ->
                 val on = index == selected

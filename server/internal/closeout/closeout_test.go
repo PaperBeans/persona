@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 func TestParse(t *testing.T) {
@@ -89,6 +90,45 @@ func TestWaitsOnNobody(t *testing.T) {
 	} {
 		if got := WaitsOnNobody(c.reply); got != c.want {
 			t.Errorf("%s: WaitsOnNobody = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// A closeout that says the turn is done and needs nobody is the agent's word that its closing question is conversation
+// (#4110): the reply asks nothing. Any other closeout, or none, leaves the words to say it as before.
+func TestAskOf(t *testing.T) {
+	const q = "Which of these matters most to you?"
+	done := "<closeout status=\"done\" merged=\"n/a\" deployed=\"n/a\"></closeout>"
+	for _, c := range []struct{ name, text, want string }{
+		{"no closeout", "Here are three options.\n\n" + q, q},
+		{"done after the question", "Here are three options.\n\n" + q + "\n\n" + done, ""},
+		{"done before the question", "Here are three options.\n\n" + done + "\n\n" + q, ""},
+		{"done, waiting no", "Here are three options.\n<closeout status=\"done\">\nwaiting: no\n</closeout>\n" + q, ""},
+		{"done, a Chinese question", "三个方向都列在上面了。\n" + done + "\n你最在意哪一点？", ""},
+		{"done but something missing", "Here are three options.\n<closeout status=\"done\">\nmissing: your pick\n</closeout>\n" + q, q},
+		{"not done", "Here are three options.\n<closeout status=\"not_done\"></closeout>\n" + q, q},
+		{"blocked", "Here are three options.\n<closeout status=\"blocked\">\nwaiting: your answer\n</closeout>\n" + q, q},
+		{"no status", "Here are three options.\n<closeout merged=\"n/a\"></closeout>\n" + q, q},
+	} {
+		if got := AskOf(c.text); got != c.want {
+			t.Errorf("%s: AskOf = %q, want %q", c.name, got, c.want)
+		}
+		// The words alone ask: it is the closeout that says otherwise, not the question falling out of the last sentences.
+		if c.want == "" && transcript.AskOf(c.text) == "" {
+			t.Errorf("%s: the words alone ask nothing, the case shows nothing", c.name)
+		}
+	}
+}
+
+// A reply with no closeout, most of them, costs AskOf nothing on top of its words (transcript.AskOf): no closeout is
+// parsed, so a reply that asks nothing allocates nothing (transcript's TestAskOfAllocations), and one that asks only
+// what reading its question takes.
+func TestAskOfAllocations(t *testing.T) {
+	report := strings.Repeat("The tests pass and the branch is pushed. ", 6)
+	for _, text := range []string{report, report + "Should I merge it now?"} {
+		words := testing.AllocsPerRun(100, func() { transcript.AskOf(text) })
+		if n := testing.AllocsPerRun(100, func() { AskOf(text) }); n > words {
+			t.Errorf("AskOf allocates %v times for %.40q…, its words alone %v", n, text, words)
 		}
 	}
 }

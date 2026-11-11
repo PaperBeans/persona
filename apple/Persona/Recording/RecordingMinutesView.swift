@@ -136,8 +136,13 @@ struct RecordingMinutesSections: View {
         case .failed:
             Section("Minutes") {
                 Label("The minutes couldn't be written.", systemImage: Theme.Icon.error).foregroundStyle(Theme.danger)
-                Button { Task { await model.regenerate(entry.id) } } label: { Text("Try Again").lineLimit(1) }
-                    .disabled(model.asking)
+                    .accessibilityIdentifier("minutes-failed")
+                Button { Task { await model.regenerate(entry.id) } } label: {
+                    Label("Retry", systemImage: Theme.Icon.retry).lineLimit(1)
+                }
+                .themedButton()
+                .disabled(model.asking)
+                .accessibilityIdentifier("minutes-retry")
             }
         case .ready(let minutes):
             ready(minutes)
@@ -148,7 +153,7 @@ struct RecordingMinutesSections: View {
         Section("Minutes") {
             HStack(spacing: Theme.Space.s) {
                 if busy { ProgressView() }
-                Text(busy ? String(localized: "Writing the minutes…") : String(localized: "Minutes come next")).font(Theme.Font.body)
+                Text(busy ? String(localized: "Writing the minutes…") : String(localized: "Minutes come next")).font(Theme.Font.bodyStrong)
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("minutes-waiting")
@@ -213,6 +218,8 @@ struct RecordingMinutesSections: View {
             if let at = item.at {
                 Button { jump(at) } label: {
                     Chip(text: RecordingFormat.clock(at), look: .tint(Theme.accent), compact: true)
+                        .scaledFrame(minWidth: Theme.Size.tapTarget, minHeight: Theme.Size.tapTarget)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(String(localized: "Show in transcript at \(RecordingFormat.clock(at))"))

@@ -410,7 +410,7 @@ private fun ViewerPage(
             JSpinner(Modifier.size(28.dp))
         }
         ViewerPicture.Failed -> Column(
-            Modifier.fillMaxSize().padding(Tokens.Space.xxl),
+            Modifier.fillMaxSize().padding(Tokens.Space.xl),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.m, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

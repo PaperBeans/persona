@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
+	"math"
 	"slices"
 	"time"
 
@@ -294,9 +295,12 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 			list[i].Archived = shown[list[i].SessionID].Archived
 			v := shown[list[i].SessionID]
 			list[i].Origin, list[i].OriginRef, list[i].OpenedBy = v.Origin, v.OriginRef, v.OpenedBy // origins.go
-			// Messages from other conversations wait in the assistant while it runs: shown like typed-ahead input.
+			// Messages from other conversations wait in the assistant while it runs: shown like typed-ahead input, after
+			// the user's own (the node's), and counted so the apps leave them alone: the assistant delivers them when the
+			// turn ends, and the queue's actions are claude's (#4342).
 			if q := shown[list[i].SessionID].Queued; len(q) > 0 {
 				list[i].Queued = append(slices.Clip(list[i].Queued), q...) // the node's slice is shared: never write into it
+				list[i].QueuedRelayed = uint16(min(len(q), math.MaxUint16))
 			}
 		}
 		list[i].SeenAt = seen[list[i].SessionID]
@@ -335,8 +339,9 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 // the node lists is decorated alone (as readinessMain does), not the machine's whole list for each finished turn; one
 // the node does not list may still be an archived row (archivedSessions), found in the whole list.
 func (s *Service) decoratedSession(machine, sid string) (proto.Session, bool) {
+	mark := s.archiveMark()
 	if row, ok := s.nodeSession(machine, sid); ok {
-		list, _, err := s.archivedSessions(context.Background(), machine, s.decorateInventory(machine, []proto.Session{row}, false))
+		list, _, err := s.archivedSessions(context.Background(), machine, s.decorateInventory(machine, []proto.Session{row}, false), mark)
 		if err != nil {
 			s.logf("load agent archives: %v", err)
 		}

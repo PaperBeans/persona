@@ -5,7 +5,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/lazyre"
 )
 
@@ -46,17 +45,9 @@ var (
 )
 
 // AskOf is the question text's last words put to the user, cleaned of Markdown and cut to a line; "" when they ask
-// nothing, or when the reply's closeout says the turn is done and needs nobody (closeout.WaitsOnNobody, #4110): the
-// agent's own word that its closing question is conversation or an offer, as triage already reads that closeout.
+// nothing. Words alone: what a session asks also depends on the reply's closeout (closeout.AskOf, which the node and
+// the manager call). That rule is not here because the hub's program links this package (#4371).
 func AskOf(text string) string {
-	if ask := askOf(text); ask != "" && !closeout.WaitsOnNobody(text) {
-		return ask
-	}
-	return ""
-}
-
-// askOf is what text's last words ask, by their words alone.
-func askOf(text string) string {
 	last, n := askSentences(text)
 	if n == 0 {
 		return ""

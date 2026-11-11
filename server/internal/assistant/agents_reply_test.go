@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/proto"
-	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 // 待你回复 (#5096): which stopped agents wait on the user's answer, and the manager's one reminder of those the user
@@ -84,7 +84,7 @@ func TestAwaitsReplyHonoursCloseout(t *testing.T) {
 		{"closeout: blocked on the user", "三个方向都列在上面了。<closeout status=\"blocked\"> waiting: 你选一个 </closeout> " + question, true},
 	} {
 		// Read by the node off the whole reply.
-		s := proto.Session{Status: proto.StatusDone, State: proto.StateIdle, LastText: c.reply, Asks: transcript.AskOf(c.reply), AsksRead: true}
+		s := proto.Session{Status: proto.StatusDone, State: proto.StateIdle, LastText: c.reply, Asks: closeout.AskOf(c.reply), AsksRead: true}
 		if decorateAwaits(&s, askReader{}); s.AwaitsReply != c.want {
 			t.Errorf("%s, read by the node: awaits %v asks %q, want %v", c.name, s.AwaitsReply, s.Asks, c.want)
 		}
@@ -97,7 +97,7 @@ func TestAwaitsReplyHonoursCloseout(t *testing.T) {
 	// A real ask tool: its card is pending and the session Needs You, with or without the closeout.
 	for _, reply := range []string{plain, settled} {
 		s := proto.Session{Status: proto.StatusBlocked, State: proto.StateNeedsYou, PendingInteractions: 1, LastText: reply,
-			Asks: transcript.AskOf(reply), AsksRead: true}
+			Asks: closeout.AskOf(reply), AsksRead: true}
 		decorateAwaits(&s, askReader{})
 		if s.State != proto.StateNeedsYou || s.PendingInteractions != 1 || s.AwaitsReply {
 			t.Errorf("card pending, reply %q: state %s pending %d awaits %v; want Needs You from the card alone", reply, s.State, s.PendingInteractions, s.AwaitsReply)

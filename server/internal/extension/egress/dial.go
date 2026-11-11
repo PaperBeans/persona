@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 )
 
@@ -31,11 +32,11 @@ func (p *Proxy) dialOut(ctx context.Context, host, port string, rule Rule) (net.
 		upstream = fromEnvironment
 	}
 	target := net.JoinHostPort(host, port)
-	if up, err := upstream(&url.URL{Scheme: "https", Host: target}); err == nil && up != nil {
-		return p.connectVia(ctx, up, target)
-	}
 	ip := net.ParseIP(host)
 	if ip != nil {
+		if up, err := upstream(&url.URL{Scheme: "https", Host: target}); err == nil && up != nil {
+			return p.connectVia(ctx, up, target)
+		}
 		return p.dial(ctx, "tcp", target) // named as it is in its permissions (Matches)
 	}
 	resolve := p.Resolve
@@ -56,7 +57,7 @@ func (p *Proxy) dialOut(ctx context.Context, host, port string, rule Rule) (net.
 	var last error = fmt.Errorf("%s: no address", host)
 	var ok []net.IP
 	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsLinkLocalMulticast() {
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsLinkLocalMulticast() || slices.Contains(metadataIPs, ip.String()) {
 			last = fmt.Errorf("%s %w", host, errInternal)
 			continue
 		}
@@ -64,6 +65,13 @@ func (p *Proxy) dialOut(ctx context.Context, host, port string, rule Rule) (net.
 	}
 	if len(ok) == 0 {
 		return nil, last
+	}
+	if up, err := upstream(&url.URL{Scheme: "https", Host: target}); err == nil && up != nil {
+		// Only a checked answer reaches the upstream, and only as a numeric address: the proxy never sees
+		// the name and cannot resolve it again to somewhere forbidden (#4353).
+		return dialRace(ctx, ok, port, func(ctx context.Context, target string) (net.Conn, error) {
+			return p.connectVia(ctx, up, target)
+		})
 	}
 	return p.dialResolved(ctx, host, port, ok)
 }

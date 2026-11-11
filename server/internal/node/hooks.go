@@ -414,7 +414,24 @@ func (n *Node) handleHook(ctx context.Context, req sockRequest) (any, error) {
 		}
 		return elicitationOutput(ix, res), nil
 
+	case in.HookEventName == "PreToolUse" && cuaToolOf(in.ToolName) != "":
+		// An Agent's own Cua Driver: never System Settings or a permission prompt (cua_gate.go, #4349).
+		if why := cuaVerdict(ctx, cuaToolOf(in.ToolName), in.ToolInput); why != "" {
+			n.logf("refused %s for %s: protected app, or the screen not checked", in.ToolName, in.SessionID)
+			return preToolDecision("deny", why), nil
+		}
+		return nil, nil
+
 	case in.HookEventName == "PreToolUse" && in.ToolName == "Bash":
+		var c struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(in.ToolInput, &c) == nil {
+			if why := cuaBashVerdict(ctx, c.Command); why != "" { // its cua-driver calls, the same way (cua_gate.go)
+				n.logf("refused a cua-driver call in Bash for %s: protected app, or not checked", in.SessionID)
+				return preToolDecision("deny", why), nil
+			}
+		}
 		if !n.isAssistantSession(in.SessionID) {
 			return nil, nil
 		}

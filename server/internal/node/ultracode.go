@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"sync"
@@ -709,7 +708,7 @@ func (n *Node) startUltracode(ctx context.Context, id, pane string, on *bool) (u
 	n.mu.Unlock()
 	typed, err := n.applyUltracode(ctx, id, pane)
 	if err != nil {
-		log.Printf("start %s: ultracode: %v", id, err)
+		n.logf("start %s: ultracode: %v", id, err)
 	}
 	return typed && err != nil
 }

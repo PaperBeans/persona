@@ -19,6 +19,9 @@ type projectRetry struct {
 	// about is what failed (a recording's revision, an item's title and time): a source changed since is tried at
 	// once, its failures forgotten. "" for steps without a cheap change signal (projects, topics' sources).
 	about string
+	// chunk: a knowledge points source whose distill call ran out of time: how many timeline lines its next call
+	// carries at most (#4350); 0 for no cap.
+	chunk int
 }
 
 // retrySet is a step's sources whose call failed, by key: the knowledge base's steps that call the model per source
@@ -54,6 +57,23 @@ func (r *retrySet) fail(key, about string) projectRetry {
 	f.at = time.Now().Add(retryWait(f.failures))
 	r.m[key] = f
 	return f
+}
+
+// chunk is how many timeline lines key's next distill call carries at most (shrink); 0 for no cap.
+func (r *retrySet) chunk(key string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.m[key].chunk
+}
+
+// shrink caps key's next distill call at lines (after fail: it keeps the failure's wait). clear forgets it.
+func (r *retrySet) shrink(key string, lines int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if f, ok := r.m[key]; ok {
+		f.chunk = lines
+		r.m[key] = f
+	}
 }
 
 // clear forgets key's failures (it succeeded).

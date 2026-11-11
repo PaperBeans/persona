@@ -28,7 +28,11 @@ func (e *Engine) pruneDocs(now time.Time, sel *Selection) int {
 		return 0
 	}
 	linked := map[string]bool{}
-	for _, p := range st.Projects() {
+	projects := st.Projects()
+	for _, trashed := range st.trashedProjects() { // a restore links them again (project_trash.go)
+		projects = append(projects, trashed...)
+	}
+	for _, p := range projects {
 		for _, key := range p.Items {
 			linked[key] = true
 		}

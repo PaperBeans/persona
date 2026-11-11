@@ -32,6 +32,18 @@ final class RecordingCapture {
     /// The recorded time now, read without observing it (`elapsed` changes four times a second).
     var timeline: Double { writer?.elapsed ?? sampleElapsed }
     @ObservationIgnored private var sampleElapsed: Double = 0
+    /// The microphone's recent level, 0...1 (the writer's smoothed, perceptual level, read-only), for the live page's meter.
+    /// Not observed: a meter reads it from its own clock, many times a second.
+    var inputLevel: Double {
+        #if DEBUG
+        if writer == nil { return sampleLevel }
+        #endif
+        return Double(writer?.level ?? 0)
+    }
+    #if DEBUG
+    /// Screenshots and the DEBUG flow (`-showMeetingSample`): the level a recording with no microphone shows.
+    @ObservationIgnored var sampleLevel: Double = 0
+    #endif
     @ObservationIgnored private var input: RecordingInput = .phone
     /// Persona may answer out loud during this recording (#2981: a meeting it takes part in). The phone's microphone
     /// session then also lets a Bluetooth headset play (A2DP is listening only, so the recording keeps its microphone);
@@ -217,6 +229,12 @@ final class RecordingCapture {
     }
 
     func togglePause() {
+        #if DEBUG
+        if writer == nil, recordingID != nil, sampleElapsed > 0 {
+            if state == .recording { state = .paused } else if state == .paused { state = .recording }
+            return
+        }
+        #endif
         guard let writer else { return }
         if state == .recording {
             interrupted = false
@@ -262,6 +280,16 @@ final class RecordingCapture {
     }
 
     func addMark() {
+        #if DEBUG
+        if writer == nil, let id = recordingID, sampleElapsed > 0 {
+            let time = sampleElapsed
+            RecordingLibrary.shared.change(id) { entry in
+                if let last = entry.marks.last, time - last < 1 { return }
+                entry.marks.append(time)
+            }
+            return
+        }
+        #endif
         guard let id = recordingID, let writer else { return }
         let time = writer.elapsed
         RecordingLibrary.shared.change(id) { entry in
@@ -279,6 +307,9 @@ final class RecordingCapture {
 
     @discardableResult func stop() -> UUID? {
         if state == .starting { cancelStarting(); return nil }
+        #if DEBUG
+        if writer == nil, let id = recordingID, sampleElapsed > 0 { return stopSample(id) }
+        #endif
         guard let writer, let id = recordingID else { return nil }
         onStopping?(id)
         generation = UUID()
@@ -352,11 +383,31 @@ final class RecordingCapture {
 
     #if DEBUG
     /// Screenshots (`-showMeetingSample`): `id` shows as being recorded `elapsed` seconds in, paused or paused by a call,
-    /// with no microphone (Stop does nothing).
+    /// with no microphone (Stop ends it through `stopSample`).
     func showSample(_ id: UUID, elapsed: Double, paused: Bool = false, interrupted: Bool = false) {
         recordingID = id; self.elapsed = elapsed; sampleElapsed = elapsed
         self.interrupted = interrupted
         state = paused || interrupted ? .paused : .recording
+    }
+
+    /// The DEBUG flow (`-showMeetingSample flow`): moves a sample recording's clock and level on.
+    func advanceSample(elapsed: Double, level: Double) {
+        guard writer == nil, state != .idle else { return }
+        sampleElapsed = elapsed; self.elapsed = elapsed; sampleLevel = level
+    }
+
+    /// Stop for a sample recording: what `stop()` does for a real one after the microphone is closed (the entry ends, the
+    /// same callbacks run), so the wrap-up steps advance as they would.
+    private func stopSample(_ id: UUID) -> UUID {
+        onStopping?(id)
+        RecordingLibrary.shared.change(id) { entry in
+            entry.active = false
+            entry.expectedSegments = entry.nextIndex
+            entry.endedAt = .now
+        }
+        recordingID = nil; state = .idle; interrupted = false; notice = nil; sampleElapsed = 0; sampleLevel = 0
+        onSaved?(id)
+        return id
     }
     #endif
 

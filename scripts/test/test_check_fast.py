@@ -281,6 +281,17 @@ class CheckFastScriptsTests(unittest.TestCase):
         self.assertIn("SKIP  apple/** builds and tests", out)  # the Mac-only checks are still reported
         self.assertNotIn("test_doc_paths.py", out)
 
+    def test_token_inputs_run_the_token_suite(self):
+        self.commit_on_top("scripts/assets/test_gen_tokens.py", FAILING, "base")
+        for path in ("spec/tokens/dimension.json", "apple/Shared/Design/Theme.swift",
+                     "android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt"):
+            with self.subTest(path=path):
+                self.write(path, "changed\n")
+                code, out = self.check_fast(path=self.toolchain_without_node_and_go())
+                self.git("clean", "-fdq", "--", path.split("/", 1)[0])
+                self.assertEqual(1, code, out)
+                self.assertIn("FAIL     scripts/assets/test_gen_tokens.py", out)
+
     def test_a_docker_change_runs_the_entrypoint_suite(self):
         self.break_suite("test_docker_entrypoint.py")
         self.write("deploy/docker/entrypoint.sh", "echo changed\n")
@@ -546,10 +557,16 @@ class CheckFastServerInputsTests(unittest.TestCase):
         self.assertNotIn("no fast check maps to", out)
 
     def test_other_spec_files_stay_unmapped(self):
+        self.write("spec/other/x.json", '{"changed": true}\n')
+        out, packages = self.check_fast()
+        self.assertEqual([], packages, out)
+        self.assertIn("no fast check maps to: spec/other/x.json", out)
+
+    def test_a_token_source_runs_no_server_package(self):
         self.write("spec/tokens/colors.json", '{"changed": true}\n')
         out, packages = self.check_fast()
         self.assertEqual([], packages, out)
-        self.assertIn("no fast check maps to: spec/tokens/colors.json", out)
+        self.assertNotIn("no fast check maps to", out)
 
     def test_a_doc_runs_only_the_package_that_reads_it(self):
         self.write("docs/example-guide.md", "guide changed\n")

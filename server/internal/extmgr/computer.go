@@ -20,6 +20,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lcuconfirm"
+	"github.com/nwverse/persona/server/internal/protectedapps"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -414,10 +415,9 @@ func (h *Manager) callComputerTool(ctx context.Context, sessionID, name string, 
 	// Never System Settings or a permission prompt (#4336, computer_protected.go), before any card.
 	if a.Script != "" && !whole {
 		h.logf("[%s] computer_run refused: a script whose apps cannot all be read", m.cfg.ID)
-		return proto.TextResult("Refused: this script names the apps it operates by expression, or names none, so they "+
-			"cannot be checked. Name each one with a literal cua.getApp(\"…\") or cua.launch(\"…\"), or use steps.", true)
+		return proto.TextResult(protectedapps.UnreadableScript, true)
 	}
-	var known []knownApp
+	var known []protectedapps.App
 	if !lcu {
 		known = h.knownApps(ctx, m)
 	}
@@ -433,8 +433,7 @@ func (h *Manager) callComputerTool(ctx context.Context, sessionID, name string, 
 		switch {
 		case !ok:
 			h.logf("[%s] computer_run refused: the windows could not be read", m.cfg.ID)
-			res := proto.TextResult("Nothing was done: the Mac's windows could not be read to check for System Settings or a "+
-				"permission prompt. Try again shortly.", true)
+			res := proto.TextResult(protectedapps.Unchecked, true)
 			return &res
 		case len(found) > 0:
 			h.logf("[%s] computer_run refused: protected app on screen", m.cfg.ID)

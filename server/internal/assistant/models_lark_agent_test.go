@@ -119,10 +119,10 @@ func TestLarkAgentModelValidationAndProviderUse(t *testing.T) {
 		}
 	}
 	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "lark-custom"}}, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "codex-custom"}})
-	if w := modelRequest(s, http.MethodPut, purposeLarkAgent, `{"revision":0,"provider":"launcher.codex-custom","model":"selected","effort":"high"}`); w.Code != http.StatusBadRequest {
-		t.Fatalf("Codex effort accepted: %d %s", w.Code, w.Body.String())
+	if w := modelRequest(s, http.MethodPut, purposeLarkAgent, `{"revision":0,"provider":"launcher.codex-custom","model":"selected","effort":"high"}`); w.Code != http.StatusOK {
+		t.Fatalf("Codex effort rejected: %d %s", w.Code, w.Body.String())
 	}
-	if w := modelRequest(s, http.MethodPut, purposeLarkAgent, `{"revision":0,"provider":"launcher.lark-custom","model":"selected"}`); w.Code != http.StatusOK {
+	if w := modelRequest(s, http.MethodPut, purposeLarkAgent, `{"revision":1,"provider":"launcher.lark-custom","model":"selected"}`); w.Code != http.StatusOK {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}
 	uses, err := s.providerModelUses(context.Background(), "launcher.lark-custom")

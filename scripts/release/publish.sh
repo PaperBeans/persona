@@ -238,8 +238,7 @@ curl -fsSL "$PERSONA_PUBLISH_URL/dl/latest.json" -o "$OUT/served.json" 2>/dev/nu
 for bin in "$OUT/bin"/personad-* "$OUT/bin"/persona-link-* "$OUT/bin"/persona-node-* "$OUT/bin"/persona-hub-* "$OUT/bin"/persona-manager-*; do
   gzip -n -9 -c "$bin" > "$bin.gz"
 done
-python3 scripts/persona_identity.py --artifact-aliases "$OUT/bin"
-# Include the device node and compatibility copies in the same verified download index.
+# Only current product names are public downloads; command compatibility stays inside installed services.
 (cd "$OUT/bin" && shasum -a 256 *.gz > SHA256SUMS && printf '%s\n' "$VERSION" > VERSION)
 
 # The manifest hubs update from: version, build number, commit and every download's sha256 (not signed, the user's

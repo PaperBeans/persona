@@ -7,13 +7,16 @@ import { onHubEvent } from "../../lib/store";
 import { SessionList, type ListCounts, type ListFilters } from "../../lib/session-list";
 import { SESSION_LIST_METRICS } from "../../ui/list-metrics";
 import { SearchField } from "../../ui/SearchField";
-import { STATE_LABEL } from "../../lib/state-labels";
+import { STATE_LABEL, stateCount } from "../../lib/state-labels";
 import type { AgentState } from "../../lib/types";
-import { Button, cx, Menu, useMenu, type MenuItem } from "../../ui/atoms";
+import { Button, cx, Menu, sidebarFoldMotion, useMenu, useNow, type MenuItem } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { SegmentedTrack } from "../../ui/Segmented";
 import { StatusMark } from "../../ui/StatusMark";
 import { baseName } from "../../lib/format";
+import { removeStoredValue, storedValue, storeValue } from "../../lib/compatibility";
+import { ACTIVE_WINDOWS, activeWindow, splitByActivity, windowStart, type ActiveWindow } from "../../lib/session-activity";
+import { useFolded } from "../../lib/use-folded";
 
 export interface PagedSessionListProps<T> {
   root: SessionList<T>;
@@ -27,7 +30,20 @@ export interface PagedSessionListProps<T> {
   label?: (dimension: string, value: string) => string;
   /** "By repo" is the full, client-side tree (Sidebar's By repo), not a paged filter: offered only when the caller has it. */
   onRepo?: () => void;
+  /** "Active within" (#4236): a row's last activity in ms, the key `compare` orders by, newest first. Given, the list
+   *  offers the window menu and folds the rows active before the window into one Earlier group at its end. */
+  activeAt?: (row: T) => number;
+  /** A row that needs the user, by the rule the server counts `state.needs_you` with: counted on the Earlier header. */
+  needsYou?: (row: T) => boolean;
+  /** The open row: the Earlier group opens by itself while it holds that row. */
+  isOpen?: (row: T) => boolean;
 }
+
+// The chosen "Active within" window, kept per list on this browser.
+const windowKey = (personal: boolean) => personal ? "persona.personalActiveWindow" : "persona.agentActiveWindow";
+const windowLabel = (w: ActiveWindow) => t(`paged-agents.window_${w || "any"}`);
+// the Earlier header's place among the rows: a key no row identity has
+const EARLIER_KEY = "\u0000earlier";
 
 /** A counts query in a stable key order, so the same scope reached through different filters compares equal. */
 function countsQuery(filters: ListFilters): string {
@@ -43,7 +59,7 @@ function scrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-export function PagedSessionList<T>({ root, path, identity, compare, removeIdentity, event, renderRow, personal = false, label, onRepo }: PagedSessionListProps<T>) {
+export function PagedSessionList<T>({ root, path, identity, compare, removeIdentity, event, renderRow, personal = false, label, onRepo, activeAt, needsYou, isOpen }: PagedSessionListProps<T>) {
   const [query, setQuery] = useState("");
   const [q, setQ] = useState("");
   const [state, setState] = useState("");
@@ -143,14 +159,40 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     return () => { off(); if (filtered) list.reset(); };
   }, [list, filters, filtered, event]);
 
+  // "Active within" (#4236): the rows active before the window fold into Earlier, after the recent ones. The split
+  // moves with the clock; the list itself, its total and its filters stay the server's.
+  const [win, setWin] = useState<ActiveWindow>(() => activeAt ? activeWindow(storedValue(windowKey(personal))) : "");
+  const chooseWindow = (w: ActiveWindow) => {
+    setWin(w);
+    if (w) storeValue(windowKey(personal), w);
+    else removeStoredValue(windowKey(personal));
+  };
+  const clock = useNow(60_000, Boolean(activeAt && win));
+  const start = activeAt ? windowStart(win, clock) : null;
+  // the Needs you chip's number for this scope: the server's, by the same rule as the chip
+  const needsYouTotal = state ? (state === "needs_you" ? page.total : 0) : scopeCounts?.state?.needs_you;
+  const split = activeAt && start !== null
+    ? splitByActivity(page.rows, activeAt, start, { total: page.total, hasMore: page.hasMore, needsYou: needsYou ?? (() => false), needsYouTotal })
+    : null;
+  const earlier = split?.reached && split.earlier > 0 ? split : null;
+  const [folded, toggleEarlier] = useFolded(personal ? "personal-sessions-earlier" : "sessions-earlier", true, {
+    holds: Boolean(earlier && isOpen && page.rows.slice(earlier.recent).some(isOpen)),
+  });
+  // folded, the list stops at its header: no further pages are read until it opens
+  const foldedAway = Boolean(earlier && folded);
+  const hasMore = page.hasMore && !foldedAway;
+  const itemCount = (foldedAway ? earlier!.recent : page.rows.length) + (earlier ? 1 : 0);
+  // the Earlier header sits between the recent rows and the earlier ones; null is the header
+  const rowAt = (i: number): T | null => !earlier ? page.rows[i] : i === earlier.recent ? null : page.rows[i > earlier.recent ? i - 1 : i];
+
   const container = useRef<HTMLDivElement>(null);
   const [margin, setMargin] = useState(0);
   const getScrollElement = useCallback(() => scrollParent(container.current), []);
   const virtual = useVirtualizer({
-    count: page.rows.length,
+    count: itemCount,
     getScrollElement,
     estimateSize: () => SESSION_LIST_METRICS.estimate,
-    getItemKey: (i) => identity(page.rows[i]),
+    getItemKey: (i) => { const row = rowAt(i); return row === null ? EARLIER_KEY : identity(row); },
     overscan: SESSION_LIST_METRICS.overscan,
     scrollMargin: margin,
   });
@@ -176,7 +218,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     const parent = getScrollElement();
     if (!parent) return;
     const maybeMore = () => {
-      if (scrolled.current && page.hasMore && !page.loading && !page.error &&
+      if (scrolled.current && hasMore && !page.loading && !page.error &&
           parent.scrollTop + parent.clientHeight >= margin + totalSize - SESSION_LIST_METRICS.overscan * SESSION_LIST_METRICS.estimate) {
         void list.more().catch(() => {});
       }
@@ -185,7 +227,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     parent.addEventListener("scroll", scroll, { passive: true });
     maybeMore();
     return () => parent.removeEventListener("scroll", scroll);
-  }, [list, getScrollElement, page.hasMore, page.loading, page.error, margin, totalSize]);
+  }, [list, getScrollElement, hasMore, page.loading, page.error, margin, totalSize]);
 
   const counts = facets ?? rootPage.counts;
   const stateTotals = scopeCounts?.state ?? {};
@@ -243,20 +285,60 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
             onChoose={setValue} />}
           {personal && <SearchField value={providerQuery} onChange={setProviderQuery} placeholder={t("paged-agents.provider")} tone="inset" icon={false} className="min-w-0 flex-1" />}
         </div>}
-        <p className="text-xs text-ink-3" data-session-total>{t("paged-agents.count", { count: page.total })}</p>
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <p className="min-w-0 truncate text-xs text-ink-3" data-session-total>{t("paged-agents.count", { count: page.total })}</p>
+          {activeAt && <ActiveWindowMenu value={win} onChange={chooseWindow} />}
+        </div>
       </div>
       {(facetError || scopeError) && <p role="alert" className="px-2 text-xs text-red">{facetError || scopeError}</p>}
       <div ref={container} data-virtual-sessions className="relative" style={{ height: totalSize }}>
-        {virtual.getVirtualItems().map((item) => (
-          <div key={item.key} ref={virtual.measureElement} data-index={item.index} data-session-row className="absolute top-0 left-0 w-full" style={{ transform: `translateY(${item.start - margin}px)` }}>
-            {renderRow(page.rows[item.index])}
-          </div>
-        ))}
+        {virtual.getVirtualItems().map((item) => {
+          const row = rowAt(item.index);
+          return (
+            <div key={item.key} ref={virtual.measureElement} data-index={item.index} {...(row === null ? { "data-earlier": "" } : { "data-session-row": "" })} className="absolute top-0 left-0 w-full" style={{ transform: `translateY(${item.start - margin}px)` }}>
+              {row === null ? <EarlierHeader count={earlier!.earlier} needs={earlier!.earlierNeedsYou} window={win} folded={folded} onToggle={toggleEarlier} /> : renderRow(row)}
+            </div>
+          );
+        })}
       </div>
       {page.loading && <p role="status" className="px-2 py-2 text-xs text-ink-3">{t("sidebar.loading")}</p>}
       {page.error && <div className="px-2 py-2"><p role="alert" className="text-xs text-red">{page.error}</p><Button onClick={() => void list.retry().catch(() => {})}>{t("sidebar.retry")}</Button></div>}
       {page.loaded && !page.loading && !page.error && !page.rows.length && <p className="px-2 py-2 text-xs text-ink-3">{t("sidebar.no_match")}</p>}
-      {page.hasMore && !page.loading && !page.error && <Button onClick={() => void list.more().catch(() => {})}>{t("paged-agents.more")}</Button>}
+      {hasMore && !page.loading && !page.error && <Button onClick={() => void list.more().catch(() => {})}>{t("paged-agents.more")}</Button>}
+    </div>
+  );
+}
+
+/** The list's "Active within" display choice (#4236): a quiet menu beside the count, naming the window it keeps. */
+function ActiveWindowMenu({ value, onChange }: { value: ActiveWindow; onChange: (w: ActiveWindow) => void }) {
+  const menu = useMenu();
+  const items: MenuItem[] = ACTIVE_WINDOWS.map((w, i) => ({ key: w || "any", label: windowLabel(w), radio: true, checked: w === value, divider: i === 1, onSelect: () => onChange(w) }));
+  return <>
+    <button type="button" aria-haspopup="menu" aria-expanded={Boolean(menu.anchor)} aria-label={t("paged-agents.active_within_value", { window: windowLabel(value) })} title={t("paged-agents.active_within")} onClick={menu.open}
+      className={cx("touch-hit relative z-10 flex h-6 min-w-0 shrink-0 items-center gap-1 whitespace-nowrap rounded-[6px] px-1.5 text-[11.5px] transition-colors duration-150 hover:bg-hover hover:text-ink", value ? "font-medium text-ink" : "text-ink-3")}>
+      <Icon name="clock" size={11} className="shrink-0" />
+      <span className="truncate">{windowLabel(value)}</span>
+      <Icon name="chevron" size={11} className="shrink-0 text-ink-3" />
+    </button>
+    {menu.anchor && <Menu items={items} anchor={menu.anchor} onClose={menu.close} header={t("paged-agents.active_within")} align="right" width={200} />}
+  </>;
+}
+
+/** The fold over the sessions last active before the window: how many, and how many of them need you (DESIGN_SYSTEM 3.4). */
+function EarlierHeader({ count, needs, window, folded, onToggle }: { count: number; needs: number; window: ActiveWindow; folded: boolean; onToggle: () => void }) {
+  return (
+    <div className="group/sec flex items-center gap-1 px-2 pt-2 pb-0.5">
+      <button type="button" aria-expanded={!folded} onClick={onToggle} title={t("paged-agents.earlier_hint", { count, window: windowLabel(window) })}
+        className="relative z-10 flex min-h-7 min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap text-left [@media(pointer:coarse)]:min-h-11">
+        <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink-2">{t("paged-agents.earlier")}</span>
+        <span className="shrink-0 text-[11px] text-ink-3 tabular-nums">{count}</span>
+        <Icon name="chevron" size={10} stroke={2.4} className="shrink-0 text-ink-3 transition-transform" style={{ ...sidebarFoldMotion(!folded), transform: folded ? "rotate(-90deg)" : "none" }} />
+      </button>
+      {needs > 0 && (
+        <span title={stateCount("needs_you", needs)} className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-field px-1 text-[10.5px] font-semibold text-attention tabular-nums">
+          {needs}<span className="sr-only"> {t("sidebar.needs_you_suffix", { count: needs })}</span>
+        </span>
+      )}
     </div>
   );
 }

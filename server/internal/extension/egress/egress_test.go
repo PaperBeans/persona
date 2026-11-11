@@ -232,7 +232,7 @@ func TestProxyGoesOutThroughTheHubsProxy(t *testing.T) {
 	}
 	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if string(b) != "via upstream api.example.com" || len(asked) != 1 || !strings.HasPrefix(asked[0], "CONNECT api.example.com:80 Basic ") {
+	if string(b) != "via upstream api.example.com" || len(asked) != 1 || !strings.HasPrefix(asked[0], "CONNECT 192.0.2.1:80 Basic ") {
 		t.Fatalf("%q %v", b, asked)
 	}
 }

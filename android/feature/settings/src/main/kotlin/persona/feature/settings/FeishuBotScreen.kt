@@ -64,7 +64,7 @@ internal fun FeishuBotPage(api: FeishuBotSettings?, onBack: () -> Unit) {
             Column {
                 JGroupItem(GroupPosition(first = true, last = false), Modifier.padding(top = Tokens.Space.s)) {
                     JRow(status?.botName?.takeIf(String::isNotBlank) ?: stringResource(R.string.settings_feishu_bot_title),
-                        leading = { JBrandMark(Brand.Lark, Tokens.Space.xxl) },
+                        leading = { JBrandMark(Brand.Lark, Tokens.Space.xl) },
                         trailing = { JStateLabel(feishuBotState(res, status, state.loading), feishuBotStatus(status),
                             problem = status?.enabled == true && !status.connected && !status.error.isNullOrBlank()) })
                 }

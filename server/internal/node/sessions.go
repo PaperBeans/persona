@@ -12,10 +12,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/sdk/go/wire"
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
-	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 // hostTextSlack: the transcript's words this long after the host's record of the answer still belong to that turn.
@@ -183,7 +183,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			if !a.LastTextAt.IsZero() && promptAt.After(a.LastTextAt) {
 				s.Asks = ""
 			} else {
-				s.Asks = transcript.AskOf(a.LastText)
+				s.Asks = closeout.AskOf(a.LastText)
 			}
 			s.AsksRead = true
 		}

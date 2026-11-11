@@ -33,5 +33,14 @@
   "empty_topics": "No topics yet",
   "empty_topics_body": "In the background, Persona pulls durable knowledge out of your project timelines and chats (concepts, decisions, how-tos, pitfalls, facts) and files it under topics. Topics appear here as it goes.",
   "map": "Knowledge map",
-  "map_title": "See topics and projects as a mind map"
+  "map_title": "See topics and projects as a mind map",
+  "delete": "Delete",
+  "delete_title": "Delete this project?",
+  "delete_confirm": "\"{name}\" leaves the lists, search and the assistant's context. Its chats, people and documents stay; they just stop naming it. You can undo this right after.",
+  "deleted": "Deleted \"{name}\"",
+  "undo": "Undo",
+  "restored": "Restored \"{name}\"",
+  "delete_failed": "Couldn't delete: {error}",
+  "restore_failed": "Couldn't restore: {error}",
+  "restore_conflict": "Couldn't restore \"{name}\": a newer project has the same name."
 }

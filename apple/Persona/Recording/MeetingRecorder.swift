@@ -163,6 +163,7 @@ import UserNotifications
     /// have no route there; the recording runs anyway). Launched by the home screen's menu or a Control, the app has no
     /// shell yet: it tries again for a few seconds.
     static func openRecordings() {
+        RecordingLivePresenter.shared.open() // a sheet swiped away on the page already in front comes back (`recordingLiveSheet`)
         let model = AppModel.shared
         model.shellSettings = false
         model.selectedTab = .assistant

@@ -24,11 +24,11 @@ import (
 // claudeSettings is the --settings a claude start of launcher passes: ours (a file in n.dir), or, when the launcher
 // is an alias with its own --settings, the two merged into launcher-settings/<launcher>-<ours>. cwd is where claude
 // runs (a relative path in the alias is from there). Anything wrong with the launcher's file: ours, as before.
-func (n *Node) claudeSettings(ctx context.Context, launcher, ours, cwd string) string {
+func (n *Node) claudeSettings(ctx context.Context, launcher, ours, cwd string, configDir ...string) string {
 	if m, ok := n.managedLauncher(launcher); ok {
 		// A managed launcher has no settings file of its own, but its gateway and key must beat the user's global
 		// settings env (another gateway): put them in ours.
-		if path, err := n.mergeManagedSettings(launcher, m, ours); err != nil {
+		if path, err := n.mergeManagedSettings(launcher, m, ours, configDir...); err != nil {
 			n.logf("launcher %s: its gateway not merged with Persona's settings: %v", launcher, err)
 			return ours
 		} else {
@@ -92,7 +92,7 @@ func (n *Node) mergeLauncherSettings(launcher, own, ours, cwd string) (string, e
 
 // mergeManagedSettings writes ours with the managed launcher's env on top and says where (see writeSettings). ours
 // "": the env alone, for a start whose hooks go in a plugin (hooksplugin.go).
-func (n *Node) mergeManagedSettings(launcher string, l proto.ManagedLauncher, ours string) (string, error) {
+func (n *Node) mergeManagedSettings(launcher string, l proto.ManagedLauncher, ours string, configDir ...string) (string, error) {
 	mine := map[string]any{}
 	name := launcher + "-env-settings.json"
 	if ours != "" {
@@ -127,7 +127,7 @@ func (n *Node) mergeManagedSettings(launcher string, l proto.ManagedLauncher, ou
 	// environment's, which `personad launch` fills from the shell, else the user's other spelling (withInheritedNoProxy),
 	// and which a pinned one here would replace (#6238). Any other list is pinned as it is.
 	if ours, _ := env["NO_PROXY"].(string); mergesNoProxy(l) && ours != "" {
-		user := n.userNoProxy(l)
+		user := n.userNoProxy(l, configDir...)
 		for _, k := range []string{"NO_PROXY", "no_proxy"} {
 			if theirs := user[k]; theirs != "" {
 				env[k] = mergeNoProxy(ours, theirs)
@@ -138,12 +138,21 @@ func (n *Node) mergeManagedSettings(launcher string, l proto.ManagedLauncher, ou
 	}
 	// A proxy the user's settings give every claude that no longer answers would hold this launcher's requests until
 	// they time out; one the launcher does not set itself is taken away (deadproxy.go, #5953).
-	for _, k := range n.deadSettingsProxies(env, l.BaseURL) {
+	if len(configDir) > 0 {
+		// Config selection precedes settings load. The caller supplies the real
+		// profile; do not turn that selection into a settings.env override.
+		delete(env, "CLAUDE_CONFIG_DIR")
+	}
+	for _, k := range n.deadSettingsProxies(env, l.BaseURL, configDir...) {
 		env[k] = ""
 		n.logf("launcher %s: the proxy in Claude's settings.json (%s) does not answer; it runs without it", launcher, k)
 	}
 	mine["env"] = env
 	mine["enableArtifact"] = false // artifactsOff: a gateway cannot carry them
+	// A managed launcher brings its own gateway key, so the computer's user-global apiKeyHelper (~/.claude/settings.json)
+	// can only authenticate it against the wrong gateway: Claude Code runs the helper and sends its token in the other
+	// auth header, and the launcher's gateway answers 401. An empty string disables the helper for this start.
+	mine["apiKeyHelper"] = ""
 	out, err := json.MarshalIndent(mine, "", "  ")
 	if err != nil {
 		return "", err

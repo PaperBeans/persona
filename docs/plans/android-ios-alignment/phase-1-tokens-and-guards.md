@@ -86,7 +86,7 @@ All in-app feedback on Android goes through one component modeled on the iOS toa
 1. Fix the default package and regenerate `Tokens.kt`. Nothing on screen changes, because nothing reads the regenerated needs-you values or tints yet.
 2. Add a test that the committed `Tokens.kt` equals the generator's output, so the Python tests catch staleness wherever they run.
 3. Run `gen_tokens.py --check` from `scripts/ci/android.sh` and from the pre-commit hook when `spec/tokens`, `Tokens.kt` or `apple/Shared/Design` change, and map those paths in `scripts/test/check-fast.sh`.
-4. Extend `RepositoryTests` to read `Theme.Space`, `Theme.Radius`, `Theme.Font` and `Theme.Motion` from `apple/Shared/Design/Theme.swift` and compare them with `dimension.json`, `type.json` and `motion.json`.
+4. Extend `RepositoryTests` to read `Theme.Space`, `Theme.Radius`, `Theme.Font` and `Theme.Motion` from `apple/Shared/Design/Theme.swift` and compare them with `dimension.json`, `type.json` and `motion.json`. Radii, spacing and the shared motions land with T1, the differences known today pinned in a table (`KNOWN_DRIFT`) that T2 and T3 empty; type lands with T4, once `type.json` names the iOS levels.
 5. Correct `DESIGN_SYSTEM.md` section 1.1 about the web.
 
 ### T2. Spacing
@@ -103,9 +103,9 @@ Call sites of the names that change meaning:
 
 **Change.**
 
-1. One pixel-identical codemod commit: rename the old `xl` (20) to a temporary name, then `xxl` to `xl` and `xxxl` to `xxl`, and `tightGap` to `sm`. Check it with `scripts/app/android_shots_diff.py` before and after. `xl` and `xxl` change meaning, so this must be one atomic commit.
+1. One pixel-identical codemod commit: rename the old `xl` (20) to a temporary name, then `xxl` to `xl` and `xxxl` to `xxl`, and `tightGap` to `sm`. Check it with `scripts/app/android_shots_diff.py` before and after. `xl` and `xxl` change meaning, so this must be one atomic commit. Done with step 2: the temporary name is `ContentTokens.legacyXl`, and instead of screenshots the codemod checked that every file refers to the same sequence of values before and after.
 2. Rewrite `dimension.json` with the iOS names and values (the aliases as references) and regenerate.
-3. A design pass on the 21 places that used 20 (nine in settings, six in the Inbox, the rest in knowledge, chat and three design-system files): each moves to 16 or 24, with screenshots next to iOS.
+3. A design pass on the 21 places that used 20 (nine in settings, six in the Inbox, the rest in knowledge, chat and three design-system files): each moves to 16 or 24, with screenshots next to iOS. Seven of them sized an icon and one a swatch, which iOS sizes with `Theme.Size.iconXS`, 20: those take `Tokens.Size.iconXS` and keep their size, and `spec/tokens` gains the icon sizes Android uses.
 4. The Swift drift test from T1 keeps the two in step.
 
 ### T3. Motion
@@ -133,7 +133,7 @@ Risks: the CSS reduced-motion variables and `Tokens.Motion.state` are renamed; A
 
 **Today.** iOS `Theme.Font`: display 28 bold, title 22 semibold, heading 17 semibold, body 17, secondary 15, caption 13, section header 13 semibold, label 12, code 13 monospaced, with line heights per level. Android's `Tokens.Type` still carries retired iOS names (panel title, card body, greeting, micro 11); `Typography.kt` reads only their sizes, the 28 and 22 are literals, and line heights, weights and families are never read.
 
-**Change.** Rewrite `type.json` as the nine iOS levels with size, weight and line height. Glass's typography reads them, and `GlassTokenContractTest` checks against the tokens instead of its own numbers.
+**Change.** Rewrite `type.json` as the nine iOS levels with size, weight and line height. Glass's typography reads them, and `GlassTokenContractTest` checks against the tokens instead of its own numbers. `RepositoryTests` compares the levels with `Theme.Font`.
 
 Risks: Glass leaves line height to the platform on purpose (see `Typography.kt`), there is a 12 sp floor, and Brief and Board are pinned by hash in the contract test.
 

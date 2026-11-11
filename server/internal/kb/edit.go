@@ -144,6 +144,11 @@ func (s *Store) putEntity(kind, id string, v any, t *Tagging, manual bool) (err 
 // message time an ingest, a history import or compression wrote meanwhile stay. It returns the chat as written (false:
 // no such chat). edit must not take chatMu or ingestMu; write linked entities after editChat returns.
 func (s *Store) editChat(id string, edit func(c *Chat)) (*Chat, bool, error) {
+	return s.editChatAs(id, true, edit)
+}
+
+// editChatAs is editChat for a write that may not be the user's own (manual false keeps locked fields).
+func (s *Store) editChatAs(id string, manual bool, edit func(c *Chat)) (*Chat, bool, error) {
 	s.chatMu.Lock()
 	defer s.chatMu.Unlock()
 	if err := s.recoverIngest(id); err != nil {
@@ -154,7 +159,7 @@ func (s *Store) editChat(id string, edit func(c *Chat)) (*Chat, bool, error) {
 		return nil, false, nil
 	}
 	edit(c)
-	if err := s.putEntity(KindChat, c.ID, c, &c.Tagging, true); err != nil {
+	if err := s.putEntity(KindChat, c.ID, c, &c.Tagging, manual); err != nil {
 		return nil, true, err
 	}
 	return c, true, nil

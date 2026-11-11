@@ -375,8 +375,8 @@ func pinnedEnv(env map[string]string) map[string]string {
 }
 
 // launchEnvFor is what `personad launch` drops from the shell and sets for a launcher (the node's clear and env lists):
-// in the assistant's process (PERSONA_ASSISTANT=1), neither touches perStartEnv, so its own compact window and
-// thinking level stay.
+// in the assistant's process (PERSONA_ASSISTANT=1), neither touches perStartEnv or CLAUDE_CONFIG_DIR, so its own
+// compact window, thinking level and recorded profile stay. Terminal Agents retain the provider's full environment.
 func launchEnvFor(clear, env []string, assistant bool) ([]string, []string) {
 	if !assistant {
 		return clear, env
@@ -384,8 +384,9 @@ func launchEnvFor(clear, env []string, assistant bool) ([]string, []string) {
 	clear = slices.DeleteFunc(slices.Clone(clear), func(c string) bool { return slices.Contains(perStartEnv, c) })
 	env = slices.DeleteFunc(slices.Clone(env), func(kv string) bool {
 		k, _, _ := strings.Cut(kv, "=")
-		return slices.Contains(perStartEnv, k)
+		return slices.Contains(perStartEnv, k) || k == "CLAUDE_CONFIG_DIR"
 	})
+	clear = slices.DeleteFunc(clear, func(k string) bool { return k == "CLAUDE_CONFIG_DIR" })
 	return clear, env
 }
 

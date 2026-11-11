@@ -232,3 +232,43 @@ describe("Search as Code compilation, evaluation, and provider hook", () => {
     expect(plan.code).toBe('ext.plan("find clean session")');
   });
 });
+
+// #4397: with Search as Code off, plain words are matched as text and never turned into hidden filters.
+describe("plain search never adds hidden filters", () => {
+  const monthOld = "2026-10-09T12:00:00Z";
+  const cases: [query: string, title: string][] = [
+    ["handling", "fix error handling in parser"],
+    ["error handling", "fix error handling in parser"],
+    ["pinned notes", "write pinned notes doc"],
+    ["today standup", "today standup summary"],
+    ["修复失败的测试", "修复失败的测试"], // i18n-ignore
+    ["claude opus", "ask claude about opus pricing"],
+    ["running unread", "running unread counts"],
+  ];
+  const ctx: EvalContext = { ...baseCtx, pins: { spaces: [], sessions: [] } };
+
+  it.each(cases)("finds %s in %s", (query, title) => {
+    const s = mkSession("plain", { title, state: "idle", agent: "codex", model: "gpt-5", updated_at: monthOld, last_text: "" });
+    const { sessions, plan } = applyDimensionFilters([s], { ...DEFAULT_DIMENSION_FILTERS, query }, ctx);
+    expect(sessions.map((x) => x.session_id)).toEqual(["plain"]);
+    expect(plan.code).toBe(`session.where(s => s.matches(${JSON.stringify(query)}, "all"))`);
+  });
+
+  it("still honors explicit operators", () => {
+    const pinned = mkSession("s-pinned", { title: "notes", updated_at: monthOld });
+    const other = mkSession("other", { title: "notes", machine_id: "mac", updated_at: monthOld });
+    const run = (query: string) => applyDimensionFilters([pinned, other], { ...DEFAULT_DIMENSION_FILTERS, query }, baseCtx).sessions.map((x) => x.session_id);
+    expect(run("is:pinned notes")).toEqual(["s-pinned"]);
+    expect(run("machine:mac notes")).toEqual(["other"]);
+    expect(run("since:24h notes")).toEqual([]);
+  });
+
+  it("keeps the word lists and a provider for Search as Code", () => {
+    registerSearchAsCodeProvider({ id: "p", compile: () => ({ code: "ext", predicates: [() => false], highlightTerms: [], source: "provider" }) });
+    const s = mkSession("plain", { title: "fix error handling", updated_at: monthOld });
+    expect(applyDimensionFilters([s], { ...DEFAULT_DIMENSION_FILTERS, query: "error handling" }, ctx).sessions).toHaveLength(1);
+    expect(compileSearchAsCode("error handling", { ...DEFAULT_DIMENSION_FILTERS, searchAsCode: true }, buildAgentFacets([s], machines, ctx.pins)).source).toBe("provider");
+    registerSearchAsCodeProvider(null);
+    expect(applyDimensionFilters([s], { ...DEFAULT_DIMENSION_FILTERS, query: "error handling", searchAsCode: true }, ctx).plan.code).toContain("s.hasErrors");
+  });
+});

@@ -179,6 +179,9 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		if in.AgentTasks != nil {
 			v.AgentTasks = in.AgentTasks
 		}
+		if in.InboxSignals != nil {
+			v.InboxSignals = in.InboxSignals
+		}
 		if in.DefaultPermissionMode != "" {
 			v.DefaultPermissionMode = in.DefaultPermissionMode
 		}

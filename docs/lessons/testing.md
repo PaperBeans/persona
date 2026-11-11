@@ -1,5 +1,10 @@
 # Lessons: testing and validation
 
+- Async node-start fixtures must cancel and join `n.starts` before closing fake terminal sockets, restoring globals
+  or removing their temporary files (#3345). Waiting only for `pane.send_input` leaves a background start polling a
+  dead host for three minutes, with its diagnostics appearing under a later test. Expected start failures use the
+  node's logger, so tests can capture diagnostics without changing production logging.
+
 - Bulk Postgres fixtures need physical isolation, not just row deletion (#3743). Deleting 500 feed rows left a larger
   unsent B-tree than the sent index; a controlled statistics refresh then changed a later index-choice assertion even
   though no fixture rows remained. Use the existing migrated-database clone for bulk fixtures so table, index and

@@ -18,4 +18,9 @@ internal object ResidentConnection {
             }
         }
     }
+
+    /** Asks every group to validate its socket now, even when the selected group already looks online. */
+    fun wake(connection: HubConnection) {
+        connection.groupLinks.forEach { it.wake() }
+    }
 }

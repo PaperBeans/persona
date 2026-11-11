@@ -176,6 +176,7 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 			Decisions: slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool {
 				return e.Kind == sigRecheck || e.Kind == sigUndecidable || e.Kind == sigOwnerCannot
 			}),
+			Inbox: slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigInbox }),
 			Asked: askedIn(list), AskMinutes: int(askHoldFor.Minutes())})
 	}
 	b.mu.Lock()
@@ -278,6 +279,8 @@ func (s *Service) queueDigest(to string, msg relayMsg, kept []superviseSignal, a
 			b.pending[id] = g
 		} else if g.Kind == sigReport && cur.Key != g.Key {
 			b.pending[id] = joinReports(g, cur) // both reports are told, this one first
+		} else if g.Kind == sigInbox && cur.Key != g.Key {
+			b.pending[id] = joinInbox(g, cur) // the newer item, with the messages of both
 		}
 	}
 	s.retryDigestLocked(retry)
@@ -291,6 +294,9 @@ func mergeSignals(a, b []superviseSignal) []superviseSignal {
 		if i := slices.IndexFunc(out, func(x superviseSignal) bool { return x.id() == g.id() }); i >= 0 {
 			if g.Kind == sigReport && out[i].Key != g.Key {
 				g = joinReports(out[i], g)
+			}
+			if g.Kind == sigInbox && out[i].Key != g.Key {
+				g = joinInbox(out[i], g)
 			}
 			out[i] = g
 		} else {
@@ -371,6 +377,10 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 			"recheck@"+a.AskedAt.UTC().Format(time.RFC3339Nano) != g.Key {
 			return prompts.SuperviseEntry{}, false // answered, or asked again, meanwhile
 		}
+	case sigInbox:
+		if g.Inbox == nil || !s.inboxSignalHolds(t) || !s.inboxSignalsOn(ctx) {
+			return prompts.SuperviseEntry{}, false // waits for the owner's decision, or the switch went off, meanwhile
+		}
 	}
 	var asks []prompts.SuperviseAsk
 	if g.Kind == sigAsk {
@@ -421,6 +431,10 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	if g.Kind == sigFailed {
 		s.remedyEntry(ctx, t, &e) // its kept tab, and the turn that hears of it (start_remedy.go)
 	}
+	if g.Kind == sigInbox {
+		in := *g.Inbox
+		e.Inbox = &in
+	}
 	b := &s.supervise
 	b.mu.Lock()
 	e.Ask = cmp.Or(g.Ask, b.asks[t.ID])
@@ -470,7 +484,7 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 
 // sortEntries puts what waits on a decision first.
 func sortEntries(list []prompts.SuperviseEntry) []prompts.SuperviseEntry {
-	rank := map[string]int{sigNeedsYou: 0, sigAsk: 0, sigEscalated: 0, sigDecide: 0, sigOwnerCannot: 0, sigUndecidable: 1, sigRecheck: 1, sigParkedDue: 2, sigIdle: 2, sigUnjudged: 2, sigFailed: 3, sigStarted: 3, sigInterrupted: 4, sigOrphaned: 4, sigReview: 5, sigStalled: 6, sigLeaderStuck: 6, sigOverdue: 6, sigReport: 7}
+	rank := map[string]int{sigNeedsYou: 0, sigAsk: 0, sigEscalated: 0, sigDecide: 0, sigOwnerCannot: 0, sigUndecidable: 1, sigRecheck: 1, sigParkedDue: 2, sigIdle: 2, sigUnjudged: 2, sigFailed: 3, sigStarted: 3, sigInterrupted: 4, sigOrphaned: 4, sigReview: 5, sigStalled: 6, sigLeaderStuck: 6, sigOverdue: 6, sigInbox: 6, sigReport: 7}
 	at := func(e prompts.SuperviseEntry) int {
 		switch {
 		case e.Kind != sigReport:

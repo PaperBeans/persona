@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -54,5 +55,44 @@ func TestStartAsyncAnswersBeforeAFastFailure(t *testing.T) {
 		if r.err == nil {
 			t.Fatalf("start %s should fail without a terminal host", id)
 		}
+	}
+}
+
+// A fixture may only check that an async start typed its command. Its unfinished starts must still stop before the
+// node and fake terminal are torn down, not wake three minutes later in another test.
+func TestAsyncStartsStopWithTheirNode(t *testing.T) {
+	var pending []*startRec
+	var stopped *Node
+	t.Run("node", func(t *testing.T) {
+		n, f, home := herdrNode(t)
+		stopped = n
+		startHerdr(f, "w1:p2", proto.StatusUnknown)
+		for i := 0; i < 2; i++ {
+			s, err := n.startAsync("", home, "claude", "", "w1", "", "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := n.starts.get(s.SessionID)
+			waitCalls(t, f, "pane.send_input", i+1)
+			select {
+			case <-r.done:
+				t.Fatal("the fake shell should leave this start pending")
+			default:
+			}
+			pending = append(pending, r)
+		}
+	})
+	for _, r := range pending {
+		select {
+		case <-r.done:
+			if !errors.Is(r.err, context.Canceled) {
+				t.Fatalf("start ended with %v, want fixture cancellation", r.err)
+			}
+		default:
+			t.Fatal("async start outlived its node's fixture")
+		}
+	}
+	if _, err := stopped.startAsync("", t.TempDir(), "claude", "", "w1", "", "", ""); err == nil || !strings.Contains(err.Error(), "shutting down") {
+		t.Fatalf("a closed node accepted another start: %v", err)
 	}
 }

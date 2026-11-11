@@ -115,7 +115,8 @@ extension AppModel {
                 throw APIError(status: 404, message: String(localized: "Nothing is listening on port :\(String(link.port)) anymore"))
             }
         }
-        return try await PortForwarder.shared.url(for: link, machine: machine.id, config: api.config)
+        // Asked again for each connection through the forward: the hub the group's socket is on now, its route and token.
+        return try await PortForwarder.shared.url(for: link, machine: machine) { [weak self] in self?.api(machine.group)?.config }
     }
 
     /// The ports the agents on a machine listen on, one per port.

@@ -280,6 +280,11 @@ private fun BindStep(channel: HubChannel, prompt: BindPrompt, bind: BindState, m
         val view = StepView.of(prompt)
         when (view) {
             StepView.QrCode -> {
+                // The page the code points at, opened directly: on the phone that has the chat app.
+                prompt.link?.takeIf { StepView.isWebLink(it) }?.let { link ->
+                    JButton(prompt.linkText?.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_src_open_web), { runCatching { uri.openUri(link) } },
+                        Modifier.fillMaxWidth(), icon = PhIcons.ArrowSquareOut)
+                }
                 JQrCode(rows, Modifier.align(Alignment.CenterHorizontally), label = stringResource(R.string.settings_src_channel_qr_label, channel.label))
                 Waiting(stringResource(R.string.settings_src_channel_waiting_scan, channel.label))
                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {

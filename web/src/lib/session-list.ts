@@ -361,10 +361,7 @@ export class SessionList<T> {
       try { page = await this.page(generation, { cursor: this.cursor }); }
       catch (error) {
         if (!this.expired(error)) throw error;
-        this.clearBaseline();
-        if (!this.current(generation)) return;
-        this.publish({ loading: true });
-        await this.refresh(generation, false);
+        await this.reread(generation, this.prefixSize + PAGE_SIZE);
         return;
       }
       if (!page || !this.current(generation)) return;
@@ -375,6 +372,36 @@ export class SessionList<T> {
     }
     this.prefixSize += PAGE_SIZE;
     this.publish({ rows: this.visible(), hasMore: !!this.cursor || this.candidateCount() > this.prefixSize });
+  }
+
+  /** An expired frozen cursor: read a fresh view at least `depth` rows deep and swap it in at once, so the rows on
+   * screen stay put instead of falling back to the first page (#4410). A revision change mid-read fails, without retry. */
+  private async reread(generation: number, depth: number): Promise<void> {
+    const frozen = new Map<string, T>();
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    const readRows = async (): Promise<ListPage<T> | null> => {
+      let first: ListPage<T> | null = null;
+      do {
+        const page = await this.page(generation, cursor ? { cursor } : {});
+        if (!page || !this.current(generation)) return null;
+        if (first && page.revision !== first.revision) throw new Error(t("paged-agents.inconsistent_page"));
+        first ??= page;
+        for (const row of page.sessions) frozen.set(this.identity(row), row);
+        cursor = page.has_more ? page.next_cursor : undefined;
+        if (cursor && cursors.has(cursor)) throw new Error(t("paged-agents.repeated_cursor"));
+        if (cursor) cursors.add(cursor);
+      } while (cursor && frozen.size < depth);
+      return first;
+    };
+    const [first] = await Promise.all([readRows(), this.readCounts(generation)]);
+    if (!first || !this.current(generation)) return;
+    this.frozen = frozen;
+    this.overlay = new Map();
+    this.cursor = cursor;
+    this.frozenRevision = this.checkpoint = first.revision;
+    this.prefixSize = depth;
+    this.publish({ rows: this.visible(), total: first.total, hasMore: !!cursor || frozen.size > depth });
   }
 
   private candidates(): Map<string, T> {

@@ -262,11 +262,18 @@ export const SessionRow = memo(function SessionRow({ s: given, k, reg, hover, ac
   const details = useAgentDetails();
   const contextUsed = useContextAsUsed();
   const withDetail = details && showState && !s.assistant;
-  // the age at the row's end (an offline or stateless row), in the details line, or a background workflow's progress
+  // when it was last active, at the row's end after its hint (#4236; the work-item row, DESIGN_SYSTEM 3.4): not twice
+  // when the details line shows it; a tab's row, whose end is the room for "N agents", keeps it to offline and
+  // stateless rows without a hint, as before
+  const ageAtEnd = !withDetail && !!s.updated_at && (!endRoom || (!tail && (st === "offline" || !showState)));
+  // beside the age, a row that already carries its marks (where it was opened, its to-do) drops the hint from its end,
+  // where it would only squeeze the title; the hint stays in the row's tooltip
+  const tailShown = !!tail && !(ageAtEnd && (source || (showTodoTag && s.todo)));
+  // the age at the row's end, in the details line, or a background workflow's progress
   // (#2935) moves on with the clock: the memo keeps an unchanged row from re-rendering on a push, so a minute tick
   // does it, and only in a row that shows one of them. The ages read the clock when the row renders: `now` is the
   // mount time until the first tick, and a row may only start showing an age long after it mounted
-  const showsAge = (!tail && (st === "offline" || !showState)) || (withDetail && !!s.updated_at);
+  const showsAge = ageAtEnd || (withDetail && !!s.updated_at);
   const now = useNow(60_000, showsAge || runningWorkflows(s).length > 0 || s.turn_error_kind === "usage_limit");
   const detail = withDetail ? rowDetail(s, contextUsed) : [];
   const workflow = showState && !s.assistant && st !== "offline" ? workflowShortLine(s) : "";
@@ -278,7 +285,7 @@ export const SessionRow = memo(function SessionRow({ s: given, k, reg, hover, ac
   // behind a prefix (a tab's name, a pane's agent) the title keeps room for a few characters: the prefix shrinks first
   const titleMin = prefix ? ROW_TITLE_MIN : "min-w-0";
   // with words at the end (where it came from, a hint) the title keeps its own width first: those words give way before it does
-  const titleFirst = tail ? "basis-auto" : undefined;
+  const titleFirst = tailShown ? "basis-auto" : undefined;
   // one ref per key, so letting go takes out only this row's entry (keyedRefs)
   const regRow = useMemo(() => reg(k), [reg, k]);
   // words left unsent in its box, once you are not in it (#5568): in place of what it asks or did
@@ -366,8 +373,8 @@ export const SessionRow = memo(function SessionRow({ s: given, k, reg, hover, ac
       )}
       {source && <SourceTag s={s} className={aside} />}
       {/* the row's ⋯ takes the end on hover: what is there steps aside instead of showing half under it */}
-      {tail && <span className={cx("max-w-[72px] min-w-6 shrink-[20] truncate text-[11px] text-ink-3", aside)}>{tail}</span>}
-      {!tail && (st === "offline" || !showState) && <span className={cx("shrink-0 text-[11px] text-ink-3", aside)}>{ago(s.updated_at)}</span>}
+      {tailShown && <span className={cx("max-w-[72px] min-w-6 shrink-[20] truncate text-[11px] text-ink-3", aside)}>{tail}</span>}
+      {ageAtEnd && <span data-row-age className={cx("shrink-0 text-[11px] text-ink-3", aside)}>{ago(s.updated_at, Date.now(), "narrow")}</span>}
       {(s.pending_interactions ?? 0) > 0 && <span className={cx("flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-field px-1 text-[10px] font-semibold text-attention tabular-nums", aside)}>{s.pending_interactions}</span>}
     </a>
   );

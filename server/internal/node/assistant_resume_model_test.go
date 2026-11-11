@@ -44,10 +44,15 @@ func TestAssistantResumeModel(t *testing.T) {
 				t.Fatal(err)
 			}
 			n := codexTestNode(t)
+			n.home = os.Getenv("HOME")
 			n.dir = t.TempDir()
 			withFakeHub(t, n)
 			cwd := t.TempDir()
-			for dir, s := range map[string]string{n.defaultClaudeDir(): tt.user, filepath.Join(cwd, ".claude"): tt.project} {
+			profile := n.assistantConfigDir(tt.launcher, "")
+			if tt.resume {
+				profile = n.defaultClaudeDir()
+			}
+			for dir, s := range map[string]string{profile: tt.user, filepath.Join(cwd, ".claude"): tt.project} {
 				if s == "" {
 					continue
 				}

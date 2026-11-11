@@ -269,3 +269,37 @@ func TestDecoratedSessionIsTheListsRow(t *testing.T) {
 		t.Fatalf("the archived row the node no longer lists: %+v (found %v)", got, ok)
 	}
 }
+
+// A list read while an agent still waited on the user does not undo the archive written after it (#4372): a reader
+// (a list publish, the archived list, another archive) that read its list before the agent was closed and archived,
+// and got the archive's lock only after, must not take that old busy row for new activity. Activity read after the
+// archive still restores it.
+func TestAgentSessionArchiveIgnoresAListReadBeforeIt(t *testing.T) {
+	ft, row := closeTestService(t, func(s *proto.Session) {
+		s.Status, s.State = proto.StatusBlocked, proto.StateNeedsYou
+	})
+	s, ctx := ft.s, context.Background()
+	mark := s.archiveMark()
+	stale := s.decoratedUnarchived("mac") // the reader reads the list: the agent still waits on the user
+	closed := row
+	closed.Status, closed.State, closed.PaneID = proto.StatusOffline, proto.StateOffline, ""
+	ft.d.setSessions("mac", []proto.Session{closed}) // its node lists it closed
+	if err := s.noteAgentArchive(ctx, closed, true); err != nil {
+		t.Fatal(err)
+	}
+	// Only now does the reader get the archive's lock.
+	list, changed, err := s.archivedSessions(ctx, "mac", stale, mark)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed || len(list) != 1 || !list[0].Archived {
+		t.Fatalf("the old list showed it restored: changed=%v %+v", changed, list)
+	}
+	if !archivedIDs(t, s)[row.SessionID] {
+		t.Fatal("a list read before the archive restored it")
+	}
+	ft.d.setSessions("mac", []proto.Session{row}) // asking the user again, read after the archive
+	if archivedIDs(t, s)[row.SessionID] {
+		t.Fatal("activity after the archive did not restore it")
+	}
+}

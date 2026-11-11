@@ -26,7 +26,13 @@ type KBTopicDistillInput struct {
 	Topics          []KBTopicRef
 }
 
-func RenderKBTopicDistill(o KBOwner) string { return render("kb/topic_distill", o) }
+// KBTopicDistill is the distill step's system prompt: MaxPoints is how many points one call answers with at most.
+type KBTopicDistill struct {
+	Owner     string
+	MaxPoints int
+}
+
+func RenderKBTopicDistill(d KBTopicDistill) string { return render("kb/topic_distill", d) }
 func RenderKBTopicDistillInput(in KBTopicDistillInput) string {
 	return render("kb/topic_distill_input", in)
 }

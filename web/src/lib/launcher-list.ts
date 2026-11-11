@@ -92,11 +92,11 @@ export interface BuiltinRow {
   stale: boolean;
 }
 
-/** The built-in claude, one row per machine that has it. */
+/** The built-in claude, one row per machine that has it; once hidden it is listed with the hidden ones instead (#4384). */
 export function builtinRows(list: ListedLauncher[]): BuiltinRow[] {
   const out: BuiltinRow[] = [];
   for (const l of list) {
-    if (l.source !== "builtin") continue;
+    if (l.source !== "builtin" || l.hidden) continue;
     for (const id of l.machines ?? []) out.push({ name: l.name, machine: id, version: l.versions?.[id], stale: (l.stale ?? []).includes(id) });
   }
   return out;

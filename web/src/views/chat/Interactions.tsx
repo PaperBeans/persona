@@ -641,7 +641,7 @@ function SecretRunCard({ ix }: { ix: Interaction }) {
 }
 
 function CloseBlockedAgent({ ix, disabled }: { ix: Interaction; disabled: boolean }) {
-  const session = useStore(st => st.sessions[ix.machine_id]?.find(s => s.session_id === ix.session_id));
+  const session = useStore(() => getSession(ix.machine_id, ix.session_id));
   const [confirming, setConfirming] = useState(false);
   const [closing, setClosing] = useState(false);
   if (!session || session.assistant || session.status !== "blocked") return null;

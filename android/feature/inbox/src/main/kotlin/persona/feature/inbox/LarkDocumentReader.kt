@@ -332,7 +332,7 @@ private fun LarkDocumentSummary(summary: String) {
 @Composable
 private fun LarkDocumentFooter(url: String) {
     val context = LocalContext.current
-    Column(Modifier.fillMaxWidth().padding(top = Tokens.Space.xl), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+    Column(Modifier.fillMaxWidth().padding(top = ContentTokens.legacyXl), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
         horizontalAlignment = Alignment.CenterHorizontally) {
         JDivider()
         JButton(stringResource(R.string.inbox_open_in_lark), onClick = { openInLark(context, url) },

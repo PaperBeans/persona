@@ -92,7 +92,7 @@ internal fun LarkMomentsCard(
     val card = preview?.card
     JCard(modifier.fillMaxWidth().clickable(onClick = onClick), padding = Tokens.Space.m) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            Icon(PhIcons.ChatsCircle.regular, contentDescription = stringResource(R.string.inbox_moments), tint = PersonaTheme.palette.accent, modifier = Modifier.size(Tokens.Space.xl))
+            Icon(PhIcons.ChatsCircle.regular, contentDescription = stringResource(R.string.inbox_moments), tint = PersonaTheme.palette.accent, modifier = Modifier.size(Tokens.Size.iconXS))
             Text(preview?.title ?: stringResource(R.string.inbox_moments_post), style = PersonaTheme.type.headline, color = PersonaTheme.palette.ink)
         }
         card?.author?.let { author ->
@@ -433,7 +433,7 @@ private fun MomentsCommentRow(
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)
         ) {
-            JAvatar(comment.userName.orEmpty(), size = Tokens.Space.xxxl)
+            JAvatar(comment.userName.orEmpty(), size = Tokens.Space.xxl)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(comment.userName.orEmpty(), style = PersonaTheme.type.headline, color = PersonaTheme.palette.ink)
@@ -500,7 +500,7 @@ internal fun MomentsImagesLayout(
                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
                     row.forEachIndexed { colIndex, img ->
                         val index = rowIndex * 3 + colIndex
-                        val shape = RoundedCornerShape(ContentTokens.tightGap)
+                        val shape = RoundedCornerShape(Tokens.Space.sm)
                         AsyncImage(
                             model = img.url,
                             contentDescription = imageLabel,

@@ -2,7 +2,7 @@ package kb
 
 import "time"
 
-// Test helpers for retrySet (production code only asks waits / fail / clear / keep).
+// Test helpers for retrySet (production code only asks waits / fail / clear / keep / chunk / shrink).
 
 // get is key's failures.
 func (r *retrySet) get(key string) (projectRetry, bool) {

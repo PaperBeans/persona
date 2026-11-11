@@ -133,14 +133,14 @@ func pluginFiles(name, description string, hooks any) (map[string][]byte, error)
 // gateway must beat the user's global settings env; Persona's own launcher has no settings of its own to lose):
 // whatever --settings a launcher passes is then the one claude keeps. Otherwise, or while the plugin is not written,
 // as before: the hooks' settings file, merged with an alias's own --settings or a managed launcher's env.
-func (n *Node) claudeStartSettings(ctx context.Context, launcher, kind, cwd string) (settings, hooks string) {
+func (n *Node) claudeStartSettings(ctx context.Context, launcher, kind, cwd string, configDir ...string) (settings, hooks string) {
 	ours := filepath.Join(n.dir, kind+"-settings.json")
 	plugin := n.hooksPlugin(kind)
 	if _, err := os.Stat(filepath.Join(plugin, "hooks", "hooks.json")); err != nil || !n.claudeLoadsPlugins(ctx) {
-		return n.claudeSettings(ctx, launcher, ours, cwd), ""
+		return n.claudeSettings(ctx, launcher, ours, cwd, configDir...), ""
 	}
 	if m, ok := n.managedLauncher(launcher); ok {
-		if path, err := n.mergeManagedSettings(launcher, m, ""); err != nil {
+		if path, err := n.mergeManagedSettings(launcher, m, "", configDir...); err != nil {
 			n.logf("launcher %s: its gateway not written for the start: %v", launcher, err)
 		} else {
 			settings = path

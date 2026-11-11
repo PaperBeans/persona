@@ -65,9 +65,13 @@ redirects / cookies need no rewriting. No DNS changes, no new ports: it uses the
 
 ### Phone (`apple/Persona/Code/PortForwarder.swift`)
 
-- One forward per (machine, port): first bind the same port number on `127.0.0.1`; if it's taken (another forward on the phone, or an existing program on the Mac running the simulator), pick a random one.
+- One forward per (group, machine, port), since machine ids are only unique within a group: first bind the same port number on `127.0.0.1`; if it's taken (another forward on the phone, or an existing program on the Mac running the simulator), pick a random one.
   Then bind the same number on `::1` (`localhost` resolves to ::1 first; without it WebKit falls back to 127.0.0.1 anyway). Only loopback is bound, so nobody on the LAN can connect.
 - Each incoming connection opens a `wss://<hub>/api/v1/machines/{mid}/ports/{port}/connect` (`Authorization: Bearer <device token>`).
+  The hub address, route and token are read when each connection arrives, not when the forward starts (#1886): the group's current hub
+  (the one its socket is on), `HubTransport`'s tunnel route at that moment, and the current device token. After a switch between a tunnel
+  and a direct address, to another hub of the group, or a re-pairing, a reload or HMR reconnect goes the new way. Disconnecting a group,
+  removing its last hub or unpairing closes its forwards (`AppModel.forgetGroups` / `unpair`).
   Each side "finishes sending the previous chunk before reading the next", so a slow side holds back a fast one instead of piling up in memory.
 - The listener stays up. If it breaks after the App is suspended, it is rebuilt on next open (reusing the old number when possible; the page's HMR reconnects by itself).
 - Before opening, ask the hub: if the port is in some Agent's `ports`, open it directly; otherwise `POST …/open` (the user explicitly tapped it). If nothing is listening, show "Nothing is listening on port :N anymore",

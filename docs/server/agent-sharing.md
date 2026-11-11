@@ -31,7 +31,8 @@ configuration, run the standalone public-only ingress from the installed binary:
 ```sh
 personad share-http --listen :18081 \
   --upstream http://127.0.0.1:18080 \
-  --public-origin http://share.example.test:18081
+  --public-origin http://share.example.test:18081 \
+  --hub-config <private hub configuration>
 ```
 
 Choose unused ports from the deployment's own configuration, not these examples.
@@ -55,11 +56,29 @@ exact anonymous capability API are eligible.
 The ingress bounds accepted connections (64), simultaneous relays (16), request
 and response headers (16 KiB), upstream requests (10 seconds) and fully buffered
 responses (1 MiB). The upstream retains its own capability and token/IP limits.
-Since this ingress does not assert a trusted forwarded client address, its viewers
-share the hub's aggregate loopback-IP budget. Do not enable general forwarded-header
-trust to bypass that limit. Deployments needing greater viewer capacity should use
-an independently reviewed trusted proxy-protocol arrangement; this command makes
-no such performance claim.
+The private Unix-owned mode0600 configuration must also contain
+`sharing.ingress_key`: 32 independently random bytes encoded as 64 hexadecimal
+characters, never copied into command arguments, URLs, logs or client state.
+Configure the key and origin before the hub's normal configuration lifecycle;
+this ingress reads the existing file without starting another hub.
+
+The ingress MAC binds its actual TCP peer IP, timestamp and exact GET authority,
+path and query. Only the exact anonymous capability API arriving on literal
+loopback verifies that proof, within 30 seconds, and uses its canonical IP for the
+existing IPv4 / IPv6 /64 budget. The key grants no account, management or content
+access; the publication capability and ownership checks remain mandatory. Client
+forwarding/proof headers are removed before the ingress creates its own proof.
+No general X-Forwarded-For or proxy-protocol trust is enabled. The original direct
+public ingress still budgets its actual peer when no authenticated proof exists.
+
+Before opening its listener, the command makes one bounded anonymous probe and
+requires the hub's proof acknowledgement. A legacy, unconfigured or wrongly keyed
+upstream cannot open the sharing listener. Losing acknowledgement on an API
+response blocks subsequent anonymous relays until the separate ingress service is
+started again after verification; it never falls back to one shared loopback
+budget. The acknowledgement and proof are never returned to readers. This
+restores IP isolation, not a guarantee against distributed load; all resource and
+per-token bounds remain in force.
 
 Run it under a separate user service for persistence. Stop that service to close
 only the sharing port; it never signals or changes the upstream hub. Removing the

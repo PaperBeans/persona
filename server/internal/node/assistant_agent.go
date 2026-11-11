@@ -17,6 +17,10 @@ func (n *Node) assistantAgent(ctx context.Context, launcher string) (string, err
 	if n.assistantRuntime(launcher) != nil {
 		return assistantOnRuntime, nil
 	}
+	// A known Codex launcher keeps its protocol even when the shell probe fails.
+	if _, ok := n.codexArgv(launcher); ok {
+		return "codex", nil
+	}
 	d := n.launcherProbeCached(ctx, launcher)
 	switch d.Agent {
 	case "", "claude": // a probe that failed: try it as claude, as before

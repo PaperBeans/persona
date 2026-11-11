@@ -257,11 +257,9 @@ func (s *Service) launcherRoutes() {
 			return
 		}
 		s.models.mu.Unlock()
-		if name == "claude" { // plain claude is every machine's default launcher: there is nothing to hide
-			apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-models_launchers.err_builtin_hide"))
-			return
-		}
-		hidden := s.hiddenLaunchers(ctx) // an rc-file launcher: hidden in Persona, the file is not touched
+		// an rc-file launcher, or plain claude (#4384): hidden in Persona, the file is not touched; a start that names it,
+		// or a default that runs it, still runs it
+		hidden := s.hiddenLaunchers(ctx)
 		if !slices.Contains(hidden, name) {
 			hidden = append(hidden, name)
 		}

@@ -182,6 +182,8 @@ struct TerminalPanel: View {
     @State private var pickingFiles = false
     /// Files are being dragged over the terminal (Mac).
     @State private var dropping = false
+    /// Resume Session is on its way (the node opens a tab and waits for Claude, up to a couple of minutes).
+    @State private var resuming = false
     /// Switches the page to another session (two-finger swipes); nil where the panel cannot (the full-screen sheet).
     var switchTo: ((SessionKey) -> Void)?
     /// The keyboard came up on the terminal or went down (the page folds its header meanwhile).
@@ -215,8 +217,11 @@ struct TerminalPanel: View {
         let _ = PerfTrace.body("TerminalPanel")
         #endif
         VStack(spacing: 0) {
+            // Over the page its bar is always there, whatever the terminal shows (#4328: with no terminal it went
+            // with the screen, and nothing closed the cover).
+            if let grab { grabBar(grab) }
             screen
-            controls
+            if !noTerminal { controls } // keys with nothing to type into
         }
         .background(Color(hex: side.background), in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
         // The controls on the terminal take its look: dark keys on the dark theme whatever the app's appearance.
@@ -360,12 +365,12 @@ struct TerminalPanel: View {
 
     // MARK: Screen
 
+    /// Nothing runs the session (its tab was closed: a finished task's Agent, #4328) and no screen came before.
+    private var noTerminal: Bool { feed.offline && feed.screen.isEmpty }
+
     @ViewBuilder private var screen: some View {
-        if feed.offline && feed.screen.isEmpty {
-            ContentUnavailableView("No Terminal", systemImage: Theme.Icon.terminal,
-                                   description: Text("This session isn't running in herdr. Resume it to see the terminal."))
-                .foregroundStyle(Color(hex: side.foreground))
-                .frame(maxHeight: .infinity)
+        if noTerminal {
+            notRunning
         } else {
             // The view is there while the first frame comes: its layout tells the phone's grid, which driving the
             // terminal waits for before it subscribes (a spinner in its place kept it loading forever).
@@ -374,6 +379,62 @@ struct TerminalPanel: View {
                     ProgressView().tint(Color(hex: side.foreground)).frame(maxWidth: .infinity, maxHeight: .infinity)
                         .allowsHitTesting(false)
                 }
+            }
+        }
+    }
+
+    /// No terminal: says the session isn't running and, for a Claude Code session, offers to resume it (in a new tab,
+    /// as a message to it would, node `session.start` with `resume_session_id`). Over the page it drags down like
+    /// the bar: there is no output under the finger to scroll.
+    private var notRunning: some View {
+        notRunningContent
+            .padding(Theme.Space.page)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(.rect)
+            .modifier(TerminalGrabDrag(grab: grab))
+            .accessibilityElement(children: .contain) // one element to find, its text and Resume Session inside
+            .accessibilityIdentifier("terminal-not-running")
+    }
+
+    @ViewBuilder private var notRunningContent: some View {
+        if resuming {
+            ProgressView { Text("Resuming…").lineLimit(1) }
+                .tint(Color(hex: side.foreground))
+        } else if canResume {
+            EmptyStateView(symbol: Theme.Icon.terminal, title: String(localized: "No Terminal"),
+                           message: String(localized: "This session isn't running on its computer. Resume it to open its terminal."),
+                           action: (title: String(localized: "Resume Session"), run: resumeSession))
+        } else {
+            EmptyStateView(symbol: Theme.Icon.terminal, title: String(localized: "No Terminal"),
+                           message: String(localized: "This session isn't running on its computer. Send it a message to resume it."))
+        }
+    }
+
+    /// A Claude Code session in a terminal engine that isn't being started: one Resume Session can bring back. Others
+    /// (Codex, which resumes with its next message) are resumed by a message.
+    private var canResume: Bool {
+        guard let s = model.session(key) else { return false }
+        return !s.hasSource && s.isClaude && !s.assistant && s.starting != true
+    }
+
+    /// Resumes it with what it ran with (the node fills in what is left out) and connects as soon as it is up.
+    private func resumeSession() {
+        guard let s = model.session(key), let api = model.api(key.group), !resuming else { return }
+        Haptics.tap()
+        resuming = true
+        Task {
+            defer { resuming = false }
+            do {
+                let started = try await api.start(.init(machineID: key.machineID, cwd: s.cwd, launcher: s.launcher ?? "", prompt: nil,
+                                                        resumeSessionID: key.sessionID, workspaceID: nil,
+                                                        permissionMode: s.permissionMode, effort: s.effort))
+                Haptics.success()
+                model.adopt(started)
+                feed.retryNow(model)
+            } catch {
+                guard !error.isCancellation else { return }
+                Haptics.error()
+                model.toast = Toast(error.shown ?? String(localized: "Couldn't resume the session"), style: .error)
             }
         }
     }
@@ -405,7 +466,7 @@ struct TerminalPanel: View {
             if !feed.paused {
                 TerminalFeedLink(feed: feed)
             }
-            header
+            if grab == nil { cardHeader } // over the page the bar is above the screen (body)
             TerminalFeedFrame(feed: feed) { content in
                 TerminalView(content: content, wrap: wrap, fontSize: fontSize, font: font, theme: theme,
                              focused: direct ? $keyboardUp : nil,
@@ -485,12 +546,9 @@ struct TerminalPanel: View {
         }
     }
 
-    @ViewBuilder private var header: some View {
-        if let grab { grabBar(grab) } else { cardHeader }
-    }
-
-    /// Over the page (TerminalCover): a slim bar — its size on the left, the handle, settings on the right. Dragged
-    /// down it takes the terminal with it (far or fast enough: closed); a tap on the handle closes it too.
+    /// Over the page (TerminalCover): a bar on top in every state — its size on the left, the handle, settings and Close
+    /// on the right. Dragged down it takes the terminal with it (far or fast enough: closed); a tap on the handle or on
+    /// Close closes it. With no terminal (#4328) only the handle and Close: size and settings have nothing to act on.
     private func grabBar(_ g: TerminalGrab) -> some View {
         let fg = Color(hex: side.foreground)
         return ZStack {
@@ -498,28 +556,39 @@ struct TerminalPanel: View {
                 .scaledFrame(width: Theme.Size.box110, height: Theme.Size.wellS)
                 .contentShape(.rect)
                 .onTapGesture { Haptics.tap(); g.close() }
-                .accessibilityElement()
-                .accessibilityLabel("Close Terminal")
-                .accessibilityAddTraits(.isButton)
-                .accessibilityIdentifier("terminal-close")
+                .accessibilityHidden(true) // Close says it
             HStack(spacing: Theme.Space.sm) {
-                if feed.wantsControl, feed.control != .off { sizeChip } else { wrapToggle }
-                if feed.loading { ProgressView().controlSize(.mini).tint(fg) }
+                if !noTerminal {
+                    if feed.wantsControl, feed.control != .off { sizeChip } else { wrapToggle }
+                    if feed.loading { ProgressView().controlSize(.mini).tint(fg) }
+                }
                 Spacer(minLength: 0)
-                Button { Haptics.tap(); showSettings = true } label: {
-                    ThemedIcon(Theme.Icon.options).font(Theme.Font.captionStrong).scaledFrame(width: Theme.Size.well, height: Theme.Size.iconL)
+                if !noTerminal {
+                    Button { Haptics.tap(); showSettings = true } label: {
+                        ThemedIcon(Theme.Icon.options).font(Theme.Font.captionStrong).scaledFrame(width: Theme.Size.well, height: Theme.Size.iconL)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(fg.opacity(0.75))
+                    .accessibilityLabel("Terminal Settings")
+                }
+                Button { Haptics.tap(); g.close() } label: {
+                    ThemedIcon(Theme.Icon.clear).symbolRenderingMode(.hierarchical).font(Theme.Font.title)
+                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(fg.opacity(0.75))
-                .accessibilityLabel("Terminal Settings")
+                .accessibilityLabel("Close Terminal")
+                .accessibilityIdentifier("terminal-close")
             }
         }
-        .padding(.horizontal, Theme.Space.m)
-        .scaledFrame(height: Theme.Size.wellM)
+        .padding(.leading, Theme.Space.m)
+        .padding(.trailing, Theme.Space.xs)
+        .scaledFrame(height: Theme.Size.tapTarget)
         .contentShape(.rect)
-        .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .global)
-            .onChanged { g.dragged($0.translation.height) }
-            .onEnded { g.released($0.translation.height, $0.predictedEndTranslation.height) })
+        .modifier(TerminalGrabDrag(grab: g))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("terminal-bar")
     }
 
     private var cardHeader: some View {
@@ -1572,5 +1641,21 @@ struct TerminalGrab {
     var dragged: (CGFloat) -> Void
     var released: (_ distance: CGFloat, _ predicted: CGFloat) -> Void
     var close: () -> Void
+}
+
+/// The cover's drag down, on its bar and on the no-terminal state (#4328): the terminal follows the finger, and goes
+/// when let go far or fast enough. Nothing where there is no cover to drag (the panel in place).
+private struct TerminalGrabDrag: ViewModifier {
+    var grab: TerminalGrab?
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let grab {
+            content.gesture(DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                .onChanged { grab.dragged($0.translation.height) }
+                .onEnded { grab.released($0.translation.height, $0.predictedEndTranslation.height) })
+        } else {
+            content
+        }
+    }
 }
 

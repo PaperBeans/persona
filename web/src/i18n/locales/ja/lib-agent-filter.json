@@ -25,5 +25,8 @@
   "role_user": "ユーザー：",
   "role_agent": "Agent：",
   "role_error": "エラー：",
-  "role_title": "タイトル："
+  "role_title": "タイトル：",
+  "filter": "フィルタ",
+  "remove_filter": "{name} を外す",
+  "search_as_code_off": "コード検索をオフ"
 }

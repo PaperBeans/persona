@@ -17,17 +17,24 @@ type assistantControlUnconfirmed struct{ error }
 func (e *assistantControlUnconfirmed) Unwrap() error { return e.error }
 
 type assistantControlResponse struct {
-	RequestID string `json:"request_id"`
-	Subtype   string `json:"subtype"`
-	Error     string `json:"error"`
+	RequestID string          `json:"request_id"`
+	Subtype   string          `json:"subtype"`
+	Error     string          `json:"error"`
+	Response  json.RawMessage `json:"response"` // what a request answers besides success (cancel_async_message's cancelled)
 }
 
 // control waits for this request's verdict, never treating a successful stdin write as acceptance.
 func (p *assistantProc) control(ctx context.Context, request map[string]any) error {
+	_, err := p.controlAnswer(ctx, request)
+	return err
+}
+
+// controlAnswer is control with the answer Claude gave, null when it gave none.
+func (p *assistantProc) controlAnswer(ctx context.Context, request map[string]any) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, assistantControlTimeout)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	id := fmt.Sprintf("persona-%d", p.reqSeq.Add(1))
 	result := make(chan assistantControlResponse, 1)
@@ -50,23 +57,23 @@ func (p *assistantProc) control(ctx context.Context, request map[string]any) err
 	select {
 	case err := <-written:
 		if err != nil {
-			return err
+			return nil, err
 		}
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	case <-p.exited:
-		return io.EOF
+		return nil, io.EOF
 	}
 	select {
 	case response := <-result:
 		if response.Subtype == "success" {
-			return nil
+			return response.Response, nil
 		}
-		return refusal("assistant_control_failed", response.Error, nil)
+		return nil, refusal("assistant_control_failed", response.Error, nil)
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	case <-p.exited:
-		return io.EOF
+		return nil, io.EOF
 	}
 }
 

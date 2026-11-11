@@ -113,7 +113,7 @@ final class TerminalTypingTests: XCTestCase {
         app.buttons["收起键盘"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
         sleep(1)
-        let bar = app.descendants(matching: .any)["terminal-close"]
+        let bar = app.descendants(matching: .any)["terminal-bar"] // its handle is in the middle
         bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.05, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
         XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "the terminal did not close when its bar was dragged down")

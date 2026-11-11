@@ -1529,6 +1529,23 @@ ASSISTANT = [
     assistant_sess(ASK4, "整理这个季度的读书笔记", 60 * 50, "第 30 本整理好了。"),
 ]
 
+
+def mock_png(w=96, h=64):
+    """A made-up picture (a two-tone gradient) as base64 PNG, for photos the mock hands back."""
+    rows = b"".join(b"\x00" + bytes(v for x in range(w) for v in (40 + x, 120 + y, 200 - x // 2)) for y in range(h))
+    chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+    return base64.b64encode(png).decode()
+
+
+# MOCK_PERSONA_QUEUE=1 (#4342): the first Persona chat is at work with two of the user's messages queued (the second
+# went with a photo, so its words are the apps' stand-in) and one from another conversation, which the assistant holds
+# until the turn ends (`queued_relayed`: only shown and copied). POST …/queue answers the photos with the queue.
+QUEUED_PHOTOS = {"请看图片": [{"mime": "image/png", "data": mock_png()}]}
+if os.environ.get("MOCK_PERSONA_QUEUE") == "1":
+    ASSISTANT[0].update({"state": "working", "status": "working", "queued_relayed": 1,
+                         "queued": ["顺便把下周三的会也挪到下午", "请看图片", "来自「早报 · 周三」：会议纪要整理好了，要不要发给参会的人？"]})
+
 # MOCK_ORIGINS=1 (#3264, docs/protocol/protocol.md "Origin of assistant chats"): conversations the hub opened by itself — the inbox's AI twin,
 # scheduled tasks, a Feishu /agent, one another conversation started — next to the user's own; one of them runs, one
 # waits for the user. The sidebar keeps them out of "Recent" under "Automatic conversations".
@@ -1855,9 +1872,10 @@ SCHEDULE_RAN = []  # what "Run now" started (UI tests read it back at /mock/sche
 ASSISTANT_HUB_NOTES = "代码都在 ~/code 下，平时用 MacBook 开发。\n周报每周五下班前先给我草稿，不要直接发。\n服务器上的 /srv 目录不要动。"
 ASSISTANT_CONFIG = {"machine_id": "server", "launcher": "claude", "timezone": "Asia/Shanghai", "notes": None, "main": ASK1,
                     "main_tasks_quiet": True,  # Notify tasks dispatched from the main chat only in that chat (#1731), on by default
-                    # Every agent Persona starts is a supervised task (#3617), off by default; closed sessions archive
-                    # themselves after this many idle days (#3618), 0 is never. Left out with MOCK_LEGACY_HUB.
-                    "agent_tasks": False, "archive_closed_days": 3,
+                    # Every agent Persona starts is a supervised task (#3617), off by default; new Inbox messages on a
+                    # supervised task reach its supervisor (#4293), off by default; closed sessions archive themselves
+                    # after this many idle days (#3618), 0 is never. Left out with MOCK_LEGACY_HUB.
+                    "agent_tasks": False, "inbox_signals": False, "archive_closed_days": 3,
                     # The role a meeting recording pre-selects (#2981; MOCK_MEETING_ATTENDANCE_DEFAULT=listener starts there)
                     "meeting_attendance_default": os.environ.get("MOCK_MEETING_ATTENDANCE_DEFAULT", "off"),
                     # How long recordings stay (#3235, MOCK_RECORDING_DAYS) and a meeting's minutes after its transcript
@@ -1883,7 +1901,8 @@ def assistant_state(space="", archived=False):
            "conversations": [s for s in ASSISTANT if s["machine_id"] == cfg["machine_id"] and s.get("space", "") == space
                              and (archived or not s.get("archived"))]}
     if not os.environ.get("MOCK_LEGACY_HUB"):
-        out.update(agent_tasks=cfg["agent_tasks"], archive_closed_days=cfg["archive_closed_days"], kb_topics=cfg["kb_topics"])
+        out.update(agent_tasks=cfg["agent_tasks"], inbox_signals=cfg["inbox_signals"], archive_closed_days=cfg["archive_closed_days"],
+                   kb_topics=cfg["kb_topics"])
     if cfg["notes"] is not None:
         out["notes"] = cfg["notes"]
     if cfg["main"]:
@@ -16674,6 +16693,9 @@ class H(BaseHTTPRequestHandler):
                 after, _, back = fail.partition(":")
                 if t > float(after) and not (back and t > float(after) + float(back)):
                     return self.send_json({"error": "node macbook: not connected"}, 503)
+            row = next((x for x in all_sessions() if x["session_id"] == p.split("/")[5]), None)
+            if row is not None and row.get("status") == "offline":  # no pane runs it (node/panescreen.go)
+                return self.send_json({"text": "", "status": "offline"})
             return self.send_json({"text": TERMINAL, "status": "idle"})
         if p.startswith("/api/v1/kb/"):  # the knowledge base (Persona › Knowledge base)
             parts = p.split("/")[4:]
@@ -17625,6 +17647,15 @@ class H(BaseHTTPRequestHandler):
                 if len(parts) >= 7:
                     SENT_TO.append({"machine_id": parts[4], "session_id": parts[5],
                                     "client_msg_id": body.get("client_msg_id"), "text": body.get("text")})
+                    # MOCK_PERSONA_QUEUE=1 (#4342): a working Persona chat queues it after the user's own, photos kept
+                    q = next((x for x in ASSISTANT if x["session_id"] == parts[5] and x.get("state") == "working"), None)
+                    if q is not None and os.environ.get("MOCK_PERSONA_QUEUE") == "1":
+                        held = q.get("queued_relayed") or 0
+                        own = (q.get("queued") or [])[:len(q.get("queued") or []) - held]
+                        q["queued"] = own + [body.get("text") or ""] + (q.get("queued") or [])[len(own):]
+                        if body.get("images"):
+                            QUEUED_PHOTOS[body.get("text") or ""] = [{"mime": i.get("mime"), "data": i.get("data")} for i in body["images"]]
+                        push_machine(q["machine_id"])
             return self.send_json({"ok": True})
         if p == "/api/v1/inbox/refresh": return self.send_json(inbox_list(parse_qs(urlparse(self.path).query)))
         if p == "/api/v1/inbox/done" and self.command == "POST":  # "Mark all as handled" / "Undo"
@@ -17959,6 +17990,8 @@ class H(BaseHTTPRequestHandler):
                 ASSISTANT_CONFIG["archive_closed_days"] = days
             if isinstance(body.get("agent_tasks"), bool):
                 ASSISTANT_CONFIG["agent_tasks"] = body["agent_tasks"]
+            if isinstance(body.get("inbox_signals"), bool):
+                ASSISTANT_CONFIG["inbox_signals"] = body["inbox_signals"]
             if isinstance(body.get("kb_topics"), bool):
                 ASSISTANT_CONFIG["kb_topics"] = body["kb_topics"]
             if body.get("machine_id"):
@@ -18036,6 +18069,14 @@ class H(BaseHTTPRequestHandler):
                 return self.send_json({"error": "machine is offline"}, 503)
             if body.get("cwd", "").endswith("/broken"):  # a launcher that never gets ready
                 return self.send_json({"error": "claude did not become ready within 1m0s\nzsh: command not found: claude"}, 502)
+            # Resume Session (#4328): a session that isn't running comes back in a new tab under the same id, answered
+            # once it is up (a resume is never async). MOCK_RESUME_ERROR=<why>: the node refuses it.
+            resume = next((x for x in SESSIONS if body.get("resume_session_id") and x["session_id"] == body["resume_session_id"]), None)  # the row itself (all_sessions() decorates copies)
+            if resume is not None:
+                if os.environ.get("MOCK_RESUME_ERROR"): return self.send_json({"error": os.environ["MOCK_RESUME_ERROR"]}, 502)
+                resume.update(status="idle", state="idle")
+                push_machine(resume["machine_id"])
+                return self.send_json({"session": decorated_session(resume)})
             codex = body.get("launcher") == "codex"  # the node starts Codex with its first message and answers with its thread
             if codex and (body.get("async") or not (body.get("prompt") or "").strip()):
                 return self.send_json({"error": "新建 Codex 会话要连第一条消息一起发：Codex 收到第一条消息才建会话。", "code": "codex_needs_prompt"}, 400)
@@ -18189,26 +18230,31 @@ class H(BaseHTTPRequestHandler):
                     return self.send_json({"ok": True})
             return self.send_json({"error": "session not found"}, 404)
         if p.startswith("/api/v1/sessions/") and p.endswith("/queue/send-now"):  # node session.queue.send_now (#6088)
-            s = next((x for x in SESSIONS if x["session_id"] == p.split("/")[5]), None)
+            s = next((x for x in SESSIONS + ASSISTANT if x["session_id"] == p.split("/")[5]), None)
             if not (s or {}).get("queued"):
                 return self.send_json({"code": "nothing_queued", "error": "Nothing is queued for the agent any more."}, 409)
             refuse = os.environ.get("MOCK_SEND_NOW")  # refuses with that code, to see the app's words for it
             if refuse:
                 return self.send_json({"error": "refused (%s)" % refuse, "code": refuse,
                                        **({"delivered": "unknown"} if refuse == "send_now_in_doubt" else {})}, 409)
-            s["queued"] = []
+            relayed = s.get("queued_relayed") or 0  # a Persona chat's from other conversations stay (#4342)
+            s["queued"] = s["queued"][len(s["queued"]) - relayed:] if relayed else []
             push_machine(s["machine_id"])
             return self.send_json({"sent": True})
         if p.startswith("/api/v1/sessions/") and p.endswith("/queue"):  # node editQueue: pull every queued message back, re-queue `keep`
             body = json.loads(self.last_body or b"{}")
             QUEUE_EDITS.append(body)
             # The stored session (all_sessions() hands out copies): the new order is what the next list says (#6088).
-            s = next((x for x in SESSIONS if x["session_id"] == p.split("/")[5]), None) \
+            s = next((x for x in SESSIONS + ASSISTANT if x["session_id"] == p.split("/")[5]), None) \
                 or next((x for x in all_sessions() if x["session_id"] == p.split("/")[5]), None)
-            pulled = list((s or {}).get("queued") or [])
+            queued = list((s or {}).get("queued") or [])
+            relayed = (s or {}).get("queued_relayed") or 0  # a Persona chat: keep indexes the user's own (#4342)
+            pulled, held = queued[:len(queued) - relayed], queued[len(queued) - relayed:]
             if not pulled: return self.send_json({"error": "nothing is queued"}, 502)
-            s["queued"] = [pulled[k] for k in body.get("keep") or [] if 0 <= k < len(pulled)]
+            s["queued"] = [pulled[k] for k in body.get("keep") or [] if 0 <= k < len(pulled)] + held
             push_machine(s["machine_id"])
+            if s.get("assistant"):
+                return self.send_json({"queue": pulled, "images": [QUEUED_PHOTOS.get(q, []) for q in pulled]})
             return self.send_json({"queue": pulled})
         if p.startswith("/api/v1/sessions/") and p.endswith("/modes"):  # permission mode / effort chips
             body = json.loads(self.last_body or b"{}")
@@ -18535,6 +18581,12 @@ class H(BaseHTTPRequestHandler):
                         elif ch >= " ": drive["typed"] += ch
                     if ctl: drive.update(cols=ctl["cols"], rows=ctl["rows"])
                     drive["send"](full=bool(ctl))
+                    continue
+                if msg.get("type") == "terminal_subscribe" and TERMINAL_STREAM and any(
+                        x["session_id"] == msg.get("session_id") and x.get("status") == "offline" for x in all_sessions()):
+                    # Nothing runs it (#4328): the stream ends with the node's words (node/send.go paneFor), watched or driven.
+                    send({"type": "terminal", "machine_id": msg.get("machine_id"), "session_id": msg.get("session_id"),
+                          "error": "session %s is not running" % msg.get("session_id")})
                     continue
                 if msg.get("type") == "terminal_subscribe" and TERMINAL_STREAM and TERMINAL_CONTROL and msg.get("control"):
                     sid, mid, ctl = msg.get("session_id"), msg.get("machine_id"), msg["control"]

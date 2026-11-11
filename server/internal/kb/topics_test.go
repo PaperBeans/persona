@@ -3,6 +3,7 @@ package kb
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"slices"
 	"strconv"
@@ -368,4 +369,102 @@ func TestTopicPromptsGolden(t *testing.T) {
 		{ID: "p4", Path: []string{"后台整理"}, Kind: "question", Text: "要不要定时整理主题"},
 		{ID: "p5", Path: []string{"索引", "表"}, Kind: "fact", Text: "kb_entities 没有外键"}, // a subtopic with only a deeper one
 	}))
+}
+
+// timeoutModel runs out of time on its first fails calls and answers with no points after; it keeps the user prompts.
+type timeoutModel struct {
+	mu    sync.Mutex
+	fails int
+	asked []string
+}
+
+func (m *timeoutModel) JSONMax(_ context.Context, _, user string, _ int, out any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.asked = append(m.asked, user)
+	if len(m.asked) <= m.fails {
+		return fmt.Errorf("ai: read stream: %w", context.DeadlineExceeded)
+	}
+	return json.Unmarshal([]byte(`{"points":[]}`), out)
+}
+
+// One call carries at most distillInput bytes of timeline lines (#4350).
+func TestDistillStretchFitsTheInput(t *testing.T) {
+	m := &topicModel{replies: []string{`{"points":[]}`}}
+	e := testEngine(t, m)
+	line := strings.Repeat("a", 500)
+	var lines []string
+	for range 40 {
+		lines = append(lines, line)
+	}
+	quietProject(t, e, "p", lines...)
+	e.DistillTopics(context.Background(), 1)
+	got := e.Store.topicMark(KindProject, "p").Lines
+	size := len(e.Store.timeline("p")[0]) // the line as the timeline holds it (day and source before it)
+	if got == 0 || got*size > distillInput || (got+1)*size <= distillInput {
+		t.Fatalf("first stretch = %d lines of %d bytes, want as many as fit in %d", got, size, distillInput)
+	}
+}
+
+// A stretch that ran out of time is tried again with half its lines, then half again; the mark moves only over what
+// was distilled, and a success lifts the cap (#4350).
+func TestDistillRetriesATimedOutStretchSmaller(t *testing.T) {
+	m := &timeoutModel{fails: 2}
+	e := testEngine(t, m)
+	line := "★" + strings.Repeat("a", 150) // ★ counts a call's lines (AppendLog keeps 200 characters)
+	var lines []string
+	for range 100 {
+		lines = append(lines, line)
+	}
+	quietProject(t, e, "p", lines...)
+	key := KindProject + "/p"
+
+	e.DistillTopics(context.Background(), 1)
+	full := strings.Count(m.asked[0], "★") // lines that fit in distillInput
+	if full < 8 {
+		t.Fatalf("the first call carried %d lines", full)
+	}
+	if mark := e.Store.topicMark(KindProject, "p"); mark.Lines != 0 {
+		t.Fatalf("a call that ran out of time moved the mark: %+v", mark)
+	}
+	if f, _ := e.retries().topics.get(key); f.failures != 1 || f.chunk != full/2 {
+		t.Fatalf("after the first timeout: %+v, want 1 failure and a cap of %d lines", f, full/2)
+	}
+	if e.DistillTopics(context.Background(), 1) != 0 {
+		t.Fatal("tried again before its wait was over")
+	}
+
+	e.retries().topics.over()
+	e.DistillTopics(context.Background(), 1)
+	if f, _ := e.retries().topics.get(key); f.failures != 2 || f.chunk != max(distillMinLines, full/4) {
+		t.Fatalf("after the second timeout: %+v, want a cap of %d lines", f, max(distillMinLines, full/4))
+	}
+
+	e.retries().topics.over()
+	e.DistillTopics(context.Background(), 1)
+	if mark := e.Store.topicMark(KindProject, "p"); mark.Lines != max(distillMinLines, full/4) {
+		t.Fatalf("mark after the smaller stretch = %+v, want %d lines", mark, max(distillMinLines, full/4))
+	}
+	if _, ok := e.retries().topics.get(key); ok {
+		t.Fatal("a success kept the failure and its cap")
+	}
+	e.DistillTopics(context.Background(), 1) // no cap: the next stretch is a full one again
+	if mark := e.Store.topicMark(KindProject, "p"); mark.Lines != max(distillMinLines, full/4)+full {
+		t.Fatalf("mark after a full stretch = %+v", mark)
+	}
+	for i, want := range []int{full, full / 2, max(distillMinLines, full/4), full} {
+		if got := strings.Count(m.asked[i], "★"); got != want {
+			t.Errorf("call %d carried %d lines, want %d", i+1, got, want)
+		}
+	}
+}
+
+// A call that failed otherwise (not out of time) is tried again with the same stretch.
+func TestDistillKeepsTheStretchAfterOtherFailures(t *testing.T) {
+	e := testEngine(t, &topicModel{replies: []string{`not json`}})
+	quietProject(t, e, "p", "一行", "两行")
+	e.DistillTopics(context.Background(), 1)
+	if f, ok := e.retries().topics.get(KindProject + "/p"); !ok || f.chunk != 0 {
+		t.Fatalf("after a bad answer: %+v, %v; want a failure without a cap", f, ok)
+	}
 }

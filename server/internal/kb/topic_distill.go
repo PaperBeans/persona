@@ -22,22 +22,26 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
 const (
 	topicMarkFile = ".topics.json"
-	// distillInput: bytes of timeline lines per call, each line clipped to distillLineRunes. Kept small so a call's
-	// answer (at most distillMaxPoints points) comes back quickly.
-	distillInput     = 12000
+	// distillInput: bytes of timeline lines (or of a chat's summary) per call, each line clipped to distillLineRunes.
+	// Kept small so a call's answer (at most distillMaxPoints points) comes back well inside its deadline also from a
+	// model that writes 30–40 tokens a second (#4350: 12000 bytes and 25 points ran out of 3 minutes).
+	distillInput     = 6000
 	distillLineRunes = 600
+	// distillMinLines: the fewest timeline lines a call that follows one that ran out of time carries (distillChunk).
+	distillMinLines = 2
 	// A project is due once it has distillBatch new lines, or fewer and its timeline has been quiet distillQuiet.
 	distillBatch = 8
 	distillQuiet = 30 * time.Minute
 	// distillChatEvery: a chat whose summary changed is distilled again at most this often (compression rewrites the
 	// summary with every batch).
 	distillChatEvery    = 12 * time.Hour
-	distillMaxPoints    = 25
+	distillMaxPoints    = 12
 	distillMaxNewTopics = 4   // new topics one call may open; the rest of its points for new topics are dropped
 	maxTopics           = 150 // no new topic past this many
 	pendingMax          = 200 // candidates a topic holds at most; the oldest go first
@@ -188,11 +192,16 @@ func (e *Engine) DistillTopics(ctx context.Context, max int) int {
 	var calls atomic.Int32
 	e.bounded(ctx, len(todo), topicWorkers, func(i int) bool {
 		key := todo[i].kind + "/" + todo[i].id
-		if err := e.distill(ctx, todo[i], now); err != nil {
+		sent, err := e.distill(ctx, todo[i], now, e.retries().topics.chunk(key))
+		if err != nil {
 			if deferred(ctx, err) {
 				return false
 			}
 			e.topicRetryLater(key, err, "distill")
+			if distillTooBig(err) && sent > 0 {
+				// The same stretch would run out again: the next try carries half of it (distillMinLines at least).
+				e.retries().topics.shrink(key, halfStretch(sent))
+			}
 			calls.Add(1) // a failed call is a call
 			return true
 		}
@@ -248,23 +257,35 @@ func (e *Engine) bounded(ctx context.Context, n, workers int, job func(i int) bo
 	wg.Wait()
 }
 
+// halfStretch is how many lines the call after one of sent lines that ran out of time carries.
+func halfStretch(sent int) int { return max(distillMinLines, sent/2) }
+
+// distillTooBig: the call ran out of time, or its answer did not fit even in twice the room: less input per call is
+// what helps (a call that failed otherwise is tried again with the same stretch).
+func distillTooBig(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ai.ErrTruncated)
+}
+
 // errSourceGone: the source went (forgotten, merged) while it was being distilled.
 var errSourceGone = errors.New("the source is gone")
 
-func (e *Engine) distill(ctx context.Context, src distillSource, now time.Time) error {
+// distill makes one distill call for src and files its candidates; sent is how many timeline lines the call carried
+// (a project's; 0 for a chat). maxLines > 0 caps them: a stretch that ran out of time before is tried in a smaller one
+// (retrySet.shrink). The mark moves only over what was distilled.
+func (e *Engine) distill(ctx context.Context, src distillSource, now time.Time, maxLines int) (sent int, err error) {
 	in := prompts.KBTopicDistillInput{Topics: e.topicRefs()}
 	mark := e.Store.topicMark(src.kind, src.id)
 	switch src.kind {
 	case KindProject:
 		p, ok := e.Store.Project(src.id)
 		if !ok {
-			return nil
+			return 0, nil
 		}
 		lines := e.Store.timeline(src.id)
 		from := min(mark.Lines, len(lines))
 		size := 0
 		to := from
-		for to < len(lines) {
+		for to < len(lines) && (maxLines <= 0 || to-from < maxLines) {
 			l := clipRunes(lines[to], distillLineRunes)
 			if size > 0 && size+len(l) > distillInput {
 				break
@@ -275,6 +296,7 @@ func (e *Engine) distill(ctx context.Context, src distillSource, now time.Time) 
 		}
 		in.Project, in.Name, in.Goal = true, p.Name, p.Goal
 		in.From, in.To, in.Total = from+1, to, len(lines)
+		sent = to - from
 		mark = topicMark{Lines: to, At: now}
 		if info, err := os.Stat(e.Store.path(KindProject, src.id, "log.md")); err == nil && to == len(lines) {
 			mark.Size = info.Size() // read to the end: unchanged from here means nothing new
@@ -282,19 +304,21 @@ func (e *Engine) distill(ctx context.Context, src distillSource, now time.Time) 
 	case KindChat:
 		c, ok := e.Store.Chat(src.id)
 		if !ok {
-			return nil
+			return 0, nil
 		}
+		// A chat's summary is one piece (compression keeps it short): clipped to the same size, not split.
 		sum := strings.TrimSpace(e.Store.Summary(KindChat, src.id))
-		in.Name, in.Summary = c.Name, clip(sum, 6000)
+		in.Name, in.Summary = c.Name, clip(sum, distillInput)
 		mark = topicMark{Summary: summaryHash(sum), At: now}
 	}
 	var d distillDigest
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	if err := e.modelFor("kb.topics").JSONMax(cctx, prompts.RenderKBTopicDistill(prompts.KBOwner{Owner: e.ownerName()}), prompts.RenderKBTopicDistillInput(in), 12000, &d); err != nil {
-		return err
+	system := prompts.RenderKBTopicDistill(prompts.KBTopicDistill{Owner: e.ownerName(), MaxPoints: distillMaxPoints})
+	if err := e.modelFor("kb.topics").JSONMax(cctx, system, prompts.RenderKBTopicDistillInput(in), 12000, &d); err != nil {
+		return sent, err
 	}
-	return e.fileCandidates(src, d.Points, mark, now)
+	return sent, e.fileCandidates(src, d.Points, mark, now)
 }
 
 // topicRefs are the existing topics the model may file points under, the biggest first.

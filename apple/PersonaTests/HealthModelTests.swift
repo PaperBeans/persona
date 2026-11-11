@@ -69,7 +69,7 @@ struct HealthModelTests {
         hub.on("GET", "/api/v1/assistant") { req in
             #expect(req.query["space"] == "health")
             return Data(#"""
-                {"machine_id":"m","conversations":[
+                {"machine_id":"m","launcher":"ccc","cwd":"/home/me/.persona/health","conversations":[
                  {"session_id":"old","title":"步数","status":"idle","state":"idle","assistant":true,"space":"health","updated_at":"2026-11-01T08:00:00Z"},
                  {"session_id":"latest","title":"睡眠","status":"idle","state":"idle","assistant":true,"space":"health","updated_at":"2026-11-11T08:00:00Z"}]}
                 """#.utf8)
@@ -86,7 +86,7 @@ struct HealthModelTests {
 
     @Test func enteringHealthWithNoHistoryOpensTheNewConversationPage() async {
         let hub = FakeHub()
-        hub.on("GET", "/api/v1/assistant") { _ in Data(#"{"machine_id":"m","conversations":[]}"#.utf8) }
+        hub.on("GET", "/api/v1/assistant") { _ in Data(#"{"machine_id":"m","launcher":"ccc","cwd":"/home/me/.persona/health","conversations":[]}"#.utf8) }
         #expect(await HealthModel.entry(deps: deps(hub), live: []) == .new)
         #expect(HealthModel.entry([], live: [Self.session("gone", archived: true, updated: 3)]) == .new)
     }

@@ -124,6 +124,14 @@ class HttpChannelManagementTest {
         assertEquals(listOf("10", "01"), (qr.qr?.rows).zhAny())
         assertTrue(qr.polled)
 
+        // The Lark bot's registration: the page the code points at also comes as a link to open directly.
+        server.enqueue(MockResponse().setBody("""{"step":"register","kind":"qr","url":"https://example.com/page","interval":5,
+            "qr":{"size":2,"rows":["10","01"]},"link":"https://example.com/page","link_text":"Open in Lark"}"""))
+        val reg = api.bind("feishu", "register")
+        server.takeRequest()
+        assertEquals("https://example.com/page", (reg.link).zhAny())
+        assertEquals("Open in Lark", (reg.linkText).zhAny())
+
         server.enqueue(MockResponse().setBody("""{"done":true,"account":"微信用户 a1b2c3"}"""))
         val done = api.bind("wechat", "scan")
         server.takeRequest()

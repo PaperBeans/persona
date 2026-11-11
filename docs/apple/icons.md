@@ -78,7 +78,7 @@ tiles. Raw point sizes are only for pictures with a fixed layout (share cards, t
 
 Icons take role colors, never hex values: `.secondary` / `.tertiary` for chrome and accessories, `Theme.accent` for what
 can be tapped, `Theme.danger`, `Theme.caution`, `Theme.positive` for outcomes, `AgentState.tone` and `StatusPalette` for
-Agent states (Needs you red, Working amber, Unread green), `Theme.ai` for the AI mark. A tile's glyph is white on its
+Agent states (Needs you blue, Working amber, Unread green), `Theme.ai` for the AI mark. A tile's glyph is white on its
 tint. State colors are the same in every style.
 
 ## Avatars, state dots and app icons

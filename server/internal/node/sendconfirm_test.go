@@ -301,8 +301,9 @@ func TestLongPaste(t *testing.T) {
 	}{
 		{"fix the flaky test", false},
 		{"fix the flaky test\n\n<attached_images>\n/a.png\n/b.png\n</attached_images>", false},
-		{"fix the flaky test\n\n<attached_images>\n/a.png\npath: /a.png\n</attached_images>", true}, // its path: lines stay in the paste
-		{"<attached_images>\n/a.png\npath: /a.png\n</attached_images>", false},                      // pictures only: nothing to tell by
+		{"fix the flaky test\n\n<attached_images>\n/a.png\npath:/a.png\n</attached_images>", true},  // its path: lines stay in the paste
+		{"fix the flaky test\n\n<attached_images>\n/a.png\npath: /a.png\n</attached_images>", true}, // as nodes before #4361 wrote it
+		{"<attached_images>\n/a.png\npath:/a.png\n</attached_images>", false},                       // pictures only: nothing to tell by
 		{"one\ntwo\nthree", true},
 		{strings.Repeat("长", 800), true},
 	} {

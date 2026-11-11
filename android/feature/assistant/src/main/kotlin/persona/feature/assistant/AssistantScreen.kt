@@ -966,9 +966,9 @@ private fun HealthHome(
 ) {
     val history = remember(chats) { HealthEntry.history(chats.orEmpty()) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = pagePadding, end = pagePadding,
-        top = contentPadding.calculateTopPadding() + Tokens.Space.l, bottom = contentPadding.calculateBottomPadding() + Tokens.Space.xxl)) {
+        top = contentPadding.calculateTopPadding() + Tokens.Space.l, bottom = contentPadding.calculateBottomPadding() + Tokens.Space.xl)) {
         item(key = "health-lead") {
-            Column(Modifier.padding(vertical = Tokens.Space.xl), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
+            Column(Modifier.padding(vertical = ContentTokens.legacyXl), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                 Text(stringResource(R.string.assistant_health_title), style = PersonaTheme.type.largeTitle, color = PersonaTheme.palette.ink)
                 Text(stringResource(R.string.assistant_health_lead), style = PersonaTheme.type.voice, color = PersonaTheme.palette.ink2)
             }
@@ -1212,8 +1212,9 @@ private fun ConversationRow(
             leading = { JIcon(if (selected) PhIcons.CheckCircle else PhIcons.ChatCircle, null,
                 selected = selected, tint = if (selected) PersonaTheme.palette.accent else PersonaTheme.palette.ink2) },
             trailing = { JIconButton(PhIcons.DotsThree, stringResource(R.string.assistant_conversation_actions), { menu = true }) }, chevron = false)
-        Row(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        // Under the title, not the icon: a fixed 16dp put it under the icon in glass and board and past it in brief.
+        Row(Modifier.padding(start = rowTitleStart, end = rowPadding, bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
             StatusLabel(session.conversationStatus())
             conversationTime(session.updated, currentLocale)?.let { time ->
                 Text(time, Modifier.weight(1f), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3,
@@ -1310,7 +1311,7 @@ private fun PersonaRow(main: Session?, selected: Boolean, hasMain: Boolean, onMa
     JRow(name, onClick = onMain, onLongClick = main?.let { { menu = true } }, selected = selected,
         // "Main chat" under the name keeps the row readable as a conversation, not a brand heading (#6327, as the web, #6293).
         subtitle = stringResource(if (main == null && !hasMain) R.string.assistant_start_main else R.string.assistant_main_chat),
-        leading = { JAppMark(Tokens.Space.xxl) }, chevron = false,
+        leading = { JAppMark(Tokens.Space.xl) }, chevron = false,
         trailing = if (main == null) null else ({
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
                 if (pending > 0) JBadge(pending)

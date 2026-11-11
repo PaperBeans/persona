@@ -27,8 +27,13 @@ class ResidentConnectionTest {
         override val events = MutableSharedFlow<ServerEvent>()
         var selectedReconnects = 0
         var otherReconnects = 0
+        var selectedWakes = 0
+        var otherWakes = 0
         override fun reconnect() { selectedReconnects++; otherReconnects++ }
-        override val groupLinks = listOf(GroupLink(selectedState) { selectedReconnects++ }, GroupLink(otherState) { otherReconnects++ })
+        override val groupLinks = listOf(
+            GroupLink(selectedState, { selectedReconnects++ }, { selectedWakes++ }),
+            GroupLink(otherState, { otherReconnects++ }, { otherWakes++ }),
+        )
         override fun send(message: JsonObject) = false
     }
 
@@ -61,6 +66,15 @@ class ResidentConnectionTest {
             assertEquals("$selected/$other selected", if (selected == ConnectionState.Online) 0 else 1, connection.selectedReconnects)
             assertEquals("$selected/$other other", if (other == ConnectionState.Online) 0 else 1, connection.otherReconnects)
         }
+    }
+
+    @Test fun theWatchdogWakesEveryGroupWithoutDroppingLiveConnections() {
+        val connection = TwoGroupConnection(ConnectionState.Online, ConnectionState.Updating)
+        ResidentConnection.wake(connection)
+        assertEquals(1, connection.selectedWakes)
+        assertEquals(1, connection.otherWakes)
+        assertEquals(0, connection.selectedReconnects)
+        assertEquals(0, connection.otherReconnects)
     }
 
     // The service registered its own default network callback that called reconnect() on every onAvailable / onLost,

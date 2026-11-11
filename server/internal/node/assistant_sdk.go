@@ -122,6 +122,7 @@ func (n *Node) sdkPrepare(ctx context.Context, launcher string) (sdkBridge, stri
 // sdkStart is a claude start as spawnClaude puts it together, CLI flag by flag.
 type sdkStart struct {
 	id, cwd, model, permissionMode string
+	configDir                      string
 	resume                         bool
 	mcp                            map[string]any // --mcp-config's {"mcpServers": …}
 	allowedTools                   string         // --allowedTools
@@ -246,25 +247,34 @@ func extraArgs(args []string) map[string]any {
 // launcher's provider env replaces whatever the node inherited for a gateway, as `personad launch` does. Nothing secret
 // goes on the command line: the key is in the environment and in the persona_start line.
 func (n *Node) sdkCommand(b sdkBridge, launcher string, s sdkStart, base []string) (*exec.Cmd, []byte, error) {
+	configDir := n.assistantConfigDir(launcher, s.configDir)
+	base = n.claudeProcessEnv(base, configDir)
 	if l, managed := n.managedLauncher(launcher); managed {
 		// the main conversation's provider env (launcherenv.go); its values hold the key: never logged
 		s.env, s.launcherArgs = providerEnv(l, s.model, "", true), l.Args
+		s.env["CLAUDE_CONFIG_DIR"] = configDir
 		if mergesNoProxy(l) {
 			// As `personad launch` and its settings file do (#6238): the provider's hosts are added to the bypass lists
 			// this claude would read without it, the user's settings env's (applied over the environment), else the node's.
-			user := n.userNoProxy(l)
+			configPath := configDir
+			if configPath == "" {
+				configPath = filepath.Join(n.home, ".claude")
+			}
+			user := n.userNoProxy(l, configPath)
 			s.env["NO_PROXY"], s.env["no_proxy"] = addNoProxy(s.env["NO_PROXY"], func(k string) string {
 				return cmp.Or(user[k], envValue(base, k))
 			})
 		}
 		base = withoutEnv(base, envClearFor(l))
 		own := envList(s.env)
-		base = append(base, own...)
+		base = identity.Environment(base, own...)
 		// as `personad launch` does: a proxy inherited that no longer answers holds every request (deadproxy.go)
 		base = withoutDeadProxies(base, own, l.BaseURL, func(msg string) { n.logf("assistant: launcher %s: %s", launcher, msg) })
-	} else if d := n.claudeStartDir.Load(); d != nil && *d != "" { // plain claude: as launcherCommand
-		base = append(base, "CLAUDE_CONFIG_DIR="+proto.ExpandHome(*d, userHome()))
 	}
+	if s.env == nil {
+		s.env = map[string]string{}
+	}
+	s.env["CLAUDE_CONFIG_DIR"] = configDir
 	if s.compaction != nil {
 		base = identity.Environment(base, s.compaction.env()...)
 	}

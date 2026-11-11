@@ -32,5 +32,14 @@
   "empty_topics": "还没有主题",
   "empty_topics_body": "Persona 会在后台从项目时间线和会话里整理出以后用得上的知识（概念、决定、做法、踩过的坑、事实），按主题归类，整理出来就会显示在这里。",
   "map": "知识导图",
-  "map_title": "用思维导图查看主题和项目"
+  "map_title": "用思维导图查看主题和项目",
+  "delete": "删除",
+  "delete_title": "删除这个项目？",
+  "delete_confirm": "「{name}」会从列表、搜索和助手的上下文里移除。它关联的聊天、人和文档都还在，只是不再关联它。删除后可以马上撤销。",
+  "deleted": "已删除「{name}」",
+  "undo": "撤销",
+  "restored": "已恢复「{name}」",
+  "delete_failed": "删除失败：{error}",
+  "restore_failed": "恢复失败：{error}",
+  "restore_conflict": "无法恢复「{name}」：已经有一个同名的新项目。"
 }

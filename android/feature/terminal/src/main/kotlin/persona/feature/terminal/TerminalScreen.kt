@@ -131,7 +131,7 @@ private fun TerminalDisplaySheet(
                 JButton(stringResource(R.string.terminal_font_down), { onFont(false) }, kind = JButtonKind.Secondary, size = JButtonSize.Small, enabled = fontSize > TerminalFontSize.MIN)
                 val sizeDescription = stringResource(R.string.terminal_font_size_value, TerminalFontSize.label(fontSize))
                 Text(TerminalFontSize.label(fontSize), style = PersonaTheme.type.micro, color = palette.ink, textAlign = TextAlign.Center,
-                    maxLines = 1, modifier = Modifier.widthIn(min = Tokens.Space.xxxl).semantics { contentDescription = sizeDescription })
+                    maxLines = 1, modifier = Modifier.widthIn(min = Tokens.Space.xxl).semantics { contentDescription = sizeDescription })
                 JButton(stringResource(R.string.terminal_font_up), { onFont(true) }, kind = JButtonKind.Secondary, size = JButtonSize.Small, enabled = fontSize < TerminalFontSize.MAX)
             }
         })

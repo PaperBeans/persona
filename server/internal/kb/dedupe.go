@@ -425,11 +425,30 @@ func (e *Engine) relinkRefs(p *Project, manual bool, f func(ref string, projects
 		var list *[]string
 		switch kind {
 		case KindChat:
-			c, ok := e.Store.Chat(id)
-			if !ok {
-				continue
+			// Under chatMu (editChatAs): an ingest's pending count and last message time written meanwhile stay.
+			if _, _, err := e.Store.editChatAs(id, manual, func(c *Chat) {
+				if l, changed := f(ref, c.Projects); changed {
+					c.Projects = l
+				}
+			}); err != nil {
+				return err
 			}
-			v, t, list = c, &c.Tagging, &c.Projects
+			continue
+		case KindRecording:
+			// Under recMu, like every other read-compare-write of a recording: an upload or a trim meanwhile stays.
+			e.Store.recMu.Lock()
+			var err error
+			if r, ok := e.Store.Recording(id); ok {
+				if l, changed := f(ref, r.Projects); changed {
+					r.Projects = l
+					err = e.Store.putEntity(KindRecording, r.ID, r, &r.Tagging, manual)
+				}
+			}
+			e.Store.recMu.Unlock()
+			if err != nil {
+				return err
+			}
+			continue
 		case KindPerson:
 			// Read again under personMu: chats or handles the pipeline links meanwhile stay.
 			if _, _, err := e.Store.updatePerson(id, manual, nil, func(per *Person) bool {

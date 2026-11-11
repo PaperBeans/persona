@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"sort"
 	"sync"
 	"time"
@@ -25,7 +24,8 @@ const startFailedFor = 10 * time.Minute
 
 type startRec struct {
 	done    chan struct{}
-	session proto.Session // what is listed while it starts
+	cancel  context.CancelFunc // nil for a record without an async worker
+	session proto.Session      // what is listed while it starts
 	err     error
 	ended   time.Time
 	tabID   string // the herdr tab, once made
@@ -33,8 +33,10 @@ type startRec struct {
 }
 
 type startLog struct {
-	mu sync.Mutex
-	m  map[string]*startRec
+	mu      sync.Mutex
+	m       map[string]*startRec
+	stopped bool
+	running sync.WaitGroup // the start workers and their initial session-list notifications
 }
 
 func (l *startLog) get(id string) *startRec {
@@ -53,9 +55,15 @@ func (l *startLog) recovered(id string) {
 	}
 }
 
-func (l *startLog) add(id string, r *startRec) {
+func (l *startLog) add(id string, r *startRec) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.stopped {
+		return errors.New("node is shutting down")
+	}
+	if l.m[id] != nil {
+		return fmt.Errorf("session %s is already starting", id)
+	}
 	if l.m == nil {
 		l.m = map[string]*startRec{}
 	}
@@ -65,6 +73,29 @@ func (l *startLog) add(id string, r *startRec) {
 		}
 	}
 	l.m[id] = r
+	if r.cancel != nil {
+		l.running.Add(2)
+	}
+	return nil
+}
+
+// close cancels unfinished starts and joins all their work before the node's hosts and state are torn down.
+// Admission and WaitGroup.Add share the lock, so a request still returning as the connection closes cannot add
+// work after the wait starts. Calling close again is safe.
+func (l *startLog) close() {
+	l.mu.Lock()
+	l.stopped = true
+	var cancel []context.CancelFunc
+	for _, r := range l.m {
+		if r.cancel != nil {
+			cancel = append(cancel, r.cancel)
+		}
+	}
+	l.mu.Unlock()
+	for _, stop := range cancel {
+		stop()
+	}
+	l.running.Wait()
 }
 
 // finish records how the start went: a started session is listed by herdr from now on, a failed one keeps its entry.
@@ -213,11 +244,15 @@ func (n *Node) startAsyncIn(kind, id, cwd, launcher, prompt, workspaceID, mode, 
 		return nil, refusal("codex_needs_prompt", "新建 Codex 会话要连第一条消息一起发（更新 App 后再试）。", nil)
 	}
 	now := time.Now().UTC()
-	r := &startRec{done: make(chan struct{}), session: proto.Session{
+	ctx, cancel := context.WithTimeout(withStartHost(context.Background(), kind), n.startWait())
+	r := &startRec{done: make(chan struct{}), cancel: cancel, session: proto.Session{
 		SessionID: id, Cwd: cwd, Launcher: launcher, Agent: "claude", Status: proto.StatusIdle, Starting: true,
 		StartedByPersona: true, PermissionMode: mode, Effort: effort, UpdatedAt: now, WorkspaceID: workspaceID,
 	}}
-	n.starts.add(id, r)
+	if err := n.starts.add(id, r); err != nil {
+		cancel()
+		return nil, err
+	}
 	// Known from now on: its chat loads empty (startingSession) and its watch waits for the transcript.
 	n.state.put(id, sessionState{Launcher: launcher, Cwd: cwd, StartedAt: now})
 	n.noteModes(id, mode, effort)
@@ -225,16 +260,19 @@ func (n *Node) startAsyncIn(kind, id, cwd, launcher, prompt, workspaceID, mode, 
 	// rewrite r.session (under the log's lock) before this goroutine would get to it.
 	s := r.session
 	go func() {
-		ctx, cancel := context.WithTimeout(withStartHost(context.Background(), kind), n.startWait())
+		defer n.starts.running.Done()
 		defer cancel()
 		_, err := n.start(ctx, cwd, launcher, prompt, "", workspaceID, mode, effort, tabName, id, "", execution)
-		if err != nil {
-			log.Printf("start %s: %v", id, err)
+		if err != nil && !errors.Is(ctx.Err(), context.Canceled) {
+			n.logf("start %s: %v", id, err)
 		}
 		n.starts.finish(id, err)
 		n.notifySessions()
 	}()
 	n.decorate(&s)
-	go n.notifySessions()
+	go func() {
+		defer n.starts.running.Done()
+		n.notifySessions()
+	}()
 	return &s, nil
 }

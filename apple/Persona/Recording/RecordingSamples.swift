@@ -29,6 +29,56 @@ enum RecordingSamples {
     /// A finished meeting, transcribed (`-showMeetingSample minutes|pending` opens it).
     static let pastMeeting = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
 
+    #if os(iOS)
+    /// The lines the `flow` sample hears, one segment of one sentence each, a few seconds apart.
+    private static let flowLines = [
+        "好，我们开始，今天先看录音入口的进展。",
+        "新版入口已经合进主干，开始录音只要一步。",
+        "锁屏和灵动岛可以看到时长，也能直接停止。",
+        "决定：默认用中文转写，中英混说也要能用。",
+        "张三负责周五前补上长录音的真机测试。",
+        "还没定的是 Mac 上要不要也支持录音。",
+        "下周同一时间再对一次进展，今天就到这里。",
+    ]
+    nonisolated(unsafe) private static var flowTask: Task<Void, Never>?
+
+    /// `-showMeetingSample flow`: a meeting that records itself with no microphone. The clock and the level move, a line is
+    /// heard every few seconds, and Stop, Pause and Bookmark work (`RecordingCapture`'s DEBUG sample paths), so the
+    /// simulator can show the whole way from the live sheet through the wrap-up to the minutes (mock hub, `recording_minutes`).
+    @MainActor private static func startFlow(_ meeting: RecordingMeeting) {
+        RecordingLibrary.shared.restore(liveMeeting)
+        var live = RecordingEntry(id: liveMeeting, createdAt: .now, source: .phone, title: "产品周会", active: true)
+        live.meeting = meeting
+        live.attendance = RecordingAttendance(role: .participant, session: nil, sessionTitle: "Persona")
+        try? RecordingLibrary.shared.save(live)
+        let capture = RecordingCapture.shared
+        capture.showSample(liveMeeting, elapsed: 1)
+        flowTask?.cancel()
+        flowTask = Task { @MainActor in
+            var elapsed = 1.0
+            var heard = 0
+            var lastLine = 0.0
+            while !Task.isCancelled, capture.recordingID == liveMeeting {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard capture.state == .recording else { capture.advanceSample(elapsed: elapsed, level: 0); continue }
+                elapsed += 0.1
+                // Speech in bursts: a slow swell and a quicker flutter.
+                let swell = max(0, sin(elapsed * 0.9)), flutter = 0.5 + 0.5 * sin(elapsed * 9)
+                capture.advanceSample(elapsed: elapsed, level: min(1, 0.08 + 0.7 * swell * flutter))
+                if elapsed - lastLine >= 6, heard < flowLines.count {
+                    lastLine = elapsed
+                    let start = max(0, elapsed - 8), line = flowLines[heard], index = heard
+                    heard += 1
+                    RecordingLibrary.shared.change(liveMeeting) { entry in
+                        entry.segments.append(RecordingSegment(index: index, start: start, duration: 6, sentences: [
+                            RecordingSentence(start: start, end: start + 5, text: line)]))
+                    }
+                }
+            }
+        }
+    }
+    #endif
+
     /// `-showMeetingSample recording|paused|interrupted`: a meeting 12:34 into its recording, as the recording page and its
     /// Live Activity show it (no microphone); `listening|taking-part|answered`: the same with Persona attending (#2981);
     /// `minutes` / `pending`: a finished meeting whose page opens (its minutes from the hub, or still being written). Both
@@ -61,6 +111,7 @@ enum RecordingSamples {
         past.marks = [44]
         try? RecordingLibrary.shared.save(past)
         if mode == "minutes" || mode == "pending" { return }
+        if mode == "flow" { startFlow(meeting); return }
 
         RecordingLibrary.shared.restore(liveMeeting)
         var live = RecordingEntry(id: liveMeeting, createdAt: .now.addingTimeInterval(-754), source: .phone, title: "产品周会", active: true)

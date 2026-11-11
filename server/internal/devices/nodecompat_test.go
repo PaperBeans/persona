@@ -186,6 +186,31 @@ func TestMachineCallGatesUltracodeStarts(t *testing.T) {
 	}
 }
 
+func TestMachineCallGatesAssistantConfigDir(t *testing.T) {
+	d := newTestDevices(t)
+	m := newMachine(d, MachineConfig{ID: "box", Name: "Box", Kind: "ssh", SSHHost: "box.invalid"})
+	without := current("old")
+	without.Capabilities = slices.DeleteFunc(slices.Clone(without.Capabilities), func(c string) bool { return c == nodeproto.AssistantConfigDir })
+	for _, info := range []proto.NodeInfo{current("new"), without, {Version: "pre-handshake"}} {
+		m.mu.Lock()
+		m.info, m.online = info, true
+		m.mu.Unlock()
+		for _, method := range []string{"assistant.send", "assistant.warm", "session.send"} {
+			for _, dir := range []string{"", "legacy", "default", "/tmp/assistant-profile"} {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				var re *rpc.Error
+				err := m.call(ctx, method, map[string]any{"config_dir": dir}, nil)
+				refused := errors.As(err, &re) && re.Code == proto.CodeNodeOutdated
+				want := dir != "" && !nodeHas(info, nodeproto.AssistantConfigDir)
+				if refused != want {
+					t.Fatalf("%s %s config_dir=%q: refused=%v want=%v: %v", info.Version, method, dir, refused, want, err)
+				}
+			}
+		}
+	}
+}
+
 func TestNodeInfoHandshakeIsOptionalOnTheWire(t *testing.T) {
 	// An old node's node.info (no handshake fields) still decodes, and an old manager's decoder ignores the new ones.
 	var info proto.NodeInfo

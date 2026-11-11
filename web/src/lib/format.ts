@@ -178,18 +178,20 @@ export function shortPath(p?: string): string {
   return p.replace(/^\/(Users|home|data\d*\/home)\/[^/]+/, "~");
 }
 
-export function ago(iso?: string, now = Date.now()): string {
+/** `style` "narrow" is for a crowded row's end ("13m ago" in English; Chinese reads the same in every style). */
+export function ago(iso?: string, now = Date.now(), style: Intl.RelativeTimeFormatStyle = "long"): string {
   if (!iso) return "";
   const ts = Date.parse(iso);
   if (!Number.isFinite(ts) || ts < 86400_000) return "";
   const s = Math.round((now - ts) / 1000);
+  const opts: Intl.RelativeTimeFormatOptions = { numeric: "auto", style };
   // "Just now" rather than Intl's "now" for under a minute
   if (s < 45) return t("lib-format.just_now");
-  if (s < 3600) return formatRelative(-Math.round(s / 60), "minute");
-  if (s < 86400) return formatRelative(-Math.round(s / 3600), "hour");
+  if (s < 3600) return formatRelative(-Math.round(s / 60), "minute", opts);
+  if (s < 86400) return formatRelative(-Math.round(s / 3600), "hour", opts);
   // Days by the local calendar, not by 24 h spans: yesterday morning seen late tonight is yesterday, not the day before yesterday (#4281).
   const days = calendarDays(ts, now);
-  if (days < 7) return formatRelative(-days, "day");
+  if (days < 7) return formatRelative(-days, "day", opts);
   return formatDate(ts, { month: "numeric", day: "numeric" });
 }
 

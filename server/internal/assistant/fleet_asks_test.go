@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/proto"
-	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 // A list decorated with what its sessions asked in the lists before is the list decorated afresh, for the same inputs,
@@ -25,7 +25,7 @@ func TestDecoratedListsAnswerAsAfresh(t *testing.T) {
 	st := newFleetMem()
 	s := New(Options{Hub: f, Devices: d, Store: func() Store { return st }})
 	reads := 0
-	s.fleet.asks.askOf = func(text string) string { reads++; return transcript.AskOf(text) }
+	s.fleet.asks.askOf = func(text string) string { reads++; return closeout.AskOf(text) }
 
 	row := func(id, text string) proto.Session {
 		return proto.Session{SessionID: id, Cwd: "/code/example", Agent: "claude", Status: proto.StatusDone, LastText: text}

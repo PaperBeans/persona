@@ -409,15 +409,6 @@ def command_aliases(directory):
         os.replace(temporary, alias)
 
 
-def artifact_aliases(directory):
-    import shutil
-    directory = pathlib.Path(directory)
-    for current, legacy in (("personad-", "jarvisd-"), ("persona-link-", "jarvis-link-")):
-        for path in directory.glob(current + "*.gz"):
-            target = directory / (legacy + path.name[len(current):])
-            shutil.copyfile(path, target)
-
-
 def render_installer(source, target, url):
     code = base64.b64encode(pathlib.Path(__file__).read_bytes()).decode()
     text = pathlib.Path(source).read_text().replace("@PERSONA_DL@", url).replace("@PERSONA_IDENTITY@", code)
@@ -432,14 +423,10 @@ def main():
     parser.add_argument("--shell", action="store_true")
     parser.add_argument("--env", action="store_true")
     parser.add_argument("--alias-binaries", metavar="DIRECTORY")
-    parser.add_argument("--artifact-aliases", metavar="DIRECTORY")
     parser.add_argument("--render-installer", nargs=3, metavar=("SOURCE", "TARGET", "URL"))
     args = parser.parse_args()
     if args.alias_binaries:
         command_aliases(args.alias_binaries)
-        return
-    if args.artifact_aliases:
-        artifact_aliases(args.artifact_aliases)
         return
     if args.render_installer:
         render_installer(*args.render_installer)

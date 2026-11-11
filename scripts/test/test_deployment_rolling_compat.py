@@ -206,16 +206,9 @@ class DeploymentRollingCompatibilityTests(unittest.TestCase):
             self.assertTrue((profile / "bin/personad").is_file())
             self.assertFalse((home / '.persona').exists())
 
-    def test_artifact_aliases_are_byte_identical_and_command_aliases_do_not_loop(self):
+    def test_command_aliases_do_not_loop(self):
         with tempfile.TemporaryDirectory() as directory:
             directory = Path(directory)
-            for prefix in ("personad-", "persona-link-", "personad-wechat-"):
-                file = directory / (prefix + "linux-amd64.gz")
-                file.write_bytes(gzip.compress(b"fixture-program", mtime=0))
-            identity.artifact_aliases(directory)
-            for file in directory.glob("person*.gz"):
-                old = file.name.replace("personad-", FORMER + "d-", 1).replace("persona-link-", FORMER + "-link-", 1)
-                self.assertEqual((directory / old).read_bytes(), file.read_bytes())
             executable(directory / "personad", "#!/bin/sh\nexit 0\n")
             identity.command_aliases(directory)
             identity.command_aliases(directory)

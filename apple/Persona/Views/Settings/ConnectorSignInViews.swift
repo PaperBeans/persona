@@ -433,6 +433,16 @@ struct ConnectorSignInSteps: View {
                         .accessibilityIdentifier("connector.restart")
                     }
                 } else if p.isQRCode {
+                    if let s = p.link, let url = URL(string: s) {
+                        // The page the code points at, opened directly: on the phone that has the other app.
+                        FormAction {
+                            Link(destination: url) {
+                                Label(p.linkText ?? s, systemImage: Theme.Icon.openExternal).lineLimit(1).formActionWidth()
+                            }
+                            .formButton(prominent: true)
+                            .accessibilityIdentifier("connector.openLink")
+                        }
+                    }
                     if let image = model.qrImage {
                         FormAction {
                             ShareLink(item: Image(uiImage: image), preview: SharePreview(String(localized: "QR Code"), image: Image(uiImage: image))) {

@@ -2,7 +2,7 @@
 // groups them (docs/assistant/knowledge.md "Pages"), and search results merged by entry.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { api, enc, errorText, isAbort } from "../../lib/api";
+import { api, ApiError, enc, errorText, isAbort } from "../../lib/api";
 import { ago } from "../../lib/format";
 import {
   countLabel,
@@ -21,7 +21,9 @@ import {
   type KBResult,
 } from "../../lib/kb";
 import { href, navigate } from "../../lib/router";
-import { Button, Collapse, cx, EASE, IconButton, Loading, Spinner } from "../../ui/atoms";
+import { Button, Collapse, cx, Dialog, EASE, IconButton, Loading, Menu, Spinner, toast } from "../../ui/atoms";
+import { contextMenuProps } from "../../ui/context-menu";
+import type { MenuAt } from "../../ui/menu-model";
 import { Icon } from "../../ui/icons";
 import { lists, listKey, remember, searches, searchKey } from "./cache";
 import { Badges, Card, KBIcon, KIND_ICON, Marked, onPlainClick, SectionTitle, Tile } from "./KBParts";
@@ -119,6 +121,43 @@ export function ListPane({
   const isSel = (e: KBEntry) => selected?.kind === e.kind && selected.id === e.id;
   const setTag = (t?: string) => setTags((x) => ({ ...x, [kind]: t }));
 
+  // ── deleting a project (soft, with Undo: docs/assistant/knowledge.md "Deleting a project") ──
+  const [rowMenu, setRowMenu] = useState<{ e: KBEntry; at: MenuAt } | null>(null);
+  const [confirm, setConfirm] = useState<KBEntry | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const deleteProject = async (e: KBEntry) => {
+    if (deleting) return;
+    setDeleting(true);
+    let trash: { id: string };
+    try {
+      trash = await api<{ id: string }>(`/kb/projects/${enc(e.id)}`, { method: "DELETE" });
+    } catch (err) {
+      toast(t("knowledge-kblist.delete_failed", { error: errorText(err) }), "error");
+      return;
+    } finally {
+      setDeleting(false);
+    }
+    setConfirm(null);
+    // Gone on the hub: drop it from every cached projects list now rather than after a reload.
+    for (const [k, v] of lists) if (k.includes("|projects|")) lists.set(k, { ...v, items: (v.items ?? []).filter((x) => x.id !== e.id) });
+    searches.clear();
+    setList((l) => l && { ...l, items: (l.items ?? []).filter((x) => !(x.kind === e.kind && x.id === e.id)) });
+    if (isSel(e)) navigate({ name: "kb", kind: "projects" });
+    toast(t("knowledge-kblist.deleted", { name: e.name }), "ok", { label: t("knowledge-kblist.undo"), run: () => void restoreProject(e, trash.id) });
+  };
+  const restoreProject = async (e: KBEntry, trashId: string) => {
+    try {
+      await api(`/kb-trash/${enc(trashId)}/restore`, { method: "POST" });
+    } catch (err) {
+      toast(err instanceof ApiError && err.status === 409 ? t("knowledge-kblist.restore_conflict", { name: e.name }) : t("knowledge-kblist.restore_failed", { error: errorText(err) }), "error");
+      return;
+    }
+    searches.clear();
+    setRetry((x) => x + 1);
+    toast(t("knowledge-kblist.restored", { name: e.name }), "ok");
+  };
+  const onRowMenu = (e: KBEntry) => (e.kind === "projects" ? (at: MenuAt) => setRowMenu({ e, at }) : undefined);
+
   return (
     <section className={cx("min-h-0 min-w-0 flex-col @3xl:w-[400px] @3xl:shrink-0 @3xl:border-r @3xl:border-line", detailOpen ? "hidden @3xl:flex" : "flex w-full")}>
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 sm:px-4">
@@ -203,7 +242,7 @@ export function ListPane({
                   const k = `${kind}:${s.key}`;
                   const shown = !s.fold || open.has(k);
                   const limit = limits[k] ?? PAGE;
-                  const rows = s.items.slice(0, limit).map((e) => <EntryRow key={`${e.kind}/${e.id}`} e={e} tag={tag} selected={isSel(e)} onOpen={onOpen} />);
+                  const rows = s.items.slice(0, limit).map((e) => <EntryRow key={`${e.kind}/${e.id}`} e={e} tag={tag} selected={isSel(e)} onOpen={onOpen} onMenu={onRowMenu(e)} />);
                   const more = s.items.length - limit;
                   const moreRow = more > 0 && (
                     <button type="button" onClick={() => setLimits((x) => ({ ...x, [k]: limit + PAGE }))} className="flex h-9 w-full items-center whitespace-nowrap px-4 text-[12.5px] font-medium text-accent-ink hover:bg-hover">
@@ -249,12 +288,31 @@ export function ListPane({
           )}
         </div>
       </div>
+      {rowMenu && (
+        <Menu
+          anchor={rowMenu.at.anchor ?? null}
+          point={rowMenu.at.point}
+          onClose={() => setRowMenu(null)}
+          items={[{ key: "delete", label: t("knowledge-kblist.delete"), icon: "trash", danger: true, onSelect: () => setConfirm(rowMenu.e) }]}
+        />
+      )}
+      <Dialog open={Boolean(confirm)} onClose={() => setConfirm(null)} title={t("knowledge-kblist.delete_title")}>
+        <div className="py-2 text-[13.5px] text-ink-2">{confirm && t("knowledge-kblist.delete_confirm", { name: confirm.name })}</div>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button tone="secondary" onClick={() => setConfirm(null)}>
+            {t("common.cancel")}
+          </Button>
+          <Button tone="danger" busy={deleting} onClick={() => confirm && void deleteProject(confirm)}>
+            {t("knowledge-kblist.delete")}
+          </Button>
+        </div>
+      </Dialog>
     </section>
   );
 }
 
 /** One ranked entry: the kind tile carrying the importance, the name, its one line, then badges and the tags that fit. */
-function EntryRow({ e, tag, selected, onOpen }: { e: KBEntry; tag?: string; selected: boolean; onOpen: (e: KBEntry) => void }) {
+function EntryRow({ e, tag, selected, onOpen, onMenu }: { e: KBEntry; tag?: string; selected: boolean; onOpen: (e: KBEntry) => void; onMenu?: (at: MenuAt) => void }) {
   const tags = rowTags(e, tag);
   const when = ago(e.updated);
   const status = projectInfo(e)?.status === "paused" ? statusLabel("paused") : null;
@@ -264,7 +322,9 @@ function EntryRow({ e, tag, selected, onOpen }: { e: KBEntry; tag?: string; sele
       href={href({ name: "kb", kind: e.kind, id: e.id })}
       onClick={(ev) => onPlainClick(ev, () => onOpen(e))}
       aria-current={selected ? "page" : undefined}
+      aria-haspopup={onMenu ? "menu" : undefined}
       className={cx("flex gap-3 px-3.5 py-3 transition-colors", selected ? "bg-hover-2" : "hover:bg-hover")}
+      {...(onMenu ? contextMenuProps((at) => onMenu(at)) : {})}
     >
       <Tile entry={e} />
       <span className="min-w-0 flex-1">

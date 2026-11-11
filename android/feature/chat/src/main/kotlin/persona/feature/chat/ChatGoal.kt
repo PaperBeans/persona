@@ -83,7 +83,7 @@ internal fun ChatGoalDetail(goal: GoalInfo, modifier: Modifier = Modifier) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
     val colors = goalColors(goal)
-    Column(modifier.fillMaxWidth().padding(horizontal = Tokens.Space.l).padding(bottom = Tokens.Space.xxl),
+    Column(modifier.fillMaxWidth().padding(horizontal = Tokens.Space.l).padding(bottom = Tokens.Space.xl),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.l)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             JIcon(PhIcons.Target, null, size = Tokens.Space.l, tint = colors.text)

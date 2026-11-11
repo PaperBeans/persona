@@ -253,7 +253,7 @@ internal fun DiffView(diff: ToolDiff, id: String) {
                             Text("${line.old ?: ""}  ${line.new ?: ""}", Modifier.width(64.dp),
                                 style = style, color = PersonaTheme.palette.ink2, maxLines = 1)
                             // A hunk header or a note of a unified diff ('@') reads quietly, with no sign.
-                            Text(if (line.sign == '@') " " else line.sign.toString(), Modifier.width(Tokens.Space.xl), style = style,
+                            Text(if (line.sign == '@') " " else line.sign.toString(), Modifier.width(ContentTokens.legacyXl), style = style,
                                 color = when (line.sign) { '+' -> palette.diffAdd; '-' -> palette.diffDel; else -> PersonaTheme.palette.ink2 })
                             Box(Modifier.weight(1f).horizontalScroll(horizontal)) {
                                 Text(line.text.replace("\t", "    "), Modifier.width(codeWidth), style = style, softWrap = false,

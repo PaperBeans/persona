@@ -66,7 +66,7 @@ internal fun HubAccessPage(tunnels: HubTunnelSettings, hubId: String, onBack: ()
             }
         }
         item("save") {
-            Column(Modifier.padding(top = Tokens.Space.l, bottom = Tokens.Space.xl), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+            Column(Modifier.padding(top = Tokens.Space.l, bottom = ContentTokens.legacyXl), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                 if (failed) JNotice(stringResource(R.string.settings_access_failed), status = Status.NeedsYou)
                 JButton(stringResource(R.string.settings_access_save), { save(entered, R.string.settings_access_saved) }, Modifier.fillMaxWidth(),
                     loading = busy, enabled = entered != null && entered != saved)

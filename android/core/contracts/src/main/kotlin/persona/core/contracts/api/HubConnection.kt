@@ -32,8 +32,8 @@ interface HubConnection {
     fun reconnect()
 
     /**
-     * Each open hub group's own state and reconnect, for callers that must act per group (#5311): [reconnect] restarts
-     * every group while [state] is only the selected one's. A single connection is its own only group.
+     * Each open hub group's own state and recovery actions, for callers that must act per group (#5311): [reconnect]
+     * restarts every group while [state] is only the selected one's. A single connection is its own only group.
      */
     val groupLinks: List<GroupLink> get() = listOf(GroupLink(state, ::reconnect))
 
@@ -41,5 +41,10 @@ interface HubConnection {
     fun send(message: JsonObject): Boolean
 }
 
-/** One hub group as [HubConnection.groupLinks] shows it. */
-class GroupLink(val state: StateFlow<ConnectionState>, val reconnect: () -> Unit)
+/**
+ * One hub group as [HubConnection.groupLinks] shows it. [wake] validates an open socket with its bounded ping/pong
+ * recovery; the two-argument constructor keeps a basic connection's wake equivalent to reconnecting it.
+ */
+class GroupLink(val state: StateFlow<ConnectionState>, val reconnect: () -> Unit, val wake: () -> Unit) {
+    constructor(state: StateFlow<ConnectionState>, reconnect: () -> Unit) : this(state, reconnect, reconnect)
+}

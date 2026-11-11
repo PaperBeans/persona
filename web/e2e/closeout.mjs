@@ -1,8 +1,9 @@
 // End-to-end check of closeouts, orphaned tasks and their settings (#3612, #3618, #3617; docs/web/web.md "What the session
 // is waiting for"): a stopped agent's page opens with its closeout as a card above the transcript (each claim confirmed,
 // contradicted or not checked), the reply shows without the raw block, list rows end with where it stands on merged and
-// deployed, Settings › Session triage has "Ask for a closeout", Settings › Assistant has the two agent settings, and an
-// open to-do nobody works on says so on its row and its task card.
+// deployed, Settings › Session triage has "Ask for a closeout", Settings › Assistant has the agent follow-up settings
+// (#4293 added "Tell supervisors about new messages"), and an open to-do nobody works on says so on its row
+// and its task card.
 //
 // Needs the web page against the fake hub, and Chrome (or any Chromium through --executable):
 //
@@ -159,9 +160,11 @@ try {
       await shot(page, `settings-triage-${size}-${theme}`);
       const tasks = page.getByRole("switch", { name: "Follow up every agent Persona starts" });
       await tasks.waitFor({ state: "visible", timeout: 15000 }).catch(() => fail(`${where}: no agent tasks switch`));
+      await page.getByRole("switch", { name: "Tell supervisors about new messages" }).waitFor({ state: "visible", timeout: 15000 })
+        .catch(() => fail(`${where}: no inbox signals switch`));
       await tasks.scrollIntoViewIfNeeded();
       await shot(page, `settings-assistant-${size}-${theme}`);
-      ok(`${where}: the closeout switch and the two agent settings are in Settings`);
+      ok(`${where}: the closeout switch and the agent follow-up settings are in Settings`);
 
       // an open to-do nobody works on: its row, and its task card in the main chat
       await page.goto(`${base}/todos`);
@@ -215,7 +218,15 @@ try {
   if ((await hub("/assistant")).agent_tasks !== true) fail("agent_tasks did not save");
   await tasks.click();
   await page.waitForTimeout(400);
-  ok("the days field saves 7, refuses 99999, and the agent tasks switch saves");
+  const signals = page.getByRole("switch", { name: "Tell supervisors about new messages" });
+  if ((await signals.getAttribute("aria-checked")) !== "false" || (await hub("/assistant")).inbox_signals !== false) fail("inbox_signals is not off by default");
+  await signals.click();
+  await page.waitForTimeout(400);
+  const saved = await hub("/assistant");
+  if (saved.inbox_signals !== true || saved.agent_tasks !== false) fail(`inbox_signals did not save alone: ${JSON.stringify(saved)}`);
+  await signals.click();
+  await page.waitForTimeout(400);
+  ok("the days field saves 7, refuses 99999, and the agent tasks and inbox signals switches save");
   await ctx.close();
 
   // Chinese and Japanese: the card's labels fit on a phone

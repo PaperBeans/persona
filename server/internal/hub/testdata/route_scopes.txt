@@ -63,6 +63,7 @@ extensions.call:{id} /api/v1/extensions/{id}/
 -                    DELETE /api/v1/imessage/data
 inbox.write          DELETE /api/v1/inbox/mutes/{id}
 inbox.write          DELETE /api/v1/inbox/policies/{id}
+-                    DELETE /api/v1/kb/projects/{id}
 -                    DELETE /api/v1/launchers/{name}
 -                    DELETE /api/v1/looks/uploads/{id}
 -                    DELETE /api/v1/machines/{mid}/browser/cookies
@@ -179,6 +180,7 @@ agents.read          GET /api/v1/interactions
 agents.read          GET /api/v1/interactions/history
 -                    GET /api/v1/iphone
 kb.read              GET /api/v1/kb-search
+-                    GET /api/v1/kb-trash
 kb.read              GET /api/v1/kb/chats/{id}/context
 kb.read              GET /api/v1/kb/chats/{id}/days/{day}
 kb.read              GET /api/v1/kb/moments/{id}
@@ -398,6 +400,7 @@ inbox.write          POST /api/v1/inbox/{id}/suggestion
 agents.control       POST /api/v1/interactions/{id}/choose
 agents.control       POST /api/v1/interactions/{id}/reanswer
 agents.control       POST /api/v1/interactions/{id}/resolve
+-                    POST /api/v1/kb-trash/{id}/restore
 -                    POST /api/v1/later/{id}/handled
 -                    POST /api/v1/launchers
 -                    POST /api/v1/launchers/discover

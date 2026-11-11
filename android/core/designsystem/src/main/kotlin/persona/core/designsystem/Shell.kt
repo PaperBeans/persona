@@ -261,8 +261,12 @@ fun HomeNavigation(
             .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             leading()
-            JSegmented(items.map { JSegment(it.label, it.badge.takeIf { count -> count > 0 }) },
-                items.indexOfFirst { it.key == selected }.coerceAtLeast(0), { onSelect(items[it].key) }, Modifier.weight(1f))
+            // The switcher keeps its cells' width; given the rest of the row itself, Board's ruled frame stretched
+            // past its two cells and left an empty box beside them.
+            Box(Modifier.weight(1f)) {
+                JSegmented(items.map { JSegment(it.label, it.badge.takeIf { count -> count > 0 }) },
+                    items.indexOfFirst { it.key == selected }.coerceAtLeast(0), { onSelect(items[it].key) })
+            }
             trailing()
         }
         return

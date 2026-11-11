@@ -144,7 +144,7 @@ final class PerfAssistantTests: PerfTestCase {
     @MainActor func testWelcomePageIdle() throws {
         launch(["-dev.openChat", "", "-app.tab", "assistant", "-tab", "assistant", "-newAssistant", "YES"])
         see(any("assistant-welcome"), "the welcome page", timeout: 20)
-        measureIdle(push: "churn?n=12&ms=300&inbox=1")
+        measureIdle(push: "churn?n=12&ms=300&inbox=1", assertMainThreadBudget: true)
     }
 
     // MARK: Pages from the conversation

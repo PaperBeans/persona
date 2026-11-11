@@ -36,6 +36,7 @@ import { useScopedMachines } from "../lib/current-assistant";
 import { currentHosts, engineName, startHosts } from "../lib/engines";
 import { initialLauncher, launcherBlock } from "../lib/launcher-health";
 import { navigate } from "../lib/router";
+import { settingsHref } from "./settings/nav";
 import { LauncherBlockedHelp } from "./LauncherBlockedHelp";
 
 interface Dirs {
@@ -794,6 +795,19 @@ export function NewAgent({ open, onClose, preset }: { open: boolean; onClose: ()
                   <span className="min-w-0 truncate">{launcher ? t("newagent.override_hint") : modelDefault || t("newagent.default_hint")}</span>
                 </p>
               )}
+              {/* add, hide or restore launchers (#4384): Settings › Model providers */}
+              <button
+                type="button"
+                data-testid="new-agent-manage-launchers"
+                onClick={() => {
+                  onClose();
+                  navigate(settingsHref("models", null, false, null, "providers"));
+                }}
+                className="mt-1.5 inline-flex items-center gap-1 text-[11.5px] font-medium whitespace-nowrap text-accent-ink hover:underline"
+              >
+                <Icon name="gear" size={11} />
+                {t("newagent.manage_launchers")}
+              </button>
             </Field>
           )}
 

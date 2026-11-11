@@ -32,9 +32,9 @@ class VisualNoiseShotsTest {
     @get:Rule val rule = createComposeRule()
 
     @Test fun movedContentGeometryKeepsTheExistingMeasurements() {
-        assertEquals(listOf(1f, 1.5f, 6f, 10f, 18f, 28f, 40f, 44f, 36f, 56f, 280f, 160f, 120f, 72f, 3f, 80f,
+        assertEquals(listOf(1f, 1.5f, 20f, 10f, 18f, 28f, 40f, 44f, 36f, 56f, 280f, 160f, 120f, 72f, 3f, 80f,
             100f, 3f, 3f, 160f, 240f, 160f, 380f), with(ContentTokens) {
-            listOf(hairline, optionOutline, tightGap, rowGap, statusIcon, smallAvatar, mediumAvatar, fieldHeight,
+            listOf(hairline, optionOutline, legacyXl, rowGap, statusIcon, smallAvatar, mediumAvatar, fieldHeight,
                 taskQuoteMarkHeight, mailLabelWidth, mailBodyMinHeight, profileHeaderHeight, profileCoverHeight,
                 profileAvatar, profileAvatarInset, profileLabelWidth, mediaWaveWidth, mediaWaveGap, mediaWaveBarWidth,
                 mediaPreviewMinHeight, mediaPreviewMaxHeight, stickerMaxSize, reactionPickerMaxHeight).map { it.value }

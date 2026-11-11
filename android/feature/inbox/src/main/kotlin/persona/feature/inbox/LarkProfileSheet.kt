@@ -189,7 +189,7 @@ private fun LarkProfileCardContent(
         Modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = Tokens.Space.xl)
+            .padding(bottom = ContentTokens.legacyXl)
     ) {
         // Banner and Avatar
         Box(Modifier.fillMaxWidth().height(ContentTokens.profileHeaderHeight)) {

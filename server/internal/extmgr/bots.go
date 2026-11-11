@@ -51,6 +51,12 @@ type FeishuBotSettings struct {
 	Features       BotFeatures `json:"features"`
 	Owner          *BotOwner   `json:"owner,omitempty"`
 	Pairing        *botPairing `json:"pairing,omitempty"`
+	// Registration is an app registration under way (bots_register.go): binding in one authorization.
+	Registration *botRegistration `json:"registration,omitempty"`
+	// RegistrationDeviceEnc and RegistrationSecretEnc are the registration's device code and, once confirmed, the new
+	// app's secret, sealed with secret.key; top-level so the key rotation re-seals them (db.sealedSettings).
+	RegistrationDeviceEnc string `json:"registration_device_enc,omitempty"`
+	RegistrationSecretEnc string `json:"registration_secret_enc,omitempty"`
 	// TopicChats are the group chats the owner opted in (bots_topics.go): their messages reach the assistant, and the
 	// bot may send into them. The owner's own list: it goes when the owner does.
 	TopicChats []BotChat `json:"topic_chats,omitempty"`
@@ -137,6 +143,10 @@ type botHub struct {
 	line chan struct{}
 	// now is replaced in tests.
 	now func() time.Time
+	// registrar is the accounts site's client for app registration, regDomain where a registered app's calls go
+	// (bots_register.go); both replaced in tests.
+	registrar *feishubot.Registrar
+	regDomain func(region string) string
 }
 
 func (b *botHub) clock() time.Time {
@@ -280,6 +290,10 @@ func (s FeishuBotSettings) copy() FeishuBotSettings {
 	if s.Pairing != nil {
 		p := *s.Pairing
 		s.Pairing = &p
+	}
+	if s.Registration != nil {
+		r := *s.Registration
+		s.Registration = &r
 	}
 	return s
 }

@@ -86,6 +86,9 @@ type Settings struct {
 	// AgentTasks: every agent Persona starts is on a quiet, supervised todo (#3617, agent_tasks.go). nil is off (the
 	// default).
 	AgentTasks *bool `json:"agent_tasks,omitempty"`
+	// InboxSignals: new Inbox messages the judge links to a supervised task reach its supervisor as the signal inbox
+	// (#4293, supervise_inbox.go). nil is off (the default): each one is a supervisor turn.
+	InboxSignals *bool `json:"inbox_signals,omitempty"`
 	// IdleCloseHours: an agent Persona started that has been idle this many hours with nothing going on is closed
 	// (tasks_idle.go); 0 turns it off, nil is 12 (the default).
 	IdleCloseHours *int `json:"idle_close_hours,omitempty"`
@@ -457,6 +460,8 @@ type assistantView struct {
 	InterjectBackground bool `json:"interject_background"`
 	// AgentTasks is in effect, like DoneNeedsDelivery.
 	AgentTasks bool `json:"agent_tasks"`
+	// InboxSignals is in effect, like DoneNeedsDelivery.
+	InboxSignals bool `json:"inbox_signals"`
 }
 
 // view is GET /api/v1/assistant; withArchived lists archived conversations too (flagged `archived`). It lists the
@@ -478,7 +483,8 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		ArchiveClosedDays:   int(s.archiveClosedAfter(ctx) / (24 * time.Hour)),
 		ReviewSamplePercent: s.reviewSamplePercent(ctx),
 		InterjectBackground: v.InterjectBackground != nil && *v.InterjectBackground,
-		AgentTasks:          v.AgentTasks != nil && *v.AgentTasks}
+		AgentTasks:          v.AgentTasks != nil && *v.AgentTasks,
+		InboxSignals:        v.InboxSignals != nil && *v.InboxSignals}
 	if d, ok := s.device(ctx, v.MachineID); ok {
 		out.Cwd = s.spaceCwd(d, sp)
 		var list []proto.Session

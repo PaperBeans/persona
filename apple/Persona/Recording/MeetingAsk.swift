@@ -138,14 +138,16 @@ final class MeetingAsk {
     private func run(_ id: UUID, locale: String, prepare: Bool) {
         Task {
             guard let start = exchanges.first(where: { $0.id == id }) else { return }
+            // The hub's copy of the attendance first: until it has it, no live line can go, so a question about what was
+            // just said would reach the hub before the lines it is about.
+            let settled = await deps.settled(start.recordingID)
             var liveNext = start.liveNext
-            if prepare {
+            if prepare, settled {
                 liveNext = await deps.heard(start.recordingID)
                 if let index = exchanges.firstIndex(where: { $0.id == id }) { exchanges[index].liveNext = liveNext }
             }
             let state: Exchange.State
             var answer: Answer?
-            let settled = await deps.settled(start.recordingID)
             // The meeting ended meanwhile (its questions went with it): nothing to ask any more.
             guard exchanges.contains(where: { $0.id == id }) else { return }
             if settled {

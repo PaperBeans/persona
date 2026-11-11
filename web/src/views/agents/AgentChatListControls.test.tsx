@@ -18,6 +18,7 @@ vi.hoisted(() => {
     removeListener() {},
   });
 });
+import { t } from "../../i18n";
 import { getState, reset, savePins } from "../../lib/store";
 import type { Machine, Session } from "../../lib/types";
 import { AgentsList } from "../Sidebar";
@@ -86,57 +87,94 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Agents Tab Chat-List & Composable Filter Bar", () => {
-  it("renders IM Chat-List rows with pinned sessions at the top, metadata chips, and Search as Code", async () => {
-    Object.assign(getState(), {
-      loaded: true,
-      machines,
-      sessions: { gcp: [sessions[0]], mac: [sessions[1]] },
-      pins: { spaces: [], sessions: ["mac/s2"] },
-      todosLoaded: true,
-    });
+const menuRow = (label: string) =>
+  [...document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]')].find((el) =>
+    el.textContent?.includes(label),
+  );
 
+async function openFilterMenu() {
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>('[data-testid="agent-filter-button"]')!.click();
+  });
+}
+
+async function chooseRow(label: string) {
+  const row = menuRow(label);
+  expect(row, `menu row ${label}`).toBeTruthy();
+  await act(async () => {
+    row!.click();
+  });
+}
+
+function seed() {
+  Object.assign(getState(), {
+    loaded: true,
+    machines,
+    sessions: { gcp: [sessions[0]], mac: [sessions[1]] },
+    pins: { spaces: [], sessions: ["mac/s2"] },
+    todosLoaded: true,
+  });
+}
+
+describe("Agents list search and Filter menu (#4397)", () => {
+  it("is one row when idle: the search field and a Filter button, no pills, chips or plan bar", async () => {
+    seed();
+    await act(async () => {
+      root.render(<AgentsList route={{ name: "agent-list" }} onNewAgent={() => {}} />);
+    });
+    const bar = host.querySelector<HTMLElement>('[data-testid="agent-dimension-filter-bar"]')!;
+    expect(bar.children).toHaveLength(1);
+    expect(bar.querySelectorAll("button")).toHaveLength(1);
+    expect(host.querySelector('[data-testid="agent-filter-button"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="scoped-filter-strip"]')).toBeNull();
+    expect(host.querySelector('[data-testid="search-as-code-plan"]')).toBeNull();
+    // the grouped list stays the default; chat-list rows only when picked
+    expect(host.querySelectorAll('[data-testid="agent-chatlist-row"]')).toHaveLength(0);
+  });
+
+  it("filters from the menu, shows removable chips, and holds the chat-list view and Search as Code", async () => {
+    seed();
     await act(async () => {
       root.render(<AgentsList route={{ name: "agent-list" }} onNewAgent={() => {}} />);
     });
 
+    await openFilterMenu();
+    await chooseRow(t("lib-agent-filter.chat_list_view"));
     const rows = [...host.querySelectorAll<HTMLElement>('[data-testid="agent-chatlist-row"]')];
-    expect(rows).toHaveLength(2);
-    // Pinned session s2 appears first in the Pinned section
-    expect(rows[0].getAttribute("data-session-id")).toBe("s2");
+    expect(rows.map((r) => r.getAttribute("data-session-id"))).toEqual(["s2", "s1"]);
     expect(rows[0].getAttribute("data-pinned")).toBe("true");
-    expect(rows[1].getAttribute("data-session-id")).toBe("s1");
-
-    // Metadata chips show machine, project, harness, model
     expect(rows[0].textContent).toContain("Mac Studio");
     expect(rows[0].textContent).toContain("orca");
-    expect(rows[0].textContent).toContain("Codex");
-    expect(rows[0].textContent).toContain("gpt-5");
 
-    // Toggle Pinned filter pill
-    const pinnedPill = host.querySelector<HTMLButtonElement>('[data-testid="filter-pill-pinned"]')!;
-    await act(async () => {
-      pinnedPill.click();
-    });
-    expect(host.querySelector('[data-testid="scoped-filter-strip"]')).not.toBeNull();
-    const filteredRows = [...host.querySelectorAll<HTMLElement>('[data-testid="agent-chatlist-row"]')];
-    expect(filteredRows.map((r) => r.getAttribute("data-session-id"))).toEqual(["s2"]);
+    // a facet page: pick one machine, the menu stays open and the chip appears
+    await openFilterMenu();
+    await chooseRow(t("lib-agent-filter.filter_machine"));
+    await chooseRow("Cloud Dev");
+    expect(menuRow("Mac Studio")).toBeTruthy();
+    expect([...host.querySelectorAll<HTMLElement>('[data-testid="agent-chatlist-row"]')].map((r) => r.getAttribute("data-session-id"))).toEqual(["s1"]);
+    const strip = host.querySelector<HTMLElement>('[data-testid="scoped-filter-strip"]')!;
+    expect(strip.textContent).toContain(`${t("lib-agent-filter.filter_machine")}: Cloud Dev`);
+    expect(host.querySelector('[data-testid="agent-filter-button"]')!.textContent).toBe("1");
 
-    // Reset via Scoped Filter Strip
-    const resetBtn = host.querySelector<HTMLButtonElement>('[data-testid="scoped-filter-reset"]')!;
+    // the chip's × removes it, and the strip goes with the last one
     await act(async () => {
-      resetBtn.click();
+      strip.querySelector<HTMLButtonElement>("button[aria-label]")!.click();
     });
+    expect(host.querySelector('[data-testid="scoped-filter-strip"]')).toBeNull();
     expect(host.querySelectorAll('[data-testid="agent-chatlist-row"]')).toHaveLength(2);
 
-    // Activate Search as Code mode and enter query
-    const sacToggle = host.querySelector<HTMLButtonElement>('[data-testid="agent-search-as-code-toggle"]')!;
+    // Search as Code: off the list until turned on in the menu, then its plan bar, which closes it again
     await act(async () => {
-      sacToggle.click();
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
+    await openFilterMenu();
+    await chooseRow(t("lib-agent-filter.search_as_code"));
     expect(host.querySelector('[data-testid="search-as-code-plan"]')).not.toBeNull();
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[data-testid="search-as-code-off"]')!.click();
+    });
+    expect(host.querySelector('[data-testid="search-as-code-plan"]')).toBeNull();
 
-    // Update pins dynamically
     await act(async () => {
       savePins({ spaces: [], sessions: ["gcp/s1"] });
     });

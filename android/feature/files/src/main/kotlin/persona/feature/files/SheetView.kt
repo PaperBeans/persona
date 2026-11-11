@@ -254,8 +254,8 @@ private fun columnWidths(sheet: TableSheet): List<Dp> {
     val style = cellStyle().copy(fontWeight = FontWeight.SemiBold)
     val density = LocalDensity.current
     val pad = Tokens.Space.s * 2
-    val min = Tokens.Space.xxxl * 2
-    val max = Tokens.Space.xxxl * 7
+    val min = Tokens.Space.xxl * 2
+    val max = Tokens.Space.xxl * 7
     // One measurement for a character cell (half a CJK glyph, or a digit if wider), times each column's widest text in
     // cells: a sheet can have thousands of columns, too many to lay each one's text out on the main thread.
     val cell = remember(style, density) {

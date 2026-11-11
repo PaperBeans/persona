@@ -135,7 +135,7 @@ internal fun ReplyQuote(lineStyle: TextStyle, content: @Composable () -> Unit) {
     val foldPx = with(LocalDensity.current) { fold.roundToPx() }
     var full by remember { mutableIntStateOf(0) }
     var open by remember { mutableStateOf(false) }
-    val folds = !streaming && full > foldPx + with(LocalDensity.current) { Tokens.Space.xxl.roundToPx() }
+    val folds = !streaming && full > foldPx + with(LocalDensity.current) { Tokens.Space.xl.roundToPx() }
     val folded = folds && !open
     val expand = stringResource(R.string.chat_content_quote_more)
     val collapse = stringResource(R.string.chat_content_quote_less)
@@ -147,7 +147,7 @@ internal fun ReplyQuote(lineStyle: TextStyle, content: @Composable () -> Unit) {
             drawRect(palette.accent, size = Size(Tokens.Space.xs.toPx() * 3 / 4, size.height))
         }) {
         Box(Modifier.fillMaxWidth()
-            .padding(end = Tokens.Space.xxxl, top = Tokens.Space.s, bottom = Tokens.Space.s)
+            .padding(end = Tokens.Space.xxl, top = Tokens.Space.s, bottom = Tokens.Space.s)
             .then(if (folded) Modifier.heightIn(max = fold).clipToBounds().fade(palette.ink).clickable(onClickLabel = expand) { open = true }
                 .semantics { contentDescription = expand } else Modifier)) {
             Box(Modifier.wrapContentHeight(Alignment.Top, unbounded = true).onSizeChanged { full = it.height }) { content() }

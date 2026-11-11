@@ -49,5 +49,10 @@
   "auto_config_unreachable": "the open platform could not be reached; it will be tried again next time",
   "pair_hint": "Send these 6 digits to the bot in a private chat in Lark (valid for 10 minutes)",
   "not_bound": "{name} isn't bound",
-  "not_running": "{name} isn't running"
+  "not_running": "{name} isn't running",
+  "register_hint": "Open the page in Lark and confirm: Persona creates a bot app for you and pairs it with your account. On another device, scan the code with Lark instead. To use an app you already have, enter its App ID and App Secret on the Lark bot's settings page.",
+  "register_open": "Open in Lark",
+  "register_expired": "That authorization expired. Here is a new one.",
+  "register_denied": "The authorization was declined. Open it again when you're ready.",
+  "register_failed": "Lark couldn't create the app. Enter the App ID and App Secret of an app you created instead."
 }

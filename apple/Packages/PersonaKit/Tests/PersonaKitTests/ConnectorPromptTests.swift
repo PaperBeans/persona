@@ -16,6 +16,13 @@ struct ConnectorPromptTests {
         #expect(p.interval == 5)
     }
 
+    @Test func aQRCodeWithALink() throws {
+        let p = try prompt(#"{"step":"register","kind":"qr","url":"https://accounts.example.com/page","interval":5,"qr":{"size":1,"rows":["1"]},"link":"https://accounts.example.com/page","link_text":"Open in Lark"}"#)
+        #expect(p.isQRCode)
+        #expect(p.link == "https://accounts.example.com/page")
+        #expect(p.linkText == "Open in Lark")
+    }
+
     @Test func fieldsAsBefore() throws {
         let p = try prompt(#"{"step":"phone","fields":[{"name":"phone","label":"手机号"}]}"#)
         #expect(!p.isDeviceCode)

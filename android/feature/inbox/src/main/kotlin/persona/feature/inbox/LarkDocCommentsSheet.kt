@@ -109,7 +109,7 @@ private fun LarkDocThreadCard(thread: LarkDocCommentThread, replying: Boolean, a
 private fun LarkDocReplyRow(reply: LarkDocCommentReply) {
     val palette = PersonaTheme.palette
     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-        JAvatar(reply.author, size = Tokens.Space.xxl)
+        JAvatar(reply.author, size = Tokens.Space.xl)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
                 Text(reply.author, Modifier.weight(1f, fill = false), style = PersonaTheme.type.headline, color = palette.ink, maxLines = 1,
@@ -154,7 +154,7 @@ internal fun LarkDocCommentComposer(model: LarkDocCommentsModel, run: (suspend (
             LarkDocCommentTarget.Document -> Unit
         }
         people.forEach { person ->
-            JRow(person.name, Modifier.testTag("docComments.person.${person.userId}"), leading = { JAvatar(person.name, size = Tokens.Space.xxl) },
+            JRow(person.name, Modifier.testTag("docComments.person.${person.userId}"), leading = { JAvatar(person.name, size = Tokens.Space.xl) },
                 onClick = { model.mention(person); people = emptyList() }, chevron = false)
         }
         model.failure?.let { f ->

@@ -136,7 +136,8 @@ func (s *Service) builtinClaude(ctx context.Context, zshrc []zshrcLaunchers) (La
 	if slices.ContainsFunc(s.storedLaunchers(ctx), func(l storedLauncher) bool { return l.Name == "claude" }) {
 		return LauncherView{}, false
 	}
-	v := LauncherView{Name: "claude", Source: "builtin", Versions: map[string]string{}}
+	// hidden like an rc-file launcher (#4384): out of the pickers, shown under Hidden to restore
+	v := LauncherView{Name: "claude", Source: "builtin", Versions: map[string]string{}, Hidden: slices.Contains(s.hiddenLaunchers(ctx), "claude")}
 	for _, m := range zshrc {
 		listed := slices.ContainsFunc(m.Launchers, func(l proto.Launcher) bool { return l.Name == "claude" })
 		if m.ClaudeVersion == "" && !listed {

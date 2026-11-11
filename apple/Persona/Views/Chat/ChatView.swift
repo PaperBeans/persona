@@ -5121,7 +5121,8 @@ extension UIImage {
 }
 
 /// The session's live terminal, come up from the bottom over the page (Terminal, or the terminal button of a reply): all
-/// of the screen goes to it — no title, no tabs — under a slim bar that drags it back down (a tap on its handle too).
+/// of the screen goes to it — no title, no tabs — under a slim bar that drags it back down (a tap on its handle or its
+/// Close too), there in every state, a session that isn't running included (#4328).
 /// Its size does not change with anything around it but the keyboard (a new size is a resize of the pane it drives).
 struct TerminalCover: View {
     @Environment(\.dismiss) private var dismiss
@@ -5143,6 +5144,7 @@ struct TerminalCover: View {
                 // The page shows through, dimmed less as the terminal goes down.
                 Color.black.opacity(Double(0.4 * (1 - min(offset / 500, 1)))).ignoresSafeArea()
             }
+            .accessibilityAction(.escape) { close() } // VoiceOver's scrub, as on any sheet (#4328)
     }
 
     private func close() { dismiss() }

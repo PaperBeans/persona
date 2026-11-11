@@ -10,6 +10,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 var (
@@ -102,6 +103,18 @@ func WaitsOnNobody(reply string) bool {
 	}
 	c, _, ok := Parse(reply)
 	return ok && c.Status == proto.CloseoutDone && c.Missing == "" && c.Waiting == ""
+}
+
+// AskOf is what an agent's final reply asks the user: the question its last words put (transcript.AskOf), or "" when
+// they ask nothing or its closeout says the turn is done and needs nobody (WaitsOnNobody, #4110), the agent's own word
+// that its closing question is conversation or an offer, as triage already reads that closeout. A session's asks is
+// read with it, by the node and by the manager. It lives here, not in transcript, so the hub's program, which links
+// transcript, does not link this package (#4371).
+func AskOf(reply string) string {
+	if ask := transcript.AskOf(reply); ask != "" && !WaitsOnNobody(reply) {
+		return ask
+	}
+	return ""
 }
 
 // cutKey splits "key: value", taking a full-width colon as well and a leading list marker.

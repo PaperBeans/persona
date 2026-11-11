@@ -122,7 +122,7 @@ fun LarkReactionRow(
         // Button to open reaction picker
         Box(
             Modifier
-                .size(Tokens.Space.xxl)
+                .size(Tokens.Space.xl)
                 .clip(CircleShape)
                 .background(palette.ink.copy(alpha = 0.05f))
                 .clickable(onClick = onOpenPicker)
@@ -168,7 +168,7 @@ fun LarkMessageActionMenu(
             for (key in DEFAULT_QUICK_REACTIONS) {
                 Box(
                     Modifier
-                        .size(Tokens.Space.xxxl)
+                        .size(Tokens.Space.xxl)
                         .clip(CircleShape)
                         .clickable {
                             onDismiss()
@@ -182,7 +182,7 @@ fun LarkMessageActionMenu(
             }
             Box(
                 Modifier
-                    .size(Tokens.Space.xxxl)
+                    .size(Tokens.Space.xxl)
                     .clip(CircleShape)
                     .clickable {
                         onDismiss()

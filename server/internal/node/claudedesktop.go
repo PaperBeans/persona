@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -35,6 +36,7 @@ type claudeDesktopEntry struct {
 	archived   bool     // isArchived
 	prior      []string // priorCliSessionIds
 	title, cwd string   // as the sidebar shows it, and where it runs
+	local      string   // the app's own id of the session (sessionId, local_<uuid>): its link opens it (claudedesktop_open.go)
 }
 
 type claudeDesktopFile struct {
@@ -55,7 +57,7 @@ type claudeDesktopIndex struct {
 	about   map[string]claudeDesktopAbout // an unarchived session's current transcript → its title and directory
 }
 
-type claudeDesktopAbout struct{ title, cwd string }
+type claudeDesktopAbout struct{ title, cwd, local string }
 
 // claudeDesktopNow is a session that went on from an earlier transcript: the one it runs now, and whether it is archived.
 type claudeDesktopNow struct {
@@ -91,7 +93,7 @@ func readClaudeDesktopIndex(home string) claudeDesktopIndex {
 		}
 		x.visible[e.transcript] = x.visible[e.transcript] || !e.archived
 		if !e.archived {
-			x.about[e.transcript] = claudeDesktopAbout{e.title, e.cwd}
+			x.about[e.transcript] = claudeDesktopAbout{e.title, e.cwd, e.local}
 		}
 		for _, old := range e.prior {
 			x.earlier[old] = append(x.earlier[old], claudeDesktopNow{e.transcript, e.archived})
@@ -116,6 +118,7 @@ func readClaudeDesktopEntry(path string) claudeDesktopEntry {
 		Prior      []string `json:"priorCliSessionIds"`
 		Title      string   `json:"title"`
 		Cwd        string   `json:"cwd"`
+		Local      string   `json:"sessionId"`
 	}
 	if json.Unmarshal(b, &raw) != nil || !validID(raw.Transcript) {
 		return claudeDesktopEntry{}
@@ -124,7 +127,11 @@ func readClaudeDesktopEntry(path string) claudeDesktopEntry {
 	if !filepath.IsAbs(cwd) {
 		cwd = ""
 	}
-	return claudeDesktopEntry{transcript: raw.Transcript, archived: raw.Archived, prior: raw.Prior, title: raw.Title, cwd: cwd}
+	local := raw.Local
+	if !strings.HasPrefix(local, "local_") || !validID(strings.TrimPrefix(local, "local_")) {
+		local = "" // it goes into a link: only the app's own form
+	}
+	return claudeDesktopEntry{transcript: raw.Transcript, archived: raw.Archived, prior: raw.Prior, title: raw.Title, cwd: cwd, local: local}
 }
 
 // listed: transcript id is the one an unarchived session of the desktop app runs: the sidebar lists it, so the offline

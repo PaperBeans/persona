@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/nodeclient"
@@ -33,9 +34,9 @@ func TestHookSettingsWindowsNativeArgs(t *testing.T) {
 				}
 			}
 			before, _ := json.Marshal(legacy)
-			darwin, _ := json.Marshal(hookSettingsForOS("darwin", bin, dir, assistant))
+			darwin, _ := json.Marshal(withoutCuaGate(hookSettingsForOS("darwin", bin, dir, assistant)))
 			if string(darwin) != string(before) {
-				t.Fatal("non-Windows hook generation changed")
+				t.Fatal("non-Windows hook generation changed (beyond the Mac's Cua Driver gate)")
 			}
 			// Only command and args may differ: retain every event, matcher and timeout.
 			for _, raw := range legacy["hooks"].(map[string]any) {
@@ -53,4 +54,22 @@ func TestHookSettingsWindowsNativeArgs(t *testing.T) {
 			}
 		}
 	}
+}
+
+// withoutCuaGate is settings without the Mac's Cua Driver gate entries (cua_gate.go): the Cua MCP matcher, and an
+// Agent's Bash hook that only takes commands running cua-driver.
+func withoutCuaGate(settings map[string]any) map[string]any {
+	hooks := settings["hooks"].(map[string]any)
+	var pre []any
+	for _, block := range hooks["PreToolUse"].([]any) {
+		b := block.(map[string]any)
+		h := b["hooks"].([]any)[0].(map[string]any)
+		cmd, _ := h["command"].(string)
+		if b["matcher"] == cuaMCPMatcher || strings.HasSuffix(cmd, " "+nodeclient.CuaOnlyFlag) {
+			continue
+		}
+		pre = append(pre, block)
+	}
+	hooks["PreToolUse"] = pre
+	return settings
 }

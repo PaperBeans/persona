@@ -51,6 +51,9 @@ interface AssistantState {
   /** "Follow up every agent Persona starts" (#3617, docs/assistant/unified-entry.md "Agent tasks"): off by default; unset
    *  from a hub before it. */
   agent_tasks?: boolean;
+  /** "Tell supervisors about new messages" (#4293, docs/assistant/unified-entry.md "Supervision (#3124)"): off
+   *  by default; unset from a hub before it. */
+  inbox_signals?: boolean;
   /** Days a closed session stays listed before it archives itself (#3618, docs/assistant/todos.md "Closed sessions
    *  archive themselves"): 0 is never, at most 3650; unset from a hub before it. */
   archive_closed_days?: number;
@@ -165,17 +168,17 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
   };
 
   const [agentsBusy, setAgentsBusy] = useState(false);
-  // One field of the Agents group (#3617, #3618): shown as chosen at once, taken back with the reason when the hub refuses.
-  const setAgents = async (patch: { agent_tasks: boolean } | { archive_closed_days: number }) => {
+  // One field of the Agents group (#3617, #3618, #4293): shown as chosen at once, taken back with the reason when the hub refuses.
+  const setAgents = async (patch: { agent_tasks: boolean } | { inbox_signals: boolean } | { archive_closed_days: number }) => {
     const before = info;
     setAgentsBusy(true);
     setInfo((i) => (i ? { ...i, ...patch } : i));
     try {
       const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: patch });
       // what the hub saved, when it says
-      setInfo((i) => (i ? { ...i, agent_tasks: r.agent_tasks ?? i.agent_tasks, archive_closed_days: r.archive_closed_days ?? i.archive_closed_days } : i));
+      setInfo((i) => (i ? { ...i, agent_tasks: r.agent_tasks ?? i.agent_tasks, inbox_signals: r.inbox_signals ?? i.inbox_signals, archive_closed_days: r.archive_closed_days ?? i.archive_closed_days } : i));
     } catch (e) {
-      setInfo((i) => (i && before ? { ...i, agent_tasks: before.agent_tasks, archive_closed_days: before.archive_closed_days } : i));
+      setInfo((i) => (i && before ? { ...i, agent_tasks: before.agent_tasks, inbox_signals: before.inbox_signals, archive_closed_days: before.archive_closed_days } : i));
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally {
       setAgentsBusy(false);
@@ -283,12 +286,17 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         </Row>
       </Group>
 
-      {/* Following up agents and tidying closed ones (#3617, #3618): each row only from a hub that has its setting */}
-      {(typeof info?.agent_tasks === "boolean" || typeof info?.archive_closed_days === "number") && (
+      {/* Following up agents, their tasks' new messages and tidying closed ones (#3617, #4293, #3618): each row only from a hub that has its setting */}
+      {(typeof info?.agent_tasks === "boolean" || typeof info?.inbox_signals === "boolean" || typeof info?.archive_closed_days === "number") && (
         <Group anchor="agents" title={t("settings-assistantsettings.agents_title")}>
           {typeof info.agent_tasks === "boolean" && (
             <Row label={t("settings-assistantsettings.agent_tasks")} hint={t("settings-assistantsettings.agent_tasks_hint")} wrapHint>
               <Switch on={info.agent_tasks} onChange={(on) => void setAgents({ agent_tasks: on })} disabled={agentsBusy} label={t("settings-assistantsettings.agent_tasks")} />
+            </Row>
+          )}
+          {typeof info.inbox_signals === "boolean" && (
+            <Row label={t("settings-assistantsettings.inbox_signals")} hint={t("settings-assistantsettings.inbox_signals_hint")} wrapHint>
+              <Switch on={info.inbox_signals} onChange={(on) => void setAgents({ inbox_signals: on })} disabled={agentsBusy} label={t("settings-assistantsettings.inbox_signals")} />
             </Row>
           )}
           {typeof info.archive_closed_days === "number" && (

@@ -802,3 +802,11 @@ refused as `dialog_open` with nothing on the phone to answer.
   decide the state.
 - Measure a hook's effect on a real pty with a throwaway `--settings` hook and an empty config directory, answering both ways: the
   same check that ignored allow honoured deny.
+
+## A headless Claude's queue is on its stdout, not in its transcript (#4342)
+
+`claude -p --input-format stream-json` writes `queue-operation enqueue` with no content for a message that waits, so a transcript reader
+sees a wait it can't name, and a following `dequeue` pops whatever it guessed. Give each user line a `uuid` and follow the
+`command_lifecycle` lines for it instead (queued, started, cancelled, completed). Take one back with `cancel_async_message`, and treat
+`cancelled: false` as "it went in": writing it again would send it twice. Check such behavior against the real CLI with a short
+`claude -p` script before building on it; the requests are not in the public docs.

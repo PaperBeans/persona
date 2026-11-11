@@ -145,6 +145,8 @@ func (p AssistantProfile) HTMLViewsOn() bool { return p.HTMLViews == nil || *p.H
 
 type SharingConfig struct {
 	PublicOrigin string `json:"public_origin,omitempty"`
+	// IngressKey authenticates only loopback sharing-ingress peer IPs, never content or management access.
+	IngressKey string `json:"ingress_key,omitempty"`
 }
 
 type Config struct {

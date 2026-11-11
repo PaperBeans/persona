@@ -151,6 +151,16 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.agentTasks(ctx)), nil },
 			set: s.setAgentTasks},
+		{Setting: Setting{Key: "assistant.inbox_signals", Title: "Tell a task's supervisor about new Inbox messages on it", Actions: getSet,
+			About: "off (the default): an Inbox message the AI twin's judge links to a task only reaches the twin's handling chat " +
+				"(and a message card once it drafts a reply). on: new messages from other people linked to a supervised task also " +
+				"reach the task's supervisor (its leader conversation, else the main conversation) as an inbox entry of the next " +
+				"supervision message, several collapsed into one per task with their count. Needs the Inbox AI twin, which makes the " +
+				"link; Persona's own sends, bot chats and tasks waiting for the user's decision never raise one. Costs supervisor " +
+				"turns. Applies from the next new message",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.inboxSignalsOn(ctx)), nil },
+			set: s.setInboxSignals},
 		{Setting: Setting{Key: "assistant.launcher", Title: "Persona 的启动器", Actions: getSet,
 			About: "which launcher (model) new Persona conversations start with by default",
 			Value: "a launcher name from this setting's get"},
@@ -277,7 +287,7 @@ var settingTitles = map[string]string{"assistant.notes": "title_notes", "assista
 	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
 	"assistant.recording_days": "title_recording_days", "assistant.done_needs_delivery": "title_done_needs_delivery",
 	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders",
-	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "model_profiles.tiers": "title_model_tiers",
+	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "assistant.inbox_signals": "title_inbox_signals", "model_profiles.tiers": "title_model_tiers",
 	"assistant.meeting_attendance_default": "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
 	"assistant.kb_topics": "title_kb_topics", "assistant.main_background_folded": "title_main_background_folded"}
 
@@ -537,6 +547,13 @@ func (s *Service) setAgentTasks(ctx context.Context, v json.RawMessage) (*ownCha
 		return i18n.T(l, "assistant-settings_tool.change_agent_tasks", i18n.Args{"before": before, "after": after})
 	}, func(v *Settings) **bool { return &v.AgentTasks },
 		"assistant.agent_tasks is %v from the next start, turn end and report on (to-dos made before keep what they have).")
+}
+
+func (s *Service) setInboxSignals(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setBoolSetting(ctx, v, s.inboxSignalsOn, "assistant.inbox_signals is unchanged", func(l i18n.Lang, before, after string) string {
+		return i18n.T(l, "assistant-settings_tool.change_inbox_signals", i18n.Args{"before": before, "after": after})
+	}, func(v *Settings) **bool { return &v.InboxSignals },
+		"assistant.inbox_signals is %v from the next new Inbox message on (signals already waiting go out only while it is on).")
 }
 
 // launchers are the launchers of the assistant's machine, as the apps list them.

@@ -569,6 +569,19 @@ func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, 
 			if alt != "" {
 				st.AltActions = []ReadinessAction{{ID: alt}}
 			}
+			if code == proto.TurnErrorNotLoggedIn {
+				// The machine may already have other launchers (a signed-in Codex, a gateway alias from ~/.zshrc):
+				// offer switching the main chat to one before steering to an API key (#4355). Their sign-in state is
+				// not probed — the list is the offer.
+				if n := s.otherLaunchers(ctx, d.ID, launcher); n > 0 {
+					st.AltActions = append(st.AltActions, ReadinessAction{ID: "main_chat_model"})
+					name := d.Name
+					if name == "" {
+						name = i18n.T(lang, "assistant-readiness.this_computer")
+					}
+					st.Detail = i18n.T(lang, "assistant-readiness.model_not_logged_in_switch_detail", i18n.Args{"machine": name})
+				}
+			}
 			return st, false
 		}
 	}
@@ -758,6 +771,24 @@ const (
 	launcherThere
 	launcherGone
 )
+
+// otherLaunchers counts machine's launchers other than launcher: what the main chat could switch to. Any doubt
+// (the machine is slow to answer, the list failed) is zero: the offer is made only from a list that is there.
+func (s *Service) otherLaunchers(ctx context.Context, machine, launcher string) int {
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	list, err := s.machineLaunchers(cctx, machine)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, l := range list {
+		if l.Name != launcher {
+			n++
+		}
+	}
+	return n
+}
 
 // readinessLauncher looks launcher up among what machine can start: the agent it starts ("" Claude Code; a runtime's
 // assistant launcher counts as not Claude Code) and whether it is there.

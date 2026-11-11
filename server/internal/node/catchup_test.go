@@ -81,6 +81,7 @@ func testNode(t testing.TB) (*Node, string) {
 		// A start pauses 300 ms before typing, as before #2570, instead of watching the shell: tests of the settle
 		// wait turn it on (shellsettle_test.go watchShell).
 		shellPause: 300 * time.Millisecond}
+	t.Cleanup(n.starts.close)
 	return n, home
 }
 

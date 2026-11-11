@@ -178,7 +178,7 @@ func newFakeOpenAPI(t *testing.T) *fakeOpenAPI {
 			case reject != 0 && strings.Contains(string(body), `"msg_type":"interactive"`):
 				code = reject
 			}
-			reply(map[string]any{"code": code, "data": map[string]any{"message_id": fmt.Sprintf("om_bot%d", n)}})
+			reply(map[string]any{"code": code, "data": map[string]any{"message_id": fmt.Sprintf("om_bot%d", n), "chat_id": "oc_p2p"}})
 		default:
 			reply(map[string]any{"code": 404, "msg": "not faked: " + p})
 		}

@@ -39,9 +39,9 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private val WheelRow = Tokens.Space.xxxl + Tokens.Space.s
-private val DayButton = Tokens.Space.xxxl + Tokens.Space.s
-private val TimeColumn = Tokens.Space.xxxl * 2 + Tokens.Space.s
+private val WheelRow = Tokens.Space.xxl + Tokens.Space.s
+private val DayButton = Tokens.Space.xxl + Tokens.Space.s
+private val TimeColumn = Tokens.Space.xxl * 2 + Tokens.Space.s
 
 /** A caption under a section, in the page's quiet ink. */
 @Composable
@@ -101,7 +101,7 @@ internal fun TaskRow(
                 }
             },
             trailing = {
-                if (busy) JSpinner(Modifier.size(Tokens.Space.xxl))
+                if (busy) JSpinner(Modifier.size(Tokens.Space.xl))
                 else {
                     val description = stringResource(R.string.assistant_proactive_auto_run, title)
                     JSwitch(task.enabled, onToggle, Modifier.semantics { contentDescription = description })
@@ -136,7 +136,7 @@ internal fun OneOffRow(
                 }
             },
             trailing = {
-                if (busy) JSpinner(Modifier.size(Tokens.Space.xxl))
+                if (busy) JSpinner(Modifier.size(Tokens.Space.xl))
                 else JIconButton(PhIcons.DotsThree, stringResource(R.string.assistant_proactive_actions_for, title), onMore)
             },
             onClick = onOpen, onLongClick = onMore, chevron = false,
@@ -161,7 +161,7 @@ internal fun RunRow(
     JGroupItem(position) {
         JRow(
             title, subtitle = listOf(time, run.detail(say)).filter { it.isNotBlank() && it != title }.joinToString("\n"), subtitleLines = 3,
-            leading = { JIcon(icon, stringResource(outcome.word), size = Tokens.Space.xxl, tint = tint, selected = true) },
+            leading = { JIcon(icon, stringResource(outcome.word), size = Tokens.Space.xl, tint = tint, selected = true) },
             onClick = conversation?.let { key -> { onOpen(key) } },
         )
     }

@@ -25,6 +25,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/shareproof"
 )
 
 const publicSharePrefix = "/api/public/agent-shares/"
@@ -391,6 +392,15 @@ func shareSourceKey(remote string) string {
 	}
 	return a.String()
 }
+func (h *Hub) sharingPeer(r *http.Request, now time.Time) (string, bool) {
+	if h.cfg != nil && h.cfg.Sharing != nil {
+		if ip, ok := shareproof.Verify(shareproof.DecodeKey(h.cfg.Sharing.IngressKey), r, now); ok {
+			return net.JoinHostPort(ip.String(), "0"), true
+		}
+	}
+	return r.RemoteAddr, false
+}
+
 func (h *Hub) forwardSharePublic(w http.ResponseWriter, r *http.Request) {
 	shareHeaders(w)
 	token := strings.TrimPrefix(r.URL.Path, publicSharePrefix)
@@ -403,7 +413,12 @@ func (h *Hub) forwardSharePublic(w http.ResponseWriter, r *http.Request) {
 		hash := sha256.Sum256([]byte(token))
 		tokenKey = hex.EncodeToString(hash[:])
 	}
-	release, ok := h.shareIngress.enter(shareSourceKey(r.RemoteAddr), tokenKey, time.Now())
+	now := time.Now()
+	peer, authenticated := h.sharingPeer(r, now)
+	if authenticated {
+		w.Header().Set(shareproof.Acknowledgement, shareproof.Accepted)
+	}
+	release, ok := h.shareIngress.enter(shareSourceKey(peer), tokenKey, now)
 	if !ok {
 		w.Header().Set("Retry-After", "15")
 		h.shareTransportError(w, r, 429, "rate_limited")

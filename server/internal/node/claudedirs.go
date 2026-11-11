@@ -21,13 +21,14 @@ import (
 // directory: $CLAUDE_CONFIG_DIR, else ~/.claude. Launchers for several accounts or profiles set CLAUDE_CONFIG_DIR, so one
 // machine can have many. The node looks in all of them:
 //   - the node's own default ($CLAUDE_CONFIG_DIR of the node, else ~/.claude);
+//   - the machine's Agent directory, private assistant profiles, and explicitly selected assistant directories;
 //   - every running claude process's CLAUDE_CONFIG_DIR (scanned every 30 s; also tells which directory a pid uses);
 //   - the hub's list: hub.json machines[].claude_config_dirs plus directories scanned earlier (node.configure), so a
 //     profile's past sessions stay listed when none of its claudes runs.
 // Directories are compared by their real path: ~/.claude/projects symlinked into a profile is the same directory.
 // Directories the user blocked for this machine (node.configure claude_dirs_blocked, proto.ClaudeDirBlocked) are left
 // out of all of it: not looked in, not reported, their sessions not listed. The node's default directory is never
-// blocked (what Persona starts runs there).
+// blocked. Launch selection is separate from discovery below.
 
 // claudeScanEvery is how often running claude processes are scanned for their config directory.
 const claudeScanEvery = 30 * time.Second
@@ -56,7 +57,7 @@ func newClaudeDirs() *claudeDirs {
 	return &claudeDirs{byPID: map[int]string{}, bySession: map[string]procEnv{}, scan: scanClaudeProcesses}
 }
 
-// defaultClaudeDir is where a claude started without CLAUDE_CONFIG_DIR keeps its files.
+// defaultClaudeDir is the inherited legacy default, also kept for old-session discovery.
 func (n *Node) defaultClaudeDir() string {
 	if n.sessionScope != nil {
 		return n.sessionScope.claude
@@ -75,6 +76,23 @@ func (n *Node) claudeConfigDirs() []string {
 	d := n.cdirs
 	n.refreshClaudeDirs()
 	cands := []string{n.defaultClaudeDir()}
+	// Include private assistant profiles even before a process scan, including
+	// after a node restart when only their transcripts remain.
+	profiles, _ := filepath.Glob(filepath.Join(n.dir, "profiles", "*"))
+	cands = append(cands, profiles...)
+	cands = append(cands, filepath.Join(n.home, ".claude"))
+	if dir := n.claudeStartDir.Load(); dir != nil && *dir != "" {
+		cands = append(cands, *dir)
+	}
+	if n.state != nil {
+		n.state.mu.Lock()
+		for _, st := range n.state.Sessions {
+			if st.ConfigDir != "" && st.ConfigDir != "default" {
+				cands = append(cands, st.ConfigDir)
+			}
+		}
+		n.state.mu.Unlock()
+	}
 	if d != nil {
 		d.mu.Lock()
 		cands = append(append(cands, d.found...), d.known...)

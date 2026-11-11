@@ -132,12 +132,12 @@ func TestInboxAgentModelValidationAndProviderUse(t *testing.T) {
 			t.Fatalf("invalid %s: %d %s", body, w.Code, w.Body.String())
 		}
 	}
-	// The twin is an Agents run: the same launchers as Agents, so no effort on Codex.
+	// The twin is an Agents run: Codex accepts the same explicit purpose effort.
 	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "twin-fast"}}, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "codex-custom"}})
-	if w := modelRequest(s, http.MethodPut, purposeAgent, `{"revision":0,"provider":"launcher.codex-custom","model":"selected","effort":"high"}`); w.Code != http.StatusBadRequest {
-		t.Fatalf("Codex effort accepted: %d %s", w.Code, w.Body.String())
+	if w := modelRequest(s, http.MethodPut, purposeAgent, `{"revision":0,"provider":"launcher.codex-custom","model":"selected","effort":"high"}`); w.Code != http.StatusOK {
+		t.Fatalf("Codex effort rejected: %d %s", w.Code, w.Body.String())
 	}
-	if w := modelRequest(s, http.MethodPut, purposeAgent, `{"revision":0,"provider":"launcher.twin-fast","model":"selected"}`); w.Code != http.StatusOK {
+	if w := modelRequest(s, http.MethodPut, purposeAgent, `{"revision":1,"provider":"launcher.twin-fast","model":"selected"}`); w.Code != http.StatusOK {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}
 	uses, err := s.providerModelUses(context.Background(), "launcher.twin-fast")

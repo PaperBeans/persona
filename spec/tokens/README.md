@@ -100,7 +100,7 @@ python3 scripts/assets/gen_tokens.py --check \
 python3 -m unittest discover -s scripts/assets -p test_gen_tokens.py -v
 ```
 
-三个输出参数可以单独使用，参数值是文件路径。包名默认 `persona.android.core.designsystem`，可用 `--package example.design` 或 `--kotlin-package example.design` 改。默认 token 目录相对脚本定位，任意工作目录均可调用；`--source <目录>` 可检查独立的测试用 token。
+三个输出参数可以单独使用，参数值是文件路径。包名默认 `persona.core.designsystem`，可用 `--package example.design` 或 `--kotlin-package example.design` 改。默认 token 目录相对脚本定位，任意工作目录均可调用；`--source <目录>` 可检查独立的测试用 token。
 
 普通生成先校验结构与引用，打印对比度失败但仍输出文件，成功写入时返回 0。这样可以在修色前先审阅色板。`--check` 全程只读：结构、引用、底线对比度（不含已知例外）、已知例外是否已经达标、指定文件的字节一致性有任一失败就返回 1，成功返回 0；建议项只报告；参数用法错误返回 2。未传输出路径时只检查 JSON 与对比度，不会推测客户端中的产物位置。已有对比度失败不会跳过产物比较，文件不存在也算失败。
 

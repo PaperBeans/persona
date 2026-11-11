@@ -49,7 +49,7 @@ fun LarkMergeForwardCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)
         ) {
-            JIcon(PhIcons.ChatsCircle, modifier = Modifier.size(Tokens.Space.xl), tint = palette.accent)
+            JIcon(PhIcons.ChatsCircle, modifier = Modifier.size(Tokens.Size.iconXS), tint = palette.accent)
             Text(
                 part.title.ifBlank { stringResource(R.string.inbox_lark_forward) },
                 style = PersonaTheme.type.callout,
@@ -197,7 +197,7 @@ fun LarkVoiceView(
         // Play / Pause button
         Box(
             Modifier
-                .size(Tokens.Space.xxxl)
+                .size(Tokens.Space.xxl)
                 .clip(CircleShape)
                 .background(palette.accent),
             contentAlignment = Alignment.Center
@@ -279,7 +279,7 @@ fun LarkVideoView(
             JIcon(
                 PhIcons.Play,
                 contentDescription = videoLabel,
-                modifier = Modifier.size(Tokens.Space.xxl),
+                modifier = Modifier.size(Tokens.Space.xl),
                 tint = palette.onMediaBackdrop
             )
         }

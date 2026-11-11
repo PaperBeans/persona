@@ -35,7 +35,7 @@ struct RecordingLiveActivity: Widget {
                     VStack(alignment: .leading, spacing: IslandMetrics.rowGap) {
                         VStack(alignment: .leading, spacing: IslandMetrics.smallGap) {
                             Text(state.title).font(.headline).lineLimit(1)
-                            RecordingSubtitle(state: state).font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                            RecordingSubtitle(state: state).font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
                         }
                         .padding(.horizontal, IslandMetrics.gap)
                         RecordingAnswer(state: state).foregroundStyle(.white.opacity(0.85)).padding(.horizontal, IslandMetrics.gap)
@@ -75,7 +75,7 @@ struct RecordingMark: View {
 
     var body: some View {
         ZStack {
-            Circle().fill(Palette.recordingRed.opacity(phase == .recording ? 1 : 0.35))
+            Circle().fill(Palette.recordingRed.opacity(phase == .recording ? 1 : 0.6))
             Image(systemName: phase == .recording ? RecordingSymbol.recording : RecordingSymbol.paused)
                 .font(.system(size: size * 0.48, weight: .bold))
                 .foregroundStyle(.white)
@@ -187,12 +187,12 @@ struct RecordingAnswer: View {
         if let persona = state.persona {
             if let answer = state.answer, !answer.isEmpty {
                 Label { Text(answer).lineLimit(2) } icon: { Image(systemName: RecordingSymbol.persona) }
-                    .font(.caption)
+                    .font(.caption.weight(.medium))
             } else if state.phase != .recording {
                 Label { Text(persona == "participant" ? "Persona taking part" : "Persona listening").lineLimit(1) } icon: {
                     Image(systemName: RecordingSymbol.persona)
                 }
-                .font(.caption)
+                .font(.caption.weight(.medium))
             }
         }
     }
@@ -227,7 +227,7 @@ struct RecordingLockScreen: View {
                 RecordingMark(phase: state.phase, size: IslandMetrics.recordingMark)
                 VStack(alignment: .leading, spacing: IslandMetrics.smallGap) {
                     Text(state.title).font(.headline).lineLimit(1)
-                    RecordingSubtitle(state: state).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    RecordingSubtitle(state: state).font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: IslandMetrics.gap)
                 RecordingTime(state: state)

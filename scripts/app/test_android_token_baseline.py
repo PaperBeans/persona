@@ -1,5 +1,8 @@
+import tempfile
 import unittest
-from android_token_baseline import count, regressions
+from pathlib import Path
+
+from android_token_baseline import baseline_of, count, regressions, scan, wildcard_material3
 
 
 class TokenBaselineTest(unittest.TestCase):
@@ -18,7 +21,7 @@ class TokenBaselineTest(unittest.TestCase):
             val e = PersonaTypography.body
             val f = MaterialTheme.colorScheme.primary
         ''')
-        self.assertEqual({k: {'hardcoded': 1, 'token': 1} for k in ('color', 'font', 'dp')}, counts)
+        self.assertEqual({k: {'hardcoded': 1, 'token': 1} for k in ('color', 'font', 'dp')}, {k: counts[k] for k in ('color', 'font', 'dp')})
 
     def test_only_canonical_persona_names_count_as_design_tokens(self):
         canonical = '''
@@ -35,15 +38,67 @@ class TokenBaselineTest(unittest.TestCase):
         self.assertEqual(2, counts['dp']['token'])
         former = ('jar' + 'vis').capitalize()
         retired_symbols = f'{former}Theme.palette.ink {former}Typography.body {former}Theme.shapes.card'
-        self.assertEqual({key: {'hardcoded': 0, 'token': 0} for key in ('color', 'font', 'dp')}, count(retired_symbols))
+        self.assertEqual({key: {'hardcoded': 0, 'token': 0} for key in ('color', 'font', 'dp', 'material3')}, count(retired_symbols))
 
     def test_new_file_or_category_cannot_spend_another_files_reduction(self):
-        baseline = {'files': {'a.kt': count('1.dp 2.dp')}}
+        baseline = baseline_of({'version': 2, 'files': {'a.kt': count('1.dp 2.dp'), 'b.kt': count('Text("ok")')}})
+        self.assertEqual({'version': 2, 'files': {'a.kt': {'dp': 2}}}, baseline)  # zero counts and files are left out
         current = {'files': {'a.kt': count('1.dp'), 'b.kt': count('2.dp')}}
         self.assertEqual(1, len(regressions(current, baseline)))
         current = {'files': {'a.kt': count('Color.Red')}}
         self.assertEqual(1, len(regressions(current, baseline)))
         self.assertEqual([], regressions({'files': {'a.kt': count('Tokens.Space.m')}}, baseline))
+
+    def test_material3_components_count_in_pages_only(self):
+        page = '''
+            import androidx.compose.material3.Text
+            import androidx.compose.material3.DropdownMenu
+            import androidx.compose.material3.Checkbox as Box3
+            // Card(  Button {
+            val note = "AlertDialog("
+            fun page() {
+                Text("ok")
+                DropdownMenu(expanded = true, onDismissRequest = {}) {}
+                Box3(checked = true, onCheckedChange = null)
+                androidx.compose.material3.Card { }
+                JCard { }
+                Checkbox(checked = true)
+            }
+        '''
+        self.assertEqual(3, count(page)['material3']['hardcoded'])  # DropdownMenu, Box3 and the full name; Checkbox isn't imported
+        self.assertEqual(0, count(page, pages=False)['material3']['hardcoded'])
+        wildcard = '''
+            import androidx.compose.material3.*
+            fun page() { Scaffold { } ; TextButton(onClick = {}) { } ; Text("ok") ; val s = SnackbarHostState() }
+        '''
+        self.assertEqual(2, count(wildcard)['material3']['hardcoded'])
+        self.assertEqual(1, wildcard_material3(wildcard))
+        self.assertEqual(1, wildcard_material3('import androidx.compose.material3.adaptive.layout.*'))
+        self.assertEqual(0, wildcard_material3('import androidx.compose.material3.Text\n// import androidx.compose.material3.*'))
+
+    def test_scan_covers_every_module_but_tests_and_generated_tokens(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = {
+                'android/app/src/main/java/a/App.kt': 'val a = 1.dp',
+                'android/core/designsystem/src/main/kotlin/d/Parts.kt': 'import androidx.compose.material3.*\nval c = Color.Red',
+                'android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt': 'val c = Color(0xFF000000)',
+                'android/core/hub/src/main/kotlin/h/Hub.kt': 'import androidx.compose.material3.*\nval s = 2.sp',
+                'android/feature/inbox/src/main/kotlin/i/Inbox.kt': 'val b = 3.dp',
+                'android/feature/inbox/src/test/kotlin/i/InboxTest.kt': 'val t = 4.dp',
+                'android/platform/notify/src/main/kotlin/n/Notify.kt': 'val c = Color.Blue',
+                'android/build-logic/src/main/kotlin/Plugin.kt': 'val p = 5.dp',
+            }
+            for name, text in files.items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text(text)
+            current, wildcards = scan(root)
+        self.assertEqual({'android/app/src/main/java/a/App.kt', 'android/core/designsystem/src/main/kotlin/d/Parts.kt',
+                          'android/core/hub/src/main/kotlin/h/Hub.kt', 'android/feature/inbox/src/main/kotlin/i/Inbox.kt',
+                          'android/platform/notify/src/main/kotlin/n/Notify.kt'}, set(current['files']))
+        self.assertEqual({'app', 'core/designsystem', 'core/hub', 'feature/inbox', 'platform/notify'}, set(current['modules']))
+        self.assertEqual(1, current['modules']['core/designsystem']['color']['hardcoded'])  # the design system counts too
+        self.assertEqual(['android/core/hub/src/main/kotlin/h/Hub.kt'], wildcards)  # the design system may use wildcards
 
 
 if __name__ == '__main__':

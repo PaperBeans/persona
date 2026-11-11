@@ -14,6 +14,7 @@
   "launcher_missing_detail": "Can't find the model entry “{launcher}” on {machine}. It may have been removed.",
   "not_logged_in_title": "Claude Code isn't signed in",
   "not_logged_in_detail": "Sign in once on {machine}, or use an API key instead.",
+  "model_not_logged_in_switch_detail": "Sign in on {machine}, use an API key, or switch the main chat to another launcher on it (Settings › Model).",
   "auth_failed_title": "The model's key doesn't work",
   "auth_failed_detail": "The model's key is wrong or has expired. Use one that works.",
   "model_fallback_unavailable_title": "The refusal fallback model is unavailable",

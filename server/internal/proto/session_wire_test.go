@@ -58,6 +58,10 @@ func wireSamples(t *testing.T, ty reflect.Type) []reflect.Value {
 		for _, n := range []int64{-7, 1 << 40, math.MaxInt64, math.MinInt64} {
 			add(n)
 		}
+	case ty.Kind() == reflect.Uint16:
+		for _, n := range []uint16{1, 7, math.MaxUint16} {
+			add(n)
+		}
 	case ty.Kind() == reflect.Pointer:
 		for _, v := range append([]reflect.Value{reflect.Zero(ty.Elem())}, wireSamples(t, ty.Elem())...) {
 			p := reflect.New(ty.Elem())

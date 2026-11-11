@@ -73,12 +73,32 @@ func TestLauncherListSaysHowEachMachineSynced(t *testing.T) {
 		t.Errorf("away: %+v", st)
 	}
 
-	// The built-in claude has its own page and cannot be hidden (that would take plain claude out of every picker).
+	// The built-in claude has its own page, and hides like an rc-file launcher (#4384): out of the computer's picker,
+	// listed as hidden, back with restore.
 	if code, raw := launcherCall(t, s, "GET", "/api/v1/launchers/claude", ""); code != http.StatusOK {
 		t.Errorf("detail: %d %s", code, raw)
 	}
-	if code, raw := launcherCall(t, s, "DELETE", "/api/v1/launchers/claude", ""); code != http.StatusBadRequest {
+	picker := func() string {
+		_, raw := launcherCall(t, s, "GET", "/api/v1/machines/box/launchers", "")
+		return raw
+	}
+	if !strings.Contains(picker(), `"name":"claude"`) {
+		t.Fatalf("claude not in the picker before hiding: %s", picker())
+	}
+	if code, raw := launcherCall(t, s, "DELETE", "/api/v1/launchers/claude", ""); code != http.StatusOK {
 		t.Errorf("hide claude: %d %s", code, raw)
+	}
+	if code, raw := launcherCall(t, s, "GET", "/api/v1/launchers/claude", ""); code != http.StatusOK || !strings.Contains(raw, `"hidden":true`) {
+		t.Errorf("hidden detail: %d %s", code, raw)
+	}
+	if strings.Contains(picker(), `"name":"claude"`) || !strings.Contains(picker(), `"name":"codex"`) {
+		t.Errorf("picker with claude hidden: %s", picker())
+	}
+	if code, raw := launcherCall(t, s, "POST", "/api/v1/launchers/claude/restore", ""); code != http.StatusOK {
+		t.Errorf("restore claude: %d %s", code, raw)
+	}
+	if !strings.Contains(picker(), `"name":"claude"`) {
+		t.Errorf("claude not back in the picker: %s", picker())
 	}
 	// 模型配置's 「Claude Code 默认」 says where it is.
 	for _, p := range s.modelProviders(t.Context()) {

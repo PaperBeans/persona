@@ -42,32 +42,6 @@ func TestAskOf(t *testing.T) {
 	}
 }
 
-// A closeout that says the turn is done and needs nobody is the agent's word that its closing question is conversation
-// (#4110): the reply asks nothing. Any other closeout, or none, leaves the words to say it as before.
-func TestAskOfCloseout(t *testing.T) {
-	const q = "Which of these matters most to you?"
-	done := "<closeout status=\"done\" merged=\"n/a\" deployed=\"n/a\"></closeout>"
-	for _, c := range []struct{ name, text, want string }{
-		{"no closeout", "Here are three options.\n\n" + q, q},
-		{"done after the question", "Here are three options.\n\n" + q + "\n\n" + done, ""},
-		{"done before the question", "Here are three options.\n\n" + done + "\n\n" + q, ""},
-		{"done, waiting no", "Here are three options.\n<closeout status=\"done\">\nwaiting: no\n</closeout>\n" + q, ""},
-		{"done, a Chinese question", "三个方向都列在上面了。\n" + done + "\n你最在意哪一点？", ""},
-		{"done but something missing", "Here are three options.\n<closeout status=\"done\">\nmissing: your pick\n</closeout>\n" + q, q},
-		{"not done", "Here are three options.\n<closeout status=\"not_done\"></closeout>\n" + q, q},
-		{"blocked", "Here are three options.\n<closeout status=\"blocked\">\nwaiting: your answer\n</closeout>\n" + q, q},
-		{"no status", "Here are three options.\n<closeout merged=\"n/a\"></closeout>\n" + q, q},
-	} {
-		if got := AskOf(c.text); got != c.want {
-			t.Errorf("%s: AskOf = %q, want %q", c.name, got, c.want)
-		}
-		// The words alone ask: it is the closeout that says otherwise, not the question falling out of the last sentences.
-		if c.want == "" && askOf(c.text) == "" {
-			t.Errorf("%s: the words alone ask nothing, the case shows nothing", c.name)
-		}
-	}
-}
-
 func TestAskOfClips(t *testing.T) {
 	long := ""
 	for range 200 {

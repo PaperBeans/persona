@@ -1,3 +1,11 @@
 #!/bin/bash
-# Refuse a commit that would record private values (scripts/privacy_check.py). Install: git config core.hooksPath scripts/hooks
-exec python3 "$(git rev-parse --show-toplevel)/scripts/privacy_check.py" --staged
+# Refuse a commit that would record private values (scripts/privacy_check.py), or that leaves the design tokens out of
+# step with spec/tokens and the iOS values (scripts/assets/gen_tokens.py). Install: git config core.hooksPath scripts/hooks
+set -e
+root=$(git rev-parse --show-toplevel)
+python3 "$root/scripts/privacy_check.py" --staged
+if git diff --cached --name-only | grep -qE '^(spec/tokens/|apple/Shared/Design/|scripts/assets/(test_)?gen_tokens\.py$|android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens\.kt$)'; then
+  python3 -B "$root/scripts/assets/gen_tokens.py" --check \
+    --kotlin "$root/android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt" >/dev/null
+  (cd "$root/scripts/assets" && python3 -B -m unittest -q test_gen_tokens.RepositoryTests)
+fi

@@ -375,10 +375,11 @@ func TestConnectSingleAddressAndUpstreamKeepTheirLifetime(t *testing.T) {
 			want := []string{"192.0.2.1:443"}
 			if upstream {
 				inner := newProxy(t, silent, nil)
-				up, _ := url.Parse(inner.Register("notes", Rule{Hosts: []string{"api.example.com"}}))
+				up, _ := url.Parse(inner.Register("notes", Rule{Hosts: []string{"api.example.com", "192.0.2.1"}}))
 				p.Upstream = func(*url.URL) (*url.URL, error) { return up, nil }
 				p.Resolve = func(context.Context, string) ([]net.IP, error) {
-					return nil, errors.New("an upstream tunnel must not resolve the target locally")
+					// The hub checks the answer locally, then the upstream CONNECTs to that address (#4353).
+					return []net.IP{net.ParseIP("192.0.2.1")}, nil
 				}
 				want = []string{up.Host}
 			}
