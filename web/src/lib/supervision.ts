@@ -1,10 +1,19 @@
-import { t } from "../i18n";
+import { formatDate, t } from "../i18n";
 import type { Todo } from "./todos";
 
 // A task the main conversation supervises (#3124, docs/assistant/unified-entry.md "Supervision"): what done means, where its review
 // stands, and the reviews so far. Only such tasks carry `supervision`; an older hub sends none.
 
-export type ReviewState = "" | "pending_review" | "rework" | "needs_user" | "accepted" | "cancelled";
+export type ReviewState = "" | "pending_review" | "rework" | "needs_user" | "parked" | "accepted" | "cancelled";
+
+/** What a parked task waits for (#3804, docs/assistant/todos.md "Parked tasks"): the reason in one sentence, until when,
+ *  what kind of thing it waits on, and how many times in a row it was parked with no agent turn in between. */
+export interface Parked {
+  reason: string;
+  until: string;
+  waiting_on: "owner_priority" | "someone_else" | "external_event" | "date";
+  count: number;
+}
 
 export interface ReviewCheck {
   criterion: string;
@@ -14,7 +23,7 @@ export interface ReviewCheck {
 
 export interface TaskReview {
   at: string;
-  verdict: "accepted" | "rework" | "needs_user" | "cancelled";
+  verdict: "accepted" | "rework" | "needs_user" | "parked" | "cancelled";
   /** "reviewer": a rework the independent reviewer's findings started (#2173); absent: the supervisor's. */
   by?: string;
   round?: number;
@@ -27,6 +36,8 @@ export interface Supervision {
   done_when?: string[];
   expect_minutes?: number;
   state?: ReviewState;
+  /** Present while `state` is "parked": what the task waits for. Absent otherwise, and on an older hub. */
+  parked?: Parked;
   round?: number;
   reviews?: TaskReview[];
   updated_at?: string;
@@ -93,12 +104,22 @@ export function acceptanceStands(todo: { supervision?: Supervision }): boolean {
 }
 
 /** The review state that holds now: a cancelled task reopened goes on again; an accepted one stays accepted while
- *  its acceptance stands (acceptanceStands). */
+ *  its acceptance stands (acceptanceStands); a parked one that was closed is no longer parked. */
 export function reviewState(todo: Pick<Todo, "done_at"> & { supervision?: Supervision }): ReviewState {
   const st = todo.supervision?.state ?? "";
   if (!todo.done_at && st === "accepted" && !acceptanceStands(todo)) return "";
   if (!todo.done_at && st === "cancelled") return "";
+  if (st === "parked" && (todo.done_at || !todo.supervision?.parked)) return "";
   return st;
+}
+
+/** "Parked until Nov 14, 9:00 AM · The design team has to pick the icon set first": a parked task in a line, for its
+ *  row among the tasks in progress and for its page; undefined for a task that is not parked. */
+export function parkedLine(todo: (Pick<Todo, "done_at"> & { supervision?: Supervision }) | undefined): string | undefined {
+  const p = todo?.supervision?.parked;
+  if (!todo || !p || reviewState(todo) !== "parked") return undefined;
+  const time = formatDate(p.until, { dateStyle: "medium", timeStyle: "short" });
+  return time ? t("assistant-tasks.review_parked_until", { time, reason: p.reason }) : t("assistant-tasks.review_parked_reason", { reason: p.reason });
 }
 
 export type ReviewTone = "accent" | "red" | "orange" | "green" | "muted";
@@ -114,6 +135,8 @@ export function reviewBadge(todo: Pick<Todo, "done_at"> & { supervision?: Superv
       return { label: t("assistant-tasks.review_rework", { round: sup.round ?? 1 }), tone: "orange" };
     case "needs_user":
       return { label: t("assistant-tasks.review_needs_user"), tone: "orange" };
+    case "parked":
+      return { label: t("assistant-tasks.review_parked"), tone: "muted" };
     case "accepted":
       return { label: t("assistant-tasks.review_accepted"), tone: "green" };
     case "cancelled":
@@ -201,6 +224,8 @@ export function reviewVerdictLabel(verdict: string, round?: number): string {
       return t("assistant-tasks.review_rework", { round: round ?? 1 });
     case "needs_user":
       return t("assistant-tasks.review_needs_user");
+    case "parked":
+      return t("assistant-tasks.review_parked");
     case "cancelled":
       return t("assistant-tasks.review_cancelled");
   }

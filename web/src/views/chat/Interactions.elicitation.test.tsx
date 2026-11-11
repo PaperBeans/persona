@@ -19,6 +19,7 @@ vi.mock("../../lib/ops", () => ({
 import { InteractionCard } from "./Interactions";
 import { dropElicitationDraft } from "../../lib/elicitation";
 import { getState } from "../../lib/store";
+import { t } from "../../i18n";
 import type { Interaction, Session } from "../../lib/types";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -131,6 +132,25 @@ describe("MCP 链接卡片", () => {
 });
 
 describe("MCP 表单卡片", () => {
+  it.each([
+    [{ type: "string", format: "date-time" }, ["2026-02-30T12:00:00Z", "2026-01-01T24:00:00Z"], "2028-02-29T12:00:00+05:30", "2028-02-29T12:00:00+05:30"],
+    [{ type: "integer" }, ["9007199254740993", "9007199254740990.5", "1e-400"], "2e3", 2000],
+  ] as const)("blocks invalid scalar input without resolving and accepts a valid correction: %j", async (field, invalid, corrected, expected) => {
+    render(formIx({ type: "object", required: ["value"], properties: { value: { ...field, title: "Value" } } }));
+    for (const value of invalid) {
+      type(input("Value"), value);
+      expect(button(t("chat-interactions.submit"))!.disabled).toBe(true);
+      expect(input("Value").getAttribute("aria-invalid")).toBe("true");
+      await click(button(t("chat-interactions.submit")));
+      expect(calls).toEqual([]);
+    }
+    type(input("Value"), corrected);
+    expect(input("Value").hasAttribute("aria-invalid")).toBe(false);
+    expect(button(t("chat-interactions.submit"))!.disabled).toBe(false);
+    await click(button(t("chat-interactions.submit")));
+    expect(calls).toEqual([{ path: "/interactions/ix_form/resolve", body: { action: "accept", content: { value: expected } } }]);
+  });
+
   it("没填的必填项直接说出来，填好后发出数字和文字", async () => {
     render(formIx(schema));
     expect(button("提交")!.disabled).toBe(true);

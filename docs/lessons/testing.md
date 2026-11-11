@@ -7,6 +7,13 @@
   that the complete package is unaffected. The controlled reproducer shows the mechanism, not which background
   statistics event happened in a particular failed run.
 
+- An index-choice assertion needs a table of its own, shaped like production (#4191). On the few rows earlier tests
+  leave behind, with `enable_seqscan = off`, two indexes cost about the same, and the leftovers decide which one wins:
+  `TestMarkFeedSentUsesUnsentIndex` passed alone and failed from the third `-count=10` iteration on, before and after
+  #3787. Check the plan in a migrated clone, on a few thousand synthetic rows, after `ANALYZE` and at default costs.
+  Check the generic plan too (`PREPARE` + `EXPLAIN EXECUTE` under `plan_cache_mode`), since cached statements can
+  switch to it. Then prove the test by mutation: drop the index, or the query's matching predicate, and it must fail.
+
 - Bound cold simulator compilation separately from test execution (#2671). A combined `xcodebuild test` can spend
   most of its deadline compiling before the first test starts. Build for testing, then test without building against
   the same derived data and suite selection; preserve failure propagation, integration exclusions and result-bundle
@@ -649,6 +656,32 @@ Pin the visual style, not an alternate navigation tree. A shared launch helper t
 - Icon-sized `Menu` (20 pt) often does not expand under XCUITest. Put row actions in a row of `.borderless` text buttons, clearer on both phone and Mac.
 - **Fake extensions installed through `dir:` in e2e are sandboxed by default** (bwrap, writes only to own data/runtime directories). A fake channel plugin writing received messages to a test directory throws and exits;
   hub restarts it, replayed input is deduplicated, and it looks like lost messages. Store files in `extension.data_dir` from `initialize` (tests read `~/.persona/extensions/data/<id>/`), retaining sandboxing.
+
+## XCUITest cannot tap while a list glides (2026-11-10, #3027)
+
+- **Every XCUITest gesture waits for the app to be idle, before and after**, and a scroll view gliding after a flick
+  is not idle. `press(forDuration:thenDragTo:…)` returns only once the glide has stopped, and a tap after it, even
+  through SpringBoard's coordinates, came 2 s later on a stopped list: a "tap ↓ during the glide" test passed without
+  testing anything.
+- **One synthesized record of the flick and the tap** (`XCSynthesizedEventRecord` with two `XCPointerEventPath`s, the
+  classes XCUITest's gestures are made of) did not keep its timing: the moves came in a burst, the finger sat still,
+  the list never glided.
+- **What works** (`apple/PersonaUITests/TouchScript.swift`): the flick stays XCUITest's own, and the tap is a
+  one-path record played through `XCUIDevice.shared`'s `eventSynthesizer` from a background queue while the main thread
+  waits the glide out. These are not public API: the helper throws `XCTSkip` if this Xcode lacks them.
+- **Time the tap from the app**: when the flick starts depends on XCUITest's wait for the app to be idle, which a running
+  turn (a step a second) stretches. A fixed delay after the drag call came before the flick (↓ not up yet) or into it
+  (the synthesizer refuses: "only one gesture can be performed at a time"). Polling the synthesizer with empty records
+  does not work either: its answers do not come while XCUITest's gesture call waits. The chat posts a Darwin
+  notification as a user's flick starts to glide (`ChatView.glideNote`, `notify_post`, DEBUG with `-probes YES`); the
+  helper waits for it with `notify_register_dispatch` on its own queue and taps 0.1 s later.
+- **Retry while the daemon still holds the flick**: XCTest's daemon counts the flick as its gesture for about 0.2 s after
+  the finger lifts, and refuses any tap until then (`XCTDaemonErrorDomain` 21). Played once, the tap never reached the
+  app. The helper plays it again every 20 ms while the answer is 21 (for up to 3 s), and logs each try. On iOS 27.0 it
+  was taken 0.19–0.22 s into a glide of about 3 s.
+- **Prove the timing in the app, not the test**: a test cannot read the list during the glide without waiting for it.
+  The app counts ↓ taps made while its scroll view `isDecelerating` (probe `glideTaps`), and the test asserts the count
+  went up; `-scrollTrace YES` shows the frames.
 
 ## Local port discovery probes fake model servers in tests (2026-11-04)
 

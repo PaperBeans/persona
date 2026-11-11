@@ -5,7 +5,8 @@ import XCTest
 /// it, a finger on the list) and asserts what the user should see. Each case saves a few screenshots along its
 /// timeline (`/tmp/persona-follow-<case>-<n><suffix>.png`) for the review.
 ///   Agents chat:  PORT=… MOCK_STREAM=1 MOCK_LONG_HISTORY=1 MOCK_AGENTS=1 python3 scripts/mock/mock_hub.py  (PERSONA_MOCK_HUB)
-///   Persona chat:  PORT=… MOCK_ASSISTANT_RUN=1 (PERSONA_RUN_HUB); MOCK_ASSISTANT_RUN=alone for the one-screen chat
+///   Persona chat:  PORT=… MOCK_ASSISTANT_RUN=1 (PERSONA_RUN_HUB); MOCK_ASSISTANT_RUN=alone for the one-screen chat;
+///                  12: PORT=… MOCK_ASSISTANT_RUN=1 MOCK_LONG_ASSISTANT=1 (PERSONA_LONG_RUN_HUB, a long chat to glide in)
 final class ScrollToBottomTests: XCTestCase {
     private var app: XCUIApplication!
     private static let widget = "macbook/a1f3c2d4-0000-4000-8000-000000000001" // streams with MOCK_STREAM, long history
@@ -25,6 +26,9 @@ final class ScrollToBottomTests: XCTestCase {
         var gap: Int?
         var dragging: Bool?
         var held: Bool?
+        var glideTaps: Int?
+        var jumpMs: Int?
+        var content: Int?
     }
 
     private typealias Timeline = [(t: Double, r: Rows)]
@@ -342,5 +346,60 @@ final class ScrollToBottomTests: XCTestCase {
         let after = record("10 after ↓", seconds: 3, shots: 1)
         let a = try XCTUnwrap(after.last?.r)
         XCTAssertTrue(a.newest && a.mode == "following", "↓ with the cards up: at the newest end:\n\(describe(after))")
+    }
+
+    /// 11. ↓ tapped while the list still glides after a flick (#3027): the glide stops at once and the list goes to the
+    /// newest end, following. XCUITest's own tap waits for the glide to stop: this one (`TouchScript`) is played while the
+    /// flick's call still waits it out. `glideTaps` (the app's count of ↓ taps made while the list glided) proves it came
+    /// in time.
+    func testK_ArrowWhileTheListGlides() throws {
+        launch(try hub("PERSONA_MOCK_HUB"), chat: Self.widget, assistant: false, ["-scrollTrace", "YES"])
+        try tapWhileGliding("11")
+    }
+
+    /// 12. The same in Persona's chat, a long one (`MOCK_LONG_ASSISTANT=1`) whose turn runs (a step every second): after
+    /// ↓ it stays at the newest end and keeps following what the turn adds.
+    func testL_ArrowWhileTheListGlidesInPersonasChat() throws {
+        launch(try hub("PERSONA_LONG_RUN_HUB"), chat: Self.main, assistant: true, ["-scrollTrace", "YES"])
+        try tapWhileGliding("12")
+    }
+
+    /// From the newest end, as the chat opens or as ↓ leaves it: a thumb's flick toward the oldest (3000 pt/s, it glides
+    /// on for screens) and ↓ 0.1 s after the list starts to glide, while it is fast, as in the report.
+    private func tapWhileGliding(_ label: String) throws {
+        guard (rows()?.content ?? 0) > Int(app.frame.height * 2) else {
+            throw XCTSkip("a chat of two screens or more to glide in (Persona's: MOCK_LONG_ASSISTANT=1)")
+        }
+        drag(from: 0.3, to: 0.85, velocity: .fast)
+        sleep(1)
+        guard arrowButton.waitForExistence(timeout: 3), arrowButton.isHittable else {
+            throw XCTSkip("no ↓ after a flick: the chat fits on a screen or two")
+        }
+        let arrow = CGPoint(x: arrowButton.frame.midX, y: arrowButton.frame.midY)
+        for round in 1...3 {
+            backToTheNewest()
+            let counted = rows()?.glideTaps ?? 0
+            let tap = try TouchScript.tapWhenGlideBegins(arrow)
+            drag(from: 0.3, to: 0.85, velocity: XCUIGestureVelocity(3000))
+            XCTAssertEqual(XCTWaiter().wait(for: [tap.played], timeout: 25), .completed, "the tap was played")
+            print("TAP \(label) round \(round):\n\(tap.log())")
+            XCTAssertNil(tap.error(), "the tap was played:\n\(tap.log())")
+            let s = record("\(label) tapped while gliding \(round)", seconds: 4, shots: 1)
+            let r = try XCTUnwrap(s.last?.r)
+            XCTAssertEqual(r.glideTaps, counted + 1, "round \(round): the tap did not come during the glide (nothing tested)")
+            XCTAssertTrue(r.newest && r.mode == "following" && r.arrow != true && !(r.frozen ?? true),
+                          "round \(round): ↓ during the glide: at the newest end, following, no ↓:\n\(describe(s))")
+            XCTAssertFalse(s.contains { $0.r.mode == "reading" }, "round \(round): reading again after ↓:\n\(describe(s))")
+            // Quick from anywhere: a screen at most is animated (`ChatJump.longest`, 0.36 s), with room for a busy simulator.
+            print("GLIDE \(label) round \(round): ↓ took \(r.jumpMs ?? -1) ms")
+            XCTAssertTrue((0...700).contains(r.jumpMs ?? -1), "round \(round): ↓ took \(r.jumpMs ?? -1) ms to the newest end")
+        }
+    }
+
+    /// At the newest end by ↓ (a tap at rest), as a round of `tapWhileGliding` begins: where the list is, it was put by ↓.
+    private func backToTheNewest() {
+        if rows()?.newest != true, arrowButton.waitForExistence(timeout: 2) { arrowButton.tap() }
+        XCTAssertTrue(waitFor(seconds: 4) { $0.newest && $0.mode == "following" }, "back at the newest end before the round")
+        sleep(1)
     }
 }

@@ -71,6 +71,17 @@ struct StyleSpecTests {
         #expect(found.isEmpty, "the accent on the page under 3:1: \(found)")
     }
 
+    /// The quieter Markdown headings (H4–H6, `Theme.Reply.secondaryInk`, #3863) are text: ≥ 4.5:1 on every page and
+    /// card, and on Persona's reply box, in light and dark.
+    @Test func quieterHeadingsReadAsText() {
+        let ink = Theme.Reply.secondaryInk, hex = Theme.Reply.secondaryInkHex
+        let found = Self.below(4.5) { (ink, $0.page) } + Self.below(4.5) { (ink, $0.card) }
+        #expect(found.isEmpty, "the quieter heading ink under 4.5:1: \(found)")
+        #expect(Self.hex(ink) == hex.light && Self.hex(ink, .dark) == hex.dark)
+        #expect(PersonaPalette.contrast(hex.light, Theme.ChatBox.personaHex.light) >= 4.5)
+        #expect(PersonaPalette.contrast(hex.dark, Theme.ChatBox.personaHex.dark) >= 4.5)
+    }
+
     /// The colored canvases stay darker than the system's grouped cells in dark (#1C1C1E): Clay's at #1D1A23 was one
     /// color with them (1.01:1); Island's own #0A1110 is 1.13:1.
     @Test func darkWashesSitUnderTheCells() {

@@ -1,13 +1,15 @@
 // Actual-app acceptance for requests made by personad ask outside a session.
-// Usage: node web/e2e/sessionless-cards.mjs <mockWebOrigin> <artifactDir>
+// Usage: node web/e2e/sessionless-cards.mjs <mockWebOrigin> <artifactDir> [mcp-scalars]
+// mcp-scalars checks the same real request page with an MCP form, at standard and Large app text size.
 // The caller owns the mock hub and web server. All writes stay inside this fixture.
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 
-const [address, artifacts, ...extra] = process.argv.slice(2);
-assert.ok(address && artifacts && !extra.length, "Supply the mock web origin and artifact directory");
+const [address, artifacts, scenario, ...extra] = process.argv.slice(2);
+assert.ok(address && artifacts && !extra.length && (scenario === undefined || scenario === "mcp-scalars"), "Supply the mock web origin, artifact directory and optional mcp-scalars scenario");
+const scalars = scenario === "mcp-scalars";
 const base = new URL(address);
 assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(base.hostname), "Use a loopback mock server");
 assert.ok(["http:", "https:"].includes(base.protocol) && !base.username && !base.password && !base.search && !base.hash && base.pathname === "/", "Use an origin without credentials or a route");
@@ -24,18 +26,28 @@ const card = (id, kind = "permission") => ({
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const deadline = setTimeout(() => void browser.close(), 180_000);
 try {
-  for (const lang of ["en", "zh-Hans", "ja"]) for (const theme of ["light", "dark"]) {
+  for (const lang of ["en", "zh-Hans", "ja"]) for (const theme of ["light", "dark"]) for (const textSize of scalars ? ["standard", "large"] : ["standard"]) {
     const labels = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/chat-interactions.json`, import.meta.url)));
-    const name = `${lang}-${theme}`;
+    const name = `${lang}-${theme}${scalars ? `-${textSize}` : ""}`;
     const run = { name, writes: [], errors: [], blocked: [], mockHellos: 0 };
     result.runs.push(run);
     let cards = [card("script-permission"), card("script-question", "question")];
+    if (scalars) cards = [{
+      ...card("scalar-form", "elicitation"), mcp_server_name: "example-mcp",
+      elicitation: { mode: "form", message: "Confirm the date and count", requested_schema: {
+        type: "object", required: ["when", "count"], properties: {
+          when: { type: "string", format: "date-time", title: "Date and time" },
+          count: { type: "integer", title: "Count" },
+        },
+      } },
+    }];
     const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, colorScheme: theme, serviceWorkers: "block" });
-    await context.addInitScript(({ lang, theme }) => {
+    await context.addInitScript(({ lang, theme, textSize }) => {
       localStorage.setItem("persona.token", "fixture-token");
       localStorage.setItem("persona.language", lang);
       localStorage.setItem("persona.theme", theme);
-    }, { lang, theme });
+      if (textSize === "large") localStorage.setItem("persona.text-size", textSize);
+    }, { lang, theme, textSize });
     await context.route("**/*", async (route) => {
       const req = route.request(), url = new URL(req.url());
       if (url.origin !== base.origin) { run.blocked.push(url.pathname); return route.abort(); }
@@ -85,10 +97,51 @@ try {
         await Promise.all(document.getAnimations().filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime)).map((animation) => animation.finished.catch(() => {})));
       });
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "No horizontal overflow");
+      if (scalars) assert.equal(await page.locator("html").getAttribute("data-text-size"), textSize === "large" ? "large" : null);
       const file = `${name}-${state}.png`;
       await page.screenshot({ path: join(output, file) });
       result.screenshots.push(file);
     };
+    if (scalars) {
+      await page.goto(new URL("/requests/scalar-form", base).href);
+      const form = page.locator('[data-card="scalar-form"]');
+      const when = form.getByLabel(labels.field_required.replace("{title}", "Date and time"), { exact: true });
+      const count = form.getByLabel(labels.field_required.replace("{title}", "Count"), { exact: true });
+      const submit = form.getByRole("button", { name: labels.submit, exact: true });
+      await when.waitFor();
+      await page.waitForFunction((dark) => document.documentElement.classList.contains("dark") === dark, theme === "dark");
+      await when.fill("2026-02-30T12:00:00Z");
+      await count.fill("9007199254740993");
+      assert.equal(await submit.isDisabled(), true);
+      assert.equal(await when.getAttribute("aria-invalid"), "true");
+      assert.equal(await count.getAttribute("aria-invalid"), "true");
+      await shot("invalid-scalars");
+      await when.fill("2028-02-29T12:00:00+05:30");
+      for (const invalid of ["9007199254740990.5", "1e-400"]) {
+        await count.fill(invalid);
+        assert.equal(await submit.isDisabled(), true);
+        assert.equal(await count.getAttribute("aria-invalid"), "true");
+      }
+      assert.deepEqual(run.writes.filter((w) => w.path.endsWith("/resolve")), []);
+      await count.fill("2e3");
+      assert.equal(await submit.isEnabled(), true);
+      assert.equal(await when.getAttribute("aria-invalid"), null);
+      assert.equal(await count.getAttribute("aria-invalid"), null);
+      if (textSize === "large") {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await shot("phone-corrected");
+      }
+      await submit.click();
+      await page.locator('[data-answered="scalar-form"]').waitFor();
+      assert.deepEqual(run.writes.filter((w) => w.path.endsWith("/resolve")), [{ method: "POST", path: "/api/v1/interactions/scalar-form/resolve", body: { action: "accept", content: { when: "2028-02-29T12:00:00+05:30", count: 2000 } } }]);
+      assert.deepEqual(run.errors, []);
+      assert.deepEqual(run.blocked, []);
+      assert.ok(run.mockHellos > 0, "The real app completed the mock WebSocket handshake");
+      result.checks.push(`${name}: invalid calendar and lossy integers blocked; correction resolves exactly once`);
+      console.log(`PASS ${result.checks.at(-1)}`);
+      await context.close();
+      continue;
+    }
     await page.goto(new URL("/overview", base).href);
     const main = page.locator("main");
     await main.locator('a[href="/requests/script-permission"]').waitFor();

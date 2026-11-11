@@ -1175,7 +1175,7 @@ For extensions installed from an extension marketplace (source `market:<marketpl
   The hub keeps each extension's `auto_upgrade` preference, and `PUT …/auto-upgrade` can still change it. Add the marketplace again with its original registration address (`spec`) to restore its id and resume upgrades under the saved settings; an extension that is still disabled then reports `disabled` instead. If the address was edited after registration, use the original address that generated the id in the extension's origin.
   An unreadable catalog, a bad signature or a missing catalog entry does not mean the marketplace was removed.
   Every marketplace extension's view keeps `market` (the marketplace it upgrades from) after that marketplace is removed, so a client can count, before a deletion, the manager's own extensions that stop upgrading (leaving out other managers' copies: a marketplace id is the same wherever its address is registered).
-  Clients: Android (#2399) greys out the switch and says how to resume; the web greys out the switch and **Check for updates**, says how to resume, and its deletion confirmation counts the affected extensions. Apple remains follow-up work.
+  Clients: Android (#2399) greys out the switch and says how to resume; the web and Apple grey out the switch and **Check for updates**, say how to resume, and count the affected extensions in their deletion confirmations.
 - **More permissions**: no upgrade; the user is told once ("Example UI 1.2.0 needs one more permission: broader network access (api.example.com), go confirm"), and the upgrade happens only after the user confirms in the app
   (through the marketplace preview and upgrade, with the permission summary).
   While the master switch or the extension's own switch is off, such a version (more permissions, a changed permission summary, or new dependencies or pack members to confirm) is only shown on the extension's page (#1828):
@@ -2694,8 +2694,11 @@ Views, components, actions, responses, placements and context all use schema-gen
   retaining hub rejection reasons in the form (#1373: https, `github:owner/repo`, `git:<address>[#branch]`; git uses the hub machine's SSH credentials, no token).
   Logic in `ExtensionMarketModel.swift` (`ExtensionMarketModel`, `MarketExtensionModel`), pages in `ExtensionMarketViews.swift`.
 - Auto-upgrade (#1699, "Auto-upgrade"): details for marketplace-installed extensions (with `ExtensionView.auto_upgrade`) add an **Update** section below **Enabled**:
-  - **Auto-Update** switch (`PUT …/{id}/-/auto-upgrade`). With `auto_upgrade_paused` (the extension is turned off) it shows off and greyed out, and the footer says auto-update is paused until the extension is on again,
-    when the extension's own setting comes back (web, iOS / Mac / Vision and Android alike; mock hub `MOCK_PLUGIN_UPGRADE=disabled`).
+  - **Auto-Update** switch (`PUT …/{id}/-/auto-upgrade`) keeps the saved preference visible. With `auto_upgrade_paused: "disabled"`, the footer says auto-update is paused until the extension is on again;
+    Apple still allows editing that saved preference, while web and Android grey it out (mock hub `MOCK_PLUGIN_UPGRADE=disabled`).
+  - With `auto_upgrade_paused: "market_removed"` (#1895), **Auto-Update** and **Check for updates** are greyed out and the page says that adding the marketplace again with the same address restores the saved setting and update checks.
+    A marketplace's delete confirmation first counts the default manager's installed extensions with that `ExtensionView.market`; 0, 1 and several have their own wording, while a read failure or an old hub that omits `market` gets the generic stopped-upgrading note rather than a false 0.
+    Covered by `ExtensionSettingsLifecycleTests`, `ExtensionMarketModelTests`, `ExtensionMarketTests.testRemovedMarketKeepsPreferenceButPausesUpdates` and `testRemoveMarketConfirmationCountsAffectedExtensions`.
   - With a new version, "New version 1.1.0" plus small status text: auto-update when idle / auto-update off / needs one more permission: … (orange) / last version failed to start, no further auto-update (orange) / you rolled back from this version, no auto-update to it (orange, `skipped_by: "user"`) / failed to install / incompatible.
     Actionable rows end with **Review** or **Update**, opening the marketplace upgrade page with permissions and confirmation.
   - Without a new version, show the last result: "Auto-updated to 1.0.0 (was 0.9.0) · 3 hours ago", or "1.1.0 failed to start, reverted to 1.0.0".

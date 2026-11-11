@@ -36,6 +36,9 @@ func digestFingerprint(e prompts.SuperviseEntry, g superviseSignal) (string, str
 	if len(e.Asks) > 0 { // the cards it lists are what is new about it
 		fields = append(fields, e.Asks)
 	}
+	if g.Kind == sigParkedDue { // each park's time is news of its own, whatever its agent said last
+		fields = append(fields, g.Key)
+	}
 	payload, _ := json.Marshal(fields)
 	sum := sha256.Sum256(payload)
 	return string(key), hex.EncodeToString(sum[:])

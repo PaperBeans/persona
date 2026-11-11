@@ -356,3 +356,135 @@ func TestSecretReferencesInExtensionSecrets(t *testing.T) {
 		t.Fatalf("saving the reference and each resolution are recorded: set %v resolved %v", setRef, resolved)
 	}
 }
+
+// A launcher key that is a reference: kept for secretKeep per launcher and computer, dropped when the launcher's
+// settings change, when its provider is switched off and when a resolution of that reference fails; the provider's
+// details list the launchers holding its references.
+func TestLauncherSecretsKept(t *testing.T) {
+	h, _ := extensionTestHub(t)
+	mux := h.routes()
+	master := h.cfg.Token
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "calls.jsonl")
+	_, pv := call(t, mux, "POST", "/api/v1/plugins/-/preview", master, `{"source": "dir:`+secretProviderPackage(t, "example-vault", "exv", out)+`"}`)
+	if c, body := call(t, mux, "POST", "/api/v1/plugins/-/install", master, fmt.Sprintf(`{"preview_id": %q, "permissions_digest": %q}`, pv["preview_id"], pv["permissions_digest"])); c != 200 {
+		t.Fatalf("install: %d %v", c, body)
+	}
+	waitLong(t, "the provider running", func() bool {
+		_, hp, err := h.extensions.secretProvider("exv://Example/item/ok")
+		return err == nil && hp != nil
+	})
+	const ref = "exv://Example/item/ok"
+	resolves := func() (n int) {
+		raw, _ := os.ReadFile(out)
+		for _, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, `"method":"resolve"`) {
+				n++
+			}
+		}
+		return n
+	}
+	get := func(launcher, machine string) {
+		t.Helper()
+		if v, err := h.LauncherSecret(ctx, ref, launcher, machine); err != nil || v != secretValueForTest {
+			t.Fatalf("%s on %q: %q %v", launcher, machine, v, err)
+		}
+	}
+
+	get("gateway", "")
+	get("gateway", "")
+	if n := resolves(); n != 1 {
+		t.Fatalf("kept after the first: %d resolutions", n)
+	}
+	raw, _ := os.ReadFile(out)
+	if !strings.Contains(string(raw), `"purpose":{"kind":"launcher","id":"gateway"}`) {
+		t.Fatalf("the provider is told which launcher: %s", raw)
+	}
+	get("gateway", "mac")
+	if n := resolves(); n != 2 || !strings.Contains(readFile(t, out), `"machine":"mac"`) {
+		t.Fatalf("each computer's use is its own: %d", n)
+	}
+
+	h.ForgetLauncherSecrets("gateway") // its settings changed
+	get("gateway", "")
+	if n := resolves(); n != 3 {
+		t.Fatalf("forgotten: %d", n)
+	}
+
+	h.extensions.kept.mu.Lock() // secretKeep later
+	for k, v := range h.extensions.kept.kept {
+		v.at = v.at.Add(-secretKeep)
+		h.extensions.kept.kept[k] = v
+	}
+	h.extensions.kept.mu.Unlock()
+	get("gateway", "")
+	if n := resolves(); n != 4 {
+		t.Fatalf("expired: %d", n)
+	}
+
+	// Any resolution of the reference that fails drops the kept copies (here: refused before reaching the provider).
+	h.extensions.resolves.mu.Lock()
+	h.extensions.resolves.most = 1
+	h.extensions.resolves.mu.Unlock()
+	if _, err := h.ResolveSecret(ctx, ref, wire.SecretPurpose{Kind: "extension", ID: "example-user"}, "settings"); err == nil {
+		t.Fatal("limited")
+	}
+	h.extensions.resolves.mu.Lock()
+	h.extensions.resolves.most = secretResolvesMost
+	h.extensions.resolves.mu.Unlock()
+	get("gateway", "")
+	if n := resolves(); n != 5 {
+		t.Fatalf("after a failure: %d", n)
+	}
+
+	// The provider's details list the launchers holding its references, not others'.
+	h.opts.LauncherReferences = func(context.Context) []LauncherReference {
+		return []LauncherReference{{Launcher: "gateway", LauncherName: "Gateway", Reference: ref},
+			{Launcher: "gateway", LauncherName: "Gateway", Machine: "mac", Reference: ref},
+			{Launcher: "other", LauncherName: "Other", Reference: "nop://Example/item/ok"}}
+	}
+	_, d := call(t, mux, "GET", "/api/v1/extensions/example-vault/-/", master, "")
+	users, _ := json.Marshal(d["secret_users"])
+	if !strings.Contains(string(users), `{"kind":"launcher","launcher":"gateway","launcher_name":"Gateway","reference":"exv://Example/item/ok"}`) ||
+		!strings.Contains(string(users), `"machine":"mac"`) || strings.Contains(string(users), "nop://") {
+		t.Fatalf("secret_users: %s", users)
+	}
+
+	// Switched off: nothing kept answers for it.
+	if c, _ := call(t, mux, "PUT", "/api/v1/extensions/example-vault/-/enabled", master, `{"enabled": false}`); c != 200 {
+		t.Fatalf("switch off: %d", c)
+	}
+	waitLong(t, "the provider gone", func() bool { _, ok := h.SecretProviderOf(ref); return !ok })
+	if v, err := h.LauncherSecret(ctx, ref, "gateway", ""); err == nil || v != "" {
+		t.Fatalf("switched off, still answered: %q %v", v, err)
+	}
+	h.extensions.kept.mu.Lock()
+	left := len(h.extensions.kept.kept)
+	h.extensions.kept.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d kept after the provider went", left)
+	}
+}
+
+// A value resolved while something was forgotten is not kept: its provider may have just gone.
+func TestKeptSecretsAfterAForget(t *testing.T) {
+	var k keptSecrets
+	key := keptKey{reference: "exv://a/b/c", kind: "launcher", id: "gw"}
+	_, gen, _ := k.get(key)
+	k.forgetProvider("example-vault")
+	k.put(key, "v", "example-vault", gen)
+	if _, _, ok := k.get(key); ok {
+		t.Fatal("kept across a forget")
+	}
+	_, gen, _ = k.get(key)
+	k.put(key, "v", "example-vault", gen)
+	if v, _, ok := k.get(key); !ok || v != "v" {
+		t.Fatalf("not kept: %q %v", v, ok)
+	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	raw, _ := os.ReadFile(path)
+	return string(raw)
+}

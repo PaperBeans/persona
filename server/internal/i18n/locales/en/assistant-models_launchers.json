@@ -9,6 +9,7 @@
   "err_chat_launcher": "Chat Completions connections cannot run as launchers",
   "err_claude_messages": "Claude launchers only support Messages connections",
   "err_auth": "Unsupported authentication method",
+  "err_key_value_or_reference": "Give a key or a reference, not both",
   "err_api_launch_fields": "A direct API connection can’t have launch arguments, a small model or a subagent model",
   "err_subagent_model_long": "Subagent model is too long",
   "err_custom_model_long": "Custom model is too long",

@@ -43,15 +43,18 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		CostOfWaiting string           `json:"cost_of_waiting"`
 		// accepted: what was done beyond the brief (#3822, task_brief_result.go).
 		AlsoDone []string `json:"also_done"`
+		// parked (parked.go): until when it waits (a duration or a time; reason says for what), and on what kind of thing.
+		Until     string `json:"until"`
+		WaitingOn string `json:"waiting_on"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("arguments: %v", err)
 	}
 	a.Note = strings.TrimSpace(a.Note)
 	switch a.Verdict {
-	case reviewAccepted, reviewRework, reviewNeedsUser, reviewCancelled:
+	case reviewAccepted, reviewRework, reviewNeedsUser, reviewParked, reviewCancelled:
 	default:
-		return "", fmt.Errorf("verdict must be accepted, rework, needs_user or cancelled")
+		return "", fmt.Errorf("verdict must be accepted, rework, needs_user, parked or cancelled")
 	}
 	switch a.Outcome = strings.TrimSpace(a.Outcome); a.Outcome {
 	case "", outcomeDone, outcomeCannot:
@@ -71,6 +74,17 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 			return "", err
 		}
 		decision, decided = d, true
+	}
+	// A parked task says what it waits for, on what kind of thing, and until when, or it is refused (parked.go).
+	var park Parked
+	if a.Verdict == reviewParked {
+		p, err := readPark(a.Reason, a.Until, a.WaitingOn, time.Now())
+		if err != nil {
+			return "", err
+		}
+		park = p
+	} else if strings.TrimSpace(a.Until) != "" || strings.TrimSpace(a.WaitingOn) != "" {
+		return "", fmt.Errorf("until and waiting_on apply to parked only")
 	}
 	deadline, err := parseDeadline(a.Deadline, time.Now())
 	switch {
@@ -99,7 +113,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 			return "", fmt.Errorf("task %s was not handed out from this conversation", t.ID)
 		}
 	}
-	if t.DoneAt != nil && (a.Verdict == reviewRework || a.Verdict == reviewNeedsUser) {
+	if t.DoneAt != nil && (a.Verdict == reviewRework || a.Verdict == reviewNeedsUser || a.Verdict == reviewParked) {
 		return "", fmt.Errorf("task %s is done already (%s): hand out a new task for what is left", t.ID, cmp.Or(t.DoneReason, "closed"))
 	}
 	if err := restated(t, a.Verdict, decision); err != nil {
@@ -121,12 +135,16 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	}
 	// Only the main conversation supervises (task_plan, quietAgentTask): another conversation's task without a ledger
 	// gets none here either, or its signals would go into the main conversation's supervision messages (#4262). It can still
-	// be closed; rework and needs_user are what supervision is for.
+	// be closed; rework, needs_user and parked are what supervision is for.
 	ledger := t.Supervision != nil || isMain
-	if !ledger && (verdict == reviewRework || verdict == reviewNeedsUser) {
+	if !ledger && (verdict == reviewRework || verdict == reviewNeedsUser || verdict == reviewParked) {
 		return "", fmt.Errorf("task %s is not supervised: send what is missing to its agent with agent_send, or ask the user in your answer", t.ID)
 	}
-	over, refused := false, false
+	if verdict == reviewParked && s.agentSupervised(t) {
+		// Its supervisor is a task leader's agent, whose supervision messages do not know parked_due (task_leader.go).
+		return "", fmt.Errorf("task %s is supervised by a task leader agent: parking applies to tasks a conversation supervises", t.ID)
+	}
+	over, refused, parks := false, false, 0
 	var waiting *OwnerWait // accepted while the work stopped on the owner's decision: refused, nothing written (#1277)
 	var v Supervision
 	if ledger {
@@ -148,6 +166,17 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				}
 				verdict, over = reviewNeedsUser, true
 			}
+			if verdict == reviewParked {
+				// Parked again while it still is (its agent's turn would have ended that): one more in a row.
+				park.Count = 1
+				if prev := v.parking(); prev != nil {
+					if prev.Parks > maxReparks {
+						parks = prev.Parks // refused: nothing is written
+						return false
+					}
+					park.Count = max(1, prev.Parks) + 1
+				}
+			}
 			r := TaskReview{At: time.Now().UTC(), Verdict: verdict, Checks: checks, Note: note, UserCheck: a.UserCheck}
 			if verdict == reviewNeedsUser {
 				r.WhyOwner, r.Reason, r.Recommend = decision.WhyOwner, decision.Reason, decision.Recommend
@@ -156,6 +185,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 			if verdict == reviewRework {
 				v.Round++
 				r.Round = v.Round
+			}
+			if verdict == reviewParked {
+				r.Reason, r.Until, r.WaitingOn, r.Parks = park.Reason, park.Until, park.WaitingOn, park.Count
 			}
 			v.State, v.Waits = verdict, nil // reviewed: the supervisor answered what the judge found
 			v.Reviews = append(v.Reviews, r)
@@ -171,6 +203,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	if refused {
 		return "", reworkOverError(t.ID)
 	}
+	if parks > 0 {
+		return "", reparkError(t.ID, parks)
+	}
 	if waiting != nil {
 		return "", ownerWaitError(t.ID, waiting)
 	}
@@ -180,7 +215,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	b := &s.supervise
 	b.mu.Lock()
 	b.init()
-	for _, k := range []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigOrphaned, sigOverdue, sigRecheck, sigUndecidable, sigOwnerCannot} {
+	for _, k := range []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigOrphaned, sigOverdue, sigRecheck, sigUndecidable, sigOwnerCannot, sigParkedDue} {
 		delete(b.pending, t.ID+"|"+k) // reviewed: what waited is answered
 	}
 	b.mu.Unlock()
@@ -189,7 +224,11 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	if verdict == reviewAccepted || verdict == reviewCancelled {
 		result = s.recordBriefResult(ctx, t, checks, a.AlsoDone, "", verdict)
 	}
-	_, _ = s.appendFeed(ctx, t.Origin, feedReview, t.ID, reviewFeedBody{Title: t.Title, Verdict: verdict, Round: v.Round, Note: note, Checks: checks, Result: result})
+	body := reviewFeedBody{Title: t.Title, Verdict: verdict, Round: v.Round, Note: note, Checks: checks, Result: result}
+	if verdict == reviewParked { // what it waits for is what the line says; an older app shows it as the note
+		body.Note, body.Until, body.WaitingOn = cmp.Or(note, park.Reason), park.Until, park.WaitingOn
+	}
+	_, _ = s.appendFeed(ctx, t.Origin, feedReview, t.ID, body)
 	if verdict != reviewNeedsUser && verdict != reviewAccepted {
 		s.dropDecision(ctx, t.ID) // the review moved on: a decision still waiting on the owner is over (conclusion.go)
 	}
@@ -317,6 +356,8 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		}
 		return fmt.Sprintf("Task %s waits for the user. Ask them (ask_user, or in your answer, pushed with notify_user if they are away); "+
 			"review it again once they decide (that also ends the decision the briefing lists for it).%s", t.ID, pushed), nil
+	case reviewParked:
+		return parkedAnswer(t.ID, park, s.location(ctx)), nil
 	}
 	text := prompts.RenderSuperviseRework(prompts.SuperviseRework{Round: v.Round, Max: maxReworkRounds, Checks: reworkChecks(checks), Note: note})
 	sent, err := s.sendToTask(ctx, t, text)
@@ -353,6 +394,9 @@ type reviewFeedBody struct {
 	Round   int           `json:"round,omitempty"`
 	Note    string        `json:"note,omitempty"`
 	Checks  []ReviewCheck `json:"checks,omitempty"`
+	// A parked review's (parked.go): until when it waits and on what kind of thing; Note says for what.
+	Until     time.Time `json:"until,omitzero"`
+	WaitingOn string    `json:"waiting_on,omitempty"`
 	// Result: an accepted or cancelled review against the task's brief (task_brief_result.go): each criterion met,
 	// not_met, unchecked or dropped, then what was done beyond it.
 	Result *BriefResult `json:"result,omitempty"`

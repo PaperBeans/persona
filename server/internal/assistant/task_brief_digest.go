@@ -168,6 +168,9 @@ func (s *Service) briefDigest(ctx context.Context, now, since time.Time, loc *ti
 			task.Need, rank = clip(oneLine(a.Verdict), 80), 0
 		} else if v := carrier.Supervision; v != nil && v.state(*carrier) == reviewNeedsUser {
 			task.Decide, rank = true, 0
+		} else if p := carrier.Supervision.parked(); p != nil && v.state(*carrier) == reviewParked && p.WaitingOn == parkOwnerPriority {
+			// Parked for the owner's priority call (parked.go): the one park that concerns them, said here and nowhere else.
+			task.Parked, rank = clip(p.Reason, 80), 1
 		}
 		if brief.Overdue != nil {
 			task.Overdue, rank = true, min(rank, 1)

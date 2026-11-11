@@ -2,7 +2,7 @@ import { useState } from "react";
 import { t } from "../../i18n";
 import type { FeedItem } from "../../lib/feed";
 import { ago } from "../../lib/format";
-import { autoReviewLine, checkCount, checklist, latestReview, reportLine, reportText, reviewBadge, reviewVerdictLabel, type CheckMark, type ReviewTone, type Supervision } from "../../lib/supervision";
+import { autoReviewLine, checkCount, checklist, latestReview, parkedLine, reportLine, reportText, reviewBadge, reviewVerdictLabel, type CheckMark, type ReviewTone, type Supervision } from "../../lib/supervision";
 import type { Todo } from "../../lib/todos";
 import { cx } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
@@ -48,6 +48,7 @@ export function ReviewChecklist({ todo }: { todo: Todo }) {
   if (!sup) return null;
   const list = checklist(sup);
   const review = latestReview(sup);
+  const parked = parkedLine(todo);
   return (
     <section data-testid="review-checklist" className="mt-4 rounded-control bg-inset p-3.5 shadow-hairline">
       <div className="flex items-center gap-2">
@@ -76,6 +77,7 @@ export function ReviewChecklist({ todo }: { todo: Todo }) {
           })}
         </ul>
       )}
+      {parked && <p data-testid="review-parked" className="mt-2 text-[12.5px] leading-[1.6] text-ink-2 select-text">{parked}</p>}
       {review?.note && <p className="mt-2 text-[12.5px] leading-[1.6] text-ink-2 select-text">{t("assistant-tasks.review_note", { note: review.note })}</p>}
       <AutoReviewResult sup={sup} />
     </section>

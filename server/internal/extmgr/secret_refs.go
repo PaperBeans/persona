@@ -3,6 +3,7 @@ package extmgr
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"time"
 
@@ -31,11 +32,24 @@ type SecretReferenceView struct {
 // SecretUserView is a secret of another extension that holds one of a provider's references, as the provider's
 // details list them: who its approvals cover.
 type SecretUserView struct {
-	Extension     string `json:"extension"`
-	ExtensionName string `json:"extension_name"`
-	Secret        string `json:"secret"`
-	SecretTitle   string `json:"secret_title"`
+	// Kind is what holds it: "extension" (Extension's secret Secret) or "launcher" (model provider Launcher's key, the
+	// one for computer Machine when that is set).
+	Kind          string `json:"kind"`
+	Extension     string `json:"extension,omitempty"`
+	ExtensionName string `json:"extension_name,omitempty"`
+	Secret        string `json:"secret,omitempty"`
+	SecretTitle   string `json:"secret_title,omitempty"`
+	Launcher      string `json:"launcher,omitempty"`
+	LauncherName  string `json:"launcher_name,omitempty"`
+	Machine       string `json:"machine,omitempty"`
 	Reference     string `json:"reference"`
+}
+
+// LauncherReference is a model provider's key that holds a reference (the assistant's launchers, Options.LauncherReferences).
+type LauncherReference struct {
+	Launcher, LauncherName string
+	Machine                string // "": the provider's own key; else that computer's
+	Reference              string
 }
 
 // programSecrets are extension id's secrets as its program gets them: values as stored, references resolved. One
@@ -96,7 +110,7 @@ func (ps *extensions) secretUsers(ctx context.Context, p *extension.Extension, l
 	}
 	var out []SecretUserView
 	for _, r := range ps.reg.ReferencesTo(ctx, schemes) {
-		u := SecretUserView{Extension: r.Extension, ExtensionName: r.Extension, Secret: r.Name, SecretTitle: r.Name, Reference: r.Reference}
+		u := SecretUserView{Kind: "extension", Extension: r.Extension, ExtensionName: r.Extension, Secret: r.Name, SecretTitle: r.Name, Reference: r.Reference}
 		if holder := ps.reg.Get(r.Extension); holder != nil {
 			u.ExtensionName = holder.L10n.Name(l, holder.Full.Name)
 			for _, s := range holder.Full.Secrets {
@@ -107,7 +121,23 @@ func (ps *extensions) secretUsers(ctx context.Context, p *extension.Extension, l
 		}
 		out = append(out, u)
 	}
+	if ps.h != nil && ps.h.opts.LauncherReferences != nil {
+		for _, r := range ps.h.opts.LauncherReferences(ctx) {
+			if scheme, ok := extension.ReferenceScheme(r.Reference); ok && slices.Contains(schemes, scheme) {
+				out = append(out, SecretUserView{Kind: "launcher", Launcher: r.Launcher, LauncherName: r.LauncherName, Machine: r.Machine, Reference: r.Reference})
+			}
+		}
+	}
 	return out
+}
+
+// SecretReference is reference as a settings field shows it: its provider and what it names (asked of the provider
+// for at most secretDescribeForView, the reference itself when it does not say).
+func (h *Manager) SecretReference(ctx context.Context, reference string) *SecretReferenceView {
+	if h.extensions == nil {
+		return &SecretReferenceView{Reference: reference, Title: reference}
+	}
+	return h.extensions.secretReferenceView(ctx, reference)
 }
 
 // secretRefError is a resolution failure as a settings check reports it (in l).

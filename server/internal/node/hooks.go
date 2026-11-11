@@ -445,8 +445,14 @@ func (n *Node) handleHook(ctx context.Context, req sockRequest) (any, error) {
 		ix.Kind, ix.Plan = proto.IxPlan, p.Plan
 		// The terminal's own dialog may decide the plan while the card still waits (the card is not always
 		// withdrawn then): the footer is watched from now, until the card is answered.
-		stopWatch := n.planThenAfterTerminal(in.SessionID)
-		res, ok, err := n.ask(ctx, ix)
+		decided := &terminalDecided{}
+		askCtx, endAsk := context.WithCancel(context.WithValue(ctx, terminalDecidedKey{}, decided))
+		defer endAsk()
+		stopWatch := n.planAfterTerminal(in.SessionID, func() {
+			decided.Store(true) // the card is withdrawn as decided on the computer, not as a hook that went away
+			endAsk()
+		})
+		res, ok, err := n.ask(askCtx, ix)
 		if err != nil || !ok || res.Approve == nil {
 			return nil, err // the watch goes on: the terminal decides, and with it the mode that follows
 		}
@@ -754,6 +760,10 @@ func (n *Node) askOnce(ctx context.Context, ix proto.Interaction) (proto.Resolut
 		}
 		if errors.Is(err, rpc.ErrClosed) {
 			return res, false, errNodeGone
+		}
+		if d, _ := ctx.Value(terminalDecidedKey{}).(*terminalDecided); d != nil && d.Load() {
+			_ = n.peer.Notify("interaction.dismiss", map[string]any{"id": ix.ID}) // answered in the terminal (planthen.go)
+			return res, false, nil
 		}
 		_ = n.peer.Notify("interaction.cancel", map[string]any{"id": ix.ID})
 		return res, false, nil

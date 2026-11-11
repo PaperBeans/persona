@@ -57,7 +57,7 @@ import { formatDate, t } from "../i18n";
 import { groupTodosByProject, treeStateLabel, type TodoProjectGroup, type TreeState } from "../lib/todo-tree";
 import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, lastActivity, triageTodos, type TriageGroup, type TriageSection } from "../lib/todo-triage";
 import { useRestoredTodos } from "../lib/todo-restore";
-import { progressLine } from "../lib/supervision";
+import { parkedLine, progressLine } from "../lib/supervision";
 import { prLink } from "./TodoStageBar";
 import { projectChoices, projectNames, useTodoProjects } from "../lib/todo-projects";
 import { useFolded } from "../lib/use-folded";
@@ -931,7 +931,7 @@ export function todoRowView(todo: Todo, lookup: SessionLookup, interactions: Int
     return view;
   }
   if (!view.urgentLine && !todo.done_at) {
-    const said = progressLine(todo.supervision);
+    const said = parkedLine(todo) ?? progressLine(todo.supervision);
     if (said) {
       view.urgentLine = true;
       view.urgentText = said;

@@ -97,6 +97,9 @@ var Features = []string{
 	// A secret may hold a provider's op://… reference: PUT …/{id}/-/secrets/{name} {reference}; secrets[].reference and
 	// secret_users in the details (docs/extensions/secret-providers.md).
 	"extension_secret_references",
+	// A model provider's key (and a computer's key for it) may be such a reference: api_key_reference /
+	// machine_key_references on POST / PUT /api/v1/launchers, key_reference / machine_key_references in its view.
+	"launcher_secret_references",
 }
 
 // Codes of a failed credential.gh_token (hub → node, node/credential.go).

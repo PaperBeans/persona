@@ -3961,6 +3961,21 @@ if MOCK_TASKS:
                           "done_when": ["List this week's merged changes"], "reviews": [], "updated_at": ago(minutes=20)})
         next(i for i in TASK_FEED[ASK1] if i["kind"] == "today")["body"]["pending_review"] = [
             {"id": "todo_task_release", "title": "整理发布说明"}]
+    # MOCK_TASKS_PARKED=1: the blog migration is parked by its supervisor (#3804): open, in In progress with until when
+    # and why, never in Needs you.
+    if os.environ.get("MOCK_TASKS_PARKED") == "1":
+        _PARKED = {"reason": "The new theme has to be picked before the pages are moved", "until": ago(days=-3),
+                   "waiting_on": "owner_priority", "count": 1}
+        for _t in TODOS_INIT + TODOS:
+            if _t["id"] == "todo_task_blog":
+                _t.update(done_at=None, supervision={
+                    "supervisor": ASK1, "state": "parked", "parked": _PARKED, "round": 0, "done_when": ["Every page renders in Astro"],
+                    "updated_at": ago(minutes=50),
+                    "reviews": [{"at": ago(minutes=50), "verdict": "parked", "reason": _PARKED["reason"], "until": _PARKED["until"],
+                                 "waiting_on": _PARKED["waiting_on"], "parks": 1}]})
+        TASK_FEED[ASK1] += [_feed("feed_parked", 50, "review", "todo_task_blog", {
+            "title": "博客迁移到 Astro", "verdict": "parked", "note": _PARKED["reason"], "until": _PARKED["until"],
+            "waiting_on": _PARKED["waiting_on"]})]
     # MOCK_TASKS_AUTO_REVIEW=1 (with MOCK_TASKS_PENDING_REVIEW=1): the independent reviewer looked at the release notes
     # task's change first (#2173): nothing blocking, one finding, its report under the criteria.
     if os.environ.get("MOCK_TASKS_AUTO_REVIEW") == "1":
@@ -9496,6 +9511,31 @@ def mock_tool_names():
 
 if os.environ.get("MOCK_TOOL_NAMES") == "1":
     mock_tool_names()
+
+
+# MOCK_REPLY_MARKDOWN=1 (#3863): a reply with a table whose delimiter row aligns its columns (leading, trailing, centered;
+# decimals that line up), headings at levels 4 to 6 and bold labels next to full-width punctuation (`**注意：**后文`,
+# `**「必须」**`), which CommonMark alone leaves as literal asterisks; in an Agents chat of its own and at the end of
+# Persona's conversation. Made-up content.
+REPLY_MD = "a1f3c2d4-0000-4000-8000-0000000c3863"
+REPLY_MD_TEXT = ("导出耗时按行数整理好了：\n\n"
+                 "| 行数 | 之前（秒） | 之后（秒） | 结果 |\n| :--- | ---: | ---: | :---: |\n"
+                 "| 1,000 | 4.8 | 0.9 | 通过 |\n| 4,000 | 19.6 | 2.7 | 通过 |\n| 8,760 | 41.2 | 5.6 | 通过 |\n\n"
+                 "#### 原因\n每行查一次数据库，一年的数据要查 8,760 次。\n\n"
+                 "##### 改法\n按 500 行一批查询，导出时间降到原来的七分之一。\n\n"
+                 "###### 备注\n旧的导出接口先保留一周。\n\n"
+                 "**注意：**夜间导出要等这次修复上线后才会变快。\n\n这是**「必须」**在周五前合并的改动。")
+
+
+def mock_reply_markdown():
+    ITEMS[REPLY_MD] = [it("user", "text", 6, text="导出现在多快了？"), it("assistant", "text", 5, text=REPLY_MD_TEXT)]
+    SESSIONS.append(sess("macbook", REPLY_MD, "导出耗时整理", "/Users/me/code/weather", "done", "unread", "weather", 1, "reply-md", 20, 5,
+                         "这是必须在周五前合并的改动。"))
+    ITEMS[ASK1] = ITEMS[ASK1] + [it("user", "text", 2, text="导出现在多快了？"), it("assistant", "text", 1, text=REPLY_MD_TEXT)]
+
+
+if os.environ.get("MOCK_REPLY_MARKDOWN") == "1":
+    mock_reply_markdown()
 
 
 # MOCK_API_ERRORS=1: model API errors as Claude Code writes them when it gives up. The home conversation ends with the
@@ -20086,6 +20126,8 @@ MOCK_HELP.append("MOCK_AGENT_ARCHIVES=1|archive  Agent 归档：features 带 age
                  "先有两个已归档的 Agent；忙的 Agent 回 409 agent_busy；?close=1 关闭开着的 Claude Agent。MOCK_ARCHIVE_CLOSE=refuse|offline：电脑没关它")
 MOCK_HELP.append("MOCK_CLOSEOUT=1  Four stopped agents on the server that ended their turn with a closeout (#3612): done with merged and deployed confirmed by the hub; "
                  "done saying merged where the hub found it is not; blocked on someone, nothing checked; not done, its reply only the block. Each last reply carries the raw block")
+MOCK_HELP.append("MOCK_TASKS_PARKED=1  With MOCK_TASKS=1: the blog migration task is parked by its supervisor (#3804): `supervision.state` "
+                 "`parked` with `supervision.parked` {reason, until, waiting_on, count}; it is In progress, not in Needs you")
 MOCK_HELP.append("MOCK_ORPHANED=1  Open to-dos nobody is working on (#3618): `orphaned` on the PR check (error), the blog (offline) and, "
                  "with MOCK_TASKS=1, the blog task (closed) and the release notes task (error)")
 
