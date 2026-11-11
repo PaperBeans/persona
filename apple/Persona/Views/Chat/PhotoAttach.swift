@@ -7,10 +7,12 @@ import SwiftUI
 
 @MainActor enum MessagePhotos {
     static let limit = 4
+    /// The long side a picture is scaled down to before it goes.
+    static let maxSide: CGFloat = 1600
 
     /// A picture as a message carries it; nil when it can't be encoded.
     static func payload(_ img: UIImage) -> (UIImage, ImagePayload)? {
-        let scaled = img.scaledDown(maxSide: 1600)
+        let scaled = img.scaledDown(maxSide: maxSide)
         guard let jpeg = scaled.jpegData(compressionQuality: 0.75) else { return nil }
         return (scaled, ImagePayload(mime: "image/jpeg", data: jpeg.base64EncodedString()))
     }

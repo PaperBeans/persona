@@ -265,6 +265,8 @@ extension Theme {
         static let unmute = "bell"
         /// An Inbox rule: where a chat's, sender's or repository's items go and what the AI twin does with them.
         static let inboxRule = "signpost.right"
+        /// Source subscriptions (#2041): what a connector's read-only tools pull into the Inbox or the knowledge base.
+        static let subscriptions = "arrow.2.circlepath"
         static let collapseAll = "rectangle.compress.vertical"
         static let expandAll = "rectangle.expand.vertical"
         static let newConversation = "plus.bubble"
@@ -546,6 +548,8 @@ extension Theme {
         static let taskPlan = "list.clipboard"
         /// Saying something straight to a task (Message, and Message “xx”).
         static let routeToTask = "arrowshape.turn.up.right"
+        /// Forward a message to another chat (#3807): sending it on, the same arrow as saying something to a task.
+        static let forwardMessage = routeToTask
         /// A pull request a task opened.
         static let pullRequest = "arrow.triangle.pull"
         /// GitHub's thread page: a merged pull request, an open issue, a review asking for changes, a check skipped

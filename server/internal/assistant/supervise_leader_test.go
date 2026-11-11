@@ -176,12 +176,12 @@ func TestDigestGoesToMainWithoutLeader(t *testing.T) {
 		t.Fatal("a side conversation's context says it is a leader")
 	}
 
-	// task_plan from a side conversation that is not a leader: no ledger, as before.
+	// task_plan from a side conversation that is not a leader: the main conversation supervises it (#4669).
 	res, err := s.toolTaskPlan(ctx, "lead1", planArgs(true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(res, "You supervise them") {
+	if strings.Contains(res, "You supervise them") || !strings.Contains(res, "The main conversation supervises them") {
 		t.Fatalf("a side conversation is told it supervises: %s", res)
 	}
 	var planned Todo
@@ -194,8 +194,8 @@ func TestDigestGoesToMainWithoutLeader(t *testing.T) {
 		}
 		return false
 	})
-	if planned.Supervision != nil {
-		t.Fatalf("a side conversation's task is supervised: %+v", planned.Supervision)
+	if planned.Supervision == nil || planned.Supervision.Supervisor != "conv1" {
+		t.Fatalf("a side conversation's task is not the main conversation's to supervise: %+v", planned.Supervision)
 	}
 }
 

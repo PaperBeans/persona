@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
@@ -32,7 +34,13 @@ func (n *Node) terminalPane(ctx context.Context, id string) (string, error) {
 	if pane, ok := strings.CutPrefix(id, panePrefix); ok {
 		return n.shellPane(ctx, pane)
 	}
-	return n.paneFor(ctx, id)
+	pane, err := n.paneFor(ctx, id)
+	if err != nil {
+		if p, ok := n.keptPane(id); ok { // a stopped agent's terminal: the shell it left (stopped.go, #4754)
+			return p.PaneID, nil
+		}
+	}
+	return pane, err
 }
 
 // shellPane checks that pane is one the host lists (a snapshot is taken when the one kept does not have it: a tab
@@ -133,9 +141,13 @@ func (n *Node) listPanes(ctx context.Context) (proto.PanesResponse, error) {
 			if p.PaneID == "" {
 				continue
 			}
-			ph.Panes = append(ph.Panes, proto.PaneItem{Pane: p.PaneID, Terminal: panePrefix + p.PaneID, TabID: p.TabID,
+			item := proto.PaneItem{Pane: p.PaneID, Terminal: panePrefix + p.PaneID, TabID: p.TabID,
 				WorkspaceID: p.WorkspaceID, Agent: p.Agent, Status: p.AgentStatus, Title: p.Title, Cwd: p.Cwd,
-				SessionID: sessionOf[p.PaneID]})
+				SessionID: sessionOf[p.PaneID]}
+			if id := p.Tokens[personaTabToken]; validID(id) && p.Agent == "" && item.SessionID == "" {
+				item.AgentSession = id // the terminal a stopped agent left (stopped.go)
+			}
+			ph.Panes = append(ph.Panes, item)
 		}
 		out.Hosts = append(out.Hosts, ph)
 	}
@@ -190,4 +202,55 @@ func (n *Node) spaceOf(kind, ws string) (host.Space, bool) {
 	defer n.mu.Unlock()
 	s, ok := n.layouts[kind].spaces[ws]
 	return s, ok
+}
+
+// paneForegroundWait bounds how long panes.list waits for the programs in front of its plain panes.
+var paneForegroundWait = 1500 * time.Millisecond
+
+// paneForegrounds names the program in front of each pane with no agent (herdr: pane.process_info) for the terminal
+// list (#4754): "zsh" at a prompt, "vim", "npm"… Nothing on the screen is read; a pane the host cannot answer for in
+// time keeps none.
+func (n *Node) paneForegrounds(ctx context.Context, out *proto.PanesResponse) {
+	ctx, cancel := context.WithTimeout(ctx, paneForegroundWait)
+	defer cancel()
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, 8)
+	for hi := range out.Hosts {
+		fg, ok := n.hosts.Get(out.Hosts[hi].Kind).(host.ForegroundNamer)
+		if !ok {
+			continue
+		}
+		for pi := range out.Hosts[hi].Panes {
+			p := &out.Hosts[hi].Panes[pi]
+			if p.Agent != "" {
+				continue
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				slots <- struct{}{}
+				defer func() { <-slots }()
+				if names, err := fg.PaneForeground(ctx, n.hosts.Ref(p.Pane)); err == nil {
+					p.Foreground = frontProgram(names)
+				}
+			}()
+		}
+	}
+	wg.Wait()
+}
+
+// frontProgram is the program a pane shows in front: the first that is not a shell, else its shell, without a login
+// shell's leading "-" or a directory.
+func frontProgram(names []string) string {
+	pick := ""
+	for _, name := range names {
+		if !shellProgram(name) {
+			pick = name
+			break
+		}
+		if pick == "" {
+			pick = name
+		}
+	}
+	return filepath.Base(strings.TrimPrefix(pick, "-"))
 }

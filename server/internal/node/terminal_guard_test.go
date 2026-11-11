@@ -23,6 +23,7 @@ var paneClosers = map[string]string{
 	"closeCodexStart": "a Codex start abandoned before Codex ran",
 	"closeNewTab":     "a start whose command never ran",
 	"failedTerminal":  "a Herdr App terminal whose launch failed",
+	"closeFinished":   "panes.close_finished: the user's Close finished terminals (stopped.go)",
 }
 
 func TestOnlyUserActionsClosePanes(t *testing.T) {

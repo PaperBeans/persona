@@ -1,0 +1,5 @@
+🔔 你用 conversation_new 开的对话「1110 | 研究 | 竞品定价」（conv-2）出错了，这一轮没做成。
+链接：https://hub.example.com/persona/conv-2
+它的错误：Invalid API key · Fix external API key
+（这是 Persona 的通知，不是用户发的消息，也不是那段对话自己发来的；同一段对话只通知这一次。）
+你来决定接下来怎么办：要看它做到哪就用 conversation_read，要它接着做或把结果发回来就用 conversation_send，也可以自己接手。错误是登录、密钥、额度这类要用户处理的，就告诉用户怎么处理。没什么要做的就不用回应。

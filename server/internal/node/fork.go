@@ -87,6 +87,10 @@ func (n *Node) fork(ctx context.Context, id, at string) (string, error) {
 		n.forked = map[string]bool{}
 	}
 	n.forked[newID] = true // listed however short it is (scanOffline skips files under 2 KB)
+	if n.freshForks == nil {
+		n.freshForks = map[string]bool{}
+	}
+	n.freshForks[newID] = true // its first message starts it (stopped.go)
 	n.mu.Unlock()
 	offlineCache.Lock()
 	offlineCache.at = time.Time{} // listed at once, not with the next scan

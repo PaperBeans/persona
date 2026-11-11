@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -80,10 +81,10 @@ func TestHerdrRetire(t *testing.T) {
 	}
 }
 
-// A message to a Codex Persona started that is no longer running resumes it in a new tab of its directory's
-// workspace, named after its title: its launcher's words with the model it ran with, `resume <id>`, and the message
-// as the prompt (nothing typed). One whose launcher is not known stays refused.
-func TestHerdrSendResumesARetiredCodex(t *testing.T) {
+// A message to a Codex Persona started that is no longer running is refused (#4754: a stopped agent takes no
+// messages). The user's Resume (session.start) brings it back in a new tab of its directory's workspace, named after
+// its title: its launcher's words with the model it ran with, `resume <id>`, and the start's prompt (nothing typed).
+func TestHerdrResumeBringsBackAStoppedCodex(t *testing.T) {
 	withCodexLaunchers(t, map[string][]string{"cx": {"codex", "-m", "gpt-6"}})
 	n, f, home := herdrNode(t)
 	cwd := mkdir(t, filepath.Join(home, "proj"))
@@ -95,9 +96,9 @@ func TestHerdrSendResumesARetiredCodex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on"}); err == nil ||
-		!strings.Contains(err.Error(), "重新打开") {
-		t.Fatalf("resumed a Codex whose launcher is not known: %v", err)
+	_, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on"})
+	if code, _ := refusalOf(t, err); code != agentStopped {
+		t.Fatalf("a message to a stopped Codex: %v", err)
 	}
 
 	n.state.put(startThread, sessionState{Launcher: "cx", Cwd: cwd, Model: "gpt-7"})
@@ -119,7 +120,7 @@ func TestHerdrSendResumesARetiredCodex(t *testing.T) {
 			f.reply("session.snapshot", snapshot(nil, nil, []any{agentOf("codex", "", proto.StatusWorking, "w1:p2", "w1:t2", "w1", cwd, "")}, nil))
 		}
 	})
-	if _, err := request(t, n, "session.send", map[string]any{"session_id": startThread, "text": "go on"}); err != nil {
+	if _, err := request(t, n, "session.start", map[string]any{"resume_session_id": startThread, "prompt": "go on"}); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -146,12 +147,14 @@ func TestOrcaRetireKeepsTheTerminal(t *testing.T) {
 	withStop(t, 1, orcaProcsMaxAge+time.Second) // the node reads Orca's processes at most this often
 	cn, co, procs := orcaSession(t)
 	go func() { // claude quits once Ctrl+C has been pressed twice: its process leaves the terminal
+		tick := time.NewTicker(10 * time.Millisecond) // the fake's trace signals nothing: looked at 200 times at most
+		defer tick.Stop()
 		for range 200 {
 			if len(co.Trace("terminal.send")) >= 2 {
 				procs.set("tab1:leaf1")
 				return
 			}
-			time.Sleep(10 * time.Millisecond)
+			<-tick.C
 		}
 	}()
 	res, err := request(t, cn, "session.retire", map[string]any{"session_id": sidA})
@@ -160,5 +163,98 @@ func TestOrcaRetireKeepsTheTerminal(t *testing.T) {
 	}
 	if c := co.Trace("terminal.close"); len(c) != 0 {
 		t.Errorf("closed: %v", c)
+	}
+}
+
+func TestRetireUsesSessionHostWithRuntimeDefault(t *testing.T) {
+	for _, closeTerminal := range []bool{false, true} {
+		action := "stop"
+		if closeTerminal {
+			action = "close"
+		}
+		t.Run(action, func(t *testing.T) {
+			for _, def := range []string{proto.EnginePaseo, proto.EngineHerdr} {
+				t.Run(def, func(t *testing.T) {
+					withStop(t, 1, 50*time.Millisecond)
+					n, f, home := herdrNode(t)
+					choice := proto.EngineChoice{Hosts: []string{proto.EngineHerdr, proto.EnginePaseo}, Default: def}
+					n.eng.name, n.eng.set = proto.LegacyEngine(choice), &choice
+					cwd := mkdir(t, filepath.Join(home, "proj"))
+					writeTranscript(t, home, cwd, sidA, time.Now(), `{"type":"assistant","message":{"role":"assistant","content":"done"},"uuid":"a1"}`)
+					n.agents[sidA] = host.Agent{Agent: "claude", PaneID: "w1:p1", TabID: "w1:t1", WorkspaceID: "w1", AgentStatus: proto.StatusDone}
+					n.state.put(sidA, sessionState{Pane: "w1:p1", Launcher: "cc", Cwd: cwd})
+					n.runtimes = newRuntimeRegistry()
+					n.runtimes.known[sidB] = knownSession{runtime: proto.EnginePaseo, label: "Paseo", at: time.Now()}
+					n.agents[sidB] = host.Agent{Agent: "claude", PaneID: "w1:p9", AgentStatus: proto.StatusDone}
+					n.state.put(sidB, sessionState{Pane: "w1:p9"}) // stale terminal state cannot override runtime ownership
+					if !closeTerminal {
+						quitsOn(f, "w1:p1", sidA, nil, shellPane("w1:p1", "w1:t1", "w1", cwd, sidA))
+					}
+					res, err := request(t, n, "session.retire", map[string]any{"session_id": sidA, "close_terminal": closeTerminal})
+					if err != nil || res["closed"] != true {
+						t.Fatalf("herdr session: %v, %v", res, err)
+					}
+					if closeTerminal {
+						if got := f.trace("tab.close"); len(got) != 1 || !strings.Contains(got[0], `"tab_id":"w1:t1"`) {
+							t.Fatalf("herdr close calls: %v", got)
+						}
+					} else {
+						closesNothing(t, f)
+					}
+					f.reset()
+					_, err = request(t, n, "session.retire", map[string]any{"session_id": sidB, "close_terminal": closeTerminal})
+					if code, _ := refusalOf(t, err); code != notRetirable {
+						t.Fatalf("Paseo session: %v", err)
+					}
+					if got := f.trace("pane.send_keys", "tab.close"); len(got) != 0 {
+						t.Fatalf("Paseo retirement touched terminals: %v", got)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestRetireHerdrCoreWithRuntimeDefault(t *testing.T) {
+	for _, closeTerminal := range []bool{false, true} {
+		action := "stop"
+		if closeTerminal {
+			action = "close"
+		}
+		t.Run(action, func(t *testing.T) {
+			withStop(t, 1, 50*time.Millisecond)
+			n, hc := hcSession(t)
+			choice := proto.EngineChoice{Hosts: []string{proto.EngineHerdrCore, proto.EnginePaseo}, Default: proto.EnginePaseo}
+			n.eng.name, n.eng.set = proto.LegacyEngine(choice), &choice
+			hc.handle("terminal.keys", func(map[string]any) any {
+				hc.setTerminals(hcTerminal("t1", "", "", 4243, "zsh", hcCwd, "", "", ""))
+				return map[string]any{}
+			})
+			hc.handle("terminal.kill", func(map[string]any) any {
+				k := hcTerminal("t1", "", "", 0, "", hcCwd, "", "", "")
+				k["state"] = "finished"
+				return k
+			})
+			res, err := request(t, n, "session.retire", map[string]any{"session_id": sidA, "close_terminal": closeTerminal})
+			if err != nil || res["closed"] != true {
+				t.Fatalf("herdr-core retirement: %v, %v", res, err)
+			}
+			if got := hc.trace("terminal.keys"); len(got) != 2 {
+				t.Fatalf("interrupt calls: %v", got)
+			}
+			kills := hc.trace("terminal.kill")
+			if closeTerminal {
+				if len(kills) != 1 || !strings.Contains(kills[0], `"terminal":"t1"`) {
+					t.Fatalf("close calls: %v", kills)
+				}
+			} else {
+				if len(kills) != 0 {
+					t.Fatalf("stopping closed terminal: %v", kills)
+				}
+				if _, live := n.agent(sidA); live {
+					t.Fatal("agent still live after stop")
+				}
+			}
+		})
 	}
 }

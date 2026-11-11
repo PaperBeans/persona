@@ -642,10 +642,11 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 				adopted = append(adopted, adoption{len(out), s.ParentThreadID, root})
 			}
 		}
-		if s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && n.codexResumableIn(id, pass) {
-			// Nothing has it open: a message resumes it in a new tab (codex_resume.go).
-			s.Capabilities.Send = true
-			s.ReadOnlyReason = ""
+		if s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && n.codexResumableIn(context.Background(), id, pass) {
+			// Nothing has it open: a stopped agent, read-only like any (stopped.go, #4754); its terminal page's Resume
+			// brings it back in a new tab (session.start, codex_resume.go).
+			s.Capabilities.Terminal = true
+			s.ReadOnlyReason = stoppedReason
 		}
 		if n.codexBlocked(id) {
 			markCodexConflict(&s)

@@ -108,7 +108,7 @@ struct ManagerGroupsTests {
         await page.load()
         let groups = try #require(page.groups)
         #expect(groups.map(\.manager.name) == ["助手", "工作", "家里"])
-        #expect(groups[0].items.map(\.id) == ["cua", "notes", "stray", "old"], "no stamp, or a manager the roster lacks: the default's")
+        #expect(groups[0].items.map(\.id) == ["notes", "old", "stray", "cua"], "missing counts use name order; unknown or missing manager stamps still belong to the default")
         #expect(groups[1].items.map(\.listKey) == ["m-1/cua"] && groups[2].items.map(\.listKey) == ["m-2/cua"])
         // The offline one's heading says when it last synced.
         #expect(!groups[2].manager.online && groups[2].manager.lastSeen != nil)

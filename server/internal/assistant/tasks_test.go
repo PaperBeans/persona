@@ -1243,8 +1243,8 @@ func TestSnapshotListsPlansWaitingToStart(t *testing.T) {
 	}
 }
 
-// A task opened from a side conversation (neither quiet nor supervised) pushes a failure notification
-// when its agent cannot start, with reason and next steps, unless muted (#5081).
+// A task opened from a side conversation (not quiet; supervised by the main conversation since #4669) pushes a
+// failure notification when its agent cannot start, with reason and next steps, unless muted (#5081).
 func TestSideConversationTaskFailedToStartPushes(t *testing.T) {
 	ctx := context.Background()
 	s, f := newTaskService(t)

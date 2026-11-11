@@ -35,7 +35,8 @@
   "peer_command": "The message channel only delivers plain messages and doesn’t run slash commands. Type the command on the computer.",
   "desktop_open_failed": "Claude’s desktop app on the computer didn’t open this session in time (it may still be starting, or the computer may be locked). Open it there, then send again. Nothing was sent.",
   "modes_on_computer": "This Claude session runs in Claude on the computer (its desktop app or another terminal). Change its mode, effort or model there.",
-  "modes_not_running": "This agent isn’t running. Send it a message to resume it, then change this.",
+  "modes_not_running": "This agent isn’t running. Resume it from its terminal page, then change this.",
+  "agent_stopped": "This agent has stopped. Its conversation and terminal stay; it doesn’t take messages, and nothing was sent. To run it again, use Resume on its terminal page.",
   "shell_waiting": "The new terminal tab stopped on a question before the agent could start. Nothing ran; the tab stays open for a few minutes so it can be answered.",
   "start_line_rejected": "The new terminal tab didn't take the start command, twice. Nothing ran; check what that shell does when it starts, then try again.",
   "directory_untypable": "This directory’s name contains a control character, such as a tab or a line break, so the agent can’t be started in it from here. Rename the directory or choose another one."

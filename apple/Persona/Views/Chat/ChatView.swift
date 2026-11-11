@@ -72,6 +72,10 @@ struct ChatView: View {
     @State private var pane: SessionPane = .chat
     @State private var git: GitStatus?
     @State private var menu = MessageMenu()
+    /// What Forward To picked (#3807): done once its sheet has gone, as a navigation made while it goes is dropped.
+    @State private var forwardPicked: ForwardOutcome?
+    /// A forward on its way to a new Agent: New Chat with it over the first message.
+    @State private var forwardNewAgent: ForwardNewAgent?
     #if os(iOS)
     /// Full Page in this chat's system screenshot (#1609).
     @State private var fullPage = ChatFullPage()
@@ -194,6 +198,8 @@ struct ChatView: View {
     @State private var quoteFlash: QuoteFlashMark?
     /// The right-edge navigator while a finger is on it (new conversation layout, `ChatEdgeScrub`).
     @State private var scrub = EdgeScrubState()
+    @State private var userInputIndex: (key: SessionKey, index: ChatUserInputIndex)?
+    @State private var navigationJump: EdgeMark?
     /// Offered once this chat's pending card was answered and another conversation needs you (#4348); nil until then.
     @State private var offeredNext: SessionKey?
 
@@ -1913,8 +1919,8 @@ struct ChatView: View {
     }
 
     private var paneBadges: [SessionPane: String] {
-        guard let n = git?.files.count, n > 0 else { return [:] }
-        return [.git: n > 99 ? "99+" : String(n)]
+        guard let n = git?.files.count, let text = CountBadge.text(n) else { return [:] }
+        return [.git: text]
     }
 
     private func loadGit() async {
@@ -1942,6 +1948,13 @@ struct ChatView: View {
                     // The navigator and the arrow keep to the part of the list over the footer.
                     .overlay { if layout.on { EdgeScrubOverlay(state: scrub).padding(.bottom, under) } }
                     .modifier(EdgeScrubbing(on: layout.on, band: scrubBand, changed: scrubbed))
+                    .tabActiveTask(id: "\(shownKey)|\(store.resets)|\(lastPromptID ?? "")") {
+                        await loadUserInputIndex()
+                    }
+                    .tabActiveTask(id: navigationJump) {
+                        guard let mark = navigationJump else { return }
+                        await jumpToInput(mark)
+                    }
                     .overlay(alignment: .bottomTrailing) { arrowLayer.padding(.bottom, under) }
                     #if DEBUG
                     .overlay(alignment: .topLeading) { if Self.scrollProbe { scrollState } }
@@ -2019,7 +2032,7 @@ struct ChatView: View {
         switch phase {
         case .began:
             let opened = withAnimation(Theme.Motion.state) {
-                scrub.open(EdgeScrubState.marks(currentLines()), height: scratch.listFrame.height, top: headerRoom, at: y)
+                scrub.open(navigationMarks(), height: scratch.listFrame.height, top: headerRoom, at: y)
             }
             if opened { EdgeScrubHaptics.open() }
         case .changed:
@@ -2027,7 +2040,7 @@ struct ChatView: View {
         case .ended:
             // The tick it opened on is only where the finger happened to be: letting go there is no choice.
             let chosen = scrub.moved
-            if let mark = withAnimation(Theme.Motion.state, { scrub.close() }), chosen { jumpToLine(mark.id) }
+            if let mark = withAnimation(Theme.Motion.state, { scrub.close() }), chosen { navigationJump = mark }
         default:
             withAnimation(Theme.Motion.state) { _ = scrub.close() }
         }
@@ -2035,6 +2048,70 @@ struct ChatView: View {
     #else
     private func scrubbed(_ p: CGPoint, _ phase: Int) {}
     #endif
+
+    /// Derive only when opening the navigator, never on scroll frames. Loaded history expands the initial window.
+    private func navigationMarks() -> [EdgeMark] {
+        ChatUserNavigation.marks(index: userInputIndex?.key == shownKey ? userInputIndex?.index : nil,
+                                 lines: currentLines(), history: store.history, revealingOlder: userScrolled)
+    }
+
+    private func loadUserInputIndex() async {
+        guard layout.on, let api = model.api(shownKey.group) else { return }
+        let key = shownKey, store = store
+        for attempt in 0..<4 {
+            do {
+                let index = try await api.userInputIndex(key)
+                guard !Task.isCancelled, shownKey == key, model.api(key.group)?.config == api.config else { return }
+                guard store.history == nil || index.history == store.history else {
+                    await model.reload(key, shouldApply: { !Task.isCancelled && shownKey == key })
+                    continue
+                }
+                userInputIndex = (key, index)
+                return
+            } catch {
+                // Older/offline hubs retain the loaded-only navigator; retry only while this page is visible.
+                guard !Task.isCancelled, shownKey == key, attempt < 3 else { return }
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
+    }
+
+    /// A released choice may not be in the two-turn tail yet. Load contiguous, folded pages only on that choice.
+    /// Both the request and every wait are bounded and fenced against leaving the page or rewriting its history.
+    private func jumpToInput(_ mark: EdgeMark) async {
+        let key = shownKey, store = store, history = store.history
+        guard let api = model.api(key.group) else { return }
+        defer { if navigationJump == mark { navigationJump = nil } }
+        let deadline = ContinuousClock.now + .seconds(60)
+        for _ in 0...Self.entryPageLimit {
+            guard !Task.isCancelled, shownKey == key, store.history == history,
+                  model.api(key.group)?.config == api.config, ContinuousClock.now < deadline else { return }
+            while (store.isRebuilding || store.isLoadingOlder), !Task.isCancelled, ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            guard !Task.isCancelled, shownKey == key, store.history == history, ContinuousClock.now < deadline else { return }
+            if let line = ChatUserNavigation.lineID(for: mark, lines: currentLines()) {
+                jumpToLine(line)
+                return
+            }
+            guard store.hasMore, let first = store.items.first else { break }
+            store.isLoadingOlder = true
+            do {
+                let page = try await api.items(key, beforeSeq: first.seq, turns: ChatUserNavigation.initialCount)
+                store.isLoadingOlder = false
+                guard !Task.isCancelled, shownKey == key, store.history == history,
+                      model.api(key.group)?.config == api.config,
+                      page.history == nil || page.history == history else { return }
+                guard let earlier = page.items.first, earlier.seq < first.seq else { break }
+                store.prepend(page.items, hasMore: page.hasMore)
+            } catch {
+                store.isLoadingOlder = false
+                if !Task.isCancelled { model.show(error) }
+                return
+            }
+        }
+        if !Task.isCancelled { model.show(APIError(status: 0, message: String(localized: "Couldn't load this message. Try again."))) }
+    }
 
     /// Brings a line of the loaded chat to the middle of the list and lights it up, as a quote's does; the list stops
     /// following the newest.
@@ -2053,6 +2130,7 @@ struct ChatView: View {
     /// for a moment. False when it is not in the loaded chat (an older page, another conversation): the block shows
     /// its whole text instead.
     private func jumpToQuoted(_ ref: ContextRef) -> Bool {
+        if ref.isForward { return openForwarded(ref) }
         guard ref.kind == "quote", !ref.msg.isEmpty else { return false }
         var target: String?
         for line in currentLines() {
@@ -2084,6 +2162,16 @@ struct ChatView: View {
             try? await Task.sleep(for: .milliseconds(250))
             quoteFlash = QuoteFlashMark(line: target)
         }
+        return true
+    }
+
+    /// A forward's card (#3807): its original chat, at the message, when this app has that chat; else the card opens to
+    /// the whole text.
+    private func openForwarded(_ ref: ContextRef) -> Bool {
+        guard let o = ForwardMessage.origin(ref) else { return false }
+        let origin = SessionKey(group: key.group, machineID: o.machine, sessionID: o.session)
+        guard model.session(origin) != nil else { return false }
+        model.openLinked(origin, item: o.item)
         return true
     }
 
@@ -2646,6 +2734,15 @@ struct ChatView: View {
         .sheet(item: $menu.selecting) { t in SelectableTextSheet(text: t.text, plain: t.plain, quote: menu.selectionQuote(of: t)) }
         #endif
         .sheet(item: $menu.sharing) { m in MessageShareSheet(message: m) }
+        #if os(iOS)
+        .sheet(item: $menu.forwarding, onDismiss: forwardDone) { d in ForwardSheet(draft: d) { forwardPicked = $0 } }
+        .sheet(item: $forwardNewAgent) { f in
+            NewChatView(contextBlock: f.ref.xml, forwarded: f.ref, forwardedImages: f.images, onlyGroup: key.group) { s in
+                forwardNewAgent = nil
+                model.open(s.key)
+            }
+        }
+        #endif
         .confirmationDialog("This Reply", isPresented: Binding(get: { menu.more != nil }, set: { if !$0 { menu.more = nil } })) {
             if let id = menu.more {
                 // A new conversation with what was said up to here (#2137). Opened once the dialog is gone: a navigation
@@ -3784,7 +3881,7 @@ struct ChatView: View {
     #if DEBUG && os(iOS)
     private func showEdgeScrub(_ n: Int) async {
         try? await Task.sleep(for: .seconds(4)) // the chat loaded and settled
-        let marks = EdgeScrubState.marks(currentLines())
+        let marks = navigationMarks()
         guard scrub.open(marks, height: scratch.listFrame.height, top: headerRoom, at: 0) else { return }
         scrub.pick(max(0, marks.count - n))
     }
@@ -3886,6 +3983,58 @@ struct ChatView: View {
             let s = model.session(key)
             return [s?.spaceName, s?.slotLabel].compactMap { $0 }.joined(separator: " › ")
         }
+        #if os(iOS)
+        // Forward (#3807): the pressed message as a forward, to the picker.
+        menu.forward = { [model, key, weak menu = menu] bar in
+            guard let menu else { return }
+            menu.forwarding = Self.forwardDraft(bar, key: key, model: model, menu: menu)
+        }
+        #endif
+    }
+
+    /// The pressed message as a forward: who wrote it and where, its text as this chat holds it (the whole of it read
+    /// when it goes, if cut), your own message's pictures, and the same message as a share card.
+    static func forwardDraft(_ bar: MessageBarInfo, key: SessionKey, model: AppModel, menu: MessageMenu) -> ForwardDraft {
+        let s = model.session(key)
+        let item = model.chat(key).items.first { $0.id == bar.id }
+        let role: ForwardMessage.Role = bar.isUser ? .user : bar.from != nil ? .other : s?.assistant == true ? .persona : .agent
+        let author = bar.from ?? (role == .persona ? "Persona" : s?.agentLabel ?? "Claude")
+        let project = s?.assistant == true ? nil : [s?.spaceName, s?.slotLabel].compactMap { $0 }.joined(separator: " › ")
+        let source = ForwardMessage.Source(key: key, item: bar.id, role: role, author: author, chat: s?.displayTitle ?? "",
+                                           project: project, machine: s?.assistant == true ? nil : model.machine(key.machineRef)?.name,
+                                           time: bar.date ?? item?.ts)
+        // The transcript's text, as the bubble or the source card reads it; what the bar has when the item is not loaded.
+        let relayed = item.flatMap { MessageSource.of($0) } != nil
+        let raw = item.map { relayed ? MessageSource.body($0) : ($0.text ?? bar.text) } ?? bar.text
+        var full: (() async throws -> String)?
+        if let item, item.fullSize != nil {
+            full = { [model] in
+                guard let api = model.api(key.group) else { throw CancellationError() }
+                var whole = item
+                whole.text = try await api.fullItem(key, id: item.id).text ?? ""
+                whole.fullSize = nil
+                whole.injected = nil
+                return relayed ? MessageSource.body(whole) : whole.text ?? ""
+            }
+        }
+        let share = ShareMessage(text: bar.text, isUser: bar.isUser, source: menu.source(), date: bar.date, agent: menu.agent())
+        return ForwardDraft(source: source, raw: raw, full: full, images: bar.isUser ? UserBubble.imagePaths(raw) : [],
+                            loadImage: { [model] path in
+                                guard let data = try? await model.api(key.group)?.fileBytes(machine: key.machineID, path: path, cwd: nil)
+                                else { return nil }
+                                return UIImage(data: data)
+                            }, share: share)
+    }
+
+    /// Forward To has gone: share the message as an image, start a new Agent with it, or put it over the target's box.
+    private func forwardDone() {
+        guard let picked = forwardPicked else { return }
+        forwardPicked = nil
+        switch picked {
+        case .share(let m): menu.sharing = m
+        case .newAgent(let ref, let images): forwardNewAgent = ForwardNewAgent(ref: ref, images: images)
+        case .target(let ref, let images, let target): model.forward(ref, images: images, to: target, group: key.group)
+        }
     }
 
     private func closedAgent(_ closed: SessionKey, order: [SessionKey]) {
@@ -3949,6 +4098,15 @@ struct ChatView: View {
         return [s.sourceSubtitle, machine, place.isEmpty ? nil : place, s.hasSource ? nil : s.agentLabel, s.stateLabel(muted: model.isMuted(s))].compactMap { $0 }.joined(separator: " · ")
     }
 
+    /// The extension that opened this Persona conversation (#3758), when `item` is the message it opened it with: the
+    /// conversation's first user message, once the page has loaded back to its start (with more to load, the first one
+    /// here is not the first). nil for every other message and conversation.
+    private func externalOpening(_ item: Item) -> AutoConversationSource? {
+        guard style == .assistant, let source = AutoConversationSource.external(session?.origin), !store.hasMore,
+              store.items.first(where: { $0.role == "user" && $0.kind == .text })?.id == item.id else { return nil }
+        return source
+    }
+
     /// A user's line: a bubble, or what stands for it (a message from a source, one Persona injected, a loop's tick, a peer's).
     @ViewBuilder private func userRow(_ i: Item, showsSource: Bool, hidesPrompt: Bool) -> some View {
         if let source = MessageSource.of(i) {
@@ -3961,7 +4119,7 @@ struct ChatView: View {
         } else if let from = i.from {
             PeerMessage(item: i, from: from)
         } else {
-            UserBubble(item: i).equatable()
+            UserBubble(item: i, external: externalOpening(i)).equatable()
         }
     }
 
@@ -4969,7 +5127,9 @@ struct Composer: View, Equatable {
         // Picked page excerpts ride along as <persona-context> tags before what was typed, comments as `> ` blocks
         // after them (the web's order), videos as <persona-file> after the text. Comments alone need no words.
         let alone = t.isEmpty && images.isEmpty && files.isEmpty && !comments.isEmpty
-        let typed = alone ? "" : t.isEmpty ? (images.isEmpty ? (files.isEmpty ? String(localized: "See the context above.") : String(localized: "Please look at the image [Assistant View a3e0a0]")) : String(localized: "Please look at the image [Assistant View 5ad878]")) : t
+        // A forward with no note (#3807) says so, rather than pointing at "the context".
+        let lone = ctx.contains(where: \.isForward) ? String(localized: "Please look at the forwarded message above.") : String(localized: "See the context above.")
+        let typed = alone ? "" : t.isEmpty ? (images.isEmpty ? (files.isEmpty ? lone : String(localized: "Please look at the image [Assistant View a3e0a0]")) : String(localized: "Please look at the image [Assistant View 5ad878]")) : t
         let body = MessageComments.message(comments, text: AttachedFile.message(typed, files: files))
         let message = ctx.isEmpty ? body : ctx.map(\.xml).joined(separator: "\n") + "\n\n" + body
         // Routed to a task ("Tell “xx”"): straight to its agent, not to Persona (docs/assistant/unified-entry.md「指向谁」).

@@ -177,6 +177,9 @@
     <string name="settings_ext_contributions_note">1つをオフにしても拡張機能の権限は減りません。ほかの提供機能はそのまま動き、変更後に拡張機能が再起動します。</string>
     <string name="settings_ext_permissions_note">インストール時に同意した内容です。新しいバージョンでさらに必要になる場合は、アップグレード前に再度確認します。</string>
     <string name="settings_ext_about_version">バージョン</string>
+    <plurals name="settings_ext_downloads">
+        <item quantity="other">%1$s回ダウンロード</item>
+    </plurals>
     <string name="settings_ext_about_previous">前のバージョン</string>
     <string name="settings_ext_about_source">ソース</string>
     <string name="settings_ext_about_publisher">発行元</string>

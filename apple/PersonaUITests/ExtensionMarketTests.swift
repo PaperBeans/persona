@@ -24,6 +24,26 @@ final class ExtensionMarketTests: XCTestCase {
         return app
     }
 
+    /// Uses Fixtures/extension-artwork.json: download totals are synthetic, publisher images are public HTTPS URLs.
+    @MainActor func testArtworkCatalogOrdersByDownloads() throws {
+        guard env["PERSONA_ARTWORK_FIXTURE"] == "1" else { throw XCTSkip("needs the extension artwork fixture") }
+        let app = try launch(["-openExtensionMarket", "YES"])
+        let telegram = app.buttons["market-plugin-telegram"]
+        let github = app.buttons["market-plugin-github"]
+        let gitlab = app.buttons["market-plugin-gitlab"]
+        XCTAssertTrue(telegram.waitForExistence(timeout: 15))
+        XCTAssertTrue(github.exists && gitlab.exists)
+        XCTAssertLessThan(telegram.frame.minY, github.frame.minY)
+        XCTAssertLessThan(github.frame.minY, gitlab.frame.minY)
+        shot(app, "artwork-catalog")
+        github.tap()
+        let settings = app.buttons["market-open-plugin"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        XCTAssertTrue(app.staticTexts["GitHub"].firstMatch.waitForExistence(timeout: 10))
+        shot(app, "artwork-installed-detail")
+    }
+
     @MainActor private func marketRequest(_ method: String, path: String, body: [String: String]? = nil) throws {
         guard let hub = env["PERSONA_EXTENSIONS_HUB"], let url = URL(string: hub + path) else { throw XCTSkip("needs the extensions mock") }
         var request = URLRequest(url: url)

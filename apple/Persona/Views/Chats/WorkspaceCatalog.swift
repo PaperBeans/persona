@@ -47,6 +47,10 @@ import SwiftUI
 }
 
 struct WorkspaceCatalogPolling: ViewModifier {
+    /// Worktrees change rarely, and the ones made or renamed here refresh the catalog themselves (`ChatsView`). Every
+    /// 10 s it was about 300 KB of JSON a minute to decode (#4685).
+    static let interval: Duration = .seconds(60)
+
     @Environment(AppModel.self) private var model
     let catalog: WorkspaceCatalog
     let enabled: Bool
@@ -58,7 +62,7 @@ struct WorkspaceCatalogPolling: ViewModifier {
             guard enabled, !covered else { return }
             while !Task.isCancelled {
                 await catalog.refresh(groups) { model.api($0) }
-                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                do { try await Task.sleep(for: Self.interval) } catch { return }
             }
         }
     }

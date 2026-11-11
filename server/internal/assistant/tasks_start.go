@@ -114,6 +114,13 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 				}
 			}
 			s.superviseTodo(ctx, todo.ID, sup, t.DoneWhen, t.ExpectMinutes)
+		} else if sup, ok := s.defaultPlanSupervisor(ctx, p.Conversation, t.Parent); ok {
+			// Any other conversation's task is the main conversation's to supervise (#4669): its signals go there, and
+			// the planning conversation hears when it ends (taskEndedNotice). The main conversation sees its card too.
+			if t.ReuseTodo == "" {
+				s.taskCard(ctx, sup, todo.ID)
+			}
+			s.superviseTodo(ctx, todo.ID, sup, t.DoneWhen, t.ExpectMinutes)
 		}
 		if t.Parent != "" { // a task leader's worker: supervised by its leader's agent, with no conversation to show a card in
 			s.superviseTodo(ctx, todo.ID, p.Conversation, t.DoneWhen, t.ExpectMinutes)
@@ -517,6 +524,16 @@ func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, 
 		s.tasks.mu.Lock()
 		delete(s.tasks.retrying, cur.ID)
 		s.tasks.mu.Unlock()
+	}
+	if stoppedAgent(cut) { // it stopped since (read-only, #4754): a new agent goes on with the task (tasks_successor.go)
+		defer release()
+		if live, _ := liveTaskAgents(s.taskAgents(ctx, cur)); len(live) > 0 {
+			return s.todoView(ctx, cur.ID) // another agent of the task still runs: it is that one's
+		}
+		if _, err := s.startTaskSuccessor(ctx, cur, cut, continueText); err != nil {
+			return nil, err
+		}
+		return s.todoView(ctx, cur.ID)
 	}
 	if err := s.call(ctx, cut.MachineID, DeviceSessionSend, map[string]any{"session_id": cut.SessionID, "text": continueText}, nil); err != nil {
 		release()

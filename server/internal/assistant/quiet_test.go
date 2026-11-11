@@ -196,23 +196,25 @@ func TestQuietNoticeWaitsForTheTurn(t *testing.T) {
 	}
 }
 
-// Tasks from another conversation are neither quiet nor supervised: no messages (the hub pushes as always). With
-// the setting off a task from the main conversation is not quiet (the hub pushes) but is still supervised.
+// Tasks from another conversation are not quiet: the planning conversation gets no notices (the hub pushes as
+// always), and since #4669 the main conversation supervises them. With the setting off a task from the main
+// conversation is not quiet (the hub pushes) but is still supervised.
 func TestNotQuietTasksAreNotTold(t *testing.T) {
 	for _, c := range []struct {
-		name string
-		set  func(*Settings)
-		told bool
+		name       string
+		set        func(*Settings)
+		supervisor string
+		told       bool
 	}{
-		{"side conversation", func(v *Settings) { v.Main = "conv-main" }, false},
-		{"setting off", func(v *Settings) { v.MainTasksQuiet = new(false) }, true},
+		{"side conversation", func(v *Settings) { v.Main = "conv-main" }, "conv-main", false},
+		{"setting off", func(v *Settings) { v.MainTasksQuiet = new(false) }, "conv1", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s, f := newQuietService(t)
 			f.judge = `{"verdict":"done","reason":"好了"}`
 			setSettings(t, s, c.set)
-			if todo := startedTask(t, s, f); todo.Quiet || (todo.Supervision != nil) != c.told {
-				t.Fatalf("todo = %+v", todo)
+			if todo := startedTask(t, s, f); todo.Quiet || todo.Supervision == nil || todo.Supervision.Supervisor != c.supervisor {
+				t.Fatalf("todo = %+v (supervision %+v)", todo, todo.Supervision)
 			}
 			agentTurn(s, f, proto.StatusWorking, "", 0)
 			agentTurn(s, f, proto.StatusDone, "好了", 0)

@@ -126,6 +126,8 @@ data class ExtensionMarket(
     val signature: MarketSignature? = null,
     /** The official market every hub has (#2351), which the hub lists first; false on others and older hubs. */
     val official: Boolean = false,
+    /** When this market's signed cumulative package download counts were refreshed (RFC3339). */
+    @SerialName("downloads_updated_at") val downloadsUpdatedAt: String? = null,
 ) {
     val label: String get() = name.ifBlank { spec }
 }
@@ -181,6 +183,11 @@ data class CatalogExtension(
     val replaces: String? = null,
     /** The installed extension this one upgrades under a new ID, once the hub checked it came from this market. */
     @SerialName("rename_from") val renameFrom: String? = null,
+    /** An anonymous, absolute HTTPS logo URL from the signed catalog, not a hub image route. */
+    @SerialName("icon_url") val iconUrl: String? = null,
+    /** GHCR package downloads across all versions; null means no count was provided, not zero. */
+    val downloads: Long? = null,
+    @SerialName("downloads_updated_at") val downloadsUpdatedAt: String? = null,
 ) {
     val label: String get() = name.ifBlank { id }
 }

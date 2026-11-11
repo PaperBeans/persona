@@ -7,6 +7,7 @@
   "chat_off": "飞书机器人的对话功能没有打开（App 设置 › 连接器 › 飞书机器人）。",
   "agent_not_found": "找不到这个 Agent（{id}）：发 /agents 重新选",
   "agent_read_only": "这个 Agent 仅支持查看：{reason}",
+  "agent_stopped": "这个 Agent 已经停了：对话和终端还在，但它不再收消息。在 Persona 里它的终端页点「恢复」，或者开一个新的 Agent。",
   "no_assistant_machine": "助手所在的机器没有配置",
   "new_chat": "新对话",
   "main_chat": "主对话",

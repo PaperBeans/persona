@@ -27,8 +27,9 @@
 | 快速筛选下置顶空间领先，其余空间仅按更新时间和完整空间 id 排序，并取消空闲空间容器。 | ChatsView 的 `body` | `quick_spaces_use_updated_time` |
 | 空间标题按需要你、工作中、完成未看、空闲的顺序朗读数量，unknown 合并到空闲。 | `StateCounts.spoken`；`AgentFilterTests.foldedHeaderSpeaksItsCounts` | `space_header_counts`、`spaces_pin_busy_muted_quiet` |
 | 助手、机器条件和搜索先决定 base，快速筛选计数取 base 中当前状态，全部标签不显示数字。 | ChatsView 的 `base`、`counts`、`QuickFilterBar` | `machine_search_before_counts`、`empty_list`、`filter_all` |
-| 搜索不区分大小写，查 title、cwd、last_text、space_name、slot_name。 | ChatsView 的 `base` | `machine_search_before_counts`、`search_expands_idle` |
+| 搜索不区分大小写，按空白分词，每个词都要出现在 title、cwd、repo_root、branch、last_text、asks、space_name、slot_name、Agent 名、model、launcher、start_error、turn_error 之一；`machine:`、`project:`、`agent:`、`model:`、`state:`、`is:pinned`、`is:error`、`since:` 是条件，不是词（`AgentParsedQuery`）。 | ChatsView 的 `base` | `machine_search_before_counts`、`search_expands_idle` |
 | 需要你、未读、工作中分别匹配对应 state。 | `AgentFilter.matches`；`AgentFilterTests.eachFilterKeepsItsState` | `filter_needsyou`、`filter_unread`、`filter_working` |
+| 后台等待中（`backgroundWaiting`）只算 state 为 working 且 `background_waiting` 为真的会话，工作中不再算它们（#6045）。 | `AgentFilter.matches`、`Session.countedState` | 各用例的 `counts` |
 | kept 保留已经匹配过的会话，但不能绕过 base；重新选择筛选会重建 kept。 | ChatsView 的 `body`、`choose`、`onChange(of: matching)` | `unread_keeps_seen_rows`、`unread_reselected_drops_seen_rows`、`kept_cannot_escape_base` |
 | 批量标已读只取筛选结果中当前 unread 的会话，不包含 kept 中已经看过的会话。 | ChatsView 的 `unreadShown` | `unread_keeps_seen_rows` |
 | 折叠只改变可见行，保留分组成员及计数；按状态的「已看」默认折叠，打开后 folded 里记 `!state/idle`。 | ChatsView 的 `spaceSection`、`stateSections`、`machineSections` | `folded_space_keeps_counts`、`folded_state_and_expanded_idle`、`folded_machine_hides_rows` |
@@ -52,7 +53,7 @@
 - `machines` 只投影分组需要的 `id` 和 `name`，顺序就是 iOS 的机器登记顺序。
 - `pins` 含 `spaces`、`sessions`；`mutes` 另含 `allowed`；空间偏好键是 `machine_id/空间名称`，会话偏好键是 `machine_id/session_id`。
 - `settings.grouping` 为 `state`、`space` 或 `machine`，其中 space 对应界面的「按项目」，并非按 cwd 汇总。
-- `settings.quick` 为 `all`、`needsYou`、`unread` 或 `working`；`machine_filter` 和 `query` 为空字符串时不限。
+- `settings.quick` 为 `all`、`needsYou`、`unread`、`working` 或 `backgroundWaiting`；`machine_filter` 和 `query` 为空字符串时不限。
 - `kept` 是这一帧已经保留的完整会话 id；用例成对给出看过后和重新选择筛选后的快照，不要求测试驱动模拟 SwiftUI 回调。
 - `folded` 使用 `state/needs` 等状态段 id（`!state/idle` 表示默认折叠的「已看」已打开）、`machine/机器标识` 或 `机器标识/空间标识`。
 - `expanded_idle` 使用活跃空间 id 或 `machine-机器标识`；`expanded_quiet` 使用空闲空间 id；二者和显式 folded 分开。

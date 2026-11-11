@@ -1,5 +1,6 @@
 package persona.core.domain.sort
 
+import persona.core.contracts.AgentState
 import persona.core.contracts.CoreText
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.Machine
@@ -49,5 +50,25 @@ class ByStatusTest {
         // "Collapse all" folds it again; a search opens it.
         assertTrue(seen(byStatus.copy(folded = setOf(StateSeenGroup, StateSeenOpened))).folded)
         assertFalse(seen(byStatus.copy(query = "seen")).folded)
+    }
+
+    // #4338 A11, as iOS's `AgentFilter`: a filter of its own, and not Working.
+    @Test fun waitingInTheBackgroundIsItsOwnQuickFilterAndNotWorking() {
+        val busy = row("busy", "working")
+        val sleeping = row("sleeping", "working", background = true)
+        assertTrue(AgentQuickFilter.Working.matches(busy))
+        assertFalse(AgentQuickFilter.Working.matches(sleeping))
+        assertTrue(AgentQuickFilter.BackgroundWaiting.matches(sleeping))
+        assertFalse(AgentQuickFilter.BackgroundWaiting.matches(busy))
+        val list = buildAgentList(listOf(busy, sleeping, row("seen", "idle")), machines)
+        assertEquals(1, list.counts[AgentQuickFilter.Working])
+        assertEquals(1, list.counts[AgentQuickFilter.BackgroundWaiting])
+        // Shown while it has agents, after Working; a paged list asks the hub for working rows.
+        assertEquals(listOf(AgentQuickFilter.All, AgentQuickFilter.Working, AgentQuickFilter.BackgroundWaiting),
+            AgentQuickFilter.shown(AgentQuickFilter.All, list.counts))
+        assertEquals(AgentState.Working, AgentQuickFilter.BackgroundWaiting.state)
+        assertEquals(listOf("m/sleeping"),
+            buildAgentList(listOf(busy, sleeping), machines, settings = AgentListSettings(quick = AgentQuickFilter.BackgroundWaiting))
+                .groups.flatMap { it.rows }.map { it.id })
     }
 }

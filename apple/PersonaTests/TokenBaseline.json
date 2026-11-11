@@ -198,14 +198,8 @@
   "Persona\/Views\/Settings\/ExtensionAuthViews.swift" : {
     "rawSymbol" : 1
   },
-  "Persona\/Views\/Settings\/ExtensionMarketViews.swift" : {
-    "rawSymbol" : 1
-  },
   "Persona\/Views\/Settings\/ExtensionOperationViews.swift" : {
     "rawSymbol" : 5
-  },
-  "Persona\/Views\/Settings\/ExtensionsViews.swift" : {
-    "rawSymbol" : 1
   },
   "Persona\/Views\/Settings\/SettingsView.swift" : {
     "animation" : 1,

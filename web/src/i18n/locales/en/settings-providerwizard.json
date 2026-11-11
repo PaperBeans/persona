@@ -132,5 +132,11 @@
   "assign_checking": "Checking whether the main conversation already works…",
   "done_no_claude_kept": "The key is saved. Claude Code still needs to be installed on {machine} before anything can run on it.",
   "done_no_claude_kept_any": "The key is saved. Claude Code still needs to be installed on the computer before anything can run on it.",
-  "step_devices": "Devices"
+  "step_devices": "Devices",
+  "check_hint": "Once the URL and key are in, the models are fetched and the connection is tested by itself.",
+  "check_wait": "Checking when you stop typing…",
+  "discovering": "Fetching models…",
+  "testing": "Testing the connection…",
+  "retry": "Retry",
+  "check_leave_url": "Checking once you leave the URL field."
 }

@@ -23,6 +23,8 @@ import {
 import { loadLaunchers } from "../../lib/launcher-list";
 import { Button, cx, Dialog, EASE, IconButton, Loading, Spinner, toast } from "../../ui/atoms";
 import { TriageRuleField } from "../../ui/TriageRuleField";
+import { ExtensionLogo } from "../../ui/ExtensionLogo";
+import { ExtensionDownloads, packageDownloads } from "../../ui/ExtensionDownloads";
 import { Icon } from "../../ui/icons";
 import { ChannelLink } from "./Channels";
 import { MarketCatalog, MarketItem, Markets, PackMemberRow, UninstallDialog, useInstalledNames } from "./ExtensionMarket";
@@ -273,9 +275,7 @@ function ExtensionList({ onOpen, onMarket, onMarkets }: { onOpen: (id: string) =
               className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-hover"
               style={{ animation: `fade-up 320ms ${EASE} ${Math.min(i, 8) * 30}ms both` }}
             >
-              <span className={cx("flex size-8 shrink-0 items-center justify-center rounded-[8px]", TILE[extensionTone(p)])}>
-                <Icon name="extension" size={15} />
-              </span>
+              <ExtensionLogo url={p.icon_url} iconSize={15} className={cx("flex size-8 shrink-0 items-center justify-center rounded-[8px]", TILE[extensionTone(p)])} />
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-[13px] text-ink">{p.name}</span>
@@ -286,6 +286,7 @@ function ExtensionList({ onOpen, onMarket, onMarkets }: { onOpen: (id: string) =
                     {note}
                   </div>
                 )}
+                {packageDownloads(p.downloads) !== null && <div className="mt-0.5"><ExtensionDownloads downloads={p.downloads} /></div>}
               </div>
               <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12px] text-ink-2">
                 <StateDot extension={p} />
@@ -661,9 +662,7 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
       {/* what it is and how it is doing */}
       <section className="mb-6 overflow-hidden rounded-card bg-surface shadow-card">
         <div className="flex items-center gap-3 px-4 py-3.5">
-          <span className={cx("flex size-11 shrink-0 items-center justify-center rounded-[11px]", TILE[extensionTone(p)])}>
-            <Icon name="extension" size={20} />
-          </span>
+          <ExtensionLogo url={p?.icon_url} iconSize={20} className={cx("flex size-11 shrink-0 items-center justify-center rounded-[11px]", TILE[extensionTone(p)])} />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-[15px] font-semibold text-ink">{p?.name ?? id}</h2>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] text-ink-3">

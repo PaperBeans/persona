@@ -63,6 +63,20 @@ afterEach(() => {
 });
 
 describe("NavRail", () => {
+  it("keeps global input ordinals in labels and keyboard announcements for a 50-mark window", async () => {
+    const ticks = Array.from({ length: 50 }, (_, i) => ({ ...tick(i), ordinal: 629 + i }));
+    act(() => root.render(<NavRail ticks={ticks} total={678} scroller={scrollerWith(1000, 800)} onJump={() => {}} reset="example/global" />));
+    await settle();
+    const marks = host.querySelectorAll("button[data-tick]");
+    expect(marks).toHaveLength(50);
+    expect(marks[0].getAttribute("aria-label")).toContain("629");
+    expect(marks[49].getAttribute("aria-label")).toContain("678");
+    const rail = host.querySelector<HTMLElement>("[data-nav-rail]")!;
+    act(() => rail.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })));
+    expect(host.querySelector('[aria-live="polite"]')?.textContent).toContain("629");
+    expect(host.querySelector('[aria-live="polite"]')?.textContent).toContain("678");
+  });
+
   it("separates the hit strip from native and overlay scrollbars and clears narrow content padding on unmount", async () => {
     const sc = scrollerWith(500, 600);
     Object.defineProperty(sc, "offsetWidth", { value: 510 });

@@ -405,6 +405,9 @@ struct SettingsView: View {
         else if d.bool(forKey: "openSentAsYou") { p = SettingsPage.sentPath }
         else if d.bool(forKey: "openConnectors") { p.append(SettingsPage.connectors) }
         else if d.bool(forKey: "openSkills") { p.append(SettingsPage.skills) }
+        else if let scope = str("openSubscriptions") { // the source subscription pages: `all`, or their first state (#2041)
+            p.append(SettingsPage.subscriptions(state: scope == "all" ? nil : scope))
+        }
         else if flag("openExtensions") || str("openExtension") != nil { // Settings › Extensions (› one (› a page of it))
             p.append(SettingsPage.plugins)
             if let id = str("openExtension") {
@@ -539,6 +542,9 @@ enum SettingsPage: Hashable {
     /// A page a plugin draws (placement plugin_page, docs/extensions/extensions.md「Declarative UI」), titled until its View says
     /// otherwise; `manager`: the plugin's (nil: the default's).
     case pluginPage(plugin: String, ui: String, title: String, manager: String? = nil)
+    /// The source subscription pages (#2041, docs/extensions/subscriptions.md "Pages"), drawn by the manager; `state` opens them on
+    /// one extension's or one connector's (`SubscriptionsUI.state`), nil on every subscription.
+    case subscriptions(state: String? = nil)
     /// Settings › Extensions › Extension Market, one plugin of a market, and the markets (docs/extensions/extensions.md「Extension marketplace」).
     case pluginMarket
     case marketExtension(market: String, id: String)
@@ -637,6 +643,8 @@ private struct SettingsDestinations: ViewModifier {
         case .plugins: ExtensionsView()
         case .plugin(let id, let manager): ExtensionDetailView(id: id, manager: manager)
         case .pluginPage(let plugin, let ui, let title, let manager): ExtensionPageView(plugin: plugin, ui: ui, title: title, manager: manager)
+        case .subscriptions(let state):
+            ExtensionPageView(plugin: SubscriptionsUI.id, ui: SubscriptionsUI.page, title: String(localized: "Subscriptions [Source Subscriptions]"), state: state)
         case .pluginMarket: ExtensionMarketView()
         case .marketExtension(let market, let id): MarketExtensionDetailView(market: market, id: id)
         case .pluginMarkets: ExtensionMarketsView()
@@ -1519,11 +1527,15 @@ struct SettingsRow: View {
     var look: ValueLook = .plain
     /// A brand's own mark (an asset of `Theme.Brand`) in place of the tinted tile, in the BeautifulUI style.
     var brand: String? = nil
+    /// Public catalog artwork; absent artwork preserves the existing row mark.
+    var iconURL: String? = nil
 
     var body: some View {
         if AppStyle.current.usesBeautifulUI {
             BUIListRow(title, value: value.flatMap { $0.isEmpty ? nil : $0 }) {
-                if let brand { SettingsBrandMark(asset: brand) } else { IconTile(symbol, tint: tint) }
+                if let iconURL, ExtensionImageCache.url(iconURL) != nil {
+                    ExtensionLogo(url: iconURL, side: Theme.Size.iconL)
+                } else if let brand { SettingsBrandMark(asset: brand) } else { IconTile(symbol, tint: tint) }
             }
         } else if let value {
             LabeledContent {

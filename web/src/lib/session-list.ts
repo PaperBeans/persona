@@ -16,6 +16,8 @@ export function compareListIds(a: string, b: string): number {
   return a.length - b.length;
 }
 const JOURNAL_LIMIT = 16_384;
+const validCounts = (counts: ListCounts | undefined): counts is ListCounts => !!counts && typeof counts.total === "number" &&
+  typeof counts.revision === "string" && !!counts.machine && !!counts.project && !!counts.group && !!counts.state;
 const FILTER_KEYS = ["state", "machine_id", "project", "group", "source", "provider", "q"] as const;
 
 export type ListFilters = Partial<Record<typeof FILTER_KEYS[number], string>>;
@@ -34,6 +36,8 @@ export interface ListPage<T> {
   next_cursor?: string;
   revision: string;
   total: number;
+  /** Only when the read asked `with_counts=1` (`sessions_page_counts`): what `counts=1` with the same filters returns. */
+  counts?: ListCounts;
 }
 export interface ListSnapshot<T> {
   rows: T[];
@@ -50,6 +54,9 @@ export interface SessionListOptions<T> {
   summary?: boolean;
   /** Receives only this completed delta's net changes, including unloaded identities. Must not throw. */
   onDelta?: (upsert: T[], remove: string[]) => void;
+  /** Whether the hub answers `with_counts=1` (`sessions_page_counts`, #4858): a refresh then reads its counts with the
+   * page, one request instead of two. A page that comes back without them still gets the separate counts read. */
+  pageCounts?: () => boolean;
 }
 
 type PreparedDelta<T> = { overlay: Map<string, T | null>; changes: Map<string, T | null>; revision: string; total: number };
@@ -78,6 +85,7 @@ export class SessionList<T> {
   private lastFailure: "load" | "more" = "load";
   private summary: boolean;
   private onDelta?: (upsert: T[], remove: string[]) => void;
+  private pageCounts: () => boolean;
 
   constructor(
     private path: string,
@@ -89,9 +97,12 @@ export class SessionList<T> {
   ) {
     this.summary = options.summary ?? true;
     this.onDelta = options.onDelta;
+    this.pageCounts = options.pageCounts ?? (() => false);
   }
 
   isSummary(): boolean { return this.summary; }
+  /** For a list over the same collection, e.g. a filtered copy of this one. */
+  usesPageCounts(): boolean { return this.pageCounts(); }
 
   /** Changing projection invalidates its bound cursors, but preserves filters and does not start a read. */
   setSummary(value: boolean): void {
@@ -213,7 +224,7 @@ export class SessionList<T> {
   private query(extra: Record<string, string>): string {
     const [path, existing = ""] = this.path.split("?");
     const params = new URLSearchParams(existing);
-    for (const key of [...FILTER_KEYS, "summary", "limit", "counts", "cursor", "since"]) params.delete(key);
+    for (const key of [...FILTER_KEYS, "summary", "limit", "counts", "with_counts", "cursor", "since"]) params.delete(key);
     for (const key of FILTER_KEYS) if (this.filters[key]) params.set(key, this.filters[key]!);
     for (const [key, value] of Object.entries(extra)) params.set(key, value);
     return `${path}?${params}`;
@@ -258,9 +269,7 @@ export class SessionList<T> {
       const counts = await api<ListCounts>(this.query({ counts: "1" }));
       if (!this.current(generation)) return;
       // Legacy hubs may ignore counts and answer with sessions. Never use that as a row baseline.
-      if (typeof counts.total === "number" && typeof counts.revision === "string" && counts.machine && counts.project && counts.group && counts.state) {
-        this.publish({ counts });
-      }
+      if (validCounts(counts)) this.publish({ counts });
     } catch (error) {
       if (!this.current(generation)) return;
       if (!this.unsupported(error)) throw error;
@@ -268,10 +277,17 @@ export class SessionList<T> {
     }
   }
 
+  /** The counts that came with a page (`with_counts`), or the separate read when they did not. */
+  private async pageCountsOrRead(generation: number, page: ListPage<T>): Promise<void> {
+    if (validCounts(page.counts)) this.publish({ counts: page.counts });
+    else await this.readCounts(generation);
+  }
+
   private async refresh(generation: number, retry = true): Promise<void> {
+    const withCounts = this.pageCounts();
     const results = await Promise.allSettled([
-      this.checkpoint && this.snapshot.supported !== false ? this.readDelta(generation) : this.readFirst(generation),
-      this.readCounts(generation),
+      this.checkpoint && this.snapshot.supported !== false ? this.readDelta(generation, withCounts) : this.readFirst(generation, withCounts),
+      withCounts ? undefined : this.readCounts(generation),
     ]);
     if (!this.current(generation)) return;
     const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
@@ -290,9 +306,11 @@ export class SessionList<T> {
     if (result.status === "fulfilled" && result.value) this.commitDelta(generation, result.value);
   }
 
-  private async readFirst(generation: number): Promise<void> {
-    const page = await this.page(generation);
+  private async readFirst(generation: number, withCounts = false): Promise<void> {
+    const page = await this.page(generation, withCounts ? { with_counts: "1" } : {});
     if (!page || !this.current(generation)) return;
+    if (withCounts) await this.pageCountsOrRead(generation, page);
+    if (!this.current(generation)) return;
     this.frozen = new Map(page.sessions.map((row) => [this.identity(row), row]));
     this.overlay = new Map();
     this.prefixSize = PAGE_SIZE;
@@ -302,7 +320,7 @@ export class SessionList<T> {
     this.publish({ rows: this.visible(), loaded: true, supported: this.snapshot.supported !== false, total: page.total, hasMore: !!this.cursor });
   }
 
-  private async readDelta(generation: number): Promise<PreparedDelta<T> | null> {
+  private async readDelta(generation: number, withCounts = false): Promise<PreparedDelta<T> | null> {
     const since = this.checkpoint!;
     const overlay = new Map(this.overlay);
     const changes = new Map<string, T | null>();
@@ -312,8 +330,12 @@ export class SessionList<T> {
     let total = this.snapshot.total;
     const cursors = new Set<string>();
     do {
-      const page = await this.page(generation, { since, ...(cursor ? { cursor } : {}) });
+      const page = await this.page(generation, { since, ...(cursor ? { cursor } : {}), ...(first && withCounts ? { with_counts: "1" } : {}) });
       if (!page || !this.current(generation)) return null;
+      if (first && withCounts) {
+        await this.pageCountsOrRead(generation, page);
+        if (!this.current(generation)) return null;
+      }
       if (!first && target !== page.revision) throw new Error(t("paged-agents.inconsistent_delta"));
       first = false;
       target = page.revision;

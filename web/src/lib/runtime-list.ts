@@ -34,6 +34,10 @@ export const runtimeActiveAt = (s: Session) => Date.parse(s.updated_at ?? "");
 /** Needs the user by the hub's rule for `state.needs_you` counts, not the client's answered-here state. */
 export const runtimeNeedsYou = (s: Session) => s.state === "needs_you";
 export const SESSIONS_LOOKUP_FEATURE = "sessions_lookup";
+export const SESSIONS_PAGE_COUNTS_FEATURE = "sessions_page_counts";
+let pageCounts = false;
+/** Set from hello: whether this hub reads a page's counts with it (`with_counts`, #4858). */
+export function setRuntimePageCounts(on: boolean) { pageCounts = on; }
 const changeListeners = new Set<(upsert: Session[], remove: string[]) => void>();
 export function onRuntimeChanges(listener: (upsert: Session[], remove: string[]) => void) {
   changeListeners.add(listener);
@@ -41,4 +45,5 @@ export function onRuntimeChanges(listener: (upsert: Session[], remove: string[])
 }
 export const runtimeSessions = new SessionList<Session>("/sessions", runtimeIdentity, runtimeOrder, undefined, runtimeRemoval, {
   onDelta: (upsert, remove) => changeListeners.forEach((listener) => listener(upsert, remove)),
+  pageCounts: () => pageCounts,
 });

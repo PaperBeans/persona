@@ -257,6 +257,11 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		fmt.Fprintf(&b, " Leader conversation %s supervises them: their supervision messages go there, and it reviews them with task_review.", lead)
 	case s.supervises(ctx, sessionID):
 		b.WriteString(" You supervise them: a supervision message comes when one needs you (review it with task_review).")
+	default:
+		if _, ok := s.defaultPlanSupervisor(ctx, sessionID, ""); ok {
+			b.WriteString(" The main conversation supervises them (its supervision messages and task_review); this conversation " +
+				"gets a one-line notice with the task's link when each one ends.")
+		}
 	}
 	b.WriteString(dups)
 	return b.String(), nil

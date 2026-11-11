@@ -100,7 +100,8 @@
         "counts": {
           "needsYou": 1,
           "unread": 2,
-          "working": 1
+          "working": 1,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -253,7 +254,8 @@
         "counts": {
           "needsYou": 1,
           "unread": 2,
-          "working": 1
+          "working": 1,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -370,7 +372,8 @@
         "counts": {
           "needsYou": 1,
           "unread": 2,
-          "working": 1
+          "working": 1,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -492,7 +495,8 @@
         "counts": {
           "needsYou": 1,
           "unread": 2,
-          "working": 1
+          "working": 1,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -557,7 +561,8 @@
         "counts": {
           "needsYou": 0,
           "unread": 0,
-          "working": 0
+          "working": 0,
+          "backgroundWaiting": 0
         },
         "groups": [],
         "unread_shown": []
@@ -658,7 +663,8 @@
         "counts": {
           "needsYou": 0,
           "unread": 2,
-          "working": 0
+          "working": 0,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -787,7 +793,8 @@
         "counts": {
           "needsYou": 0,
           "unread": 2,
-          "working": 0
+          "working": 0,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -921,7 +928,8 @@
         "counts": {
           "needsYou": 1,
           "unread": 1,
-          "working": 0
+          "working": 0,
+          "backgroundWaiting": 0
         },
         "groups": [
           {
@@ -1057,7 +1065,8 @@
         "counts": {
           "needsYou": 0,
           "unread": 0,
-          "working": 0
+          "working": 0,
+          "backgroundWaiting": 0
         },
         "groups": [],
         "unread_shown": []

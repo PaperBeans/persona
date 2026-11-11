@@ -46,6 +46,11 @@ data class HubExtension(
     val tools: List<ExtensionToolView>? = null,
     /** Manager-owned attachment metadata; an attached process is externally managed, not a market installation. */
     val attached: kotlinx.serialization.json.JsonObject? = null,
+    /** Signed-market metadata, absent for older hubs and extensions without a matching catalog entry. */
+    @SerialName("icon_url") val iconUrl: String? = null,
+    /** GHCR package downloads across all versions; absence must not be displayed as zero. */
+    val downloads: Long? = null,
+    @SerialName("downloads_updated_at") val downloadsUpdatedAt: String? = null,
 ) {
     val isRunningVoice: Boolean get() = kind == "voice" && status == "running"
 }

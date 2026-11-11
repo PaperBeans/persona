@@ -24,7 +24,17 @@ const (
 	// featureSessionsManager: GET /api/v1/sessions takes ?manager=<id> (sessionsManager). An older hub ignores the
 	// key and answers with every manager's sessions, so an app sends it only to a hub that says this.
 	featureSessionsManager = "sessions_manager"
+	// featureSessionsPageCounts: a paged GET /api/v1/sessions takes with_counts=1 and answers with the page plus the
+	// counts ?counts=1 would give for the same filters (pageWithCounts), one read where a refresh took two (#4858).
+	featureSessionsPageCounts = "sessions_page_counts"
 )
+
+// pageWithCounts is a page with its view's current counts (with_counts=1): what a separate ?counts=1 read with the
+// same filters returns, ignoring since, cursor and limit.
+type pageWithCounts struct {
+	sessionlist.Page
+	Counts sessionlist.Counts `json:"counts"`
+}
 
 // runtimeList is a transport cache of the manager's already-decorated rows. It
 // does not derive agent state or store business data. sessionsMu orders updates
@@ -144,7 +154,8 @@ func indexedRow(mid, id string, row *proto.Session, stamp bool, manager string, 
 		ID: id, Machine: mid, Project: project, Group: group, PaneSource: pane,
 		State: row.State, BackgroundWaiting: row.BackgroundWaiting, Source: row.SourceKind, Provider: row.Agent, UpdatedAt: row.UpdatedAt,
 	}
-	text := [...]string{row.Title, row.Cwd, row.RepoRoot, row.SpaceName, row.SlotName, row.AgentName, row.LastText}
+	// What q finds a row by: the fields the apps' own searches read, the branch too (#4770).
+	text := [...]string{row.Title, row.Cwd, row.RepoRoot, row.Branch, row.SpaceName, row.SlotName, row.AgentName, row.LastText}
 	if was, ok := indexed.Full.(json.RawMessage); ok && sameIndexedFull(was, raw, pane) {
 		item.Summary, item.Full = indexed.Summary, indexed.Full
 		if item.SearchText = indexed.SearchText; !joinedBy(item.SearchText, text[:], '\n') {
@@ -483,6 +494,22 @@ func (h *Hub) pagedSessions(w http.ResponseWriter, r *http.Request, manager stri
 			sessionListErr(w, err)
 			return
 		}
+	}
+	if with := r.URL.Query().Get("with_counts"); with == "1" || with == "true" {
+		o := opts
+		o.Since, o.Cursor = "", "" // current membership, as the separate counts read asks for it
+		var counts sessionlist.Counts
+		if limited {
+			counts, err = ownCounts(index, o, own)
+		} else {
+			counts, err = index.Counts(o)
+		}
+		if err != nil {
+			sessionListErr(w, err)
+			return
+		}
+		writeJSON(w, pageWithCounts{Page: page, Counts: counts})
+		return
 	}
 	writeJSON(w, page)
 }

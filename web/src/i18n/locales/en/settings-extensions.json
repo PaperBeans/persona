@@ -1,4 +1,8 @@
 {
+  "package_downloads_one": "{downloads} package download",
+  "package_downloads_other": "{downloads} package downloads",
+  "package_downloads_label": "Package downloads",
+  "package_downloads_definition": "Cumulative downloads of all versions of the extension package, not users or Persona installations.",
   "redraw": "Redraw",
   "intro": "Extensions add capabilities to Persona, like new connectors and voice chat. Built-in ones, ones in manager.json and ones installed on the hub machine are all listed here.",
   "title": "Extensions",

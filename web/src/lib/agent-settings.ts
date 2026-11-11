@@ -303,7 +303,7 @@ export function mailRequest(f: MailForm, gmailAppPassword = false): AddMailAccou
     if (f.smtpHost.trim()) {
       req.smtp_host = f.smtpHost.trim();
       req.smtp_port = port(f.smtpPort);
-      req.smtp_security = f.smtpPort.trim() === "587" ? "starttls" : "tls";
+      req.smtp_security = req.smtp_port === 587 ? "starttls" : "tls";
     }
   }
   return req;

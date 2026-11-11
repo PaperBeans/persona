@@ -141,14 +141,32 @@ private fun SectionRule() {
     else Box(Modifier.fillMaxWidth().height(Hairline).background(palette.line))
 }
 
-/** Status counts after a heading: a dot and a number for each state that has any. */
+/**
+ * Status counts after a heading: a dot and a number for each state that has any; [waiting] (the agents that only wait in
+ * the background, #6045) as a clock and a number, before an idle count, as iOS's `StateCounts`. Each is spoken as one.
+ */
 @Composable
-private fun StateCounts(counts: List<Pair<Status, Int>>) {
-    counts.filter { it.second > 0 }.forEach { (status, count) ->
+private fun StateCounts(counts: List<Pair<Status, Int>>, waiting: Int = 0) {
+    val palette = PersonaTheme.palette
+    @Composable fun count(n: Int, spoken: String, mark: @Composable () -> Unit) {
         Spacer(Modifier.width(Tokens.Space.s + Tokens.Space.xxs))
-        JStatusDot(status, size = Dot)
-        Spacer(Modifier.width(Tokens.Space.xs))
-        Text("$count", style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink2, maxLines = 1)
+        Row(Modifier.clearAndSetSemantics { contentDescription = spoken }, verticalAlignment = Alignment.CenterVertically) {
+            mark()
+            Spacer(Modifier.width(Tokens.Space.xs))
+            Text("$n", style = PersonaTheme.type.micro, color = palette.ink2, maxLines = 1)
+        }
+    }
+    val waitingWords = stringResource(R.string.designsystem_count_waiting_background, waiting)
+    var clockDrawn = false
+    counts.filter { it.second > 0 }.forEach { (status, n) ->
+        if (status == Status.Idle && waiting > 0 && !clockDrawn) {
+            clockDrawn = true
+            count(waiting, waitingWords) { JIcon(persona.core.designsystem.icons.PersonaIcons.backgroundWaiting, null, size = Caret, tint = palette.status(Status.Working).dot, decorative = true) }
+        }
+        count(n, "$n ${stringResource(status.labelRes)}") { JStatusDot(status, size = Dot) }
+    }
+    if (waiting > 0 && !clockDrawn) count(waiting, waitingWords) {
+        JIcon(persona.core.designsystem.icons.PersonaIcons.backgroundWaiting, null, size = Caret, tint = palette.status(Status.Working).dot, decorative = true)
     }
 }
 
@@ -179,6 +197,8 @@ fun AgentTreeHeader(
     online: Boolean? = null,
     detail: String? = null,
     counts: List<Pair<Status, Int>> = emptyList(),
+    /** The agents that only wait in the background, drawn apart from [counts] ([StateCounts]). */
+    waiting: Int = 0,
     onMonitor: (() -> Unit)? = null,
     tag: String? = null,
     onAction: (() -> Unit)? = null,
@@ -212,7 +232,7 @@ fun AgentTreeHeader(
                 }
                 detail?.let { Text(it, style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-            StateCounts(counts)
+            StateCounts(counts, waiting)
             if (onMonitor != null) { Spacer(Modifier.width(Tokens.Space.xs)); HeadingAction(PhIcons.Gauge, stringResource(R.string.designsystem_machine_monitor), onMonitor) }
             if (onAction != null) { Spacer(Modifier.width(Tokens.Space.xs)); HeadingAction(actionIcon ?: PhIcons.CaretRight, actionLabel ?: stringResource(R.string.designsystem_details), onAction) }
         }
@@ -280,6 +300,29 @@ fun AgentIdleRow(hidden: Int, onClick: () -> Unit, modifier: Modifier = Modifier
         Text(pluralStringResource(R.plurals.designsystem_idle_more, hidden, hidden), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1)
         Spacer(Modifier.width(Tokens.Space.xs))
         JIcon(PhIcons.CaretDown, null, size = Caret, tint = PersonaTheme.palette.ink3)
+    }
+}
+
+/**
+ * A long run of a section's rows (iOS's "Show All N"): [count] of them, the first ones above; once [expanded], "Collapse"
+ * at their end. In the accent, as a button; [depth] as the rows'.
+ */
+@Composable
+fun AgentShowAllRow(count: Int, expanded: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, depth: Int = 1) {
+    val start = Step * depth + (Caret - markSize) / 2
+    val accent = PersonaTheme.palette.accent
+    Row(
+        modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
+            .padding(start = start.coerceAtLeast(None), top = Tokens.Space.s, bottom = Tokens.Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+    ) {
+        Box(Modifier.width(markSize), contentAlignment = Alignment.Center) {
+            JIcon(if (expanded) persona.core.designsystem.icons.PersonaIcons.collapse else persona.core.designsystem.icons.PersonaIcons.expand,
+                null, size = Caret, tint = accent, decorative = true)
+        }
+        Text(if (expanded) stringResource(R.string.designsystem_show_fewer) else stringResource(R.string.designsystem_show_all, count),
+            style = PersonaTheme.type.caption, color = accent, maxLines = 1)
     }
 }
 
@@ -608,7 +651,8 @@ private const val BoardBayPeek = 0.4f
 
 /** One quick filter: a label, its count, and the status it filters by. */
 @Immutable
-data class Bay(val label: String, val count: Int? = null, val status: Status? = null)
+/** A quick filter: its words, count and state ([status]'s dot, or [icon] in its color: Waiting in the background's clock). */
+data class Bay(val label: String, val count: Int? = null, val status: Status? = null, val icon: persona.core.designsystem.icons.PhIcon? = null)
 
 /**
  * The quick filters of a list. Glass shows glass chips; brief underlined tabs; the board a counter board with

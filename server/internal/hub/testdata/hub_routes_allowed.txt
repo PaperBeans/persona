@@ -139,6 +139,7 @@ POST /api/v1/machines/{mid}/node-update/{action}
 POST /api/v1/machines/{mid}/panes
 POST /api/v1/machines/{mid}/panes/agent
 POST /api/v1/machines/{mid}/panes/close
+POST /api/v1/machines/{mid}/panes/close_finished
 POST /api/v1/machines/{mid}/panes/git
 POST /api/v1/machines/{mid}/panes/split
 POST /api/v1/machines/{mid}/ports/{port}/open

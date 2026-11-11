@@ -1,4 +1,7 @@
 {
+  "package_downloads": "パッケージのダウンロード {downloads} 回",
+  "package_downloads_label": "パッケージのダウンロード数",
+  "package_downloads_definition": "拡張機能パッケージの全バージョンの累計ダウンロード数です。ユーザー数やPersonaでのインストール数ではありません。",
   "redraw": "再描画",
   "intro": "拡張機能は、新しいコネクタや音声チャットなどの機能を Persona に追加します。ハブに組み込みのもの、manager.json に書かれたもの、ハブのマシンにインストールされたものがすべてここに表示されます。",
   "title": "拡張機能",

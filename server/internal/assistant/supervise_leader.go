@@ -39,6 +39,21 @@ func (s *Service) supervises(ctx context.Context, id string) bool {
 	return s.isMain(ctx, id) || s.isLeader(ctx, id)
 }
 
+// defaultPlanSupervisor is who supervises a task conversation hands out with task_plan when conversation does not supervise
+// (supervises): the main conversation, so no task goes unwatched (#4669). None for a task leader's worker (parent set:
+// its leader's agent supervises it), a reporting conversation's task (its notices go back to it, #4101), a plan with
+// no conversation, or a hub with no main conversation (as before: the task is not supervised).
+func (s *Service) defaultPlanSupervisor(ctx context.Context, conversation, parent string) (string, bool) {
+	if parent != "" || conversation == "" {
+		return "", false
+	}
+	if _, reports := s.reporterOf(ctx, conversation); reports {
+		return "", false
+	}
+	main := s.settings(ctx).Main
+	return main, main != "" && main != conversation
+}
+
 // digestTo is the conversation signal g goes to, with cfg the settings in effect: the one it names (To), else its task's
 // supervisor when that is a leader, unless the main conversation handles it (a leader's needs_user, a start to remedy, a task waiting for the
 // user); else the main conversation.

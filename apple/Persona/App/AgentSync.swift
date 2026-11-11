@@ -42,6 +42,7 @@ final class AgentSync {
 
     private init() {
         synced = StateCache.load(Self.stateName) ?? [:]
+        saved = synced
         // Where it was kept before 2026-11-01: the recent chats are pulled once more.
         UserDefaults.standard.removeObject(forKey: "agentSync.revs")
     }
@@ -106,11 +107,19 @@ final class AgentSync {
         let up = Set(model.groupIDs.filter { model.isLive($0) })
         guard !up.isEmpty else { return }
         let cutoff = Date.now.addingTimeInterval(-Self.recentWindow)
-        let recent = model.sessionsByMachine.values.joined()
-            .filter { up.contains($0.group) }
-            .filter { $0.status != .offline || ($0.updatedAt ?? .distantPast) > cutoff }
-            .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
-            .prefix(Self.maxSessions)
+        // Sorted by place, not by value: sorting the full `Session` values copied every one of them on each plan, which
+        // took 130–265 ms of main thread a minute on a hub with about 230 sessions (#4683).
+        let lists = Array(model.sessionsByMachine.values)
+        var order: [(at: Date, list: Int, row: Int)] = []
+        for (l, rows) in lists.enumerated() {
+            for r in rows.indices {
+                let at = rows[r].updatedAt ?? .distantPast
+                guard up.contains(rows[r].group), rows[r].status != .offline || at > cutoff else { continue }
+                order.append((at, l, r))
+            }
+        }
+        order.sort { $0.at > $1.at }
+        let recent = order.prefix(Self.maxSessions).map { lists[$0.list][$0.row] }
         var due: [SessionKey] = []
         var later: Date?
         let now = Date.now
@@ -243,8 +252,14 @@ final class AgentSync {
         }
     }
 
+    /// What the file holds once the write waiting in `saver` is done: every plan saves, and most plans change nothing
+    /// (#4684).
+    private var saved: [String: Int64]?
+
     private func save() {
+        guard synced != saved else { return }
         let snapshot = synced
+        saved = snapshot
         saver.run { StateCache.save(Self.stateName, snapshot) }
     }
 

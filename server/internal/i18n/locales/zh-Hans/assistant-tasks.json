@@ -32,6 +32,7 @@
   "done": "完成了",
   "route_no_task": "这段对话里没有这个任务",
   "route_no_agent": "这个任务没有在跑的 Agent",
+  "route_agents_stopped": "这个任务的 Agent 都已经停了，这次没有发送。在任务上发一条消息会为它开一个新的 Agent。",
   "route_offline": "那台电脑不在线",
   "outcome_question": "做完的结论",
   "outcome_pitfall": "踩过的坑",

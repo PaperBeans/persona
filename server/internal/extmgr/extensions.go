@@ -66,13 +66,16 @@ type ExtensionView struct {
 	Status string `json:"status"` // disabled | needs_setup | incompatible | stopped | starting | running | error
 	Error  string `json:"error,omitempty"`
 
-	Version     string              `json:"version,omitempty"`
-	Source      string              `json:"source,omitempty"` // builtin | hub.json | installed
-	Enabled     bool                `json:"enabled"`
-	Description string              `json:"description,omitempty"`
-	Contributes map[string][]string `json:"contributes,omitempty"`
-	NeedsSetup  []string            `json:"needs_setup,omitempty"`
-	Warnings    []string            `json:"warnings,omitempty"`
+	Version            string              `json:"version,omitempty"`
+	Source             string              `json:"source,omitempty"` // builtin | hub.json | installed
+	Enabled            bool                `json:"enabled"`
+	Description        string              `json:"description,omitempty"`
+	IconURL            string              `json:"icon_url,omitempty"`
+	Downloads          *int64              `json:"downloads,omitempty"`
+	DownloadsUpdatedAt string              `json:"downloads_updated_at,omitempty"`
+	Contributes        map[string][]string `json:"contributes,omitempty"`
+	NeedsSetup         []string            `json:"needs_setup,omitempty"`
+	Warnings           []string            `json:"warnings,omitempty"`
 
 	// A plugin from a market (extension_autoupgrade.go): its own auto-upgrade switch, why that switch does not apply
 	// now ("market_removed": its market is no longer registered; "disabled": the extension is switched off; the switch
@@ -387,6 +390,7 @@ func (ps *extensions) view(ctx context.Context, p *extension.Extension) Extensio
 	}
 	if ps.h != nil {
 		ps.h.extensionUpgrades().decorate(ctx, &v, p)
+		ps.h.decorateMarketMetadata(ctx, &v, p)
 	}
 	if m.NodeProgram() != nil {
 		v.Nodes = ps.nodes.views(p.Record.ID)

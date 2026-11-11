@@ -81,7 +81,7 @@ Chat page:
   after its `covered` and merges silently: at most every 10 seconds, once per `updated_at` (`AgentSyncPacing.catchUpAt`, the rule of the
   web's `web/src/lib/stale-page.ts`). The `rev` catches the last line of a burst whose push was lost, which `updated_at` cannot (#1179); a push never settles a moved rev, only a read sent after the move (a subscription or a catch-up, `AgentSyncPacing.RevReads`, #3191). Working Agents fetch at most once per minute (`AgentSync.workingGap`; each fetch decodes and rewrites the entire disk cache),
   immediately at turn end / Needs you (most likely to open); 19-minute real-hub replay: 45 calls/minute → 9 (2026-11-02 battery investigation). Lark (`LarkSync`): hub forwards gateway live events (`lark`), refreshing Inbox Lark chats and open chats
-  (polling fallback only: list 90 seconds, chat 60); changed Inbox chats fetch the newest page into `lark-chat-<id>` cache; on hub connection catch up latest 20;
+  (polling fallback only: list 90 seconds, chat 60); while a Feishu list is in front, changed Inbox chats fetch the newest page into `lark-chat-<id>` cache, and with none in front they are only noted, the newest 20 fetched when one comes back (#4693; a chat opened before that shows its cached page until its own fetch lands); on hub connection catch up latest 20;
   unread chats open from cache if it reaches the first unread message.
 - Settings › Storage (`StorageView`): space used on this phone, size and share bars by category (Agent chats, chat images, Lark images/files, lists/Lark chats, websites,
   network cache, other, App data); swipe left / long-press clears a category, or Clear all caches (settings and pairing retained; websites clear cache, not login).
@@ -133,6 +133,27 @@ Chat page:
   - **Sending**: after the `<persona-context>` tags and before what was typed, numbered from 1; comments alone send without words.
   - **Sent bubble**: the blocks, from any client, are quote cards at the top of the bubble (kind, number, place; the note); a tap opens the whole note and the code. A plain `> ` quote before them is a quote card too; a message with no comment block is drawn as before.
   - **Edit**: the comments go back over the box as cards, the words into it.
+- Forwarding a message (#3807; `Views/Chat/Forward.swift`, `ForwardSheet.swift`; iPhone and iPad, not the frozen Mac app): the
+  `<persona-context kind="forward">` block and its metadata are in docs/protocol/protocol.md, "Forwarded messages".
+  - **Entry**: the lifted message's bar has Forward where Share was (`MessageActionBar.forwards`: a sent message, in a chat that
+    forwards), so the bar keeps its width; Share as Image is the first row of the picker. Messages not sent yet, the Mac and
+    Apple Vision Pro keep Share.
+  - **Forward To** (`ForwardSheet`): Share as Image, the message being forwarded, Persona (Main Chat, unless that is this
+    chat) and New Agent…, then Recent (`ForwardMemory`: the last 8 targets per hub group, ids only, never synced, gone with
+    the group) and each computer's live Agents in the Machines order, latest first (`ForwardTargets`: same hub, takes
+    messages, computer online, never this chat or Health). Search matches titles, Agents, projects and computers, and also
+    finds ended Agents (the send resumes them) and Persona's other conversations. The lists are the sessions the app holds,
+    read once as the sheet opens.
+  - **Picking a target** reads the whole message when the chat holds it cut (`/items/{iid}/full`) and the photos of your own
+    message, then opens the target's chat (`AppModel.forward`) with the forward over its box (`composerContexts`, like a
+    quote, × takes it off) and a line saying where it comes from and goes ("From MacBook Pro · to Codex on Mac Studio"), the
+    photos in the box's tray (`composerInbox`). The note is typed and sent there, through the usual send. New Agent opens
+    New Chat with the card over First Message, the block as its `contextBlock`. Persona with no main conversation yet: the
+    new conversation's box.
+  - **Sent**: the block is a card at the top of the bubble, as a quote's, with the arrow, "Forwarded from Claude · chat",
+    the computer and time, and four lines; a tap opens the original chat at the message (`AppModel.openLinked`), or the
+    whole text when this app does not have that chat. Nothing is written to the original chat.
+  - Tests: `ForwardTests` (`spec/fixtures/forward`), `ForwardMessageTests` (the whole way on the mock hub, screenshots).
   - Screenshots `-showSampleComments YES` (two code comments and an element over the box); `MOCK_COMMENTS=1` gives the widget chat a review sent from the web; end-to-end `CommentBubbleTests`.
 - Files: message paths and Read / Edit / Write tool paths become tappable file tags, read from the session's computer
   (`GET /api/v1/machines/{mid}/file`, at most 2 MB, iCloud directories denied), rendered Markdown / numbered code / images / PDF / directories.
@@ -305,6 +326,7 @@ Chat page:
   Action icons fixed 22pt high (SF Symbols differ, otherwise text misaligns).
   A message of yours not in the transcript yet (sending, waiting for the network, failed: `PendingBubble`) has the strip too, with Copy / Select text / Share (#6427), so one the computer refused can be copied rather than typed again;
   no Quote (also not by swiping or from Select text: it may never reach the agent), no Edit (a waiting one would still go out besides the edited one), no Rewind. `PendingBubbleMenuTests` (the `SendSafetyTests` mock: refused, Not Now, long-press, Copy, paste into the composer).
+  One only on this phone (`PendingMessage.onlyHere`: failed, or waiting for the network; #4626) ends the strip in red with what its mark's menu says, **Delete** or **Don't Send**, and the plain context menu where there is no strip (a new conversation's failed first message) has it too. It removes the bubble and its outbox entry and sends nothing; a toast offers Undo, which puts it back where it was (`AppModel.discard` / `undoDiscard`; a new conversation's first message through `FailedStart`). A message the hub may have (sending, sent, in the transcript) has no Delete. `PendingDeleteTests`, `PendingBubbleMenuTests.testDeleteAMessageThatWasNotSent` (Delete, Undo, deleted again, gone after a relaunch, no Delete on a delivered message).
   - Rewind here (#2915, web #2436, `Rewind.swift`): Claude Agent own transcript message action adds Rewind,
     chooses Chat only / Code and chat, latter confirms files too. Idle only; working/waiting/not running/non-Claude explains why;
     absent for assistant/sub-Agents. App sends original text (fetch full if truncated), reverse occurrence index of identical text and count after it (`POST …/rewind`),
@@ -527,7 +549,7 @@ Inspired by dot and ChatGPT App (user-provided screenshots). Code in `Persona/Vi
 - **Sidebar** below the main page, 82% of screen width (at most 380pt). The main page covers it, remaining a same-size rounded card when slid right (thin dark-mode border separates it from the sidebar), dimming with progress (`Theme.Fill.scrim`, black 20% light / 45% dark, #334); sidebar stays horizontally fixed and rises only 8pt as revealed (`Theme.Motion.drawerLift`), with no scaling or fading. Tap the card or drag left to close.
   Content (2026-10-31, changed to match Doubao's sidebar from user screenshots): large avatar name (Persona) and a circular Search button on the right (becomes search field + Cancel);
   Main chat is the first row (avatar App icon + Persona, identical to the new-shell drawer, #2004 / #5110), then a separator; actions below: New chat, Scheduled tasks, Knowledge, Health (icon + text, no cards; Health in `docs/assistant/health.md` ("iOS and Mac entry points")); separator; Directions (the leader conversations in the hub's order, each with its "N working · N need you", as in the new shell) and one **All Chats** row opening the full list; no inline Pinned or Recent group (#4331). Each row has one circular marker (pale chat bubble color chosen by session id, adjacent rows different) + one-line title,
-  with a right-side status dot only for Needs you / Unread / Working; the last message appears only in long-press preview. Current chat has a rounded gray background. Bottom row: avatar + name + Online / Offline and machine
+  with a right-side state mark only for Needs you / Unread / Working (`RowStateMark`: a blue dot, a green dot, the amber spinner; the same mark on the main chat's row, the Directions rows and in All Chats, #4538); the last message appears only in long-press preview. Current chat has a rounded gray background. Bottom row: avatar + name + Online / Offline and machine
   (tap for profile), Settings on the right (drawer only; split mode has the tab bar beside it). Search lists only results (N chats). Long-press also copies session ID or ends the chat.
   **All Chats** (#3264, `AutoConversationsView`): every conversation, filtered along the top by All, Mine and each origin the hub reports (`conversation_origin`, session `origin`, `docs/protocol/protocol.md` ("Origin of assistant chats")): Inbox AI twin, scheduled tasks, Lark /agent, derived chats and extension-created chats. Same view in iPhone drawer, iPad split and Mac sidebar. Search still searches all. Old hubs without origins omit the source filters.
 - **Gestures** (2026-10-31, rebuilt to match ChatGPT after build 49 feedback "not smooth, not following the finger, small area, swipes do nothing"): right-drag anywhere on the page opens the sidebar,
@@ -1130,8 +1152,10 @@ iOS, Mac, visionOS, watch and extensions support Simplified Chinese, English and
   - Call icons `voiceMute` / `voiceUnmute` (same crossed mic, filled unmute, Phone-like toggle), `voiceEnd` (`Theme.danger`), `voiceCaptions` full captions, `voiceTimbre` voice; entry `voiceChannel`.
   - Mac continuous clocks relayout whole window each frame (`docs/lessons/macos.md`); no Mac voice yet, future animation Core Animation.
 - One badge/count recipe (`Components.swift`): noninteractive `Chip` neutral (gray/pale: model/version/tab/direct chat),
-  tinted (meaning + pale fill: `.tone` state, @me red, Recommended AI purple), outlined (Claude/Codex kind); `CountBadge` white on
-  gray `Theme.countBadge` or accent, or state text on tint, 99+ over 99. Interactive filters/tabs/modes/sub-Agents are controls, not these.
+  tinted (meaning + pale fill: `.tone` state, @me red, Recommended AI purple), outlined (Claude/Codex kind); `CountBadge` in the web's three looks (#4538):
+  `.needs` (Needs you's text on its tint) for what waits for the user, `.neutral` (white on gray `Theme.countBadge`, the default) for a passive total,
+  `.accent` (white on accent) for a mention or the selected item. Nothing at 0, 99+ over 99 (`CountBadge.text`, also for the tab and pane badges that are
+  strings), VoiceOver reads the exact number or the host's `label`. Interactive filters/tabs/modes/sub-Agents are controls, not these.
 - BeautifulUI (`apple/Packages/BeautifulUI`, vendored copy, source/update in `VENDORED.md`, no local library edits):
   **BeautifulUI style only** (`AppStyle.usesBeautifulUI`, Liquid Glass surfaces/theme colors), other styles retain Persona thinking/tool/work/input UI.
   Direct replacement 2026-10-30 (#93/#94) judged ugly by user, reverted and made this theme. In it:

@@ -24,6 +24,11 @@ func (s *Service) taskNotice(ctx context.Context, t Todo, machine, state, ask, t
 		s.quietNotify(ctx, t, machine, state, ask, text)
 		return
 	}
+	if state == "failed" && !t.Quiet && t.Origin != "" && t.Supervision.Supervisor != t.Origin && !s.isMain(ctx, t.Origin) {
+		// A side conversation's task the main conversation supervises (#4669): the user still gets the failure push
+		// they got before it had a ledger (#5081), and the main conversation its signal.
+		s.notifyTaskFailed(ctx, t, machine, text)
+	}
 	g := superviseSignal{Todo: t.ID, Machine: machine, Detail: text, At: time.Now()}
 	switch state {
 	case "failed":
