@@ -1844,3 +1844,18 @@ The hub copies sessions by value (decorated lists, readers that keep rows), and 
 One `int` took a 1,528-byte `Session` to 1,536, and those readers went 5 to 12% over. Small fields fit in the padding instead
 (between the bools and the next 8-byte field): check the layout with `reflect` field offsets and keep the size unchanged.
 A new field type also needs wire samples in `session_wire_test.go`.
+
+## `http.DefaultTransport` drops a push connection after 90 s idle (2026-11-11, #4800)
+
+- The hub's relay client and `apns.Client` were `&http.Client{Timeout: …}` with no transport, so they ran on
+  `http.DefaultTransport`, whose `IdleConnTimeout` is 90 s. Two thirds of one hub's pushes came more than 90 s after the
+  previous one and paid a new TCP + TLS handshake (0.2-0.3 s to the relay; APNs wants one long-lived HTTP/2 connection).
+  Both now use `apns.NewTransport`: their own clone of the default transport with a one-hour idle timeout and HTTP/2
+  health pings (`http.HTTP2Config.SendPingTimeout` / `PingTimeout`).
+- A client that talks to one service often gets its own transport with the idle timeout chosen for that service. The
+  default one is shared with every other client in the process, and its 90 s fits none of them in particular.
+- Test connection reuse with `testing/synctest`: serve TLS on an in-memory `net.Pipe` listener (loopback sockets do not
+  let the bubble go idle), dial it from a clone of the client's real transport, count `http.StateNew` in the server's
+  `ConnState`, and move the gaps with `synctest.Sleep`. The transport's idle timer and pings then run on the fake clock
+  (`TestRelayPushesKeepOneConnection`, `TestSendsKeepOneConnection`). Register the server's and transport's shutdown
+  with `t.Cleanup`, or a failed assertion ends in a synctest deadlock panic.
