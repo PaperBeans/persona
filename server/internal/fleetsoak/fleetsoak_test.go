@@ -180,8 +180,11 @@ func TestReadProcessCutsWholeMinutes(t *testing.T) {
 func TestComparison(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string, alloc, cpu float64) string {
+		// The machine was twice as busy in the second minute: both processes used twice the CPU time.
 		r := report{Label: name, Commit: "abc1234", Minutes: 20, Processes: map[string]*processReport{
-			"manager": {AllocMB: spread{Median: alloc, Min: alloc - 1, Max: alloc + 1}, CPUMs: spread{Median: cpu, Min: cpu, Max: cpu}}}}
+			"manager": {AllocMB: spread{Median: alloc, Min: alloc - 1, Max: alloc + 1}, CPUMs: spread{Median: cpu, Min: cpu, Max: cpu},
+				PerMinute: []minuteReport{{CPUMs: cpu}, {CPUMs: 2 * cpu}}},
+			"hub": {PerMinute: []minuteReport{{CPUMs: 1000}, {CPUMs: 2000}}}}}
 		b, _ := json.Marshal(r)
 		path := filepath.Join(dir, name+".json")
 		if err := os.WriteFile(path, b, 0o600); err != nil {
@@ -193,7 +196,8 @@ func TestComparison(t *testing.T) {
 	if err := printComparison(&out, write("base", 500, 2000), write("head", 400, 1500)); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"| manager allocated MB | 500.0 [499.0..501.0] | 400.0 [399.0..401.0] | -20.0% |", "| manager CPU ms | 2000 [2000..2000] | 1500 [1500..1500] | -25.0% |"} {
+	for _, want := range []string{"| manager allocated MB | 500.0 [499.0..501.0] | 400.0 [399.0..401.0] | -20.0% |", "| manager CPU ms | 2000 [2000..2000] | 1500 [1500..1500] | -25.0% |",
+		"| manager CPU per hub CPU, same minute | 2.000 [2.000..2.000] | 1.500 [1.500..1.500] | -25.0% |"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("no %q in\n%s", want, out.String())
 		}
