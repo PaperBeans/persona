@@ -517,7 +517,7 @@ struct ExtensionDetailView: View {
         if let members = d.extensionPack, !members.isEmpty {
             Section {
                 ForEach(members, id: \.id) { member in
-                    LabeledContent(member.id, value: member.version ?? "")
+                    ExtensionPackMemberRow(line: ExtensionPackMemberLine(member, name: page.memberNames[member.id]))
                 }
             } header: { SettingsHeading(String(localized: "Pack Members")) }
         }

@@ -472,6 +472,12 @@ extension Theme {
         static let servedPage = "globe"
         /// The web: a page an agent fetches, a browser it drives (the same globe).
         static let web = servedPage
+        /// A dev server's preview (#150): a picture of the page for the message (the link card's bar).
+        static let pageScreenshot = "camera.viewfinder"
+        /// Picking an element of the page to comment on (the link card's bar), and the element comment's card.
+        static let pickElement = pointer
+        /// Runs a launch.json entry's command (the preview's Start…).
+        static let startServer = run
         /// Something opened in a window of its own (Mac).
         static let newWindow = "macwindow.badge.plus"
         /// The Mac code viewer's find bar: the previous / next match.
@@ -527,6 +533,8 @@ extension Theme {
         static let handToAI = "paperplane"
         /// Mentions of the user (@Me).
         static let mention = "at"
+        /// An Agent's Quick Commands (Continue, Report Progress, /compact…): the submenu of the composer's + (#3225).
+        static let quickCommands = "slash.circle"
         /// The day's Today card at the top of the assistant's conversation (docs/assistant/unified-entry.md).
         static let today = "sun.max.fill"
         /// Something done on the phone from the conversation: an event added to its calendar, a reminder.
