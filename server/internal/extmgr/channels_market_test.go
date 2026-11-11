@@ -195,8 +195,8 @@ func TestCatalogItemsAreTheCatalogs(t *testing.T) {
 	}
 }
 
-// Only the entries that contribute a channel are built: 2 of the 83 here, 356 allocations a call measured, where the
-// whole catalog was 12,709. The bounds leave room for an item that grows, not for building the entries without one.
+// Only the entries that contribute a channel are built: 2 of the 83 here, 360 allocations a call measured, where the
+// whole catalog was 12,719. The bounds leave room for an item that grows, not for building the entries without one.
 func TestMarketChannelsBuildOnlyChannelEntries(t *testing.T) {
 	h := officialLikeMarket(t, 83)
 	have := []channel.View{{ID: channel.App}, {ID: channel.Feishu}, {ID: "voice"}}

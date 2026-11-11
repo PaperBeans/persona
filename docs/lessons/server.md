@@ -1852,16 +1852,16 @@ same spread, and the Mac's `sshd-session` already has TCP_NODELAY (lsof `-T f`: 
   translations parsed, its permission lines written, every contribution decoded and its install problems checked, to
   keep the one entry in 83 that contributes a channel. The assistant asks for the channel list every few seconds while
   agents end turns: 3.6% of the manager's allocation and 4% of its CPU in a soak of 10 computers x 50 sessions, and
-  1.07 ms and 707 KB a call on a synthetic market of that size.
+  1.29 ms and 691 KB a call on a synthetic market of that size.
 - Test the cheap condition on the raw entry first (`len(e.Parsed.Contributes["channel"])`, then its items), and build
-  the ones that pass with the function the full list uses (`catalogItem`): 38 µs and 22 KB. Sharing the builder is what
+  the ones that pass with the function the full list uses (`catalogItem`): 43 µs and 22 KB. Sharing the builder is what
   keeps the two from drifting; a second, slimmer builder would have to track every later change to names, problems
   and install state. It happened while this was in review: the catalog began to list the official market's entries
   most downloaded first (#4909), and the channel list had to keep that order. The comparison with the old path caught
   it once the test had an official market; the order is a named function both use (`officialCatalogOrder`), a total
   order, so sorting only the entries kept gives the order the whole catalog has.
 - No cache, so nothing to invalidate when a market is refreshed, an extension installed or the language changed. A
-  cache would have saved the remaining 38 µs and cost a stale channel list on any missed invalidation.
+  cache would have saved the remaining 43 µs and cost a stale channel list on any missed invalidation.
 - Prove it against the old path kept in the test, over every kind of entry the filter tells apart (installed, no
   package for the platform, a newer hub needed, a refused signature, an empty, null or malformed channel list, an id
   another entry or the list already has), in every language (`TestMarketChannelsAreTheCatalogs`), and pin what the
