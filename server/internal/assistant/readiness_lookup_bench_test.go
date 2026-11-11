@@ -50,6 +50,9 @@ func BenchmarkReadinessMainLargeInventory(b *testing.B) {
 // Readiness reads the one main conversation, not the computer's whole inventory: about 4.7 KB a lookup measured,
 // where a copy of the 8200 sessions alone is 11.7 MB.
 func TestReadinessMainSkipsInventory(t *testing.T) {
+	if raceEnabled {
+		t.Skip("race instrumentation allocates")
+	}
 	s := largeInventory()
 	ctx := context.Background()
 	if _, ok := s.readinessMain(ctx, "box", "session-00000"); !ok {

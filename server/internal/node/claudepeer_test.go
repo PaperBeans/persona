@@ -173,7 +173,7 @@ func TestOutsideClaudeSendNotTaken(t *testing.T) {
 	shortPeerWait(t, 500*time.Millisecond)
 	p := bgTranscript(t, home, home, sidA, "plan")
 	inbox := newFakeInbox(t, p)
-	inbox.mode = "hold"
+	inbox.setMode("hold")
 	writeOutsideClaude(t, home, sidA, "cli", "idle", inbox, nil)
 	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
 	_, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "still there?", "client_msg_id": "m-1"})

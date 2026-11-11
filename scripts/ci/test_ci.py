@@ -32,6 +32,12 @@ class PathTests(unittest.TestCase):
         self.assertTrue(paths.select(["scripts/mock/inbox_events.json"])["web"])
         self.assertTrue(paths.select(["schema/extension/example.json"])["apple"])
 
+    def test_sdk_ts_sources_also_select_the_server_lane(self):
+        # The trusted Deno adapter and the extension page tests bundle sdk/ts/src (#4221); the rest of sdk/ts is not.
+        self.assertTrue(paths.select(["sdk/ts/src/wire.ts"])["server"])
+        self.assertTrue(paths.select(["sdk/ts/src/wire.ts"])["runtimes"])
+        self.assertFalse(paths.select(["sdk/ts/README.md"])["server"])
+
     def test_source_authoring_sdk_and_gate_paths_select_runtime_ci(self):
         for filename in ["sdk/ts/scripts/check-source-bundle.mjs", "sdk/ts/scripts/source-authoring-worker.mjs",
                          "sdk/ts/scripts/source-authoring-tests.mjs", "sdk/ts/README.md", "scripts/ci/runtimes.sh"]:

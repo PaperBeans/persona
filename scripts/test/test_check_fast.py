@@ -567,6 +567,27 @@ class CheckFastServerInputsTests(unittest.TestCase):
         out, packages = self.check_fast()
         self.assertEqual(["./internal/db/dbtest/..."], packages, out)
 
+    def test_an_sdk_ts_source_runs_the_trusted_adapter_check(self):
+        # The trusted Deno adapter bundles sdk/ts/src (#4221): a change there runs denohost's tests, where
+        # TestTrustedAdapterMatchesOfficialSDK catches a stale adapter. The rest of sdk/ts is not bundled.
+        bun = self.go_log.parent / "bun"  # a fake bun next to the fake go: bun test passes
+        bun.write_text("#!/bin/sh\n")
+        bun.chmod(0o755)
+        self.write("sdk/ts/README.md", "changed\n")
+        out, packages = self.check_fast()
+        self.assertEqual([], packages, out)
+        self.write("sdk/ts/src/wire.ts", "export {}\n")
+        out, packages = self.check_fast()
+        self.assertEqual(["./internal/extension/denohost/..."], packages, out)
+
+    def test_without_bun_the_trusted_adapter_check_says_it_skipped(self):
+        self.env = {**self.env, "PATH": os.pathsep.join(
+            d for d in self.env["PATH"].split(os.pathsep) if not (Path(d) / "bun").exists())}
+        self.write("sdk/ts/src/wire.ts", "export {}\n")
+        out, packages = self.check_fast()
+        self.assertEqual([], packages, out)
+        self.assertIn("SKIP  trusted Deno adapter", out)
+
     def test_a_server_go_change_also_runs_the_repo_wide_guards(self):
         # The guards fail on code outside their own package (#1936 broke the lazyre guard on main that way), so a change
         # in any package runs them next to that package's own tests.

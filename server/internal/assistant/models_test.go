@@ -812,6 +812,59 @@ func TestLaunchersListHideRestoreDelete(t *testing.T) {
 	}
 }
 
+// Automatic selection is not a user's assignment: deleting its provider leaves the next automatic pick, while an
+// explicit choice still protects the provider underneath it (#3198).
+func TestAutomaticProviderDeletionDoesNotCountAsExplicitUse(t *testing.T) {
+	s, _, _ := modelService(t)
+	key, err := s.sealKey("synthetic-provider-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	putLaunchers(t, s,
+		storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "first", Kind: "api", BaseURL: "https://api.example.com", Model: "first-model"}, KeySealed: key},
+		storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "second", Kind: "api", BaseURL: "https://api.example.com", Model: "second-model"}, KeySealed: key})
+	ctx := context.Background()
+	for _, id := range []string{"kb", "inbox.triage", "agent.delegate"} {
+		p := purposeOf(t, s, id)
+		if p.Override != (ModelBinding{}) || p.Effective.Provider != "launcher.first" {
+			t.Fatalf("%s did not start on the automatic provider: %+v", id, p)
+		}
+	}
+	if rec := request(s, http.MethodDelete, "/api/v1/launchers/first", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"deleted":true`) {
+		t.Fatalf("automatic selection blocked deletion: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, id := range []string{"kb", "inbox.triage", "agent.delegate"} {
+		if b, err := s.resolveModel(ctx, id); err != nil || b.Provider != "launcher.second" {
+			t.Fatalf("%s did not move to the next automatic provider: %+v %v", id, b, err)
+		}
+	}
+	setModel(t, s, "kb", ModelBinding{Provider: "launcher.second"})
+	use := purposeOf(t, s, "kb").Name
+	if rec := request(s, http.MethodDelete, "/api/v1/launchers/second", ""); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), use) {
+		t.Fatalf("an explicit provider was not protected: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// When only one provider is eligible, deleting it leaves automatic API categories with no model, so deletion is
+// still refused with 409 Conflict naming the affected purposes.
+func TestDeletingLastAutomaticProviderStillProtectsBuiltinPurposes(t *testing.T) {
+	s, _, _ := modelService(t)
+	key, err := s.sealKey("synthetic-provider-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	putLaunchers(t, s,
+		storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "only", Kind: "api", BaseURL: "https://api.example.com", Model: "only-model"}, KeySealed: key})
+	p := purposeOf(t, s, "kb")
+	if p.Effective.Provider != "launcher.only" {
+		t.Fatalf("kb did not start on the automatic provider: %+v", p)
+	}
+	rec := request(s, http.MethodDelete, "/api/v1/launchers/only", "")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), p.Name) {
+		t.Fatalf("deleting the last automatic provider was not protected: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func slicesContain(list []string, s string) bool {
 	for _, x := range list {
 		if x == s {

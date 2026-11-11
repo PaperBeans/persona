@@ -74,7 +74,7 @@ Hand the user a plan of one or more tasks for agents on their computers, instead
           },
           "ultracode": {
             "type": "boolean",
-            "description": "true for a large task (many files, checks from several angles): Claude Code runs every substantial step as a multi-agent workflow, slower and costlier; false for small or quick work. Claude Code agents only (2.1.284 or later): any other agent, or an older Claude Code, fails to start. Never put the word in the prompt or title instead"
+            "description": "true for a large task (many files, checks from several angles): Claude Code runs every substantial step as a multi-agent workflow, slower and costlier; false for small or quick work. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it. Never put the word in the prompt or title instead"
           },
           "readonly": {
             "type": "boolean",

@@ -162,10 +162,12 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
     return () => removeEventListener("popstate", back);
   }, []);
   const listed = phone && !at.tab;
-  // one scroller shows the list and every page: each keeps its own spot, and Back to the list lands where it was (#5133)
-  const scroller = useRef<HTMLDivElement>(null);
-  useScrollMemory(scroller, listed ? "settings" : `settings/${at.tab ?? "general"}/${at.sub ?? ""}`);
   const tab: Tab = at.tab ?? "general";
+  // one scroller shows the list and every page: each keeps its own spot, and Back to the list lands where it was (#5133).
+  // An item that opens in a dialog over its category's page (a model purpose) is not a page: the key leaves it out, so
+  // opening and closing it leave the page where it was (#4282).
+  const scroller = useRef<HTMLDivElement>(null);
+  useScrollMemory(scroller, listed ? "settings" : `settings/${tab}/${itemIsPage(tab) ? (at.sub ?? "") : ""}`);
   const { sub } = at;
   // The current assistant's group (docs/assistant/managers.md "The current assistant"): its pages read and write that
   // assistant only. Their merged lists are filtered by it, its configuration editors name it, and what else they ask of
@@ -302,7 +304,8 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
                   <Models />
                 </section>
                 <section id="settings-model-config" className="scroll-mt-4">
-                  <ModelConfiguration open={sub} onOpen={(id) => pick("models", id, "model-config")} onProviders={() => pick("models", null, "providers")} />
+                  {/* no section: the row is on the page in view, which stays where it is (#4282) */}
+                  <ModelConfiguration open={sub} onOpen={(id) => pick("models", id)} onProviders={() => pick("models", null, "providers")} />
                 </section>
               </>}
               {tab === "agents" && <AgentSections section={at.section} />}

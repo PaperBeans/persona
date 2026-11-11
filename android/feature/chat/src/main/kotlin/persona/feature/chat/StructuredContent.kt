@@ -35,10 +35,13 @@ import persona.core.designsystem.icons.PhIcons
  * rest in place (R3).
  */
 @Composable
-internal fun MessageContent(item: Item, user: Boolean, update: ChatTextUpdate? = null, boxed: Boolean = false) {
+internal fun MessageContent(item: Item, user: Boolean, update: ChatTextUpdate? = null, boxed: Boolean = false,
+    /** The closeout card above the transcript says this reply's closeout block (#3612): draw the reply without it. */
+    hideCloseout: Boolean = false) {
     var whole by remember(item.id) { mutableStateOf<String?>(null) }
     val cut = item.fullSize != null && whole == null && update?.streaming != true
-    val text = whole ?: update?.text ?: item.text.orEmpty().let { if (item.fullSize != null) cutText(it) else it }
+    val text = (whole ?: update?.text ?: item.text.orEmpty().let { if (item.fullSize != null) cutText(it) else it })
+        .let { if (hideCloseout) persona.core.domain.sort.stripCloseout(it) else it }
     val model = remember(text, item.from, user) { messageModel(text, item.from, user) }
     val uri = LocalUriHandler.current
     Column(Modifier.fillMaxWidth().messageMenu(MessageTarget(item.id, model.plain, user, model.editText()))) {

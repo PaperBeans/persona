@@ -15,6 +15,7 @@
   "start_identity_conflict": "启动响应未确认所请求电脑上的会话身份。",
   "start_interrupted": "Hub 在此任务的 Agent 启动途中重启了，之前的请求仍可能完成。请等电脑重新连接后检查会话，再决定是否重试，以免重复启动 Agent。",
   "failed_start": "没开起来：{reason}",
+  "ultracode_skipped": "没开 ultracode 就启动了：{reason}",
   "task_failed_title": "「{name}」没开起来",
   "task_failed_title_health": "任务没开起来",
   "task_failed_body": "{reason}。打开对话点『重试』，或换一台电脑再派",

@@ -1,0 +1,86 @@
+package node
+
+import "time"
+
+// ---- staying on the fallback that answered (#3788) ----
+//
+// A refusal sticks to a conversation: the refused turn stays in its transcript, so a resend carries it again (on one
+// install 43 of 67 refused turns came in runs, #3204). The main conversation and a scheduled task's ask for the
+// configured model with every message (the manager's sendModel), so a fallback that answered would last one turn: the
+// next message restarts the process on the refused model, is refused, retried, and moved back again, each restart
+// writing the whole prompt cache anew. After a model switch answered, the conversation stays on it for a while, and
+// a refusal soon after skips the same-model retry.
+
+const (
+	// assistantFallbackHold: how long messages asking for the model a recovery moved away from stay on its fallback.
+	// A compaction ends it sooner (the refused turns are summarized away), and so does any other model picked.
+	assistantFallbackHold = 30 * time.Minute
+	// assistantRefusalSticky: a conversation refused again this soon after its last fallback answered skips the
+	// same-model retry and goes on to the next model at once.
+	assistantRefusalSticky = 2 * time.Hour
+)
+
+// assistantFallback is a conversation's last model switch that answered: on launcher, away from what it was asked
+// to run (from) to the model that answered (to), at at; until ends the hold (zero once over).
+type assistantFallback struct {
+	launcher string
+	from, to modelExecution
+	at       time.Time
+	until    time.Time
+}
+
+// sameModelChoice: two requests for the same model, whatever the message around them.
+func sameModelChoice(a, b modelExecution) bool {
+	return a.Model == b.Model && a.Effort == b.Effort && a.UseEffort == b.UseEffort && a.Fingerprint == b.Fingerprint &&
+		a.Runtime == b.Runtime
+}
+
+// holdFallback starts conversation id's hold on to, after a recovery's switch away from from answered there. n.mu is
+// held.
+func (n *Node) holdFallback(id, launcher string, from, to modelExecution) {
+	if n.fallbacks == nil {
+		n.fallbacks = map[string]*assistantFallback{}
+	}
+	now := time.Now()
+	n.fallbacks[id] = &assistantFallback{launcher: launcher, from: from, to: to, at: now, until: now.Add(assistantFallbackHold)}
+}
+
+// heldFallback is the execution conversation id's message runs on: its fallback while the hold lasts and the message
+// asks for the model the switch moved away from, else what it asks for. Another model asked for ends the hold.
+func (n *Node) heldFallback(id, launcher string, asked modelExecution) modelExecution {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	f := n.fallbacks[id]
+	if f == nil {
+		return asked
+	}
+	now := time.Now()
+	if now.Sub(f.at) >= assistantRefusalSticky {
+		delete(n.fallbacks, id)
+		return asked
+	}
+	if !now.Before(f.until) || f.launcher != launcher || !sameModelChoice(asked, f.from) {
+		f.until = time.Time{} // over; a refusal soon after still skips the same-model retry
+		return asked
+	}
+	out := f.to
+	out.IsMain, out.Interject, out.Ultracode = asked.IsMain, asked.Interject, asked.Ultracode // the message's own
+	return out
+}
+
+// recentFallback: conversation id's last fallback answered within assistantRefusalSticky, and what the conversation
+// was asked to run before it (the model a hold keeps it away from). n.mu is held.
+func (n *Node) recentFallback(id string) (from modelExecution, launcher string, ok bool) {
+	f := n.fallbacks[id]
+	if f == nil || time.Since(f.at) >= assistantRefusalSticky {
+		return modelExecution{}, "", false
+	}
+	return f.from, f.launcher, true
+}
+
+// forgetFallback ends conversation id's hold and its sticky window: it compacted, so the refused turns are gone.
+func (n *Node) forgetFallback(id string) {
+	n.mu.Lock()
+	delete(n.fallbacks, id)
+	n.mu.Unlock()
+}

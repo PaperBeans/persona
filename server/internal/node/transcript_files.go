@@ -59,7 +59,10 @@ func (n *Node) findTranscriptPath(id string, pass *codexListPass) string {
 				return src.path
 			}
 		}
-		return rolloutPath(src.home, src.thread)
+		if p := rolloutPath(src.home, src.thread); p != "" {
+			return p
+		}
+		return n.codexAppHistoryPath(src, pass) // the App's chat with no rollout: its history as written (codex_apphistory.go)
 	}
 	if strings.HasPrefix(id, "c0de-") {
 		return n.oldCodexTranscript(id)
@@ -125,6 +128,7 @@ func newestFirst(paths []string) []string {
 func validID(id string) bool { return nodeclient.ValidSessionID(id) }
 
 func (n *Node) file(id string) (*transcript.File, error) {
+	n.refreshCodexAppHistory(id) // a Codex App chat with no rollout: its history written out of the App's database (codex_apphistory.go)
 	n.mu.Lock()
 	f := n.files[id]
 	if f != nil {

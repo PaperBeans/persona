@@ -175,6 +175,8 @@ type Node struct {
 	recoveryClosed bool
 	// adoptedFailures: failures a handover carried here, resumed once this connection's session state is loaded.
 	adoptedFailures []adoptedFailure
+	// fallbacks: each conversation's last model switch that answered, and the hold on it (assistant_fallback_hold.go).
+	fallbacks map[string]*assistantFallback
 
 	// runtimes: agent runtimes without a terminal, connected on runtime.sock (runtimes.go); runtimeSock overrides the
 	// socket path (tests).

@@ -20,7 +20,9 @@ func TestMigratedInbox(t *testing.T) {
 	now := time.Now()
 	old := &InboxItem{ID: "lark:10:3", Source: "lark", Kind: KindDM, Account: "feishu", AccountName: "飞书", Title: "Alice", Last: "3", Count: 1,
 		StartedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour), Lark: &InboxLark{AccountID: 1, FeedID: "10", StartPosition: "3"}}
+	h.inbox.mu.Lock() // the "Needs you" teller the first read started counts the items under it
 	h.inbox.items[old.ID] = old
+	h.inbox.mu.Unlock()
 	extra := func(block string, v any, legacy string, count int) *connector.ThingExtra {
 		x := &connector.ThingExtra{Source: "lark", Account: "feishu", AccountName: "飞书", LegacyID: legacy, Count: count, StartedAt: now}
 		switch block {

@@ -9,6 +9,7 @@ import { getState, onHubEvent, putTodo, refreshTodos, todosPushed } from "./stor
 import { applySnapshot } from "./assistant-views";
 import type { AssistantView, ViewAction } from "./extension-wire";
 import { isResumed } from "./reconnect";
+import type { TaskBrief } from "./brief";
 import { deleteTodo, type Todo, type TodoAsk } from "./todos";
 import { getInbox, itemPath } from "./inbox";
 import { BUILTIN_MANAGER, conversationManager, defaultManager, itemHeaders, MANAGER_HEADER, managerHeaderFor, routedConversationManager } from "./manager-choice";
@@ -36,6 +37,9 @@ export interface PlanTask {
   /** The failed start's coded refusal and its details (as a session's start_error_code / start_error_args). */
   error_code?: string;
   error_args?: Record<string, string>;
+  /** The brief the task will be held to (#3822, lib/brief.ts): the card shows it, and "Start" confirms it. Absent from
+   *  a hub before briefs and on a plan made before them. */
+  brief?: TaskBrief;
 }
 
 export interface TaskPlan {

@@ -192,7 +192,7 @@ func TestAssistantRecoverableErrorClasses(t *testing.T) {
 		{"successful result mentioning an error", "API Error: 503", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := assistantRecoverableError(tc.failed, tc.result); got != tc.want {
+			if got := assistantRecoverableError(tc.failed, tc.result, true); got != tc.want {
 				t.Fatalf("assistantRecoverableError(%v, %q) = %v, want %v", tc.failed, tc.result, got, tc.want)
 			}
 		})
@@ -513,11 +513,11 @@ func TestAssistantRecoveryIgnoresAReplacedProcessCleanup(t *testing.T) {
 	old, current := &assistantProc{id: id}, &assistantProc{id: id}
 	n.procs[id] = current
 	n.recoveries = map[string]*assistantTurnRecovery{id: {running: true}}
-	n.clearAssistantRecovery(old)
+	n.clearAssistantRecovery(old, true)
 	if n.recoveries[id] == nil {
 		t.Fatal("a replaced process cleared its replacement's recovery")
 	}
-	n.clearAssistantRecovery(current)
+	n.clearAssistantRecovery(current, true)
 	if n.recoveries[id] != nil {
 		t.Fatal("the current process did not clear its completed recovery")
 	}
@@ -669,7 +669,7 @@ func TestAssistantSuccessBeforeAdoptionDoesNotMigrateRecovery(t *testing.T) {
 	r := &assistantTurnRecovery{retried: map[string]bool{}, used: map[string]bool{}}
 	a.recoveries = map[string]*assistantTurnRecovery{id: r}
 	a.handOverAssistants()
-	a.clearAssistantRecovery(p) // success is recorded, but the result handler has not cleared busy yet
+	a.clearAssistantRecovery(p, true) // success is recorded, but the result handler has not cleared busy yet
 	if adopted := k.adopt(b); len(adopted) != 1 {
 		t.Fatalf("the live conversation was not adopted: %+v", adopted)
 	}
@@ -694,7 +694,7 @@ func TestAssistantSuccessOnTheOldNodeClearsTheAdoptedRecovery(t *testing.T) {
 	if adopted := k.adopt(b); len(adopted) != 1 {
 		t.Fatalf("the live conversation was not adopted: %+v", adopted)
 	}
-	a.clearAssistantRecovery(p) // the result handler read the old owner before adoption
+	a.clearAssistantRecovery(p, true) // the result handler read the old owner before adoption
 	p.mu.Lock()
 	p.busy = false
 	p.mu.Unlock()

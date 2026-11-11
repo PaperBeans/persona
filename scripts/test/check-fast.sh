@@ -21,6 +21,8 @@
 #   integrations/<pkg>/**      node --test test/*.test.{js,mjs} (packages without tests are skipped)
 #   site/**                    node --test site/worker.test.mjs
 #   sdk/ts/**                  bun test (skipped with a reason when bun is absent)
+#   sdk/ts/src/**              also go test ./internal/extension/denohost/...: the trusted Deno adapter bundles it,
+#                              and TestTrustedAdapterMatchesOfficialSDK fails while the committed one is stale (#4221)
 #   sdk/go/**                  go test ./... inside the sdk/go module
 #   server/internal/foo/**     go test ./internal/foo/...   (cmd/<x>/** and plugins/<x>/** likewise; other server
 #                              changes: go build ./...)
@@ -701,6 +703,17 @@ if [ "$ALL" -eq 0 ]; then
       [ -n "$_g" ] && { arr_has "$_g" "${GO_GROUPS[@]:-}" || GO_GROUPS+=("$_g"); }
     done < <(server_readers "$_re")
   done
+fi
+
+# The trusted Deno adapter (server/internal/extension/denohost/adapter.mjs) is generated from adapter.ts, which bundles
+# sdk/ts/src: a change there also runs denohost's tests, whose TestTrustedAdapterMatchesOfficialSDK fails while the
+# committed adapter is stale (#4221; scripts/gen/deno_adapter.sh regenerates it). A few seconds; it needs bun.
+if [ "$ALL" -eq 0 ] && printf '%s\n' "$CHANGED" | grep -q '^sdk/ts/src/'; then
+  if [ "$HAVE_BUN" -eq 0 ]; then
+    INFO+=("SKIP  trusted Deno adapter (go test ./internal/extension/denohost/...): bun not found in PATH")
+  elif ! arr_has internal/extension "${GO_GROUPS[@]:-}"; then  # ./internal/extension/... already covers it
+    arr_has internal/extension/denohost "${GO_GROUPS[@]:-}" || GO_GROUPS+=(internal/extension/denohost)
+  fi
 fi
 
 # script_test_add adds a scripts/<dir>/test_*.py that exists (a deleted one is not run) and that no dedicated job above

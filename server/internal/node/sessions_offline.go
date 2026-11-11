@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"maps"
 	"os"
 	"path/filepath"
@@ -74,6 +75,7 @@ func (n *Node) scanOffline() []proto.Session {
 		others = iota
 		assistants
 		keptOnes
+		desktopOnes // the desktop app's unarchived sessions, whatever their age (claudedesktop.go)
 	)
 	type cand struct {
 		path  string
@@ -86,6 +88,9 @@ func (n *Node) scanOffline() []proto.Session {
 	forked := maps.Clone(n.forked) // "Branch to New Chat"'s copies (fork.go)
 	n.mu.Unlock()
 	own := n.assistantProject()
+	persona := n.personaProjectDirs()
+	// The desktop app's sessions as its sidebar lists them (claudedesktop.go).
+	desktop := readClaudeDesktopIndex(n.home)
 	for _, p := range files {
 		id := strings.TrimSuffix(filepath.Base(p), ".jsonl")
 		if !validID(id) {
@@ -99,7 +104,9 @@ func (n *Node) scanOffline() []proto.Session {
 			cands = append(cands, cand{p, st, keptOnes})
 			continue
 		}
-		if time.Since(st.ModTime()) > offlineWindow || (st.Size() < 2048 && !forked[id]) {
+		// In the desktop app's sidebar: listed however long it has been quiet, and however little it says yet.
+		inDesktop := desktop.listed(id)
+		if !inDesktop && (time.Since(st.ModTime()) > offlineWindow || (st.Size() < 2048 && !forked[id])) {
 			continue
 		}
 		if isAssistantProject(filepath.Base(filepath.Dir(p)), own) {
@@ -107,8 +114,15 @@ func (n *Node) scanOffline() []proto.Session {
 			continue
 		}
 		// Another platform's runs (agentfilters.go) go before the newest are counted: hundreds a day would crowd out
-		// the user's own.
+		// the user's own. So do a program's one-shot runs (`claude -p`, claude_oneshot.go).
 		if !forked[id] && n.agentFiltered("claude", p) {
+			continue
+		}
+		if !forked[id] && n.oneShotRun(id, filepath.Base(filepath.Dir(p)), p, st, persona) {
+			continue
+		}
+		if inDesktop { // counted on their own: they neither take the others' 80 nor are pushed out by them
+			cands = append(cands, cand{p, st, desktopOnes})
 			continue
 		}
 		cands = append(cands, cand{p, st, others})
@@ -116,12 +130,10 @@ func (n *Node) scanOffline() []proto.Session {
 	// Newest first, and only what is listed counts: a session the filters below leave out (a blocked or out-of-scope
 	// directory, a probe that never said anything, an older copy) took one of the 80 and pushed a listed one out.
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].st.ModTime().After(cands[j].st.ModTime()) })
-	limit := [...]int{others: 80, assistants: maxAssistantOffline, keptOnes: len(cands)}
-	var counted [3]int
+	limit := [...]int{others: 80, assistants: maxAssistantOffline, keptOnes: len(cands), desktopOnes: maxDesktopOffline}
+	var counted [4]int
 	listed := map[string]bool{}
-	// The desktop app's sessions as its sidebar lists them (claudedesktop.go): left out before a row is counted.
-	desktop := readClaudeDesktopIndex(n.home)
-	shown := map[string]bool{}
+	shown := map[string]bool{} // what the desktop app's rules look at: rows are left out before they are counted
 	for _, c := range cands {
 		id := strings.TrimSuffix(filepath.Base(c.path), ".jsonl")
 		if listed[id] {
@@ -138,8 +150,14 @@ func (n *Node) scanOffline() []proto.Session {
 		if isLauncherCheckRun(c.path, m) {
 			continue // a launcher health check's run, a hundred a day on each computer: no session of the user's (#2959)
 		}
-		// Where the session is: an assistant conversation's start directory, before the filters look at it.
-		cwd := n.assistantHome(id, m.cwd)
+		// Where the session is: an assistant conversation's start directory, before the filters look at it. A desktop
+		// app's session whose transcript says nothing yet (it just began, or went on in a new transcript) has the
+		// directory and the title its entry gives.
+		title, cwd := m.title, m.cwd
+		if about, ok := desktop.about[id]; ok {
+			title, cwd = cmp.Or(title, about.title), cmp.Or(cwd, about.cwd)
+		}
+		cwd = n.assistantHome(id, cwd)
 		if !n.sessionScopeAllows(cwd) {
 			continue
 		}
@@ -150,12 +168,12 @@ func (n *Node) scanOffline() []proto.Session {
 		// one only had its tail read, and a tail of tool calls under one huge line says nothing; the main conversation is
 		// listed whatever its tail holds. Dropping it left the app and the web with no session for the main chat, and its composer
 		// disabled (#1163: its last turn stopped mid tool call, under a 377 KB line).
-		if m.lastText == "" && m.lastTextAt.IsZero() && m.title == "" && !keep[id] && !forked[id] && c.st.Size() <= quickTail {
+		if m.lastText == "" && m.lastTextAt.IsZero() && m.title == "" && !keep[id] && !forked[id] && c.count != desktopOnes && c.st.Size() <= quickTail {
 			continue
 		}
 		n.setPath(id, c.path)
 		s := proto.Session{
-			SessionID: id, Title: m.title, Cwd: cwd, Status: proto.StatusOffline, Model: m.model,
+			SessionID: id, Title: title, Cwd: cwd, Status: proto.StatusOffline, Model: m.model,
 			Agent: "claude", AgentSurface: m.surface,
 			LastText: snippet(m.lastText), UpdatedAt: lastUsed(m, c.st), Rev: c.st.Size(),
 		}

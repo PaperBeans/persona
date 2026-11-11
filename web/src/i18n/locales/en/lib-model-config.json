@@ -1,6 +1,5 @@
 {
   "effort": "Thinking {effort}",
   "not_configured": "Not set",
-  "group_misc": "Other",
   "runtime_fallback": "Fell back to the CLI: {reason}"
 }

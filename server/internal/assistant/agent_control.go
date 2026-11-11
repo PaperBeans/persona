@@ -538,12 +538,13 @@ func (s *Service) agentTool(ctx context.Context, machine, session, name string, 
 // false is no signal: it goes into the queue of questions that can wait (later.go) when a briefing will list it.
 func (s *Service) reportToSupervisor(ctx context.Context, machine, session string, args json.RawMessage, now time.Time) (string, error) {
 	var a struct {
-		Kind     string   `json:"kind"`
-		Text     string   `json:"text"`
-		Evidence []string `json:"evidence"`
-		Step     int      `json:"step"`
-		Steps    int      `json:"steps"`
-		Urgent   *bool    `json:"urgent"`
+		Kind     string            `json:"kind"`
+		Text     string            `json:"text"`
+		Evidence []string          `json:"evidence"`
+		Step     int               `json:"step"`
+		Steps    int               `json:"steps"`
+		Urgent   *bool             `json:"urgent"`
+		Criteria []criterionReport `json:"criteria"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("arguments: %v", err)
@@ -582,8 +583,15 @@ func (s *Service) reportToSupervisor(ctx context.Context, machine, session strin
 			}
 		}
 	}
+	reports, err := cleanCriterionReports(a.Criteria, t.Supervision.DoneWhen)
+	if err != nil {
+		return "", err
+	}
 	if !s.upReports.allow(machine, session, now) {
 		return "", fmt.Errorf("too many reports: at most %d in %d minutes; put what is left into one report later", reportLimit, int(reportWindow.Minutes()))
+	}
+	if err := s.recordCriterionReports(ctx, t, machine, session, reports, now.UTC()); err != nil {
+		return "", err
 	}
 	evidence := make([]string, 0, len(a.Evidence))
 	for _, e := range a.Evidence {

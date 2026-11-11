@@ -6,6 +6,25 @@ const base: Todo = { id: "todo_1", title: "部署 hub", created_at: "2026-11-05T
 const sup = (s: Partial<Supervision>): Supervision => ({ supervisor: "main", done_when: ["PR 合并到 master", "截图贴进 PR"], ...s });
 
 describe("supervision", () => {
+  it("uses live per-criterion state ahead of stale reviews, in done_when order", () => {
+    const s = sup({
+      criteria: [
+        { criterion: "截图贴进 PR", state: "not_met", evidence: "dark screenshot missing", at: "2026-11-10T10:00:00Z", by: "supervisor:main" },
+        { criterion: "PR 合并到 master", state: "met", evidence: "pull/7 merged", at: "2026-11-10T09:00:00Z", by: "agent:box/s1" },
+      ],
+      reviews: [{ at: "old", verdict: "rework", checks: [{ criterion: "PR 合并到 master", met: false }] }],
+    });
+    expect(checklist(s).map((c) => [c.criterion, c.mark])).toEqual([["PR 合并到 master", "met"], ["截图贴进 PR", "missing"]]);
+    expect(checklist(s)[0]).toMatchObject({ evidence: "pull/7 merged", at: "2026-11-10T09:00:00Z", by: "agent:box/s1" });
+    expect(checkCount(s)).toBe("1/2");
+    s.criteria![1].state = "pending";
+    expect(checkCount(s)).toBe("0/2");
+    expect(checklist(sup({ criteria: [] })).map((c) => c.mark)).toEqual(["open", "open"]);
+    // Reviews may describe what a task was for when no done_when was defined.
+    expect(checkCount(sup({ done_when: [], criteria: [], reviews: [
+      { at: "old", verdict: "accepted", checks: [{ criterion: "answer delivered", met: true, evidence: "posted" }] },
+    ] }))).toBe("1/1");
+  });
   it("says a parked task is parked, until when and why (#3804)", () => {
     const parked = { reason: "设计组要先定图标", until: "2026-11-14T09:00:00Z", waiting_on: "someone_else" as const, count: 1 };
     const todo = { ...base, supervision: sup({ state: "parked", parked }) };

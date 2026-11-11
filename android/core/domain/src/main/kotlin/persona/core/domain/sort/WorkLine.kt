@@ -26,9 +26,15 @@ val Session.replyLine: String? get() =
 
 /**
  * The row's line for a stopped session the hub triaged: "✓ Conclusion" when done, what it waits for when blocked (with when the
- * hub acts next); null while it works or before the hub triaged its turn.
+ * hub acts next); null while it works or before the hub triaged its turn. A turn that ended with a closeout
+ * ([shownCloseout]) and that the hub gave no line says the closeout's own words: its last words would be the raw block.
+ * A turn that is not finished (an empty phase with a line) keeps the hub's line as it is: the hub already words it.
+ * Where the closeout stands on merged and deployed is the row's [closeoutFacts], not part of this line: a phone's row
+ * cuts a long line short, and the end is the part that would go.
  */
-fun Session.workLine(now: Instant): CoreText? {
+fun Session.workLine(now: Instant): CoreText? = triagedLine(now) ?: shownCloseout?.line()
+
+private fun Session.triagedLine(now: Instant): CoreText? {
     val w = work ?: return null
     val line = w.line?.takeIf(String::isNotBlank) ?: return null
     if (w.phase == "working" || agentState == AgentState.Working) return null

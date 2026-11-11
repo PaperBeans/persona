@@ -76,6 +76,11 @@ interface InboxAssistantTransport {
      * step 4): what a message was written for is where it goes.
      */
     suspend fun assistantOf(manager: String?): JsonObject = assistant()
+    /**
+     * The directions of one manager (null: the default), `GET /api/v1/assistant/leaders`: `{leaders: [{id, name, ended?}]}`
+     * (#3519, #3695). A transport without it answers none, and the drawer shows the leaders' titles.
+     */
+    suspend fun assistantLeadersOf(manager: String?): JsonObject = JsonObject(emptyMap())
     /** [createConversation] for one manager (null: the default), as [assistantOf]. */
     suspend fun createConversationOf(manager: String?, main: Boolean, launcher: String? = null): JsonObject =
         if (launcher == null) createConversation(main) else createConversation(main, launcher)

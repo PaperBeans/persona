@@ -82,6 +82,8 @@
     <string name="assistant_pinned_actions">ピン留めの操作</string>
     <string name="assistant_unpin_all">すべてのピン留めを解除</string>
     <string name="assistant_recent">最近</string>
+    <string name="assistant_directions">方向性</string>
+    <string name="assistant_other_chats">その他のチャット</string>
     <string name="assistant_auto">自動のチャット</string>
     <string name="assistant_origin_inbox">受信箱</string>
     <string name="assistant_origin_task">定期タスク</string>

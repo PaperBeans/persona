@@ -120,6 +120,8 @@
     <string name="agents_row_draft_attachments_text">添付付きの下書き：%1$s</string>
     <string name="agents_row_pinned">ピン留め中</string>
     <string name="agents_row_muted">ミュート中</string>
+    <string name="agents_row_closeout_contradicted">ハブの確認ではクローズアウトの報告と異なります</string>
+    <string name="agents_row_not_finished">未完了</string>
     <string name="agents_action_open_read_only">読み取り専用で開く</string>
     <string name="agents_action_delete_chat">チャットを削除</string>
     <string name="agents_action_unpin">ピン留めを解除</string>

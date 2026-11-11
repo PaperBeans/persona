@@ -20,6 +20,8 @@ class WorkflowSummaryTest {
     @Test fun theLineNamesTheNewestRunItsPhaseProgressAndTime() {
         val s = base.copy(workflows = listOf(audit))
         assertEquals("后台 workflow「parity-audit」 · Verify 2/2 · 169/185+ · 14 分", WorkflowSummary.line(s, now)?.zh())
+        assertEquals(listOf("后台 workflow「parity-audit」", "Verify 2/2", "169/185+", "14 分"),
+            WorkflowSummary.lineFields(s, now)?.map { it.zh() })
     }
 
     @Test fun moreRunsAddHowMany() {

@@ -18,6 +18,12 @@
 !spec/fixtures/attention/
 # the cases web/src/lib/recent-setups.test.ts reads (Dockerfile)
 !spec/fixtures/recents/
+# Shared JSON imported by the web app's typechecked tests.
+!spec/fixtures/entries/
+!spec/fixtures/comments/
+!spec/fixtures/inbox/
+!spec/fixtures/triage/
+!spec/fixtures/sync/
 # the extension schema and its examples: the web app builds them in and its tests import them (Dockerfile)
 !schema/extension/
 integrations/**/node_modules/

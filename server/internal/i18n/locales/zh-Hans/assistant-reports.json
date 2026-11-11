@@ -104,5 +104,14 @@
   "decision_response_not_what_i_asked": "这不是我要的",
   "decision_response_explain_first": "先讲清背景",
   "decision_response_noted": "已回复「{response}」：已转给负责它的对话，没有执行任何选项",
-  "decision_chosen_noted": "已选：{option}。已记入待办的决定并发给它的 Agent"
+  "decision_chosen_noted": "已选：{option}。已记入待办的决定并发给它的 Agent",
+  "brief_head": "**对照当初的要求**",
+  "brief_met": "✅ {criterion}",
+  "brief_not_met": "❌ {criterion}（未达成）",
+  "brief_unchecked": "▫️ {criterion}（未核对）",
+  "brief_dropped": "➖ {criterion}（已去掉：{change}）",
+  "brief_dropped_plain": "➖ {criterion}（已去掉）",
+  "brief_more": "……另有 {n} 条",
+  "brief_also_done": "另外做了：{list}",
+  "brief_also_sep": "；"
 }

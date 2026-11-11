@@ -1,5 +1,12 @@
 # Lessons: hub / node and networking
 
+## Shared web fixtures belong in the Docker build context (2026-11-11, #4260)
+
+The web production build typechecks test files. A JSON fixture imported from `spec/fixtures/` needs both a
+`.dockerignore` exception and a `COPY` into the web stage at the same relative path. A native build sees the
+whole checkout and can pass while the Docker build fails with TS2307. The Docker entrypoint suite now checks
+shared JSON imports, including globs, against both files, catching new fixture groups before an image build.
+
 ## Sharing frontiers and migration lanes (#3604)
 
 - Migration numbers are global across the hub and manager sets, even though their
@@ -1124,6 +1131,7 @@ and add that directory to image workflow PR paths.
 
 - `-race` always flagged devices and connector: tests only `defer cancel()` without waiting for `Machine.run` / `watchOne`, so the next test changed `reconnectGrace` / `watchBackoffFirst` while old goroutines read them (even already-finished reads race without synchronization). devices tests use `runMachine(t, m)` (Cleanup cancels, then waits with timeout for `run`); connector `Start` reads backoff parameters once and passes them to watchers.
 - Waiting for `run` exposed another bug: a tailcat connection stuck writing in `configureNode` (peer not reading) outlived ctx, while `watchTailcat` exited without closing it; `run` never returned and hub `workers.Wait()` hung at shutdown. `serve` now closes tailcat on ctx end (`context.AfterFunc`). Cancel-without-wait tests hid the hang.
+- A goroutine stopped before it starts still reads what it reads when it does start (2026-11-11, #3942). `TestPlanThenWatchStopsWhenTheCardAnswers` cancels the plan-then watch at once, and the goroutine read `planThenEvery` after `fastPlanThen`'s cleanup had put it back; `planThenAfterTerminal` now reads it before `go`. The same holds for fields: `setCatalog` prefetches a pushed entry in a goroutine that reads `n.peer`, so a test gives the node its hub before `setCatalog`, never after.
 
 
 ## Knowledge corrections and extension permissions (#1908)

@@ -309,6 +309,9 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	if err := n.ensureManaged(ctx, launcher); err != nil { // the conversation's own provider (managed.go)
 		return "", err
 	}
+	if recovery == nil && id != "" {
+		execution = n.heldFallback(id, launcher, execution) // the fallback that answered, for a while (#3788)
+	}
 	if execution.Model != "" {
 		if _, err := n.launcherModelCheck(ctx, launcher, execution.Model); err != nil {
 			return "", err
@@ -683,7 +686,7 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 			}
 			recovering := n.recoverAssistantResult(p, ev.IsError, ev.Result, kinds...)
 			if !recovering {
-				n.clearAssistantRecovery(p)
+				n.clearAssistantRecovery(p, !ev.IsError)
 			}
 			p.mu.Lock()
 			manual := p.manual

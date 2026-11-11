@@ -158,7 +158,7 @@ func TestRunRecoversTaskStarts(t *testing.T) {
 	restarted, hub := newTaskServiceOn(t, database)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	restarted.hub = stopOnRecoveryPush{fakeHub: hub, cancel: cancel}
+	setHub(restarted, stopOnRecoveryPush{fakeHub: hub, cancel: cancel})
 	restarted.Run(ctx)
 	if ctx.Err() != context.Canceled {
 		t.Fatalf("Run did not report the interrupted start before its deadline: %v", ctx.Err())

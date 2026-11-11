@@ -98,7 +98,7 @@ func TestInboxRefreshSaysWhenTheCollectFailed(t *testing.T) {
 	h := newInboxHub(t)
 	h.addConnector(&inboxConnector{things: []connector.InboxThing{thing("a", time.Now())}}, false)
 	bridge := &failingCollectHub{Hub: h.Service.hub, err: errors.New("hand the round to the manager: context deadline exceeded")}
-	h.Service.hub = bridge
+	setHub(h.Service, bridge)
 	said := map[any]bool{}
 	for _, l := range []i18n.Lang{i18n.En, i18n.Ja} {
 		status, body := serveJSON(t, h.Service, "POST", "/api/v1/inbox/refresh?sources=all", string(l), `{}`)

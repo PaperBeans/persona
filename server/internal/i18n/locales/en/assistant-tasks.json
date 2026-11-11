@@ -15,6 +15,7 @@
   "start_identity_conflict": "The start response did not identify a session on the requested computer.",
   "start_interrupted": "The hub restarted while this task’s agent was starting. The earlier request may still finish. Check the computer’s sessions after it reconnects before retrying to avoid starting a second agent.",
   "failed_start": "Didn’t start: {reason}",
+  "ultracode_skipped": "started without ultracode: {reason}",
   "task_failed_title": "“{name}” couldn’t be started",
   "task_failed_title_health": "Task couldn’t be started",
   "task_failed_body": "{reason}. Open the conversation to tap “Retry”, or assign to another computer",

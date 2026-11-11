@@ -45208,6 +45208,29 @@
       },
       "extractionState": "manual"
     },
+    "Directions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directions"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "方向性"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "方向"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
     "Disabled": {
       "localizations": {
         "en": {
@@ -48341,6 +48364,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "已编辑 %1$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Editing %@ [Work Line]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editing %1$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "編集中：%1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在编辑 %1$@"
           }
         }
       },
@@ -52704,6 +52750,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "在文件中查找"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Finding %@ [Work Line]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finding %1$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ファイル検索中：%1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在查找 %1$@"
           }
         }
       },
@@ -87149,6 +87218,29 @@
         }
       }
     },
+    "Opening %@ [Work Line]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening %1$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクセス中：%1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在打开 %1$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
     "Open [Dispatched Task]": {
       "localizations": {
         "en": {
@@ -87562,6 +87654,76 @@
         }
       }
     },
+    "Reading %@ [Work Line]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading %1$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読み込み中：%1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在读取 %1$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Reading %lld files [Work Line]": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Reading %lld file"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Reading %lld files"
+                }
+              }
+            }
+          }
+        },
+        "ja": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld個のファイルを読み込み中"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "正在读取 %lld 个文件"
+                }
+              }
+            }
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
     "Remove Key": {
       "extractionState": "manual",
       "localizations": {
@@ -87631,6 +87793,29 @@
         }
       }
     },
+    "Running %@ [Work Line]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Running %1$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実行中：%1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在运行 %1$@"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
     "Saved before computer scopes existed: it still runs on every computer, work ones included, and each keeps a copy of the key. Changing anything here and saving makes the scope what you set.": {
       "extractionState": "manual",
       "localizations": {
@@ -87653,6 +87838,52 @@
           }
         }
       }
+    },
+    "Searching for %@ [Work Line]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Searching for “%1$@”"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "検索中：「%1$@」"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在搜索“%1$@”"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Searching the web for %@ [Work Line]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Searching the web for “%1$@”"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Web検索中：「%1$@」"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在网上搜索“%1$@”"
+          }
+        }
+      },
+      "extractionState": "manual"
     },
     "Selected Computers": {
       "extractionState": "manual",
@@ -90586,6 +90817,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "其他缓存"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Other Chats": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Other Chats"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "その他のチャット"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其他对话"
           }
         }
       },
@@ -130221,6 +130475,29 @@
       },
       "extractionState": "manual"
     },
+    "Thinking [Work Line]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Thinking"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "思考中"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在思考"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
     "Thinking effort and model: %@, %@": {
       "localizations": {
         "zh-Hans": {
@@ -149485,6 +149762,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "写下你的回答"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Writing %@ [Work Line]": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Writing %1$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書き込み中：%1$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在写入 %1$@"
           }
         }
       },

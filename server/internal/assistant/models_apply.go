@@ -16,10 +16,15 @@ import (
 // applyModel fills params (a node call's: session.start, assistant.send…) with what purpose id runs on; a launcher,
 // model or effort already in params is this call's own pick. The permission mode is left as it is.
 func (s *Service) applyModel(ctx context.Context, id string, params map[string]any) error {
+	p, err := s.modelPurposeDef(ctx, id)
+	if err != nil {
+		return err
+	}
 	b, err := s.resolveModel(ctx, id)
 	if err != nil {
 		return err
 	}
+	params["launch"] = p.launch() // a caller cannot override the purpose's execution form
 	if name, _ := params["launcher"].(string); name != "" && launcherProvider(name) != b.Provider {
 		b = ModelBinding{Provider: launcherProvider(name), Runtime: b.Runtime}
 	}

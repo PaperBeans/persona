@@ -115,6 +115,7 @@ struct AssistantTopBarTests {
         let all = [try s("1", "早报 · 周三", "两个会议"), try s("2", "Weekly Report", nil), try s("3", "吃饭", "已经加到日历")]
         #expect(AssistantSidebarSearch.filter(all, "日历").map(\.sessionID) == ["3"])
         #expect(AssistantSidebarSearch.filter(all, "ｗｅｅｋｌｙ").map(\.sessionID) == ["2"]) // width and case
+        #expect(AssistantSidebarSearch.filter(all, "Growth", names: ["3": "Growth"]).map(\.sessionID) == ["3"]) // a direction by its name
         #expect(AssistantSidebarSearch.filter(all, "  ").count == 3)
     }
 
@@ -135,6 +136,30 @@ struct AssistantTopBarTests {
                                                    try s("today2", hoursAgo: 1)], now: now, calendar: cal)
         #expect(groups.map(\.title) == ["今天", "昨天", "最近 7 天", "更早"])
         #expect(groups.map { $0.sessions.map(\.sessionID) } == [["today2", "today"], ["yesterday"], ["week"], ["old", "none"]])
+    }
+
+    /// The sidebar's Directions: the leader conversations in the hub's order, never the main one, none the list lacks.
+    @Test func directionsFollowTheHubsOrder() throws {
+        func s(_ id: String) throws -> Session {
+            let o: [String: Any] = ["session_id": id, "machine_id": "hub", "status": "idle", "title": "1110 | explore | \(id)", "assistant": true]
+            return try JSON.decoder.decode(Session.self, from: JSONSerialization.data(withJSONObject: o))
+        }
+        let all = [try s("main"), try s("mine"), try s("lead-b"), try s("lead-a")]
+        let main = all[0].key
+        let picked = AssistantSidebarGroups.directions(all, leaders: ["lead-a", "gone", "main", "lead-b"], main: main)
+        #expect(picked.map(\.sessionID) == ["lead-a", "lead-b"])
+        #expect(AssistantSidebarGroups.directions(all, leaders: [], main: main).isEmpty)
+    }
+
+    /// A direction's name comes from GET /api/v1/assistant/leaders: current ones with a name only.
+    @Test func directionNamesSkipEndedAndBlank() {
+        let names = APIClient.directionNames([
+            .init(id: "a", name: "Product", ended: nil),
+            .init(id: "b", name: "  ", ended: nil),
+            .init(id: "c", name: "Old", ended: true),
+            .init(id: "", name: "Nobody", ended: nil),
+        ])
+        #expect(names == ["a": "Product"])
     }
 
     /// A drag to the right on something that scrolls sideways and is not at its left edge scrolls it, not the sidebar.

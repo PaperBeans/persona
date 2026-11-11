@@ -214,7 +214,14 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	}
 	picked, _ := params["launcher"].(string)
 	s.setPlanThen(ctx, m.ID, params)
-	if err := s.call(ctx, m.ID, DeviceSessionStart, params, &res); err != nil {
+	err = s.call(ctx, m.ID, DeviceSessionStart, params, &res)
+	skipped, refused := s.ultracodeRefusal(ctx, err, params)
+	if refused {
+		delete(params, "ultracode") // an extra the agent it landed on cannot have: it starts without it (#3596)
+		s.logf("task %s: start: %s; starting without ultracode", t.TodoID, skipped)
+		err = s.call(ctx, m.ID, DeviceSessionStart, params, &res)
+	}
+	if err != nil {
 		s.recordStartFailure(ctx, m.ID, s.startLauncher(ctx, picked), err)
 		return "", "", err
 	}
@@ -232,14 +239,20 @@ func (s *Service) startTaskAgent(ctx context.Context, t *PlanTask, retry bool) (
 	if !res.Session.Starting {
 		s.recordStartSuccess(ctx, m.ID, s.startLauncher(ctx, picked))
 	}
+	if refused { // only once it started here: a task moved elsewhere after a failed start asks again
+		off := false
+		t.Ultracode = &off // a retry does not ask again
+		t.noteWhy(i18n.T(s.lang(ctx), "assistant-tasks.ultracode_skipped", i18n.Args{"reason": skipped}))
+	}
 	return m.ID, res.Session.SessionID, nil
 }
 
-// updatePlanTask keeps the machine, directory and why task i of started plan planID runs with now.
+// updatePlanTask keeps the machine, directory and why task i of started plan planID runs with now, and its ultracode
+// when the start went without it.
 func (s *Service) updatePlanTask(ctx context.Context, planID string, i int, t PlanTask) {
 	if err := s.patchPlanTask(ctx, planID, i, func(pt *PlanTask) {
 		pt.Machine, pt.Cwd, pt.Why = t.Machine, t.Cwd, t.Why
-		pt.Reroute = t.Reroute
+		pt.Reroute, pt.Ultracode = t.Reroute, t.Ultracode
 		pt.Launcher, pt.Model, pt.Effort, pt.Tier = t.Launcher, t.Model, t.Effort, t.Tier
 	}); err != nil {
 		s.logf("plan %s: %v", planID, err)

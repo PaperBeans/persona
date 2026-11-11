@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, ApiError, enc, errorText } from "../../lib/api";
 import { extRoot } from "../../lib/extension-api";
 import {
-  chooseProvider, draftFor, providerAgent, providerName, modelConfiguration, modelPurpose, modelSummary, providersFor, purposeGroups, runtimeChoices, runtimeLabel, saveModelPurpose, supportsField,
-  type ModelBinding, type ModelConfigurationBody, type ModelDraft, type ModelPurposeBody,
+  chooseProvider, draftFor, providerAgent, providerName, modelConfiguration, modelPurpose, modelSummary, providersFor, runtimeChoices, runtimeLabel, saveModelPurpose, supportsField,
+  type ModelBinding, type ModelConfigurationBody, type ModelDraft, type ModelProvider, type ModelPurpose, type ModelPurposeBody,
 } from "../../lib/model-config";
+import { executionForm, purposeGroups, purposeLaunch } from "../../lib/model-config-execution";
 import { effortChoices, providerModels, takesEffort } from "../../lib/launcher-models";
 import { useStore } from "../../lib/store";
 import { t } from "../../i18n";
@@ -40,7 +41,7 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
     }
   };
   useEffect(() => { void load(); }, []);
-  const groups = useMemo(() => purposeGroups(data?.purposes ?? [], query), [data, query]);
+  const groups = useMemo(() => purposeGroups(data?.purposes ?? [], query, data?.providers), [data, query]);
   const sourceName = (id?: string) => data?.purposes.find((p) => p.id === id)?.name ?? id;
 
   return (
@@ -61,11 +62,9 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
       {error && <p role="alert" className="mb-4 text-[13px] text-red">{error}</p>}
       {data && groups.length === 0 && <p className="py-10 text-center text-[13px] text-ink-3">{query ? t("settings-modelconfiguration.no_match", { query }) : t("settings-modelconfiguration.no_purposes")}</p>}
       {groups.map(([group, purposes]) => (
-        <Group key={group} title={group}>
+        <Group key={group} title={group} footer={purposes.some((p) => p.id === "assistant") ? t("settings-modelconfiguration.schedule_default") : undefined}>
           {purposes.map((p) => (
-            <Row key={p.id} label={p.name} hint={modelSummary(p, data?.providers)} onClick={() => onOpen(p.id)}>
-              <span className={p.id === "lark.agent" ? "max-w-[180px] truncate text-[11.5px] text-ink-3" : "hidden max-w-[180px] truncate text-[11.5px] text-ink-3 sm:inline"}>{p.id === "lark.agent" ? larkAgentStatus(p.override) : p.status || (p.inherited_from ? t("settings-modelconfiguration.follows", { name: sourceName(p.inherited_from) ?? "" }) : t("settings-modelconfiguration.custom"))}</span>
-            </Row>
+            <PurposeRow key={p.id} purpose={p} providers={data?.providers ?? []} sourceName={sourceName} onOpen={() => onOpen(p.id)} />
           ))}
         </Group>
       ))}
@@ -73,6 +72,56 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
       <PurposeEditor manager={manager} key={open} id={open} sourceName={sourceName} onClose={() => onOpen(null)} onSaved={() => void load()} />
     </>
   );
+}
+
+/** A sibling help button keeps the editing row a single, unnested button.
+ * Details expand inside the card so they stay reachable on narrow screens and at larger text sizes. */
+function PurposeRow({ purpose: p, providers, sourceName, onOpen }: { purpose: ModelPurpose; providers: ModelProvider[]; sourceName: (id?: string) => string | undefined; onOpen: () => void }) {
+  const machines = useStore((s) => s.machines);
+  const form = executionForm(p, providers, machines);
+  const [help, setHelp] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const row = useRef<HTMLDivElement>(null);
+  const helpID = useId();
+  useEffect(() => {
+    if (!help) return;
+    const close = (event: PointerEvent) => {
+      if (!row.current?.contains(event.target as Node)) { setHelp(false); setPinned(false); }
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [help]);
+  const inheritance = p.id === "lark.agent" ? (p.override.provider || p.override.model || p.override.effort ? larkAgentStatus(p.override) : t("settings-modelconfiguration.lark_headless_inheritance"))
+    : p.inherited_from ? t("settings-modelconfiguration.follows", { name: sourceName(p.inherited_from) ?? "" })
+    : !p.status ? t("settings-modelconfiguration.custom") : "";
+  return <div ref={row} data-model-purpose={p.id} onMouseLeave={() => { if (!pinned) setHelp(false); }}
+    onKeyDown={(event) => { if (event.key === "Escape") { setHelp(false); setPinned(false); event.stopPropagation(); } }}>
+    <div className="flex items-center pr-1">
+      <div className="min-w-0 flex-1">
+        <Row label={p.id === "agent.new" ? t("newagent.title") : p.name} onClick={onOpen} wrapHint hint={<>
+          <div className="truncate">{modelSummary(p, providers)}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <Pill wrap>{form.label} · {form.backend}</Pill>
+            {inheritance && <span className="whitespace-normal">{inheritance}</span>}
+            {p.status && <span>{p.status}</span>}
+          </div>
+        </>} />
+      </div>
+      <button type="button" className="flex size-11 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-hover focus-visible:outline-accent"
+        aria-label={t("settings-modelconfiguration.execution_help", { name: p.name })} aria-expanded={help} aria-controls={helpID}
+        onMouseEnter={() => setHelp(true)} onFocus={() => setHelp(true)}
+        onBlur={(event) => { if (!pinned && !row.current?.contains(event.relatedTarget as Node)) setHelp(false); }}
+        onClick={() => { setPinned(!pinned); setHelp(!pinned); }}>
+        <span aria-hidden className="flex size-5 items-center justify-center rounded-full bg-inset text-[12px] shadow-hairline">?</span>
+      </button>
+    </div>
+    {help && <div id={helpID} role="region" aria-label={t("settings-modelconfiguration.execution_help", { name: p.name })}
+      className="border-t border-line bg-inset px-4 py-3 text-[12px] leading-relaxed text-ink-2">
+      <p>{t(`settings-modelconfiguration.execution_${purposeLaunch(p) || p.kind}`)}</p>
+      <p className="mt-2 font-medium">{t("settings-modelconfiguration.execution_current", { backend: form.backend, provider: providerName(p.effective?.provider, providers) ?? t("settings-modelconfiguration.not_configured") })}</p>
+      {p.kind === "launcher" && <p className="mt-2 text-ink-3">{t("settings-modelconfiguration.execution_unverified")}</p>}
+    </div>}
+  </div>;
 }
 
 const inputClass = "h-9 w-full rounded-control bg-field px-3 text-[13px] text-ink shadow-inset-field outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";
@@ -150,6 +199,7 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
   const effectiveAgent = providerAgent(effectiveProvider, p?.effective?.provider);
   const chosenAgent = (launcherList.provider === listProvider && launcherList.list?.agent) || providerAgent(chosen, draft.provider || p?.effective?.provider);
   const runtimes = p ? runtimeChoices(p, chosenAgent) : [];
+  const previewForm = p ? executionForm({ ...p, effective: { ...p.effective, provider: draft.provider || p.effective?.provider, runtime: draft.runtime || p.effective?.runtime } }, data?.providers, machines) : undefined;
   const listMachine = machines.find((m) => m.id === launcherList.machine)?.name ?? launcherList.machine;
   const save = async (restore = false) => {
     if (!p || !writable || busy || conflict) return;
@@ -198,6 +248,7 @@ function PurposeEditor({ manager, id, sourceName, onClose, onSaved }: { manager:
             {candidates.map((v) => <option key={v.id} value={v.id}>{v.hidden ? t("settings-modelconfiguration.provider_hidden", { name: v.name }) : v.name}</option>)}
           </select>
         </label>}
+        {previewForm && <div data-execution-preview><Pill wrap>{previewForm.label} · {previewForm.backend}</Pill></div>}
         {supportsField(p, "model") && <div className="block">
           <span className="mb-1 block text-[12px] font-medium text-ink-2">{t("settings-modelconfiguration.specific_model")}</span>
           {p.kind === "plugin" ? <select aria-label={t("settings-modelconfiguration.specific_model")} className={inputClass} value={draft.model} disabled={busy || (!!modelsError && models.length === 0)} onChange={(e) => setDraft((d) => ({ ...d, model: e.target.value }))}>

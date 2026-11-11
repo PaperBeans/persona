@@ -409,6 +409,8 @@
     <string name="settings_triage_continue">エラー時に自動続行</string>
     <string name="settings_triage_wake">時間になったら起動</string>
     <string name="settings_triage_actions_about">モデルサービスの一時的なエラー（503など）のあとは「続行」を最大3回自動で送ります。デプロイ、CI、ほかのエージェントを待っているものは、時間になったら起こして自分で確認させます。どちらもエージェント自身のモデルでもう1ターン実行します。コードのプッシュ、デプロイ、他人へのメッセージ送信などは、ハブがあなたに確認するだけで自分では行いません。</string>
+    <string name="settings_triage_closeout">クローズアウトを求める</string>
+    <string name="settings_triage_closeout_about">作業したエージェントが、完了したか、マージとデプロイの有無、不足しているものを報告せずに止まったとき、一度だけ停止を保留してその記録を求めます。エージェント自身のモデルで短い1ターンを余分に使います</string>
     <string name="settings_triage_reply_reminder">既読で未返信なら通知</string>
     <string name="settings_triage_reply_reminder_about">エージェントに質問され、見てから30分返信していないと1回だけ通知します。ルールだけで判断し、トークンは使いません。</string>
     <plurals name="settings_notify_long_turn">

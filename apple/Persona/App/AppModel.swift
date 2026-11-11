@@ -256,6 +256,9 @@ final class AppModel {
     /// instead of a made-up launcher name (#4200). Held settings (or a restored snapshot) keep the page usable. An
     /// answer that names no launcher sets it too (current hubs always name one; purely defensive against old hubs).
     private(set) var assistantConfigLoadFailed = false
+    /// The directions' names by leader conversation id (`GET /api/v1/assistant/leaders`): the sidebar's Directions group
+    /// shows these instead of the conversations' titles. Read again with the assistant; empty without leaders.
+    private(set) var directionNames: [String: String] = [:]
     @ObservationIgnored private var assistantRetryInFlight: Task<Void, Never>?
     /// The assistant conversation shown in the Chat tab (persisted across launches).
     ///
@@ -953,6 +956,8 @@ final class AppModel {
                 assistantConfig = updated
             }
             guard showsPage(of: api) else { return }
+            await refreshDirectionNames(api, leaders: st.leaders ?? [])
+            guard showsPage(of: api) else { return }
             // A hub that names no launcher gets the same retry state as a failed read (#4200): current hubs always
             // resolve one (their default), so an empty answer means an old hub — show Couldn't Load Settings instead of an
             // endless Reading or a made-up name.
@@ -961,6 +966,23 @@ final class AppModel {
             // Settings that already name a launcher stay usable; with none held the page shows Couldn't Load Settings (#4200).
             if showsPage(of: api), (assistantConfig?.launcher ?? "").isEmpty { assistantConfigLoadFailed = true }
         }
+    }
+
+    /// The directions' names for `leaders`: none without leaders; a hub that cannot list them keeps the names held
+    /// (or none), and the sidebar shows those conversations' titles.
+    private func refreshDirectionNames(_ api: APIClient, leaders: [String]) async {
+        guard !leaders.isEmpty else {
+            if !directionNames.isEmpty { directionNames = [:] }
+            return
+        }
+        guard let names = try? await api.directionNames(), showsPage(of: api), names != directionNames else { return }
+        directionNames = names
+    }
+
+    /// The assistant's leader conversations (the sidebar's Directions), in the hub's order, never the main one.
+    var assistantLeaders: [String] {
+        let main = assistantConfig?.main
+        return (assistantConfig?.leaders ?? []).filter { !$0.isEmpty && $0 != main }
     }
 
     /// The Couldn't Load Settings retry: the page flips back to Reading at once, and repeated taps share the one request (#4200).

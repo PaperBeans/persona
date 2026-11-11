@@ -3,12 +3,13 @@ package assistant
 import (
 	"cmp"
 	"context"
-	"github.com/nwverse/persona/server/internal/closeout"
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/closeout"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -396,6 +397,14 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	}
 	if g.Kind == sigReport { // what it said is the report itself, not a reason in brackets
 		e.Detail, e.Report, e.Said, e.Evidence, e.Step, e.Steps = "", g.Report, g.Detail, g.Evidence, g.Step, g.Steps
+	}
+	// Progress reports stay quiet. Their persisted evidence accompanies the next
+	// real supervision event, even after restart or a report of a different kind.
+	for i, c := range v.Criteria {
+		if c.At != nil {
+			e.Evidence = append(e.Evidence, fmt.Sprintf("criterion %d [%s] %s — %s (%s at %s)",
+				i+1, c.State, c.Criterion, c.Evidence, c.By, c.At.UTC().Format(time.RFC3339)))
+		}
 	}
 	if g.Kind == sigOrphaned {
 		e.Orphan = g.Orphan

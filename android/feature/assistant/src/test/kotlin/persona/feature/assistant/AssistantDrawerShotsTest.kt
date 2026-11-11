@@ -81,13 +81,18 @@ class AssistantDrawerShotsTest {
         var info: AssistantInfo? = null
         var settingsTapped = false
         var inboxTapped = false
+        var openedPage = ""
         rule.setContent {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
                 Box(Modifier.testTag("shot").width(400.dp).height(1100.dp).background(PersonaTheme.palette.background)) {
                     AssistantDrawer("", {}, groups, active = null, hasMain = groups.main != null,
                         onEnd = null, onMain = { mainTapped = true }, onOpen = { opened = it }, onInfo = { info = it },
                         onNew = {}, onHome = {}, onSettings = { settingsTapped = true }, onTodos = {}, todoCount = 2,
-                        onInbox = { inboxTapped = true }, inboxCount = 5, settingsDot = true)
+                        onInbox = { inboxTapped = true }, inboxCount = 5, settingsDot = true,
+                        pages = listOf(
+                            NavItem("machines", "电脑", PhIcons.Desktop, badge = 2),
+                            NavItem("extension", "扩展", PhIcons.PuzzlePiece, dot = true),
+                        ), onPage = { openedPage = it })
                 }
             }
         }

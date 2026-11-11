@@ -10,6 +10,13 @@ data class AssistantSnapshot(
     val manager: String? = null,
     /** Stable owner identity, including when this manager becomes or ceases to be the default. */
     val managerId: String = manager ?: ManagerRoster.ASSISTANT_MANAGER,
+    /**
+     * The leader conversations (`assistant.leaders`, docs/assistant/unified-entry.md "Leader conversations"), in the hub's
+     * order: the drawer's Directions group. Empty when there are none or from an older hub.
+     */
+    val leaders: List<String> = emptyList(),
+    /** Each direction's name by leader conversation id (`GET /api/v1/assistant/leaders`), shown instead of its title. */
+    val directionNames: Map<String, String> = emptyMap(),
 )
 
 interface AssistantRepository {

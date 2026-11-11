@@ -137,14 +137,15 @@ export function RowFailed({ text, retry, onRetry }: { text: React.ReactNode; ret
   );
 }
 
-/** `animated`: a change of tone crossfades its colors (an extension's badge that the extension redraws, #2757). */
-export function Pill({ children, tone, animated }: { children: React.ReactNode; tone?: "accent" | "green" | "red" | "orange"; animated?: boolean }) {
+/** `animated`: crossfade tone changes (#2757). `wrap`: keep long explanatory chips inside a narrow row. */
+export function Pill({ children, tone, animated, wrap }: { children: React.ReactNode; tone?: "accent" | "green" | "red" | "orange"; animated?: boolean; wrap?: boolean }) {
   return (
     <span
       style={animated ? { transitionTimingFunction: EASE } : undefined}
       className={cx(
         animated && "transition-[background-color,color,box-shadow] duration-300",
-        "inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full px-1.5 text-[11px] font-medium",
+        "inline-flex items-center rounded-full px-1.5 text-[11px] font-medium",
+        wrap ? "min-h-5 max-w-full whitespace-normal break-words py-0.5" : "h-5 shrink-0 whitespace-nowrap",
         tone === "accent" ? "bg-accent-tint text-accent-ink" : tone === "green" ? "bg-green-tint text-green" : tone === "red" ? "bg-red-tint text-red" : tone === "orange" ? "bg-orange-tint text-orange" : "bg-inset text-ink-2 shadow-hairline",
       )}
     >

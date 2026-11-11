@@ -251,7 +251,40 @@ data class WorkState(
     val max: Int? = null,
     @SerialName("interaction_id") val interactionId: String? = null,
     val agent: WorkAgent? = null,
+    /** What the turn produced (a pull request, a commit, a document), as the hub read it from the final reply. */
+    val artifacts: List<WorkArtifact>? = null,
+    /** What the agent said of its own work as the turn ended (#3612); null without one and from an older hub. */
+    val closeout: Closeout? = null,
 )
+
+/** One thing a turn produced: [kind] pr, commit, branch, doc, build or url (kept as sent), [ref] its link or name. */
+@Serializable
+data class WorkArtifact(val kind: String = "", val ref: String = "")
+
+/**
+ * An agent's closeout (docs/assistant/agent-work.md "Closeout", #3612): the record it ends a turn with. It is the agent's
+ * own claim: [status] done, not_done or blocked (anything else is no closeout: [known]), [merged] and [deployed] "yes" or
+ * "no" (null when unsaid or not applicable), and [checked], what the hub found when it looked itself. Session lists
+ * leave out [did] and [verified].
+ */
+@Serializable
+data class Closeout(
+    val status: String = "",
+    val waiting: String? = null,
+    val did: List<String>? = null,
+    val merged: String? = null,
+    val deployed: String? = null,
+    val verified: String? = null,
+    val missing: String? = null,
+    val checked: CloseoutChecked? = null,
+) {
+    /** A status this app knows; a closeout with any other is not shown. */
+    val known: Boolean get() = status == "done" || status == "not_done" || status == "blocked"
+}
+
+/** What the hub found of a closeout's merged and deployed claims: "yes", "no", or null when it could not tell. */
+@Serializable
+data class CloseoutChecked(val merged: String? = null, val deployed: String? = null)
 
 @KeepGeneratedSerializer
 @Serializable(with = WorkAgentSerializer::class)

@@ -421,11 +421,12 @@ func TestProviderReadFailureAssignmentIsCheckedAndRecovers(t *testing.T) {
 	}
 }
 
-func TestProviderReadFailureDeleteRetainsInUseFallback(t *testing.T) {
+func TestProviderReadFailureDeleteRetainsExplicitUse(t *testing.T) {
 	s, f, st := providerReadFixture(t)
-	// Without explicit choices, these API purposes use the first managed API provider.
+	// Explicit choices keep these API purposes on the first managed API provider.
 	for _, id := range []string{"kb", "inbox.triage"} {
-		if err := st.memStore.PutSetting(context.Background(), modelRecordKey(id), modelRecord{}); err != nil {
+		binding := modelRecord{Binding: ModelBinding{Provider: "launcher.old_api"}}
+		if err := st.memStore.PutSetting(context.Background(), modelRecordKey(id), binding); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_closeout_label">Closeout</string>
+    <string name="chat_closeout_own_claim">The agent\'s own report</string>
+    <string name="chat_closeout_status_done">Done</string>
+    <string name="chat_closeout_status_not_done">Not done</string>
+    <string name="chat_closeout_status_blocked">Blocked</string>
+    <string name="chat_closeout_blocked_on">Blocked on: %1$s</string>
+    <string name="chat_closeout_did">What changed</string>
+    <string name="chat_closeout_artifacts">Artifacts</string>
+    <string name="chat_closeout_merged">Merged</string>
+    <string name="chat_closeout_deployed">Deployed</string>
+    <string name="chat_closeout_verified">Verified</string>
+    <string name="chat_closeout_missing">Still needs</string>
+    <string name="chat_closeout_yes">Says yes</string>
+    <string name="chat_closeout_no">Says no</string>
+    <string name="chat_closeout_not_said">Not said</string>
+    <string name="chat_closeout_confirmed">Hub confirmed</string>
+    <string name="chat_closeout_unchecked">Not checked by the hub</string>
+    <string name="chat_closeout_found_merged_yes">Hub found it merged</string>
+    <string name="chat_closeout_found_merged_no">Hub found it isn\'t merged</string>
+    <string name="chat_closeout_found_deployed_yes">Hub found it deployed</string>
+    <string name="chat_closeout_found_deployed_no">Hub found it isn\'t deployed</string>
+    <string name="chat_decision_recommended">Recommended</string>
+    <string name="chat_decision_default_at">Taken by default at %1$s</string>
+    <string name="chat_decision_default_never">Never taken by default</string>
+    <string name="chat_decision_cost">If it waits: %1$s</string>
+    <string name="chat_decision_other">Other…</string>
+    <string name="chat_decision_more">More answers</string>
+    <string name="chat_decision_decide_yourself">You decide</string>
+    <string name="chat_decision_decide_yourself_detail">Persona decides and records what it assumed.</string>
+    <string name="chat_decision_not_what_i_asked">This isn\'t what I asked for</string>
+    <string name="chat_decision_not_what_i_asked_detail">The work pauses until Persona checks it against your request.</string>
+    <string name="chat_decision_explain_first">Tell me the background first</string>
+    <string name="chat_decision_explain_first_detail">Persona asks again with what this is and why.</string>
+    <string name="chat_decision_chosen">Answered: %1$s</string>
+    <string name="chat_decision_responded">Sent back to Persona</string>
+    <string name="chat_decision_handled">Already handled</string>
+    <string name="chat_decision_failed">Couldn\'t send your answer. %1$s</string>
+    <string name="chat_decision_confirm">Confirm: %1$s</string>
+</resources>

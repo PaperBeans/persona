@@ -70,6 +70,9 @@ type Service struct {
 	// taskRetry is how long a task waits before its one retry after a dropped link (0: taskStartRetryDelay; tests
 	// shorten it).
 	taskRetry time.Duration
+	// leaderResume bounds each attempt to put a supervision message into a closed task leader agent, and is the first
+	// wait of the retries after one failed (0: leaderResumeWait; tests shorten it, task_leader.go leaderResumeTime).
+	leaderResume time.Duration
 	// superviseTimes are how supervision messages gather and space out (zero fields: the package's; tests shorten
 	// them, supervise_signals.go superviseTimings).
 	superviseTimes superviseTimings

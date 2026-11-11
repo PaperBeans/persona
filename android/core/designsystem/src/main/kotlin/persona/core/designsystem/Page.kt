@@ -228,16 +228,17 @@ private fun EdgeWhen(under: (() -> Boolean)?, modifier: Modifier, edge: @Composa
 
 /**
  * A blur (or a fade, when glass is opaque) along one edge of a glass page, under the bars there: full strength
- * over the bars, fading out over the last [fade] towards the content. The wash on top of the blur is the page's own
+ * over the bars, then fading out over [fade] into the content. The wash on top of the blur is the page's own
  * light ([PageBackdrop]), not a flat colour, so over bare background the edge is invisible; only content under the
  * bars goes soft (2026-11-01: the flat wash showed as a hard band at the top and bottom of empty pages).
  */
 @Composable
-private fun ScrollEdge(modifier: Modifier, height: Dp, top: Boolean, light: Ambience, fade: Dp = 28.dp) {
+internal fun ScrollEdge(modifier: Modifier, height: Dp, top: Boolean, light: Ambience, fade: Dp = 28.dp) {
     val state = LocalGlassSource.current
-    val strip = modifier.fillMaxWidth().height(height)
+    val edgeHeight = height + fade
+    val strip = modifier.fillMaxWidth().height(edgeHeight)
     val density = LocalDensity.current
-    val full = with(density) { height.toPx() }
+    val full = with(density) { edgeHeight.toPx() }
     val soft = with(density) { fade.toPx() }.coerceAtMost(full)
     fun wash(strength: Float, from: Float): Brush {
         // Alpha of the wash down the strip: [strength] over the bars, none at the content's side.
@@ -256,8 +257,8 @@ private fun ScrollEdge(modifier: Modifier, height: Dp, top: Boolean, light: Ambi
             )
         })) { AmbientLight(light, Modifier.matchParentSize(), inWindow = true, mask = wash(0.5f, full - soft)) }
     } else {
-        // Opaque bars hide what is under them, so fading the content into the background over the whole edge is enough.
-        Box(strip) { AmbientLight(light, Modifier.matchParentSize(), inWindow = true, mask = wash(0.92f, 0f)) }
+        // Opaque bars hide what is under them; only the wash fades into the extra strip.
+        Box(strip) { AmbientLight(light, Modifier.matchParentSize(), inWindow = true, mask = wash(0.92f, full - soft)) }
     }
 }
 

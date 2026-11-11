@@ -281,6 +281,8 @@ internal fun ChatLineContent(
     plan: LinePlan? = null,
     showSourceLabel: Boolean = true,
     waiting: Boolean = false,
+    /** The reply whose closeout block the card above the transcript shows (#3612, [closeoutReplyId]); null: none. */
+    closeoutReply: String? = null,
 ) {
     val res = LocalResources.current
     when (line) {
@@ -295,7 +297,13 @@ internal fun ChatLineContent(
                         images = userPictures(userImages, session, loader))
                 }
             }
-            "reply" -> line.row.item?.item?.let { MessageContent(it, false, textUpdates[it.id], boxed = true) }
+            "reply" -> line.row.item?.item?.let {
+                val hideCloseout = closeoutReply == line.row.id && textUpdates[it.id]?.streaming != true
+                // only the block goes; a reply that said nothing else is not drawn at all
+                if (!hideCloseout || !onlyCloseout(textUpdates[it.id]?.text ?: it.text, cut = it.fullSize != null)) {
+                    MessageContent(it, false, textUpdates[it.id], boxed = true, hideCloseout = hideCloseout)
+                }
+            }
             "thinking" -> if (!style.hideThoughts) ThoughtContent(line.row.item?.text.orEmpty(), line.id, style.collapseThoughts)
             "image" -> line.row.item?.item?.let { ChatPicture(session, it, loader) }
             "recap" -> line.row.item?.item?.let { RecapLine(listOf(it)) }

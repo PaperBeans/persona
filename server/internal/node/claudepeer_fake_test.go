@@ -25,10 +25,19 @@ type fakeInbox struct {
 	token      string
 	requireAut bool
 	transcript string // where a taken message is written
-	mode       string // "take" (default), "hold", "drop-auth" (close at once, like a bad auth line)
 
 	mu    sync.Mutex
+	mode  string           // "take" (default), "hold", "drop-auth" (close at once, like a bad auth line); setMode
 	lines []map[string]any // every line read, auth lines included
+}
+
+// setMode changes how the inbox treats the next connections. The accept loop is already running, and the socket
+// between the node and the inbox orders nothing for the race detector, so the mode is written under the lock that
+// each connection reads it under.
+func (f *fakeInbox) setMode(mode string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mode = mode
 }
 
 // newFakeInbox listens where a claude's messagingSocketPath would be (listenFakeInbox, per platform).

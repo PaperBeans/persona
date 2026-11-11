@@ -992,6 +992,20 @@ internal fun AssistantDrawer(
             } }
             if (drawer) item { JDivider(Modifier.padding(vertical = Tokens.Space.s)) }
             if (!drawer || searchVisible || query.isNotBlank()) item { JSearchField(query, onQuery, stringResource(R.string.assistant_search_chats)) }
+            // The leader conversations, under their directions' names: the group says what they are (no Pin here; Unpin
+            // only for one pinned before it became a direction).
+            if (groups.directions.isNotEmpty()) item(key = "directions-header") {
+                JSectionHeader(stringResource(R.string.assistant_directions), count = groups.directions.size)
+            }
+            itemsIndexed(groups.directions, key = { _, session -> "direction-" + session.key.path }) { index, session ->
+                ConversationRow(session, selected = session.key == active,
+                    position = GroupPosition.of(index, groups.directions.size),
+                    onOpen = { onOpen(session.key) }, onEnd = onEnd?.let { action -> { action(session) } },
+                    onCopy = { onCopy(session) }, onArchive = onArchive?.let { action -> { action(session) } },
+                    pinned = session.key in groups.pinnedDirections,
+                    onPin = onPin?.takeIf { session.key in groups.pinnedDirections }?.let { pin -> { pin(session) } },
+                    named = groups.names[session.sessionId])
+            }
             if (groups.pinned.isNotEmpty()) item(key = "pinned-header") {
                 var pinMenu by remember { mutableStateOf(false) }
                 JSectionHeader(stringResource(R.string.assistant_pinned), count = groups.pinned.size, action = if (onUnpinAll != null) ({
@@ -1012,7 +1026,9 @@ internal fun AssistantDrawer(
             // The most recent 30, then one row for the rest (a search shows everything it finds).
             val recent = recentRows(groups.recent, query, showAllRecent)
             val recentCount = recent.shown.size + if (recent.hidden > 0) 1 else 0
-            if (groups.recent.isNotEmpty()) item(key = "recent-header") { JSectionHeader(stringResource(R.string.assistant_recent), count = groups.recent.size) }
+            if (groups.recent.isNotEmpty()) item(key = "recent-header") {
+                JSectionHeader(stringResource(if (groups.directions.isEmpty()) R.string.assistant_recent else R.string.assistant_other_chats), count = groups.recent.size)
+            }
             itemsIndexed(recent.shown, key = { _, session -> session.key.path }) { index, session ->
                 ConversationRow(session, selected = session.key == active,
                     position = GroupPosition.of(index, recentCount),
@@ -1050,7 +1066,7 @@ internal fun AssistantDrawer(
                     }
                 }
             }
-            if (groups.pinned.isEmpty() && groups.recent.isEmpty() && groups.auto.isEmpty() && (groups.main == null || query.isNotBlank())) {
+            if (groups.directions.isEmpty() && groups.pinned.isEmpty() && groups.recent.isEmpty() && groups.auto.isEmpty() && (groups.main == null || query.isNotBlank())) {
                 item { JEmptyState(stringResource(if (query.isBlank()) R.string.assistant_empty_title else R.string.assistant_no_match),
                     stringResource(if (query.isBlank()) R.string.assistant_empty_detail else R.string.assistant_no_match_detail)) }
             }
@@ -1081,12 +1097,14 @@ private fun ConversationRow(
     session: Session, selected: Boolean, onOpen: () -> Unit, onEnd: (() -> Unit)?,
     modifier: Modifier = Modifier, position: GroupPosition = GroupPosition.Single,
     pinned: Boolean = false, onPin: (() -> Unit)? = null, onCopy: () -> Unit = {}, onArchive: (() -> Unit)? = null,
+    named: String? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
     // The channel its latest message came in from (WeChat, the Feishu bot…), as a small mark after the title.
     val channels = LocalChannels.current
     val channel = remember(session.channels, channels) { ChannelSources.latest(session.channels, channels) }
-    val title = session.conversationTitle(conversationWords())
+    // [named]: a direction's name, shown instead of its leader conversation's title
+    val title = named ?: session.conversationTitle(conversationWords())
     if (LocalHomeDrawer.current) {
         JSidebarHistoryRow(title, session.conversationStatus(), selected, onOpen, { menu = true },
             stringResource(R.string.assistant_conversation_actions),

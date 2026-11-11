@@ -61,7 +61,20 @@ class RealAssistantRepository(
         return AssistantSnapshot(
             if (machine.isNotEmpty() && main.isNotEmpty()) SessionKey(machine, main) else null,
             conversations, request.manager, request.owner,
+            leaders = leadersOf(data),
         )
+    }
+
+    /** The directions' names for [leaders] (none without leaders); a hub that cannot list them keeps [held]. */
+    private suspend fun directionNames(request: Request, leaders: List<String>, held: Map<String, String>): Map<String, String> {
+        if (leaders.isEmpty()) return emptyMap()
+        return try {
+            directionNamesOf(request.transport.assistantLeadersOf(request.owner))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            held
+        }
     }
 
     private fun noteConversation(id: String, request: Request) {
@@ -146,11 +159,18 @@ class RealAssistantRepository(
         }
         // Network calls never hold the page/cache mutex: a slow manager cannot block switching away.
         val data = request.transport.assistantOf(request.owner)
+        // the names are asked for again only when the leaders or their titles change (as the web does)
+        val fresh = decode(data, request)
+        val held = current.value.takeIf { it.managerId == request.owner }
+        fun AssistantSnapshot.leaderTitles() = leaders.map { id -> conversations.firstOrNull { it.sessionId == id }?.title }
+        val names = if (held != null && held.directionNames.isNotEmpty() && held.leaders == fresh.leaders &&
+            held.leaderTitles() == fresh.leaderTitles()) held.directionNames
+            else directionNames(request, fresh.leaders, held?.directionNames.orEmpty())
         val pins = if (preferences != null) preferences.preferences.value.pins.sessions.mapNotNull(::sessionPath).toSet()
             else request.transport.pins().array("sessions").mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.let(::sessionPath) }.toSet()
         lock.withLock {
             if (!selected(request) || version != refreshVersion) return
-            val snapshot = decode(data, request)
+            val snapshot = fresh.copy(directionNames = names)
             cached[request.key] = snapshot
             current.value = snapshot
             currentPins.value = pins
@@ -216,6 +236,18 @@ class RealAssistantRepository(
     }
 
 }
+
+/** `assistant.leaders`: the leader conversations' ids in the hub's order, never the main one. */
+internal fun leadersOf(data: JsonObject): List<String> {
+    val main = data.string("main")
+    return data.array("leaders").mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf { id -> id.isNotEmpty() && id != main } }
+}
+
+/** `GET /api/v1/assistant/leaders`'s names by leader conversation id: current directions with a name only. */
+internal fun directionNamesOf(data: JsonObject): Map<String, String> = data.array("leaders").mapNotNull { it as? JsonObject }
+    .filter { (it["ended"] as? JsonPrimitive)?.booleanOrNull != true }
+    .mapNotNull { l -> l.string("id").takeIf { it.isNotEmpty() }?.let { id -> l.string("name").trim().takeIf { it.isNotEmpty() }?.let { id to it } } }
+    .toMap()
 
 internal fun JsonObject.string(key: String): String = (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
 internal fun JsonObject.optional(key: String): String? = string(key).takeIf { it.isNotEmpty() }

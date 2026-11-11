@@ -20,6 +20,7 @@ func (s *Service) modelPurpose(ctx context.Context, id string, providers []Model
 	if err != nil {
 		return p, err
 	}
+	p.Launch = p.launch()
 	recordID := modelRecordID(p)
 	r, err := s.modelRecord(ctx, recordID)
 	if err != nil {

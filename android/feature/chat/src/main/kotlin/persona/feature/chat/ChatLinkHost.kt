@@ -15,6 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -164,13 +166,19 @@ fun ChatLinkHost(
     // A web page is over the page: the page's glass goes opaque and the dock makes way (LocalWebSheets).
     WebSheetShown(url != null)
     // A conversation embedded under its host's bar (Persona's page) has the card start below that bar, not under it.
+    // Standalone hosts use the safe top instead; the larger value avoids counting an inset already in the host's bar twice.
     val hostBar = LocalChromeInsets.current.top
+    var hostTop by remember { mutableFloatStateOf(0f) }
     CompositionLocalProvider(LocalUriHandler provides uriHandler, LocalChatLinkOpening provides opening) {
-        BoxWithConstraints(modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier.fillMaxSize().onGloballyPositioned { hostTop = it.positionInWindow().y }) {
             val height = maxHeight
+            val safeDrawing = WindowInsets.safeDrawing
             val density = LocalDensity.current
+            // Window insets use window coordinates; this host may already start below its page bar or a sheet's safe top.
+            val remainingSafeTop = with(density) { (safeDrawing.getTop(this) - hostTop).coerceAtLeast(0f).toDp() }
+            val cardTop = maxOf(hostBar, remainingSafeTop)
             val pixels = with(density) { height.toPx() }
-            val above = with(density) { hostBar.toPx() }.coerceIn(0f, pixels)
+            val above = with(density) { cardTop.toPx() }.coerceIn(0f, pixels)
             val drag = remember { AnchoredDraggableState(LinkDetent.Hidden) }
             SideEffect {
                 drag.updateAnchors(DraggableAnchors {
@@ -182,7 +190,7 @@ fun ChatLinkHost(
             LaunchedEffect(opening) { if (url != null) drag.animateTo(LinkDetent.Full) }
             LaunchedEffect(closeRequest) { if (closeRequest > 0 && url != null) drag.animateTo(LinkDetent.Hidden) }
             LaunchedEffect(drag.settledValue) { if (drag.settledValue == LinkDetent.Hidden && !drag.isAnimationRunning) { url = null; forwarded = null } }
-            content(if (url != null && drag.currentValue == LinkDetent.Peek) (height - hostBar.coerceAtMost(height)) * 0.6f else 0.dp)
+            content(if (url != null && drag.currentValue == LinkDetent.Peek) (height - cardTop.coerceAtMost(height)) * 0.6f else 0.dp)
             url?.let { target ->
                 // A page whose renderer went away is loaded anew (a new view) when the user asks.
                 var generation by remember(target) { mutableIntStateOf(0) }
@@ -237,10 +245,13 @@ fun ChatLinkHost(
                 val palette = PersonaTheme.palette
                 val shape = PersonaTheme.shapes.sheetShape
                 // No glass inside the card either: its page would put the WebView in a glass source (LocalWebSheets).
-                // The card sits below the host's bar and over the dock, so its page keeps no room for them.
+                // The card sits below the host's bar and system top, and over the dock, so its page keeps no room for them.
+                // Its background reaches the side cutouts; only the controls and page content move inside them.
                 CompositionLocalProvider(LocalGlassLevel provides GlassLevel.Solid, LocalChromeInsets provides ChromeInsets()) {
-                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(panelHeight)
-                    .shadow(Tokens.Space.s, shape).clip(shape).background(palette.surfaceOpaque)) {
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(panelHeight).testTag("chat_link_card")
+                    .shadow(Tokens.Space.s, shape).clip(shape).background(palette.surfaceOpaque)
+                    .windowInsetsPadding(safeDrawing.only(WindowInsetsSides.Horizontal))
+                    .consumeWindowInsets(safeDrawing.only(WindowInsetsSides.Top))) {
                     Column(Modifier.fillMaxWidth().anchoredDraggable(drag, Orientation.Vertical)) {
                         Box(Modifier.align(Alignment.CenterHorizontally).padding(top = Tokens.Space.s).size(Tokens.Space.xxxl, Tokens.Space.xs)
                             .clip(PersonaTheme.shapes.controlShape).background(palette.ink3))

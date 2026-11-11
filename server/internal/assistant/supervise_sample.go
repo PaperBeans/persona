@@ -122,7 +122,9 @@ func (s *Service) judgeClose(ctx context.Context, t Todo, key, reason string, c 
 			return false
 		}
 		v.State = reviewAccepted
-		v.Reviews = append(v.Reviews, TaskReview{At: time.Now().UTC(), Verdict: reviewAccepted, By: reviewerJudge, Checks: checks, Note: note})
+		at := time.Now().UTC()
+		v.applyChecks(checks, at, reviewerJudge)
+		v.Reviews = append(v.Reviews, TaskReview{At: at, Verdict: reviewAccepted, By: reviewerJudge, Checks: checks, Note: note})
 		if len(v.Reviews) > 20 {
 			v.Reviews = v.Reviews[len(v.Reviews)-20:]
 		}

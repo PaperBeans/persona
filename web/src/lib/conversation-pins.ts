@@ -86,3 +86,10 @@ export function sidebarConversations(conversations: readonly Session[], main: st
   const rest = others.filter((c) => !order.has(c.session_id) && !isAutoConversation(c)).sort((a, b) => byTime(b.updated_at, a.updated_at));
   return { pinned, recent: firstAndCurrent(rest, limit, (c) => c.session_id === current) };
 }
+
+/** The sidebar's pinned Persona chats split in two: the leader conversations (the "Directions" group, in the hub's order)
+ *  and this browser's own pins (still "Pinned"). The main conversation is never a direction. */
+export function splitDirections(pinned: readonly Session[], leaders: readonly string[] | undefined, main: string | undefined): { directions: Session[]; pinned: Session[] } {
+  const lead = new Set((leaders ?? []).filter((id) => id !== main));
+  return { directions: pinned.filter((c) => lead.has(c.session_id)), pinned: pinned.filter((c) => !lead.has(c.session_id)) };
+}

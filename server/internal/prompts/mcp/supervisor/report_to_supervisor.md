@@ -1,5 +1,7 @@
 Report to the Persona assistant that handed you this task and reviews it (your supervisor), not to the user: a decision you need from it (question), that you are stuck (blocked), that you finished with the evidence for each acceptance criterion (done), or where you are in a long task (progress). It reads it within minutes, and answers or redirects you by message. Only for a task Persona supervises; elsewhere nobody receives it and it says so. Don't use it for every small step, and keep asking the user what only the user can decide the usual way. A question that does not hold you up (you can go on with other work, and a late answer costs nothing: which name to prefer, a style choice) can be sent with `urgent: false`: nobody is woken for it, and the owner sees it in their next morning or evening briefing, under "Can wait", and answers you in your chat. If no briefing is switched on it goes as an urgent question, and the answer says so. Ask what blocks you without it. `urgent` is for kind `question` only.
 
+Report individual done_when entries as they change with `criteria`: `number` is the one-based position in the task's ordered done_when, `state` is pending / met / not_met, and evidence is required for met and not_met (a command plus output, a link or the gap). Omitted entries keep their previous state; pending resets an entry. This persists immediately and updates the task's count, but is an agent report, not the supervisor's acceptance. The supervisor receives the entries and evidence in its supervision message and still reviews the task itself.
+
 ```json
 {
   "type": "object",
@@ -18,6 +20,20 @@ Report to the Persona assistant that handed you this task and reviews it (your s
       "maxItems": 8,
       "items": { "type": "string" },
       "description": "links, command output, file paths that show it (a PR, CI, a screenshot)"
+    },
+    "criteria": {
+      "type": "array",
+      "maxItems": 6,
+      "description": "only the done_when entries you are updating; does not accept or close the task",
+      "items": {
+        "type": "object",
+        "required": ["number", "state"],
+        "properties": {
+          "number": { "type": "integer", "minimum": 1, "description": "one-based position in the task's done_when" },
+          "state": { "type": "string", "enum": ["pending", "met", "not_met"] },
+          "evidence": { "type": "string", "maxLength": 600, "description": "required for met/not_met; command + output, link, or what is missing" }
+        }
+      }
     },
     "step": {
       "type": "integer",

@@ -444,6 +444,24 @@ class ComposeTests(unittest.TestCase):
         self.assertIn("TLS_PORT=18662", ENTRYPOINT.read_text())
         self.assertIn("EXPOSE 18660 18662", (ROOT / "Dockerfile").read_text())
 
+    def test_web_shared_fixture_imports_are_in_the_image(self):
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        context = (ROOT / ".dockerignore").read_text().splitlines()
+        imports = re.compile(r'''["']((?:\.\./)+spec/fixtures/[^"']+\.json)["']''')
+        groups = set()
+        for source in (ROOT / "web/src").rglob("*"):
+            if source.suffix not in (".ts", ".tsx"):
+                continue
+            for relative in imports.findall(source.read_text()):
+                fixture = (source.parent / relative).resolve()
+                self.assertTrue(list(fixture.parent.glob(fixture.name)), str(fixture.relative_to(ROOT)))
+                groups.add(fixture.relative_to(ROOT / "spec/fixtures").parts[0])
+        self.assertTrue(groups)
+        for group in sorted(groups):
+            with self.subTest(group=group):
+                self.assertIn("!spec/fixtures/" + group + "/", context)
+                self.assertIn("COPY spec/fixtures/" + group + "/ /src/spec/fixtures/" + group + "/", dockerfile)
+
 
 if __name__ == "__main__":
     unittest.main()

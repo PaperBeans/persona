@@ -16,6 +16,7 @@ This document covers:
 - the numbered steps that keep redraws small (code comments cite them by number);
 - how "true and timely" is defined and tested.
 
+The general performance rules (main-thread IO, `@State`, images, launch, memory) are in `docs/apple/performance.md`; this document is its rule P5 in depth.
 Background: `docs/archive/apple/live-updates.md` (three instances of "push interrupts an action").
 The root causes, the staged plan and the measurements after each step are in `docs/archive/apple/ios-state-records.md`.
 

@@ -34,6 +34,8 @@ export interface TaskReview {
 export interface Supervision {
   supervisor: string;
   done_when?: string[];
+  /** Latest per-entry reports/checks. Absent on older hubs; done_when owns text and order. */
+  criteria?: CriterionStatus[];
   expect_minutes?: number;
   state?: ReviewState;
   /** Present while `state` is "parked": what the task waits for. Absent otherwise, and on an older hub. */
@@ -45,6 +47,15 @@ export interface Supervision {
   progress?: TaskProgress;
   /** The latest independent review of its change (#2173); absent when none ran (or on an older hub). */
   auto_review?: AutoReview;
+}
+
+export interface CriterionStatus {
+  criterion: string;
+  state: "pending" | "met" | "not_met";
+  evidence?: string;
+  at?: string;
+  /** agent:<machine>/<session>, supervisor:<conversation>, or judge. */
+  by?: string;
 }
 
 /** An independent reviewer's run over a supervised task's change: its state, counts and report. */
@@ -147,28 +158,37 @@ export function reviewBadge(todo: Pick<Todo, "done_at"> & { supervision?: Superv
 
 export type CheckMark = "met" | "missing" | "open" | "unchecked";
 
+export interface ChecklistEntry {
+  criterion: string;
+  mark: CheckMark;
+  evidence?: string;
+  at?: string;
+  by?: string;
+}
+
 /**
- * Each criterion with how the latest review that judged it found it: met, missing (with its evidence or gap), or
- * open (not reviewed yet). Criteria a review judged that are not in done_when (a task without any) follow. Once the
- * acceptance stands, a criterion no review judged (one added after it, #3156) is "unchecked", not open: nothing waits
- * on it any more.
+ * Current criterion progress, independent of the task's acceptance. Older hubs
+ * omit criteria: retain their review-derived display, including unchecked entries
+ * added after a standing acceptance (#3156).
  */
-export function checklist(sup: Supervision | undefined): { criterion: string; mark: CheckMark; evidence?: string }[] {
+export function checklist(sup: Supervision | undefined): ChecklistEntry[] {
   if (!sup) return [];
-  const settled = acceptanceStands({ supervision: sup });
-  const latest = new Map<string, ReviewCheck>();
-  for (const r of sup.reviews ?? []) for (const c of r.checks ?? []) latest.set(c.criterion, c);
-  const out: { criterion: string; mark: CheckMark; evidence?: string }[] = [];
-  const seen = new Set<string>();
-  for (const criterion of sup.done_when ?? []) {
-    seen.add(criterion);
-    const c = latest.get(criterion);
-    out.push({ criterion, mark: c ? (c.met ? "met" : "missing") : settled ? "unchecked" : "open", evidence: c?.evidence || undefined });
+  const criteria = sup.done_when ?? [];
+  const current = criteria.length ? sup.criteria : undefined;
+  const latest = new Map<string, ChecklistEntry>();
+  for (const c of current ?? sup.reviews?.flatMap((r) => r.checks ?? []) ?? []) {
+    latest.set(c.criterion, {
+      criterion: c.criterion,
+      mark: "state" in c ? (c.state === "met" ? "met" : c.state === "not_met" ? "missing" : "open") : c.met ? "met" : "missing",
+      evidence: c.evidence || undefined,
+      ...("state" in c ? { at: c.at, by: c.by } : {}),
+    });
   }
-  for (const [criterion, c] of latest) {
-    if (!seen.has(criterion)) out.push({ criterion, mark: c.met ? "met" : "missing", evidence: c.evidence || undefined });
-  }
-  return out;
+  const settled = !current && acceptanceStands({ supervision: sup });
+  return [
+    ...criteria.map((criterion): ChecklistEntry => latest.get(criterion) ?? { criterion, mark: settled ? "unchecked" : "open", evidence: undefined }),
+    ...(current ? [] : [...latest.values()].filter((c) => !criteria.includes(c.criterion))),
+  ];
 }
 
 /** The latest review, if any. */

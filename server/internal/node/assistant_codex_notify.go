@@ -200,7 +200,7 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 		}
 		recovering := n.recoverAssistantResult(p, failure != "", failure, failureKinds...)
 		if !recovering {
-			n.clearAssistantRecovery(p)
+			n.clearAssistantRecovery(p, failure == "")
 		}
 		p.mu.Lock()
 		if !recovering {

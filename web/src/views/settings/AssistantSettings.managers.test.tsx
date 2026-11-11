@@ -109,7 +109,8 @@ it("pins model configuration reads and edits to the current assistant", async ()
   function Harness() { const [open, onOpen] = useState<string | null>(null); return <ModelConfiguration open={open} onOpen={onOpen} onProviders={() => {}} />; }
   await act(async () => root.render(<Harness />)); await flush();
   await current("work");
-  await act(async () => [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("work Agents"))!.click()); await flush();
+  expect(host.querySelector('[data-model-purpose="agent.new"]')!.textContent).toContain("work");
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-model-purpose="agent.new"] button')!.click()); await flush();
   await act(async () => [...document.querySelectorAll("button")].find((b) => b.textContent === t("common.save"))!.click()); await flush();
   expect(requests.filter((r) => r.method === "PATCH")).toEqual([{ manager: "work", method: "PATCH", path: "/api/v1/model-config/purposes/agent.new" }]);
   expect(requests.every((r) => ["assistant", "work"].includes(r.manager))).toBe(true);

@@ -62,6 +62,10 @@ func TestJudgeClosesATaskThatPassedItsCheck(t *testing.T) {
 	if !strings.HasPrefix(cur.DoneReason, "判官核对通过") {
 		t.Fatalf("done reason %q", cur.DoneReason)
 	}
+	if len(v.Criteria) != 2 || v.Criteria[0].State != "met" || v.Criteria[0].By != reviewerJudge ||
+		v.Criteria[0].At == nil || v.Criteria[0].Evidence != v.Reviews[0].Checks[0].Evidence {
+		t.Fatalf("judge criteria: %+v", v.Criteria)
+	}
 	if _, ok := reviewSignal(s, todo.ID); ok {
 		t.Fatal("the main conversation still gets it to review")
 	}

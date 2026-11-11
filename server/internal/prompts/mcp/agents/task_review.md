@@ -24,7 +24,7 @@ Review a task you handed out from this conversation (its todo id), after you che
           "evidence": {"type": "string", "description": "what shows it is met (a link, a command's output), or what is missing"}
         }
       },
-      "description": "each criterion, met or not, with its evidence or gap"
+      "description": "each criterion, met or not, with its evidence or gap; updates that done_when entry's persisted state, evidence, time and supervisor identity. Omitted entries keep their progress"
     },
     "note": {
       "type": "string",

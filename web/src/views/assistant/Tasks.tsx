@@ -59,6 +59,9 @@ import { Icon, type IconName } from "../../ui/icons";
 import { ReportLine, ReviewBadge, ReviewLine } from "./Supervision";
 import { AcceptRow, BriefCard } from "./Brief";
 
+// A plan task's brief (#3822) comes with the first plan card that has one, as the decision row does.
+const PlanBrief = lazy(() => import("./TaskBrief").then((m) => ({ default: m.PlanBrief })));
+
 // A decision's row comes with the tray's first decision, not with the first screen (startup-preload's budget).
 const DecisionRow = lazy(() => import("./DecisionRow").then((m) => ({ default: m.DecisionRow })));
 import { SentLine, TaskSentList } from "./Sent";
@@ -360,7 +363,9 @@ export function PlanCard({ plan }: { plan: TaskPlan }) {
         <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="accent-[var(--accent)]" />
         {t("assistant-tasks.plan_remember")}
       </label>
-      <div className="flex gap-2">
+      {/* Start stays in reach (#3822): a card taller than the tray it scrolls in (several tasks, an opened brief) keeps
+          its buttons at the tray's bottom edge; a card that fits looks as it did (the padding it takes it gives back) */}
+      <div data-plan-actions className="sticky bottom-0 z-[1] -mx-4 -mt-2 -mb-4 flex gap-2 rounded-b-card bg-surface px-4 pt-2 pb-4">
         <Button tone="accent" busy={busy} onClick={() => run(() => startPlan(plan, remember, planUltracodeToSend(plan, ultracode, ultracodeBlockedNow)))} className="flex-1">
           {plan.tasks.length > 1 ? t("assistant-tasks.plan_start_n", { count: plan.tasks.length }) : t("assistant-tasks.plan_start")}
         </Button>
@@ -417,6 +422,12 @@ function PlanTaskRow({ n, task, numbered, ultra, busy, onUltra }: { n: number; t
       {/* it is asked for where it can't run: say it starts without */}
       {ultra?.blocked && ultra.on && <div className="text-[12px] text-orange">{t("ultracode.plan_blocked", { reason: ultra.blocked })}</div>}
       {task.why && <div className="text-[12px] text-ink-2">{task.why}</div>}
+      {/* what the task will be held to, shown before "Start" confirms it (#3822) */}
+      {task.brief && (
+        <Suspense fallback={null}>
+          <PlanBrief brief={task.brief} title={task.title} />
+        </Suspense>
+      )}
     </div>
   );
 }

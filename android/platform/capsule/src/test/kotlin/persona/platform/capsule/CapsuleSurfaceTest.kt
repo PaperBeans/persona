@@ -107,6 +107,7 @@ class CapsuleSurfaceTest {
         rule.onNodeWithText(next.text).performScrollTo()
         rule.onNodeWithText(next.text).assertIsDisplayed()
         rule.runOnIdle { content = content.copy(messages = content.messages + final, readVersion = "v3") }
+        rule.waitUntil(5_000) { runCatching { rule.onNodeWithText(final.text).assertIsDisplayed() }.isSuccess }
         rule.onNodeWithText(final.text).assertIsDisplayed()
         rule.waitForIdle()
         rule.mainClock.advanceTimeBy(1_000)

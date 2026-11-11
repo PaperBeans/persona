@@ -1,6 +1,7 @@
 package persona.feature.agents
 
 import persona.feature.chat.TodoRestores
+import persona.core.domain.tasks.orphanedLine
 import persona.core.domain.tasks.HoldStep
 import persona.core.domain.tasks.HoldUnblock
 import persona.core.domain.tasks.TodoHold
@@ -708,14 +709,17 @@ private fun TodoActivityLine(todo: Todo, urgent: TodoMostUrgent?, card: Interact
         null -> null
     }
     val notes = todo.notes.trim().takeIf { it.isNotEmpty() }
-    val text = reason ?: summary ?: notes ?: stringResource(R.string.agents_todo_not_handed)
     val waiting = reason == null && summary != null && urgent?.status == AgentState.NeedsYou
+    // Nobody is working on it (#3618): ahead of its agents' last words, which are from before they went; not ahead
+    // of a failed start or an agent that waits for the user.
+    val orphaned = todo.orphanedLine?.takeIf { reason == null && startFailed == null && !waiting }?.text()
+    val text = reason ?: orphaned ?: summary ?: notes ?: stringResource(R.string.agents_todo_not_handed)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
         modifier = Modifier.padding(start = Tokens.Space.xxxl)
     ) {
-        if (reason == null && urgent != null) {
+        if (reason == null && orphaned == null && urgent != null) {
             JStatusDot(when (urgent.status) {
                 AgentState.NeedsYou -> Status.NeedsYou
                 AgentState.Unread -> Status.Unread
@@ -728,6 +732,7 @@ private fun TodoActivityLine(todo: Todo, urgent: TodoMostUrgent?, card: Interact
             style = PersonaTheme.type.caption,
             color = when {
                 startFailed != null && reason == null -> palette.danger.text
+                orphaned != null -> palette.cautionText
                 waiting -> palette.needsYou.text
                 else -> palette.ink2
             },

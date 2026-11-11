@@ -27,6 +27,12 @@ COPY spec/fixtures/injected/ /src/spec/fixtures/injected/
 COPY spec/fixtures/attention/ /src/spec/fixtures/attention/
 # And src/lib/recent-setups.test.ts reads ../../../spec/fixtures/recents.
 COPY spec/fixtures/recents/ /src/spec/fixtures/recents/
+# Shared JSON imported by the web app's typechecked tests.
+COPY spec/fixtures/entries/ /src/spec/fixtures/entries/
+COPY spec/fixtures/comments/ /src/spec/fixtures/comments/
+COPY spec/fixtures/inbox/ /src/spec/fixtures/inbox/
+COPY spec/fixtures/triage/ /src/spec/fixtures/triage/
+COPY spec/fixtures/sync/ /src/spec/fixtures/sync/
 # The extension schema, which the web app builds in: src/lib/extension-ui-stream.ts imports its *.schema.json (?raw),
 # the admin page's assistant card preview and the showcase glob its examples (import.meta.glob, which comes out empty
 # without them), and tests import example JSON (TS2307 in tsc -b without it).

@@ -178,6 +178,24 @@
         <item quantity="other">%1$d時間後に起こします</item>
     </plurals>
     <string name="designsystem_core_wake_in_hours_minutes">%1$d時間%2$d分後に起こします</string>
+    <string name="designsystem_core_dot_joined">%1$s · %2$s</string>
+    <string name="designsystem_core_closeout_merged_yes">マージ済み</string>
+    <string name="designsystem_core_closeout_merged_no">未マージ</string>
+    <string name="designsystem_core_closeout_merged_confirmed">マージ済み ✓</string>
+    <string name="designsystem_core_closeout_merged_contradicted">✗ マージ済みと報告、実際は未マージ</string>
+    <string name="designsystem_core_closeout_deployed_yes">デプロイ済み</string>
+    <string name="designsystem_core_closeout_deployed_no">未デプロイ</string>
+    <string name="designsystem_core_closeout_deployed_confirmed">デプロイ済み ✓</string>
+    <string name="designsystem_core_closeout_deployed_contradicted">✗ デプロイ済みと報告、実際は未デプロイ</string>
+    <string name="designsystem_core_closeout_blocked_on">ブロック中：%1$s</string>
+    <string name="designsystem_core_closeout_blocked">ブロック中</string>
+    <string name="designsystem_core_closeout_not_done_missing">未完了：%1$s</string>
+    <string name="designsystem_core_closeout_not_done">未完了</string>
+    <string name="designsystem_core_closeout_done">完了と報告</string>
+    <string name="designsystem_core_todo_orphaned">誰も作業していません</string>
+    <string name="designsystem_core_todo_orphaned_error">エラー後に終了</string>
+    <string name="designsystem_core_todo_orphaned_closed">終了済み</string>
+    <string name="designsystem_core_todo_orphaned_offline">パソコンがオフライン</string>
     <string name="designsystem_core_source_codex_live">Codexライブ</string>
     <string name="designsystem_core_source_codex_history">Codex履歴</string>
     <string name="designsystem_core_source_identity_conflict">ID競合</string>

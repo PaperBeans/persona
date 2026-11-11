@@ -10,6 +10,15 @@
 
 
 
+## Apple performance
+
+<!-- Required when the change touches apple/; otherwise write "Not applicable".
+     Paste the review checklist from docs/apple/performance.md and mark each rule done, not applicable, or deviated (with the reason).
+     A performance-sensitive change (chat list, composer, Agents list, pushes, launch, images) adds before / after numbers:
+     device or simulator, build settings, runs, range. -->
+
+
+
 ## Design principles self-check
 
 <!-- Required when the change touches UI, settings or defaults, or how a number or status is counted; otherwise write "Not applicable" and delete the list.

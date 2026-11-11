@@ -56,6 +56,7 @@ import persona.core.domain.answer.waitingCard
 import persona.core.domain.tasks.TaskNow
 import persona.core.domain.tasks.TaskState
 import persona.core.domain.tasks.isRemovable
+import persona.core.domain.tasks.orphanedLine
 
 // A task's detail, the dock's "All" and the plan's "Edit" (iOS TaskSheets.swift / PlanEditSheet; web TaskPanel): what a
 // tap on a task opens instead of leaving the conversation for its agent's page.
@@ -106,7 +107,9 @@ private fun TaskDetailSheet(todoId: String, host: AssistantTaskHost, onDismiss: 
             TaskMark(state)
             Column(Modifier.weight(1f)) {
                 Text(todo.title, style = PersonaTheme.type.title, color = PersonaTheme.palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(state.label.text(), style = PersonaTheme.type.caption, color = PersonaTheme.palette.status(state.status()).text, maxLines = 1,
+                val orphaned = todo.orphanedLine.takeIf { state != TaskState.NeedsYou }
+                Text(orphaned?.text() ?: state.label.text(), style = PersonaTheme.type.caption,
+                    color = if (orphaned != null) PersonaTheme.palette.cautionText else PersonaTheme.palette.status(state.status()).text, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
             }
             if (state.isRemovable) JIconButton(PhIcons.DotsThree, stringResource(R.string.chat_task_detail_more), { menu = true })

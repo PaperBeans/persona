@@ -38,6 +38,7 @@ import persona.core.domain.sort.canInterrupt
 import persona.core.domain.sort.canSend
 import persona.core.domain.sort.canTerminal
 import persona.core.domain.sort.canTypeClaudeCommands
+import persona.core.domain.sort.shownCloseout
 import persona.feature.chat.media.ChatImageViewer
 import persona.core.domain.rewind.Rewind
 import dagger.hilt.android.EntryPointAccessors
@@ -172,6 +173,21 @@ private fun ChatPage(
     } ?: lastSession
     SideEffect { if (liveSession != null) lastSession = liveSession }
     val session = liveSession ?: readOnlySessionMetadata(key, historyReadOnly, historySession)
+    // A stopped agent's closeout is a card above the transcript (#3612): its own session's, never an assistant
+    // conversation's, a subagent's or a workflow agent's (those pages borrow their parent's row).
+    val listedCloseout = session?.takeIf { renderStyle != ChatRenderStyle.Assistant && !it.assistant && child == null && workflowAgent == null }?.shownCloseout
+    // A list row is a summary: where the closeout stands. What the agent did and verified, and what it produced, come
+    // with the whole row, read once per closeout; until then (and from a hub without the lookup) the card shows the row's part.
+    var closeoutDetail by remember(key) { mutableStateOf<Session?>(null) }
+    LaunchedEffect(key, listedCloseout, row?.rev, chrome.tasks) {
+        if (listedCloseout == null) { closeoutDetail = null; return@LaunchedEffect }
+        if (row?.waiting == null) return@LaunchedEffect
+        try { chrome.tasks?.sessionDetail(key)?.takeIf { it.sessionId == key.sessionId }?.let { closeoutDetail = it } }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Keep the row's part: the card still says where the work stands. */ }
+    }
+    val closeoutWork = listedCloseout?.let { closeoutDetail?.takeIf { detail -> detail.shownCloseout != null }?.work ?: session?.work }
+    val closeoutShown = closeoutWork?.closeout
     // What the session's source lets the phone do (docs/protocol/protocol.md "Codex sources and capabilities"). Older sessions, and one whose
     // metadata has not arrived, can do everything: the hub and the node refuse what is not allowed anyway.
     val canSend = session?.canSend ?: true
@@ -972,11 +988,18 @@ private fun ChatPage(
                             }
                         }
                     },
-                ) { padding ->
+                ) { pagePaddingValues ->
                     val horizontalPadding = pagePadding
+                    // The closeout card takes the room under the top bar; the list then starts right under the card.
+                    val padding = if (closeoutShown != null) PaddingValues(bottom = pagePaddingValues.calculateBottomPadding()) else pagePaddingValues
+                    val closeoutReply = remember(lines, closeoutShown != null) { if (closeoutShown != null) closeoutReplyId(lines) else null }
                     Column(Modifier.fillMaxSize()) {
                         if (search.selected != null) ReturnChip { search.returnToOrigin(chatList) }
                         search.notice?.let { Text(it, Modifier.padding(horizontal = horizontalPadding), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2) }
+                        closeoutShown?.let { closeout ->
+                            CloseoutCard(closeout, closeoutWork?.artifacts.orEmpty(), key.path, Modifier.padding(
+                                start = horizontalPadding, end = horizontalPadding, top = pagePaddingValues.calculateTopPadding() + Tokens.Space.s))
+                        }
                         Box(Modifier.weight(1f)) {
                             ChatList(state = chatList, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(
                                 start = horizontalPadding, end = horizontalPadding,
@@ -1022,7 +1045,8 @@ private fun ChatPage(
                                             contentWorkGroups[it.groupId]?.steps?.lastOrNull()?.id == it.step.id
                                         } == true,
                                         plan = (line as? ChatLine.Step)?.let { contentPlans[it.groupId] },
-                                        showSourceLabel = line.id in contentSourceLabels, waiting = waitingOnYou)
+                                        showSourceLabel = line.id in contentSourceLabels, waiting = waitingOnYou,
+                                        closeoutReply = closeoutReply)
                                         }
                                     }
                                 }

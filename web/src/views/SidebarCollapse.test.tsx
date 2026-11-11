@@ -307,28 +307,25 @@ describe("the main conversation: the column's first row, Persona with the app's 
     await flush();
     expect(newChats()).toEqual([]);
     await load();
-    // one entry, a labeled row: the first of the Persona chats group, after the main chat and the pages
+    // one entry: the compose icon at the end of the Persona chats title, as on the phone's sidebar, folded or not; not a row
     expect(newChats()).toHaveLength(1);
-    const row = newChats()[0];
-    expect(row.textContent).toBe("新对话");
-    expect(block("Persona 对话").contains(row)).toBe(true);
-    const chatRows = [...block("Persona 对话").querySelectorAll("a")];
-    expect(chatRows[0]).toBe(row);
-    expect(chatRows.some((a) => a.textContent?.includes("整理周报"))).toBe(true);
-    const all = [...host.querySelectorAll("a")];
-    expect(all.indexOf(row)).toBeGreaterThan(all.indexOf(mainRow()));
-    expect(host.querySelector("[data-sidebar-sticky]")!.contains(row)).toBe(false);
-    // folded, the group's title carries the same entry as an icon with its name
-    act(() => button("Persona 对话")!.click());
-    await flush();
-    const icon = newChats().find((a) => !a.closest("[inert]"))!;
+    const icon = newChats()[0];
+    expect(icon.textContent).toBe("");
     expect(icon.getAttribute("aria-label")).toBe("新对话");
     expect(icon.getAttribute("title")).toBe("新对话");
     expect(icon.closest(".group\\/sec")).not.toBeNull();
+    expect(block("Persona 对话").contains(icon)).toBe(true);
+    const chatRows = [...block("Persona 对话").querySelectorAll("a")];
+    expect(chatRows.some((a) => a.textContent?.includes("整理周报"))).toBe(true);
+    const all = [...host.querySelectorAll("a")];
+    expect(all.indexOf(icon)).toBeGreaterThan(all.indexOf(mainRow()));
+    expect(host.querySelector("[data-sidebar-sticky]")!.contains(icon)).toBe(false);
     act(() => button("Persona 对话")!.click());
     await flush();
-    expect(newChats().filter((a) => !a.closest("[inert]"))).toEqual([row]);
-    // the open new chat page lights the row
+    expect(newChats().filter((a) => !a.closest("[inert]"))).toHaveLength(1);
+    act(() => button("Persona 对话")!.click());
+    await flush();
+    // the open new chat page lights the icon
     act(() => root.render(<Sidebar route={{ name: "persona-new" }} onSearch={() => {}} onNewAgent={() => {}} />));
     await flush();
     expect(newChats()[0].getAttribute("aria-current")).toBe("page");

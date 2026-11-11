@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_closeout_label">收尾记录</string>
+    <string name="chat_closeout_own_claim">Agent 自己的说法</string>
+    <string name="chat_closeout_status_done">已完成</string>
+    <string name="chat_closeout_status_not_done">没做完</string>
+    <string name="chat_closeout_status_blocked">卡住了</string>
+    <string name="chat_closeout_blocked_on">卡在：%1$s</string>
+    <string name="chat_closeout_did">改了什么</string>
+    <string name="chat_closeout_artifacts">产出</string>
+    <string name="chat_closeout_merged">合并</string>
+    <string name="chat_closeout_deployed">部署</string>
+    <string name="chat_closeout_verified">验证</string>
+    <string name="chat_closeout_missing">还缺</string>
+    <string name="chat_closeout_yes">自述：是</string>
+    <string name="chat_closeout_no">自述：否</string>
+    <string name="chat_closeout_not_said">没说</string>
+    <string name="chat_closeout_confirmed">hub 已核实</string>
+    <string name="chat_closeout_unchecked">hub 没核对</string>
+    <string name="chat_closeout_found_merged_yes">hub 查到已合并</string>
+    <string name="chat_closeout_found_merged_no">hub 查到没有合并</string>
+    <string name="chat_closeout_found_deployed_yes">hub 查到已部署</string>
+    <string name="chat_closeout_found_deployed_no">hub 查到没有部署</string>
+    <string name="chat_decision_recommended">推荐</string>
+    <string name="chat_decision_default_at">%1$s 没回复就按推荐办</string>
+    <string name="chat_decision_default_never">不会默认执行，等你回复</string>
+    <string name="chat_decision_cost">等下去的代价：%1$s</string>
+    <string name="chat_decision_other">其他…</string>
+    <string name="chat_decision_more">更多回答</string>
+    <string name="chat_decision_decide_yourself">你来定</string>
+    <string name="chat_decision_decide_yourself_detail">Persona 自己决定，并记下它的假设。</string>
+    <string name="chat_decision_not_what_i_asked">这不是我要的</string>
+    <string name="chat_decision_not_what_i_asked_detail">先暂停，等 Persona 对照你的要求核对。</string>
+    <string name="chat_decision_explain_first">先告诉我背景</string>
+    <string name="chat_decision_explain_first_detail">Persona 补上这是什么、为什么做，再问一次。</string>
+    <string name="chat_decision_chosen">已回答：%1$s</string>
+    <string name="chat_decision_responded">已交回 Persona</string>
+    <string name="chat_decision_handled">已经处理过了</string>
+    <string name="chat_decision_failed">回答没发出去。%1$s</string>
+    <string name="chat_decision_confirm">确认：%1$s</string>
+</resources>

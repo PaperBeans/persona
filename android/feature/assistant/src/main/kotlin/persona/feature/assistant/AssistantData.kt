@@ -24,9 +24,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.UUID
 
-/** [auto]: the conversations the hub opened by itself (#3264), out of [recent] while nothing is searched. */
+/**
+ * [auto]: the conversations the hub opened by itself (#3264), out of [recent] while nothing is searched. [directions]: the
+ * leader conversations (`assistant.leaders`), first, in the hub's order, out of [pinned] and [recent]; [names] what each
+ * direction is called, by session id, shown instead of its title.
+ */
 internal data class ConversationGroups(
     val main: Session?, val pinned: List<Session>, val recent: List<Session>, val auto: List<Session> = emptyList(),
+    val directions: List<Session> = emptyList(), val names: Map<String, String> = emptyMap(),
+    /** Directions also pinned (before they became one): their menu keeps Unpin, so the pin can still go. */
+    val pinnedDirections: Set<SessionKey> = emptySet(),
 )
 
 /** The drawer's groups of automatic conversations, in its order; [Other] is any origin this app doesn't know. */
@@ -59,14 +66,21 @@ internal fun conversationGroups(
                 it.lastText.orEmpty().contains(query.trim(), ignoreCase = true))
     }.map { it to it.updated } // each time parsed once, not on every comparison
         .sortedWith(compareByDescending<Pair<Session, java.time.Instant?>> { it.second }.thenBy { it.first.key.path }).map { it.first }
-    val others = matches.filter { it.key != snapshot.mainSession && it.key !in pinned }
+    // The leaders are the Directions group, under their names (a search matches the name too), in the hub's order.
+    val names = snapshot.directionNames
+    val directions = snapshot.leaders.mapNotNull { id ->
+        snapshot.conversations.firstOrNull { it.sessionId == id && it.key != snapshot.mainSession && !it.archived }
+    }.filter { query.isBlank() || it in matches || names[it.sessionId].orEmpty().contains(query.trim(), ignoreCase = true) }
+    val isDirection = directions.map { it.key }.toSet()
+    val others = matches.filter { it.key != snapshot.mainSession && it.key !in pinned && it.key !in isDirection }
     // A search finds every conversation, wherever it comes from; otherwise "Recent" is the user's own.
     val searching = query.isNotBlank()
     // The main conversation is the drawer's first row, above the search: a search does not take it away.
     return ConversationGroups(snapshot.conversations.firstOrNull { it.key == snapshot.mainSession && !it.archived },
-        matches.filter { it.key != snapshot.mainSession && it.key in pinned },
+        matches.filter { it.key != snapshot.mainSession && it.key in pinned && it.key !in isDirection },
         if (searching) others else others.filter { it.autoOrigin() == null },
-        if (searching) emptyList() else others.filter { it.autoOrigin() != null })
+        if (searching) emptyList() else others.filter { it.autoOrigin() != null },
+        directions, names, directions.map { it.key }.filter { it in pinned }.toSet())
 }
 
 /** How many recent conversations the history lists before folding the rest into "See all N". */

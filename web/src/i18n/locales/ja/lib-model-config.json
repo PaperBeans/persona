@@ -1,6 +1,5 @@
 {
   "effort": "思考{effort}",
   "not_configured": "未設定",
-  "group_misc": "その他",
   "runtime_fallback": "CLIに切り替えました：{reason}"
 }

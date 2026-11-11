@@ -1,6 +1,7 @@
 import { formatDate, t } from "../i18n";
 import { currentHeaders, noteItemManager } from "./manager-choice";
 import { acceptanceStands, reviewState, type Supervision } from "./supervision";
+import type { LineageStep, TaskBrief } from "./brief";
 import { api, ApiError, enc } from "./api";
 import { contextBody } from "./context-body";
 import { parseAPIError, retryable } from "./api-errors";
@@ -90,6 +91,10 @@ export interface Todo {
    *  to-do is gone and nothing brings one back. `reason`: `error` (closed after a model error), `offline` (its computer
    *  is not connected) or `closed`; `since` is when the hub first saw it. Unset otherwise, and from hubs before it. */
   orphaned?: { reason?: "error" | "offline" | "closed" | (string & {}); since?: string };
+  /** The brief its work is held to and the to-dos that worked for it, oldest first (#3822, lib/brief.ts,
+   *  docs/assistant/unified-entry.md "Briefs"); unset for a to-do that is no task, and from hubs before briefs. */
+  brief?: TaskBrief;
+  lineage?: LineageStep[];
 }
 
 /** "Nobody is working on this" and why ("closed after an error"), for an open to-do the hub found orphaned; undefined

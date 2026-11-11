@@ -52,6 +52,9 @@ func (s *Service) AgentStartParams(ctx context.Context, p AgentStartParams) (map
 		if err := s.applyModel(ctx, "agent.new", params); err != nil {
 			return nil, badRequest(err, s.appLang(ctx, p.Lang)) // a typed model that is no id among them
 		}
+		if params["launch"] != "engine" {
+			return nil, badRequest(fmt.Errorf("purpose %q requires engine launch for session.start", "agent.new"), s.appLang(ctx, p.Lang))
+		}
 		// Held to what the computer has (#2640): a launcher picked that it lacks is refused, a default it lacks gives
 		// way to one it has.
 		if m, ok := s.device(ctx, p.MachineID); ok {

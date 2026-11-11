@@ -18,6 +18,7 @@ import { agentChatKey, noteChatShown, personaChatKey } from "./lib/recent-chats"
 import { ago, sessionTitle, shortPath } from "./lib/format";
 import type { Session } from "./lib/types";
 import { unreachable } from "./lib/shell";
+import { useTabLookup } from "./lib/tab-lookup";
 import { ConnectionPill } from "./views/ConnectionPill";
 import { NARROW, useKeyboardFrame, useMedia } from "./lib/viewport";
 import { connect, disconnect, reset, type State, useStore } from "./lib/store";
@@ -199,7 +200,11 @@ function Shell() {
   useEffect(() => {
     if (tabLinkPath) navigate(tabLinkPath, true);
   }, [tabLinkPath]);
-  const pane = target?.sid ? { mid: target.mid, sid: target.sid } : undefined;
+  // a tab not among the page's rows (a paged hub lists only active and pinned ones): asked of the hub before it is gone
+  const tabRoute = route.name === "tab" ? route : undefined;
+  const lookup = useTabLookup(tabRoute, !!tabRoute && loaded && !target?.sid);
+  const found = lookup.state === "found" ? { mid: lookup.mid, sid: lookup.sid } : undefined;
+  const pane = target?.sid ? { mid: target.mid, sid: target.sid } : found;
   const launch = useStore((s) => (pane ? s.launches[pane.sid] : undefined));
   const starting = useStore((s) => (pane ? (s.sessions[pane.mid] ?? []).find((session) => session.session_id === pane.sid)?.starting : undefined));
   const shell = useRef<HTMLDivElement>(null);
@@ -329,7 +334,7 @@ function Shell() {
     case "session":
     case "tab":
       main = route.name === "session" && target?.link === "ambiguous" ? <SessionChoices mid={route.mid} sid={route.sid} onToggleSidebar={toggle} />
-        : !pane ? (loaded && route.name === "tab" ? <TabGone onToggleSidebar={toggle} /> : <Loading />)
+        : !pane ? (loaded && route.name === "tab" && lookup.state === "missing" ? <TabGone onToggleSidebar={toggle} /> : <Loading />)
         : launch ? <StartingAgent launch={launch} onToggleSidebar={toggle} />
         : <ChatView key={`${pane.mid}/${pane.sid}`} mid={pane.mid} sid={pane.sid} starting={starting} onToggleSidebar={toggle} inPage />;
       break;

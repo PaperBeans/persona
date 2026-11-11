@@ -43,7 +43,7 @@ func writeCodexApp(t *testing.T, home, project, sql string) {
 		t.Fatalf("sqlite3: %v: %s", err, out)
 	}
 	codexAppDBs.Lock()
-	delete(codexAppDBs.byHome, home) // read the database again now, not after codexAppDBRefresh
+	clear(codexAppDBs.byHome) // read the database again now, not after codexAppDBRefresh (under any spelling of home)
 	codexAppDBs.Unlock()
 }
 

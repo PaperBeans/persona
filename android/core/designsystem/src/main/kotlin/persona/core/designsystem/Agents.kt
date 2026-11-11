@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import persona.core.contracts.CoreText
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
 
@@ -53,11 +55,11 @@ data class RowFlag(val label: String, val icon: PhIcon, val caution: Boolean = f
 data class RowFact(val text: String, val caution: Boolean = false)
 
 /**
- * A line of its own under a session row's latest words, after an AI-coloured [icon]: work it runs in the background
- * (a Workflow, #2935) that the facts' short words cannot hold.
+ * Background Workflow fields under a session row, after an AI-coloured [icon]. The row gives its critical facts their
+ * space first, then ellipsizes these details in the remaining part of the same metadata line.
  */
 @Immutable
-data class RowNote(val text: String, val icon: PhIcon)
+data class RowNote(val fields: List<CoreText>, val icon: PhIcon)
 
 // ------------------------------------------------------------------ measures
 
@@ -284,8 +286,9 @@ fun AgentIdleRow(hidden: Int, onClick: () -> Unit, modifier: Modifier = Modifier
 // ------------------------------------------------------------------ rows
 
 /**
- * A session: its mark, title and time on the first line, the state and latest message on the second, then metadata
- * lines for [note] and [facts]. [compact] keeps the first line alone. [depth] is that of the heading it sits under, so the
+ * A session: its mark, title and time on the first line, the state and latest message on the second, and one metadata
+ * line for [note] and [facts]. Board puts metadata on the second line instead, so its strip never exceeds two lines.
+ * [compact] keeps the first line alone. [depth] is that of the heading it sits under, so the
  * mark lines up with the heading's caret. Glass and brief draw a plain row with a hairline above it unless it is
  * first in its group ([position]); the board keeps its agent strip, compacted, because each strip is the agent itself.
  * Long-pressing (or a secondary click) opens the row's actions ([onLongClick]). [muted] fades the row with
@@ -329,9 +332,15 @@ fun AgentRow(
     val mark = markSize
     val start = if (board) Step * depth else (Step * depth + (Caret - mark) / 2).coerceAtLeast(None)
     val gap = Tokens.Space.s - Tokens.Space.xxs
+    val hasMetadata = note != null || facts.isNotEmpty()
+    val boardMetadata = board && hasMetadata && !compact
     val click = Modifier.selectedRow(selected).onSecondaryClick(onLongClick).combinedClickable(role = Role.Button, onClick = onClick, onLongClick = onLongClick)
-        // Compact rows drop the state line, and the mark is colour only: TalkBack still says where the agent stands (#3902).
-        .then(if (compact && statusText != null) Modifier.semantics { stateDescription = statusText } else Modifier)
+        // Compact rows and Board's two-line metadata rows have no visible state line: TalkBack still says it (#3902).
+        // Board also keeps the latest message in its merged text without replacing the title or metadata.
+        .then(if (compact || boardMetadata) Modifier.semantics {
+            if (statusText != null) stateDescription = statusText
+            if (boardMetadata && !preview.isNullOrBlank()) text = AnnotatedString(preview.replace('\n', ' '))
+        } else Modifier)
     val text: @Composable ColumnScope.() -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
@@ -349,7 +358,7 @@ fun AgentRow(
             }
             agent?.let { Spacer(Modifier.width(Tokens.Space.s)); Text(it, style = type.micro, color = palette.ink2, maxLines = 1) }
             // one line only: the tag goes before the time
-            if (compact) source?.let { Spacer(Modifier.width(Tokens.Space.s)); SourceTag(it) }
+            if (compact || boardMetadata) source?.let { Spacer(Modifier.width(Tokens.Space.s)); SourceTag(it) }
             time?.takeIf { it.isNotEmpty() }?.let { Spacer(Modifier.width(Tokens.Space.s)); Text(it, style = type.micro, color = palette.ink3, maxLines = 1) }
         }
         if (!compact) {
@@ -361,17 +370,13 @@ fun AgentRow(
             val lineText: @Composable () -> Unit = {
                 Text(line, style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            if (source != null) Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { if (line.isNotEmpty()) lineText() }
-                Spacer(Modifier.width(Tokens.Space.s))
-                SourceTag(source)
-            } else if (line.isNotEmpty()) lineText()
-            val factsLine = rowFactsText(facts)
-            if (note != null) RowNoteLine(note)
-            if (factsLine.isNotEmpty()) Text(
-                factsLine,
-                style = type.caption.copy(fontWeight = FontWeight.Normal), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
+            if (!boardMetadata) {
+                if (source != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) { if (line.isNotEmpty()) lineText() }
+                    Spacer(Modifier.width(Tokens.Space.s))
+                    SourceTag(source)
+                } else if (line.isNotEmpty()) lineText()
+            }
         }
     }
     // a branch hangs off its initiator one step up: a hairline down from under that row's mark
@@ -381,34 +386,51 @@ fun AgentRow(
     }
     if (board) {
         val shape = RoundedCornerShape(PersonaTheme.shapes.card)
-        Row(
+        Column(
             modifier.fillMaxWidth().then(guide).padding(start = start, bottom = if (position.last) None else Tokens.Space.s - Tokens.Space.xxs).clip(shape)
                 .background(palette.surface).drawBehind { drawRect(tone.dot, size = size.copy(width = Tokens.Space.xxs.toPx())) }
                 .border(Hairline, palette.line, shape).then(click).stableAlpha(if (muted) 0.75f else 1f),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // The agent's mark before its state (#6390): what runs there, then how it is doing.
-            agentMark?.let { Spacer(Modifier.width(Tokens.Space.s)); JAgentMark(it) }
-            Box(Modifier.width(Holder), contentAlignment = Alignment.Center) { HolderGlyph(shown) }
-            Column(Modifier.weight(1f).padding(horizontal = Tokens.Space.m - Tokens.Space.xxs, vertical = Tokens.Space.s - Tokens.Space.xxs), content = text)
-            end?.invoke()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // The agent's mark before its state (#6390): what runs there, then how it is doing.
+                agentMark?.let { Spacer(Modifier.width(Tokens.Space.s)); JAgentMark(it) }
+                Box(Modifier.width(Holder), contentAlignment = Alignment.Center) { HolderGlyph(shown) }
+                Column(
+                    Modifier.weight(1f).padding(horizontal = Tokens.Space.m - Tokens.Space.xxs)
+                        .padding(top = Tokens.Space.s - Tokens.Space.xxs, bottom = if (boardMetadata) None else Tokens.Space.s - Tokens.Space.xxs),
+                    content = text,
+                )
+                end?.invoke()
+            }
+            if (boardMetadata) {
+                val indent = (if (agentMark != null) Tokens.Space.s + Caret else None) + Holder + Tokens.Space.m
+                RowMetadata(note, facts, indent, Modifier.padding(bottom = Tokens.Space.s - Tokens.Space.xxs))
+            }
         }
         return
     }
-    Row(
+    Column(
         modifier.fillMaxWidth().then(guide).then(click)
             .drawBehind {
                 if (!position.first) drawLine(palette.line, Offset((start + mark + gap).toPx(), 0f), Offset(size.width, 0f), Hairline.toPx())
             }
-            .stableAlpha(if (muted) 0.72f else 1f).padding(start = start, top = Tokens.Space.s, bottom = Tokens.Space.s),
-        verticalAlignment = if (compact) Alignment.CenterVertically else Alignment.Top,
+            .stableAlpha(if (muted) 0.72f else 1f),
     ) {
-        // The agent's mark before its state (#6390): what runs there, then how it is doing.
-        agentMark?.let { Box(Modifier.height(mark), contentAlignment = Alignment.Center) { JAgentMark(it) }; Spacer(Modifier.width(Tokens.Space.xs)) }
-        Box(Modifier.size(mark), contentAlignment = Alignment.Center) { JStatusMark(shown) }
-        Spacer(Modifier.width(gap))
-        Column(Modifier.weight(1f).padding(top = if (compact) None else Tokens.Space.xxs), content = text)
-        end?.let { Box(Modifier.align(Alignment.CenterVertically)) { it() } }
+        Row(
+            Modifier.padding(start = start, top = Tokens.Space.s, bottom = if (hasMetadata && !compact) None else Tokens.Space.s),
+            verticalAlignment = if (compact) Alignment.CenterVertically else Alignment.Top,
+        ) {
+            // The agent's mark before its state (#6390): what runs there, then how it is doing.
+            agentMark?.let { Box(Modifier.height(mark), contentAlignment = Alignment.Center) { JAgentMark(it) }; Spacer(Modifier.width(Tokens.Space.xs)) }
+            Box(Modifier.size(mark), contentAlignment = Alignment.Center) { JStatusMark(shown) }
+            Spacer(Modifier.width(gap))
+            Column(Modifier.weight(1f).padding(top = if (compact) None else Tokens.Space.xxs), content = text)
+            end?.let { Box(Modifier.align(Alignment.CenterVertically)) { it() } }
+        }
+        if (hasMetadata && !compact) {
+            val indent = (if (agentMark != null) Caret + Tokens.Space.xs else None) + mark + gap
+            RowMetadata(note, facts, indent, Modifier.padding(start = start, bottom = Tokens.Space.s))
+        }
     }
 }
 
@@ -423,16 +445,56 @@ private fun rowFactsText(facts: List<RowFact>): AnnotatedString {
     }
 }
 
-/** The note under a row; its numbers count to new ones when only they change ("169/185+" → "170/186+", #3435). */
+/**
+ * One metadata line, normally aligned with the title. When long facts would consume the Workflow's width there, the line
+ * uses the space below the row's marks too. Facts have priority and ellipsize only when they cannot fit; a bounded Workflow
+ * slot keeps its full text in semantics while its visible text ellipsizes in the remaining width.
+ */
 @Composable
-private fun RowNoteLine(note: RowNote) {
+private fun RowMetadata(note: RowNote?, facts: List<RowFact>, indent: Dp, modifier: Modifier = Modifier) {
     val palette = PersonaTheme.palette
-    val value = rollingText(note.text)
-    Row(Modifier.padding(top = Tokens.Space.xxs), verticalAlignment = Alignment.CenterVertically) {
-        JIcon(note.icon, null, size = Caret, tint = palette.ai)
-        Spacer(Modifier.width(Tokens.Space.xs))
-        Text(value, style = PersonaTheme.type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink2,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
+    val textStyle = PersonaTheme.type.caption.copy(fontWeight = FontWeight.Normal)
+    val factsLine = rowFactsText(facts)
+    val value = note?.let { rollingText(it.fields.map { field -> field.text() }.filter(String::isNotEmpty).joinToString("   ")) }
+    Layout(
+        content = {
+            if (note != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                JIcon(note.icon, null, size = Caret, tint = palette.ai)
+                Spacer(Modifier.width(Tokens.Space.xxs))
+                Text(value.orEmpty(), style = textStyle, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (factsLine.isNotEmpty()) Text(factsLine, style = textStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        modifier = modifier.padding(top = Tokens.Space.xxs),
+    ) { measurables, constraints ->
+        val noteMeasurable = if (note != null) measurables.first() else null
+        val factsMeasurable = if (factsLine.isNotEmpty()) measurables.last() else null
+        val gap = if (note != null && factsMeasurable != null) Tokens.Space.xs.roundToPx() else 0
+        val minimumNote = if (note != null) (Caret + Tokens.Space.xxs + Tokens.Space.l).roundToPx() else 0
+        // Intrinsics choose the allocation; Compose permits only one measure() call for each child.
+        val desiredFactsWidth = factsMeasurable?.maxIntrinsicWidth(constraints.maxHeight) ?: 0
+        val indented = indent.roundToPx().coerceAtLeast(0)
+        fun metadataStart(factsWidth: Int) = if (indented + minimumNote + gap + factsWidth <= constraints.maxWidth) indented else 0
+        val fullStart = metadataStart(desiredFactsWidth)
+        val needsNoteSlot = noteMeasurable != null && factsMeasurable != null &&
+            constraints.maxWidth - fullStart - gap - desiredFactsWidth < minimumNote
+        val reservedNote = if (needsNoteSlot) minimumNote + gap else 0
+        val factsMaxWidth = (constraints.maxWidth - reservedNote).coerceAtLeast(0)
+        val factsPlaceable = factsMeasurable?.measure(constraints.copy(minWidth = 0, maxWidth = factsMaxWidth))
+        val factsWidth = factsPlaceable?.width ?: 0
+        val start = metadataStart(factsWidth)
+        val noteWidth = (constraints.maxWidth - start - gap - factsWidth).coerceAtLeast(0)
+        val notePlaceable = if (noteWidth > 0) noteMeasurable?.measure(constraints.copy(minWidth = 0, maxWidth = noteWidth)) else null
+        val width = constraints.maxWidth
+        val height = maxOf(notePlaceable?.height ?: 0, factsPlaceable?.height ?: 0)
+        layout(width, height) {
+            var x = start
+            notePlaceable?.let {
+                it.placeRelative(x, (height - it.height) / 2)
+                x += it.width + gap
+            }
+            factsPlaceable?.placeRelative(x, (height - factsPlaceable.height) / 2)
+        }
     }
 }
 

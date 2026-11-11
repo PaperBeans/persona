@@ -45,6 +45,24 @@ class HttpTasksApiTest {
         }
     }
 
+    @Test fun aDecisionIsAnsweredThroughTheAcceptRouteWithItsOptionOrResponse() = runBlocking {
+        MockWebServer().use { server ->
+            val askedAt = "2026-11-01T09:00:00.123Z"
+            server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+            api(server).answerTask("todo/one", askedAt, persona.core.contracts.api.AskAnswer.Option("Ship it"))
+            val option = server.takeRequest()
+            assertEquals("POST", option.method)
+            assertEquals("/api/v1/todos/todo%2Fone/accept", option.path)
+            assertEquals("""{"asked_at":"$askedAt","option":"Ship it"}""", option.body.readUtf8())
+            server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+            api(server).answerTask("todo/one", askedAt, persona.core.contracts.api.AskAnswer.Response("explain_first"))
+            assertEquals("""{"asked_at":"$askedAt","response":"explain_first"}""", server.takeRequest().body.readUtf8())
+            server.enqueue(MockResponse().setResponseCode(409).setBody("""{"error":"Already handled"}"""))
+            try { api(server).answerTask("todo/one", askedAt, persona.core.contracts.api.AskAnswer.Option("Ship it")); fail("a stale answer was not refused") }
+            catch (error: HubFailure) { assertEquals(409, error.status) }
+        }
+    }
+
     @Test fun acceptanceCarriesTheCapturedRoundAndRetainsAStaleRefusal() = runBlocking {
         MockWebServer().use { server ->
             val askedAt = "2026-11-01T09:00:00.123Z"

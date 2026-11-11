@@ -5,7 +5,7 @@ vi.hoisted(() => {
   (globalThis as Record<string, unknown>).localStorage = { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v), removeItem: (k: string) => void kept.delete(k), clear: () => kept.clear() };
 });
 
-import { getPinnedConversations, parsePinned, pinOrder, sidebarConversations, togglePinnedConversation, unpinAllConversations } from "./conversation-pins";
+import { getPinnedConversations, parsePinned, pinOrder, sidebarConversations, splitDirections, togglePinnedConversation, unpinAllConversations } from "./conversation-pins";
 import type { Session } from "./types";
 
 const conv = (id: string, updated: string) => ({ machine_id: "hub", session_id: id, updated_at: updated }) as Session;
@@ -78,5 +78,15 @@ describe("the sidebar's Persona chats", () => {
     const { pinned, recent } = sidebarConversations(withOrigins, undefined, ["task"], 5);
     expect(pinned.map((c) => c.session_id)).toEqual(["task"]);
     expect(recent.map((c) => c.session_id)).toEqual(["wechat", "mine", "old"]);
+  });
+});
+
+describe("splitDirections", () => {
+  it("takes the leaders out of the pinned ones, in order, never the main conversation", () => {
+    const s = (session_id: string) => ({ session_id }) as Session;
+    const { directions, pinned } = splitDirections([s("d"), s("b"), s("c")], ["d", "b", "main"], "main");
+    expect(directions.map((c) => c.session_id)).toEqual(["d", "b"]);
+    expect(pinned.map((c) => c.session_id)).toEqual(["c"]);
+    expect(splitDirections([s("c")], undefined, "main").pinned).toHaveLength(1);
   });
 });

@@ -52,7 +52,7 @@ func idleTaskService(t *testing.T, n int) (*Service, *idleTaskHub, *TaskPlan) {
 	f.sessions["box"] = nil
 	s := newStorelessService(t, f)
 	h := &idleTaskHub{fakeHub: f, entered: make(chan struct{}, n), release: make(chan struct{})}
-	s.hub = h
+	setHub(s, h)
 	p := &TaskPlan{ID: "plan_idle", Conversation: "conv1", State: planStarted, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	for i := range n {
 		title := fmt.Sprintf("Check example %d", i)

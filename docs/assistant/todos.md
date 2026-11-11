@@ -461,7 +461,7 @@ An Agent is gone when its computer is not connected, the computer no longer list
 
 Not orphaned: a done to-do; one with no Agent yet (not started, or its start failed: "Remedying a start"); a supervised task waiting for its review or for the user's decision, which waits on them and not on an Agent. A to-do whose computer is connected but could not be asked this minute keeps what was found before.
 
-The assistant's snapshot says it on the task's line, and a supervised task's supervisor gets the `orphaned` signal once (`docs/assistant/unified-entry.md`, "Supervision": the supervisor loop's signals). Clients that do not know the field show the to-do as before; showing it on the task card and row is each client's own work.
+The assistant's snapshot says it on the task's line, and a supervised task's supervisor gets the `orphaned` signal once (`docs/assistant/unified-entry.md`, "Supervision": the supervisor loop's signals). Clients that do not know the field show the to-do as before; showing it on the task card and row is each client's own work: the web and Android (`docs/android/android.md`, "Closeout, decisions and tasks nobody works on") do.
 
 ## Decision records
 
@@ -519,7 +519,7 @@ Something the owner raises in the main conversation and wants an answer to is a 
 
   `todo.manager` is the manager whose to-do it is (`assistant` for the assistant the hub starts), as the merged list stamps each item's `manager`; OK names it in `X-Persona-Manager`, so it reaches that manager whichever one is the default. All rounds of one to-do share an `apns-collapse-id`, so a later round's push takes the earlier one's place. Through the push relay `category` and `todo` are sealed with the rest (`docs/operations/push-relay.md` "Encryption"). On the WebSocket (`ws_notify`) it is a `notify` of kind `assistant` with the same `todo`, so a client that does not know decisions shows a plain notification. The app's OK action on `TODO_DECIDE` calls the accept route with `todo.asked_at`. No push for a decision without a recommendation (nothing for OK to take), for a task from a health conversation (the lock screen says nothing of those) or a muted conversation; a deployed to-do's "Please verify" and conclusions that only tell are not pushed either.
 - **The supervisor** is told what went out. With a Lark card, as before (don't ask again), plus that a push with OK went too. With the bot off it still asks the owner as before (the hub taking a push says neither that a device got it nor that its app shows OK), and is told that OK on the push may take the recommendation first.
-- **Clients**: the web shows the ask on the to-do's row, its page, the main chat's task card and the task panel, with the one button that takes it (`docs/web/web.md`, "Waiting for you"); a stopped to-do with an open ask sorts with Awaiting review. The iOS / Mac / Watch part (the to-do row and detail, the `TODO_DECIDE` action) and Android are not built yet.
+- **Clients**: the web shows the ask on the to-do's row, its page, the main chat's task card and the task panel, with the one button that takes it (`docs/web/web.md`, "Waiting for you"); a stopped to-do with an open ask sorts with Awaiting review. The iOS / Mac / Watch part (the to-do row and detail, the `TODO_DECIDE` action) is not built yet; Android shows the ask in the Needs you tray and on the task's page (`docs/android/android.md`, "Closeout, decisions and tasks nobody works on").
 - Not done here: the push is not withdrawn when the decision is taken elsewhere (an OK on it then answers 409, "already handled"); the watch's answer-only credential can neither read `/api/v1/todos` nor call the accept route.
 
 ## Decisions the owner can answer
@@ -538,7 +538,7 @@ Something the owner raises in the main conversation and wants an answer to is a 
   - Counted: each is a work event `owner_cannot_answer` and `GET /api/v1/agents/work/stats` sums them per supervisor conversation (`docs/assistant/agent-work.md`, "Evaluation").
 - **Choosing an option**: `POST /api/v1/todos/{id}/accept {"asked_at", "option"}` with the recommended label is the plain OK; another option goes to the task's Agent as the owner's choice with what it leads to, is recorded in the to-do's decisions and ends the decision. The Lark card has a button per option and one per fixed answer. The `decide` push's `todo` also carries `options` (the labels, the recommended first) and `responses`, so an app can offer them from the notification; its body lists the background, the options and the cost of waiting.
 - **A decision is not replaced by "Please verify"**: while a decision waits, a turn of the task's Agent that says "deployed" (or a held deploy landing) no longer starts a "Please verify" round in its place; and a review that arrives while such a round is still being written keeps its decision, the round giving way. Before, either order left a `needs_user` task with no `ask`, passed by the supervising assistant as if it were a deployed task.
-- Not done here: iOS and Android (they keep showing the verdict line and OK). A task that only waits is parked: "Parked tasks" below.
+- Not done here: iOS (it keeps showing the verdict line and OK); offering the options from the decision push on Android (its notification opens the conversation). A task that only waits is parked: "Parked tasks" below.
 
 ## Parked tasks
 

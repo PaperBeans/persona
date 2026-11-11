@@ -89,6 +89,20 @@ internal fun TriageSettingsPage(triage: AgentTriage?, models: ModelConfiguration
             SettingsCaption(stringResource(R.string.settings_triage_actions_about),
                 Modifier.padding(horizontal = pagePadding, vertical = Tokens.Space.s))
         }
+        // Ask for a closeout (#3612): only on a hub that has the switch (it sends the field); part of triage, so it
+        // waits with the main switch like the actions above.
+        if (sw?.closeout != null) {
+            item("closeout") {
+                JGroupItem(GroupPosition.of(0, 1), Modifier.padding(top = Tokens.Space.m)) {
+                    JSwitchRow(stringResource(R.string.settings_triage_closeout), sw.closeout == true, { v -> change(sw.copy(closeout = v)) },
+                        Modifier.testTag("triage-closeout"), leadingIcon = PhIcons.Checks, enabled = on && !busy)
+                }
+            }
+            item("closeout-about") {
+                SettingsCaption(stringResource(R.string.settings_triage_closeout_about),
+                    Modifier.padding(horizontal = pagePadding, vertical = Tokens.Space.s))
+            }
+        }
         // Rules on the hub, no model: apart from the triage switch above (#5096).
         item("reply-reminder") {
             JGroupItem(GroupPosition.of(0, 1), Modifier.padding(top = Tokens.Space.m)) {

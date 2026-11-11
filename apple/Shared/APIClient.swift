@@ -1103,13 +1103,37 @@ nonisolated struct APIClient: Sendable {
         /// The role a meeting recording starts with (#2981, docs/assistant/meeting-minutes.md「Attendance fields」): `off`,
         /// `listener` or `participant`; nil from a hub without attending.
         var meetingAttendanceDefault: String?
+        /// The side conversations that lead a direction of the owner's work (docs/assistant/unified-entry.md "Leader
+        /// conversations"), in the hub's order; nil when there are none or from an older hub. The sidebar shows them as
+        /// the Directions group, under the names `assistantLeaders()` gives.
+        var leaders: [String]?
         enum CodingKeys: String, CodingKey {
-            case launcher, cwd, conversations, timezone, main
+            case launcher, cwd, conversations, timezone, main, leaders
             case machineID = "machine_id", notes = "notes_effective", mainTasksQuiet = "main_tasks_quiet"
             case meetingAttendanceDefault = "meeting_attendance_default"
         }
     }
     func assistant() async throws -> AssistantState { owned(try await get("/api/v1/assistant")) }
+    /// A direction as `GET /api/v1/assistant/leaders` lists it (#3519, #3695): its leader conversation's id and the name
+    /// the hub gives the direction (the name set, else its project's, else the title without its "MMDD | kind | " prefix).
+    struct LeaderInfo: Codable, Sendable, Equatable {
+        var id: String
+        var name: String?
+        var ended: Bool?
+    }
+    /// The directions' names by leader conversation id: the current ones with a name (ended ones left out).
+    func directionNames() async throws -> [String: String] {
+        struct Body: Decodable { var leaders: [LeaderInfo]? }
+        let body = try await get("/api/v1/assistant/leaders", as: Body.self)
+        return Self.directionNames(body.leaders ?? [])
+    }
+    static func directionNames(_ list: [LeaderInfo]) -> [String: String] {
+        var out: [String: String] = [:]
+        for l in list where !(l.ended ?? false) && !l.id.isEmpty {
+            if let name = l.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty { out[l.id] = name }
+        }
+        return out
+    }
     /// `st` with its conversations stamped with the manager this client named: the hub relays another manager's answer as
     /// it came, without the `manager` its own lists put on each session. Nothing named: the default's, left as they came.
     private func owned(_ st: AssistantState) -> AssistantState {

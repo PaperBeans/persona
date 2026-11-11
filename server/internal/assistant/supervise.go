@@ -38,10 +38,11 @@ const maxReworkRounds = 2
 
 // Supervision is a supervised task's ledger, as the apps get it on the todo (supervision).
 type Supervision struct {
-	Supervisor    string   `json:"supervisor"` // the conversation that handed it out
-	DoneWhen      []string `json:"done_when"`
-	ExpectMinutes int      `json:"expect_minutes,omitempty"`
-	State         string   `json:"state"` // "" going on, or one of review*
+	Supervisor    string             `json:"supervisor"` // the conversation that handed it out
+	DoneWhen      []string           `json:"done_when"`
+	Criteria      []db.TodoCriterion `json:"criteria"`
+	ExpectMinutes int                `json:"expect_minutes,omitempty"`
+	State         string             `json:"state"` // "" going on, or one of review*
 	// Parked: what a parked task waits for (parked.go); nil unless State is parked. Read off its latest review each time
 	// the ledger is copied, not kept on its own.
 	Parked  *Parked      `json:"parked,omitempty"`
@@ -131,6 +132,7 @@ func (v *Supervision) clone() *Supervision {
 	}
 	out := *v
 	out.DoneWhen = slices.Clone(v.DoneWhen)
+	out.Criteria = db.AlignTodoCriteria(v.DoneWhen, v.Criteria)
 	out.Reviews = make([]TaskReview, len(v.Reviews))
 	for i, r := range v.Reviews {
 		out.Reviews[i] = r
@@ -187,7 +189,7 @@ func (s *Service) supervisionDB() supervisionStore {
 }
 
 func supervisionFromRow(r db.TodoSupervisionRow) *Supervision {
-	v := &Supervision{Supervisor: r.Supervisor, DoneWhen: r.DoneWhen, ExpectMinutes: r.ExpectMinutes, State: r.State, Round: r.Round,
+	v := &Supervision{Supervisor: r.Supervisor, DoneWhen: r.DoneWhen, Criteria: r.Criteria, ExpectMinutes: r.ExpectMinutes, State: r.State, Round: r.Round,
 		UpdatedAt: r.UpdatedAt}
 	_ = json.Unmarshal(r.Reviews, &v.Reviews)
 	if len(r.AutoReview) > 0 {
@@ -214,7 +216,7 @@ func (v *Supervision) row(todoID string) db.TodoSupervisionRow {
 	if v.Waits != nil {
 		waits, _ = json.Marshal(v.Waits)
 	}
-	return db.TodoSupervisionRow{TodoID: todoID, Supervisor: v.Supervisor, DoneWhen: v.DoneWhen, ExpectMinutes: v.ExpectMinutes,
+	return db.TodoSupervisionRow{TodoID: todoID, Supervisor: v.Supervisor, DoneWhen: v.DoneWhen, Criteria: v.Criteria, ExpectMinutes: v.ExpectMinutes,
 		State: v.State, Round: v.Round, Reviews: raw, AutoReview: auto, Waits: waits, UpdatedAt: v.UpdatedAt}
 }
 
@@ -258,6 +260,7 @@ func (s *Service) updateSupervision(ctx context.Context, id string, change func(
 	if !change(v) {
 		return *v, false, nil
 	}
+	v.Criteria = db.AlignTodoCriteria(v.DoneWhen, v.Criteria)
 	v.UpdatedAt = time.Now().UTC()
 	if st := s.supervisionDB(); st != nil && s.todoDB() != nil {
 		if err := st.PutTodoSupervision(ctx, v.row(id)); err != nil {

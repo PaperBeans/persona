@@ -88,6 +88,26 @@ class AssistantTest {
         assertTrue(searched.auto.isEmpty())
     }
 
+    // The leader conversations are the Directions group: first, in the hub's order, under their names, out of Pinned and Recent.
+    @Test fun leadersAreTheDirectionsGroup() {
+        val main = Session(machineId = "demo", sessionId = "main", title = "主对话")
+        val mine = Session(machineId = "demo", sessionId = "mine", title = "周报", origin = "user")
+        val leadA = Session(machineId = "demo", sessionId = "lead-a", title = "1110 | 探索 | 增长", origin = "user")
+        val leadB = Session(machineId = "demo", sessionId = "lead-b", title = "1110 | 探索 | 支付", origin = "user")
+        val snapshot = AssistantSnapshot(main.key, listOf(main, mine, leadB, leadA),
+            leaders = listOf("lead-a", "gone", "lead-b"), directionNames = mapOf("lead-a" to "Growth"))
+        val result = conversationGroups(snapshot, "", setOf(leadB.key, mine.key), words)
+        assertEquals(listOf(leadA, leadB), result.directions)
+        assertEquals("Growth", result.names["lead-a"])
+        assertEquals(listOf(mine), result.pinned)
+        assertEquals(setOf(leadB.key), result.pinnedDirections)
+        assertTrue(result.recent.isEmpty())
+        // a search finds a direction by its name
+        assertEquals(listOf(leadA), conversationGroups(snapshot, "growth", emptySet(), words).directions)
+        // no leaders: no group, as before
+        assertTrue(conversationGroups(AssistantSnapshot(main.key, listOf(main, mine)), "", emptySet(), words).directions.isEmpty())
+    }
+
     @Test fun archivedConversationsLeaveTheHistory() {
         val kept = Session(machineId = "demo", sessionId = "kept", title = "留着")
         val archived = Session(machineId = "demo", sessionId = "gone", title = "归档了", archived = true)

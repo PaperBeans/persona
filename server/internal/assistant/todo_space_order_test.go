@@ -286,7 +286,7 @@ func TestTodoWorkspaceSupersededFanout(t *testing.T) {
 					a, b = e.create("Task A").ID, e.create("Task B").ID
 				}
 				h := &workspaceSessionHub{fakeHub: e.f, entered: make(chan struct{}), release: make(chan struct{})}
-				e.s.hub = h
+				setHub(e.s, h)
 				e.f.setSessions("machine", proto.Session{SessionID: "existing", SpaceName: "work", Status: proto.StatusWorking})
 				var once sync.Once
 				defer once.Do(func() { close(h.release) })

@@ -37,7 +37,7 @@ func TestTrustedAdapterMatchesOfficialSDK(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(generated, embedded) {
-		t.Fatal("trusted adapter is stale: run scripts/gen/deno_adapter.sh with the portable runtime CI's Bun version")
+		t.Fatal("trusted adapter is stale: run scripts/gen/deno_adapter.sh with the bun-version pinned in .github/workflows/server-test.yml")
 	}
 	t.Log("PASS generated trusted adapter matches the official SDK and installed bytes")
 }

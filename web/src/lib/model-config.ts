@@ -28,6 +28,8 @@ export interface ModelPurpose {
   name: string;
   group: string;
   kind: "api" | "launcher" | "plugin";
+  /** Read-only execution form; absent for direct API/plugin purposes and older hubs. */
+  launch?: "headless" | "engine";
   parent?: string;
   /** Owning category; a child with nonempty fields can still have its own editable record. */
   category_id?: string;
@@ -149,15 +151,4 @@ export function modelSummary(p: ModelPurpose, providers: ModelProvider[] = []): 
 /** The main chat's note when it asked for the Agent SDK and runs on the CLI (the session's `runtime_fallback`). */
 export function runtimeFallbackText(reason: string): string {
   return t("lib-model-config.runtime_fallback", { reason: reason.trim() });
-}
-
-export function purposeGroups(purposes: ModelPurpose[], query: string): [string, ModelPurpose[]][] {
-  const q = query.trim().toLocaleLowerCase();
-  const groups = new Map<string, ModelPurpose[]>();
-  for (const p of purposes) {
-    if (q && ![p.name, p.group, p.id, modelSummary(p)].some((s) => s.toLocaleLowerCase().includes(q))) continue;
-    const group = p.group || t("lib-model-config.group_misc");
-    groups.set(group, [...(groups.get(group) ?? []), p]);
-  }
-  return [...groups.entries()];
 }

@@ -21,21 +21,26 @@ object WorkflowSummary {
      * The line for [session]'s running workflows: the newest one, then "and N others" for the others. An older hub that sends
      * no workflows but has one in its background says "Running in background". Null when no workflow runs.
      */
-    fun line(session: Session?, now: Instant): CoreText? {
+    fun line(session: Session?, now: Instant): CoreText? = lineFields(session, now)?.let { CoreText.joined(SEPARATOR, it) }
+
+    /** The same line as separate fields, so an Agents row can lay them out with its facts instead of receiving a joined string. */
+    fun lineFields(session: Session?, now: Instant): List<CoreText>? {
         session ?: return null
         val running = session.runningWorkflows
-        if (running.isEmpty()) return if (session.legacyWorkflowRunning) CoreText.of(Key.WorkflowBackgroundRunning) else null
-        val parts = listOf(of(running.first(), now)) + listOfNotNull((running.size - 1).takeIf { it > 0 }?.let { CoreText.of(Key.WorkflowMore, it) })
-        return CoreText.joined(SEPARATOR, parts)
+        if (running.isEmpty()) return if (session.legacyWorkflowRunning) listOf(CoreText.of(Key.WorkflowBackgroundRunning)) else null
+        return fields(running.first(), now) + listOfNotNull((running.size - 1).takeIf { it > 0 }?.let { CoreText.of(Key.WorkflowMore, it) })
     }
 
     /** One run on one line: its name, phase, done / started agents ("169/185+" while it runs, #3435) and how long it has run. */
-    fun of(workflow: Workflow, now: Instant): CoreText = CoreText.joined(SEPARATOR, listOfNotNull(
+    fun of(workflow: Workflow, now: Instant): CoreText = CoreText.joined(SEPARATOR, fields(workflow, now))
+
+    /** The fields of [of], before presentation joins them. */
+    private fun fields(workflow: Workflow, now: Instant): List<CoreText> = listOfNotNull(
         workflow.title?.let { CoreText.of(Key.WorkflowLine, it) } ?: CoreText.of(Key.WorkflowLineUntitled),
         phase(workflow),
         workflow.agentsStarted.takeIf { it > 0 }?.let { CoreText.plain(WorkflowTimeline.counts(workflow)) },
         elapsed(workflow, now),
-    ))
+    )
 
     /** "Verify 2/2" where the hub knows its place among the phases, else the phase's name alone. */
     fun phase(workflow: Workflow): CoreText? {

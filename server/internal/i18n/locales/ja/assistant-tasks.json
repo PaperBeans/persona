@@ -15,6 +15,7 @@
   "start_identity_conflict": "起動応答で、指定したコンピューター上のセッションを確認できませんでした。",
   "start_interrupted": "このタスクのエージェントの起動中にハブが再起動しました。前のリクエストがまだ完了する可能性があります。エージェントの重複起動を防ぐため、コンピュータの再接続後にセッションを確認してから再試行してください。",
   "failed_start": "開始できませんでした：{reason}",
+  "ultracode_skipped": "ultracode なしで開始しました：{reason}",
   "task_failed_title": "「{name}」を開始できませんでした",
   "task_failed_title_health": "タスクを開始できませんでした",
   "task_failed_body": "{reason}。会話を開いて「再試行」をタップするか、別のパソコンに割り当ててください",

@@ -179,6 +179,9 @@ data class Todo(
     @WireTime @SerialName("cancelled_at") val cancelledAt: String? = null,
     /** The manager it belongs to, as the merged list stamps it (docs/assistant/managers.md "Ownership"); null: the default manager's. */
     val manager: String? = null,
+    /** Nobody is working on it (#3618): every agent of this open to-do is gone and nothing brings one back; null otherwise
+     *  and from an older hub. */
+    val orphaned: TodoOrphaned? = null,
 ) {
     val isDone: Boolean get() = doneAt != null
     val activeAgents get() = agents.filter { it.releasedAt == null }
@@ -216,13 +219,40 @@ sealed interface TodoDue {
     data class Day(val day: LocalDate) : TodoDue
 }
 
+/**
+ * Why an open to-do has nobody working on it (docs/assistant/todos.md "Nobody is working on this"): [reason] error (closed
+ * after a model error), offline (its computer is not connected) or closed, kept as sent; [since] when the hub first saw it.
+ */
+@Serializable
+data class TodoOrphaned(val reason: String? = null, @WireTime val since: String? = null)
+
+/**
+ * What a to-do waits on from the owner (docs/assistant/todos.md "Waiting for the owner"). A decision (#3804, "Decisions the
+ * owner can answer") also carries what is to be decided ([question]), why only the owner can ([whyOwner]), its
+ * [options] with the recommended one first, where the task came from and stands in one line ([background]), what waiting
+ * costs, whether the recommendation is taken at [deadline] ([default] "taken") or never ("never"), the fixed answers the
+ * hub takes ([responses]) and the one already given while it still waits ([response]). All absent from an older hub.
+ */
 @Serializable
 data class TodoAsk(
     val outcome: String? = null,
     val verdict: String = "",
     val recommend: String? = null,
     @WireTime @SerialName("asked_at") val askedAt: String = "",
+    val question: String? = null,
+    @SerialName("why_owner") val whyOwner: String? = null,
+    val options: List<AskOption>? = null,
+    @SerialName("cost_of_waiting") val costOfWaiting: String? = null,
+    val background: String? = null,
+    @WireTime val deadline: String? = null,
+    val default: String? = null,
+    val responses: List<String>? = null,
+    val response: String? = null,
 )
+
+/** One option of a decision: its [label], which is the answer, and what choosing it leads to. */
+@Serializable
+data class AskOption(val label: String = "", @SerialName("leads_to") val leadsTo: String? = null)
 
 /**
  * How far a task's finished work went out (#3306, docs/assistant/todos.md"Delivery"): [state] live, pr, merged, off or none (kept as

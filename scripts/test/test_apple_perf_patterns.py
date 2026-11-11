@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Calls that block the thread they run on may not grow in the Apple sources (docs/apple/performance.md, "Automated checks").
+
+App targets default to MainActor (`SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor` in apple/project.yml), so a Photos fetch, a
+keychain read, a synchronous file read or a full image decode written in a view, a model or an app-target helper runs on
+the main thread unless its function is `nonisolated` / `@concurrent` or inside `Task.detached`. Telling those apart
+needs the compiler, so this is a ratchet: each file has a committed count per pattern (apple_perf_baseline.json) that
+may stay the same or go down, never up, and a file with no entry starts at zero.
+
+A call that is known to run off the main thread does not count when its line carries `// perf-ok: <reason>` (the reason
+must be non-empty), for example `// perf-ok: nonisolated, called from the loader's Task.detached`. Comments are ignored.
+
+  python3 scripts/test/test_apple_perf_patterns.py            run the check (unittest)
+  python3 scripts/test/test_apple_perf_patterns.py --update   rewrite the baseline downward after removing calls
+  python3 scripts/test/test_apple_perf_patterns.py --list     print every counted call, file:line
+"""
+from collections import Counter
+import json
+from pathlib import Path
+import re
+import sys
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts" / "i18n"))
+import apple_comments  # noqa: E402
+
+BASELINE = Path(__file__).resolve().with_name("apple_perf_baseline.json")
+ESCAPE = re.compile(r"//\s*perf-ok:\s*\S")
+
+# Rule ids match docs/apple/performance.md.
+PATTERNS = {
+    # P1: system-framework and disk IO.
+    "photos-fetch": re.compile(r"\bPH(?:Asset|AssetCollection|CollectionList)\s*\.\s*fetch\w*\s*\("),
+    "keychain-read": re.compile(r"\bSecItemCopyMatching\s*\("),
+    "file-read": re.compile(r"\b(?:Data|String|NSData|NSString)\s*\(\s*contentsOf(?:File)?\s*:"),
+    "directory-listing": re.compile(r"\.\s*(?:contentsOfDirectory|subpathsOfDirectory|enumerator)\s*\(\s*(?:at|atPath)\s*:"),
+    "defaults-synchronize": re.compile(r"\bUserDefaults\b[^\n]*\.\s*synchronize\s*\(\s*\)"),
+    # P8: a full decode of an encoded picture.
+    "image-decode": re.compile(r"\b(?:UIImage|NSImage)\s*\(\s*(?:data|contentsOfFile)\s*:"),
+    # P9: a frame-rate timeline that never pauses.
+    "unpaused-animation": re.compile(r"\bTimelineView\s*\(\s*\.animation(?:\s*\((?![^()\n]*\bpaused\s*:)[^()\n]*\))?\s*\)"),
+}
+
+# Test targets and tooling: they run on purpose where they run and ship nothing.
+SKIP_PARTS = {"PersonaTests", "PersonaUITests", "PersonaMacTests", "PersonaWatchTests", "Tests", "verify"}
+
+
+def blank_comments(src):
+    """The source with its comments blanked out, lines kept."""
+    out = list(src)
+    for start, end in apple_comments.c_comments(src):
+        for i in range(start, end):
+            if out[i] != "\n":
+                out[i] = " "
+    return "".join(out)
+
+
+def calls(src):
+    """(rule, line) for each counted call in one Swift file."""
+    raw = src.splitlines()
+    code = blank_comments(src)
+    found = []
+    for rule, pattern in PATTERNS.items():
+        for m in pattern.finditer(code):
+            line = code.count("\n", 0, m.start()) + 1
+            if not ESCAPE.search(raw[line - 1]):
+                found.append((rule, line))
+    return sorted(found, key=lambda x: (x[1], x[0]))
+
+
+def swift_files():
+    for path in apple_comments.sources():
+        p = Path(path)
+        rel = p.relative_to(ROOT)
+        if p.suffix == ".swift" and not SKIP_PARTS.intersection(rel.parts) and not rel.parts[1].endswith("Tests"):
+            yield rel
+
+
+def scan():
+    """{file: {rule: count}} and the call sites behind it."""
+    counts, sites = {}, []
+    for rel in swift_files():
+        found = calls((ROOT / rel).read_text(encoding="utf-8", errors="replace"))
+        if found:
+            counts[str(rel)] = dict(sorted(Counter(rule for rule, _ in found).items()))
+            sites += [f"{rel}:{line} {rule}" for rule, line in found]
+    return dict(sorted(counts.items())), sites
+
+
+def load_baseline():
+    return json.loads(BASELINE.read_text(encoding="utf-8"))
+
+
+def compare(counts, baseline):
+    """(grown, shrunk): lines describing files over their baseline, and under it."""
+    grown, shrunk = [], []
+    for f in sorted(set(counts) | set(baseline)):
+        now, was = counts.get(f, {}), baseline.get(f, {})
+        for rule in sorted(set(now) | set(was)):
+            n, w = now.get(rule, 0), was.get(rule, 0)
+            if n > w:
+                grown.append(f"{f}: {rule} {w} -> {n}")
+            elif n < w:
+                shrunk.append(f"{f}: {rule} {w} -> {n}")
+    return grown, shrunk
+
+
+def update():
+    counts, _ = scan()
+    baseline = load_baseline()
+    grown, _ = compare(counts, baseline)
+    if grown:
+        print("refusing to raise the baseline (move the call off the main actor, or mark a verified one `// perf-ok: <reason>`):")
+        print("\n".join(grown))
+        return 1
+    BASELINE.write_text(json.dumps(counts, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"apple perf baseline: {sum(sum(r.values()) for r in counts.values())} calls in {len(counts)} files")
+    return 0
+
+
+class ApplePerfPatternTests(unittest.TestCase):
+    def test_no_file_grows_its_blocking_calls(self):
+        counts, _ = scan()
+        grown, shrunk = compare(counts, load_baseline())
+        self.assertEqual(grown, [], "a blocking call was added (docs/apple/performance.md, rules P1, P8, P9): move it off "
+                         "the main actor, or mark a call verified to run off it `// perf-ok: <reason>`")
+        self.assertEqual(shrunk, [], "fewer blocking calls than the baseline: run "
+                         "python3 scripts/test/test_apple_perf_patterns.py --update and commit the baseline")
+
+    def test_what_counts(self):
+        self.assertEqual(calls("let r = PHAsset.fetchAssets(with: o)"), [("photos-fetch", 1)])
+        self.assertEqual(calls("// PHAsset.fetchAssets(with: o)\n/* SecItemCopyMatching(q, &o) */"), [])
+        self.assertEqual(calls("let r = PHAsset.fetchAssets(with: o) // perf-ok: nonisolated loader"), [])
+        self.assertEqual(calls("let r = PHAsset.fetchAssets(with: o) // perf-ok:"), [("photos-fetch", 1)])
+        self.assertEqual(calls("x\nlet d = try Data(contentsOf: url)"), [("file-read", 2)])
+        self.assertEqual(calls("let s = try String(contentsOfFile: p, encoding: .utf8)"), [("file-read", 1)])
+        self.assertEqual(calls("let i = UIImage(data: d)\nlet j = UIImage(contentsOfFile: p)"),
+                         [("image-decode", 1), ("image-decode", 2)])
+        self.assertEqual(calls("let i = UIImage(named: \"a\")"), [])
+        self.assertEqual(calls("try fm.contentsOfDirectory(at: u, includingPropertiesForKeys: nil)"), [("directory-listing", 1)])
+        self.assertEqual(calls("SecItemCopyMatching(q as CFDictionary, &out)"), [("keychain-read", 1)])
+        self.assertEqual(calls("UserDefaults.standard.synchronize()"), [("defaults-synchronize", 1)])
+        self.assertEqual(calls("TimelineView(.animation) { c in }"), [("unpaused-animation", 1)])
+        self.assertEqual(calls("TimelineView(.animation(minimumInterval: 1 / 30)) { c in }"), [("unpaused-animation", 1)])
+        self.assertEqual(calls("TimelineView(.animation(minimumInterval: 1 / 60, paused: still)) { c in }"), [])
+        self.assertEqual(calls("TimelineView(.periodic(from: .now, by: 1)) { c in }"), [])
+
+    def test_compare(self):
+        self.assertEqual(compare({"a": {"x": 2}}, {"a": {"x": 1}}), (["a: x 1 -> 2"], []))
+        self.assertEqual(compare({"b": {"x": 1}}, {}), (["b: x 0 -> 1"], []))
+        self.assertEqual(compare({}, {"a": {"x": 1}}), ([], ["a: x 1 -> 0"]))
+        self.assertEqual(compare({"a": {"x": 1}}, {"a": {"x": 1}}), ([], []))
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--update"]:
+        sys.exit(update())
+    if sys.argv[1:] == ["--list"]:
+        print("\n".join(scan()[1]))
+        sys.exit(0)
+    unittest.main()

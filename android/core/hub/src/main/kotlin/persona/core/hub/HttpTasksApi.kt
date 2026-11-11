@@ -189,6 +189,16 @@ class HttpTasksApi internal constructor(
         call(path("todos", todoId, "accept"), "POST", buildJsonObject { put("asked_at", askedAt) })
     }
 
+    override suspend fun answerTask(todoId: String, askedAt: String, answer: persona.core.contracts.api.AskAnswer) {
+        call(path("todos", todoId, "accept"), "POST", buildJsonObject {
+            put("asked_at", askedAt)
+            when (answer) {
+                is persona.core.contracts.api.AskAnswer.Option -> put("option", answer.label)
+                is persona.core.contracts.api.AskAnswer.Response -> put("response", answer.code)
+            }
+        })
+    }
+
     override suspend fun markLaterHandled(questionId: String) {
         call(path("later", questionId, "handled"), "POST", JsonObject(emptyMap()))
     }

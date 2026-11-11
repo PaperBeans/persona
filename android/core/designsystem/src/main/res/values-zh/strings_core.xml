@@ -178,6 +178,24 @@
         <item quantity="other">%1$d 小时后叫醒</item>
     </plurals>
     <string name="designsystem_core_wake_in_hours_minutes">%1$d 小时 %2$d 分后叫醒</string>
+    <string name="designsystem_core_dot_joined">%1$s · %2$s</string>
+    <string name="designsystem_core_closeout_merged_yes">已合并</string>
+    <string name="designsystem_core_closeout_merged_no">未合并</string>
+    <string name="designsystem_core_closeout_merged_confirmed">已合并 ✓</string>
+    <string name="designsystem_core_closeout_merged_contradicted">✗ 说已合并，实际没有</string>
+    <string name="designsystem_core_closeout_deployed_yes">已部署</string>
+    <string name="designsystem_core_closeout_deployed_no">未部署</string>
+    <string name="designsystem_core_closeout_deployed_confirmed">已部署 ✓</string>
+    <string name="designsystem_core_closeout_deployed_contradicted">✗ 说已部署，实际没有</string>
+    <string name="designsystem_core_closeout_blocked_on">卡在：%1$s</string>
+    <string name="designsystem_core_closeout_blocked">卡住了</string>
+    <string name="designsystem_core_closeout_not_done_missing">没做完：%1$s</string>
+    <string name="designsystem_core_closeout_not_done">没做完</string>
+    <string name="designsystem_core_closeout_done">自述已完成</string>
+    <string name="designsystem_core_todo_orphaned">没人在做</string>
+    <string name="designsystem_core_todo_orphaned_error">出错后关闭</string>
+    <string name="designsystem_core_todo_orphaned_closed">已关闭</string>
+    <string name="designsystem_core_todo_orphaned_offline">电脑离线</string>
     <string name="designsystem_core_source_codex_live">Codex 实时</string>
     <string name="designsystem_core_source_codex_history">Codex 历史</string>
     <string name="designsystem_core_source_identity_conflict">身份冲突</string>

@@ -13,34 +13,44 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// hungChannelHub is a hub on which channel hung's program never answers a send: the call holds until its context
-// ends. Any call made on a context that has ended fails with that context's error, as a real hub call does.
-type hungChannelHub struct {
-	Hub
-	hung string
+// hangChannel makes channel's program on f never answer a send: the call holds until its context ends. From then on
+// any app call made on a context that has ended fails with that context's error, as a real hub call does. The fake
+// does it rather than a hub wrapped around it: swapping a running service's hub races with the service's own
+// goroutines that read it, such as the directionsSoon timer that fires on the synctest clock while fanOut waits.
+func (f *fakeHub) hangChannel(channel string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hungChannel = channel
 }
 
-func (h hungChannelHub) AppCall(ctx context.Context, p AppCall) (json.RawMessage, error) {
+// hungAppCall is AppCall's part for hangChannel: the error a call ends with, or nil to answer it as usual.
+func (f *fakeHub) hungAppCall(ctx context.Context, p AppCall) error {
+	f.mu.Lock()
+	hung := f.hungChannel
+	f.mu.Unlock()
+	if hung == "" {
+		return nil
+	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
 	if p.AppID == AppChannels && p.Method == ChannelsSend {
 		var m struct{ Channel string }
 		_ = json.Unmarshal(p.Params, &m)
-		if m.Channel == h.hung {
+		if m.Channel == hung {
 			<-ctx.Done()
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
 	}
-	return h.Hub.AppCall(ctx, p)
+	return nil
 }
 
 // fanOutPastHungChannel runs fanOut with examplechat's program hung (examplechat comes first in the hub's list). It
 // checks that otherchat's send reaches the hub at once and that fanOut returns only when examplechat's own send
 // timeout ends, and returns otherchat's send.
-func fanOutPastHungChannel(t *testing.T, s *Service, f *fakeHub, fanOut func()) map[string]any {
+func fanOutPastHungChannel(t *testing.T, f *fakeHub, fanOut func()) map[string]any {
 	t.Helper()
-	s.hub = hungChannelHub{Hub: s.hub, hung: "examplechat"}
+	f.hangChannel("examplechat")
 	start := time.Now()
 	done := make(chan struct{})
 	go func() {
@@ -65,7 +75,7 @@ func fanOutPastHungChannel(t *testing.T, s *Service, f *fakeHub, fanOut func()) 
 func TestChannelPushReachesTheOtherChannelsPastAHungOne(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s, f := channelPushService(t, true)
-		got := fanOutPastHungChannel(t, s, f, func() { s.channelPush("server", "s1", "Status", "The notification") })
+		got := fanOutPastHungChannel(t, f, func() { s.channelPush("server", "s1", "Status", "The notification") })
 		if got["text"] != "🔔 Status\n\nThe notification" || got["kind"] != channel.OutPush {
 			t.Fatalf("unexpected notification: %v", got)
 		}
@@ -79,7 +89,7 @@ func TestChannelPushReachesTheOtherChannelsPastAHungOne(t *testing.T) {
 func TestExtensionMirrorReachesTheOtherChannelsPastAHungOne(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s, f := channelPushService(t, true)
-		got := fanOutPastHungChannel(t, s, f, func() { s.extensionMirror(context.Background(), "server", "s1") })
+		got := fanOutPastHungChannel(t, f, func() { s.extensionMirror(context.Background(), "server", "s1") })
 		if text, _ := got["text"].(string); !strings.Contains(text, "The full answer") || got["kind"] != channel.OutPush {
 			t.Fatalf("unexpected mirror: %v", got)
 		}
@@ -106,7 +116,7 @@ func TestChannelInteractionAsksTheOtherChannelsPastAHungOne(t *testing.T) {
 		s.chans.mu.Unlock()
 		ix := proto.Interaction{ID: "ix_1", Kind: proto.IxPermission, MachineID: "server", SessionID: "s1", Cwd: "/work/project",
 			ToolName: "Bash", Summary: "Run the tests"}
-		got := fanOutPastHungChannel(t, s, f, func() { s.channelInteraction(ix) })
+		got := fanOutPastHungChannel(t, f, func() { s.channelInteraction(ix) })
 		if got["ref"] != "ask:ix_1" || got["kind"] != channel.OutAsk {
 			t.Fatalf("unexpected ask: %v", got)
 		}

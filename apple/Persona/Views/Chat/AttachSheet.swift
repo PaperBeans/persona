@@ -55,6 +55,10 @@ final class AttachPanel {
     fileprivate(set) var leaving: AttachOutcome?
 
     func close(then action: @escaping () -> Void) { leaving = .then([], action) }
+
+    /// The panel's photo library and its image manager, kept from one opening to the next. Made on first use: the
+    /// chat's `@State` makes an `AttachPanel` on every init of the view, and only the first is kept.
+    @ObservationIgnored private(set) lazy var library = AttachLibrary()
 }
 
 /// The photo library as the grid needs it: access, the newest photos and videos, thumbnails and full pictures.
@@ -64,6 +68,20 @@ final class AttachLibrary {
     private(set) var access: Access = .unknown
     private(set) var assets: [PHAsset] = []
     @ObservationIgnored private let manager = PHCachingImageManager()
+    private static var warmed = false
+
+    /// Opens the Photos library once, off the main thread, so the first 「+」 doesn't wait for it: the first query in a
+    /// process loads the Photos database, which took 50 ms to over a second on the main thread (#4250). Only when access
+    /// was already given: this never asks.
+    static func prewarm() {
+        guard !warmed else { return }
+        warmed = true
+        Task.detached(priority: .utility) {
+            let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            guard status == .authorized || status == .limited else { return }
+            _ = newest(limit: 1)
+        }
+    }
 
     func load() async {
         var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -73,19 +91,34 @@ final class AttachLibrary {
         case .limited: access = .limited
         default: access = .denied; assets = []; return
         }
-        fetch()
+        await fetch()
     }
 
-    func fetch() {
+    /// Lets go of the photos when the panel goes: the next opening draws its light loading state first and the grid a
+    /// moment later, rather than the whole grid in the frame the panel presents in (#4250).
+    func forget() { access = .unknown; assets = [] }
+
+    /// The newest photos and videos, fetched off the main thread (#4250).
+    func fetch() async {
+        let limit = Theme.Attach.fetchLimit
+        let fetched = await Task.detached(priority: .userInitiated) { Self.newest(limit: limit) }.value
+        // The panel went while it was fetching (`forget()` has run): keep nothing for the next opening.
+        guard !Task.isCancelled else { return }
+        assets = fetched.assets
+    }
+
+    private struct Fetched: @unchecked Sendable { let assets: [PHAsset] }
+
+    private nonisolated static func newest(limit: Int) -> Fetched {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.predicate = NSPredicate(format: "mediaType == %d || mediaType == %d", PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue)
-        options.fetchLimit = Theme.Attach.fetchLimit
+        options.fetchLimit = limit
         let result = PHAsset.fetchAssets(with: options)
         var list: [PHAsset] = []
         list.reserveCapacity(result.count)
         result.enumerateObjects { asset, _, _ in list.append(asset) }
-        assets = list
+        return Fetched(assets: list)
     }
 
     func thumbnail(_ asset: PHAsset, side: CGFloat) async -> UIImage? {
@@ -170,7 +203,7 @@ struct AttachSheet<More: View>: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.buiTheme) private var theme
-    @State private var library = AttachLibrary()
+    private var library: AttachLibrary { panel.library }
     @State private var tab: AttachTab = .photos
     @State private var picked: [String] = []
     /// 0: still the 「+」 button; 1: the sheet. The corners round off on their own, quicker.
@@ -220,6 +253,7 @@ struct AttachSheet<More: View>: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
         .task { await library.load() }
+        .onDisappear { library.forget() }
     }
 
     // MARK: The sheet
@@ -552,7 +586,7 @@ private struct AttachGrid: View {
         let rows = stride(from: 0, to: rest.count, by: Theme.Attach.columns).map { Array(rest[$0..<min($0 + Theme.Attach.columns, rest.count)]) }
         ScrollView {
             LazyVStack(alignment: .leading, spacing: spacing) {
-                if limited { AttachLimitedBanner(refetch: library.fetch) }
+                if limited { AttachLimitedBanner(refetch: { await library.fetch() }) }
                 if let camera {
                     HStack(alignment: .top, spacing: spacing) {
                         AttachCameraCell(action: camera).frame(width: cell, height: cell * 2 + spacing)
@@ -687,7 +721,7 @@ private struct AttachCameraCell: View {
 
 /// Limited access: a line over the grid saying so, and Manage to pick more.
 private struct AttachLimitedBanner: View {
-    var refetch: () -> Void
+    var refetch: () async -> Void
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
@@ -697,7 +731,7 @@ private struct AttachLimitedBanner: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button("Manage") {
                 guard let top = AttachTop.controller() else { return }
-                PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: top) { _ in Task { @MainActor in refetch() } }
+                PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: top) { _ in Task { @MainActor in await refetch() } }
             }
             .font(Theme.Font.secondaryStrong)
             .lineLimit(1)

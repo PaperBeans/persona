@@ -22,6 +22,12 @@ data class TriageSwitches(
      * change always sends it, since a value equal to the default would not be encoded.
      */
     @SerialName("reply_reminder") val replyReminder: Boolean? = null,
+    /**
+     * Ask for a closeout (#3612, docs/assistant/agent-work.md "Closeout"): hold an agent's stop once when a turn that did
+     * work ends without one. Null from a hub that predates it, which has no such switch; a PUT without it keeps the hub's
+     * value, and a change always sends it.
+     */
+    val closeout: Boolean? = null,
 ) {
     val remindsReply: Boolean get() = replyReminder != false
 }

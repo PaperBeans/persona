@@ -83,6 +83,8 @@
     <string name="assistant_pinned_actions">Pinned actions</string>
     <string name="assistant_unpin_all">Unpin all</string>
     <string name="assistant_recent">Recent</string>
+    <string name="assistant_directions">Directions</string>
+    <string name="assistant_other_chats">Other chats</string>
     <string name="assistant_auto">Automatic</string>
     <string name="assistant_origin_inbox">Inbox</string>
     <string name="assistant_origin_task">Scheduled</string>

@@ -29,3 +29,12 @@ func TestParseLineReadsTheSurface(t *testing.T) {
 		t.Fatalf("Codex CLI rollout: surface %q", m.Surface)
 	}
 }
+
+// A one-shot run of Claude Code's command line by a program (`claude -p`); the Agent SDKs' interactive hosts are not.
+func TestClaudeOneShot(t *testing.T) {
+	for in, want := range map[string]bool{"sdk-cli": true, "sdk-ts": false, "sdk-py": false, "cli": false, "claude-desktop": false, "": false} {
+		if got := ClaudeOneShot(in); got != want {
+			t.Errorf("ClaudeOneShot(%q) = %v, want %v", in, got, want)
+		}
+	}
+}

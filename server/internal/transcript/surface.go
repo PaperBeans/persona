@@ -21,6 +21,11 @@ func ClaudeSurface(entrypoint string) string {
 	return ""
 }
 
+// ClaudeOneShot: a Claude Code transcript's entrypoint is a one-shot run of its command line by a program (`claude -p`,
+// "sdk-cli"): a script at work, not a session of the user's. The Agent SDKs' ("sdk-ts", "sdk-py") are not: interactive
+// hosts (Paseo, ACP clients) run the user's own sessions through them.
+func ClaudeOneShot(entrypoint string) bool { return entrypoint == "sdk-cli" }
+
 // CodexSurface is the client of a Codex rollout's originator (its session_meta): "Codex Desktop" is the Codex App,
 // "codex-tui" / "codex_cli_rs" the command line. `codex exec` and the SDKs over it say neither.
 func CodexSurface(originator string) string {

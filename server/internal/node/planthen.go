@@ -67,10 +67,13 @@ type terminalDecidedKey struct{}
 // dialog. The returned stop ends the watch: the card was answered, and its answer set the mode.
 func (n *Node) planAfterTerminal(id string, decidedHere func()) (stop func()) {
 	want := n.planThen(id)
+	// Both read here, not in the goroutine: a test shortens them (fastPlanThen) and puts them back when it ends, which
+	// can come before a watch it stopped at once has even started (#3942).
 	ctx, cancel := context.WithTimeout(context.Background(), planThenWatch)
+	every := planThenEvery
 	go func() {
 		defer cancel()
-		t := time.NewTicker(planThenEvery)
+		t := time.NewTicker(every)
 		defer t.Stop()
 		told := false
 		for {

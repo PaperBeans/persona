@@ -14,6 +14,7 @@ import persona.core.contracts.Todo
 import persona.core.designsystem.*
 import persona.core.domain.tasks.AssistantExtra
 import persona.core.domain.tasks.AssistantTaskCards
+import persona.core.domain.tasks.decisionOptions
 
 /** Acceptance carries the exact round the user read, independently of any later task refresh. */
 @Composable
@@ -45,6 +46,11 @@ internal fun TaskOwnerDecision(todo: Todo, host: AssistantTaskHost) {
 internal fun TaskDecisionCard(todo: Todo, host: AssistantTaskHost, enabled: Boolean = true, onOpen: (() -> Unit)? = null) {
     val ask = todo.ask?.takeIf { it.outcome == "decide" } ?: return
     if (todo.isDone || todo.cancelledAt != null) return
+    // A decision with options is answered on the row (#3804); one from an older hub keeps the recommendation's button.
+    if (ask.decisionOptions.isNotEmpty()) {
+        TaskDecisionAnswers(todo, ask, host, enabled, onOpen)
+        return
+    }
     val busy by host.tasks.busy.collectAsStateWithLifecycle()
     val sending = "accept:${todo.id}" in busy
     var failed by remember(todo.id, ask) { mutableStateOf(false) }

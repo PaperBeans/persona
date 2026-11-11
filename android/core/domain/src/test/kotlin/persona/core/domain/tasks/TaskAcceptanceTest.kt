@@ -39,6 +39,12 @@ class TaskAcceptanceTest {
             return delayed?.let { held -> delayed = null; held.await() } ?: rows
         }
         override suspend fun acceptTask(todoId: String, askedAt: String) { accepted += todoId to askedAt }
+        val answers = mutableListOf<Triple<String, String, AskAnswer>>()
+        var answerFailure: Throwable? = null
+        override suspend fun answerTask(todoId: String, askedAt: String, answer: AskAnswer) {
+            answers += Triple(todoId, askedAt, answer)
+            answerFailure?.let { throw it }
+        }
         override suspend fun feed(conversation: String, since: String?) = FeedResponse()
         override suspend fun startPlan(id: String, remember: Boolean): TaskPlan = error("unused")
         override suspend fun dismissPlan(id: String): TaskPlan = error("unused")
@@ -202,6 +208,81 @@ class TaskAcceptanceTest {
         assertEquals(listOf(decision.id to true), api.patches)
         assertEquals(BriefOutcome.Completed,
             store.briefOutcomes.value[briefAcceptOutcomeKey(decision.id, decision.ask!!.askedAt)])
+    }
+
+    private class Coded(override val status: Int?) : Exception("refused"), HubCodedFailure { override val code: String? = null }
+
+    private val choice = Todo("task", origin = "main", supervision = Supervision(state = "needs_user"),
+        ask = TodoAsk("decide", "Choose the release scope", "Ship it", "2026-11-01T09:00:00Z",
+            options = listOf(AskOption("Ship it", "Goes out today"), AskOption("Hold")), responses = listOf("decide_yourself", "explain_first")))
+
+    @Test fun anOptionIsAnsweredWithTheRoundTheOwnerReadAndEndsTheDecision() = runTest {
+        val api = Api(listOf(choice))
+        val store = TasksStore(api, Connection(), backgroundScope)
+        store.reloadTodos(); runCurrent()
+        val done = mutableListOf<Boolean>()
+        store.answerTask(choice, AskAnswer.Option("Hold"), { throw it }, { fail("unchanged") }) { done += it }
+        // a second press while the first is on its way sends nothing
+        store.answerTask(choice, AskAnswer.Option("Ship it"), { throw it }, { fail("unchanged") }) { done += it }
+        runCurrent()
+        assertEquals(listOf(Triple(choice.id, choice.ask!!.askedAt, AskAnswer.Option("Hold") as AskAnswer)), api.answers)
+        assertEquals(listOf(true), done)
+        assertTrue(api.accepted.isEmpty())
+        assertNull(store.todos.value.single().ask)
+        assertTrue(store.busy.value.isEmpty())
+    }
+
+    @Test fun aFixedResponseLeavesTheDecisionToTheHub() = runTest {
+        val api = Api(listOf(choice))
+        val store = TasksStore(api, Connection(), backgroundScope)
+        store.reloadTodos(); runCurrent()
+        val done = mutableListOf<Boolean>()
+        store.answerTask(choice, AskAnswer.Response("explain_first"), { throw it }, { fail("unchanged") }) { done += it }
+        runCurrent()
+        assertEquals(listOf(Triple(choice.id, choice.ask!!.askedAt, AskAnswer.Response("explain_first") as AskAnswer)), api.answers)
+        assertEquals(listOf(true), done)
+        // the hub decides whether it still waits: the row is what the next read says
+        assertEquals(choice.ask, store.todos.value.single().ask)
+    }
+
+    @Test fun anAnswerToARoundHandledElsewhereTakesNothingAndIsNoError() = runTest {
+        val api = Api(listOf(choice)).apply { answerFailure = Coded(409) }
+        val store = TasksStore(api, Connection(), backgroundScope)
+        store.reloadTodos(); runCurrent()
+        val done = mutableListOf<Boolean>()
+        store.answerTask(choice, AskAnswer.Option("Ship it"), { throw it }, { fail("unchanged") }) { done += it }
+        runCurrent()
+        assertEquals(listOf(false), done)
+        assertEquals(choice.ask, store.todos.value.single().ask)
+    }
+
+    @Test fun aFailedAnswerIsReportedAndCanBeSentAgain() = runTest {
+        val api = Api(listOf(choice)).apply { answerFailure = Coded(502) }
+        val store = TasksStore(api, Connection(), backgroundScope)
+        store.reloadTodos(); runCurrent()
+        val errors = mutableListOf<Throwable>()
+        store.answerTask(choice, AskAnswer.Option("Ship it"), { errors += it }, { fail("unchanged") }) { fail("not taken") }
+        runCurrent()
+        assertEquals(1, errors.size)
+        assertEquals(choice.ask, store.todos.value.single().ask)
+        assertTrue(store.busy.value.isEmpty())
+        api.answerFailure = null
+        val done = mutableListOf<Boolean>()
+        store.answerTask(choice, AskAnswer.Option("Ship it"), { throw it }, { fail("unchanged") }) { done += it }
+        runCurrent()
+        assertEquals(listOf(true), done)
+        assertEquals(2, api.answers.size)
+    }
+
+    @Test fun anAnswerToARoundThatChangedMeanwhileIsNotSent() = runTest {
+        val api = Api(listOf(choice.copy(ask = choice.ask!!.copy(askedAt = "2026-11-02T09:00:00Z"))))
+        val store = TasksStore(api, Connection(), backgroundScope)
+        store.reloadTodos(); runCurrent()
+        var changed = 0
+        store.answerTask(choice, AskAnswer.Option("Ship it"), { throw it }, { changed++ }) { fail("not taken") }
+        runCurrent()
+        assertEquals(1, changed)
+        assertTrue(api.answers.isEmpty())
     }
 
     @Test fun acceptedRoundCannotResurrectFromDelayedReadButANewAskSurvives() = runTest {

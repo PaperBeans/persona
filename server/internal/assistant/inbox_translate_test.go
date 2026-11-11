@@ -309,7 +309,7 @@ func (h *failingMailHub) AppCall(ctx context.Context, p AppCall) (json.RawMessag
 func TestTranslateMailUnknownAccount(t *testing.T) {
 	h, _, _, translated := translateHub(t)
 	bridge := &failingMailHub{Hub: h.Service.hub}
-	h.Service.hub = bridge
+	setHub(h.Service, bridge)
 	const req = `{"account_id":"none","uid":1,"target":"zh-Hans"}`
 	unknown := &mail.UnknownAccountError{Account: "none"}
 	for _, err := range []error{unknown, fmt.Errorf("read mail: %w", unknown)} {

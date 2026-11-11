@@ -180,6 +180,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				}
 			}
 			r := TaskReview{At: time.Now().UTC(), Verdict: verdict, Checks: checks, Note: note, UserCheck: a.UserCheck}
+			v.applyChecks(checks, r.At, "supervisor:"+self)
 			if verdict == reviewNeedsUser {
 				r.WhyOwner, r.Reason, r.Recommend = decision.WhyOwner, decision.Reason, decision.Recommend
 				r.Options, r.CostOfWaiting = decision.Options, decision.CostOfWaiting

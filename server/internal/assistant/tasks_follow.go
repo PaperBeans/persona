@@ -165,6 +165,12 @@ type receiptBody struct {
 	PR      string         `json:"pr,omitempty"`
 	Machine string         `json:"machine,omitempty"`
 	Review  *receiptReview `json:"review,omitempty"`
+	// Criteria: a done receipt's list of its brief's criteria as they stood when the agent stopped (#3822,
+	// briefCriteriaNow): met or not met as the supervision ledger tracks them (#3635: the agent's reports and the
+	// reviews), unchecked while pending there, or dropped by a scope change.
+	// Absent without a brief or criteria. CriteriaMore: how many the list left out.
+	Criteria     []BriefCriterion `json:"criteria,omitempty"`
+	CriteriaMore int              `json:"criteria_more,omitempty"`
 	// Reroute names the machine a flexible task was moved off and where it landed, with the health-check reason;
 	// absent when it ran where it was asked (#2271).
 	Reroute *PlanReroute `json:"reroute,omitempty"`
@@ -358,6 +364,13 @@ func (s *Service) taskTurnSettled(ctx context.Context, machine, sid string) {
 				state = "awaiting"
 			}
 			body.Review = &receiptReview{State: state, Criteria: len(v.DoneWhen)}
+		}
+	}
+	if current, ok := s.todoNow(t.ID); ok {
+		if list := s.briefCriteriaNow(current); len(list) > briefCriteriaMost {
+			body.Criteria, body.CriteriaMore = list[:briefCriteriaMost], len(list)-briefCriteriaMost
+		} else {
+			body.Criteria = list
 		}
 	}
 	if body.Summary == "" {

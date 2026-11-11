@@ -4710,6 +4710,7 @@ struct Composer: View, Equatable {
         .mediaPicker(isPresented: $showPhotos, selection: $picks)
         #if os(iOS)
         .modifier(attachHost)
+        .task { if attachOpener != nil { AttachLibrary.prewarm() } }
         #endif
         .fileUploadPicker(isPresented: $showFiles) { urls in
             uploads.start(urls, machine: key.machineRef, model: model, dest: uploadDest) { insertPath($0) }
@@ -5953,7 +5954,7 @@ struct WorkLine: View, Equatable {
     /// The closures are the line's own (keyed by its id): a hub push re-evaluating the page leaves unchanged lines alone.
     nonisolated static func == (a: Self, b: Self) -> Bool {
         a.isEmpty == b.isEmpty && a.counts == b.counts && a.live == b.live && a.start == b.start && a.end == b.end
-            && a.open == b.open && (a.openTerminal == nil) == (b.openTerminal == nil) && a.agents == b.agents
+            && a.open == b.open && (a.openTerminal == nil) == (b.openTerminal == nil) && a.agents == b.agents && a.doing == b.doing
     }
 
     private let isEmpty: Bool
@@ -5964,6 +5965,12 @@ struct WorkLine: View, Equatable {
     let open: Bool
     /// The subagents the running line waits on: what it says instead of its counts.
     let agents: AgentsWorking?
+    /// Otherwise, while it runs, the step it names instead of its counts (#2987); drawn as `shown`, which follows it at
+    /// most about twice a second.
+    private let doing: WorkNow?
+    @State private var shown: WorkNow?
+    @State private var shownAt = Date.distantPast
+    @Environment(\.dynamicTypeSize) private var typeSize
     let openTerminal: (() -> Void)?
     let toggle: () -> Void
 
@@ -5976,6 +5983,8 @@ struct WorkLine: View, Equatable {
         self.end = end
         self.open = open
         self.agents = live ? agents : nil
+        doing = live && self.agents == nil ? WorkNow.of(items) : nil
+        _shown = State(initialValue: doing)
         self.openTerminal = openTerminal
         self.toggle = toggle
     }
@@ -5984,8 +5993,25 @@ struct WorkLine: View, Equatable {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("WorkLine")
         #endif
-        if AppStyle.current.usesBeautifulUI { beautiful } else { plain }
+        Group { if AppStyle.current.usesBeautifulUI { beautiful } else { plain } }
+            .task(id: doing) { await follow(doing) }
     }
+
+    /// Lets `next` through once half a second has passed since the last step shown (`WorkNow.hold`); a newer step in
+    /// the meantime replaces this wait (`task(id:)`), so a run of quick calls shows the newest, not each name in turn.
+    private func follow(_ next: WorkNow?) async {
+        guard next != shown else { return }
+        let wait = WorkNow.hold(next, shown: shown, shownAt: shownAt, now: .now)
+        if wait > 0 {
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled else { return }
+        }
+        shown = next
+        shownAt = .now
+    }
+
+    /// The step the line names now, when it names one (`doing` is already nil on a finished line and under subagents).
+    private var step: WorkNow? { WorkNow.named(doing: doing, shown: shown) }
 
     /// BeautifulUI's tool run header: ⌄, the counts and the time; working, a spinner and a shimmer.
     private var beautiful: some View {
@@ -6056,7 +6082,33 @@ struct WorkLine: View, Equatable {
         }
     }
 
-    private func summary(now: Date) -> some View {
+    @ViewBuilder private func summary(now: Date) -> some View {
+        if let step { stepSummary(step, now: now) } else { counted(now: now) }
+    }
+
+    /// One line: the step's words give way (a path or a command in the middle, a sentence at the end), "+2" and the
+    /// time stay whole. At the accessibility text sizes, where beside those the words kept a letter: up to two lines of
+    /// words, room for both always kept so the line holds still as the steps change, and "+2" and the time on a line under them.
+    @ViewBuilder private func stepSummary(_ step: WorkNow, now: Date) -> some View {
+        let took = Self.duration(from: start, to: now)
+        if typeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: Theme.Space.flush) {
+                Text(step.text).truncationMode(step.tail ? .tail : .middle).lineLimit(2, reservesSpace: true)
+                // Whole: on a line too narrow it wraps rather than cuts.
+                Text(step.trailer(took: took, alone: true)).lineLimit(nil)
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            HStack(spacing: Theme.Space.flush) {
+                Text(step.text).truncationMode(step.tail ? .tail : .middle)
+                Text(step.trailer(took: took)).fixedSize()
+            }
+            .lineLimit(1)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func counted(now: Date) -> some View {
         FirstFitting { // ViewThatFits measured both at every width of a window resize (#1337)
             Text(label(now: now, short: false)).fixedSize()
             Text(label(now: now, short: true)).fixedSize()
@@ -6065,6 +6117,8 @@ struct WorkLine: View, Equatable {
     }
 
     private func label(now: Date, short: Bool) -> String {
+        // The step in full: the line may have cut it.
+        if let step { return step.text + step.trailer(took: Self.duration(from: start, to: now)) }
         let parts = agents.map { [SubagentGridText.working(count: $0.count, doing: $0.doing, short: short)] } ?? (short ? counts.short : counts.full)
         let took = Self.duration(from: start, to: now)
         guard AppStyle.current.usesBeautifulUI else {
