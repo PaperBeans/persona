@@ -40,4 +40,14 @@ class CompactCountTest {
         assertEquals("1.2 万", compactCount(12_345, 10_000, { "$it 万" }, { "${it}M" }))
         assertEquals("120 万", compactCount(1_200_000, 10_000, { "$it 万" }, { "${it}M" }))
     }
+
+    /** [CoreText.english] (logs, no strings table) reads compact counts as the English strings do, not the raw count + K (#4182). */
+    @Test fun englishFallbackMatchesTheEnglishStrings() {
+        fun words(count: Long) = CoreText.of(CoreText.Key.CompactCount, count).english()
+        assertEquals("950", words(950))
+        assertEquals("180.9K", words(180_902))
+        assertEquals("1M", words(999_950))
+        assertEquals("1.2M", words(1_200_000))
+        assertEquals("180.9K tokens before", CoreText.of(CoreText.Key.CompactBefore, CoreText.of(CoreText.Key.CompactCount, 180_902L)).english())
+    }
 }

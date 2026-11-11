@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
@@ -52,20 +53,26 @@ var (
 // planThenSet bounds pressing the session over to its mode (tuiSetMode: a read and a key per step of the cycle).
 const planThenSet = 20 * time.Second
 
-// planThenAfterTerminal follows a plan from the moment its card is raised: once the footer shows a mode other than
-// plan, the plan was approved in the terminal, and the session is moved to its recorded mode when the dialog picked
-// another. A plan sent back (the footer stays on plan), a dialog in front (no footer) and a session with no recorded
-// mode are left alone. The returned stop ends the watch: the card was answered, and its answer set the mode.
-func (n *Node) planThenAfterTerminal(id string) (stop func()) {
+// terminalDecided marks an ask whose question the terminal's own dialog answered: its card is withdrawn as dismissed
+// (decided on the computer), where a hook that merely went away is cancelled.
+type terminalDecided struct{ atomic.Bool }
+
+type terminalDecidedKey struct{}
+
+// planAfterTerminal follows a plan from the moment its card is raised. The plan dialog hides the TUI's footer; once
+// the footer is back, the terminal decided the plan (approved, or sent back), and decidedHere is called once so the
+// card that still waits is withdrawn. When the footer then shows a mode other than plan, the plan was approved there,
+// and a session whose start recorded a mode (planThen) is moved to it when the dialog picked another. A dialog still
+// in front (no footer) is waited out: a plan approved with "manually approve" is followed at once by a permission
+// dialog. The returned stop ends the watch: the card was answered, and its answer set the mode.
+func (n *Node) planAfterTerminal(id string, decidedHere func()) (stop func()) {
 	want := n.planThen(id)
-	if want == "" {
-		return func() {}
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), planThenWatch)
 	go func() {
 		defer cancel()
 		t := time.NewTicker(planThenEvery)
 		defer t.Stop()
+		told := false
 		for {
 			select {
 			case <-ctx.Done():
@@ -80,10 +87,18 @@ func (n *Node) planThenAfterTerminal(id string) (stop func()) {
 			if err != nil {
 				return
 			}
-			switch cur := tuiMode(screen); cur {
-			case "", "plan":
-				continue // a dialog is up, or the plan is not approved (yet)
-			case want:
+			cur := tuiMode(screen)
+			if cur == "" {
+				continue // a dialog is up
+			}
+			if !told && decidedHere != nil {
+				told = true
+				decidedHere()
+			}
+			switch {
+			case cur == "plan":
+				return // sent back in the terminal: it plans again, and its next plan is a new card
+			case want == "" || cur == want:
 				return
 			default:
 				// Its own time: the watch may be nearly over when the approval is seen.

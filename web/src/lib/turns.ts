@@ -364,17 +364,122 @@ export function toolChip(use: Item): string {
     return "";
   };
   const name = use.tool_name ?? "";
+  const tool = name.startsWith("mcp__") && !isPersonaTool(name) ? "" : name;
+  const newer = ownEntry(CLAUDE_TOOL_CHIP, tool);
   let v = "";
-  if (name === "Bash" || name === "exec_command" || name === "shell") v = pick("description", "command", "cmd");
-  else if (/^(Read|Edit|Write|MultiEdit|NotebookEdit)$/.test(name)) v = shortFile(pick("file_path", "notebook_path"));
-  else if (name === "Grep" || name === "Glob") v = pick("pattern");
-  else if (name === "WebFetch") v = pick("url");
-  else if (name === "WebSearch") v = pick("query");
-  else if (name === "Task" || name === "Agent") v = pick("description", "prompt");
-  else if (name === "TodoWrite") v = t("lib-turns.update_todos");
-  else v = pick("description", "command", "file_path", "path", "query", "url", "prompt", "pattern", "name");
+  if (tool === "Bash" || tool === "exec_command" || tool === "shell" || tool === "PowerShell") v = pick("description", "command", "cmd");
+  else if (/^(Read|Edit|Write|MultiEdit|NotebookEdit)$/.test(tool)) v = shortFile(pick("file_path", "notebook_path"));
+  else if (tool === "Grep" || tool === "Glob") v = pick("pattern");
+  else if (tool === "WebFetch") v = pick("url");
+  else if (tool === "WebSearch") v = pick("query");
+  else if (tool === "Task" || tool === "Agent") v = pick("description", "prompt");
+  else if (tool === "TodoWrite") v = t("lib-turns.update_todos");
+  else if (newer) v = newer(inp, pick);
+  else v = pickSubject(inp);
   if (!v && Array.isArray(inp.command)) v = (inp.command as unknown[]).join(" ");
-  return v.split("\n")[0].slice(0, 200);
+  return v.split("\n").map((l) => l.trim()).find(Boolean)?.slice(0, 200) ?? "";
+}
+
+/** The fields that say what an unknown tool's call is about, the most telling first (iOS ToolNaming.subjectKeys). */
+export const SUBJECT_KEYS = ["description", "title", "subject", "name", "file_path", "filePath", "notebook_path", "path", "url", "uri", "query", "pattern", "command", "prompt"];
+const PATH_KEYS = new Set(["file_path", "filePath", "notebook_path", "path"]);
+
+/** An unknown tool's subject: the first of SUBJECT_KEYS it has (a path by its file's name), else its first string by field name. */
+export function pickSubject(inp: Record<string, unknown>): string {
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  for (const k of SUBJECT_KEYS) if (str(inp[k])) return PATH_KEYS.has(k) ? baseFileName(str(inp[k])) : str(inp[k]);
+  for (const k of Object.keys(inp).sort()) if (str(inp[k])) return str(inp[k]);
+  return "";
+}
+
+const baseFileName = (p: string) => p.split(/[/\\]/).filter(Boolean).pop() ?? p;
+
+type Pick = (...keys: string[]) => string;
+/** What Claude Code's newer tools are about (iOS ToolPresentation.subject). */
+const CLAUDE_TOOL_CHIP: Record<string, (inp: Record<string, unknown>, pick: Pick) => string> = {
+  TaskCreate: (_, pick) => pick("subject", "description"),
+  TaskUpdate: (inp, pick) => pick("subject", "activeForm") || (inp.taskId != null ? `#${String(inp.taskId)}` : ""),
+  TaskGet: (inp) => (inp.taskId != null ? `#${String(inp.taskId)}` : ""),
+  TaskList: () => "",
+  ListAgents: () => "",
+  CronList: () => "",
+  ExitWorktree: () => "",
+  TaskStop: (_, pick) => pick("task_id", "shell_id"),
+  KillShell: (_, pick) => pick("shell_id", "task_id"),
+  KillBash: (_, pick) => pick("shell_id", "task_id"),
+  TaskOutput: (_, pick) => pick("task_id"),
+  BashOutput: (_, pick) => pick("bash_id", "task_id"),
+  SendMessage: (_, pick) => [pick("to", "recipient"), pick("summary") || pick("message", "content").split("\n")[0]].filter(Boolean).join(" · "),
+  Monitor: (inp, pick) => pick("description", "command") || String((inp.ws as Record<string, unknown> | undefined)?.url ?? ""),
+  ScheduleWakeup: (_, pick) => pick("reason"),
+  CronCreate: (_, pick) => [pick("cron"), pick("prompt").split("\n")[0]].filter(Boolean).join(" · "),
+  CronDelete: (_, pick) => pick("id"),
+  RemoteTrigger: (_, pick) => [humanizeTool(pick("action")), pick("trigger_id")].filter(Boolean).join(" · "),
+  LSP: (inp, pick) =>
+    inp.operation === "workspaceSymbol" && pick("query") ? pick("query") : [baseFileName(pick("filePath")), inp.line != null ? String(inp.line) : ""].filter(Boolean).join(":"),
+  EnterWorktree: (_, pick) => pick("name") || baseFileName(pick("path")),
+  SendUserFile: (inp, pick) => {
+    const list = [inp.files, inp.file_paths, inp.paths].find(Array.isArray) as unknown[] | undefined;
+    const paths = (list ?? []).map((f) => (typeof f === "string" ? f : String((f as Record<string, unknown>)?.path ?? (f as Record<string, unknown>)?.file_path ?? ""))).filter(Boolean);
+    if (pick("file_path", "path")) paths.push(pick("file_path", "path"));
+    return paths.length ? paths.map(baseFileName).join(", ") : pick("caption");
+  },
+  Artifact: (_, pick) => pick("title") || baseFileName(pick("file_path")) || pick("url"),
+  PushNotification: (_, pick) => pick("message"),
+  ReportFindings: (inp) => {
+    const findings = Array.isArray(inp.findings) ? (inp.findings as Record<string, unknown>[]) : [];
+    if (findings.length === 1) return String(findings[0]?.short_summary ?? findings[0]?.summary ?? "");
+    return findings.length ? t("lib-turns.findings", { count: findings.length }) : "";
+  },
+  ToolSearch: (_, pick) => (pick("query").startsWith("select:") ? pick("query").slice(7).split(",").join(", ") : pick("query")),
+  WaitForMcpServers: (inp, pick) => (Array.isArray(inp.servers) ? (inp.servers as unknown[]).map(String).join(", ") : pick("server")),
+  ListMcpResourcesTool: (_, pick) => pick("server"),
+  ReadMcpResourceTool: (_, pick) => pick("uri", "server"),
+  Skill: (_, pick) => pick("skill", "command"),
+};
+
+/** A table's entry for a key that comes from data (a tool's name, a word of it): its own entries only, so a tool or a
+ *  word called "constructor" or "toString" is not mistaken for one of Object's methods. */
+export function ownEntry<T>(table: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
+/** Words spelled their own way wherever they show up in a name (iOS ToolNaming.spelled). */
+// i18n-ignore-start: product names and acronyms, the same in every language
+const SPELLED: Record<string, string> = {
+  api: "API", ai: "AI", aws: "AWS", ci: "CI", cli: "CLI", csv: "CSV", devtools: "DevTools", dns: "DNS", gcp: "GCP", github: "GitHub",
+  gitlab: "GitLab", graphql: "GraphQL", html: "HTML", http: "HTTP", https: "HTTPS", id: "ID", ids: "IDs", ide: "IDE", ios: "iOS",
+  json: "JSON", llm: "LLM", lsp: "LSP", macos: "macOS", mcp: "MCP", oauth: "OAuth", openai: "OpenAI", pdf: "PDF", pr: "PR", prs: "PRs",
+  sdk: "SDK", sql: "SQL", ssh: "SSH", ui: "UI", uri: "URI", url: "URL", urls: "URLs", youtube: "YouTube",
+};
+// i18n-ignore-end
+const SPELLED_VALUES = new Set(Object.values(SPELLED));
+
+/** An identifier cut into words at _ - . / : and spaces, and where camel case turns ("getPRComments": get, PR, Comments). */
+export function nameWords(id: string): string[] {
+  return id
+    .split(/[_\-./: ]+/)
+    .flatMap((part) => part.split(/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/))
+    .filter(Boolean);
+}
+
+/** An identifier in words, the first capitalized: "create_issue" is "Create issue", "getPRComments" "Get PR comments" (iOS ToolNaming.humanize). */
+export function humanizeTool(id: string): string {
+  const words = nameWords(id).map((w) => ownEntry(SPELLED, w.toLowerCase()) ?? (w.length > 1 && /^[A-Z0-9]+$/.test(w) ? w : w.toLowerCase()));
+  if (!words.length) return "";
+  const [first, ...rest] = words;
+  return [SPELLED_VALUES.has(first) ? first : first.charAt(0).toUpperCase() + first.slice(1), ...rest].join(" ");
+}
+
+/** An MCP server's name as a name: "github" is "GitHub", "chrome-devtools" "Chrome DevTools"; a plugin's server and a
+ *  claude.ai connector read as their own name, once (iOS ToolNaming.serverName). */
+export function mcpServerName(server: string): string {
+  let s = server;
+  for (const prefix of ["plugin_", "claude_ai_"]) if (s.startsWith(prefix) && s.length > prefix.length) s = s.slice(prefix.length);
+  let words = nameWords(s);
+  const half = words.length / 2;
+  if (half >= 1 && Number.isInteger(half) && words.slice(0, half).join(" ").toLowerCase() === words.slice(half).join(" ").toLowerCase()) words = words.slice(0, half);
+  return words.map((w) => ownEntry(SPELLED, w.toLowerCase()) ?? w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
 
 export function shortFile(p: string) {
@@ -406,7 +511,8 @@ export const TOOL_LABEL: Record<string, string> = {
 
 export function toolLabel(name?: string): string {
   if (!name) return t("lib-turns.tool");
-  if (TOOL_LABEL[name]) return TOOL_LABEL[name];
+  const label = ownEntry(TOOL_LABEL, name);
+  if (label) return label;
   // mcp__<server>__<tool>, and the server may have underscores itself (mcp__plugin_x_y__tool), like the apps
   if (name.startsWith("mcp__")) return name.slice(name.lastIndexOf("__") + 2).replace(/_/g, " ");
   return name;
@@ -426,12 +532,15 @@ export function mcpServer(name?: string): string | null {
   return i > 0 ? rest.slice(0, i) : rest || null;
 }
 
-/** A tool's name for a sentence (a permission card): an MCP tool as "Persona · mail send", others as written. */
+/** A tool's name for a sentence (a permission card): Persona's own MCP tool as "Persona · mail send", another server's
+ *  in words ("GitHub · Create issue", #2986), others as written. */
 export function toolDisplayName(name?: string): string {
   const server = mcpServer(name);
   if (server === null) return name || toolLabel();
-  const tool = name!.slice(5 + server.length + 2).replace(/_/g, " ");
-  return tool ? `${mcpServerLabel(server)} · ${tool}` : mcpServerLabel(server);
+  const raw = name!.slice(5 + server.length + 2);
+  if (PERSONA_SERVERS.has(server.replace(/^plugin_/, ""))) return raw ? `Persona · ${raw.replace(/_/g, " ")}` : "Persona";
+  const tool = humanizeTool(raw);
+  return tool ? `${mcpServerName(server)} · ${tool}` : mcpServerName(server);
 }
 
 /** The tool a card asks about, for its title: the manager's name for its own tools when it gave one (tool_title). */
@@ -503,7 +612,7 @@ const PERSONA_VERB_KEY: Record<string, string> = {
 export function personaToolVerb(name?: string): { verb: string; what?: string } | null {
   if (!isPersonaTool(name)) return null;
   const base = name!.slice(name!.lastIndexOf("__") + 2);
-  const key = PERSONA_VERB_KEY[canonicalTool(base)];
+  const key = ownEntry(PERSONA_VERB_KEY, canonicalTool(base));
   if (key) return { verb: t(`lib-turns.${key}`) };
   const family = /^(phone|mail)_(.+)$/.exec(base);
   if (family) return { verb: t(family[1] === "phone" ? "lib-turns.persona_phone" : "lib-turns.persona_mail"), what: family[2].replace(/_/g, " ") };

@@ -396,6 +396,9 @@ data class CoreText(val key: Key, val args: List<Any> = emptyList()) {
     fun english(): String = when (key) {
         Key.Verbatim -> args.first().toString()
         Key.Joined -> args.drop(1).map { (it as CoreText).english() }.filter(String::isNotEmpty).joinToString(args.first().let { if (it is CoreText) it.english() else it.toString() })
+        // The count is the raw number: in thousands, stepping up to millions, as the English strings read it (#4182).
+        Key.CompactCount -> compactCount((args.first() as Number).toLong(), Key.CompactUnit.english.toLong(),
+            { String.format(java.util.Locale.ROOT, key.english, it) }, { "${it}M" })
         else -> if (args.isEmpty()) key.english else String.format(java.util.Locale.ROOT, key.english, *args.map { if (it is CoreText) it.english() else it }.toTypedArray())
     }
 

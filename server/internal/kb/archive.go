@@ -83,6 +83,8 @@ type Engine struct {
 	LiveChanged func(id string)
 	// HandleKey is the hub's key for the senders' identity hints (handles.go); without it none are kept.
 	HandleKey []byte
+	// TopicsOn says whether the knowledge points curation runs (topics.go; assistant.kb_topics). nil: it does.
+	TopicsOn func() bool
 
 	// Limits (zero: defaults).
 	ChatsPerRun  int // how many recently active chats an archive run looks at (100)
@@ -109,6 +111,8 @@ type Engine struct {
 	find findCache // what Find read last time, kept while the files are unchanged (find_cache.go)
 
 	projectRetries map[string]projectRetry // projects whose rewrite failed, by slug (RefreshProjects)
+	// topicRetries: sources whose distill call failed ("<kind>/<id>") and topics whose merge failed ("topics/<slug>").
+	topicRetries map[string]projectRetry
 }
 
 func (e *Engine) modelFor(id string) Model {

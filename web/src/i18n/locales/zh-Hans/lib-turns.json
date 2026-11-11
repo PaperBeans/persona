@@ -1,5 +1,6 @@
 {
   "update_todos": "更新待办",
+  "findings_other": "{count} 条发现",
   "tool": "工具",
   "tool_run": "运行",
   "tool_read": "读取",

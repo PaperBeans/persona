@@ -155,6 +155,10 @@ func (s *Service) launcherRoutes() {
 			apierr.Write(w, http.StatusConflict, i18n.Err("assistant-models_launchers.err_name_taken", i18n.Args{"name": in.Name}))
 			return
 		}
+		if err := s.sealKeyReferences(ctx, &in, false); err != nil {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
 		l, err := s.saveLauncher(ctx, in, nil)
 		if err != nil {
 			status := http.StatusInternalServerError
@@ -206,6 +210,10 @@ func (s *Service) launcherRoutes() {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
+		if err := s.sealKeyReferences(r.Context(), &in, true); err != nil {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
 		saved, err := s.saveLauncher(r.Context(), in, old)
 		if err != nil {
 			status := http.StatusInternalServerError
@@ -244,6 +252,7 @@ func (s *Service) launcherRoutes() {
 				apierr.Write(w, 409, i18n.Err("assistant-models_launchers.err_in_use", i18n.Args{"uses": strings.Join(uses, i18n.T(s.requestCtxLang(r.Context()), "assistant-models_launchers.list_sep"))}))
 				return
 			}
+			s.forgetLauncherSecrets(name) // what was kept of its keys (launcher_secrets.go)
 			apierr.WriteJSON(w, map[string]any{"ok": true, "deleted": true})
 			return
 		}

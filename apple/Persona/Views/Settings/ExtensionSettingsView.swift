@@ -210,13 +210,13 @@ struct ExtensionSettingsView<Configuration: View, AdvancedInformation: View>: Vi
 
     private var autoUpgradeReason: String {
         if offline { return offlineReason }
-        if !policy.canAutoUpgrade { return policy.updateReason }
-        if detail.plugin.autoUpgradePaused == "market_removed" {
-            return String(localized: "The extension market is unavailable. Check its source and try again.")
+        if detail.plugin.marketWasRemoved {
+            return String(localized: "Auto-upgrade is paused because its market was removed. Your setting is kept and applies again once the market is added back with the same address.")
         }
         if detail.plugin.enabled == false || detail.plugin.autoUpgradePaused == "disabled" {
             return String(localized: "Auto-upgrade is paused while this extension is off.")
         }
+        if !policy.canAutoUpgrade { return policy.updateReason }
         if lifecycle.globalAuto == false { return String(localized: "Automatic upgrades are paused globally for this manager.") }
         return String(localized: "Compatible updates run automatically. Permission changes require review.")
     }

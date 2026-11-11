@@ -73,6 +73,61 @@ describe("elicitation form", () => {
   });
 });
 
+describe("MCP scalar answers preserve the entered value", () => {
+  const scalar = (field: Record<string, unknown>) => ({ type: "object", required: ["value"], properties: { value: field } });
+
+  it.each([
+    "2026-02-30T12:00:00Z", "2026-02-29T12:00:00Z", "1900-02-29T12:00:00Z",
+    "2026-04-31T12:00:00+05:30", "2026-01-01T24:00:00Z", "2026-13-01T12:00:00Z",
+    "2026-01-01T12:60:00Z", "2026-01-01T12:00:60Z", "2026-01-01T12:00:00+24:00",
+  ])("refuses an invalid original date-time: %s", (value) => {
+    const s = scalar({ type: "string", format: "date-time" });
+    expect(validate(s, { value }).valid).toBe(false);
+    expect(elicitationResolution(form(s), "accept", { value })).toBeUndefined();
+  });
+
+  it.each([
+    "2026-02-28T12:00:00Z", "2000-02-29T23:59:59.123Z", "2028-02-29T00:00:00+05:30",
+    "2026-01-01t00:00:00z", "2026-12-31T23:59:59-05:00", "0001-01-01T00:00:00Z",
+    "0099-02-28T12:00:00Z", "0000-02-29T00:00:00Z",
+  ])("keeps a valid date-time unchanged: %s", (value) => {
+    const s = scalar({ type: "string", format: "date-time" });
+    expect(elicitationResolution(form(s), "accept", { value })).toEqual({ action: "accept", content: { value } });
+  });
+
+  it.each([
+    "9007199254740993", "9007199254740992", "-9007199254740993", "9007199254740990.5",
+    "1.0000000000000001", "1e-400", "-1e-400", "0.0001e-9999999999999999999999",
+    "9007199254740991.0000000000000001",
+  ])("refuses lossy or nonintegral integer text: %s", (value) => {
+    const s = scalar({ type: "integer" });
+    expect(validate(s, { value }).valid).toBe(false);
+    expect(elicitationResolution(form(s), "accept", { value })).toBeUndefined();
+  });
+
+  it.each([
+    ["9007199254740991", 9007199254740991], ["-9007199254740991", -9007199254740991],
+    ["2.0", 2], ["2e3", 2000], ["1200e-2", 12], [".001e3", 1], ["+002.00", 2],
+    ["0e-1000", 0], ["0e9999999999999999999999", 0], ["-0.00e-400", -0],
+  ])("preserves exact integral decimal/exponent text: %s", (value, number) => {
+    const s = scalar({ type: "integer" });
+    expect(elicitationResolution(form(s), "accept", { value })).toEqual({ action: "accept", content: { value: number } });
+  });
+
+  it("retains numeric defaults, bounds, optional fields, number fractions and alternate actions", () => {
+    const s = { type: "object", properties: {
+      count: { type: "integer", default: 2, minimum: 1, maximum: 5 }, ratio: { type: "number" },
+    } };
+    expect(validate(s, defaults(s)).content).toEqual({ count: 2 });
+    expect(validate(s, {}).valid).toBe(true);
+    expect(validate(s, { count: "2e1" }).valid).toBe(false);
+    expect(validate(s, { count: "2.0", ratio: "1.5" }).content).toEqual({ count: 2, ratio: 1.5 });
+    expect(validate(s, { count: 9007199254740992 }).valid).toBe(false);
+    expect(elicitationResolution(form(s), "decline", { count: "1e-400" })).toEqual({ action: "decline" });
+    expect(elicitationResolution(form(s), "cancel", { count: "1e-400" })).toEqual({ action: "cancel" });
+  });
+});
+
 describe("elicitation url", () => {
   const url = "https://example.com/authorize";
   const ix: Interaction = { id: "ix_2", machine_id: "m", session_id: "s", kind: "elicitation", elicitation: { mode: "url", url, message: "请打开链接完成确认" } };

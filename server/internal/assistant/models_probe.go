@@ -54,8 +54,11 @@ func (s *Service) probeTarget(ctx context.Context, in probeInput) (probeTarget, 
 			return t, i18n.Err("assistant-models_probe.err_no_provider", i18n.Args{"name": in.Name})
 		}
 		l := list[i]
-		key, err := s.openKey(l.KeySealed)
+		key, err := s.openLauncherKey(ctx, l.KeySealed, l.Name, "")
 		if err != nil {
+			if _, ref := s.keyReference(l.KeySealed); ref {
+				return t, err // the provider extension's words
+			}
 			return t, i18n.Err("assistant-models_probe.err_open_key")
 		}
 		headers, err := s.openKey(l.HeadersSealed)

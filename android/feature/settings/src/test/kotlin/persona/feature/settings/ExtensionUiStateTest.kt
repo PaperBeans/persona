@@ -93,6 +93,21 @@ class ExtensionUiStateTest {
         }
     }
 
+    @Test fun anImagesViewerFollowsThePictureNotItsPlace() {
+        val picture = ExtensionImageSource(url = "https://example.com/a.png", path = "/api/v1/extensions/x/files/a")
+        // the extension's key first, then the hub's path, the address, the ref
+        assertEquals("key:hero", ExtensionViewText.imageIdentity(ExtensionViewItem("image", key = "hero", src = picture)))
+        assertEquals("path:/api/v1/extensions/x/files/a", ExtensionViewText.imageIdentity(ExtensionViewItem("image", key = " ", src = picture)))
+        assertEquals("url:https://example.com/b.png", ExtensionViewText.imageIdentity(ExtensionViewItem("image", src = ExtensionImageSource(url = "https://example.com/b.png"))))
+        assertEquals("ref:cover", ExtensionViewText.imageIdentity(ExtensionViewItem("image", src = ExtensionImageSource(ref = "cover"))))
+        // two unkeyed pictures that swap places are told apart
+        assertNotEquals(ExtensionViewText.imageIdentity(ExtensionViewItem("image", src = ExtensionImageSource(url = "https://example.com/a.png"))),
+            ExtensionViewText.imageIdentity(ExtensionViewItem("image", src = ExtensionImageSource(url = "https://example.com/b.png"))))
+        // nothing to go by: the viewer stays with its place, as before
+        assertNull(ExtensionViewText.imageIdentity(ExtensionViewItem("image", src = ExtensionImageSource())))
+        assertNull(ExtensionViewText.imageIdentity(ExtensionViewItem("image")))
+    }
+
     @Test fun tonesLinksAndItemsTheAppDraws() {
         assertEquals(Tone.Positive, ExtensionViewText.tone("positive"))
         assertEquals(Tone.Danger, ExtensionViewText.tone("danger"))

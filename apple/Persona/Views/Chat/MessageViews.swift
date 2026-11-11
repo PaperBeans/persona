@@ -8,10 +8,11 @@ extension MarkdownUI.Theme {
     /// The base size is the body level's (`Theme.Level.body`: 17 on the iPhone, 13 on the Mac, where a fixed 17 put
     /// replies and profiles a size above the user's bubble, #779); MarkdownUI scales it with Dynamic Type (a
     /// ScaledMetric relative to .body), so a reply and the user's bubble are one size at every setting. Headings follow
-    /// `Theme.Font`: the first is the title level (1.3 em), the others the heading level (body size, semibold), told
-    /// apart by the space above them; code blocks are the code level. Paragraphs have the body's line height (1.45:
-    /// 0.26 em over SF's own 1.19). On the Mac, where ScaledMetric does not follow Small / Standard / Large, the base size is
-    /// times `Theme.Font.scale` (#833) and the theme is made again when it changes (once on the iPhone).
+    /// `Theme.Font`: the first is the title level (1.3 em), the second and third the heading level (body size, semibold),
+    /// told apart by the space above them, the rest a step smaller in a quieter ink (`minorHeading`); code blocks are the
+    /// code level. Paragraphs have the body's line height (1.45: 0.26 em over SF's own 1.19). On the Mac, where
+    /// ScaledMetric does not follow Small / Standard / Large, the base size is times `Theme.Font.scale` (#833) and the
+    /// theme is made again when it changes (once on the iPhone).
     @MainActor static var persona: MarkdownUI.Theme { personaAtScale.value }
     @MainActor private static let personaAtScale = PerTextScale { makePersona() }
 
@@ -37,6 +38,9 @@ extension MarkdownUI.Theme {
                 config.label.markdownMargin(top: ReplyMetrics.heading3.top, bottom: ReplyMetrics.heading3.bottom)
                     .markdownTextStyle { FontWeight(.semibold); FontSize(.em(1)) }
             }
+            .heading4 { config in minorHeading(config) }
+            .heading5 { config in minorHeading(config) }
+            .heading6 { config in minorHeading(config) }
             .paragraph { config in
                 config.label.fixedSize(horizontal: false, vertical: true).relativeLineSpacing(.em(ReplyMetrics.lineSpacing))
                     .markdownMargin(top: 0, bottom: ReplyMetrics.paragraphBottom)
@@ -83,6 +87,18 @@ extension MarkdownUI.Theme {
         .macHoverActions {
             MacHoverButton(title: String(localized: "Copy Code [Message Views fa2611]"), symbol: Theme.Icon.copy) { MacHover.copy(config.content, said: String(localized: "Code copied")) }
         }
+    }
+
+    /// H4–H6 (#3863): MarkdownUI's own were the bare text, so `#### Notes` read as the next paragraph's first line. A step
+    /// below the third level (the secondary level's size), semibold in the quieter ink, more space above than below.
+    /// Its label is built as heading1–3's are: a modifier theirs gains (the style's run fonts, say) belongs here too.
+    @MainActor static func minorHeading(_ config: BlockConfiguration) -> some View {
+        config.label.markdownMargin(top: ReplyMetrics.heading4.top, bottom: ReplyMetrics.heading4.bottom)
+            .markdownTextStyle {
+                FontWeight(.semibold)
+                FontSize(.em(ReplyMetrics.heading4.size))
+                ForegroundColor(Theme.Reply.secondaryInk)
+            }
     }
 }
 
@@ -985,7 +1001,7 @@ struct RecapDrawer: View {
                                 Text(Self.written(ts, latest: n == 0 && items.count > 1))
                                     .font(Theme.Font.caption).foregroundStyle(.secondary)
                             }
-                            Markdown(Links.markdown(MathMarkdown.rewrite(ReplyBreaks.apply(item.text ?? ""))))
+                            Markdown(Links.markdown(MathMarkdown.rewrite(CJKEmphasis.apply(ReplyBreaks.apply(item.text ?? "")))))
                                 .markdownTheme(.persona)
                                 .markdownSoftBreakMode(.lineBreak)
                                 .textSelection(.enabled)
@@ -1045,7 +1061,7 @@ nonisolated enum StreamTail {
         memo(tail) { tail in
             var shown = StreamRepair.repair(StreamRepair.plainOpenFence(tail) { RenderedFence.kind($0) != nil })
             if StreamRepair.end(of: tail) == .text { shown += " ▍" }
-            return MarkdownContent(Links.markdown(MathMarkdown.rewrite(ReplyBreaks.apply(shown))))
+            return MarkdownContent(Links.markdown(MathMarkdown.rewrite(CJKEmphasis.apply(ReplyBreaks.apply(shown)))))
         }
     }
 }
@@ -1076,11 +1092,11 @@ nonisolated enum WebLinks {
 /// Parsed Markdown per text: MarkdownUI parses (cmark) in `Markdown.init`, on every redraw of the row.
 nonisolated enum MarkdownMemo {
     private static let memo = TextMemo<MarkdownContent>(limit: 128)
-    static func content(_ text: String) -> MarkdownContent { memo(text) { MarkdownContent(Links.markdown(MathMarkdown.rewrite(ReplyBreaks.apply($0)))) } }
+    static func content(_ text: String) -> MarkdownContent { memo(text) { MarkdownContent(Links.markdown(MathMarkdown.rewrite(CJKEmphasis.apply(ReplyBreaks.apply($0))))) } }
 
     private static let pathsMemo = TextMemo<PathMarkdown>(limit: 128)
     /// Where the paths are in the same Markdown (`content`).
-    static func paths(_ text: String) -> PathMarkdown { pathsMemo(text) { PathMarkdown(Links.markdown(MathMarkdown.rewrite(ReplyBreaks.apply($0)))) } }
+    static func paths(_ text: String) -> PathMarkdown { pathsMemo(text) { PathMarkdown(Links.markdown(MathMarkdown.rewrite(CJKEmphasis.apply(ReplyBreaks.apply($0))))) } }
 }
 
 /// Markdown with the paths that are there on the conversation's machine as links (docs/apple/ios.md「File viewer」), the code
@@ -1158,9 +1174,9 @@ nonisolated struct AssistantRowText {
     /// limit) and its pictures, videos and sounds; documents aside (their cards).
     let chips: [String]
     init(_ text: String) {
-        // Steps that go on at "5." under a line of text are a list (`ReplyBreaks`, #2088); links end where `Links` says,
-        // not at the next space; formulas as pictures.
-        let source = Links.markdown(MathMarkdown.rewrite(ReplyBreaks.apply(text)))
+        // Steps that go on at "5." under a line of text are a list (`ReplyBreaks`, #2088); bold next to CJK punctuation
+        // closes (`CJKEmphasis`, #3863); links end where `Links` says, not at the next space; formulas as pictures.
+        let source = Links.markdown(MathMarkdown.rewrite(CJKEmphasis.apply(ReplyBreaks.apply(text))))
         markdown = MarkdownContent(source)
         let paths = PathMarkdown(source)
         self.paths = paths

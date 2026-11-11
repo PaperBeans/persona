@@ -1,0 +1,6 @@
+{
+  "footer": "In the background, Persona pulls durable knowledge (concepts, decisions, how-tos, pitfalls, facts) out of your project timelines and chats and files it under topics. It uses the knowledge base model. Turning it off stops new curation; topics already organized stay.",
+  "load_failed": "Couldn’t read the setting: {error}",
+  "save_failed": "Couldn’t save: {error}",
+  "open_map": "Open the knowledge map"
+}

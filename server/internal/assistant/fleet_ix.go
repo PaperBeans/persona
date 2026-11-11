@@ -178,9 +178,10 @@ func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (pr
 	if ix.Kind == proto.IxQuestion && proto.HasDuplicateQuestionText(ix.Questions) {
 		return proto.Resolution{}, i18n.Err("hub-hub.duplicate_question")
 	}
-	// Plan mode enforces a read-only task's launch constraint; it is not a request to become writable.
-	// Deny before registering a card, so the agent can return its findings without a workflow approval.
-	if ix.Kind == proto.IxPlan && ix.ToolName == "ExitPlanMode" {
+	// Plan mode enforces a read-only task's launch constraint. Its supervisor report may run once,
+	// but exiting plan mode must still be denied. Neither path registers a card or grants permissions.
+	report := ix.Kind == proto.IxPermission && ix.ToolName == "mcp__persona__report_to_supervisor"
+	if ix.Kind == proto.IxPlan && ix.ToolName == "ExitPlanMode" || report {
 		if todo, ok := s.taskOf(ctx, ix.MachineID, ix.SessionID); ok {
 			plans, err := s.conversationPlans(ctx, todo.Origin)
 			if err != nil {
@@ -192,6 +193,13 @@ func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (pr
 				}
 				for _, task := range plan.Tasks {
 					if task.TodoID == todo.ID && task.Readonly {
+						if report {
+							if todo.Supervision == nil || todo.Supervision.Supervisor == "" {
+								continue
+							}
+							allow := true
+							return proto.Resolution{Allow: &allow}, nil
+						}
 						approve := false
 						return proto.Resolution{Approve: &approve, Feedback: prompts.RenderReadonlyTaskPlanExit()}, nil
 					}

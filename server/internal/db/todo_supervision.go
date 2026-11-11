@@ -23,12 +23,15 @@ type TodoSupervisionRow struct {
 	Reviews       json.RawMessage `json:"reviews"`
 	// AutoReview is the latest independent review run (#2173), JSON the assistant owns; nil when none ran.
 	AutoReview json.RawMessage `json:"auto_review,omitempty"`
-	UpdatedAt  time.Time       `json:"updated_at"`
+	// Waits is the done judge's finding that the latest stretch of work stopped on the owner's decision (#1277), JSON the
+	// assistant owns; nil when it does not hold.
+	Waits     json.RawMessage `json:"waits,omitempty"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 // ListTodoSupervision returns every supervised task's ledger.
 func (d *DB) ListTodoSupervision(ctx context.Context) ([]TodoSupervisionRow, error) {
-	rows, err := d.pool.Query(ctx, `SELECT todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, updated_at
+	rows, err := d.pool.Query(ctx, `SELECT todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, updated_at
 		FROM todo_supervision`)
 	if err != nil {
 		return nil, err
@@ -37,12 +40,15 @@ func (d *DB) ListTodoSupervision(ctx context.Context) ([]TodoSupervisionRow, err
 	var out []TodoSupervisionRow
 	for rows.Next() {
 		var r TodoSupervisionRow
-		var when, auto []byte
-		if err := rows.Scan(&r.TodoID, &r.Supervisor, &when, &r.ExpectMinutes, &r.State, &r.Round, &r.Reviews, &auto, &r.UpdatedAt); err != nil {
+		var when, auto, waits []byte
+		if err := rows.Scan(&r.TodoID, &r.Supervisor, &when, &r.ExpectMinutes, &r.State, &r.Round, &r.Reviews, &auto, &waits, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if len(auto) > 0 {
 			r.AutoReview = auto
+		}
+		if len(waits) > 0 {
+			r.Waits = waits
 		}
 		_ = json.Unmarshal(when, &r.DoneWhen)
 		out = append(out, r)
@@ -61,16 +67,19 @@ func (d *DB) PutTodoSupervision(ctx context.Context, r TodoSupervisionRow) error
 	if len(reviews) == 0 {
 		reviews = json.RawMessage("[]")
 	}
-	var auto []byte // NULL when no review ran
+	var auto, waits []byte // NULL when no review ran / when no wait holds
 	if len(r.AutoReview) > 0 {
 		auto = r.AutoReview
 	}
-	tag, err := d.pool.Exec(ctx, `INSERT INTO todo_supervision (todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, updated_at)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9 WHERE EXISTS (SELECT 1 FROM todos WHERE id = $1)
+	if len(r.Waits) > 0 {
+		waits = r.Waits
+	}
+	tag, err := d.pool.Exec(ctx, `INSERT INTO todo_supervision (todo_id, supervisor, done_when, expect_minutes, state, round, reviews, auto_review, waits, updated_at)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10 WHERE EXISTS (SELECT 1 FROM todos WHERE id = $1)
 		ON CONFLICT (todo_id) DO UPDATE SET supervisor = EXCLUDED.supervisor, done_when = EXCLUDED.done_when,
 			expect_minutes = EXCLUDED.expect_minutes, state = EXCLUDED.state, round = EXCLUDED.round,
-			reviews = EXCLUDED.reviews, auto_review = EXCLUDED.auto_review, updated_at = EXCLUDED.updated_at`,
-		r.TodoID, r.Supervisor, when, r.ExpectMinutes, r.State, r.Round, reviews, auto, r.UpdatedAt)
+			reviews = EXCLUDED.reviews, auto_review = EXCLUDED.auto_review, waits = EXCLUDED.waits, updated_at = EXCLUDED.updated_at`,
+		r.TodoID, r.Supervisor, when, r.ExpectMinutes, r.State, r.Round, reviews, auto, waits, r.UpdatedAt)
 	if err != nil {
 		return err
 	}

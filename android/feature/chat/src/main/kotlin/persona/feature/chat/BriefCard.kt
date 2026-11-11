@@ -51,7 +51,7 @@ internal fun BriefCard(item: FeedItem, host: AssistantTaskHost) {
     val brief = item.brief ?: return
     JCard(Modifier.fillMaxWidth().testTag("brief-card")) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            Text(brief.title.ifBlank { stringResource(R.string.brief_default_title) },
+            Text(brief.title.ifBlank { stringResource(R.string.chat_brief_default_title) },
                 style = PersonaTheme.type.label, color = PersonaTheme.palette.ink2, maxLines = 1)
             BriefWaiting(brief, host)
             JDivider()
@@ -86,12 +86,12 @@ private fun BriefNote(text: String) {
 
 @Composable
 private fun BriefMore(n: Int) {
-    if (n > 0) BriefNote(stringResource(R.string.brief_more, n))
+    if (n > 0) BriefNote(stringResource(R.string.chat_brief_more, n))
 }
 
 @Composable
 private fun BriefOpen(tag: String, onClick: () -> Unit) {
-    JButton(stringResource(R.string.brief_open), onClick, Modifier.testTag(tag), kind = JButtonKind.Secondary, size = JButtonSize.Small)
+    JButton(stringResource(R.string.chat_brief_open), onClick, Modifier.testTag(tag), kind = JButtonKind.Secondary, size = JButtonSize.Small)
 }
 
 @Composable
@@ -102,15 +102,15 @@ private fun briefMetadata(parts: List<String>): String =
 private fun briefMeta(row: BriefRow): String {
     val minutes = (row.waitedS.coerceAtLeast(60) + 59) / 60
     val waited = when {
-        minutes < 60 -> stringResource(R.string.brief_waited_minutes, minutes)
-        minutes < 1_440 -> if (minutes % 60 == 0L) stringResource(R.string.brief_waited_hours, minutes / 60)
-            else stringResource(R.string.brief_waited_hours_minutes, minutes / 60, minutes % 60)
-        else -> if (minutes % 1_440 == 0L) stringResource(R.string.brief_waited_days, minutes / 1_440)
-            else stringResource(R.string.brief_waited_days_hours, minutes / 1_440, (minutes % 1_440) / 60)
+        minutes < 60 -> stringResource(R.string.chat_brief_waited_minutes, minutes)
+        minutes < 1_440 -> if (minutes % 60 == 0L) stringResource(R.string.chat_brief_waited_hours, minutes / 60)
+            else stringResource(R.string.chat_brief_waited_hours_minutes, minutes / 60, minutes % 60)
+        else -> if (minutes % 1_440 == 0L) stringResource(R.string.chat_brief_waited_days, minutes / 1_440)
+            else stringResource(R.string.chat_brief_waited_days_hours, minutes / 1_440, (minutes % 1_440) / 60)
     }
     return briefMetadata(buildList {
         add(waited)
-        if (row.nudged) add(stringResource(R.string.brief_nudged))
+        if (row.nudged) add(stringResource(R.string.chat_brief_nudged))
         row.from?.takeIf(String::isNotBlank)?.let(::add)
     })
 }
@@ -119,11 +119,11 @@ private fun briefMeta(row: BriefRow): String {
 private fun BriefWaiting(brief: BriefBody, host: AssistantTaskHost) {
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
         if (brief.waitingUnknown) {
-            BriefHead(PhIcons.Hand, Status.NeedsYou, stringResource(R.string.brief_waiting_unknown))
-            BriefNote(stringResource(R.string.brief_waiting_unknown_note))
+            BriefHead(PhIcons.Hand, Status.NeedsYou, stringResource(R.string.chat_brief_waiting_unknown))
+            BriefNote(stringResource(R.string.chat_brief_waiting_unknown_note))
         } else {
-            BriefHead(PhIcons.Hand, Status.NeedsYou, stringResource(R.string.brief_waiting, brief.waiting.size))
-            if (brief.waiting.isEmpty()) BriefNote(stringResource(R.string.brief_nothing))
+            BriefHead(PhIcons.Hand, Status.NeedsYou, stringResource(R.string.chat_brief_waiting, brief.waiting.size))
+            if (brief.waiting.isEmpty()) BriefNote(stringResource(R.string.chat_brief_nothing))
             brief.waiting.forEach { row ->
                 val chat = row.chat(waiting = true, pending = host.pending)
                 Row(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.xs), verticalAlignment = Alignment.CenterVertically,
@@ -162,13 +162,13 @@ private fun briefTime(at: String?): String? = AssistantLines.time(at)?.let {
 private fun BriefPast(brief: BriefBody, host: AssistantTaskHost) {
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
         BriefHead(PhIcons.Clock, Status.Working,
-            stringResource(R.string.brief_past, brief.hours, brief.doneTotal, brief.failedTotal))
-        if (brief.done.isEmpty() && brief.failed.isEmpty()) BriefNote(stringResource(R.string.brief_nothing))
+            stringResource(R.string.chat_brief_past, brief.hours, brief.doneTotal, brief.failedTotal))
+        if (brief.done.isEmpty() && brief.failed.isEmpty()) BriefNote(stringResource(R.string.chat_brief_nothing))
         brief.failed.forEach { row: BriefFailed ->
             val label = stringResource(when {
-                row.skipped -> R.string.brief_skipped
-                row.kind == "task" -> R.string.brief_failed_task
-                else -> R.string.brief_failed_routine
+                row.skipped -> R.string.chat_brief_skipped
+                row.kind == "task" -> R.string.chat_brief_failed_task
+                else -> R.string.chat_brief_failed_routine
             })
             BriefMarkLine(PhIcons.XCircle, Status.NeedsYou, row.id, row.title,
                 briefMetadata(listOfNotNull(label, briefTime(row.at), row.why?.takeIf(String::isNotBlank))),
@@ -186,8 +186,8 @@ private fun BriefPast(brief: BriefBody, host: AssistantTaskHost) {
 @Composable
 private fun BriefAccept(brief: BriefBody, host: AssistantTaskHost) {
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-        BriefHead(PhIcons.CheckCircle, Status.Unread, stringResource(R.string.brief_accept, brief.accept.size))
-        if (brief.accept.isEmpty()) BriefNote(stringResource(R.string.brief_nothing))
+        BriefHead(PhIcons.CheckCircle, Status.Unread, stringResource(R.string.chat_brief_accept, brief.accept.size))
+        if (brief.accept.isEmpty()) BriefNote(stringResource(R.string.chat_brief_nothing))
         brief.accept.forEach { row -> BriefAcceptRow(row, host) }
     }
 }
@@ -210,13 +210,13 @@ private fun BriefAcceptRow(row: BriefRow, host: AssistantTaskHost) {
         if (outcome != null) {
             val text = when (outcome) {
                 BriefOutcome.Taken -> stringResource(when (row.take) {
-                    BriefTake.Accept, null -> R.string.brief_accepted
-                    BriefTake.GotIt -> R.string.brief_noted
-                    BriefTake.Recommendation -> R.string.brief_recommendation_taken
+                    BriefTake.Accept, null -> R.string.chat_brief_accepted
+                    BriefTake.GotIt -> R.string.chat_brief_noted
+                    BriefTake.Recommendation -> R.string.chat_brief_recommendation_taken
                 })
                 BriefOutcome.Completed -> stringResource(R.string.chat_tray_done)
-                BriefOutcome.AlreadyHandled -> stringResource(R.string.brief_already_handled)
-                BriefOutcome.HubTooOld -> stringResource(R.string.brief_hub_too_old)
+                BriefOutcome.AlreadyHandled -> stringResource(R.string.chat_brief_already_handled)
+                BriefOutcome.HubTooOld -> stringResource(R.string.chat_brief_hub_too_old)
                 else -> ""
             }
             Text(text, Modifier.testTag("brief-outcome-${row.id}"), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
@@ -225,16 +225,16 @@ private fun BriefAcceptRow(row: BriefRow, host: AssistantTaskHost) {
             val take = row.take
             if (outcome == null && take != null) {
                 val label = stringResource(when (take) {
-                    BriefTake.Accept -> R.string.brief_accept_action
-                    BriefTake.GotIt -> R.string.brief_got_it
-                    BriefTake.Recommendation -> R.string.brief_take_recommendation
+                    BriefTake.Accept -> R.string.chat_brief_accept_action
+                    BriefTake.GotIt -> R.string.chat_brief_got_it
+                    BriefTake.Recommendation -> R.string.chat_brief_take_recommendation
                 })
                 JButton(label, { host.tasks.acceptBrief(row.id, askedAt, host.onError, host.manager) },
                     Modifier.testTag("brief-take-${row.id}"), enabled = askedAt.isNotBlank() && !sending,
                     kind = JButtonKind.Primary, size = JButtonSize.Small, loading = sending)
             }
             if (outcome == null && row.isDecision) {
-                JButton(stringResource(R.string.brief_complete_directly), {
+                JButton(stringResource(R.string.chat_brief_complete_directly), {
                     host.tasks.finishBrief(row.id, askedAt, host.onError, host.manager)
                 }, Modifier.testTag("brief-finish-${row.id}"), enabled = askedAt.isNotBlank() && !sending,
                     kind = JButtonKind.Secondary, size = JButtonSize.Small, loading = sending)
@@ -247,7 +247,7 @@ private fun BriefAcceptRow(row: BriefRow, host: AssistantTaskHost) {
 @Composable
 private fun BriefLater(brief: BriefBody, host: AssistantTaskHost) {
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-        BriefHead(PhIcons.Question, Status.Idle, stringResource(R.string.brief_later, brief.laterTotal))
+        BriefHead(PhIcons.Question, Status.Idle, stringResource(R.string.chat_brief_later, brief.laterTotal))
         brief.later.forEach { row -> BriefLaterRow(row, host) }
         BriefMore(brief.laterMore)
     }
@@ -264,15 +264,15 @@ private fun BriefLaterRow(row: BriefRow, host: AssistantTaskHost) {
         Text(briefMeta(row), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
         if (outcome != null) {
             val text = stringResource(when (outcome) {
-                BriefOutcome.MarkedHandled -> R.string.brief_marked_handled
-                BriefOutcome.AlreadyHandled -> R.string.brief_already_handled
-                BriefOutcome.HubTooOld -> R.string.brief_hub_too_old
-                else -> R.string.brief_marked_handled
+                BriefOutcome.MarkedHandled -> R.string.chat_brief_marked_handled
+                BriefOutcome.AlreadyHandled -> R.string.chat_brief_already_handled
+                BriefOutcome.HubTooOld -> R.string.chat_brief_hub_too_old
+                else -> R.string.chat_brief_marked_handled
             })
             Text(text, Modifier.testTag("brief-outcome-${row.id}"), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            if (outcome == null) JButton(stringResource(R.string.brief_handled), {
+            if (outcome == null) JButton(stringResource(R.string.chat_brief_handled), {
                 host.tasks.markBriefHandled(row.id, host.onError, host.manager)
             }, Modifier.testTag("brief-handled-${row.id}"), enabled = "later:${row.id}" !in busy,
                 kind = JButtonKind.Secondary, size = JButtonSize.Small, loading = "later:${row.id}" in busy)
@@ -282,12 +282,12 @@ private fun BriefLaterRow(row: BriefRow, host: AssistantTaskHost) {
 }
 
 private val briefStages = listOf(
-    "plan" to R.string.brief_stage_plan,
-    "develop" to R.string.brief_stage_develop,
-    "review" to R.string.brief_stage_review,
-    "merge" to R.string.brief_stage_merge,
-    "deploy" to R.string.brief_stage_deploy,
-    "verify" to R.string.brief_stage_verify,
+    "plan" to R.string.chat_brief_stage_plan,
+    "develop" to R.string.chat_brief_stage_develop,
+    "review" to R.string.chat_brief_stage_review,
+    "merge" to R.string.chat_brief_stage_merge,
+    "deploy" to R.string.chat_brief_stage_deploy,
+    "verify" to R.string.chat_brief_stage_verify,
 )
 
 @Composable
@@ -312,7 +312,7 @@ private fun BriefStage(row: BriefProgress) {
 @Composable
 private fun BriefProgress(brief: BriefBody, host: AssistantTaskHost) {
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-        BriefHead(PhIcons.GearSix, Status.Working, stringResource(R.string.brief_progress, brief.progressTotal))
+        BriefHead(PhIcons.GearSix, Status.Working, stringResource(R.string.chat_brief_progress, brief.progressTotal))
         brief.progress.forEach { row: BriefProgress ->
             Row(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.xs), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {

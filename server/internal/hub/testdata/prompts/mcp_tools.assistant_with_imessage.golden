@@ -1017,7 +1017,7 @@
   },
   {
     "name": "kb_search",
-    "description": "Search the knowledge base: summaries and metadata of chats, people, projects, docs, meetings, events, recordings (with their minutes and any transcript still retained), project timelines, the notes directories the user added (hits with an absolute path) and, with messages=true, the full message archive (newest days first). All words must match. Hits come in the order the files are read, not by relevance, so a broad search can fill the limit with chats: give kind to search one kind only, the entries whose name matches first, then as kb_list ranks them. A past meeting (its decisions, what is still open, who does what) is kind=recordings: found by its title, the calendar event's title, its minutes or any transcript still retained; then kb_get it. Transcripts expire before minutes; do not promise the full transcript of a trimmed recording.",
+    "description": "Search the knowledge base: summaries and metadata of chats, people, projects, docs, meetings, events, recordings (with their minutes and any transcript still retained), topics (curated knowledge points: how something works, what was decided and why, the steps and pitfalls), project timelines, the notes directories the user added (hits with an absolute path) and, with messages=true, the full message archive (newest days first). All words must match. Hits come in the order the files are read, not by relevance, so a broad search can fill the limit with chats: give kind to search one kind only, the entries whose name matches first, then as kb_list ranks them. A past meeting (its decisions, what is still open, who does what) is kind=recordings: found by its title, the calendar event's title, its minutes or any transcript still retained; then kb_get it. Transcripts expire before minutes; do not promise the full transcript of a trimmed recording.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1036,7 +1036,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ],
           "description": "only this kind's entries (no notes directories; the message archive only with chats)"
         },
@@ -1053,7 +1054,7 @@
   },
   {
     "name": "kb_list",
-    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes and which transcripts have expired). Transcripts are kept for recording_days (14 days by default); meetings' minutes are kept longer under minutes_days (forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.",
+    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes and which transcripts have expired), topics (knowledge points curated by subject out of the timelines and chats: concepts, decisions with their reasons, practices, pitfalls, facts, open questions; the biggest first). Transcripts are kept for recording_days (14 days by default); meetings' minutes are kept longer under minutes_days (forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1069,7 +1070,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ]
         },
         "tag": {
@@ -1084,7 +1086,7 @@
   },
   {
     "name": "kb_get",
-    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes with where each action item stands (a suggestion, or its to-do: open, done, cancelled, deleted) and its timestamped transcript while still retained (recordings: the user's phone / watch recordings, text only), a meeting's or event's recordings. Transcripts expire after recording_days (14 days by default); meetings then keep only their minutes under minutes_days (forever by default). id from kb_list / kb_search (a project also by name).",
+    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes with where each action item stands (a suggestion, or its to-do: open, done, cancelled, deleted) and its timestamped transcript while still retained (recordings: the user's phone / watch recordings, text only), a meeting's or event's recordings, a topic's knowledge points by subtopic (each with its kind, reason and the entries it came from). Transcripts expire after recording_days (14 days by default); meetings then keep only their minutes under minutes_days (forever by default). id from kb_list / kb_search (a project also by name).",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1101,7 +1103,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ]
         },
         "id": {
@@ -1112,7 +1115,7 @@
   },
   {
     "name": "kb_update",
-    "description": "Write to the knowledge base: create or change a project (name, project_kind short|long, status, goal, my_role, aliases, link chats / people, code dirs as \"\u003cmachine\u003e:\u003cpath\u003e\" so Agents there belong to it, append a timeline `log` line, replace its summary), or tag / annotate a chat, person, doc, meeting, event, recording (a recording's content is the phone's: only its tags, pinned and projects; importance P0–P3, relevance 0–100, tags, note, link projects). Tags set here are kept over the automatic ones. Use it whenever a conversation settles something about a project or person. Two projects that are the same work under two names: `merge_into`; two that were merged but are not: `unmerge` on the one merged away.",
+    "description": "Write to the knowledge base: create or change a project (name, project_kind short|long, status, goal, my_role, aliases, link chats / people, code dirs as \"\u003cmachine\u003e:\u003cpath\u003e\" so Agents there belong to it, append a timeline `log` line, replace its summary), or tag / annotate a chat, person, doc, meeting, event, recording (a recording's content is the phone's: only its tags, pinned and projects; importance P0–P3, relevance 0–100, tags, note, link projects), or a topic (its points are curated: only its name, note, aliases and tags). Tags set here are kept over the automatic ones. Use it whenever a conversation settles something about a project or person. Two projects that are the same work under two names: `merge_into`; two that were merged but are not: `unmerge` on the one merged away.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1129,7 +1132,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ]
         },
         "id": {

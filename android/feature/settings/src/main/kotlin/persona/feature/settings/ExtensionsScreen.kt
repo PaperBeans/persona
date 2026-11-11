@@ -240,7 +240,9 @@ fun ExtensionPage(
     val hasForm = detail != null && !detail.readOnly && detail.form.isNotEmpty()
     // A form of machine lists only saves each switch at once: nothing waits for "Save".
     val waitsForSave = hasForm && detail.form.flatMap { if (it.type == "object") it.fields.orEmpty() else listOf(it) }.any { it.items?.machines != true }
-    ExtensionSettingsPage(detail = detail, busy = state.busy || state.saving || state.loading || state.loadFailed,
+    // A pack's members by their installed names, on its page and in its dialogs (#4122); read only for a pack.
+    val memberNames = rememberExtensionNames(api, detail?.extensionPack?.isNotEmpty() == true || state.partial != null)
+    ExtensionSettingsPage(detail = detail, memberNames = memberNames, busy = state.busy || state.saving || state.loading || state.loadFailed,
         refreshing = state.loading && detail != null, onBack = onBack, onRefresh = { scope.launch { model.load() } }, updates = state.updates,
         onEnabled = { on -> scope.launch { model.setEnabled(on) } },
         onAutoUpgrade = { on -> scope.launch {
@@ -299,8 +301,6 @@ fun ExtensionPage(
             })
     }
     val current = detail
-    // Read only for a pack: an extension with no members needs no names.
-    val memberNames = rememberExtensionNames(api, removing && current?.extensionPack?.isNotEmpty() == true || state.partial != null)
     if (removing && current != null) UninstallDialog(current.extension.name.ifBlank { current.extension.id }, onDismiss = { removing = false },
         installedVersion = current.extension.version, members = memberNames.named(current.extensionPack.map { it.id })) { keep, members ->
         removing = false

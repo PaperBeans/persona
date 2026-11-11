@@ -8,13 +8,17 @@ import { defaultManager, MANAGER_HEADER, messageManager } from "../../lib/manage
 import { onHubEvent } from "../../lib/store";
 import { Button, Loading } from "../../ui/atoms";
 import { ConfigurationManager } from "./ConfigurationManager";
+import { KnowledgeTopicsSwitch } from "./KnowledgeTopics";
 import { Group, Row, RowFailed, settingsInputClass, Switch } from "./SettingsParts";
 
 const text = (key: string, values?: Record<string, string | number>) => t(`settings-knowledge.${key}`, values);
 
 export function KnowledgeSelection() {
   const owner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner, credentialOwner);
-  return <ConfigurationManager>{(manager) => <KnowledgeSelectionEditor key={`${owner}/${manager}`} manager={manager} owner={owner} />}</ConfigurationManager>;
+  return <ConfigurationManager>{(manager) => <>
+    <KnowledgeTopicsSwitch key={`topics/${owner}/${manager}`} manager={manager} />
+    <KnowledgeSelectionEditor key={`${owner}/${manager}`} manager={manager} owner={owner} />
+  </>}</ConfigurationManager>;
 }
 
 /** Exported for public-adapter tests; Settings uses the roster and credential keyed wrapper above. */

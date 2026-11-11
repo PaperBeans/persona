@@ -1,11 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { checkCount, checklist, latestReview, progressLine, reportLine, reportText, reviewBadge, reviewState, type Supervision } from "./supervision";
+import { checkCount, checklist, latestReview, parkedLine, progressLine, reportLine, reportText, reviewBadge, reviewState, reviewVerdictLabel, type Supervision } from "./supervision";
 import { todoStatusLabel, type Todo } from "./todos";
 
 const base: Todo = { id: "todo_1", title: "部署 hub", created_at: "2026-11-05T08:00:00Z", updated_at: "2026-11-05T08:00:00Z" };
 const sup = (s: Partial<Supervision>): Supervision => ({ supervisor: "main", done_when: ["PR 合并到 master", "截图贴进 PR"], ...s });
 
 describe("supervision", () => {
+  it("says a parked task is parked, until when and why (#3804)", () => {
+    const parked = { reason: "设计组要先定图标", until: "2026-11-14T09:00:00Z", waiting_on: "someone_else" as const, count: 1 };
+    const todo = { ...base, supervision: sup({ state: "parked", parked }) };
+    expect(reviewState(todo)).toBe("parked");
+    expect(reviewBadge(todo)).toEqual({ label: "已搁置", tone: "muted" });
+    expect(parkedLine(todo)).toMatch(/^搁置到 .*2026.* · 设计组要先定图标$/);
+    expect(reviewVerdictLabel("parked")).toBe("已搁置");
+    // closed, or without what it waits for (its agent works again): not parked
+    expect(reviewState({ ...todo, done_at: "2026-11-12T09:00:00Z" })).toBe("");
+    expect(parkedLine({ ...todo, done_at: "2026-11-12T09:00:00Z" })).toBeUndefined();
+    expect(reviewState({ ...base, supervision: sup({ state: "parked" }) })).toBe("");
+    expect(parkedLine({ ...base, supervision: sup({}) })).toBeUndefined();
+    expect(parkedLine(undefined)).toBeUndefined();
+    // a time that cannot be read: the reason alone
+    expect(parkedLine({ ...base, supervision: sup({ state: "parked", parked: { ...parked, until: "" } }) })).toBe("已搁置 · 设计组要先定图标");
+  });
+
   it("says the agent's latest report in a line", () => {
     expect(progressLine(undefined)).toBeUndefined();
     expect(progressLine(sup({}))).toBeUndefined();

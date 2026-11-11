@@ -4315,10 +4315,11 @@ const (
 	KBKindMeetings   = "meetings"
 	KBKindEvents     = "events"
 	KBKindRecordings = "recordings"
+	KBKindTopics     = "topics"
 )
 
 // KBKinds are the values of KBKind, in order.
-var KBKinds = []string{"projects", "chats", "people", "docs", "meetings", "events", "recordings"}
+var KBKinds = []string{"projects", "chats", "people", "docs", "meetings", "events", "recordings", "topics"}
 
 // KBErrorCode: error.code of a knowledge-base call besides permission_denied (data {scope}, the one missing):
 // invalid_params, not_found, assistant_offline (the manager is away), kb_unavailable (not open yet), conflict
@@ -4450,6 +4451,30 @@ type KBDetail struct {
 	Segments []KBRecordingSegment `json:"segments,omitempty"`
 	// A recording's meeting minutes, once written (docs/assistant/meeting-minutes.md); kept as the hub sends them.
 	Minutes json.RawMessage `json:"minutes,omitempty"`
+	// A topic's knowledge points (docs/assistant/knowledge.md "Topics").
+	Points []KBTopicPoint `json:"points,omitempty"`
+}
+
+// KBTopicPoint: one knowledge point of a topic, under up to two levels of subtopics (path).
+type KBTopicPoint struct {
+	ID   string   `json:"id"`
+	Path []string `json:"path,omitempty"`
+	Kind string   `json:"kind"`
+	Text string   `json:"text"`
+	// A decision's reason, a pitfall's cause.
+	Why     string          `json:"why,omitempty"`
+	Sources []KBTopicSource `json:"sources,omitempty"`
+	// YYYY-MM-DD: when it was last confirmed.
+	When string `json:"when,omitempty"`
+}
+
+// KBTopicSource: an entry a knowledge point came from.
+type KBTopicSource struct {
+	// projects or chats
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+	// YYYY-MM-DD
+	Day string `json:"day,omitempty"`
 }
 
 // KBMomentRef: A feed post linked to a project.
@@ -6049,6 +6074,8 @@ var newDef = map[string]func() any{
 	"KBGetParams":                   func() any { return new(KBGetParams) },
 	"KBGetResult":                   func() any { return new(KBGetResult) },
 	"KBDetail":                      func() any { return new(KBDetail) },
+	"KBTopicPoint":                  func() any { return new(KBTopicPoint) },
+	"KBTopicSource":                 func() any { return new(KBTopicSource) },
 	"KBMomentRef":                   func() any { return new(KBMomentRef) },
 	"KBRecordingSegment":            func() any { return new(KBRecordingSegment) },
 	"KBDayParams":                   func() any { return new(KBDayParams) },

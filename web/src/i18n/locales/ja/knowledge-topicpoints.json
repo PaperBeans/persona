@@ -1,0 +1,15 @@
+{
+  "title": "ナレッジポイント",
+  "empty": "このトピックにはまだナレッジポイントがありません。",
+  "reason": "理由：{text}",
+  "cause": "原因：{text}",
+  "source_title": "{name} を開く",
+  "when": "{day} に確認",
+  "point_concept": "概念",
+  "point_decision": "決定",
+  "point_practice": "やり方",
+  "point_pitfall": "落とし穴",
+  "point_fact": "事実",
+  "point_question": "未決",
+  "point_plain": "ポイント"
+}

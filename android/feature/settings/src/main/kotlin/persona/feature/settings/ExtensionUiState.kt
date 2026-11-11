@@ -89,6 +89,16 @@ internal object ExtensionViewText {
     fun spark(spark: persona.core.contracts.api.ExtensionSpark?): persona.core.designsystem.JSpark? = spark?.values?.filter(Double::isFinite)
         ?.takeIf { it.size >= 2 }?.take(60)?.let { persona.core.designsystem.JSpark(it, hue(spark.color), spark.tone?.takeIf { t -> t.isNotBlank() }?.let(::tone), spark.fill == true) }
 
+    /**
+     * Which picture an image item is (UI version 6), to tie its viewer to: the extension's key, else its source (the
+     * hub's path, the https address, the extension's ref); none without any (the viewer then stays with its place).
+     */
+    fun imageIdentity(item: ExtensionViewItem): String? = item.key?.takeIf { it.isNotBlank() }?.let { "key:$it" }
+        ?: item.src?.let { s ->
+            s.path?.takeIf { it.isNotBlank() }?.let { "path:$it" } ?: s.url?.takeIf { it.isNotBlank() }?.let { "url:$it" }
+                ?: s.ref?.takeIf { it.isNotBlank() }?.let { "ref:$it" }
+        }
+
     /** A picture's frame (UI version 6): `square` 1:1, `wide` 16:9, `portrait` 3:4, `auto` from the source's size; else 4:3. */
     fun aspect(item: ExtensionViewItem): Float = when (item.aspect) {
         "square" -> 1f

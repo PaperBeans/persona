@@ -34,7 +34,8 @@ nonisolated struct ExtensionSettingsPolicy {
         let parts = origin.hasPrefix("market:") ? String(origin.dropFirst(7)).split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false) : []
         market = installed && parts.count == 2 && !parts[0].isEmpty && !parts[1].isEmpty ? String(parts[0]) : nil
         canEnable = !configured && plugin.source != "dev" && (plugin.enabled != nil || builtin)
-        canCheck = market != nil
+        let marketRemoved = plugin.marketWasRemoved
+        canCheck = market != nil && !marketRemoved
         canAutoUpgrade = canCheck && plugin.autoUpgrade != nil
         // DELETE is destructive even when dependency checks fail. There is no safe removal preview API.
         canUninstall = false
@@ -56,9 +57,14 @@ nonisolated struct ExtensionSettingsPolicy {
             case "installed": source = String(localized: "Installed [Extension Market Views a8b6c3]")
             default: source = String(localized: "Not provided")
             }
-            updateReason = canCheck && !canAutoUpgrade ? String(localized: "This manager does not provide this action.") :
-                (canCheck ? "" : String(localized: "This extension is not managed by an extension market. Update it at its source."))
-            uninstallReason = canCheck ? Self.uninstallPreviewGap : String(localized: "This extension is managed outside the extension market. Remove it at its source.")
+            if marketRemoved {
+                updateReason = String(localized: "Its market was removed. Add the market again with the same address to check for new versions.")
+            } else if canCheck && !canAutoUpgrade {
+                updateReason = String(localized: "This manager does not provide this action.")
+            } else {
+                updateReason = canCheck ? "" : String(localized: "This extension is not managed by an extension market. Update it at its source.")
+            }
+            uninstallReason = market != nil ? Self.uninstallPreviewGap : String(localized: "This extension is managed outside the extension market. Remove it at its source.")
         }
         // Manager-owned market identifiers are safe provenance; never expose local paths or URLs.
         provenance = attached ? String(localized: "Attached") :

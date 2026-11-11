@@ -63,6 +63,9 @@ MCP tool descriptions and parameter explanations shown to models are also prompt
 | `inbox/handoff.md`, `handoff_note.md` | Hand to AI with write-back: the `<persona-context>` naming the item before the user's words in the main chat, and the wrapper around a handling note told to a chat the item was handed to, whose head the hub recognizes to show the apps one line (`prompts.ParseInjected`; `docs/assistant/inbox.md`, "Item actions") | `assistant/inbox_handoff.go` |
 | `kb/compress.md`, `compress_input.md` | Chat compression + tagging | `kb/compress.go` |
 | `kb/project.md`, `project_input.md` | Rewrite project profiles | `kb/project_refresh.go` |
+| `kb/topic_distill.md`, `topic_distill_input.md` | Knowledge points: candidate points (topic, subtopic path, kind, text, reason, day) from a stretch of a project's timeline or a chat's summary, with the existing topics to reuse (purpose `kb.topics`; `docs/assistant/knowledge.md`, "Topics") | `kb/topic_distill.go` |
+| `kb/topic_merge.md`, `topic_merge_input.md` | Knowledge points: fold a topic's candidates into its points as add / update / drop edits, the pinned facts read-only (purpose `kb.topics`) | `kb/topic_merge.go` |
+| `kb/topic_summary.md` | Not a prompt: a topic's `summary.md`, written from its points | `kb/topics.go` |
 | `kb/items.md`, `items_input.md` | Tag documents / meetings / calendar events | `kb/items.go` |
 | `kb/recording.md`, `recording_input.md` | Summary, title, and tags for recording transcripts (purpose `kb.compress`) | `kb/recordings.go` |
 | `kb/minutes.md`, `minutes_input.md`, `minutes_meeting.md`, `minutes_merge.md`, `minutes_merge_input.md` | Meeting minutes of a recording: the whole transcript or one part's notes, then merging the parts of a long one (purpose `kb.compress`; `docs/assistant/meeting-minutes.md`) | `kb/minutes.go` |

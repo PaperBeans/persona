@@ -82,11 +82,15 @@ object ChartMath {
     /**
      * A number written short in [locale]'s words: 12,345 → 12.3K, 1,200,000 → 1.2M; small ones keep up to two decimals.
      * Chinese and Japanese count in ten-thousands (12,345 → 1.2万, 1,200,000,000 → 12亿 / 12億), written by the
-     * system's ICU; every other language keeps the K / M / B / T below.
+     * system's ICU; every other language keeps the K / M / B / T below. The app's Chinese is Simplified only, so any
+     * `zh` locale (`zh-TW`, `zh-Hant-HK`…) writes 万 / 亿, not ICU's Traditional 萬 / 億; the region does not change the units.
      */
     fun compact(value: Double, locale: Locale = Locale.ENGLISH): String {
         if (!value.isFinite()) return "—"
-        if (locale.language == "zh" || locale.language == "ja") return cjk(locale).format(value)
+        when (locale.language) {
+            "zh" -> return cjk(Locale.SIMPLIFIED_CHINESE).format(value)
+            "ja" -> return cjk(locale).format(value)
+        }
         val a = abs(value)
         val (scaled, suffix) = when {
             a >= 1e12 -> value / 1e12 to "T"

@@ -1,6 +1,9 @@
 package persona.feature.settings
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -16,7 +19,12 @@ class ConnectDeviceModelTest {
         var list = listOf(PairedDevice("me", "这台手机", "phone", "full"))
         var codes = 0
         var fail: Exception? = null
-        override suspend fun devices() = PairedDevices(list, "me")
+        /** When set, the next devices() read waits for it, then answers with the list as it is by then. */
+        var hold: CompletableDeferred<Unit>? = null
+        override suspend fun devices(): PairedDevices {
+            hold?.let { hold = null; it.await() }
+            return PairedDevices(list, "me")
+        }
         override suspend fun revoke(credentialId: String) {}
         override suspend fun preferences() = DeviceNotificationPreferences()
         override suspend fun savePreferences(preferences: DeviceNotificationPreferences) = preferences
@@ -70,6 +78,31 @@ class ConnectDeviceModelTest {
         assertEquals(1, paired)
         assertFalse("once paired, nothing more to catch up on", model.catchUp { paired++ })
         assertEquals(1, paired)
+    }
+
+    @Test fun aNewCodeAskedForDuringTheCatchUpReadIsNotMarkedPaired() = runBlocking {
+        val hub = Hub()
+        var paired = 0
+        val model = ConnectDeviceModel(hub) { 0 }
+        model.make()
+        val read = CompletableDeferred<Unit>()
+        hub.hold = read
+        // Back in front: the catch-up's read of the device list is on its way...
+        val caught = async(start = CoroutineStart.UNDISPATCHED) { model.catchUp { paired++ } }
+        assertFalse(caught.isCompleted)
+        // ...when the user taps "New code".
+        model.make()
+        val fresh = model.state.value.phase
+        assertEquals("jp_2", (fresh as ConnectPhase.Showing).code.token)
+        // The late answer has a device the old code's list did not have.
+        hub.list = hub.list + PairedDevice("new", "新手机", "phone", "full")
+        read.complete(Unit)
+        assertFalse("the answer was for the old code", caught.await())
+        assertSame(fresh, model.state.value.phase)
+        assertEquals(0, paired)
+        // The new code still finds it on its own next read.
+        assertTrue(model.poll())
+        assertEquals(ConnectPhase.Paired("新手机"), model.state.value.phase)
     }
 
     @Test fun aRefusalIsShownWithItsReason() = runBlocking {

@@ -49,7 +49,7 @@ func (s *Service) toolKB(ctx context.Context, name string, args json.RawMessage)
 		case kbRPCKind(a.Kind):
 			hits = e.SearchKind(a.Query, a.Kind, messages, limit)
 		default:
-			return "", fmt.Errorf("kind %q: one of projects, chats, people, docs, meetings, events, recordings", a.Kind)
+			return "", fmt.Errorf("kind %q: one of projects, chats, people, docs, meetings, events, recordings, topics", a.Kind)
 		}
 		if len(hits) == 0 {
 			// A neutral, localized line: it can be relayed to the owner, so it never names the store's disk path.

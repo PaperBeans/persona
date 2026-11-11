@@ -251,8 +251,10 @@ fun ExtensionCatalogPage(
                 onRetry = { scope.launch { model.retry() } }, onClose = { scope.launch { model.closeOperation() } },
                 onReview = { scope.launch { model.review() } }) })
     }
+    // A pack being installed: its members already here, by name (#4122).
+    val previewNames = rememberExtensionNames(api, state.preview?.manifest?.extensionPack?.isNotEmpty() == true)
     state.preview?.let { preview ->
-        PreviewSheet(extension, preview, busy = state.acting, onDismiss = { scope.launch { model.dismissPreview() } },
+        PreviewSheet(extension, preview, busy = state.acting, onDismiss = { scope.launch { model.dismissPreview() } }, installedNames = previewNames,
             onConfirm = { scope.launch { model.confirm()?.let { feedback?.notice(it) } } },
             onPreviewAgain = { scope.launch { model.previewAgain() } })
     }
@@ -371,6 +373,8 @@ private fun Tags(tags: List<String>) {
 internal fun PreviewSheet(
     extension: CatalogExtension?, preview: ExtensionPreview, busy: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit,
     modifier: Modifier = Modifier, onPreviewAgain: () -> Unit = {}, now: () -> Instant = Instant::now,
+    /** The installed extensions' names, for a pack's members (#4122). */
+    installedNames: Map<String, String> = emptyMap(),
 ) {
     val name = preview.manifest?.name?.takeIf { it.isNotBlank() } ?: extension?.label ?: preview.manifest?.id.orEmpty()
     val more = CatalogText.asksForMore(preview)
@@ -386,7 +390,7 @@ internal fun PreviewSheet(
                 JInlineStatus(stringResource(R.string.settings_ext_more_permissions), tone = InlineTone.Caution)
                 PermissionList(stringResource(R.string.settings_ext_added), preview.addedPermissions.orEmpty())
             }
-            BundlePreview(preview)
+            BundlePreview(preview, installedNames)
             PermissionList(stringResource(if (preview.upgrade) R.string.settings_ext_it_can_after_upgrade else R.string.settings_ext_it_can), preview.permissions)
             preview.warnings.orEmpty().forEach { JInlineStatus(it, tone = InlineTone.Caution) }
             SettingsCaption(stringResource(R.string.settings_ext_preview_note) +

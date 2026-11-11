@@ -74,6 +74,8 @@ The old `PersonaTypography.*`, `statusTone(...)`, `PrimaryButton` / `SecondaryBu
 
 ### 2.2 Components
 
+A component with a composable slot ends with a function-typed parameter, so a caller can pass the slot as a trailing lambda. Add a parameter before the slots, never after (#4146, checked by `scripts/app/android_slot_order.py`; see [android.md](android.md) "Design-system slot order").
+
 | Component | Use |
 | --- | --- |
 | `JPage` | A page with custom content. Pass the `PaddingValues` it gives you as the scroll container's contentPadding: in Glass the top bar and input overlays float over the content, and this is what leaves room for them |

@@ -1,6 +1,7 @@
 import Foundation
 import HealthKit
 import Testing
+import UIKit
 @testable import Persona
 
 /// The registry is main-actor isolated (the app target defaults to MainActor),
@@ -341,7 +342,100 @@ struct PhoneToolsTests {
         #expect(dict["required"] == .array([.string("a")]))
     }
 
+    // MARK: - Clipboard (#4192)
+
+    /// Persona in front: the write lands and answers ok with its length, and the read gives the text back.
+    @Test func clipboardInFrontCopiesAndReads() throws {
+        let board = FakeClipboard()
+        let set = try ClipboardTool.set(.object(["text": .string("héllo")]), board: board, inFront: true)
+        #expect(text(of: set) == JSONValue.object(["ok": .bool(true), "characters": .number(5)]).pretty)
+        #expect(board.changeCount == 1)
+        let get = try ClipboardTool.get(board: board, inFront: true)
+        #expect(text(of: get) == JSONValue.object(["text": .string("héllo"), "characters": .number(5)]).pretty)
+        // Clearing it is still a write that answers ok, though no string is left.
+        let clear = try ClipboardTool.set(.object(["text": .string("")]), board: board, inFront: true)
+        #expect(text(of: clear) == JSONValue.object(["ok": .bool(true), "characters": .number(0)]).pretty)
+    }
+
+    /// Persona in the background (a silent push woke it, or a connection outlived the app on screen): iOS would drop
+    /// the write and read nothing, so neither tool touches the pasteboard and both ask for Persona to be opened,
+    /// rather than answering ok or "empty".
+    @Test func clipboardInBackgroundRefuses() {
+        let board = FakeClipboard(string: "earlier")
+        let set = failure { try ClipboardTool.set(.object(["text": .string("new")]), board: board, inFront: false) }
+        let get = failure { try ClipboardTool.get(board: board, inFront: false) }
+        for message in [set, get] {
+            #expect(message.contains("Persona is not open on the iPhone"))
+            #expect(message.contains("open Persona and try again"))
+        }
+        #expect(board.changeCount == 0 && board.reads == 0)
+        // Bad arguments still say so first: opening Persona would not fix them.
+        let missing = failure { try ClipboardTool.set(.object([:]), board: board, inFront: false) }
+        #expect(missing.contains("text is required"))
+    }
+
+    /// In front, but the write did not land (the change count did not move, or no string is there): a failure, never ok.
+    @Test func clipboardWriteThatDidNotLandFails() {
+        let secret = "tok-8f3a1c"
+        let dropped = FakeClipboard(string: "earlier")
+        dropped.takesWrites = false
+        let message = failure { try ClipboardTool.set(.object(["text": .string(secret)]), board: dropped, inFront: true) }
+        #expect(message.contains("did not reach the iPhone's clipboard"))
+        #expect(!message.contains(secret), "the refusal never quotes the text (it may be a secret read from a file)")
+
+        let emptied = FakeClipboard()
+        emptied.keepsStrings = false // the count moved, yet no string arrived
+        let noString = failure { try ClipboardTool.set(.object(["text": .string(secret)]), board: emptied, inFront: true) }
+        #expect(noString.contains("did not reach the iPhone's clipboard"))
+    }
+
+    /// The real pasteboard does what the check expects: a write by the app in front (the test host) moves `changeCount`
+    /// at once and leaves a string, so a write that landed is never reported as lost.
+    @Test func clipboardCheckPassesOnTheRealPasteboard() throws {
+        let set = try ClipboardTool.set(.object(["text": .string("Persona clipboard check")]), board: UIPasteboard.general, inFront: true)
+        #expect(text(of: set) == JSONValue.object(["ok": .bool(true), "characters": .number(23)]).pretty)
+    }
+
+    /// The model's text of the error a tool call throws, or "" when it did not throw.
+    private func failure(of call: () throws -> [ToolContent]) -> String {
+        do {
+            _ = try call()
+            Issue.record("the call did not fail")
+            return ""
+        } catch {
+            return ToolErrors.describe(error)
+        }
+    }
+
     private func text(of content: [ToolContent]) -> String {
         content.compactMap(\.text).joined(separator: "\n")
     }
+}
+
+/// A pasteboard that takes writes like iOS does for the app in front, or drops them (`takesWrites`) or keeps no string
+/// (`keepsStrings`), and counts reads.
+@MainActor private final class FakeClipboard: ClipboardBoard {
+    var takesWrites = true
+    var keepsStrings = true
+    private(set) var changeCount = 0
+    private(set) var reads = 0
+    private var stored: String?
+
+    init(string: String? = nil) {
+        stored = string
+    }
+
+    var string: String? {
+        get {
+            reads += 1
+            return stored
+        }
+        set {
+            guard takesWrites else { return }
+            changeCount += 1
+            stored = keepsStrings ? newValue : nil
+        }
+    }
+
+    var hasStrings: Bool { !(stored ?? "").isEmpty }
 }

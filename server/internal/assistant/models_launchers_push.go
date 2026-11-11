@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -88,6 +89,9 @@ func (s *Service) openStoredLauncher(l storedLauncher) (proto.ManagedLauncher, e
 	var err error
 	if m.APIKey, err = s.openKey(l.KeySealed); err != nil {
 		return m, i18n.Err("assistant-models.err_key_decrypt")
+	}
+	if _, ok := extension.ReferenceOf(m.APIKey); ok {
+		m.APIKey = "" // a reference: only openFor resolves it, for the computer that pulls it (launcher_secrets.go)
 	}
 	if m.Headers, err = s.openKey(l.HeadersSealed); err != nil {
 		return m, i18n.Err("assistant-models.err_key_decrypt")

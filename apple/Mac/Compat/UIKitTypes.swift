@@ -278,6 +278,7 @@ nonisolated struct UIGraphicsImageRenderer {
         }
     }
 
+    var changeCount: Int { board.changeCount }
     var hasStrings: Bool { board.canReadItem(withDataConformingToTypes: [UTType.utf8PlainText.identifier, UTType.plainText.identifier]) }
     var hasImages: Bool { NSImage.canInit(with: board) }
     var hasURLs: Bool { board.canReadObject(forClasses: [NSURL.self], options: nil) }

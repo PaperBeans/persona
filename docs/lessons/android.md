@@ -1,5 +1,9 @@
 # Lessons: Android
 
+## A design-system signature change compiles every caller (#4145)
+
+#4124 added a `Boolean` after `JSectionHeader`'s composable slot. A caller passing the slot as a trailing lambda then bound it to the `Boolean`, and `main` stopped compiling for every Android build. No hosted CI runs on PRs, so the module's own build passing was not enough. Before merging a change to a `core/designsystem` component's parameters, compile `:app:compileDebugKotlin` (every feature's main code) and the test code of the modules that call it. Keep a composable slot last; `scripts/app/android_slot_order.py` checks that (#4146).
+
 ## Receipt navigation inside task details (#3841)
 
 A receipt reused inside task details must not invoke the same task-sheet destination again: assigning the same Compose state produces no visible change. Resolve the task's existing lead binding and open its Agent page after dismissing the sheet. Keep missing-target feedback inside that sheet; generic operation feedback discards arbitrary exception messages and a snackbar behind a modal does not prove the explanation is visible. Exercise the receipt button independently of the footer and verify the real navigation stack in addition to callback tests.

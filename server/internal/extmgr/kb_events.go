@@ -12,7 +12,7 @@ import (
 func init() {
 	onAssistantEvent(assistantwire.EventKBChanged, func(h *Manager, raw json.RawMessage) {
 		var p assistantwire.KBChanged
-		if json.Unmarshal(raw, &p) != nil || p.ID == "" || !slices.Contains([]string{kb.KindChat, kb.KindPerson, kb.KindProject, kb.KindDoc, kb.KindMeeting, kb.KindEvent, kb.KindRecording}, p.Kind) ||
+		if json.Unmarshal(raw, &p) != nil || p.ID == "" || !slices.Contains([]string{kb.KindChat, kb.KindPerson, kb.KindProject, kb.KindDoc, kb.KindMeeting, kb.KindEvent, kb.KindRecording, kb.KindTopic}, p.Kind) ||
 			!slices.Contains([]string{"metadata", "summary", "messages", "log"}, p.What) {
 			return
 		}

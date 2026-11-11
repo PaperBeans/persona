@@ -589,6 +589,17 @@ Since the 2026-10-31 redesign, `PersonaTheme.palette` / `type` / `shapes` also c
 
 Hard-coded counts for each file and category must not exceed the baseline; new files start at zero. Existing code with permitted fixed sizes, such as the terminal, also counts toward the baseline, and new usage is checked too. Reducing hard-coded values in another file does not offset additions in this file. When a change really must be accepted, run `python3 scripts/app/android_token_baseline.py --update-baseline` and review the baseline diff; the normal check never rewrites it. After merging several lanes, run the check first, fix new hard-coded values first, then decide whether to update the baseline. The Swift output is out of scope here.
 
+## Design-system slot order
+
+A component in `core/designsystem` with a composable slot (`@Composable … -> …`) ends with a function-typed parameter, so callers can pass the slot as a trailing lambda (`JSectionHeader(title) { … }`); a new parameter goes before the slots (#4146). A parameter added after the slot broke `main` in #4124 (#4145). Check it from the repository root; no Android SDK needed:
+
+```sh
+python3 scripts/app/android_slot_order.py
+python3 scripts/app/test_android_slot_order.py
+```
+
+The script reads the non-private `@Composable fun` components under `android/core/designsystem/src/main`, ignoring comments and strings. Components that already end otherwise are listed in `android/core/designsystem/tools/slot-order-baseline.json` with a count per file and name (overloads counted together). That list may only shrink: `--update-baseline` rewrites it once a component keeps a slot last, and a new entry needs the same review as raising the token baseline. CI runs both beside the token checks (`scripts/ci/android.sh`).
+
 ## Modules and code
 
 Modules are defined by `android/settings.gradle.kts`, and direct in-repository dependencies by each module's `build.gradle.kts`. Arrows below point from the consumer to its dependency; only production `project(...)` dependencies are listed, not external libraries or test dependencies.

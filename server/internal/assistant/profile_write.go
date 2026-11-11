@@ -145,6 +145,9 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		if in.MinutesDays != nil {
 			v.MinutesDays = in.MinutesDays
 		}
+		if in.KBTopics != nil {
+			v.KBTopics = in.KBTopics
+		}
 		if in.MeetingAttendanceDefault != nil {
 			v.MeetingAttendanceDefault = in.MeetingAttendanceDefault
 		}

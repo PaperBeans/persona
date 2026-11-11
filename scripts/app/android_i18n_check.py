@@ -13,6 +13,9 @@
   `contentDescription`, or as a String parameter named text / title / label / placeholder / name … of most composables
   declared in android/ (`JButton("…")`, `JTextField(v, f, label = "…")`; an animation's `label` is not one). Calls are
   matched by name, so a class or function named like a composable can be flagged too: mark that line `// i18n-ignore`.
+  When such an argument is an `if` / `else`, `when` or elvis expression, its literal branches count the same
+  (`Text(a ?: "…")`, `Text(if (x) "…" else "…")`, `title = when (k) { 1 -> "…" else -> "…" }`); a literal inside a
+  function whose result is passed, a lambda or a `{ … }` branch block is not followed.
   Only literals that read as words count (no identifiers, keys, URLs, hosts, formats, acronyms or product names such as
   Persona); `// i18n-ignore` works the same way. Counts live in each module's i18n-english-baseline.json and every
   recorded line is listed, so it can be moved into strings.xml later.
@@ -275,16 +278,71 @@ def _string(source, i):
     return i + 1, ''.join(out)
 
 
+class _Frame:
+    """An open `(` / `{` / `[` while scanning: the call it belongs to, the current argument (or statement) and, for a
+    `when (…) { … }` that is a whole argument, that argument's (call, name or position) and its branch literals."""
+    __slots__ = ('call', 'opener', 'index', 'arg', 'prev', 'where', 'when', 'pending')
+
+    def __init__(self, call, opener, where, arg):
+        self.call, self.opener, self.where, self.index = call, opener, where, 0
+        self.arg = self.prev = arg
+        self.when, self.pending = None, []
+
+
+ENDS = ',)}\n;'
+
+
+def _argument(top, segment):
+    """(call, name or position, expression) of the argument whose text so far is [segment] in frame [top], or None
+    when it is not an argument of a call or a `name = …` (a declaration's default value is neither)."""
+    if top is None:
+        return None
+    named = re.match(r'\s*([A-Za-z_]\w*)\s*=(?!=)(.*)\Z', segment, re.S)
+    call = top.call if top.opener == '(' else None
+    if named:
+        return call, named.group(1), named.group(2)
+    if call and not re.match(r'\s*(?:\w+\s+)*\w+\s*:(?!:)', segment):
+        return call, top.index, segment
+    return None
+
+
+def _branch(source, start, before, after, top, closed):
+    """(call, argument) when the literal at source[start] is a result of the whole argument's `if` / `else` or elvis
+    expression: `Text(a ?: "…")`, `Text(if (x) "…" else "…")`."""
+    if top is None:
+        return None
+    segment = source[top.arg:start]
+    if top.opener == '{' and segment.lstrip().startswith('?:'):
+        segment = source[top.prev:start]  # an elvis continued on the next line
+    found = _argument(top, segment)
+    if not found:
+        return None
+    call, argument, expression = found
+    ends = after[0] in ENDS or re.match(r'else\b', after)
+    if before.endswith('?:'):
+        return (call, argument) if ends else None
+    if not re.match(r'\s*if\s*\(', expression):
+        return None
+    after_if = closed and closed[0] == 'if' and not source[closed[1]:start].strip()
+    if after_if or re.search(r'\belse$', before):
+        return (call, argument) if ends else None
+    return None
+
+
 def ui_literals(source):
-    """(line, text, call, argument, source) for each whole-argument string literal of Kotlin [source]: `call` is the
-    innermost call it is passed to (None outside one), `argument` its parameter name or position (an int), or the name
-    assigned to; `text` has templates and escapes blanked."""
-    found, stack = [], []  # stack entries: [call name or None, '(' / '{' / '[', positional index]
+    """(line, text, call, argument, source) for each string literal of Kotlin [source] that is a whole argument, or a
+    branch of an argument's `if` / `else`, `when` or elvis expression: `call` is the innermost call it is passed to
+    (None outside one), `argument` its parameter name or position (an int), or the name assigned to; `text` has
+    templates and escapes blanked."""
+    found, stack = [], []
+    closed = None  # (name, end) of the last `(…)` closed: `if (…)` / `when (…)`
     i, line, n = 0, 1, len(source)
     while i < n:
         c = source[i]
         if c == '\n':
             line += 1
+            if stack and stack[-1].opener == '{':
+                stack[-1].prev, stack[-1].arg = stack[-1].arg, i + 1
             i += 1
         elif source.startswith('//', i):
             end = source.find('\n', i)
@@ -304,35 +362,66 @@ def ui_literals(source):
             i, text = _string(source, i)
             here, line = line, line + source.count('\n', start, i)
             after = source[i:i + 200].lstrip(' \t')
-            if text is None or not after or after[0] not in ',)}\n;':
+            if text is None or not after:
                 continue
             before = source[max(0, start - 200):start].rstrip()
             top = stack[-1] if stack else None
-            call = top[0] if top and top[1] == '(' else None
+            call = top.call if top and top.opener == '(' else None
             named = re.search(r'([A-Za-z_]\w*)\s*=$', before)
-            if named and not re.search(r'[=!<>+\-*/]=$', before):
+            if after[0] in ENDS and named and not re.search(r'[=!<>+\-*/]=$', before):
                 found.append((here, text, call, named.group(1), source[start:i]))
-            elif call and before.endswith(('(', ',')):
-                found.append((here, text, call, top[2], source[start:i]))
+            elif after[0] in ENDS and call and before.endswith(('(', ',')):
+                found.append((here, text, call, top.index, source[start:i]))
+            elif top and top.when and before.endswith('->') and after[0] in '\n};':
+                top.pending.append((here, text, *top.when, source[start:i]))
+            else:
+                branch = _branch(source, start, before, after, top, closed)
+                if branch:
+                    found.append((here, text, *branch, source[start:i]))
         elif c == "'":
             end = source.find("'", i + 1)
             i = end + 1 if 0 < end - i <= 8 else i + 1
         elif c in '([{':
-            name = IDENTIFIER.fullmatch(re.split(r'[^A-Za-z0-9_]', source[max(0, i - 80):i].rstrip())[-1] or '-')
-            stack.append([name.group() if c == '(' and name else None, c, 0])
+            head = source[max(0, i - 80):i].rstrip()
+            name = IDENTIFIER.fullmatch(re.split(r'[^A-Za-z0-9_]', head)[-1] or '-')
+            top = stack[-1] if stack else None
+            frame = _Frame(name.group() if c == '(' and name else None, c, max(0, i - 80) + len(head) - len(name.group()) if name else i, i + 1)
+            if c == '{' and top:
+                # A `when` whose value is the whole argument: its branches' literals are that argument's.
+                if closed and closed[0] == 'when' and not source[closed[1]:i].strip():
+                    keyword = closed[2]
+                else:
+                    bare = re.search(r'\bwhen\s*$', source[top.arg:i])
+                    keyword = top.arg + bare.start() if bare else None
+                found_when = keyword is not None and _argument(top, source[top.arg:keyword])
+                if found_when and not found_when[2].strip():
+                    frame.when = found_when[:2]
+            stack.append(frame)
             i += 1
         elif c in ')]}':
             opener = {')': '(', ']': '[', '}': '{'}[c]
-            while stack and stack.pop()[1] != opener:
-                pass
+            while stack:
+                frame = stack.pop()
+                if frame.opener == opener:
+                    break
+            else:
+                frame = None
+            if frame and frame.pending and source[i + 1:i + 200].lstrip(' \t')[:1] in tuple(ENDS) + ('',):
+                found.extend(frame.pending)
+            closed = (frame.call, i + 1, frame.where) if frame and c == ')' else None
             i += 1
         elif c == ',':
-            if stack and stack[-1][1] == '(':
-                stack[-1][2] += 1
+            if stack and stack[-1].opener in '([':
+                stack[-1].index += 1
+                stack[-1].arg = i + 1
+            i += 1
+        elif c == ';':
+            if stack and stack[-1].opener == '{':
+                stack[-1].arg = i + 1
             i += 1
         else:
             i += 1
-    return found
+    return sorted(found, key=lambda hit: hit[0])
 
 
 COMPOSABLE = re.compile(r'@Composable\s+(?:(?:private|internal|public|inline)\s+)*fun\s+(?:<(?:[^<>]|<[^<>]*>)*>\s*)?([A-Za-z_]\w*)\s*\(')

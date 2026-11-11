@@ -436,6 +436,14 @@ func TestReadonlyTaskExitPlanModeAfterRestart(t *testing.T) {
 
 // A topic can outlive several plans; only its current task may control plan approval.
 func TestReusedWritableTaskExitPlanModeKeepsApproval(t *testing.T) {
+	testReusedWritableTaskKeepsApproval(t, false)
+}
+
+func TestReusedWritableTaskReportKeepsApproval(t *testing.T) {
+	testReusedWritableTaskKeepsApproval(t, true)
+}
+
+func testReusedWritableTaskKeepsApproval(t *testing.T, report bool) {
 	for _, backend := range []string{"memory", "database", "restart"} {
 		for _, retired := range []string{"released", "dismissed"} {
 			t.Run(backend+"/"+retired, func(t *testing.T) {
@@ -446,6 +454,7 @@ func TestReusedWritableTaskExitPlanModeKeepsApproval(t *testing.T) {
 				}
 				s, f := newTaskServiceOn(t, store)
 				f.ownModels = true
+				setSettings(t, s, func(v *Settings) { v.Main = "reuse-chat" })
 				e := &todoEnv{t: t, s: s, f: f}
 				todo, err := s.createTodo(ctx, "Inspect and then fix", "", "reuse-chat", "")
 				if err != nil {
@@ -504,6 +513,9 @@ func TestReusedWritableTaskExitPlanModeKeepsApproval(t *testing.T) {
 				defer cancel()
 				ix := proto.Interaction{ID: "reused-writable-exit", MachineID: agent.MachineID,
 					SessionID: agent.SessionID, Kind: proto.IxPlan, ToolName: "ExitPlanMode", Resumable: true}
+				if report {
+					ix.Kind, ix.ToolName = proto.IxPermission, "mcp__persona__report_to_supervisor"
+				}
 				done := make(chan proto.Resolution, 1)
 				go func() {
 					r, err := s.nodeInteraction(callCtx, ix)
@@ -523,13 +535,20 @@ func TestReusedWritableTaskExitPlanModeKeepsApproval(t *testing.T) {
 					return s.fleet.interactions[ix.ID] != nil
 				})
 				approve := true
-				if err := s.resolve(ix.ID, proto.Resolution{Approve: &approve}); err != nil {
+				resolution := proto.Resolution{Approve: &approve}
+				if report {
+					resolution = proto.Resolution{Allow: &approve}
+				}
+				if err := s.resolve(ix.ID, resolution); err != nil {
 					t.Fatal(err)
 				}
-				if r := <-done; r.Approve == nil || !*r.Approve {
+				r := <-done
+				got, _ := json.Marshal(r)
+				want, _ := json.Marshal(resolution)
+				if string(got) != string(want) {
 					t.Fatalf("writable user approval was lost: %+v", r)
 				}
-				// A subsequent read-only takeover must still deny ExitPlanMode without a card.
+				// A subsequent read-only takeover keeps its own completion behavior without a card.
 				e.s = s
 				e.must("DELETE", "/api/v1/todos/"+todo.ID+"/agents/"+agent.MachineID+"/"+agent.SessionID, "")
 				task.Readonly = true
@@ -553,8 +572,13 @@ func TestReusedWritableTaskExitPlanModeKeepsApproval(t *testing.T) {
 				denyCtx, stop := context.WithTimeout(ctx, time.Second)
 				defer stop()
 				ix.ID, ix.MachineID, ix.SessionID = "reused-readonly-exit", agent.MachineID, agent.SessionID
-				r, err := s.nodeInteraction(denyCtx, ix)
-				if err != nil || r.Approve == nil || *r.Approve || !strings.Contains(r.Feedback, "read-only") || r.Mode != "" {
+				r, err = s.nodeInteraction(denyCtx, ix)
+				if report {
+					raw, _ := json.Marshal(r)
+					if err != nil || string(raw) != `{"allow":true}` {
+						t.Fatalf("current readonly report was not allowed once: %s, error = %v", raw, err)
+					}
+				} else if err != nil || r.Approve == nil || *r.Approve || !strings.Contains(r.Feedback, "read-only") || r.Mode != "" {
 					t.Fatalf("current readonly task lost its restriction: %+v, error = %v", r, err)
 				}
 				if cards := s.workCards(); len(cards) != 0 {

@@ -137,8 +137,11 @@ class I18nCheckTest(unittest.TestCase):
         self.assertEqual([(1, r'"a \" 中"')], literals(r'val x = "a \" 中"'))
 
     def english_lines(self, *lines):
+        return sorted({line for line, _ in self.english_hits(*lines)})
+
+    def english_hits(self, *lines):
         write(self.module, 'src/main/kotlin/A.kt', '\n'.join(lines))
-        return [line for line, _ in english_hits_by_file(self.root).get('feature/demo/src/main/kotlin/A.kt', [])]
+        return english_hits_by_file(self.root).get('feature/demo/src/main/kotlin/A.kt', [])
 
     def test_english_ui_text_in_compose_positions_is_found(self):
         write(self.root, 'core/designsystem/build.gradle.kts', '')
@@ -186,13 +189,61 @@ class I18nCheckTest(unittest.TestCase):
             'AnimatedContent(pages, label = "Proactive Pages")',
             'throw IllegalStateException("Not connected")',
             'Text("Hello " + name)',
-            'Text(if (on) "On" else "Off")',
             'Text("""Raw Text""")',
             'Text("MainActivity")',
             'Text("Agents")',
             'val label = "Session"',
             '// Text("Commented out")',
             'Text("需要你")',
+        ))
+
+    def test_english_in_if_when_and_elvis_branches_of_a_ui_argument_is_found(self):
+        write(self.root, 'core/designsystem/build.gradle.kts', '')
+        write(self.root, 'core/designsystem/src/main/kotlin/J.kt',
+              '@Composable fun JRow(title: String, modifier: Modifier = Modifier) {}')
+        self.assertEqual([1, 2, 2, 3, 4, 4, 6, 7, 8, 8, 13, 14, 17], [line for line, _ in self.english_hits(
+            'Text(a ?: "Some label")',
+            'Text(if (x) "Yes" else "No")',
+            'JRow(title = name ?: "Agent", modifier = m)',
+            'Text(text = if (kind == "agent") "Agent" else if (b) stringResource(R.string.x) else "Other one")',
+            'JRow(',
+            '    title = when (k) { 1 -> "One thing" else -> "Other" })',
+            'Box(Modifier.semantics { contentDescription = label ?: "Close the page" })',
+            'Text(if (on) "On" else "Off")',
+            'val s = when {',
+            '    a -> "Not shown"',
+            '}',
+            'Text(when (k) {',
+            '    Kind.A -> "First kind"',
+            '    else -> "Second kind"',
+            '})',
+            'Text(a',
+            '    ?: "Multi line")',
+        )])
+
+    def test_english_branches_skip_what_is_not_the_argument_value(self):
+        write(self.root, 'core/designsystem/build.gradle.kts', '')
+        write(self.root, 'core/designsystem/src/main/kotlin/J.kt',
+              '@Composable fun JRow(title: String, modifier: Modifier = Modifier) {}')
+        self.assertEqual([], self.english_lines(
+            '@Composable fun JCell(title: String = a ?: "Default title", subtitle: String? = null) {}',
+            '@Composable fun JTile(title: String = if (a) "Default one" else "Default two") {}',
+            'JRow(title = name ?: return)',
+            'Text(a ?: stringResource(R.string.x))',
+            'Text(if (x) label else other)',
+            'Text(if (kind == "agent") agentLabel else name)',
+            'Text(if (x) "agent" else "session")',
+            'Text(if (x) "Yes" + y else "No".uppercase())',
+            'Text(when (k) { 1 -> "One thing" }.uppercase())',
+            'Text(when (k) { 1 -> { "One thing" } })',
+            'Text(items.firstOrNull { it.name == "Some Name" } ?: other)',
+            'val label = a ?: "Other label"',
+            'val title = if (x) "Yes" else "No"',
+            'Text(label(if (x) "Yes" else "No"))',
+            'Text(x.let { if (it) "Yes" else "No" })',
+            'Log.w(tag, a ?: "Request failed")',
+            'Text(a ?: "Persona")',
+            'Text(if (x) "Yes" else "No") // i18n-ignore: test',
         ))
 
     def test_unicode_template_names_do_not_break_either_check(self):

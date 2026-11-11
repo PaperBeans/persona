@@ -1,7 +1,7 @@
 // Actual production app, synthetic loopback hub; no account, registry or real settings are contacted.
 // Build web first, then: node web/e2e/pack-uninstall.mjs <absolute-output-directory>
-// Uninstalling a pack with its members (#4072): the members named as they're installed, and a removal that stopped part
-// way listing what went, what didn't and what wasn't tried. Wide and phone width, light and dark.
+// A pack's page names its members (#4122), and uninstalling it with its members (#4072): the members named as they're
+// installed, and a removal that stopped part way listing what went, what didn't and what wasn't tried. Wide and phone width, light and dark.
 import assert from "node:assert/strict";
 import { createServer as httpServer } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -19,7 +19,7 @@ const installed = (id, name, extra = {}) => ({ id, name, kind: "ui", source: "in
   origin: `market:${market}/${id}`, ...extra });
 // Two members installed (named), one not (its id only).
 const pack = installed("example-pack", "Example Pack", { kind: "extension_pack",
-  extension_pack: [{ id: "example-notes" }, { id: "example-ui" }, { id: "example-mail" }] });
+  extension_pack: [{ id: "example-notes", market: market, version: "1.0.0" }, { id: "example-ui" }, { id: "example-mail" }] });
 const list = [pack, installed("example-notes", "Example Notes"), installed("example-ui", "Example UI")];
 const partial = { ok: false, code: "partial_uninstall", error: "Removal didn’t finish.",
   removed_members: ["example-notes"], failed_members: [{ id: "example-ui", error: "it is still running" }], remaining_members: ["example-mail"] };
@@ -76,6 +76,13 @@ try {
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`${appURL}/settings?tab=extensions&extension=${pack.id}`);
     await page.evaluate((dark) => document.documentElement.classList.toggle("dark", dark), scheme === "dark");
+    // The pack's page names its members, the id beside (#4122); the one not installed keeps its id.
+    const members = page.locator('[data-pack-members]');
+    await members.getByText("Example Notes", { exact: true }).waitFor();
+    const listed = (await members.innerText()).replace(/\s+/g, " ");
+    for (const part of ["Example Notes", "example-notes · fixture-market", "Example UI", "example-ui", "example-mail"]) assert.ok(listed.includes(part), `${part} in ${listed}`);
+    await members.scrollIntoViewIfNeeded();
+    { const file = `pack-members-${width}-${scheme}.png`; await members.screenshot({ path: join(output, file) }); screenshots.push(file); }
     await page.getByRole("button", { name: "Uninstall", exact: true }).first().click();
     const dialog = page.getByRole("dialog");
     // By name; the member that isn't installed keeps its id.

@@ -43,7 +43,11 @@ internal fun InteractionPanel(
     terminalHelp: Boolean = true,
     onDiscardLocal: ((Interaction) -> Unit)? = null,
 ) {
-    var selected by rememberSaveable { mutableStateOf(0) }
+    // The card in view, by its id: cards come and go around it (answered on another device, expired, one sorted in
+    // front), and an index would put another card in its place under the same Allow (#4165). [selectedAt] is where it
+    // was, so that when it leaves, the card that took its place is shown.
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedAt by rememberSaveable { mutableIntStateOf(0) }
     var full by rememberSaveable { mutableStateOf(false) }
     var all by remember { mutableStateOf(false) }
     LaunchedEffect(LocalChatLinkOpening.current) { full = false; all = false }
@@ -51,8 +55,10 @@ internal fun InteractionPanel(
     LaunchedEffect(full, all) { onOverlay(full || all) }
     DisposableEffect(Unit) { onDispose { onOverlay(false) } }
     if (requests.isEmpty()) return
-    val index = selected.coerceIn(0, requests.lastIndex)
+    val index = requestIndex(requests, selectedId, selectedAt)
     val request = requests[index]
+    SideEffect { selectedId = request.id; selectedAt = index }
+    fun select(at: Int) { requests.getOrNull(at)?.let { selectedId = it.id; selectedAt = at } }
     val body: @Composable (Boolean) -> Unit = { complete ->
         key(request.id, request.dialog?.rev, complete) {
             RequestEditor(request, machine, busyId != null, request.id in uncertainIds, complete,
@@ -92,7 +98,7 @@ internal fun InteractionPanel(
         },
         headline = request.headline.text(), expires = RequestExpiry.label(request.expiresAt, now)?.text(),
         modifier = Modifier.heightIn(max = maxHeight), position = index + 1 to requests.size,
-        onPrevious = { selected = index - 1 }, onNext = { selected = index + 1 }, onList = { all = true },
+        onPrevious = { select(index - 1) }, onNext = { select(index + 1) }, onList = { all = true },
         collapsed = collapsed, onCollapsedChange = onCollapsedChange, onExpand = { full = true },
         headerActions = closeCard,
     ) {
@@ -110,11 +116,15 @@ internal fun InteractionPanel(
     if (all) JSheet(onDismiss = { all = false }, title = stringResource(R.string.chat_request_list_title)) {
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = maxHeight), contentPadding = PaddingValues(bottom = 16.dp)) {
             itemsIndexed(requests, key = { _, interaction -> interaction.id }) { i, interaction ->
-                JRow(interaction.headline.text(), value = "${i + 1}", onClick = { selected = i; all = false; full = true })
+                JRow(interaction.headline.text(), value = "${i + 1}", onClick = { select(i); all = false; full = true })
             }
         }
     }
 }
+
+/** Where the card [selectedId] is now; once it has left, the card at its old place [selectedAt] (the last when that is past the end). */
+internal fun requestIndex(requests: List<Interaction>, selectedId: String?, selectedAt: Int): Int =
+    requests.indexOfFirst { it.id == selectedId }.takeIf { it >= 0 } ?: selectedAt.coerceIn(0, requests.lastIndex.coerceAtLeast(0))
 
 @Composable
 internal fun InteractionForm(

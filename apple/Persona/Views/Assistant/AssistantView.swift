@@ -1246,7 +1246,7 @@ struct AssistantToolsRow: View {
                         if running {
                             ProgressView().controlSize(.mini)
                             if let last = calls.last {
-                                Text("\(ToolPresentation.verb(last.name)) \(ToolPresentation.subject(last))").lineLimit(1)
+                                Text("\(ToolPresentation.verb(last)) \(ToolPresentation.subject(last))").lineLimit(1)
                             }
                         } else {
                             ThemedIcon(Theme.Icon.unknownTool)

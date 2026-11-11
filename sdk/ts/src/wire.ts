@@ -4562,8 +4562,8 @@ export interface ChannelEditParams {
   text: string;
 }
 
-export type KBKind = "projects" | "chats" | "people" | "docs" | "meetings" | "events" | "recordings" | (string & {});
-export const KBKINDS = ["projects", "chats", "people", "docs", "meetings", "events", "recordings"] as const;
+export type KBKind = "projects" | "chats" | "people" | "docs" | "meetings" | "events" | "recordings" | "topics" | (string & {});
+export const KBKINDS = ["projects", "chats", "people", "docs", "meetings", "events", "recordings", "topics"] as const;
 
 /**
  * error.code of a knowledge-base call besides permission_denied (data {scope}, the one missing): invalid_params,
@@ -4703,6 +4703,34 @@ export interface KBDetail {
   segments?: KBRecordingSegment[];
   /** A recording's meeting minutes, once written (docs/assistant/meeting-minutes.md); kept as the hub sends them. */
   minutes?: unknown;
+  /** A topic's knowledge points (docs/assistant/knowledge.md "Topics"). */
+  points?: KBTopicPoint[];
+}
+
+/**
+ * One knowledge point of a topic, under up to two levels of subtopics (path).
+ */
+export interface KBTopicPoint {
+  id: string;
+  path?: string[];
+  kind: string;
+  text: string;
+  /** A decision's reason, a pitfall's cause. */
+  why?: string;
+  sources?: KBTopicSource[];
+  /** YYYY-MM-DD: when it was last confirmed. */
+  when?: string;
+}
+
+/**
+ * An entry a knowledge point came from.
+ */
+export interface KBTopicSource {
+  /** projects or chats */
+  kind: string;
+  id: string;
+  /** YYYY-MM-DD */
+  day?: string;
 }
 
 /**

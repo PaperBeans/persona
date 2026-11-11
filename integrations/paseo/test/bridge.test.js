@@ -578,3 +578,23 @@ test('Paseo restarting: the bridge connects again and keeps the sessions; gone f
   }, 5000)
   assert.ok(logs.some((l) => /away/.test(l)))
 })
+
+test('a read-only supervisor report runs once without permission or mode updates', async (t) => {
+  const { fake, node, a, rows } = await setup(t)
+  fake.update(a.claude.id, { currentModeId: 'plan' })
+  await until('plan mode', () => rows().find((r) => r.session_id === SID)?.permission_mode === 'plan')
+  node.resolve = (ix) => {
+    assert.equal(ix.kind, 'permission')
+    assert.equal(ix.tool_name, 'mcp__persona__report_to_supervisor')
+    return { allow: true }
+  }
+  const modesBefore = fake.requestsOf('set_agent_mode_request').length
+  fake.permission(a.claude.id, { id: 'readonly-report', provider: 'claude', name: 'mcp__persona__report_to_supervisor', kind: 'tool',
+    input: { kind: 'done', text: 'Inspection complete.' },
+    suggestions: [{ type: 'addRules', rules: [{ toolName: 'mcp__persona__report_to_supervisor' }], behavior: 'allow', destination: 'session' },
+      { type: 'setMode', mode: 'bypassPermissions' }] })
+  await until('report response', () => fake.requestsOf('agent_permission_response').length === 1)
+  assert.deepEqual(fake.requestsOf('agent_permission_response')[0].response, { behavior: 'allow' })
+  assert.equal(fake.requestsOf('set_agent_mode_request').length, modesBefore)
+  assert.equal(rows().find((r) => r.session_id === SID)?.permission_mode, 'plan')
+})

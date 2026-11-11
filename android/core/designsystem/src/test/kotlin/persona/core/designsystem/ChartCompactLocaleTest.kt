@@ -32,6 +32,14 @@ class ChartCompactLocaleTest {
         assertEquals(chinese, compact(Locale.forLanguageTag("zh-Hans")))
     }
 
+    // The app's Chinese is Simplified only (#4161): a Traditional-region phone's locale still writes 万 / 亿, not 萬 / 億.
+    @Test fun traditionalRegionsStaySimplified() {
+        val chinese = listOf("999", "1000", "1.2万", "120万", "12亿", "1.2万亿", "-1.2万", "-12亿")
+        for (tag in listOf("zh-TW", "zh-HK", "zh-Hant", "zh-Hant-TW", "zh-Hant-HK")) {
+            assertEquals(tag, chinese, compact(Locale.forLanguageTag(tag)))
+        }
+    }
+
     @Test fun japaneseCountsInManAndOku() {
         assertEquals(listOf("999", "1000", "1.2万", "120万", "12億", "1.2兆", "-1.2万", "-12億"), compact(Locale.JAPANESE))
     }

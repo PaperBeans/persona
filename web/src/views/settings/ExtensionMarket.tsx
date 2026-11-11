@@ -496,6 +496,9 @@ export function PermissionRow({ p, tone }: { p: ExtensionPermission; tone?: "ora
 /** `managerName`: the manager whose copy it installs or upgrades, when another than the default's (said on the
  *  consent, so it is agreed to for that one). */
 export function PreviewDialog({ pv, managerName, onClose, onAgree }: { pv: MarketPreview; managerName?: string; onClose: () => void; onAgree: () => Promise<void> }) {
+  // A pack's members named (#4122): the ones installed with it by their manifests, the ones already here by the installed list.
+  const installedNames = useInstalledNames(!!pv.manifest.extension_pack?.length);
+  const memberNames: Record<string, string> = { ...installedNames, ...Object.fromEntries((pv.bundle ?? []).map((b) => [b.manifest.id, b.manifest.name])) };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const now = useNow(1000);
@@ -574,7 +577,7 @@ export function PreviewDialog({ pv, managerName, onClose, onAgree }: { pv: Marke
           </div>
         </div>
         {!!pv.depends?.length && <Group title={t("settings-extensionmarket.depends")}>{pv.depends.map((d) => <Row key={d.id} label={d.name || d.id} hint={d.version}>{dependencyText(d)}</Row>)}</Group>}
-        {!!m.extension_pack?.length && <Group title={t("settings-extensionmarket.pack_members")}>{m.extension_pack.map((p) => <Row key={p.id} label={p.id} hint={p.market}>{p.version || ""}</Row>)}</Group>}
+        {!!m.extension_pack?.length && <Group title={t("settings-extensionmarket.pack_members")}>{m.extension_pack.map((p) => <PackMemberRow key={p.id} member={p} name={memberNames[p.id]} />)}</Group>}
         {!!pv.bundle?.length && (
           <Group title={t("settings-extensionmarket.bundle")} footer={t("settings-extensionmarket.bundle_footer")}>
             {pv.bundle.map((b) => (
@@ -606,17 +609,27 @@ export function PreviewDialog({ pv, managerName, onClose, onAgree }: { pv: Marke
   );
 }
 
+/** The installed extensions' names by id, read once [active] is (a pack's members are named, #4122); one not installed keeps its id. */
+export function useInstalledNames(active: boolean): Record<string, string> {
+  const [names, setNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (active) void listExtensions().then((list) => setNames(Object.fromEntries(list.map((x) => [x.id, x.name || x.id]))), () => {});
+  }, [active]);
+  return names;
+}
+
+/** A pack member's row: its name when known, its id beside the market as the hint (only the id when the name isn't known). */
+export function PackMemberRow({ member, name, mono }: { member: PackMember; name?: string; mono?: boolean }) {
+  return <Row label={name || member.id} hint={[name ? member.id : "", member.market ?? ""].filter(Boolean).join(" · ") || undefined} mono={mono}>{member.version || ""}</Row>;
+}
+
 /** Uninstalling an extension a market installed; its data can stay for a later install. */
 export function UninstallDialog({ id, name, version, pack, onClose, onDone }: { id: string; name: string; version?: string; pack?: PackMember[]; onClose: () => void; onDone: () => void }) {
   const [members, setMembers] = useState(false);
   const [packMembers, setPackMembers] = useState(pack);
   useEffect(() => { if (!pack) void extensionDetail(id).then((d) => setPackMembers(d.extension_pack), () => {}); }, [id, pack]);
   // A pack's members by the names they're installed under (#4072); one not installed keeps its id.
-  const [names, setNames] = useState<Record<string, string>>({});
-  const hasMembers = !!packMembers?.length;
-  useEffect(() => {
-    if (hasMembers) void listExtensions().then((list) => setNames(Object.fromEntries(list.map((x) => [x.id, x.name || x.id]))), () => {});
-  }, [hasMembers]);
+  const names = useInstalledNames(!!packMembers?.length);
   const named = (ids: string[]) => ids.map((m) => names[m] || m).join(t("settings-extensionmarket.list_separator"));
   // Uninstalled part way: which members went, which didn't and why, which weren't tried. Uninstall tries again.
   const [partial, setPartial] = useState<PartialUninstall | null>(null);
