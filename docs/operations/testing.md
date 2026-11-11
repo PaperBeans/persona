@@ -1276,6 +1276,40 @@ How often a client reads `GET /api/v1/sessions`, and what kind of read, while it
 - A real hub's `traffic` journal lines count by route template, not query: there a complete list and a delta are told
   apart only by `body_bytes / count`.
 
+## Fleet soak (`server/internal/fleetsoak`, #3197)
+
+What a fleet's churn costs the hub and its manager, per minute: bytes and objects allocated, CPU time, live heap.
+For a change that claims to make the manager or the hub cheaper under load, run it on the base and on the change and
+put both in the PR.
+
+```sh
+cd server
+go run ./internal/fleetsoak -label head -minutes 20 -out <directory>
+go run ./internal/fleetsoak -label base -minutes 20 -out <directory> -tree <a worktree of the base commit>/server
+go run ./internal/fleetsoak -compare <base directory>/report.json <head directory>/report.json
+```
+
+- It builds `personad` from `-tree` and runs a throwaway hub with its manager: a home directory of its own under
+  `/tmp`, a free loopback port, and a `persona-ci-db-fleetsoak-<pid>` Postgres 18 container, all removed when it ends
+  (it needs Docker and the `postgres:18-alpine` image). Every process gets an environment made by the soak, so the
+  machine's own installation is neither read nor written.
+- The computers are played by the soak itself: it puts itself on the manager's `PATH` as `ssh`, and started that way
+  it is the node of the host asked for (`node.go`): 10 computers with 50 sessions each by default, one of them starting
+  or ending a turn every 2 s on each computer (`-machines`, `-sessions`, `-interval`). 20 WebSocket connections play
+  apps left open (`-clients`). Nodes answer every other call with `{}`: transcripts, screens and cards are not played.
+- The measured programs are the ones that ship, plus a sampler laid over `cmd/personad` at build time
+  (`go build -overlay`, `sampler.go`): every five seconds it appends the runtime's allocation and GC counters and the
+  process's CPU time to `<out>/stats/<role>-<pid>.jsonl`. The window starts after `-warmup` (a minute) and is cut into
+  whole minutes; steady numbers have their min and max close to the median.
+- The manager refreshes the official market first, as a hub in use has it (the report says how many catalog entries
+  it got; without the network the catalog is empty and the channel list cheaper than in use).
+- `<out>` also has `report.md` and `report.json`, the hub's log, CPU and allocation profiles of the window
+  (`stats/*.pprof`) and what `go tool pprof -top` says of them (`manager-alloc-cum.txt`, `manager-cpu-cum.txt`, the
+  hub's beside them).
+- Allocation per minute repeats within about a percent from run to run. CPU time moves with whatever else the
+  machine does: note the load average the report prints, alternate base and head, and rerun when it was high.
+- It ends with one line: `PASS`, `FAIL` or `TIMEOUT`.
+
 ## Live Activity screenshots (`LiveActivityShots`)
 
 `simctl io screenshot` doesn't capture Dynamic Island/lock-screen activities. `LiveActivityShots` uses `-showFleetSample` for fictional activity,

@@ -727,15 +727,51 @@ func (d *Devices) Reconnect(id string) error {
 func (d *Devices) List() []Summary {
 	out := []Summary{}
 	for _, m := range d.machinesNow() {
-		m.mu.Lock()
-		s := Summary{ID: m.cfg.ID, Name: m.name(), Kind: m.cfg.Kind, SSHHost: m.cfg.SSHHost, Home: m.info.Home,
-			DataDir: m.info.DataDir, Online: m.online}
-		m.mu.Unlock()
-		s.Trust = d.machineTrust(m)
-		s.Reachable = m.reachable()
-		out = append(out, s)
+		out = append(out, d.summaryOf(m))
 	}
 	return out
+}
+
+// summaryOf is one machine as List has it.
+func (d *Devices) summaryOf(m *Machine) Summary {
+	m.mu.Lock()
+	s := Summary{ID: m.cfg.ID, Name: m.name(), Kind: m.cfg.Kind, SSHHost: m.cfg.SSHHost, Home: m.info.Home,
+		DataDir: m.info.DataDir, Online: m.online}
+	m.mu.Unlock()
+	s.Trust = d.machineTrust(m)
+	s.Reachable = m.reachable()
+	return s
+}
+
+// Summary is List's entry for the machine id names (an entry another one absorbed: that one's), false when List has
+// none: the first listed machine with Canonical(id) as its id, found without the summaries of the others (their trust
+// reads every path's configuration). The fleet asks for one machine on every list a node sends.
+func (d *Devices) Summary(id string) (Summary, bool) {
+	m := d.listed(d.Canonical(id))
+	if m == nil {
+		return Summary{}, false
+	}
+	return d.summaryOf(m), true
+}
+
+// listed is the first of machinesNow with this id, read in place rather than from a copy of the list; nil when none
+// has it.
+func (d *Devices) listed(id string) *Machine {
+	f := &d.fleet
+	f.mu.Lock()
+	order := f.order // replaced whole by a regroup, never written into
+	f.mu.Unlock()
+	if order == nil {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		order = d.entries
+	}
+	for _, m := range order {
+		if m.cfg.ID == id {
+			return m
+		}
+	}
+	return nil
 }
 
 // View is one machine with what its node said of itself (node.info), and its sessions as the node listed them.
