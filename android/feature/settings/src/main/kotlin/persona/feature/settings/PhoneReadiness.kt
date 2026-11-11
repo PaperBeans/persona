@@ -21,7 +21,29 @@ internal data class ReadyItem(val id: String, val title: String, val detail: Str
 internal val appDetails = SettingsTarget(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri = true)
 internal val notificationSettings = SettingsTarget(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
 
-fun detectedPhoneSystem(): SystemKind = PhoneReadiness.system()
+/**
+ * The phone's system, worked out once per system build (#4041). [PhoneReadiness.system] starts up to six `getprop`
+ * processes one after another, and the connection asks for it while the app's process starts, with the main thread
+ * waiting. Every system update changes [Build.FINGERPRINT], and with it the answer.
+ */
+fun detectedPhoneSystem(context: Context): SystemKind {
+    val preferences = context.getSharedPreferences("phone-system", Context.MODE_PRIVATE)
+    return cachedPhoneSystem(preferences.getString("system", null), Build.FINGERPRINT.orEmpty(), PhoneReadiness::system) {
+        preferences.edit().putString("system", it).apply()
+    }
+}
+
+/** [stored] when it was written for [fingerprint]; otherwise [detect], kept through [store]. */
+internal fun cachedPhoneSystem(stored: String?, fingerprint: String, detect: () -> SystemKind, store: (String) -> Unit): SystemKind {
+    val parts = stored?.split('\n')
+    if (fingerprint.isNotEmpty() && parts?.size == 4 && parts[0] == fingerprint && parts[1].isNotBlank())
+        return SystemKind(parts[1], parts[2], parts[3])
+    val system = detect()
+    // A value with a line break in it is not kept: it is detected again next time, as before.
+    val fields = listOf(fingerprint, system.name, system.version, system.property)
+    if (fingerprint.isNotEmpty() && fields.none { '\n' in it }) store(fields.joinToString("\n"))
+    return system
+}
 
 internal object PhoneReadiness {
     // The names are ids: sent to the hub as the phone's OS and matched below; [systemName] is what a page shows.

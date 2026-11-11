@@ -16,6 +16,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import android.content.res.Resources
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -248,23 +251,35 @@ fun ExtensionCatalogPage(
                 onRetry = { scope.launch { model.retry() } }, onClose = { scope.launch { model.closeOperation() } },
                 onReview = { scope.launch { model.review() } }) })
     }
+    // A pack being installed: its members already here, by name (#4122).
+    val previewNames = rememberExtensionNames(api, state.preview?.manifest?.extensionPack?.isNotEmpty() == true)
     state.preview?.let { preview ->
-        PreviewSheet(extension, preview, busy = state.acting, onDismiss = { scope.launch { model.dismissPreview() } },
+        PreviewSheet(extension, preview, busy = state.acting, onDismiss = { scope.launch { model.dismissPreview() } }, installedNames = previewNames,
             onConfirm = { scope.launch { model.confirm()?.let { feedback?.notice(it) } } },
             onPreviewAgain = { scope.launch { model.previewAgain() } })
     }
-    if (removing && extension != null) UninstallDialog(extension.label, onDismiss = { removing = false }, installedVersion = extension.installed) { keep ->
+    // A pack's members, read from the installed extension when its removal is asked (the catalog doesn't list them, #1154).
+    var packMembers by remember { mutableStateOf(emptyList<String>()) }
+    LaunchedEffect(removing) {
+        if (removing) packMembers = try { api.extension(extensionId).extensionPack.map { it.id } }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { emptyList() }
+    }
+    // Read only for a pack: an extension with no members needs no names.
+    val names = rememberExtensionNames(api, removing && packMembers.isNotEmpty() || state.partial != null)
+    if (removing && extension != null) UninstallDialog(extension.label, onDismiss = { removing = false }, installedVersion = extension.installed,
+        members = names.named(packMembers)) { keep, members ->
         removing = false
-        scope.launch { if (model.uninstall(keep)) feedback?.notice(res.getString(R.string.settings_ext_uninstalled, extension.label)) }
+        scope.launch { if (model.uninstall(keep, members = members)) feedback?.notice(ExtensionText.uninstalled(res, extension.label, members, model.removal)) }
     }
     // Others depend on it (#5611): asked as on its own page, then removed with them switched off.
     state.cascade?.let { ask ->
         val name = extension?.label ?: extensionId
         JDialog({ model.dismissCascade() }, title = stringResource(R.string.settings_ext_dependents_title), text = ExtensionText.cascade(res, ask, name),
             destructive = true, confirm = stringResource(R.string.settings_ext_dependents_remove) to {
-                scope.launch { if (model.confirmCascade()) feedback?.notice(res.getString(R.string.settings_ext_uninstalled, name)) }
+                scope.launch { if (model.confirmCascade()) feedback?.notice(ExtensionText.uninstalled(res, name, ask.members, model.removal)) }
             })
     }
+    state.partial?.let { PackPartialDialog(it, extension?.label ?: extensionId, names) { model.dismissPartial() } }
 }
 
 private fun LazyListScope.catalogExtensionBody(
@@ -358,6 +373,8 @@ private fun Tags(tags: List<String>) {
 internal fun PreviewSheet(
     extension: CatalogExtension?, preview: ExtensionPreview, busy: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit,
     modifier: Modifier = Modifier, onPreviewAgain: () -> Unit = {}, now: () -> Instant = Instant::now,
+    /** The installed extensions' names, for a pack's members (#4122). */
+    installedNames: Map<String, String> = emptyMap(),
 ) {
     val name = preview.manifest?.name?.takeIf { it.isNotBlank() } ?: extension?.label ?: preview.manifest?.id.orEmpty()
     val more = CatalogText.asksForMore(preview)
@@ -373,7 +390,7 @@ internal fun PreviewSheet(
                 JInlineStatus(stringResource(R.string.settings_ext_more_permissions), tone = InlineTone.Caution)
                 PermissionList(stringResource(R.string.settings_ext_added), preview.addedPermissions.orEmpty())
             }
-            BundlePreview(preview)
+            BundlePreview(preview, installedNames)
             PermissionList(stringResource(if (preview.upgrade) R.string.settings_ext_it_can_after_upgrade else R.string.settings_ext_it_can), preview.permissions)
             preview.warnings.orEmpty().forEach { JInlineStatus(it, tone = InlineTone.Caution) }
             SettingsCaption(stringResource(R.string.settings_ext_preview_note) +
@@ -421,21 +438,62 @@ internal fun PermissionList(title: String, permissions: List<ExtensionPermission
  * web: a plain "Remove" loses nothing a reinstall could pick up again). The market's page and the extension's own share it.
  */
 @Composable
-internal fun UninstallDialog(name: String, onDismiss: () -> Unit, installedVersion: String? = null, onConfirm: (Boolean) -> Unit) {
+internal fun UninstallDialog(
+    name: String, onDismiss: () -> Unit, installedVersion: String? = null,
+    /** A pack's members (#1154): offered to go with it, off by default so they stay. */
+    members: List<String> = emptyList(),
+    onConfirm: (keepData: Boolean, members: Boolean) -> Unit,
+) {
     var keep by remember { mutableStateOf(true) }
+    var withMembers by remember { mutableStateOf(false) }
     val version = installedVersion?.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_extension_missing)
     val text = stringResource(R.string.settings_extension_remove_version, version) + "\n\n" + stringResource(R.string.settings_ext_uninstall_text)
     JDialog(onDismiss, title = stringResource(R.string.settings_ext_uninstall_title, name), text = text,
-        confirm = stringResource(R.string.settings_ext_uninstall) to { onConfirm(keep) }, destructive = true) {
-        Row(Modifier.fillMaxWidth().padding(top = Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
-            JCheckbox(keep, { keep = it })
-            Column(Modifier.padding(start = Tokens.Space.s)) {
-                Text(stringResource(R.string.settings_ext_keep_data), style = PersonaTheme.type.body, color = PersonaTheme.palette.ink)
-                Text(stringResource(R.string.settings_ext_keep_data_hint), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
-            }
+        confirm = stringResource(R.string.settings_ext_uninstall) to { onConfirm(keep, withMembers && members.isNotEmpty()) }, destructive = true) {
+        UninstallChoice(keep, { keep = it }, stringResource(R.string.settings_ext_keep_data), stringResource(R.string.settings_ext_keep_data_hint), "uninstall-keep-data")
+        if (members.isNotEmpty()) UninstallChoice(withMembers, { withMembers = it }, stringResource(R.string.settings_ext_uninstall_members),
+            stringResource(R.string.settings_ext_uninstall_members_hint, members.joinToString(stringResource(R.string.settings_ext_list_separator))),
+            "uninstall-members")
+    }
+}
+
+@Composable
+private fun UninstallChoice(checked: Boolean, onChange: (Boolean) -> Unit, title: String, hint: String, tag: String) {
+    // The whole line toggles it, and TalkBack reads it as one checkbox.
+    Row(Modifier.fillMaxWidth().padding(top = Tokens.Space.s).toggleable(checked, role = Role.Checkbox, onValueChange = onChange).testTag(tag),
+        verticalAlignment = Alignment.CenterVertically) {
+        JCheckbox(checked, null)
+        Column(Modifier.padding(start = Tokens.Space.s)) {
+            Text(title, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink)
+            Text(hint, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
         }
     }
 }
+
+/** A pack's uninstall that stopped part way (#1154): what went, what didn't and why, what wasn't tried; nothing is put back. */
+@Composable
+internal fun PackPartialDialog(partial: PackPartial, name: String, names: Map<String, String> = emptyMap(), onDismiss: () -> Unit) {
+    val res = LocalResources.current
+    JDialog(onDismiss, title = stringResource(R.string.settings_ext_partial_title), text = ExtensionText.partial(res, partial, name, names),
+        confirm = stringResource(persona.core.designsystem.R.string.designsystem_done) to onDismiss, dismiss = null)
+}
+
+/**
+ * The installed extensions' names by id, read while [active]: a pack's members show by name, as everything else in the
+ * app does (#1154); one not installed (or a list that couldn't be read) keeps its id.
+ */
+@Composable
+internal fun rememberExtensionNames(api: ExtensionManagement, active: Boolean): Map<String, String> {
+    var names by remember(api) { mutableStateOf(emptyMap<String, String>()) }
+    LaunchedEffect(api, active) {
+        if (active) names = try { api.extensions().associate { it.id to it.name.ifBlank { it.id } } }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { names }
+    }
+    return names
+}
+
+/** [ids] by their names in this map, their ids when unknown. */
+internal fun Map<String, String>.named(ids: List<String>): List<String> = ids.map { this[it] ?: it }
 
 /** "Manage markets": the markets the hub reads; add (an address, a token if private), refresh, change the token, remove. */
 @Composable

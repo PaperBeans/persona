@@ -92,6 +92,7 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "agents", group: "Codex", anchor: "settings-codex" },
   { tab: "agents", group: "Antigravity", anchor: "settings-agy" },
   { tab: "agents", group: "omp", anchor: "settings-omp" },
+  { tab: "knowledge", group: t("settings-knowledge.topics_title"), anchor: "knowledge-topics" },
   { tab: "knowledge", group: t("settings-knowledge.items"), anchor: "knowledge-items" },
   { tab: "knowledge", group: t("settings-knowledge.messages"), anchor: "knowledge-messages" },
   { tab: "knowledge", group: t("settings-knowledge.docs"), anchor: "knowledge-docs" },

@@ -67,20 +67,6 @@ data class ManagerRoster(
     /** Which manager an item stamped with [manager] belongs to: no stamp is the default manager's. */
     fun ownerOf(manager: String?): String = manager?.takeIf { it.isNotBlank() } ?: defaultManagerId
 
-    /**
-     * [items] by the manager they belong to ([managerOf]; no stamp is the default's): the installed managers in
-     * [installed]'s order, empty groups left out; items of a manager the roster does not list (deleted, still
-     * installing) come last, by their id. Null with one manager: nothing groups then.
-     */
-    fun <T> groups(items: List<T>, managerOf: (T) -> String?): List<ManagerGroup<T>>? {
-        if (!isMulti) return null
-        val byOwner = items.groupBy { ownerOf(managerOf(it)) }
-        val known = installed.mapNotNull { m -> byOwner[m.id]?.let { ManagerGroup(m.id, m, it) } }
-        val ids = installed.map { it.id }.toSet()
-        val others = byOwner.keys.filter { it !in ids }.sorted().map { id -> ManagerGroup(id, manager(id), byOwner.getValue(id)) }
-        return known + others
-    }
-
     companion object {
         /** The hub's own assistant's id: what an unstamped live update comes from. */
         const val ASSISTANT_MANAGER = "assistant"
@@ -116,9 +102,6 @@ data class CurrentAssistant(
     /** What waits for the user at the other assistants ([ManagerRoster.waiting]'s tally): the dot on the sidebar's button. */
     fun othersWaiting(waiting: Map<String, Int>): Boolean = waiting.any { (manager, count) -> count > 0 && manager != id }
 }
-
-/** One manager's share of a list; [manager] is null for an id the roster does not list. */
-data class ManagerGroup<T>(val id: String, val manager: HubManager?, val items: List<T>)
 
 /**
  * The current assistant: the manager every page shows (docs/assistant/managers.md "Clients"), picked in the sidebar's

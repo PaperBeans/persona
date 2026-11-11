@@ -224,8 +224,10 @@ struct TodosView: View {
     }
 
     private func todoRow(_ todo: TodoItem, triage: TodoTriage?) -> some View {
-        NavigationLink(value: TodoDetailRoute(id: todo.id)) {
-            TodoRow(todo: todo, triage: triage, onToggleDone: { store.toggleDone(todo) },
+        // a failed start waiting on the owner reads open: its checkbox and swipe close it (#3713)
+        let open = TodoTriageLogic.checksAsOpen(todo, triage)
+        return NavigationLink(value: TodoDetailRoute(id: todo.id)) {
+            TodoRow(todo: todo, triage: triage, onToggleDone: { store.toggleDone(todo, done: open) },
                     onRestore: triage?.section == .shelved ? { restore(todo) } : nil)
         }
         .swipeActions(edge: .leading) {
@@ -236,16 +238,16 @@ struct TodosView: View {
                     Label("Restore", systemImage: Theme.Icon.restoreShelved)
                 }
                 .tint(Theme.accent)
-            } else if todo.isDone {
+            } else if !open {
                 Button {
-                    store.toggleDone(todo)
+                    store.toggleDone(todo, done: false)
                 } label: {
                     Label("Reopen", systemImage: Theme.Icon.undo)
                 }
                 .tint(Theme.accent)
             } else {
                 Button {
-                    store.toggleDone(todo)
+                    store.toggleDone(todo, done: true)
                 } label: {
                     Label("Done [Extension System Presentation c0b3fb]", systemImage: Theme.Icon.done)
                 }
@@ -376,12 +378,15 @@ struct TodoRow: View {
         let urgent = TodosLogic.mostUrgentAgent(todo, lookup: lookup)
         let activeAgents = todo.agents.filter { $0.releasedAt == nil }
         let ultracode = Ultracode.todoShown(todo, lookup: lookup)
+        // a failed start waiting on the owner reads open, not done, and says why in red (#3713, DESIGN_SYSTEM 5.6)
+        let shownDone = !TodoTriageLogic.checksAsOpen(todo, triage)
+        let failedOpen = !shownDone && todo.failedToStart
 
         HStack(alignment: .top, spacing: Theme.Space.m) {
             Button(action: onToggleDone) {
-                ThemedIcon(todo.isDone ? Theme.Icon.successFilled : Theme.Icon.unchecked)
+                ThemedIcon(shownDone ? Theme.Icon.successFilled : Theme.Icon.unchecked)
                     .font(Theme.Font.title)
-                    .foregroundStyle(todo.isDone ? Theme.positive : .secondary)
+                    .foregroundStyle(shownDone ? Theme.positive : .secondary)
             }
             .buttonStyle(.plain)
             .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
@@ -390,8 +395,8 @@ struct TodoRow: View {
                 HStack(alignment: .firstTextBaseline) {
                     UltracodeMark.after(todo.title, on: ultracode, font: Theme.Font.labelStrong)
                         .font(Theme.Font.bodyStrong)
-                        .foregroundStyle(todo.isDone ? Color.secondary : Color.primary)
-                        .strikethrough(todo.isDone)
+                        .foregroundStyle(shownDone ? Color.secondary : Color.primary)
+                        .strikethrough(shownDone)
                         .lineLimit(2)
                         .animation(UltracodeMark.motion, value: ultracode)
                     Spacer(minLength: Theme.Space.xs)
@@ -450,7 +455,12 @@ struct TodoRow: View {
                     .accessibilityIdentifier("todos.restore")
                 }
 
-                if let reason = todo.closedReason {
+                if failedOpen, let error = todo.startError {
+                    Text("Failed to start: \(error)")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.danger)
+                        .lineLimit(2)
+                } else if let reason = todo.closedReason {
                     Text(reason)
                         .font(Theme.Font.caption)
                         .foregroundStyle(.secondary)

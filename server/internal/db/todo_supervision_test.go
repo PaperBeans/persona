@@ -53,6 +53,22 @@ func TestTodoSupervision(t *testing.T) {
 	if list, _ = d.ListTodoSupervision(ctx); len(list) != 1 || list[0].AutoReview != nil {
 		t.Fatalf("after a write without a run: %+v", list)
 	}
+	// The work stopped on the owner's decision (#1277): kept, then cleared.
+	r.Waits = json.RawMessage(`{"work":"2026-11-11T08:00:00Z","at":"2026-11-11T09:00:00Z","reason":"等用户挑一版"}`)
+	if err := d.PutTodoSupervision(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	var wait struct{ Reason string }
+	if list, _ = d.ListTodoSupervision(ctx); len(list) != 1 || json.Unmarshal(list[0].Waits, &wait) != nil || wait.Reason != "等用户挑一版" {
+		t.Fatalf("waits = %+v", list)
+	}
+	r.Waits = nil
+	if err := d.PutTodoSupervision(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = d.ListTodoSupervision(ctx); len(list) != 1 || list[0].Waits != nil {
+		t.Fatalf("after the wait cleared: %+v", list)
+	}
 	if err := d.PutTodoSupervision(ctx, TodoSupervisionRow{TodoID: "nope", Supervisor: "main", UpdatedAt: now}); !errors.Is(err, ErrTodoNotFound) {
 		t.Fatalf("missing todo: %v", err)
 	}

@@ -479,6 +479,14 @@ func (r *Registry) conflictsCandidates(m *Manifest, candidates []*Manifest) erro
 			}
 		}
 	}
+	// A reference names one provider by its scheme, so two installed extensions cannot both claim one.
+	for _, scheme := range m.Schemes() {
+		for otherID, other := range owners {
+			if otherID != m.ID && slices.Contains(other.Schemes(), scheme) {
+				errs = append(errs, fmt.Errorf("secret_providers: the scheme %q is already extension %s's", scheme, otherID))
+			}
+		}
+	}
 	return errors.Join(errs...)
 }
 

@@ -84,6 +84,12 @@ class NotificationPolicyTest {
         assertEquals("alert", NotificationPolicy.channel(NotifyEvent("alert", "machine", "session")))
         assertEquals(Notifier.CH_DONE, NotificationPolicy.channel(NotifyEvent("done", "machine", "session")))
         assertEquals(Notifier.CH_DONE, NotificationPolicy.channel(NotifyEvent("reply", "machine", "session")))
+        // As the hub sends it (#4035): decoding used to turn "reply" into "unknown", which posts nothing.
+        for ((kind, channel) in listOf("reply" to Notifier.CH_DONE, "done" to Notifier.CH_DONE, "assistant" to Notifier.CH_ASSISTANT, "alert" to "alert")) {
+            val wire = persona.core.contracts.ServerEvent.decode(
+                """{"type":"notify","kind":"$kind","machine_id":"machine","session_id":"session","title":"t","body":"b"}""") as NotifyEvent
+            assertEquals(kind, channel, NotificationPolicy.channel(wire))
+        }
         assertEquals(Notifier.CH_ASSISTANT, NotificationPolicy.channel(NotifyEvent("assistant", "machine", "session")))
         assertNull(NotificationPolicy.channel(NotifyEvent("interaction", "machine", "session")))
         assertNull(NotificationPolicy.channel(NotifyEvent("unknown", "machine", "session")))

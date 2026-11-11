@@ -9,6 +9,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -78,6 +82,29 @@ class HttpKnowledgeRepository(
         val body = JsonCodec.encodeToString(KnowledgeUpdate.serializer(), update)
         val request = Request.Builder().url(url("kb", kind.wire, id).withRequestManager()).header("Authorization", "Bearer $token")
             .put(body.toRequestBody("application/json".toMediaType())).build()
+        http.newCall(request).awaitResponse().use { response ->
+            checkScope()
+            if (!response.isSuccessful) throw HubFailure.from(response)
+        }
+    }
+
+    override suspend fun makeMinutes(id: String) = post(url("recordings", recording(id), "minutes"), null)
+
+    override suspend fun addMinutesTodos(id: String, version: Int, actions: List<String>) {
+        require(actions.isNotEmpty())
+        post(url("recordings", recording(id), "minutes", "todos"), buildJsonObject {
+            put("version", JsonPrimitive(version))
+            put("actions", JsonArray(actions.map(::JsonPrimitive)))
+        })
+    }
+
+    private fun recording(id: String) = id.also { require(it.isNotBlank() && it != "." && it != "..") }
+
+    /** A write to the knowledge base's recordings: its answer isn't needed, the page reads the recording back. */
+    private suspend fun post(url: HttpUrl, body: JsonObject?) {
+        checkScope()
+        val request = Request.Builder().url(url.withRequestManager()).header("Authorization", "Bearer $token")
+            .post((body?.toString() ?: "{}").toRequestBody("application/json".toMediaType())).build()
         http.newCall(request).awaitResponse().use { response ->
             checkScope()
             if (!response.isSuccessful) throw HubFailure.from(response)

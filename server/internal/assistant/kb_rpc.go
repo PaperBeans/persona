@@ -39,7 +39,7 @@ func kbInvalidParams(method, message string) error {
 
 func kbRPCKind(kind string) bool {
 	switch kind {
-	case kb.KindProject, kb.KindChat, kb.KindPerson, kb.KindDoc, kb.KindMeeting, kb.KindEvent, kb.KindRecording:
+	case kb.KindProject, kb.KindChat, kb.KindPerson, kb.KindDoc, kb.KindMeeting, kb.KindEvent, kb.KindRecording, kb.KindTopic:
 		return true
 	}
 	return false

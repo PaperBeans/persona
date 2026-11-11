@@ -64,6 +64,10 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
     /// At rest the strip is on the shell's page anyway.
     private func opensMenu(_ value: AppTab) -> Bool {
         guard chosen == value else { return false }
+        // No menu to open (the switch over a phone's tabs, iPhone Duo open, #3680): the chosen segment is a plain button,
+        // not an empty menu that VoiceOver called List Options.
+        if value == .chats, WorkMenu.self == EmptyView.self { return false }
+        if value == .assistant, ChatMenu.self == EmptyView.self { return false }
         guard let pager = shell?.pager else { return true }
         return !pager.moving
     }

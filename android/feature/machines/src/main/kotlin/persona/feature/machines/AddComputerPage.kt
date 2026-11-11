@@ -16,6 +16,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import persona.core.contracts.Machine
 import persona.core.contracts.api.ComputerCode
 import persona.core.contracts.api.ComputerOs
@@ -44,7 +47,10 @@ internal fun AddComputerPage(api: ComputerPairing?, machines: StateFlow<List<Mac
     val assistant = currentAssistant()
     val offline = assistant.offlineForAdding()
     val scope = rememberCoroutineScope()
-    LaunchedEffect(model) { model.run() }
+    // Only while the page is shown: a hidden tab, the app in the background or the screen off asks the hub nothing.
+    // Back in front, the countdown catches up at once and the next read finds a computer that joined meanwhile.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(model, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { model.tick(); model.run() } }
     val machine = state.machine(listed)
     val stage = state.stage(listed)
     val shown = state.shown(machine)

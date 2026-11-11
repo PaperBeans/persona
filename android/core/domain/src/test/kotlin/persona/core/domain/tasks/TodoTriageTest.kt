@@ -230,6 +230,26 @@ class TodoTriageTest {
         assertEquals(1, r.open)
     }
 
+    /** spec/fixtures/triage/groups.json `failed_start_superseded_by_finished_work` (#3713). */
+    @Test
+    fun movesAFailedStartOutOfWaitingOnceItsRowsWorkFinished() {
+        val failed = todo("f1", title = "Deploy the self-hosted panel", doneAt = hoursAgo(1), startError = "no launcher", planId = "p1")
+        val done = todo("done1", title = "Panel: verify it on the hub", doneAt = hoursAgo(2), planId = "p1")
+        val other = todo("f2", title = "Rotate the backup keys", doneAt = hoursAgo(3), startError = "no launcher", planId = "p2")
+        val twin = todo("f3", title = "Rotate the backup keys", doneAt = hoursAgo(4), startError = "no launcher")
+        val list = listOf(failed, done, other, twin)
+        assertEquals(setOf("f1"), supersededFailedStarts(list))
+        val r = triageTodos(list, groupLookup, now, zone = zone)
+        assertEquals(listOf(listOf("done1", "f1")), r.rows(TriageSection.JustDone).map { g -> g.members.map { it.id } })
+        assertEquals(listOf(listOf("f2", "f3")), r.rows(TriageSection.Waiting).map { g -> g.members.map { it.id } })
+        assertEquals(2, r.open)
+        assertEquals(TodoBucket.Closed, failed.bucket(groupLookup, now, superseded = true))
+        assertEquals(TodoBucket.Open, failed.bucket(groupLookup, now))
+        // the checkbox: open while it waits on the owner, done once superseded
+        assertEquals(true, other.checksAsOpen(r.rows(TriageSection.Waiting)[0].triage["f2"]))
+        assertEquals(false, failed.checksAsOpen(r.rows(TriageSection.JustDone)[0].triage["f1"]))
+    }
+
     @Test
     fun listsQuietTasksOnThePageLeavesThemOutForABadge() {
         val list = listOf(todo("q", quiet = true))

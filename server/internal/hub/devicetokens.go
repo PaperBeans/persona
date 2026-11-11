@@ -477,6 +477,7 @@ func (h *Hub) revoked(id string) {
 			delete(h.wokeAt, deviceID)
 		}
 	}
+	delete(h.rings.devices, id) // its kept notify events (notifyring.go)
 	var gone []*client
 	for c := range h.clients {
 		if c.device == id {

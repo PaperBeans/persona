@@ -12,13 +12,12 @@
         <item quantity="one">%1$d hour ago</item>
         <item quantity="other">%1$d hours ago</item>
     </plurals>
-    <string name="designsystem_manager_chip_offline">%1$s, offline</string>
     <string name="designsystem_manager_offline_note">%1$s · %2$s</string>
     <string name="designsystem_manager_current">Current</string>
     <string name="designsystem_manager_others_waiting">Something is waiting for you at another assistant</string>
     <plurals name="designsystem_manager_waiting">
-        <item quantity="one">%1$d waiting for you</item>
-        <item quantity="other">%1$d waiting for you</item>
+        <item quantity="one">%1$d thing waiting for you</item>
+        <item quantity="other">%1$d things waiting for you</item>
     </plurals>
     <string name="designsystem_manager_spoken">%1$s, %2$s</string>
 </resources>

@@ -107,11 +107,11 @@ class AssistantSettingsEntriesTest {
             for (s in AppStyle.entries) for (night in listOf(false, true)) {
                 rule.runOnIdle { style = s; dark = night }
                 rule.waitForIdle()
-                // One navigation title ("助手资料", no longer the bare "助手") and, with several assistants, one switcher chip each (this page keeps its own). The deleted owner row added two more matches.
-                val switching = response !in listOf("no-roster", "single")
+                // One navigation title ("助手资料", no longer the bare "助手"), and no assistant picker of its own: the page is the
+                // current assistant's (the sidebar's switcher picks). The deleted owner row added two more matches.
                 rule.onAllNodesWithText("助手资料", useUnmergedTree = true).assertCountEquals(1)
-                rule.onAllNodesWithText("助手", useUnmergedTree = true).assertCountEquals(if (switching) 1 else 0)
-                rule.onAllNodesWithText("工作", useUnmergedTree = true).assertCountEquals(if (switching) 1 else 0)
+                rule.onAllNodesWithText("助手", useUnmergedTree = true).assertCountEquals(0)
+                rule.onAllNodesWithText("工作", useUnmergedTree = true).assertCountEquals(0)
                 val permission = rule.onAllNodesWithText("新会话默认权限").onLast()
                 if (response in listOf("claude", "codex")) permission.assertIsEnabled() else permission.assertIsNotEnabled()
                 val image = rule.onNodeWithTag("entry-shot").captureToImage().asAndroidBitmap()

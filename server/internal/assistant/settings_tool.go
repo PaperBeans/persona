@@ -83,6 +83,13 @@ func (s *Service) ownSettings() []ownSetting {
 				return minutesDaysLabel(s.lang(ctx), s.minutesDays(ctx)), nil
 			},
 			set: s.setMinutesDays},
+		{Setting: Setting{Key: "assistant.kb_topics", Title: "Organize knowledge points by topic", Actions: getSet,
+			About: "on (the default): the knowledge base pulls durable knowledge (concepts, decisions, practices, pitfalls, facts, open " +
+				"questions) out of the projects' timelines and the chats' summaries and files it by topic (kind topics), a few model calls " +
+				"a round on the knowledge base's model; off: no more calls, the topics already written stay",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.kbTopics(ctx)), nil },
+			set: s.setKBTopics},
 		{Setting: Setting{Key: "assistant.meeting_attendance_default", Title: "Persona in recorded meetings", Actions: getSet,
 			About: "the role a meeting recording on the phone pre-selects (the user can still change it when it starts): off (the " +
 				"default) only records and makes minutes afterwards; listener follows the meeting in a session and answers questions " +
@@ -257,7 +264,8 @@ var settingTitles = map[string]string{"assistant.notes": "title_notes", "assista
 	"assistant.recording_days": "title_recording_days", "assistant.done_needs_delivery": "title_done_needs_delivery",
 	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders",
 	"assistant.interject_background": "title_interject_background", "assistant.agent_tasks": "title_agent_tasks", "model_profiles.tiers": "title_model_tiers",
-	"assistant.meeting_attendance_default": "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days"}
+	"assistant.meeting_attendance_default": "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",
+	"assistant.kb_topics": "title_kb_topics"}
 
 // clipped is a value as the card shows it, in l.
 func clipped(l i18n.Lang, s string) string {
@@ -331,6 +339,13 @@ func (s *Service) setStartRequestedTasks(ctx context.Context, v json.RawMessage)
 		return i18n.T(l, "assistant-settings_tool.change_start_requested_tasks", i18n.Args{"before": before, "after": after})
 	}, func(v *Settings) **bool { return &v.StartRequestedTasks },
 		"assistant.start_requested_tasks is %v for plans from now on.")
+}
+
+func (s *Service) setKBTopics(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	return s.setBoolSetting(ctx, v, s.kbTopics, "assistant.kb_topics is unchanged", func(l i18n.Lang, before, after string) string {
+		return i18n.T(l, "assistant-settings_tool.change_kb_topics", i18n.Args{"before": before, "after": after})
+	}, func(v *Settings) **bool { return &v.KBTopics },
+		"assistant.kb_topics is %v from the knowledge base's next round on.")
 }
 
 func (s *Service) setRecordingDays(ctx context.Context, v json.RawMessage) (*ownChange, error) {

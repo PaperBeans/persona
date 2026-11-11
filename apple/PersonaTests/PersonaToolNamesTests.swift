@@ -25,9 +25,9 @@ struct PersonaToolNamesTests {
         ("mcp__persona__browser_look", "看浏览器"),
         ("mcp__persona__phone_calendar_events", "iPhone"),
         ("mcp__persona__mail_send", "邮件"),
-        // Other servers and bare names are untouched.
-        ("mcp__github__create_issue", "create_issue"),
-        ("agent_read", "agent_read"),
+        // Other servers read as "<Server> · <Tool>", unknown bare names in words (#2986).
+        ("mcp__github__create_issue", "GitHub · Create issue"),
+        ("agent_read", "Agent read"),
         ("ask_user", "提问"),
         ("AskUserQuestion", "提问"),
         ("Read", "读取"),

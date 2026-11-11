@@ -81,7 +81,8 @@ func matcher(query string) func(string) bool {
 // is not: a person's hashed identity hints (handles.json, handles.go), a connector's cursor (cursors/<source>.json),
 // history imports' progress (history/, history.go), the selection's bookkeeping (select/, a chat's retention.json),
 // the Moments verdicts of a project (moments-judged.json, moments_link.go) and recording undo snapshots mean nothing
-// to a model, and the hints are kept out of every tool and prompt. A meeting's live log (live.json, live.go) is never
+// to a model, and the hints are kept out of every tool and prompt. Nor are a topic's points.json and a source's
+// distill mark (.topics.json, topics.go). A meeting's live log (live.json, live.go) is never
 // searched: other people's words said while Persona attended, and the questions asked of it.
 func searchable(rel string) bool {
 	parts := strings.Split(filepath.ToSlash(rel), "/")
@@ -98,6 +99,10 @@ func searchable(rel string) bool {
 		return false
 	case len(parts) == 3 && parts[0] == KindProject && parts[2] == "moments-judged.json":
 		return false
+	case len(parts) == 3 && parts[0] == KindTopic && parts[2] == topicPointsFile:
+		return false // summary.md has the points' text; the candidates waiting in it are the model's, unchecked
+	case len(parts) == 3 && parts[2] == topicMarkFile:
+		return false
 	}
 	return true
 }
@@ -109,7 +114,7 @@ func entryOf(rel string) (kind, id string, ok bool) {
 		return "", "", false
 	}
 	switch parts[0] {
-	case KindChat, KindPerson, KindProject, KindRecording:
+	case KindChat, KindPerson, KindProject, KindRecording, KindTopic:
 		if len(parts) < 3 {
 			return "", "", false
 		}
@@ -139,6 +144,8 @@ func shown(kind, rel string) bool {
 		return kind == KindChat && ok && strings.HasSuffix(day, ".md") && !strings.Contains(day, "/")
 	case KindRecording:
 		return rest == "summary.md" || rest == "minutes.md" || rest == "transcript.md" || rest == "meta.json"
+	case KindTopic:
+		return rest == "summary.md" || rest == "meta.json"
 	case KindDoc, KindMeeting, KindEvent:
 		return true // entryOf already keeps only <kind>/<id>.json
 	}
@@ -211,7 +218,7 @@ func (e *Engine) Find(query string, limit int) []Result {
 	}
 	known := e.find.entries(metas, func() map[string]Entry {
 		known := map[string]Entry{}
-		for _, k := range []string{KindProject, KindChat, KindPerson, KindDoc, KindMeeting, KindEvent} {
+		for _, k := range []string{KindProject, KindChat, KindPerson, KindDoc, KindMeeting, KindEvent, KindTopic} {
 			for _, en := range e.List(k, "") {
 				known[k+"/"+en.ID] = en
 			}

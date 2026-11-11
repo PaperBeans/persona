@@ -39,7 +39,7 @@
     <string name="machines_onb_confirm">自分のもの</string>
     <string name="machines_onb_reject">違う、削除</string>
     <string name="machines_onb_confirmed">%1$sを追加しました</string>
-    <string name="machines_onb_confirmed_hint">マシン一覧に表示され、新しい Agent で選べます。</string>
+    <string name="machines_onb_confirmed_hint">マシン一覧に表示され、新しいエージェントで選べます。</string>
     <string name="machines_onb_rejected">「%1$s」を削除しました</string>
     <string name="machines_onb_gone">「%1$s」はもうありません</string>
     <string name="machines_onb_rejected_hint">使われたペアリングリンクも無効になりました。もう一度追加してください。</string>

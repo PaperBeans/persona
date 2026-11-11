@@ -39,7 +39,7 @@
     <string name="machines_onb_confirm">It\'s mine</string>
     <string name="machines_onb_reject">No, remove</string>
     <string name="machines_onb_confirmed">Added %1$s</string>
-    <string name="machines_onb_confirmed_hint">It\'s in the machine list now, and you can pick it for new Agents.</string>
+    <string name="machines_onb_confirmed_hint">It\'s in the machine list now, and you can pick it for new agents.</string>
     <string name="machines_onb_rejected">Removed \"%1$s\"</string>
     <string name="machines_onb_gone">\"%1$s\" is gone</string>
     <string name="machines_onb_rejected_hint">The pairing link it used no longer works. Add the computer again to try once more.</string>

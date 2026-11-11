@@ -51,6 +51,8 @@ type ExtensionDetail struct {
 	// another host deletes its key, docs/extensions/extensions.md "Built-in voice extension"; a line in Warnings says so too). An
 	// error answer carries it too when they went before the configuration could not be saved.
 	SecretsCleared []string `json:"secrets_cleared,omitempty"`
+	// SecretUsers: for a secret provider, the other extensions' secrets that hold its references (secret_refs.go).
+	SecretUsers []SecretUserView `json:"secret_users,omitempty"`
 	// DataDir is its data directory on the manager's machine, the one its program is given there (an attached package
 	// keeps it): for the master token over loopback and the admin UI only, never a device; none for one installed from
 	// remote:, one from hub.json or manager.json, or one with no program on the manager.
@@ -66,6 +68,8 @@ type ExtensionSecretView struct {
 	Set         bool   `json:"set"`
 	// Hint is a set secret's last four characters, when its spec asks (hint "last4", #5906); never more of it.
 	Hint string `json:"hint,omitempty"`
+	// Reference: the secret holds a reference, not a value (secret_refs.go); never a hint then.
+	Reference *SecretReferenceView `json:"reference,omitempty"`
 }
 
 // switched is the detail a switch answers, with what did not follow it (switchExtension).
@@ -114,15 +118,21 @@ func (ps *extensions) detail(ctx context.Context, p *extension.Extension) Extens
 			d.Config = json.RawMessage(`{}`)
 		}
 		set := ps.reg.SecretsSet(ctx, p)
-		var plain map[string]string // read only when a secret is shown by its end
+		var plain map[string]string // read when a secret is set: shown by its end, or a reference
 		for _, s := range m.Secrets {
-			if s.Hint != "" && set[s.Name] && plain == nil {
+			if set[s.Name] && plain == nil {
 				plain, _ = ps.reg.Secrets(ctx, p.Record.ID)
 			}
 			shown := p.L10n.Secret(l, s)
-			d.Secrets = append(d.Secrets, ExtensionSecretView{Name: s.Name, Title: shown.Title, Description: shown.Description, Required: s.Required, Set: set[s.Name],
-				Hint: extension.SecretHint(s, plain[s.Name])})
+			view := ExtensionSecretView{Name: s.Name, Title: shown.Title, Description: shown.Description, Required: s.Required, Set: set[s.Name]}
+			if ref, ok := extension.ReferenceOf(plain[s.Name]); ok {
+				view.Reference = ps.secretReferenceView(ctx, ref)
+			} else {
+				view.Hint = extension.SecretHint(s, plain[s.Name])
+			}
+			d.Secrets = append(d.Secrets, view)
 		}
+		d.SecretUsers = ps.secretUsers(ctx, p, l)
 	}
 	return d
 }
@@ -315,11 +325,25 @@ func (h *Manager) extensionRoutes(api *http.ServeMux) {
 	api.HandleFunc("PUT /api/v1/extensions/{id}/-/secrets/{name}", full(func(w http.ResponseWriter, r *http.Request, p *extension.Extension) {
 		var in struct {
 			Value string `json:"value"`
+			// Reference instead of a value (op://…): the owner's standing approval to hand this extension its value.
+			Reference string `json:"reference"`
 		}
 		if !readExtensionJSON(w, r, &in) {
 			return
 		}
-		if err := ps().reg.SetSecret(r.Context(), p.Record.ID, r.PathValue("name"), in.Value, actor(r)); err != nil {
+		set := func() error {
+			return ps().reg.SetSecret(r.Context(), p.Record.ID, r.PathValue("name"), in.Value, actor(r))
+		}
+		switch {
+		case in.Reference != "" && in.Value != "":
+			writeExtensionResponseError(w, r, http.StatusBadRequest, "invalid_secret", i18n.Err("extension-status.secret_value_or_reference"))
+			return
+		case in.Reference != "":
+			set = func() error {
+				return ps().reg.SetSecretReference(r.Context(), p.Record.ID, r.PathValue("name"), in.Reference, actor(r))
+			}
+		}
+		if err := set(); err != nil {
 			code := "invalid_secret"
 			if errors.As(err, new(keyNeedsURLError)) { // the voice extension's key is for an address (voice_extension.go)
 				code = "needs_url"

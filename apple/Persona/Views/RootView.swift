@@ -368,6 +368,18 @@ struct PageTabSwitchRow: View {
     }
 }
 
+/// The switch as a row over a page opened in Agents' split column on a phone's tabs. The column's stack has it as an
+/// inset (`SplitNavigation`), and that reached only its root page: an opened page covers the whole column, so the switch
+/// went as soon as an agent was opened, and nothing led back to Assistant (#3680). Only where it shows: everywhere else
+/// the page is left exactly as it was.
+struct PageTabSwitchInset: ViewModifier {
+    var shown: Bool
+
+    func body(content: Content) -> some View {
+        if shown { content.safeAreaInset(edge: .top, spacing: 0) { PageTabSwitchRow() } } else { content }
+    }
+}
+
 /// A phone's tabs (`pageTabSwitch`): no tab bar; the pages draw the switch.
 private struct PageTabSwitch: ViewModifier {
     func body(content: Content) -> some View {

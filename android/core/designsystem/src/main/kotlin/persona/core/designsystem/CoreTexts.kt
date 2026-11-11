@@ -7,7 +7,7 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.platform.LocalResources
 import persona.core.contracts.CoreText
 import persona.core.contracts.CoreTextFailure
-import persona.core.domain.lines.compactUnits
+import persona.core.contracts.compactCount
 
 /**
  * [CoreText] (the words of the pure-JVM core modules) in the language of [resources]. The strings live in
@@ -23,8 +23,8 @@ fun CoreText.resolve(resources: Resources): String {
         CoreText.Key.CompactCount -> {
             val count = (args.first() as Number).toLong()
             val unit = resources.getString(R.string.designsystem_core_compact_unit).toLong()
-            return if (count < unit) count.toString()
-                else resources.getString(R.string.designsystem_core_compact_count, compactUnits(count, unit))
+            return compactCount(count, unit, { resources.getString(R.string.designsystem_core_compact_count, it) },
+                { resources.getString(R.string.designsystem_core_compact_millions, it) })
         }
         else -> Unit
     }
@@ -421,6 +421,6 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.WorkflowFailed -> R.string.designsystem_core_workflow_failed
     CoreText.Key.WorkflowKilled -> R.string.designsystem_core_workflow_killed
     CoreText.Key.WorkflowStalled -> R.string.designsystem_core_workflow_stalled
-    CoreText.Key.WorkflowAgentsDone -> R.string.designsystem_core_workflow_agents_done
+    CoreText.Key.WorkflowAgentsDone -> -R.plurals.designsystem_core_workflow_agents_done
     CoreText.Key.Verbatim, CoreText.Key.Joined -> error("no resource")
 }

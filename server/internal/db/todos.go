@@ -210,8 +210,9 @@ type TodoEdit struct {
 }
 
 // Apply makes the edit to cur at the moment at: done stamps done_at (once), not done reopens it (reopened_at, no
-// longer failed); a reminder at another moment is to be pushed again. The store and the store-less memory both
-// change a todo with it.
+// longer failed); done on a failed start, which the hub closed itself and which waits on the owner, is the owner closing
+// it: no longer failed, done now by them (#3713). A reminder at another moment is to be pushed again. The store and the
+// store-less memory both change a todo with it.
 func (e TodoEdit) Apply(cur *TodoRow, at time.Time) {
 	if e.Title != nil {
 		cur.Title = *e.Title
@@ -221,8 +222,9 @@ func (e TodoEdit) Apply(cur *TodoRow, at time.Time) {
 	}
 	if e.Done != nil {
 		if *e.Done {
-			if cur.DoneAt == nil {
+			if cur.DoneAt == nil || cur.StartError != "" {
 				cur.DoneAt = &at
+				cur.StartError = ""
 				cur.DoneBy, cur.DoneReason = "", ""
 			}
 		} else {

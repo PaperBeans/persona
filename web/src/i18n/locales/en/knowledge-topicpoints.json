@@ -1,0 +1,15 @@
+{
+  "title": "Knowledge points",
+  "empty": "No knowledge points under this topic yet.",
+  "reason": "Why: {text}",
+  "cause": "Cause: {text}",
+  "source_title": "Open {name}",
+  "when": "Confirmed {day}",
+  "point_concept": "Concept",
+  "point_decision": "Decision",
+  "point_practice": "How to",
+  "point_pitfall": "Pitfall",
+  "point_fact": "Fact",
+  "point_question": "Open question",
+  "point_plain": "Point"
+}

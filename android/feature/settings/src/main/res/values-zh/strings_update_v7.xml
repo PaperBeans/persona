@@ -31,5 +31,4 @@
     <string name="settings_update_v7_system_failed">系统安装未完成，请重试。</string>
     <string name="settings_update_v7_native_title">默认打开原生聊天</string>
     <string name="settings_update_v7_native_subtitle">开启使用左右气泡聊天；关闭使用插件事件详情。下次打开事项时生效。</string>
-    <string name="settings_update_v7_native_section">收件箱</string>
 </resources>

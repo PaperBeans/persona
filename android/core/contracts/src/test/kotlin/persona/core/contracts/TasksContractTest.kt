@@ -40,6 +40,38 @@ class TasksContractTest {
         assertEquals("accepted", item.field("verdict"))
     }
 
+    /** A scheduled briefing must reach the feed renderer instead of decoding as an unknown item (#4053). */
+    @Test fun aBriefKeepsItsKind() {
+        val item = JsonCodec.decodeFromString<FeedItem>("""{"id":"brief1","kind":"brief","ref":"routine1",
+            "body":{"title":"Morning briefing","hours":12,"waiting":[],"done":[],"accept":[],"progress":[]}}""")
+        assertEquals("brief", item.kind)
+        assertEquals("Morning briefing", item.field("title"))
+        assertEquals(12, item.number("hours"))
+    }
+
+    @Test fun briefRowsDecodeIndependently() {
+        val item = JsonCodec.decodeFromString<FeedItem>("""{"id":"brief2","kind":"brief","body":{
+            "title":"Evening briefing","hours":12.0,"waiting_unknown":true,
+            "waiting":[{"id":"w1","title":"Answer?","waited_s":1.5,"machine_id":"box","session_id":"agent"},{"title":"missing id"},"bad"],
+            "done":[{"id":"d1","title":"Done"}],"done_total":0,
+            "accept":[{"id":"a1","outcome":"decide","recommend":"Canary"},{"id":"a2","outcome":"decide"},{"id":"a3","outcome":"done"}],
+            "later":[{"id":"l1","title":"Later"}],"later_total":3,
+            "progress":[{"id":"p1","stage":"future-stage","stage_kind":"code"}],"progress_total":2}}""")
+        val brief = item.brief ?: error("brief body missing")
+        assertEquals("Evening briefing", brief.title)
+        assertEquals(12, brief.hours)
+        assertTrue(brief.waitingUnknown)
+        assertEquals(listOf("w1"), brief.waiting.map { it.id })
+        assertEquals(2, brief.waiting.single().waitedS)
+        assertEquals(SessionKey("box", "agent"), brief.waiting.single().chat(waiting = true, pending = emptyList()))
+        assertEquals(1, brief.doneTotal)
+        assertEquals(listOf(BriefTake.Recommendation, null, BriefTake.GotIt), brief.accept.map { it.take })
+        assertEquals(2, brief.laterMore)
+        assertEquals("future-stage", brief.progress.single().stage)
+        assertEquals("code", brief.progress.single().stageKind)
+        assertEquals(1, brief.progressMore)
+    }
+
     /** Reports retain their original body and evidence metadata; presentation does not alter the wire record. */
     @Test fun aReportKeepsItsBodyAndEvidence() {
         val raw = """{"id":"report1","conversation":"main","kind":"report","ref":"task1","body":{

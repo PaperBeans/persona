@@ -127,10 +127,16 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		return "", fmt.Errorf("task %s is not supervised: send what is missing to its agent with agent_send, or ask the user in your answer", t.ID)
 	}
 	over, refused := false, false
-	judgedDone := false // it was waiting for review: the judge had found it done
+	var waiting *OwnerWait // accepted while the work stopped on the owner's decision: refused, nothing written (#1277)
+	judgedDone := false    // it was waiting for review: the judge had found it done
 	var v Supervision
 	if ledger {
 		v, _, err = s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
+			if verdict == reviewAccepted && t.DoneAt == nil && v.Waits != nil {
+				w := *v.Waits
+				waiting = &w
+				return false
+			}
 			judgedDone = v.State == reviewPending
 			if isMain && !s.isLeader(ctx, v.Supervisor) && !s.isLeaderRef(v.Supervisor) {
 				v.Supervisor = self // the main conversation takes over an old main conversation's task, not a leader's
@@ -153,7 +159,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 				v.Round++
 				r.Round = v.Round
 			}
-			v.State = verdict
+			v.State, v.Waits = verdict, nil // reviewed: the supervisor answered what the judge found
 			v.Reviews = append(v.Reviews, r)
 			if len(v.Reviews) > 20 {
 				v.Reviews = v.Reviews[len(v.Reviews)-20:]
@@ -166,6 +172,9 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 	}
 	if refused {
 		return "", reworkOverError(t.ID)
+	}
+	if waiting != nil {
+		return "", ownerWaitError(t.ID, waiting)
 	}
 	if a.Verdict == reviewRework { // after the judge's done, a wrong "done" in the work stats (agents_work_wrong_done.go)
 		s.workEvent("", "", reviewReworkEvent, map[string]any{"todo": t.ID, "judged_done": judgedDone})
@@ -468,6 +477,20 @@ func (s *Service) sendToTask(ctx context.Context, t Todo, text string) (string, 
 		return "", err
 	}
 	return "sent to the agent", nil
+}
+
+// ownerWaitError refuses accepting task id while its latest stretch of work stopped on a decision only the owner can
+// make (OwnerWait, #1277): closing it would drop the decision, the way a task whose drafts wait for the owner to pick one
+// was once accepted as done.
+func ownerWaitError(id string, w *OwnerWait) error {
+	why := ""
+	if w.Reason != "" {
+		why = fmt.Sprintf(" (the done judge: %q)", w.Reason)
+	}
+	return fmt.Errorf("task %s stopped on a decision only the owner can make%s: accepting it would close the task and lose "+
+		"that decision. Review it needs_user as a decision they can answer (why_owner, reason, recommend, options, "+
+		"cost_of_waiting); if the owner already decided, send their answer to its agent with agent_send and review the "+
+		"work it does next; or cancelled when it is no longer wanted", id, why)
 }
 
 // reworkOverError refuses a rework past maxReworkRounds that states no decision: the task goes to the owner only as a

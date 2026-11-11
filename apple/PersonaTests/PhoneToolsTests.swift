@@ -275,6 +275,7 @@ struct PhoneToolsTests {
             "phone_alarm_cancel",
             "phone_call_start",
             "phone_shortcuts_register",
+            "phone_music_create_playlist",
             "phone_home_control",
             "phone_home_run_scene",
         ])

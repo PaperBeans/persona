@@ -5,6 +5,9 @@ import persona.core.contracts.api.CatalogExtension
 import persona.core.contracts.api.ExtensionCatalog
 import persona.core.contracts.api.ExtensionDetail
 import persona.core.contracts.api.ExtensionHasDependents
+import persona.core.contracts.api.ExtensionFailedMember
+import persona.core.contracts.api.ExtensionPartialUninstall
+import persona.core.contracts.api.ExtensionRemoval
 import persona.core.contracts.api.ExtensionMarket
 import persona.core.contracts.api.ExtensionMarkets
 import persona.core.contracts.api.ExtensionOperation
@@ -229,6 +232,8 @@ internal data class CatalogExtensionState(
     val consentFor: String? = null,
     /** The removal was refused for its enabled dependents (`has_dependents`, #5611): asked before going on with `cascade`. */
     val cascade: ExtensionCascade? = null,
+    /** The pack's members were partly uninstalled (#1154): said in a dialog. */
+    val partial: PackPartial? = null,
 ) {
     val busy: Boolean get() = loading || previewing || acting || operation?.active == true
 }
@@ -251,8 +256,12 @@ internal class CatalogExtensionModel(
     private var onDone: (String) -> Unit = {}
     /** Opens the installed extension's sign-in (an operation that succeeded with `next: auth`, #4507). */
     private var onSignIn: (String) -> Unit = {}
-    /** The removal in steps this page started and its keepData, until it ends (kept when refused, for Retry). */
-    private var removing: Pair<String, Boolean>? = null
+    /** The removal in steps this page started and its options, until it ends (kept when refused, for Retry). */
+    private var removing: Removal? = null
+    private data class Removal(val operation: String, val keepData: Boolean, val members: Boolean)
+    /** What the last uninstall that went through at once removed (its members, #1154). */
+    var removal: ExtensionRemoval? = null
+        private set
 
     /** The hub runs installs in steps; asked when something starts (a hub without the flag: no). */
     private suspend fun stepped(): Boolean = try {
@@ -280,7 +289,7 @@ internal class CatalogExtensionModel(
 
     /** An operation the manager does not know (any more): nothing to wait for, cancel or retry. */
     private fun gone(op: ExtensionOperation) {
-        if (removing?.first == op.id) removing = null
+        if (removing?.operation == op.id) removing = null
         mutable.update {
             if (it.operation?.id != op.id) it
             else it.copy(operation = null, consentFor = if (it.consentFor == op.id) null else it.consentFor,
@@ -300,11 +309,15 @@ internal class CatalogExtensionModel(
         // One that ended before the page knew it is not news; a failed one still shows where it stopped.
         if (was?.id != op.id && !op.active && !op.failed) return
         val refused = op.failed && op.kind == "uninstall" && op.errorCode == "has_dependents"
-        if (!op.active && !refused && removing?.first == op.id) removing = null
+        val asked = removing?.takeIf { it.operation == op.id }
+        if (!op.active && !refused && asked != null) removing = null
         when (op.state) {
             ExtensionOperation.Succeeded -> {
                 mutable.update { it.copy(operation = null, consentFor = null, preview = if (it.consentFor == op.id) null else it.preview) }
-                onDone(OperationText.done(res, op, state.value.extension?.label ?: op.name ?: op.extension))
+                val name = state.value.extension?.label ?: op.name ?: op.extension
+                // A pack's removal with its members ends only once every member is gone (#1154).
+                onDone(if (op.kind == "uninstall" && asked?.members == true) ExtensionText.uninstalled(res, name, members = true, stepped = true)
+                    else OperationText.done(res, op, name))
                 // Installed but not signed in: straight on to its sign-in.
                 if (op.next == "auth" && op.kind != "uninstall") onSignIn(op.extension.ifBlank { id })
                 load()
@@ -316,8 +329,7 @@ internal class CatalogExtensionModel(
                 mutable.update { it.copy(operation = op) }
                 if (op.state == ExtensionOperation.NeedsConsent && state.value.consentFor != op.id) askConsent(op)
                 // The operation carries only the code, not who depends on it.
-                val keepData = removing?.takeIf { it.first == op.id }?.second
-                if (refused && keepData != null) mutable.update { it.copy(cascade = ExtensionCascade(emptyList(), keepData)) }
+                if (refused && asked != null) mutable.update { it.copy(cascade = ExtensionCascade(emptyList(), asked.keepData, asked.members)) }
             }
         }
     }
@@ -345,8 +357,8 @@ internal class CatalogExtensionModel(
         if (state.value.acting) return false
         // The hub would run it again without cascade and be refused again: asked instead (no remembered keepData: kept).
         if (op.kind == "uninstall" && op.errorCode == "has_dependents") {
-            val keepData = removing?.takeIf { it.first == op.id }?.second ?: true
-            mutable.update { it.copy(cascade = ExtensionCascade(emptyList(), keepData)) }
+            val asked = removing?.takeIf { it.operation == op.id }
+            mutable.update { it.copy(cascade = ExtensionCascade(emptyList(), asked?.keepData ?: true, asked?.members ?: false)) }
             return false
         }
         mutable.update { it.copy(acting = true, actionError = null) }
@@ -452,25 +464,32 @@ internal class CatalogExtensionModel(
         } finally { mutable.update { it.copy(acting = false) } }
     }
 
-    /** Removes it; true when it is gone now. In steps it returns false at once and says it when it ends. */
-    suspend fun uninstall(keepData: Boolean, cascade: Boolean = false): Boolean {
+    /**
+     * Removes it; true when it is gone now. In steps it returns false at once and says it when it ends. [members]: a
+     * pack's installed members too (`members=1`, #1154), kept for the dependents question and its Retry.
+     */
+    suspend fun uninstall(keepData: Boolean, cascade: Boolean = false, members: Boolean = false): Boolean {
         if (state.value.busy) return false
-        mutable.update { it.copy(acting = true, actionError = null) }
+        mutable.update { it.copy(acting = true, actionError = null, partial = null) }
         return try {
             if (stepped()) {
                 removing = null
-                val op = api.startUninstall(id, keepData, cascade)
-                if (!cascade) removing = op.id to keepData
+                val op = api.startUninstall(id, keepData, cascade, members)
+                removing = Removal(op.id, keepData, members)
                 track(op, requestOwned = true)
                 return false
             }
-            api.uninstall(id, keepData, cascade)
+            removal = api.uninstall(id, keepData, cascade, members)
             mutable.update { it.copy(acting = false) }
             load()
             true
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (refused: ExtensionHasDependents) {
-            mutable.update { it.copy(cascade = ExtensionCascade(refused.dependents.map { d -> d.label }, keepData)) }
+            mutable.update { it.copy(cascade = ExtensionCascade(refused.dependents.map { d -> d.label }, keepData, members)) }
+            false
+        } catch (partial: ExtensionPartialUninstall) {
+            mutable.update { it.copy(partial = PackPartial.of(partial)) }
+            load()
             false
         } catch (error: Exception) {
             mutable.update { it.copy(actionError = res.getString(R.string.settings_ext_not_removed, failureReasonText(error).resolve(res))) }
@@ -482,10 +501,12 @@ internal class CatalogExtensionModel(
     suspend fun confirmCascade(): Boolean {
         val ask = state.value.cascade ?: return false
         mutable.update { it.copy(cascade = null) }
-        return uninstall(ask.keepData ?: true, cascade = true)
+        return uninstall(ask.keepData ?: true, cascade = true, members = ask.members)
     }
 
     fun dismissCascade() = mutable.update { it.copy(cascade = null) }
+
+    fun dismissPartial() = mutable.update { it.copy(partial = null) }
 }
 
 internal data class MarketsState(

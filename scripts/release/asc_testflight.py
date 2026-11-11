@@ -14,7 +14,9 @@ Without it every command means the iPhone builds, so a Mac build never gets the 
 
 "wait" and "info" also hand the build to the external group when the config has app_store.external, so every new
 TestFlight build reaches the external testers too (after Beta App Review); a failure there never fails the release.
-A build can't be submitted while another of its version is in review; "catch-up" submits it once that is over.
+A build can't be submitted while another of its version is in review; "catch-up" submits it once that is over. Nor
+while App Store Connect's limit on review submissions is used up (422 SUBMISSION_LIMIT_REACHED): that prints one line
+and a later "catch-up" submits it. Dropped connections are tried again in scripts/release/asc.py (#4034).
 
 Internal testers (app_store.testers in the config) must be users of the team in App Store Connect.
 External testers join the group by its public link when app_store.external.public_link is true (at most
@@ -306,16 +308,28 @@ def external_state(build) -> str | None:
     return request("GET", f"/v1/builds/{build['id']}/buildBetaDetail")["data"]["attributes"].get("externalBuildState")
 
 
-def submit_for_review(build):
-    """Asks for Beta App Review; a build already submitted (or approved) answers 409/422, which is fine."""
+def submit_for_review(build) -> bool:
+    """Asks for Beta App Review; a build already submitted (or approved) answers 409/422, which is fine.
+
+    False when App Store Connect's limit on review submissions is used up (422 SUBMISSION_LIMIT_REACHED): asking again
+    at once only meets the limit again, so the build waits in the group and a later catch-up round submits it (#4034)."""
+    version = build["attributes"]["version"]
     state = external_state(build)
     if state in SUBMITTED:
-        print("build", build["attributes"]["version"], "beta review:", state)
-        return
-    request("POST", "/v1/betaAppReviewSubmissions",
-            {"data": {"type": "betaAppReviewSubmissions",
-                      "relationships": {"build": {"data": {"type": "builds", "id": build["id"]}}}}})
-    print("build", build["attributes"]["version"], "submitted for Beta App Review")
+        print("build", version, "beta review:", state)
+        return True
+    try:
+        request("POST", "/v1/betaAppReviewSubmissions",
+                {"data": {"type": "betaAppReviewSubmissions",
+                          "relationships": {"build": {"data": {"type": "builds", "id": build["id"]}}}}})
+    except APIError as e:
+        if e.status == 422 and "SUBMISSION_LIMIT_REACHED" in str(e.body):
+            print(PLATFORM, "build", version, "not submitted for Beta App Review yet: the submission limit is used up "
+                  "for now; a later catch-up round submits it")
+            return False
+        raise
+    print("build", version, "submitted for Beta App Review")
+    return True
 
 
 def share(build):
@@ -331,7 +345,8 @@ def share(build):
     if not write_review_details():
         print("testers are invited once a build is submitted")
         return
-    submit_for_review(build)
+    if not submit_for_review(build):  # the submission limit: testers wait for the build that gets submitted
+        return
     testers = EXTERNAL.get("testers", [])
     if not testers and not EXTERNAL.get("public_link"):
         print("no app_store.external.testers and no public link in the config: nobody can join yet")

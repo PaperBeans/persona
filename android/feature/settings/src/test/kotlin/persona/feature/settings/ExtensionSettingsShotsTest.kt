@@ -51,6 +51,8 @@ class ExtensionSettingsShotsTest {
         val api = object : ExtensionApiStub() {
             override suspend fun extension(id: String) = detail
             override suspend fun autoUpgrades() = true
+            // Installed: one of the pack's two members (#4122: named; the other keeps its id).
+            override suspend fun extensions() = listOf(HubExtension("example-notes", "示例笔记"))
         }
         rule.setContent {
             PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
@@ -73,8 +75,8 @@ class ExtensionSettingsShotsTest {
             rule.onNodeWithText("waiting · 依赖未就绪").assertExists()
             rule.onNodeWithText("ready · 已满足").assertExists()
             rule.onNodeWithText("future · 状态未知，请刷新详情").assertExists()
-            rule.onNodeWithText("example-notes").assertExists()
-            rule.onNodeWithText("^1.0.0 · example").assertExists()
+            rule.waitUntil { rule.onAllNodesWithText("示例笔记").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText("example-notes · ^1.0.0 · example").assertExists()
             rule.onNodeWithText("other").assertExists()
         } else {
             rule.onNodeWithText("依赖").assertDoesNotExist()

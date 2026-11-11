@@ -66,10 +66,10 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 			}
 		}
 		v, _, uerr := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
-			if v.state(t) == reviewPending {
+			if v.state(t) == reviewPending && v.Waits == nil {
 				return false
 			}
-			v.State = reviewPending
+			v.State, v.Waits = reviewPending, nil
 			return true
 		})
 		if uerr != nil {
@@ -95,6 +95,9 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 		s.signal(superviseSignal{Todo: t.ID, Kind: sigUnjudged, Key: key, Detail: "判定模型出错"})
 		return
 	}
+	if c.Verdict == verdictNeedsUser {
+		s.noteOwnerWait(ctx, t, work, c.Reason)
+	}
 	detail := verdictWords[c.Verdict]
 	if c.Reason != "" {
 		detail += "：" + c.Reason
@@ -116,15 +119,34 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 var verdictWords = map[string]string{verdictNotDone: "没做完", verdictWaiting: "在等别人或别的事", verdictNeedsUser: "要用户决定",
 	verdictUnsure: "看不出做没做完", verdictUndelivered: "做完了但还没上线"}
 
+// noteOwnerWait keeps on supervised task t's ledger that the stretch of work begun at work stopped on a decision only
+// the owner can make (the done judge's needs_user, with its reason), so task_review accepted cannot close it and lose
+// the decision (#1277). The same stretch judged again keeps the first note.
+func (s *Service) noteOwnerWait(ctx context.Context, t Todo, work time.Time, reason string) {
+	if _, _, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
+		if v.Waits != nil && v.Waits.Work.Equal(work) {
+			return false
+		}
+		v.Waits = &OwnerWait{Work: work.UTC(), At: time.Now().UTC(), Reason: clip(oneLine(reason), 200)}
+		return true
+	}); err != nil {
+		s.logf("task %s: owner wait: %v", t.ID, err)
+	}
+}
+
 // supervisedWorking: one of supervised task t's agents started a turn: a review waiting is moot (the work goes on).
 func (s *Service) supervisedWorking(ctx context.Context, t Todo) {
 	s.autoReviewWorking(ctx, t)
-	if t.Supervision.state(t) != reviewPending {
+	if t.Supervision.state(t) != reviewPending && (t.Supervision == nil || t.Supervision.Waits == nil) {
 		return
 	}
 	if _, _, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
-		if v.State != reviewPending {
+		if v.State != reviewPending && v.Waits == nil {
 			return false
+		}
+		v.Waits = nil // its agent goes on: the owner's answer reached it, or the work changed (#1277)
+		if v.State != reviewPending {
+			return true
 		}
 		v.State = ""
 		if v.Round > 0 {

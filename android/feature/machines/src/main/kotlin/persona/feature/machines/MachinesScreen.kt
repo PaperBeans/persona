@@ -12,7 +12,10 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import persona.core.contracts.*
 import persona.core.contracts.api.HubManager
 import persona.core.contracts.api.ManagerRoster
@@ -78,7 +81,18 @@ internal fun MachinesScreen(
         // ego lite is asked again when the page opens, and every few seconds while a job runs or its setup is under way.
         LaunchedEffect(health, machineId, machine?.online, enabled) { if (machine?.online == true && enabled) health.refreshBrowser(machineId) }
         val watching = health.watchesBrowser(machine?.online == true)
-        LaunchedEffect(health, machineId, watching) { if (watching) health.watchBrowser(machineId) { health.watchesBrowser(machine?.online == true) } }
+        // Only while the page is shown: a hidden tab, the app in the background or the screen off asks the hub nothing. Back in front it
+        // asks at once (a job may have ended meanwhile); the first start doesn't, the page-open read or the answer that started the job is fresh.
+        val lifecycle = LocalLifecycleOwner.current.lifecycle
+        LaunchedEffect(health, machineId, watching, lifecycle) {
+            if (!watching) return@LaunchedEffect
+            var stale = !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                val readFirst = stale
+                stale = true
+                health.watchBrowser(machineId, readFirst) { health.watchesBrowser(machine?.online == true) }
+            }
+        }
     }
     if (confirmFix && health != null && machineId != null) FixDialog(healthState, { confirmFix = false }) { health.fix(machineId) }
     var addComputerHelp by rememberSaveable { mutableStateOf(false) }

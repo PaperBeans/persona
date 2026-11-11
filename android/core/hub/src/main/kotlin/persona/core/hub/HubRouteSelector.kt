@@ -176,9 +176,11 @@ class HubRouteSelector internal constructor(
                     result.getOrNull()?.let { winner -> return@coroutineScope winner }
                     failures += HubFailure.from(result.exceptionOrNull()!!)
                 }
-                throw failures.firstOrNull { it.kind == HubError.CertificateMismatch }
+                // A pinned endpoint's mismatch says the most; a proxied address's certificate (#2622) only when no pinned one did.
+                throw failures.firstOrNull { it.kind == HubError.CertificateMismatch && it.code != PROXY_CERTIFICATE }
                     ?: failures.firstOrNull { it.kind == HubError.HubMismatch }
                     ?: failures.firstOrNull { it.kind == HubError.AccessRejected || it.kind == HubError.AccessRequired }
+                    ?: failures.firstOrNull { it.code == PROXY_CERTIFICATE }
                     ?: failures.first()
             } finally {
                 probes.forEach { it.cancel() }
@@ -244,9 +246,10 @@ class HubRouteSelector internal constructor(
                     }
                 }
                 memberWinner?.let { return@coroutineScope it }
-                throw failures.firstOrNull { it.kind == HubError.CertificateMismatch }
+                throw failures.firstOrNull { it.kind == HubError.CertificateMismatch && it.code != PROXY_CERTIFICATE }
                     ?: failures.firstOrNull { it.kind == HubError.HubMismatch }
                     ?: failures.firstOrNull { it.kind == HubError.AccessRejected || it.kind == HubError.AccessRequired }
+                    ?: failures.firstOrNull { it.code == PROXY_CERTIFICATE }
                     ?: failures.firstOrNull()
                     ?: HubFailure(HubError.Unreachable)
             } finally {

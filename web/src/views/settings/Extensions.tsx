@@ -25,7 +25,7 @@ import { Button, cx, Dialog, EASE, IconButton, Loading, Spinner, toast } from ".
 import { TriageRuleField } from "../../ui/TriageRuleField";
 import { Icon } from "../../ui/icons";
 import { ChannelLink } from "./Channels";
-import { MarketCatalog, MarketItem, Markets, UninstallDialog } from "./ExtensionMarket";
+import { MarketCatalog, MarketItem, Markets, PackMemberRow, UninstallDialog, useInstalledNames } from "./ExtensionMarket";
 import { ExtensionSettingsPage } from "./ExtensionSettingsPage";
 import { ExtensionUI } from "./ExtensionView";
 import { ExtensionConnectorInbox } from "./HubConnector";
@@ -643,6 +643,8 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
   const secretDone = (n: number, d: HubExtensionDetail) => wrote(n, d);
 
   const p = detail;
+  // A pack's members by their installed names (#4122); one not installed keeps its id.
+  const memberNames = useInstalledNames(!!detail?.extension_pack?.length);
 
   return (
     <div>
@@ -685,6 +687,7 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
       {p && (
         <ExtensionSettingsPage
           detail={p}
+          memberNames={memberNames}
           manager={manager}
           busy={toggling || saving}
           offline={offline}
@@ -772,9 +775,11 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
             </Group>
           )}
           {!!p.extension_pack?.length && (
-            <Group title={t("settings-extensions.pack_title")} footer={t("settings-extensions.pack_footer")}>
-              {p.extension_pack.map((m) => <Row key={m.id} label={m.id} hint={m.market} mono>{m.version || ""}</Row>)}
-            </Group>
+            <div data-pack-members>
+              <Group title={t("settings-extensions.pack_title")} footer={t("settings-extensions.pack_footer")}>
+                {p.extension_pack.map((m) => <PackMemberRow key={m.id} member={m} name={memberNames[m.id]} mono />)}
+              </Group>
+            </div>
           )}
           {!!p.contributions?.length && (
             <Group title={t("settings-extensions.contributions_title")} footer={t("settings-extensions.contributions_footer")}>

@@ -64,4 +64,10 @@
     <string name="settings_switcher_line">%1$s · %2$s</string>
     <string name="settings_switcher_switched">Switched to %1$s</string>
     <string name="settings_switcher_manage">Manage assistants…</string>
+    <string name="settings_group_assistant">%1$s\'s settings</string>
+    <string name="settings_group_assistant_switch">Switch</string>
+    <string name="settings_group_assistant_footer">Only %1$s\'s own settings are shown. To change another assistant\'s, switch to it first.</string>
+    <string name="settings_group_device">This device</string>
+    <string name="settings_group_hub">Hub</string>
+    <string name="settings_group_hub_footer">These two groups are the same whichever assistant is current.</string>
 </resources>

@@ -123,4 +123,27 @@ class TodoListFilterTest {
         val result = triageTodos(shown, lookup, now.toEpochMilli(), zone = zone)
         assertEquals(1, result.listed(TriageSection.Waiting))
     }
+
+    /** A failed start (#3713) whose finished work a filter or a search leaves out is still superseded (decided on every
+     *  to-do): not back in Needs you, not in the line about those the filter leaves out. The case of iOS and the web. */
+    @Test fun aFilterNeverPutsASupersededFailedStartBackInNeedsYou() {
+        val failed = todo("failed", day = "2026-11-11", done = true).copy(planId = "p", startError = "no launcher") // due today
+        val finished = todo("finished", done = true).copy(planId = "p") // its plan's work, no due date: left out
+        val hiddenFailed = todo("hidden-failed", done = true).copy(planId = "q", startError = "no launcher")
+        val hiddenFinished = todo("hidden-finished", done = true).copy(planId = "q")
+        val waiting = todo("waiting", done = true).copy(startError = "no launcher") // nothing finished beside it: waits
+        val all = listOf(failed, finished, hiddenFailed, hiddenFinished, waiting)
+        val superseded = supersededFailedStarts(all)
+        val nowMs = now.toEpochMilli()
+        val lookup = { _: persona.core.contracts.SessionKey -> null as Session? }
+
+        val today = all.filter { it.matches(TodoListFilter.Today, now, zone, monday) }
+        val r = triageTodos(today, lookup, nowMs, zone = zone, known = superseded)
+        assertEquals(0, r.listed(TriageSection.Waiting))
+        assertEquals(listOf("failed"), r.rows(TriageSection.JustDone).flatMap { g -> g.members.map { it.id } })
+        assertEquals(1, hiddenWaiting(all, today, lookup, nowMs, zone = zone, superseded = superseded))
+
+        val searched = triageTodos(listOf(failed, waiting), lookup, nowMs, zone = zone, known = superseded)
+        assertEquals(listOf("waiting"), searched.rows(TriageSection.Waiting).flatMap { g -> g.members.map { it.id } })
+    }
 }

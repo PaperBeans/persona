@@ -63,6 +63,7 @@
   "fill_in_app": "このステップはAppで入力してください",
   "write_text_first": "先に入力内容を書いてください",
   "unknown_action": "不明な操作です",
+  "press_not_sent": "この操作は届きませんでした：{error}\nカードをもう一度押すとやり直せます。",
   "working_on_it": "処理中…",
   "no_such_machine": "そのコンピューターは見つかりません。",
   "cannot_start": "起動できませんでした：{error}",

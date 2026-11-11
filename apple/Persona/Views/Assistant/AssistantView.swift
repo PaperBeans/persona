@@ -209,7 +209,9 @@ struct AssistantView: View {
                         .id(key)
                         // The iPad draws the shell's composer too (`ChatComposerKind.padCard`): the assistant's, as on the iPhone.
                         .environment(\.shellChat, shell != nil || ChatComposerKind.padCard)
-                } else if shell != nil {
+                } else if shell != nil || pageTabSwitch {
+                    // A phone's tabs too (iPhone Duo open, #3680): the iPhone's new conversation, with what needs the user
+                    // over the composer. The iPad keeps `AssistantHome`.
                     ShellHome(pending: shownStart, error: shownFailure?.reason, launcher: $starterLauncher, mode: $starterMode,
                               effort: $starterEffort, openInbox: { path.append($0) }, resend: resend, delete: deleteFailed) { text, images in
                         Task { await start(text, images) }
@@ -544,8 +546,9 @@ struct FirstMessagePending: View {
     }
 }
 
-/// A new conversation outside the compact shell: `AssistantWelcome` (greeting, capabilities, one-tap suggestions); while
-/// a conversation spins up it shows the first message and a typing indicator so the send feels instant.
+/// A new conversation outside the compact shell and a phone's split (the iPad, the Mac, Apple Vision Pro):
+/// `AssistantWelcome` (greeting, capabilities, one-tap suggestions); while a conversation spins up it shows the first
+/// message and a typing indicator so the send feels instant.
 struct AssistantHome: View {
     @Environment(AppModel.self) private var model
     @Environment(\.managerSwitcherRoom) private var switcherRoom
@@ -578,7 +581,7 @@ struct AssistantHome: View {
                 }
                 .padding(.horizontal, Theme.Space.xl)
                 .padding(.bottom, Theme.Space.xl)
-                // The conversation's measure on a wide display (iPhone Duo open).
+                // The conversation's measure on a wide display (the iPad).
                 .frame(maxWidth: ChatView.readableWidth)
                 .frame(maxWidth: .infinity)
             }
@@ -1243,7 +1246,7 @@ struct AssistantToolsRow: View {
                         if running {
                             ProgressView().controlSize(.mini)
                             if let last = calls.last {
-                                Text("\(ToolPresentation.verb(last.name)) \(ToolPresentation.subject(last))").lineLimit(1)
+                                Text("\(ToolPresentation.verb(last)) \(ToolPresentation.subject(last))").lineLimit(1)
                             }
                         } else {
                             ThemedIcon(Theme.Icon.unknownTool)

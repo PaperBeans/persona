@@ -183,8 +183,12 @@ internal class MachineHealthViewModel(private val management: MachineManagement)
         }
     }
 
-    /** The browser's state is watched while [watching] says so. */
-    suspend fun watchBrowser(machineId: String, watching: () -> Boolean) {
+    /**
+     * The browser's state is watched while [watching] says so. [readFirst] asks at once instead of after the first pause: the page
+     * coming back in front, when what is shown may be from before it was hidden (the job may have finished or failed meanwhile).
+     */
+    suspend fun watchBrowser(machineId: String, readFirst: Boolean = false, watching: () -> Boolean) {
+        if (readFirst && watching()) refreshBrowser(machineId)
         while (watching()) {
             delay(BROWSER_POLL_MILLIS)
             refreshBrowser(machineId)

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_brief_default_title">Briefing</string>
+    <string name="chat_brief_waiting">Waiting for you (%1$d)</string>
+    <string name="chat_brief_waiting_unknown">Waiting for you (?)</string>
+    <string name="chat_brief_waiting_unknown_note">Cards waiting for you were not read yet. Look in Agents.</string>
+    <string name="chat_brief_past">Last %1$d hours: %2$d done · %3$d not through</string>
+    <string name="chat_brief_accept">To verify (%1$d)</string>
+    <string name="chat_brief_later">Can wait (%1$d)</string>
+    <string name="chat_brief_progress">In progress (%1$d)</string>
+    <string name="chat_brief_nothing">Nothing.</string>
+    <string name="chat_brief_more">and %1$d more</string>
+    <string name="chat_brief_open">Open</string>
+    <string name="chat_brief_waited_minutes">Waited %1$d min</string>
+    <string name="chat_brief_waited_hours">Waited %1$d hr</string>
+    <string name="chat_brief_waited_days">Waited %1$d d</string>
+    <string name="chat_brief_waited_hours_minutes">Waited %1$d hr %2$d min</string>
+    <string name="chat_brief_waited_days_hours">Waited %1$d d %2$d hr</string>
+    <string name="chat_brief_nudged">nudged</string>
+    <string name="chat_brief_accept_action">Accept</string>
+    <string name="chat_brief_got_it">Got It</string>
+    <string name="chat_brief_take_recommendation">Take Recommendation</string>
+    <string name="chat_brief_complete_directly">Complete Directly</string>
+    <string name="chat_brief_handled">Handled</string>
+    <string name="chat_brief_accepted">Accepted</string>
+    <string name="chat_brief_noted">Noted</string>
+    <string name="chat_brief_recommendation_taken">Recommendation taken</string>
+    <string name="chat_brief_marked_handled">Marked as handled</string>
+    <string name="chat_brief_already_handled">Already handled</string>
+    <string name="chat_brief_hub_too_old">The hub is too old for this button</string>
+    <string name="chat_brief_failed_task">Did not start</string>
+    <string name="chat_brief_failed_routine">Run failed</string>
+    <string name="chat_brief_skipped">Skipped</string>
+    <string name="chat_brief_stage_plan">Plan</string>
+    <string name="chat_brief_stage_develop">Develop</string>
+    <string name="chat_brief_stage_review">Review</string>
+    <string name="chat_brief_stage_merge">Merge</string>
+    <string name="chat_brief_stage_deploy">Deploy</string>
+    <string name="chat_brief_stage_verify">Verified</string>
+</resources>

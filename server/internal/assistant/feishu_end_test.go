@@ -146,3 +146,48 @@ func TestFeishuHeldRunGivesUpWithoutItsCard(t *testing.T) {
 		t.Fatalf("card %v", (*posts)[0])
 	}
 }
+
+// A held run's ending can also be quiet: its background work reported back in a turn that said nothing. The run has no
+// card left to rewrite, but the chat was told it would answer again — so its ending line goes out as a card of its own,
+// rather than nowhere.
+func TestFeishuHeldRunQuietEndWithoutItsCard(t *testing.T) {
+	s, f, r, posts := endHub(t)
+	s.finishChannelRun(r, &channel.Result{Answer: "先答一部分", Held: true})
+	s.chans.mu.Lock()
+	left := r.Ext["card"]
+	r.Started = time.Now().Add(-channel.HeldIdleMost - time.Minute)
+	s.chans.mu.Unlock()
+	if left != "" {
+		t.Fatalf("the held run kept its card: %q", left)
+	}
+	*posts = nil
+	sess := proto.Session{Status: proto.StatusDone, State: proto.StateIdle, MachineID: "server", SessionID: "c1"}
+	f.setSessions("server", sess)
+	f.setItems()
+	s.checkChannelRun(r.ID)
+	if run, _ := s.channelRunByID(r.ID); run != nil {
+		t.Fatalf("the run did not end")
+	}
+	if len(*posts) != 1 {
+		t.Fatalf("the run ended without telling the owner: %v", *posts)
+	}
+	post := (*posts)[0]
+	card, _ := post["card"].(string)
+	if post["update"] == true || post["reply_to"] != "om_m1" || !strings.Contains(card, "完成 · Persona · 用时") {
+		t.Fatalf("post %v", post)
+	}
+}
+
+// A quiet ending is not always one to report: a message the owner recalled says nothing, with a card or without one.
+func TestFeishuRecalledEndWithoutItsCardSaysNothing(t *testing.T) {
+	s, _, r, posts := endHub(t)
+	s.chans.mu.Lock()
+	delete(r.Ext, "card") // recalled before its first progress card
+	r.Recalled = true
+	s.chans.mu.Unlock()
+	*posts = nil
+	s.finishChannelRun(r, recalledResult())
+	if len(*posts) != 0 {
+		t.Fatalf("a recalled message said something: %v", *posts)
+	}
+}

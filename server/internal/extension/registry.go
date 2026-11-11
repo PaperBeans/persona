@@ -184,6 +184,8 @@ type Registry struct {
 	yielded map[string]*Extension
 	// devSecrets are the secrets of the extensions being written (SourceDev), in memory only.
 	devSecrets map[string]map[string]string
+	// refSchemes: the schemes each extension's secrets reference, by id (secret_refs.go), noted at each read.
+	refSchemes map[string][]string
 	// keptOff are built-in extensions held off whatever their rows say (KeepOff).
 	keptOff map[string]*keptOff
 }

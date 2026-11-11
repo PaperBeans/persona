@@ -31,6 +31,27 @@ type Detail struct {
 	Segments []RecordingSegment `json:"segments,omitempty"`
 	// Minutes: a recording's meeting minutes (minutes.json, docs/assistant/meeting-minutes.md), once written.
 	Minutes json.RawMessage `json:"minutes,omitempty"`
+	// Points: a topic's knowledge points (points.json, docs/assistant/knowledge.md "Topics"), grouped by Path.
+	Points []TopicPoint `json:"points,omitempty"`
+}
+
+// TopicPoint is one knowledge point of a topic: a concept, decision, practice, pitfall, fact or open question, under
+// up to two levels of subtopics (Path), with the entries it came from.
+type TopicPoint struct {
+	ID      string        `json:"id"`
+	Path    []string      `json:"path,omitempty"`
+	Kind    string        `json:"kind"` // concept | decision | practice | pitfall | fact | question
+	Text    string        `json:"text"`
+	Why     string        `json:"why,omitempty"` // a decision's reason, a pitfall's cause
+	Sources []TopicSource `json:"sources,omitempty"`
+	When    string        `json:"when,omitempty"` // YYYY-MM-DD: last confirmed
+}
+
+// TopicSource is an entry a knowledge point came from: a project's timeline or a chat's summary, and the day.
+type TopicSource struct {
+	Kind string `json:"kind"` // projects | chats
+	ID   string `json:"id"`
+	Day  string `json:"day,omitempty"`
 }
 
 // MomentRef is a Moments post as a project shows it.

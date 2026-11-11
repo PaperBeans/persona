@@ -203,14 +203,16 @@ func (c *Card) Raw() *CardPayload { return &CardPayload{Type: "raw", Data: c} }
 var (
 	fenceRe  = lazyre.New("(?s)```.*?(?:```|$)|~~~.*?(?:~~~|$)")
 	inlineRe = lazyre.New("`[^`\n]+`")
+	// A list item's line: its indentation, its marker ("- ", "* ", "+ ", "1. ", "1) ") and what follows it.
+	listItemRe = lazyre.New(`^([ \t]*)(?:[-*+]|\d{1,9}[.)])[ \t]+\S`)
 )
 
 // CardMarkdown turns GitHub Markdown (a model's answer) into what a card shows as written: outside code, "<" is
 // escaped, since cards read <at>, <font>, <link>… as their own tags (and drop what they do not know); an autolink
-// (<https://…>, <mailto:…>) becomes a card link first. The assistant's persona-card charts are written as numbers
-// first (PersonaCards).
+// (<https://…>, <mailto:…>) becomes a card link first; and a list is nested the way cards nest it (listIndent). The
+// assistant's persona-card charts are written as numbers first (PersonaCards).
 func CardMarkdown(s string) string {
-	s = PersonaCards(s)
+	s = listIndent(PersonaCards(s))
 	var b strings.Builder
 	last := 0
 	for _, loc := range fenceRe.FindAllStringIndex(s, -1) {
@@ -220,6 +222,61 @@ func CardMarkdown(s string) string {
 	}
 	b.WriteString(cardProse(s[last:]))
 	return b.String()
+}
+
+// listIndent rewrites a list's indentation for cards: one nesting level is four leading spaces there (Lark's Markdown
+// component says a list is nested "4 spaces per level"), while CommonMark — and so a model writing an answer — indents
+// a sub-item by its parent marker's width: two spaces under "- ", three under "1. ". Passed through unchanged those
+// sub-items are siblings of their parent to Lark, so the answer's hierarchy is lost. Each item's observed indentation
+// is mapped to a level (an item deeper than the one above it, by any amount, is one level deeper) and written out as
+// four spaces per level; a paragraph at the left margin ends the list. Fenced code (the levels carry across it, so a
+// list continues around a code block), text indented four or more spaces at the left margin (an indented code block)
+// and a list item's indented continuation lines are left as they are; a tab counts as four columns. A list inside a
+// blockquote is left as written.
+func listIndent(s string) string {
+	lines := strings.Split(s, "\n")
+	var levels []int // the indent width of each open nesting level, outermost first
+	fence := ""
+	for i, line := range lines {
+		t := strings.TrimSpace(line)
+		if fence != "" { // inside code: as written
+			if strings.HasPrefix(t, fence) && strings.Trim(t, fence[:1]) == "" {
+				fence = ""
+			}
+			continue
+		}
+		if f := fenceMarker(t); f != "" {
+			fence = f
+			continue
+		}
+		m := listItemRe.FindStringSubmatchIndex(line)
+		if m == nil {
+			if t != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+				levels = levels[:0] // a paragraph at the left margin ends the list
+			}
+			continue
+		}
+		indent, rest := line[:m[3]], line[m[3]:]
+		w := 0
+		for _, c := range indent {
+			if c == '\t' {
+				w += 4
+			} else {
+				w++
+			}
+		}
+		if len(levels) == 0 && w >= 4 {
+			continue // four or more spaces at the left margin is an indented code block, not a list item
+		}
+		for len(levels) > 0 && w < levels[len(levels)-1] {
+			levels = levels[:len(levels)-1]
+		}
+		if len(levels) == 0 || w > levels[len(levels)-1] {
+			levels = append(levels, w)
+		}
+		lines[i] = strings.Repeat("    ", len(levels)-1) + rest
+	}
+	return strings.Join(lines, "\n")
 }
 
 func cardProse(s string) string {

@@ -29,5 +29,9 @@
   "clear_filter": "Clear filter",
   "all": "All",
   "no_tags": "No tags in this type yet.",
-  "empty_recordings": "No recordings yet"
+  "empty_recordings": "No recordings yet",
+  "empty_topics": "No topics yet",
+  "empty_topics_body": "In the background, Persona pulls durable knowledge out of your project timelines and chats (concepts, decisions, how-tos, pitfalls, facts) and files it under topics. Topics appear here as it goes.",
+  "map": "Knowledge map",
+  "map_title": "See topics and projects as a mind map"
 }

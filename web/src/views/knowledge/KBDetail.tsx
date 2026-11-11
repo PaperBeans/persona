@@ -9,6 +9,7 @@ import { RecordingMinutes } from "./RecordingMinutes";
 import { RecordingAsks } from "./RecordingAsks";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { Relationships } from "./Relationships";
+import { TopicPoints } from "./TopicPoints";
 import { ago, sessionPreview, sessionTitle, shortPath, stateOf, tabLabel } from "../../lib/format";
 import {
   agentPreset,
@@ -179,7 +180,8 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
   const facts = d ? factsOf(d.kind, d.meta) : null;
   const rec = d ? recordingView(d.kind, d.meta, d.segments) : null;
   const log = timeline(d?.log);
-  const prof = profile(d?.summary, e.one_line, e.name);
+  // A topic's summary is its points as Markdown (for search and Persona): the page shows the points themselves.
+  const prof = d?.kind === "topics" ? "" : profile(d?.summary, e.one_line, e.name);
   const dirs = dirsOf(d?.meta);
   const recent = d?.kind === "chats" ? parseRecent(d.recent) : [];
   const into = typeof d?.meta?.merged_into === "string" ? d.meta.merged_into : "";
@@ -340,6 +342,8 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
                 refresh={load}
                 onSaved={onSaved}
               />}
+
+              {d.kind === "topics" && <TopicPoints detail={d} onOpen={onOpen} />}
 
               {prof && (
                 <section>

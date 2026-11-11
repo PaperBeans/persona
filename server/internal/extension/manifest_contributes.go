@@ -138,6 +138,22 @@ func (m *Manifest) AuthRelays() []AuthRelayItem {
 	return out
 }
 
+// SecretProviders are the manifest's contributions to secret_providers.
+func (m *Manifest) SecretProviders() []SecretProviderItem {
+	var out []SecretProviderItem
+	_ = json.Unmarshal(m.Contributes["secret_providers"], &out)
+	return out
+}
+
+// Schemes are the reference schemes the manifest's secret_providers contributions claim.
+func (m *Manifest) Schemes() []string {
+	var out []string
+	for _, p := range m.SecretProviders() {
+		out = append(out, p.Schemes...)
+	}
+	return out
+}
+
 // Topics are the events the plugin is told about, each once.
 func (m *Manifest) Topics() []string {
 	var out []string

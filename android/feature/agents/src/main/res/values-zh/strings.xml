@@ -346,6 +346,7 @@
     <string name="agents_todo_delete_action">删除</string>
     <string name="agents_todo_done_failed">完成待办失败：%1$s</string>
     <string name="agents_todo_delete_failed">删除待办失败：%1$s</string>
+    <string name="agents_todo_state_didnt_start">没开起来</string>
     <string name="agents_todo_start_failed">启动失败：%1$s</string>
     <string name="agents_todo_in_progress">正在进行</string>
     <plurals name="agents_todo_agents">
@@ -495,7 +496,9 @@
     <string name="agents_herdr_why_timeout">等了很久 herdr 还没起来，稍后再看看</string>
     <string name="agents_empty_no_computer_title">还没有电脑</string>
     <string name="agents_empty_no_computer_hint">添加一台，Persona 就能在上面替你干活。</string>
-    <string name="agents_page_loaded">已加载 %1$d / %2$d 个会话</string>
+    <plurals name="agents_page_loaded">
+        <item quantity="other">已加载 %1$d / %2$d 个会话</item>
+    </plurals>
     <string name="agents_page_more">加载更多</string>
     <string name="agents_page_previous">加载之前的会话</string>
     <!-- To-do status sections (#3206, docs/assistant/todo-status-sop.md) -->

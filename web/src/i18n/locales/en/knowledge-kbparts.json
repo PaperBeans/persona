@@ -7,5 +7,7 @@
   "relevance_title": "How relevant to me, 0–100, higher is more",
   "relevance": "Relevance {value}/100",
   "collapse": "Show less",
-  "project_kind": "{kind} project"
+  "project_kind": "{kind} project",
+  "points_one": "{count} point",
+  "points_other": "{count} points"
 }

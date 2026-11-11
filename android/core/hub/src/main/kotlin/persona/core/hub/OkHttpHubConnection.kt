@@ -37,6 +37,8 @@ data class HubConnectionConfig(
     val token: String,
     val endpoints: List<Endpoint>,
     val version: String,
+    /** The pairing link's proxied origins, checked with system trust (#2622, [HubHttpClient.systemOrigins]). */
+    val systemOrigins: Set<String> = emptySet(),
     val deviceId: String? = null,
     val build: JsonElement? = null,
     val os: JsonObject? = null,
@@ -66,7 +68,7 @@ class OkHttpHubConnection(
     private val config: HubConnectionConfig,
     initialNetwork: HubNetwork,
     val http: HubHttpClient = HubHttpClient(config.hubId, config.fingerprint, config.version,
-        pins = config.members.mapNotNullTo(LinkedHashSet()) { it.fingerprint }),
+        pins = config.members.mapNotNullTo(LinkedHashSet()) { it.fingerprint }, systemOrigins = config.systemOrigins),
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val onReady: suspend (OkHttpHubConnection) -> Unit = {},
     // Android callers should inject SystemClock.elapsedRealtime, which includes deep sleep.

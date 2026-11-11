@@ -206,7 +206,7 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
   " | " and with empty ones skipped (a trailing `||` adds no junk), clipped and escaped like any other cell. When
   changing how a table row is laid out, compare its card with its fallback.
 
-- **Text a client draws as Markdown is cut with `clipMarkdown`, not `clip`** (#3818). The briefing card quoted the model's answer through `textfmt.Clip` (exactly n runes plus an ellipsis), so an answer over 1500 runes was cut inside whatever it was in: an unclosed code fence turned the rest of the quote into code, and a cut inside `**`, a code span or a link left half a marker or half a URL. `clipMarkdown` (`assistant/mdtext.go`) cuts on a line break where it can, closes a code block the cut lands in, and moves the cut back out of an unclosed span, emphasis or link; it also flattens a `persona-card` block to its title (`wire.AssistantCardText`), so draw charts first with `feishubot.PersonaCards` and cut after, as `answerCards` does for the bot's answers. Plain fallback text (the push body, a notice's fallback) keeps `clip` / `textfmt.PlainMarkdown`; only the Markdown element takes `clipMarkdown`. Test through the same builder the card uses, not the clippers alone, and assert the shape (`fences % 2 == 0`, no `](https://…` left) rather than an exact string.
+- **Text a client draws as Markdown is cut with `clipMarkdown`, not `clip`** (#3818). The briefing card quoted the model's answer through `textfmt.Clip` (exactly n runes plus an ellipsis), so an answer over 1500 runes was cut inside whatever it was in: an unclosed code fence turned the rest of the quote into code, and a cut inside `**`, a code span or a link left half a marker or half a URL. `clipMarkdown` (`assistant/mdtext.go`) cuts on a line break where it can, closes a code block the cut lands in, and moves the cut back out of an unclosed span, emphasis or link; it also flattens a `persona-card` block to its title (`wire.AssistantCardText`), so draw charts first with `feishubot.PersonaCards` and cut after, as `answerCards` does for the bot's answers. Plain fallback text (the push body, a notice's fallback) keeps `clip` / `textfmt.PlainMarkdown`; only the Markdown element takes `clipMarkdown`. Test through the same builder the card uses, not the clippers alone, and assert the shape (`fences % 2 == 0`, no `](https://…` left) rather than an exact string. The same trap caught the task report's item body (#4093): it drew the answer with `CardMarkdown` *after* `clipMarkdown`, which flattens a chart to its title on its own, so the owner read the report with no numbers. Any Markdown a client draws that is clipped first must have `PersonaCards` run before the clip.
 
 - **A finished run's last write into the progress card has to wait out a card rate limit** (#3915). The progress tick
   answers 230020 by pausing its updates (`prog.quietUntil`), but the answer's write comes right after a tick's, and a
@@ -225,3 +225,30 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
   docs promise ("Timed out, see the app"); a run with no card gets that line as a card of its own. Plugin channels, which
   send a note as plain text, stop being silent the same way. When a step ends a run without an answer, give it a note, or
   check what the sink does with a quiet end and no card.
+
+- **A quiet ending still needs a card to land on** (#4101). `channel.Run.Decide` ends a held run whose background work
+  reported back in a turn without words as `Quiet`, and the Feishu sink answered a quiet end only by rewriting the run's
+  card — but a held run gave its card back with its message, so the owner was told "N background tasks are still running"
+  and then heard nothing when they finished. The sink now builds the ending line for every quiet end and, with no card,
+  posts it as a card of its own (the same rule #3930's timeout relies on). The result stays quiet: the line is
+  "Done · took X", not an empty answer.
+
+- **A card nests a list by four spaces per level, not by the Markdown rule** (#4180). Lark's Markdown component documents
+  one nesting level as four leading spaces (a list's sub-items are indented four spaces per level), while CommonMark — and
+  so a model writing an answer — indents a sub-item by its parent marker's width: two spaces under "- ", three under
+  "1. ". The answer's Markdown was passed through unchanged, so every nested list arrived as a flat list of siblings and
+  the hierarchy the answer was written with was gone. `CardMarkdown` now maps each item's observed indentation to a level
+  and writes four spaces per level (`listIndent` in `feishubot/card.go`) in one pass over the whole answer, so the levels
+  carry across a fenced code block and a list goes on around it; a list item's continuation lines, a list inside a
+  blockquote, and four-or-more-space indented code at the left margin stay as written, and a paragraph at the left margin
+  ends the list. Test the conversion through `CardMarkdown` and through the answer builder (`answerCards`).
+
+- **A list shown to a client holds the thing it names, not the records that produce it** (#4184). `feishu.view`'s
+  `agents` is "the Agents you have talked to in Lark", but it was built by walking the chat's thread bindings — and the
+  chat binds *every* card it posts about a conversation (the list card "Chat here" was pressed on, each progress card,
+  each answer card, each finished card), so one Agent talked to for a while filled the settings section with dozens of
+  copies of itself, in map order, keyed alike on both clients (web and iOS key those rows by session id). Fold the
+  bindings by machine + session, let the newest name the row, and sort it (rows of the same time by session): the same
+  source, read as what the field means. A test that binds three cards of one Agent along with two other Agents, and
+  loads the view ten times, shows it. The settings pages are the only readers — web and iOS key the rows by session id,
+  Android draws them in order — so none of them changes.

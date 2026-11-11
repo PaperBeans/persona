@@ -70,6 +70,8 @@ type Settings struct {
 	// MinutesDays: how many days a meeting's minutes stay once its transcript went with RecordingDays (#3780,
 	// kb/recording_trim.go); nil or 0 means forever. Finite windows are never fewer than RecordingDays (kb.MinutesDaysFor).
 	MinutesDays *int `json:"minutes_days,omitempty"`
+	// KBTopics: the knowledge base organizes knowledge points by topic (#3783, kb/topics.go). nil is on (the default).
+	KBTopics *bool `json:"kb_topics,omitempty"`
 	// MeetingAttendanceDefault: the role a meeting recording pre-selects on the phone (off, listener, participant;
 	// docs/assistant/meeting-minutes.md "Attending a meeting"); nil is off.
 	MeetingAttendanceDefault *string `json:"meeting_attendance_default,omitempty"`
@@ -272,8 +274,13 @@ var meetingRoles = []string{kb.AttendanceOff, kb.AttendanceListener, kb.Attendan
 
 // meetingAttendanceDefault is the role a meeting recording pre-selects (meeting_attendance_default, off by default).
 func (s *Service) meetingAttendanceDefault(ctx context.Context) string {
-	if v := s.settings(ctx).MeetingAttendanceDefault; v != nil && slices.Contains(meetingRoles, *v) {
-		return *v
+	return meetingAttendanceOf(s.settings(ctx))
+}
+
+// meetingAttendanceOf is meetingAttendanceDefault of settings already read (the view reads them once).
+func meetingAttendanceOf(v Settings) string {
+	if r := v.MeetingAttendanceDefault; r != nil && slices.Contains(meetingRoles, *r) {
+		return *r
 	}
 	return kb.AttendanceOff
 }
@@ -320,6 +327,18 @@ func (s *Service) minutesDaysNow() int {
 		return 0
 	}
 	return minutesDaysSetting(v)
+}
+
+// kbTopics: the knowledge base organizes knowledge points by topic (kb_topics, on by default).
+func (s *Service) kbTopics(ctx context.Context) bool { return quietOn(s.settings(ctx).KBTopics) }
+
+// kbTopicsNow is kbTopics for the knowledge base loop, from the last settings read well: a database that does not
+// answer neither starts nor stops the curation.
+func (s *Service) kbTopicsNow() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	v, ok := s.settingsLastGood(ctx)
+	return !ok || quietOn(v.KBTopics)
 }
 
 // launcherNow is the launcher new conversations start with: Model configuration › Main chat's, else the assistant's own.
@@ -412,6 +431,8 @@ type assistantView struct {
 	DoneNeedsDelivery bool `json:"done_needs_delivery"`
 	// MinutesDays is in effect: 0 means forever (the default); otherwise never fewer than RecordingDays.
 	MinutesDays int `json:"minutes_days"`
+	// KBTopics is in effect, like MainTasksQuiet.
+	KBTopics bool `json:"kb_topics"`
 	// MeetingAttendanceDefault is in effect (off until changed).
 	MeetingAttendanceDefault string `json:"meeting_attendance_default"`
 	// IdleCloseHours is in effect (0: off).
@@ -438,8 +459,8 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 	v.Launcher = s.launcherNow(ctx)
 	out := assistantView{Settings: v, Manager: s.managerIdentity(), PermissionDefaults: s.permissionDefaults(), Conversations: []proto.Session{}, NotesEffective: s.notes(ctx), MainTasksQuiet: quietOn(v.MainTasksQuiet),
 		StartRequestedTasks: quietOn(v.StartRequestedTasks), RecordingDays: recordingDaysOf(v), MinutesDays: kb.MinutesDaysFor(minutesDaysSetting(v), recordingDaysOf(v)),
-		MeetingAttendanceDefault: s.meetingAttendanceDefault(ctx),
-		DoneNeedsDelivery:        v.DoneNeedsDelivery != nil && *v.DoneNeedsDelivery, IdleCloseHours: int(s.idleCloseAfter(ctx) / time.Hour),
+		MeetingAttendanceDefault: meetingAttendanceOf(v), KBTopics: quietOn(v.KBTopics),
+		DoneNeedsDelivery: v.DoneNeedsDelivery != nil && *v.DoneNeedsDelivery, IdleCloseHours: int(s.idleCloseAfter(ctx) / time.Hour),
 		ArchiveClosedDays:   int(s.archiveClosedAfter(ctx) / (24 * time.Hour)),
 		ReviewSamplePercent: s.reviewSamplePercent(ctx),
 		InterjectBackground: v.InterjectBackground != nil && *v.InterjectBackground,

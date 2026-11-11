@@ -5,11 +5,13 @@ import persona.core.domain.sort.workLine
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
@@ -55,6 +57,8 @@ import persona.core.navigation.ChatRoute
 import persona.core.navigation.ConversationKind
 import persona.core.navigation.Navigator
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URI
 import java.time.OffsetDateTime
@@ -135,7 +139,7 @@ private fun LazyListScope.listContent(page: KnowledgePage, showIgnored: Boolean,
             sections.forEach { section ->
                 item(key = "section/${section.key}", contentType = "section") {
                     JSectionHeader(section.tag?.let { "#$it" } ?: stringResource(section.title), count = section.entries.size,
-                        onClick = if (section.collapsed) toggleIgnored else null,
+                        onClick = if (section.collapsed) toggleIgnored else null, open = showIgnored, trailingIsFoldAction = true,
                         trailing = if (section.collapsed) stringResource(if (showIgnored) R.string.knowledge_collapse else R.string.knowledge_expand) else null)
                 }
                 if (!section.collapsed || showIgnored) items(section.entries, key = { "entry/${it.key}" }, contentType = { "entry" }) {
@@ -263,6 +267,9 @@ internal fun KnowledgeDetailScreen(
     val page by model.page.collectAsStateWithLifecycle()
     val sending by model.sending.collectAsStateWithLifecycle()
     val tagging by model.tagging.collectAsStateWithLifecycle()
+    val minutesWork by model.minutesWork.collectAsStateWithLifecycle()
+    val listState = rememberLazyListState()
+    val scrolls = rememberCoroutineScope()
     var allLog by rememberSaveable(page.scope?.path) { mutableStateOf(false) }
     var recent by rememberSaveable(page.scope?.path) { mutableStateOf(false) }
     var openLinks by rememberSaveable(page.scope?.path) { mutableStateOf(listOf<String>()) }
@@ -296,6 +303,14 @@ internal fun KnowledgeDetailScreen(
         }
     }
     LaunchedEffect(tagging.saved) { if (tagging.saved > 0) editing = false }
+    // While the hub writes a recording's minutes, the page reads it again every few seconds (as the web's, every 5 s).
+    val minutesPending = page.detail?.meta.string("minutes_state") == "pending"
+    LaunchedEffect(minutesPending, lifecycle) {
+        if (minutesPending) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) { delay(MinutesPollMillis); model.refresh() }
+        }
+    }
+    val minutesCopied = stringResource(R.string.knowledge_minutes_copied)
     val detail = page.detail
     val entry = detail?.entry()
     val kindName = KnowledgeKind.fromWire(detail?.kind.orEmpty())?.label().orEmpty()
@@ -310,7 +325,7 @@ internal fun KnowledgeDetailScreen(
     }
     CompositionLocalProvider(LocalUriHandler provides uriHandler) {
         JListPage(entry?.name ?: stringResource(R.string.knowledge_detail_title), onBack = navigator::back,
-            refreshing = page.loading && detail != null, onRefresh = model::refresh,
+            refreshing = page.loading && detail != null, onRefresh = model::refresh, state = listState,
             actions = {
                 JIconButton(PhIcons.Hash, stringResource(R.string.knowledge_tag_action), { model.dismissTagError(); editing = true }, enabled = detail != null)
                 JIconButton(PhIcons.ArrowClockwise, stringResource(R.string.knowledge_refresh_detail), model::refresh, enabled = !page.loading)
@@ -361,8 +376,28 @@ internal fun KnowledgeDetailScreen(
                         openLinks = if (kind in openLinks) openLinks - kind else openLinks + kind
                     }, navigator, model.owner)
                     dirs(detail.meta.strings("dirs"))
+                    // A recording's minutes (#2738), right above its transcript as on iOS; a time scrolls to its line.
+                    val lines = transcript(detail.segments)
+                    facts?.let { recorded -> minutesView(detail, recorded)?.let { view ->
+                        recordingMinutes(view, MinutesActions(
+                            busy = minutesWork.busy || page.loading, message = minutesWork.message,
+                            make = model::makeMinutes, add = model::addMinutesTodos,
+                            copy = { markdown ->
+                                (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                                    .setPrimaryClip(ClipData.newPlainText(minutesCopied, markdown))
+                                feedback?.notice(minutesCopied)
+                            },
+                            jump = { at -> segmentAt(lines, at)?.let { index -> scrolls.launch { listState.scrollToKey(segmentKey(index)) } } },
+                            dismiss = model::dismissMinutesMessage,
+                            share = { markdown ->
+                                val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, markdown)
+                                    .putExtra(Intent.EXTRA_SUBJECT, entry?.name.orEmpty())
+                                runCatching { context.startActivity(Intent.createChooser(send, null)) }
+                            },
+                        )) { at -> minutesClock(recorded, at) }
+                    } }
                     // A recording's `recent` is its transcript as text: the transcript below shows it line by line.
-                    facts?.let { recordingTranscript(it, transcript(detail.segments)) }
+                    facts?.let { recordingTranscript(it, lines) }
                     if (!recording && !detail.recent.isNullOrBlank()) {
                         item("recent-header", contentType = "section") { JSectionHeader(stringResource(R.string.knowledge_chat_history)) }
                         item("recent-toggle", contentType = "row") {
@@ -508,7 +543,7 @@ private fun LazyListScope.recordingTranscript(facts: RecordingFacts, segments: L
         }
         return
     }
-    itemsIndexed(segments, key = { index, _ -> "segment/$index" }, contentType = { _, _ -> "segment" }) { index, segment ->
+    itemsIndexed(segments, key = { index, _ -> segmentKey(index) }, contentType = { _, _ -> "segment" }) { index, segment ->
         JGroupItem(GroupPosition.of(index, segments.size)) {
             JRow {
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
@@ -678,3 +713,6 @@ private fun KnowledgeHitSource.label(): String = when (this) {
     KnowledgeHitSource.Transcript -> stringResource(R.string.knowledge_recording_transcript)
     is KnowledgeHitSource.File -> name
 }
+
+/** How often a recording's page reads it again while its minutes are being written. */
+internal const val MinutesPollMillis = 5_000L

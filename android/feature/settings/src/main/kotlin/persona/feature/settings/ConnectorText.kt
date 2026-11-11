@@ -117,8 +117,19 @@ internal class ConnectorSignInModel(
             wait(bind.pollMillis)
             // Cancelled or replaced while waiting: whatever is on screen now is the one to ask about.
             if (state.value.bind.prompt !== prompt) continue
-            step(prompt.step.orEmpty(), emptyMap(), quiet = true)
+            step(prompt.step.orEmpty(), emptyMap(), quiet = true, asked = prompt)
         }
+    }
+
+    /**
+     * Back in front after the page was away (the user scanned with another app or approved in a browser): asks the code
+     * on screen once at once, so a sign-in finished meanwhile shows without waiting an interval. Nothing while a step the
+     * user sent is on its way; true once the hub answered.
+     */
+    suspend fun catchUp(): Boolean {
+        val bind = state.value.bind
+        val prompt = bind.prompt?.takeIf { bind.polled && !bind.sending } ?: return false
+        return step(prompt.step.orEmpty(), emptyMap(), quiet = true, asked = prompt)
     }
 
     /** "Sign out"; why it did not go, null when it did. */
@@ -134,13 +145,16 @@ internal class ConnectorSignInModel(
 
     private fun update(change: (BindState) -> BindState) = mutable.update { it.copy(bind = change(it.bind)) }
 
-    private suspend fun step(step: String, values: Map<String, String>, quiet: Boolean = false): Boolean {
+    /** [asked]: the step a quiet ask was about; a step that is not done any more is dropped when that one has gone meanwhile. */
+    private suspend fun step(step: String, values: Map<String, String>, quiet: Boolean = false, asked: BindPrompt? = null): Boolean {
         if (!quiet) {
             if (state.value.bind.sending) return false
             update { it.copy(sending = true, error = null) }
         }
         return try {
             val prompt = stepCall(step, values)
+            // Cancelled or replaced while the ask was on its way: only a finished sign-in still counts.
+            if (asked != null && !prompt.done && state.value.bind.prompt !== asked) return false
             if (prompt.done) mutable.update { ConnectorSignIn(signedInAs = prompt.account.orEmpty()) }
             // A new step starts empty; the same step asked again (a mistake) keeps what was typed.
             else update { BindState(prompt, if (it.prompt?.step == prompt.step) it.values else emptyMap()) }

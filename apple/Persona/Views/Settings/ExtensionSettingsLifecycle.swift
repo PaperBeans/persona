@@ -68,10 +68,17 @@ nonisolated struct ExtensionSettingsPolicy {
 }
 
 /// Shared by standard settings views. It never touches the configuration page's draft.
+///
+/// Review on a hub that runs operations (#3692) previews as the market page does (`MarketExtensionModel`): the hub
+/// downloads and checks in the background, the page shows the operation's steps (`operation`), the Update sheet opens
+/// when it waits for consent, and agreeing goes on with the same operation. A slow download no longer holds one
+/// request until the phone gives up on it. An older hub answers the preview when it is done, as before.
 @Observable final class ExtensionSettingsLifecycle {
     struct Deps {
         var api: () -> APIClient?
-        static var live: Deps { .init(api: { AppModel.shared.api }) }
+        /// The app's operations; nil: a store of its own that runs none (tests of the synchronous path).
+        var operations: ExtensionOperations?
+        static var live: Deps { .init(api: { AppModel.shared.api }, operations: .shared) }
     }
 
     let id: String
@@ -83,7 +90,13 @@ nonisolated struct ExtensionSettingsPolicy {
     private(set) var checked = false
     private(set) var preview: ExtensionPreview?
     private(set) var detail: HubExtensionDetail?
+    /// The hub is downloading and checking the new version (its operation's steps are on the page meanwhile).
+    private(set) var previewing = false
+    /// The operation the open preview belongs to: agreeing goes on with it, closing the sheet without agreeing
+    /// cancels it.
+    @ObservationIgnored private(set) var consentOf: String?
     @ObservationIgnored private let deps: Deps
+    @ObservationIgnored private let operations: ExtensionOperations
 
     var policy: ExtensionSettingsPolicy? { detail.map(ExtensionSettingsPolicy.init(detail:)) }
     var previousVersion: String? { detail?.previousVersion }
@@ -93,7 +106,27 @@ nonisolated struct ExtensionSettingsPolicy {
         self.id = id
         self.manager = manager
         self.deps = deps
+        operations = deps.operations ?? ExtensionOperations(deps: .init(api: deps.api, features: { [] }, hub: { nil }))
     }
+
+    /// The upgrade going on, waiting for consent, or the one that failed (one that went through or was canceled is
+    /// not shown).
+    var operation: ExtensionOperation? {
+        latestOperation.flatMap { $0.state == .succeeded || $0.state == .canceled ? nil : $0 }
+    }
+
+    /// The state of its latest operation, the ones that ended included (to read the page again when one went through).
+    var operationState: ExtensionOperation.State? { latestOperation?.state }
+
+    /// Its latest operation from its market; a rename's is under the new ID once its package was read.
+    private var latestOperation: ExtensionOperation? {
+        guard let market = policy?.market else { return nil }
+        return operations.operation(for: id, market: market, manager: manager)
+            ?? candidate?.renameTo.flatMap { operations.operation(for: $0, market: market, manager: manager) }
+    }
+
+    /// Review can start: nothing else is going on for it.
+    var canReview: Bool { !busy && !previewing && operation?.isActive != true }
 
     private func api() throws -> APIClient {
         guard let api = deps.api()?.manager(manager) else {
@@ -164,15 +197,39 @@ nonisolated struct ExtensionSettingsPolicy {
     }
 
     func prepareUpgrade() async {
-        guard !busy, policy?.canCheck == true else { return }
-        busy = true
-        defer { busy = false }
+        guard canReview, policy?.canCheck == true else { return }
         preview = nil
+        let candidate: ExtensionUpgrade?
+        busy = true
         do {
-            guard let candidate = try await checkedCandidate(refresh: false) else { error = nil; return }
+            candidate = try await checkedCandidate(refresh: false)
+        } catch {
+            busy = false
+            record(error)
+            return
+        }
+        guard let candidate else { busy = false; error = nil; return }
+        if operations.stepped {
+            // The request answers at once with the operation: the page shows its steps, not a spinner, for as long
+            // as the download takes, and the sheet opens when it waits for consent.
+            previewing = true
+            defer { previewing = false }
+            do {
+                let started = try await operations.startPreview(market: candidate.market, extension: id, manager: manager)
+                busy = false
+                error = nil
+                let op = await operations.settled(started)
+                if op.state == .needsConsent { try await review(op) }
+            } catch {
+                busy = false
+                record(error)
+            }
+            return
+        }
+        defer { busy = false }
+        do {
             let next = try await api().previewCatalogExtension(market: candidate.market, plugin: id)
-            guard next.upgrades(id), next.upgrade == true, next.market == candidate.market,
-                  next.from == detail?.plugin.version else {
+            guard previewMatches(next, market: candidate.market) else {
                 throw APIError(status: 0, message: String(localized: "This manager does not provide this action."))
             }
             preview = next
@@ -180,15 +237,50 @@ nonisolated struct ExtensionSettingsPolicy {
         } catch { record(error) }
     }
 
-    /// Called only by the user's final confirmation; preparing never agrees to added permissions.
-    @discardableResult func confirmUpgrade() async -> Bool {
-        guard !busy, let preview, policy?.canCheck == true else { return false }
-        busy = true
-        defer { busy = false }
+    /// Opens the preview an operation waits on (Review Permissions on its card, the page opened again, a retry).
+    func review(_ op: ExtensionOperation) async throws {
+        guard op.state == .needsConsent, let market = policy?.market,
+              let pv = try await operations.consentPreview(op.id, manager: op.manager) else { return }
+        guard previewMatches(pv, market: market) else {
+            await operations.dismiss(op.id, manager: op.manager)
+            throw APIError(status: 0, message: String(localized: "This manager does not provide this action."))
+        }
+        consentOf = op.id
+        preview = pv
+    }
+
+    /// A preview this page may confirm: an upgrade of this extension, from its market, from the version installed.
+    private func previewMatches(_ pv: ExtensionPreview, market: String) -> Bool {
+        pv.upgrades(id) && pv.upgrade == true && pv.market == market && pv.from == detail?.plugin.version
+    }
+
+    /// The operation the open preview belongs to, taken: the sheet closing after this does not cancel it.
+    func takeConsent() -> String? {
+        defer { consentOf = nil }
+        return consentOf
+    }
+
+    /// Called only by the user's final confirmation; preparing never agrees to added permissions. `consent`: the
+    /// operation it goes on with (`takeConsent()`, taken before the sheet closed): the sheet closes at once and the
+    /// steps show on the page; nil: the synchronous upgrade of an older hub. true: upgraded.
+    @discardableResult func confirmUpgrade(_ agreed: ExtensionPreview? = nil, consent: String? = nil) async -> Bool {
+        guard !busy, let preview = agreed ?? preview, policy?.canCheck == true else { return false }
         if let problem = preview.confirmationProblem(at: .now) { error = problem; return false }
         guard preview.upgrades(id), preview.market == policy?.market, preview.from == detail?.plugin.version else {
             error = String(localized: "This manager does not provide this action.")
             return false
+        }
+        busy = true
+        defer { busy = false }
+        if consent != nil {
+            self.preview = nil
+            do {
+                // The card shows where a failure stopped, with Retry.
+                guard try await operations.agree(id, preview: preview, manager: manager).state == .succeeded else { return false }
+                candidate = nil
+                error = nil
+                return true
+            } catch { record(error); return false }
         }
         do {
             detail = try await api().upgradeExtension(id, preview: preview)
@@ -199,10 +291,47 @@ nonisolated struct ExtensionSettingsPolicy {
         } catch { record(error); return false }
     }
 
+    /// The sheet closed without Update: the operation waiting on it is canceled (the hub drops the preview).
     func dismissPreview() {
         guard !busy else { return }
         preview = nil
+        guard let op = consentOf else { return }
+        consentOf = nil
+        Task { await operations.dismiss(op, manager: manager) }
     }
+
+    /// Retry on the card of a failed operation: the hub starts it again (its package is in its cache, or still
+    /// downloading); the sheet opens when it waits for consent again. true: upgraded.
+    func retry() async -> Bool {
+        guard let op = operation, op.state == .failed, !previewing else { return false }
+        guard op.retryable, !op.isLocal else {
+            await operations.dismiss(op.id, manager: op.manager)
+            await prepareUpgrade()
+            return false
+        }
+        previewing = true
+        defer { previewing = false }
+        do {
+            let next = try await operations.retry(op)
+            error = nil
+            switch next.state {
+            case .needsConsent: try await review(next)
+            case .succeeded: candidate = nil; return true
+            default: break
+            }
+        } catch { record(error) }
+        return false
+    }
+
+    /// Close or Cancel on the card: the hub forgets one that ended, cancels one that waits or still downloads.
+    func dismissOperation() async {
+        guard let op = operation else { return }
+        if op.id == consentOf { consentOf = nil }
+        await operations.dismiss(op.id, manager: op.manager)
+    }
+
+    /// What the hub has going on, when the page opens (one started earlier shows its steps).
+    func loadOperations() async { await operations.reload() }
 
     private func record(_ error: Error) {
         if let apiError = error as? APIError, [404, 405, 501].contains(apiError.status) {

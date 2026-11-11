@@ -1,5 +1,9 @@
 # Lessons: Android
 
+## A design-system signature change compiles every caller (#4145)
+
+#4124 added a `Boolean` after `JSectionHeader`'s composable slot. A caller passing the slot as a trailing lambda then bound it to the `Boolean`, and `main` stopped compiling for every Android build. No hosted CI runs on PRs, so the module's own build passing was not enough. Before merging a change to a `core/designsystem` component's parameters, compile `:app:compileDebugKotlin` (every feature's main code) and the test code of the modules that call it. Keep a composable slot last; `scripts/app/android_slot_order.py` checks that (#4146).
+
 ## Receipt navigation inside task details (#3841)
 
 A receipt reused inside task details must not invoke the same task-sheet destination again: assigning the same Compose state produces no visible change. Resolve the task's existing lead binding and open its Agent page after dismissing the sheet. Keep missing-target feedback inside that sheet; generic operation feedback discards arbitrary exception messages and a snackbar behind a modal does not prove the explanation is visible. Exercise the receipt button independently of the footer and verify the real navigation stack in addition to callback tests.
@@ -141,6 +145,12 @@ Pitfalls in the new multi-module Android App (`android/`, `docs/android/android.
 
 ## UI and Compose
 
+- **A big page must not read a state that changes on every scroll frame** (#4039). `ChatListState.position` holds the
+  reading anchor's pixel offset, written each frame; `ChatPage` read `position.expanded`, so a scroll re-ran the whole
+  page (about 1,000 lines, chat-length lists rebuilt) once per frame. Read such parts through `derivedStateOf`
+  (`ChatListState.expanded`, `followsEnd`) and count recompositions in a real composition (Robolectric, `Recomposer` +
+  `BroadcastFrameClock`, `ChatListStateTest`): `SnapshotStateObserver` handles derived states differently from
+  composition, and a plain JVM test cannot compose (Compose calls `android.os.Trace`).
 - **A control meant to "look like the chips" must be the chip** (#2956). #2920 rebuilt the Assistant entries as a new row
   (44 dp, control radius, its own padding) next to `JChip` (36 dp, chip radius), and they visibly grew. Draw such controls
   with `JChip` / `JChipTokens`, add an optional parameter for what is missing (`dot`), and assert the rendered height
@@ -299,6 +309,7 @@ Pitfalls in the new multi-module Android App (`android/`, `docs/android/android.
 
 ## Contracts and wiring
 
+- A `@WireEnum` value missing from its list decodes as `"unknown"`, silently (#4035). Android handled the hub's `notify` kind `reply` (Awaiting reply) in every policy and test, but the tests built `NotifyEvent("reply", …)` by constructor, so none went through the decoder, and the reminder never posted. When a new kind or state reaches the wire, add it to the `@WireEnum` and test it from the raw JSON (`ServerEvent.decode`), not from a constructed event.
 - When adding interface methods with default implementations (`ChatActions.editQueue` / `info`, `AgentOperations.attachSession`), `by delegate` wrappers forward automatically, but handwritten forwarding objects do not. `trackActions` in `core:data` and the anonymous `AgentOperations` in App `AgentsWiringModule` forward method by method; missing a new method silently uses its default ("Not integrated yet") without compilation errors. When adding methods, use `git grep ': ChatActions\b\|object : AgentOperations'` to update all handwritten forwarding.
 - Claude Code transcripts do not retain `client_msg_id` (2026-11-03, #895). A user item's ID is Claude's own UUID; neither hub nor node rewrites it. With hub `client_ops`, Android previously matched "already in the transcript" only by ID, leaving every Claude Code message at "Delivered, waiting for transcript." Match pending messages to transcript entries by text (`MessageEcho`, same rules as iOS `PendingMessage.arrived`: normalization, computer clock up to 2 minutes behind, prefix match for truncation), only for sent / uncertain messages, and one pending message per transcript entry. Every new item (events, paging, gap repair) is reconciled with the outbox (`HubChatRepository` `transcript`).
 - Delivery does not guarantee an identical user message in the transcript (2026-11-03, #950). Phone `/compact` appears only as a compaction notice; Codex writes queued messages only at turn end. Waiting only for an echo leaves bubbles forever. iOS (`settleSend`) and web dismiss 60 seconds after delivery once the session is not working (wait at most another 15 minutes); Android does the same (`OutboxMessageSender.sentGraceMillis`, `connectActivity`). Do not add constructor parameters after `now`: callers pass the clock as a trailing lambda.
@@ -386,6 +397,7 @@ Stable task-card upserts are identity hints, not newer than live to-dos by defin
 
 - Pixel-by-pixel screenshots (`SHOTS_*` in `android.sh shots`; `docs/android/android.md`, "Pixel-exact before/after comparison"): after SystemUI demo mode hides mobile networking on Android 15, a satellite icon appears about 5 seconds later. Neither demo commands nor `icon_blacklist` removes it; wait for it before every capture. `adb root` restarts adbd and loses existing `adb reverse`; root before forwarding. macOS `sips -Z` changes the original image; copy first before viewing. macOS bash 3.2 with `set -u` errors on empty-array expansion; use `${arr[@]+"${arr[@]}"}`.
 - Homebrew Android SDK is at `/opt/homebrew/share/android-commandlinetools`, not `~/Library/Android/sdk`, and default Java is JDK 8. Before `android.sh`, set `ANDROID_HOME` to it and `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`. Custom AVDs need a separate `ANDROID_AVD_HOME`; do not touch other running emulators. If the first-launch readiness checklist blocks access, run `android.sh shots` once to clear data, pair, and skip readiness, then switch to your mock with `DebugEntryActivity --es debug.mockAddress …`.
+- On a host with little free disk, Android 36 can replace a smaller `disk.dataPartition.size` or `-partition-size` with its 6 GB default at every launch. The SDK's own tools can prepare a bounded sparse data image instead: `emulator/qemu-img create -f raw <owned AVD>/userdata-qemu.img 1536M`, then `emulator/bin64/mkfs.ext4 -F <same image>`, and boot without `-wipe-data` (which would delete it). A blank qcow2 only gets past the host-space check and then leaves `/data` read-only because it has no ext4 filesystem; kernel logs showing `invalid magic` and encryption-key failures identify this case. Use an even ADB port in the supported 5554–5584 range. Stopping the local SSH wrapper does not necessarily stop a remote mock hub: find its PID by listening port, verify its cwd, and kill only that PID.
 
 - Multiple hubs (#634): when integrating a service invoked by machine ID, do not use the current-pairing connection (`ConnectionRuntime.scopedData` / `connectionFor`). Page machine IDs come from the merged list; other groups carry `~<group id>`. Sending to the selected group's hub merely yields "Machine not found," or worse, changes another machine if both groups have the same ID.
   Find the group through `GroupStacks.use(GroupKeys.namespaceOf(id))`, strip suffixes there with `inGroup(names)`, and add them back to returned machines. Only one-per-hub services (model configuration, voice, Inbox) follow the selected group.

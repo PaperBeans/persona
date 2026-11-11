@@ -20,8 +20,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -182,7 +180,8 @@ fun LarkVoiceView(
     }
 
     val shape = RoundedCornerShape(Tokens.Radius.control)
-    // The play / pause icon is drawn without a description: TalkBack names the bubble and says what a tap does (#3904).
+    // The play / pause icon carries the name, not the bubble: a content description on the merging bubble would
+    // replace its merged duration text, and TalkBack would stop reading the length (#3904, #4085).
     val voiceLabel = stringResource(R.string.inbox_lark_audio)
     val toggleLabel = stringResource(if (isPlaying) R.string.inbox_lark_media_pause else R.string.inbox_lark_media_play)
 
@@ -191,7 +190,6 @@ fun LarkVoiceView(
             .clip(shape)
             .background(palette.ink.copy(alpha = 0.06f))
             .clickable(role = Role.Button, onClickLabel = toggleLabel) { isPlaying = !isPlaying }
-            .semantics { contentDescription = voiceLabel }
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)
@@ -206,6 +204,7 @@ fun LarkVoiceView(
         ) {
             JIcon(
                 if (isPlaying) PhIcons.Pause else PhIcons.Play,
+                contentDescription = voiceLabel,
                 modifier = Modifier.size(Tokens.Space.l),
                 tint = palette.onAccent
             )
@@ -255,7 +254,8 @@ fun LarkVideoView(
         "%02d:%02d".format(s / 60, s % 60)
     }
 
-    // Only the duration badge is text: TalkBack names the preview and says a tap plays it (#3904).
+    // The play icon carries the name, not the preview: a content description on the merging preview would replace
+    // its merged duration badge, and TalkBack would stop reading the length (#3904, #4085).
     val videoLabel = stringResource(R.string.inbox_lark_video)
     val playLabel = stringResource(R.string.inbox_lark_media_play)
 
@@ -265,8 +265,7 @@ fun LarkVideoView(
             .heightIn(min = ContentTokens.mediaPreviewMinHeight, max = ContentTokens.mediaPreviewMaxHeight)
             .clip(shape)
             .background(palette.mediaScrim)
-            .clickable(role = Role.Button, onClickLabel = playLabel, onClick = onPlay)
-            .semantics { contentDescription = videoLabel },
+            .clickable(role = Role.Button, onClickLabel = playLabel, onClick = onPlay),
         contentAlignment = Alignment.Center
     ) {
         // Play icon in center
@@ -277,7 +276,12 @@ fun LarkVideoView(
                 .background(palette.mediaControlFill),
             contentAlignment = Alignment.Center
         ) {
-            JIcon(PhIcons.Play, modifier = Modifier.size(Tokens.Space.xxl), tint = palette.onMediaBackdrop)
+            JIcon(
+                PhIcons.Play,
+                contentDescription = videoLabel,
+                modifier = Modifier.size(Tokens.Space.xxl),
+                tint = palette.onMediaBackdrop
+            )
         }
 
         // Duration badge
