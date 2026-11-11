@@ -413,8 +413,8 @@ def run_once(label, binary, pg, body, args, name):
                 if mark < args.settle:
                     row[f"after_{mark}s"] = sampler.at(pid, answered + mark)
             hwm = read_hwm(pid)
-            if hwm is not None:
-                row["peak"] = hwm
+            if hwm is not None and row["peak"] is not None:  # the kernel's mark can trail the counter by a little
+                row["peak"] = max(row["peak"], hwm)
             if None in row.values():
                 raise Failed(f"the {key} (pid {pid}) was gone before the end")
             row["series"] = sampler.series(pid, answered)
