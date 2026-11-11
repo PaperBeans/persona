@@ -1846,6 +1846,24 @@ On TestFlight 224 an extension's **Review** spun for two minutes and then failed
 hub, and a download runs at 88 MB/s: the hub, the bus, the manager and the stream mux are not where a live screen's
 latency goes. The hub → node leg (`ssh -T` over Tailscale on the LAN) is where it varies; plain `ssh host cat` shows the
 same spread, and the Mac's `sshd-session` already has TCP_NODELAY (lsof `-T f`: TF flag 0x4), so it is not Nagle.
+## A list of a few entries built the whole catalog to find them (2026-11-12, #3197)
+
+- `marketChannels` called `catalog("", "")` to list the channels the markets offer: every entry of every market with its
+  translations parsed, its permission lines written, every contribution decoded and its install problems checked, to
+  keep the one entry in 83 that contributes a channel. The assistant asks for the channel list every few seconds while
+  agents end turns: 3.6% of the manager's allocation and 4% of its CPU in a soak of 10 computers x 50 sessions, and
+  1.07 ms and 707 KB a call on a synthetic market of that size.
+- Test the cheap condition on the raw entry first (`len(e.Parsed.Contributes["channel"])`, then its items), and build
+  the ones that pass with the function the full list uses (`catalogItem`): 38 µs and 22 KB. Sharing the builder is what
+  keeps the two from drifting; a second, slimmer builder would have to track every later change to names, problems
+  and install state.
+- No cache, so nothing to invalidate when a market is refreshed, an extension installed or the language changed. A
+  cache would have saved the remaining 38 µs and cost a stale channel list on any missed invalidation.
+- Prove it against the old path kept in the test, over every kind of entry the filter tells apart (installed, no
+  package for the platform, a newer hub needed, a refused signature, an empty, null or malformed channel list, an id
+  another entry or the list already has), in every language (`TestMarketChannelsAreTheCatalogs`), and pin what the
+  table holds so that two empty lists do not pass.
+
 ## A child in its own process group outlives a node killed by `exec.CommandContext` (2026-11-11, #4259)
 
 - The manager ran the hub machine's node (`node --stdio`) with `exec.CommandContext` and the default `Cancel`, a SIGKILL. The node puts each assistant process in its own group (`Setpgid`, so `stop()` can end its background tasks), and nothing ties that group to the node: a SIGKILLed node leaves its conversations running. Before blue-green switching, the systemd restart's cgroup kill hid this; a switch keeps the unit, so the old Claude processes went on beside the ones the next node resumed for the same conversations, and the next node rightly refused them the assistant's tools.
