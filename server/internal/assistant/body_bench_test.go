@@ -45,3 +45,17 @@ func BenchmarkDecode22MB(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkDecode1K serves a relayed 1 KiB new conversation to the same route, as most are: decoding a large upload
+// where it is must not cost the small ones.
+func BenchmarkDecode1K(b *testing.B) {
+	p := assistantwire.HTTPRequest{Method: http.MethodPost, Path: "/api/v1/assistant/conversations", Body: largeStart(700)}
+	b.SetBytes(int64(len(p.Body)))
+	b.ReportAllocs()
+	for b.Loop() {
+		res, err := serveHTTP(context.Background(), startDecoder, p, nil)
+		if err != nil || res.Status != http.StatusBadRequest {
+			b.Fatal(res.Status, err)
+		}
+	}
+}

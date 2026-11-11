@@ -70,3 +70,14 @@ func BenchmarkRelay22MB(b *testing.B) {
 		relayOnce(b, h, body)
 	}
 }
+
+// BenchmarkRelay1K relays a 1 KiB request body, as most requests have: the relay of a large upload must not cost
+// the small ones.
+func BenchmarkRelay1K(b *testing.B) {
+	h, body := answeringManager(b), largePrompt(700)
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	for b.Loop() {
+		relayOnce(b, h, body)
+	}
+}
