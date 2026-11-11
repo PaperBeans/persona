@@ -97,7 +97,9 @@ Chat page:
 - Links (`Views/Link/LinkSheet.swift`): chat http(s) opens an in-App bottom card like Telegram: full screen immediately, at 60% pulled down the chat remains usable, further down closes;
   behind a 60% card chat still scrolls and accepts input (`presentationBackgroundInteraction`). Lark docs / Knowledge use native `FeishuDocReader`,
   other websites `WebViewPool`: preload first 3 links in each appearing reply, at most 6 resident WKWebViews (LRU), sharing default disk website data (cache, login),
-  requests `returnCacheDataElseLoad`, opening reuses the loaded view. Selected web text gets AI edit (enter request, immediately send to Agent) and
+  requests `returnCacheDataElseLoad`, opening takes the preloaded view. A view serves one opening (#4074): when its sheet closes the pool drops it, with the
+  page the user browsed to and its back/forward history, and starts a fresh one on the link, so every tap opens the link's own page with no history from
+  earlier openings (a machine's dev server loads again only when opened). Inside the sheet an edge swipe goes back and forward. Selected web text gets AI edit (enter request, immediately send to Agent) and
   Add as context (quote strip above input, sent with next message); native Lark docs use title-bar Add as context for the whole document. Message context is
   `<persona-context kind="context|edit" title="…" url="…">selected text</persona-context>`, raw tags hidden.
 - This-hub links (#2696, `Shared/HubPageLink.swift`, `App/HubPageRouting.swift`): assistant links to this hub's web pages (#2194) open native App pages, not website cards:

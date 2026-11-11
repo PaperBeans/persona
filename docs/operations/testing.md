@@ -585,6 +585,12 @@ external links remain web cards. `MOCK_HUB_LINKS=1 PORT=18796 python3 scripts/mo
 `TEST_RUNNER_PERSONA_HUB_LINKS_HUB=http://127.0.0.1:18796 xcodebuild test … -only-testing:PersonaUITests/HubPageLinkUITests`;
 `TEST_RUNNER_PERSONA_SHOTS=<directory>`, `TEST_RUNNER_PERSONA_SHOTS_APPEARANCE=light|dark` save shots. URL unit tests `PersonaTests/HubPageLinkTests`.
 
+A link tapped again opens its own page (`LinkSheetReopenTests`, #4074): Persona's main chat links 示例页面 (example.com); in the sheet the page's link leads on to iana.org
+and the sheet is closed there; tapping 示例页面 again shows example.com. Needs the internet. A synthesized edge swipe does not start WebKit's back gesture in the simulator,
+so that the reopened page has no history is checked by the unit tests.
+`MOCK_LINKS=1 PORT=<dedicated port> python3 scripts/mock/mock_hub.py &`, `TEST_RUNNER_PERSONA_LINKS_HUB=http://127.0.0.1:<port> xcodebuild test … -only-testing:PersonaUITests/LinkSheetReopenTests`;
+`TEST_RUNNER_PERSONA_SHOTS=<directory>`, `TEST_RUNNER_PERSONA_SHOTS_APPEARANCE=light|dark` save each step. Pool unit tests `PersonaTests/WebViewPoolTests`.
+
 Telegram reply box (`ConnectorThreadReplyTests`, #1190): sent replies appear immediately; no confirmation-card notice or Allow:
 `MOCK_TELEGRAM=signed_in MOCK_TELEGRAM_INBOX=1 PORT=18857 python3 scripts/mock/mock_hub.py &`,
 `TEST_RUNNER_PERSONA_MOCK_HUB_TELEGRAM_THREAD=http://127.0.0.1:18857 xcodebuild test … -only-testing:PersonaUITests/ConnectorThreadReplyTests`.

@@ -303,6 +303,11 @@ Use an invalidation revision as the task key and handle the flag after completio
   Lark chat rows updated "seen" and report timers on entry, receipt bookkeeping on exit, repeatedly reevaluating the entire page during scrolling and doubling dropped frames.
   Keep invisible bookkeeping in a class held by `@State` (`LarkChatBook`), whose writes do not invalidate views; visible counts / receipts remain state, written only when actually changed.
 - Do not construct WKWebView on the main thread while scrolling: preload links only for recent replies (within 15 minutes); preloading every old reply caused 1–2 second freezes.
+- A pooled WKWebView keyed by its link's URL carries the page the user browsed to, and its back/forward history, into the next opening of that link
+  (2026-11-11, #4074: a PR link reopened on an issue page). Hand a view out for one opening only: `dismantleUIView` gives it back and the pool drops it
+  (`WebViewPool.release`). A WKWebView's history cannot be cleared, so a fresh opening needs a new view. In a unit test neither
+  `loadHTMLString` nor a script's `history.pushState` adds back/forward entries (iOS 26.5 simulator), and a UI test's synthesized edge swipe
+  does not start WebKit's back gesture: a followed link in a UI test (`LinkSheetReopenTests`) is what builds real history.
 - Scroll bookkeeping (visible rows, touch state) belongs in unobserved objects (`ChatScratch`); writing `@State` reevaluates the page. Cache derived rows by
   `ChatStore.version` and similar keys. Decode WebSocket messages on callback threads, not after returning to main.
 - `ScrollPosition.scrollTo(y:)` also zeros horizontal offset: with `contentMargins(.horizontal)`, the page sticks to screen edges.
