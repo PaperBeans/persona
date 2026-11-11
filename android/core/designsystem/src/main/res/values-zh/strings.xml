@@ -319,4 +319,5 @@
     <string name="designsystem_candle_volume">量 %1$s</string>
     <string name="designsystem_stepper_minus">减少</string>
     <string name="designsystem_stepper_plus">增加</string>
+    <string name="designsystem_copy_too_large">文本过大无法复制，请使用分享</string>
 </resources>

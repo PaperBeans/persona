@@ -1,5 +1,5 @@
 // Small pieces the knowledge pages share: the kind tile, tinted pills, marked text, section headers, local icons.
-import { importanceTone, initial, isKind, markParts, projectKindLabel, relevanceTone, type KBEntry, type KBKind, type Tone } from "../../lib/kb";
+import { importanceTone, initial, isKind, markParts, projectKindLabel, relevanceTone, topicPointCount, type KBEntry, type KBKind, type Tone } from "../../lib/kb";
 import { cx } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import { t } from "../../i18n";
@@ -43,7 +43,7 @@ export function KBIcon({ name, size = 15, stroke = 1.9, className }: { name: KBI
   );
 }
 
-export const KIND_ICON: Record<KBKind, KBIconName> = { projects: "layers", chats: "chat", people: "person", docs: "read", meetings: "video", events: "calendar", recordings: "mic" };
+export const KIND_ICON: Record<KBKind, KBIconName> = { projects: "layers", topics: "light", chats: "chat", people: "person", docs: "read", meetings: "video", events: "calendar", recordings: "mic" };
 
 export const TINT: Record<Tone, string> = {
   red: "bg-red-tint text-red",
@@ -94,6 +94,7 @@ export function importanceLabel(level: string): string {
 /** The importance, the project's kind and status, and the relevance, as pills that say what they are without a hover (phones have none). */
 export function Badges({ entry, status, asProject = false }: { entry: KBEntry; status?: string | null; asProject?: boolean }) {
   const kind = projectKindLabel(entry);
+  const points = topicPointCount(entry);
   return (
     <>
       {entry.importance && (
@@ -103,6 +104,7 @@ export function Badges({ entry, status, asProject = false }: { entry: KBEntry; s
       )}
       {kind && <TonePill tone={entry.extra?.startsWith("long") ? "accent" : "neutral"}>{asProject ? t("knowledge-kbparts.project_kind", { kind }) : kind}</TonePill>}
       {status && <TonePill>{status}</TonePill>}
+      {points !== null && <TonePill>{t("knowledge-kbparts.points", { count: points })}</TonePill>}
       {entry.relevance > 0 && (
         <TonePill tone={relevanceTone(entry.relevance)} title={t("knowledge-kbparts.relevance_title")}>
           {t("knowledge-kbparts.relevance", { value: entry.relevance })}

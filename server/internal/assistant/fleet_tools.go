@@ -62,7 +62,11 @@ func (s *Service) sessionMCPTools(ctx context.Context, machine, session string, 
 		if s.isWorkMachine(machine) {
 			return s.AgentTools()
 		}
-		return s.mcpTools(ctx, assistant)
+		tools := s.mcpTools(ctx, assistant)
+		if !assistant {
+			tools = append(tools, s.leaderTools(ctx, machine, session)...) // a task leader's task_plan (task_leader.go)
+		}
+		return tools
 	}
 	if s.isWorkMachine(machine) {
 		return []proto.Tool{}
@@ -108,6 +112,12 @@ func (s *Service) mcpCall(ctx context.Context, machine, session, name string, ar
 	}
 	if !assistant && isAgentTool(name) {
 		return s.agentTool(ctx, machine, session, name, args)
+	}
+	if !assistant && name == "task_plan" { // only a task leader's agent has it (task_leader.go)
+		return s.leaderTaskPlan(ctx, machine, session, args)
+	}
+	if !assistant && name == "task_review" {
+		return s.leaderTaskReview(ctx, machine, session, args)
 	}
 	if !assistant && isDispatchTool(name) {
 		return s.dispatchTool(ctx, machine, session, name, args)

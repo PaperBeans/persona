@@ -590,6 +590,8 @@ extension Theme {
         static let findFiles = "folder.badge.questionmark"
         /// Text searched for inside files (Grep).
         static let findText = "text.magnifyingglass"
+        /// A command watched in the background, each line it prints an event (Claude Code's Monitor, its task notes).
+        static let monitor = "waveform.path.ecg"
         /// A subagent the agent started (the Agent / Task tool, a session's subagents); one at work.
         static let subagent = "person.2"
         static let subagentWorking = "person.2.badge.gearshape"

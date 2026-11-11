@@ -11,6 +11,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -102,7 +103,7 @@ func (s *Service) elicitationReachable(ix proto.Interaction) bool {
 // card goes to its supervisor first when leaders are configured (ask_route.go); a question the assistant may answer for
 // the user goes to it first (fleet_delegate.go).
 func (s *Service) announce(ix proto.Interaction) {
-	if s.routeAsk(ix) {
+	if !s.agentSupervisedSession(ix.MachineID, ix.SessionID) && s.routeAsk(ix) { // a worker's card stays the user's (task_leader.go)
 		return
 	}
 	if forget := s.delegable(ix); forget != nil {
@@ -176,6 +177,35 @@ func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (pr
 	// Defense behind the node hook: question-text-keyed answers could not be kept apart on a duplicate card.
 	if ix.Kind == proto.IxQuestion && proto.HasDuplicateQuestionText(ix.Questions) {
 		return proto.Resolution{}, i18n.Err("hub-hub.duplicate_question")
+	}
+	// Plan mode enforces a read-only task's launch constraint. Its supervisor report may run once,
+	// but exiting plan mode must still be denied. Neither path registers a card or grants permissions.
+	report := ix.Kind == proto.IxPermission && ix.ToolName == "mcp__persona__report_to_supervisor"
+	if ix.Kind == proto.IxPlan && ix.ToolName == "ExitPlanMode" || report {
+		if todo, ok := s.taskOf(ctx, ix.MachineID, ix.SessionID); ok {
+			plans, err := s.conversationPlans(ctx, todo.Origin)
+			if err != nil {
+				return proto.Resolution{}, err
+			}
+			for _, plan := range plans {
+				if plan.State != planStarted {
+					continue
+				}
+				for _, task := range plan.Tasks {
+					if task.TodoID == todo.ID && task.Readonly {
+						if report {
+							if todo.Supervision == nil || todo.Supervision.Supervisor == "" {
+								continue
+							}
+							allow := true
+							return proto.Resolution{Allow: &allow}, nil
+						}
+						approve := false
+						return proto.Resolution{Approve: &approve, Feedback: prompts.RenderReadonlyTaskPlanExit()}, nil
+					}
+				}
+			}
+		}
 	}
 	ix = nodeCard(ix, s.fleetStore() != nil, s.ixInHealth(ctx, ix))
 	if r, ok := s.alwaysAllowed(ctx, ix); ok {

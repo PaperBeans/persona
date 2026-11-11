@@ -10,6 +10,10 @@ extension AppModel {
     /// The roster of the hub-level group's hub; nil from a hub before managers, or until it is read.
     var managerRoster: ManagerRoster? { managerRosters[hub?.group ?? ""] }
 
+    var showsAssistantIdentity: Bool { managerRoster?.isMulti == true }
+
+    var assistantDisplayName: String { showsAssistantIdentity ? persona.name : String(localized: "Persona") }
+
     /// Reads group's roster again. A hub without one (404) has none; one that can't be read now keeps the last.
     func refreshManagerRoster(_ group: String) async {
         guard let api = api(group) else { return }

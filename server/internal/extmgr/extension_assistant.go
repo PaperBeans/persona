@@ -274,7 +274,7 @@ func (h *Manager) assistantLark(ctx context.Context) (proto.AssistantLark, error
 	larkRules := append(connector.LarkRules(h.cfg.ConnectorGate, h.cfg.LarkGate), connector.LarkRules(h.connectors.UserRules(), nil)...)
 	out := proto.AssistantLark{Rules: larkRules, Prefer: lc.Prefer}
 	if lc.CLI != nil {
-		out.CLI = &proto.LarkCLI{Bin: lc.CLI.Bin, Profile: lc.CLI.Profile}
+		out.CLI = &proto.LarkCLI{Bin: lc.CLI.Bin, Profile: h.effectiveLarkCLIProfile(ctx)}
 	}
 	out.Gates = h.extensions.assistantGates(ctx, func(id string) []proto.LarkRule {
 		if id == connector.Lark {

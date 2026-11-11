@@ -11,7 +11,14 @@ import { SESSION_LIST_METRICS } from "../../ui/list-metrics";
 import { PagedSessionList } from "./PagedSessionList";
 
 vi.mock("../../lib/api", async (original) => ({ ...await original<typeof import("../../lib/api")>(), api: vi.fn() }));
-vi.mock("../../lib/store", () => ({ onHubEvent: () => () => {} }));
+const hub = vi.hoisted(() => ({ handlers: new Set<{ event: string; fn: () => void }>() }));
+vi.mock("../../lib/store", () => ({
+  onHubEvent: (event: string, fn: () => void) => {
+    const entry = { event, fn };
+    hub.handlers.add(entry);
+    return () => { hub.handlers.delete(entry); };
+  },
+}));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 type Row = { id: string };
@@ -66,6 +73,15 @@ async function show() {
   expect(labels()).toEqual(expected(initialState));
 }
 
+/** A `sessions_list` hint as the store delivers it: to every listener, and the root list refreshes. */
+async function hint() {
+  await act(async () => {
+    for (const entry of [...hub.handlers]) if (entry.event === "sessions_list") entry.fn();
+    await list.load();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
 async function search() {
   const input = host.querySelector<HTMLInputElement>(`input[aria-label="${t("paged-agents.search")}"]`)!;
   act(() => {
@@ -102,7 +118,7 @@ describe("paged state chips during count refreshes", () => {
     const pending = deferred<ListCounts>();
     scopedCounts.mockReturnValue(pending.promise);
     rootCounts.mockResolvedValue(counts(initialState, "refresh"));
-    await act(async () => { await list.load(); });
+    await hint();
     expect(labels()).toEqual(expected(scoped));
     expect(chips()).toEqual(before);
 
@@ -113,9 +129,27 @@ describe("paged state chips during count refreshes", () => {
     const next = { ...scoped, working: 9 };
     scopedCounts.mockResolvedValue(counts(next, "recovered"));
     rootCounts.mockResolvedValue(counts(initialState, "retry"));
-    await act(async () => { await list.load(); });
+    await hint();
     expect(labels()).toEqual(expected(next));
     expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("reads scoped counts once per hint, not again when the root's counts land for it", async () => {
+    vi.mocked(api).mockClear();
+    await show();
+    await search();
+    const scopedReads = () => vi.mocked(api).mock.calls.filter(([path]) => path === "/sessions?counts=1&q=review").length;
+    expect(scopedReads()).toBe(2); // the facet chips and the scope, once each
+    const before = scopedReads();
+    for (let i = 0; i < 3; i++) {
+      rootCounts.mockResolvedValue(counts(initialState, `hint-${i}`));
+      await hint();
+    }
+    expect(scopedReads() - before).toBe(6); // 3 hints × (facets + scope)
+    // A root refresh with no hint (a retry, a rebaseline) reads nothing scoped.
+    rootCounts.mockResolvedValue(counts(initialState, "retry"));
+    await act(async () => { await list.load(); });
+    expect(scopedReads() - before).toBe(6);
   });
 
   it("keeps unfiltered chips while the root rebaselines and accepts a successful empty count", async () => {

@@ -522,9 +522,10 @@ internal fun CodeDiff(item: ExtensionViewItem, state: ExtensionViewState, handle
                 var drawn = 0
                 @Composable
                 fun under(spots: List<String>) {
-                    spots.flatMap { at[it].orEmpty() }.forEach { th ->
+                    // a thread's state (folded, its reply box) goes with its id when one is added before it (#4179)
+                    spots.flatMap { at[it].orEmpty() }.forEach { th -> androidx.compose.runtime.key(th.id) {
                         Box(Modifier.width(screenWidth())) { ReviewThread(th, original(th.side, th.line, th.startLine), state, handle) }
-                    }
+                    } }
                     val b = box
                     if (b != null && ExtensionCodeText.spot(b.side, b.line) in spots) Box(Modifier.width(screenWidth()).background(palette.surfaceOpaque)) {
                         LineComposer(b, body, { body = it }, item, original(b.side, b.line, b.startLine), state.view?.review?.count ?: 0, state, handle) { box = null }
@@ -587,7 +588,7 @@ internal fun CodeDiff(item: ExtensionViewItem, state: ExtensionViewState, handle
                 if (rest.isNotEmpty()) {
                     JDivider()
                     Text(stringResource(R.string.settings_ext_code_elsewhere), Modifier.padding(horizontal = rowPadding, vertical = Tokens.Space.s), style = type.caption, color = palette.ink3)
-                    rest.forEach { ReviewThread(it, emptyList(), state, handle) }
+                    rest.forEach { th -> androidx.compose.runtime.key(th.id) { ReviewThread(th, emptyList(), state, handle) } }
                 }
             }
         }

@@ -1,18 +1,44 @@
 import { useState, type ReactNode } from "react";
 import { t } from "../../i18n";
-import { useKnownDefault, useShownManager } from "../../lib/manager-choice";
+import { useChosenManager, useKnownDefault, useShownManager } from "../../lib/manager-choice";
 import { managerOrder, useRoster } from "../../lib/managers";
 import { Loading } from "../../ui/atoms";
 import { Group, Row } from "./SettingsParts";
 
-/** A configuration editor owns its target, independently of the chat switcher and late requests. */
-export function ConfigurationManager({ children, title, rowLabel, hint, hideSingle = false }: {
+/**
+ * Which manager a configuration editor reads and writes, independently of late requests (its children are drawn again
+ * for another one). By default the current assistant (docs/assistant/managers.md "The current assistant": the current
+ * assistant's settings pages have no picker of their own), drawn once the roster says which manager that is (a kept
+ * pick counts before). `pick`: an editor outside those pages (the hub's download mirrors) with its own picker,
+ * starting on the current assistant and kept in the address (`?manager=`).
+ */
+export function ConfigurationManager({ children, title, rowLabel, hint, hideSingle = false, pick = false }: {
   children: (manager: string) => ReactNode;
   title?: string;
   /** A shorter label beside the picker, when the group title already names it. */
   rowLabel?: string;
   hint?: string;
   hideSingle?: boolean;
+  pick?: boolean;
+}) {
+  return pick ? <PickedManager title={title} rowLabel={rowLabel} hint={hint} hideSingle={hideSingle}>{children}</PickedManager> : <CurrentManager>{children}</CurrentManager>;
+}
+
+/** The current assistant's editor: the picked manager, else the roster's default once it is known. */
+function CurrentManager({ children }: { children: (manager: string) => ReactNode }) {
+  const picked = useChosenManager();
+  const knownDefault = useKnownDefault();
+  const manager = picked ?? knownDefault;
+  if (!manager) return <Loading />;
+  return <div key={manager}>{children(manager)}</div>;
+}
+
+function PickedManager({ children, title, rowLabel, hint, hideSingle }: {
+  children: (manager: string) => ReactNode;
+  title?: string;
+  rowLabel?: string;
+  hint?: string;
+  hideSingle: boolean;
 }) {
   const roster = useRoster();
   const knownDefault = useKnownDefault();

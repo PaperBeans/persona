@@ -5,7 +5,17 @@ plugins {
 
 android {
     namespace = "persona.core.designsystem"
-    testOptions { unitTests { isIncludeAndroidResources = true } }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all {
+                it.jvmArgs(
+                    "--add-opens=java.base/java.io=ALL-UNNAMED",
+                    "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED"
+                )
+            }
+        }
+    }
 }
 
 dependencies {

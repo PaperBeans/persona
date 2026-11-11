@@ -13,6 +13,7 @@ import {
 } from "../../lib/inbox";
 import { isTransient } from "../../lib/ops";
 import { machineWithHub } from "../../lib/mesh";
+import { conversationPage } from "../../lib/conversation-page";
 import { navigate } from "../../lib/router";
 import { refreshAssistant, useStore } from "../../lib/store";
 import type { Machine, Session } from "../../lib/types";
@@ -122,7 +123,7 @@ function DraftEditor({ item, onClose }: { item: InboxItem; onClose: () => void }
               onClick={() => {
                 onClose();
                 // The AI twin runs as the assistant (docs/assistant/inbox.md): its conversation is one of Persona's.
-                navigate(agent.machine_id === assistant?.machine_id ? { name: "persona", sid: agent.session_id! } : conversationRoute(agent.machine_id!, agent.session_id!, sessions, assistant));
+                navigate(agent.machine_id === assistant?.machine_id ? conversationPage(agent.session_id!, agent.machine_id, item.manager) : conversationRoute(agent.machine_id!, agent.session_id!, sessions, assistant, item.manager));
               }}
               className="mt-1.5 flex items-center gap-1 text-[12px] font-medium whitespace-nowrap text-accent-ink hover:underline"
             >
@@ -278,7 +279,7 @@ export function HandOffDialog({ item, onClose }: { item: InboxItem; onClose: () 
         remember();
         toast(t("inbox-inboxdialogs.handed_to_persona"), "ok");
         onClose();
-        navigate({ name: "persona", sid: to.session_id });
+        navigate(conversationPage(to.session_id, to.machine_id, item.manager));
         if (markDone) void setDone(item, true);
         return;
       }
@@ -303,7 +304,7 @@ export function HandOffDialog({ item, onClose }: { item: InboxItem; onClose: () 
       remember();
       toast(t("inbox-inboxdialogs.handed_to_persona"), "ok");
       onClose();
-      navigate({ name: "persona", sid: r.session.session_id });
+      navigate(conversationPage(r.session.session_id, r.session.machine_id, item.manager));
     } catch (e) {
       setError(errorText(e));
     } finally {

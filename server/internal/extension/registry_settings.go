@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/nwverse/persona/server/internal/i18n"
 )
@@ -250,6 +251,14 @@ func (r *Registry) secretSpec(p *Extension, name string) error {
 
 // SetSecret keeps one of a plugin's declared secrets, sealed. The value never goes to a log or back to anyone.
 func (r *Registry) SetSecret(ctx context.Context, id, name, value, actor string) error {
+	if strings.HasPrefix(value, refMarker) {
+		return i18n.Err("extension-status.secret_size", i18n.Args{"max": SecretMost >> 10}) // never typed: refused like an empty one
+	}
+	return r.setSecret(ctx, id, name, value, actor, map[string]any{"name": name})
+}
+
+// setSecret keeps value (or a SealedReference) as secret name, checked first, audited with detail.
+func (r *Registry) setSecret(ctx context.Context, id, name, value, actor string, detail map[string]any) error {
 	checked, err := r.checkSettings(ctx, id, nil, name, value)
 	if err != nil {
 		return err
@@ -292,7 +301,7 @@ func (r *Registry) SetSecret(ctx context.Context, id, name, value, actor string)
 		return err
 	}
 	unlock()
-	r.audit(ctx, id, "secret_set", actor, map[string]any{"name": name})
+	r.audit(ctx, id, "secret_set", actor, detail)
 	r.changed(Change{ID: id, Kind: "secret"})
 	return nil
 }
@@ -365,6 +374,7 @@ func (r *Registry) Secrets(ctx context.Context, id string) (map[string]string, e
 		}
 		out[name] = plain
 	}
+	r.noteReferences(id, out)
 	return out, nil
 }
 

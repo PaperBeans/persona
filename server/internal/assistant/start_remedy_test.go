@@ -33,7 +33,7 @@ func remedyingTask(t *testing.T, s *Service, f *fakeHub, failure error) (Todo, *
 		t.Fatal(err)
 	}
 	s.superviseTodo(ctx, todo.ID, "conv1", []string{"PR 合并"}, 0)
-	task := PlanTask{Title: "修登录", Prompt: "修登录", Machine: "box", Cwd: "/code/app", TodoID: todo.ID}
+	task := PlanTask{Title: "修登录", Prompt: "修登录", Machine: "box", Cwd: "/code/app", Permission: "bypassPermissions", TodoID: todo.ID}
 	p := &TaskPlan{ID: "plan_r", Conversation: "conv1", State: planStarted, Tasks: []PlanTask{task}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	if err := s.savePlan(ctx, p); err != nil {
 		t.Fatal(err)

@@ -14,7 +14,10 @@ android {
             all {
                 it.maxHeapSize = "1g"
                 // Robolectric's API 36 shared-memory setup accesses the JDK file-descriptor bridge.
-                it.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
+                it.jvmArgs(
+                    "--add-opens=java.base/java.io=ALL-UNNAMED",
+                    "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED"
+                )
             }
         }
     }

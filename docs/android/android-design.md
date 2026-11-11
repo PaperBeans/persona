@@ -74,6 +74,8 @@ The old `PersonaTypography.*`, `statusTone(...)`, `PrimaryButton` / `SecondaryBu
 
 ### 2.2 Components
 
+A component with a composable slot ends with a function-typed parameter, so a caller can pass the slot as a trailing lambda. Add a parameter before the slots, never after (#4146, checked by `scripts/app/android_slot_order.py`; see [android.md](android.md) "Design-system slot order").
+
 | Component | Use |
 | --- | --- |
 | `JPage` | A page with custom content. Pass the `PaddingValues` it gives you as the scroll container's contentPadding: in Glass the top bar and input overlays float over the content, and this is what leaves room for them |
@@ -88,7 +90,7 @@ The old `PersonaTypography.*`, `statusTone(...)`, `PrimaryButton` / `SecondaryBu
 | `JRow` / `JSwitchRow` | Settings-style rows: icon, title, subtitle, value, switch, chevron. For multi-line content in the middle (wrapping addresses, tags, test results, a leading status dot) use the slot form `JRow(onClick = …, trailing = …) { … }`: horizontal padding, minimum height, tap and long press, selection, dimming when disabled, trailing controls and chevron are the same as a normal row and align automatically in every style. `rowPadding` is the row's horizontal padding (Glass 16, Brief 0, Board 14); use it for content hung under a row that must align with the row's text (long values, explanations) |
 | `JCard` | Card; `status` gives the glass stroke the state color, or adds a thin state edge in Board |
 | `JNotice` | In-page notice (connection lost, permission needed), with one action |
-| `JEmptyState` / `JLoading` | Empty state, loading |
+| `JEmptyState` / `JLoading` | Empty state (an icon, or a `leading` slot in its place), loading |
 | `JButton` (Primary / Secondary / Quiet / Destructive, Large / Medium / Small), `JTextButton`, `JIconButton` | Buttons. Text is always one line |
 | `Modifier.stableAlpha` | Changing opacity (dimming when disabled). Do not use `Modifier.alpha`: switching between 1 and another value adds or removes a layer, and placed after `clip` + `background` the background color gets lost (`docs/android/android.md` lessons) |
 | `JTextField` / `JSearchField` | Input fields |
@@ -99,6 +101,8 @@ The old `PersonaTypography.*`, `statusTone(...)`, `PrimaryButton` / `SecondaryBu
 | `JStatusDot` / `JStatusMark` / `StatusLabel` / `StatusLine` / `PendingBadge` | State: small dot, the mark before a session row (glowing in Glass, spinner and check mark in Brief, square in Board), status text, the status line in a chat |
 | `JAvatar` | People, groups, sources; a corner badge marks Lark / mail |
 | `JManagerAvatar`, `JAssistantSwitcherHeader`, `JAssistantSwitcherRow` | The sidebar's assistant switcher: an assistant's monogram on its colour (`managerHue`) with its presence dot (`managerPresenceColor`), the head with the current one, a roster row (faded as a whole when offline) |
+| `JAssistantOffline` | A list's empty state while the current assistant is offline (`CurrentAssistant.offline`, several assistants): its faded monogram with the offline mark, "<name> is offline", when it last synced |
+| `JAssistantSettingsHeader`, `LocalAssistantWaiting` | The head of Settings' first group: the current assistant's monogram with its presence dot, "<name>'s settings" and a **Switch** text button that opens the same roster as the sidebar; the badges the roster shows, provided by the shell |
 | `JSwipeActions` | Left/right swipe actions on rows (Inbox: swipe right for done, left to hand to Persona) |
 | `JCodeBlock` | Commands and code |
 | `JSheet` / `JActionSheet` / `JMenu` / `JDialog` | Bottom sheet, long-press action sheet (instead of long dropdowns), small anchored menu (its `content` slot goes above the actions: the assistant switcher's roster), confirmation dialog |
@@ -142,7 +146,7 @@ when chart labels and series count are unchanged, bars / lines move to the new v
 
 These rules apply to all three styles, including extension-rendered content.
 
-- **Red is exceptional.** Use `danger` only for an actual error/failure or an explicitly destructive action. Routine approvals, reviews waiting for the user, permission requests, extra permissions during installation, and bypass-mode cautions use `needsYou` / `caution`, never red. A quota approaching its limit is caution; an exhausted quota is a failure. Stderr alone is not a failure.
+- **Red is exceptional.** Use `danger` only for an actual error/failure or an explicitly destructive action. Routine approvals, reviews waiting for the user, permission requests and extra permissions during installation use `needsYou` / `caution`, never red. The one exception is an agent's **Allow Everything** permission mode, which is drawn in `danger` on the header's mode button and the composer's Mode button, as on iOS and the web (#3719, #3957): amber read as Working. A quota approaching its limit is caution; an exhausted quota is a failure. Stderr alone is not a failure.
 - **Neutral containers.** Cards, rows, banners, status bars, receipts, advice, draft previews and received-message bubbles use `surface`, `surfaceStrong`, `sunken` or the semantic `statusSurface` token. Glass's own-message bubble instead uses the shared iPhone-derived `userBubble`; it identifies authorship, not a work status. Do not fill the container with `StatusColors.tint`, `accentSoft`, the highlighter or a state color. Put state on a small dot/icon, readable words or a thin edge. Board retains its strip geometry and glyph column, with a 2dp state edge instead of a broad color block. Glass retains translucent surfaces, strokes and rounded overlays; Brief retains paper, ink and small highlighter marks.
 - **One broad colored area at most per screen.** Glass's subdued, single-state ambient backdrop is that area; the content above it stays neutral. Other styles need no broad colored area. Charts, photographs, source images and syntax/diff content are information, not status backing; never reuse their colors as a card skin. Small badges, switches and selected-control marks do not count as broad areas.
 - **One solid primary per action group.** Use the style's neutral `action` / `onAction` pair for the main action; alternatives are Secondary or Quiet. Approval is not destructive. Recommendations/selected options use a border, icon and label, not another solid primary or colored option fill. Extension review/composer button tones must not make every positive choice primary or a negative review destructive; explicit destructive roles still use the destructive treatment.

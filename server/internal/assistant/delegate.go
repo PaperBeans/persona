@@ -62,19 +62,29 @@ func (s *Service) Delegate(ctx context.Context, p DelegateParams) (DelegateResul
 		return asIs, nil
 	}
 	in := s.delegateInput(ctx, ix, c)
-	var out delegateOut
-	sys := prompts.RenderAgentDelegate(prompts.AgentDelegate{Owner: s.owner(ctx), Rules: strings.TrimSpace(s.hello(ctx).Agents.Delegate.Rules)})
-	if err := s.purposeModel("agent.delegate").JSON(ctx, sys, prompts.RenderAgentDelegateInput(in), &out); err != nil {
+	sys := prompts.AgentDelegate{Owner: s.owner(ctx), Rules: strings.TrimSpace(s.hello(ctx).Agents.Delegate.Rules)}
+	res, err := judgeDelegateWith(ctx, s.purposeModel("agent.delegate"), sys, in, ix)
+	if err != nil {
 		s.workEvent(ix.MachineID, ix.SessionID, "delegate_failed", map[string]any{"error": clip(err.Error(), 200)})
 		return asIs, err
 	}
-	res := delegateResult(ix, out, time.Now())
 	kind := "delegate_asked"
 	if res.Answer {
 		kind = "delegate_answered"
 	}
 	s.workEvent(ix.MachineID, ix.SessionID, kind, map[string]any{"questions": len(ix.Questions)})
 	return res, nil
+}
+
+// judgeDelegateWith asks m whether the assistant answers ix for the user, with sys (the user's rules) and in (what was
+// read around the question), and applies the hub's rules to what it answers (delegateResult). It reads nothing else,
+// so a behaviour check can run it on written-out questions (#2586, delegate_judge_live_test.go).
+func judgeDelegateWith(ctx context.Context, m jsonModel, sys prompts.AgentDelegate, in prompts.AgentDelegateInput, ix proto.Interaction) (DelegateResult, error) {
+	var out delegateOut
+	if err := m.JSON(ctx, prompts.RenderAgentDelegate(sys), prompts.RenderAgentDelegateInput(in), &out); err != nil {
+		return DelegateResult{}, err
+	}
+	return delegateResult(ix, out, time.Now()), nil
 }
 
 // delegateResult turns the model's answer into the hub's: an answer only when it is a full, valid one that sets off

@@ -28,10 +28,11 @@ class HubTunnelConnectionTest {
     private val identity = SshIdentity(SshIdentity.generateSeed(), "persona-test")
     private val LoopbackHub.port get() = URI(paired).port
 
-    private fun connection(address: String, ways: HubWays, vararg tunnels: HubTunnel, recheckMillis: Long = HubWay.RECHECK_MILLIS) =
+    private fun connection(address: String, ways: HubWays, vararg tunnels: HubTunnel, recheckMillis: Long = HubWay.RECHECK_MILLIS,
+        initialNetwork: HubNetwork = HubNetwork("offline", available = false)) =
         OkHttpHubConnection(
             HubConnectionConfig("hub-a", null, "token", listOf(Endpoint(address, "lan")), "test", tunnels = tunnels.toList()),
-            HubNetwork("offline", available = false), ways = ways, tunnelRecheckMillis = recheckMillis,
+            initialNetwork, ways = ways, tunnelRecheckMillis = recheckMillis,
         )
 
     private suspend fun OkHttpHubConnection.awaitOnline() = withTimeout(10_000) { state.first { it == ConnectionState.Online } }
@@ -84,6 +85,25 @@ class HubTunnelConnectionTest {
                         connection.awaitOnline()
                         assertEquals(TunnelKind.Proxy, connection.tunnel.value?.kind)
                         assertTrue(proxy.carried.get() > 0)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test fun aReplacementTunnelIsProbedWithoutTheOldListenersConnection() = runBlocking<Unit> {
+        LoopbackHub(hubId = "hub-a", version = "1").use { hub ->
+            FakeSocks5().use { proxy ->
+                val tunnel = HubTunnel("hub-a", hub.paired, proxy = LocalProxyRoute(port = proxy.port, always = true))
+                HubWays(identity = { identity }).use { ways ->
+                    connection(hub.paired, ways, tunnel, initialNetwork = HubNetwork("network")).use { connection ->
+                        connection.awaitOnline()
+                        assertEquals(TunnelKind.Proxy, connection.tunnel.value?.kind)
+                        connection.updateNetwork(HubNetwork("network-2"))
+                        eventually(10_000) {
+                            connection.state.value == ConnectionState.Online && connection.route.value != null &&
+                                connection.tunnel.value?.kind == TunnelKind.Proxy
+                        }
                     }
                 }
             }

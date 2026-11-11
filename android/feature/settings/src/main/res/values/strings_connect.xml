@@ -78,6 +78,8 @@
     <string name="settings_pairing_failure_timeout">Can\'t reach the hub. At home, check that your phone and the computer running the hub are on the same network; away from home, check that your home router lets connections in from outside.</string>
     <string name="settings_pairing_failure_local">To connect to the hub at home, allow Persona to access the local network.</string>
     <string name="settings_pairing_failure_certificate">The certificate or hub identity doesn\'t match. If you reinstalled the hub, make a new code on a signed-in device and scan again.</string>
+    <string name="settings_pairing_failure_proxy_certificate">The certificate at %1$s isn\'t trusted by this phone. That address goes through a reverse proxy or tunnel, so check that its certificate is valid for that name; the hub itself is fine and a new code won\'t help.</string>
+    <string name="settings_pairing_failure_proxy_this_address">this address</string>
     <string name="settings_pairing_failure_expired">This code has expired or was already used. Make a new one on a signed-in device.</string>
     <string name="settings_pairing_failure_incompatible">The connection or the hub doesn\'t support this kind of pairing. Update, then try again.</string>
     <string name="settings_pairing_failure_tls_required">This address needs an encrypted connection. Pair again with an HTTPS address.</string>

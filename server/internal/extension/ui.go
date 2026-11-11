@@ -222,6 +222,10 @@ type ErrorReportsItem = wire.ErrorReportsItem
 // AuthRelayItem is a contribution to auth_relay: the authorization links (hosts and paths) it completes.
 type AuthRelayItem = wire.AuthRelayItem
 
+// SecretProviderItem is a contribution to secret_providers: the reference schemes whose values it supplies
+// (docs/extensions/secret-providers.md).
+type SecretProviderItem = wire.SecretProviderItem
+
 // Events this hub has.
 var (
 	// EventTopics are the events by topic; how the install screen says each is extension-permissions.event_<topic with

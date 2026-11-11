@@ -888,6 +888,66 @@
       }
     },
     {
+      "name": "superseded_failed_start_in_neither",
+      "description": "A task whose agent never started, in the same plan as a task that really finished (a review closed it): the work got done, so the failed start waits on nobody and is finished, in neither entry, as the To-dos page has it (#3713). Another failed start with nothing finished beside it still needs the user.",
+      "source": [
+        "web/src/lib/assistant-entries.ts assistantEntries",
+        "web/src/lib/todo-triage.ts supersededFailedStarts",
+        "issue #3713"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-fail",
+            "title": "Deploy the panel",
+            "origin": "main-chat",
+            "plan_id": "p-panel",
+            "created_at": "2026-11-10T07:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "agents": [],
+            "start_error": "machine offline",
+            "done_at": "2026-11-10T08:00:00Z"
+          },
+          {
+            "id": "t-done",
+            "title": "Verify the panel",
+            "origin": "main-chat",
+            "plan_id": "p-panel",
+            "created_at": "2026-11-10T07:00:00Z",
+            "updated_at": "2026-11-10T08:30:00Z",
+            "agents": [],
+            "done_at": "2026-11-10T08:30:00Z",
+            "done_by": "review"
+          },
+          {
+            "id": "t-retry",
+            "title": "Rotate the keys",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T07:00:00Z",
+            "updated_at": "2026-11-10T08:00:00Z",
+            "agents": [],
+            "start_error": "machine offline",
+            "done_at": "2026-11-10T08:00:00Z"
+          }
+        ],
+        "sessions": [],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [
+          "task:t-retry"
+        ],
+        "running": [],
+        "shelved": []
+      }
+    },
+    {
       "name": "stale_task_folded_not_counted",
       "description": "An open task with nothing running and no activity for 48 hours is folded under In progress (shelved) and not counted; a stopped task from today is an In progress row.",
       "source": [

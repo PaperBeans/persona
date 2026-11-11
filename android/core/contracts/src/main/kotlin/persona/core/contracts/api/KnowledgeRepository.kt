@@ -56,7 +56,54 @@ data class KnowledgeDetail(
     val links: List<KnowledgeEntry>? = null,
     /** A recording's transcript (recordings only); the same text as [recent], kept apart line by line. */
     val segments: List<KnowledgeSegment>? = null,
+    /** A recording's meeting minutes, once the hub wrote them (#2738, docs/assistant/meeting-minutes.md); `meta.minutes_state` says where newer ones stand. */
+    val minutes: RecordingMinutes? = null,
 )
+
+/**
+ * A recording's minutes as the hub wrote them (docs/assistant/meeting-minutes.md "Field contract"). Every item's [MinutesItem.at]
+ * is seconds from the recording's start, the clock of [KnowledgeSegment.start]. Sections with nothing in them are empty.
+ */
+@Serializable
+data class RecordingMinutes(
+    /** Increases each time they are rewritten; sent back when confirming to-dos. */
+    val version: Int = 0,
+    /** The recording revision they were made from: below `meta.revision` while newer ones are being written. */
+    val revision: Int = 0,
+    val title: String? = null,
+    /** "2026-11-10 14:00–15:10", in the user's time zone. */
+    @SerialName("when") val time: String? = null,
+    val where: String? = null,
+    val attendees: List<String> = emptyList(),
+    val points: List<MinutesItem> = emptyList(),
+    val decisions: List<MinutesItem> = emptyList(),
+    val actions: List<MinutesAction> = emptyList(),
+    val open: List<MinutesItem> = emptyList(),
+    /** The transcript was too long and its end wasn't read. */
+    val partial: Boolean = false,
+    /** The same minutes as Markdown: what Copy sends. */
+    val markdown: String = "",
+) {
+    val isEmpty: Boolean get() = points.isEmpty() && decisions.isEmpty() && actions.isEmpty() && open.isEmpty()
+}
+
+/** A key point, decision or open question; [who] only when the transcript or the calendar supports it. */
+@Serializable
+data class MinutesItem(val text: String = "", val at: Double? = null, val who: String? = null)
+
+/** An action item: a suggested to-do until the user confirms it, then [todoId]. [by] is the deadline as spoken; [dueDate] only when it resolves to one date. */
+@Serializable
+data class MinutesAction(
+    val id: String = "",
+    val who: String? = null,
+    val what: String = "",
+    val by: String? = null,
+    @SerialName("due_date") val dueDate: String? = null,
+    val at: Double? = null,
+    @SerialName("todo_id") val todoId: String? = null,
+) {
+    val added: Boolean get() = !todoId.isNullOrBlank()
+}
 
 /** One line of a recording's transcript: [start] and [end] are seconds from the recording's `started_at`. */
 @Serializable
@@ -98,6 +145,15 @@ interface KnowledgeRepository {
     /** Saves hand-made tagging; see [KnowledgeUpdate]. */
     suspend fun update(kind: KnowledgeKind, id: String, update: KnowledgeUpdate): Unit =
         throw UnsupportedOperationException("Knowledge tagging unavailable")
+
+    /** Asks for a recording's minutes, new or again (`POST /api/v1/recordings/{id}/minutes`, #2738): `409` while its transcript isn't complete. */
+    suspend fun makeMinutes(id: String): Unit = throw UnsupportedOperationException("Minutes unavailable")
+
+    /**
+     * Makes the minutes' [actions] (their ids) to-dos (`POST /api/v1/recordings/{id}/minutes/todos`): [version] is the minutes'
+     * as shown; `409 minutes_stale` when they were rewritten since (read them again first).
+     */
+    suspend fun addMinutesTodos(id: String, version: Int, actions: List<String>): Unit = throw UnsupportedOperationException("Minutes unavailable")
 }
 
 /** The composition root clears this before disposing a pairing's HTTP client. */

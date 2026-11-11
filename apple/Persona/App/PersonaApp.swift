@@ -99,6 +99,9 @@ struct PersonaApp: App {
                 // Closed, the hub knows the phone is away and wakes it with a silent push instead; and nothing opens it
                 // again until the app is back (the network returning, a refresh ending: LiveConnection.suspended).
                 model.suspendLinks()
+                #if os(iOS)
+                QuickAction.publish() // the home screen menu with the conversations' titles as they are now (#2191)
+                #endif
             }
         }
         #if os(visionOS)

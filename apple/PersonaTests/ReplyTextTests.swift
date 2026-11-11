@@ -87,6 +87,37 @@ struct ReplyTextTests {
         #expect(big > look.size * 1.2)
     }
 
+    /// H4–H6 as the chat draws them (`MarkdownUI.Theme.minorHeading`, #3863): a step smaller than the text, semibold, in
+    /// the quieter ink, with more space above than below; the third level stays at the text's size in its color.
+    @Test func lowerHeadingsAreSmallerAndQuieter() {
+        let s = reply("正文\n\n#### 补充说明\n\n更多\n\n###### 末级\n\n### 三级")
+        for heading in ["补充说明", "末级"] {
+            let at = (s.string as NSString).range(of: heading).location
+            let font = s.attribute(.font, at: at, effectiveRange: nil) as? UIFont
+            #expect(abs((font?.pointSize ?? 0) - look.size * ReplyMetrics.heading4.size) < 0.01, "\(heading)")
+            let traits = font?.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any]
+            #expect((traits?[.weight] as? CGFloat ?? 0) >= UIFont.Weight.semibold.rawValue, "\(heading)")
+            #expect(s.attribute(.foregroundColor, at: at, effectiveRange: nil) as? UIColor === look.secondaryInk, "\(heading)")
+        }
+        #expect(ReplyMetrics.heading4.size < 1 && ReplyMetrics.heading4.top > ReplyMetrics.heading4.bottom)
+        let lines = look.size * ReplyMetrics.lineSpacing
+        #expect(style(s, at: "正文")?.paragraphSpacing == ReplyMetrics.heading4.top - lines)
+        #expect(style(s, at: "补充说明")?.paragraphSpacing == ReplyMetrics.heading4.bottom)
+        let three = (s.string as NSString).range(of: "三级").location
+        #expect((s.attribute(.font, at: three, effectiveRange: nil) as? UIFont)?.pointSize == look.size)
+        #expect(s.attribute(.foregroundColor, at: three, effectiveRange: nil) as? UIColor === look.color)
+    }
+
+    /// A bold label the Chinese way (a full-width colon, no space after it) is bold here as in the chat (`CJKEmphasis`):
+    /// no asterisks left.
+    @Test func cjkBoldLabelsAreBold() {
+        let s = reply("**注意：**后文，这是**「强调」**的文字")
+        #expect(s.string == "注意：后文，这是「强调」的文字")
+        let bold = s.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        let traits = bold?.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any]
+        #expect((traits?[.weight] as? CGFloat ?? 0) >= UIFont.Weight.semibold.rawValue)
+    }
+
     /// Spacing as in the chat: the lines of a paragraph are only line-spaced; between blocks the larger margin; a list's
     /// items 0.2 em apart.
     @Test func spacingFollowsTheChat() {

@@ -49,4 +49,7 @@
     <string name="chat_tray_done">已完成</string>
     <string name="chat_tray_accepted">已验收</string>
     <string name="chat_tray_in_progress">进行中</string>
+    <string name="chat_tasks_dismiss_draft">不处理</string>
+    <string name="chat_tasks_draft_dismissed">已选择不处理，草稿没有发送</string>
+    <string name="chat_tasks_undo_draft">撤销</string>
 </resources>

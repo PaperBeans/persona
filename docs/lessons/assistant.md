@@ -1,5 +1,16 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- Reusing a topic to-do must retire the previous plan's execution binding (#3985). Released or dismissed Agents let
+  a later plan take over the same to-do, while the old plans stay in storage. A historical `TodoID` match cannot
+  impose that plan's read-only constraint on the current session. Clear old execution bindings under the takeover
+  reservation before launching the replacement; keep `ReuseTodo` as history. Plan creation order is not start order,
+  and retries can change `UpdatedAt`. Cover both directions of permission changes, memory, storage and restart.
+
+- Unavailable context is not nonexistent data (#3780, #3862). When a privacy switch excludes earlier meetings, carry
+  that policy into both answer prompts: do not promise earlier minutes or render an empty lookup as “none with
+  minutes.” Keep goldens for disabled, enabled-with-results and enabled-without-results modes. Tool descriptions must
+  also distinguish expired transcripts from meeting minutes retained forever by default.
+
 - A to-do's `origin` is what makes it a task, for the hub and every app (#1852, #1909). The hub tests `origin != ""` in some 70 places (receipts, the done judgment, reopening on a new turn, retiring a finished task's Agents, retitling, outcome records, Today, MCP tool text), and web, iOS and Android pick a conversation's tasks by it. A to-do that only relates to a conversation, such as a question nobody answered, keeps that conversation in its own record, not in `origin`: an `isAskTodo` skip in `todosOf` hid it from the snapshot alone, while the apps showed it as a task whose Agent was starting and a hand-off got it closed by the judge. Before giving a new kind of to-do an origin, read every `t.Origin` use and the apps' task filters.
 
 - A read-modify-write of shared assistant state needs a lock and a read that can fail (#2192). `ensureToday` looked for the day's card and then appended one, and `assistant_feed` has no unique key, so concurrent opens of a chat each made a card. A plan's tasks are one blob that `movePlan` writes whole, so tasks whose starts failed together wrote back each other's old errors. `trustKinds` read `tasks.trust` through a read that answered an empty map on error and wrote that back over every kind remembered before. Serialize the writers of one key (`cardLocks`, `patchPlanTask`, `trustMu`), read again under the lock instead of writing back a copy read earlier, skip the write when the read failed, and answer from the rows that were saved (`saveWrites`), not from memory. Where DST starts at midnight, `time.Date(y, m, d, 0, 0, 0, 0, loc)` is 23:00 the day before: take the date from `now` and the day's start from `dayStart`.
@@ -195,7 +206,7 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
   " | " and with empty ones skipped (a trailing `||` adds no junk), clipped and escaped like any other cell. When
   changing how a table row is laid out, compare its card with its fallback.
 
-- **Text a client draws as Markdown is cut with `clipMarkdown`, not `clip`** (#3818). The briefing card quoted the model's answer through `textfmt.Clip` (exactly n runes plus an ellipsis), so an answer over 1500 runes was cut inside whatever it was in: an unclosed code fence turned the rest of the quote into code, and a cut inside `**`, a code span or a link left half a marker or half a URL. `clipMarkdown` (`assistant/mdtext.go`) cuts on a line break where it can, closes a code block the cut lands in, and moves the cut back out of an unclosed span, emphasis or link; it also flattens a `persona-card` block to its title (`wire.AssistantCardText`), so draw charts first with `feishubot.PersonaCards` and cut after, as `answerCards` does for the bot's answers. Plain fallback text (the push body, a notice's fallback) keeps `clip` / `textfmt.PlainMarkdown`; only the Markdown element takes `clipMarkdown`. Test through the same builder the card uses, not the clippers alone, and assert the shape (`fences % 2 == 0`, no `](https://…` left) rather than an exact string.
+- **Text a client draws as Markdown is cut with `clipMarkdown`, not `clip`** (#3818). The briefing card quoted the model's answer through `textfmt.Clip` (exactly n runes plus an ellipsis), so an answer over 1500 runes was cut inside whatever it was in: an unclosed code fence turned the rest of the quote into code, and a cut inside `**`, a code span or a link left half a marker or half a URL. `clipMarkdown` (`assistant/mdtext.go`) cuts on a line break where it can, closes a code block the cut lands in, and moves the cut back out of an unclosed span, emphasis or link; it also flattens a `persona-card` block to its title (`wire.AssistantCardText`), so draw charts first with `feishubot.PersonaCards` and cut after, as `answerCards` does for the bot's answers. Plain fallback text (the push body, a notice's fallback) keeps `clip` / `textfmt.PlainMarkdown`; only the Markdown element takes `clipMarkdown`. Test through the same builder the card uses, not the clippers alone, and assert the shape (`fences % 2 == 0`, no `](https://…` left) rather than an exact string. The same trap caught the task report's item body (#4093): it drew the answer with `CardMarkdown` *after* `clipMarkdown`, which flattens a chart to its title on its own, so the owner read the report with no numbers. Any Markdown a client draws that is clipped first must have `PersonaCards` run before the clip.
 
 - **A finished run's last write into the progress card has to wait out a card rate limit** (#3915). The progress tick
   answers 230020 by pausing its updates (`prog.quietUntil`), but the answer's write comes right after a tick's, and a
@@ -214,3 +225,50 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
   docs promise ("Timed out, see the app"); a run with no card gets that line as a card of its own. Plugin channels, which
   send a note as plain text, stop being silent the same way. When a step ends a run without an answer, give it a note, or
   check what the sink does with a quiet end and no card.
+
+- **A quiet ending still needs a card to land on** (#4101). `channel.Run.Decide` ends a held run whose background work
+  reported back in a turn without words as `Quiet`, and the Feishu sink answered a quiet end only by rewriting the run's
+  card — but a held run gave its card back with its message, so the owner was told "N background tasks are still running"
+  and then heard nothing when they finished. The sink now builds the ending line for every quiet end and, with no card,
+  posts it as a card of its own (the same rule #3930's timeout relies on). The result stays quiet: the line is
+  "Done · took X", not an empty answer. With no card left it is posted for every ending except a message the owner
+  recalled, which gets no card of its own (that one only gets the card the run still has rewritten), and the line says
+  how the wait ended (#4228); and the quiet branch must not swallow errors the way it first did (#4229): a card update
+  refused for anything but a rate limit falls back to that card of its own, and an unreachable failure is returned so
+  `finishChannelRun` keeps the run and tries again — posting under an idempotency key made from the run id (`endKey`),
+  because the first attempt may have landed before its answer was lost.
+
+- **A card nests a list by four spaces per level, not by the Markdown rule** (#4180). Lark's Markdown component documents
+  one nesting level as four leading spaces (a list's sub-items are indented four spaces per level), while CommonMark — and
+  so a model writing an answer — indents a sub-item by its parent marker's width: two spaces under "- ", three under
+  "1. ". The answer's Markdown was passed through unchanged, so every nested list arrived as a flat list of siblings and
+  the hierarchy the answer was written with was gone. `CardMarkdown` now maps each item's observed indentation to a level
+  and writes four spaces per level (`listIndent` in `feishubot/card.go`) in one pass over the whole answer, so the levels
+  carry across a fenced code block and a list goes on around it; a list item's continuation lines, a list inside a
+  blockquote, and four-or-more-space indented code at the left margin stay as written, and a paragraph at the left margin
+  ends the list. Test the conversion through `CardMarkdown` and through the answer builder (`answerCards`).
+
+- **A list shown to a client holds the thing it names, not the records that produce it** (#4184). `feishu.view`'s
+  `agents` is "the Agents you have talked to in Lark", but it was built by walking the chat's thread bindings — and the
+  chat binds *every* card it posts about a conversation (the list card "Chat here" was pressed on, each progress card,
+  each answer card, each finished card), so one Agent talked to for a while filled the settings section with dozens of
+  copies of itself, in map order, keyed alike on both clients (web and iOS key those rows by session id). Fold the
+  bindings by machine + session, let the newest name the row, and sort it (rows of the same time by session): the same
+  source, read as what the field means. A test that binds three cards of one Agent along with two other Agents, and
+  loads the view ten times, shows it. The settings pages are the only readers — web and iOS key the rows by session id,
+  Android draws them in order — so none of them changes.
+
+- A read-only worker must be able to report while staying in plan mode (#4201). Denying `ExitPlanMode` does not remove
+  the provider's separate permission request for `mcp__persona__report_to_supervisor`. Allow that exact call once only
+  for a supervised task with a current read-only plan binding. Return `Allow` without `Always`, `Approve`, or `Mode`;
+  the terminal hook and Paseo then send no permission or mode update. Reuse `PlanTask.TodoID`, whose old bindings are
+  retired on takeover, rather than treating a historical read-only plan as authority for a new writable worker.
+
+- **A quiet ending is still an ending: it has to say how the run ended** (#4228). `channel.Run.Decide` returned a held
+  run's quiet result (`&Result{Quiet: true}`) from an early branch, before the `End` below it was computed — and it left
+  `Stopped` empty too — so `End` stayed `EndDone` whatever had happened, and once #4101 posted that line as a card of its
+  own the owner was told "Done" about a turn that was interrupted, hit a model API error, or lost its computer. Both
+  endings now come from one `endOf(rd, l)` (the turn's last notice, the failed turn, an offline machine), and the sink
+  posts the card of a quiet end unless it was recalled (`end != channel.EndRecalled`), not only when it ended as done:
+  gating the post on `EndDone` would have made every bad quiet ending silent instead. A branch that answers a run owes
+  it the same ending fields as the normal path.

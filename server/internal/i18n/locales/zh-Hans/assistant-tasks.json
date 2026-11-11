@@ -1,4 +1,9 @@
 {
+  "draft_changed": "这份草稿已更新或不再待处理，请刷新后再试。",
+  "draft_dismissed": "你已选择不处理这份草稿。要发送，请先撤销这个决定。",
+  "draft_decision_question": "按任务进度起草的回复",
+  "draft_decision_ignore": "不处理这份草稿，不发送回复。任务和 Agent 保持开启。",
+  "draft_decision_undo": "撤销对这份草稿的不处理决定，恢复待处理，不发送回复。",
   "plan_waiting": "有 {n} 件事等你开始",
   "plan_waiting_single": "有一件事等你开始",
   "list_sep": "、",

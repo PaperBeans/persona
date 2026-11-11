@@ -2,6 +2,7 @@ package node
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestPlanThenAfterTerminalMovesToTheRecordedMode(t *testing.T) {
 	n.state.put(sidA, sessionState{Pane: "w1:p1", Launcher: "claude", Cwd: "/tmp/m", PlanThen: "acceptEdits"})
 	cycleModes(t, f, "w1:p1", "auto")
 	f.reset()
-	n.planThenAfterTerminal(sidA)
+	n.planAfterTerminal(sidA, nil)
 	waitWithin(t, 3*time.Second, "the recorded mode", func() bool {
 		mode, _ := n.modesOf(sidA)
 		return mode == "acceptEdits"
@@ -73,8 +74,8 @@ func TestPlanThenAfterTerminalLeavesAlone(t *testing.T) {
 	cycleModes(t, f, "w1:p1", "plan")
 	cycleModes(t, f, "w1:p2", "auto")
 	f.reset()
-	n.planThenAfterTerminal(sidA)
-	n.planThenAfterTerminal(sidB)
+	n.planAfterTerminal(sidA, nil)
+	n.planAfterTerminal(sidB, nil)
 	// Observe the full watch window before asserting that no key was sent.
 	timer := time.NewTimer(planThenWatch + 200*time.Millisecond)
 	defer timer.Stop()
@@ -93,7 +94,7 @@ func TestPlanThenWatchStopsWhenTheCardAnswers(t *testing.T) {
 	seedAgents(t, n, f, claudeAgent(sidA, proto.StatusIdle, "w1:p1", "w1:t1", "w1", "/tmp/m", ""))
 	n.state.put(sidA, sessionState{Pane: "w1:p1", Launcher: "claude", Cwd: "/tmp/m", PlanThen: "acceptEdits"})
 	cycleModes(t, f, "w1:p1", "plan")
-	n.planThenAfterTerminal(sidA)() // answered at once
+	n.planAfterTerminal(sidA, nil)() // answered at once
 	cycleModes(t, f, "w1:p1", "auto")
 	f.reset()
 	// Observe the full watch window before asserting that no key was sent.
@@ -103,6 +104,31 @@ func TestPlanThenWatchStopsWhenTheCardAnswers(t *testing.T) {
 	for _, c := range f.trace() {
 		if strings.Contains(c, "shift+tab") {
 			t.Fatalf("a key was pressed after the card answered: %v", f.trace())
+		}
+	}
+}
+
+// The footer coming back means the terminal decided the plan: the waiting card is told once, whether the plan was
+// approved (another mode) or sent back (still plan), and for a session with no recorded mode too.
+func TestPlanAfterTerminalWithdrawsTheCard(t *testing.T) {
+	fastPlanThen(t)
+	for name, footer := range map[string]string{"approved": "auto", "sent back": "plan"} {
+		n, f, _ := herdrNode(t)
+		seedAgents(t, n, f, claudeAgent(sidA, proto.StatusIdle, "w1:p1", "w1:t1", "w1", "/tmp/m", ""))
+		n.state.put(sidA, sessionState{Pane: "w1:p1", Launcher: "claude", Cwd: "/tmp/m"}) // no recorded mode
+		f.setScreen("w1:p1", screenFixture(t, "claude-2.1.312-trust-162.txt"))            // a dialog: no footer
+		var told atomic.Int32
+		f.reset()
+		stop := n.planAfterTerminal(sidA, func() { told.Add(1) })
+		waitWithin(t, 3*time.Second, "a few looks at the dialog", func() bool { return len(f.trace()) >= 4 })
+		if told.Load() != 0 {
+			t.Fatalf("%s: told while the dialog is up", name)
+		}
+		cycleModes(t, f, "w1:p1", footer)
+		waitWithin(t, 3*time.Second, "the card to be told", func() bool { return told.Load() > 0 })
+		stop()
+		if told.Load() != 1 {
+			t.Fatalf("%s: the card was told %d times, want 1", name, told.Load())
 		}
 	}
 }

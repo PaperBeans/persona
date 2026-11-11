@@ -319,6 +319,11 @@ data class Session(
     @SerialName("launcher") val launcher: String? = null,
     @SerialName("model") val model: String? = null,
     @SerialName("permission_mode") val permissionMode: String? = null,
+    /**
+     * The agent's process can take Allow Everything while it runs (its start flags put the mode in its cycle, read off the
+     * process by the node; #1379, #3957). False while unknown and from older hubs: then Allow Everything is a start's choice.
+     */
+    @SerialName("bypass_available") val bypassAvailable: Boolean = false,
     @SerialName("assistant") val assistant: Boolean = false,
     /** An assistant conversation put away (POST /api/v1/assistant/conversations/{id}/archive): kept, not listed. */
     @SerialName("archived") val archived: Boolean = false,
@@ -695,6 +700,12 @@ data class Interaction(
     @SerialName("always_label") val alwaysLabel: String? = null,
     /** The persisted scope granted by this card; absent on older hubs and terminal-only sessions. */
     @SerialName("always_keys") val alwaysKeys: List<String>? = null,
+    /**
+     * Whether the manager keeps an "always allow" for this card (#3590): false on its own cards, which keep nothing, so
+     * they offer only Allow and Deny; true where it does, another agent's card included. Absent (an older hub, an
+     * Agents session's card): the card's own rule (`offersAlways` in core:domain).
+     */
+    @SerialName("always_honored") val alwaysHonored: Boolean? = null,
     /** Why the agent asks for this permission, in its own words (Codex). */
     val reason: String? = null,
     /** Filled in before approving (adding a mail account's password); the hub refuses allow without the required ones. */

@@ -71,9 +71,11 @@ class HttpTasksApi internal constructor(
             AssistantManagerChoice.noteItem(listOf("todos", it.id), it.manager)
         }
 
-    // A new to-do is the current assistant's (the client names it on `POST todos`).
+    // A new to-do is the current assistant's (the client names it on `POST todos`), or the one the caller named for it
+    // (a RequestManager: an agent's own assistant when it is linked at once; "" the default's).
     override suspend fun createTodo(title: String, notes: String): Todo {
-        val owner = AssistantManagerChoice.current.value.manager
+        val named = kotlinx.coroutines.currentCoroutineContext()[persona.core.contracts.api.RequestManager]
+        val owner = if (named != null) named.id.ifEmpty { null } else AssistantManagerChoice.current.value.manager
         val made: Todo = JsonCodec.decodeFromJsonElement(call(path("todos"), "POST", buildJsonObject {
             put("title", title)
             put("notes", notes)
@@ -133,9 +135,41 @@ class HttpTasksApi internal constructor(
         call(path("todos", todoId, "spaces", machineId, space), "DELETE")
     }
 
+    private val feedOwners = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val conversationOwners = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    override fun noteFeedOwner(item: FeedItem, manager: String?) {
+        val owner = persona.core.contracts.pushManager(manager)
+        feedOwners[item.id] = owner
+        conversationOwners[item.conversation] = owner
+    }
+
+    private fun feedOwner(conversation: String): String = conversationOwners[conversation]
+        ?: AssistantManagerChoice.itemManager(listOf("assistant", "conversations", conversation))
+        ?: AssistantManagerChoice.current.value.defaultId
+
     override suspend fun feed(conversation: String, since: String?): FeedResponse =
-        JsonCodec.decodeFromJsonElement(call(path("assistant", "conversations", conversation, "feed",
-            query = since?.let { mapOf("since" to it) } ?: emptyMap())))
+        readFeed(conversation, since, null, feedOwner(conversation), paginated = false)
+
+    override fun feedPages(conversation: String): persona.core.contracts.api.FeedPageReader {
+        val owner = feedOwner(conversation)
+        return persona.core.contracts.api.FeedPageReader { since, cursor -> readFeed(conversation, since, cursor, owner, paginated = true) }
+    }
+
+    private suspend fun readFeed(conversation: String, since: String?, cursor: String?, owner: String, paginated: Boolean): FeedResponse {
+        val query = buildMap {
+            if (paginated) put(ManagerQuery, owner)
+            if (cursor != null) put("cursor", cursor)
+            else {
+                if (paginated) put("paginate", "1")
+                since?.let { put("since", it) }
+            }
+        }
+        val response: FeedResponse = JsonCodec.decodeFromJsonElement(call(path("assistant", "conversations", conversation, "feed", query = query)))
+        response.items.forEach { feedOwners.putIfAbsent(it.id, owner) }
+        conversationOwners.putIfAbsent(conversation, owner)
+        return response
+    }
 
     override suspend fun startPlan(id: String, remember: Boolean): TaskPlan = startPlan(id, remember, null)
 
@@ -155,6 +189,10 @@ class HttpTasksApi internal constructor(
         call(path("todos", todoId, "accept"), "POST", buildJsonObject { put("asked_at", askedAt) })
     }
 
+    override suspend fun markLaterHandled(questionId: String) {
+        call(path("later", questionId, "handled"), "POST", JsonObject(emptyMap()))
+    }
+
     override suspend fun removeTask(todoId: String) {
         call(path("todos", todoId), "DELETE")
     }
@@ -172,6 +210,19 @@ class HttpTasksApi internal constructor(
     override suspend fun inboxReply(itemId: String, text: String, card: String?) {
         call(path("inbox", itemId, "reply"), "POST", buildJsonObject { put("text", text); card?.let { put("card", it) } })
     }
+
+    override suspend fun dismissMessage(cardId: String, draft: String): persona.core.contracts.api.MessageDraftDismissal {
+        val owner = feedOwners[cardId] ?: persona.core.contracts.api.ManagerRoster.ASSISTANT_MANAGER
+        feedOwners[cardId] = owner
+        val response = call(path("assistant", "feed", cardId, "dismiss", query = mapOf("manager" to owner)), "POST", buildJsonObject { put("draft", draft) })
+        val token = (response["dismissal_id"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.takeIf(String::isNotBlank)
+            ?: error("no dismissal token in the answer")
+        return persona.core.contracts.api.MessageDraftDismissal(item(response), token)
+    }
+
+    override suspend fun undoDismissMessage(cardId: String, dismissalId: String): FeedItem =
+        item(call(path("assistant", "feed", cardId, "undo-dismiss", query = mapOf("manager" to
+            (feedOwners[cardId] ?: persona.core.contracts.api.ManagerRoster.ASSISTANT_MANAGER))), "POST", buildJsonObject { put("dismissal_id", dismissalId) }))
 
     override suspend fun viewAction(conversation: String, key: String, input: ExtensionViewActionInput): AssistantViewAnswer =
         cardCall(path("assistant", "conversations", conversation, "views", key, "actions"),

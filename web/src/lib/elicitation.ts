@@ -95,7 +95,7 @@ export function supported(schema: Schema | undefined): boolean {
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i;
+const DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i;
 const NUMBER = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 
 function validDate(text: string): boolean {
@@ -103,6 +103,28 @@ function validDate(text: string): boolean {
   if (!m) return false;
   const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
   return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
+}
+
+function validDateTime(text: string): boolean {
+  const m = DATE_TIME.exec(text);
+  if (!m) return false;
+  // Check the original day before Date.parse normalizes it; UTC avoids timezone shifts.
+  // setUTCFullYear also preserves years 0000–0099, which Date.UTC treats as 1900–1999.
+  const d = new Date(0);
+  d.setUTCFullYear(+m[1], +m[2] - 1, +m[3]);
+  return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3]
+    && +m[4] < 24 && +m[5] < 60 && +m[6] < 60 && !Number.isNaN(Date.parse(text));
+}
+
+/** NUMBER has already checked the grammar. Rounding/underflow must not turn a fraction into an integer. */
+function exactInteger(text: string, n: number): boolean {
+  if (!Number.isSafeInteger(n)) return false;
+  const [coefficient, exponent = "0"] = text.replace(/^[+-]/, "").toLowerCase().split("e");
+  const [whole, fraction = ""] = coefficient.split(".");
+  const digits = whole + fraction;
+  const trailingZeros = digits.length - digits.replace(/0+$/, "").length;
+  // Zero stays integral even with an exponent too large for Number to represent.
+  return trailingZeros === digits.length || Number(exponent) + trailingZeros >= fraction.length;
 }
 
 function absoluteUri(text: string): boolean {
@@ -134,7 +156,7 @@ function convert(f: Field, value: unknown): unknown {
       if (format === "email" && !EMAIL.test(value)) return undefined;
       if (format === "uri" && !absoluteUri(value)) return undefined;
       if (format === "date" && !validDate(value)) return undefined;
-      if (format === "date-time" && !(DATE_TIME.test(value) && !Number.isNaN(Date.parse(value)))) return undefined;
+      if (format === "date-time" && !validDateTime(value)) return undefined;
       out = value;
       break;
     }
@@ -143,7 +165,7 @@ function convert(f: Field, value: unknown): unknown {
       const text = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : "";
       if (!NUMBER.test(text)) return undefined;
       const n = Number(text);
-      if (!Number.isFinite(n) || (f.type === "integer" && !Number.isInteger(n))) return undefined;
+      if (!Number.isFinite(n) || (f.type === "integer" && !exactInteger(text, n))) return undefined;
       if (typeof s.minimum === "number" && n < s.minimum) return undefined;
       if (typeof s.maximum === "number" && n > s.maximum) return undefined;
       if (typeof s.exclusiveMinimum === "number" && n <= s.exclusiveMinimum) return undefined;

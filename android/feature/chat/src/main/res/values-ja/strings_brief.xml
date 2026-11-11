@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_brief_default_title">ブリーフィング</string>
+    <string name="chat_brief_waiting">対応待ち（%1$d）</string>
+    <string name="chat_brief_waiting_unknown">対応待ち（?）</string>
+    <string name="chat_brief_waiting_unknown_note">対応待ちのカードをまだ読み込めていません。Agents で確認してください。</string>
+    <string name="chat_brief_past">過去 %1$d 時間：%2$d 件完了 · %3$d 件未通過</string>
+    <string name="chat_brief_accept">確認待ち（%1$d）</string>
+    <string name="chat_brief_later">後回し可（%1$d）</string>
+    <string name="chat_brief_progress">進行中（%1$d）</string>
+    <string name="chat_brief_nothing">ありません。</string>
+    <string name="chat_brief_more">ほか %1$d 件</string>
+    <string name="chat_brief_open">開く</string>
+    <string name="chat_brief_waited_minutes">%1$d 分待ち</string>
+    <string name="chat_brief_waited_hours">%1$d 時間待ち</string>
+    <string name="chat_brief_waited_days">%1$d 日待ち</string>
+    <string name="chat_brief_waited_hours_minutes">%1$d 時間 %2$d 分待ち</string>
+    <string name="chat_brief_waited_days_hours">%1$d 日 %2$d 時間待ち</string>
+    <string name="chat_brief_nudged">再通知済み</string>
+    <string name="chat_brief_accept_action">承認</string>
+    <string name="chat_brief_got_it">了解</string>
+    <string name="chat_brief_take_recommendation">推奨を採用</string>
+    <string name="chat_brief_complete_directly">直接完了</string>
+    <string name="chat_brief_handled">処理済み</string>
+    <string name="chat_brief_accepted">承認済み</string>
+    <string name="chat_brief_noted">確認済み</string>
+    <string name="chat_brief_recommendation_taken">推奨を採用しました</string>
+    <string name="chat_brief_marked_handled">処理済みにしました</string>
+    <string name="chat_brief_already_handled">すでに処理済み</string>
+    <string name="chat_brief_hub_too_old">この hub バージョンはこのボタンに対応していません</string>
+    <string name="chat_brief_failed_task">開始できませんでした</string>
+    <string name="chat_brief_failed_routine">実行失敗</string>
+    <string name="chat_brief_skipped">スキップしました</string>
+    <string name="chat_brief_stage_plan">計画</string>
+    <string name="chat_brief_stage_develop">開発</string>
+    <string name="chat_brief_stage_review">レビュー</string>
+    <string name="chat_brief_stage_merge">マージ</string>
+    <string name="chat_brief_stage_deploy">デプロイ</string>
+    <string name="chat_brief_stage_verify">検証済み</string>
+</resources>

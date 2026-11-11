@@ -33,6 +33,13 @@ type Point struct {
 
 var connectorID = lazyre.New(`^[a-z][a-z0-9]*$`)
 
+// schemePattern is a secret_providers scheme (op), reservedSchemes the ones no provider may claim: addresses and the
+// app's own links, which a secret field never holds as a reference.
+var (
+	schemePattern   = lazyre.New(`^[a-z][a-z0-9+.-]{0,15}$`)
+	reservedSchemes = []string{"http", "https", "file", "data", "persona", "about", "javascript"}
+)
+
 // ConnectorItem is a contribution to connectors: the connector protocol's manifest (docs/protocol/connector-protocol.md), known
 // before the program ever runs.
 type ConnectorItem struct {
@@ -678,6 +685,33 @@ var Points = map[string]Point{
 			}
 		}
 		return a.ID, nil
+	}},
+	// secret_providers: values for references of its schemes (op://…), resolved when a setting holding one is used or
+	// the user approves handing one to an Agent run (secrets.describe / secrets.resolve, docs/extensions/secret-providers.md).
+	"secret_providers": {Name: "secret_providers", Namespace: "secrets", Version: 1, NeedsRPC: true, Item: func(raw json.RawMessage) (string, error) {
+		var p SecretProviderItem
+		if err := strict(raw, &p); err != nil {
+			return "", err
+		}
+		if !idPattern.MatchString(p.ID) {
+			return p.ID, fmt.Errorf("secret_providers id %q: a-z0-9_-", p.ID)
+		}
+		if strings.TrimSpace(p.Name) == "" || utf8.RuneCountInString(p.Name) > 80 {
+			return p.ID, fmt.Errorf("secret_providers %s: a name of 1 to 80 characters", p.ID)
+		}
+		if len(p.Schemes) == 0 || len(p.Schemes) > 4 {
+			return p.ID, fmt.Errorf("secret_providers %s: 1 to 4 schemes", p.ID)
+		}
+		for i, s := range p.Schemes {
+			if !schemePattern.MatchString(s) || slices.Contains(reservedSchemes, s) {
+				return p.ID, fmt.Errorf("secret_providers %s: scheme %q: a-z0-9+.- starting with a letter, at most 16, not %s", p.ID, s,
+					strings.Join(reservedSchemes, ", "))
+			}
+			if slices.Contains(p.Schemes[:i], s) {
+				return p.ID, fmt.Errorf("secret_providers %s: scheme %q twice", p.ID, s)
+			}
+		}
+		return p.ID, nil
 	}},
 	"voice": {Name: "voice", Namespace: "voice", Version: 1, NeedsHTTP: true, Item: func(raw json.RawMessage) (string, error) {
 		var v VoiceItem

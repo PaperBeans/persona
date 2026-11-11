@@ -307,18 +307,9 @@ func (f *File) PageTurns(beforeSeq, turns, maxItems int) ([]proto.Item, bool, Sp
 // rather than pass the cut copy off as whole.
 func (f *File) Full(id string) (proto.Item, error) {
 	f.mu.Lock()
-	var it proto.Item
-	found := false
-	for {
-		for i := len(f.items) - 1; i >= 0; i-- {
-			if f.items[i].ID == id {
-				it, found = f.items[i], true
-				break
-			}
-		}
-		if found || f.loadOlder() == 0 { // an item in lines not parsed yet: parse back to it
-			break
-		}
+	it, found := f.item(id)
+	if !found { // an item in lines not parsed yet: parse back to it (window.go)
+		it, found = f.findOlder(id)
 	}
 	ref, cut := f.cut[it.Seq]
 	scratch := Meta{Sidechain: f.meta.Sidechain, Codex: f.meta.Codex,
@@ -336,6 +327,16 @@ func (f *File) Full(id string) (proto.Item, error) {
 	}
 	it.Text, it.FullSize, it.Image = full.Text, 0, full.Image
 	return it, nil
+}
+
+// item is the parsed item with this id. Callers hold f.mu.
+func (f *File) item(id string) (proto.Item, bool) {
+	for i := len(f.items) - 1; i >= 0; i-- {
+		if f.items[i].ID == id {
+			return f.items[i], true
+		}
+	}
+	return proto.Item{}, false
 }
 
 // WithImages puts the image data back into items (for callers that did not ask for lazy images).

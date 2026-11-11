@@ -209,7 +209,8 @@ struct AttachSheet<More: View>: View {
                     .accessibilityLabel("Close")
                     .accessibilityAddTraits(.isButton)
                     .accessibilityIdentifier("attach-dim")
-                sheet(width: width, height: height, top: top, rest: rest, offset: resting)
+                // The sheet is laid out over the whole screen, its foot at the screen's: the keyboard's room comes from here.
+                sheet(width: width, height: height, top: top, rest: rest, offset: resting, keyboard: keyboardUp ? outer.safeAreaInsets.bottom : 0)
             }
             .ignoresSafeArea(.container)
             .onAppear { appear(rest: rest) }
@@ -223,7 +224,7 @@ struct AttachSheet<More: View>: View {
 
     // MARK: The sheet
 
-    private func sheet(width: CGFloat, height: CGFloat, top: CGFloat, rest: CGFloat, offset: CGFloat) -> some View {
+    private func sheet(width: CGFloat, height: CGFloat, top: CGFloat, rest: CGFloat, offset: CGFloat, keyboard: CGFloat) -> some View {
         let progress = AttachSheetPhysics.restProgress(offset: offset, rest: rest)
         let sheetTop = top + offset + drop + dip + Theme.Space.xxs * progress
         let sheetHeight = height - top - offset
@@ -244,7 +245,7 @@ struct AttachSheet<More: View>: View {
             page(width: width, open: offset == 0)
         }
         .opacity(contentShown ? 1 : 0)
-        .overlay(alignment: .bottom) { bar(width: width).opacity(contentShown ? 1 : 0) }
+        .overlay(alignment: .bottom) { bar(width: width, keyboard: keyboard).opacity(contentShown ? 1 : 0) }
         .frame(width: width, height: sheetHeight)
         .background(surface, in: shape)
         .clipShape(shape)
@@ -353,7 +354,10 @@ struct AttachSheet<More: View>: View {
 
     // MARK: The bar
 
-    @ViewBuilder private func bar(width: CGFloat) -> some View {
+    /// The tabs, or once photos are picked the caption and Send: over the keyboard while the caption is typed (`keyboard`,
+    /// how far it reaches up). The sheet's foot is under the keyboard, and the field went there with nothing showing what
+    /// was typed (#3704).
+    @ViewBuilder private func bar(width: CGFloat, keyboard: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             if picked.isEmpty {
                 AttachTabBar(tabs: tabs, selected: tab, width: AttachSheetPhysics.barWidth(tabs: tabs.count, width: width), pick: pick)
@@ -365,7 +369,7 @@ struct AttachSheet<More: View>: View {
                             .combined(with: .opacity.animation(Theme.Motion.attachBarAway))))
             } else {
                 captionBar
-                    .padding(.bottom, captionFocused ? Theme.Space.s : Theme.Attach.barInset)
+                    .padding(.bottom, captionFocused ? keyboard + Theme.Space.s : Theme.Attach.barInset)
                     .transition(.opacity.animation(Theme.Motion.attachBarBack))
             }
         }

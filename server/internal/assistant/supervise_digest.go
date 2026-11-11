@@ -75,8 +75,27 @@ func (s *Service) sendDigest(ctx context.Context) {
 	web := s.webBase(ctx)
 	groups := map[string][]superviseSignal{}
 	var order []string
-	gone := map[string]bool{} // leaders whose conversation is not there: their signals go to the main one
+	leaders := map[[2]string][]superviseSignal{} // leader agent (machine, session) → the signals of its workers (task_leader.go)
+	var leaderOrder []TodoAgent
+	gone := map[string]bool{}      // leaders whose conversation is not there: their signals go to the main one
+	s.rehomeLeaderlessWorkers(ctx) // a worker whose leader's task closed gets a supervisor that can act, before routing
 	for _, g := range list {
+		if lead, handled, reachable := s.leaderRoute(g); handled { // never digestTo: a session is no conversation
+			if reachable {
+				key := [2]string{lead.MachineID, lead.SessionID}
+				if _, seen := leaders[key]; !seen {
+					leaderOrder = append(leaderOrder, lead)
+				}
+				leaders[key] = append(leaders[key], g)
+				continue
+			}
+			// Unreachable, not dropped: it becomes a decision for the conversation above the leader (escalateLeaderSignal),
+			// which has its own delivery target below.
+			g = s.escalateLeaderSignal(ctx, g)
+			if g.Todo == "" { // nobody above it: it is told again next time
+				continue
+			}
+		}
 		to := s.digestTo(here, g)
 		if to != here.Main {
 			if _, seen := gone[to]; !seen {
@@ -93,6 +112,9 @@ func (s *Service) sendDigest(ctx context.Context) {
 		groups[to] = append(groups[to], g)
 	}
 	delivered := false
+	for _, lead := range leaderOrder {
+		delivered = s.deliverToLeaderAgent(ctx, lead, leaders[[2]string{lead.MachineID, lead.SessionID}], web, now, prev) || delivered
+	}
 	for _, to := range order {
 		delivered = s.deliverDigest(ctx, here, to, groups[to], web, now, prev) || delivered
 	}
@@ -140,13 +162,16 @@ func (s *Service) deliverDigest(ctx context.Context, here Settings, to string, l
 	defer func() {
 		if !accepted {
 			rollback()
+			return
 		}
+		s.parkedDueTold(ctx, kept) // told for good: not again after a restart (parked.go)
 	}()
 	leader := to != here.Main
 	render := func(list []prompts.SuperviseEntry) string {
 		return prompts.RenderSupervise(prompts.Supervise{Entries: sortEntries(list), Leader: leader, Escalated: escalatedIn(list),
 			LeaderStuck: slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigLeaderStuck }),
 			Overdue:     slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigOverdue }),
+			ParkedDue:   slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool { return e.Kind == sigParkedDue }),
 			Decisions: slices.ContainsFunc(list, func(e prompts.SuperviseEntry) bool {
 				return e.Kind == sigRecheck || e.Kind == sigUndecidable || e.Kind == sigOwnerCannot
 			}),
@@ -310,13 +335,27 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 		if !s.taskWaits(ctx, t) {
 			return prompts.SuperviseEntry{}, false // answered meanwhile
 		}
+	case sigDecide:
+		if g.Unreachable {
+			// The leader could not be reached: the worker's own state is not what decides this (the leader's task is still open).
+		} else if st != reviewNeedsUser {
+			return prompts.SuperviseEntry{}, false // decided meanwhile
+		}
 	case sigEscalated:
 		if st != reviewNeedsUser && len(g.Cards) == 0 { // a leader's escalated cards are told as they were
 			return prompts.SuperviseEntry{}, false // decided meanwhile
 		}
 	case sigOverdue:
-		if b, ok := s.briefOfTodo(t.ID); !ok || b.Overdue == nil || st == reviewNeedsUser {
-			return prompts.SuperviseEntry{}, false // re-scoped, or with the owner, meanwhile
+		if b, ok := s.briefOfTodo(t.ID); !ok || b.Overdue == nil || st == reviewNeedsUser || st == reviewParked {
+			return prompts.SuperviseEntry{}, false // re-scoped, with the owner, or parked meanwhile
+		}
+	case sigIdle, sigUnjudged, sigStalled:
+		if st == reviewParked {
+			return prompts.SuperviseEntry{}, false // parked meanwhile: it waits on purpose (parked.go)
+		}
+	case sigParkedDue:
+		if r := v.parking(); st != reviewParked || r == nil || parkKey(r) != g.Key {
+			return prompts.SuperviseEntry{}, false // its agent works again, or it was reviewed again, meanwhile
 		}
 	case sigOrphaned:
 		if o, ok := s.orphanOf(t.ID); !ok || o.key != g.Key {
@@ -348,6 +387,10 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 		e.Recommend = g.Ask // the leader's recommendation (escalate)
 		e.Asks = g.Cards
 	}
+	if g.Kind == sigDecide {
+		e.Recommend = g.Ask // the task leader's recommendation
+		e.LeaderGone = g.Unreachable
+	}
 	if g.Kind == sigAsk {
 		e.Asks, e.Decisions = asks, s.todoDecisionsContext(ctx, t.ID) // what was settled already, not to be gone against
 	}
@@ -359,6 +402,9 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 	}
 	if g.Kind == sigRecheck || g.Kind == sigOwnerCannot {
 		e.Decision = g.Decision
+	}
+	if g.Kind == sigParkedDue { // what it waited for is the signal, not a reason in brackets
+		e.Detail, e.Parked = "", s.parkedEntry(ctx, v.parking())
 	}
 	if g.Kind == sigOwnerCannot { // the owner's answer is the signal, not a reason in brackets
 		e.Detail, e.Response = "", g.Detail
@@ -415,7 +461,7 @@ func (s *Service) digestEntry(ctx context.Context, g superviseSignal, web string
 
 // sortEntries puts what waits on a decision first.
 func sortEntries(list []prompts.SuperviseEntry) []prompts.SuperviseEntry {
-	rank := map[string]int{sigNeedsYou: 0, sigAsk: 0, sigEscalated: 0, sigOwnerCannot: 0, sigUndecidable: 1, sigRecheck: 1, sigIdle: 2, sigUnjudged: 2, sigFailed: 3, sigStarted: 3, sigInterrupted: 4, sigOrphaned: 4, sigReview: 5, sigStalled: 6, sigLeaderStuck: 6, sigOverdue: 6, sigReport: 7}
+	rank := map[string]int{sigNeedsYou: 0, sigAsk: 0, sigEscalated: 0, sigDecide: 0, sigOwnerCannot: 0, sigUndecidable: 1, sigRecheck: 1, sigParkedDue: 2, sigIdle: 2, sigUnjudged: 2, sigFailed: 3, sigStarted: 3, sigInterrupted: 4, sigOrphaned: 4, sigReview: 5, sigStalled: 6, sigLeaderStuck: 6, sigOverdue: 6, sigReport: 7}
 	at := func(e prompts.SuperviseEntry) int {
 		switch {
 		case e.Kind != sigReport:

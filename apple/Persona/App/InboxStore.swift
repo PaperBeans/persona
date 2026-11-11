@@ -434,9 +434,10 @@ final class InboxStore {
     /// in `changes` first) and files the item as done. Filed at once (the reply takes Feishu / the mail server a few
     /// seconds); a failure puts the item back and keeps the text for the reply sheet. `card`: sent from that message card.
     @discardableResult
-    func send(_ item: InboxItem, text: String, changes: [InboxItem.DocChange] = [], card: String? = nil) async -> Bool {
+    func send(_ item: InboxItem, text: String, changes: [InboxItem.DocChange] = [], card: String? = nil,
+              api injected: APIClient? = nil) async -> Bool {
         let key = item.key
-        guard let api = AppModel.shared.api?.manager(AppModel.shared.itemManager(item.manager)), !sending.contains(key) else { return false }
+        guard let api = injected ?? AppModel.shared.api?.manager(AppModel.shared.itemManager(item.manager)), !sending.contains(key) else { return false }
         sending.insert(key)
         defer { sending.remove(key) }
         let before = items.first { $0.key == key }

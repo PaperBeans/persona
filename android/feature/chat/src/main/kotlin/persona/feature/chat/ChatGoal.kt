@@ -28,12 +28,12 @@ internal fun goalStatusLabel(res: Resources, goal: GoalInfo): String = when (goa
     else -> goal.status
 }
 
-/** What it has spent so far ("12.3k / 500.0k tokens · 42 min"), null when nothing is known (iOS `GoalInfo.usage`). */
+/** What it has spent so far ("12.3K / 500K tokens · 42 min" in English), null when nothing is known (iOS `GoalInfo.usage`). */
 internal fun goalUsage(res: Resources, goal: GoalInfo): String? = buildList {
     goal.tokensUsed?.takeIf { it > 0 }?.let { used ->
         val budget = goal.tokenBudget?.takeIf { it > 0 }
-        add(if (budget != null) res.getString(R.string.chat_goal_tokens_budget, formatTokens(used), formatTokens(budget))
-            else res.getString(R.string.chat_goal_tokens, formatTokens(used)))
+        add(if (budget != null) res.getString(R.string.chat_goal_tokens_budget, formatTokens(used, res), formatTokens(budget, res))
+            else res.getString(R.string.chat_goal_tokens, formatTokens(used, res)))
     }
     goal.seconds?.takeIf { it > 0 }?.let { s ->
         add(if (s < 3600) res.getString(R.string.chat_goal_minutes, maxOf(s / 60, 1).toInt())

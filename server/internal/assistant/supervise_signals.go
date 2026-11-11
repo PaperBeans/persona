@@ -26,6 +26,7 @@ const (
 	sigEscalated   = "escalated"   // its leader conversation judged it needs the user (supervise_leader.go): told the main one
 	sigOrphaned    = "orphaned"    // nobody works on it: its agents are closed or offline and nothing brings one back (tasks_orphan.go)
 	sigAsk         = "ask"         // its agent's card came to the supervisor before the user (ask_route.go)
+	sigDecide      = "decide"      // a task leader's worker needs a decision its leader cannot make: told the conversation above the leader (task_leader.go)
 	// sigLeaderStuck: a leader's task is stuck (leader_reports.go): the main conversation says so in one line, no push
 	// (the owner's ruling after H1, #3609). Detail is the direction's name and where it is stuck.
 	sigLeaderStuck = "leader_stuck"
@@ -51,7 +52,10 @@ var (
 // superviseSignal is one thing about one task the supervisor should know. Key names the stretch of state it is about:
 // the same signal with the same key is told once.
 type superviseSignal struct {
-	Todo, Kind, Key  string
+	Todo, Kind, Key string
+	// Unreachable: this decision exists because the task leader's agent could not be reached, not because the worker
+	// waits for the user. It stays a decision even though the worker's ledger is not needs_user (task_leader.go).
+	Unreachable      bool
 	At               time.Time
 	Machine, Session string
 	Detail, Ask      string
@@ -103,7 +107,7 @@ func (g superviseSignal) id() string {
 // urgent: a signal that waits on a decision goes out sooner than the rest.
 func (g superviseSignal) urgent() bool {
 	switch g.Kind {
-	case sigNeedsYou, sigIdle, sigUnjudged, sigFailed, sigInterrupted, sigStarted, sigEscalated, sigAsk, sigOrphaned, // started: the user waits to hear it
+	case sigNeedsYou, sigIdle, sigUnjudged, sigFailed, sigInterrupted, sigStarted, sigEscalated, sigAsk, sigOrphaned, sigDecide, // started: the user waits to hear it
 		sigRecheck, sigUndecidable, sigOwnerCannot: // the owner waits on a decision they cannot answer as it is
 		return true
 	case sigReport:
@@ -261,7 +265,8 @@ func (s *Service) retryDigestLocked(d time.Duration) {
 // watchSignals are what t and its agents show now that the supervisor should hear of, by their state alone: a task
 // waiting for review (told once per review: again after a restart of the assistant, which forgot what it told), an
 // agent waiting for an answer (at once for a quiet task), or working without progress for long. Nothing more for a
-// task waiting for review or for the user, and nothing for one done or not supervised. A task nobody works on any more
+// task waiting for review or for the user, only that its time came for a parked one, and nothing for one done or not
+// supervised. A task nobody works on any more
 // is told from what the minute pass found (orphanSignal, tasks_orphan.go), since that asks whether its computers answer.
 func watchSignals(t Todo, agents []proto.Session, now time.Time) []superviseSignal {
 	v := t.Supervision
@@ -272,6 +277,11 @@ func watchSignals(t Todo, agents []proto.Session, now time.Time) []superviseSign
 	case reviewPending:
 		return []superviseSignal{{Todo: t.ID, Kind: sigReview, Key: reviewKey(v)}}
 	case reviewNeedsUser:
+		return nil
+	case reviewParked: // nothing until its time, then that it came (parked.go)
+		if g, ok := parkedDueSignal(t, now); ok {
+			return []superviseSignal{g}
+		}
 		return nil
 	}
 	var out []superviseSignal
@@ -319,6 +329,7 @@ func (s *Service) superviseLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+		s.rehomeLeaderlessWorkers(ctx) // a worker whose leader's task closed is rehomed even with no signal of its own
 		s.superviseWatch(ctx, time.Now())
 	}
 }

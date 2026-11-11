@@ -3,11 +3,14 @@ package transcript
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"hash/crc32"
 	"io"
 	"maps"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -15,8 +18,9 @@ import (
 
 // Opening a big transcript cold (a node that just started, a session not opened for a while) used to parse all of it
 // to answer "the last two exchanges": 22 s for 317 MB on a busy machine, past the hub's timeout. Now a cold open of a
-// file over 2×windowBytes counts its lines (fast: no JSON) and parses only a window at the end. Pages, after_seq and
-// full texts that reach before the window parse the window before it, and so on back to the first line.
+// file over 2×windowBytes counts its lines (fast: no JSON) and parses only a window at the end. Pages and after_seq
+// that reach before the window parse the window before it, and so on back to the first line; a full text parses back
+// only to the line that names its item (findOlder).
 // Session-level Meta (turns, tokens, compactions) needs the whole file: it is worked out when first asked for
 // (Meta), outside the file's lock.
 //
@@ -521,6 +525,115 @@ func (f *File) ensureTurns(beforeSeq, turns, maxItems int) {
 func (f *File) ensureAfter(afterSeq int) {
 	for f.base > afterSeq && f.loadOlder() > 0 {
 	}
+}
+
+// findOlder finds an item that is not among the parsed ones in the lines not parsed yet, parsing back only to the last
+// of them that names its line: the uuid or Codex item id before the id's "#<n>", quoted as JSON writes it (a Codex
+// FileChange's "<id>-<n>" is named by "<id>"), or the seq of a "line<seq>" id unless that Claude line has a uuid
+// (its items are named by the uuid). A line that names it without holding it (a child's parentUuid, a call's output)
+// sends the search further back. An id no line names loads nothing: a stale or mistyped one used to parse the whole
+// file under the lock and keep all of it. Callers hold f.mu.
+func (f *File) findOlder(id string) (proto.Item, bool) {
+	if f.base == 0 || f.win == nil || id == "" {
+		return proto.Item{}, false
+	}
+	fh, err := os.Open(f.Path)
+	if err != nil {
+		return proto.Item{}, false
+	}
+	defer fh.Close()
+	stem := uuidOf(id)
+	if rest, ok := strings.CutPrefix(stem, "line"); ok {
+		if n, err := strconv.Atoi(rest); err == nil && n > 0 && strconv.Itoa(n) == rest {
+			if n <= f.base && !f.win.codex && claudeLineUUID(fh, f.win.starts, n) != "" {
+				return proto.Item{}, false // a stale id: a rewind or a replaced file moved its line
+			}
+			f.ensureAfter(n - 1)
+			return f.item(id)
+		}
+	}
+	needles := [][]byte{quoteID(stem)}
+	if i := strings.LastIndexByte(stem, '-'); i > 0 && i < len(stem)-1 && strings.Trim(stem[i+1:], "0123456789") == "" {
+		needles = append(needles, quoteID(stem[:i]))
+	}
+	for f.base > 0 && f.win != nil {
+		line := lastMention(fh, f.win.starts, f.win.starts[f.base], needles)
+		if line == 0 {
+			return proto.Item{}, false
+		}
+		base := f.base
+		f.ensureAfter(line - 1)
+		if it, ok := f.item(id); ok {
+			return it, true
+		}
+		if f.base == base { // the file changed: loadOlder parsed nothing
+			return proto.Item{}, false
+		}
+	}
+	return proto.Item{}, false
+}
+
+// claudeLineUUID is the uuid of line n (1-based, starts as in window) of a Claude transcript, which names the line's
+// items by it; "" when it has none or cannot be read. The caller knows the file is not a Codex rollout, so the line is
+// not tested again.
+func claudeLineUUID(fh *os.File, starts []int64, n int) string {
+	if n < 1 || n >= len(starts) {
+		return ""
+	}
+	data := make([]byte, starts[n]-starts[n-1])
+	if _, err := fh.ReadAt(data, starts[n-1]); err != nil && err != io.EOF {
+		return ""
+	}
+	var e struct {
+		UUID string `json:"uuid"`
+	}
+	if unmarshalLine(data, &e) != nil {
+		return ""
+	}
+	return e.UUID
+}
+
+// quoteID is an id as a JSON string in a transcript line (ids are plain ASCII; the escaping is for odd ones).
+func quoteID(s string) []byte {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(s)
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n"))
+}
+
+// lastMention is the line (1-based, starts as in window) holding the last of the needles found in the file's bytes
+// before end, read back a block at a time; 0 when none is (or the file cannot be read).
+func lastMention(fh *os.File, starts []int64, end int64, needles [][]byte) int {
+	const block = 4 << 20
+	keep := 0 // a needle split across two blocks
+	for _, n := range needles {
+		keep = max(keep, len(n)-1)
+	}
+	buf := make([]byte, min(end, block+int64(keep)))
+	for hi := end; hi > 0; {
+		lo := max(hi-block, 0)
+		data := buf[:min(hi+int64(keep), end)-lo]
+		if _, err := fh.ReadAt(data, lo); err != nil && err != io.EOF {
+			return 0
+		}
+		at := -1
+		for _, n := range needles { // the last one, by forward searches: bytes.Index is much faster than LastIndex
+			for i := 0; ; {
+				j := bytes.Index(data[i:], n)
+				if j < 0 {
+					break
+				}
+				at, i = max(at, i+j), i+j+1
+			}
+		}
+		if at >= 0 {
+			off := lo + int64(at)
+			return sort.Search(len(starts), func(i int) bool { return starts[i] > off })
+		}
+		hi = lo
+	}
+	return 0
 }
 
 // fullMeta works out the session-level Meta of a file opened by its end: every line, in order, as a full read

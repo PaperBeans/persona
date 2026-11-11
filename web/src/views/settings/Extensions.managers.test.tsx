@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // Another manager's extension page (docs/assistant/managers.md "Clients"): the connectors it contributes, its channel and its
-// upgrade are that manager's, not the default's of the same id; a link that names no manager waits for the roster.
+// upgrade are that manager's, not the default's of the same id; a link that names no manager is the current assistant's,
+// and Settings › Connectors and Extensions list the current assistant's copies only.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,8 +12,9 @@ vi.mock("../../lib/store", async (original) => {
 });
 vi.mock("../../ui/atoms", async (original) => ({ ...(await original<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
 
-import { managerHeaderFor, resetManagerChoice } from "../../lib/manager-choice";
-import { loadRoster, setRoster } from "../../lib/managers";
+import { t } from "../../i18n";
+import { chooseManager, managerHeaderFor, resetManagerChoice } from "../../lib/manager-choice";
+import { setRoster } from "../../lib/managers";
 import { ChannelPage } from "./Channels";
 import { Connectors } from "./Connectors";
 import { Extensions } from "./Extensions";
@@ -32,6 +34,12 @@ const DETAIL = {
   contributes: { channel: ["wechat"], connectors: ["wechat"] },
   auto_upgrade: false, upgrade: { market: "official", id: "example-wechat", from: "1.0.0", to: "1.1.0", state: "off" },
 };
+// the merged list: each manager's built-in copy, and the default's install from a market (a source with no word for it)
+const LIST = [
+  { id: "example-wechat", name: "示例微信", kind: "process", status: "running", source: "builtin", enabled: true, manager: "assistant" },
+  { id: "example-gateway", name: "Example Gateway", kind: "quota", status: "running", source: "market", enabled: true, manager: "assistant" },
+  { id: "example-wechat", name: "示例微信", kind: "process", status: "running", source: "builtin", enabled: true, manager: "m-1" },
+];
 const CHANNEL = { id: "wechat", name: "微信", kind: "im", source: "plugin", installed: true, enabled: true, state: "ready" };
 
 let host: HTMLDivElement;
@@ -63,6 +71,7 @@ beforeEach(() => {
         { id: "wechat", name: "微信", status: "ok", account: "work@example.com", inbox: true, manager: "m-1" },
       ] });
     }
+    if (/\/(plugins|extensions)$/.test(url)) return reply({ extensions: LIST });
     if (url.includes("/connectors/wechat/settings")) return reply({ id: "wechat", name: "微信", status: "ok", inbox: false });
     if (url.endsWith("/channels")) return reply({ channels: header === "m-1" ? [CHANNEL] : [] });
     if (url.endsWith("/channels/wechat")) return reply({ ...CHANNEL, capabilities: {}, bind: "none", waiting: { answers: 0, asks: 0 } });
@@ -132,16 +141,25 @@ describe("another manager's extension page", () => {
     expect(calls.filter((c) => !c.url.endsWith("/managers")).every((c) => c.header === null)).toBe(true);
   });
 
-  it("waits for the roster before drawing a link that names no manager", async () => {
-    roster = () => {}; // the roster's answer is on its way
-    void loadRoster();
+  it("opens a link that names no manager as the current assistant's copy", async () => {
+    setRoster(ROSTER);
+    act(() => chooseManager("m-1"));
     act(() => root.render(<Extensions open="example-wechat" onOpen={() => {}} />));
     await flush();
-    expect(calls.some((c) => /example-wechat\/-\/$/.test(c.url))).toBe(false);
-    expect(host.textContent).not.toContain("示例微信");
-    await act(async () => roster!());
+    const reads = calls.filter((c) => /example-wechat\/-\/$/.test(c.url));
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((c) => c.header === "m-1")).toBe(true);
+    expect(host.textContent).toContain("示例微信");
+  });
+
+  it("installs from the market for the current assistant", async () => {
+    setRoster(ROSTER);
+    act(() => chooseManager("m-1"));
+    act(() => root.render(<Extensions open="-market/official/example-wechat" onOpen={() => {}} />));
     await flush();
-    expect(calls.some((c) => /example-wechat\/-\/$/.test(c.url))).toBe(true);
+    const catalog = calls.filter((c) => c.url.includes("/-/catalog"));
+    expect(catalog.length).toBeGreaterThan(0);
+    expect(catalog.every((c) => c.header === "m-1")).toBe(true);
   });
 });
 
@@ -167,22 +185,66 @@ describe("another manager's connector and channel pages", () => {
   });
 });
 
+describe("a page opened by an address that names no assistant, or another one", () => {
+  it("opens a connector and a channel without `@` as the current assistant's", async () => {
+    setRoster(ROSTER);
+    act(() => chooseManager("m-1"));
+    act(() => root.render(<Connectors open="wechat" onOpen={() => {}} />));
+    await flush();
+    expect(host.textContent).toContain("work@example.com");
+    expect(host.textContent).not.toContain("home@example.com");
+    expect(managerHeaderFor("/connectors/wechat/settings")).toBe("m-1");
+    act(() => root.render(<ChannelPage id="wechat" onBack={() => {}} onSettings={() => {}} />));
+    await flush();
+    expect(calls.find((c) => c.url.endsWith("/channels/wechat"))?.header).toBe("m-1");
+  });
+
+  it("names whose it is beside the title when it is another assistant's than the current one's, and nowhere else", async () => {
+    setRoster(ROSTER);
+    act(() => root.render(<Connectors open="wechat@m-1" onOpen={() => {}} />));
+    await flush();
+    expect(host.querySelector("[data-owner-mark=m-1]")?.textContent).toContain("工作");
+    act(() => chooseManager("m-1"));
+    await flush();
+    expect(host.querySelector("[data-owner-mark]")).toBeNull();
+    act(() => root.render(<Extensions open="example-wechat@assistant" onOpen={() => {}} />));
+    await flush();
+    expect(host.querySelector("[data-owner-mark=assistant]")?.textContent).toContain("助手");
+  });
+});
+
 describe("Settings › Connectors' rows", () => {
   const rows = () => [...host.querySelectorAll<HTMLButtonElement>("button")].filter((b) => b.textContent?.includes("微信"));
 
-  it("lists each manager's copy under its name, and a row opens that manager's copy", async () => {
+  it("lists the current assistant's copy only, with no assistant's name over it, and a row opens that copy", async () => {
     setRoster(ROSTER);
     const onOpen = vi.fn();
     act(() => root.render(<ConnectorList onOpen={onOpen} />));
     await flush();
-    const text = host.textContent ?? "";
-    expect(rows()).toHaveLength(2);
-    expect(text.indexOf("助手")).toBeGreaterThan(-1);
-    expect(text.indexOf("助手")).toBeLessThan(text.indexOf("工作"));
-    act(() => rows()[1].click());
-    expect(onOpen).toHaveBeenLastCalledWith("wechat@m-1");
+    expect(rows()).toHaveLength(1);
+    expect(host.textContent).not.toContain("助手");
     act(() => rows()[0].click());
     expect(onOpen).toHaveBeenLastCalledWith("wechat");
+    // 工作 made current: its copy, opened by its name
+    act(() => chooseManager("m-1"));
+    await flush();
+    expect(rows()).toHaveLength(1);
+    expect(host.textContent).not.toContain("工作");
+    act(() => rows()[0].click());
+    expect(onOpen).toHaveBeenLastCalledWith("wechat@m-1");
+  });
+
+  it("says the current assistant is offline rather than listing nothing", async () => {
+    setRoster({ ...ROSTER, managers: [...ROSTER.managers, { id: "m-2", name: "家里", online: false }] });
+    act(() => chooseManager("m-2"));
+    act(() => root.render(<ConnectorList onOpen={() => {}} />));
+    await flush();
+    expect(rows()).toHaveLength(0);
+    expect(host.querySelector('[data-assistant-offline="m-2"]')?.textContent).toContain(t("settings-managers.offline_page_title", { name: "家里" }));
+    // an online one: its list, no offline state
+    act(() => chooseManager("m-1"));
+    await flush();
+    expect(host.querySelector("[data-assistant-offline]")).toBeNull();
   });
 
   it("one manager: no headings, a row opens by id", async () => {
@@ -193,5 +255,36 @@ describe("Settings › Connectors' rows", () => {
     expect(host.textContent).not.toContain("助手");
     act(() => rows()[0].click());
     expect(onOpen).toHaveBeenLastCalledWith("wechat");
+  });
+});
+
+describe("Settings › Extensions' rows", () => {
+  it("says the current assistant is offline rather than that nothing is installed", async () => {
+    setRoster({ ...ROSTER, managers: [...ROSTER.managers, { id: "m-2", name: "家里", online: false }] });
+    act(() => chooseManager("m-2"));
+    act(() => root.render(<Extensions open={null} onOpen={() => {}} />));
+    await flush();
+    expect(host.querySelector('[data-assistant-offline="m-2"]')).not.toBeNull();
+    expect(host.textContent).not.toContain(t("settings-extensions.empty_title"));
+    act(() => chooseManager("m-1"));
+    await flush();
+    expect(host.querySelector("[data-assistant-offline]")).toBeNull();
+  });
+
+  const rows = () => [...host.querySelectorAll<HTMLElement>("[data-extension-row]")];
+  // what follows a row's name: its source's word, if it has one
+  const tags = (row: HTMLElement) => [...row.querySelector("span.truncate")!.parentElement!.children].slice(1).map((c) => c.textContent);
+
+  it("lists the current assistant's copies only, each source with its word and none with an empty tag", async () => {
+    setRoster(ROSTER);
+    act(() => root.render(<Extensions open={null} onOpen={() => {}} />));
+    await flush();
+    expect(rows().map((r) => `${r.dataset.extensionRow}@${r.dataset.manager}`).sort()).toEqual(["example-gateway@assistant", "example-wechat@assistant"]);
+    const byId = (id: string) => rows().find((r) => r.dataset.extensionRow === id)!;
+    expect(tags(byId("example-wechat"))).toEqual([t("lib-extensions.source_builtin")]);
+    expect(tags(byId("example-gateway"))).toEqual([]);
+    act(() => chooseManager("m-1"));
+    await flush();
+    expect(rows().map((r) => [r.dataset.extensionRow, r.dataset.manager])).toEqual([["example-wechat", "m-1"]]);
   });
 });

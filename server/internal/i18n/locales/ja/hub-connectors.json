@@ -1,5 +1,20 @@
 {
   "program_missing": "{name}のプログラムが見つかりません（{path}）",
   "program_fails": "{name}のプログラムを実行できません：{err}",
-  "program_version": "{name}のプログラムとハブのバージョンが一致しません（{got} / {want}）"
+  "program_version": "{name}のプログラムとハブのバージョンが一致しません（{got} / {want}）",
+  "not_installed": "ハブのマシンに lark-cli がインストールされていません",
+  "install_guide": "ハブのマシンに lark-cli をインストールするか、lark.cli.bin に実行ファイルを設定してください",
+  "old_version": "lark-cli {got} は古すぎます。Persona には {want} 以降が必要です",
+  "not_signed_in": "lark-cli にサインインしていません",
+  "expired": "lark-cli のログインの有効期限が切れています",
+  "login_guide": "このページからサインインしてください。ハブのマシンで {command} を実行することもできます",
+  "login_restart": "このページからサインインをやり直してください",
+  "login_failed": "lark-cli のサインインに失敗しました。このページからやり直してください",
+  "login_timeout": "lark-cli のサインインがタイムアウトしました。このページからやり直してください",
+  "login_not_complete": "lark-cli のサインインが完了しませんでした。このページからやり直してください",
+  "missing_permission": "lark-cli に権限がありません：{scope}",
+  "rate_limited": "lark-cli はレート制限中です。後でもう一度お試しください",
+  "error": "lark-cli で Lark を読み取れませんでした",
+  "expiry_reminder": "ログインはあと {count} 日で期限切れになります。ハブのマシンで {command} を実行してください",
+  "larkcli_name": "Lark · 自分のメッセージ"
 }

@@ -1,0 +1,14 @@
+{
+  "kind": "code",
+  "total": 1,
+  "more": false,
+  "items": [
+    {
+      "id": "example-org/example-repo:src/example.go",
+      "repo": "example-org/example-repo",
+      "path": "src/example.go",
+      "title": "src/example.go",
+      "link": "https://github.com/example-org/example-repo/blob/main/src/example.go"
+    }
+  ]
+}

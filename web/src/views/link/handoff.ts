@@ -3,6 +3,8 @@
 // (a read-only source), it goes to Persona's main conversation (a new one when there is none): the page moves there and
 // the panel stays open, as on the Mac.
 import { addContext, editMessage, usableComposer, whenComposer, type ContextRef } from "../../lib/links";
+import { conversationPage } from "../../lib/conversation-page";
+import { shownManager } from "../../lib/manager-choice";
 import { navigate } from "../../lib/router";
 import { getState } from "../../lib/store";
 import { toast } from "../../ui/atoms";
@@ -11,7 +13,7 @@ import { t } from "../../i18n";
 /** Persona's main conversation (its composer's draft key and route), else a new conversation. */
 function personaTarget(): { key: string; go: () => void } {
   const a = getState().assistant;
-  if (a?.main) return { key: `${a.machine_id}/${a.main}`, go: () => navigate({ name: "persona", sid: a.main }) };
+  if (a?.main) return { key: `${a.machine_id}/${a.main}`, go: () => navigate(conversationPage(a.main!, a.machine_id, shownManager())) };
   return { key: "persona-new", go: () => navigate({ name: "persona" }) };
 }
 

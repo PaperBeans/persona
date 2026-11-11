@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// Params json.Marshal wrote go out in the line json.Marshal writes for the envelope: HTML characters, U+2028 and
+// Params json.Marshal wrote go out in the line the envelope's encoder writes for them: HTML characters, U+2028 and
 // control characters escaped and invalid UTF-8 replaced in params, an event the encoder would escape or leave out
 // written by the encoder, null for nil params and the same error (nothing written) for empty ones.
 func TestNotifyMarshaledIsTheSameLine(t *testing.T) {
@@ -25,7 +25,7 @@ func TestNotifyMarshaledIsTheSameLine(t *testing.T) {
 			}
 			var got bytes.Buffer
 			err = New("t", &got).Notify(event, Marshaled(raw))
-			want, werr := oldNotify(event, v)
+			want, werr := oldNotify(event, json.RawMessage(raw))
 			if err != nil || werr != nil || !bytes.Equal(got.Bytes(), want) {
 				t.Errorf("Notify(%q, %s):\n%q, %v\nwas %q, %v", event, raw, got.Bytes(), err, want, werr)
 			}

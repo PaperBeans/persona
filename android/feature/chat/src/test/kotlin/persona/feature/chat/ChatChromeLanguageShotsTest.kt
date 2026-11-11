@@ -73,6 +73,47 @@ class ChatChromeLanguageShotsTest {
     @Config(sdk = [35], qualifiers = "ja-w400dp-h900dp-xhdpi")
     @Test fun japanese() = shots("ja", more = "その他の操作", mode = "モード", allow = "許可")
 
+    @Config(sdk = [35], qualifiers = "zh-w400dp-h900dp-xhdpi")
+    @Test fun assistantChatTitlesAndMessagesDoNotBecomeRosterIdentity() {
+        val only = persona.core.contracts.api.HubManager("assistant", "Personal assistant name", online = true)
+        var roster by mutableStateOf<persona.core.contracts.api.ManagerRoster?>(null)
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        val conversation = session.copy(title = "Plan a sample trip", assistant = true, manager = "assistant", status = "idle")
+        val answer = Item("answer", role = "assistant", kind = "text", text = "The sample itinerary is ready.")
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                val scope = rememberCoroutineScope()
+                val resources = androidx.compose.ui.platform.LocalResources.current
+                val chrome = remember { ChatChromeState(resources, null, scope, {}, {}) }
+                androidx.compose.runtime.CompositionLocalProvider(LocalManagerRoster provides roster) {
+                    Column(Modifier.testTag("identity-chat").width(400.dp).height(860.dp).background(PersonaTheme.palette.background)) {
+                        ChatHeader(conversation, machine, listOf(conversation), chrome, null, false,
+                            onBack = {}, onOpenSession = {}, onConnectionDetails = {}, onOverlay = {})
+                        Box(Modifier.padding(Tokens.Space.l)) { MessageContent(answer, user = false, boxed = true) }
+                    }
+                }
+            }
+        }
+        for (s in AppStyle.entries) for (d in listOf(false, true)) {
+            rule.runOnIdle { style = s; dark = d; roster = null }
+            val before = rule.onNodeWithTag("identity-chat").captureToImage().asAndroidBitmap()
+            for ((case, installed) in listOf("single" to listOf(only),
+                "multiple" to listOf(only, persona.core.contracts.api.HubManager("work", "Other assistant", online = false)))) {
+                rule.runOnIdle { roster = persona.core.contracts.api.ManagerRoster(installed, "assistant") }
+                rule.onNodeWithText("Plan a sample trip").assertExists()
+                rule.onNodeWithText("The sample itinerary is ready.").assertExists()
+                rule.onNodeWithText("Personal assistant name").assertDoesNotExist()
+                rule.onNodeWithText("Other assistant").assertDoesNotExist()
+                val rendered = rule.onNodeWithTag("identity-chat").captureToImage().asAndroidBitmap()
+                assertTrue("Roster identity changed the conversation's chrome or attribution", before.sameAs(rendered))
+                File(out(), "identity-$case-${s.key}-${if (d) "dark" else "light"}.png").outputStream().use {
+                    assertTrue(rendered.compress(Bitmap.CompressFormat.PNG, 100, it))
+                }
+            }
+        }
+    }
+
     private enum class Scene { Header, HeaderMenu, Composer, Permission, Plan, Question, Modes, ApiError, MessageMenu }
 
     private val machine = Machine(id = "box", name = "workstation", online = true)

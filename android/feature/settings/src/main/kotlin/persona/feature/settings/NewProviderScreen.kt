@@ -44,7 +44,7 @@ object ProviderEditPreview {
 
 /**
  * "New model provider". On a hub with built-in presets (docs/assistant/onboarding.md 4.3 "Three paths" B) it is a wizard: (1) pick a provider (the
- * hub's providers, then "Custom compatible gateway"), (2) paste the key (tested by itself; "Use it for the main conversation and new Agents" follows the main
+ * hub's providers, then "Custom compatible gateway"), (2) paste the key (tested by itself; "Use it for the main conversation and new agents" follows the main
  * conversation's readiness; the name and another model under "More options") and (3) what now runs on it. A gateway typed in is
  * the form, with "Test connection" and "Fetch models". An older hub opens on the form: "Fill in" - the name, the kind, the gateway and
  * key, the models and flags - or "From extension": a preset, then the name, the key and maybe another of its models.
@@ -316,21 +316,21 @@ private fun androidx.compose.foundation.lazy.LazyListScope.manualForm(
         Column(Modifier.padding(top = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             JSegmented(listOf(JSegment(stringResource(R.string.settings_src_provider_kind_launcher)), JSegment(stringResource(R.string.settings_src_provider_kind_api))), if (api) 1 else 0,
                 { if (editable) onEdit(draft.copy(kind = if (it == 1) "api" else "launcher")) }, Modifier.fillMaxWidth())
-            if (api) JSegmented(listOf(JSegment("Messages"), JSegment("Responses")), if (draft.api == "responses") 1 else 0,
+            if (api) JSegmented(listOf(JSegment("Messages"), JSegment("Responses")), if (draft.api == "responses") 1 else 0, // i18n-ignore: API style names (Anthropic Messages / OpenAI Responses)
                 { if (editable) onEdit(draft.copy(api = if (it == 1) "responses" else "messages")) }, Modifier.fillMaxWidth())
             SettingsCaption(stringResource(if (api) R.string.settings_src_provider_api_note else R.string.settings_src_provider_launcher_note),
                 Modifier.padding(horizontal = rowPadding))
         }
     }
     item("base-url") {
-        JTextField(draft.baseUrl, { onEdit(draft.copy(baseUrl = it)) }, Modifier.fillMaxWidth().padding(top = Tokens.Space.m), label = "Base URL",
+        JTextField(draft.baseUrl, { onEdit(draft.copy(baseUrl = it)) }, Modifier.fillMaxWidth().padding(top = Tokens.Space.m), label = "Base URL", // i18n-ignore: the field name gateways' docs use, same on iOS / web
             placeholder = "https://…", singleLine = true, enabled = editable, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             supportingText = stringResource(R.string.settings_src_provider_base_url_hint))
     }
     // The labels are the header names a gateway's docs use, so they are not translated.
     if (!api && (draft.agent == "claude" || draft.agent.isBlank())) item("auth") {
         Column(Modifier.padding(top = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            JSegmented(listOf(JSegment("x-api-key"), JSegment("Bearer")), if (draft.auth == "bearer") 1 else 0,
+            JSegmented(listOf(JSegment("x-api-key"), JSegment("Bearer")), if (draft.auth == "bearer") 1 else 0, // i18n-ignore: auth header scheme name
                 { if (editable) onEdit(draft.copy(auth = if (it == 1) "bearer" else "api_key")) }, Modifier.fillMaxWidth())
             SettingsCaption(stringResource(if (draft.auth == "bearer") R.string.settings_onb_auth_bearer_hint else R.string.settings_onb_auth_key_hint),
                 Modifier.padding(horizontal = rowPadding))

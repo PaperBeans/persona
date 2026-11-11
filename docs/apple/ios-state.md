@@ -321,6 +321,33 @@ The behavior before #1046 (several separate truths), its measurements and the pl
 | 8 | Background for a few seconds, then return, at latest of a running turn | At latest, following, ↓ doesn't flash |
 | 9 | Chat shorter than one screen, drag once | ↓ never appears, keeps following |
 | 10 | Several pending cards over the chat (#939) | At rest: no ↓, following; scrolled up, ↓ sits clear of the cards and returns to latest |
+| 11 | Flick up from latest and tap ↓ while the list still glides (#3027) | The glide stops at once; at latest within 0.7 s, following, no ↓, never reading again |
+| 12 | The same in Persona's chat while its turn runs | As 11, then keeps following the steps the turn adds |
+
+### How ↓ gets there (#3027)
+
+Telegram and iMessage stop the list the moment ↓ is tapped and are at the newest message a third of a second later,
+from anywhere. On iPhone and iPad `ChatView.jumpToEnd` runs the jump on the list's own `UIScrollView` (`ChatJumpRun`)
+rather than asking SwiftUI's `ScrollPosition`:
+
+1. Stop a glide where it is (`setContentOffset(contentOffset, animated: false)`, UIKit's way to end deceleration).
+2. Plan by the distance (`ChatJump.plan`, PersonaKit, `ChatJumpTests`): there already, nothing moves; up to 1.5 screens,
+   the whole way animates; further, the list is put one screen short of latest at once and that screen animates. The
+   flipped list's newest end is offset 0, so that place is exact however long the chat; a scroll through the whole
+   history laid out every row on the way and took seconds.
+3. Animate on a display link with a cubic ease-out (`ChatJump.progress`), 0.22 s for a few lines to 0.36 s for a screen
+   (`ChatJump.seconds`), aiming at the newest end again each frame (an inset that changes moves it). Reduce Motion: there
+   at once. A finger on the list ends it where it is, and the release decides as always.
+4. Meanwhile `contentArrived` does not jump (it would cut the glide short; offset 0 stays the newest end whatever streams
+   in). Once there: the geometry is read from the list (#1211), and following catches up with what came in.
+
+↓ acts the moment the finger lands, a glide or not: a UIKit view laid over the button takes the touch
+(`JumpArrowTouch`; a tap on the SwiftUI `Button` during a glide did nothing on phones,
+docs/lessons/ios.md「Jump to Latest during a glide: take the touch in UIKit, on touch-down」).
+The finger gets a light haptic, the arrow scales and fades away (`Theme.Motion.state`, following again) and the list
+stops and goes, all on that frame. ↓ also comes up with the same
+scale and fade, not at once. VoiceOver and the keyboard press the `Button` under the pad. The Mac keeps SwiftUI's
+animated `scrollTo(edge:)` and its arrow as before (frozen).
 
 ### One truth: `ChatFollow` (#1046)
 

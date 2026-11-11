@@ -1,6 +1,5 @@
 package persona.core.designsystem
 
-import android.text.format.DateUtils
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -34,8 +33,9 @@ import persona.core.contracts.api.ConnectionState
 import persona.core.contracts.api.DeliveryState
 import persona.core.contracts.api.OutboxMessage
 import persona.core.designsystem.icons.PhIcons
-import java.text.DateFormat
 import java.time.Instant
+import java.time.ZoneId
+import java.util.Locale
 
 /**
  * What the connection details read besides the state the page already has (docs/android/android.md "Connection details"): the
@@ -169,9 +169,13 @@ private fun ago(at: Instant, now: Instant): String {
     return when {
         seconds < 60 -> pluralStringResource(R.plurals.designsystem_connection_seconds_ago, seconds, seconds)
         seconds < 3600 -> pluralStringResource(R.plurals.designsystem_connection_minutes_ago, seconds / 60, seconds / 60)
-        else -> DateUtils.formatSameDayTime(at.toEpochMilli(), now.toEpochMilli(), DateFormat.SHORT, DateFormat.SHORT).toString()
+        else -> clockOrDate(at, now, currentLocale)
     }
 }
+
+/** The time of day of [at] if it is [now]'s day in [zone], else its date; in the app's language, not the system's (#4103). */
+internal fun clockOrDate(at: Instant, now: Instant, locale: Locale, zone: ZoneId = ZoneId.systemDefault()): String =
+    LocalizedFormats.format(at, if (at.atZone(zone).toLocalDate() == now.atZone(zone).toLocalDate()) LocalizedFormats.TIME else LocalizedFormats.DATE, locale, zone)
 
 @get:StringRes
 private val ConnectionState.detailsTitle: Int

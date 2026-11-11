@@ -71,7 +71,7 @@ func TestTriageFollowsTheSharedCases(t *testing.T) {
 			if err := json.Unmarshal(c.Input.Todo, &td); err != nil {
 				t.Fatal(err)
 			}
-			got := triageTodo(td, lookupOf(c.Input.Sessions), c.Input.Now, c.Input.RestoredAt, time.UTC)
+			got := triageTodo(td, lookupOf(c.Input.Sessions), c.Input.Now, c.Input.RestoredAt, time.UTC, false)
 			if got.Section != c.Expected.Section || got.Rule != c.Expected.Rule {
 				t.Fatalf("got %s / %s, want %s / %s", got.Section, got.Rule, c.Expected.Section, c.Expected.Rule)
 			}
@@ -145,7 +145,7 @@ func TestTriageLeavesDismissedAgentsOut(t *testing.T) {
 	td := listedTodo{Todo: Todo{ID: "t", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-time.Hour), Origin: "c",
 		Agents: []TodoAgent{{MachineID: "m", SessionID: "ask", DismissedAt: &gone}}}}
 	look := lookupOf([]proto.Session{{MachineID: "m", SessionID: "ask", State: proto.StateNeedsYou, UpdatedAt: now}})
-	if got := triageTodo(td, look, now, time.Time{}, time.UTC); got.Rule != ruleRest {
+	if got := triageTodo(td, look, now, time.Time{}, time.UTC, false); got.Rule != ruleRest {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -160,16 +160,16 @@ func TestTriageNeverShelvesAConcern(t *testing.T) {
 	task := concern
 	task.ID, task.Kind = "t", ""
 	none := lookupOf(nil)
-	if got := triageTodo(listedTodo{Todo: task}, none, now, time.Time{}, time.UTC); got.Section != triageShelved {
+	if got := triageTodo(listedTodo{Todo: task}, none, now, time.Time{}, time.UTC, false); got.Section != triageShelved {
 		t.Fatalf("a quiet task: %+v", got)
 	}
-	if got := triageTodo(listedTodo{Todo: concern}, none, now, time.Time{}, time.UTC); got.Section != triageOther || got.Rule != ruleRest {
+	if got := triageTodo(listedTodo{Todo: concern}, none, now, time.Time{}, time.UTC, false); got.Section != triageOther || got.Rule != ruleRest {
 		t.Fatalf("a quiet concern: %+v", got)
 	}
 	running := concern
 	running.Agents = []TodoAgent{{MachineID: "m", SessionID: "s"}}
 	look := lookupOf([]proto.Session{{MachineID: "m", SessionID: "s", State: proto.StateWorking, Status: proto.StatusWorking, UpdatedAt: now}})
-	if got := triageTodo(listedTodo{Todo: running}, look, now, time.Time{}, time.UTC); got.Section != triageWorking {
+	if got := triageTodo(listedTodo{Todo: running}, look, now, time.Time{}, time.UTC, false); got.Section != triageWorking {
 		t.Fatalf("a concern with an agent working: %+v", got)
 	}
 	res := triageTodos([]listedTodo{{Todo: concern}, {Todo: task}}, none, now, time.UTC, false)
@@ -179,7 +179,7 @@ func TestTriageNeverShelvesAConcern(t *testing.T) {
 	// A failed start long ago, an accepted review or a live delivery file a task with the finished ones, never a concern.
 	failed := concern
 	failed.StartError = "no launcher"
-	if got := triageTodo(listedTodo{Todo: failed}, none, now, time.Time{}, time.UTC); got.Section != triageOther {
+	if got := triageTodo(listedTodo{Todo: failed}, none, now, time.Time{}, time.UTC, false); got.Section != triageOther {
 		t.Fatalf("a concern whose agent failed to start days ago: %+v", got)
 	}
 	accepted := concern
@@ -187,14 +187,14 @@ func TestTriageNeverShelvesAConcern(t *testing.T) {
 	live := concern
 	live.Delivery = &TodoDelivery{State: deliveryLive, At: old}
 	for name, c := range map[string]Todo{"accepted": accepted, "deployed": live} {
-		if got := triageTodo(listedTodo{Todo: c}, none, now, time.Time{}, time.UTC); got.Section != triageOther {
+		if got := triageTodo(listedTodo{Todo: c}, none, now, time.Time{}, time.UTC, false); got.Section != triageOther {
 			t.Fatalf("a %s concern: %+v", name, got)
 		}
 	}
 	reported := concern
 	at := now.Add(-time.Minute)
 	reported.DoneAt = &at
-	if got := triageTodo(listedTodo{Todo: reported}, none, now, time.Time{}, time.UTC); got.Section != triageJustDone {
+	if got := triageTodo(listedTodo{Todo: reported}, none, now, time.Time{}, time.UTC, false); got.Section != triageJustDone {
 		t.Fatalf("a reported concern: %+v", got)
 	}
 }

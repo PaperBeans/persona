@@ -129,7 +129,11 @@ struct AssistantTopBar: View {
             Menu { menuItems(link) } label: {
                 HStack(spacing: Theme.Space.xs) {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(name).font(Theme.Font.heading).foregroundStyle(Theme.macLabel).lineLimit(1)
+                        if let menuName {
+                            Text(menuName).font(Theme.Font.heading).foregroundStyle(Theme.macLabel).lineLimit(1)
+                        } else {
+                            ThemedIcon(Theme.Icon.more).font(Theme.Font.heading).foregroundStyle(Theme.macLabel)
+                        }
                         Group {
                             if let hint {
                                 Label(hint, systemImage: Theme.Icon.successFilled).foregroundStyle(Theme.positive)
@@ -149,8 +153,8 @@ struct AssistantTopBar: View {
             .buttonStyle(.plain)
             .fixedSize()
             .help("Knowledge, details, copy directory and chat info")
-            .accessibilityLabel(link != .online ? String(localized: "\(name), \(ConnectionLabel.text(link, hubRestarting: model.hubUpdate?.restarting == true))") : name)
-            .accessibilityIdentifier("persona-avatar")
+            .accessibilityLabel(menuAccessibilityLabel)
+            .accessibilityIdentifier(model.showsAssistantIdentity ? "persona-avatar" : "assistant-menu")
             .connectionDetails($showLink)
             .layoutPriority(-1)
             Spacer(minLength: Theme.Space.s)
@@ -344,32 +348,40 @@ struct AssistantTopBar: View {
         let link = model.connection.shown
         return Menu { menuItems(link) } label: {
             VStack(spacing: -7) {
-                TopBarDot(key: key, machineID: machineID)
-                    .shadow(color: Theme.persona.opacity(0.3), radius: 8, y: 3)
-                ZStack {
-                    if link != .online {
-                        ConnectionLabel(phase: link, compact: true).transition(.opacity)
-                    } else {
-                        Text(name).font(Theme.Font.labelStrong).lineLimit(1).transition(.opacity)
-                    }
+                if model.showsAssistantIdentity {
+                    TopBarDot(key: key, machineID: machineID)
+                        .shadow(color: Theme.persona.opacity(0.3), radius: 8, y: 3)
+                } else {
+                    ThemedIcon(Theme.Icon.more)
+                        .font(Theme.Font.heading)
+                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                        .surface(interactive: true, in: .circle)
                 }
-                .padding(.horizontal, Theme.Space.m)
-                .scaledFrame(height: Theme.Size.icon)
-                .scaledFrame(maxWidth: Theme.Size.box200)
-                .fixedSize() // as wide as the name, at most 200
-                // Not the glass `surface`: inside a Menu's label the glass spreads over the whole label (face included).
-                .background(.regularMaterial, in: .capsule)
-                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
-                .animation(Theme.Motion.standard, value: link)
-                .opacity(hint == nil ? 1 : 0)
+                if menuName != nil || link != .online {
+                    ZStack {
+                        if link != .online {
+                            ConnectionLabel(phase: link, compact: true).transition(.opacity)
+                        } else {
+                            Text(menuName ?? "").font(Theme.Font.labelStrong).lineLimit(1).transition(.opacity)
+                        }
+                    }
+                    .padding(.horizontal, Theme.Space.m)
+                    .scaledFrame(height: Theme.Size.icon)
+                    .scaledFrame(maxWidth: Theme.Size.box200)
+                    .fixedSize()
+                    .background(.regularMaterial, in: .capsule)
+                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+                    .animation(Theme.Motion.standard, value: link)
+                    .opacity(hint == nil ? 1 : 0)
+                }
             }
             .contentShape(.rect)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
-        .accessibilityLabel(link != .online ? String(localized: "\(name), \(ConnectionLabel.text(link, hubRestarting: model.hubUpdate?.restarting == true))") : name)
+        .accessibilityLabel(menuAccessibilityLabel)
         .accessibilityHint("Knowledge, details, copy directory and chat info")
-        .accessibilityIdentifier("persona-avatar")
+        .accessibilityIdentifier(model.showsAssistantIdentity ? "persona-avatar" : "assistant-menu")
         .connectionDetails($showLink)
     }
 
@@ -380,6 +392,23 @@ struct AssistantTopBar: View {
         guard let key, key != model.assistantMain else { return persona }
         let t = session?.title ?? ""
         return t.isEmpty || t == "Claude Code" ? persona : t
+    }
+
+    nonisolated static func visibleTitle(showsIdentity: Bool, persona: String, conversation: String?, isMain: Bool) -> String? {
+        let title = conversation.flatMap { $0.isEmpty || $0 == "Claude Code" ? nil : $0 }
+        if isMain || title == nil { return showsIdentity ? persona : nil }
+        return title
+    }
+
+    private var menuName: String? {
+        Self.visibleTitle(showsIdentity: model.showsAssistantIdentity, persona: model.persona.name,
+                          conversation: session?.title, isMain: key == nil || key == model.assistantMain)
+    }
+
+    private var menuAccessibilityLabel: String {
+        guard let menuName else { return String(localized: "Knowledge, details, copy directory and chat info") }
+        let link = model.connection.shown
+        return link != .online ? String(localized: "\(menuName), \(ConnectionLabel.text(link, hubRestarting: model.hubUpdate?.restarting == true))") : menuName
     }
 
     /// The conversation's launcher (the next message uses it) or, on the new-conversation page, the default one.

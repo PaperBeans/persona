@@ -226,6 +226,14 @@ func (c mailConnector) Call(ctx context.Context, name string, args json.RawMessa
 	return toolText(c.h.mail.Call(ctx, name, args, nil))
 }
 
+var _ connector.ReadJSON = mailConnector{}
+
+// CallJSON is connector.ReadJSON: mail_accounts and mail_search as JSON for subscriptions (mail.Service.CallJSON),
+// mail_read as its text.
+func (c mailConnector) CallJSON(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, bool, error) {
+	return c.h.mail.CallJSON(ctx, name, args)
+}
+
 // Describe refuses a mail_send that could not be sent before the user is asked.
 func (mailConnector) Describe(_ context.Context, name string, args json.RawMessage) (connector.Action, string, error) {
 	summary, err := mail.SendSummary(args)

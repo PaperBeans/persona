@@ -119,7 +119,8 @@ class AssistantSettingsShotsTest {
                 .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
         rule.waitForIdle()
-        assertTrue(rule.onAllNodesWithText(title).fetchSemanticsNodes().isNotEmpty())
+        // The current assistant's profile, with no assistant picker of its own (the sidebar's switcher picks).
+        assertTrue(rule.onAllNodesWithText(title).fetchSemanticsNodes().isEmpty())
         for (s in AppStyle.entries) for (d in listOf(false, true)) { style = s; dark = d; capture("home") }
         style = AppStyle.Glass
         for (p in listOf("notes", "memory", "memory-file", "memory-edit", "memory-delete", "machine", "timezone", "move")) {

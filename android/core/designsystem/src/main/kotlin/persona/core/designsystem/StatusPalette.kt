@@ -84,6 +84,10 @@ data class PersonaPalette(
     /** Media overlays stay readable over a photograph/video, independent of the page's appearance. */
     val mediaBackdrop: Color get() = Color.Black
     val onMediaBackdrop: Color get() = Color.White
+    /** Outside the circle an avatar crop keeps (New from photo, #2407): dimmed in every style and appearance, as iOS `Theme.Crop.outside`. */
+    val cropOutside: Color get() = mediaBackdrop.copy(alpha = 0.5f)
+    /** The crop circle's edge, as iOS `Theme.Crop.edge`. */
+    val cropEdge: Color get() = onMediaBackdrop.copy(alpha = 0.9f)
     val mediaScrim: Color get() = mediaBackdrop.copy(alpha = 0.85f)
     val mediaControlFill: Color get() = mediaBackdrop.copy(alpha = 0.6f)
     val mediaLabelFill: Color get() = mediaBackdrop.copy(alpha = 0.7f)

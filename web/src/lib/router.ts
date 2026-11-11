@@ -20,7 +20,10 @@ export type Route =
   | { name: "session"; mid: string; sid: string; view?: SessionView }
   // one herdr tab (a slot) of a workspace; `sid` picks its pane (lib/herdr-tree.ts resolveTab)
   | { name: "tab"; mid: string; space: string; slot: string; sid?: string; view?: SessionView }
-  | { name: "persona"; sid?: string }
+  // `mid` / `manager`: the computer the conversation runs on and its manager when another than the default
+  // (`?machine=…&manager=…`, lib/conversation-page.ts): with several assistants a reload, a new tab or a link finds it
+  // where it runs, whichever assistant is current
+  | { name: "persona"; sid?: string; mid?: string; manager?: string }
   // "All chats"; `origin` filters it (lib/conversation-origins.ts): the sidebar's "Automatic" rows open it so
   | { name: "history"; origin?: string }
   // the health space (docs/assistant/health.md): its home, or one of its conversations
@@ -51,6 +54,14 @@ export type Route =
   // the source subscription pages (#2041), their first state in ?state=
   | { name: "subscriptions" };
 
+/** A conversation page's `?machine=` and `?manager=` (routePath writes them), each only when there. */
+function conversationQuery(search: string): { mid?: string; manager?: string } {
+  const q = new URLSearchParams(search);
+  const mid = q.get("machine");
+  const manager = q.get("manager");
+  return { ...(mid ? { mid } : {}), ...(manager ? { manager } : {}) };
+}
+
 /** `?view=term|chat` of an agent page's address; anything else is no choice. */
 export function parseView(search: string): SessionView | undefined {
   const v = new URLSearchParams(search).get("view");
@@ -64,7 +75,7 @@ export function parse(path: string, search = ""): Route {
   if (p[0] === "s" && p[1] && p[2]) return { name: "session", mid: p[1], sid: p[2], ...(view && { view }) };
   if (p[0] === "t" && p[1] && p[2] && p[3]) return { name: "tab", mid: p[1], space: p[2], slot: p[3], sid: p[4] || undefined, ...(view && { view }) };
   if (!p.length) return { name: "persona" };
-  if (assistantPath(p[0])) return p[1] === "new" && !p[2] ? { name: "persona-new" } : { name: "persona", sid: p[1] };
+  if (assistantPath(p[0])) return p[1] === "new" && !p[2] ? { name: "persona-new" } : p[1] ? { name: "persona", sid: p[1], ...conversationQuery(search) } : { name: "persona" };
   if (p[0] === "workspace-board") return { name: "workspace-board" };
   if (p[0] === "requests" && p[1]) return { name: "request", id: p[1] };
   if (p[0] === "overview") return { name: "home" };
@@ -130,8 +141,14 @@ export function routePath(r: Route): string {
       return `/s/${encodeURIComponent(r.mid)}/${encodeURIComponent(r.sid)}${viewQuery(r.view)}`;
     case "tab":
       return ["/t", r.mid, r.space, r.slot, ...(r.sid ? [r.sid] : [])].map((x, i) => (i ? encodeURIComponent(x) : x)).join("/") + viewQuery(r.view);
-    case "persona":
-      return r.sid ? `/persona/${encodeURIComponent(r.sid)}` : "/";
+    case "persona": {
+      if (!r.sid) return "/";
+      const q = new URLSearchParams();
+      if (r.mid) q.set("machine", r.mid);
+      if (r.manager) q.set("manager", r.manager);
+      const query = q.toString();
+      return `/persona/${encodeURIComponent(r.sid)}${query ? `?${query}` : ""}`;
+    }
     case "persona-new":
       return "/persona/new";
     case "history":

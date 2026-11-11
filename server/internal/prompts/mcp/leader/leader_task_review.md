@@ -1,0 +1,49 @@
+Close, send back or hand up one of the worker tasks you handed out with task_plan. You get this tool only as a task leader, and it reaches your own direct workers only (any other task is refused). accepted: the work meets its done_when (you checked the evidence): the task closes. rework: say what is missing (note, or checks that are not met): it goes to the worker as a message, at most two rounds, after which it goes up as a decision. needs_user: only for a decision that is not yours: reason says what to decide and recommend what you would pick; it goes to whoever handed you your task, and nothing is shown to the user from here. cancelled: not to be done: the task closes and its agent is closed. A worker's supervision message tells you when one needs this.
+
+```json
+{
+  "type": "object",
+  "required": [
+    "todo_id",
+    "verdict"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "todo_id": {
+      "type": "string",
+      "description": "the worker's task id, as the supervision message and task_plan's answer give it"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["accepted", "rework", "needs_user", "cancelled"]
+    },
+    "note": {
+      "type": "string",
+      "description": "rework: what is missing, written to the worker; accepted and cancelled: one line of why"
+    },
+    "checks": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "required": ["criterion", "met"],
+        "additionalProperties": false,
+        "properties": {
+          "criterion": {"type": "string", "description": "one of the task's done_when"},
+          "met": {"type": "boolean"},
+          "evidence": {"type": "string", "description": "what shows it, or what is missing"}
+        }
+      },
+      "description": "each done_when with whether it is met, and the evidence"
+    },
+    "reason": {
+      "type": "string",
+      "description": "needs_user: one sentence on what is to be decided"
+    },
+    "recommend": {
+      "type": "string",
+      "description": "needs_user: the option you recommend"
+    }
+  }
+}
+```

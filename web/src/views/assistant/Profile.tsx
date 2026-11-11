@@ -3,6 +3,8 @@
 // groups: "On its own", "About you", "Runs on") and what it can reach.
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/api";
+import { conversationPage } from "../../lib/conversation-page";
+import { shownManager } from "../../lib/manager-choice";
 import { navigate } from "../../lib/router";
 import { dayLabel, hm, untilLabel, upcoming, type Task } from "../../lib/routines";
 import { useStore } from "../../lib/store";
@@ -49,7 +51,7 @@ export function Profile({ onToggleSidebar }: { onToggleSidebar: () => void }) {
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-3 sm:px-4">
         <IconButton icon="sidebar" label={t("assistant-profile.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
         <h1 className="min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">{persona.name}</h1>
-        {assistant?.main && <IconButton icon="chat" label={t("assistant-profile.main_chat")} onClick={() => navigate({ name: "persona", sid: assistant.main })} />}
+        {assistant?.main && <IconButton icon="chat" label={t("assistant-profile.main_chat")} onClick={() => navigate(conversationPage(assistant.main!, assistant.machine_id, shownManager()))} />}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[760px] px-5 py-8 sm:px-8" style={{ animation: `fade-up 320ms ${EASE} both` }}>

@@ -63,6 +63,7 @@
   "fill_in_app": "Fill this step in in the app",
   "write_text_first": "Write what to type first",
   "unknown_action": "Unknown action",
+  "press_not_sent": "That didn't go through: {error}\nPress the card again to retry.",
   "working_on_it": "Working on it…",
   "no_such_machine": "That computer isn't there.",
   "cannot_start": "Couldn't start it: {error}",

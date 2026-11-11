@@ -135,7 +135,7 @@ func TestFlexibleTaskNoDirectoryKeepsOriginalStartFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := PlanTask{Title: todo.Title, Prompt: "Inspect project", TodoID: todo.ID,
-		Machine: "l4", Cwd: "/home/me/code/app", Launcher: "work", MachinePolicy: machineFlexible}
+		Machine: "l4", Cwd: "/home/me/code/app", Launcher: "work", MachinePolicy: machineFlexible, Permission: "bypassPermissions"}
 	p := &TaskPlan{ID: todo.PlanID, Conversation: "conv9", State: planStarted, Tasks: []PlanTask{task}}
 	if err := s.savePlan(ctx, p); err != nil {
 		t.Fatal(err)

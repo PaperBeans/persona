@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.filter
 
 /** Holds the one hub connection for the process: the activity and the foreground service share it. */
 @HiltAndroidApp
@@ -86,13 +88,15 @@ class PersonaApp : Application() {
         }
         // Light/dark for what Compose does not draw (WebView pages, system dialogs) too: the app's own night mode.
         scope.launch { appearance.scheme.collect { applyNightMode(it) } }
-        // A tiered look moved to another tier: the new tier is downloaded whole before the face changes.
+        // A tiered look moved to another tier: the new tier is downloaded whole before the face changes. The two events
+        // are taken off the event flow first, so the download holds up no other live event (#4038).
         scope.launch {
-            connection.events.collect { event ->
-                if (event is persona.core.contracts.PersonasEvent) runCatching { personas.refresh() }
-                // Another device chose a look (#3200): this phone shows it too.
-                if (event is persona.core.contracts.LookEvent) runCatching { personas.follow(event.id) }
-            }
+            connection.events.filter { it is persona.core.contracts.PersonasEvent || it is persona.core.contracts.LookEvent }
+                .buffer(kotlinx.coroutines.channels.Channel.UNLIMITED).collect { event ->
+                    if (event is persona.core.contracts.PersonasEvent) runCatching { personas.refresh() }
+                    // Another device chose a look (#3200): this phone shows it too.
+                    if (event is persona.core.contracts.LookEvent) runCatching { personas.follow(event.id) }
+                }
         }
     }
 

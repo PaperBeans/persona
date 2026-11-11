@@ -52,5 +52,7 @@
   "too_many_waiting": "すでに {count} 台のコンピューターが待機中です。接続されていないものは削除し、接続されたものは自分のものか確認してから、新しく追加してください。",
   "never_connected": "未接続",
   "waiting_confirm": "確認待ち",
-  "offline_short": "オフライン"
+  "offline_short": "オフライン",
+  "added_under": "このコンピューターは「{name}」に追加されました。",
+  "assistant_offline": "「{name}」はオフラインのため、今はコンピューターを追加できません。"
 }

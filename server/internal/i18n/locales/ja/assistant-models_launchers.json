@@ -9,6 +9,7 @@
   "err_chat_launcher": "Chat Completions接続はランチャーとして実行できません",
   "err_claude_messages": "ClaudeのランチャーはMessages接続にのみ対応しています",
   "err_auth": "対応していない認証方式です",
+  "err_key_value_or_reference": "キーか参照のどちらか一方だけを指定してください",
   "err_api_launch_fields": "直接API接続には起動引数、小型モデル、サブエージェントのモデルを設定できません",
   "err_subagent_model_long": "サブエージェントのモデルが長すぎます",
   "err_custom_model_long": "カスタムモデルが長すぎます",

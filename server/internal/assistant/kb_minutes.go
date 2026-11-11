@@ -27,6 +27,10 @@ import (
 // codeMinutesStale: the minutes were written again since the version the app sent; it reads them again.
 const codeMinutesStale = "minutes_stale"
 
+// codeTranscriptExpired: the recording's transcript went with recording_days and only its minutes are kept, so they
+// can't be made again (kb/recording_trim.go).
+const codeTranscriptExpired = "transcript_expired"
+
 // minutesWritten pushes the minutes the knowledge-base loop wrote for a recording's current revision: one push per
 // recording and version (a stable id, so a restart does not repeat it), a tap opening the main conversation as
 // reminders do, and the same text with the recording's web page to the Lark bot and the channels with pushes on.
@@ -65,6 +69,9 @@ func (s *Service) minutesRoutes(engine func(http.ResponseWriter, *http.Request) 
 		switch err := e.AskMinutes(r.PathValue("id")); {
 		case errors.Is(err, kb.ErrNotFound):
 			apierr.Write(w, http.StatusNotFound, i18n.Err("assistant-minutes.no_recording"))
+			return
+		case errors.Is(err, kb.ErrTranscriptExpired):
+			apierr.WriteCode(w, http.StatusConflict, codeTranscriptExpired, i18n.Err("assistant-minutes.transcript_expired"))
 			return
 		case errors.Is(err, kb.ErrRecordingIncomplete):
 			apierr.Write(w, http.StatusConflict, i18n.Err("assistant-minutes.incomplete"))

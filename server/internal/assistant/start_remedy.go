@@ -84,7 +84,7 @@ func (s *Service) beginRemedy(ctx context.Context, planID string, i int, t PlanT
 		return false
 	}
 	todo, ok := s.todoNow(t.TodoID)
-	if !ok || todo.Supervision == nil || todo.DoneAt != nil {
+	if !ok || todo.Supervision == nil || todo.DoneAt != nil || s.agentSupervised(todo) { // a leader has no start remedies
 		return false
 	}
 	attempt := 0
@@ -245,6 +245,11 @@ func (s *Service) toolTaskRetry(ctx context.Context, self string, args json.RawM
 		return "", err
 	}
 	pt := p.Tasks[i]
+	// A plan saved before the rule, or edited, does not get past it on a remedy retry either (nothing is started).
+	pt.Permission = strings.TrimSpace(pt.Permission)
+	if err := pt.checkWritablePermission(); err != nil {
+		return "", fmt.Errorf("%w; nothing was started", err)
+	}
 	attempt := 1
 	if pt.Start != nil {
 		attempt = pt.Start.Attempt + 1

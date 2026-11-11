@@ -20,6 +20,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import persona.core.contracts.api.ConnectorsManagement
 import persona.core.contracts.api.HubConnector
 import persona.core.contracts.Machine
@@ -70,7 +71,9 @@ internal fun ExtensionsPage(extensions: ExtensionManagement?, onBack: () -> Unit
     LaunchedEffect(model) { ExtensionChanges.of(extensions).collect { model.load() } }
     // Signed in or out somewhere else: " · Not signed in" follows.
     LaunchedEffect(model) { model.watchAuth() }
-    val list = state.extensions
+    // The current assistant's alone (docs/assistant/managers.md "Clients"): a merged list is filtered by each one's stamp.
+    val assistant = currentAssistant()
+    val list = state.extensions?.filter { assistant.owns(it.manager) }
     val roster = LocalManagerRoster.current
     val detail = LocalDetailKey.current
     JListPage(title = stringResource(R.string.settings_ext_title), onBack = onBack, refreshing = state.loading && list != null, onRefresh = { scope.launch { model.load() } }) {
@@ -92,8 +95,6 @@ internal fun ExtensionsPage(extensions: ExtensionManagement?, onBack: () -> Unit
             JEmptyState(stringResource(R.string.settings_ext_empty_title), stringResource(R.string.settings_ext_empty_text), icon = PhIcons.PuzzlePiece)
         }
         if (!list.isNullOrEmpty()) {
-            // Several managers (docs/assistant/managers.md step 4): each one's extensions under its name instead of one list.
-            val byManager = roster?.groups(list) { it.manager }
             val rows: LazyListScope.(List<HubExtension>) -> Unit = { shown ->
                 // keyed by manager and id in every path: a built-in is listed under each manager, and the list can come
                 // before the roster; a pair that still repeats (a hub that stamps nothing) takes its place too
@@ -109,13 +110,8 @@ internal fun ExtensionsPage(extensions: ExtensionManagement?, onBack: () -> Unit
                     }
                 }
             }
-            if (byManager == null) {
-                item("top") { JSectionHeader(stringResource(R.string.settings_ext_list_header), count = list.size) }
-                rows(list)
-            } else byManager.forEach { group ->
-                item("manager-${group.id}") { JManagerHeader(group, count = group.items.size) }
-                rows(group.items)
-            }
+            item("top") { JSectionHeader(stringResource(R.string.settings_ext_list_header), count = list.size) }
+            rows(list)
             item("footer") {
                 SettingsCaption(stringResource(if (state.markets && onMarket != null) R.string.settings_ext_list_footer_market
                     else R.string.settings_ext_list_footer),
@@ -206,7 +202,13 @@ fun ExtensionPage(
     var signOutError by remember { mutableStateOf<String?>(null) }
     var confirmingSignOut by remember { mutableStateOf(false) }
     val polled = signInState.bind.prompt?.takeIf { signInState.bind.polled }
-    LaunchedEffect(signIn, polled?.step, polled?.kind, polled?.userCode, polled?.url) { if (polled != null) signIn.poll() }
+    // While shown and for a while after (the user signs in in another app); back in front, ask at once (`pollWhileShown`).
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // When the page left, once per sign-in: a new code (the effect below starting again) keeps it.
+    val away = remember(signIn, polled != null) { SignInAway() }
+    LaunchedEffect(signIn, lifecycle, away, polled?.step, polled?.kind, polled?.userCode, polled?.url) {
+        if (polled != null) pollWhileShown(lifecycle.startedFlow(), away, catchUp = { signIn.catchUp() }, poll = { signIn.poll() })
+    }
     LaunchedEffect(signInState.signedInAs) {
         val who = signInState.signedInAs ?: return@LaunchedEffect
         feedback?.notice(if (who.isBlank()) res.getString(R.string.settings_ext_auth_signed_in) else res.getString(R.string.settings_ext_auth_signed_in_as, who))
@@ -238,7 +240,9 @@ fun ExtensionPage(
     val hasForm = detail != null && !detail.readOnly && detail.form.isNotEmpty()
     // A form of machine lists only saves each switch at once: nothing waits for "Save".
     val waitsForSave = hasForm && detail.form.flatMap { if (it.type == "object") it.fields.orEmpty() else listOf(it) }.any { it.items?.machines != true }
-    ExtensionSettingsPage(detail = detail, busy = state.busy || state.saving || state.loading || state.loadFailed,
+    // A pack's members by their installed names, on its page and in its dialogs (#4122); read only for a pack.
+    val memberNames = rememberExtensionNames(api, detail?.extensionPack?.isNotEmpty() == true || state.partial != null)
+    ExtensionSettingsPage(detail = detail, memberNames = memberNames, busy = state.busy || state.saving || state.loading || state.loadFailed,
         refreshing = state.loading && detail != null, onBack = onBack, onRefresh = { scope.launch { model.load() } }, updates = state.updates,
         onEnabled = { on -> scope.launch { model.setEnabled(on) } },
         onAutoUpgrade = { on -> scope.launch {
@@ -297,15 +301,17 @@ fun ExtensionPage(
             })
     }
     val current = detail
-    if (removing && current != null) UninstallDialog(current.extension.name.ifBlank { current.extension.id }, onDismiss = { removing = false }, installedVersion = current.extension.version) { keep ->
+    if (removing && current != null) UninstallDialog(current.extension.name.ifBlank { current.extension.id }, onDismiss = { removing = false },
+        installedVersion = current.extension.version, members = memberNames.named(current.extensionPack.map { it.id })) { keep, members ->
         removing = false
         scope.launch {
-            if (model.uninstall(keep)) {
-                feedback?.notice(res.getString(R.string.settings_ext_uninstalled, current.extension.name.ifBlank { current.extension.id }))
+            if (model.uninstall(keep, members = members)) {
+                feedback?.notice(ExtensionText.uninstalled(res, current.extension.name.ifBlank { current.extension.id }, members, model.removal))
                 onBack()
             }
         }
     }
+    state.partial?.let { PackPartialDialog(it, detail?.extension?.name?.ifBlank { null } ?: extensionId, memberNames) { model.dismissPartial() } }
     // Others depend on it (#5192): named, and switched off with it once agreed.
     state.cascade?.let { ask ->
         val name = detail?.extension?.name?.ifBlank { null } ?: extensionId
@@ -313,7 +319,7 @@ fun ExtensionPage(
             destructive = true, confirm = stringResource(if (ask.keepData == null) R.string.settings_ext_dependents_off else R.string.settings_ext_dependents_remove) to {
                 scope.launch {
                     if (model.confirmCascade() && ask.keepData != null) {
-                        feedback?.notice(res.getString(R.string.settings_ext_uninstalled, name))
+                        feedback?.notice(ExtensionText.uninstalled(res, name, ask.members, model.removal))
                         onBack()
                     }
                 }

@@ -58,6 +58,13 @@ class PersonaStore(context: Context, private val style: AppStyleStore, private v
     /** Bumped when pictures land on disk: the views that asked for one before ask again. */
     val pictures: StateFlow<Int> = _pictures.asStateFlow()
 
+    private val _uploaded = MutableStateFlow(_offered.value.filter { it.manifest.uploaded }.map { it.id }.toSet())
+    /** The looks made from an image (`uploaded` in GET /api/v1/looks, or the manifest's `source.kind`): the only ones the apps can delete. */
+    val uploaded: StateFlow<Set<String>> = _uploaded.asStateFlow()
+    private val _canUpload = MutableStateFlow(false)
+    /** The hub makes avatars from images (`look_uploads`, #2404): Settings offers New from Photo. */
+    val canUpload: StateFlow<Boolean> = _canUpload.asStateFlow()
+
     /** Whether the hub keeps the choice (it answered GET /api/v1/looks): choices go there. */
     @Volatile private var synced = false
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -76,10 +83,12 @@ class PersonaStore(context: Context, private val style: AppStyleStore, private v
         val list = try {
             val looks = try { api.looks() } catch (e: PersonaPacksUnsupported) { null }
             synced = looks != null
+            _canUpload.value = looks != null && api.uploads
             if (looks != null) {
                 settle(looks.current, api)
+                _uploaded.value = looks.looks.filter { it.uploaded || it.manifest?.uploaded == true }.map { it.id }.toSet()
                 looks.looks.mapNotNull { it.pack }.filter { it.usable }
-            } else api.list().filter { it.usable }
+            } else api.list().filter { it.usable }.also { _uploaded.value = emptySet() }
         } catch (e: CancellationException) { throw e } catch (e: PersonaPacksUnsupported) {
             _error.value = e.message; return@withLock
         } catch (e: Exception) {
@@ -174,6 +183,52 @@ class PersonaStore(context: Context, private val style: AppStyleStore, private v
         }
     }
 
+    /**
+     * Makes an avatar from [image] (New from Photo, #2407) and chooses it: the upload asks the hub to choose it for every
+     * device, so this phone only takes it on, with no PUT of its own ([fetch]).
+     */
+    suspend fun upload(name: String, subtitle: String?, image: ByteArray): LookUploadOutcome {
+        val api = packs() ?: return LookUploadOutcome.Unreachable
+        val made = try { api.upload(name, subtitle, image, choose = true) }
+            catch (e: CancellationException) { throw e } catch (e: Exception) { return failure(e) }
+        return fetch(made.look.id)
+    }
+
+    /**
+     * Lists the hub's looks again and brings [id]'s package here, chosen as the hub's choice says (the one just made,
+     * unless another device chose since). Try Again after an upload whose package did not come: the image is not sent again.
+     */
+    suspend fun fetch(id: String): LookUploadOutcome {
+        refresh()
+        if (_offered.value.none { it.id == id }) return LookUploadOutcome.NotDownloaded(id)
+        return if (style.personaId.value != id || _current.value?.id == id) LookUploadOutcome.Done else LookUploadOutcome.NotDownloaded(id)
+    }
+
+    /**
+     * Deletes an avatar made from an image (DELETE /api/v1/looks/uploads/{id}); one already gone (404) counts as deleted.
+     * When it was the one chosen here the default comes back here, as the hub chooses it for the others.
+     */
+    suspend fun delete(id: String): LookUploadOutcome {
+        val api = packs() ?: return LookUploadOutcome.Unreachable
+        try { api.deleteUpload(id) } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            if (persona.core.hub.HubFailure.from(e).status != 404) return failure(e)
+        }
+        if (style.personaId.value == id) {
+            choices++
+            style.setFace(PersonaDesign.Default)
+            _current.value = null
+        }
+        _uploaded.value -= id
+        refresh()
+        return LookUploadOutcome.Done
+    }
+
+    /** The hub's refusal in its words; no answer at all is [LookUploadOutcome.Unreachable]. */
+    private fun failure(e: Exception): LookUploadOutcome {
+        val failure = persona.core.hub.HubFailure.from(e)
+        return if (failure.status != null) LookUploadOutcome.Refused(failure.message) else LookUploadOutcome.Unreachable
+    }
+
     /** Counts choices, so a download finishing after a later choice does not undo it. */
     @Volatile private var choices = 0
 
@@ -239,6 +294,18 @@ class PersonaStore(context: Context, private val style: AppStyleStore, private v
         /** Settings' cards show faces 64 dp wide, at up to 3 pixels a dp. */
         const val THUMBNAIL_PX = 192
     }
+}
+
+/** How an upload or a delete of an avatar made from an image ended. */
+sealed interface LookUploadOutcome {
+    /** Made (or deleted), and on this phone as the hub's choice says. */
+    data object Done : LookUploadOutcome
+    /** Made, but its package did not come to this phone: [PersonaStore.fetch] tries again without sending the image. */
+    data class NotDownloaded(val id: String) : LookUploadOutcome
+    /** The hub refused, in its own words (the app's language). */
+    data class Refused(val words: String) : LookUploadOutcome
+    /** No answer from the hub. */
+    data object Unreachable : LookUploadOutcome
 }
 
 val LocalPersonaStore = staticCompositionLocalOf<PersonaStore?> { null }

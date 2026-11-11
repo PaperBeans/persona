@@ -1017,7 +1017,7 @@
   },
   {
     "name": "kb_search",
-    "description": "Search the knowledge base: summaries and metadata of chats, people, projects, docs, meetings, events, recordings (with their minutes and full transcripts), project timelines, the notes directories the user added (hits with an absolute path) and, with messages=true, the full message archive (newest days first). All words must match. Hits come in the order the files are read, not by relevance, so a broad search can fill the limit with chats: give kind to search one kind only, the entries whose name matches first, then as kb_list ranks them. A past meeting (its decisions, what is still open, who does what) is kind=recordings: found by its title, the calendar event's title or what was said; then kb_get it.",
+    "description": "Search the knowledge base: summaries and metadata of chats, people, projects, docs, meetings, events, recordings (with their minutes and any transcript still retained), topics (curated knowledge points: how something works, what was decided and why, the steps and pitfalls), project timelines, the notes directories the user added (hits with an absolute path) and, with messages=true, the full message archive (newest days first). All words must match. Hits come in the order the files are read, not by relevance, so a broad search can fill the limit with chats: give kind to search one kind only, the entries whose name matches first, then as kb_list ranks them. A past meeting (its decisions, what is still open, who does what) is kind=recordings: found by its title, the calendar event's title, its minutes or any transcript still retained; then kb_get it. Transcripts expire before minutes; do not promise the full transcript of a trimmed recording.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1036,7 +1036,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ],
           "description": "only this kind's entries (no notes directories; the message archive only with chats)"
         },
@@ -1053,7 +1054,7 @@
   },
   {
     "name": "kb_list",
-    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (transcripts of the user's phone / watch recordings, kept a few days; newest first, saying which have meeting minutes). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.",
+    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes and which transcripts have expired), topics (knowledge points curated by subject out of the timelines and chats: concepts, decisions with their reasons, practices, pitfalls, facts, open questions; the biggest first). Transcripts are kept for recording_days (14 days by default); meetings' minutes are kept longer under minutes_days (forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1069,7 +1070,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ]
         },
         "tag": {
@@ -1084,7 +1086,7 @@
   },
   {
     "name": "kb_get",
-    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes with where each action item stands (a suggestion, or its to-do: open, done, cancelled, deleted) and its full timestamped transcript (recordings: the user's phone / watch recordings of the last days, text only), a meeting's or event's recordings. id from kb_list / kb_search (a project also by name).",
+    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes with where each action item stands (a suggestion, or its to-do: open, done, cancelled, deleted) and its timestamped transcript while still retained (recordings: the user's phone / watch recordings, text only), a meeting's or event's recordings, a topic's knowledge points by subtopic (each with its kind, reason and the entries it came from). Transcripts expire after recording_days (14 days by default); meetings then keep only their minutes under minutes_days (forever by default). id from kb_list / kb_search (a project also by name).",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1101,7 +1103,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ]
         },
         "id": {
@@ -1112,7 +1115,7 @@
   },
   {
     "name": "kb_update",
-    "description": "Write to the knowledge base: create or change a project (name, project_kind short|long, status, goal, my_role, aliases, link chats / people, code dirs as \"\u003cmachine\u003e:\u003cpath\u003e\" so Agents there belong to it, append a timeline `log` line, replace its summary), or tag / annotate a chat, person, doc, meeting, event, recording (a recording's content is the phone's: only its tags, pinned and projects; importance P0–P3, relevance 0–100, tags, note, link projects). Tags set here are kept over the automatic ones. Use it whenever a conversation settles something about a project or person. Two projects that are the same work under two names: `merge_into`; two that were merged but are not: `unmerge` on the one merged away.",
+    "description": "Write to the knowledge base: create or change a project (name, project_kind short|long, status, goal, my_role, aliases, link chats / people, code dirs as \"\u003cmachine\u003e:\u003cpath\u003e\" so Agents there belong to it, append a timeline `log` line, replace its summary), or tag / annotate a chat, person, doc, meeting, event, recording (a recording's content is the phone's: only its tags, pinned and projects; importance P0–P3, relevance 0–100, tags, note, link projects), or a topic (its points are curated: only its name, note, aliases and tags). Tags set here are kept over the automatic ones. Use it whenever a conversation settles something about a project or person. Two projects that are the same work under two names: `merge_into`; two that were merged but are not: `unmerge` on the one merged away.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1129,7 +1132,8 @@
             "docs",
             "meetings",
             "events",
-            "recordings"
+            "recordings",
+            "topics"
           ]
         },
         "id": {
@@ -1618,7 +1622,7 @@
   },
   {
     "name": "task_plan",
-    "description": "Hand the user a plan of one or more tasks for agents on their computers, instead of starting agents yourself. Use it for any work that takes an agent (code, research in a repo, anything longer than a few tool calls); one task per independent piece of work. Check machines_list for current machine resources and availability before choosing a machine. Fill in every field from what you know (the knowledge base, agents_list: which machine works in which directory, the user's habits); the user sees each choice as a chip they can change, with your one-line reason. Read-only tasks, tasks the user asked for themselves (user_requested), and kinds the user told you to start without asking, start at once; the rest wait as a card for the user's 开始. Either way this returns at once: don't wait, carry on. Each queued task is a todo (todo id) whose progress shows in your context snapshot; send to a task's agent with agent_send. Quick things you can do with a tool yourself (a reminder, an event) are not tasks. A task stays on its requested machine by default (machine_policy=fixed), including retries. An unavailable launcher fails there; do not reroute machine-local work. Use machine_policy=flexible only when the task may run on another computer: a failed health check can then move it, and its why says so. The response confirms queued dispatch, not a successful Agent start; inspect the task outcome. From the main conversation or a leader conversation (assistant.leaders) you supervise what you hand out; you get a 督办 message when one needs you, and you close it with task_review, not by repeating its agent's words. The answer lists work already going on that looks like the same task: check it before you let both go on. A todo this conversation opened that has no agent yet (one opened from a Lark topic: the message that handed it to you names its id) is the task's own: give that id as the task's todo_id and the agent works on it, instead of a new todo being made; any other todo_id is refused with why. From the main conversation, supervisor hands the whole plan to a leader conversation (one of assistant.leaders): its tasks are that leader's to supervise and review, as if it had handed them out; leave it out to supervise them yourself. Every task gets a brief, kept from the moment it starts and never rewritten: the hub records the owner's message that led to it (their words, from this conversation; work you start on your own after a 督办 message, a notice or a routine is recorded as yours, with started_why), and you supply the goal, done_when, expect_minutes and out_of_bounds. A writable task (readonly false) without done_when (at least one result that can be checked) and expect_minutes is refused, and so is a read-only task without goal and expect_minutes; the refusal says what is missing. The card shows the brief, so the owner's 开始 confirms it. A task that takes over from an earlier one (a retry on another computer, a rework round, a new agent after the first failed, a part split off) gives continues (that task's todo id) and continues_why: it keeps that task's brief (the owner's request, the criteria as they stand, the clock) while its prompt is its own, and the earlier task is linked as superseded; do not restate the request in a new brief. After a task started, done_when changes only with task_scope.",
+    "description": "Hand the user a plan of one or more tasks for agents on their computers, instead of starting agents yourself. Use it for any work that takes an agent (code, research in a repo, anything longer than a few tool calls); one task per independent piece of work. Check machines_list for current machine resources and availability before choosing a machine. Fill in every field from what you know (the knowledge base, agents_list: which machine works in which directory, the user's habits); the user sees each choice as a chip they can change, with your one-line reason. Read-only tasks, tasks the user asked for themselves (user_requested), and kinds the user told you to start without asking, start at once; the rest wait as a card for the user's 开始. Either way this returns at once: don't wait, carry on. Each queued task is a todo (todo id) whose progress shows in your context snapshot; send to a task's agent with agent_send. Quick things you can do with a tool yourself (a reminder, an event) are not tasks. A task stays on its requested machine by default (machine_policy=fixed), including retries. An unavailable launcher fails there; do not reroute machine-local work. Use machine_policy=flexible only when the task may run on another computer: a failed health check can then move it, and its why says so. The response confirms queued dispatch, not a successful Agent start; inspect the task outcome. From the main conversation or a leader conversation (assistant.leaders) you supervise what you hand out; you get a 督办 message when one needs you, and you close it with task_review, not by repeating its agent's words. The answer lists work already going on that looks like the same task: check it before you let both go on. A todo this conversation opened that has no agent yet (one opened from a Lark topic: the message that handed it to you names its id) is the task's own: give that id as the task's todo_id and the agent works on it, instead of a new todo being made; any other todo_id is refused with why. From the main conversation, supervisor hands the whole plan to a leader conversation (one of assistant.leaders): its tasks are that leader's to supervise and review, as if it had handed them out; leave it out to supervise them yourself. Every task gets a brief, kept from the moment it starts and never rewritten: the hub records the owner's message that led to it (their words, from this conversation; work you start on your own after a 督办 message, a notice or a routine is recorded as yours, with started_why), and you supply the goal, done_when, expect_minutes and out_of_bounds. A writable task (readonly false) without done_when (at least one result that can be checked) and expect_minutes is refused, and so is a read-only task without goal and expect_minutes; the refusal says what is missing. The card shows the brief, so the owner's 开始 confirms it. A task that takes over from an earlier one (a retry on another computer, a rework round, a new agent after the first failed, a part split off) gives continues (that task's todo id) and continues_why: it keeps that task's brief (the owner's request, the criteria as they stand, the clock) while its prompt is its own, and the earlier task is linked as superseded; do not restate the request in a new brief. After a task started, done_when changes only with task_scope. A task that changes files (readonly false) must set permission \"bypassPermissions\" explicitly; any other value, or none, is refused before anything is planned. A task that only reads (readonly true) is not affected. role \"leader\" makes the task's agent a task leader, which can hand direct workers to its own task through its own restricted task_plan and task_review and receives their supervision messages; use it only for a task that splits into several agents' work. Depth stops there: the leader's workers cannot hand tasks on.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1686,7 +1690,14 @@
                   "auto",
                   "bypassPermissions"
                 ],
-                "description": "permission mode; empty: the default for writable tasks (the user's default permission mode, else Claude Code's default mode on that computer). readonly=true always uses plan, overriding this field"
+                "description": "permission mode. Required, and only \"bypassPermissions\" is accepted, when readonly is false. readonly=true always uses plan, overriding this field"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "leader"
+                ],
+                "description": "optional: leader makes this task's agent a task leader that may hand direct workers to its own task (only from the main conversation or a leader conversation); leave it out for an ordinary worker task"
               },
               "ultracode": {
                 "type": "boolean",

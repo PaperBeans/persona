@@ -19,6 +19,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource
@@ -102,12 +105,13 @@ private fun StyleOption(style: AppStyle, selected: Boolean, onClick: () -> Unit)
 
 /** A selectable option card: the whole card is the radio button, outlined in the accent (ink in Brief) when chosen. */
 @Composable
-private fun Modifier.option(selected: Boolean, onClick: () -> Unit): Modifier {
+private fun Modifier.option(selected: Boolean, onClick: () -> Unit, radio: Boolean = true): Modifier {
     val palette = PersonaTheme.palette
     val shape = PersonaTheme.shapes.cardShape
     return fillMaxWidth().clip(shape).background(palette.surface)
         .border(if (selected) 2.dp else 1.dp, if (selected) palette.accent.takeIf { PersonaTheme.style != AppStyle.Brief } ?: palette.ink else palette.line, shape)
-        .clickable(role = Role.RadioButton, onClick = onClick).semantics(mergeDescendants = true) { this.selected = selected }
+        .clickable(role = if (radio) Role.RadioButton else Role.Button, onClick = onClick)
+        .semantics(mergeDescendants = true) { if (radio) this.selected = selected }
 }
 
 /** The same two primary destinations as the shell, including in appearance previews. */
@@ -186,6 +190,33 @@ fun PersonaSettings(demo: Boolean, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     // Shown at once on tap: the choice may wait for a refresh already fetching thumbnails.
     var asked by remember { mutableStateOf<String?>(null) }
+    // New from Photo (#2407): with a hub that makes avatars from images, never in demo mode.
+    val canUpload by (packs?.canUpload ?: remember { MutableStateFlow(false) }).collectAsState()
+    val uploaded by (packs?.uploaded ?: remember { MutableStateFlow(emptySet()) }).collectAsState()
+    val context = LocalContext.current
+    var upload by remember { mutableStateOf<AvatarUploadModel?>(null) }
+    var opening by remember { mutableStateOf(false) }
+    var uploadError by remember { mutableStateOf<UiText?>(null) }
+    var deleting by remember { mutableStateOf<PersonaInfo?>(null) }
+    var deletingNow by remember { mutableStateOf<String?>(null) }
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        opening = true
+        uploadError = null
+        scope.launch {
+            try { upload = AvatarUploadModel(decodeAvatarImage(context.contentResolver, uri)) }
+            catch (e: AvatarImageException) {
+                uploadError = when (e.reason) {
+                    AvatarImageException.Reason.TooSmall -> UiText.Res(R.string.settings_avatar_upload_too_small, listOf(AvatarImage.MIN_SIDE))
+                    AvatarImageException.Reason.Unreadable -> UiText.Res(R.string.settings_avatar_upload_unreadable)
+                    AvatarImageException.Reason.Unprepared -> UiText.Res(R.string.settings_avatar_upload_unprepared)
+                }
+            } catch (_: OutOfMemoryError) { uploadError = UiText.Res(R.string.settings_avatar_upload_unprepared) }
+            finally { opening = false }
+        }
+    }
     LaunchedEffect(packs) { packs?.refresh() }
     val chosen = if (demo || (chosenId != PersonaDesign.Default.id && offered.none { it.id == chosenId }))
         PersonaDesign.Default.id else chosenId
@@ -205,10 +236,20 @@ fun PersonaSettings(demo: Boolean, modifier: Modifier = Modifier) {
             Spacer(Modifier.height(Tokens.Space.m))
         }
         if (packs != null) offered.forEach { p ->
-            val busy = p.id in downloading || p.id == asked
+            val busy = p.id in downloading || p.id == asked || p.id == deletingNow
             val from = p.manifest.source?.extensionName?.let { stringResource(R.string.settings_avatar_from_extension, it) }
-            PersonaOption(p.manifest.displayName(language), p.manifest.about ?: p.manifest.subtitle ?: from ?: stringResource(if (packs.onPhone(p)) R.string.settings_avatar_on_hub else R.string.settings_avatar_download), selected = p.id == chosen,
-                onClick = { if (!busy) scope.launch { asked = p.id; try { packs.choose(p) } finally { if (asked == p.id) asked = null } } }) {
+            val made = p.id in uploaded || p.manifest.uploaded
+            val name = p.manifest.displayName(language)
+            val summary = if (made) p.manifest.subtitle?.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_avatar_from_image)
+                else p.manifest.about ?: p.manifest.subtitle ?: from ?: stringResource(if (packs.onPhone(p)) R.string.settings_avatar_on_hub else R.string.settings_avatar_download)
+            val deleteLabel = stringResource(R.string.settings_avatar_delete)
+            PersonaOption(name, summary, selected = p.id == chosen,
+                onClick = { if (!busy) scope.launch { asked = p.id; try { packs.choose(p) } finally { if (asked == p.id) asked = null } } },
+                // TalkBack reaches Delete from the row too, as VoiceOver's Delete Avatar action on iOS.
+                modifier = if (made) Modifier.semantics { customActions = listOf(CustomAccessibilityAction(deleteLabel) { deleting = p; true }) } else Modifier,
+                trailing = if (made) ({
+                    JIconButton(PhIcons.Trash, deleteLabel, { deleting = p }, Modifier.testTag("avatar-delete-${p.id}"), enabled = p.id != deletingNow)
+                }) else null) {
                 Box(contentAlignment = Alignment.Center) {
                     PackAvatar(packs, p, Tokens.Space.xxxl * 2)
                     if (busy) JSpinner(Modifier.size(Tokens.Space.xxl))
@@ -216,7 +257,38 @@ fun PersonaSettings(demo: Boolean, modifier: Modifier = Modifier) {
             }
             Spacer(Modifier.height(Tokens.Space.m))
         }
+        if (packs != null && canUpload) {
+            NewFromPhotoOption(onClick = {
+                pick.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+            }, enabled = !opening && upload == null)
+            Spacer(Modifier.height(Tokens.Space.s))
+            Text(stringResource(R.string.settings_avatar_upload_footer), style = PersonaTheme.type.caption, color = palette.ink2)
+            Spacer(Modifier.height(Tokens.Space.m))
+        }
         error?.let { JNotice(it, status = Status.NeedsYou); Spacer(Modifier.height(Tokens.Space.m)) }
+        uploadError?.let { JNotice(it.text(), Modifier.testTag("avatar-upload-page-error"), status = Status.NeedsYou); Spacer(Modifier.height(Tokens.Space.m)) }
+        upload?.let { model ->
+            AvatarUploadSheet(model, onSend = { scope.launch { if (packs != null && model.send(packs)) upload = null } },
+                onDismiss = { if (!model.busy) upload = null })
+        }
+        deleting?.let { p ->
+            JDialog(onDismiss = { deleting = null }, title = stringResource(R.string.settings_avatar_delete_title, p.manifest.displayName(language)),
+                text = stringResource(R.string.settings_avatar_delete_text), destructive = true,
+                confirm = stringResource(R.string.settings_avatar_delete) to {
+                    deleting = null
+                    if (packs != null) scope.launch {
+                        deletingNow = p.id
+                        uploadError = null
+                        try {
+                            uploadError = when (val outcome = packs.delete(p.id)) {
+                                is LookUploadOutcome.Refused -> UiText.Plain(outcome.words)
+                                LookUploadOutcome.Unreachable -> UiText.Res(R.string.settings_avatar_upload_unreachable)
+                                else -> null
+                            }
+                        } finally { deletingNow = null }
+                    }
+                })
+        }
         JSectionHeader(stringResource(R.string.settings_avatar_states, pack?.manifest?.displayName(language) ?: design.title))
         Row(
             Modifier.fillMaxWidth().clip(PersonaTheme.shapes.cardShape).background(palette.surface).padding(vertical = Tokens.Space.m)
@@ -246,12 +318,18 @@ private fun PackAvatar(store: PersonaStore, p: PersonaInfo, size: Dp) {
 }
 
 @Composable
-private fun PersonaOption(
-    title: String, summary: String, selected: Boolean, onClick: () -> Unit, tag: String? = null, face: @Composable () -> Unit,
+internal fun PersonaOption(
+    title: String, summary: String, selected: Boolean, onClick: () -> Unit, tag: String? = null,
+    /** False: an action rather than a choice (New from Photo). */
+    radio: Boolean = true,
+    modifier: Modifier = Modifier,
+    /** Drawn before the radio: an uploaded avatar's delete button. */
+    trailing: (@Composable () -> Unit)? = null,
+    face: @Composable () -> Unit,
 ) {
     val palette = PersonaTheme.palette
     Row(
-        Modifier.option(selected, onClick).padding(Tokens.Space.m),
+        modifier.option(selected, onClick, radio).padding(Tokens.Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         face()
@@ -265,7 +343,8 @@ private fun PersonaOption(
             Text(summary, style = PersonaTheme.type.callout, color = palette.ink2)
         }
         Spacer(Modifier.width(Tokens.Space.s))
-        JRadio(selected, null)
+        trailing?.invoke()
+        if (radio) JRadio(selected, null)
     }
 }
 

@@ -1,5 +1,20 @@
 {
   "program_missing": "没有找到 {name} 的程序（{path}）",
   "program_fails": "{name} 的程序运行不了：{err}",
-  "program_version": "{name} 的程序和 hub 不是同一个版本（{got} / {want}）"
+  "program_version": "{name} 的程序和 hub 不是同一个版本（{got} / {want}）",
+  "not_installed": "hub 机器没有安装 lark-cli",
+  "install_guide": "请在 hub 机器安装 lark-cli，或把 lark.cli.bin 设置为它的可执行文件",
+  "old_version": "lark-cli {got} 太旧，Persona 需要 {want} 或更新版本",
+  "not_signed_in": "lark-cli 尚未登录",
+  "expired": "lark-cli 的登录已过期",
+  "login_guide": "请在此页面登录；也可以在 hub 机器运行 {command}",
+  "login_restart": "请从此页面重新开始登录",
+  "login_failed": "lark-cli 登录失败，请从此页面重新开始",
+  "login_timeout": "lark-cli 登录超时，请从此页面重新开始",
+  "login_not_complete": "lark-cli 没有完成登录，请从此页面重新开始",
+  "missing_permission": "lark-cli 缺少权限：{scope}",
+  "rate_limited": "lark-cli 受到频率限制，请稍后再试",
+  "error": "lark-cli 无法读取飞书",
+  "expiry_reminder": "登录还有 {count} 天过期，请在 hub 机器运行 {command}",
+  "larkcli_name": "飞书 · 我的消息"
 }

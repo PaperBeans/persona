@@ -111,13 +111,15 @@ internal object ChannelText {
     fun canBind(c: HubChannel): Boolean = binds(c) && c.enabled && !isBound(c)
 
     /**
-     * The page the hub links to (`settings_url`), where Android has it: an extension's page, "Model configuration". The Feishu bot's own
+     * The page the hub links to (`settings_url`), where Android has it: an extension's page (of [manager]'s), "Model configuration". The Feishu bot's own
      * settings page is iOS's and the web's only; without a page here the row is left out.
      */
-    fun settingsDestination(url: String?): NavKey? {
+    fun settingsDestination(url: String?, manager: String? = null): NavKey? {
         val path = url?.trim()?.trim('/') ?: return null
         return when {
-            path.startsWith("settings/plugins/") -> path.removePrefix("settings/plugins/").takeIf { it.matches(ExtensionId) }?.let(::ExtensionRoute)
+            // The extension of the assistant whose channel it is ([manager]; null: the default's), not the default's copy.
+            path.startsWith("settings/plugins/") -> path.removePrefix("settings/plugins/").takeIf { it.matches(ExtensionId) }
+                ?.let { ExtensionRoute(it, manager = manager?.takeIf(String::isNotBlank)) }
             path == "settings/model-config" -> SettingsPageRoute(SettingsPage.ModelConfig)
             path == "settings/connectors/feishu-bot" -> SettingsPageRoute(SettingsPage.FeishuBot)
             else -> null
@@ -333,18 +335,34 @@ internal class ChannelModel(private val api: ChannelManagement, private val id: 
             wait(bind.pollMillis)
             // Cancelled or replaced while waiting: whatever is on screen now is the one to ask about.
             if (state.value.bind.prompt !== prompt) continue
-            step(prompt.step.orEmpty(), null, quiet = true)
+            step(prompt.step.orEmpty(), null, quiet = true, asked = prompt)
         }
     }
 
-    /** True once a step went (the next one is on screen, or binding is done). */
-    private suspend fun step(step: String?, values: Map<String, String>?, quiet: Boolean = false): Boolean {
+    /**
+     * Back in front after the page was away (the user scanned with another app): asks the code on screen once at once,
+     * so a binding finished meanwhile shows without waiting an interval. Nothing while a step the user sent is on its
+     * way; true once the hub answered.
+     */
+    suspend fun catchUp(): Boolean {
+        val bind = state.value.bind
+        val prompt = bind.prompt?.takeIf { bind.polled && !bind.sending } ?: return false
+        return step(prompt.step.orEmpty(), null, quiet = true, asked = prompt)
+    }
+
+    /**
+     * True once a step went (the next one is on screen, or binding is done). [asked]: the step a quiet ask was about; a
+     * step that is not done any more is dropped when that one has gone meanwhile.
+     */
+    private suspend fun step(step: String?, values: Map<String, String>?, quiet: Boolean = false, asked: BindPrompt? = null): Boolean {
         if (!quiet) {
             if (state.value.bind.sending) return false
             mutable.update { it.copy(bind = it.bind.copy(sending = true, error = null)) }
         }
         return try {
             val prompt = api.bind(id, step, values)
+            // Cancelled or replaced while the ask was on its way: only a finished binding still counts.
+            if (asked != null && !prompt.done && state.value.bind.prompt !== asked) return false
             if (prompt.done) {
                 mutable.update { it.copy(bind = BindState(), boundAs = prompt.account.orEmpty()) }
                 load()

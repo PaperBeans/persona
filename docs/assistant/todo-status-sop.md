@@ -37,6 +37,7 @@ The first rule that holds wins.
 | # | Rule | Condition | Section |
 | :--- | :--- | :--- | :--- |
 | 1 | `failed_start` | The task's agent never started (`start_error`) | Waiting on you; Done once 48 hours passed |
+| 1a | `superseded` | Rule 1, and its row (see "Related to-dos") has a to-do that really finished: closed without a start error (#3713) | Just finished for 24 hours, then Done; behind that to-do in the row, never leading it |
 | 2 | `agent_asks` | An agent waits on the owner (question, approval, plan) or was cut off by a model error | Waiting on you |
 | 3 | `owner_decides` | Open, and the review says `needs_user`, or its ask is a decision or "cannot be done" | Waiting on you |
 | 4 | `agent_running` | An agent is working or starting | Working |
@@ -47,6 +48,14 @@ The first rule that holds wins.
 | 9 | `pr_open` | Its PR is open (rule "PR / delivery" above); a `pr_url` whose stage is Merge or later is a merged PR, never this (#3205) | PR to merge |
 | 10 | `stale` | Shelvable (see "Shelving") and no activity for 48 hours | Shelved |
 | 11 | `rest` | Anything else | Other open |
+
+**A failed start whose work got done another way is not the owner's**: the hub closes a to-do whose agent never started
+(`done_at` with its `start_error`), and rule 1 keeps it in Waiting on you so the owner can retry or remove it. When the
+same piece of work finished in a related to-do (the same plan, PR, issue or title: its row), there is nothing left to
+retry: rule 1a files it with that work and it counts as closed, on the page, the sidebar's badge and the assistant's
+entries alike (`supersededFailedStarts` in each copy). A failed start that still waits on the owner reads as one on every
+client: not ticked or struck through, why it did not start in red, and its checkbox closes it for good (`"done": true`
+on it clears `start_error`: the owner closed it; `docs/assistant/todos.md`, API overview).
 
 **Waiting on you is only for what the owner must do in person**: answer a question, grant a permission, decide on a
 large feature. A deployed to-do's "Please verify" ask and a "done" conclusion are not: the supervising assistant
@@ -112,6 +121,9 @@ The header reads "N open · N shelved · N done". **Open** counts to-dos that ar
 and not shelved: Waiting on you, Working, PR to merge, Other open, and Just finished rows still open (a finished turn
 is not a closed to-do; only a review or the user closes it). **Done** counts closed, accepted and deployed ones. The
 sidebar's To-dos badge shows the same open count without quiet tasks (#1731), as before; the page lists and counts them. A task whose agent never started (rule 1) counts as open while it waits on the owner.
+
+Android's list (#3712) shows no such line: each section's title carries its count, the to-dos listed under it (a merged
+row's related ones included), so the counts follow a search and the list's filter (#3740).
 
 ## Shelving
 

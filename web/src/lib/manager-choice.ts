@@ -174,6 +174,24 @@ export function noteConversation(id: string, manager: string | undefined) {
   if (id) noteItemManager(`/assistant/conversations/${encodeURIComponent(id)}`, manager);
 }
 
+// The manager a conversation's address names (`?manager=`): the last fallback for conversationHeaders, after what a page
+// noted and the store's row, for an address whose row is not found (its computer moved to another assistant, or the
+// address was edited).
+const routedManagers = new Map<string, string>();
+
+/** A page opened conversation id by an address naming manager (none: forget it). */
+export function noteRoutedConversation(id: string, manager: string | undefined) {
+  if (!id) return;
+  if (manager) routedManagers.set(id, manager);
+  else routedManagers.delete(id);
+}
+
+/** The manager the address of conversation id named, undefined when none or the default's. */
+export function routedConversationManager(id: string): string | undefined {
+  const m = routedManagers.get(id);
+  return m && m !== rosterDefault ? m : undefined;
+}
+
 // Pins: while a view about one manager's thing is open (an extension's details or pages), the requests under its
 // prefix name that manager; the latest pin of a prefix wins, and each pin goes with its own view (released by the pin
 // itself, so two views of the same manager don't take each other's). Views about an inbox item don't pin: they name the

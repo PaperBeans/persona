@@ -1,11 +1,15 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"slices"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
@@ -17,9 +21,68 @@ func (s *Service) messageCard(ctx context.Context, itemID string, body MessageCa
 	if err != nil || !ok || t.DoneAt != nil || t.Origin == "" {
 		return
 	}
+	body.ProgressVersion = s.draftProgressVersion(ctx, t)
 	if _, err := s.appendFeed(ctx, t.Origin, feedMessage, itemID, body); err != nil {
 		s.logf("task %s: message card: %v", body.TodoID, err)
 	}
+}
+
+type draftFeedStore interface {
+	AppendDraftFeed(context.Context, db.FeedRow) (bool, error)
+}
+
+// duplicateDismissedDraft is the store-less producer fence. Caller holds tasks.mu.
+func (s *Service) duplicateDismissedDraft(card FeedItem) bool {
+	var next MessageCard
+	_ = json.Unmarshal(card.Body, &next)
+	for _, list := range s.tasks.feed {
+		for _, old := range list {
+			if old.Kind != feedMessage || old.Ref != card.Ref || cardDismissalID(old) == "" {
+				continue
+			}
+			var b MessageCard
+			_ = json.Unmarshal(old.Body, &b)
+			if b.TodoID == next.TodoID && b.MessageVersion == next.MessageVersion && (next.ProgressVersion == "" || b.ProgressVersion == next.ProgressVersion) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// draftProgressVersion changes with Agent output, not polling, read receipts or
+// task-decision timestamps. Missing sessions fail closed: an offline Agent is not
+// evidence of a new progress generation. No transcript text is exposed in the key.
+func (s *Service) draftProgressVersion(ctx context.Context, t Todo) string {
+	type progress struct {
+		Machine, Session, Last, Activity string
+		Rev                              int64
+		ActivityAt                       int64
+	}
+	var rows []progress
+	expected := 0
+	for _, a := range t.Agents {
+		if a.ReleasedAt == nil && a.DismissedAt == nil {
+			expected++
+		}
+	}
+	agents := s.taskAgents(ctx, t)
+	if len(agents) != expected {
+		return ""
+	}
+	for _, a := range agents {
+		r := progress{Machine: a.MachineID, Session: a.SessionID, Last: a.LastText, Activity: a.Activity, Rev: a.Rev}
+		if a.ActivityAt != nil {
+			r.ActivityAt = a.ActivityAt.UnixMicro()
+		}
+		rows = append(rows, r)
+	}
+	slices.SortFunc(rows, func(a, b progress) int {
+		return cmp.Or(cmp.Compare(a.Machine, b.Machine), cmp.Compare(a.Session, b.Session))
+	})
+	raw, _ := json.Marshal(rows)
+	hash := sha256.Sum256(raw)
+	return hex.EncodeToString(hash[:])
 }
 
 // markCardsSent records on the cards about an inbox item put in by at that its reply went out (text: what it said;
@@ -149,6 +212,9 @@ func (s *Service) cardSent(ctx context.Context, cardID, itemID string) (bool, er
 	card, err := s.feedItem(ctx, cardID)
 	if err != nil {
 		return false, err
+	}
+	if card != nil && card.Kind == feedMessage && card.Ref == itemID && cardDismissalID(*card) != "" {
+		return false, errDraftDismissed
 	}
 	return card != nil && card.Kind == feedMessage && card.Ref == itemID && cardSentAt(*card) != nil, nil
 }

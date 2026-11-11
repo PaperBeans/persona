@@ -1,0 +1,11 @@
+{
+  "repo": "example-org/example-repo",
+  "number": 12,
+  "id": "src/example.go",
+  "title": "src/example.go",
+  "path": "src/example.go",
+  "status": "modified",
+  "additions": 8,
+  "deletions": 2,
+  "patch": "@@ -1 +1 @@\n-old\n+new"
+}

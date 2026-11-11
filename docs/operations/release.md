@@ -280,6 +280,12 @@ python3 scripts/release/asc_testflight.py external   # create the group, enable/
   while Mac 110 was in review, 111–127 were all attached to Friends but stuck in `READY_FOR_BETA_SUBMISSION`; external testers never got them (2026-11-03, #792).
   `asc_testflight.py [--platform mac] catch-up`: if the latest VALID build hasn't been submitted, attach it to Friends and submit (without changing its What to Test);
   if another is in review, say to wait for the next run; if already submitted / approved / rejected, write nothing. Each local auto-tf round (every 10 minutes while waiting for a new commit) runs this once for iPhone and once for Mac.
+- **The review submission limit**: when App Store Connect's limit on Beta App Review submissions is used up (422 `SUBMISSION_LIMIT_REACHED`), `wait`, `info`, `external`
+  and `catch-up` print one line saying so, leave the build in Friends unsubmitted and don't invite testers; a later `catch-up` round submits it. It is never retried at once.
+- **Dropped connections**: every App Store Connect call (`scripts/release/asc.py`) tries again with doubling waits (2 s up to 30 s, six tries, about a minute) when the
+  connection fails or breaks, such as a TLS handshake ended early (`[SSL: UNEXPECTED_EOF_WHILE_READING]`), a reset or a timeout, and on HTTP 429 and 5xx. Other 4xx answers fail at
+  once. A `POST` is tried again only when it never got out (urllib's `URLError`), so a repeat can't create a second resource (#945). Two auto-tf rounds lost their Mac step to
+  one such handshake before this (#4034).
 - External builds must pass **Beta App Review** (the first takes about a day; later builds of the same version usually pass automatically). A contact is required before submission:
   `first_name` / `last_name` / `phone` / `email` in `app_store.external.review`. If missing, the script only attaches the build, without submitting or adding testers.
 - The public link opens before any build passes review (the API gives the address directly), but the page says "This beta isn't accepting any new testers right now";

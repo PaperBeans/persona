@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import {
   addBody,
+  addedUnder,
   addErrorText,
   addStage,
   canAddComputer,
@@ -27,12 +28,15 @@ import {
 import { api, ApiError, enc, errorText } from "../../lib/api";
 import { readinessChanged } from "../../lib/readiness";
 import { clock, secondsLeft } from "../../lib/connect-device";
+import { useChosenManager, useKnownDefault, useShownManager } from "../../lib/manager-choice";
+import { useRoster } from "../../lib/managers";
 import { useStore } from "../../lib/store";
 import { documentPage, visiblePoll } from "../../lib/visible-poll";
 import type { Machine } from "../../lib/types";
 import { Button, copyText, Dialog, Spinner } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { Field, inputClass, Segmented } from "../assistant/parts";
+import { useShownOffline } from "../ManagerParts";
 
 const POLL_MS = 3000;
 const NAME_MAX = 40; // the hub's limit (docs/protocol/protocol.md "Computer pairing codes")
@@ -49,6 +53,8 @@ export function AddComputer({ open, onClose, again, confirm }: { open: boolean; 
   const [os, setOS] = useState<ComputerOS>("mac");
   const [name, setName] = useState("");
   const [code, setCode] = useState<ComputerCodeReply | null>(null);
+  // the manager the code was asked for (a new computer's `add.manager`; none for a new code, or a hub without a roster)
+  const [asked, setAsked] = useState<string | undefined>(undefined);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -61,8 +67,21 @@ export function AddComputer({ open, onClose, again, confirm }: { open: boolean; 
   const seen = useRef(false);
   // Only the latest pair-codes request may land: a reply to one made before the dialog closed or switched computers is dropped.
   const seq = useRef(0);
+  // every assistant's computers, as the hub lists them: who waits to be confirmed (the hub's limit counts them all) and
+  // where a reused one is
   const listed = useStore((s) => s.machines);
   const canAdd = useStore((s) => canAddComputer(s.features));
+  // A new computer is the current assistant's (docs/assistant/managers.md "Clients"): its real id, the default's too,
+  // once the roster said which that is; until then (the first moments after a reload) nothing is added, and a hub
+  // without a roster gets the request it always got. A roster that failed to read (not a 404, which clears the pick)
+  // leaves the kept pick, which is the one named. An offline one can't take one now.
+  const roster = useRoster();
+  const shownManager = useShownManager();
+  const picked = useChosenManager();
+  const knownDefault = useKnownDefault();
+  const rosterKnown = Boolean(roster) || Boolean(knownDefault);
+  const target = roster ? shownManager : (picked ?? undefined);
+  const offline = useShownOffline();
 
   const reset = () => {
     setCode(null);
@@ -86,6 +105,9 @@ export function AddComputer({ open, onClose, again, confirm }: { open: boolean; 
       reset();
       setNow(Date.now());
       setCode(reply);
+      // a new code for the same computer (it expired) keeps what its first one asked for
+      const add = (body as { add?: { manager?: string } }).add;
+      if (add) setAsked(add.manager);
     } catch (e) {
       if (mine !== seq.current) return;
       setError(addErrorText(e));
@@ -100,6 +122,7 @@ export function AddComputer({ open, onClose, again, confirm }: { open: boolean; 
     setBusy(false);
     if (!open) return;
     reset();
+    setAsked(undefined);
     setName("");
     if (again) {
       setOS(knownOS(listed.find((m) => m.id === again.id)?.os, again.id) ?? "mac");
@@ -167,6 +190,14 @@ export function AddComputer({ open, onClose, again, confirm }: { open: boolean; 
   const blocking = tooMany ? listed.filter(isPending) : [];
 
   const shown = code?.name || machine?.name || again?.name || confirm?.name || name.trim();
+  // the computer went to another assistant than the one asked for (or the hub didn't say where: one from before
+  // add.manager), said on the screens that wait for it
+  const under = code ? addedUnder(asked, code, listed.find((m) => m.id === code.machine)?.manager) : null;
+  const underNote = under ? (
+    <p role="status" data-added-under={under} className="rounded-[8px] bg-orange-tint px-3 py-2 text-[12.5px] leading-relaxed text-ink">
+      {t("machines-addcomputer.added_under", { name: roster?.managers.find((m) => m.id === under)?.name ?? under })}
+    </p>
+  ) : null;
   // a new link for a computer that never came online (or for the one being confirmed, which is not online)
   const relink = again ?? (confirm && code ? confirm : null);
   let body: React.ReactNode;
@@ -178,9 +209,19 @@ export function AddComputer({ open, onClose, again, confirm }: { open: boolean; 
 
   if (!code && again) {
     body = error ? <Failure text={error} onRetry={() => void make({ machine: again.id })} /> : <Busy />;
+  } else if (!code && !confirm && offline) {
+    // the current assistant is offline: nothing is added to it now
+    body = (
+      <div className="flex flex-col items-center gap-2 py-6 text-center" data-stage="assistant-offline">
+        <span className="mb-1 flex size-11 items-center justify-center rounded-full bg-field text-ink-3">
+          <Icon name="machine" size={19} />
+        </span>
+        <p className="max-w-[340px] text-[13px] leading-relaxed text-ink-2">{t("machines-addcomputer.assistant_offline", { name: offline.manager.name })}</p>
+      </div>
+    );
   } else if (!code && !confirm) {
     const trimmed = name.trim();
-    const submit = () => trimmed && !busy && void make(addBody(trimmed, os), os);
+    const submit = () => trimmed && !busy && rosterKnown && void make(addBody(trimmed, os, target), os);
     body = (
       <form
         className="flex flex-col gap-4"
@@ -219,7 +260,8 @@ export function AddComputer({ open, onClose, again, confirm }: { open: boolean; 
         <Button tone="quiet" onClick={onClose}>
           {t("machines-addcomputer.cancel")}
         </Button>
-        <Button tone="primary" disabled={!trimmed} busy={busy} onClick={submit}>
+        {/* busy until the roster says whose the computer will be (the first moments after a reload) */}
+        <Button tone="primary" disabled={!trimmed} busy={busy || !rosterKnown} onClick={submit}>
           {t("machines-addcomputer.next")}
         </Button>
       </>
@@ -246,6 +288,7 @@ export function AddComputer({ open, onClose, again, confirm }: { open: boolean; 
         </span>
         <p className="text-[14px] font-medium text-ink">{t("machines-addcomputer.joined", { name: shown })}</p>
         {about && <p className="text-[12px] text-ink-3">{about}</p>}
+        {underNote}
         <p className="max-w-[340px] text-[12.5px] leading-relaxed text-ink-2">{t("machines-addcomputer.joined_hint")}</p>
         {error && <p role="alert" className="text-[12.5px] text-red">{error}</p>}
       </div>
@@ -304,6 +347,7 @@ export function AddComputer({ open, onClose, again, confirm }: { open: boolean; 
   } else {
     body = (
       <div className="flex flex-col gap-4" data-stage="waiting">
+        {underNote}
         {relink && (
           // The hub does not know which system a computer that never connected runs: let the user switch.
           <Segmented<ComputerOS> label={t("machines-addcomputer.os")} value={os} onChange={setOS} options={COMPUTER_OSES.map((v) => ({ v, label: t(`machines-addcomputer.os_${v}`) }))} />

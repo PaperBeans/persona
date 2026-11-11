@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "data": {
+    "messages": [
+      {
+        "message_id": "om_example_search",
+        "msg_type": "text",
+        "create_time": "2030-01-02T09:00:00Z",
+        "sender": {"id": "ou_example_peer", "id_type": "open_id", "sender_type": "user", "name": "Example User"},
+        "content": "{\"text\":\"Example search result\"}",
+        "chat_id": "oc_example_group",
+        "chat_name": "Example Group",
+        "chat_type": "group",
+        "thread_id": "omt_example_thread",
+        "deleted": false,
+        "updated": false
+      }
+    ],
+    "total": 1,
+    "has_more": false
+  }
+}

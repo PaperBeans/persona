@@ -160,6 +160,7 @@ func startEdge(t *testing.T, first string, tweak func(*Options)) *testEdge {
 		}
 	})
 	te.waitFor(first)
+	te.waitControl(first)
 	return te
 }
 
@@ -357,6 +358,8 @@ func TestSwitchesUnderLoad(t *testing.T) {
 	var failed, served atomic.Int32
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
+	stopWorkers := sync.OnceFunc(func() { close(stop); wg.Wait() })
+	t.Cleanup(stopWorkers)
 	for i := 0; i < 16; i++ {
 		wg.Add(1)
 		go func() {
@@ -385,8 +388,7 @@ func TestSwitchesUnderLoad(t *testing.T) {
 			t.Fatalf("switch %d: %v", i, err)
 		}
 	}
-	close(stop)
-	wg.Wait()
+	stopWorkers()
 	if failed.Load() != 0 || served.Load() == 0 {
 		t.Fatalf("%d failed, %d served across 6 switches", failed.Load(), served.Load())
 	}

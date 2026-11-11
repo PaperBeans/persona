@@ -92,6 +92,8 @@ type Options struct {
 	AssistantMachine func() string
 	// AssistantTools are the assistant's tools now (a connector's tool may not shadow one).
 	AssistantTools func() []proto.Tool
+	// LauncherReferences are the model providers' keys that hold references, for their providers' details (nil: none).
+	LauncherReferences func(ctx context.Context) []LauncherReference
 	// Lang and Timezone are the user's language and zone ("" when not known).
 	Lang     func() i18n.Lang
 	Timezone func() string

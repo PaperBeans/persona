@@ -344,35 +344,68 @@ func peerSeen(path string, offset int64, needle string) bool {
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return false
 	}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64<<10), 8<<20)
-	for sc.Scan() {
-		l := sc.Bytes()
-		if !bytes.Contains(l, []byte(`"queue-operation"`)) && !bytes.Contains(l, []byte(`"peer"`)) {
-			continue
-		}
-		var e struct {
-			Type    string `json:"type"`
-			Content string `json:"content"`
-			Message struct {
-				Content json.RawMessage `json:"content"`
-			} `json:"message"`
-			Origin *struct {
-				Kind string `json:"kind"`
-				Body string `json:"body"`
-			} `json:"origin"`
-		}
-		if json.Unmarshal(l, &e) != nil {
-			continue
-		}
-		var said string
-		_ = json.Unmarshal(e.Message.Content, &said)
-		switch {
-		case e.Type == "queue-operation" && strings.Contains(e.Content, needle):
-			return true
-		case e.Origin != nil && e.Origin.Kind == "peer" && (strings.Contains(e.Origin.Body, needle) || strings.Contains(said, needle)):
+	br := bufio.NewReaderSize(f, 64<<10)
+	for {
+		l, err := peerLine(br)
+		if peerLineSeen(l, needle) {
 			return true
 		}
+		if err != nil {
+			return false
+		}
+	}
+}
+
+// peerScanMax bounds a transcript line peerSeen decodes: a queue-operation or a peer's line carries one inbox message
+// (peerLineMax, JSON-escaped). A longer line (several pasted images inline, a tool result repeating a large output)
+// cannot be one; it is read past without being kept, and the lines after it are still read.
+const peerScanMax = 8 << 20
+
+// peerLine is br's next line without its newline: nil when it is longer than peerScanMax. err is the last read's;
+// io.EOF with a line is a last line without a newline (possibly still being written).
+func peerLine(br *bufio.Reader) ([]byte, error) {
+	b, err := br.ReadSlice('\n')
+	if !errors.Is(err, bufio.ErrBufferFull) {
+		return bytes.TrimSuffix(b, []byte("\n")), err
+	}
+	l := append([]byte(nil), b...) // copied: the next read reuses b
+	for errors.Is(err, bufio.ErrBufferFull) {
+		b, err = br.ReadSlice('\n')
+		if l != nil && len(l)+len(b) <= peerScanMax {
+			l = append(l, b...)
+		} else {
+			l = nil
+		}
+	}
+	return bytes.TrimSuffix(l, []byte("\n")), err
+}
+
+// peerLineSeen: l is a queue-operation, or a line with a peer origin, whose text has needle in it.
+func peerLineSeen(l []byte, needle string) bool {
+	if !bytes.Contains(l, []byte(`"queue-operation"`)) && !bytes.Contains(l, []byte(`"peer"`)) {
+		return false
+	}
+	var e struct {
+		Type    string `json:"type"`
+		Content string `json:"content"`
+		Message struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+		Origin *struct {
+			Kind string `json:"kind"`
+			Body string `json:"body"`
+		} `json:"origin"`
+	}
+	if json.Unmarshal(l, &e) != nil {
+		return false
+	}
+	var said string
+	_ = json.Unmarshal(e.Message.Content, &said)
+	switch {
+	case e.Type == "queue-operation" && strings.Contains(e.Content, needle):
+		return true
+	case e.Origin != nil && e.Origin.Kind == "peer" && (strings.Contains(e.Origin.Body, needle) || strings.Contains(said, needle)):
+		return true
 	}
 	return false
 }

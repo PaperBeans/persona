@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Item, Subagent } from "../../lib/types";
 import type { Step } from "../../lib/turns";
 import { planProgress, type ToolStep, type WorkGroupNode } from "../../lib/work-groups";
-import { ActionRow, DIFF_FOLD_LINES, diffStats, editDiffs, foldDiffs, lineDiff, presentAction, truncateParam } from "./ActionRow";
+import { ActionRow, argumentLines, DIFF_FOLD_LINES, diffStats, editDiffs, foldDiffs, inlineInput, lineDiff, presentAction, truncateParam } from "./ActionRow";
 import { ChatContext } from "./chat-context";
 import { emptyTaskIndex } from "../../lib/tasks";
 import { latestPlan, PlanCard, PlanList, PlanPill, planSummary } from "./PlanCard";
@@ -89,8 +89,30 @@ describe("ActionRow", () => {
   it("verbs follow cindy's table", () => {
     const verb = (name: string, input: Record<string, unknown> = {}) => presentAction(use("v", name, input)).verb;
     expect([verb("Edit", { file_path: "/a" }), verb("Write", { file_path: "/a" }), verb("Grep", { pattern: "x" }), verb("WebFetch", { url: "u" }), verb("mcp__github__create_issue")]).toEqual(["编辑", "创建", "搜索", "访问", "调用"]);
-    expect(presentAction(use("v", "mcp__github__create_issue", {})).param!.text).toBe("github · create issue");
+    expect(presentAction(use("v", "mcp__github__create_issue", {})).param!.text).toBe("GitHub · Create issue");
+    expect(presentAction(use("v", "mcp__github__create_issue", { title: "Crash" })).param!.text).toBe("GitHub · Create issue · Crash");
     expect(presentAction(use("v", "mcp__persona__unknown_tool", {})).param).toEqual({ text: "Persona · unknown tool", title: "mcp__persona__unknown_tool" });
+  });
+
+  it("Claude Code's newer tools say what they did, then what about (#2986)", () => {
+    expect(presentAction(use("n", "TaskCreate", { subject: "Write tests", description: "…" }))).toEqual({ verb: "加待办", param: { text: "Write tests", title: "Write tests" } });
+    expect(presentAction(use("n", "ListAgents", {}))).toEqual({ verb: "看 Agent 列表" });
+    expect(presentAction(use("n", "Monitor", { command: "tail -f x", description: "errors in x" })).verb).toBe("监视");
+    expect(presentAction(use("n", "PowerShell", { command: "Get-ChildItem" }))).toEqual({ verb: "运行命令", raw: "Get-ChildItem" });
+    expect(inlineInput(use("n", "Monitor", { command: "tail -f x", description: "d" }))).toBe("tail -f x");
+  });
+
+  it("a tool named like one of Object's methods reads as any other unknown tool", () => {
+    expect(presentAction(use("n", "constructor", {}))).toEqual({ verb: "调用", param: { text: "constructor", title: undefined } });
+    expect(presentAction(use("n", "hasOwnProperty", { title: "T" })).param!.text).toBe("hasOwnProperty · T");
+    expect(presentAction(use("n", "mcp__foundry__constructor_args", {})).param!.text).toBe("Foundry · Constructor args");
+  });
+
+  it("any other call opens to its arguments as key: value lines, not JSON", () => {
+    expect(argumentLines({ repo: "persona", title: "Crash", labels: ["bug", "ios"], meta: { a: 1 }, blank: " ", none: [] })).toBe(
+      "title: Crash\nlabels: bug, ios\nmeta: {\"a\":1}\nrepo: persona",
+    );
+    expect(inlineInput(use("n", "mcp__github__create_issue", { title: "Crash", body: "Steps" }))).toBe("title: Crash\nbody: Steps");
   });
 
   it("Persona's own tools read as their verb, then what they were given", () => {

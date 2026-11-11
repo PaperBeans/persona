@@ -65,7 +65,7 @@ it("shows the default role with its footer and saves a change confirmed by the e
   expect(select.value).toBe("off");
   expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([["off", "Off"], ["listener", "Listener"], ["participant", "Participant"]]);
   expect(host.textContent).toContain("Meetings");
-  expect(host.textContent).toContain("Answers use meeting material only");
+  expect(host.textContent).toContain("Answers use only this meeting");
   await choose(select, "participant");
   expect(writes).toEqual([{ manager: "assistant", body: { meeting_attendance_default: "participant" } }]);
   expect(meeting()!.value).toBe("participant");

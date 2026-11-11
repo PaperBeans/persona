@@ -391,6 +391,14 @@ button:disabled { cursor: default; }
 :root { --hue-red: #e3474c; --hue-orange: #e2680a; --hue-amber: #b57a00; --hue-yellow: #9c8500; --hue-green: #189a4d; --hue-teal: #0f8a9c; --hue-blue: #0285ff; --hue-indigo: #5b5bd6; --hue-purple: #9a4fd0; --hue-pink: #d6407f; --hue-gray: #7c8087; }
 .dark { --hue-red: #ee5c61; --hue-orange: #f68f3c; --hue-amber: #f0b429; --hue-yellow: #e8d04a; --hue-green: #3dbb72; --hue-teal: #3fb8c8; --hue-blue: #3d9aff; --hue-indigo: #8b8ef0; --hue-purple: #c08af0; --hue-pink: #ef7aa8; --hue-gray: #9a9ea5; }
 
+/* A permission mode's tone (#3956; iOS Theme.ModeTone, Android ModeTone, docs/design/DESIGN_SYSTEM.md): how much a
+ * mode lets an agent do without asking, on the header's mode button. None is an agent state's color (blue, orange, green).
+ * Ask First (and a mode not reported yet) is the quiet ink on the chip fill; the others wash their capsule at 12%. */
+:root { --mode-plans: #0e7c86; --mode-acts: var(--hue-purple); --mode-allows: var(--red); }
+.dark { --mode-plans: #4fd1c5; }
+:root { --mode-plans-tint: color-mix(in srgb, var(--mode-plans) 12%, transparent); --mode-acts-tint: color-mix(in srgb, var(--mode-acts) 12%, transparent); --mode-allows-tint: color-mix(in srgb, var(--mode-allows) 12%, transparent); }
+@theme inline { --color-mode-plans: var(--mode-plans); --color-mode-acts: var(--mode-acts); --color-mode-allows: var(--mode-allows); --color-mode-plans-tint: var(--mode-plans-tint); --color-mode-acts-tint: var(--mode-acts-tint); --color-mode-allows-tint: var(--mode-allows-tint); }
+
 /* ── Phones (#1996) ─────────────────────────────────────── */
 /* The chat's reading sizes: 15 / 14 on wide screens, 16 / 15 on a phone (the user's call: iOS reads at 17, but tool rows
    and tables would fit too few lines). Views read them as text-[length:var(--chat-body)]. */

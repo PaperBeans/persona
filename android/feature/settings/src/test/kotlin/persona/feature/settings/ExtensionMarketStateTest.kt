@@ -52,7 +52,7 @@ private class FakeMarket : ExtensionApiStub() {
     override suspend fun previewFromMarket(market: String, extension: String): ExtensionPreview { calls += "preview $market/$extension"; check(); return preview }
     override suspend fun install(preview: ExtensionPreview): ExtensionDetail { calls += "install ${preview.previewId} ${preview.permissionsDigest}"; check(); return installed }
     override suspend fun upgrade(id: String, preview: ExtensionPreview): ExtensionDetail { calls += "upgrade $id ${preview.previewId}"; check(); return installed }
-    override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean) { calls += "uninstall $id keep=$keepData"; check() }
+    override suspend fun uninstall(id: String, keepData: Boolean, cascade: Boolean, members: Boolean): ExtensionRemoval { calls += "uninstall $id keep=$keepData"; check(); return ExtensionRemoval() }
     override suspend fun markets(): List<ExtensionMarket> { check(); return markets }
     override suspend fun addMarket(spec: String, token: String?): ExtensionMarket {
         calls += "add $spec token=${token != null}"; check()

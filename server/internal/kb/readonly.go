@@ -79,6 +79,8 @@ func validateArchiveMetadata(dir, path string) error {
 			entity = &Project{}
 		case KindRecording:
 			entity = &Recording{}
+		case KindTopic:
+			entity = &Topic{}
 		}
 	} else if len(parts) == 2 && strings.HasSuffix(parts[1], ".json") && !strings.HasPrefix(parts[1], ".") {
 		switch parts[0] {

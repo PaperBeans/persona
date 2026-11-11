@@ -204,11 +204,15 @@ type TodoEdit struct {
 	RemindAt     *time.Time
 	Priority     *string
 	Project      *string
+	// Origin: the conversation (or agent) the task belongs to now; a task whose supervisor was handed to another
+	// conversation moves with it (assistant/task_leader.go rehome).
+	Origin *string
 }
 
 // Apply makes the edit to cur at the moment at: done stamps done_at (once), not done reopens it (reopened_at, no
-// longer failed); a reminder at another moment is to be pushed again. The store and the store-less memory both
-// change a todo with it.
+// longer failed); done on a failed start, which the hub closed itself and which waits on the owner, is the owner closing
+// it: no longer failed, done now by them (#3713). A reminder at another moment is to be pushed again. The store and the
+// store-less memory both change a todo with it.
 func (e TodoEdit) Apply(cur *TodoRow, at time.Time) {
 	if e.Title != nil {
 		cur.Title = *e.Title
@@ -218,8 +222,9 @@ func (e TodoEdit) Apply(cur *TodoRow, at time.Time) {
 	}
 	if e.Done != nil {
 		if *e.Done {
-			if cur.DoneAt == nil {
+			if cur.DoneAt == nil || cur.StartError != "" {
 				cur.DoneAt = &at
+				cur.StartError = ""
 				cur.DoneBy, cur.DoneReason = "", ""
 			}
 		} else {
@@ -242,6 +247,9 @@ func (e TodoEdit) Apply(cur *TodoRow, at time.Time) {
 	}
 	if e.Project != nil {
 		cur.Project = *e.Project
+	}
+	if e.Origin != nil {
+		cur.Origin = *e.Origin
 	}
 	cur.UpdatedAt = at
 }
@@ -276,9 +284,9 @@ func (d *DB) EditTodo(ctx context.Context, id string, e TodoEdit, updatedAt time
 		e.Apply(&cur, updatedAt)
 		_, err = tx.Exec(ctx, `UPDATE todos SET title = $2, notes = $3, done_at = $4, updated_at = $5, start_error = $6,
 			done_by = $7, done_reason = $8, reopened_at = $9, due_at = $10, due_date = $11, remind_at = $12, reminded_at = $13,
-			priority = $14, project = $15 WHERE id = $1`,
+			priority = $14, project = $15, origin = $16 WHERE id = $1`,
 			cur.ID, cur.Title, cur.Notes, cur.DoneAt, cur.UpdatedAt, cur.StartError, cur.DoneBy, cur.DoneReason, cur.ReopenedAt,
-			cur.DueAt, cur.DueDate, cur.RemindAt, cur.RemindedAt, cur.Priority, cur.Project)
+			cur.DueAt, cur.DueDate, cur.RemindAt, cur.RemindedAt, cur.Priority, cur.Project, cur.Origin)
 		if err != nil {
 			return err
 		}

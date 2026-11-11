@@ -148,7 +148,7 @@ internal class TodoCalendarPrefs(context: Context) {
         set(value) = prefs.edit().putBoolean("show_done", value).apply()
 }
 
-/** The top of the to-dos page: List | Calendar, and in the calendar its options ("Show done"). */
+/** The top of the to-dos page: List | Calendar, then the list's [listControls] (#3740), or in the calendar its options ("Show done"). */
 @Composable
 internal fun TodosViewBar(
     view: TodosView,
@@ -156,6 +156,7 @@ internal fun TodosViewBar(
     showDone: Boolean,
     onShowDone: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    listControls: (@Composable () -> Unit)? = null,
 ) {
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         JSegmented(
@@ -165,6 +166,7 @@ internal fun TodosViewBar(
             modifier = Modifier.testTag("todos-view"),
         )
         Spacer(Modifier.weight(1f))
+        if (view == TodosView.List) listControls?.invoke()
         if (view == TodosView.Calendar) {
             var open by remember { mutableStateOf(false) }
             Box {

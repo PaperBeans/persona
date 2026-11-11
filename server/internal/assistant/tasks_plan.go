@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,28 +26,49 @@ type planTaskIn struct {
 
 // toolTaskPlanFrom is task_plan from the conversation sessionID running on machine (where its attachments are).
 func (s *Service) toolTaskPlanFrom(ctx context.Context, machine, sessionID string, args json.RawMessage) (string, error) {
-	var in struct {
-		Tasks      []planTaskIn `json:"tasks"`
-		Supervisor string       `json:"supervisor"`
-	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return "", fmt.Errorf("tasks: %v", err)
-	}
-	lead, err := s.planSupervisor(ctx, sessionID, in.Supervisor)
-	if err != nil {
-		return "", err
-	}
+	return s.taskPlanFrom(ctx, machine, sessionID, args, nil)
+}
+
+// taskPlanFrom is task_plan from sessionID: a conversation (scope nil), or the agent of the task leader's task in scope,
+// which plans workers beneath that task only and starts them at once (task_leader.go).
+func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, args json.RawMessage, scope *leaderScope) (string, error) {
 	var a struct{ Tasks []PlanTask }
-	for _, t := range in.Tasks {
-		t.PlanTask.ReuseTodo = strings.TrimSpace(t.TodoID)
-		t.PlanTask.Supervisor = lead
-		a.Tasks = append(a.Tasks, t.PlanTask)
+	lead := "" // the leader conversation the main conversation hands the plan to (task_plan's supervisor, #3608)
+	if scope != nil {
+		tasks, err := scope.workerTasks(args)
+		if err != nil {
+			return "", err
+		}
+		a.Tasks = tasks
+	} else {
+		var in struct {
+			Tasks      []planTaskIn `json:"tasks"`
+			Supervisor string       `json:"supervisor"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return "", fmt.Errorf("tasks: %v", err)
+		}
+		var err error
+		if lead, err = s.planSupervisor(ctx, sessionID, in.Supervisor); err != nil {
+			return "", err
+		}
+		for _, t := range in.Tasks {
+			t.PlanTask.ReuseTodo = strings.TrimSpace(t.TodoID)
+			t.PlanTask.Parent = "" // the hub's, set only for a task leader's workers
+			t.PlanTask.Supervisor = lead
+			a.Tasks = append(a.Tasks, t.PlanTask)
+		}
 	}
 	if len(a.Tasks) == 0 {
 		return "", fmt.Errorf("tasks is empty")
 	}
 	if len(a.Tasks) > 8 {
 		return "", fmt.Errorf("at most 8 tasks in one plan")
+	}
+	if scope != nil {
+		if err := s.checkLeaderRoom(ctx, scope, len(a.Tasks)); err != nil {
+			return "", err
+		}
 	}
 	reused := map[string]bool{}
 	modes := map[string]string{} // each computer's Claude Code default mode, read once for this plan
@@ -60,6 +82,16 @@ func (s *Service) toolTaskPlanFrom(ctx context.Context, machine, sessionID strin
 		t.Title, t.Prompt, t.Cwd = strings.TrimSpace(t.Title), strings.TrimSpace(t.Prompt), strings.TrimSpace(t.Cwd)
 		t.Model = strings.TrimSpace(t.Model)
 		t.Permission = strings.TrimSpace(t.Permission)
+		if err := t.checkWritablePermission(); err != nil {
+			return "", fmt.Errorf("task %d: %w. Nothing was planned", i+1, err)
+		}
+		if err := t.checkRole(ctx, s, sessionID, scope != nil); err != nil {
+			return "", fmt.Errorf("task %d: %w", i+1, err)
+		}
+		if m, ok := s.machineByName(ctx, t.Machine); ok && t.Role == roleLeader && s.isWorkMachine(m.ID) {
+			return "", fmt.Errorf("task %d: role \"leader\" cannot run on %s: a work-trust computer gives its agents only the "+
+				"reporting tools, so it could not supervise workers. Put the task leader on a computer you own", i+1, m.Name)
+		}
 		if err := t.normalizeMachinePolicy(); err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
@@ -77,16 +109,18 @@ func (s *Service) toolTaskPlanFrom(ctx context.Context, machine, sessionID strin
 		if t.Model != "" && !proto.ValidModelID(t.Model) { // it goes to the agent as --model (#1644)
 			return "", fmt.Errorf("task %d: model %q is not a model id: %s", i+1, t.Model, proto.ModelIDRule)
 		}
-		atts, err := cleanAttachments(t.Attachments)
-		if err == nil {
-			atts, err = s.checkAttachments(ctx, machine, sessionID, atts)
-		}
-		if err != nil {
-			return "", fmt.Errorf("task %d: %w", i+1, err)
-		}
-		t.Attachments, t.Mentioned, t.AttachFrom = atts, s.mentionedAttachments(ctx, machine, sessionID, t.Prompt, atts), ""
-		if t.Project, err = s.todoProject(ctx, t.Project); err != nil {
-			return "", fmt.Errorf("task %d: %w", i+1, err)
+		if scope == nil { // a task leader has none to give and keeps its task's project
+			atts, err := cleanAttachments(t.Attachments)
+			if err == nil {
+				atts, err = s.checkAttachments(ctx, machine, sessionID, atts)
+			}
+			if err != nil {
+				return "", fmt.Errorf("task %d: %w", i+1, err)
+			}
+			t.Attachments, t.Mentioned, t.AttachFrom = atts, s.mentionedAttachments(ctx, machine, sessionID, t.Prompt, atts), ""
+			if t.Project, err = s.todoProject(ctx, t.Project); err != nil {
+				return "", fmt.Errorf("task %d: %w", i+1, err)
+			}
 		}
 		if len(t.Attachments)+len(t.Mentioned) > 0 {
 			t.AttachFrom = machine
@@ -144,12 +178,33 @@ func (s *Service) toolTaskPlanFrom(ctx context.Context, machine, sessionID strin
 	}
 	// The plan goes in the item's body too: a client that missed the task_plan event (or raced it) still draws the
 	// card from the conversation itself.
-	if _, err := s.appendFeed(ctx, sessionID, feedPlan, p.ID, map[string]any{"plan": p}); err != nil {
-		s.logf("task plan %s: feed: %v", p.ID, err)
+	if scope == nil {
+		if _, err := s.appendFeed(ctx, sessionID, feedPlan, p.ID, map[string]any{"plan": p}); err != nil {
+			s.logf("task plan %s: feed: %v", p.ID, err)
+		}
 	}
 	// A plan from the health space hands its prompts to agents outside it: it waits for the user's "Start" on its card,
 	// whatever would start it at once, and its push names no task (health.go).
 	health := s.inHealth(ctx, sessionID)
+	if scope != nil { // no card: a leader's workers start at once, as part of the task the user let start
+		started, err := s.startPlan(ctx, p.ID, nil, false)
+		if err != nil {
+			return "", err
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "Queued %d worker(s) beneath your task %s for dispatch:\n", len(started.Tasks), scope.task.ID)
+		for _, t := range started.Tasks {
+			if t.Error != "" {
+				fmt.Fprintf(&b, "- %s on %s: dispatch failed: %s\n", t.Title, t.Machine, t.Error)
+			} else {
+				fmt.Fprintf(&b, "- %s → todo %s on %s (dispatching)\n", t.Title, t.TodoID, t.Machine)
+			}
+		}
+		b.WriteString("This is not confirmation that any agent started: you are told when one fails to start. A worker that has " +
+			"report_to_supervisor reports to you in a message, and they cannot hand work on.")
+		b.WriteString(dups)
+		return b.String(), nil
+	}
 	if health || !s.planStartsAtOnce(ctx, p.Tasks) {
 		s.event(ctx, map[string]any{"type": "task_plan", "plan": p})
 		// A card below the answer is easy to miss: push it as well.
@@ -273,4 +328,46 @@ func planErr(w http.ResponseWriter, err error) {
 	default:
 		apierr.Write(w, http.StatusServiceUnavailable, err)
 	}
+}
+
+// checkWritablePermission refuses a task that changes files and does not say bypassPermissions itself: it starts with
+// nobody there to answer a permission prompt, and a plan that left it to a default would stop at a prompt at run time.
+// It runs when a plan is made and again when a saved one is started, so a plan saved earlier, or one a card edit changed,
+// cannot get past it. Called with the permission trimmed.
+func (t *PlanTask) checkWritablePermission() error {
+	if t.Readonly || t.Permission == permBypass {
+		return nil
+	}
+	return t.permissionRuleError()
+}
+
+// errPermissionRule marks the refusal of checkWritablePermission, for a start that must not be tried again.
+var errPermissionRule = errors.New("writable task without bypassPermissions")
+
+type permissionRuleError struct{ error }
+
+func (e permissionRuleError) Is(target error) bool { return target == errPermissionRule }
+
+func (t *PlanTask) permissionRuleError() error {
+	got := "none"
+	if t.Permission != "" {
+		got = strconv.Quote(t.Permission)
+	}
+	return permissionRuleError{fmt.Errorf("%q changes files (readonly false), so permission must be %q, set explicitly (got %s); set it, or set "+
+		"readonly true when the task only reads", t.Title, permBypass, got)}
+}
+
+// checkRole refuses a role a plan task may not have, before anything is planned. Role leader is for a supervising
+// conversation: the leader's own reports need a supervisor to reach; a task leader's workers are never one.
+func (t *PlanTask) checkRole(ctx context.Context, s *Service, sessionID string, byLeader bool) error {
+	switch {
+	case t.Role == "":
+	case byLeader:
+		return errors.New("a task leader plans workers only: role is refused")
+	case t.Role != roleLeader:
+		return fmt.Errorf("role %q is not one: leave it out, or \"leader\"", t.Role)
+	case !s.supervises(ctx, sessionID):
+		return errors.New("role \"leader\" is for the main conversation or a leader conversation: a task leader reports to its supervisor")
+	}
+	return nil
 }

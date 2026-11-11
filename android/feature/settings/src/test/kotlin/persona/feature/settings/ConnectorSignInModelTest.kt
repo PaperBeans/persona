@@ -1,6 +1,9 @@
 package persona.feature.settings
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -88,6 +91,40 @@ class ConnectorSignInModelTest {
         assertEquals("token", bind.prompt?.step)
         model.cancel()
         assertNull(model.state.value.bind.prompt)
+    }
+
+    /** Back in front after the page was away (#4133): the code on screen is asked once at once. */
+    @Test fun backInFrontTheCodeIsAskedOnceAtOnce() = runBlocking {
+        val hub = Hub(BindPrompt(step = "scan", kind = "qr", interval = 2, qr = BindQrCode(1, listOf("1"))),
+                      BindPrompt(done = true, account = "wxid_example_a"))
+        val model = ConnectorSignInModel(hub, "example")
+        assertFalse(model.catchUp()) // nothing on screen: nothing asked
+        assertTrue(hub.steps.isEmpty())
+        assertTrue(model.start())
+
+        // Signed in in another app while the page was away: one ask, no values, and the sign-in shows as done.
+        assertTrue(model.catchUp())
+        assertEquals(listOf("" to emptyMap<String, String>(), "scan" to emptyMap<String, String>()), hub.steps)
+        assertNull(model.state.value.bind.prompt)
+        assertEquals("wxid_example_a", model.state.value.signedInAs)
+        assertFalse(model.catchUp()) // done: nothing more to ask
+        assertEquals(2, hub.steps.size)
+    }
+
+    /** An ask about a code the user cancelled while it was on its way does not bring the code back. */
+    @Test fun anAnswerAfterCancelIsDropped() = runBlocking {
+        val qr = BindPrompt(step = "scan", kind = "qr", interval = 2, qr = BindQrCode(1, listOf("1")))
+        val answer = CompletableDeferred<BindPrompt>()
+        var calls = 0
+        val model = ConnectorSignInModel({ _, _ -> if (calls++ == 0) qr else answer.await() }, {})
+        assertTrue(model.start())
+        val ask = async { model.catchUp() }
+        yield() // the ask is on its way
+        model.cancel()
+        answer.complete(qr.copy(hint = "Scanned"))
+        assertFalse(ask.await())
+        assertNull(model.state.value.bind.prompt)
+        assertEquals(2, calls)
     }
 
     @Test fun logoutAndCapabilities() = runBlocking {

@@ -297,8 +297,56 @@ func (c *Remote) Tools() []proto.Tool {
 
 // Call runs one of the read tools on the Mac's messages (the conversations that go to Persona, codes masked).
 func (c *Remote) Call(ctx context.Context, name string, args json.RawMessage) (string, error) {
+	v, err := c.answer(ctx, name, args)
+	if err != nil {
+		return "", err
+	}
+	switch v := v.(type) {
+	case ChatsPage:
+		return c.chatsText(v), nil
+	case MessagesPage:
+		return c.messagesText(v), nil
+	case hits:
+		return c.hitsText(v.query, v.list), nil
+	}
+	return "", fmt.Errorf("unknown tool %s", name)
+}
+
+var _ connector.ReadJSON = (*Remote)(nil)
+
+// CallJSON is connector.ReadJSON: the same answers for subscriptions, as JSON with an id on each item
+// (persona_json.go).
+func (c *Remote) CallJSON(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, bool, error) {
+	if !slices.Contains(readTools, name) {
+		return nil, false, nil
+	}
+	v, err := c.answer(ctx, name, args)
+	if err != nil {
+		return nil, true, err
+	}
+	var data any
+	switch v := v.(type) {
+	case ChatsPage:
+		data = chatsData(v)
+	case MessagesPage:
+		data = messagesData(v)
+	case hits:
+		data = hitsData(v.list)
+	}
+	out, err := json.Marshal(data)
+	return out, true, err
+}
+
+// hits is what imessage_search found.
+type hits struct {
+	query string
+	list  []Hit
+}
+
+// answer is what a read tool found: a ChatsPage, a MessagesPage or hits.
+func (c *Remote) answer(ctx context.Context, name string, args json.RawMessage) (any, error) {
 	if !c.AI() {
-		return "", errors.New("「信息」没有交给 Persona（设置 › 连接器 › 信息）")
+		return nil, errors.New("「信息」没有交给 Persona（设置 › 连接器 › 信息）")
 	}
 	var a struct {
 		Chat   string `json:"chat"`
@@ -309,7 +357,7 @@ func (c *Remote) Call(ctx context.Context, name string, args json.RawMessage) (s
 	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &a); err != nil {
-			return "", fmt.Errorf("arguments: %w", err)
+			return nil, fmt.Errorf("arguments: %w", err)
 		}
 	}
 	switch name {
@@ -317,34 +365,34 @@ func (c *Remote) Call(ctx context.Context, name string, args json.RawMessage) (s
 		var page ChatsPage
 		if err := c.read(ctx, "connector.chats", map[string]any{"id": ID, "limit": clamp(a.Limit, 30, 100), "before": a.Before,
 			"keep": KeepContacts}, &page); err != nil {
-			return "", errors.New(c.explain(err))
+			return nil, errors.New(c.explain(err))
 		}
-		return c.chatsText(page), nil
+		return page, nil
 	case "imessage_read":
 		chat := strings.TrimSpace(a.Chat)
 		if !ValidChat(chat) {
-			return "", errors.New("chat must be a conversation id from imessage_chats or imessage_search (imessage-<12 hex>)")
+			return nil, errors.New("chat must be a conversation id from imessage_chats or imessage_search (imessage-<12 hex>)")
 		}
 		var page MessagesPage
 		if err := c.read(ctx, "connector.older", map[string]any{"id": ID, "chat": chat, "limit": clamp(a.Limit, 40, 200),
 			"before": a.Before, "keep": KeepContacts}, &page); err != nil {
-			return "", errors.New(c.explain(err))
+			return nil, errors.New(c.explain(err))
 		}
-		return c.messagesText(page), nil
+		return page, nil
 	case "imessage_search":
 		if strings.TrimSpace(a.Query) == "" {
-			return "", errors.New("query is empty")
+			return nil, errors.New("query is empty")
 		}
 		var res struct {
 			Hits []Hit `json:"hits"`
 		}
 		if err := c.read(ctx, "connector.search", map[string]any{"id": ID, "query": a.Query, "limit": clamp(a.Limit, 20, 50),
 			"days": clamp(a.Days, 365, 3650), "keep": KeepContacts}, &res); err != nil {
-			return "", errors.New(c.explain(err))
+			return nil, errors.New(c.explain(err))
 		}
-		return c.hitsText(a.Query, res.Hits), nil
+		return hits{query: a.Query, list: res.Hits}, nil
 	}
-	return "", fmt.Errorf("unknown tool %s", name)
+	return nil, fmt.Errorf("unknown tool %s", name)
 }
 
 func clamp(n, def, most int) int {

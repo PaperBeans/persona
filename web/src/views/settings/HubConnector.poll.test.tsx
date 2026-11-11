@@ -12,7 +12,7 @@ vi.mock("../../lib/connectors", async (original) => ({
   ...(await original<typeof import("../../lib/connectors")>()),
   listConnectors: () => new Promise<HubConnector[]>((resolve) => reads.push({ resolve })),
 }));
-import { ConnectorDetail } from "./HubConnector";
+import { ConnectorDetail, ConnectorList } from "./HubConnector";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -42,6 +42,18 @@ afterEach(() => {
 });
 
 describe("a connector's page while it starts", () => {
+  it("keeps lark-cli out of More connectors while reporting it to the Lark group", async () => {
+    const onLarkCli = vi.fn();
+    act(() => root.render(<ConnectorList onOpen={() => {}} onLarkCli={onLarkCli} />));
+    await answer(0, [
+      { id: "larkcli", name: "Lark via lark-cli", status: "ok", account: "me" },
+      running("github"),
+    ]);
+    expect(text()).toContain("示例 github");
+    expect(text()).not.toContain("Lark via lark-cli");
+    expect(onLarkCli).toHaveBeenCalledWith(expect.objectContaining({ id: "larkcli" }));
+  });
+
   it("keeps the newest status when an older read answers last, and stops polling", async () => {
     draw("x");
     await answer(0, [starting("x")]);

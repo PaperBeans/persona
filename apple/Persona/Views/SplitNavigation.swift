@@ -76,6 +76,7 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
                     empty.modifier(destinations)
                 }
                 #if os(iOS)
+                // The stack's root page only: the pages opened on it carry their own (`SplitDetailPage`, #3680).
                 .safeAreaInset(edge: .top, spacing: 0) { if pageSwitch { PageTabSwitchRow() } }
                 #endif
             }
@@ -84,7 +85,7 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
             .modifier(SplitDividerHandle(columns: $columns, key: listKey))
             // On the whole split, not the detail stack: its pages are built from the destinations the sidebar
             // registered, in the sidebar's environment.
-            .environment(\.splitDetail, SplitDetail(isFirstPage: path.count <= 1, listHidden: columns == .detailOnly))
+            .environment(\.splitDetail, SplitDetail(isFirstPage: path.count <= 1, listHidden: columns == .detailOnly, pageSwitch: pageSwitch))
             .environment(\.splitShowList, SplitShowList { [columns = $columns] in
                 withAnimation(Theme.Motion.layout) { columns.wrappedValue = SplitColumns.shown }
             })
@@ -179,6 +180,8 @@ struct SplitDetail: Equatable {
     /// The page is a window of its own (the Mac's chat window), not a split's detail column: the window's title bar has
     /// its title.
     var ownWindow = false
+    /// The Assistant | Agents switch rides over each page of the column (a phone's tabs, `pageTabSwitch`, #3680).
+    var pageSwitch = false
 }
 
 extension EnvironmentValues {
@@ -203,8 +206,9 @@ struct SplitPush {
 }
 
 extension View {
-    /// A page the list opens: in the split's detail column its first page has no back button. `ownsBack`: the page
-    /// shows or hides the system's back itself (an Agents chat); on iOS this leaves it alone, as an outer
+    /// A page the list opens: in the split's detail column its first page has no back button, and on a phone's tabs each
+    /// page there carries the Assistant | Agents switch (`SplitDetail.pageSwitch`, #3680). `ownsBack`: the page shows or
+    /// hides the system's back itself (an Agents chat); on iOS this leaves it alone, as an outer
     /// `navigationBarBackButtonHidden(false)` wins over the page's own `true` (iPhone Duo's side bars, 2026-11-04: the
     /// system's back beside the chat's own, two backs). On the Mac the title row draws no ‹ for it: the chat's header
     /// has its own, shown only with a page under the chat (#1337).
@@ -220,7 +224,12 @@ private struct SplitDetailPage: ViewModifier {
         content.modifier(MacDetailBack(shown: !ownsBack && split?.isFirstPage == false))
         #else
         // `ownsBack` is fixed for a page (no identity change as the path grows).
-        if ownsBack { content } else { content.navigationBarBackButtonHidden(split?.isFirstPage == true) }
+        Group {
+            if ownsBack { content } else { content.navigationBarBackButtonHidden(split?.isFirstPage == true) }
+        }
+        #if os(iOS)
+        .modifier(PageTabSwitchInset(shown: split?.pageSwitch == true))
+        #endif
         #endif
     }
 }

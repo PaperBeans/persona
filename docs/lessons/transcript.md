@@ -221,3 +221,12 @@ A view that fetches once per id cannot recover when the store puts the same id b
   A Write that creates a file records no hunks; its lines are the content's.
 - One machine's transcripts (2026-11-10): 76k records, 4.4k of them strings and 554 arrays, none with a field of an
   unexpected type; parsing them before and after the change gave the same items in all 2,023 files.
+
+## A rollout line is told by its own top-level type (#3159)
+
+- `ParseLine` switches a file to the Codex parser for good on the first rollout line. A substring test for
+  `"type":"event_msg"` and `"payload"` also matched a Claude line whose tool input had that shape (an MCP call is
+  enough), and every later line of the session then parsed to nothing. `isCodexLine` keeps the substring test as a cheap
+  filter and then reads only the line's top-level keys (`rolloutHead`), without decoding the line.
+- Checked on one machine's transcripts (2026-11-10): 10,597 files and 1.9M lines gave the same answer before and after
+  for every line, rollout lines included.

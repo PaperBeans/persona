@@ -100,5 +100,7 @@
   "discard": "Remove local copy",
   "check_found": "Sent",
   "check_missing": "Not found in the latest messages; it may not have been sent",
-  "thread_placeholder": "Reply in thread…"
+  "thread_placeholder": "Reply in thread…",
+  "unavailable_title": "This conversation is unavailable",
+  "unavailable_detail": "The group may have been disbanded, or the Lark app no longer has access to it."
 }

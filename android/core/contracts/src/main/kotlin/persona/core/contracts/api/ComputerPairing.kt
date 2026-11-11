@@ -43,6 +43,11 @@ data class ComputerCode(
     val added: Boolean = false,
     val command: String? = null,
     val linuxInstall: String? = null,
+    /**
+     * The manager the computer belongs to now (docs/protocol/protocol.md "Computer pairing codes"); null from a hub before
+     * `add.manager`, which puts a new computer under its own assistant (`assistant`).
+     */
+    val manager: String? = null,
 )
 
 /**
@@ -55,6 +60,12 @@ interface ComputerPairing {
 
     /** A new computer named [name] (up to 40 characters, any language), with its code. */
     suspend fun add(name: String, os: ComputerOs): ComputerCode
+
+    /**
+     * The same, the computer [manager]'s from the start (`add.manager`, a manager's id from the roster; null: none named,
+     * the hub's own assistant's as before).
+     */
+    suspend fun add(name: String, os: ComputerOs, manager: String?): ComputerCode = add(name, os)
 
     /** A new code for a computer that waits to be confirmed (the old one's Persona Link is revoked). */
     suspend fun again(machineId: String): ComputerCode
