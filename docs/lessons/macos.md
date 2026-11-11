@@ -316,6 +316,18 @@ Each page has its own `NSHostingView`, with `isHidden` set while inactive. Pitfa
   Real-window screenshots in the default glass style show a color band too, but offscreen screenshots may render both colors alike and cannot establish that no issue exists. Clay reproduces reliably in light and dark mode. Mac `AssistantSidebar` now fills its whole column with the same token,
   without changing row selection/hover or iOS. Check title, group headers, unselected rows, and bottom empty space together, and also inspect a style with a colored page background.
 
+## Markdown table anchors in a flipped chat scroll view (#4235)
+
+MarkdownUI's table-cell bounds preferences can feed a layout loop in the Mac's flipped chat scroll view. Keep
+the Mac table's widths independent of viewport geometry: measure the current content once, cap long columns
+with `TablePlan.scrollCap`, and let the table scroll horizontally. Draw cell backgrounds and borders with ordinary
+overlays rather than MarkdownUI's anchor-based table decorations. Preserve the delimiter row's alignment,
+tabular digits and inline attributes; only the second row is a delimiter, since headers and data may themselves
+contain only dashes or colons. Cache inline parsing alongside measurement and invalidate both when content changes.
+
+This removes the table-specific preference path; it does not establish that every long-chat scrolling hang has
+the same cause. Recheck scrolling, folding and layout separately with synthetic long conversations.
+
 ## Native extension showcase capture (2026-11-08, #1149)
 
 - A native page's inline search row must not duplicate the Mac toolbar's search field. The real shared-list screenshots exposed both after native confirmation/search hosting was introduced. Preserve the inline control on iOS and the existing Mac toolbar control; do not redesign either platform.

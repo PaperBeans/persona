@@ -124,10 +124,12 @@ func (ps *extensions) secretProvider(reference string) (extension.SecretProvider
 func (ps *extensions) resolveSecret(ctx context.Context, reference string, purpose wire.SecretPurpose, approvedBy string) (string, error) {
 	prov, hp, err := ps.secretProvider(reference)
 	if prov.Extension == "" {
+		ps.kept.forgetReference(reference)
 		return "", err // no provider to record it on
 	}
 	detail := map[string]any{"reference": reference, "purpose": purpose}
 	fail := func(e *SecretError) (string, error) {
+		ps.kept.forgetReference(reference) // a kept launcher key of it is not trusted any more (secret_kept.go)
 		detail["code"] = e.Code
 		ps.h.audit(ctx, prov.Extension, "secret_resolve_failed", approvedBy, detail)
 		ps.logf("plugin %s: secrets.resolve for %s %s: %s", prov.Extension, purpose.Kind, purpose.ID, e.Code)

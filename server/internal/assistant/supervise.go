@@ -20,7 +20,8 @@ import (
 // the main conversation as one supervision message (the quiet tasks' notices are among them), at most every few minutes, and
 // the turn it starts is not pushed unless the assistant pushes (notify_user). The assistant answers with task_review:
 // accepted closes the todo (its agents are closed later, tasks_close.go), rework sends the gaps back to the agent (at
-// most maxReworkRounds times), needs_user waits for the user, cancelled ends it.
+// most maxReworkRounds times), needs_user waits for the user, parked waits for something else until a time
+// (parked.go), cancelled ends it.
 //
 // A supervised todo is never closed by the hub's judge (done.go): a finished stretch of work waits for review instead.
 
@@ -37,12 +38,15 @@ const maxReworkRounds = 2
 
 // Supervision is a supervised task's ledger, as the apps get it on the todo (supervision).
 type Supervision struct {
-	Supervisor    string       `json:"supervisor"` // the conversation that handed it out
-	DoneWhen      []string     `json:"done_when"`
-	ExpectMinutes int          `json:"expect_minutes,omitempty"`
-	State         string       `json:"state"` // "" going on, or one of review*
-	Round         int          `json:"round"` // reworks so far
-	Reviews       []TaskReview `json:"reviews"`
+	Supervisor    string   `json:"supervisor"` // the conversation that handed it out
+	DoneWhen      []string `json:"done_when"`
+	ExpectMinutes int      `json:"expect_minutes,omitempty"`
+	State         string   `json:"state"` // "" going on, or one of review*
+	// Parked: what a parked task waits for (parked.go); nil unless State is parked. Read off its latest review each time
+	// the ledger is copied, not kept on its own.
+	Parked  *Parked      `json:"parked,omitempty"`
+	Round   int          `json:"round"` // reworks so far
+	Reviews []TaskReview `json:"reviews"`
 	// AutoReview is the latest independent review of its change (supervise_autoreview.go, #2173); nil when none ran.
 	AutoReview *AutoReview `json:"auto_review,omitempty"`
 	// Waits: the done judge found the latest stretch of work stopped on a decision only the owner can make (verdict
@@ -91,6 +95,12 @@ type TaskReview struct {
 	Recommend     string           `json:"recommend,omitempty"`
 	Options       []DecisionOption `json:"options,omitempty"`
 	CostOfWaiting string           `json:"cost_of_waiting,omitempty"`
+	// A parked review's (parked.go): until when it waits, what kind of thing it waits on (Reason says what), how many
+	// parks in a row this one is with no agent turn in between, and when a supervision message carried its parked_due.
+	Until     time.Time `json:"until,omitzero"`
+	WaitingOn string    `json:"waiting_on,omitempty"`
+	Parks     int       `json:"parks,omitempty"`
+	DueAt     time.Time `json:"due_at,omitzero"`
 	// RestateAt: when the hub handed this needs_user back to its supervisor because the owner could not answer it
 	// (undecidable, or owner_cannot_answer): told once.
 	RestateAt time.Time `json:"restate_at,omitzero"`
@@ -142,12 +152,17 @@ func (v *Supervision) clone() *Supervision {
 		w := *v.Waits
 		out.Waits = &w
 	}
+	out.Parked = out.parked()
 	return &out
 }
 
-// state is the review state that holds now: an accepted or cancelled task the user reopened goes on again.
+// state is the review state that holds now: an accepted or cancelled task the user reopened goes on again, and a
+// parked one that was closed is no longer parked.
 func (v *Supervision) state(t Todo) string {
 	if v == nil {
+		return ""
+	}
+	if v.State == reviewParked && (t.DoneAt != nil || v.parking() == nil) {
 		return ""
 	}
 	if t.DoneAt == nil && (v.State == reviewAccepted || v.State == reviewCancelled) {
@@ -298,6 +313,8 @@ func taskHealth(t Todo, agents []proto.Session, now time.Time) (string, int) {
 		return "已验收", 8
 	case reviewCancelled:
 		return "已取消", 8
+	case reviewParked: // waits on purpose (parked.go): below everything that needs the assistant
+		return parkedHealth(v.parked(), now.Location()), 6
 	}
 	if t.DoneAt != nil {
 		return "", 8

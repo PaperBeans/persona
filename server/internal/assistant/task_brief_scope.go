@@ -237,13 +237,14 @@ func (s *Service) clearOverdue(todoID string) {
 
 // briefClock raises supervised open task t's overdue signal when its brief's clock ran out with no end: once per
 // clock (the mark is on the brief, so a restart does not raise it again), and only for the to-do that carries the
-// work now. A task waiting for the owner's decision or for review has reached its end for now.
+// work now. A task waiting for the owner's decision or for review has reached its end for now, and a parked one waits
+// on purpose (its own time brings it back, parked.go).
 func (s *Service) briefClock(ctx context.Context, t Todo, now time.Time) {
 	v := t.Supervision
 	if v == nil || t.DoneAt != nil {
 		return
 	}
-	if st := v.state(t); st == reviewNeedsUser || st == reviewPending {
+	if st := v.state(t); st == reviewNeedsUser || st == reviewPending || st == reviewParked {
 		return
 	}
 	brief, ok := s.briefOfTodo(t.ID)

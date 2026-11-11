@@ -778,3 +778,10 @@ node RPC so an older node cannot silently ignore a billable setting in `session.
 
 Persona-owned Codex conversations use a separate stdio connection. Share catalog parsing across both transports and
 include the owned connection in session projection, setting routing and native notifications.
+
+## Runtime assistant identity comes from persisted state (#4202)
+
+A runtime can rediscover an assistant conversation with its current project directory. Apply the node's trusted
+session-state projection before publishing runtime rows so the original assistant or health directory and launcher
+survive snapshots and reconnects. The hub uses that directory to classify assistant history. Preserve the runtime's
+status, model, permission choices and capabilities while restoring owned metadata.

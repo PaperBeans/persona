@@ -172,8 +172,9 @@ type extensions struct {
 	// (secret_providers.go).
 	resolves checkLimiter
 	words    secretWords
-	dir      string // the hub's data directory
-	root     string // where the extensions are kept: <dir>/extensions (extensionsRoot)
+	kept     keptSecrets // resolved launcher keys (secret_kept.go)
+	dir      string      // the hub's data directory
+	root     string      // where the extensions are kept: <dir>/extensions (extensionsRoot)
 	reg      *extension.Registry
 	// logf is the hub's log, each line about an extension kept with its log too; journal only the hub's (the host's
 	// lines reach the extension's log through its Observe).
@@ -549,8 +550,9 @@ func (ps *extensions) changed(c extension.Change) {
 			}
 		}
 	}
-	ps.forgetAuth(c.ID)        // another version, removed, switched, set up again: ask again
-	ps.forgetSecretWords(c.ID) // a provider's references may name other things now
+	ps.forgetAuth(c.ID)          // another version, removed, switched, set up again: ask again
+	ps.forgetSecretWords(c.ID)   // a provider's references may name other things now
+	ps.kept.forgetProvider(c.ID) // and give other values, or none
 	switch c.Kind {
 	case "removed", "upgraded", "rolled_back": // only the version installed now keeps its packages for computers
 		keep := ""

@@ -231,7 +231,12 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
   card — but a held run gave its card back with its message, so the owner was told "N background tasks are still running"
   and then heard nothing when they finished. The sink now builds the ending line for every quiet end and, with no card,
   posts it as a card of its own (the same rule #3930's timeout relies on). The result stays quiet: the line is
-  "Done · took X", not an empty answer.
+  "Done · took X", not an empty answer. With no card left it is posted for every ending except a message the owner
+  recalled, which gets no card of its own (that one only gets the card the run still has rewritten), and the line says
+  how the wait ended (#4228); and the quiet branch must not swallow errors the way it first did (#4229): a card update
+  refused for anything but a rate limit falls back to that card of its own, and an unreachable failure is returned so
+  `finishChannelRun` keeps the run and tries again — posting under an idempotency key made from the run id (`endKey`),
+  because the first attempt may have landed before its answer was lost.
 
 - **A card nests a list by four spaces per level, not by the Markdown rule** (#4180). Lark's Markdown component documents
   one nesting level as four leading spaces (a list's sub-items are indented four spaces per level), while CommonMark — and
@@ -252,3 +257,18 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
   source, read as what the field means. A test that binds three cards of one Agent along with two other Agents, and
   loads the view ten times, shows it. The settings pages are the only readers — web and iOS key the rows by session id,
   Android draws them in order — so none of them changes.
+
+- A read-only worker must be able to report while staying in plan mode (#4201). Denying `ExitPlanMode` does not remove
+  the provider's separate permission request for `mcp__persona__report_to_supervisor`. Allow that exact call once only
+  for a supervised task with a current read-only plan binding. Return `Allow` without `Always`, `Approve`, or `Mode`;
+  the terminal hook and Paseo then send no permission or mode update. Reuse `PlanTask.TodoID`, whose old bindings are
+  retired on takeover, rather than treating a historical read-only plan as authority for a new writable worker.
+
+- **A quiet ending is still an ending: it has to say how the run ended** (#4228). `channel.Run.Decide` returned a held
+  run's quiet result (`&Result{Quiet: true}`) from an early branch, before the `End` below it was computed — and it left
+  `Stopped` empty too — so `End` stayed `EndDone` whatever had happened, and once #4101 posted that line as a card of its
+  own the owner was told "Done" about a turn that was interrupted, hit a model API error, or lost its computer. Both
+  endings now come from one `endOf(rd, l)` (the turn's last notice, the failed turn, an offline machine), and the sink
+  posts the card of a quiet end unless it was recalled (`end != channel.EndRecalled`), not only when it ended as done:
+  gating the post on `EndDone` would have made every bad quiet ending silent instead. A branch that answers a run owes
+  it the same ending fields as the normal path.

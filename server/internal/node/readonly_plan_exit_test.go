@@ -41,3 +41,36 @@ func TestReadonlyPlanExitDenialKeepsClaudeReadOnly(t *testing.T) {
 		t.Fatalf("read-only plan exit changed permissions or lost denial guidance: %s", raw)
 	}
 }
+
+func TestReadonlyReportAllowKeepsClaudeReadOnly(t *testing.T) {
+	n := codexTestNode(t)
+	fh := withFakeHub(t, n)
+	fh.answer = func(ix proto.Interaction) proto.Resolution {
+		if ix.Kind != proto.IxPermission || ix.ToolName != "mcp__persona__report_to_supervisor" {
+			t.Errorf("report interaction = %+v", ix)
+		}
+		allow := true
+		return proto.Resolution{Allow: &allow}
+	}
+	args := json.RawMessage(`{"kind":"done","text":"Inspection complete."}`)
+	out, _ := runPermissionHook(t, n, hookInput{HookEventName: "PermissionRequest", SessionID: decidedSession,
+		PermissionMode: "plan", ToolName: "mcp__persona__report_to_supervisor", ToolInput: args})
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Output struct {
+			Event    string                     `json:"hookEventName"`
+			Decision map[string]json.RawMessage `json:"decision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatal(err)
+	}
+	d := response.Output.Decision
+	if response.Output.Event != "PermissionRequest" || string(d["behavior"]) != `"allow"` || len(d) != 2 ||
+		string(d["updatedInput"]) != string(args) {
+		t.Fatalf("report allow must preserve input without a permission or mode update: %s", raw)
+	}
+}

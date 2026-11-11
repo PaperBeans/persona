@@ -20895,6 +20895,29 @@
         }
       }
     },
+    "Auto-upgrade is paused because its market was removed. Your setting is kept and applies again once the market is added back with the same address.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto-upgrade is paused because its market was removed. Your setting is kept and applies again once the market is added back with the same address."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "它的扩展市场已删除，自动升级暂停。你的设置会保留，用同样的地址把市场加回来后恢复。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マーケットが削除されたため、自動アップグレードは一時停止しています。設定は保持され、同じアドレスでマーケットを追加し直すと再び適用されます。"
+          }
+        }
+      }
+    },
     "Auto-upgrade is paused while this extension is off.": {
       "extractionState": "manual",
       "localizations": {
@@ -62024,6 +62047,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "マネージャー「%@」がオフラインです。マネージャーが戻ると、このコンピューターもオンラインに戻ります。"
+          }
+        }
+      }
+    },
+    "Its market was removed. Add the market again with the same address to check for new versions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Its market was removed. Add the market again with the same address to check for new versions."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マーケットが削除されています。同じアドレスでマーケットを追加し直すと、新しいバージョンを確認できます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "它的扩展市场已删除。用同样的地址把市场加回来，才能检查新版本。"
           }
         }
       }
@@ -126173,6 +126219,87 @@
           "stringUnit": {
             "state": "translated",
             "value": "这是 hub 自己运行的管理者，不能删除或换地方装"
+          }
+        }
+      }
+    },
+    "The hub stops reading this market. %lld extensions installed from it stay, but stop upgrading until the market is added again with the same address.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "The hub stops reading this market. %1$lld extension installed from it stays, but stops upgrading until the market is added again with the same address."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "The hub stops reading this market. %1$lld extensions installed from it stay, but stop upgrading until the market is added again with the same address."
+                }
+              }
+            }
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブはこのマーケットを読まなくなります。そこからインストールした%1$lld件の拡張機能は残りますが、同じアドレスでマーケットを追加し直すまでアップグレードされません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 不再读这个市场。从它装的 %1$lld 个扩展留着，但不再升级，直到用同样的地址把市场加回来。"
+          }
+        }
+      }
+    },
+    "The hub stops reading this market. Extensions installed from it stay, but stop upgrading until the market is added again with the same address.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The hub stops reading this market. Extensions installed from it stay, but stop upgrading until the market is added again with the same address."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブはこのマーケットを読まなくなります。そこからインストールした拡張機能は残りますが、同じアドレスでマーケットを追加し直すまでアップグレードされません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 不再读这个市场。从它装的扩展留着，但不再升级，直到用同样的地址把市场加回来。"
+          }
+        }
+      }
+    },
+    "The hub stops reading this market. No installed extension came from it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The hub stops reading this market. No installed extension came from it."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブはこのマーケットを読まなくなります。このマーケットからインストールした拡張機能はありません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 不再读这个市场。没有扩展是从它装的。"
           }
         }
       }

@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"slices"
 	"strconv"
@@ -173,8 +174,9 @@ func (f feishuSink) recalled(ctx context.Context, m channel.Folded) {
 // answer writes the answer into the progress card (more cards when long), and marks the messages DONE. When nothing
 // of it got out because the hub could not be reached it says so (tried again later); once a piece is out, the rest
 // is best effort (a card sent twice would show twice). The card's last line says how the run ended; a quiet end
-// still turns the progress card into that line — and, when the run gave its card back on a held wait, posts it as a
-// card of its own — so the chat never stays on "Working" and is never left silent.
+// still turns the progress card into that line — or, when that card was refused or the run gave it back on a held
+// wait, posts it as a card of its own under a key (so a retry lands once) — so the chat never stays on "Working" and
+// is never left silent.
 func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note string, took time.Duration, final, quiet bool, end channel.End) error {
 	s := f.s
 	l := s.botLang(ctx)
@@ -213,20 +215,30 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 			endHeader(l, c, end)
 		}
 		if quiet && i == 0 {
+			// The ending has to land somewhere: in the progress card the run still has, or — when that card was refused
+			// (recalled, no longer a card, still limited after the wait) or a held run gave its card back with its
+			// message — as a card of its own, which says how the run ended, done or not (#4228). A recalled message
+			// says nothing.
 			var err error
-			switch {
-			case card != "":
-				err = s.botUpdateAnswerCard(ctx, card, c)
-			case end == channel.EndDone:
-				// A held run has no card left (it gave it back with its message): the ending goes out as a card of its
-				// own, so the follow-up it was told to expect is never left silent. A recalled message says nothing.
+			post := end != channel.EndRecalled
+			if card != "" {
+				if err = s.botUpdateAnswerCard(ctx, card, c); err == nil {
+					post = false
+				} else if post {
+					s.logf("bots: the progress card's end: %v; sending it", err)
+				}
+			}
+			if post {
 				var mid string
-				mid, err = s.botPostTo(ctx, to, r.ReplyTo, c, foot, "")
+				mid, err = s.botPostTo(ctx, to, r.ReplyTo, c, foot, endKey(r.ID))
 				if err == nil && to.ChatID == "" {
 					s.rememberBotThread(mid, botTargetOf(r), r.Label)
 				}
 			}
 			if err != nil {
+				if unreachable(err) {
+					return err // nothing went out: the ending is tried again later, under the same key
+				}
 				s.logf("bots: the run's quiet ending: %v", err)
 			}
 			break
@@ -273,6 +285,13 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 		}
 	}
 	return nil
+}
+
+// endKey is the key a run's quiet ending goes out under when it is posted as a card of its own: a retry after an
+// unreachable failure lands once. Feishu caps a uuid at 50 characters, so it is hashed like the nudge's.
+func endKey(id string) string {
+	sum := sha256.Sum256([]byte("end:" + id))
+	return "end-" + hex.EncodeToString(sum[:12])
 }
 
 // botUpdateAnswerCard writes the answer into the progress card. Feishu refusing the update for being too often is

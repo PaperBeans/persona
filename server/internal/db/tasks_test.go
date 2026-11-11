@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // A message card's sent mark: set once on the cards about the item put in by then, kept, and listed again to a
@@ -67,35 +69,52 @@ func TestFeedMarkSent(t *testing.T) {
 }
 
 // MarkFeedSent finds the unsent cards through assistant_feed_unsent rather than scanning the whole feed (#2617).
+// Which index the planner takes is only worth checking on a feed shaped like a real one: on the few rows other tests
+// leave behind, a full scan of the small assistant_feed_sent costs about as little and wins once their leftovers tip
+// it. So this runs in a database of its own, on a few thousand synthetic cards, analyzed, at the planner's default
+// costs, and checks the plan a statement starts with (custom) and the one a cached statement can switch to (generic).
 func TestMarkFeedSentUsesUnsentIndex(t *testing.T) {
-	d, ctx := open(t), context.Background()
-	tx, err := d.pool.Begin(ctx)
+	ctx := context.Background()
+	d, err := Open(ctx, migratedDatabase(t, AllSets), AllSets)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	// The table is tiny here, so tell the planner a scan costs too much. Without assistant_feed_unsent it still
-	// avoids the scan (a bitmap scan of assistant_feed_conversation), so check the plan names the index itself.
-	if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan = off`); err != nil {
+	t.Cleanup(d.Close)
+	// 8000 cards about 2000 items, one of each kind per item; every other message card is sent.
+	if _, err := d.pool.Exec(ctx, `INSERT INTO assistant_feed (id, conversation, at, kind, ref, body, sent_at)
+		SELECT 'f' || n, 'c' || n % 20, $1::timestamptz + n * interval '1 second',
+			(ARRAY['message', 'task', 'plan', 'receipt'])[1 + n % 4], 'inbox:' || n / 4,
+			CASE WHEN n % 8 = 0 THEN jsonb_build_object('sent_at', $1::timestamptz) ELSE '{}' END,
+			CASE WHEN n % 8 = 0 THEN $1::timestamptz END
+		FROM generate_series(0, 7999) n`, time.Now().UTC().Add(-3*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := tx.Query(ctx, `EXPLAIN `+markFeedSentSQL, "message", "inbox:1", time.Now(), []byte(`{"sent_at":"x"}`))
+	if _, err := d.pool.Exec(ctx, `ANALYZE assistant_feed`); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := d.pool.Acquire(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var plan []string
-	for rows.Next() {
-		var line string
-		if err := rows.Scan(&line); err != nil {
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `PREPARE mark_feed_sent (text, text, timestamptz, jsonb) AS `+markFeedSentSQL); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"force_custom_plan", "force_generic_plan"} {
+		if _, err := conn.Exec(ctx, `SET plan_cache_mode = `+mode); err != nil {
 			t.Fatal(err)
 		}
-		plan = append(plan, line)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(strings.Join(plan, "\n"), "assistant_feed_unsent") {
-		t.Fatalf("MarkFeedSent does not use assistant_feed_unsent:\n%s", strings.Join(plan, "\n"))
+		rows, err := conn.Query(ctx, `EXPLAIN EXECUTE mark_feed_sent ('message', 'inbox:1', now(), '{"sent_at": "x"}')`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(plan, "\n"), "assistant_feed_unsent") {
+			t.Fatalf("%s: MarkFeedSent does not use assistant_feed_unsent:\n%s", mode, strings.Join(plan, "\n"))
+		}
 	}
 }
 
