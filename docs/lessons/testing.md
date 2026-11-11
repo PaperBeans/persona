@@ -888,3 +888,8 @@ To check that a failure is this, move `dev.json` aside in the app's data contain
 ## Warm allocation measurements need one processor (2026-11-10, #3390)
 
 - Disabling GC preserves `sync.Pool` contents but does not keep a goroutine on the processor whose private pool was warmed. A switch during a byte-allocation measurement can charge a cold JSON encoder's buffer growth to the operation. Measure an explicitly warmed steady state with `GOMAXPROCS(1)` during the window and restore it afterward, as `testing.AllocsPerRun` does. Check warm-up errors and retain the original byte limit; a historical extra-copy implementation measured by the same helper must still fail that limit. This isolates the measurement from processor migration, not from unrelated allocating goroutines: do not run these process-wide measurements in parallel.
+
+## A test binary that is a container's PID 1 never reaps orphans (2026-11-11, #4363)
+
+- `docker run --entrypoint <test binary>` without `--init` makes the test binary PID 1, and every orphan is reparented to it. Go waits only for the children its `exec.Cmd`s started, so a background child killed after its shell exited stays a zombie, `kill(-pgid, 0)` still finds its group, and process-group tests fail. On `main`, `TestSecretRunTimeoutKillsTheGroup` and `TestSecretRunTimeoutEndsWhatIgnoresSIGTERM` failed in a `postgres:18-alpine` container this way and passed with `--init`.
+- Run such tests with `docker run --init` (Docker's own init, no image to pull), and compare with `main` in the same container before blaming a change.
