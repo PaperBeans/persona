@@ -62,6 +62,10 @@ type fakeMail struct {
 	reads    int
 	sent     []map[string]any
 	fetched  func(uid uint32)
+	// box is the mailbox the hub looks mail up in (inbox.mail_flags) by UID: seen or not; a UID not in it is gone.
+	// nil: the hub can't say (a hub from before #5993 answers an unknown method). flagAsks are the lookups asked.
+	box      map[uint32]bool
+	flagAsks []assistantwire.InboxMailFlagsAsk
 }
 
 func newFakeInbox() *fakeInbox {
@@ -247,6 +251,28 @@ func (in *fakeInbox) answer(ctx context.Context, p AppCall) (json.RawMessage, bo
 		if fetched != nil {
 			fetched(ref.UID)
 		}
+	case assistantwire.InboxMailFlagsMethod:
+		var ask assistantwire.InboxMailFlagsAsk
+		_ = json.Unmarshal(p.Params, &ask)
+		in.mu.Lock()
+		if in.mail == nil || in.mail.box == nil {
+			err = errors.New("unknown method inbox.mail_flags")
+		} else {
+			in.mail.flagAsks = append(in.mail.flagAsks, ask)
+			flags := assistantwire.InboxMailFlags{Seen: []uint32{}, Unseen: []uint32{}}
+			for _, uid := range ask.UIDs {
+				seen, there := in.mail.box[uid]
+				switch {
+				case !there:
+				case seen:
+					flags.Seen = append(flags.Seen, uid)
+				default:
+					flags.Unseen = append(flags.Unseen, uid)
+				}
+			}
+			out = flags
+		}
+		in.mu.Unlock()
 	case assistantwire.InboxReplyMail:
 		var a map[string]any
 		_ = json.Unmarshal(p.Params, &a)
