@@ -1,19 +1,32 @@
 import SwiftUI
 
 extension SettingsPage {
-    var belongsToCurrentAssistant: Bool {
+    @MainActor func belongsToCurrentAssistant(in model: AppModel) -> Bool {
         switch self {
         case .models, .agents, .assistant, .claude, .codex, .modelConfiguration, .triage, .connectors, .plugins, .channels,
-             .mail, .feishu, .feishuBot, .sent, .skills,
-             .knowledgeSelection, .pluginMarket, .marketExtension, .pluginMarkets, .subscriptions, .inboxSources, .computers:
+             .mail, .feishuBot, .sent, .skills,
+             .knowledgeSelection, .pluginMarket, .marketExtension, .pluginMarkets, .inboxSources, .computers:
             true
-        case .connector(_, let manager), .plugin(_, let manager), .pluginPage(_, _, _, let manager), .channel(_, let manager):
-            manager == nil
+        case .connector(_, let manager), .plugin(_, let manager), .pluginPage(_, _, _, let manager), .channel(_, let manager),
+             .subscriptions(_, let manager), .feishu(let manager):
+            manager == nil || model.settingsRoute(manager) == nil
         #if os(iOS)
         case .meetings: true
         #endif
         default: false
         }
+    }
+}
+
+extension AppModel {
+    /// The manager a Settings route names for a page stamped `manager`, as its requests name it. A route that names none opens
+    /// the current assistant's copy (`ExtensionDetailView`, `HubConnectorView`, …), so with multiple assistants the current
+    /// assistant's route names none and another assistant's names its owner. Explicit manager ids normalize the same way; with
+    /// one assistant or a hub without a roster, every route names none.
+    func settingsRoute(_ manager: String?) -> String? {
+        guard let roster = managerRoster, roster.isMulti else { return nil }
+        let owner = roster.owner(manager)
+        return owner == roster.owner(assistantManagerID) ? nil : owner
     }
 }
 

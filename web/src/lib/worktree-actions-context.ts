@@ -16,6 +16,7 @@ export interface WorktreeActionContext {
   machines: readonly Machine[];
   /** Granted only after an owner-bound full-device permission check. */
   writable: boolean;
+  linkedWorktree?: boolean;
 }
 
 /** All entry points resolve the exact host-owned catalog row; paths are checked for replacement, never used to find it. */
@@ -44,7 +45,9 @@ export function resolveWorktreeAction(target: WorkspaceTarget, context: Worktree
     canReconcile: owned && writable && Boolean(machine?.online && currentHosts(machine).hosts.includes(target.host)
       && !machine.engines?.some((e) => e.id === target.host && !e.available))
       && (matches.length === 0 || Boolean(workspace && workspace.online !== false && workspace.available !== false)),
-    canDelete: !reason && target.host === "orca" && workspace?.is_main !== true && !hasChildren,
+    canClose: !reason && target.host === "herdr",
+    canDelete: !reason && (target.host === "orca" || target.host === "herdr" && context.linkedWorktree === true)
+      && workspace?.is_main !== true && !hasChildren,
   };
 }
 export type ResolvedWorktreeAction = ReturnType<typeof resolveWorktreeAction>;

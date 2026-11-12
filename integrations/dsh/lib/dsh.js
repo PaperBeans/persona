@@ -140,21 +140,21 @@ export function createDshRuntime(deps, options = {}) {
       if (archived.has(id)) continue // archived in DSH (or closed from the phone): DSH hides it too
       if (options.assistant && assistantDir(s.cwd) && !assistants.has(id)) assistants.set(id, {})
       const st = known.get(id)
-      const running = s.running === true || st?.running === true
+      const openTurn = hasOpenTurn(s, st)
       const waiting = activeQuestions(s) > 0 // asked in the Web GUI; cards on the phone the SDK marks itself
       if (s.blank && !rt.touched(id)) continue // before its first prompt, only one the phone started
-      rows.push({ s, id, running, waiting })
+      rows.push({ s, id, openTurn, waiting })
     }
     for (const r of rows) {
       r.subagents = subagentsOf(r.id, kids.get(r.id) ?? [])
-      r.background = backgroundOf(r.id)
+      r.background = backgroundOf(r.id, r.s)
       r.busy = r.subagents.some((a) => a.running) || r.background.length > 0
     }
     // Running and waiting ones always, those with work still running and those the phone touched always, the rest by
     // age and count (the SDK's rule).
-    const chosen = rt.recent(rows, { days: listDays, max: maxSessions, pinned: (r) => r.running || r.waiting || r.busy,
+    const chosen = rt.recent(rows, { days: listDays, max: maxSessions, pinned: (r) => r.openTurn || r.waiting || r.busy,
       id: (r) => r.id, updatedAt: (r) => r.s.updatedAt ?? 0 })
-    return chosen.map(({ s, id, running, waiting, subagents, background }) => {
+    return chosen.map(({ s, id, openTurn, waiting, subagents, background }) => {
       const st = known.get(id)
       const hints = s.projections
       const title = typeof hints?.values?.title === 'string' ? hints.values.title : ''
@@ -163,7 +163,7 @@ export function createDshRuntime(deps, options = {}) {
         session_id: id,
         title: title || (s.cwd ? basename(s.cwd) : ''),
         cwd: s.cwd ?? '',
-        status: waiting ? 'blocked' : running ? 'working' : 'done',
+        status: waiting ? 'blocked' : openTurn ? 'working' : 'done',
         updated_at: new Date(s.updatedAt ?? Date.now()).toISOString(),
       }
       if (runtimeID !== 'dsh') row.agent_label = label // the node names only a runtime's own agent itself
@@ -252,11 +252,30 @@ export function createDshRuntime(deps, options = {}) {
   }
 
   /**
+   * Whether a DSH session currently has an active foreground turn under way.
+   * Projections (turnBoundary or approvalState) or session events (st.running) determine whether the turn
+   * is open; background commands or jobs alone do not count as an open turn (#5981).
+   */
+  function hasOpenTurn(summary, st) {
+    const vals = summary?.projections?.values
+    if (vals?.turnBoundary && Object.prototype.hasOwnProperty.call(vals.turnBoundary, 'openTurnStartSeq')) {
+      return vals.turnBoundary.openTurnStartSeq !== null && vals.turnBoundary.openTurnStartSeq !== undefined
+    }
+    if (vals?.approvalState && typeof vals.approvalState.turnOpen === 'boolean') {
+      return vals.approvalState.turnOpen
+    }
+    if (st && typeof st.running === 'boolean') {
+      return st.running
+    }
+    return summary?.running === true
+  }
+
+  /**
    * A session's background tasks: its DSH jobs still running (workflows, shells run in the background) — not one whose
    * tool call is still waiting for its result (that call is in the foreground). From the job events the plugin saw,
-   * and DSH's job registry for those that started before it.
+   * DSH's job registry for those that started before it, and background commands in contextTimeline (#5981).
    */
-  function backgroundOf(id) {
+  function backgroundOf(id, summary) {
     const open = openCalls.get(id) ?? new Set()
     const tracked = jobs.get(id) ?? new Map()
     const out = new Map()
@@ -273,6 +292,20 @@ export function createDshRuntime(deps, options = {}) {
       }
     } catch (err) {
       log(`persona: jobs of ${id}: ${err.message}`)
+    }
+    const commands = summary?.projections?.values?.contextTimeline?.commands
+    if (Array.isArray(commands)) {
+      for (const cmd of commands) {
+        if (cmd?.background !== true || (cmd.status && cmd.status !== 'running')) continue
+        const cmdId = String(cmd.id ?? cmd.commandId ?? '')
+        if (cmdId && out.has(cmdId)) continue
+        const key = cmdId || `cmd-${out.size + 1}`
+        out.set(key, task(key, {
+          kind: 'bash',
+          label: cmd.command ?? cmd.label,
+          startedAt: cmd.startedAt ?? cmd.startTime,
+        }))
+      }
     }
     return [...out.values()]
   }

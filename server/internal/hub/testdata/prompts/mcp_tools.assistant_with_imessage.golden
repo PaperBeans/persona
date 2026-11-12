@@ -520,7 +520,7 @@
   },
   {
     "name": "agents_list",
-    "description": "The Claude Code / Codex agents running on the user's computers (herdr), with their state: needs_you (waiting for an answer / approval), working, unread (finished, result not looked at), idle. done lists work finished in the last 24 hours, and muted lists the muted agents that would otherwise appear in the live snapshot; both include the work conclusion when known. Each line has machine, session id, project, title, last update and the last thing the agent said. Known Claude Code switch states appear as ultracode=on/off; an omitted state is unknown. ultracode=on means every substantive task runs a multi-agent dynamic workflow, independently of thinking effort. Let it finish and wait for workflow results without nudging it. Much faster and more accurate than ssh + herdr. At the end: the launchers that failed their last health check, by machine (agent_start and task_plan move off them).\n\nA line under an agent is something waiting for the user: a question lists its options and the interaction id to answer it with (interaction_answer), an approval is the user's to give in the app.",
+    "description": "The Claude Code / Codex agents running on the user's computers (herdr), with their state: needs_you (waiting for an answer / approval), working, unread (finished, result not looked at), idle. done lists work finished in the last 24 hours, and muted lists the muted agents that would otherwise appear in the live snapshot; both include the work conclusion when known. Each line has machine, session id, project, title, last update and the last thing the agent said. launcher= names the launcher an agent runs on when it is known, and usage_limit (with resets_at when the reset is known) marks one its subscription's usage limit stopped (agent_switch moves such an agent to another launcher when the user asks). Known Claude Code switch states appear as ultracode=on/off; an omitted state is unknown. ultracode=on means every substantive task runs a multi-agent dynamic workflow, independently of thinking effort. Let it finish and wait for workflow results without nudging it. Much faster and more accurate than ssh + herdr. At the end: the launchers that failed their last health check, by machine (agent_start and task_plan move off them).\n\nA line under an agent is something waiting for the user: a question lists its options and the interaction id to answer it with (interaction_answer), an approval is the user's to give in the app.",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -629,6 +629,44 @@
               "description": "how long it should take from now; longer without progress counts as stuck"
             }
           }
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_switch",
+    "description": "Move a running Claude Code agent (from agents_list) to another launcher on its computer and go on with it, in one step: the agent is quit and resumed on that launcher in the same terminal, with the same conversation, and `text` is sent to it there. It is the switch the user makes from the agent's chat. Use it only when the user asked for it, for example when a subscription's usage limit stopped agents and the user wants them to go on with another provider now rather than wait for the reset; never on your own. The launcher must be one of that computer's (machines_list and agents_list show the names). The switch happens now or not at all: an agent that is working, waits for the user (a question, a permission, a plan), is starting, has background work its quit would end, or has a draft or a dialog in its input box is refused with nothing typed and nothing left waiting; tell the user why, and try again once it has stopped if they still want it. Other refusals say why too (a launcher that does not run there or is not signed in, a model the launcher's default cannot be read for: give model). Not for agents that have stopped (only the user can resume one, with Resume on its terminal page), assistant conversations, read-only agents, or Codex and other agents. An agent its usage limit stopped goes on with what it was doing when `text` is left out; any other agent needs `text`. Its usage-limit continuation, if one was due, is not sent afterwards.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id",
+        "launcher"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "the machine's id or name, as agents_list shows it"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "the agent's session id, or its first 8 characters"
+        },
+        "launcher": {
+          "type": "string",
+          "description": "the launcher to move it to, by its name on that computer"
+        },
+        "model": {
+          "type": "string",
+          "description": "a model of that launcher; empty: the launcher's default"
+        },
+        "effort": {
+          "type": "string",
+          "description": "the reasoning effort on the new launcher; empty: as it is"
+        },
+        "text": {
+          "type": "string",
+          "description": "what the agent does on the new launcher, sent as the user would type it; empty only for an agent its usage limit stopped (it goes on with what it was doing)"
         }
       }
     }
@@ -2227,7 +2265,7 @@
   },
   {
     "name": "todo_list",
-    "description": "List the user's Persona to-dos (the To-dos page in the app, not Feishu tasks): open ones by default, earliest due first (those without a due date last), each with its id, title, state, priority, project, due date, reminder and the agents on it, and the first line of its notes. Times are in the user's time zone. Filter by state, by due date (due_before / due_after: a day or a moment), overdue ones only, with or without agents, by knowledge-base project, by kind (concerns only), or a word in the title or notes. Use it before changing a to-do, to find its id; ask with todo_get for one in full.",
+    "description": "List the user's Persona to-dos (the To-dos page in the app, not Feishu tasks): open ones and failed starts by default, earliest due first (those without a due date last), each with its id, title, state, priority, project, due date, reminder and the agents on it, and the first line of its notes. Times are in the user's time zone. Filter by state, by due date (due_before / due_after: a day or a moment), overdue ones only, with or without agents, by knowledge-base project, by kind (concerns only), or a word in the title or notes. Use it before changing a to-do, to find its id; ask with todo_get for one in full.",
     "input_schema": {
       "type": "object",
       "properties": {

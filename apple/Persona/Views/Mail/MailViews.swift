@@ -661,7 +661,7 @@ struct AddMailAccountView: View {
                         Text("Choose an account on Google and let Persona send and receive mail. No password needed. You can revoke access anytime under “Third-party apps & services” in your Google Account; if access expires, just sign in again.")
                     }
                 } else if form.kind == .outlook {
-                    OutlookSignInSection(error: $error) { dismiss() }
+                    OutlookSignInSection(api: settingsAPI ?? capturedAPI, error: $error) { dismiss() }
                 } else {
                     Section {
                         TextField(String(localized: "Email address"), text: $form.email).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()

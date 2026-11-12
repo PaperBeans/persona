@@ -3,6 +3,7 @@ package node
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -525,6 +526,71 @@ func (n *Node) switchModel(launcher, cwd, dir string, dirKnown bool) (string, bo
 	return n.resumeModelOf(launcher, cwd, "", dir)
 }
 
+// switchNowReady checks a message with switch_now (the assistant's agent_switch, #5973) before anything else in its
+// turn: session id is a Claude Code agent running in one of Persona's terminals, with a switch to another Claude Code
+// launcher waiting (the one the assistant just picked). Otherwise it is refused with nothing typed, and a switch that
+// waited is dropped: a message that would go on the launcher the agent runs on, or a switch left for the user's next
+// message, is what switch_now is there to rule out.
+func (n *Node) switchNowReady(ctx context.Context, id string) error {
+	if n.externalCodex(id) {
+		return n.switchNowDropped(id, refusal(proto.CodeSwitchUnsupported, fmt.Sprintf("session %s is a Codex session outside Persona's terminals: it keeps its launcher", id), nil))
+	}
+	a, live := n.agent(id)
+	if !live {
+		return n.switchNowDropped(id, refusal(proto.CodeSwitchUnsupported, fmt.Sprintf("session %s is not running in one of Persona's terminals: there is no agent to switch", id), nil))
+	}
+	if a.Agent != "" && a.Agent != "claude" {
+		return n.switchNowDropped(id, refusal(proto.CodeSwitchUnsupported, fmt.Sprintf("session %s runs %s, not Claude Code: it keeps its launcher", id, a.Agent), nil))
+	}
+	_ = n.state.loaded(ctx)
+	ps := n.pendingSwitch(id)
+	if ps == nil {
+		own, _ := n.ownLauncher(id)
+		return refusal(proto.CodeSwitchStale, fmt.Sprintf("no switch waits for session %s (on launcher %s now): pick it again", id, own), nil)
+	}
+	if ps.Agent != "" {
+		return n.switchNowDropped(id, refusal(proto.CodeSwitchOtherAgent, fmt.Sprintf("launcher %s runs %s: switch_now moves an agent only to another Claude Code launcher", ps.Launcher, ps.Agent), nil))
+	}
+	return nil
+}
+
+// switchNowElsewhere refuses a session.send with switch_now to session id that a runtime or a terminal-only agent
+// takes (node.go), before it could take the message without the switch; nil for any other call.
+func (n *Node) switchNowElsewhere(method, id string, params json.RawMessage) error {
+	if method != "session.send" {
+		return nil
+	}
+	var o struct {
+		SwitchNow bool `json:"switch_now"`
+	}
+	if json.Unmarshal(params, &o) != nil || !o.SwitchNow {
+		return nil
+	}
+	return n.switchNowDropped(id, refusal(proto.CodeSwitchUnsupported, fmt.Sprintf("session %s runs in an agent runtime or is not a Claude Code agent Persona drives: it keeps its launcher", id), nil))
+}
+
+// switchNowRefusal drops session id's switch to launcher, which switch_now wanted carried out at once, because the agent
+// is busy (why, switchBusy): the message is refused with nothing typed (switch_busy).
+func (n *Node) switchNowRefusal(id, launcher, why string) error {
+	return n.switchNowDropped(id, refusal(proto.CodeSwitchBusy, fmt.Sprintf("session %s cannot switch to launcher %s now: %s. Nothing was typed, and the switch was dropped", id, launcher, why), nil))
+}
+
+// switchNowDropped drops session id's waiting switch and returns err: what refused a message with switch_now.
+func (n *Node) switchNowDropped(id string, err error) error {
+	n.dropSwitchNow(id, err)
+	return err
+}
+
+// dropSwitchNow drops session id's waiting switch after a message with switch_now was refused (why): the assistant
+// picked it for this message only, so it must not wait for the user's next one.
+func (n *Node) dropSwitchNow(id string, why error) {
+	if n.pendingSwitch(id) == nil {
+		return
+	}
+	n.logf("session %s: switch dropped: the assistant's switch_now message was refused: %v", id, why)
+	n.putPendingSwitch(id, nil)
+}
+
 // switchBusy says why a switch of session id waits for a later message, "" when it can go now: its agent works, waits
 // for the user or still starts, or has background work that quitting it would end (backgroundWork).
 func (n *Node) switchBusy(ctx context.Context, id string) string {
@@ -716,8 +782,9 @@ func (n *Node) resumeTurn(ctx context.Context, id string) (done func()) {
 // applySwitch carries out session id's pending switch ps before the user's message is typed, inside send's turn, and
 // returns the pane the message goes to, and whether the switch was carried out. A switch that waits (a busy agent)
 // or no longer applies (too old, the launcher the agent runs on by now) leaves the message to go as always; one that
-// fails is dropped and refuses the message with nothing typed.
-func (n *Node) applySwitch(ctx context.Context, id, pane string, ps proto.PendingSwitch) (string, bool, error) {
+// fails is dropped and refuses the message with nothing typed. now (the assistant's switch_now): one that would wait
+// is dropped and refuses the message instead (switchNowRefusal).
+func (n *Node) applySwitch(ctx context.Context, id, pane string, ps proto.PendingSwitch, now bool) (string, bool, error) {
 	own, _ := n.ownLauncher(id)
 	if ps.Launcher == own || time.Since(ps.At) > switchMaxAge {
 		n.logf("session %s: switch to launcher %s picked %s dropped: on it already, or picked too long ago", id, ps.Launcher, ps.At.Format(time.RFC3339))
@@ -725,6 +792,9 @@ func (n *Node) applySwitch(ctx context.Context, id, pane string, ps proto.Pendin
 		return pane, false, nil
 	}
 	if why := n.switchBusy(ctx, id); why != "" {
+		if now {
+			return "", false, n.switchNowRefusal(id, ps.Launcher, why)
+		}
 		n.logf("session %s: switch to launcher %s waits (%s); the message goes on %s", id, ps.Launcher, why, own)
 		return pane, false, nil
 	}
@@ -749,11 +819,17 @@ func (n *Node) applySwitch(ctx context.Context, id, pane string, ps proto.Pendin
 	// The last look before the first Ctrl+C: the checks took a while, and a turn may have started (a background task
 	// reporting back, a wakeup), a dialog come up or someone typed at the computer meanwhile.
 	if why := n.switchBusy(ctx, id); why != "" {
+		if now {
+			return "", false, n.switchNowRefusal(id, ps.Launcher, why)
+		}
 		n.logf("session %s: switch to launcher %s waits (%s); the message goes on %s", id, ps.Launcher, why, own)
 		return pane, false, nil
 	}
 	if err := n.checkPaneFor(ctx, pane, "claude", sendOpts{}); err != nil {
-		return "", false, err // as for any message: nothing done, the switch waits
+		if now {
+			n.dropSwitchNow(id, err)
+		}
+		return "", false, err // as for any message: nothing done, the switch waits (the assistant's is dropped)
 	}
 	row := proto.Session{SessionID: id, Cwd: plan.cwd, Launcher: ps.Launcher, Agent: "claude", Status: proto.StatusIdle,
 		Starting: true, StartedByPersona: had, UpdatedAt: time.Now().UTC(), WorkspaceID: plan.a.WorkspaceID, PendingSwitch: &ps}

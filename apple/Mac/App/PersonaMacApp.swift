@@ -108,7 +108,7 @@ extension AppModel {
         guard let cfg = ServerConfig(pairURL: url.absoluteString) else { return }
         guard MacPairing.accepts(isPaired: isPaired, isDemo: isDemo) else {
             let host = config?.url.host() ?? String(localized: "a hub")
-            toast = Toast(String(localized: "Already connected to \(host). To switch hubs, disconnect in Settings › Server first."), style: .error)
+            toast = Toast(String(localized: "Already connected to \(host). To switch hubs, disconnect in Settings › Hub › Devices & Pairing first."), style: .error)
             return
         }
         Task {

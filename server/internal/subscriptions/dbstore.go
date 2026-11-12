@@ -35,27 +35,28 @@ type kept struct {
 }
 
 type keptRun struct {
-	Tool            string     `json:"tool"`
-	ToolFingerprint string     `json:"tool_fingerprint"`
-	SourceMin       int        `json:"source_min,omitempty"`
-	MaxCallsPerHour int        `json:"max_calls_per_hour,omitempty"`
-	SinceAt         *time.Time `json:"since_at,omitempty"`
-	ShapeMisses     int        `json:"shape_misses,omitempty"`
-	SnapshotHash    string     `json:"snapshot_hash,omitempty"`
-	RunState        string     `json:"run_state,omitempty"`
-	Runs            []Run      `json:"runs,omitempty"`
-	InboxFrom       *time.Time `json:"inbox_from,omitempty"`
-	InboxCatchup    *time.Time `json:"inbox_catchup,omitempty"`
-	KBFrom          *time.Time `json:"kb_from,omitempty"`
-	CatchupFrom     *time.Time `json:"catchup_from,omitempty"`
-	Baseline        *time.Time `json:"baseline,omitempty"`
-	InboxGroup      string     `json:"inbox_group,omitempty"`
-	InboxGroupFrom  *time.Time `json:"inbox_group_from,omitempty"`
+	Tool            string        `json:"tool"`
+	ToolFingerprint string        `json:"tool_fingerprint"`
+	SourceMin       int           `json:"source_min,omitempty"`
+	MaxCallsPerHour int           `json:"max_calls_per_hour,omitempty"`
+	SinceAt         *time.Time    `json:"since_at,omitempty"`
+	Continuation    *Continuation `json:"continuation,omitempty"`
+	ShapeMisses     int           `json:"shape_misses,omitempty"`
+	SnapshotHash    string        `json:"snapshot_hash,omitempty"`
+	RunState        string        `json:"run_state,omitempty"`
+	Runs            []Run         `json:"runs,omitempty"`
+	InboxFrom       *time.Time    `json:"inbox_from,omitempty"`
+	InboxCatchup    *time.Time    `json:"inbox_catchup,omitempty"`
+	KBFrom          *time.Time    `json:"kb_from,omitempty"`
+	CatchupFrom     *time.Time    `json:"catchup_from,omitempty"`
+	Baseline        *time.Time    `json:"baseline,omitempty"`
+	InboxGroup      string        `json:"inbox_group,omitempty"`
+	InboxGroupFrom  *time.Time    `json:"inbox_group_from,omitempty"`
 }
 
 func encode(s Subscription) ([]byte, error) {
 	return json.Marshal(kept{Subscription: s, Keep: keptRun{Tool: s.Tool, ToolFingerprint: s.ToolFingerprint, SourceMin: s.SourceMin,
-		MaxCallsPerHour: s.MaxCallsPerHour, SinceAt: s.SinceAt, ShapeMisses: s.ShapeMisses, SnapshotHash: s.SnapshotHash,
+		MaxCallsPerHour: s.MaxCallsPerHour, SinceAt: s.SinceAt, Continuation: s.Continuation, ShapeMisses: s.ShapeMisses, SnapshotHash: s.SnapshotHash,
 		RunState: s.RunState, Runs: s.Runs, InboxFrom: s.InboxFrom, InboxCatchup: s.InboxCatchup, KBFrom: s.KBFrom,
 		CatchupFrom: s.CatchupFrom, Baseline: s.Baseline, InboxGroup: s.InboxGroup, InboxGroupFrom: s.InboxGroupFrom}})
 }
@@ -67,7 +68,7 @@ func decode(data []byte) (Subscription, error) {
 	}
 	s := k.Subscription
 	s.Tool, s.ToolFingerprint, s.SourceMin, s.MaxCallsPerHour = k.Keep.Tool, k.Keep.ToolFingerprint, k.Keep.SourceMin, k.Keep.MaxCallsPerHour
-	s.SinceAt, s.ShapeMisses, s.SnapshotHash, s.RunState, s.Runs = k.Keep.SinceAt, k.Keep.ShapeMisses, k.Keep.SnapshotHash, k.Keep.RunState, k.Keep.Runs
+	s.SinceAt, s.Continuation, s.ShapeMisses, s.SnapshotHash, s.RunState, s.Runs = k.Keep.SinceAt, k.Keep.Continuation, k.Keep.ShapeMisses, k.Keep.SnapshotHash, k.Keep.RunState, k.Keep.Runs
 	s.InboxFrom, s.InboxCatchup, s.KBFrom = k.Keep.InboxFrom, k.Keep.InboxCatchup, k.Keep.KBFrom
 	s.CatchupFrom, s.Baseline = k.Keep.CatchupFrom, k.Keep.Baseline
 	s.InboxGroup, s.InboxGroupFrom = k.Keep.InboxGroup, k.Keep.InboxGroupFrom

@@ -113,6 +113,9 @@ type Service struct {
 	prepared   map[string]preparedState
 
 	epoch string
+	// born is when this manager started: a background supervisor started before it may be in a profile with no login
+	// (backgroundSignedOut).
+	born  time.Time
 	pubMu sync.Mutex
 	seq   uint64
 
@@ -231,7 +234,7 @@ var _ Handler = (*Service)(nil)
 
 // New makes the assistant; nothing runs until the hub calls it.
 func New(o Options) *Service {
-	s := &Service{hub: o.Hub, store: o.Store, logf: o.Logf, mux: http.NewServeMux(), epoch: randomHex(8), tasks: newTasksState(),
+	s := &Service{hub: o.Hub, store: o.Store, logf: o.Logf, mux: http.NewServeMux(), epoch: randomHex(8), tasks: newTasksState(), born: time.Now(),
 		devs: o.Devices, trustSrc: o.Trust, id: o.ID, build: o.Build, repositoryConfig: o.RepositoryConfig}
 	s.inbox.lang = func() i18n.Lang { return s.lang(context.Background()) }
 	if s.store == nil {

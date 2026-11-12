@@ -728,13 +728,14 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
         if let name = await name { managerName = name }
     }
 
-    /// Reads the hub's launchers when the form has a launcher field and they aren't in yet. GET /api/v1/launchers asks
-    /// every machine (up to half a minute), so it runs apart from load. They are the hub's, not a manager's: asked of
-    /// the default client.
+    /// Reads the launchers when the form has a launcher field and they aren't in yet. GET /api/v1/launchers asks every
+    /// machine (up to half a minute), so it runs apart from load. They are the model providers of this copy's manager
+    /// (the current assistant's in Settings, Models › Providers and Keys), whose extension picks one: asked of it, as the
+    /// page's other requests.
     func loadLaunchersIfNeeded() async {
         guard launchers == nil, !loadingLaunchers, let form = detail?.form,
               form.contains(where: { $0.picksLauncher || ($0.fields ?? []).contains(where: \.picksLauncher) }),
-              let api = deps.api() else { return }
+              let api else { return }
         loadingLaunchers = true
         defer { loadingLaunchers = false }
         launchers = try? await api.allLaunchers()

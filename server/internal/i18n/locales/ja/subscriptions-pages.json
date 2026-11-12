@@ -243,6 +243,7 @@
   "problem.conflict": "ほかの場所で変更されたばかりです",
   "problem.dry_run_failed": "試し取得に通りませんでした",
   "problem.interval_too_short": "間隔が短すぎます",
+  "problem.invalid_pagination": "ページネーションを安全に続けられないため、取得方法を修正してください",
   "problem.model_failed": "モデルが今回は作成できませんでした。少ししてから試してください",
   "problem.needs_recipe": "取得方法がまだありません",
   "problem.no_list": "結果に項目の一覧が見つかりません",

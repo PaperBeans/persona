@@ -86,6 +86,7 @@ class GroupStacks @Inject constructor(application: Application, private val runt
                 HttpHubPreferencesTransport(connection) { current() })
         }
         val names = GroupNames(group.namespace)
+        group.adoptSession = { previous, session -> if (current()) repositories.sessions.adoptThread(previous, session) }
         val view = object : HubConnection {
             override val state = group.state
             override val resumed get() = connection.resumed

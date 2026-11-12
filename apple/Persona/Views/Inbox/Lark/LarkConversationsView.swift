@@ -281,8 +281,10 @@ private struct LarkConversationsPage: View {
         .frame(maxWidth: .infinity).padding(.vertical, Theme.Space.xxl)
     }
 
+    /// The chat connector's page of the default assistant, whose account and switches these chats follow
+    /// (`SettingsPage.feishu`), whichever assistant is current.
     private func openConnectionSettings() {
-        model.settingsPath = NavigationPath([SettingsPage.feishu])
+        model.settingsPath = NavigationPath([SettingsPage.feishu(manager: model.settingsRoute(nil))])
         if shell != nil { model.shellSettings = true }
         else { model.selectedTab = .settings }
     }

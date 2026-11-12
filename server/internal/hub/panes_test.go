@@ -180,6 +180,24 @@ func TestNodeActionsAreMountedOnTheHTTPRouter(t *testing.T) {
 	}
 }
 
+func TestHerdrWorkspaceCloseModeIsForwardedAsAStrictBoolean(t *testing.T) {
+	tn := newTermNode(t)
+	if code := postAction(tn.hub, roleFull, "worktree/delete", `{"workspace_id":"w1","kind":"herdr","preview":true,"close_only":true}`); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	tn.await(t, 1)
+	var got map[string]any
+	if err := json.Unmarshal([]byte(tn.args["worktree.delete"]), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["close_only"] != true || got["kind"] != "herdr" {
+		t.Fatal(got)
+	}
+	if code := postAction(tn.hub, roleFull, "worktree/delete", `{"workspace_id":"w1","kind":"herdr","preview":true,"close_only":"true"}`); code != http.StatusBadRequest {
+		t.Fatal(code)
+	}
+}
+
 // Every one of them changes a computer: answer-only devices and extension tokens are refused before the node hears of
 // it, a full device gets through.
 func TestNodeActionsNeedAFullDevice(t *testing.T) {

@@ -286,7 +286,11 @@ private fun LazyListScope.newAgentItems(
     }
     item("prompt") {
         JTextField(state.prompt, model::prompt, enabled = !state.locked,
-            label = stringResource(if (state.agentType == "codex") R.string.agents_new_first_message_codex else R.string.agents_new_first_message),
+            label = stringResource(when {
+                state.promptRequired -> R.string.agents_new_first_message_codex
+                state.agentType == "codex" -> R.string.agents_new_first_message_codex_optional
+                else -> R.string.agents_new_first_message
+            }),
             minLines = 3, maxLines = 8, modifier = Modifier.fillMaxWidth().focusRequester(prompt))
     }
 }
@@ -319,10 +323,10 @@ private fun NewAgentFooter(state: NewAgentState, model: NewAgentViewModel, machi
     }
 }
 
-/** A folder, a launcher or the configuration to follow, an online machine, and Codex's first message. */
-private fun startable(state: NewAgentState, machines: List<Machine>): Boolean =
+/** A folder, a launcher or the configuration to follow, an online machine, and a first message when required. */
+internal fun startable(state: NewAgentState, machines: List<Machine>): Boolean =
     state.selection.cwd.isNotBlank() && (state.selection.launcher.isNotBlank() || state.following) &&
-        machines.any { it.id == state.machineId && it.online } && (state.agentType != "codex" || state.prompt.isNotBlank())
+        machines.any { it.id == state.machineId && it.online } && (!state.promptRequired || state.prompt.isNotBlank())
 
 internal fun String.agentLabel() = when (this) { "claude" -> "Claude Code"; "codex" -> "Codex"; "traex" -> "TRAEX"; else -> this }
 internal val permissionModes = listOf("" to R.string.agents_mode_follow, "default" to R.string.agents_mode_default,

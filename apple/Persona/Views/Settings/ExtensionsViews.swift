@@ -258,7 +258,8 @@ struct ExtensionDetailView: View {
         .task { await page.load() }
         // A launcher field's choices (format launcher): the hub asks every machine for them, so apart from the page.
         .task(id: page.detail?.plugin.id) { await page.loadLaunchersIfNeeded() }
-        .subscriptionCounts($subscriptions, enabled: page.manager == nil) { [id = page.id] in $0.extensionID == id }
+        // Its own manager's subscriptions (the current assistant's in Settings), as everything else on the page.
+        .subscriptionCounts($subscriptions, manager: page.manager) { [id = page.id] in $0.extensionID == id }
         // Again when the connector's page closes (its switch may have changed there) or the extension is switched.
         // Also once paired (opened at launch, before the hub's address is known) or paired to another hub.
         .task(id: ConnectorSectionsKey(ids: connectorIDs, depth: AppModel.shared.settingsPath.count,
@@ -349,7 +350,7 @@ struct ExtensionDetailView: View {
         }
         pages(d)
         if d.plugin.enabled ?? true {
-            SubscriptionsEntrySection(counts: subscriptions, state: SubscriptionsUI.state(extension: d.plugin.id))
+            SubscriptionsEntrySection(counts: subscriptions, state: SubscriptionsUI.state(extension: d.plugin.id), manager: page.manager)
         }
         connectorSections(d)
         if !d.readOnly && !d.form.isEmpty { form(d) }

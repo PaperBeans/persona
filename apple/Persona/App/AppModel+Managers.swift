@@ -306,6 +306,12 @@ extension ManagerRoster {
         return id == (defaultID ?? assistant) ? nil : id
     }
 
+    /// The manager for a storage key. Unlike a raw push, storage's nil already means the default assistant, not the
+    /// hub's own assistant, so name that default before applying the push rule.
+    static func stored(_ manager: String?, defaultID: String?) -> String? {
+        pushed(by: manager ?? defaultID, defaultID: defaultID)
+    }
+
     /// The installed manager a thing stamped `manager` belongs to, when it is offline on a hub with several managers;
     /// nil otherwise (with one manager the pages show none of it).
     func offlineManager(of manager: String?) -> HubManager? {

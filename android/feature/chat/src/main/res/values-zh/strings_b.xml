@@ -45,6 +45,8 @@
     <string name="chat_chrome_actions_title">会话操作</string>
     <string name="chat_chrome_todo">待办 · %1$s</string>
     <string name="chat_chrome_terminal">终端</string>
+    <string name="chat_chrome_resume_in_terminal">在终端里恢复</string>
+    <string name="chat_chrome_resume_no_engine">%1$s 没有启用终端引擎</string>
     <string name="chat_chrome_search">搜索</string>
     <string name="chat_chrome_files">文件</string>
     <string name="chat_chrome_details">会话详情</string>
