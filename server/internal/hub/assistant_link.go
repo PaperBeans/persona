@@ -579,7 +579,17 @@ func (a assistantRemote) to(ctx context.Context) string {
 var errAssistantOffline = i18n.Err("hub-assistant_link.offline")
 
 func (a assistantRemote) call(ctx context.Context, method string, params, out any) error {
-	err := a.h.callBus(ctx, a.to(ctx), method, params, out)
+	return assistantOffline(a.h.callBus(ctx, a.to(ctx), method, params, out))
+}
+
+// callAsIs is call with ctx's own deadline, or none (callBusAsIs): a card is waited for as long as it lives
+// (waitInteraction).
+func (a assistantRemote) callAsIs(ctx context.Context, method string, params, out any) error {
+	return assistantOffline(a.h.callBusAsIs(ctx, a.to(ctx), method, params, out))
+}
+
+// assistantOffline is a bus call's error as the assistant's callers get it: assistant_offline while it is not connected.
+func assistantOffline(err error) error {
 	if errors.Is(err, errBusOffline) {
 		return &rpc.Error{Code: assistantwire.CodeAssistantOffline, Message: errAssistantOffline.Error()}
 	}

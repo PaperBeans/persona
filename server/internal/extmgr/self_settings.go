@@ -365,5 +365,10 @@ func (h *Manager) toolPersonaSettings(ctx context.Context, machineID, sessionID 
 			return "", fmt.Errorf("%s was left empty on the phone: nothing changed", f.Label)
 		}
 	}
+	// Whoever asked stopped waiting while the card was being answered (the hub's call ended, the bus dropped): it was
+	// told nothing came of the call, so nothing is changed now that nobody would hear of (#5907).
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("the change was approved after its caller stopped waiting: nothing changed (%w)", err)
+	}
 	return change.apply(ctx, r.Values)
 }

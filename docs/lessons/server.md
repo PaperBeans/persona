@@ -2028,3 +2028,25 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
 - The node sent an assistant chat's messages to its agent runtime under a `client_msg_id` of its own, new on every call. The runtime protocol lets a runtime put the id it was sent with on the message's item, and the node forwards an item a runtime tied as it is (`echo.go`). So the line carried an id no app had, the app's pending bubble stayed beside it, and the message showed twice: the same failure as #5200, in another place.
 - Hand a message on with the id it came with, or with none. A made-up id deduplicates nothing either: it is new on every retry. A message without an id leaves its line without one, and the apps match it by its words.
 - In-repo runtimes (DSH, Antigravity) did not tie their lines, so nothing showed it. The test that does is a fake runtime that ties its line as the protocol allows (`TestAssistantOnARuntimeSendsTheMessagesOwnID`).
+
+## A wait for a person takes its deadline from the card, not from the bus default (2026-11-13, #5907)
+
+- `callBus` gives up after two minutes when its context has no deadline. That suits a call a program answers. A call
+  that waits for a person is different, and nothing upstream of the hub gives a tool call a deadline: the MCP
+  process's own timeout is not carried over the socket, so `app.call` arrives without `timeout_ms`. A
+  `persona_settings` card good for 15 minutes was withdrawn after 2.
+- It was worse where the wait is relayed. For the manager's own settings the hub calls `extensions.hub_call`, which
+  was not in the hub peer's `Cancels`. The hub's deadline failed the tool call, the manager never heard of it, its
+  card stayed on the phone, and a later approval made the change after the assistant had been told it failed.
+- A call that waits for a card takes its deadline from the card: its `ExpiresAt` plus a margin when the card is the
+  caller's (`waitInteraction`), none of its own when the card is the other side's (`callBusAsIs`, as
+  `managerSettingsTool` does for a change). The margin lets the side that holds the card end it and say how.
+- Whoever may stop waiting on a call that holds a card says so (`Peer.Cancels`), and the side that holds the card
+  makes no change once its caller is gone: check `ctx.Err()` before a change that does not take the context (adding
+  a mail account). The answer and the caller's end can cross, and the queue still hands back an answer it had taken.
+- What the caller is told and what becomes of the card are one assertion: test both ends together. `protocol.md`
+  already said `extensions.hub_call` sent `rpc.cancel`; no test held the code to it.
+- The hub's real bus endpoint runs inside a `testing/synctest` bubble over a `net.Pipe` (`playManager` in
+  `server/internal/hub/settings_card_wait_test.go`), so fifteen minutes pass at once. Give the hub's end a loopback
+  address (the bus refuses plaintext from an address it cannot place), and let what the hub does after a hang-up
+  (`devicesGone` waits half a second) pass in a cleanup: the bubble's clock stops when the test's goroutine is done.
