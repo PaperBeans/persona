@@ -1,5 +1,28 @@
 # Lessons: hub / node and networking
 
+## An app connection's read loop must not wait for a node (2026-11-13, #5915)
+
+`subscribe` and `unsubscribe` called the node (`session.watch` / `session.unwatch`, up to 10 s each) from the app
+connection's only read loop, and the cleanup after a disconnect did the same for each session in turn. While such a
+call waited, nothing else the app sent was read: its `ping`, a phone tool's `tool_result`, terminal keys, and the pong
+of the hub's own protocol ping, so the hub closed a healthy app with `pong_timeout`. No faulty component is needed:
+for 30 s after a manager restart a call for a computer still shown online waits for its node to come back
+(`waitWarm`), and that is when every app subscribes again. One open with a ping behind it took 9.51 s; an open and a
+leave across the hub's ping closed the socket 37 s after it connected.
+
+In the read loop, change only what the hub keeps (the subscription and its count), in the order the messages came,
+and call the node from a goroutine. That is safe because the call is decided by state, not by the message:
+`syncWatch` takes the session's turn (`watchLock`) and looks at the subscriber count when its turn comes, so the
+goroutines may run in any order. The count cannot move to the goroutine too: a leave that ran ahead of its join would
+find nothing to take away, and the join would stay counted for good. What must keep its order with the app's other
+messages (terminal keys) is a one-way `notify` written in place, never a call.
+
+Test it by keeping the node's answer back, waiting until the call is at the node, and then checking that a message
+sent behind it is taken: the fix is told apart by whether the hub reads, not by how long something took. Run the
+scenario through the manager as well, where the wait is the manager's own
+(`server/internal/hub/subscribe_readloop_test.go`). As of this change `fs_watch` still calls the node from the read
+loop (`fsWatchSet`, up to 10 s).
+
 ## A Go file named after a platform builds only there (#5563)
 
 Go reads a file name's last `_<word>` (before `_test`) as a build constraint when the word is a GOOS or GOARCH:
