@@ -199,8 +199,12 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			s.AsksRead = true
 		}
 		if a.Agent == "codex" {
+			if _, thread, err := n.codexOwner(id); err == nil && thread.model != "" {
+				s.Model = thread.model
+			}
 			n.codexEffortRow(id, &s.Efforts, &s.Effort, rollout) // joined on its app-server: its effort (codex_effort.go)
 			n.codexSpeedRow(&s)
+			n.codexRewindRow(id, &s)
 		}
 		if piFamily(a.Agent) {
 			n.mergePiRow(&s) // its conversation is the extension's (pi.go)

@@ -87,6 +87,8 @@ final class InboxHandOffModel {
     private(set) var error: String?
     /// Where the last send went, and to which target: what `open()` opens.
     private(set) var sent: (target: Target, key: SessionKey)?
+    /// A send went from a sheet that is closing: `closed()` opens where it went.
+    @ObservationIgnored private(set) var opensWhenClosed = false
     /// The ask waiting out the Undo window (`queue`).
     private(set) var queued: String?
     /// The last ask sent or tried, for Retry.
@@ -217,6 +219,21 @@ final class InboxHandOffModel {
     func open() {
         guard let sent else { return }
         deps.open(sent.target, sent.key)
+    }
+
+    /// Goes where the last send went once the sheet that sent it has closed (`closed()`), not while it is still up. On the
+    /// Mac, opening moves the window to another section and hides the page that presents the sheet, which then never
+    /// closed (#5921).
+    func openWhenClosed() {
+        opensWhenClosed = sent != nil
+    }
+
+    /// The sheet has closed: opens where the last send went if `openWhenClosed()` asked for it, once. A sheet closed
+    /// without a send (Cancel, Esc, a failed send) opens nothing.
+    func closed() {
+        guard opensWhenClosed else { return }
+        opensWhenClosed = false
+        open()
     }
 
     /// Sends `ask` after `window`, unless `undo()` comes first. Leaving the page does not stop it: the task keeps the

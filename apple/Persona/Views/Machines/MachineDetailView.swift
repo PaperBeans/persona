@@ -108,7 +108,7 @@ struct MachineDetailView: View {
                         NodeHealthSection(ref: ref, machine: machine)
                         if let computer = machine.computer { ComputerSection(ref: ref, computer: computer, online: online) }
                         if let browser = machine.browser { BrowserSection(ref: ref, browser: browser, online: online) }
-                        if machine.browser?.setUp == true { BrowserLoginsSection(ref: ref, online: online) }
+                        if machine.browser?.setUp == true { BrowserLoginsSection(ref: ref, online: online).id(Self.browserLoginsAnchor) }
                         #if os(iOS)
                         // The iPhones paired with this computer, for the assistant (docs/extensions/iphone.md); the frozen Mac app skips it.
                         if let iphone = machine.iphone { IPhoneControlSection(ref: ref, iphone: iphone, online: online) }
@@ -144,6 +144,12 @@ struct MachineDetailView: View {
                 guard machine?.clipboard != nil, at == "YES" || at == "bottom" else { return }
                 try? await Task.sleep(for: .milliseconds(300))
                 scroller.scrollTo(Self.clipboardAnchor, anchor: at == "bottom" ? .bottom : .top)
+            }
+            // `-openBrowserLogins YES`: the page opens scrolled to Browser Sign-ins' top (screenshots, #5821).
+            .task(id: machine?.browser?.setUp == true) {
+                guard machine?.browser?.setUp == true, UserDefaults.standard.string(forKey: "openBrowserLogins") != nil else { return }
+                try? await Task.sleep(for: .seconds(1)) // after the charts above have their height
+                scroller.scrollTo(Self.browserLoginsAnchor, anchor: .top)
             }
             #endif
         }
@@ -200,6 +206,7 @@ struct MachineDetailView: View {
     }
 
     private static let clipboardAnchor = "machine-clipboard"
+    private static let browserLoginsAnchor = "machine-browser-logins"
 
     nonisolated private struct Poll: Hashable, Sendable { var range: MetricRange; var active: Bool }
     nonisolated private struct ExtensionsKey: Hashable, Sendable { var ref: MachineRef; var slots: Bool }

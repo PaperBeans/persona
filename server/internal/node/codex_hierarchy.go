@@ -79,6 +79,7 @@ func (n *Node) decorateCodexSession(s *proto.Session, src codexSource, legacy st
 	}
 	if s.IsSubagent {
 		s.Capabilities.Send, s.Capabilities.Attach, s.Capabilities.Interrupt = false, false, false
+		s.Capabilities.Rewind = proto.CanModes(false)
 	}
 	if origin.started != nil && s.Hierarchy == nil {
 		s.Hierarchy = origin.started // when the thread began, read with its origin: no read of its own (#5120)

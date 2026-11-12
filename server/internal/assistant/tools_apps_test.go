@@ -40,7 +40,9 @@ func TestKBProjectNoteRoundTrip(t *testing.T) {
 		"importance": "invalid", "relevance": 101,
 		"chats": []string{"missing"},
 	})
-	if err != nil || out != "Saved projects/project-note." {
+	// A project does not use projects: said, not dropped silently. Invalid values of fields it does use are still
+	// dropped as before (projectUpdate).
+	if err != nil || out != "Saved projects/project-note.\nNot saved: projects (projects entries do not use projects)." {
 		t.Fatalf("update: %q %v", out, err)
 	}
 	out, err = runTool(s, "c1", "kb_get", map[string]any{"kind": "projects", "id": "Project note"})

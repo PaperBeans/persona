@@ -375,6 +375,7 @@ struct InboxHandOffSheet: View {
                 }
             }
         }
+        .onDisappear { handOff.closed() }
     }
 
     private func send() async {
@@ -382,7 +383,12 @@ struct InboxHandOffSheet: View {
         guard await handOff.send(ask: ask.isEmpty ? Self.presets[0] : ask) else { return }
         if let key = InboxHandOffMemory.key(item) { memory.remember(key, target: handOff.target) }
         Haptics.success()
-        handOff.open()
+        #if os(macOS)
+        // The sheet closes first and `onDisappear` opens where it went: opening first left the sheet up for good (#5921).
+        handOff.openWhenClosed()
+        #else
+        handOff.open() // the tab changes under the sheet as it slides away
+        #endif
         dismiss()
     }
 

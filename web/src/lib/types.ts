@@ -145,6 +145,9 @@ export interface SessionCapabilities {
   close?: boolean;
   /** The permission mode and effort chips can change it (session.modes, #1843): the node's word, absent from older nodes. */
   modes?: boolean;
+  /** Returning to before a user message, with optional native file restoration. */
+  rewind?: boolean;
+  rewind_code?: boolean;
 }
 
 /** A session's work state (docs/assistant/agent-work.md): working, blocked on a named precondition, or done. */

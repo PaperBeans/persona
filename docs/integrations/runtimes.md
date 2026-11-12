@@ -359,6 +359,13 @@ empty boundary. A tool call ends the current text message, so the next message r
 Each prompt clears its live text on completion, including when another prompt is queued.
 
 Session inventory, watch cursors, item pages and live item pushes read `transcript_full.jsonl` when available.
+Antigravity declares `caps.rewind` for idle Agent conversations. The selected message, duplicate occurrence from the
+end, and following user-input count are checked against `GetCascadeTrajectory`. The owned ACP process's private log
+identifies its loopback native service. `RevertToCascadeStep` receives `conversationOnly: true` and the preceding step
+index, including `-1` for an empty conversation. Native refusal propagates to the caller. The bridge uses the current
+native summary and replacement step indices to discard the abandoned export tail, then publishes a changed history
+token. This survives companion restarts without modifying native transcript files.
+
 The compact `transcript.jsonl` export can contain native `<truncated N bytes>` placeholders and can be ahead of
 the complete export. Use one source for sequences and content so a watch cannot advance past unread complete items.
 Older histories fall back to the compact export when the complete file is unavailable. Persona applies the SDK's

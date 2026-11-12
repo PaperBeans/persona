@@ -545,9 +545,13 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		s := proto.Session{SessionID: id, Agent: "codex", SourceKind: "codex_history", SourceThreadID: src.thread, Status: proto.StatusOffline,
 			Capabilities: &proto.SessionCapabilities{Read: true}, ReadOnlyReason: "仅查看：未发现可共享的 app-server 入口，请在电脑上打开会话"}
 		var m quickMeta
-		if src.path != "" {
-			if st, err := pass.stat(src.path); err == nil {
-				m = n.meta(src.path, st)
+		readPath := src.path
+		if p := n.codexAppHistoryPath(src, pass); p != "" {
+			readPath = p
+		}
+		if readPath != "" {
+			if st, err := pass.stat(readPath); err == nil {
+				m = n.meta(readPath, st)
 				if !n.sessionScopeAllows(m.cwd) {
 					continue
 				}
@@ -596,6 +600,9 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			if t.cwd != "" {
 				s.Cwd = t.cwd
 			}
+			if t.model != "" {
+				s.Model = t.model
+			}
 			s.Capabilities.Send, s.Capabilities.Attach = t.parent == "", t.parent == ""
 			s.Capabilities.Approve, s.Capabilities.Interrupt = t.joined, t.turn != "" && t.parent == ""
 			s.ReadOnlyReason = ""
@@ -607,6 +614,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			}
 			n.codexEffortRow(id, &s.Efforts, &s.Effort, m) // codex_effort.go
 			n.codexSpeedRow(&s)
+			n.codexRewindRow(id, &s)
 		} else if err != errCodexNoOwner {
 			s.ReadOnlyReason = err.Error()
 		} else if src.path == "" && codexDesktopChatIn(src, pass) {

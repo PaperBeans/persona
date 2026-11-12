@@ -30,6 +30,18 @@ class WorkflowSummaryTest {
         assertEquals("后台 workflow「parity-audit」 · Verify 2/2 · 169/185+ · 14 分 · 等 2 个", WorkflowSummary.line(s, now)?.zh())
     }
 
+    @Test fun aSummaryRowReadsItsWorkflowProgress() {
+        // summary=1 rows (#5888): no workflows, the newest running run without its agents and phases
+        val s = base.copy(runningWorkflowsCount = 1, workflowProgress = audit.copy(phases = null, phaseCount = 2))
+        assertEquals("后台 workflow「parity-audit」 · Verify 2/2 · 169/185+ · 14 分", WorkflowSummary.line(s, now)?.zh())
+        assertEquals(true, AgentSession(s).isBackgroundWorking)
+        // a count without progress (an older runtime's background entry) still reads as background work
+        assertEquals(true, AgentSession(base.copy(runningWorkflowsCount = 1)).isBackgroundWorking)
+        // a row that carries workflows reads only those
+        assertNull(WorkflowSummary.line(s.copy(workflows = emptyList()), now))
+        assertEquals(false, AgentSession(s.copy(workflows = emptyList())).isBackgroundWorking)
+    }
+
     @Test fun nothingRunningOrAnOlderHub() {
         assertNull(WorkflowSummary.line(base, now))
         assertNull(WorkflowSummary.line(base.copy(workflows = listOf(audit.copy(status = "killed", running = false))), now))

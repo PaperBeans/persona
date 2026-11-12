@@ -201,11 +201,16 @@ func LocalizedBody(status int, code string, err error, l i18n.Lang) map[string]a
 }
 
 var rpcFailureKeys = map[string]string{
-	"timeout":          "rpc-errors.timeout",
-	"node_unreachable": "rpc-errors.unreachable",
-	"internal":         "rpc-errors.failed",
-	"input_draft":      "rpc-errors.input_draft",
-	"dialog_open":      "rpc-errors.dialog_open",
+	"rewind_busy":        "rpc-errors.rewind_busy",
+	"rewind_unsupported": "rpc-errors.rewind_unsupported",
+	"rewind_mismatch":    "rpc-errors.rewind_mismatch",
+	"rewind_nothing":     "rpc-errors.rewind_nothing",
+	"rewind_failed":      "rpc-errors.rewind_failed",
+	"timeout":            "rpc-errors.timeout",
+	"node_unreachable":   "rpc-errors.unreachable",
+	"internal":           "rpc-errors.failed",
+	"input_draft":        "rpc-errors.input_draft",
+	"dialog_open":        "rpc-errors.dialog_open",
 	// the first message to a Codex opened with no first message (node/codex_waiting.go, #4961)
 	"codex_not_ready":          "rpc-errors.codex_not_ready",
 	"codex_first_text":         "rpc-errors.codex_first_text",

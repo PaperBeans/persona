@@ -3295,6 +3295,7 @@ nonisolated struct AgentsListShown: Encodable, Equatable {
             x.subagents = (s.subagents ?? []).contains(where: \.running) ? [] : nil
             x.background = (s.background ?? []).isEmpty ? nil : []
             x.workflows = s.runningWorkflows.isEmpty ? nil : []
+            x.listWorkflowProgress = nil // a summary row's run: its counts move on every step, only rows show them
             return x
         }, byTime: byTime)
     }

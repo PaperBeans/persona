@@ -57,6 +57,8 @@ nonisolated struct LocalRequest: Sendable {
     var method: String
     var path: String
     var query: [String: String]
+    /// Query items a name can repeat in (`site=a&site=b`), after `query`'s, in their order.
+    var repeated: [URLQueryItem] = []
     var body: Data?
     /// Operation semantics and anonymous caller diagnostics, matching the real request's headers.
     var headers: [String: String] = [:]
@@ -195,13 +197,13 @@ nonisolated struct APIClient: Sendable {
 
     /// Where a request goes: under the hub's address, through its SSH tunnel when the app routes it there
     /// (HubTransport). `direct`: the hub's own address all the same (the probe that asks whether it answers there).
-    func url(_ path: String, query: [String: String] = [:], direct: Bool = false) -> URL {
+    func url(_ path: String, query: [String: String] = [:], repeated: [URLQueryItem] = [], direct: Bool = false) -> URL {
         var comps = URLComponents(url: config.url, resolvingAgainstBaseURL: false)!
         var base = comps.percentEncodedPath
         if base.hasSuffix("/") { base.removeLast() }
         comps.percentEncodedPath = base + Self.encodedPath(path)
-        let items = query.filter { !$0.value.isEmpty }.map { URLQueryItem(name: $0.key, value: $0.value) }
-        if !items.isEmpty { comps.queryItems = items.sorted { $0.name < $1.name } }
+        let items = query.filter { !$0.value.isEmpty }.map { URLQueryItem(name: $0.key, value: $0.value) }.sorted { $0.name < $1.name } + repeated
+        if !items.isEmpty { comps.queryItems = items }
         return direct ? comps.url! : HubTransport.resolve(comps.url!, hub: config.url)
     }
 
@@ -297,7 +299,7 @@ nonisolated struct APIClient: Sendable {
     /// it arrives. A repeat it cannot answer yet comes back `202 {"state":"pending" | "unknown"}`: thrown as an
     /// APIError with `OpReceipt.pendingCode` / `unknownCode`, so no caller takes it for done.
     /// `extraHeaders`: what this one request says besides (a hand-off card's approval declares its feature).
-    func request(_ method: String, _ path: String, query: [String: String] = [:], body: (any Encodable)? = nil,
+    func request(_ method: String, _ path: String, query: [String: String] = [:], repeated: [URLQueryItem] = [], body: (any Encodable)? = nil,
                  timeout: TimeInterval = 30, opID: UUID? = nil, extraHeaders: [String: String] = [:]) async throws -> Data {
         let query = larkScoped(path, query)
         let headers = clientMetadata.headers.merging(opID.map(HubNaming.operationHeaders) ?? [:]) { _, operation in operation }
@@ -306,7 +308,7 @@ nonisolated struct APIClient: Sendable {
         if let answer = transport ?? (config.isDemo ? Self.local : nil) {
             let data: Data
             do {
-                data = try await answer(LocalRequest(method: method, path: path, query: query.filter { !$0.value.isEmpty },
+                data = try await answer(LocalRequest(method: method, path: path, query: query.filter { !$0.value.isEmpty }, repeated: repeated,
                                                      body: try body.map { try JSON.encoder.encode(AnyEncodable($0)) }, headers: headers, timeout: timeout))
             } catch var error as APIError {
                 error.requestPath = path
@@ -316,7 +318,7 @@ nonisolated struct APIClient: Sendable {
             return data
         }
         if config.isDemo { throw APIError(status: 503, message: String(localized: "Demo mode isn't available")) }
-        var req = URLRequest(url: url(path, query: query), timeoutInterval: timeout)
+        var req = URLRequest(url: url(path, query: query, repeated: repeated), timeoutInterval: timeout)
         req.httpMethod = method
         config.authorize(&req)
         req.setValue(LanguageStore.shared.launched, forHTTPHeaderField: "Accept-Language")
@@ -685,10 +687,12 @@ nonisolated struct APIClient: Sendable {
         struct Body: Encodable { var cookies: [BrowserCookie] }
         return try JSON.decoder.decode(BrowserCookies.self, from: await request("POST", "/api/v1/machines/\(machine)/browser/cookies", body: Body(cookies: cookies), timeout: 150))
     }
-    /// Clears a site's sign-ins, or (nil) all of them.
-    func clearBrowserCookies(machine: String, site: String?) async throws -> BrowserCookies {
-        let query = site.map { ["site": $0] } ?? ["all": "1"]
-        return try JSON.decoder.decode(BrowserCookies.self, from: await request("DELETE", "/api/v1/machines/\(machine)/browser/cookies", query: query, timeout: 150))
+    /// Clears these sites' sign-ins in one call (`?site=a&site=b`), or (nil) all of them.
+    func clearBrowserCookies(machine: String, sites: [String]?) async throws -> BrowserCookies {
+        let path = "/api/v1/machines/\(machine)/browser/cookies"
+        guard let sites else { return try JSON.decoder.decode(BrowserCookies.self, from: await request("DELETE", path, query: ["all": "1"], timeout: 150)) }
+        let named = sites.map { URLQueryItem(name: "site", value: $0) }
+        return try JSON.decoder.decode(BrowserCookies.self, from: await request("DELETE", path, repeated: named, timeout: 150))
     }
 
     /// The group on what the hub returned (docs/protocol/multi-hub.md).

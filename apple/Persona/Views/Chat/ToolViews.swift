@@ -755,14 +755,8 @@ struct ToolDetail: View {
                     #if os(macOS)
                     .textSelection(.enabled)
                     #endif
-            case "AskUserQuestion":
-                ForEach(Array((i["questions"]?.array ?? []).enumerated()), id: \.offset) { _, q in
-                    Text(q["question"]?.string ?? "").font(Theme.Font.captionMedium)
-                        #if os(macOS)
-                        .textSelection(.enabled)
-                        #endif
-                }
-            case "ask_user":
+            case "AskUserQuestion", "ask_user":
+                // Claude Code's dialog shows its options too (#5889): what it asked can be read where it can't be answered.
                 AskUserDetail(call: call)
             case SecretRun.tool:
                 SecretRunToolDetail(call: call)
@@ -974,6 +968,20 @@ nonisolated enum AskUserAnswers {
         return out
     }
 
+    /// The AskUserQuestion the agent waits on (#5889): its newest call, while it has no result; nil otherwise.
+    static func pending(_ items: [Item]) -> [Question]? {
+        var answered: Set<String> = []
+        for item in items.reversed() {
+            if item.kind == .toolResult, let id = item.toolUseID { answered.insert(id) }
+            guard item.kind == .toolUse else { continue }
+            guard ToolNaming.tableName(item.toolName ?? "") == "AskUserQuestion", let id = item.toolUseID,
+                  !answered.contains(id) else { return nil }
+            let qs = questions(item.toolInput ?? .object([:])).filter { !$0.question.isEmpty }
+            return qs.isEmpty ? nil : qs
+        }
+        return nil
+    }
+
     /// Whether an option is among what was picked.
     static func picked(_ label: String, answer: String?, multiSelect: Bool) -> Bool {
         guard let answer else { return false }
@@ -1002,19 +1010,20 @@ struct AskUserDetail: View {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text(q.question).font(Theme.Font.captionMedium)
                     ForEach(Array(q.options.enumerated()), id: \.offset) { _, label in
-                        choice(label, picked: AskUserAnswers.picked(label, answer: answer, multiSelect: q.multiSelect))
+                        Self.choice(label, picked: AskUserAnswers.picked(label, answer: answer, multiSelect: q.multiSelect))
                     }
-                    if let typed = AskUserAnswers.typed(q, answer: answer) { choice(typed, picked: true) }
+                    if let typed = AskUserAnswers.typed(q, answer: answer) { Self.choice(typed, picked: true) }
                 }
             }
-            if let result = call.result, result.isError != true, answers.isEmpty {
+            // Claude Code's own answer is the result under it (`ToolDetail`), which this does not read.
+            if ToolNaming.tableName(call.name) == "ask_user", let result = call.result, result.isError != true, answers.isEmpty {
                 Text("No answer").font(Theme.Font.label).foregroundStyle(.secondary)
             }
         }
         .accessibilityIdentifier("ask-user-detail")
     }
 
-    private func choice(_ label: String, picked: Bool) -> some View {
+    static func choice(_ label: String, picked: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             ThemedIcon(picked ? Theme.Icon.successFilled : Theme.Icon.unchecked)
                 .font(Theme.Font.label)

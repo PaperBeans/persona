@@ -212,7 +212,7 @@ struct ContextPickerSheet: View {
                 }
             }
             .themedGroupedPage()
-            .searchable(text: $query, prompt: Text("Search"))
+            .pageSearchable(text: $query, prompt: String(localized: "Search"))
             .navigationTitle(model.kind.pageTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

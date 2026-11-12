@@ -186,6 +186,7 @@ func (s *Service) toolKB(ctx context.Context, name string, args json.RawMessage)
 		if err := json.Unmarshal(args, &a); err != nil {
 			return "", err
 		}
+		ignored := kb.Unsupported(a.Kind, a.Update)
 		id, err := e.ApplyUser(a.Kind, a.ID, a.UserUpdate)
 		if err != nil {
 			return "", err
@@ -193,7 +194,11 @@ func (s *Service) toolKB(ctx context.Context, name string, args json.RawMessage)
 		if a.Unmerge {
 			return "Unmerged " + a.Kind + "/" + id + ".", nil
 		}
-		return "Saved " + a.Kind + "/" + id + ".", nil
+		out := "Saved " + a.Kind + "/" + id + "."
+		for _, f := range ignored { // said, so the model does not take a dropped field for written
+			out += "\nNot saved: " + f.Field + " (" + f.Reason + ")."
+		}
+		return out, nil
 	}
 	return "", fmt.Errorf("unknown tool %s", name)
 }

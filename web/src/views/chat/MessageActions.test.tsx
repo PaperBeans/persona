@@ -101,3 +101,9 @@ describe("MessageActions on your own message", () => {
     expect(mine({ ...base, rewind: { block: liveValue(""), run: async () => {} } })).not.toContain('aria-label="更多"');
   });
 });
+
+
+it("offers only conversation rewind when native file restoration is unavailable", () => {
+  const [action] = rewindActions("example#0", "Example", { block: "", code: false, run: async () => {} });
+  expect((action.children as { key: string }[]).map((item) => item.key)).toEqual(["rewind-conversation"]);
+});

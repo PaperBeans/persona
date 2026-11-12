@@ -481,8 +481,12 @@ nonisolated struct Lossy<T: Decodable & Sendable>: Decodable, Sendable {
 }
 
 nonisolated extension Session {
-    /// Its workflows still running.
-    var runningWorkflows: [WorkflowRun] { (workflows ?? []).filter(\.isRunning) }
+    /// Its workflows still running. A summary row (`summary=1`, the Agents list's Recent grouping) has no `workflows`:
+    /// its `workflow_progress`, the newest running run without its agents and phases, stands for them (#5888).
+    var runningWorkflows: [WorkflowRun] {
+        if let workflows { return workflows.filter(\.isRunning) }
+        return listWorkflowProgress.map { $0.isRunning ? [$0] : [] } ?? []
+    }
 
     /// The chat header's cards: the running ones, and those that ended in the last hour (what happened to it), running
     /// first; only while one runs or one just ended.
@@ -499,7 +503,10 @@ nonisolated extension Session {
     var leadWorkflow: WorkflowRun? { runningWorkflows.first }
 
     /// Working while its turn has ended, because a workflow runs (#2935; the hub counts it as working): 「工作中（后台）」.
-    var isBackgroundWorking: Bool { !assistant && state == .working && !runningWorkflows.isEmpty }
+    /// A summary row's `running_workflows` also counts a run it sends no progress for (an older runtime's background entry).
+    var isBackgroundWorking: Bool {
+        !assistant && state == .working && (!runningWorkflows.isEmpty || (workflows == nil && (listRunningWorkflows ?? 0) > 0))
+    }
 
     /// Background tasks to count apart from the workflows (the hub also lists a running workflow in `background`, for
     /// older apps): 「后台 N」 is these plus the running workflows.

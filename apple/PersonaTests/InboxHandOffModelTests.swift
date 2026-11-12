@@ -499,6 +499,29 @@ struct InboxHandOffModelTests {
         #expect(calls.went.last?.target == .agent(agent) && calls.went.last?.key == agent && calls.went.count == 3)
     }
 
+    /// The Mac sheet (#5921): a send opens nothing while the sheet is up; once it has closed, where it went opens once.
+    @Test func aSendFromTheSheetOpensOnlyOnceTheSheetHasClosed() async {
+        let calls = Calls(), m = model(calls)
+        m.target = .newChat
+        #expect(await m.send(ask: "a"))
+        m.openWhenClosed()
+        #expect(calls.went.isEmpty && m.opensWhenClosed)
+        m.closed()
+        #expect(calls.went.count == 1 && calls.went[0].target == .newChat && calls.went[0].key == Self.fresh)
+        m.closed() // a second disappearance opens nothing more
+        #expect(calls.went.count == 1 && !m.opensWhenClosed)
+    }
+
+    @Test func aSheetClosedWithoutASendOpensNothing() async {
+        let calls = Calls(), m = model(calls)
+        m.closed() // Cancel
+        calls.failures = [APIError(status: 400, message: "no")]
+        #expect(!(await m.send(ask: "a")))
+        m.openWhenClosed() // nothing went, so nothing is waiting
+        m.closed() // Cancel after the error
+        #expect(calls.went.isEmpty && !m.opensWhenClosed)
+    }
+
     @Test func aFailedSendHasNowhereToOpen() async {
         let calls = Calls(), m = model(calls)
         calls.failures = [APIError(status: 400, message: "no")]

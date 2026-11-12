@@ -154,6 +154,7 @@ func normalizeRuntimeSessions(h *runtimeConn, list []proto.Session) []proto.Sess
 		}
 		s.Capabilities = &proto.SessionCapabilities{Read: true, Send: caps.Send, Interrupt: caps.Interrupt, Approve: true,
 			Close: &caps.Close, Modes: proto.CanModes(runtimeModes(caps.Modes, rt, s)),
+			Rewind: proto.CanModes(caps.Rewind && !s.IsSubagent && !strings.Contains(s.SessionID, subagentSep)), RewindCode: proto.CanModes(false),
 			Model: proto.CanModes(caps.Modes && caps.Model && !strings.Contains(s.SessionID, subagentSep))}
 		s.ReadOnlyReason, s.Attached, s.CodexRoute, s.CodexRouteNote = readOnly, false, "", ""
 		// The pane is the engine's to show (pi.go joins it with the engine's pane), not part of the runtime's row.

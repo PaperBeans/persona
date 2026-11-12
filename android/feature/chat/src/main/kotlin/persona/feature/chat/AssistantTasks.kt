@@ -437,6 +437,15 @@ internal fun permissionLabel(mode: String?): String = when (mode ?: "default") {
 }
 
 /**
+ * What a planned task runs on, as its chip says it: the model, else its launcher, by the short name the Agents rows and the
+ * composer's pill use ("Opus 4.8", `modelShortName`; iOS writes the raw string), else "Default model". The Edit sheet's field
+ * keeps the raw value: it is what the task starts with.
+ */
+@Composable
+internal fun planModelLabel(task: persona.core.contracts.PlanTask): String =
+    persona.core.domain.modelShortName(task.model?.takeIf(String::isNotBlank) ?: task.launcher).ifEmpty { stringResource(R.string.chat_tasks_default_model) }
+
+/**
  * A plan as the conversation or a sheet draws it: the store's latest of it ([given] until it knows the plan), so a card left
  * open on the screen follows the plan to started or dismissed instead of offering Start again.
  */
@@ -479,7 +488,7 @@ internal fun PlanCard(given: TaskPlan, host: AssistantTaskHost) {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
                             JChip(host.machineName(t.machine), icon = PhIcons.Laptop)
                             JChip(t.project, icon = PhIcons.Folder)
-                            JChip(t.model?.takeIf(String::isNotBlank) ?: t.launcher?.takeIf(String::isNotBlank) ?: stringResource(R.string.chat_tasks_default_model), icon = PhIcons.Cpu)
+                            JChip(planModelLabel(t), icon = PhIcons.Cpu)
                             JChip(if (t.readonly == true) stringResource(R.string.chat_tasks_read_only) else permissionLabel(t.permission), selected = t.readonly == true)
                         }
                         t.why?.takeIf(String::isNotBlank)?.let { Text(it, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2) }

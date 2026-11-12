@@ -232,6 +232,12 @@ func (w *keyWriter) caps(c *proto.SessionCapabilities) {
 	if c.Model != nil {
 		w.b.WriteString(" model=" + strconv.FormatBool(*c.Model))
 	}
+	if c.Rewind != nil {
+		w.b.WriteString(" rewind=" + strconv.FormatBool(*c.Rewind))
+	}
+	if c.RewindCode != nil {
+		w.b.WriteString(" rewind_code=" + strconv.FormatBool(*c.RewindCode))
+	}
 	w.b.WriteByte('}')
 }
 
