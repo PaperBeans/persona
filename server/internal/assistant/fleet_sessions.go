@@ -360,23 +360,58 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 }
 
 // decoratedSession is one of the machine's sessions as the apps get it. Each row is decorated on its own, so the one
-// the node lists is decorated alone (as readinessMain does), not the machine's whole list for each finished turn; one
-// the node does not list may still be an archived row (archivedSessions), found in the whole list.
+// the node lists is decorated alone (listedSession, as readinessMain does), not the machine's whole list for each
+// finished turn; one the node does not list may still be an archived row (archivedSessions), read from its record
+// alone (archivedRow): the records only grow, and the whole list carries every one of them.
 func (s *Service) decoratedSession(machine, sid string) (proto.Session, bool) {
+	if row, ok := s.listedSession(machine, sid); ok {
+		return row, true
+	}
+	row, ok, err := s.archivedRow(context.Background(), machine, sid)
+	if err != nil {
+		s.logf("load agent archives: %v", err)
+	}
+	if !ok {
+		return proto.Session{}, false
+	}
+	one := []proto.Session{row}
+	s.foldSubset(machine, one) // what the last complete list folded it as, as for a row the node lists
+	return one[0], true
+}
+
+// listedSession is decoratedSession for a row machine's node lists: false for one only the archive keeps.
+func (s *Service) listedSession(machine, sid string) (proto.Session, bool) {
 	mark := s.archiveMark()
-	if row, ok := s.nodeSession(machine, sid); ok {
-		list, _, err := s.archivedSessions(context.Background(), machine, s.decorateInventory(machine, []proto.Session{row}, false), mark)
-		if err != nil {
-			s.logf("load agent archives: %v", err)
-		}
-		return list[0], true // the row itself: the archive appends only the rows it was not given
+	row, ok := s.nodeSession(machine, sid)
+	if !ok {
+		return proto.Session{}, false
 	}
-	for _, sess := range s.decorated(machine) {
-		if sess.SessionID == sid {
-			return sess, true
-		}
+	list, err := s.archivedListed(context.Background(), machine, s.decorateInventory(machine, []proto.Session{row}, false), mark)
+	if err != nil {
+		s.logf("load agent archives: %v", err)
 	}
-	return proto.Session{}, false
+	return list[0], true
+}
+
+// listedSessions are the sessions machine's node lists, each as the apps get it (listedSession, for the whole list,
+// folded as the last complete list was): sessions without the rows only the archive keeps, for a reader of what runs
+// on a machine. Those rows are offline, and every record of the machine is one (they only grow). Without the fleet
+// in this process it is sessions, archive rows and all.
+func (s *Service) listedSessions(ctx context.Context, machine string) ([]proto.Session, error) {
+	if !s.fleetOn() || machine == DeviceAll {
+		return s.sessions(ctx, machine)
+	}
+	m, ok := s.fleetMachine(machine)
+	if !ok {
+		return nil, ErrNoDevice // as sessions.list says
+	}
+	mark := s.archiveMark()
+	list, err := s.archivedListed(context.Background(), m.ID, s.decorateInventory(m.ID, s.nodeSessions(m.ID), true), mark)
+	if err != nil {
+		s.logf("load agent archives: %v", err)
+	}
+	s.foldSubset(m.ID, list) // never stored: the fold is the complete list's, archive rows and all (foldInventory)
+	return list, nil
 }
 
 // decorateTodos puts on machine mid's sessions the todo each works for and whether it is quiet.

@@ -88,6 +88,13 @@ or the manager restarts and retries). A previous interrupted send (hub stopped o
 - Messages sent by the app bound to `lark-cli` (the `appId` reported by `lark-cli auth status --json`) are marked seen and omitted to prevent Persona's own bot replies from looping back into the Inbox. If that app id is unavailable, the connector keeps the existing behavior; messages from other apps remain eligible.
 - Mail: unread messages in each account's latest 40 Inbox messages, within 7 days. The list API reads only the first 2 KB of body (HTML mail often contains nothing but `<style>`),
   so new mails fetch the full body again (IMAP `BODY.PEEK`, without marking read) for preview and AI context (`BodyOf` tracks which mail was read).
+- Mail that leaves that page (archived or deleted in the mail client, or pushed off by newer mail) follows the same rules (#5993,
+  `inbox_mail_off_page.go`): after a round applies an account's page, its open, unread mail items with no mail on the page are
+  settled. One whose newest mail is past the 7 days is handled like a mail past the window on the page; for the others the manager asks
+  the hub once a round which of their mails are still in the mailbox, read or not (`inbox.mail_flags`, one read-only IMAP `UID FETCH
+  (FLAGS)`, at most 200 UIDs per account, the longest unasked first). Every mail read or gone means read elsewhere ("Lifecycle"); one still
+  unread keeps the item as it is, and so does a lookup that fails (a hub from before it). Needs you and an FYI conclusion waiting for
+  Got it are only marked read, as on the page.
 - Mail's **Add to Inbox** (#5307; Settings › Connectors › Mail and Settings › Inbox Sources, `PUT /api/v1/connectors/mail/settings {inbox}`) is on
   until turned off and kept with the other connector switches. Off, the mail rounds read no account (`readMail`), so the mail items the
   Inbox has stay as they are (and its accounts' read errors as last read); search, replies and the knowledge base go on. Turned on again, the
@@ -538,7 +545,7 @@ To-dos do not store a separate tree. Code: `assistant/inbox_parent.go`.
   done page of a build from before it still runs if a hub goes back to that build (`docs/operations/hub-restart.md`); it can be dropped once no such build can run.
   The start read (`InboxItems`) has no `ORDER BY` (the manager keys the items by id) and hands each row to the manager straight from the driver's buffer,
   where it is decoded; the rows are never collected as bytes first. A read that fails midway takes nothing in, as before.
-- Read elsewhere (Lark / another mail client): mark `read`; non-Needs you items become done (`done_by=read`). Needs you remains open, but unread count becomes zero and me / everyone mention flags clear (no longer unread mentions). Rule-tiered items are retiered using current rules after reading; no longer Needs you means done.
+- Read elsewhere (Lark / another mail client; for mail also gone from INBOX or past the window, on the page or off it, #5993): mark `read`; non-Needs you items become done (`done_by=read`). Needs you remains open, but unread count becomes zero and me / everyone mention flags clear (no longer unread mentions). Rule-tiered items are retiered using current rules after reading; no longer Needs you means done.
   Already-read open items with remaining unread count or stale rule tiers (read before a rule change) are reconciled next round (#798).
 - A reply by me in Lark (latest chat message is mine, newer than the item) handles it (`done_by=replied`).
 - Lark collection reads messages without holding a lock. If an item is marked done during the read (manually or in bulk), newly read messages create another item rather than merge into the done one (previously swallowed and invisible, #1105).

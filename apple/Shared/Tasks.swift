@@ -21,10 +21,64 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
     /// Set once started: the todo the task is, and why its agent did not start.
     var todoID: String?
     var error: String?
+    /// What the task will be held to, shown on the plan card before Start (docs/assistant/unified-entry.md "Briefs").
+    /// Read-only: it is never sent back (`encode(to:)` leaves it out), and one that does not decode is as if there were none.
+    var brief: TaskBrief?
 
     enum CodingKeys: String, CodingKey {
-        case title, prompt, machine, cwd, launcher, model, permission, ultracode, readonly, why, error
+        case title, prompt, machine, cwd, launcher, model, permission, ultracode, readonly, why, error, brief
         case todoID = "todo_id"
+    }
+
+    init(title: String, prompt: String, machine: String, cwd: String, launcher: String? = nil, model: String? = nil,
+         permission: String? = nil, ultracode: Bool? = nil, readonly: Bool? = nil, why: String? = nil, todoID: String? = nil,
+         error: String? = nil, brief: TaskBrief? = nil) {
+        self.title = title
+        self.prompt = prompt
+        self.machine = machine
+        self.cwd = cwd
+        self.launcher = launcher
+        self.model = model
+        self.permission = permission
+        self.ultracode = ultracode
+        self.readonly = readonly
+        self.why = why
+        self.todoID = todoID
+        self.error = error
+        self.brief = brief
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decode(String.self, forKey: .title)
+        prompt = try c.decode(String.self, forKey: .prompt)
+        machine = try c.decode(String.self, forKey: .machine)
+        cwd = try c.decode(String.self, forKey: .cwd)
+        launcher = try c.decodeIfPresent(String.self, forKey: .launcher)
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        permission = try c.decodeIfPresent(String.self, forKey: .permission)
+        ultracode = try c.decodeIfPresent(Bool.self, forKey: .ultracode)
+        readonly = try c.decodeIfPresent(Bool.self, forKey: .readonly)
+        why = try c.decodeIfPresent(String.self, forKey: .why)
+        todoID = try c.decodeIfPresent(String.self, forKey: .todoID)
+        error = try c.decodeIfPresent(String.self, forKey: .error)
+        brief = (try? c.decodeIfPresent(TaskBrief.self, forKey: .brief)) ?? nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(title, forKey: .title)
+        try c.encode(prompt, forKey: .prompt)
+        try c.encode(machine, forKey: .machine)
+        try c.encode(cwd, forKey: .cwd)
+        try c.encodeIfPresent(launcher, forKey: .launcher)
+        try c.encodeIfPresent(model, forKey: .model)
+        try c.encodeIfPresent(permission, forKey: .permission)
+        try c.encodeIfPresent(ultracode, forKey: .ultracode)
+        try c.encodeIfPresent(readonly, forKey: .readonly)
+        try c.encodeIfPresent(why, forKey: .why)
+        try c.encodeIfPresent(todoID, forKey: .todoID)
+        try c.encodeIfPresent(error, forKey: .error)
     }
 
     var isReadOnly: Bool { readonly ?? false }
@@ -135,6 +189,10 @@ nonisolated struct FeedItem: Codable, Hashable, Identifiable, Sendable {
         return s
     }
 
+    /// `task`: how the main chat came to the task: `created` (started now), `active` (the Agent was running already) or
+    /// `resumed` (picked up again). Anything else, or none, reads as created (the web's `feedWake`).
+    var wake: String? { string("wake") }
+
     /// `answered`: what the card asked and the user's answer, a line each (the collapsed row).
     var question: String? { string("question") }
     var answer: String? { string("answer") }
@@ -232,15 +290,16 @@ nonisolated struct FeedItem: Codable, Hashable, Identifiable, Sendable {
 }
 
 /// What Persona sent to its tasks' agents in a conversation's feed (#1542, docs/assistant/unified-entry.md "Messages to agents"):
-/// a task's card lists them, the hand-off sent with the card is drawn only there, a later one is a folded line.
+/// each is a folded line or an exchange in the chat.
 nonisolated enum SentToAgents {
     /// How long after its task's card a message of Persona's counts as the card's hand-off: agent_send with a task writes
     /// the card and, right after it, what it sent.
     static let handOff: TimeInterval = 60
 
-    /// The hand-offs the task cards take in (not drawn on their own): Persona's messages within `handOff` after their own
-    /// task's card in the same conversation. Only a card drawn in full (from today, `FeedLine`) has the list: from another
-    /// day it is one line (`TaskLine`), and its hand-off stays a folded line under it (#1668).
+    /// The hand-offs a task's feed item takes in (not drawn on their own): Persona's messages within `handOff` after their own
+    /// task's item in the same conversation, from today. Nothing in the app applies this (`shown`) any more: the old task card
+    /// listed them and the chat left them out, until docs/design/task-cards.md P7 removed that card, so they are drawn like any
+    /// other message of Persona's. The rule stays, with its tests, for the day a card lists them again.
     static func takenIn(_ feed: [FeedItem], now: Date = .now, calendar: Calendar = .current) -> Set<String> {
         var cards: [String: [Date]] = [:]
         for item in feed where item.kind == .task && calendar.isDate(item.at, inSameDayAs: now) {
@@ -315,6 +374,19 @@ nonisolated struct TodayBody: Codable, Hashable, Sendable {
         case date, done, waiting, working, meetings, unread, failed
         case atMe = "at_me", failedTotal = "failed_total"
     }
+}
+
+/// The round of a task's owner decision (`decision_review`, docs/protocol/protocol.md): `reviewAt` is the hub's own string,
+/// sent back as it came (a `Date` would lose the sub-second part and the hub would answer 409), and `dismissalID` is the
+/// receipt of a Don't handle that has not been undone.
+nonisolated struct DecisionReview: Codable, Hashable, Sendable {
+    var reviewAt: String
+    var dismissalID: String?
+
+    enum CodingKeys: String, CodingKey { case reviewAt = "review_at", dismissalID = "dismissal_id" }
+
+    /// Don't handle was pressed for this very round and not undone.
+    var dismissed: Bool { !(dismissalID ?? "").isEmpty }
 }
 
 /// A todo (docs/assistant/todos.md); a task is one whose `origin` is an assistant conversation.
@@ -401,9 +473,12 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
     /// routing"): the pages list the current assistant's, and a request about it names this one. Nil with one manager,
     /// and on an answer about one to-do, which keeps the stamp the list gave it.
     var manager: String?
+    /// The round of a decision that waits on the owner (`decision_review`): what Later / Don't handle on its row refer to.
+    var decisionReview: DecisionReview?
 
     enum CodingKeys: String, CodingKey {
         case id, title, notes, origin, agents, spaces, quiet, stage, supervision, priority, ask, delivery, manager
+        case decisionReview = "decision_review"
         case doneAt = "done_at", createdAt = "created_at", updatedAt = "updated_at", reopenedAt = "reopened_at", seenAt = "seen_at", planID = "plan_id", startError = "start_error",
              doneBy = "done_by", doneReason = "done_reason", prURL = "pr_url", dueAt = "due_at", dueDate = "due_date",
              remindAt = "remind_at", remindedAt = "reminded_at"
@@ -414,7 +489,7 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
          agents: [Agent] = [], spaces: [Space]? = nil, quiet: Bool = false, stage: String? = nil, prURL: String? = nil,
          supervision: TaskSupervision? = nil, dueAt: Date? = nil, dueDate: String? = nil, remindAt: Date? = nil,
          remindedAt: Date? = nil, priority: String? = nil, ask: TodoAsk? = nil, reopenedAt: Date? = nil,
-         delivery: TodoDelivery? = nil, manager: String? = nil, seenAt: Date? = nil) {
+         delivery: TodoDelivery? = nil, manager: String? = nil, seenAt: Date? = nil, decisionReview: DecisionReview? = nil) {
         self.id = id
         self.title = title
         self.notes = notes
@@ -442,6 +517,7 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         self.delivery = delivery
         self.manager = manager
         self.seenAt = seenAt
+        self.decisionReview = decisionReview
     }
 
     init(from decoder: Decoder) throws {
@@ -478,6 +554,8 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         seenAt = (try? c.decodeIfPresent(Date.self, forKey: .seenAt)) ?? nil
         delivery = (try? c.decodeIfPresent(TodoDelivery.self, forKey: .delivery)) ?? nil
         manager = try c.decodeIfPresent(String.self, forKey: .manager)
+        // New: only on an open task whose latest review needs the owner; one that does not decode is as if there were none.
+        decisionReview = (try? c.decodeIfPresent(DecisionReview.self, forKey: .decisionReview)) ?? nil
     }
 
     /// An ended task cannot keep an old decision card alive.
@@ -803,7 +881,7 @@ nonisolated enum TaskAsk {
         return nil
     }
 
-    /// The task card's line while it waits: what it asks, else the generic word.
+    /// A task row's line while it waits: what it asks, else the generic word.
     static func waitingLine(_ interactions: [Interaction]) -> String {
         line(interactions) ?? String(localized: "Waiting for your answer [Tasks 542ebd]")
     }
@@ -911,6 +989,35 @@ nonisolated extension APIClient {
             enum CodingKeys: String, CodingKey { case askedAt = "asked_at" }
         }
         _ = try await post("/api/v1/todos/\(Self.pathPart(id))/accept", body: Body(askedAt: askedAt))
+    }
+
+    /// Don't handle on a decision row (`decision_review`, docs/protocol/protocol.md): the round `reviewAt` stays hidden from
+    /// Needs You until it changes, nothing else on the task does. The answer carries the receipt Undo needs. A 409 means that
+    /// round is over (the task moved on, or it was dismissed already).
+    func dismissDecision(_ id: String, reviewAt: String) async throws -> DecisionReview {
+        struct Body: Encodable {
+            var reviewAt: String
+            enum CodingKeys: String, CodingKey { case reviewAt = "review_at" }
+        }
+        return try await post("/api/v1/todos/\(Self.pathPart(id))/decision-dismiss", body: Body(reviewAt: reviewAt), as: DecisionReview.self)
+    }
+
+    /// Undo of Don't handle: only the dismissal this receipt names.
+    func undoDecisionDismissal(_ id: String, reviewAt: String, receipt: String) async throws {
+        struct Body: Encodable {
+            var reviewAt: String
+            var dismissalID: String
+            enum CodingKeys: String, CodingKey { case reviewAt = "review_at", dismissalID = "dismissal_id" }
+        }
+        _ = try await post("/api/v1/todos/\(Self.pathPart(id))/decision-undo-dismiss", body: Body(reviewAt: reviewAt, dismissalID: receipt))
+    }
+
+    /// Retry on a task whose agent did not start, Continue on one a model error cut off (`POST /api/v1/todos/{id}/retry`): the
+    /// hub starts it again and answers with the todo. 409: it is not a task that can be retried now (or its machine is
+    /// offline).
+    func retryTodo(_ id: String) async throws -> TodoItem {
+        struct Response: Decodable { var todo: TodoItem }
+        return try await post("/api/v1/todos/\(Self.pathPart(id))/retry", as: Response.self).todo
     }
 
     /// The Handled button of a question that can wait (a `brief` item's `later` row). A 409 means it is not in the queue any

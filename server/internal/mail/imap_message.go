@@ -52,6 +52,44 @@ func (s *Service) GetMessage(ctx context.Context, accountID string, uid uint32, 
 	return out, nil
 }
 
+// SeenFlags says, for each of uids still in mailbox, whether it is seen; a UID the mailbox no longer has (moved,
+// archived or deleted) is not in the map. One read-only UID FETCH (FLAGS): nothing is marked.
+func (s *Service) SeenFlags(ctx context.Context, accountID, mailbox string, uids []uint32) (map[uint32]bool, error) {
+	a, err := s.account(accountID)
+	if err != nil {
+		return nil, err
+	}
+	if mailbox == "" {
+		mailbox = "INBOX"
+	}
+	out := map[uint32]bool{}
+	if len(uids) == 0 {
+		return out, nil
+	}
+	var set imap.UIDSet
+	for _, uid := range uids {
+		set.AddNum(imap.UID(uid))
+	}
+	err = s.withConn(ctx, a, func(c *imapclient.Client) error {
+		clear(out)
+		if _, err := c.Select(mailbox, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+			return fmt.Errorf("select %s: %w", mailbox, err)
+		}
+		msgs, err := c.Fetch(set, &imap.FetchOptions{UID: true, Flags: true}).Collect()
+		if err != nil {
+			return fmt.Errorf("fetch: %w", err)
+		}
+		for _, m := range msgs {
+			out[uint32(m.UID)] = hasFlag(m.Flags, imap.FlagSeen)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // messageFrom parses a fully fetched message.
 func messageFrom(a *MailAccount, mailbox string, m *imapclient.FetchMessageBuffer) *MailMessage {
 	sum := MailSummary{

@@ -75,6 +75,8 @@ fun ChatScreen(
     sessionKey: SessionKey, repository: ChatRepository, sender: MessageSender,
     interactions: InteractionCenter, sessions: SessionsRepository, onBack: () -> Unit,
     onTerminal: ((SessionKey) -> Unit)? = null,
+    /** Resume in Terminal (#5565): open the terminal and resume there; null when the shell has no terminal. */
+    onResumeInTerminal: ((SessionKey) -> Unit)? = null,
     chrome: ChatChromeBindings = ChatChromeBindings(),
     pendingBadge: @Composable () -> Unit = { PendingBadge(PendingStatus.NeedsReview) },
     readingKey: ChatReadingKey? = null,
@@ -101,7 +103,8 @@ fun ChatScreen(
         key(sessionKey, scopedReadingKey) {
             val readOnlyRefusal = androidx.compose.ui.res.stringResource(R.string.chat_read_only_history)
             val pageSender = remember(sender, historyReadOnly) { if (historyReadOnly) ReadOnlyMessageSender(sender, readOnlyRefusal) else sender }
-            ChatPage(sessionKey, repository, pageSender, interactions, sessions, onBack, onTerminal, chrome, scopedReadingKey, anchorStore ?: local?.anchors,
+            ChatPage(sessionKey, repository, pageSender, interactions, sessions, onBack, onTerminal, onResumeInTerminal, chrome,
+                scopedReadingKey, anchorStore ?: local?.anchors,
                 renderStyle, textUpdates,
                 composerService, composerState ?: rememberChatComposerState(), onDraftChanged, onContextCleared, statusBindings,
                 embedded, showTopBar, historyReadOnly, historyFooter, historySession)
@@ -114,7 +117,7 @@ fun ChatScreen(
 private fun ChatPage(
     key: SessionKey, repository: ChatRepository, sender: MessageSender,
     interactions: InteractionCenter, sessions: SessionsRepository, onBack: () -> Unit,
-    onTerminal: ((SessionKey) -> Unit)?, chrome: ChatChromeBindings,
+    onTerminal: ((SessionKey) -> Unit)?, onResumeInTerminal: ((SessionKey) -> Unit)?, chrome: ChatChromeBindings,
     readingKey: ChatReadingKey?, anchorStore: ChatAnchorStore?,
     renderStyle: ChatRenderStyle, textUpdates: Map<String, ChatTextUpdate>,
     composerService: ChatComposerService?, composer: ChatComposerState,
@@ -149,6 +152,8 @@ private fun ChatPage(
     val machines by sessions.machines.collectAsStateWithLifecycle()
     val allRequests by interactions.pending.collectAsStateWithLifecycle()
     val allMessages by sender.outbox.collectAsStateWithLifecycle()
+    val adoptedSessions by sessions.adoptedSessions.collectAsStateWithLifecycle()
+    val startedThreads by sessions.startedThreads.collectAsStateWithLifecycle()
     val writtenAt by sender.writtenAt.collectAsStateWithLifecycle()
     val allSendReceipts by key(sender) { sender.sendReceipts.collectAsStateWithLifecycle() }
     val sendReceipts = allSendReceipts.filter { receipt -> receipt.session == key ||
@@ -171,7 +176,11 @@ private fun ChatPage(
     val readOnly = historyOnly || child != null || workflowAgent != null || key.sessionId.contains('@')
     var lastSession by remember(key) { mutableStateOf<Session?>(null) }
     var detailInfo by remember(key) { mutableStateOf<SessionInfo?>(null) }
-    val row = sessionList.firstOrNull { it.key == key }
+    val adopted = adoptedSessions.lastOrNull { it.key == key }
+    val row = sessionList.firstOrNull { it.key == key }?.let {
+        // Summary rows from older hubs omit this flag; a waiting pane keeps its id only until it becomes a thread.
+        if (adopted?.awaitingFirstMessage == true) it.copy(awaitingFirstMessage = true) else it
+    } ?: adopted
     LaunchedEffect(key, row?.waiting != null, row?.rev, row?.model, chrome.actions) {
         if (row?.waiting == null) return@LaunchedEffect
         try { detailInfo = chrome.actions?.info(row) }
@@ -181,8 +190,8 @@ private fun ChatPage(
     // What an Agent's summary row leaves out and `info` doesn't say: the launcher switch waiting for the next message
     // (#5055), read from the session's complete row where the hub looks one up (`sessions_lookup`); Glass's pill shows it.
     var completeRow by remember(key) { mutableStateOf<Session?>(null) }
-    val lookup = "sessions_lookup" in LocalHubFeatures.current && PersonaTheme.style == AppStyle.Glass &&
-        renderStyle != ChatRenderStyle.Assistant && AgentModelPanel.LAUNCHER_SWITCH in LocalHubFeatures.current
+    val lookup = "sessions_lookup" in LocalHubFeatures.current && renderStyle != ChatRenderStyle.Assistant &&
+        PersonaTheme.style == AppStyle.Glass && AgentModelPanel.LAUNCHER_SWITCH in LocalHubFeatures.current
     LaunchedEffect(key, row?.waiting != null, row?.rev, chrome.actions, lookup) {
         if (row?.waiting == null || !lookup) return@LaunchedEffect
         try { completeRow = chrome.actions?.completeRow(row) }
@@ -202,6 +211,13 @@ private fun ChatPage(
     } ?: lastSession
     SideEffect { if (liveSession != null) lastSession = liveSession }
     val session = liveSession ?: readOnlySessionMetadata(key, historyReadOnly, historySession)
+    val codexThread = session?.takeIf { it.awaitingFirstMessage && !historyOnly }?.let {
+        startedThreads[key] ?: codexThreadOf(sessionList, it)
+    }
+    val followSession = chrome.onFollowSession ?: onContextCleared ?: chrome.onOpenSession
+    LaunchedEffect(codexThread?.key) {
+        codexThread?.let { followSession?.invoke(it.key) }
+    }
     // A launcher switch this page recorded or dropped (#5055), drawn at once until the row's next push says what the hub has.
     var drawnSwitch by remember(key) { mutableStateOf<DrawnSwitch?>(null) }
     val switchSession = session?.let { drawnSwitch.over(it) }
@@ -576,6 +592,7 @@ private fun ChatPage(
     // A session without a terminal (a Codex thread, an agent runtime's) has nothing to open or explain (#4339 C7).
     val hasTerminal = ChatTerminalPlaces.has(readOnly, canTerminal, renderStyle)
     val agentTerminal = terminal?.takeIf { hasTerminal }
+    val resumeInTerminal: (() -> Unit)? = onResumeInTerminal?.let { action -> { action(key) } }
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
 
     fun followEnd() {
@@ -1156,6 +1173,7 @@ private fun ChatPage(
                                         onOpenTodo = chrome.onOpenTodo, agentShares = chrome.agentShares, worktrees = chrome.worktrees,
                                         onSearch = { search.open(chatList) { timeline.freeze(currentItems); timelineVersion++ } },
                                         onTerminal = agentTerminal, onTerminalHelp = if (hasTerminal && terminal == null) ({ terminalHelp = true }) else null,
+                                        onResumeInTerminal = resumeInTerminal,
                                         turnStart = runningSince)
                                     // The space's other tabs under the title (iOS SiblingTabs); not for the assistant's conversation.
                                     if (tabs && session != null && onOpenSibling != null) {
@@ -1445,7 +1463,7 @@ private fun ChatPage(
                             }
                             else if (!settling && lines.isEmpty() && messages.isEmpty() && snapshot.error == null)
                                 JEmptyState(stringResource(R.string.chat_screen_empty_title),
-                                    stringResource(if (readOnly) R.string.chat_screen_empty_read_only else R.string.chat_screen_empty_hint),
+                                    emptyChatHint(res, session, machines.firstOrNull { it.id == key.machineId }?.name, readOnly),
                                     Modifier.align(Alignment.Center).padding(padding).padding(horizontal = horizontalPadding))
                             // The newest plan card scrolled out of view: "Step N/M" above the composer brings it back (web PlanPill).
                             val anchor = remember(lines, contentPlans, renderStyle) { latestPlanLine(lines, contentPlans) }

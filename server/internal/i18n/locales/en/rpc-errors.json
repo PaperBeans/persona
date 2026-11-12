@@ -56,6 +56,7 @@
   "switch_stale": "The agent moved to another model provider since you picked this one. Look at the provider it runs on now, then pick again.",
   "switch_pick_model": "Persona can’t see which model that model provider runs by default, and without one the conversation would keep its current model. Pick a model of that provider.",
   "switch_under_way": "The agent is moving to another model provider right now. Try again once it runs; nothing was done.",
+  "switch_busy": "The agent is busy right now (working, waiting for you, starting, or running something in the background), so it wasn’t moved to the other model provider. Nothing was sent; try again once it has stopped.",
   "rewind_busy": "Wait for the session to become idle before rewinding.",
   "rewind_unsupported": "This session does not support the requested rewind.",
   "rewind_mismatch": "The selected message moved. Reload the conversation before rewinding.",

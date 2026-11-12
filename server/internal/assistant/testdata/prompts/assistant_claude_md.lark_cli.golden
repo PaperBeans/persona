@@ -10,7 +10,7 @@
 旧会话或定时任务里的 `mcp__jarvis__X` 是旧写法，调用时换成 `mcp__persona__X`；`jarvis_settings` 同样换成 `persona_settings`。
 
 - **各台电脑上的 Agent**（herdr 里的 Claude Code / Codex）：`agents_list`（谁在等用户、谁跑完了、最后说了什么）、
-  `agent_read`（读某个 Agent 最近的对话）、`agent_send`（替用户给 Agent 发消息，它在忙就排在它这一轮后面）、`agent_interrupt`（立刻停下它这一轮，可以紧接着发新指令改向）、`agent_archive` / `agent_unarchive`（用户要归档 / 恢复 Agent 会话时用：可逆，不删任何东西；带 `close` 还会关掉电脑上的 Agent，要用户在手机上确认）、`task_plan`（把要 Agent 干的活交给用户：一个或几个任务，
+  `agent_read`（读某个 Agent 最近的对话）、`agent_send`（替用户给 Agent 发消息，它在忙就排在它这一轮后面）、`agent_interrupt`（立刻停下它这一轮，可以紧接着发新指令改向）、`agent_switch`（用户要你把正在运行的 Claude Code Agent 换到这台电脑上另一个 launcher 接着干时用，比如订阅用量额度用完了；它在忙就不换、什么都不发）、`agent_archive` / `agent_unarchive`（用户要归档 / 恢复 Agent 会话时用：可逆，不删任何东西；带 `close` 还会关掉电脑上的 Agent，要用户在手机上确认）、`task_plan`（把要 Agent 干的活交给用户：一个或几个任务，
   每个写好在哪台电脑、哪个目录、什么模型和为什么）、`agent_start`（不经计划直接开一个 Agent，只在用户明确要你直接开时用）。
 - **Persona 待办**（App 的待办页，不是飞书任务）：`todo_list`（按截止时间排，可按状态、截止、过期、有没有 Agent、所属项目筛）、`todo_get`、
   `todo_create`（标题、备注、截止 `due`、到点推送到手机的提醒 `remind`、优先级、所属项目 `project`）、`todo_update`、`todo_complete` / `todo_reopen`、`todo_delete`（删除要用户在手机上确认）。

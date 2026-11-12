@@ -589,6 +589,21 @@
     <string name="agents_todo_calendar_change_due_of">Change Due Date: %1$s…</string>
     <string name="agents_todo_calendar_date">Date</string>
     <string name="agents_todo_calendar_time">Time</string>
+    <string name="agents_todo_calendar_mode_day">Day</string>
+    <string name="agents_todo_calendar_mode_week">Week</string>
+    <string name="agents_todo_calendar_mode_month">Month</string>
+    <string name="agents_todo_calendar_previous_day">Previous day</string>
+    <string name="agents_todo_calendar_next_day">Next day</string>
+    <string name="agents_todo_calendar_previous_week">Previous week</string>
+    <string name="agents_todo_calendar_next_week">Next week</string>
+    <string name="agents_todo_calendar_show_day">Show Day</string>
+    <string name="agents_todo_calendar_due">Due</string>
+    <string name="agents_todo_calendar_add">Add</string>
+    <string name="agents_todo_calendar_add_hint">Set a reminder, the priority and notes on the to-do\'s page.</string>
+    <plurals name="agents_todo_calendar_open">
+        <item quantity="one">1 to-do</item>
+        <item quantity="other">%1$d to-dos</item>
+    </plurals>
     <plurals name="agents_todo_calendar_undated">
         <item quantity="one">1 without a due date</item>
         <item quantity="other">%1$d without a due date</item>

@@ -1982,9 +1982,17 @@ final class AppModel {
             }
             #endif
             Task { await refreshInAppTunnel(group) }
-            Task { await refreshManagerRoster(group) }
+            let rosterRead = Task { await refreshManagerRoster(group) }
             // Back on the hub: an install that moved on while the connection was down shows where it is now (#3307).
-            if isHub, Set(hello.features).hasExtensionFeature("operations") { Task { await ExtensionOperations.shared.reload() } }
+            if isHub, Set(hello.features).hasExtensionFeature("operations") {
+                Task {
+                    await ExtensionOperations.shared.reload()
+                    await rosterRead.value
+                    if managerRoster != nil, let manager = assistantManagerID {
+                        await ExtensionOperations.shared.reload(manager: manager)
+                    }
+                }
+            }
             if isHub { flushErrorReports(group) } // the feature may have come or gone with this hello (#5621)
             if isHub, link(group)?.isDemo == false { learnedRecordingDay(hello) }
             #if DEBUG && (os(iOS) || os(visionOS))

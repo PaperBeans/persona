@@ -855,6 +855,10 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     var turnError: String? = nil
     var turnErrorKind: String? = nil
     var turnErrorCode: String? = nil
+    /// A subscription usage limit's reset time, and whether the CLI goes on by itself after it (`turn_error_resets_at`,
+    /// `turn_error_resumes`; docs/assistant/agent-work.md "Usage limits"). Nil from older hubs and for other errors.
+    var turnErrorResetsAt: Date? = nil
+    var turnErrorResumes: Bool? = nil
     /// Where it lives outside Persona (a botmux session's Feishu topic): Open in Lark.
     var externalURL: String? = nil
     /// The channels messages came into it from, newest first ("wechat", "feishu"; docs/extensions/channels.md「Source markers」): the
@@ -1055,7 +1059,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
              updatedAt = "updated_at", lastText = "last_text", asks, awaitsReply = "awaits_reply", backgroundWaiting = "background_waiting", backgroundWorking = "background_working", activity, activityAt = "activity_at", pendingInteractions = "pending_interactions", rev, suggestion,
              starting, awaitingFirstMessage = "awaiting_first_message", startError = "start_error", startErrorCode = "start_error_code", startErrorArgs = "start_error_args", todo, quiet, hubGroup = "app_hub_group",
              attentionReason = "attention_reason", failureReason = "failure_reason",
-             turnError = "turn_error", turnErrorKind = "turn_error_kind", turnErrorCode = "turn_error_code", externalURL = "external_url", channels, origin, openedBy = "opened_by", compaction, work,
+             turnError = "turn_error", turnErrorKind = "turn_error_kind", turnErrorCode = "turn_error_code", turnErrorResetsAt = "turn_error_resets_at", turnErrorResumes = "turn_error_resumes", externalURL = "external_url", channels, origin, openedBy = "opened_by", compaction, work,
              runtime, runtimeFallback = "runtime_fallback", manager, modelFallback = "model_fallback", modelRestore = "model_restore"
     }
 
@@ -1163,6 +1167,8 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         turnError = try c.decodeIfPresent(String.self, forKey: .turnError)
         turnErrorKind = try c.decodeIfPresent(String.self, forKey: .turnErrorKind)
         turnErrorCode = try c.decodeIfPresent(String.self, forKey: .turnErrorCode)
+        turnErrorResetsAt = try? c.decodeIfPresent(Date.self, forKey: .turnErrorResetsAt)
+        turnErrorResumes = try? c.decodeIfPresent(Bool.self, forKey: .turnErrorResumes)
         externalURL = try c.decodeIfPresent(String.self, forKey: .externalURL)
         channels = try c.decodeIfPresent([String].self, forKey: .channels)
         origin = try c.decodeIfPresent(String.self, forKey: .origin)
@@ -1186,6 +1192,8 @@ nonisolated struct WorkState: Codable, Hashable, Sendable {
     var then: String? = nil
     /// When the hub acts next on its own: Continue (transient) or a wake (external, agent).
     var wakeAt: Date? = nil
+    /// When a usage limit resets (`resets_at`), for a wait on one.
+    var resetsAt: Date? = nil
     var attempts: Int? = nil
     var max: Int? = nil
     /// The agent it waits for.
@@ -1193,7 +1201,7 @@ nonisolated struct WorkState: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case phase, on, line, wait, then, attempts, max, agent
-        case wakeAt = "wake_at"
+        case wakeAt = "wake_at", resetsAt = "resets_at"
     }
 
     /// The hub waits it out: it wakes it (`wake_at`), or it wakes itself (its background tasks, a /loop). Waiting in the

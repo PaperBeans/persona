@@ -242,8 +242,13 @@ func recipeFormat() map[string]any {
 			"link":     "where to open it (https links become the row's link)",
 			"due_date": "a deadline: a row with one is Needs you without a triage model",
 		},
-		"paths":         "relative to one item: $, .key (letters, digits, _ and -) and [index]; no wildcards, filters or expressions",
-		"items_path":    "where the list of items is in the result ($ by default); leave it empty to have the dry run find the result's one top-level list",
+		"paths":      "relative to one item: $, .key (letters, digits, _ and -) and [index]; no wildcards, filters or expressions",
+		"items_path": "where the list of items is in the result ($ by default); leave it empty to have the dry run find the result's one top-level list",
+		"pagination": map[string]string{
+			"cursor": "set cursor_arg and next_cursor_path: the tool argument and result path for an opaque next-page cursor",
+			"page":   "set page_arg and optionally next_page_path: numeric next page or boolean has-more; without a result path, a full requested page continues",
+			"resume": "one page is committed per leased run; the original window advances only after the terminal page",
+		},
 		"template_vars": map[string]string{"{{since}}": "RFC 3339 time: an hour before the newest item already pulled, a day back on the first run", "{{since_date}}": "the same as a date, YYYY-MM-DD in the user's zone"},
 		"modes": map[string]string{
 			wire.ConnectorSubscriptionModeItems:    "new items, each kept once (a JSON result with a list)",

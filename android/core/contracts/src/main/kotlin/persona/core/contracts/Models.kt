@@ -60,6 +60,11 @@ data class Machine(
     @SerialName("node_mismatch") val nodeMismatch: Boolean? = null,
     /** The terminal engine chosen for this machine (docs/integrations/engines.md); hubs send it always, herdr when never chosen. */
     @SerialName("engine") val engine: String = "herdr",
+    /**
+     * The terminal hosts this machine enables side by side (#2576 / #3302); empty when none are enabled; null from an older
+     * hub that only sent [engine]. Resume in Terminal (#5565) reads the empty set as "no terminal engine".
+     */
+    @SerialName("engine_hosts") val engineHosts: List<String>? = null,
     /** What the node found there; empty from older hubs and nodes, and while the machine is offline. */
     @SerialName("engines") val engines: List<DetectedEngine> = emptyList(),
     /** The hub is installing its own personad build there ("Redeploy"). */
@@ -455,6 +460,8 @@ data class Session(
     @SerialName("starting") val starting: Boolean = false,
     /** Why starting it failed; the session is offline and sends get the same error. */
     @SerialName("start_error") val startError: String? = null,
+    /** Codex is open in its pane and has no thread until its first message. */
+    @SerialName("awaiting_first_message") val awaitingFirstMessage: Boolean = false,
     /**
      * The channels messages came into this conversation from, newest first (`wechat`, `feishu`; docs/extensions/channels.md
      * "Source marks"): the conversation list draws the latest's mark. Older hubs never send it.

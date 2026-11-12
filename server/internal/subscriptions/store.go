@@ -55,7 +55,8 @@ type Held struct {
 	Item
 }
 
-// RunCommit is what a run writes at once: the new dedup keys and items, the cursor and history, and the state. The
+// RunCommit is what a run writes at once: the new dedup keys and items, the SinceAt cursor or bounded continuation
+// with its original window, the history, and the state. The
 // state (RunState, Error, FailCount, FailingSince, PausedUntil, ShapeMisses, ToolFingerprint) is written only while
 // the subscription is still at Revision: a run that started before the user changed the recipe does not undo the
 // change. The run's lease is released.
@@ -263,7 +264,10 @@ func applyRun(cur *Subscription, c RunCommit, withState bool) {
 	if c.Baseline != nil && sameTime(cur.Baseline, c.Baseline) {
 		cur.Baseline = nil
 	}
-	cur.SinceAt, cur.SnapshotHash, cur.Runs = out.SinceAt, out.SnapshotHash, out.Runs
+	cur.SnapshotHash, cur.Runs = out.SnapshotHash, out.Runs
+	if SameRecipe(cur.Recipe, out.Recipe) {
+		cur.SinceAt, cur.Continuation = out.SinceAt, cloneContinuation(out.Continuation)
+	}
 	cur.LastRunAt, cur.LastOKAt, cur.LastNewCount = out.LastRunAt, out.LastOKAt, out.LastNewCount
 	cur.WeakDedup, cur.Shape, cur.NextRunAt = out.WeakDedup, out.Shape, out.NextRunAt
 	cur.SourceName, cur.Icon, cur.Service, cur.SourceMin, cur.MaxCallsPerHour = out.SourceName, out.Icon, out.Service, out.SourceMin, out.MaxCallsPerHour
@@ -285,5 +289,6 @@ func sameTime(a, b *time.Time) bool {
 
 func clone(s Subscription) Subscription {
 	s.Runs = slices.Clone(s.Runs)
+	s.Continuation = cloneContinuation(s.Continuation)
 	return s
 }

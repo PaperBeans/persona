@@ -209,7 +209,7 @@ struct WatchAllDayCard: View {
         let state = allDay.state
         return VStack(alignment: .leading, spacing: Theme.Watch.lineSpacing) {
             Label(state.word(startable: startable) ?? String(localized: "All-Day Recording"), systemImage: state.symbol)
-                .font(Theme.Font.secondaryMedium).foregroundStyle(state.tone).lineLimit(2)
+                .labelStyle(.watchRow).font(Theme.Font.secondaryMedium).foregroundStyle(state.tone).lineLimit(2)
             if state == .recording, let since = allDay.since {
                 Text(timerInterval: since...Date.distantFuture, countsDown: false)
                     .font(Theme.Font.caption.monospacedDigit()).foregroundStyle(.secondary)

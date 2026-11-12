@@ -226,7 +226,7 @@ extension AppModel {
     /// and naming the default is harmless. The Rules and Muted lists name their stamp too.
     func itemManager(_ manager: String?) -> String? { managerRoster.map { $0.naming(manager) } ?? manager }
 
-    /// The manager the requests of a Persona conversation name (its feed, a reply draft's Send and Do Not Handle, a plan's
+    /// The manager the requests of a Persona conversation name (its feed, a reply draft's Send and Don't handle, a plan's
     /// Start or Don't Start, a briefing question's Handled): the conversation's own, none for the default's. Some of those
     /// routes name no conversation, so the hub would take them to the default manager whichever assistant the conversation
     /// is. By its listing, else by what it was opened for (`assistantItemManagers`), else the current assistant, on whose
@@ -304,6 +304,12 @@ extension ManagerRoster {
     static func pushed(by manager: String?, defaultID: String?) -> String? {
         let id = manager ?? assistant
         return id == (defaultID ?? assistant) ? nil : id
+    }
+
+    /// The manager for a storage key. Unlike a raw push, storage's nil already means the default assistant, not the
+    /// hub's own assistant, so name that default before applying the push rule.
+    static func stored(_ manager: String?, defaultID: String?) -> String? {
+        pushed(by: manager ?? defaultID, defaultID: defaultID)
     }
 
     /// The installed manager a thing stamped `manager` belongs to, when it is offline on a hub with several managers;

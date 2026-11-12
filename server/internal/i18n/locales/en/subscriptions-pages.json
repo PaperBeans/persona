@@ -247,6 +247,7 @@
   "problem.conflict": "It was just changed elsewhere",
   "problem.dry_run_failed": "The dry run didn't pass",
   "problem.interval_too_short": "That's more often than allowed",
+  "problem.invalid_pagination": "Pagination can't continue safely; fix the recipe",
   "problem.model_failed": "The model couldn't write it this time; try again later",
   "problem.needs_recipe": "There's no recipe yet",
   "problem.no_list": "Couldn't find a list of items in the result",

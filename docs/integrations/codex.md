@@ -275,7 +275,7 @@ and answers with a **waiting row** for the pane (`node/codex_waiting.go`).
 - **Clients**: launchers of nodes that start Codex this way carry `prompt_optional: true`. The manager marks its own managed Codex launchers so when the node's Codex launchers are marked.
   - New Agent offers the first message as optional for those launchers only. The web's work picker reads `prompt_required: false` from the start options.
   - The row says "Waiting for its first message" (it is not Needs you, not unread, and sends no push). Its chat says Codex is open on the computer and takes the first message.
-  - Web and iOS follow the answer's `session` to the thread, and follow the pane when the message was typed in the terminal (`web/src/lib/codex-waiting.ts`, iOS `ChatView.codexThread`). Android: not yet.
+  - Web, iOS and Android follow the first message answer's `session` from a waiting row to the thread, and follow the same computer's pane in the already-loaded session list when the message was typed in the terminal (`web/src/lib/codex-waiting.ts`, iOS `ChatView.codexThread`, Android `codexThreadOf` in `CodexWaiting.kt`). Android replaces the open route; it does not fetch extra pages when a filter excludes the thread.
 - **Verified**: Codex 0.153.4 and herdr 0.9.3 on a Mac (2026-11-12), two Codex in one directory:
   - the App's first message (quotes, `$HOME`, backticks, newline, Chinese, 2,098 characters) reached the rollout unchanged, attached in 1.9 seconds;
   - the other row's message, typed in its terminal, attached to its own thread;

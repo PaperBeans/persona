@@ -93,6 +93,11 @@ const (
 	// ModelRun: model.run, an API purpose's request answered by a launcher's CLI run headless on this computer
 	// (docs/assistant/model-config.md "Running API purposes on a launcher").
 	ModelRun = "model_run"
+	// LauncherSwitchNow: session.send takes switch_now, the assistant's agent_switch (#5973): the switch it picked is
+	// carried out with that message now, or the message is refused (switch_busy and the other switch codes) with
+	// nothing typed and the switch dropped. A node without it would take the message as apply_switch alone: typed on the
+	// launcher the agent runs on while it is busy, with the switch left waiting for the user's next message.
+	LauncherSwitchNow = "launcher_switch_now"
 )
 
 // Error codes in the manager's answers to a resident node's replayed notifications (a notify with spool_id,
@@ -117,7 +122,7 @@ const (
 )
 
 // Announced is what a node built from this code announces.
-var Announced = []string{ShareProjection, CreationReceipt, PersonaContracts, ManagerUpdateInventory, Sessions, ModelConfiguration, AssistantConfigDir, NodeUpdate, Engines, MachineUID, HerdrServer, PluginNodeCall, Ultracode, HealthSpaces, Preview, SecretRun, Clipboard, SecretEnv, LauncherSwitch, ModelHTTP, EngineSwitch, ModelRun}
+var Announced = []string{ShareProjection, CreationReceipt, PersonaContracts, ManagerUpdateInventory, Sessions, ModelConfiguration, AssistantConfigDir, NodeUpdate, Engines, MachineUID, HerdrServer, PluginNodeCall, Ultracode, HealthSpaces, Preview, SecretRun, Clipboard, SecretEnv, LauncherSwitch, ModelHTTP, EngineSwitch, ModelRun, LauncherSwitchNow}
 
 // ShareProjection is the bounded complete-source sharing projection, not light Items.
 const ShareProjection = "share_projection.v1"

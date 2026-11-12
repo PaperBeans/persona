@@ -353,6 +353,22 @@ class HttpTasksApiTest {
         }
     }
 
+    // #4200: a to-do made on the calendar is due where it was tapped, by the moment or the day; without one, neither is sent.
+    @Test fun aNewTodoCarriesTheDueDateItWasMadeWith() = runBlocking {
+        MockWebServer().use { server ->
+            repeat(3) { server.enqueue(MockResponse().setBody("""{"todo":{"id":"t$it","title":"Call the bank"}}""")) }
+            api(server).createTodo("Call the bank", due = persona.core.contracts.TodoDue.At(java.time.Instant.parse("2026-11-19T06:30:00Z")))
+            val atReq = server.takeRequest()
+            assertEquals("POST", atReq.method)
+            assertEquals("/api/v1/todos", atReq.path)
+            assertEquals("""{"title":"Call the bank","notes":"","due_at":"2026-11-19T06:30:00Z"}""", atReq.body.readUtf8())
+            api(server).createTodo("Call the bank", due = persona.core.contracts.TodoDue.Day(java.time.LocalDate.parse("2026-11-19")))
+            assertEquals("""{"title":"Call the bank","notes":"","due_date":"2026-11-19"}""", server.takeRequest().body.readUtf8())
+            api(server).createTodo("Call the bank")
+            assertEquals("""{"title":"Call the bank","notes":""}""", server.takeRequest().body.readUtf8())
+        }
+    }
+
     @Test fun directCompletionOnlyPatchesDoneAndDecodesTheUserCompletionReceipt() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("""{"todo":{"id":"todo/one","title":"Review the sample release","done_at":"2026-11-04T10:00:00Z"}}"""))

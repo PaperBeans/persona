@@ -570,6 +570,20 @@
     <string name="agents_todo_calendar_change_due_of">改截止时间：%1$s…</string>
     <string name="agents_todo_calendar_date">日期</string>
     <string name="agents_todo_calendar_time">时间</string>
+    <string name="agents_todo_calendar_mode_day">日</string>
+    <string name="agents_todo_calendar_mode_week">周</string>
+    <string name="agents_todo_calendar_mode_month">月</string>
+    <string name="agents_todo_calendar_previous_day">前一天</string>
+    <string name="agents_todo_calendar_next_day">后一天</string>
+    <string name="agents_todo_calendar_previous_week">上一周</string>
+    <string name="agents_todo_calendar_next_week">下一周</string>
+    <string name="agents_todo_calendar_show_day">查看当天</string>
+    <string name="agents_todo_calendar_due">截止</string>
+    <string name="agents_todo_calendar_add">添加</string>
+    <string name="agents_todo_calendar_add_hint">提醒、优先级和备注在待办页面里设置。</string>
+    <plurals name="agents_todo_calendar_open">
+        <item quantity="other">%1$d 条待办</item>
+    </plurals>
     <plurals name="agents_todo_calendar_undated">
         <item quantity="other">%1$d 条没有截止</item>
     </plurals>

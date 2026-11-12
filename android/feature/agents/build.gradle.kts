@@ -9,8 +9,13 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
-            // RecentSetupsFixtureTest reads spec/fixtures/recents.
-            all { it.systemProperty("persona.repo.root", rootProject.projectDir.parentFile.absolutePath) }
+            all {
+                // RecentSetupsFixtureTest reads spec/fixtures/recents.
+                it.systemProperty("persona.repo.root", rootProject.projectDir.parentFile.absolutePath)
+                // The screens' screenshots (the to-dos calendar's day, week and month in three styles, dark and light)
+                // share one test process; retain the bounded heap they need rather than the 512 MB default, as feature/settings does.
+                it.maxHeapSize = "1g"
+            }
         }
     }
 }

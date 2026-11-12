@@ -667,6 +667,13 @@ Same shape as Moshi `worktree/prepare` + `worktree/create`.
 
 The local Orca adapter also provides a capability-gated composer, GitHub issue/PR source lookup, sparse presets and preview-confirmed workspace removal. The exact HTTP fields, adapter/runtime capability distinction, receipt handling and deletion reconciliation are specified in [the protocol](../protocol/protocol.md#orca-worktree-composer-and-removal). Legacy branch/path creation remains available. Removal keeps branches by default, unregisters folder workspaces without deleting their directories, and requires a fresh instance-bound preview when identity or dirty content changes. A background acknowledgement is not completion; clients reconcile without automatically repeating the destructive request.
 
+The sidebar also offers **Close workspace** for herdr. Confirmation ends its terminals and keeps the directory, files
+and branches, including a main checkout or a workspace whose directory has disappeared. A linked Git checkout also
+offers **Delete worktree** after its directory is verified. Deletion previews the checkout's changed files and keeps
+its branch by default. The optional merged-branch cleanup uses Git's safe branch deletion. Each confirmation binds
+the workspace, pane membership, available native socket identity and, for deletion, the checkout and reviewed file contents.
+An uncertain response is reconciled through the live catalog and filesystem. Reconciliation preserves one-use dispatch. A herdr parent with linked workspaces requires closing those child workspaces first.
+
 ### A new agent in a worktree (#6115)
 
 A new agent can start in a Git worktree of its own, so agents on the same repository don't step on each other (after Claude Desktop, which gives each session a worktree under the repository and asks to keep or discard it on archive).

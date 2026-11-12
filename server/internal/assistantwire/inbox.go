@@ -91,6 +91,9 @@ const (
 	InboxConfigMethod = "inbox.config"
 	// InboxMailBody: InboxMailRef → InboxMailMessage: a mail read in full (peeked: it stays unread).
 	InboxMailBody = "inbox.mail_body"
+	// InboxMailFlags: InboxMailFlagsAsk → InboxMailFlags: which of a mailbox's mails are still there, read or not (a mail
+	// item's mail off the account's latest page, #5993); at most InboxMailFlagsMost UIDs, peeked (nothing is marked).
+	InboxMailFlagsMethod = "inbox.mail_flags"
 	// InboxReplyMail: {account_id, uid, mailbox, text, send_id} → InboxSent: the reply to that mail, sent from the
 	// account that got it.
 	InboxReplyMail = "inbox.reply_mail"
@@ -251,6 +254,23 @@ type InboxMailRef struct {
 	UID       uint32 `json:"uid"`
 	Mailbox   string `json:"mailbox"`
 	Readable  bool   `json:"readable,omitempty"`
+}
+
+// InboxMailFlagsMost is the most UIDs one InboxMailFlagsMethod call asks about.
+const InboxMailFlagsMost = 200
+
+// InboxMailFlagsAsk names mails of one account's mailbox by UID.
+type InboxMailFlagsAsk struct {
+	AccountID string   `json:"account_id"`
+	Mailbox   string   `json:"mailbox"`
+	UIDs      []uint32 `json:"uids"`
+}
+
+// InboxMailFlags is what became of the asked mails: those still in the mailbox, read or not; one in neither list is
+// gone from it (moved, archived or deleted).
+type InboxMailFlags struct {
+	Seen   []uint32 `json:"seen"`
+	Unseen []uint32 `json:"unseen"`
 }
 
 // InboxMailMessage is one mail read in full: Text is its text part, else its HTML as text.

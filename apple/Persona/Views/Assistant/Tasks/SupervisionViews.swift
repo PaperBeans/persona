@@ -119,23 +119,6 @@ private struct CriterionRow: View {
     }
 }
 
-/// What the task's agent last told Persona, under the card's current step (only while the task is open).
-struct TaskProgressLine: View {
-    var line: String
-
-    var body: some View {
-        Label {
-            Text(line).lineLimit(1)
-        } icon: {
-            ThemedIcon(Theme.Icon.reported).font(Theme.Font.labelStrong)
-        }
-        .labelStyle(.titleAndIcon)
-        .font(Theme.Font.caption)
-        .foregroundStyle(.secondary)
-        .accessibilityIdentifier("task-progress-line")
-    }
-}
-
 /// A review in the conversation (feed kind `review`): a capsule like the answered line, with the task (a tap opens it),
 /// the verdict and the supervisor's note.
 struct ReviewFeedLine: View {

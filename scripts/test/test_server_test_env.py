@@ -175,7 +175,7 @@ class ServerTestEnvironmentTests(unittest.TestCase):
             remote = root / "remote"
             profile = remote / "live-profile"
             for path in (checkout / "scripts/test", checkout / "scripts/mock", checkout / "server/internal/hub",
-                         checkout / "spec", checkout / "apple",
+                         checkout / "spec", checkout / "apple", checkout / "web/src/i18n/locales/en",
                          checkout / "docs", checkout / "sdk/go/ext", checkout / "sdk/go/wire/schema",
                          checkout / "sdk/templates/go", checkout / "sdk/ts/src", checkout / "sdk/ts/node_modules/typescript",
                          checkout / "schema/extension/examples/invalid", tools, profile):
@@ -184,6 +184,8 @@ class ServerTestEnvironmentTests(unittest.TestCase):
             (checkout / "sdk/ts/src/index.ts").write_text("export const fixture = true;\n")
             (checkout / "sdk/ts/node_modules/typescript/package.json").write_text('{"name":"typescript"}\n')
             (checkout / "docs/guide.md").write_text("# Fixture guide\n")
+            # kb's minutes tests read the web's locale files (web/src/i18n/locales/<lang>/*.json)
+            (checkout / "web/src/i18n/locales/en/fixture.json").write_text('{"locale":true}\n')
             (checkout / "scripts/deploy").mkdir()
             (checkout / "scripts/deploy/db.sh").write_text("# synthetic db script\n")
             (checkout / "sdk/templates/go/persona-extension.json").write_text('{"template":true}\n')
@@ -278,6 +280,7 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                  "assert (schema/'examples/invalid/View.fixture.json').read_text()=='{\"valid\":false}\\n'\n"
                  "assert not (schema/'stale.json').exists()\n"
                  "assert (base/'docs/guide.md').read_text()=='# Fixture guide\\n'\n"
+                 "assert (base/'web/src/i18n/locales/en/fixture.json').read_text()=='{\"locale\":true}\\n'\n"
                  "assert (base/'sdk/templates/go/persona-extension.json').read_text()=='{\"template\":true}\\n'\n"
                  "assert (base/'sdk/ts/src/index.ts').read_text()=='export const fixture = true;\\n'\n"
                  "assert not (base/'sdk/ts/node_modules').exists()\n"

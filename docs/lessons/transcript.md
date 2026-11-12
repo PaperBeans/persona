@@ -269,3 +269,16 @@ A view that fetches once per id cannot recover when the store puts the same id b
   same split again. Leave `cwd` as recorded: it is what the session's own record says.
 - A test that makes a repository under `t.TempDir()` and compares paths needs the physical temporary directory
   (`physicalTempDir`): macOS's is behind a link, so the test passes on Linux and fails on a Mac.
+
+## The background scan never sees a long line (2026-11-13, #6003)
+
+- The node's background scan (`node/bgscan.go`) parses only lines of at most 64 KiB that name a marker: request blobs
+  repeat the whole conversation, markers included, and are 100–500 KB each. Lines over its 256 KiB buffer come in
+  pieces and are skipped too. Anything the session list needs from that scan has to be readable from a short line.
+- A Workflow call carries its script inline (`input.script`), so the call is as long as the script: a 42 KB script
+  made a 94 KB call line. The call was skipped, never parked in `bgPending`, and its short result ("Workflow launched in
+  background. Task ID: …") then registered nothing, so a running workflow had no card. The result names the task, the
+  run (`Run ID`, `Transcript dir`) and the script file on its own, so `backgroundStarted` now starts the run from it
+  when the call was not read; it only takes a result that starts with those words and names a run.
+- Before blaming the line limit, measure the lines: in the same session the earlier runs' calls were 2–27 KB and listed
+  fine; the 69–115 KB lines near them were request blobs and attachments.

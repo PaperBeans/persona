@@ -56,10 +56,10 @@ type edge struct {
 	active *proc
 	gate   chan struct{} // closed while connections may go to active
 	held   bool
+	served string // the name of the slot that served last: a new slot takes the other one
 
 	waiting atomic.Int32
 	reqs    chan switchReq
-	slots   int // started so far: names alternate a, b
 
 	// The update the active slot is the result of, until it confirms it.
 	confirmBuild int64
