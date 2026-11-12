@@ -14,6 +14,7 @@ On Apple silicon the IORegistry's `product` entry has the same name in about 20 
 product`); system_profiler remains for Intel Macs, run once per process in the background, and a read waits only a
 second for it. Its output, like ioreg's, holds serial numbers: read only the one line. Tests fake both commands
 (`newModelLookup` takes the runner) and use `synctest`; a node-level test puts hanging fakes first on `PATH`.
+
 ## A name taken from a counter of attempts is not a free name (2026-11-13, #6024)
 
 The hub edge named each new slot by alternating on a counter of slots started (`'a' + slots%2`), assuming every
