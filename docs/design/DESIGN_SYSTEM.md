@@ -725,6 +725,11 @@ automatic naming hides the advanced controls without losing their values. Saves 
 show only confirmed values. Native custom titles and manual renames are protected; task names and tab labels are
 separate objects and unchanged. This is a requested feature, with no new visual style, component or motion.
 
+### 3.7.2 Tick boxes (iOS)
+
+- `.toggleStyle(.tickBox)` (`TickBoxToggleStyle` in `apple/Persona/DesignSystem/Components.swift`): a box, ticked (`Theme.Icon.checkedBox`, positive) or not (`Theme.Icon.uncheckedBox`, secondary), beside a short label. Tapping the box or the label flips it, and VoiceOver reads it as the toggle it is.
+- Only for a mark the user sets on one item among many, where a switch would outweigh the item: a file marked viewed in a code review (#827). Settings keep `Toggle`'s switch.
+
 ### 3.8 Chips, badges, avatars, marks
 
 `Chip` (look neutral, tint or outline), `CountBadge` (99+ cap), `LinkBadge`, `Monogram`, `AgentMark`, `BrandMark`, `SessionAvatar`, `ThreadAvatar`. Chips are text-only and read as their text. Decorative marks are hidden from VoiceOver when adjacent text names them. Sources are in `apple/Persona/DesignSystem/Components.swift` and neighbors.
@@ -1074,6 +1079,13 @@ A message card in Persona's conversation on iOS and Android's Glass style adds *
 reads as text until Edit opens it for typing, and **Done** closes it (iOS `MessageCard`, Android `DraftDecisionButtons(edit)`).
 The original card's not-sent receipt remains inspectable. This deliberately does not reuse Inbox completion, which
 would suppress future progress replies for the same source. The API contract is in `docs/assistant/agent-work.md`.
+
+A hand-off write-back card (#5932, web `HandoffCard`, iOS `HandoffCardView`) is the same card for an Inbox item the
+user handed to the conversation: the item's summary over the reply, **Send** primary (**Got It** for a conclusion),
+**Edit** on iOS beside it (the web edits in place) and **Later**, which folds it to one line. It has no Don't handle:
+the item is still in the Inbox, where it can be turned down. Its state comes from the item, so it is never a second
+count of the same request. The main conversation's **Wrap up: <title>** chips over the composer follow `RouteChip`'s
+capsule, one per open item handed to it, at most two.
 
 Today there are seven mechanisms and the same action can use different ones (DS-24). Archive in the sidebar, to-do swipe delete and mail-account delete have no confirmation and no Undo. Only the Mac discards edits with a prompt.
 

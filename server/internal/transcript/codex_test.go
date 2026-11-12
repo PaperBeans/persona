@@ -40,7 +40,7 @@ func TestCodexRollout(t *testing.T) {
 		got = append(got, it.Role+":"+it.Kind+":"+it.ToolName)
 	}
 	want := []string{
-		"user:text:", "assistant:thinking:",
+		"user:text:", "assistant:text:",
 		"assistant:tool_use:Bash", "user:tool_result:", "assistant:tool_use:Bash", "user:tool_result:",
 		"assistant:tool_use:Edit", "user:tool_result:", "assistant:tool_use:mcp__cua__js", "user:tool_result:",
 		"assistant:text:", "system:notice:",
@@ -107,7 +107,7 @@ func TestHistoryMutationRollout(t *testing.T) {
 		got = append(got, it.Role+":"+it.Kind+":"+it.ToolName+":"+it.Text)
 	}
 	want := []string{
-		"user:text::build the proxy", "assistant:thinking::Checking the repo first.",
+		"user:text::build the proxy", "assistant:text::Checking the repo first.",
 		"assistant:tool_use:Bash:", "user:tool_result::a\n", "assistant:text::Done: the proxy runs.",
 	}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
@@ -120,6 +120,33 @@ func TestHistoryMutationRollout(t *testing.T) {
 	_ = os.WriteFile(path, []byte(strings.Join(append(lines, `{"timestamp":"2026-10-28T08:43:51.000Z","ordinal":13,"type":"event_msg","payload":{"type":"task_complete","turn_id":"t1"}}`), "\n")+"\n"), 0o644)
 	if _, err := f.Refresh(); err != nil || f.Meta().TurnOpen {
 		t.Fatalf("turn still open after task_complete: %v", err)
+	}
+}
+
+func TestCodexCommentaryAnswersUserMidTurn(t *testing.T) {
+	const ts = `"timestamp":"2026-11-12T08:00:00.000Z"`
+	ev := func(payload string) string { return `{` + ts + `,"type":"event_msg","payload":` + payload + `}` }
+	item := func(it string) string { return ev(`{"type":"item_completed","item":` + it + `}`) }
+	lines := []string{
+		`{` + ts + `,"type":"session_meta","payload":{"id":"01a1","cwd":"/r/fake","cli_version":"0.159.2"}}`,
+		ev(`{"type":"task_started","turn_id":"t1"}`),
+		item(`{"type":"UserMessage","id":"u1","content":[{"type":"text","text":"What is the current status?"}]}`),
+		item(`{"type":"Reasoning","id":"r1","summary_text":["Checking the work already done."]}`),
+		item(`{"type":"CommandExecution","id":"e1","command":["git","status"],"status":"completed","aggregated_output":"ok\n","exit_code":0}`),
+		item(`{"type":"AgentMessage","id":"m1","phase":"commentary","content":[{"type":"Text","text":"The focused tests pass; the full run is next."}]}`),
+		item(`{"type":"CommandExecution","id":"e2","command":["go","test","./..."],"status":"completed","aggregated_output":"ok\n","exit_code":0}`),
+		ev(`{"type":"task_complete","turn_id":"t1"}`),
+	}
+	m := Meta{Codex: true}
+	var got []proto.Item
+	for i, line := range lines {
+		got = append(got, ParseLine(i+1, []byte(line), &m)...)
+	}
+	if len(got) != 7 || got[1].Kind != proto.KindThinking || got[4].Kind != proto.KindText || got[4].Text != "The focused tests pass; the full run is next." {
+		t.Fatalf("commentary must be text and Reasoning thinking: %+v", got)
+	}
+	if m.LastText != "The focused tests pass; the full run is next." {
+		t.Fatalf("the commentary answer is the latest text: %+v", m)
 	}
 }
 

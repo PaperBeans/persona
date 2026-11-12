@@ -569,7 +569,7 @@ struct ToolCallRow: View {
 
     private var pad: CGFloat { grouped ? WorkCardSlice.inset : 10 }
     /// On the work timeline what a tool shows keeps right of the rail, under its words.
-    private var detailLeading: CGFloat { grouped && WorkCardSlice.timeline ? WorkCardSlice.textColumn : pad }
+    private var detailLeading: CGFloat { grouped && WorkCardSlice.timeline ? WorkCardSlice.textColumn(typeSize) : pad }
     private var onTimeline: Bool { grouped && WorkCardSlice.timeline }
 
     /// Around a chip row (`ToolChipRow`): in a work card it lines up with the card's other rows; alone, a little
@@ -623,7 +623,8 @@ struct ToolCallRow: View {
                     .rotationEffect(.degrees(isOpen ? 90 : 0))
             }
             .padding(.vertical, onTimeline ? Theme.Space.s : grouped ? 10 : 7)
-            .padding(.horizontal, pad)
+            .padding(.leading, grouped ? WorkCardSlice.iconLeading : pad)
+            .padding(.trailing, pad)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

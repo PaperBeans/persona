@@ -421,6 +421,9 @@ type codexListPass struct {
 	// runtimes is the runtime session each Codex thread is listed as (thread → session, runtimecodex.go): the list
 	// has that session's row, so the thread's own is left out and its subagents hang off the session.
 	runtimes map[string]codexClaim
+	// paginated is codexPaginatedThreads by Codex home: each call globs the home for the App's databases and stats
+	// them, which every row's codexAppHistoryPath did (#5970).
+	paginated map[string]map[string]codexAppThread
 }
 
 // runtimeOf is the runtime session that names Codex thread as its conversation; the zero claim when none does.
@@ -437,7 +440,8 @@ type codexStat struct {
 }
 
 func newCodexListPass() *codexListPass {
-	return &codexListPass{real: map[string]string{}, stats: map[string]codexStat{}, desktop: map[string]bool{}}
+	return &codexListPass{real: map[string]string{}, stats: map[string]codexStat{}, desktop: map[string]bool{},
+		paginated: map[string]map[string]codexAppThread{}}
 }
 
 func (p *codexListPass) realPath(dir string) string {
@@ -474,6 +478,20 @@ func (p *codexListPass) desktopAvailable(home string) bool {
 		p.desktop[home] = up
 	}
 	return up
+}
+
+// paginatedThreadOf is codexPaginatedThreadOf with each home's paginated threads looked up once per pass.
+func (p *codexListPass) paginatedThreadOf(src codexSource) (codexAppThread, bool) {
+	if p == nil {
+		return codexPaginatedThreadOf(src)
+	}
+	threads, ok := p.paginated[src.home]
+	if !ok {
+		threads = codexPaginatedThreads(src.home)
+		p.paginated[src.home] = threads
+	}
+	t, ok := threads[src.thread]
+	return t, ok
 }
 
 func (p *codexListPass) assistantProject(n *Node) string {

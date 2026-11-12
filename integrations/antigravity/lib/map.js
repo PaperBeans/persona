@@ -235,7 +235,9 @@ export function stepsToItems(steps, opts = {}) {
       case 'ERROR_MESSAGE': {
         const text = step.error || step.content || 'Error'
         turnError = { turn_error: String(text), ...step.turn_error, turn_error_after_work: afterWork }
-        items.push({ id: `${seq}#0`, seq, role: 'system', kind: 'notice', text: String(text), ts })
+        // Clients display this shared API-error format outside the collapsed work summary.
+        const message = String(text).startsWith('API Error:') ? String(text) : `API Error: ${text}`
+        items.push({ id: `${seq}#0`, seq, role: 'assistant', kind: 'text', text: message, ts })
         break
       }
       default:

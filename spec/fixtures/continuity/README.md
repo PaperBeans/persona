@@ -34,7 +34,7 @@
 | 缺少 `to_seq` 时按老 hub 规则合并并以末条位置推进，`more_after` 只能触发重取。 | Store `apply`；Tests `olderHubsWithoutSpansWorkAsBefore` | `legacy_batches_merge_without_gap_detection` |
 | 普通 item 的重复 id 保留第一次收到的版本。 | Store `merge`；CLAUDE.md 缓存版本经验 | `same_id_plain_item_keeps_original` |
 | 新 fold 替换范围内的工作，同 id 且范围变大的 fold 也替换旧 fold。 | Store `dropFolded`；FoldTests `aFoldReplacesTheStepsItCoversAndOpeningItPutsThemBack` | `fold_replaces_work_and_expands_in_pages` |
-| fold 的闭区间按 seq 和数字块序号判断，范围外的工作和范围内的正文都保留。 | Store `Item.folds`、`Item.isWork`；FoldTests `stepsOutsideAFoldStay` | `fold_range_uses_numeric_block_bounds`、`fold_preserves_steps_outside_range` |
+| fold 的闭区间按 seq 和数字块序号判断，范围内的 narration 被替换，范围外的工作和最终正文保留。 | Store `Item.folds`、`Item.isWork`；FoldTests `narrationTextFollowsItsFoldInBothDirections` | `fold_range_uses_numeric_block_bounds`、`fold_preserves_steps_outside_range` |
 | 展开按 `from_seq…through_seq` 分页取回，`more` 时从末条 seq 加一继续，完成后一次替换 fold。 | API `foldedWork`；Model `unfold`；Store `unfold` | `fold_replaces_work_and_expands_in_pages` |
 | 展开响应中的 fold 不再合入，展开本身不改变连续位置或分页判断。 | Store `unfold` | `unfold_discards_fold_items_in_response` |
 

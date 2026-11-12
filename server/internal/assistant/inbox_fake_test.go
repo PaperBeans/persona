@@ -357,6 +357,27 @@ type inboxMemStore struct {
 	ids  map[string]int
 	fail error // InboxItems fails
 	down error // PutInboxItem fails (writeFails)
+	feed []db.FeedRow
+}
+
+// The inbox's store keeps the assistant feed too (a hand-off's write-back card, inbox_handoff_card.go).
+func (s *inboxMemStore) AppendFeed(_ context.Context, r db.FeedRow) error {
+	s.imu.Lock()
+	defer s.imu.Unlock()
+	s.feed = append(s.feed, r)
+	return nil
+}
+
+func (s *inboxMemStore) Feed(_ context.Context, conversation string, since time.Time, limit int) ([]db.FeedRow, error) {
+	s.imu.Lock()
+	defer s.imu.Unlock()
+	var out []db.FeedRow
+	for _, r := range s.feed {
+		if r.Conversation == conversation && r.At.After(since) && (limit <= 0 || len(out) < limit) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 func newInboxMemStore() *inboxMemStore {

@@ -33,9 +33,11 @@ test('native errors preserve structured subscription limits and their actual tim
     turn_error: MESSAGE, turn_error_kind: 'usage_limit', turn_error_resets_at: '2026-01-03T18:00:00.000Z',
     turn_error_code: 'rate_limited', turn_error_after_work: false,
   })
-  assert.equal(parsed.items.at(-1).role, 'system')
-  assert.equal(parsed.items.at(-1).kind, 'notice')
-  assert.equal(parsed.items.at(-1).text, MESSAGE)
+  assert.equal(parsed.items.at(-1).role, 'assistant')
+  assert.equal(parsed.items.at(-1).kind, 'text')
+  assert.equal(parsed.items.at(-1).text, `API Error: ${MESSAGE}`)
+  const existing = stepsToItems([{ ...step, content: 'API Error: 503 unavailable' }])
+  assert.equal(existing.items[0].text, 'API Error: 503 unavailable')
   const work = { step_index: 1, type: 'PLANNER_RESPONSE', tool_calls: [{ name: 'run_command' }] }
   assert.equal(stepsToItems([input, work, { ...step, step_index: 2 }]).turnError.turn_error_after_work, true)
   assert.equal(stepsToItems([input, step, { ...input, step_index: 2 }]).turnError, undefined)
@@ -110,8 +112,9 @@ test('runtime recovers an omitted native error through a cached bounded tail wit
   const { row, calls, items, refresh, restart, transcript } = await fixture(t)
   const original = readFileSync(transcript)
   const page = await items()
+  assert.match(page.history, /:full:api-errors(?:$|:)/)
   assert.equal(page.to_seq, 2)
-  assert.equal(page.items.at(-1).text, MESSAGE)
+  assert.equal(page.items.at(-1).text, `API Error: ${MESSAGE}`)
   await until('quota fields published', () => row()?.turn_error_kind === 'usage_limit')
   assert.equal(row().turn_error_resets_at, '2026-01-03T18:00:00.000Z')
   await Promise.all([items(), items(), items()])
@@ -122,7 +125,7 @@ test('runtime recovers an omitted native error through a cached bounded tail wit
   assert.equal(calls().some((call) => ['session/resume', 'session/prompt'].includes(call.method)), false)
   assert.deepEqual(readFileSync(transcript), original)
   await restart()
-  assert.equal((await items()).items.at(-1).text, MESSAGE)
+  assert.equal((await items()).items.at(-1).text, `API Error: ${MESSAGE}`)
   await until('quota recovered after restart', () => row()?.turn_error === MESSAGE)
 })
 
@@ -143,7 +146,7 @@ test('native recovery reads only the final eight steps of a large export gap', a
   const { calls, items } = await fixture(t, { padding: 20 })
   const page = await items()
   assert.equal(page.to_seq, 22)
-  assert.equal(page.items.at(-1).text, MESSAGE)
+  assert.equal(page.items.at(-1).text, `API Error: ${MESSAGE}`)
   assert.equal(calls().find((call) => call.method === 'GetCascadeTrajectorySteps').params.stepOffset, 14)
 })
 

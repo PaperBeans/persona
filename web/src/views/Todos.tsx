@@ -1647,6 +1647,25 @@ function TodoPlanEditor({ todo }: { todo: Todo }) {
   );
 }
 
+/** A to-do whose decision is held for the briefing (#4930, #5803, docs/assistant/todos.md "Decisions that can wait"):
+ *  nothing was pushed for it, and it comes with the next briefing. The to-do's page writes out what that means under
+ *  its ask; a row's ask line carries the quiet mark itself (views/TodoAsk AskLine), as the decision's card does
+ *  (views/assistant/BriefingMark). Nothing for any other to-do, and for a hub that does not say. */
+export function HeldForBriefing({ todo }: { todo: Pick<Todo, "ask"> }) {
+  const ask = todo.ask;
+  if (!ask?.verdict || !ask.asked_at || ask.for_briefing !== true) return null;
+  return (
+    <p data-for-briefing="caption" className="mt-2 flex min-w-0 items-start gap-1.5 px-1 text-xs text-ink-2 [overflow-wrap:anywhere]">
+      <Icon name="clock" size={13} className="mt-0.5 shrink-0" />
+      <span>
+        <span className="font-medium">{t("todos.ask_held")}</span>
+        {t("assistant-decisionrow.separator")}
+        {t("todos.ask_held_hint")}
+      </span>
+    </p>
+  );
+}
+
 /** A to-do's due date, a reminder still to push and high priority under its status (#1683); nothing without them. */
 function TodoPlanLine({ todo }: { todo: Todo }) {
   const due = todoDueText(todo);
@@ -1937,6 +1956,7 @@ function TodoDetail({
 
       {/* What it waits on from the user and how to answer it (#2056) */}
       <TodoAskPanel todo={todo} />
+      <HeldForBriefing todo={todo} />
 
       {/* Due date, reminder, priority (#1683) */}
       <TodoPlanEditor todo={todo} />

@@ -39,7 +39,7 @@ import java.time.Instant
 /**
  * A decision held for the next briefing (#4930, docs/assistant/todos.md "Decisions that can wait") on its To-dos row: one
  * quiet line while the hub says so, none for a decision that was pushed, for a hub from before the field, or once the
- * to-do is finished. Every style, light and dark; native JVM captures in `build/todo-for-briefing-shots/` (or
+ * to-do is finished. Every style, light and dark; native JVM captures in `build/reports/tests/todo-for-briefing-shots/` (or
  * `-Dpersona.shots=<dir>`), not device screenshots.
  */
 @RunWith(AndroidJUnit4::class)
@@ -48,7 +48,7 @@ import java.time.Instant
 class TodoForBriefingShotsTest {
     @get:Rule val rule = createComposeRule()
 
-    private fun out(): File = File(System.getProperty("persona.shots") ?: "build/todo-for-briefing-shots").also { it.mkdirs() }
+    private fun out(): File = File(System.getProperty("persona.shots") ?: "build/reports/tests/todo-for-briefing-shots").also { it.mkdirs() }
 
     private val now = Instant.parse("2026-11-10T09:30:00Z")
     private fun ago(minutes: Long) = now.minusSeconds(minutes * 60).toString()
