@@ -85,13 +85,18 @@ func matcher(query string) func(string) bool {
 // distill mark (.topics.json, topics.go). A meeting's live log (live.json, live.go) is never
 // searched: other people's words said while Persona attended, and the questions asked of it. Nor is photos.json
 // (recording_photos.go: digests, deletions; photos.md has the photos' words), and the photos themselves are in
-// attachments/, which the walk never enters.
+// attachments/, which the walk never enters. Nor is live ingestion's bookkeeping in a chat (ingest.go): the receipts
+// (.receipts.json: the source, every message's id and time, one long line), the intent of a write in progress
+// (.ingest.json) and the zone the days are in (messages/.zone, zone.go). Profile files are read before any day, so a
+// query of digits, a date or the source's name matched every chat's receipts and filled the limit (#5991).
 func searchable(rel string) bool {
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	switch {
 	case parts[0] == "cursors" || parts[0] == "history" || parts[0] == selectDir || parts[0] == trashDirName:
 		return false
-	case len(parts) == 3 && parts[0] == KindChat && parts[2] == retentionFile:
+	case len(parts) == 3 && parts[0] == KindChat && (parts[2] == retentionFile || parts[2] == ingestReceipts || parts[2] == ingestJournal):
+		return false
+	case len(parts) == 4 && parts[0] == KindChat && parts[2] == "messages" && parts[3] == zoneFile:
 		return false
 	case len(parts) == 3 && parts[0] == KindRecording && (parts[2] == recordingJournal || parts[2] == "minutes.json"):
 		return false // minutes.md has the minutes' text
