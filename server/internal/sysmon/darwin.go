@@ -19,8 +19,12 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// ReadSystem: sw_vers and system_profiler run once (about half a second together), the rest is sysctl.
+// ReadSystem: sw_vers and sysctl, plus the model name, which is looked up once per process (macModel).
 func ReadSystem(ctx context.Context) proto.System {
+	return readSystem(ctx, macModel)
+}
+
+func readSystem(ctx context.Context, models *modelLookup) proto.System {
 	s := proto.System{OS: "darwin", Distro: "macos", Name: "macOS", Arch: runtime.GOARCH, Cores: runtime.NumCPU()}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -35,9 +39,7 @@ func ReadSystem(ctx context.Context) proto.System {
 	if rel, err := unix.Sysctl("kern.osrelease"); err == nil {
 		s.Kernel = "Darwin " + rel
 	}
-	if out, err := exec.CommandContext(ctx, "system_profiler", "SPHardwareDataType").Output(); err == nil {
-		s.Model = profilerModel(out)
-	}
+	s.Model = models.get(ctx)
 	if s.Model == "" {
 		s.Model, _ = unix.Sysctl("hw.model") // "Mac13,2"
 	}
@@ -49,6 +51,82 @@ func ReadSystem(ctx context.Context) proto.System {
 		s.BootTime = tv.Sec
 	}
 	return s
+}
+
+// macModel is this process's model name lookup: a resident node makes a new Node, and so reads the system again, for
+// every hub connection (#6028), and the hub's handshake waits for that read (node.info).
+var macModel = newModelLookup(runCommand)
+
+func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+const (
+	// modelWait is how long after the lookup starts ReadSystem waits for the model name; after it, the identifier
+	// stands in.
+	modelWait = time.Second
+	// ioregTimeout and profilerTimeout bound the two commands. system_profiler can sit for over 10 s on its
+	// Activation Lock check (#6028), past the 10 s that once cut it off just before it answered.
+	ioregTimeout    = 5 * time.Second
+	profilerTimeout = time.Minute
+)
+
+// modelLookup finds the Mac's model name ("MacBook Pro", "Mac Studio") once, in the background, so no caller waits on
+// system_profiler past modelWait from the first read.
+type modelLookup struct {
+	run   func(ctx context.Context, name string, args ...string) ([]byte, error)
+	once  sync.Once
+	until time.Time // the first read's start + modelWait
+	done  chan struct{}
+	name  string // set before done closes
+}
+
+func newModelLookup(run func(ctx context.Context, name string, args ...string) ([]byte, error)) *modelLookup {
+	return &modelLookup{run: run, done: make(chan struct{})}
+}
+
+// get starts the lookup on the first call and returns the name once it is known. While it is not, it waits until
+// modelWait has passed since the first call (or ctx ends), then returns "", as it does when there is no name.
+func (l *modelLookup) get(ctx context.Context) string {
+	l.once.Do(func() {
+		l.until = time.Now().Add(modelWait)
+		go func() {
+			defer close(l.done)
+			l.name = l.find()
+		}()
+	})
+	t := time.NewTimer(time.Until(l.until))
+	defer t.Stop()
+	select {
+	case <-l.done:
+	case <-t.C:
+	case <-ctx.Done():
+	}
+	select {
+	case <-l.done:
+		return l.name
+	default:
+		return ""
+	}
+}
+
+// find asks the IORegistry first: on Apple silicon its product entry has the name (about 20 ms). Intel Macs have no
+// such entry; system_profiler, which can take seconds, is left for them.
+func (l *modelLookup) find() string {
+	ctx, cancel := context.WithTimeout(context.Background(), ioregTimeout)
+	out, err := l.run(ctx, "ioreg", "-p", "IODeviceTree", "-rd1", "-n", "product")
+	cancel()
+	if err == nil {
+		if m := ioregModel(out); m != "" {
+			return m
+		}
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), profilerTimeout)
+	defer cancel()
+	if out, err := l.run(ctx, "system_profiler", "SPHardwareDataType"); err == nil {
+		return profilerModel(out)
+	}
+	return ""
 }
 
 // darwinCollector keeps `iostat -n 0 -w 10` (CPU) and `vm_stat 10` (memory) running and takes their latest rows:
