@@ -933,7 +933,7 @@ func (e *Engine) summarizeRecording(ctx context.Context, r *Recording) (called b
 		Transcript: clipMiddle(e.Store.renderTranscript(r, segs), recordingPromptChars)}
 	var out recordingSummary
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	err = e.modelFor("kb.compress").JSONMax(cctx, prompts.RenderKBRecording(prompts.KBOwner{Owner: e.ownerName()}), prompts.RenderKBRecordingInput(in), 4000, &out)
+	err = e.modelFor("kb.compress").JSONMax(cctx, prompts.RenderKBRecording(e.writingOwner(e.outputLang(r))), prompts.RenderKBRecordingInput(in), 4000, &out)
 	cancel()
 	if err != nil {
 		return true, err

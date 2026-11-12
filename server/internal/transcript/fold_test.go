@@ -52,7 +52,7 @@ func longCodexRollout(t testing.TB, commands, notes, replies int) string {
 
 func foldable(it proto.Item) bool {
 	return it.Kind == proto.KindToolUse || it.Kind == proto.KindToolResult || it.Kind == proto.KindThinking ||
-		(it.Kind == proto.KindImage && it.ToolUseID != "")
+		(it.Kind == proto.KindText && it.Narration) || (it.Kind == proto.KindImage && it.ToolUseID != "")
 }
 
 // The phone's first page of a long session carries the prompts, the replies and one fold per run of work (tools,
@@ -142,6 +142,65 @@ func TestFoldedFirstPageOfALongSession(t *testing.T) {
 		if last := page[at[fo.Fold.ThroughID]]; !fo.Fold.Until.Equal(last.TS) {
 			t.Fatalf("fold %s ends at %v, its last item at %v", fo.ID, fo.Fold.Until, last.TS)
 		}
+	}
+}
+
+// A running page still has an assistant answer to show; once its final answer arrives, the earlier commentary joins
+// the completed work. Both reads go through the same real rollout pagination as the chat's first page.
+func TestFoldedPageKeepsRunningCommentaryVisible(t *testing.T) {
+	path := longCodexRollout(t, 6, 2, 1)
+	complete, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(complete)), "\n")
+	running := strings.Join(lines[:len(lines)-1], "\n") + "\n" // drop the second turn's final answer
+	if err := os.WriteFile(path, []byte(running), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := NewFile(path)
+	if _, err := f.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	page, _, _ := f.PageTurns(0, 2, 2000)
+	folded := FoldWorkLatest(page)
+	visible := 0
+	for _, it := range folded {
+		if it.Kind == proto.KindText && it.Narration {
+			visible++
+			if it.Text != "note 4 before the next command" {
+				t.Fatalf("the visible commentary is not the latest: %+v", it)
+			}
+		}
+	}
+	if visible != 1 {
+		t.Fatalf("a running folded page hides its latest commentary: %+v", folded)
+	}
+	for _, it := range FoldWork(page) {
+		if it.Kind == proto.KindText && it.Narration {
+			t.Fatalf("a historical page keeps commentary visible without knowing no final answer follows: %+v", it)
+		}
+	}
+
+	if err := os.WriteFile(path, complete, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	page, _, _ = f.PageTurns(0, 2, 2000)
+	folded = FoldWorkLatest(page)
+	final := 0
+	for _, it := range folded {
+		if it.Kind == proto.KindText && it.Narration {
+			t.Fatalf("finished commentary escaped the work fold: %+v", it)
+		}
+		if it.Kind == proto.KindText && it.Text == "second answer" {
+			final++
+		}
+	}
+	if final != 1 {
+		t.Fatalf("the finished page lost its final answer: %+v", folded)
 	}
 }
 

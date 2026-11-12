@@ -442,16 +442,13 @@ func codexItemLines(seq int, ts time.Time, it *codexItem, meta *Meta) []proto.It
 		if text == "" {
 			return nil
 		}
-		// Narration between tool calls ("commentary") reads like Claude's thinking blocks: part of the work, not
-		// the answer.
-		kind := proto.KindText
-		if it.Phase == "commentary" {
-			kind = proto.KindThinking
-		} else if t := withoutBotmuxSentinel(text); t != "" {
+		// AgentMessage is what Codex said, including narration between tool calls; only Reasoning is thinking.
+		if t := withoutBotmuxSentinel(text); t != "" {
 			meta.LastText = t
 			meta.turnSaid(t)
 		}
-		a := mk(0, it.ID, "assistant", kind)
+		a := mk(0, it.ID, "assistant", proto.KindText)
+		a.Narration = it.Phase == "commentary"
 		a.Text = clip(text)
 		return []proto.Item{a}
 	case "Reasoning":

@@ -66,11 +66,13 @@ func (s *Service) inboxSignalHolds(t Todo) bool {
 // (receivedSince), and remembers how far it counted. Under b.mu.
 func inboxSignalOf(it *InboxItem, linked bool) (superviseSignal, bool) {
 	a := it.Agent
-	if a == nil || a.TodoID == "" || !it.open() || it.Kind == KindBot || a.SentOf != "" && a.SentOf == it.Last {
+	if a == nil || a.TodoID == "" || !it.open() || it.Kind == KindBot || a.SentOf != "" && a.SentOf == it.Last ||
+		a.signaledOf != "" && a.signaledOf == it.Last {
 		return superviseSignal{}, false
 	}
 	n, seq := receivedSince(it, a.signaled, linked)
 	a.signaled = seq
+	a.signaledOf = it.Last
 	return superviseSignal{Todo: a.TodoID, Kind: sigInbox, Key: it.ID + "@" + it.Last, Inbox: &prompts.SuperviseInbox{
 		Item: it.ID, Title: clip(oneLine(it.Title), 80), Sender: clip(oneLine(it.Sender), 40), Preview: clip(oneLine(it.Preview), 140),
 		Count: n}}, true

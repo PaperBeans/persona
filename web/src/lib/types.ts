@@ -1,4 +1,5 @@
 import type { UsageCard } from "./tokens";
+import type { RuleSuggestion } from "./rule-suggestion";
 // The hub's wire types (docs/protocol/protocol.md). Only the fields the web client reads.
 
 export type AgentState = "needs_you" | "working" | "unread" | "idle" | "offline" | "unknown";
@@ -817,6 +818,9 @@ export interface Interaction {
   delegating?: boolean;
   /** What the assistant filled in when it left the question to the user. */
   delegate?: Delegate;
+  /** A rule the hub suggests on a question a supervisor passed up, once the owner gave the same answer three times
+   *  (#4929, lib/rule-suggestion.ts); the card comes again without it once it was answered. Absent otherwise. */
+  suggestion?: RuleSuggestion;
 }
 
 /** The assistant's context on a question it left to the user (Interaction.delegate). */

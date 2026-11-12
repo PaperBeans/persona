@@ -922,8 +922,8 @@ struct AssistantSidebar: View {
             }
         } else {
             HStack {
-                if model.managerRoster?.isMulti == true, let current = model.currentAssistant {
-                    // Keep the current multi-assistant switcher; a sole assistant keeps the persona title.
+                if model.showsAssistantSwitcher, let current = model.currentAssistant {
+                    // One installed assistant uses the switcher too; only a missing roster or current assistant keeps the persona title.
                     AssistantSwitcherHeader(manager: current, nameFont: Theme.Font.title, compact: macTitleRow, openSettings: showSettings)
                 } else {
                     #if os(macOS)

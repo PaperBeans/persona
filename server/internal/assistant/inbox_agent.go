@@ -103,6 +103,9 @@ type InboxAgent struct {
 	// signaled is the handling chain's newest received batch an inbox signal to the linked task's supervisor counted
 	// (in memory only, supervise_inbox.go): the next one counts the messages after it.
 	signaled int
+	// signaledOf is the newest message considered for a supervisor signal in this process. URL routing also runs
+	// while the twin is off, so Of (what its handling conversation took) is independent of this cursor.
+	signaledOf string
 }
 
 // queueNote adds a note to Pending, kept to the latest 20.
@@ -134,21 +137,6 @@ func (a *InboxAgent) startDue(now time.Time) bool {
 // passes runs another after it (every caller is an event, and nothing else would come back for what it queued).
 func (s *Service) handInbox(ctx context.Context) {
 	b := &s.inbox
-	if !s.inboxConfig(ctx).Agent.Enabled {
-		b.mu.Lock()
-		pending := false
-		for _, it := range b.items {
-			active, queued := inboxAgentReleaseState(it)
-			if active || queued {
-				pending = true
-				break
-			}
-		}
-		b.mu.Unlock()
-		if !pending {
-			return
-		}
-	}
 	b.handAgain.Store(true)
 	if !b.handing.TryLock() {
 		return // the running passes' goroutine finds the mark
@@ -173,6 +161,7 @@ func (s *Service) handInbox(ctx context.Context) {
 func (s *Service) handPass(ctx context.Context) {
 	cfg := s.inboxConfig(ctx).Agent
 	b := &s.inbox
+	s.linkInboxTaskURLs(ctx)
 	if !cfg.Enabled {
 		s.releaseInboxAgents(ctx)
 		return

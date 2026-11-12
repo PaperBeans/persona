@@ -578,6 +578,9 @@ struct FeedLine: View {
             if let brief = item.brief { BriefCard(brief: brief, group: group, conversation: item.conversation) }
         case .message:
             if let id = item.ref, !store.laterMessages.contains(id) { MessageCard(item: item, itemID: id) }
+        case .inboxSuggestion:
+            // A hand-off conversation's write-back (#5932); a body this build can't read leaves the card out.
+            if let id = item.ref, let card = item.handoffCard { HandoffCardView(item: item, card: card, itemID: id) }
         case .answered: AnsweredLine(item: item, taskTitle: taskTitle)
         case .receipt: ReceiptCard(item: item)
         case .routed:

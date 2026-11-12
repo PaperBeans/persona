@@ -180,7 +180,7 @@ class FirstMessageTest {
     @Test fun aFailedStartSaysTheDayItWasSent() {
         val prefs = FailedStarts(androidx.test.core.app.ApplicationProvider.getApplicationContext())
         prefs.write("hub/assistant", FirstMessage("Book a table for Friday", failed = true, reason = "offline",
-            at = System.currentTimeMillis() - 26 * 3_600_000L))
+            at = java.time.LocalDate.now().minusDays(1).atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()))
         mount()
         rule.onNodeWithTag("assistant-first-day").assertExists().assert(hasText("Yesterday · ", substring = true))
     }

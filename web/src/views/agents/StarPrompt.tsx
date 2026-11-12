@@ -13,7 +13,7 @@ export function StarPill() {
   if (!showsStarPill(prompt)) return null;
   return (
     <div data-testid="star-pill" className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
-      <div className="pointer-events-auto flex items-center rounded-full bg-surface text-[12px] text-ink-2 shadow-hairline" style={{ animation: "fade-in 200ms ease-out both" }}>
+      <div className="pointer-events-auto flex items-center rounded-full bg-surface text-xs text-ink-2 shadow-hairline" style={{ animation: "fade-in 200ms ease-out both" }}>
         <a href={PERSONA_REPO_URL} target="_blank" rel="noopener noreferrer" onClick={starPromptStarred}
           className="touch-hit flex items-center gap-1.5 whitespace-nowrap rounded-full py-1 pr-1.5 pl-3 transition-colors hover:text-ink">
           <Icon name="star" size={12} />
@@ -42,9 +42,9 @@ export function StarPromptLine({ searching = false }: { searching?: boolean }) {
       <span className="flex min-w-0 flex-1 items-start gap-2">
         <span className="mt-[3px] flex size-3.5 shrink-0 items-center justify-center text-accent-ink"><Icon name="star" size={13} stroke={2.2} /></span>
         <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
-          <span className="text-[13px] leading-[1.45] text-ink-2">{t("lib-star-prompt.card")}</span>
+          <span className="text-sm leading-[1.45] text-ink-2">{t("lib-star-prompt.card")}</span>
           <a href={PERSONA_REPO_URL} target="_blank" rel="noopener noreferrer" data-testid="star-prompt-star" onClick={starPromptStarred}
-            className="touch-hit -ml-2 whitespace-nowrap rounded-control px-2 py-0.5 text-[12px] font-medium text-accent-ink hover:bg-hover">
+            className="touch-hit -ml-2 whitespace-nowrap rounded-control px-2 py-0.5 text-xs font-medium text-accent-ink hover:bg-hover">
             {t("lib-star-prompt.star")}
           </a>
         </span>

@@ -223,6 +223,8 @@
   "ask_answer": "チャットで答える",
   "ask_answer_hint": "おすすめがないので、元の会話で答えてください。",
   "ask_failed": "できませんでした：{error}",
+  "ask_held": "次のブリーフィングで届きます",
+  "ask_held_hint": "この決定は急がないため、通知は送っていません。次のブリーフィングで届き、ここでいつでも回答できます。",
   "summary_triage": "未完了{open} · 保留{shelved} · 完了{done}",
   "grouping_label": "ToDoのグループ分け",
   "grouping_status": "状態",

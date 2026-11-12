@@ -1522,6 +1522,9 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 		// Pages counted back from the end fold the agent's work for callers that ask (transcript.FoldWork).
 		fold := func(page []proto.Item) []proto.Item {
 			if p.FoldWork {
+				if p.BeforeSeq == 0 {
+					return transcript.FoldWorkLatest(page)
+				}
 				return transcript.FoldWork(page)
 			}
 			return page

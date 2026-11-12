@@ -72,8 +72,9 @@ export function useTakeAsk(todo: Pick<Todo, "id">, ask: TodoAsk): { taking: AskT
   return { taking, take };
 }
 
-/** The ask on a to-do's row or a task's card: its verdict, the recommendation, and the button as a link. Its clicks never
- *  open the row. Nothing when the to-do waits on nothing. */
+/** The ask on a to-do's row, a task's card or the task panel's banner: its verdict, the recommendation, the mark of a
+ *  decision held for the briefing (#5803), and the button as a link. Its clicks never open the row. Nothing when the
+ *  to-do waits on nothing. */
 export function TodoAskLine({ todo, className }: { todo: Todo; className?: string }) {
   const ask = openAsk(todo);
   return ask ? <AskLine todo={todo} ask={ask} className={className} /> : null;
@@ -94,6 +95,13 @@ function AskLine({ todo, ask, className }: { todo: Todo; ask: TodoAsk; className
         {recommend && (
           <span className="truncate text-ink-2" title={recommend}>
             {recommend}
+          </span>
+        )}
+        {/* held for the briefing (#5803): why it did not ring; what that means on hover, written out on the to-do's page */}
+        {ask.for_briefing === true && (
+          <span data-for-briefing="mark" title={t("todos.ask_held_hint")} className="flex min-w-0 items-center gap-1 text-ink-2">
+            <Icon name="clock" size={11} className="shrink-0" />
+            <span className="truncate">{t("todos.ask_held")}</span>
           </span>
         )}
       </span>

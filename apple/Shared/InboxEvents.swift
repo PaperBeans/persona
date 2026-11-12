@@ -36,9 +36,11 @@ extension InboxItem {
         var machineID: String?
         var changes: [DocChange]?
         var at: Date?
+        /// The conversation the item was handed to that handed it in (Hand to AI); nil for the item's own AI twin.
+        var conversation: Handoff?
 
         enum CodingKeys: String, CodingKey {
-            case version, kind, text, note, handback, changes, at
+            case version, kind, text, note, handback, changes, at, conversation
             case machineID = "machine_id"
         }
 

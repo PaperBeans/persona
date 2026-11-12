@@ -396,9 +396,11 @@ func (s *Service) startConversationOn(ctx context.Context, p StartParams, main b
 	return sess, nil
 }
 
-// startConversation starts a new conversation of the assistant's own (a scheduled task's, conversation_new's).
+// startConversation starts a new conversation of the assistant's own (the background supervisor's, a scheduled task's,
+// conversation_new's). Nobody is in front of it to sign in, so it starts signed in as a meeting's do (startSignedIn):
+// in the profile the assistant's conversations had, not a new private one with no login in it (#6015).
 func (s *Service) startConversation(ctx context.Context, p startParams) (proto.Session, error) {
-	return s.start(ctx, StartParams{Text: prompts.MessageSourceText(p.Text, p.Source), PermissionMode: p.PermissionMode, Purpose: p.Purpose, Space: p.Space,
+	return s.startSignedIn(ctx, StartParams{Text: prompts.MessageSourceText(p.Text, p.Source), PermissionMode: p.PermissionMode, Purpose: p.Purpose, Space: p.Space,
 		Origin: p.Origin, OriginRef: p.OriginRef})
 }
 

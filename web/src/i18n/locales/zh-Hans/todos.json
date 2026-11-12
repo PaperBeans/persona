@@ -223,6 +223,8 @@
   "ask_answer": "去对话里回答",
   "ask_answer_hint": "没有推荐方案，请到它来自的对话里回答。",
   "ask_failed": "没有成功：{error}",
+  "ask_held": "随下次简报送达",
+  "ask_held_hint": "这个决定可以等，所以没有推送提醒。它会随下一次简报送到，你也可以随时在这里回答。",
   "summary_triage": "没完成 {open} · 搁置 {shelved} · 已完成 {done}",
   "grouping_label": "待办分组方式",
   "grouping_status": "状态",

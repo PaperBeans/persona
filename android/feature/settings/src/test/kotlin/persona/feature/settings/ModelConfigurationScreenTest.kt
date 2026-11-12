@@ -185,7 +185,8 @@ class ModelConfigurationScreenTest {
                 }
             }
         }
-        val out = out()
+        // under the reports folder, which CI uploads
+        val out = File(System.getProperty("persona.shots") ?: "build/reports/tests/model-described-shots").also { it.mkdirs() }
         for (look in AppStyle.entries) for (night in listOf(false, true)) {
             style = look; dark = night; page = null
             Snapshot.sendApplyNotifications(); rule.waitForIdle()

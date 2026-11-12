@@ -911,3 +911,24 @@ extension View {
         accessibilityElement(children: .ignore).accessibilityLabel(text).accessibilityAddTraits(.isStaticText)
     }
 }
+
+/// A toggle drawn as a box that is ticked or not, beside its label: a mark the user sets on an item in a list of many
+/// (a file viewed in a code review, #827), where a switch would weigh more than the item. Tapping the box or the label
+/// flips it; VoiceOver reads it as the toggle it is. On iOS, never for a setting: settings use `Toggle`'s switch.
+struct TickBoxToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button { configuration.isOn.toggle() } label: {
+            HStack(spacing: Theme.Space.xs) {
+                ThemedIcon(configuration.isOn ? Theme.Icon.checkedBox : Theme.Icon.uncheckedBox)
+                    .foregroundStyle(configuration.isOn ? Theme.positive : Color.secondary)
+                configuration.label
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+extension ToggleStyle where Self == TickBoxToggleStyle {
+    static var tickBox: TickBoxToggleStyle { TickBoxToggleStyle() }
+}
