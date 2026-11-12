@@ -12,16 +12,18 @@
     <string name="settings_ext_sandbox_off">Sandbox off</string>
     <string name="settings_ext_sandbox_title">Isolation</string>
     <string name="settings_ext_sandbox_note">The sandbox only isolates installed extensions the hub runs; the state above is what actually applies. Change it only on the hub machine or in the admin page.</string>
-    <string name="settings_ext_sandbox_egress">Through the egress proxy: %1$s · %2$s</string>
+    <string name="settings_ext_sandbox_footer">Allowing addresses and the sandbox switch are in the admin page, with the admin password.</string>
+    <string name="settings_ext_sandbox_network">Network</string>
     <plurals name="settings_ext_sandbox_allowed">
         <item quantity="one">%d allowed</item>
         <item quantity="other">%d allowed</item>
     </plurals>
-    <plurals name="settings_ext_sandbox_denied">
-        <item quantity="one">%d denied</item>
-        <item quantity="other">%d denied</item>
+    <plurals name="settings_ext_sandbox_blocked">
+        <item quantity="one">%d blocked</item>
+        <item quantity="other">%d blocked</item>
     </plurals>
-    <string name="settings_ext_sandbox_last_denied">Last denied: %1$s</string>
+    <string name="settings_ext_sandbox_blocked_sentence">%1$s tried to reach %2$s, which isn\'t among the addresses it asked for, so it was blocked.</string>
+    <string name="settings_ext_sandbox_go_admin">Allow in Admin Page</string>
     <string name="settings_ext_depends">Dependencies</string>
     <string name="settings_ext_pack_members">Pack members</string>
     <string name="settings_ext_pack_note">Members already installed at a recent enough version are not installed again; below are the extensions this installs or upgrades along with it.</string>

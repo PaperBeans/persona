@@ -394,9 +394,12 @@ export function firstScreenOverBudget(bytes: [string, number][], budget = FIRST_
  * And 183 B for the single-category stacked bar's share predicate and horizontal segmented renderer (#5386,
  * 2026-11-12: 43,782 B measured on main before the change, 43,965 B after; the chart chunk is idle by contract —
  * code-views-lazy.test enforces `idle: true` — so the renderer has no intent tier to move into).
+ * And 35 B of minifier drift (2026-11-13): #5534 left no room, and by bdbfabd69 the idle tier sent 43,969 B with none
+ * of its pages (ComposerPanel, QueuePanel, SlashPalette, ImageEditor, ViewBody, ExtensionChart, Palette) changed since,
+ * only the code they share with other chunks (#5760); 31 B of room so the next main does not tip it.
  * Every other lazy page loads on intent, not at idle; raise it on purpose, in the change that needs it.
  */
-export const IDLE_TIER_BUDGET = 43_965;
+export const IDLE_TIER_BUDGET = 44_000;
 
 const gzip = promisify(gzipCompress);
 

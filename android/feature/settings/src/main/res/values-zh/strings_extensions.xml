@@ -11,14 +11,16 @@
     <string name="settings_ext_sandbox_off">未启用沙箱</string>
     <string name="settings_ext_sandbox_title">运行隔离</string>
     <string name="settings_ext_sandbox_note">沙箱只隔离 hub 上运行的已装扩展；到底开没开，看上面显示的状态。只能在 hub 所在的机器上或管理界面里改。</string>
-    <string name="settings_ext_sandbox_egress">经出网代理：%1$s · %2$s</string>
+    <string name="settings_ext_sandbox_footer">放行地址、开关沙箱在管理界面里做，要管理员密码。</string>
+    <string name="settings_ext_sandbox_network">出网</string>
     <plurals name="settings_ext_sandbox_allowed">
-        <item quantity="other">放行 %d 次</item>
+        <item quantity="other">放行 %d</item>
     </plurals>
-    <plurals name="settings_ext_sandbox_denied">
-        <item quantity="other">拒绝 %d 次</item>
+    <plurals name="settings_ext_sandbox_blocked">
+        <item quantity="other">拦下 %d</item>
     </plurals>
-    <string name="settings_ext_sandbox_last_denied">最近拒绝：%1$s</string>
+    <string name="settings_ext_sandbox_blocked_sentence">%1$s 想连 %2$s，这个地址不在它申请的范围里，被拦下了。</string>
+    <string name="settings_ext_sandbox_go_admin">去管理界面放行</string>
     <string name="settings_ext_depends">依赖</string>
     <string name="settings_ext_pack_members">合集成员</string>
     <string name="settings_ext_pack_note">已安装且版本够用的成员不重复安装；下面列出这次要一起安装或升级的扩展。</string>

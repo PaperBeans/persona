@@ -51,7 +51,10 @@ func (s *Service) mainChatFit(ctx context.Context, machine, name string) (mainCh
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	picker, err := s.pickerLaunchers(cctx, machine)
-	if err != nil || !slices.ContainsFunc(picker, func(l ConfiguredLauncher) bool { return l.Source != "" && compat.Source(l.Source) != "persona" }) {
+	if err != nil || !slices.ContainsFunc(picker, func(l ConfiguredLauncher) bool {
+		source := compat.Source(l.Source)
+		return l.Source != "" && source != "persona" && source != "builtin"
+	}) {
 		return mainChatFits, nil // the machine's own list did not come: a shell launcher may still be there
 	}
 	fits, err := s.assistantLaunchersOf(cctx, machine, picker)

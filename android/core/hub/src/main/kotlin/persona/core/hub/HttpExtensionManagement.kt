@@ -47,6 +47,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -90,6 +91,13 @@ class HttpExtensionManagement internal constructor(
     }
 
     override suspend fun extension(id: String) = detail(call(path(id, "-", ""), "GET"))
+
+    override fun adminNetworkUrl(id: String): String? = iconBase()?.toHttpUrlOrNull()?.newBuilder()
+        ?.addPathSegments("admin/extensions")
+        ?.query(null)
+        ?.addEncodedQueryParameter("extension", java.net.URLEncoder.encode(id, Charsets.UTF_8).replace("+", "%20"))
+        ?.fragment("network")
+        ?.build()?.toString()
 
     override suspend fun setEnabled(id: String, enabled: Boolean, cascade: Boolean) =
         detail(call(path(id, "-", "enabled"), "PUT", buildJsonObject { put("enabled", enabled); if (cascade) put("cascade", true) }))

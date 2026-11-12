@@ -213,6 +213,7 @@ object MachineManagementModule {
             changed { api().setContribution(id, point, contribution, enabled) }
         override suspend fun extensions() = api().extensions()
         override suspend fun extension(id: String) = api().extension(id)
+        override fun adminNetworkUrl(id: String) = runCatching { api().adminNetworkUrl(id) }.getOrNull()
         override suspend fun setEnabled(id: String, enabled: Boolean, cascade: Boolean) = changed { api().setEnabled(id, enabled, cascade) }
         override suspend fun setAutoUpgrade(id: String, auto: Boolean) = changed { api().setAutoUpgrade(id, auto) }
         override suspend fun autoUpgrades() = api().autoUpgrades()

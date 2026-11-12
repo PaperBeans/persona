@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
@@ -298,6 +299,8 @@ fun ChatComposer(
         if (mentions != null && mention != null) mentionRows(mentions, mention.query, browsing.listing) else emptyList()
     }
     val usedFile = stringResource(R.string.chat_mention_used_file)
+    val folderWord = stringResource(R.string.chat_mention_folder)
+    val sessionFolderWord = stringResource(R.string.chat_mention_session_folder)
     // With tasks in the list each group says what a pick does: iOS's "Message a Task", then the files and sessions.
     val taskSection = stringResource(R.string.chat_tasks_mention_title)
     val otherSection = stringResource(R.string.chat_mention).takeIf { mentionRows.any { it is MentionRow.Task } }
@@ -313,10 +316,15 @@ fun ChatComposer(
             is MentionRow.Quote -> ComposerSuggestion(row.session.displayTitle,
                 stringResource(R.string.chat_mention_session_detail, sessionMentionDetail(row.session)), key = row.key, flexible = true,
                 section = otherSection)
-            // A browsed folder's entry: its name, a folder's with a slash, and the folder typed so far (iOS `MentionRows`).
-            is MentionRow.Entry -> ComposerSuggestion(if (row.folder) "${row.name}/" else row.name, row.typed, key = row.key, flexible = true)
+            // An entry of a folder: its name, a folder's with a slash, and the folder typed so far (iOS `MentionRows`); one of
+            // the session's own folder says so ("Folder" for a folder, "Session folder" for a file), among the other groups.
+            is MentionRow.Entry -> ComposerSuggestion(if (row.folder) "${row.name}/" else row.name,
+                if (!row.top) row.typed else if (row.folder) folderWord else sessionFolderWord, key = row.key, flexible = true,
+                section = otherSection.takeIf { row.top })
         }
     }
+    // `@` at the caret, whose list opens: the @ button's, and the + menu's Mention a file or session (iOS `typeMention`).
+    fun startMention() { state.beginEdit(); state.value = typeMention(state.value); state.focusRequest++ }
     fun pickMention(picked: ComposerSuggestion) {
         val token = mention ?: return
         val row = mentionRows.firstOrNull { it.key == picked.key } ?: return
@@ -369,9 +377,7 @@ fun ChatComposer(
         leading = {
             JIconButton(PhIcons.Plus, stringResource(R.string.chat_composer_add), { menu = true }, enabled = !sending && enabled)
             if (expanded) {
-                if (mentions != null) JIconButton(PhIcons.At, stringResource(R.string.chat_mention), {
-                    state.beginEdit(); state.value = typeMention(state.value); state.focusRequest++
-                }, enabled = enabled)
+                if (mentions != null) JIconButton(PhIcons.At, stringResource(R.string.chat_mention), ::startMention, enabled = enabled)
                 leading?.invoke(this)
             }
         },
@@ -414,13 +420,18 @@ fun ChatComposer(
             ComposerSuggestions(suggestions.map { ComposerSuggestion(it.word, it.detail, destructive = it.clear) },
                 onPick = { picked -> suggestions.firstOrNull { it.word == picked.word }?.let(::pick) },
                 modifier = Modifier.padding(vertical = Tokens.Space.xs))
-            // The @ menu: Persona's open tasks, files this chat used, then other sessions; a word that matches nothing says so.
-            ComposerSuggestions(mentionItems, onPick = ::pickMention, modifier = Modifier.padding(vertical = Tokens.Space.xs))
-            if (mention != null && mentionItems.isEmpty()) Text(stringResource(when {
-                    browsing.reading -> R.string.chat_mention_reading_folder
-                    browsing.browse != null -> R.string.chat_mention_no_match_folder
-                    else -> R.string.chat_mention_no_match
-                }), Modifier.padding(vertical = Tokens.Space.xs), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+            // The @ menu: Persona's open tasks, files this chat used, the session folder's entries, then other sessions; a word
+            // that matches nothing says so. On Glass it grows in and out in iOS's state motion, rising from the field, as the
+            // lines over New chat's composer step aside for it (`NeedsStepAside`).
+            Column(Modifier.fillMaxWidth().then(if (PersonaTheme.style == AppStyle.Glass && !PersonaTheme.reduceMotion)
+                Modifier.animateContentSize(PersonaTheme.motion.enter(), Alignment.BottomStart) else Modifier)) {
+                ComposerSuggestions(mentionItems, onPick = ::pickMention, modifier = Modifier.padding(vertical = Tokens.Space.xs))
+                if (mention != null && mentionItems.isEmpty()) Text(stringResource(when {
+                        browsing.reading -> R.string.chat_mention_reading_folder
+                        browsing.browse != null -> R.string.chat_mention_no_match_folder
+                        else -> R.string.chat_mention_no_match
+                    }), Modifier.padding(vertical = Tokens.Space.xs), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+            }
             hint?.let { Text(it.text, style = PersonaTheme.type.caption, color = if (it.missing) PersonaTheme.palette.cautionText else PersonaTheme.palette.ink2) }
         },
     ) {
@@ -452,6 +463,8 @@ fun ChatComposer(
         })
         add(JAction(stringResource(R.string.chat_composer_take_photo), enabled = service != null && roomForMedia) { takePhoto() })
         add(JAction(stringResource(R.string.chat_composer_files), enabled = service != null) { launchPicker { files.launch(arrayOf("*/*")) } })
+        // iOS's Mention a File or Session, after the attachments (`AttachMoreSection.common`): where the composer has an @ list.
+        if (mentions != null) add(JAction(stringResource(R.string.chat_mention)) { menu = false; startMention() })
         // Quick messages go out at once; /clear asks first, and only while nothing is running or being cleared.
         extensionPrompts.forEach { prompt -> add(JAction(prompt.title) { menu = false; state.fillQuickPrompt(prompt) }) }
         SlashCommand.all(resources).forEach { command -> add(JAction(command.title) { menu = false; onCommand(command.text) }) }

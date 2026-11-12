@@ -20,6 +20,8 @@
     </plurals>
     <string name="chat_mention">ファイルまたはセッションを参照</string>
     <string name="chat_mention_used_file">このセッションで使ったファイル</string>
+    <string name="chat_mention_folder">フォルダ</string>
+    <string name="chat_mention_session_folder">セッションのフォルダ</string>
     <string name="chat_mention_session_detail">%1$s · コンテキストとして</string>
     <string name="chat_mention_no_match">一致するファイルやセッションはありません</string>
     <string name="chat_mention_reading_folder">フォルダを読み込み中…</string>
