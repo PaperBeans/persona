@@ -12,7 +12,7 @@ import (
 )
 
 // presenceTimes sets how long the owner counts as present and the longest a decision waits, for a test.
-func presenceTimes(t *testing.T, present, decision time.Duration) {
+func presenceTimes(t testing.TB, present, decision time.Duration) {
 	t.Helper()
 	oldPresent, oldDecision := ownerPresentFor, relayDecisionMax
 	ownerPresentFor, relayDecisionMax = present, decision

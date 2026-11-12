@@ -15,13 +15,13 @@ import (
 
 // newQuietService is newTaskService with the main conversation conv1 (idle, on machine server), a short notice
 // delay and supervision messages (supervise_digest.go) that come at once and often.
-func newQuietService(t *testing.T) (*Service, *fakeHub) {
+func newQuietService(t testing.TB) (*Service, *fakeHub) {
 	t.Helper()
 	return newQuietServiceOn(t, nil)
 }
 
 // newQuietServiceOn is newQuietService with st as its database (nil: none).
-func newQuietServiceOn(t *testing.T, st Store) (*Service, *fakeHub) {
+func newQuietServiceOn(t testing.TB, st Store) (*Service, *fakeHub) {
 	t.Helper()
 	old := quietNoticeDelay
 	quietNoticeDelay = 30 * time.Millisecond
