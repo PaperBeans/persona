@@ -1,5 +1,17 @@
 # Lessons: hub / node and networking
 
+## A name taken from a counter of attempts is not a free name (2026-11-13, #6024)
+
+The hub edge named each new slot by alternating on a counter of slots started (`'a' + slots%2`), assuming every
+start replaces the slot before it. A failed standby does not: after one, the next standby got the serving slot's own
+name and so its socket paths (`slot-<name>-<port>.sock`), and when that standby failed too, the edge's clean-up of
+"its" sockets deleted the serving slot's. The old hub kept running, the edge could no longer dial it, and every
+connection waited `HoldMax` and was closed, with nothing exiting for the service manager to restart. Self-update
+retries a version that failed in standby at the next hourly check, so two failed attempts were enough. Name a
+resource after what is in use now (the slot that served last), not after how many attempts were made, and let a
+process's clean-up remove only what it made: the edge notes any socket file already at a slot's path when it starts
+it and leaves that file alone. A test of one failed switch passed for this reason; test failures in a row.
+
 ## A new file in the knowledge base is searched unless `searchable` says otherwise (2026-11-13, #5991)
 
 Search reads every `.md` and `.json` file of the data dir it is not told to skip, profile files before any message

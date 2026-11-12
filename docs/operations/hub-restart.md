@@ -111,6 +111,8 @@ One switch (self-update, `personad hub switch`, deploy.sh), in order:
 
 1. The new binary starts as the **standby** slot: it reports its version and build number, self-checks the config, verifies it can reach the database (`db.Check`, no migration), then waits.
    Meanwhile the old slot keeps serving; if the version is wrong, it fails to start, or it cannot reach the database, the new one is killed and the old one keeps running with no interruption at all.
+   That holds however many switches fail in a row: a new slot takes the name (a or b) the slot that served last is not using, so a standby never shares the serving slot's sockets,
+   and when a slot exits the edge removes only socket files that slot left, never one that was already there when it started (#6024).
 2. The edge starts to **hold**: new connections queue at the edge instead of being refused. Then it tells the old slot to **release**, and it stops through the planned-shutdown flow: `hub_restarting`, hand over machines and the event log, 1001.
 3. It tells the new slot to **activate**: migrate the database, take over machines, start listening, report ready. The edge switches routing over and releases the queued connections to it.
 4. If the new slot fails to take over (migration failure, exit, timeout), it switches back to the previous version: `--prev`, or during self-update the edge swaps back the files recorded in the pending marker.
@@ -315,8 +317,8 @@ Socket activation caveats:
   signal-to-readiness is reported separately because preflight and idle-process drain happen while the old node still answers.
   Neither measurement claims that the active connection survives exec. Raw logs stay private; the last line is `PASS` / `FAIL` / `TIMEOUT`.
 - Blue-green switching:
-  - `internal/hubedge` tests (Linux / macOS): the test binary plays the slot itself. Covers source addresses, zero failed requests during switching, concurrency across 6 consecutive switches, a new version that cannot start,
-    rollback after failed takeover, a slot requesting its own switch, rejection of a wrong build number, rollback of an unconfirmed update, and restart after a crash.
+  - `internal/hubedge` tests (Linux / macOS): the test binary plays the slot itself. Covers source addresses, zero failed requests during switching, concurrency across 6 consecutive switches, a new version that cannot start
+    (also several times in a row, then a switch that succeeds), rollback after failed takeover, a slot requesting its own switch, rejection of a wrong build number, rollback of an unconfirmed update, and restart after a crash.
   - `TestUpdateHandsOverToTheEdge` and others in `hub`; `scripts/test/test_hub_switch_deploy.py` (hub-systemd.sh's three outcomes).
   - End-to-end test with real personad: private Postgres, v1 → `hub switch` → v2, with continuous requests to `/api/v1/health`, then try a binary that cannot start.
 - Unit / integration tests (`server/`): `TestEventLogSince`, `TestHelloResumes`, `TestStampEvent`, `TestListenInherited` (pass fd 3 to a child like systemd),
