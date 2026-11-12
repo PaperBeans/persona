@@ -400,3 +400,14 @@ leader and read an answer full of its own labels. A leader's `todo_create` now o
 tree shows pieces no Agent has worked on as `planned`. Two traps found on the way: such a piece has an `origin`, so the
 To-dos SOP shelves it after 48 h untouched like any agent-made to-do (it leaves the tree; the leader touching it keeps it),
 and the stuck rule must not count a piece that never started, or every planned piece older than a day reported stuck.
+
+## The supervision fingerprint only sees the agent's words (#6027)
+
+`digestFingerprint` (`supervise_dedup.go`) folds a signal into the one told in the last 30 minutes when its agent's
+last words are unchanged, because a new turn or a periodic sweep is not news. Some signals carry news that is not in the
+agent's words: the owner's answer to a decision's round, a recheck or undecidable review of a new round, a start
+attempt's failure or start. They were dropped: the owner's "You decide" after "Tell me the background first" ended the
+card but never reached the supervisor, and a retry that failed with the first try's error was never told although
+`task_retry` promised it. Such kinds now hash their key too (`keyIsNews`), and a failed start's key names its attempt.
+A new signal kind whose key names one event, rather than moving with every turn, belongs in `keyIsNews`; test it with
+the agent's words unchanged, which is the case that hides the drop (the task's agent is usually stopped while it waits).
