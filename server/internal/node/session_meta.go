@@ -22,7 +22,7 @@ type quickMeta struct {
 	outputTokens int
 	codex        bool
 	first        string
-	activity     time.Time // last real exchange; zero when unknown
+	activity     time.Time // last real exchange, the tail's or the last before it; zero when unknown, never the first prompt's (#5896)
 	queue        []string
 	loop         *proto.LoopInfo
 	toolLoop     toolLoopScan
@@ -50,7 +50,8 @@ type quickMeta struct {
 	asks string
 	// lastTextAt is when the agent last wrote text (botmux's sentinel included: it said something, it is no probe).
 	lastTextAt time.Time
-	// lastPromptAt is when the latest message to the agent came in.
+	// lastPromptAt is when the latest message to the agent came in: the tail's, else the latest known before it (the
+	// session's first when no nearer one is).
 	lastPromptAt time.Time
 	// doing / doingAt: what the agent's latest tool call does, when no text came after it (transcript.Activity).
 	doing       string
@@ -73,7 +74,9 @@ type quickMeta struct {
 	// turnClosed: the tail ends with a turn finished (transcript.Meta.TurnClosed): a Codex rollout's, a Claude
 	// transcript's (turn_duration, an interrupt)
 	turnClosed bool
-	// claudeTurn: a Claude transcript whose tail has a turn started and not finished (transcript.Meta.TurnOpen)
+	// claudeTurn: a Claude transcript with a turn started and not finished (transcript.Meta.TurnOpen). A tail that
+	// starts and ends no turn leaves both as they stood before it (readQuickMetaSince): a long turn's prompt is soon
+	// out of the tail, and a recap written after a finished turn starts none.
 	claudeTurn bool
 	// contentAt: the newest line in the tail that has a time, when the transcript last said something. Not the file's
 	// mtime: Claude Code rewrites its trailing metadata (last-prompt, ai-title, mode…, no timestamps) in place while
@@ -189,8 +192,13 @@ func readQuickMeta(path string, st os.FileInfo) quickMeta {
 	return readQuickMetaSince(path, st, quickMeta{})
 }
 
-// readQuickMetaSince reads a transcript's quick meta; prev is its meta from the last read (zero when there is none),
-// whose last text stands when the tail has none and the file only grew within the tail since.
+// readQuickMetaSince reads a transcript's quick meta; prev is its meta from the last read (zero when there is none).
+//
+// The head is read for what belongs to the session's start (its first prompt, where it started, what a rollout says
+// once at its start) and the tail for where the session stands, each into a Meta of its own: read into one, the first
+// prompt's time, its open turn and its mode were the session's latest whenever the tail held no exchange, and one line
+// can fill a tail (#5896). What the tail's lines do not say is as it stood before them: the last read's when nothing
+// written since is out of the tail, else what the lines further back say (lookBack).
 func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 	m := quickMeta{size: st.Size(), mtime: st.ModTime()}
 	f, err := os.Open(path)
@@ -198,38 +206,19 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 		return m
 	}
 	defer f.Close()
-	var tm transcript.Meta
+	head, start := transcriptHead(f)
+	// What the tail may not repeat: a rollout names its directory, version and client on its first line only, its model
+	// and effort once a turn. Nothing of the head's exchange, turn or mode.
+	tm := transcript.Meta{Codex: head.Codex, Cwd: head.Cwd, Version: head.Version, VersionAt: head.VersionAt, Surface: head.Surface,
+		Model: head.Model, Effort: head.Effort, EffortAt: head.EffortAt}
 	if prev.titleManual && prev.size <= st.Size() {
 		tm.Title, tm.TitleManual, tm.TitleSource = prev.title, true, "manual"
 	}
-	start := "" // the first cwd: tm.Cwd moves with every `cd` the head's lines record, and the tail's overwrite it
-	// The first prompt is usually in the first 32 KB. A Codex rollout puts its instructions first (the assistant's
-	// AGENTS.md and snapshot: 74 KB in), so up to 256 KB is read while it has not turned up.
-	head := make([]byte, 32*1024)
-	nr, _ := f.Read(head)
-	for {
-		for _, line := range bytes.Split(head[:nr], []byte("\n")) {
-			if bytes.Contains(line, []byte(`"cwd"`)) || bytes.Contains(line, []byte(`"type":"user"`)) ||
-				bytes.Contains(line, []byte(`"type":"UserMessage"`)) { // Codex rollouts: session_meta, then the first prompt
-				transcript.ParseLine(0, line, &tm)
-				if start == "" {
-					start = tm.Cwd
-				}
-				if tm.Cwd != "" && tm.FirstUser != "" {
-					break
-				}
-			}
-		}
-		if tm.FirstUser != "" || nr < len(head) || len(head) >= 256*1024 {
-			break
-		}
-		head = make([]byte, len(head)*2)
-		nr, _ = f.ReadAt(head, 0)
-	}
-	first := tm.FirstUser
-	tm.ReadingTail()
 	off := max(st.Size()-quickTail, 0)
-	if off > 0 && prev.size >= off && prev.size <= st.Size() {
+	// covered: nothing written since the last read is out of the tail, so what that read knew stands where the tail's
+	// lines say nothing.
+	covered := off > 0 && prev.size >= off && prev.size <= st.Size()
+	if covered {
 		// All newly appended rows are in the tail, so it can invalidate the previous fallback itself.
 		tm.ModelFallback = prev.modelFallback
 	}
@@ -238,10 +227,12 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 	var tail transcript.Tail
 	tail.Rewound(prev.rewound)
 	m.rewound = prev.rewound
+	whole := off // where the tail's whole lines begin: after the line off cuts
 	buf := make([]byte, st.Size()-off)
 	if _, err := f.ReadAt(buf, off); err == nil || len(buf) > 0 {
 		lines := bytes.Split(buf, []byte("\n"))
 		if off > 0 && len(lines) > 0 {
+			whole += int64(len(lines[0]))
 			lines = lines[1:] // first line is partial
 		}
 		for _, line := range lines {
@@ -251,37 +242,42 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 			if ts := lineTime(line); ts.After(m.contentAt) {
 				m.contentAt = ts
 			}
-			// Skip parsing big tool results; they still count as activity (a turn that ended on one would otherwise
-			// look finished earlier, and a look at it in the app in between would count as having seen the end). Not a
-			// compaction summary or a meta line: no prompt (Claude Code compacts on its own while idle, and its 17 KB
-			// summary read as one left the session working for hours, #5967); the parser reads them as what they are.
-			if bytes.Contains(line, []byte(`"type":"user"`)) && len(line) > 8<<10 && !notAPrompt(line) {
-				if ts := lineTime(line); ts.After(tm.LastActivity) {
-					tm.LastActivity = ts
-				}
-				if !bytes.Contains(line, []byte(`"tool_result"`)) {
-					tm.LastTool = nil // a long prompt: a new turn
-					if !tm.Codex {
-						tm.TurnOpen, tm.TurnClosed = true, false
-						tm.ClaudeTurnStarted(bytes.Contains(line, []byte(`<task-notification>`))) // the last turn's error is over
-					}
-					if ts := lineTime(line); !bytes.Contains(line, []byte(`"isMeta":true`)) && ts.After(tm.LastPromptAt) {
-						tm.LastPromptAt = ts
-					}
-				}
-				if !tm.Codex {
-					tail.Skipped(line) // its place in the tree: a rewound turn with it in is still found, and hidden whole
-				}
-				continue
-			}
-			tail.Line(&tm, transcript.ParseLine(0, line, &tm))
+			quickLine(line, &tm, &tail)
 		}
 	}
 	if rest, ok := tail.Revoked(); ok { // Claude went on from a turn the node took for rewound (transcript.File.RewoundAt)
 		m.rewound = rest
 	}
 	rewound := tail.Settle(&tm)
-	m.title, m.cwd, m.model, m.lastText, m.first, m.activity, m.queue = tm.Title, tm.Cwd, tm.Model, tm.LastText, first, tm.LastActivity, tm.Queue
+	// before: the transcript as it stood before the tail's lines, for what they do not say. Only its last words and
+	// their time, last exchange, last prompt, Claude turn and mode are read.
+	var before quickMeta
+	if covered {
+		before = prev
+	}
+	if off > 0 {
+		// Not the last read's words after a turn in the tail was gone back over: they may be that turn's.
+		words := tm.LastText == "" && (!covered || rewound)
+		exchange := !covered && tm.LastActivity.IsZero()
+		turn := !covered && !tm.Codex && !tm.TurnOpen && !tm.TurnClosed
+		// Claude Code names the mode on every prompt, so it is at most a turn back. A rollout names it once a turn and
+		// its turns outgrow the reach: its mode is taken when the lines read on the way say it, not looked for.
+		mode := !covered && !tm.Codex && tm.PermissionMode == ""
+		if words || exchange || turn || mode {
+			back := lookBack(f, whole, tm.Codex, words, exchange, turn, mode)
+			if covered {
+				before.lastText, before.answer, before.lastTextAt = back.lastText, "", back.lastTextAt
+			} else {
+				before = back
+			}
+		}
+	}
+	m.title, m.cwd, m.model, m.lastText, m.first, m.activity, m.queue = tm.Title, tm.Cwd, tm.Model, tm.LastText, head.FirstUser, tm.LastActivity, tm.Queue
+	if m.activity.IsZero() {
+		// No exchange in the tail (a tool result or a request bigger than it, then only a recap, a title, a hook's
+		// summary): the last one before it. Never the head's, the session's first; none known leaves the file's time.
+		m.activity = before.activity
+	}
 	if tm.LastText != "" {
 		m.answer = tm.TurnAnswer()
 	}
@@ -309,15 +305,18 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 		m.surface = prev.surface // Claude writes it on every line, a rollout on its first: the head read above has it
 	}
 	m.wake, m.turnClosed, m.lastTextAt, m.lastPromptAt = tm.LastTurnWake, tm.TurnClosed, tm.LastTextAt, tm.LastPromptAt
-	if m.lastText == "" && off > 0 {
+	if m.lastText == "" {
 		// An agent that said a line and then ran tools for a while: their results and hook lines push its words out of
 		// the tail (a 1.5 MB transcript whose last text was 900 KB back, 2026-11-04) and its task card said "No activity yet".
-		if !rewound && prev.size > 0 && prev.size >= off && prev.size <= st.Size() {
-			// Nothing written since the last read is out of the tail: no newer words. Not after a turn in the tail was
-			// gone back over: the last read's words may be that turn's.
-			m.lastText, m.answer = prev.lastText, prev.answer
-		} else {
-			m.lastText = lastWordsBefore(f, off)
+		m.lastText, m.answer = before.lastText, before.answer
+		if m.lastTextAt.IsZero() {
+			m.lastTextAt = before.lastTextAt // when the words that stand were written
+		}
+	}
+	if m.lastPromptAt.IsZero() {
+		// No message in the tail: the latest before it, the session's first when none nearer is known (one did come in).
+		if m.lastPromptAt = before.lastPromptAt; m.lastPromptAt.IsZero() {
+			m.lastPromptAt = head.LastPromptAt
 		}
 	}
 	if !m.lastPromptAt.After(m.lastTextAt) { // a message after the question answered it (#5096)
@@ -328,6 +327,11 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 	}
 	m.turnOpen = tm.Codex && (tm.TurnOpen || off > 0 && !tm.TurnClosed)
 	m.claudeTurn = !tm.Codex && tm.TurnOpen
+	if !tm.Codex && !tm.TurnOpen && !tm.TurnClosed {
+		// The tail starts and ends no turn: the turn stands as it stood before it. A turn seen starting stays open when
+		// its prompt leaves the tail; one that ended does not open again for a recap written after it.
+		m.claudeTurn, m.turnClosed = before.claudeTurn, before.turnClosed
+	}
 	m.modelFallback = tm.ModelFallback
 	m.turnErr = turnFailure{text: tm.TurnError, kind: tm.TurnErrorKind, code: tm.TurnErrorCode, resetsAt: tm.TurnErrorResetsAt,
 		resumes: tm.TurnErrorResumes, afterWork: tm.TurnErrorAfterWork}
@@ -338,6 +342,12 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 		m.turnErr.resumes = prev.turnErr.resumes
 	}
 	m.mode, m.modeAt, m.effort, m.effortAt, m.sandbox = tm.PermissionMode, tm.ModeAt, tm.Effort, tm.EffortAt, tm.CodexSandbox
+	if m.mode == "" && m.sandbox == "" {
+		// The tail names no mode: the latest one before it, the session's first when none nearer is known.
+		if m.mode, m.modeAt, m.sandbox = before.mode, before.modeAt, before.sandbox; m.mode == "" && m.sandbox == "" {
+			m.mode, m.modeAt, m.sandbox = head.PermissionMode, head.ModeAt, head.CodexSandbox
+		}
+	}
 	m.version, m.versionAt, m.ultracode, m.ultracodeAt = tm.Version, tm.VersionAt, tm.Ultracode, tm.UltracodeAt
 	m.contextTokens, m.contextWindow = tm.ContextTokens, tm.ContextWindow
 	if m.contextTokens == 0 && prev.size > 0 && prev.size <= st.Size() {
@@ -376,17 +386,85 @@ func (n *Node) mergeNamingMetadata(path string, m *quickMeta) {
 	}
 }
 
-// lastWordsReach: how far before the tail lastWordsBefore looks for an agent's last words.
-const lastWordsReach = 8 << 20
+// transcriptHead reads a transcript's head up to its first prompt, for what belongs to the session's start: the first
+// prompt, and start, the first directory its lines name (head.Cwd moves with every `cd` they record).
+func transcriptHead(f *os.File) (head transcript.Meta, start string) {
+	// The first prompt is usually in the first 32 KB. A Codex rollout puts its instructions first (the assistant's
+	// AGENTS.md and snapshot: 74 KB in), so up to 256 KB is read while it has not turned up.
+	buf := make([]byte, 32*1024)
+	nr, _ := f.ReadAt(buf, 0)
+	for {
+		for _, line := range bytes.Split(buf[:nr], []byte("\n")) {
+			if bytes.Contains(line, []byte(`"cwd"`)) || bytes.Contains(line, []byte(`"type":"user"`)) ||
+				bytes.Contains(line, []byte(`"type":"UserMessage"`)) { // Codex rollouts: session_meta, then the first prompt
+				transcript.ParseLine(0, line, &head)
+				if start == "" {
+					start = head.Cwd
+				}
+				if head.Cwd != "" && head.FirstUser != "" {
+					break
+				}
+			}
+		}
+		if head.FirstUser != "" || nr < len(buf) || len(buf) >= 256*1024 {
+			break
+		}
+		buf = make([]byte, len(buf)*2)
+		nr, _ = f.ReadAt(buf, 0)
+	}
+	return head, start
+}
 
-// lastWordsBefore is the last assistant text in the transcript before end, read backwards a chunk at a time (each
-// twice the last) up to lastWordsReach; "" when there is none in that reach.
-func lastWordsBefore(f *os.File, end int64) string {
-	for chunk, read := int64(quickTail), int64(0); end > 0 && read < lastWordsReach; chunk *= 2 {
+// quickLine reads one line of a transcript's end into tm, as the quick read does: tail is the tree the line takes its
+// place in (nil when the lines are not followed in one: lookBack).
+func quickLine(line []byte, tm *transcript.Meta, tail *transcript.Tail) {
+	// Skip parsing big tool results; they still count as activity (a turn that ended on one would otherwise look
+	// finished earlier, and a look at it in the app in between would count as having seen the end). Not a compaction
+	// summary or a meta line: no prompt (Claude Code compacts on its own while idle, and its 17 KB summary read as one
+	// left the session working for hours, #5967); the parser reads them as what they are.
+	if bytes.Contains(line, []byte(`"type":"user"`)) && len(line) > 8<<10 && !notAPrompt(line) {
+		ts := lineTime(line)
+		if ts.After(tm.LastActivity) {
+			tm.LastActivity = ts
+		}
+		if !bytes.Contains(line, []byte(`"tool_result"`)) {
+			tm.LastTool = nil // a long prompt: a new turn
+			if !tm.Codex {
+				tm.TurnOpen, tm.TurnClosed = true, false
+				tm.ClaudeTurnStarted(bytes.Contains(line, []byte(`<task-notification>`))) // the last turn's error is over
+			}
+			if !bytes.Contains(line, []byte(`"isMeta":true`)) && ts.After(tm.LastPromptAt) {
+				tm.LastPromptAt = ts
+			}
+		}
+		if !tm.Codex && tail != nil {
+			tail.Skipped(line) // its place in the tree: a rewound turn with it in is still found, and hidden whole
+		}
+		return
+	}
+	items := transcript.ParseLine(0, line, tm)
+	if tail != nil {
+		tail.Line(tm, items)
+	}
+}
+
+// lookBackReach: how far before the tail lookBack reads.
+const lookBackReach = 8 << 20
+
+// lookBack reads how the transcript stood before end, where a tail read's whole lines begin: the line the tail's
+// start cuts is read whole here (a tool result or a prompt bigger than the tail is the last exchange). It goes back
+// a chunk at a time (each twice the last) up to lookBackReach, until it has what is asked for: the agent's last words,
+// the last exchange, how a Claude turn stands, the mode. Each is the nearest before end, as is the last prompt's time
+// (and the mode when not asked for) when the lines read on the way say it. Only those fields are set; what is not
+// found stays zero.
+func lookBack(f *os.File, end int64, codex, words, exchange, turn, mode bool) quickMeta {
+	var b quickMeta
+	said := false // a chunk said how the turn stands
+	for chunk, read := int64(quickTail), int64(0); end > 0 && read < lookBackReach; chunk *= 2 {
 		start := max(end-chunk, 0)
 		buf := make([]byte, end-start)
 		if n, err := f.ReadAt(buf, start); err != nil && n < len(buf) {
-			return ""
+			break
 		}
 		read += end - start
 		lines := bytes.Split(buf, []byte("\n"))
@@ -395,19 +473,37 @@ func lastWordsBefore(f *os.File, end int64) string {
 			next += int64(len(lines[0])) // a partial line: whole in the next chunk
 			lines = lines[1:]
 		}
-		var tm transcript.Meta
+		tm := transcript.Meta{Codex: codex}
 		for _, line := range lines {
-			if len(line) == 0 || bytes.Contains(line, []byte(`"type":"user"`)) && len(line) > 8<<10 {
-				continue
+			if len(line) > 0 {
+				quickLine(line, &tm, nil)
 			}
-			transcript.ParseLine(0, line, &tm)
 		}
-		if tm.LastText != "" {
-			return tm.LastText
+		// An earlier chunk adds only what the later ones did not say.
+		if b.lastText == "" {
+			b.lastText = tm.LastText
+		}
+		if b.lastTextAt.IsZero() {
+			b.lastTextAt = tm.LastTextAt
+		}
+		if b.activity.IsZero() {
+			b.activity = tm.LastActivity
+		}
+		if b.lastPromptAt.IsZero() {
+			b.lastPromptAt = tm.LastPromptAt
+		}
+		if !said && (tm.TurnOpen || tm.TurnClosed) {
+			said, b.claudeTurn, b.turnClosed = true, tm.TurnOpen, tm.TurnClosed
+		}
+		if b.mode == "" && b.sandbox == "" {
+			b.mode, b.modeAt, b.sandbox = tm.PermissionMode, tm.ModeAt, tm.CodexSandbox
+		}
+		if (!words || b.lastText != "") && (!exchange || !b.activity.IsZero()) && (!turn || said) && (!mode || b.mode != "") {
+			break
 		}
 		end = next
 	}
-	return ""
+	return b
 }
 
 // codexStaleWorking: how long herdr may say a Codex agent works while its rollout says the turn is over. Codex writes

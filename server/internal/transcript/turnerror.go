@@ -31,12 +31,9 @@ func (m *Meta) ClaudeTurnStarted(wake bool) {
 
 // TurnErrorResumesSaid: a line read said whether Claude Code goes on by itself after its limit (its notices, a
 // message typed, a reply, another error). False when none did: the lines read start after its notice (a tail of the
-// transcript), and what an earlier read found stands.
+// transcript, read into a Meta of its own: the first prompt in its head says nothing of a wait at the end), and what
+// an earlier read found stands.
 func (m *Meta) TurnErrorResumesSaid() bool { return m.resumesSaid }
-
-// ReadingTail: the lines parsed from here on are the transcript's tail, after its head was read for the title (a
-// prompt there says nothing of a wait at the end): TurnErrorResumesSaid counts the tail's lines only.
-func (m *Meta) ReadingTail() { m.resumesSaid = false }
 
 func (m *Meta) clearTurnError() {
 	m.TurnError, m.TurnErrorKind, m.TurnErrorResetsAt = "", "", time.Time{}

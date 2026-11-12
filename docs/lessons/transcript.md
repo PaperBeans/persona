@@ -126,7 +126,23 @@ Now it skips only small files that have been read in full (no larger than the ta
 
 The same window also lost the last words of online sessions (#1583): after the Agent said something and then made dozens of tool calls, tool results, hook receipts (`async_hook_response`), and request lines quickly exceeded 384 KB.
 `last_text` became empty, leaving task cards and main-chat snapshots showing "No activity yet" for 7 minutes. `readQuickMetaSince` now reuses the previously read text when the window contains none;
-if there is no previous value (the node has just started), it searches backward in segments (`lastWordsBefore`, up to 8 MB). For any "last X" value found only in the tail, consider that it may already be outside the window.
+if there is no previous value (the node has just started), it searches backward in segments (`lookBack`, up to 8 MB). For any "last X" value found only in the tail, consider that it may already be outside the window.
+
+### The head speaks for the start, never for the end (2026-11-13, #5896)
+
+`readQuickMetaSince` also reads the transcript's head, up to its first prompt, for the title and the starting directory. It used to parse the head and the tail into one `transcript.Meta`,
+so whenever the tail held no exchange, the first prompt's time, its open turn and its mode were the session's latest: the row's `updated_at` jumped back to the first message (by days for a session days old,
+so it sank in every time-sorted list), the session showed as working for up to 45 s after every turn had ended, in the mode it was started in, and a question in its last reply stopped counting as asked.
+A tail holds no exchange when its last exchange is one line bigger than the window (a screenshot's tool result, cut by the window's start and dropped as a partial line) or when a recap's `api-request-blob` fills it.
+On one machine's real transcripts: 1 of 124 was in that state when scanned, and 21 transcripts had been in it 107 times, the longest for 37 minutes.
+
+- The head and the tail each get a `Meta` of their own. Only what belongs to the start crosses over: the first prompt, the starting directory, and what a Codex rollout says once on its first line (directory, version, client).
+  One `Meta` fed from two places leaks every field by default, including the ones added later; a fresh one leaks none.
+- What the tail does not say stands as it stood before it, for every "last X" the quick read reports (words, last exchange, last prompt, turn, mode): the last read's when nothing written since is out of the tail,
+  else what the lines further back say (`lookBack`), starting with the line the window's start cuts. No exchange known at all leaves the file's time (`lastUsed`), never the first prompt's.
+- The leak also hid a gap: a long turn's prompt leaves the tail after 384 KB, and the turn only read as open because the first prompt's did. Removing a wrong source of a value means supplying the right one
+  (the turn seen starting stays open until the tail ends it), and testing the case the wrong one happened to cover.
+- Check such a change against real transcripts, not only fixtures: compare the quick read with a read of the whole file, per field, and print ids and counts only.
 - **A Claude Code transcript is a tree** (`uuid` / `parentUuid`): rewinding (`/rewind`) or editing and resending with ↑ writes the next message as a sibling of an earlier one. Rewound turns remain in the file. See
   `transcript/branch.go` (two messages from the user under the same parent, with an assistant reply to the earlier one → the earlier message's entire subtree produces no items) and `docs/protocol/protocol.md` ("Rewinding to a message");
   **pressing Esc to cancel a message before any reply, then sending again, also writes the same pair of siblings** (#3036; observed: two identical messages under the same "[Request interrupted by user]" line, with no reply to the first).
