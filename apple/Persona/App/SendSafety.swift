@@ -45,7 +45,7 @@ extension AppModel {
             let launcher = assistantLaunchers[key], model = assistantModels[key]
             try await OpRetry.untilDelivered(keepTrying: { socket?.takesWrites == true }) {
                 try await api.send(key, text: msg.text, images: msg.images, launcher: launcher, model: model,
-                                   clientMsgID: msg.id.uuidString, clearDraft: clearDraft, opID: msg.id)
+                                   clientMsgID: msg.id.uuidString, clearDraft: clearDraft, via: msg.via, opID: msg.id)
             }
             return .sent
         } catch let e as APIError where e.code == "input_draft" {

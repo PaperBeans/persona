@@ -32,10 +32,12 @@ rsync -a --delete --prune-empty-dirs --include '*/' --include '*.swift' --exclud
 # Some tests read docs next to the code they describe (docs/**/*.md).
 rsync -a --delete --prune-empty-dirs --include '*/' --include '*.md' --exclude '*' docs/ "$H":"$D/docs/"
 rsync -a scripts/test/server_test_env.py "$H":"$D/server_test_env.py"
+# internal/node runs in the partitions CI and the release build use: serially it outgrew Go's ten-minute -timeout (#5594).
+rsync -a scripts/test/go_partitions.py scripts/test/go_test_partitioned.py "$H":"$D/"
 RESOLVER=$(python3 scripts/persona_identity.py --service hub --prefix -)
 # The recovered service root is only for locating the database configuration, never the Go test environment.
 # ~/.local/bin: the pinned Bun (docs/operations/testing.md), which a non-interactive shell may not have on PATH (#1947).
 ssh "$H" "$RESOLVER
 cd ~/$D/server && export PATH=\$PATH:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/go/bin && \
   python3 -I ../server_test_env.py --database-file \"\$PERSONA_HOME/hub.json\" -- \
-  ${GOCMD:-go test -count=1 -p 1} ${*:-./...}"
+  python3 -I ../go_test_partitioned.py ${GOCMD:-go test -count=1 -p 1} ${*:-./...}"

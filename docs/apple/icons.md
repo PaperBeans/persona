@@ -26,6 +26,23 @@ everywhere, and no other meaning uses `doc.on.doc`.
 Errors use the triangle (`error`, `errorFilled`); the octagon (`critical`) is only a machine's critical alert. Copy is
 `doc.on.doc`, Paste `doc.on.clipboard`, Interrupt `stop.fill`, a model or launcher `cube` (`cpu` is only a processor).
 
+## Recording marks
+
+A recording, the mode that keeps recording, its paused state and the summaries made from them are different meanings,
+each with its own entry (all-day recording, #4741, `docs/apple/recording.md` "All-day recording (Apple)"):
+
+| Entry | Symbol | Meaning |
+| --- | --- | --- |
+| `Theme.Icon.recording` | `waveform.circle` | one recording (the Recordings page, a clip) |
+| `Theme.Icon.allDay` | `record.circle` | All-Day Recording: the mode, its switch on the phone, a recorded day's row in Recent Recordings (`RecordingDayRow`), its button, page and recording state on the watch, the consent sheet's heading |
+| `Theme.Icon.allDayPaused` | `pause.circle` | all-day recording paused, waiting for a tap: a state beside its words, never the Pause control (`pause`, `pause.fill`) |
+| `Theme.Icon.meetingMark` | alias of `meeting` (`person.2.wave.2`) | a meeting marked inside a day (the watch's Mark Meeting, a meeting in the day's timeline) |
+| `Theme.Icon.dayRecap` | `text.book.closed` | the hub's recap of a day: the Day Recap section's header on a day's page and the Today row under the switch (`RecordingDayTodayRow`). Its own symbol, not `minutes` (`note.text`, the watch's Meeting Minutes): one covers a whole day |
+
+The All-Day Recording complication can't read `Theme.Icon` (the widget extension doesn't build it), so `WatchFaceTokens`
+repeats `allDaySymbol`, `allDayPausedSymbol` and `allDayAlertSymbol` (`Theme.Icon.error`'s triangle, for stopped and a
+face gone stale) with an `// icon:` note naming the entry each mirrors; change both together.
+
 ## Each style has an icon language
 
 A style's `ComponentSpec.icons` (`IconSpec`) says how its SF Symbols look: a weight, whether filled symbols are drawn as

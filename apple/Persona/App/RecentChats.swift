@@ -5,7 +5,7 @@ import Foundation
 /// (spec/fixtures/recents/README.md, checked against recent_conversations.json in `RecentChatsTests`).
 nonisolated enum RecentChats {
     static let maxEntries = 10
-    /// How many the home screen menu lists: one, with Record a Meeting, New Chat and Inbox (the system shows four).
+    /// How many the home screen menu lists: one, with Record, New Chat and Inbox (the system shows four).
     static let homeScreen = 1
 
     /// The conversation shown goes first; one already there moves (no second entry); the ten newest stay.

@@ -76,7 +76,6 @@ func TestViewActionRouteUsesStoredReplyAndPreservesOutbox(t *testing.T) {
 	}
 	t.Cleanup(database.Close)
 	f := newFakeHub().withMachine()
-	f.hello.PersonaView = true
 	conversation := "actions-" + randomHex(8)
 	s := newServiceOn(t, f, database)
 	at := time.Now().UTC()

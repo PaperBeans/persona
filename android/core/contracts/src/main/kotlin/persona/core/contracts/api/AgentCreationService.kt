@@ -117,9 +117,17 @@ data class AgentLauncher(
     @SerialName("base_url") val baseUrl: String? = null,
     val model: String? = null,
     @SerialName("agent_type") val agentType: String = "claude",
+    /** A runtime's own declaration that it can run the assistant; false or absent on other launchers. */
+    val assistant: Boolean = false,
     /** Its health on this computer (docs/server/launcher-health.md); null when never checked or from an older hub. */
     val health: LauncherHealth? = null,
 )
+
+/** The model a launcher names, short. Older nodes used the Chinese display placeholder for no model. */
+fun launcherModel(launcher: AgentLauncher): String? = launcher.model
+    ?.takeUnless { it == "默认" } // i18n-ignore: legacy wire value, never displayed
+    ?.substringAfterLast('/')
+    ?.takeIf(String::isNotBlank)
 
 /**
  * A launcher's health on one computer as the hub records it (docs/server/launcher-health.md): [state] working, failing,

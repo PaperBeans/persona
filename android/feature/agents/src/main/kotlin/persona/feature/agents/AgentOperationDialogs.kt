@@ -130,20 +130,30 @@ internal fun AgentSpaceMenu(session: Session, pinned: Boolean, muted: Boolean, b
     val actions = stringResource(R.string.agents_space_actions)
     if (compact) HeadingAction(PhIcons.DotsThree, actions, onClick = { menu = true })
     else JIconButton(PhIcons.DotsThree, actions, { menu = true })
-    if (menu) JActionSheet(buildList {
-        if (onOpen != null) add(JAction(stringResource(R.string.agents_space_open), PhIcons.SquaresFour, onClick = onOpen))
-        if (onMarkRead != null) add(JAction(stringResource(R.string.agents_mark_all_read), PhIcons.Check, onClick = onMarkRead))
-        if (named) {
-            add(JAction(stringResource(if (pinned) R.string.agents_space_unpin else R.string.agents_space_pin), PhIcons.PushPin, enabled = !busy, onClick = onPin))
-            add(JAction(stringResource(if (muted) R.string.agents_space_unmute else R.string.agents_space_mute), PhIcons.Prohibit, enabled = !busy, onClick = onMute))
-            add(JAction(stringResource(R.string.agents_dialog_rename_space), PhIcons.NotePencil, enabled = !busy && session.operationWorkspaceId != null, onClick = onRename))
-        }
-        if (todo != null) {
-            add(JAction(stringResource(if (todo.linked) R.string.agents_space_todo_move else R.string.agents_space_todo_link), PhIcons.ListChecks,
-                separatorBefore = isNotEmpty(), onClick = todo.onLink))
-            todo.onUnlink?.let { add(JAction(stringResource(R.string.agents_space_todo_unlink), PhIcons.LinkSimple, destructive = true, onClick = it)) }
-        }
-    }, { menu = false }, title = session.spaceName?.takeIf { it.isNotBlank() } ?: actions)
+    if (menu) JActionSheet(agentSpaceActions(session, pinned, muted, busy, onPin, onMute, onRename, onMarkRead, onOpen, todo),
+        { menu = false }, title = session.spaceName?.takeIf { it.isNotBlank() } ?: actions)
+}
+
+/**
+ * A space's actions, in its ⋯ sheet ([AgentSpaceMenu]) and in the long press of a repository's header on Glass (iOS's
+ * `repoMenu`): open it, mark its agents read, pin, mute and rename it, put it on a to-do.
+ */
+@Composable
+internal fun agentSpaceActions(session: Session, pinned: Boolean, muted: Boolean, busy: Boolean,
+    onPin: () -> Unit, onMute: () -> Unit, onRename: () -> Unit, onMarkRead: (() -> Unit)? = null,
+    onOpen: (() -> Unit)? = null, todo: SpaceTodoActions? = null): List<JAction> = buildList {
+    if (onOpen != null) add(JAction(stringResource(R.string.agents_space_open), PhIcons.SquaresFour, onClick = onOpen))
+    if (onMarkRead != null) add(JAction(stringResource(R.string.agents_mark_all_read), PhIcons.Check, onClick = onMarkRead))
+    if (!session.spaceName.isNullOrBlank()) {
+        add(JAction(stringResource(if (pinned) R.string.agents_space_unpin else R.string.agents_space_pin), PhIcons.PushPin, enabled = !busy, onClick = onPin))
+        add(JAction(stringResource(if (muted) R.string.agents_space_unmute else R.string.agents_space_mute), PhIcons.Prohibit, enabled = !busy, onClick = onMute))
+        add(JAction(stringResource(R.string.agents_dialog_rename_space), PhIcons.NotePencil, enabled = !busy && session.operationWorkspaceId != null, onClick = onRename))
+    }
+    if (todo != null) {
+        add(JAction(stringResource(if (todo.linked) R.string.agents_space_todo_move else R.string.agents_space_todo_link), PhIcons.ListChecks,
+            separatorBefore = isNotEmpty(), onClick = todo.onLink))
+        todo.onUnlink?.let { add(JAction(stringResource(R.string.agents_space_todo_unlink), PhIcons.LinkSimple, destructive = true, onClick = it)) }
+    }
 }
 
 /** Asks before "Mark all as read" and names how many finished sessions it marks (iOS confirmReadAll). */

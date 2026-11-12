@@ -7,25 +7,32 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.selection.DisableSelection
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import persona.core.contracts.Item
+import persona.core.designsystem.AppStyle
 import persona.core.designsystem.JIcon
 import persona.core.designsystem.JTag
 import persona.core.designsystem.JTextButton
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
+import persona.core.domain.ToolNaming
 import persona.core.domain.toolDetail
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -34,13 +41,22 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 
 // What an opened tool step shows above its output, by tool (iOS `ToolDetail`): a diff under the file it changed, a
-// path to open, the plan as Markdown, the questions, the sub-agent's brief; anything else as its input.
+// path to open, the plan as Markdown, the questions, the sub-agent's brief, a shell's command line; anything else as
+// its input, on Glass as its arguments in words.
 
 /** The input part of an opened tool step that has no diff and no checklist. */
 @Composable
 internal fun ToolInputDetail(item: Item, result: Item? = null) {
     val input = item.toolInput as? JsonObject
     val plain: @Composable () -> Unit = { CodeText(toolDetail(item), stringResource(R.string.chat_tool_details)) }
+    // iOS's default case (#2986, #4339 C1): the input as `key: value` lines in words, its JSON under Raw input (the
+    // reader actions below); Glass only, Brief and Board keep the input as code (decision 8).
+    val listed: @Composable () -> Unit = {
+        if (PersonaTheme.style == AppStyle.Glass && ToolArgumentRows.lists(item.toolName.orEmpty())) {
+            val arguments = remember(item.toolInput) { ToolNaming.arguments(item.toolInput) }
+            if (arguments.isNotEmpty()) ToolArguments(arguments) else plain()
+        } else plain()
+    }
     if (PersonaTools.isAskUser(item.toolName.orEmpty())) {
         AskUserAnswers.questions(input).takeIf { it.isNotEmpty() }?.let { AskUserDetail(it, result) } ?: plain()
         return
@@ -51,7 +67,50 @@ internal fun ToolInputDetail(item: Item, result: Item? = null) {
         "ExitPlanMode" -> input?.text("plan")?.takeIf { it.isNotBlank() }?.let { PlanDetail(it, item.id) } ?: plain()
         "AskUserQuestion" -> toolQuestions(item).takeIf { it.isNotEmpty() }?.let { QuestionsDetail(it) } ?: plain()
         "Task", "Agent" -> input?.text("prompt")?.takeIf { it.isNotBlank() }?.let { TaskDetail(it, input?.text("subagent_type")) } ?: plain()
-        else -> plain()
+        else -> listed()
+    }
+}
+
+/** Which opened tools list their arguments on Glass: any but those whose detail is their own (iOS `ToolDetail`). */
+private object ToolArgumentRows {
+    /** A command line, a diff, a computer's steps (iOS `ComputerToolDetail`, which Android doesn't draw yet: its input as code). */
+    private val own = setOf("Bash", "PowerShell", "Monitor", "Edit", "MultiEdit", "Write", "computer_run", "computer_state")
+
+    fun lists(name: String): Boolean {
+        val lower = name.lowercase()
+        return ToolNaming.tableName(name) !in own && !lower.startsWith("mcp__cua") && "cua-driver" !in lower && "cua_driver" !in lower
+    }
+}
+
+/**
+ * An unknown tool's input as a short key/value list (iOS `ToolArgumentsDetail`, `ToolNaming.arguments`): each field in
+ * words in a column as wide as its widest label (at most [Tokens.Size.box120], scaled with the text), the value beside it
+ * on the label's baseline, a token, a number or JSON in the code face, a sentence in the text face, a few lines at most.
+ * The values can be selected; each row reads as one ("Title, Crash on launch").
+ */
+@Composable
+internal fun ToolArguments(arguments: List<ToolNaming.Argument>) {
+    val palette = PersonaTheme.palette
+    val type = PersonaTheme.type
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val cap = Tokens.Size.box120 * density.fontScale
+    val column = remember(arguments, type.micro, density) {
+        with(density) { arguments.maxOf { measurer.measure(it.label, type.micro, maxLines = 1).size.width }.toDp() }
+    }.coerceAtMost(cap)
+    SelectionContainer {
+        Column(Modifier.fillMaxWidth().semantics { testTag = "tool-arguments" }, verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+            arguments.forEach { argument ->
+                Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
+                    DisableSelection {
+                        Text(argument.label, Modifier.width(column).alignByBaseline(), style = type.micro, color = palette.ink2,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text(argument.value, Modifier.weight(1f).alignByBaseline(), style = if (argument.code) type.code else type.caption,
+                        color = palette.ink, maxLines = argument.lines, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
     }
 }
 
@@ -181,14 +240,16 @@ private fun AskUserChoice(label: String, picked: Boolean) {
 }
 
 /**
- * "View sub-agent" under a Task / Agent step (iOS `WorkStepView`): its sub-agent's read-only conversation, running or
- * done; nothing when the session does not list a sub-agent for the call.
+ * "View sub-agent" under a Task / Agent step in Brief and Board (Glass draws the task card instead): its sub-agent's
+ * read-only conversation, running or done; nothing when the session does not list a sub-agent for the call or it cannot
+ * be opened here.
  */
 @Composable
 internal fun SubagentEntry(toolUseId: String?) {
     val links = LocalChatSubagents.current ?: return
+    val open = links.open ?: return
     val target = toolUseId?.let { links.keys[it] } ?: return
-    JTextButton(stringResource(R.string.chat_tool_open_subagent), { links.open(target) }, icon = PhIcons.ArrowSquareOut)
+    JTextButton(stringResource(R.string.chat_tool_open_subagent), { open(target) }, icon = PhIcons.ArrowSquareOut)
 }
 
 /** What a sub-agent was asked to do: its brief, the first lines of it, all of it in the reader. */

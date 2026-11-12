@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end check that opening a task in the side panel does not push the page up (#1282).
+"""End-to-end check that opening a task in the side panel does not push the page up (#1282, #5424).
 
 The bug: in a task's side panel, a plan waiting for approval with a question and a permission under it stood taller
 than the panel; the composer's focus then scrolled the page's overflow-hidden root up to show it (about 80-150 px),
@@ -12,9 +12,9 @@ Needs a running web page against the fake hub and Playwright for Python:
     (cd web && PERSONA_HUB_URL=http://127.0.0.1:18793 npx vite --port 5293 --strictPort &)
     python3 scripts/test/web_panel_focus_e2e.py http://127.0.0.1:5293 [--size 1280x800] [--shots <dir>]
 
-Opens every pill of the main conversation's task dock in turn, light and dark, and checks that no overflow-hidden
-element got scrolled and the panel's header is in the window. Prints one line per pill and a verdict; exits 1 on the
-first failure.
+Opens every row of the main conversation's Needs you and In progress trays in turn (the side panel is the default of
+Settings › How Agents open), light and dark, and checks that no overflow-hidden element got scrolled and the panel's
+header is in the window. Prints one line per row and a verdict; exits 1 on the first failure.
 """
 import argparse
 import sys
@@ -50,25 +50,38 @@ def main() -> int:
             ctx.add_init_script(f"localStorage.setItem('persona.theme', '{theme}')")
             page = ctx.new_page()
             page.goto(a.base + "/?token=" + a.token)
-            page.wait_for_selector('[data-testid="task-dock-board"]', timeout=20000)
+            page.wait_for_selector("[data-assistant-actionbar] [data-tray-entry]", timeout=20000)
             page.wait_for_timeout(800)
-            pills = page.locator('[data-testid="task-dock-board"] + * > button')
-            for i in range(pills.count()):
-                if pills.count() <= i:
-                    break
-                label = pills.nth(i).inner_text().replace("\n", " ")[:30]
-                pills.nth(i).click()
-                page.wait_for_timeout(900)
-                r = page.evaluate(PUSHED)
-                if a.shots:
-                    page.screenshot(path=f"{a.shots}/panel-{theme}-{w}-{i}.png")
-                ok = r["worst"] == 0 and r["doc"] == 0
-                print(f"{'ok  ' if ok else 'FAIL'} {theme} {w}x{h} [{label}]: pushed {r['worst']} px {r['who']}")
-                if not ok:
-                    print("FAIL: opening a task in the side panel pushed the page up")
-                    return 1
-                page.keyboard.press("Escape")
-                page.wait_for_timeout(300)
+            opened = 0
+            for tray, rows in (("needs", "[data-needs-row] > button, button[data-needs-row]"), ("running", "[data-task-slot], [data-running-agent]")):
+                entry = page.locator(f'[data-assistant-actionbar] [data-tray-entry="{tray}"]')
+                for i in range(30):
+                    if entry.get_attribute("aria-expanded") != "true":
+                        entry.click()
+                        page.wait_for_timeout(300)
+                    row = page.locator(f"[data-assistant-actionbar] :is({rows})")
+                    if row.count() <= i:
+                        break
+                    label = row.nth(i).inner_text().replace("\n", " ")[:30]
+                    row.nth(i).click()
+                    aside = page.locator("aside[aria-label]")
+                    aside.wait_for(timeout=10000)
+                    page.wait_for_timeout(900)
+                    r = page.evaluate(PUSHED)
+                    top = aside.locator("header").first.bounding_box()
+                    if a.shots:
+                        page.screenshot(path=f"{a.shots}/panel-{theme}-{w}-{tray}-{i}.png")
+                    ok = r["worst"] == 0 and r["doc"] == 0 and top is not None and top["y"] >= 0
+                    print(f"{'ok  ' if ok else 'FAIL'} {theme} {w}x{h} {tray} [{label}]: pushed {r['worst']} px {r['who']}, header at {top and top['y']}")
+                    if not ok:
+                        print("FAIL: opening a task in the side panel pushed the page up")
+                        return 1
+                    opened += 1
+                    aside.get_by_role("button", name="Close panel").first.click()
+                    page.wait_for_timeout(300)
+            if not opened:
+                print("FAIL: no row opened a side panel")
+                return 1
             ctx.close()
         browser.close()
     print("PASS: no task's panel pushes the page up")

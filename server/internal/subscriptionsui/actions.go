@@ -1,14 +1,12 @@
 package subscriptionsui
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/nwverse/persona/sdk/go/wire"
-	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/subscriptions"
 )
 
@@ -36,7 +34,20 @@ func (p *pages) act(action string, values map[string]string) (wire.ActionResult,
 		return p.patch(subscriptions.Patch{FallbackTier: &tier}, false, "")
 	case "rules":
 		rules := values["triage_rules"]
+		if p.st.ID == "" && p.st.C != "" { // a built-in source's own rules
+			return p.builtinRules(rules)
+		}
 		return p.patch(subscriptions.Patch{TriageRules: &rules}, true, p.t("toast.saved"))
+	case "builtin_dest":
+		return p.builtinDestination(values)
+	case "unmute":
+		return p.unmute(values["mute"])
+	case "recommend":
+		return p.recommend(values)
+	case "ask":
+		return p.ask()
+	case "triage_preview":
+		return p.triagePreview()
 	case "run_now":
 		if _, err := p.svc.RunNow(p.ctx, p.st.ID, p.env.By); err != nil {
 			return p.errorResult(err)
@@ -54,8 +65,6 @@ func (p *pages) act(action string, values map[string]string) (wire.ActionResult,
 		return p.saveRecipe(values)
 	case "raw_save":
 		return p.saveRaw(values["recipe"])
-	case "draft":
-		return p.startDraft(sourceKey(p.st.C, p.st.S), p.st.C, subscriptions.GenerateRequest{Connector: p.st.C, Source: p.st.S})
 	case "push_add":
 		// This device's own Shortcuts source, before its first item (#3848): the list again, with it under Off.
 		if _, err := p.svc.Push(p.ctx, p.env.By, subscriptions.PushRequest{}); err != nil {
@@ -63,12 +72,6 @@ func (p *pages) act(action string, values map[string]string) (wire.ActionResult,
 		}
 		v := p.draw()
 		return wire.ActionResult{View: &v, Toast: p.t("toast.push_added")}, nil
-	case "regenerate":
-		s, _, err := p.svc.Get(p.ctx, p.st.ID)
-		if err != nil {
-			return p.errorResult(err)
-		}
-		return p.startDraft(subKey(s.ID), s.Connector, subscriptions.GenerateRequest{ID: s.ID, Revision: s.Revision})
 	}
 	// A push row pressed on an app too old to push by itself: draw the page it names.
 	v := p.draw()
@@ -121,6 +124,34 @@ func (p *pages) setDestination(values map[string]string) (wire.ActionResult, err
 
 // dryRun tries the recipe on the page: the recipe page's own, or what the setup form describes.
 func (p *pages) dryRun(values map[string]string) (wire.ActionResult, error) {
+	if p.st.P == pageSource { // the preview on a source's page: the subscription's recipe, or the extension's own
+		req := subscriptions.DryRunRequest{ID: p.st.ID}
+		if p.st.ID == "" {
+			cat, err := p.svc.Catalog(p.ctx, p.st.C)
+			if err != nil {
+				return p.errorResult(err)
+			}
+			for _, src := range cat.Sources {
+				if src.ID == p.st.S && len(src.Recipes) > 0 {
+					r := src.Recipes[0]
+					req = subscriptions.DryRunRequest{Connector: p.st.C, Source: p.st.S, Recipe: &r}
+				}
+			}
+			if req.Recipe == nil {
+				return wire.ActionResult{}, errBadValues
+			}
+		}
+		dry, err := p.svc.DryRun(p.ctx, req)
+		if err != nil && !isProblem(err) {
+			return wire.ActionResult{}, err
+		}
+		p.try = &tried{err: err}
+		if err == nil {
+			p.try.dry = &dry
+		}
+		v := p.draw()
+		return wire.ActionResult{View: &v}, nil
+	}
 	if p.st.P == pageRecipe {
 		dry, err := p.svc.DryRun(p.ctx, subscriptions.DryRunRequest{ID: p.st.ID})
 		if err != nil && !isProblem(err) {
@@ -168,15 +199,10 @@ func (p *pages) saveRecipe(values map[string]string) (wire.ActionResult, error) 
 	}
 	r := p.recipeFrom(params(tool.InputSchema), values)
 	if p.st.ID == "" {
-		req := subscriptions.CreateRequest{Connector: p.st.C, Source: p.st.S, Recipe: &r}
-		if p.keptDraft(r) {
-			req.RecipeOrigin = subscriptions.OriginModel // the model's, as it drafted it
-		}
-		s, err := p.svc.Create(p.ctx, req, p.env.By)
+		s, err := p.svc.Create(p.ctx, subscriptions.CreateRequest{Connector: p.st.C, Source: p.st.S, Recipe: &r}, p.env.By)
 		if err != nil {
 			return p.refused(values, err)
 		}
-		p.env.Drafts.forget(sourceKey(p.st.C, p.st.S))
 		p.st = state{P: pageSource, ID: s.ID}
 		v := p.draw()
 		return wire.ActionResult{View: &v, Toast: p.t("toast.created")}, nil
@@ -228,31 +254,4 @@ func (p *pages) saveRaw(typed string) (wire.ActionResult, error) {
 func isProblem(err error) bool {
 	var se *subscriptions.Error
 	return errors.As(err, &se)
-}
-
-// startDraft drafts a recipe with the model in the background (#2040): up to four minutes, longer than an app waits for
-// a press. The page shows it running and is drawn again when it is done. One at a time per connector, whose tools it
-// calls outside the connector's own pace.
-func (p *pages) startDraft(key, connector string, req subscriptions.GenerateRequest) (wire.ActionResult, error) {
-	if !p.canDraft() {
-		return wire.ActionResult{}, errBadValues
-	}
-	// Not the request's context, which ends with this answer; its language is the note's.
-	ctx := i18n.With(context.Background(), p.env.Lang)
-	svc, by := p.svc, p.env.By
-	started := p.env.Drafts.start(key, connector, func() (subscriptions.Generated, error) { return svc.Generate(ctx, req, by) })
-	v := p.draw()
-	if !started {
-		return wire.ActionResult{View: &v, Toast: p.t("draft.busy")}, nil
-	}
-	return wire.ActionResult{View: &v}, nil
-}
-
-// keptDraft: r is the model's draft for this source as it passed, unchanged by the user.
-func (p *pages) keptDraft(r subscriptions.Recipe) bool {
-	if !p.st.G {
-		return false
-	}
-	job, ok := p.env.Drafts.get(p.draftKey())
-	return ok && !job.running && job.err == nil && sameRecipe(r, withDefaults(job.result.Recipe))
 }

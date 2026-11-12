@@ -99,6 +99,7 @@
     <string name="designsystem_core_agents_no_todo">没有待办</string>
     <string name="designsystem_core_agents_manual">手动开的</string>
     <string name="designsystem_core_agents_quiet_spaces">空闲的空间</string>
+    <string name="designsystem_core_agents_started_tab">发起者</string>
     <plurals name="designsystem_core_count_needs_you">
         <item quantity="other">%1$d 个需要你</item>
     </plurals>
@@ -250,6 +251,32 @@
     <string name="designsystem_core_tool_computer_run">操控电脑</string>
     <string name="designsystem_core_tool_browser_run">用浏览器</string>
     <string name="designsystem_core_tool_browser_look">看浏览器</string>
+    <string name="designsystem_core_computer_look_at">看 %1$s</string>
+    <string name="designsystem_core_computer_look_at_screen">看整个屏幕</string>
+    <string name="designsystem_core_computer_script">运行脚本</string>
+    <string name="designsystem_core_computer_script_named">运行脚本：%1$s</string>
+    <string name="designsystem_core_computer_check">检查</string>
+    <string name="designsystem_core_computer_click">点 %1$s</string>
+    <string name="designsystem_core_computer_spot">一处</string>
+    <string name="designsystem_core_computer_double_click">双击 %1$s</string>
+    <string name="designsystem_core_computer_right_click">右键 %1$s</string>
+    <string name="designsystem_core_computer_type">输入「%1$s」</string>
+    <string name="designsystem_core_computer_fill_in">填「%1$s」</string>
+    <string name="designsystem_core_computer_press">按 %1$s</string>
+    <string name="designsystem_core_computer_scroll">滚动</string>
+    <string name="designsystem_core_computer_drag">拖动</string>
+    <string name="designsystem_core_computer_open">打开 %1$s</string>
+    <string name="designsystem_core_computer_switch_to">切到 %1$s</string>
+    <string name="designsystem_core_computer_bring_to_front">切到前台</string>
+    <string name="designsystem_core_computer_look_at_window">看窗口</string>
+    <string name="designsystem_core_computer_screenshot">截屏</string>
+    <string name="designsystem_core_computer_see_screen">看屏幕上有什么</string>
+    <string name="designsystem_core_computer_zoom">放大看</string>
+    <string name="designsystem_core_computer_space">空格</string>
+    <string name="designsystem_core_computer_controlling">正在操作 %1$s · %2$s</string>
+    <string name="designsystem_core_computer_controlled">刚操作 %1$s · %2$s</string>
+    <string name="designsystem_core_computer_controlling_spoken">正在操作 %1$s，%2$s</string>
+    <string name="designsystem_core_computer_controlled_spoken">刚操作 %1$s，%2$s</string>
     <string name="designsystem_core_tool_agent_read">读 Agent 对话</string>
     <string name="designsystem_core_tool_agent_send">给 Agent 发消息</string>
     <string name="designsystem_core_tool_agents_list">看 Agent 列表</string>
@@ -451,6 +478,6 @@
     <string name="designsystem_core_always_scope_commands">这段对话里的所有命令</string>
     <string name="designsystem_core_always_scope_read_directory">这段对话中，这个目录里的所有读取操作</string>
     <string name="designsystem_core_always_scope_edit_directory">这段对话中，这个目录里的所有文件编辑</string>
-    <string name="designsystem_core_always_scope_tool">这段对话里对这个工具的所有调用</string>
+    <string name="designsystem_core_always_scope_tool">这段对话里的所有「%1$s」调用</string>
     <string name="designsystem_core_always_scope_approved">批准的范围在这段对话中持续有效</string>
 </resources>

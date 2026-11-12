@@ -23,22 +23,28 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/** One suggestion for what is being typed: the [word] to type, what it does; [destructive] marks /clear. */
+/**
+ * One suggestion for what is being typed: the [word] to type, what it does; [destructive] marks /clear. [section] is the
+ * title of the group it belongs to, drawn above the first of a run (the @ list's "Message a Task"); [status] puts that
+ * state's dot before the word (a task's).
+ */
 @Immutable
 data class ComposerSuggestion(
     val word: String, val detail: String, val destructive: Boolean = false,
     val key: String = word, val flexible: Boolean = false,
+    val section: String? = null, val status: Status? = null,
 )
 
 /**
  * Suggestions for the word being typed (the "/" quick messages), above the field inside the composer's accessory: the
  * word in bold, what it does beside it, one line each; picking one calls [onPick]. Glass is a soft well inside the
  * floating composer, brief a paper list under hairlines, the board a bordered list. All six quick messages fit;
- * a longer list scrolls.
+ * a longer list scrolls. Items in sections have each section's title above its first row, a quiet heading.
  */
 @Composable
 fun ComposerSuggestions(items: List<ComposerSuggestion>, onPick: (ComposerSuggestion) -> Unit, modifier: Modifier = Modifier) {
@@ -55,13 +61,18 @@ fun ComposerSuggestions(items: List<ComposerSuggestion>, onPick: (ComposerSugges
     Column(modifier.fillMaxWidth().then(frame).heightIn(max = 272.dp).verticalScroll(rememberScrollState()).padding(vertical = 4.dp)) {
         items.forEachIndexed { index, item ->
             val spoken = stringResource(R.string.designsystem_with_state, item.word, item.detail)
-            if (index > 0) JDivider(Modifier.padding(horizontal = 14.dp))
+            if (index > 0) JDivider(Modifier.padding(horizontal = RowInset))
+            val section = item.section?.takeIf { it != items.getOrNull(index - 1)?.section }
+            if (section != null) Text(section, Modifier.fillMaxWidth().semantics { heading() }
+                .padding(start = RowInset, end = RowInset, top = Tokens.Space.s, bottom = Tokens.Space.xxs),
+                style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable(role = Role.Button) { onPick(item) }
                     .semantics(mergeDescendants = true) { contentDescription = spoken }
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                    .padding(horizontal = RowInset, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
+                item.status?.let { JStatusDot(it) }
                 Text(item.word, style = PersonaTheme.type.bodyStrong, color = if (item.destructive) palette.danger.text else palette.ink,
                     maxLines = 1, overflow = if (item.flexible) TextOverflow.Ellipsis else TextOverflow.Clip,
                     modifier = if (item.flexible) Modifier.weight(1f) else Modifier.widthIn(min = 84.dp))
@@ -71,3 +82,6 @@ fun ComposerSuggestions(items: List<ComposerSuggestion>, onPick: (ComposerSugges
         }
     }
 }
+
+/** The rows' and section titles' side inset inside the frame. */
+private val RowInset = 14.dp

@@ -13,6 +13,46 @@ import Observation
     private(set) var selected = SessionListQuery()
     private(set) var hubFilter: String?
     @ObservationIgnored private weak var model: AppModel?
+    /// The query each group's list was last selected with, before the current assistant went into it (`managed`).
+    @ObservationIgnored private var bases: [String: SessionListQuery] = [:]
+
+    /// `query` as `group`'s hub is asked it once the pages list one assistant's things (`AppModel.assistantScope`): with
+    /// that manager, from a hub that filters by it (`sessions_manager`). A hub with bounded lists but without the
+    /// filter is read as a complete copy instead (`legacy`: every row once, then what changed), filtered here by each
+    /// row's `manager`: its pages, totals and counts are every manager's, and a page of fifty could hold none of this
+    /// assistant's. A complete copy is never asked with a manager: it is the app's rows of that hub, the other
+    /// assistants' too.
+    func managed(_ query: SessionListQuery, group: String) -> SessionListQuery {
+        var query = query
+        query.manager = ""
+        // Not before the hub answered its roster in this run: a kept pick or roster filters the rows by then, but the hub
+        // is asked as before (it may be one without managers, or have one manager by now).
+        guard !query.legacy, let model, let scope = model.assistantScope, scope.group == group, scope.asked else { return query }
+        let features = model.features(group)
+        if features.contains(SessionListQuery.sessionsManagerFeature) {
+            query.manager = scope.current
+        } else if !features.isEmpty {
+            query.legacy = true // the hub said what it has, and not the filter; before its hello, the pages as they are
+        }
+        return query
+    }
+
+    private func managed(_ scope: Scope) -> Scope { Scope(hub: scope.hub, query: managed(scope.query, group: scope.hub)) }
+
+    /// The current assistant, the roster or the hub's features changed: `group`'s list is asked again when its query
+    /// is another now, and its sections and counts, which were the query's before, go.
+    func rescope(_ group: String, model: AppModel) async {
+        self.model = model
+        guard let list = lists[group] else { return }
+        let query = managed(bases[group] ?? SessionListQuery(), group: group)
+        guard query != list.query else { return }
+        for (scope, page) in sections where scope.hub == group {
+            page.cancel()
+            sections[scope] = nil
+        }
+        for scope in aggregates.keys where scope.hub == group { aggregates[scope] = nil }
+        await list.select(query)
+    }
 
     func bind(_ model: AppModel) { self.model = model }
 
@@ -39,16 +79,19 @@ import Observation
             guard let model, let list else { return }
             if list.paged { model.landSessionSummaries(rows, group: group) }
             else { model.landCompleteSessionList(rows, group: group) }
+            // Whether the list is a window or the whole collection decides where the switcher's counts come from.
+            if group == model.hub?.group { model.followNeedsYou() }
         }
         list.outside = { [weak model] rows in model?.landSessionSummaries(rows, group: group) }
         lists[group] = list
         return list
     }
 
+    /// The sessions the Agents list shows: the current assistant's, where the hub has several (`AppModel.scoped`).
     var sessions: [Session] {
         guard let model else { return [] }
         if model.links.isEmpty { return model.allSessions }
-        return model.links.flatMap { link -> [Session] in
+        return model.scoped(model.links.flatMap { link -> [Session] in
             guard hubFilter == nil || hubFilter == link.group else { return [] }
             guard let list = lists[link.group], list.paged else {
                 return model.allSessions.filter { $0.group == link.group }
@@ -56,7 +99,7 @@ import Observation
             var seen = Set<SessionKey>()
             let rows = list.rows + sections.filter { $0.key.hub == link.group }.values.flatMap(\.rows)
             return rows.filter { seen.insert($0.key).inserted }
-        }
+        })
     }
 
     func isPaged(_ group: String) -> Bool { lists[group]?.paged == true }
@@ -82,7 +125,7 @@ import Observation
     private func legacyBase(_ group: String) -> [Session] {
         guard let model else { return [] }
         let query = selected
-        return model.allSessions.filter { row in
+        return model.scoped(model.allSessions).filter { row in
             row.group == group && !row.assistant && (query.machine.isEmpty || row.machineID == query.machine) &&
                 (query.text.isEmpty || [row.title, row.cwd, row.lastText ?? "", row.spaceName ?? "", row.slotName ?? ""]
                     .contains { $0.localizedCaseInsensitiveContains(query.text) })
@@ -131,12 +174,15 @@ import Observation
         await withTaskGroup(of: Void.self) { tasks in
             for link in model.links where hub == nil || hub == link.group {
                 let list = list(link, model: model)
-                tasks.addTask { await list.select(query) }
+                bases[link.group] = query
+                let asked = managed(query, group: link.group)
+                tasks.addTask { await list.select(asked) }
             }
         }
     }
 
     func expand(_ scope: Scope) async {
+        let scope = managed(scope)
         guard let model, let link = model.link(scope.hub), lists[scope.hub]?.paged == true else { return }
         if let page = sections[scope] { await page.load(); return }
         // Bounded independently of the hub's cursor retention.
@@ -155,9 +201,13 @@ import Observation
         await page.select(scope.query)
     }
 
-    func aggregate(_ scope: Scope) -> SessionListCounts? { sections[scope]?.counts ?? aggregates[scope] }
+    func aggregate(_ scope: Scope) -> SessionListCounts? {
+        let scope = managed(scope)
+        return sections[scope]?.counts ?? aggregates[scope]
+    }
 
     func loadCounts(_ scope: Scope) async {
+        let scope = managed(scope)
         guard aggregate(scope) == nil, let model, let link = model.link(scope.hub), lists[scope.hub]?.paged == true else { return }
         let query = selected
         let counts = try? await link.api.sessionListCounts(scope.query)
@@ -195,6 +245,7 @@ import Observation
         lists = [:]
         sections = [:]
         aggregates = [:]
+        bases = [:]
         model = nil
     }
 }
@@ -251,6 +302,8 @@ extension Session {
         row.codexRouteNote = old.codexRouteNote
         row.runtime = old.runtime
         row.runtimeFallback = old.runtimeFallback
+        row.modelFallback = old.modelFallback
+        row.modelRestore = old.modelRestore
         row.compaction = old.compaction
         row.asks = old.asks
         return row

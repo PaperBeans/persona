@@ -25,17 +25,19 @@ internal val DeliveryState.pendingStatus: PendingStatus?
         DeliveryState.Sent -> null
     }
 
-internal enum class DeliveryAction { Cancel, Edit, Retry, Delete, Discard, ConfirmDelivered, ConfirmNotDelivered }
+/** [RetryNow]: one still on its way (queued, waiting for the network) tries at once (iOS's Retry Now on a waiting message). */
+internal enum class DeliveryAction { Cancel, Edit, Retry, RetryNow, Delete, Discard, ConfirmDelivered, ConfirmNotDelivered }
 
 /**
  * Cancel and edit are for what has not gone out yet; a refused message (refused by the computer, or confirmed as never
- * delivered) reached nothing either, so it can be edited (back into the box, the bubble gone) or deleted outright.
+ * delivered) or one the hub turned down reached nothing either, so it can be edited (back into the box, the bubble gone)
+ * or deleted outright. Cancel and Delete take the bubble away with Undo ([ChatDeliveryActions.perform]'s `removed`).
  * One whose delivery is unknown can be discarded: the phone stops asking and retrying, whatever the computer got.
  */
 internal fun DeliveryState.allows(action: DeliveryAction): Boolean = when (action) {
-    DeliveryAction.Cancel -> this == DeliveryState.Queued || this == DeliveryState.WaitingForNetwork
+    DeliveryAction.Cancel, DeliveryAction.RetryNow -> this == DeliveryState.Queued || this == DeliveryState.WaitingForNetwork
     DeliveryAction.Edit -> this == DeliveryState.Queued || this == DeliveryState.WaitingForNetwork || this == DeliveryState.Refused
-    DeliveryAction.Delete -> this == DeliveryState.Refused
+    DeliveryAction.Delete -> this == DeliveryState.Refused || this == DeliveryState.Rejected
     DeliveryAction.Retry -> this == DeliveryState.Refused || this == DeliveryState.Rejected || this == DeliveryState.NeedsConfirmation
     DeliveryAction.Discard, DeliveryAction.ConfirmDelivered, DeliveryAction.ConfirmNotDelivered -> resultUnknown
 }
@@ -45,7 +47,8 @@ internal class ChatDeliveryActions(private val sender: MessageSender) {
     var busyIds by mutableStateOf(emptySet<String>())
         private set
 
-    suspend fun perform(id: String, action: DeliveryAction, restore: (String) -> Unit): Boolean {
+    /** [removed]: the message as it was before Cancel or Delete took it off, for the toast's Undo ([MessageSender.restore]). */
+    suspend fun perform(id: String, action: DeliveryAction, restore: (String) -> Unit, removed: (OutboxMessage) -> Unit = {}): Boolean {
         if (id in busyIds) return false
         val message = sender.outbox.value.firstOrNull { it.clientMessageId == id } ?: return false
         if (!message.state.allows(action)) return false
@@ -53,12 +56,13 @@ internal class ChatDeliveryActions(private val sender: MessageSender) {
         try {
             val changed = when (action) {
                 DeliveryAction.Cancel, DeliveryAction.Edit, DeliveryAction.Delete -> sender.cancel(id)
-                DeliveryAction.Retry -> sender.retry(id)
+                DeliveryAction.Retry, DeliveryAction.RetryNow -> sender.retry(id)
                 DeliveryAction.Discard -> sender.discard(id)
                 DeliveryAction.ConfirmDelivered -> sender.confirm(id, delivered = true)
                 DeliveryAction.ConfirmNotDelivered -> sender.confirm(id, delivered = false)
             }
             if (changed && action in setOf(DeliveryAction.Edit, DeliveryAction.ConfirmNotDelivered)) restore(message.text)
+            if (changed && action in setOf(DeliveryAction.Cancel, DeliveryAction.Delete)) removed(message)
             return changed
         } finally {
             busyIds = busyIds - id

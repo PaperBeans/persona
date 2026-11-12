@@ -1,0 +1,271 @@
+package extmgr
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/connector"
+	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/subscriptions"
+	"github.com/nwverse/persona/server/internal/subscriptionsui"
+)
+
+// The built-in sources of the Inbox Sources pages (#5278, docs/extensions/subscriptions.md "Pages"): the connectors
+// that bring things into the Inbox or the knowledge base themselves, and mail. Their switches, rules and mutes here
+// are the ones Settings › Connectors, an extension's page and the Inbox already change, so either place shows the
+// other's change.
+
+// kbArchiveDefault is how often the knowledge base asks a connector whose manifest names no Poll (the assistant's
+// kbConnectorPoll), for the pages to say.
+const kbArchiveDefault = 10 * time.Minute
+
+// sourceReads are the Inbox's latest reads of each source since the manager started (memory only), by connector id
+// and by "mail:<account id>": when, and the code of a failure.
+type sourceReads struct {
+	mu sync.Mutex
+	m  map[string]subscriptionsui.Read
+}
+
+// note records a read of key at at; code "" is one that worked.
+func (r *sourceReads) note(key string, at time.Time, code string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.m == nil {
+		r.m = map[string]subscriptionsui.Read{}
+	}
+	read := r.m[key]
+	read.At, read.Error = at, code
+	if code == "" {
+		ok := at
+		read.OK = &ok
+	}
+	r.m[key] = read
+}
+
+func (r *sourceReads) get(key string) *subscriptionsui.Read {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	read, ok := r.m[key]
+	if !ok {
+		return nil
+	}
+	return &read
+}
+
+// builtinSources answers the pages for the manager.
+type builtinSources struct{ h *Manager }
+
+// builtinIcons are the hub's own sources' icons on the pages; a plugin's connector is a chat or the plugin icon.
+var builtinIcons = map[string]string{"mail": "mail", "github": "code", "imessage": "chat", "larkcli": "chat", "lark": "chat",
+	"telegram": "chat", "wechat": "chat"}
+
+// listed says a connector is one of the pages' sources: it brings things into the Inbox or the knowledge base, and it
+// was set up (one never configured is no source of the user's yet).
+func (b builtinSources) listed(ctx context.Context, c connector.Connector) (bool, string) {
+	m := c.Manifest()
+	_, inbox := connector.As[connector.Inbox](c)
+	if !(m.Has(connector.CapInbox) && inbox) && !m.Has(connector.CapArchive) && c.ID() != "mail" {
+		return false, ""
+	}
+	state := connector.StatusOf(ctx, c).State
+	return state != connector.StateNotConfigured, state
+}
+
+func (b builtinSources) List(ctx context.Context) []subscriptionsui.Builtin {
+	h := b.h
+	if h.connectors == nil {
+		return nil
+	}
+	var out []subscriptionsui.Builtin
+	for _, c := range h.connectors.All() {
+		ok, state := b.listed(ctx, c)
+		if !ok {
+			continue
+		}
+		id, m := c.ID(), c.Manifest()
+		src := subscriptionsui.Builtin{ID: id, Name: connector.DisplayName(ctx, c), Icon: builtinIcons[id], Status: state,
+			Read: h.inboxReads.get(id)}
+		if !h.connectors.Enabled(id) {
+			src.Status = connector.StateDisabled
+		}
+		if hp := h.extensions.ownerOf(c); hp != nil {
+			src.Extension = hp.id
+		}
+		if _, inbox := connector.As[connector.Inbox](c); inbox && m.Has(connector.CapInbox) {
+			on := h.connectors.Feeds(id, connector.FeedInbox)
+			src.Inbox, src.InboxEvery, src.Mutable = &on, int(inboxPoll/time.Second), true
+		}
+		if m.Has(connector.CapArchive) {
+			on := h.connectors.Feeds(id, connector.FeedArchive)
+			src.Archive, src.ArchiveEvery = &on, int(kbArchiveDefault/time.Second)
+			if m.Poll > 0 {
+				src.ArchiveEvery = int(m.Poll / time.Second)
+			}
+		}
+		if id == "mail" {
+			b.mail(&src)
+		}
+		b.rules(&src)
+		out = append(out, src)
+	}
+	return out
+}
+
+// mail is the mail source's accounts: every account's inbox is read each mail round, with no switch for it.
+func (b builtinSources) mail(src *subscriptionsui.Builtin) {
+	h := b.h
+	if h.mail == nil {
+		return
+	}
+	on := h.connectors.Feeds("mail", connector.FeedInbox) // its Add to Inbox switch (#5307)
+	src.Inbox, src.InboxEvery, src.Mutable, src.Read = &on, int(inboxMailPoll/time.Second), true, nil
+	accounts, err := h.mail.ListAccounts()
+	if err != nil {
+		h.logf("inbox sources: mail accounts: %v", err)
+		return
+	}
+	for _, a := range accounts {
+		src.Accounts = append(src.Accounts, subscriptionsui.Account{ID: a.ID, Name: a.Email, Read: h.inboxReads.get("mail:" + a.ID)})
+	}
+}
+
+// rules are a source's own triage rules where it can have them: a plugin's that declares triage_rules, lark-cli's
+// option; the others' items follow the Inbox's rules.
+func (b builtinSources) rules(src *subscriptionsui.Builtin) {
+	h := b.h
+	if src.Extension != "" && h.extensions != nil {
+		if p := h.extensions.reg.Get(src.Extension); p != nil && declaresTriageRules(p.Schema) {
+			src.RulesOwn, src.Rules, src.RulesLocked = true, h.extensionTriageRules(src.Extension), p.ReadOnly()
+		}
+		return
+	}
+	if src.ID == "larkcli" {
+		var o struct {
+			Rules string `json:"triage_rules"`
+		}
+		_ = json.Unmarshal(h.optionsOf(src.ID), &o)
+		src.RulesOwn, src.Rules = true, strings.TrimSpace(o.Rules)
+	}
+}
+
+func (b builtinSources) SetFeed(ctx context.Context, id string, inbox, on bool, _ subscriptions.Actor) error {
+	f := connector.FeedArchive
+	if inbox {
+		f = connector.FeedInbox
+	}
+	if b.h.connectors.Get(id) == nil {
+		return fmt.Errorf("no connector %q", id)
+	}
+	return b.h.setConnectorFeed(ctx, id, f, on)
+}
+
+func (b builtinSources) SetRules(ctx context.Context, id, rules string, _ subscriptions.Actor) error {
+	h := b.h
+	c := h.connectors.Get(id)
+	if c == nil {
+		return fmt.Errorf("no connector %q", id)
+	}
+	rules = strings.TrimSpace(rules)
+	if hp := h.extensions.ownerOf(c); hp != nil {
+		title := i18n.T(h.userLang(), "hub-self_settings_sources.title", i18n.Args{"name": connector.DisplayName(ctx, c)})
+		raw, _ := json.Marshal(rules)
+		change, err := h.setExtensionTriageRules(hp.id, title, raw)
+		if err != nil {
+			return err
+		}
+		if change.apply == nil { // unchanged
+			return nil
+		}
+		_, err = change.apply(ctx, nil)
+		return err
+	}
+	if id != "larkcli" {
+		return errors.New("this source has no triage rules of its own")
+	}
+	var o map[string]json.RawMessage
+	if err := json.Unmarshal(h.optionsOf(id), &o); err != nil || o == nil {
+		o = map[string]json.RawMessage{}
+	}
+	o["triage_rules"], _ = json.Marshal(rules)
+	raw, _ := json.Marshal(o)
+	if err := h.setConnectorOptions(ctx, id, raw); err != nil {
+		return err
+	}
+	h.auditConnector(ctx, id, auditConnectorOptions, nil)
+	return nil
+}
+
+// errInboxAway: the assistant could not say what is muted (away, or its stored mutes unreadable).
+var errInboxAway = errors.New("the inbox is not available")
+
+func (b builtinSources) Mutes(ctx context.Context, source string) ([]subscriptionsui.Mute, error) {
+	var res struct {
+		Mutes []assistantwire.InboxMute `json:"mutes"`
+	}
+	if err := b.h.callAssistant(ctx, assistantwire.MethodInboxMutes, map[string]string{"source": source}, &res); err != nil {
+		return nil, errors.Join(errInboxAway, err)
+	}
+	out := []subscriptionsui.Mute{}
+	for _, m := range res.Mutes {
+		out = append(out, subscriptionsui.Mute{ID: m.ID, Source: m.Source, Tag: m.Tag, Name: m.Name, At: m.CreatedAt})
+	}
+	return out, nil
+}
+
+func (b builtinSources) Unmute(ctx context.Context, id string) error {
+	return b.h.callAssistant(ctx, assistantwire.MethodInboxUnmute, map[string]string{"id": id}, nil)
+}
+
+// Native is the built-in source that reads a catalog service: the mail account on its domain (the mail source), or
+// the switched-on connector whose links live on its host.
+func (b builtinSources) Native(service string) (string, string) {
+	h := b.h
+	kind, domain, ok := strings.Cut(strings.ToLower(service), ":")
+	if !ok || domain == "" {
+		return "", ""
+	}
+	if kind == "mail" && h.mail != nil && h.connectors.Get("mail") != nil {
+		if accounts, err := h.mail.ListAccounts(); err == nil {
+			for _, a := range accounts {
+				if _, d, ok := strings.Cut(strings.ToLower(a.Email), "@"); ok && d == domain {
+					return "mail", a.Email
+				}
+			}
+		}
+	}
+	for _, c := range h.connectors.All() {
+		if !h.connectors.Enabled(c.ID()) {
+			continue
+		}
+		for _, host := range c.Manifest().Hosts {
+			if host = strings.ToLower(host); host == domain || strings.HasSuffix(host, "."+domain) {
+				return c.ID(), h.subscriptionConnectorName(c.ID())
+			}
+		}
+	}
+	return "", ""
+}
+
+// triagePreview has the assistant's triage model try a preview's items (the pages' Try Triage with the Model): one
+// verdict each, nothing kept.
+func (h *Manager) triagePreview(ctx context.Context, tp subscriptions.TriagePreview) ([]subscriptionsui.Verdict, error) {
+	var res struct {
+		Verdicts []assistantwire.InboxTriageVerdict `json:"verdicts"`
+	}
+	in := assistantwire.InboxTriagePreview{Source: tp.Source, Name: tp.Name, Kinds: tp.Kinds, Things: tp.Things}
+	if err := h.callAssistant(ctx, assistantwire.MethodInboxTriagePreview, in, &res); err != nil {
+		return nil, err
+	}
+	out := make([]subscriptionsui.Verdict, 0, len(res.Verdicts))
+	for _, v := range res.Verdicts {
+		out = append(out, subscriptionsui.Verdict{Tier: v.Tier, Summary: v.Summary, Reason: v.Reason, Urgent: v.Urgent,
+			State: v.State, Why: v.Why})
+	}
+	return out, nil
+}

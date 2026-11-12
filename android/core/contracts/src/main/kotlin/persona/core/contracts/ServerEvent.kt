@@ -59,6 +59,8 @@ data class Hello(
     val build: Long? = null,
     val protocol: Int? = null,
     @SerialName("min_app_build") val minAppBuild: Int? = null,
+    /** Dedicated hub-owned receipt protocol version; an extension's feature string cannot establish trust. */
+    @SerialName("message_send_state") val messageSendState: Int? = null,
 ) : ServerEvent
 
 @KeepGeneratedSerializer
@@ -96,6 +98,19 @@ data class ItemsEvent(
 @Serializable(with = SessionsEventSerializer::class)
 data class SessionsEvent(
     @SerialName("machine_id") val machineId: String, val sessions: List<Session> = emptyList(),
+) : ServerEvent
+
+/** Session-scoped hub receipt, not proof of durable delivery to the Agent. */
+@KeepGeneratedSerializer
+@Serializable(with = MessageSendStateEventSerializer::class)
+data class MessageSendStateEvent(
+    @SerialName("machine_id") val machineId: String,
+    @SerialName("session_id") val sessionId: String,
+    @SerialName("client_msg_id") val clientMessageId: String,
+    @WireEnum("processing", "delivered", "failed", "unknown") val state: String,
+    @WireTime val at: String,
+    /** Stamped by the authenticated socket, never read from or written to JSON. */
+    @kotlinx.serialization.Transient val socketGeneration: Long? = null,
 ) : ServerEvent
 
 /** A bounded runtime list invalidation hint, never a completed HTTP baseline. */
@@ -250,6 +265,13 @@ object ServerEventSerializer : KSerializer<ServerEvent> {
             "sessions" -> input.json.decodeFromJsonElement<SessionsEvent>(obj).let { event ->
                 event.copy(sessions = event.sessions.map { it.copy(machineId = event.machineId) })
             }
+            "message_send_state" -> {
+                require((obj["state"] as? JsonPrimitive)?.content in setOf("processing", "delivered", "failed", "unknown"))
+                input.json.decodeFromJsonElement<MessageSendStateEvent>(obj).also {
+                    require(it.machineId.isNotBlank() && it.sessionId.isNotBlank() && it.clientMessageId.isNotBlank())
+                    require(parseTime(it.at) != null)
+                }
+            }
             "sessions_list" -> input.json.decodeFromJsonElement<SessionsListEvent>(obj).also {
                 require(it.revision.isNotEmpty()) { "A list hint has a revision" }
             }
@@ -315,6 +337,7 @@ object ServerEventSerializer : KSerializer<ServerEvent> {
             is Hello -> "hello" to output.json.encodeToJsonElement(value)
             is ItemsEvent -> "items" to output.json.encodeToJsonElement(value)
             is SessionsEvent -> "sessions" to output.json.encodeToJsonElement(value)
+            is MessageSendStateEvent -> "message_send_state" to output.json.encodeToJsonElement(value)
             is SessionsListEvent -> "sessions_list" to output.json.encodeToJsonElement(value)
             is MachinesEvent -> "machines" to output.json.encodeToJsonElement(value)
             is RevsEvent -> "revs" to output.json.encodeToJsonElement(value)
@@ -362,6 +385,7 @@ object HelloSerializer : WireSerializer<Hello>(Hello.generatedSerializer())
 object HubMeshSerializer : WireSerializer<HubMesh>(HubMesh.generatedSerializer())
 object MeshHubSerializer : WireSerializer<MeshHub>(MeshHub.generatedSerializer())
 object ItemsEventSerializer : WireSerializer<ItemsEvent>(ItemsEvent.generatedSerializer())
+object MessageSendStateEventSerializer : WireSerializer<MessageSendStateEvent>(MessageSendStateEvent.generatedSerializer())
 object SessionsEventSerializer : WireSerializer<SessionsEvent>(SessionsEvent.generatedSerializer())
 object MachinesEventSerializer : WireSerializer<MachinesEvent>(MachinesEvent.generatedSerializer())
 object RevsEventSerializer : WireSerializer<RevsEvent>(RevsEvent.generatedSerializer())

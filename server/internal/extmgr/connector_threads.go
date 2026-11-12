@@ -19,6 +19,8 @@ import (
 
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/subscriptions"
 )
 
 // A connector's inbox thread opened as a conversation (connector.Threads, docs/extensions/connectors.md "Interfaces: one manifest, dispatched by declaration"): a
@@ -41,13 +43,26 @@ func (h *Manager) threadConnector(w http.ResponseWriter, r *http.Request) (conne
 	}
 	th, ok := connector.As[connector.Threads](c)
 	if !ok {
-		writeErr(w, http.StatusConflict, fmt.Errorf("%s has no conversations to open", c.Name()))
+		writeErrCode(w, http.StatusConflict, "conversations_unsupported", fmt.Errorf("%s has no conversations to open", c.Name()))
 		return nil, nil, false
 	}
 	if !h.threadUsable(w, r.Context(), c) {
 		return nil, nil, false
 	}
 	return c, th, true
+}
+
+// noConversation is the page for an Inbox item with no conversation of its own to open (#5537), and whether id's
+// thread is one: a subscription's item (its source is the subscription, not a connector, and its content is already
+// the whole of it) or a connector's without threads. Every app, older ones too, shows what the hub collected for a
+// page that is neither a chat nor GitHub's thread, with no error card or Retry (an error said it could not be read).
+func (h *Manager) noConversation(ctx context.Context, id, thread string) (connector.ThreadPage, bool) {
+	page := connector.ThreadPage{Chat: connector.ThreadChat{ID: thread, Kind: connector.ThreadKindNone}, Messages: []connector.ThreadMessage{}}
+	if c := h.connectors.Get(id); c != nil {
+		_, threads := connector.As[connector.Threads](c)
+		return page, !threads
+	}
+	return page, subscriptions.OwnsThread(id, thread) || h.subs != nil && h.subs.IsSubscription(ctx, id)
 }
 
 // threadUsable writes why c cannot be read now (signed out, switched off, rate limited) and says whether it can.
@@ -69,6 +84,21 @@ func (h *Manager) threadUsable(w http.ResponseWriter, ctx context.Context, c con
 
 // threadFailed writes a connector's failure: as a rate limit when the connector is waiting one out now.
 func (h *Manager) threadFailed(w http.ResponseWriter, ctx context.Context, c connector.Connector, err error) {
+	var readError *rpc.Error
+	if errors.As(err, &readError) {
+		switch readError.Code {
+		case "rate_limited":
+			writeErrCode(w, http.StatusTooManyRequests, readError.Code, err)
+			return
+		case "no_permission":
+			writeErrCode(w, http.StatusForbidden, readError.Code, err)
+			return
+		case "not_signed_in":
+			// Source login is separate from the app device token; 401 would sign the app out.
+			writeErrCode(w, http.StatusConflict, "unavailable", err)
+			return
+		}
+	}
 	if connector.StatusOf(ctx, c).State == connector.StateRateLimited {
 		writeErrCode(w, http.StatusTooManyRequests, "rate_limited", err)
 		return
@@ -79,12 +109,16 @@ func (h *Manager) threadFailed(w http.ResponseWriter, ctx context.Context, c con
 func (h *Manager) connectorThreadRoutes(api *http.ServeMux) {
 	// A page of a thread's messages: ?thread=<the inbox item's thread>&before=<the last page's before>&limit=.
 	api.HandleFunc("GET /api/v1/connectors/{id}/thread", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		thread := q.Get("thread")
+		if page, ok := h.noConversation(r.Context(), r.PathValue("id"), thread); ok {
+			writeJSON(w, page)
+			return
+		}
 		c, th, ok := h.threadConnector(w, r)
 		if !ok {
 			return
 		}
-		q := r.URL.Query()
-		thread := q.Get("thread")
 		if thread == "" {
 			writeErr(w, http.StatusBadRequest, errors.New("thread is required"))
 			return

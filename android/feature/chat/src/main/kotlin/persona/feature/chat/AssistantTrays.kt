@@ -186,7 +186,12 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
     backgroundRecords: Boolean = false, onBackground: (() -> Unit)? = null,
     onPlan: (TaskPlan) -> Unit = {},
     /** The main conversation folds background rounds (#4314): Needs you groups its rows by supervising conversation. */
-    groupByOrigin: Boolean = false) {
+    groupByOrigin: Boolean = false,
+    /**
+     * Under the entries: the pill while the conversation's model operates a Mac. iOS puts it after them in their row
+     * (`AssistantActionBar`); beside Android's two entries a phone leaves it too little room for its words.
+     */
+    under: (@Composable () -> Unit)? = null) {
     val todos by host.tasks.todos.collectAsStateWithLifecycle()
     val plans by host.tasks.plans.collectAsStateWithLifecycle()
     val feeds by host.tasks.feeds.collectAsStateWithLifecycle()
@@ -218,6 +223,8 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
     val shownRequests = own + asking.flatMap { (it as? NeedsYouEntry.Task)?.asks ?: (it as NeedsYouEntry.Agent).asks }
     val approvals = shownRequests.mapNotNull { r -> trayApproval(r, bySession[GroupKeys.rawKey(r.sessionKey)])?.let { r to it } }
     val standalone = persona.core.domain.tasks.dockAgents(host.conversation, main, host.sessions, todos)
+    // Glass folds the shelved tasks into one line under In progress, as iOS (#4339 C18); Brief and Board keep the tray as it was.
+    val shelvedLine = PersonaTheme.style == AppStyle.Glass
     // the tray closes once its last thing is handled; tapped while empty it still opens "All caught up"
     LaunchedEffect(needsCount) { if (needsCount == 0 && state.expanded == AssistantTray.NeedsYou) state.expanded = null }
     BackHandler(state.expanded != null) { state.expanded = null }
@@ -326,11 +333,10 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
                                     }
                                 }
                             }
-                            item {
-                                val routes by host.tasks.routes.collectAsStateWithLifecycle()
-                                val routed = routes[host.conversation]?.let { id -> todos.firstOrNull { it.id == id } }
-                                if (routed != null) JRow(stringResource(R.string.chat_tasks_route_chip, routed.title),
-                                    onClick = { host.tasks.setRoute(host.conversation, null) }, leadingIcon = PhIcons.PaperPlaneTilt)
+                            // Open tasks with no progress for 48 hours: one quiet line under the rows, not counted; the board
+                            // lists them (iOS `shelvedLine`, Glass).
+                            if (shelvedLine && entries.shelved.isNotEmpty()) item(key = "shelved") {
+                                TrayShelvedLine(entries.shelved.size) { state.expanded = null; host.sheet.value = TaskSheet.Board }
                             }
                             if (schedules.isNotEmpty() || backgroundRecords) item { JSectionHeader(stringResource(R.string.chat_tray_quiet)) }
                             items(schedules, key = { "schedule:${it.id}" }) { schedule ->
@@ -348,7 +354,8 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
                             if (backgroundRecords && onBackground != null) item {
                                 JRow(stringResource(R.string.chat_tray_background), onClick = onBackground, leadingIcon = PhIcons.Clock)
                             }
-                            if (entries.running.isEmpty() && schedules.isEmpty() && !backgroundRecords) item {
+                            if (entries.running.isEmpty() && schedules.isEmpty() && !backgroundRecords &&
+                                !(shelvedLine && entries.shelved.isNotEmpty())) item {
                                 JEmptyState(stringResource(R.string.chat_tray_no_progress), "", icon = PhIcons.ListChecks)
                             }
                         }
@@ -370,6 +377,26 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
                 { state.toggle(tray) }, Modifier.testTag("assistant-entry-${tray.tag}"),
                 enabled = true)
         }
+        under?.invoke()
+    }
+}
+
+/**
+ * "Message “x”" above the composer while the next message goes straight to a task (iOS `RouteChip`, web `RouteChip`;
+ * docs/assistant/unified-entry.md "Routing"); its × hands the message back to Persona. The route is the store's one per
+ * conversation, set by a task's Message or by picking the task after @. Every style: where a message goes is behaviour,
+ * and each style draws its own chip.
+ */
+@Composable
+internal fun TaskRouteChip(host: AssistantTaskHost, modifier: Modifier = Modifier) {
+    val routes by host.tasks.routes.collectAsStateWithLifecycle()
+    val todos by host.tasks.todos.collectAsStateWithLifecycle()
+    val task = routedTask(routes, todos, host.conversation) ?: return
+    // At the tray bar's inset, so the chip lines up with its chips above it.
+    Row(modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m)) {
+        JChip(stringResource(R.string.chat_tasks_route_chip, task.title), Modifier.testTag("assistant-route-chip"),
+            icon = PhIcons.PaperPlaneTilt, accent = true, onRemove = { host.tasks.setRoute(host.conversation, null) },
+            removeLabel = stringResource(R.string.chat_tasks_route_clear))
     }
 }
 
@@ -425,6 +452,20 @@ private fun TrayBackgroundSubtitle(work: BackgroundWork?, fallback: String?) {
                 color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     } else fallback?.let { Text(it, style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+}
+
+/** "Shelved" and how many, quiet, under In progress's rows (iOS `shelvedLine`): a tap opens the board, which lists them. */
+@Composable
+private fun TrayShelvedLine(count: Int, onClick: () -> Unit) {
+    val palette = PersonaTheme.palette
+    JRow(onClick = onClick, modifier = Modifier.testTag("assistant-tray-shelved"), chevron = false, trailing = {
+        Text("$count", style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1)
+    }) {
+        JIcon(persona.core.designsystem.icons.PersonaIcons.disclosure, null, decorative = true, tint = palette.ink3)
+        Spacer(Modifier.width(Tokens.Space.s))
+        Text(stringResource(R.string.chat_tray_shelved), style = PersonaTheme.type.body, color = palette.ink2, maxLines = 1,
+            overflow = TextOverflow.Ellipsis)
+    }
 }
 
 internal fun trayPullRequestNumber(reference: String): String? =

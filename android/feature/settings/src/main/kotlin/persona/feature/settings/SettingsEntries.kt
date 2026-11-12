@@ -84,6 +84,8 @@ data class SettingsServices(
     val desktops: kotlinx.coroutines.flow.StateFlow<List<persona.core.contracts.HubDesktop>>? = null,
     /** Settings › Storage's deleting of cache files, keeping the ones the data layer has open; null deletes them directly. */
     val clearCacheFiles: ((List<java.io.File>) -> Unit)? = null,
+    /** How the Agents list draws its agents (Settings › Interface style, Glass), kept with the list's other settings; null without a list. */
+    val agentsDisplay: persona.core.domain.sort.AgentListDisplaySettings? = null,
 )
 
 fun EntryProviderScope<NavKey>.settingsEntries(navigator: Navigator, services: SettingsServices? = null) {

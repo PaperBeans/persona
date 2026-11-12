@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -203,16 +204,33 @@ func (s *Service) isOwnTool(ctx context.Context, name string) bool {
 }
 
 // assistantLark is what the assistant's machine gets for its skills' commands (proto.AssistantLark): lark-cli's
-// settings and rules, and the plugins' command gates (the hub's, app.call hub). Another machine gets nothing: the
-// credentials go to the assistant's machine only (its process runs them).
+// settings and rules, and the plugins' command gates (the hub's, app.call hub). The credentials go to the assistant's
+// machine only (its process runs them): another personal machine gets otherMachineLark, a work machine nothing.
 func (s *Service) assistantLark(ctx context.Context, machine string) (proto.AssistantLark, error) {
-	if s.isWorkMachine(machine) || !s.sameMachine(machine, s.settings(ctx).MachineID) {
+	if s.isWorkMachine(machine) || s.ext == nil {
 		return proto.AssistantLark{}, nil
 	}
-	if s.ext == nil {
-		return proto.AssistantLark{}, nil
+	cfg, err := s.ext.AssistantLark(ctx)
+	if err != nil || s.sameMachine(machine, s.settings(ctx).MachineID) {
+		return cfg, err
 	}
-	return s.ext.AssistantLark(ctx)
+	return otherMachineLark(cfg), nil
+}
+
+// otherMachineLark is what another personal machine's gate gets for the assistant conversations the manager starts
+// there (a Lark /agent placed on it, #5479): the rules and lark-cli's name, so its lark-cli calls go by lark-cli's own
+// risk levels instead of all being confirmed. Not the command gates (their credentials) nor the extensions' MCP
+// servers, and not the profile, which names one in the manager computer's lark-cli: that machine uses its lark-cli's
+// default profile, and an absolute bin is looked up there by its base name.
+func otherMachineLark(cfg proto.AssistantLark) proto.AssistantLark {
+	out := proto.AssistantLark{Rules: cfg.Rules}
+	if cfg.CLI != nil {
+		out.CLI = &proto.LarkCLI{Bin: cfg.CLI.Bin}
+		if out.CLI.Bin != "" {
+			out.CLI.Bin = filepath.Base(out.CLI.Bin)
+		}
+	}
+	return out
 }
 
 // assistantSummary is the text a gated command's card shows, as its plugin names what the ids are; false: none.

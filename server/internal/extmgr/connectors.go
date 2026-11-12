@@ -425,6 +425,9 @@ func (h *Manager) setConnectorFeed(ctx context.Context, id string, f connector.F
 		}
 	}
 	if on && f == connector.FeedInbox {
+		if c := h.connectors.Get(id); c != nil && c.Manifest().InboxSwitch {
+			h.inbox.owed.Store(true) // mail is read on a full round: the next one is that (inboxLoop)
+		}
 		h.kickInbox()
 	} else if on {
 		h.kbKick(id, connector.ScopeChats)

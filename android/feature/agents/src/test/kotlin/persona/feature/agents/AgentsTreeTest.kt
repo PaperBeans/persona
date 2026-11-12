@@ -133,6 +133,85 @@ class AgentsTreeTest {
         assertEquals(listOf("group:repo/mac//code/app", "group:tree/mac//code/notes"), folded.take(2).map { it.key })
     }
 
+    @Test fun byRepositoryOnGlassPutsEachRepositoryInACardWithItsLinesAndRowsAtTheirLevel() {
+        // iOS `repoCard` (#4338 A7): a card per repository, the header level 0, a working tree's line 1 with its agents at
+        // its level; a repository with its main checkout alone has its agents a level in under its header.
+        fun at(id: String, cwd: String, state: String, machine: String = "mac") = AgentSession(Session(machineId = machine, sessionId = id,
+            state = state, cwd = cwd, updatedAt = "2026-01-01T00:00:00Z"))
+        val rows = listOf(at("main", "/code/app", "working"), at("fix", "/code/app/.worktrees/fix", "needs_you"),
+            at("notes", "/code/notes", "unread"), at("old", "/code/old", "idle"), at("api", "/srv/api", "working", machine = "box"))
+        val entries = agentTreeEntries(buildAgentList(rows, machines, settings = AgentListSettings(grouping = AgentGrouping.Repo)), "")
+        val slots = repoCardSlots(entries)
+        assertEquals(listOf("machine-header:machine/mac", "group:repo/mac//code/app", "group:tree/mac//code/app", "session:mac/main",
+            "group:tree/mac//code/app/.worktrees/fix", "session:mac/fix", "group:tree/mac//code/notes", "session:mac/notes",
+            "group:tree/mac//code/old", "machine-header:machine/box", "group:tree/box//srv/api", "session:box/api"), entries.map { it.key })
+        assertNull("a computer's heading is outside the cards", slots["machine-header:machine/mac"])
+        assertEquals(RepoCardSlot(first = true, last = false, level = 0), slots["group:repo/mac//code/app"])
+        assertEquals(RepoCardSlot(first = false, last = false, level = 1), slots["group:tree/mac//code/app"])
+        assertEquals(RepoCardSlot(first = false, last = false, level = 1), slots["session:mac/main"])
+        assertEquals(RepoCardSlot(first = false, last = true, level = 1), slots["session:mac/fix"])
+        // The main checkout alone: its agent a level in under the repository's header.
+        assertEquals(RepoCardSlot(first = true, last = false, level = 0), slots["group:tree/mac//code/notes"])
+        assertEquals(RepoCardSlot(first = false, last = true, level = 1), slots["session:mac/notes"])
+        // A quiet repository starts folded: its header is the whole card.
+        assertEquals(RepoCardSlot(first = true, last = true, level = 0), slots["group:tree/mac//code/old"])
+        assertEquals(RepoCardSlot(first = false, last = true, level = 1), slots["session:box/api"])
+        // Folded, a repository's card is its header alone.
+        val folded = repoCardSlots(agentTreeEntries(buildAgentList(rows, machines,
+            settings = AgentListSettings(grouping = AgentGrouping.Repo, folded = setOf("repo/mac//code/app"))), ""))
+        assertEquals(RepoCardSlot(first = true, last = true, level = 0), folded["group:repo/mac//code/app"])
+        assertNull(folded["session:mac/main"])
+        // Other groupings have no cards.
+        assertTrue(repoCardSlots(agentTreeEntries(buildAgentList(rows, machines, settings = MachineSpaceTree), "")).isEmpty())
+    }
+
+    @Test fun byRepositoryOnGlassListsEachComputersIdleRepositoriesInOneCardAndFoldsIdleAgentsBehindOneLine() {
+        // iOS `hostRepos` and `agentRows` (#4338 A8): a computer's busy repositories, then its Idle Repositories heading with
+        // how many, each idle repository a row of one card, its agents a level in once opened; a busy tree's idle agents
+        // behind one line, which folds them again once open.
+        fun at(id: String, cwd: String, state: String, machine: String = "mac", tab: String? = null) = AgentSession(Session(machineId = machine,
+            sessionId = id, state = state, cwd = cwd, slotId = tab, slotName = tab, updatedAt = "2026-01-01T00:00:00Z"))
+        val rows = listOf(at("build", "/code/app", "working", tab = "build"), at("review", "/code/app", "idle", tab = "review"),
+            at("research", "/code/app", "idle", tab = "research"), at("minutes", "/code/notes", "idle", tab = "minutes"),
+            at("cleanup", "/code/scripts", "idle"), at("api", "/srv/api", "working", machine = "box"),
+            at("certs", "/srv/infra", "idle", machine = "box"))
+        fun entries(settings: AgentListSettings = AgentListSettings(grouping = AgentGrouping.Repo), idleRepos: Boolean = true) =
+            agentTreeEntries(buildAgentList(rows, machines, settings = settings), "", idleRepos = idleRepos)
+        val glass = entries()
+        assertEquals(listOf("machine-header:machine/mac", "group:tree/mac//code/app", "session:mac/build", "idle:tree/mac//code/app",
+            "idle-repos:machine/mac", "group:tree/mac//code/notes", "group:tree/mac//code/scripts",
+            "machine-header:machine/box", "group:tree/box//srv/api", "session:box/api", "idle-repos:machine/box", "group:tree/box//srv/infra"),
+            glass.map { it.key })
+        assertEquals(listOf(2, 1), glass.filterIsInstance<TreeIdleReposEntry>().map { it.count })
+        val line = glass.filterIsInstance<TreeIdleEntry>().single()
+        // Equal times: by id, as the list orders them.
+        assertEquals(listOf("research", "review"), line.fold!!.names)
+        assertFalse(line.fold!!.open)
+        val slots = repoCardSlots(glass)
+        assertEquals(RepoCardSlot(first = false, last = true, level = 1), slots["idle:tree/mac//code/app"])
+        assertNull("the heading is outside the cards", slots["idle-repos:machine/mac"])
+        assertEquals(RepoCardSlot(first = true, last = false, level = 0), slots["group:tree/mac//code/notes"])
+        assertEquals(RepoCardSlot(first = false, last = true, level = 0), slots["group:tree/mac//code/scripts"])
+        assertEquals(RepoCardSlot(first = true, last = true, level = 0), slots["group:tree/box//srv/infra"])
+        // Opened: an idle repository's agents a level in, in the same card; the idle agents after the busy one, then the
+        // line that folds them again.
+        val opened = entries(AgentListSettings(grouping = AgentGrouping.Repo, expandedQuiet = setOf("tree/mac//code/notes"),
+            expandedIdle = setOf("tree/mac//code/app")))
+        assertEquals(listOf("session:mac/build", "session:mac/research", "session:mac/review", "idle:tree/mac//code/app"),
+            opened.map { it.key }.drop(2).take(4))
+        assertTrue(opened.filterIsInstance<TreeIdleEntry>().single().fold!!.open)
+        val openSlots = repoCardSlots(opened)
+        assertEquals(RepoCardSlot(first = true, last = false, level = 0), openSlots["group:tree/mac//code/notes"])
+        assertEquals(RepoCardSlot(first = false, last = false, level = 1), openSlots["session:mac/minutes"])
+        assertEquals(RepoCardSlot(first = false, last = true, level = 0), openSlots["group:tree/mac//code/scripts"])
+        // Brief and Board (no idleRepos): as before, the idle repositories inline and "N more idle" with no line of their own.
+        val plain = entries(idleRepos = false)
+        assertTrue(plain.none { it is TreeIdleReposEntry })
+        assertNull(plain.filterIsInstance<TreeIdleEntry>().single().fold)
+        assertEquals(2, plain.filterIsInstance<TreeIdleEntry>().single().hidden)
+        assertEquals(glass.filterNot { it is TreeIdleReposEntry }.map { it.key }, plain.map { it.key })
+    }
+
     @Test fun aSharedCheckoutPathKeepsEachRepositoryAndItsSessionsInTheTree() {
         val path = "/home/user"
         fun at(id: String, repo: String) = AgentSession(Session(machineId = "mac", sessionId = id,

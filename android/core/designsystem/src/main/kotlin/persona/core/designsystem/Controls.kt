@@ -512,19 +512,29 @@ fun JChip(
     dot: Color? = null,
     role: Role = Role.Checkbox,
     trailingIcon: PhIcon? = null,
+    /** The accent's soft fill and the accent's ink (not selected; iOS `Chip`'s tint): a choice that stays on, such as
+     *  the task the next message goes to. Board keeps its edge. */
+    accent: Boolean = false,
+    /** A × of its own at the end that takes the thing away, read as [removeLabel]; the chip is then as tall as a
+     *  tappable one, so the × has its full touch target. */
+    onRemove: (() -> Unit)? = null,
+    removeLabel: String? = null,
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
     val shape = RoundedCornerShape(PersonaTheme.shapes.chip)
-    val (fill, plainInk, border) = when (style) {
-        AppStyle.Glass -> Triple(if (selected) palette.action else palette.surfaceStrong, if (selected) palette.onAction else palette.ink, if (selected) Color.Transparent else palette.strokeBottom)
-        AppStyle.Brief -> Triple(if (selected) palette.action else palette.surface, if (selected) palette.onAction else palette.ink, Color.Transparent)
-        AppStyle.Board -> Triple(if (selected) palette.statusSurface else palette.surface, palette.ink, if (selected) palette.accent else palette.line)
+    val edgeless = Color.Transparent
+    val (fill, plainInk, border) = when {
+        accent && !selected -> Triple(palette.accentSoft, palette.accent, if (style == AppStyle.Board) palette.line else edgeless)
+        style == AppStyle.Glass -> Triple(if (selected) palette.action else palette.surfaceStrong, if (selected) palette.onAction else palette.ink, if (selected) edgeless else palette.strokeBottom)
+        style == AppStyle.Brief -> Triple(if (selected) palette.action else palette.surface, if (selected) palette.onAction else palette.ink, edgeless)
+        else -> Triple(if (selected) palette.statusSurface else palette.surface, palette.ink, if (selected) palette.accent else palette.line)
     }
     val ink = if (muted && (!selected || style == AppStyle.Board)) palette.ink3 else plainInk
+    val tall = onClick != null || onRemove != null
     Row(
-        modifier.heightIn(min = if (onClick != null) JChipTokens.height else JChipTokens.quietHeight)
-            .then(if (onClick != null) Modifier.minimumInteractiveComponentSize() else Modifier)
+        modifier.heightIn(min = if (tall) JChipTokens.height else JChipTokens.quietHeight)
+            .then(if (tall) Modifier.minimumInteractiveComponentSize() else Modifier)
             .clip(shape).background(fill).border(JChipTokens.border, border, shape)
             .then(when {
                 onClick != null && onLongClick != null ->
@@ -534,13 +544,15 @@ fun JChip(
                     .semantics { if (role == Role.Checkbox) this.selected = selected }
                 else -> Modifier
             })
-            .padding(horizontal = JChipTokens.horizontalPadding),
+            .padding(start = JChipTokens.horizontalPadding, end = if (onRemove != null) Tokens.Space.xs else JChipTokens.horizontalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         status?.let { JStatusDot(it, size = JChipTokens.dotSize); Spacer(Modifier.width(JChipTokens.dotGap)) }
         if (status == null) dot?.let { Box(Modifier.size(JChipTokens.dotSize).clip(CircleShape).background(it)); Spacer(Modifier.width(JChipTokens.dotGap)) }
         icon?.let { JIcon(it, null, size = JChipTokens.iconSize, tint = ink); Spacer(Modifier.width(JChipTokens.iconGap)) }
-        Text(text, style = PersonaTheme.type.labelSmall.copy(fontWeight = FontWeight.Medium), color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // With a ×, a long text gives way to it rather than pushing it out of the chip.
+        Text(text, if (onRemove != null) Modifier.weight(1f, fill = false) else Modifier,
+            style = PersonaTheme.type.labelSmall.copy(fontWeight = FontWeight.Medium), color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
         count?.let {
             Spacer(Modifier.width(JChipTokens.countGap))
             Text("$it", style = PersonaTheme.type.micro, color = if (selected && style != AppStyle.Board) ink else palette.ink3, maxLines = 1, softWrap = false)
@@ -548,6 +560,13 @@ fun JChip(
         trailingIcon?.let {
             Spacer(Modifier.width(JChipTokens.iconGap))
             JIcon(it, null, size = JChipTokens.iconSize, tint = ink)
+        }
+        onRemove?.let { remove ->
+            Spacer(Modifier.width(Tokens.Space.xs))
+            Box(Modifier.size(Tokens.Size.icon).clip(CircleShape).clickable(role = Role.Button, onClick = remove)
+                .semantics { removeLabel?.let { contentDescription = it } }, contentAlignment = Alignment.Center) {
+                JIcon(persona.core.designsystem.icons.PersonaIcons.close, null, size = JChipTokens.iconSize, tint = ink)
+            }
         }
     }
 }

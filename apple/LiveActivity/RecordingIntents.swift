@@ -2,14 +2,16 @@ import AppIntents
 import Foundation
 
 // Recording on the phone without going through the app (docs/apple/recording.md「Meeting recordings」): Siri, Shortcuts, the
-// Action button and the Control start a meeting recording; the recording Live Activity's buttons stop it and bookmark it.
+// Action button and the Control start a meeting recording (Record, #5243); the recording Live Activity's buttons stop it
+// and bookmark it.
 // Compiled into the app and the widget extension (the Control and the activity draw them); every body runs in the app.
 
-/// Starts a meeting recording, named after the calendar event happening now. An `AudioRecordingIntent`: it may open the
-/// microphone without bringing the app to the front, and the recording shows a Live Activity for as long as it lasts
-/// (the system stops a recording without one). Before the microphone has ever been allowed it opens the app to ask.
+/// Record: starts a meeting recording, named after the calendar event happening now. An `AudioRecordingIntent`: it may
+/// open the microphone without bringing the app to the front, and the recording shows a Live Activity for as long as it
+/// lasts (the system stops a recording without one). Before the microphone has ever been allowed it opens the app to ask.
+/// The type keeps its name (it was Record a Meeting until #5243): shortcuts people made with it go on working.
 struct StartMeetingRecordingIntent: AudioRecordingIntent {
-    nonisolated static let title: LocalizedStringResource = "Record a Meeting"
+    nonisolated static let title: LocalizedStringResource = "Record [Recordings Section ef2821]"
     nonisolated static let description = IntentDescription("Starts recording a meeting in Persona, named after the calendar event happening now. The audio stays on this device; its transcript goes to Knowledge.")
     nonisolated static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
 

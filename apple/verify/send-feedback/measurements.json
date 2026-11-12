@@ -1,0 +1,67 @@
+{
+  "environment": {
+    "device": "iPhone 17 Pro simulator",
+    "runtime": "iOS 27.0",
+    "profile": "stock (managedDisabled verified as 0)",
+    "app_compiler": "Xcode 27.1",
+    "optimization": "-O; initial baseline/first fixed builds used whole-module compilation, final verification used Debug's default compilation mode",
+    "baseline_test_driver": "Xcode 27.2",
+    "final_test_driver": "Xcode 27.1"
+  },
+  "mock": {
+    "configured_acceptance_ms": 150,
+    "transport_probe_round_trip_ms": 159.4,
+    "transcript_echo_delay_seconds": 10,
+    "model_execution_latency_measured": false
+  },
+  "baseline": {
+    "processing_visible": false,
+    "observation_window_seconds": 12,
+    "agent_command_observation_seconds": 13.269,
+    "assistant_command_observation_seconds": 13.041,
+    "note": "Categorical absence check, not a normalized speed ratio. The old client can already show Getting ready locally."
+  },
+  "default_size_verified": {
+    "light": {
+      "agent_input_to_accessibility_seconds": 0.421,
+      "agent_conservative_upper_seconds": 0.441,
+      "assistant_input_to_accessibility_seconds": 0.403,
+      "assistant_conservative_upper_seconds": 0.423,
+      "agent_automation_command_seconds": 0.491,
+      "assistant_automation_command_seconds": 0.483,
+      "screenshots_visually_verified": true
+    },
+    "dark": {
+      "agent_input_to_accessibility_seconds": 0.432,
+      "agent_conservative_upper_seconds": 0.452,
+      "assistant_input_to_accessibility_seconds": 0.403,
+      "assistant_conservative_upper_seconds": 0.423,
+      "agent_automation_command_seconds": 0.512,
+      "assistant_automation_command_seconds": 0.473,
+      "screenshots_visually_verified": true
+    }
+  },
+  "largest_accessibility_size": {
+    "light_agent_accessibility_observation_seconds": 0.424,
+    "light_assistant_accessibility_observation_seconds": 0.401,
+    "dark_agent_accessibility_observation_seconds": 0.406,
+    "dark_assistant_accessibility_observation_seconds": 0.412,
+    "screenshots_visually_accepted": false,
+    "note": "The existing chrome/composer layout crowds and clips the status at this size. Accessibility presence is not visual acceptance. This broader layout gap is reported separately."
+  },
+  "verification": {
+    "ios_unit_tests": 38,
+    "mac_shared_unit_tests": 11,
+    "stock_ui_tests": 12,
+    "timing_checker_unit_tests": 3,
+    "hosted_ci_checks": [],
+    "physical_device_or_production_functional_verification": false
+  },
+  "failed_run_retained": {
+    "slim_dark_agent_automation_command_seconds": 1.364,
+    "pre_input_automation_seconds": 0.8,
+    "input_to_accessibility_seconds": 0.564,
+    "conservative_upper_seconds": 0.584,
+    "note": "The original assertion included XCTest lookup/idle work before input. The host checker now enforces from Synthesize event, fails closed on missing observations, and adds 20 ms for rounded logs. The full stock rerun subsequently passed."
+  }
+}

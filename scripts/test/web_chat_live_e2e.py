@@ -24,7 +24,7 @@ import urllib.request
 from playwright.sync_api import sync_playwright
 
 AGENT = ("macbook", "a1f3c2d4-0000-4000-8000-000000000001")
-SWITCH = '[role=radiogroup][aria-label="终端或对话"] [role=radio]'
+# the header's one button to the other view (#5421): its name is the view it goes to
 WAIT = 8000
 CHAT = "[data-chat-scroll]"  # the conversation itself: the sidebar and header repeat titles
 FIRST = "给天气 App 加一个主屏幕小组件"  # the first message of that conversation
@@ -68,7 +68,9 @@ def main():
             ok(f"{what}: {text!r} appeared without a reload")
 
         def view(name):
-            page.locator(SWITCH, has_text=name).click()
+            button = page.locator("main header").get_by_role("button", name=name, exact=True)
+            if button.count():
+                button.click()
             page.wait_for_timeout(500)
 
         try:

@@ -11,19 +11,21 @@ import { splitDevices } from "../lib/devices";
 import { ago } from "../lib/format";
 import { install, useInstall, type InstallState } from "../lib/pwa";
 import { useStore } from "../lib/store";
-import { Button, cx, Dialog, EASE, IconButton, Loading, Spinner, toast } from "../ui/atoms";
+import { Button, cx, Dialog, EASE, IconButton, Loading, Menu, Spinner, toast, useMenu } from "../ui/atoms";
 import { Icon, type IconName } from "../ui/icons";
 import { ExtensionThemePicker } from "../ui/ExtensionThemePicker";
 import { setTheme, useTheme, type Theme } from "./theme";
 import { Group, Row, Pill, RowConfirm, Switch } from "./settings/SettingsParts";
 import { LanguageRow } from "./settings/LanguageRow";
-import { TextSizeRow, ThemeColorPicker } from "./settings/LookSettings";
+import { RecentChatsRow, TextSizeRow, ThemeColorPicker } from "./settings/LookSettings";
 import { setReplyMotionEnabled, useReplyMotionSetting } from "../ui/stream/motion";
 import { setAgentDetails, setContextAsUsed, useAgentDetails, useContextAsUsed } from "../lib/context-usage";
 import { setSidebarTerminals, useSidebarTerminals } from "../lib/sidebar-terminals";
 import { HubList } from "./Hubs";
 import { useDisconnect } from "./DisconnectBrowser";
 import { KnowledgeSelection } from "./settings/KnowledgeSelection";
+import { SourcesUI } from "./subscriptions/SourcesUI";
+import { useInboxSourcesShown } from "../lib/subscriptions";
 import { ModelConfiguration } from "./settings/ModelConfiguration";
 import { AgentSettings } from "./settings/AgentSettings";
 import { SidebarPagesGroup } from "./settings/SidebarPages";
@@ -47,11 +49,18 @@ import { LauncherQuota } from "./settings/LauncherQuota";
 import { LauncherExtensionSections } from "./settings/ExtensionView";
 import { hubHasExt } from "../lib/extension-api";
 import { hostOf, type ProviderView } from "../lib/providers";
+import { referenceState } from "../lib/secret-reference";
+import { forgetProviderNames, providerIdNote, providerTitle } from "../lib/provider-names";
 import { harnessGroups, harnessLabel, scopeSummary } from "../lib/provider-scope";
+import { foundAliases, type EditDraft, type FoundAlias } from "../lib/provider-paste";
+import { dropImportLink, importLinkHeld, onImportLink } from "../lib/import-link";
+import { linkable } from "../lib/provider-link";
 import { ProviderWizard } from "./settings/ProviderWizard";
+import { ProviderLinkCopy } from "./settings/ProviderLinkCopy";
 import { ProviderImport } from "./settings/ProviderImport";
 import { builtinRows, loadLaunchers, rcFilesOf, rcGroups, syncStateText, type LauncherSync } from "../lib/launcher-list";
 import { TerminalModeRow } from "./settings/TerminalModeSetting";
+import { AgentOpenRow } from "./settings/AgentOpenSetting";
 import { AGENT_KINDS, ASSISTANT_TABS, categoryState, FROM_LIST, itemIsPage, itemState, NAV_GROUPS, openedFromSub, redirectLegacySettings, settingsAt, settingsHref, SENT_SUB, stepsToList, TAB_INFO, TABS, type AgentTab, type SettingsSection, type Tab } from "./settings/nav";
 import { searchSettings, type SearchGroup } from "./settings/search";
 import { GroupAction, GroupFooter, GroupTitle, hasFooter } from "./settings/SettingsGroups";
@@ -201,7 +210,10 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   // "Extensions" only on a hub with the extension base (docs/extensions/extensions.md "The hub's API"); a link to it still opens it.
   const hasExtensions = useStore((s) => hubHasExt(s.features, "manager"));
   const hasChannels = useStore((s) => s.features.includes("channels"));
-  const shown = (k: Tab) => (k !== "extensions" || hasExtensions || tab === "extensions") && (k !== "channels" || hasChannels || tab === "channels");
+  // Inbox Sources (#5278) only with a manager that draws them; a link to it still opens it
+  const hasSources = useInboxSourcesShown();
+  const shown = (k: Tab) => (k !== "extensions" || hasExtensions || tab === "extensions") && (k !== "channels" || hasChannels || tab === "channels") &&
+    (k !== "sources" || hasSources || tab === "sources");
   const contentId = useId();
   const configurationOwner = useRef<string | null>(new URLSearchParams(location.search).get("manager"));
   const pick = (k: Tab, id: string | null = null, section?: SettingsSection) => {
@@ -299,6 +311,7 @@ export function Settings({ onToggleSidebar }: { onToggleSidebar: () => void }) {
               )}
               {tab === "notifications" && <NotificationSettings />}
               {tab === "knowledge" && <KnowledgeSelection />}
+              {tab === "sources" && <SourcesUI title={TAB_INFO.sources.label} />}
               {tab === "models" && <>
                 <section id="settings-providers" className="scroll-mt-4">
                   <h2 className="mb-2 px-1 text-[15px] font-semibold text-ink">{TAB_INFO.models.label}</h2>
@@ -560,6 +573,7 @@ function General({ onModel }: { onModel: () => void }) {
         <Row label={t("settings.reply_motion")} hint={t("settings.reply_motion_hint")}>
           <Switch on={replyMotion} onChange={setReplyMotionEnabled} label={t("settings.reply_motion")} />
         </Row>
+        <RecentChatsRow />
       </Group>
 
       <SidebarPagesGroup />
@@ -586,7 +600,7 @@ function AssistantProfile({ onTriageModel }: { onTriageModel: () => void }) {
   );
 }
 
-/** This browser's own switches for Agents (the terminal, the sidebar, the details shown). */
+/** This browser's own switches for Agents (where they open, the terminal, the sidebar, the details shown). */
 function AgentPreferences() {
   const workBrowserReady = useStore((s) => s.features.includes("sessions_dimensions"));
   const sidebarTerminals = useSidebarTerminals();
@@ -594,6 +608,7 @@ function AgentPreferences() {
   const contextAsUsed = useContextAsUsed();
   return (
     <Group title={t("settings.agent_preferences")} anchor="agent-preferences">
+      <AgentOpenRow />
       <TerminalModeRow />
       {!workBrowserReady && <Row label={t("settings.sidebar_terminals")} hint={t("settings.sidebar_terminals_hint")}>
         <Switch on={sidebarTerminals} onChange={setSidebarTerminals} label={t("settings.sidebar_terminals")} />
@@ -691,26 +706,75 @@ function Models() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
+  // an import link this page was opened with (#5420, lib/import-link.ts): Add opens on it. Read without taking it
+  // (StrictMode runs this twice), then forgotten there once mounted; closing the wizard forgets it here too.
+  const [link, setLink] = useState(importLinkHeld);
   // `?add=1` opens the wizard, `?launcher=<name>` one provider: where "Connect a model" / "Change the key" lead (lib/readiness.ts)
-  const [open, setOpen] = useState<string | null>(() => new URLSearchParams(location.search).get("launcher"));
-  const [editing, setEditing] = useState<LauncherView | "new" | null>(() => (new URLSearchParams(location.search).get("add") === "1" ? "new" : null));
+  const [open, setOpen] = useState<string | null>(() => (link ? null : new URLSearchParams(location.search).get("launcher")));
+  const [editing, setEditing] = useState<LauncherView | "new" | null>(() => (link || new URLSearchParams(location.search).get("add") === "1" ? "new" : null));
+  // the provider whose import link is being copied (#5420)
+  const [copying, setCopying] = useState<LauncherView | null>(null);
   const [importing, setImporting] = useState(false);
+  // the import opened for one alias the wizard found (#5193); null: the computer's whole list
+  const [importAlias, setImportAlias] = useState<FoundAlias | null>(null);
+  // what a stored provider opens with when a paste goes on with it
+  const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+  // One opened while the page is up (pasted over it) opens Add in place of a provider's details, but never over a
+  // dialog with something typed in it (the wizard, the copy dialog, the alias import): it waits, held, until that closes.
+  const busy = editing !== null || copying !== null || importing;
+  const busyNow = useRef(busy);
+  busyNow.current = busy;
+  const takeLink = (l: string) => {
+    dropImportLink();
+    setOpen(null);
+    setImportAlias(null);
+    setEditDraft(null);
+    setLink(l);
+    setEditing("new");
+  };
+  useEffect(() => {
+    dropImportLink();
+    return onImportLink((l) => (busyNow.current ? toast(t("settings-providerlink.link_waits"), "info") : takeLink(l)));
+  }, []);
+  useEffect(() => {
+    const l = importLinkHeld();
+    if (!busy && l) takeLink(l);
+  }, [busy]);
 
+  // the list read again; rejects when it couldn't be
+  const refresh = () => loadLaunchers<LauncherView>().then((r) => (setList(r.launchers), setSync(r.sync ?? []), r.launchers));
   const load = () => {
     setLoading(true);
     setError("");
-    return loadLaunchers<LauncherView>()
-      .then((r) => (setList(r.launchers), setSync(r.sync ?? [])))
+    return refresh()
       .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   };
   useEffect(() => void load(), []);
+  const found = useMemo(() => foundAliases(list ?? [], machines), [list, machines]);
+  const closeWizard = () => (setEditing(null), setEditDraft(null), setLink(null), dropLinkParams());
+  // The wizard swaps to a stored provider the paste matched; one added since this list loaded is in a fresh one.
+  const editWith = async (name: string, draft: EditDraft) => {
+    const find = (ls?: LauncherView[] | null) => ls?.find((l) => managedProvider(l.source) && l.name === name);
+    let l = find(list);
+    if (!l) {
+      try {
+        l = find(await refresh());
+      } catch (e) {
+        return toast(t("settings.launchers_failed", { error: errorText(e) }), "error");
+      }
+    }
+    if (!l) return toast(t("settings-providerpaste.provider_missing", { name }), "error");
+    setLink(null);
+    setEditDraft(draft);
+    setEditing(l);
+  };
 
   const name = (id: string) => sync.find((s) => s.machine === id)?.name || machines.find((m) => m.id === id)?.name || id;
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!list || !q) return list ?? [];
-    return list.filter((l) => [l.name, l.model, l.small_model, l.base_url, ...(l.machines ?? []).map(name)].some((v) => v?.toLowerCase().includes(q)));
+    return list.filter((l) => [l.name, l.display_name, l.model, l.small_model, l.base_url, ...(l.machines ?? []).map(name)].some((v) => v?.toLowerCase().includes(q)));
   }, [list, query, machines, sync]);
   const managed = shown.filter((l) => managedProvider(l.source));
   const builtin = builtinRows(shown);
@@ -753,6 +817,12 @@ function Models() {
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("settings.search_placeholder")} className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3" aria-label={t("settings.search_providers")} />
           {query && <IconButton icon="x" label={t("settings.clear")} size={22} iconSize={12} onClick={() => setQuery("")} />}
         </label>
+        {list && (
+          // for people who already run claude from aliases on a computer: turns them into providers (the dialog explains when there is no computer)
+          <Button tone="secondary" icon="download" title={t("settings-providerimport.title")} onClick={() => (setImportAlias(null), setImporting(true))}>
+            <span className="max-sm:sr-only">{t("settings-providerimport.import")}</span>
+          </Button>
+        )}
         <Button tone="accent" icon="plus" onClick={() => setEditing("new")}>
           <span className="max-sm:hidden">{t("settings.add_provider")}</span>
           <span className="sm:hidden">{t("settings.add_provider_short")}</span>
@@ -801,16 +871,6 @@ function Models() {
           {hidden.map(row)}
         </Group>
       )}
-      {list && !query && (
-        // "Import from ~/.zshrc" reads a computer's ~/.zshrc, so it is for people who already run claude there, and needs a computer
-        <Group title={t("settings.providers_advanced")} footer={machines.length ? t("settings.zshrc_import_hint") : t("settings.zshrc_import_no_machines")}>
-          <Row label={t("settings-providerimport.title")} icon="terminal">
-            <Button tone="secondary" icon="download" disabled={machines.length === 0} onClick={() => setImporting(true)}>
-              {t("settings-providerimport.import")}
-            </Button>
-          </Row>
-        </Group>
-      )}
       {list && !query && sync.length > 0 && (
         <Group title={t("settings.sync_title", { count: sync.length })} footer={t("settings.sync_footer")}>
           {sync.map((s) => {
@@ -835,20 +895,36 @@ function Models() {
           setOpen(null);
           setEditing(l);
         }}
+        onCopyLink={(l) => {
+          setOpen(null);
+          setCopying(l);
+        }}
       />
-      <ProviderWizard existing={editing} onClose={() => (setEditing(null), dropLinkParams())} onSaved={() => void load()} />
-      <ProviderImport open={importing} onClose={() => setImporting(false)} onImported={() => void load()} />
+      <ProviderWizard existing={editing} draft={editDraft} link={link} found={found} onClose={closeWizard} onSaved={() => void load()}
+        onImportAlias={(a) => (closeWizard(), setImportAlias(a), setImporting(true))} onEditWith={(name, draft) => void editWith(name, draft)} />
+      <ProviderImport open={importing} machine={importAlias?.machine} alias={importAlias?.name} onClose={() => setImporting(false)} onImported={() => void load()} />
+      <ProviderLinkCopy provider={copying} onClose={() => (setCopying(null), dropLinkParams())} />
       </div>
     </>
   );
 }
 
-export function LauncherDetailDialog({ name, onClose, onChanged, onEdit }: { name: string | null; onClose: () => void; onChanged: () => void; onEdit: (l: LauncherView) => void }) {
+export function LauncherDetailDialog({ name, onClose, onChanged, onEdit, onCopyLink }: {
+  name: string | null;
+  onClose: () => void;
+  onChanged: () => void;
+  onEdit: (l: LauncherView) => void;
+  /** "Copy import link" in its ⋯ (#5420): this dialog closes and the copy dialog opens for the provider. */
+  onCopyLink?: (l: LauncherView) => void;
+}) {
   const machines = useStore((s) => s.machines);
+  const more = useMenu();
   const [l, setL] = useState<LauncherView | null>(null);
   const [error, setError] = useState("");
   const [checks, setChecks] = useState<Record<string, LauncherCheck | null>>({});
   const [confirm, setConfirm] = useState(false);
+  // what still names an rc-file launcher, asked when its Hide is confirmed: they keep running on it (#4661)
+  const [uses, setUses] = useState<string[] | null>(null);
   const [showDef, setShowDef] = useState(false);
   const mname = (id: string) => machines.find((m) => m.id === id)?.name ?? id;
   // extensions draw a section here (docs/extensions/extensions.md "Declarative UI" launcher_section)
@@ -863,7 +939,9 @@ export function LauncherDetailDialog({ name, onClose, onChanged, onEdit }: { nam
     setError("");
     setChecks({});
     setConfirm(false);
+    setUses(null);
     setShowDef(false);
+    more.close();
     if (!name) return;
     let live = true;
     api<{ launcher: LauncherView }>(enLauncher(name))
@@ -904,11 +982,21 @@ export function LauncherDetailDialog({ name, onClose, onChanged, onEdit }: { nam
     );
   };
 
+  const askRemove = () => {
+    setConfirm((c) => !c);
+    if (!l || !name || managedProvider(l.source) || uses !== null) return;
+    const asked = name;
+    api<{ uses?: string[] }>(`${enLauncher(name)}/uses`)
+      .then((r) => shown.current === asked && setUses(r.uses ?? []))
+      .catch(() => {}); // an older hub: the plain confirmation, as before
+  };
+
   const remove = async () => {
     if (!l) return;
     try {
       await api(enLauncher(l.name), { method: "DELETE" });
-      toast(managedProvider(l.source) ? t("settings.deleted", { name: l.name }) : t("settings.hid", { name: l.name }), "ok");
+      forgetProviderNames();
+      toast(managedProvider(l.source) ? t("settings.deleted", { name: providerTitle(l) }) : t("settings.hid", { name: providerTitle(l) }), "ok");
       onChanged();
       onClose();
     } catch (e) {
@@ -919,7 +1007,8 @@ export function LauncherDetailDialog({ name, onClose, onChanged, onEdit }: { nam
     if (!l) return;
     try {
       await api(`${enLauncher(l.name)}/restore`, { method: "POST" });
-      toast(t("settings.restored", { name: l.name }), "ok");
+      forgetProviderNames();
+      toast(t("settings.restored", { name: providerTitle(l) }), "ok");
       onChanged();
       onClose();
     } catch (e) {
@@ -932,7 +1021,8 @@ export function LauncherDetailDialog({ name, onClose, onChanged, onEdit }: { nam
       open={name !== null}
       onClose={onClose}
       width={620}
-      title={<span className="font-mono">{name}</span>}
+      // a provider's display name with its startup ID after it (#5029); an rc alias, or one not read yet, by its ID
+      title={l && providerIdNote(l) ? <>{providerTitle(l)} <span className="font-mono text-[11.5px] font-normal text-ink-3">{providerIdNote(l)}</span></> : <span className="font-mono">{name}</span>}
       footer={
         l && (
           <>
@@ -942,12 +1032,13 @@ export function LauncherDetailDialog({ name, onClose, onChanged, onEdit }: { nam
               </Button>
             ) : (
               <span className="relative">
-                <Button tone="quiet" icon={managedProvider(l.source) ? "x" : undefined} onClick={() => setConfirm((c) => !c)} className="text-red enabled:hover:text-red">
+                <Button tone="quiet" icon={managedProvider(l.source) ? "x" : undefined} onClick={askRemove} className="text-red enabled:hover:text-red">
                   {managedProvider(l.source) ? t("settings.delete_provider") : t("settings.hide_in_persona")}
                 </Button>
                 {/* the confirmation comes up right at the button (like the app), not as another dialog */}
                 {confirm && (
-                  <span className="absolute bottom-full left-0 mb-1.5 rounded-control bg-surface p-1 shadow-overlay" style={{ animation: `pop-in 160ms ${EASE} both` }}>
+                  <span className="absolute bottom-full left-0 mb-1.5 flex flex-col items-start gap-1 rounded-control bg-surface p-1 shadow-overlay" style={{ animation: `pop-in 160ms ${EASE} both` }}>
+                    {!managedProvider(l.source) && !!uses?.length && <span className="w-72 px-1 text-[12px] text-ink-2">{t("settings.hide_uses", { uses: uses.join(", ") })}</span>}
                     <Button tone="danger" onClick={() => void remove()}>
                       {managedProvider(l.source) ? t("settings.confirm_delete") : t("settings.confirm_hide")}
                     </Button>
@@ -956,6 +1047,15 @@ export function LauncherDetailDialog({ name, onClose, onChanged, onEdit }: { nam
               </span>
             )}
             <span className="flex-1" />
+            {onCopyLink && linkable(l) && (
+              <>
+                <IconButton icon="more" label={t("settings-providerlink.more")} size={32} onClick={more.open} active={!!more.anchor} />
+                {more.anchor && (
+                  <Menu anchor={more.anchor} onClose={more.close} side="top" align="right" width={220}
+                    items={[{ key: "copy-link", label: t("settings-providerlink.copy_link"), icon: "link", onSelect: () => onCopyLink(l) }]} />
+                )}
+              </>
+            )}
             {managedProvider(l.source) && (
               <Button tone="secondary" onClick={() => onEdit(l)}>
                 {t("settings.edit")}
@@ -1016,7 +1116,7 @@ export function LauncherDetailDialog({ name, onClose, onChanged, onEdit }: { nam
               {l.kind !== "api" && (!l.agent || l.agent === "claude") && l.subagent_model && <KVRow k={t("settings.subagent_model")} v={l.subagent_model} mono />}
               {l.kind !== "api" && (!l.agent || l.agent === "claude") && l.custom_model && <KVRow k={t("settings.custom_model")} v={l.custom_model} mono />}
               {l.kind !== "api" && (!l.agent || l.agent === "claude") && l.custom_model_name && <KVRow k={t("settings.custom_model_name")} v={l.custom_model_name} />}
-              <KVRow k="API Key" v={l.has_key ? t("settings.key_set_hidden") : t("settings.not_set")} />
+              <KVRow k="API Key" v={l.key_reference ? referenceState(l.key_reference) : l.has_key ? t("settings.key_set_hidden") : t("settings.not_set")} />
               {l.share && <KVRow k={t("settings.devices")} v={scopeSummary(l, mname)} />}
               {l.share && l.key_machines?.length ? <KVRow k={t("settings.machine_keys")} v={formatList(l.key_machines.map(mname), { type: "conjunction", style: "narrow" })} /> : null}
               {l.api !== "responses" && l.api !== "chat" && (!l.agent || l.agent === "claude") && <KVRow k={t("settings.auth")} v={l.auth === "bearer" ? "Bearer" : "x-api-key"} />}

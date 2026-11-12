@@ -1,14 +1,18 @@
 package persona.feature.chat
 
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasClickAction
@@ -17,6 +21,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.serialization.json.JsonPrimitive
@@ -85,5 +90,35 @@ class AssistantOwnCardShotsTest {
         assertEquals(1, sent.size)
         assertEquals(true, sent.single().allow)
         rule.onNodeWithText("在等你批准", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test fun hubTitleNamesThePermissionCardAtEveryStyleAndFontSize() {
+        val titled = bash.copy(toolName = "mcp__persona__report_to_supervisor", toolInput = null,
+            toolTitle = "Report to supervisor · Done", toolNameTitle = "Report to supervisor")
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        var large by mutableStateOf(false)
+        rule.setContent {
+            val configuration = Configuration(LocalConfiguration.current).apply { fontScale = if (large) 1.6f else 1f }
+            val density = Density(LocalDensity.current.density, if (large) 1.6f else 1f)
+            CompositionLocalProvider(LocalConfiguration provides configuration, LocalDensity provides density) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                    val panel = panelRequests(assistant = true, requests = listOf(titled), key = chat, trayReview = null, shown = listOf(titled))
+                    Column(Modifier.testTag("shot").width(400.dp).background(PersonaTheme.palette.background)) {
+                        InteractionPanel(panel, null, 600.dp, null, emptySet(), { _, _ -> }, null, {})
+                    }
+                }
+            }
+        }
+        for (s in AppStyle.entries) for (d in listOf(false, true)) for (big in listOf(false, true)) {
+            style = s; dark = d; large = big
+            rule.waitForIdle()
+            rule.onNodeWithText("请求使用 Report to supervisor · Done", useUnmergedTree = true).assertExists()
+            rule.onNodeWithText("总是同意会放行：这段对话里的所有「Report to supervisor」调用", useUnmergedTree = true).assertExists()
+            val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+            val font = if (big) "large" else "default"
+            File(out(), "title-$font-${s.name.lowercase()}-${if (d) "dark" else "light"}.png").outputStream()
+                .use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        }
     }
 }

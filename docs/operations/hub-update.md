@@ -58,6 +58,9 @@ set `PERSONA_TEST_DOCKER_CONFIG` to a credential-free directory containing
 `cli-plugins/docker-compose`; deployment tests only render configuration offline.
 The worker passes its Python interpreter through to every script suite.
 The SSH publisher uses Paramiko 4.0.0 in the same private environment.
+The remote runs the publication program with Python 3.11 or later: `python3`, unless the
+publisher config's optional `remote_python` names another interpreter (one program name or
+absolute path, for hosts whose `python3` is older). The node and manager publishers use it too.
 
 Build with `update_url=file://<remote_root>/releases/hub` for a private source.
 By default, SSH uploads only the Hub platform and atomically promotes its manifest. The
@@ -446,6 +449,19 @@ Where a release hub reads `latest.json` and downloads from (#4522). v0.2.1's bin
   Without `update.proxy`, these requests use the environment's proxies, as before. One that does not read fails every check with the reason rather than going around it. The log, `GET /api/v1/hub/update` and the errors show the proxy as `http://host:port`, never its user and password.
 - **Seeing it**: `GET /api/v1/hub/update` carries `update_url` (the source in effect), `update_url_from` (`hub.json` or `build`) and `update_proxy`. hub.json is read at the hub's start: a change takes effect at the next start or update.
 - **The default of official builds** is the maintainers' decision. It is either the publish site's `dl/`, kept in step with each GitHub Release, or the GitHub Releases base through `publish.update_url`. Either way `update.url` lets a hub choose another without a new build.
+
+### The Android app
+
+A hub with an update source offers its phones the Android app of the newest release, with no setup (#5563). The phones update from their hub (`GET /api/v1/app/android/latest`), which serves what is in `apps/android/` (`docs/protocol/protocol.md` ("Android packages")); until now only a publisher copying an APK over SSH put anything there.
+
+- **What a release carries**: a version-tag release has `android.json` beside `latest.json`, naming its signed APK (`Persona-<version>-android.apk`, `docs/operations/release.md`). It holds the fields of the hub's `latest.json` for the app (package, version code and name, minimum SDK, the signing certificate's SHA-256, size, SHA-256, source commit, notes) plus `version` (the release) and `name` (the APK's file name). A release without it, for example one whose Android build was blocked, changes nothing.
+- **When**: at every update check (a minute after start, then hourly), before the hub's own update so an install's restart cannot cut the download short, from the same source and through `update.proxy`. A Docker hub checks too, but has a source only when `update.url` gives one (`docs/operations/docker.md` ("Upgrading")).
+- **What it writes**: it downloads the APK, checks its size and SHA-256, and writes `<sha256>.apk`, its gzip copy and then `latest.json` under `.publish.lock`: the layout and lock of `scripts/release/android_apk_atomic.py`, so an SSH publisher and the sync never write at the same time, and the endpoints and the app need no change. It keeps the APK it replaced (a phone may still be downloading it) and removes older ones.
+- **What it never does**: go back to a lower or equal version code (a publisher building every commit on main stays ahead of the releases); put an APK of another package, or signed with another key, over the published one (the phones could not install it over the app they have, so a hub publishing its own builds keeps them); overwrite a `latest.json` it cannot read. A refusal or failure is logged once, not at every check, and the phones keep the app they have.
+- **On the phone**: nothing new. The app finds the version at launch or in the foreground, and the system still asks before installing it.
+- **Security**: as for the hub's own binaries ("Security"), the publisher signs no manifest; the SHA-256 guards against a broken download. The phone itself refuses an APK signed with another key than the app it has.
+
+Code: `server/internal/update/android.go`, called from `server/internal/hub/selfupdate_check.go`.
 
 ## 8. Updating (release build; automatic and manual use the same flow)
 

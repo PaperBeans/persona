@@ -62,7 +62,10 @@ struct SessionlessCardTests {
         let rows = AgentsNeedsYou.rows(cards: listed, waiting: AgentsNeedsYou.waiting(model.allSessions))
         // The device's saved agents (another run's) may wait too: machine m's rows are this test's.
         #expect(rows.filter { $0.key.machineID == "m" }.map(\.id).sorted() == ["agent:m/s", "card:script"])
-        #expect(model.badges.agents == rows.count)
+        // The badge counts the rows the page lists: the current assistant's, where the device's saved hub has several.
+        let shown = AgentsNeedsYou.rows(cards: AgentsNeedsYou.cards(model.scopedInteractions, session: model.session),
+                                        waiting: AgentsNeedsYou.waiting(model.scoped(model.allSessions)))
+        #expect(model.badges.agents == shown.count)
     }
 
     @Test func aSessionlessRowSaysWhereItComesFrom() {

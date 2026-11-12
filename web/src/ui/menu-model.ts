@@ -28,6 +28,9 @@ export interface MenuItem {
   /** A sentence under the label that explains the choice (#5584): it wraps at word breaks instead of crowding the
    *  label off the row, and screen readers read it as the row's description. */
   detail?: string;
+  /** What the row means, shown only as its tooltip (the composer's permission picker, #5324): a choice whose name says
+   *  enough at a glance and whose explanation is there on hover. */
+  tip?: string;
   icon?: IconName;
   /** Something drawn before the label in the icon's place, as a mark that the label names: an assistant's avatar. */
   lead?: ReactNode;

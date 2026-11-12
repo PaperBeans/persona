@@ -1,6 +1,5 @@
 {
   "title": "会话内搜索",
-  "menu": "会话内搜索",
   "placeholder": "搜索已加载的记录",
   "summary": "{hits} 条命中，已加载 {rounds} 轮",
   "truncated": "只显示前 100 条命中，请缩小搜索范围",
@@ -17,13 +16,5 @@
   "load_earlier": "加载更早的记录并继续搜",
   "loading_pages_other": "正在加载更早的记录，已加载 {count} 页",
   "stop_loading": "停止加载",
-  "stopped": "已停止，载入的记录已保留",
-  "at_start": "已到最早的记录",
-  "load_failed": "更早的记录未能载入，请重试",
-  "busy": "记录正在更新，请稍后继续",
-  "no_progress": "本次没有载入更早的记录，可稍后重试",
-  "page_cap": "本次已加载 20 页，可继续加载",
-  "return": "返回搜索前位置",
-  "not_found": "这条记录暂时无法定位，可返回搜索前位置",
-  "origin_changed": "原来的记录已变化，请继续浏览当前记录"
+  "at_start": "已到最早的记录"
 }

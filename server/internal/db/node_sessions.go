@@ -34,6 +34,16 @@ type NodeSession struct {
 	// the owner's Claude Code setup.
 	Guest     []string `json:"guest,omitempty"`
 	GuestKind string   `json:"guest_kind,omitempty"`
+	// PendingSwitch: a switch to another launcher waiting for the next message (node/launcher_switch.go), opaque here
+	// like UltracodeProcess, kept with the model so a node restart neither loses it nor carries it out by itself.
+	PendingSwitch json.RawMessage `json:"pending_switch,omitempty"`
+	// EngineHistory: the conversation's earlier stretches this session continues after a switch between Claude Code
+	// and Codex (node/engine_switch.go), opaque here like PendingSwitch, kept with the model so the session list leaves
+	// those sessions out after a node restart too.
+	EngineHistory json.RawMessage `json:"engine_history,omitempty"`
+	// PendingHandoff: a switch's handoff that waits for the next message to the session (its first one was held back
+	// by a dialog, node/engine_switch.go), opaque here like EngineHistory, kept so a node restart does not lose it.
+	PendingHandoff json.RawMessage `json:"pending_handoff,omitempty"`
 }
 
 func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSession) error {
@@ -52,6 +62,8 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 	if err != nil {
 		return err
 	}
+	// SQL NULL for none: the key holds a JSON null.
+	pendingSwitch, engineHistory, pendingHandoff := jsonOrNil(s.PendingSwitch), jsonOrNil(s.EngineHistory), jsonOrNil(s.PendingHandoff)
 	_, err = d.pool.Exec(ctx, `WITH saved AS (
 		INSERT INTO node_sessions (machine_id, session_id, pane, launcher, cwd, started_at, tasks, updated_at, creation_id, incarnation)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $15, $16)
@@ -63,10 +75,11 @@ func (d *DB) PutNodeSession(ctx context.Context, machine, id string, s NodeSessi
 		SELECT 'node_model.' || machine_id || '.' || session_id,
 		jsonb_build_object('model', $8::text, 'model_fingerprint', $9::text, 'model_effort', $10::text,
 			'app_mode', $11::text, 'app_effort', $12::text, 'ultracode_process', $13::jsonb,
-			'started_at_unknown', $14::bool, 'guest', $17::jsonb, 'guest_kind', $18::text, 'config_dir', $19::text), now() FROM saved
+			'started_at_unknown', $14::bool, 'guest', $17::jsonb, 'guest_kind', $18::text, 'config_dir', $19::text,
+			'pending_switch', $20::jsonb, 'engine_history', $21::jsonb, 'pending_handoff', $22::jsonb), now() FROM saved
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
 		machine, id, s.Pane, s.Launcher, s.Cwd, s.StartedAt, tasks, s.Model, s.ModelFingerprint, s.ModelEffort, s.AppMode, s.AppEffort,
-		s.UltracodeProcess, unknownStart, s.CreationID, s.Incarnation, guest, s.GuestKind, s.ConfigDir)
+		s.UltracodeProcess, unknownStart, s.CreationID, s.Incarnation, guest, s.GuestKind, s.ConfigDir, pendingSwitch, engineHistory, pendingHandoff)
 	return err
 }
 
@@ -94,6 +107,17 @@ type nodeModel struct {
 	StartedAtUnknown bool            `json:"started_at_unknown"`
 	Guest            []string        `json:"guest"`
 	GuestKind        string          `json:"guest_kind"`
+	PendingSwitch    json.RawMessage `json:"pending_switch"`
+	EngineHistory    json.RawMessage `json:"engine_history"`
+	PendingHandoff   json.RawMessage `json:"pending_handoff"`
+}
+
+// jsonOrNil is raw, or nil when it holds nothing (empty, or a JSON null).
+func jsonOrNil(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return raw
 }
 
 // NodeSessions returns a machine's sessions from the last 60 days.
@@ -114,9 +138,8 @@ func (d *DB) NodeSessions(ctx context.Context, machine string) (map[string]NodeS
 		s.Model, s.ModelFingerprint, s.ModelEffort, s.AppMode, s.AppEffort = m.Model, m.ModelFingerprint, m.ModelEffort, m.AppMode, m.AppEffort
 		s.Guest, s.GuestKind = m.Guest, m.GuestKind
 		s.ConfigDir = m.ConfigDir
-		if len(m.UltracodeProcess) > 0 && string(m.UltracodeProcess) != "null" {
-			s.UltracodeProcess = m.UltracodeProcess
-		}
+		s.UltracodeProcess, s.PendingSwitch, s.EngineHistory = jsonOrNil(m.UltracodeProcess), jsonOrNil(m.PendingSwitch), jsonOrNil(m.EngineHistory)
+		s.PendingHandoff = jsonOrNil(m.PendingHandoff)
 		if m.StartedAtUnknown {
 			s.StartedAt = time.Time{}
 		}

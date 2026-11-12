@@ -5,6 +5,7 @@
     <string name="settings_style_transparency">Transparency</string>
     <string name="settings_style_glass_auto">Refractive glass on Android 13 and later, blurred glass on earlier versions; switches to opaque panels in battery saver or when scrolling drops frames.</string>
     <string name="settings_style_glass_reduced">All overlays use opaque panels: the most battery-friendly, with the clearest text.</string>
+    <string name="settings_agents_layout">Agents list layout</string>
     <string name="settings_default">Default</string>
     <string name="settings_preview_row1_title">Add unit tests for the network layer</string>
     <string name="settings_preview_row1_preview">Which framework for the network layer tests?</string>

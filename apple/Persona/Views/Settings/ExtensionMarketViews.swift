@@ -195,10 +195,11 @@ private struct MarketExtensionRow: View {
 
 /// Available / Update / Installed / Can't Install, in its tone.
 private struct MarketStateChip: View {
+    @Environment(AppModel.self) private var app
     var item: ExtensionCatalogItem
 
     var body: some View {
-        if let op = ExtensionOperations.shared.operation(for: item.pluginID, market: item.market), let text = ExtensionOperationText.chip(op) {
+        if let op = ExtensionOperations.shared.operation(for: item.pluginID, market: item.market, manager: app.assistantManagerID), let text = ExtensionOperationText.chip(op) {
             Chip(text: text, look: .tint(op.state == .failed ? Theme.danger : Theme.accent))
         } else {
             stateChip
@@ -306,16 +307,16 @@ struct MarketExtensionDetailView: View {
             await ops
         }
         // One started earlier (the page left and opened again) ends while this page is up: read it again.
-        .onChange(of: ExtensionOperations.shared.operation(for: page.pluginID, market: page.market)?.state) { old, new in
+        .onChange(of: ExtensionOperations.shared.operation(for: page.pluginID, market: page.market, manager: page.manager)?.state) { old, new in
             guard old == .running, new == .succeeded else { return }
             Task { await page.load() }
             // Installed and waiting for a sign-in (#4507): its page, with the sign-in started.
-            if ExtensionOperations.shared.operation(for: page.pluginID, market: page.market)?.needsSignIn == true {
-                ExtensionAuthStore.shared.openSignIn = page.pluginID
+            if ExtensionOperations.shared.operation(for: page.pluginID, market: page.market, manager: page.manager)?.needsSignIn == true {
+                if page.manager == nil { ExtensionAuthStore.shared.openSignIn = page.pluginID }
                 openSignIn = true
             }
         }
-        .navigationDestination(isPresented: $openSignIn) { ExtensionDetailView(id: page.pluginID) }
+        .navigationDestination(isPresented: $openSignIn) { ExtensionDetailView(id: page.pluginID, manager: page.manager) }
     }
 
     private func done(_ kind: ExtensionOperation.Kind) {
@@ -370,7 +371,7 @@ struct MarketExtensionDetailView: View {
                 .font(Theme.Font.label)
             }
             if p.installed != nil {
-                NavigationLink(value: SettingsPage.plugin(p.pluginID)) {
+                NavigationLink(value: SettingsPage.plugin(p.pluginID, manager: page.manager)) {
                     Label { Text("Open Extension Settings").lineLimit(1) } icon: { ThemedIcon(Theme.Icon.settings) }
                 }
                 .accessibilityIdentifier("market-open-plugin")
@@ -385,12 +386,12 @@ struct MarketExtensionDetailView: View {
                 .confirmationDialog("Uninstall “\(p.name)”?", isPresented: $confirmRemove, titleVisibility: .visible) {
                     Button(role: .destructive) {
                         Task { if await page.uninstall() { done(.uninstall) } }
-                    } label: { Text(page.isPack ? String(localized: "Uninstall Pack Only") : String(localized: "Uninstall")).lineLimit(1) }
+                    } label: { Text(page.isPack ? String(localized: "Pack Only") : String(localized: "Uninstall")).lineLimit(1) }
                     .accessibilityIdentifier("market-uninstall-confirm")
                     if page.isPack {
                         Button(role: .destructive) {
                             Task { if await page.uninstall(members: true) { done(.uninstall) } }
-                        } label: { Text("Uninstall with Members").lineLimit(1) }
+                        } label: { Text("Everything [Extension Market Views 8fc6ce]").lineLimit(1) }
                         .accessibilityIdentifier("market-uninstall-members")
                     }
                     Button("Cancel", role: .cancel) {}

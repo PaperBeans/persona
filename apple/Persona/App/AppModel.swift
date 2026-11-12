@@ -67,7 +67,7 @@ final class AppModel {
         didSet {
             allSessions = sessionsByMachine.values.flatMap { $0 }
             sessionsNow = allSessions
-            let going = DockAgent.going(allSessions)
+            let going = DockAgent.going(scoped(allSessions))
             if going != goingAgents { goingAgents = going }
             let lists = AssistantLists(allSessions, group: hub?.group ?? "", shown: assistantShown)
             if lists != assistantLists { assistantLists = lists }
@@ -75,7 +75,10 @@ final class AppModel {
             for (machine, sessions) in sessionsByMachine {
                 for session in sessions {
                     let key = SessionKey(group: machine.group, machineID: machine.id, sessionID: session.sessionID)
-                    if index[key] == nil { index[key] = session }
+                    if index[key] == nil {
+                        index[key] = session
+                        chats[key]?.updateSendFeedback(session, previous: sessionIndex[key])
+                    }
                 }
             }
             sessionIndex = index
@@ -410,6 +413,11 @@ final class AppModel {
         let language = LanguageStore.shared.apply()
         WatchSync.shared.onActivated = { [weak self] in
             WatchSync.shared.push(language: language)
+            #if os(iOS) || os(visionOS)
+            // All-day recording: the erases and deletes the watch hasn't confirmed go now that a send reaches it
+            // (docs/assistant/day-recap.md「Erasing」「Deleting」), paired with a hub or not.
+            RecordingDayReceiver.shared.sessionActivated()
+            #endif
             guard let self, self.isPaired, !self.isDemo else { return }
             WatchSync.shared.push(persona: self.personas.chosenID)
             self.pushWatchConfigs()
@@ -773,6 +781,8 @@ final class AppModel {
         links = []
         registry = HubRegistry()
         saveRegistry(registry)
+        // The watch drops the credential it holds only when told (#1870): an empty push, as `removeGroup` sends for one group.
+        pushWatchConfigs()
         applyPersonaPalette()
         forgetDeviceCredentials()
         machines = []
@@ -969,6 +979,12 @@ final class AppModel {
         return assistantLists.group == group && assistantLists.shown == shown ? assistantLists : AssistantLists(allSessions, group: group, shown: shown)
     }
 
+    /// Whether this device writes its time zone to the hub: when it differs, and the user did not pick one by hand
+    /// (#1855, on Android); a hub that never says follows the devices, as before.
+    nonisolated static func syncsZone(_ st: APIClient.AssistantState, device zone: String) -> Bool {
+        st.timezonePicked != true && !zone.isEmpty && st.timezone != zone
+    }
+
     /// Loads the assistant config; with no remembered conversation, picks up the newest one.
     func refreshAssistant() async {
         guard let api else { return }
@@ -987,9 +1003,9 @@ final class AppModel {
                 }
             }
             // Routines and the assistant's sense of "now" follow this device's time zone (the Mac app writes its
-            // own too; the hub keeps whichever came last).
+            // own too; the hub keeps whichever came last), unless the user picked one by hand (#1855): then it stays.
             let tz = TimeZone.current.identifier
-            if st.timezone != tz, let updated = try? await api.setAssistant(timezone: tz) {
+            if Self.syncsZone(st, device: tz), let updated = try? await api.setAssistant(timezone: tz) {
                 guard showsPage(of: api) else { return }
                 assistantConfig = updated
             }
@@ -1193,6 +1209,28 @@ final class AppModel {
         }
     }
 
+    /// Whether conversation `id` is the hub's built-in background supervisor (#5083, docs/assistant/unified-entry.md
+    /// "Background supervisor"): its row has no Archive, End or Pin (the hub refuses the first and the last).
+    func isBackgroundSupervisor(_ id: String) -> Bool { assistantConfig?.isBackgroundSupervisor(id) ?? false }
+
+    /// Settings › Assistant › Main Chat Supervises Its Own Tasks (#5083): on, the main conversation follows up the
+    /// tasks no leader supervises instead of the background supervisor. Shown at once, put back if the hub says no;
+    /// supervision messages already sent stay where they went.
+    func setMainSupervisesOwnTasks(_ on: Bool) async {
+        guard let api, var shown = assistantConfig else { return }
+        let was = shown.mainSupervisesOwnTasks
+        shown.mainSupervisesOwnTasks = on
+        assistantConfig = shown
+        do {
+            let st = try await api.setAssistant(mainSupervisesOwnTasks: on)
+            guard showsPage(of: api) else { return }
+            assistantConfig = st
+        } catch {
+            if showsPage(of: api) { assistantConfig?.mainSupervisesOwnTasks = was }
+            show(error)
+        }
+    }
+
     /// Settings › Meetings (#2981): the role every meeting recording starts with. Shown at once, put back if the hub says no.
     func setMeetingAttendanceDefault(_ role: MeetingAttendance) async {
         guard let api else { return }
@@ -1237,6 +1275,9 @@ final class AppModel {
         if let c = chats[key] { return c }
         let c = ChatStore(key: key, cacheFolder: stateFolder)
         c.onArrived = { [weak self] in self?.saveOutbox() }
+        if let current = session(key), current.assistant == true {
+            c.updateQueuePhotoMarks(queued: current.queued, own: current.ownQueuedCount)
+        }
         chats[key] = c
         evictChats()
         return c
@@ -1370,6 +1411,27 @@ final class AppModel {
     var managerRosters: [String: ManagerRoster] = [:]
     /// Each group's latest roster read: an earlier one answering after it is dropped.
     @ObservationIgnored var managerRosterReads: [String: Int] = [:]
+    /// The groups whose roster in `managerRosters` is the one the last launch kept (`restoreSnapshot`), until the hub
+    /// answers its own (`refreshManagerRoster`). The pages show by a kept one from the start, but no request is named
+    /// or filtered by it (`rosterAsked`): the hub may have one manager by now.
+    var rostersKept: Set<String> = []
+    /// The groups whose hub answered that it has no roster (a hub from before managers): a pick kept from another time
+    /// names nothing there, and nothing is filtered (`assistantScope`).
+    var managerRosterUnsupported = Set<String>()
+    /// Each group's managers' inbox counts as its roster last told them (`HubManager.inboxNeedsYou`), by manager id; one
+    /// the hub told none for is not in it. Apart from `managerRosters`, which every page that names a manager reads: these
+    /// move with every change of an inbox, and only the switcher shows them.
+    var inboxNeedsYou: [String: [String: Int]] = [:]
+    /// The agents waiting for the user at each assistant of the hub-level group's hub, by manager id
+    /// (`AssistantBadges.waiting`): counted with the tab badges, set only when a number changes.
+    private(set) var assistantWaiting: [String: Int] = [:]
+    /// The hub-level hub's sessions in Needs You, every assistant's, as last read from a hub with bounded lists
+    /// (`readNeedsYou`); nil until read, or where the app's own lists are whole.
+    @ObservationIgnored private(set) var needsYou: (group: String, rows: [Session])?
+    @ObservationIgnored private var needsYouRead: Task<Void, Never>?
+    @ObservationIgnored private var needsYouStale = false
+    /// The scope the things below the views were last worked out for (`followScope`).
+    @ObservationIgnored private var followedScope: AssistantScope?
     /// Each group's current assistant, as picked in the sidebar's switcher (`selectAssistantManager`): the manager's id,
     /// kept on this device across launches (`AssistantPickStore`). A group without one follows its hub's default manager.
     var assistantPicks: [String: String] = [:] {
@@ -1812,9 +1874,41 @@ final class AppModel {
         if lists != sessionsByMachine { sessionsByMachine = lists }
         WatchSync.shared.push(summary: watchSummary())
         for (old, new) in olds {
+            for session in new where session.assistant == true {
+                chats[session.key]?.updateQueuePhotoMarks(queued: session.queued, own: session.ownQueuedCount)
+            }
             notifyTransitions(old: old, new: new)
             AgentSync.shared.sessions(new)
         }
+        readSettingsForNewTaskConversations(olds)
+    }
+
+    /// Conversations the assistant settings were read again for (`readSettingsForNewTaskConversations`): once each.
+    @ObservationIgnored private var taskConversationsAskedFor: Set<String> = []
+
+    /// The hub makes its background supervisor on first use, usually while the app is open (#5083): its conversation
+    /// arrives as any other, and only the assistant settings say it is the built-in one. A task's conversation the
+    /// settings held do not list has them read again, once, so its row never offers Archive, Pin or End for longer
+    /// than that request takes. Nothing is read before the settings were read at all, or for another hub's sessions.
+    private func readSettingsForNewTaskConversations(_ changes: [(old: [Session], new: [Session])]) {
+        guard let held = assistantConfig, let group = hub?.group, assistantShows(nil) else { return }
+        var unread: [String] = []
+        for (old, new) in changes where new.first?.machineRef.group == group {
+            unread += Self.unreadTaskConversations(old: old, new: new, held: held)
+        }
+        unread.removeAll { taskConversationsAskedFor.contains($0) }
+        guard !unread.isEmpty else { return }
+        taskConversationsAskedFor.formUnion(unread)
+        Task { await refreshAssistant() }
+    }
+
+    /// The assistant's task conversations (`origin: "task"`) new in `new` that `held` neither lists nor names as the
+    /// background supervisor: the ones the settings may have something to say about.
+    static func unreadTaskConversations(old: [Session], new: [Session], held: APIClient.AssistantState) -> [String] {
+        let tasks = new.filter { $0.assistant && $0.origin == "task" && !held.isBackgroundSupervisor($0.sessionID) }
+        guard !tasks.isEmpty else { return [] }
+        let had = Set(old.map(\.sessionID)).union(held.conversations.map(\.sessionID))
+        return tasks.map(\.sessionID).filter { !had.contains($0) }
     }
 
     /// The complete fallback is authoritative on a list-negotiated hub. Older delta sockets retain their live rows
@@ -1854,14 +1948,25 @@ final class AppModel {
                 page.cancel()
                 Task { await self.refresh(link) }
             }
+            // Whether this hub lists one manager's sessions may have come with this hello (`sessions_manager`).
+            Task { await sessionLists.rescope(group, model: self) }
             if isHub { PersonalAgentSync.shared.received([]) }
             // The direction tree changes while the socket is down: read it again on every (re)connect (#4352).
             if isHub, let hubAPI = api { Task { await refreshDirectionTree(hubAPI) } }
+            #if os(iOS)
+            // `meeting_live` events sent while the socket was down are gone: the meetings on screen are read again (#3862).
+            if isHub { MeetingConversation.shared.reconnected() }
+            // The meeting flags a start without the app in front reads follow every hello, not only the Recordings page.
+            if isHub, !hello.features.isEmpty {
+                MeetingAttendanceDefaults.remember(hello: Set(hello.features), role: MeetingAttendees.hubDefault(self))
+            }
+            #endif
             Task { await refreshInAppTunnel(group) }
             Task { await refreshManagerRoster(group) }
             // Back on the hub: an install that moved on while the connection was down shows where it is now (#3307).
             if isHub, Set(hello.features).hasExtensionFeature("operations") { Task { await ExtensionOperations.shared.reload() } }
             if isHub { flushErrorReports(group) } // the feature may have come or gone with this hello (#5621)
+            if isHub, link(group)?.isDemo == false { learnedRecordingDay(hello) }
             #if DEBUG && (os(iOS) || os(visionOS))
             // Registered on connect, before this hello said whether the hub keeps the runtime CLI from the agents.
             if RuntimeCLI.overHub, let link = link(group) { registerPhone(link) }
@@ -1904,6 +2009,7 @@ final class AppModel {
             }
         case .sessionsList(let revision):
             sessionLists.invalidate(group, revision: revision)
+            if isHub { followNeedsYou() }
             for key in subscribers.keys where key.group == group { Task { await refreshSessionDetail(key) } }
         case .sessions(let machineID, let list):
             // A busy hub sends each machine's list on its own, one after another: they are applied together a moment
@@ -1990,6 +2096,14 @@ final class AppModel {
             #if os(iOS) || os(visionOS)
             ExtensionWidgetReconciliation.invalidate(group: group, owner: ext, contribution: id)
             #endif
+        #if os(iOS)
+        case .meetingLive(let recordingID, let changed, let revs):
+            // Recordings sync with the hub-level group's hub: another group's meetings are none of this phone's.
+            if isHub { MeetingConversation.shared.event(recordingID: recordingID, changed: changed, revs: revs) }
+        #else
+        case .meetingLive:
+            break // the meeting conversation is the iPhone's (#3862)
+        #endif
         case .items(let key, let items, let backlog, let hasMore, let span, let moreAfter):
             if backlog { connection.caughtUp(Self.catchUpPart(key)) }
             let store = chat(key)
@@ -2102,6 +2216,7 @@ final class AppModel {
         case .fsChanged: "fs_changed"
         case .pluginBadge: "plugin_ui"
         case .extensionInvalidate: "extension_ui"
+        case .meetingLive: "meeting_live"
         case .error: "error"
         }
     }
@@ -2158,9 +2273,16 @@ final class AppModel {
     /// This device's answer to the card is on its way (the card is hidden meanwhile).
     func isAnswering(_ uid: String) -> Bool { answering.contains(uid) }
 
-    func resolve(_ ix: Interaction, _ r: Resolution) async {
+    /// `handoffCard`: the hand-off card's own buttons answer; an approval of one from anywhere else is refused here, as
+    /// the hub would refuse it (`SecretHandoff`).
+    func resolve(_ ix: Interaction, _ r: Resolution, handoffCard: Bool = false) async {
         // To the hub of the interaction's own group (docs/protocol/multi-hub.md「Connections and routing」).
         guard canAnswer(ix), let api = api(ix.group) else { return }
+        let handoff = ix.isSecretHandoff && r.allow == true
+        if handoff && !handoffCard {
+            toast = Toast(String(localized: "Approve it on its card in the chat."), style: .error)
+            return
+        }
         // No network: the card stays as it is (taking it away and bringing it back a moment later read as "done").
         guard connection.networkUp else { notDone(); return }
         interactions[ix.uid] = nil
@@ -2172,7 +2294,7 @@ final class AppModel {
         // to a minute (OpRetry.limit), then comes back with the error.
         let op = UUID()
         do {
-            let res = try await OpRetry.untilDelivered { try await api.resolve(ix.id, r, opID: op) }
+            let res = try await OpRetry.untilDelivered { try await api.resolve(ix.id, r, opID: op, handoffCard: handoff) }
             if res.already == true, let existing = res.resolution, existing.answeredBy == AssistantAnswer.assistant, ix.kind == .question {
                 // The assistant answered first: its answer shows in the chat, where the user may change it.
                 keepDelegated(ix, AssistantAnswer(answers: existing.answers ?? [:], reason: existing.reason ?? ""))
@@ -2293,37 +2415,55 @@ final class AppModel {
     /// Edit or delete one queued message: everything is pulled back out of claude and the others re-queued. One taken
     /// back to edit goes into the composer as it was written (#3022), not as the text Claude's queue keeps of it.
     func editQueued(_ key: SessionKey, index: Int, delete: Bool) async {
-        guard allowSend(key), let api = api(key.group), let queue = session(key)?.queued, queue.indices.contains(index) else { return }
+        guard allowSend(key), let api = api(key.group), let session = session(key), let queue = session.queued,
+              queue.indices.contains(index), index < session.ownQueuedCount else { return }
         do {
-            let pulled = try await api.editQueue(key, keep: queue.indices.filter { $0 != index })
+            let response = try await api.editQueue(key, keep: queue.indices.filter { $0 < session.ownQueuedCount && $0 != index })
+            let pulled = response.queue
             let taken = pulled.indices.contains(index) ? pulled[index] : nil
-            // The photos this phone sent with it are in its outbox copy, which goes with its bubble.
-            let sent = taken.flatMap { t in chat(key).pending.first { $0.state == .sent && PendingMessage.same(t, $0.text) } }?.images ?? []
+            // A Persona hub returns its photos with the queue. An Agent queue has only text, so use this phone's outbox.
+            let local = taken.flatMap { t in chat(key).pending.first { $0.state == .sent && PendingMessage.same(t, $0.text) } }?.images ?? []
+            let sent = response.images.flatMap { images in images.indices.contains(index) ? images[index] : nil } ?? local
             // The one taken out will not reach the transcript: its sent bubble goes now, not when the turn ends.
             if let taken, chat(key).pulledBack(taken) { saveOutbox() }
-            var left = 0
-            if !delete, let taken { left = await restoreQueued(key, QueuedDraft(taken), sent: sent) }
+            var outcome = (left: 0, unpreviewable: 0)
+            if !delete, let taken {
+                outcome = await restoreQueued(key, QueuedDraft(taken, photoCount: sent.count), sent: sent,
+                                              preservePayloads: response.images != nil)
+            }
             Haptics.success()
-            toast = left > 0
-                ? Toast(String(localized: "Moved back to the input box. \(left) attachments couldn't be put back and stay in the message as text."), style: .info)
-                : Toast(delete ? String(localized: "Removed from the queue") : String(localized: "Moved back to the input box. Edit it and send again."), style: .success)
+            if outcome.unpreviewable > 0 {
+                toast = Toast(String(localized: "Moved back to the input box. \(outcome.unpreviewable) photos could not be previewed; their original data is kept."), style: .info)
+            } else {
+                toast = outcome.left > 0
+                    ? Toast(String(localized: "Moved back to the input box. \(outcome.left) attachments couldn't be put back and stay in the message as text."), style: .info)
+                    : Toast(delete ? String(localized: "Removed from the queue") : String(localized: "Moved back to the input box. Edit it and send again."), style: .success)
+            }
         } catch {
             show(error)
         }
     }
 
     /// A queued message taken back to edit (#3022): its words under what the box holds, its photos (the ones this phone
-    /// sent, else read from the conversation's machine by their paths), videos and quotes back in their bars. A photo that
-    /// can't be had, or doesn't fit beside the ones already in the box, leaves its path in the words (a video its tag):
-    /// nothing is lost. Returns how many were left there.
-    private func restoreQueued(_ key: SessionKey, _ draft: QueuedDraft, sent: [ImagePayload]) async -> Int {
+    /// sent, else read from the conversation's machine by their paths), videos and quotes back in their bars. A pathful
+    /// photo that can't be had, or doesn't fit beside the ones already in the box, leaves its path in the words (a video
+    /// its tag). A pathless Persona photo stays in the composer even past the picker's cap, and an unreadable preview
+    /// keeps its original payload: nothing is silently lost. Returns the text fallbacks and unreadable preview counts.
+    private func restoreQueued(_ key: SessionKey, _ draft: QueuedDraft, sent: [ImagePayload],
+                               preservePayloads: Bool) async -> (left: Int, unpreviewable: Int) {
         let held = composerAttachments(key)
         // Each photo with its path on the machine (the outbox's in the order they went, as the paths are).
         var photos: [(path: String?, photo: (UIImage, ImagePayload))] = []
         var left: [String] = []
         var copies: [(UIImage, ImagePayload)] = []
+        var unpreviewable = 0
         for payload in sent {
-            if let photo = await Self.composerPhoto(payload) { copies.append(photo) }
+            if let photo = await Self.composerPhoto(payload) {
+                copies.append(photo)
+            } else if preservePayloads {
+                copies.append((UIImage(), payload))
+                unpreviewable += 1
+            }
         }
         if copies.count >= draft.imagePaths.count {
             photos = copies.enumerated().map { (draft.imagePaths.indices.contains($0.offset) ? draft.imagePaths[$0.offset] : nil, $0.element) }
@@ -2333,8 +2473,11 @@ final class AppModel {
             }
         }
         let room = max(0, MessagePhotos.limit - held.images.count)
-        left += photos.dropFirst(room).compactMap(\.path)
+        let overflow = photos.dropFirst(room)
+        left += overflow.compactMap(\.path)
         held.images += photos.prefix(room).map(\.photo)
+        // A hub photo has no machine path to leave as text. Keep it visible; `sendNow` still enforces the four-photo cap.
+        held.images += overflow.filter { $0.path == nil }.map(\.photo)
         left += held.videos.restore(draft.files).map(\.xml)
         if !draft.contexts.isEmpty { composerContexts[key] = (composerContexts[key] ?? []) + draft.contexts }
         let words = ([draft.text] + left).filter { !$0.isEmpty }.joined(separator: "\n")
@@ -2342,7 +2485,7 @@ final class AppModel {
             let current = drafts[key] ?? ""
             drafts[key] = current.isEmpty ? words : current + "\n" + words
         }
-        return left.count
+        return (left.count, unpreviewable)
     }
 
     /// A photo as the composer holds it, from the bytes a message carried: decoded off the main actor and no larger than
@@ -2367,8 +2510,8 @@ final class AppModel {
 
     /// Moves a queued message one place up or down (#6088): the queue is pulled back and re-queued in the new order.
     func moveQueued(_ key: SessionKey, index: Int, by step: Int) async {
-        guard allowSend(key), let api = api(key.group), let queue = session(key)?.queued,
-              let keep = QueueOrder.moved(count: queue.count, index: index, by: step) else { return }
+        guard allowSend(key), let api = api(key.group), let session = session(key),
+              let keep = QueueOrder.moved(count: session.ownQueuedCount, index: index, by: step) else { return }
         do {
             _ = try await api.editQueue(key, keep: keep)
             Haptics.tap()
@@ -2379,7 +2522,7 @@ final class AppModel {
 
     /// Gives the agent its queued messages now instead of at its next tool boundary (#6088).
     func sendQueuedNow(_ key: SessionKey) async {
-        guard allowSend(key), let api = api(key.group) else { return }
+        guard allowSend(key), let api = api(key.group), (session(key)?.ownQueuedCount ?? 0) > 0 else { return }
         do {
             try await api.sendQueuedNow(key)
             Haptics.success()
@@ -2404,14 +2547,24 @@ final class AppModel {
         return true
     }
 
-    /// Puts the message on screen immediately and sends it in the background; a failure marks it for retry.
-    func sendNow(_ key: SessionKey, text: String, images: [ImagePayload] = []) {
-        guard allowSend(key) else { return }
-        let msg = PendingMessage(text: text, images: images)
+    /// Puts the message on screen immediately and sends it in the background; a failure marks it for retry. Returns whether
+    /// the send was accepted, so a composer clears only then (a refusal must leave everything typed or restored in place).
+    @discardableResult
+    /// via: how the app wrote it when the user did not type it (`APIClient.MessageVia`).
+    func sendNow(_ key: SessionKey, text: String, images: [ImagePayload] = [], via: APIClient.MessageVia? = nil) -> Bool {
+        guard allowSend(key) else { return false }
+        // Take-back can retain pathless hub photos past the picker's cap; the person removes some before sending.
+        guard images.count <= MessagePhotos.limit else {
+            toast = Toast(String(localized: "Up to 4 at a time"), style: .error)
+            return false
+        }
+        var msg = PendingMessage(text: text, images: images)
+        msg.via = via
         chat(key).pending.append(msg)
         saveOutbox()
         Haptics.tap()
         deliver(key, msg)
+        return true
     }
 
     /// Sends /clear to a herdr pane's claude and waits for the pane to show up under its new session id (Claude Code
@@ -2446,6 +2599,7 @@ final class AppModel {
             return
         }
         chat(key).pending[i].state = .sending
+        chat(key).beginSendFeedback(chat(key).pending[i])
         Task {
             // First ask the hub what became of the old id (`GET /api/v1/ops/{id}`): done means it went, and a resend
             // would type it twice; pending means the first try is still running: the same id again waits for its
@@ -2493,6 +2647,7 @@ final class AppModel {
     }
 
     private func deliver(_ key: SessionKey, _ msg: PendingMessage, clearDraft: String? = nil) {
+        chat(key).beginSendFeedback(msg)
         Task {
             // The hub is out of reach: the message waits (clock, Sends when connected) instead of failing after a timeout.
             let socket = socket(key.group)
@@ -3076,6 +3231,7 @@ final class AppModel {
             // before, not on the default until the hub's roster is read again.
             if let managers = snap.managers, managerRosters[g] == nil {
                 managerRosters[g] = ManagerRoster(managers: managers, defaultID: snap.defaultManager)
+                rostersKept.insert(g)
             }
             if let a = snap.picked, let m = snap.pickedManager { assistantByManager[Self.managerKey(g, m)] = a }
         }
@@ -3083,6 +3239,7 @@ final class AppModel {
         sessionsByMachine = Dictionary(grouping: allSessions, by: \.machineRef)
         interactions = Dictionary(allInteractions.map { ($0.uid, $0) }, uniquingKeysWith: { a, _ in a })
         assistantConfig = heldAssistant(hub?.group ?? "")
+        followedScope = assistantScope // what was just restored was worked out for it
     }
 
     /// The snapshot waiting for its turn, written now: the app is going to the background or quitting.
@@ -3127,6 +3284,9 @@ final class AppModel {
             PinsStore.forget(suffix: g)
             assistantPicks[g] = nil
             managerRosters[g] = nil
+            rostersKept.remove(g)
+            managerRosterUnsupported.remove(g)
+            inboxNeedsYou[g] = nil
             defaultAssistantReads.remove(g)
             assistantItemManagers = assistantItemManagers.filter { $0.key.group != g }
             InboxHandOffMemory.forget(group: g)
@@ -3150,6 +3310,7 @@ final class AppModel {
         InboxStore.shared.reload()
         TodoStore.shared.forget()
         TodoStore.shared.reload()
+        followScope()
         // The avatar is the new hub's from now, before its list is read below: a card tapped meanwhile goes to it.
         personas.switchHub(api)
         Task {
@@ -3188,6 +3349,7 @@ final class AppModel {
     func relistAssistant() {
         let lists = AssistantLists(allSessions, group: hub?.group ?? "", shown: assistantShown)
         if lists != assistantLists { assistantLists = lists }
+        followScope()
     }
 
     /// The Persona settings held for group's page as it is now: its default manager's (kept in the snapshot), or what the
@@ -3226,12 +3388,16 @@ final class AppModel {
     private(set) var badges = TabBadges()
     @ObservationIgnored private var watchingMutes = false
 
-    private func countBadges() {
+    /// The tabs count the current assistant's cards (docs/assistant/managers.md "Pages"); what waits at each assistant
+    /// is counted beside them for the switcher (`assistantWaiting`).
+    func countBadges() {
         var b = TabBadges()
+        let scope = assistantScope
         func place(_ key: SessionKey) -> TabBadges.Place {
             TabBadges.place(key, session: sessionIndex[key], quiet: isQuiet(key), mutes: pinsStore(key.group)?.mutes)
         }
         for ix in interactions.values {
+            guard scope.has(ix.manager ?? sessionIndex[ix.sessionKey]?.manager, group: ix.group) else { continue }
             // A quiet task's agent asking is the main conversation's to tell (#1731): its count goes there, not on Agents.
             switch place(ix.sessionKey) {
             case .assistant, .quiet: b.assistant += 1
@@ -3239,10 +3405,81 @@ final class AppModel {
             }
         }
         // Agents counts what its Needs You section lists: one per session that waits for the user, not one per card.
-        b.agents = AgentsNeedsYou.badge(AgentsNeedsYou.rows(cards: pendingInteractions, waiting: AgentsNeedsYou.waiting(allSessions)),
+        b.agents = AgentsNeedsYou.badge(AgentsNeedsYou.rows(cards: scopedInteractions, waiting: AgentsNeedsYou.waiting(scoped(allSessions))),
                                         place: place)
         if b != badges { badges = b }
+        let waiting = waitingAgents()
+        if waiting != assistantWaiting { assistantWaiting = waiting }
         if !watchingMutes { watchingMutes = true; watchMutes() }
+    }
+
+    /// The agents waiting at each assistant of the hub-level group's hub; none with one assistant. The sessions in
+    /// Needs You are the ones read for it where the hub's lists are bounded (`needsYou`), else the app's own.
+    private func waitingAgents() -> [String: Int] {
+        guard let group = hub?.group, let roster = managerRosters[group], roster.isMulti else { return [:] }
+        let rows = needsYou.flatMap { $0.group == group ? $0.rows : nil } ?? allSessions
+        return AssistantBadges.waiting(roster: roster, group: group, sessions: rows, interactions: interactions.values,
+                                       known: { sessionIndex[$0] }) { key, session in
+            switch TabBadges.place(key, session: session, quiet: session?.quiet == true || isQuiet(key), mutes: pinsStore(key.group)?.mutes) {
+            case .assistant, .agents: return true
+            case .quiet, .muted: return false
+            }
+        }
+    }
+
+    // MARK: The current assistant's scope
+
+    /// What follows the current assistant below the views, worked out again: the counts always (a roster read may have
+    /// changed whose a thing is), the rest when the scope itself changed (another assistant, another hub, a roster that
+    /// came or went): the dock's agents, the Agents list's query and the inbox's history, which are one assistant's.
+    func followScope() {
+        countBadges()
+        let scope = assistantScope
+        guard scope != followedScope else { return }
+        followedScope = scope
+        followNeedsYou()
+        let going = DockAgent.going(scoped(allSessions))
+        if going != goingAgents { goingAgents = going }
+        InboxStore.shared.scopeChanged()
+        if let group = hub?.group { Task { await sessionLists.rescope(group, model: self) } }
+    }
+
+    /// The hub's sessions in Needs You are read again: at most one read at a time, and one more a moment after it for
+    /// what was asked meanwhile (a hub tells of every change of any session). Only with several assistants on a hub with
+    /// bounded lists (`sessions_list`) while the app's list of it is a window (`paged`): then the app holds the pages
+    /// it showed, and what it holds of an assistant it left is as it was then, so the switcher's counts would miss an
+    /// agent, or keep one answered since. A complete copy of the list (a grouping, pins or mutes, a hub without the
+    /// manager filter) has every assistant's sessions already, kept current: nothing is read for it. Nor by a roster
+    /// the last launch kept, before the hub answers its own (`rostersKept`).
+    func followNeedsYou() {
+        guard let group = hub?.group, managerRosters[group]?.isMulti == true, !rostersKept.contains(group),
+              features(group).contains("sessions_list"), sessionLists.lists[group]?.paged == true else {
+            if needsYou != nil {
+                needsYou = nil
+                countBadges()
+            }
+            return
+        }
+        needsYouStale = true
+        guard needsYouRead == nil else { return }
+        needsYouRead = Task {
+            while needsYouStale {
+                needsYouStale = false
+                await readNeedsYou()
+                try? await Task.sleep(for: AppModel.needsYouPause)
+            }
+            needsYouRead = nil
+        }
+    }
+
+    static let needsYouPause: Duration = .seconds(2)
+
+    /// One read of the hub-level hub's sessions in Needs You; a failed one keeps the last.
+    func readNeedsYou() async {
+        guard let group = hub?.group, let api = api(group), let rows = try? await api.sessionsNeedingYou() else { return }
+        guard group == hub?.group else { return }
+        needsYou = (group, rows)
+        countBadges()
     }
 
     /// Muting an agent or a space takes its questions off the Agents badge (each group's hub keeps its own mutes); a task
@@ -3571,6 +3808,22 @@ enum Haptics {
     static func attention() { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
 }
 #endif
+
+extension AppModel {
+    /// All-day recording (docs/assistant/day-recap.md「Phone to hub」): whether the hub-level hub takes day recordings,
+    /// from each of its hellos (an empty feature list included: a manager that lost the flag says so). Cached for launches
+    /// in the background, told to the watch (`recordingDayHub`, with the consent and `recordingDayKeepDays`), and the
+    /// upload tries a day an older manager or a refusal stopped once more.
+    func learnedRecordingDay(_ hello: HubHello) {
+        let offered = hello.features.contains(RecordingDayContract.feature)
+        let changed = RecordingDayDefaults.offered([]) != offered
+        RecordingDayDefaults.remember(offered: offered)
+        RecordingDayPhoneCapabilities.shared.hubChanged(offered: offered)
+        // Every day's sync state reads the flag.
+        if changed { RecordingDaySummaries.shared.refreshAll() }
+        RecordingDaySync.shared.helloReceived(offered: offered)
+    }
+}
 
 /// One session's latest state, observed on its own (`AppModel.session(_:)`). Its `rev`, `updatedAt` and last line are
 /// as of its last other change: a push of only those (most of a working agent's) draws nothing that reads the cell

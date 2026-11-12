@@ -26,6 +26,11 @@ extension EnvironmentValues {
     /// card fits it. A card taller than the area, its form scrolling inside too, took the swipes, and the area never
     /// showed its last options (#1912). 0: no such limit.
     @Entry var cardFits: CGFloat = 0
+    /// The cards' actual height cap, whether or not the keyboard is up. A question uses it to keep its fixed actions
+    /// inside a single card while its options own the only vertical scroll (#4839).
+    @Entry var cardArea: CGFloat = 0
+    /// A question form's height cap including its fixed actions, after the panel's header and margins. 0: unconstrained.
+    @Entry var cardFormCap: CGFloat = 0
 }
 
 /// The agent's pending cards (questions, permissions) above the composer. Where they fit they are laid out as they
@@ -107,6 +112,7 @@ struct PendingCards: View {
         }
         .environment(\.cardRoom, containerLength)
         .environment(\.cardFits, keyboard ? cap - Theme.Space.l - Theme.Space.s : 0)
+        .environment(\.cardArea, cap)
         // The container's length, read out here where the container is still the page's, not the scroll area.
         .background {
             Color.clear.containerRelativeFrame(.vertical)

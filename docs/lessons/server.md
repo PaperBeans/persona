@@ -1,5 +1,69 @@
 # Lessons: hub / node and networking
 
+## A Go file named after a platform builds only there (#5563)
+
+Go reads a file name's last `_<word>` (before `_test`) as a build constraint when the word is a GOOS or GOARCH:
+`selfupdate_android_test.go` compiled only for `GOOS=android`, so `go test ./internal/hub/` passed without running its
+tests. Name feature files so they do not end in `_android`, `_ios`, `_linux`, `_darwin`, `_windows`, `_js`, `_wasm`
+and the like (`selfupdate_androidsync_test.go`; `android.go` alone is fine), and check a new test file with
+`go test -list <name>` or `-v`: "no tests to run" for a test you just wrote means it was never compiled.
+
+## Resident exec must drain replies before closing transport (#5277)
+
+Stopping idle assistant processes after Attach closes spends the node's reconnect grace on SIGTERM/SIGKILL waits.
+Drain and reap them while the old transport still serves, then retain the Unix listener and run-lock descriptors across exec.
+The listener keeps the socket inode and accept backlog, not the active RPC connection or process-local assistant keeper.
+A same-PID descriptor ticket must be consumed before children start; protect the close-on-exec change with the fork lock.
+
+A handler returning is not proof its reply reached the manager. Hold admission through the reply write, announce reload,
+suspend new outgoing manager calls, and acknowledge an ordered state.load barrier only after preceding pending replies drain.
+Retry only explicit before-execution refusals and known-unsent calls; never replay an ambiguous dropped write.
+A failed barrier must resume calls and clear its reload window, and an old peer must not change a new peer's state.
+Context cancellation cannot interrupt an arbitrary writer already in progress: close an unconfirmed announcement's physical peer so a late event cannot
+suspend a surviving manager. Publish a received reply before removing its pending entry, and prefer it over a simultaneous close.
+Legacy images cannot consume a retained run lock: require their explicit handover support before install/ordinary reload; startup rollback releases both fds.
+Measure actual RPC waiting separately from signal-to-readiness: preflight and idle-process drain can take time while requests
+still succeed. Online flags and successful retries alone do not prove uninterrupted blue-green transport.
+
+## A preference clients report is not "the last one wins" (#5238)
+
+The user language was whatever full-role client sent `client_hello.locale` last. An English test simulator paired with
+a real hub, or simply an English Mac next to a Chinese iPhone, flipped it at every reconnect, and with it the Inbox
+summaries, folder names, the assistant's answers and pushes. Connecting is not choosing: remember what each device
+last reported and take only a device's own change (`server/internal/hub/locale.go`, `docs/protocol/i18n.md` "Protocol:
+telling hub the language"). Apply the same rule to any hub-wide value inferred from what several devices report.
+
+## Extension feature strings are not transport authority (#5258)
+
+Old hubs merge extension reports into `hello.features`. A new client cannot trust a newly reserved receipt type merely
+because that array contains its name: an older manager can declare both the feature and an unreserved event. Reserve the
+hub's event against manager broadcasts, and advertise its transport version in a dedicated hub-owned hello field that
+old report merging cannot manufacture. Bind trust to the current authenticated connection and clear it on reconnect or
+credential changes; cached UI capabilities are not live socket proof. Test both old feature injection and old-socket frames.
+
+## Authority handover must include the trusted keeper roster (#5228)
+
+A machine its manager keeps has moved out of hub.json, but its hub-owned keeper
+record still authorizes routing. Building sharing authority from cfgEntries alone
+leaves that manager's authority map empty while per-request routing produces a
+valid authority: creation skips as authority_stale and persists no receipt.
+Use knownEntries for this authority handover, retain entryOwner and database
+routing checks, and leave the separate machine-config handover alone. A manager's
+report is not a keeper record. Test a kept machine through the real handover, not
+only by injecting a matching authority map into both sides of a fixture.
+
+## A creation reply is not a durable receipt (#5215)
+
+A successful runtime reply and `ownership_unbound` do not reveal whether the
+manager prepared an intent, the node emitted its receipt, or the database accepted
+its state. Trace each boundary with bounded session IDs and fixed outcome codes;
+compare prepared/returned identities in memory without logging them. A one-way
+notification's successful write is not a database acknowledgement. Log its failure
+without raw error text, which may contain private input, and preserve existing
+reconnect handling. Missing diagnostics from an old node or inaccessible stream
+are not evidence of a missing receipt. Keep the actual-node callback regression
+separate from the HTTP/manager/stub-node durable integration test.
+
 ## Virtual-file sizes and EOF (#4425)
 
 Some Linux sysfs attributes report a stable page-sized length even when their readable contents are shorter. A short
@@ -68,6 +132,12 @@ The web production build typechecks test files. A JSON fixture imported from `sp
 `.dockerignore` exception and a `COPY` into the web stage at the same relative path. A native build sees the
 whole checkout and can pass while the Docker build fails with TS2307. The Docker entrypoint suite now checks
 shared JSON imports, including globs, against both files, catching new fixture groups before an image build.
+
+Checking was not enough (2026-11-12, #5197): PRs run no hosted CI, so #4968 merged a test reading
+`spec/fixtures/forward/` with neither line, and every image build from `main` failed, the fourth time after #2666,
+#2517 and #4260. The image now carries all of `spec/fixtures/` (about 2 MB, web stage only) with one exception and one
+`COPY`, and the guard checks that no per-folder lines come back. A fixture-only change now rebuilds the web stage; that
+cost is smaller than a broken image. When something has to be listed by hand in two files, prefer a rule that needs no list.
 
 ## Sharing frontiers and migration lanes (#3604)
 
@@ -299,6 +369,10 @@ A custom `http.Transport.DialContext` conservatively disables Go's automatic HTT
 `update.SwapProgram` recorded `Prev: ""` when copying the old program to `.prev` or putting the new build in place failed, and `Prev: ""` is how a swap says the program was new, so going back deleted a program the failed swap had never touched.
 A failing step reports what it actually changed: `copyFile` writes `.new` and renames, so a failed swap changed nothing (the zero `Swapped`, which `RestoreAll` skips) or only wrote `.prev` (putting that back is harmless).
 Don't add a `pending.json` field for it: older edges and watchdogs read the same file and know only `Prev == ""`.
+
+## Test a staged node before stopping the resident one (#5097)
+
+A completed gzip stream and `chmod 755` prove that bytes arrived, not that the target machine can execute them. The SSH deploy therefore runs the staged binary's `version` command before the atomic rename and before `pkill`: an `exec format error` or another failed self-test removes `.new`, preserves the installed binary, and leaves the working node running. Package selection still validates GOOS / GOARCH through Go build info; the remote self-test is the final target-side guard, not a duplicate package check. Exercise this boundary through the real login-shell deploy script with an isolated HOME and a fake `pkill`, never by replacing or stopping a development machine's resident node.
 
 ## Migrating a long-poll channel without duplicate consumers (#2020)
 
@@ -1637,6 +1711,16 @@ A connector that folds several notifications into one thread (GitHub CI failures
 - Over a real network the takeover is still not worth it (#3506): Persona Link streams kept the same 0.85 MB per end to send a sixth fewer bytes. All four stream ends now ask for no context takeover (`link.StreamCompression`): a replay of 180 s of 10 computers' node traffic took 2.64 MB on the wire instead of 2.18 MB at the same CPU, and an idle pair keeps about 40 KiB instead of 1.7 MiB. Either end asking for no context takeover decides it (RFC 7692, and coder/websocket honours it as acceptor and as dialer), so an old end paired with a new one saves on both; check every old/new pairing, not only new with new (`TestStreamCompressionInterop`). That mode leaves messages under 512 B uncompressed, so measure the wire bytes of a link that carries mostly small messages (the remote bus, mesh peers) before switching it.
 - A smaller first buffer sends the lines just past it through growth on every read (#3506): with `rpc.lineReader` at 16 KiB, a computer's session list of a few dozen rows (16-64 KiB) grew 16 -> 32 -> 64 KiB each time, and reading captured node traffic took 10% longer than with the 64 KiB start. Growing out of the first buffer straight to 64 KiB and not searching the bytes already searched for a newline (`seen`) read it as fast, and an idle connection keeps 18 KiB instead of 68 KiB. Measure the line lengths a reader really gets before choosing its sizes.
 
+## A large upload on its way: read by doubling, encoded three times, decoded twice, kept for minutes (2026-11-12, #3199)
+
+- One 22.4 MB request body relayed to the manager cost the slot 107 MiB of allocation and the manager's route 85 MiB to decode; the slot went from 45 to 180 MB resident and the manager from 56 to 192 MB, and an idle pair still held it all a minute later. `io.ReadAll` grows its buffers by half again and copies them into a final one (49 MiB): with the Content-Length known and within the limit, read into a buffer of exactly that size through the same `MaxBytesReader` (21 MiB), and give anything that differs (more bytes, fewer, an error) the results `io.ReadAll` gives, compared case by case (`TestReadRelayedIsReadAll`).
+- An encoder given a struct with a `[]byte` field writes the base64 into a pooled buffer and copies it out; the envelope's encoder then checks and copies it again, and json keeps the grown buffer in its pool until the second collection (30 MB in the slot). When the large field is the struct's last and has nothing to escape, encode the rest without it, drop the closing brace and append the field straight into the line (`rpc.Appended`, `httpParams`: 58 to 28 MiB and a third of the time per call), sized up front so the frame budget is checked before anything is built. Pin the field order with a test of its own (`TestHTTPRequestBodyIsLast`).
+- A line built by hand must come from the encoder the value would go through, and its oracle must be the code that writes the line today. The first version made the head with `json.Marshal` and one test compared with `json.Marshal` too; meanwhile #2907 had stopped `Call` from escaping `< > &`, so every query with an `&` would have gone out as other bytes, and only the test that compares with a real `Call` of the whole value saw it (`TestHTTPParamsAreJSONMarshals`). `rpc.Marshal` is that encoder; a copy of the old code as oracle proves what the code was, not what it is.
+- In Go 1.27 `encoding/json`'s `Decoder` is jsontext underneath but hides a `*bytes.Buffer` from it, so a body already in memory is read again through growing buffers (85 MiB for 22.4 MB). Decoding the bytes where they are takes what `Decode` does by hand: `jsontext.NewDecoder(bytes.NewBuffer(b), json.DefaultOptionsV1()).ReadValue()` then `jsonv2.Unmarshal` with the same options (21 MiB: the decoded strings). Its errors are not always the Decoder's words, so on any error put the value back to zero and decode the same bytes the old way (`decodeLargeBody`); without `DefaultOptionsV1` field names stop matching case-insensitively, duplicate keys and invalid UTF-8 are refused, which the equivalence table catches (`TestDecodeLargeBodyIsDecodeBody`).
+- After the request nothing allocates in an idle process, so no collection runs (`GODEBUG=gctrace=1` shows none in the minute after) and the pages stay. `debug.FreeOSMemory` a second after a body of 8 MiB or more returns them (`memtrim`); the second lets the request's own buffers become garbage first. A rate limit the first body claims leaves a second upload inside the window with nothing: schedule instead. Each body asks for a trim a second after it, trims run 30 s apart at the closest, and one asked for inside the window gets the next turn (`TestEveryLargeBodyGetsATrim`, on a clock moved by hand).
+- Fewer bytes allocated is not a lower peak. The manager's route allocates 64 MiB less, and its peak stayed (192 to 188 MB): what sets it comes before the route, the bus line read by doubling (64 MiB for a 30 MB line) and the envelope's `json.RawMessage` copying the params once more (30 MB), and the last collection before the peak runs at the same heap size either way. Measure the process end to end (`scripts/diag/relay_body_rss.py`), beside the function's benchmark.
+- RSS means different things per system. On Linux the runtime returns pages with `MADV_DONTNEED` and RSS falls at once. On macOS it marks them reusable: the physical footprint (Activity Monitor's Memory, `proc_pid_rusage`) falls at once, RSS only when the kernel takes the pages; and when the Mac is short of memory it compresses an idle process's pages, so RSS falls though nothing was given back (an unchanged build went from 192 to 70 MB by itself in one round of three). Compare builds by RSS and `VmHWM` on Linux and by the footprint on macOS.
+
 ## Hot paths: a node list copied three times, a list marshalled only to be compared (2026-11-10, #2826)
 
 - A `proto.Session` is 1,520 bytes, so every copy of a node's list is a megabyte-scale allocation and slices grown by
@@ -1838,6 +1922,7 @@ On TestFlight 224 an extension's **Review** spun for two minutes and then failed
 - `proto.Session` is copied row by row all over the hub, the manager and the node, and the allocator rounds every allocation up to a size class. #3897 added two fields (40 bytes) and took the struct from 1,528 to 1,568 bytes. A row copied on its own went from the 1,536-byte class to 1,792 (+256 B), every list copy grew by 40 B a row plus page rounding, and four allocation budgets in the assistant failed at once, none of them near the change. The readers copied no more rows than before.
 - When a budget is over by one size-class step per row it keeps, or by rows × a few bytes, compare the row type's `unsafe.Sizeof` at both commits before hunting for new copies.
 - Make room before raising a budget. The 17 bools sat in 10 separate words, 63 bytes of padding; moving bools beside other bools brought the row back to 1,528 bytes without dropping a field. Reordering fields reorders the reflect encoder's keys, so `appendSession` and `sessionWireLayout` follow, and byte goldens change only in key order (check that every line decodes to the same object). `TestSessionFitsItsSizeClass` now fails in `proto`, listing the bools that sit alone, instead of in another package's budgets.
+- The same happens to a type built as one slice per pass (2026-11-12, #5188). #5150 added three fold fields to `sessionlist.Item` (208 to 240 bytes); the hub reads a machine's 150 items as one `[]Item` each pass, and 36,000 B is past the largest size class (32 KiB), so it took whole pages, 40 KiB, 8 KB more a pass. Moving the fields behind one pointer (`Item.Fold`, nil for a row without a hierarchy) brought it back to 216 bytes. Then allocate the pointer only where it is new: `return &fold` moves `fold` to the heap where it is declared, for every row, even on the paths that return nil; copy it in the branch that returns it (`go build -gcflags=-m` says `moved to heap`).
 
 ## What the port relay costs, hop by hop (2026-11-10, #3067)
 
@@ -1916,3 +2001,30 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
   minute is then the same machine for all of them, and the head's CPU time over the base's in the same minute came
   out at 0.943 with every one of the 20 minutes below 1, the unchanged hub's at 0.983 (`pairedCPU`). Measure a noisy
   quantity against a reference that sees the same noise at the same moment.
+
+## `http.DefaultTransport` drops a push connection after 90 s idle (2026-11-11, #4800)
+
+- The hub's relay client and `apns.Client` were `&http.Client{Timeout: …}` with no transport, so they ran on
+  `http.DefaultTransport`, whose `IdleConnTimeout` is 90 s. Two thirds of one hub's pushes came more than 90 s after the
+  previous one and paid a new TCP + TLS handshake (0.2-0.3 s to the relay; APNs wants one long-lived HTTP/2 connection).
+  Both now use `apns.NewTransport`: their own clone of the default transport with a one-hour idle timeout and HTTP/2
+  health pings (`http.HTTP2Config.SendPingTimeout` / `PingTimeout`).
+- A client that talks to one service often gets its own transport with the idle timeout chosen for that service. The
+  default one is shared with every other client in the process, and its 90 s fits none of them in particular.
+- Test connection reuse with `testing/synctest`: serve TLS on an in-memory `net.Pipe` listener (loopback sockets do not
+  let the bubble go idle), dial it from a clone of the client's real transport, count `http.StateNew` in the server's
+  `ConnState`, and move the gaps with `synctest.Sleep`. The transport's idle timer and pings then run on the fake clock
+  (`TestRelayPushesKeepOneConnection`, `TestSendsKeepOneConnection`). Register the server's and transport's shutdown
+  with `t.Cleanup`, or a failed assertion ends in a synctest deadlock panic.
+
+## `exec.CommandContext` cancels only while the process runs (2026-11-11, #4363)
+
+- `cmd.Cancel` runs only when the context ends before the process exits. A shell that exits at once and leaves a background child holding its stdout or stderr (`sleep 4 & echo $!`) keeps `Wait` reading the pipe until that child exits or `WaitDelay`, counted from the shell's exit, closes it: the deadline passes unnoticed. `secret.run` held a 1-second run for 4 seconds, and the next command, which could no longer start, came back as timed out.
+- Watch the context for as long as `Wait` runs and stop the group at the deadline, sharing one "stopped" flag with `Cancel` so the group gets one SIGTERM (`runSecretCommand`). Classify the result by that flag, not the exit status: the shell exited 0.
+- A command that never started because the time was used up gets no result. A timed-out result for it reads as a command that ran and was stopped, and makes the Agent check the computer for one that never ran.
+
+## An id the node makes up for a message ends up on its line (2026-11-12, #5225)
+
+- The node sent an assistant chat's messages to its agent runtime under a `client_msg_id` of its own, new on every call. The runtime protocol lets a runtime put the id it was sent with on the message's item, and the node forwards an item a runtime tied as it is (`echo.go`). So the line carried an id no app had, the app's pending bubble stayed beside it, and the message showed twice: the same failure as #5200, in another place.
+- Hand a message on with the id it came with, or with none. A made-up id deduplicates nothing either: it is new on every retry. A message without an id leaves its line without one, and the apps match it by its words.
+- In-repo runtimes (DSH, Antigravity) did not tie their lines, so nothing showed it. The test that does is a fake runtime that ties its line as the protocol allows (`TestAssistantOnARuntimeSendsTheMessagesOwnID`).

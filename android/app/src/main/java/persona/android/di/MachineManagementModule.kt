@@ -222,6 +222,8 @@ object MachineManagementModule {
         override suspend fun uiAction(
             extension: String, ui: String, action: String, context: ExtensionUiContext?, state: String?, values: Map<String, String>?,
         ) = api().uiAction(extension, ui, action, context, state, values)
+        override fun iconPath(value: String) = runCatching { api().iconPath(value) }.getOrNull()
+        override suspend fun icon(path: String) = api().icon(path)
         override suspend fun markets() = api().markets()
         override suspend fun addMarket(spec: String, token: String?) = api().addMarket(spec, token)
         override suspend fun removeMarket(id: String) = api().removeMarket(id)

@@ -12,8 +12,8 @@ import { isResumed } from "./reconnect";
 import type { TaskBrief } from "./brief";
 import { deleteTodo, type Todo, type TodoAsk } from "./todos";
 import { getInbox, itemPath } from "./inbox";
-import { BUILTIN_MANAGER, conversationManager, defaultManager, itemHeaders, MANAGER_HEADER, managerHeaderFor, routedConversationManager } from "./manager-choice";
 import { closePanel, getPanel } from "./panel";
+import { BUILTIN_MANAGER, conversationManager, defaultManager, itemHeaders, MANAGER_HEADER, managerHeaderFor, routedConversationManager } from "./manager-choice";
 import type { ChatLine } from "./turns";
 import type { Item } from "./types";
 import { upsertTaskCards, type TaskCardMetadata } from "./task-cards";
@@ -156,6 +156,23 @@ export interface BriefBody {
   later_total: number;
   progress: { id: string; title: string; stage?: string; stage_kind?: Todo["stage_kind"] }[];
   progress_total: number;
+  /** The recommended-setup block (#5085), on the first briefing of a week when it names something: which mechanism
+   *  that is off would have removed how many of the last 7 days' asks or background rounds. The hub counted and worded
+   *  each line; nothing is turned on from here. A hub that does not know it leaves the list out. */
+  setup: BriefSetup[];
+}
+
+/** One mechanism of a `brief` item's `setup`: `text` is the whole line (count, cost, where it is turned on). */
+export interface BriefSetup {
+  id: string;
+  count: number;
+  text: string;
+}
+
+/** The settings page a recommended mechanism is turned on at, for those that have one in this app: Session triage, the
+ *  standing authorizations and the remembered kinds of task are on the assistant's own page. */
+export function briefSetupPage(id: string): string | undefined {
+  return ["triage_decide", "triage_auto_continue", "triage_wake", "standing_authorizations", "task_trust"].includes(id) ? "/settings?tab=persona" : undefined;
 }
 
 /** A `brief` item's body, every list a list (a hub that left one out, or an item that is not one, gives nothing to draw). */
@@ -185,6 +202,7 @@ export function briefBody(it: FeedItem): BriefBody | undefined {
     later_total: num(b.later_total, later.length),
     progress,
     progress_total: num(b.progress_total, progress.length),
+    setup: list<BriefSetup>(b.setup).filter((x) => x && typeof x.id === "string" && typeof x.text === "string" && x.text !== ""),
   };
 }
 
@@ -801,8 +819,8 @@ export async function undoDismissMessage(card: FeedItem, dismissalId: string): P
   }
 }
 
-export function later(itemId: string) {
-  set({ later: { ...st.later, [itemId]: true } });
+export function later(itemId: string, deferred = true) {
+  set({ later: { ...st.later, [itemId]: deferred } });
 }
 
 // ── the conversation's lines ──

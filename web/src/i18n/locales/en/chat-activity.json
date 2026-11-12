@@ -1,19 +1,10 @@
 {
-  "label_loop": "Looping, {loop}",
-  "label_background_one": "{count} background task",
-  "label_background_other": "{count} background tasks",
-  "label_loop_and_background_one": "Looping, {loop}, {count} background task",
-  "label_loop_and_background_other": "Looping, {loop}, {count} background tasks",
-  "open_label": "{label}. Click to view",
-  "background_chip": "Background",
-  "title_loop": "Loop",
-  "title_background": "Background tasks",
-  "title_both": "Loop and background tasks",
-  "looping": "Looping",
-  "looping_every": "Looping · {cadence}",
+  "section_running": "Running",
+  "section_completed": "Completed",
+  "empty": "No background tasks in this session yet",
+  "back": "Back",
+  "loop": "Loop",
   "stop_loop": "Stop loop",
   "stop_loop_explain": "This sends the agent a message so it won't schedule another wake-up. The current run finishes first.",
-  "background_count": "Background tasks {count}",
-  "copy_command": "Copy command",
-  "view_output": "View output"
+  "copy_command": "Copy command"
 }

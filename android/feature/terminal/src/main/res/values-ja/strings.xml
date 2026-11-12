@@ -5,6 +5,7 @@
     <string name="terminal_control_watching">閲覧のみ</string>
     <string name="terminal_select_text">テキストを選択</string>
     <string name="terminal_display_settings">表示設定</string>
+    <string name="terminal_close">ターミナルを閉じる</string>
     <string name="terminal_retry">再試行</string>
     <string name="terminal_busy_title">ターミナルを引き継ぎますか？</string>
     <string name="terminal_busy_text">コンピューター上の別のプログラムがこのターミナルを使用しています。引き継ぐとそのプログラムは切断され、ターミナルはスマートフォンのサイズで表示されます。</string>

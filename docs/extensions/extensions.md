@@ -183,6 +183,7 @@ Lives at the root of the extension package. Example (a connector for a fictional
 | `version` | Yes | `MAJOR.MINOR.PATCH` (may carry `-pre`, not `+build`); upgrades only go up |
 | `description`, `publisher`, `homepage` | No | `homepage` must be https |
 | `tags` | No | Tags shown and searched in the marketplace (#2424, previously in the extension repository's `market.json`): at most 16, each 1–24 characters. Written only in the source manifest: the manifests inside packages and marketplace indexes drop it (both SDKs also drop it when answering `manifest`, since the program embeds the source manifest), and the tags go in the index entry's `tags` (see "Extension marketplace"), because hubs from before this field read manifests strictly and refuse to install when they see `tags` |
+| `icon` | No | Source-only bundled logo metadata (#5461): `assets/icon.png`. Strip it from packaged, catalog `manifest`, and runtime manifest responses; the catalog entry carries `icon` beside `manifest`. PNG only, square 256–4096 pixels, at most 2 MiB; 512×512 recommended. A repository using `market.json` may put this source metadata there. See "Bundled catalog artwork" below. |
 | `engines.persona` | No | A range of hub build numbers, only `>=N`, `<N` and combinations; if not satisfied it can't be installed, and installed ones are marked `incompatible`. Development builds (build number 0) are not checked; a warning is given |
 | `engines.extension_protocol` | Yes when there is `runtime` or `node` | `1` |
 | `runtime` | No | Without it, the extension is declarative only. `command`: a relative path in the package, or `{"<GOOS>-<GOARCH>": path}`; if this hub's platform is missing it can't be installed. Must not be absolute or escape the package (`..` and links pointing outside the package are both checked), and must be executable; `personad` is allowed only for built-in extensions. `args`; `env` (must not start with `PERSONA_` / `PERSONA_`, nor be the dynamic loader's `LD_*` / `DYLD_*`, which would reach the sandbox launcher outside the sandbox; secrets don't go here); `rpc`: `stdio` (default) / `none`; `http`: serve HTTP on `PERSONA_EXTENSION_SOCKET`. `rpc: none` without `http` can't be installed |
@@ -1077,7 +1078,8 @@ sent only as `Authorization: Bearer` to the marketplace's own origin (for a GitH
 - `l10n` (optional) is the package's translations again, `{"<language>": <its l10n/<language>.json>}` (see "Translations: `l10n/`"), so
   the catalog can show them before anything is downloaded. Older hubs ignore the key. One that does not check out is left out with a warning,
   and the entry stays, in its manifest's words.
-- `icon_url` (optional, #4780) is an absolute HTTPS logo URL without account credentials, at most 2048 bytes. Clients load it anonymously and keep the existing extension mark when absent, invalid or unavailable. It is catalog metadata, not a runtime manifest or navigation icon.
+- `icon` (optional, #5461) is `assets/icon.png` inside each versioned package. It is signed catalog metadata beside `manifest`, not a runtime or navigation field. Bundled artwork takes precedence over legacy `icon_url`; an invalid path has no external-logo fallback. See "Bundled catalog artwork" below.
+- `icon_url` (optional, #4780) is a legacy absolute HTTPS logo URL without account credentials, at most 2048 bytes. Clients load it anonymously and keep the existing extension mark when absent, invalid or unavailable. It is catalog metadata, not a runtime manifest or navigation icon. The hub API also uses this field for its own authenticated relative bundled-image paths (#5461).
 - `downloads` (optional integer, #4780) is the package download count at the publisher's snapshot. The official publisher reports GHCR **Total downloads** across all versions of that package, not Persona installs or unique users. Explicit zero is retained; absent or negative counts are unknown, not zero in the UI. Top-level `downloads_updated_at` is the RFC 3339 snapshot timestamp (official publication uses UTC seconds); an invalid timestamp is omitted.
 - `packages` are searched in order for the first whose `platforms` includes this hub (`GOOS-GOARCH`); one without `platforms` counts as usable anywhere. `url` is a path relative to the index (for GitHub and git marketplaces, a path in the repo; git marketplaces cannot escape the repo through links),
   an HTTPS address, an immutable `oci:<registry>/<repository>@sha256:<64 lowercase hex>` reference, or for GitHub marketplaces `release:<tag>/<asset name>` (downloads the Release asset through the API; private repos work too). `sha256` is required and checked after download; on mismatch it is not installed.
@@ -1105,6 +1107,8 @@ A GitHub marketplace can commit installable archives alongside its catalog: no R
 | `POST /api/v1/extensions/-/markets/{id}/refresh` | Re-read the index now; on a bad signature returns 400 `market_signature` (the last good index is kept) |
 | `PUT /api/v1/extensions/-/markets/{id}/token` `{token}` | Replace the token (empty string removes it) and re-read |
 | `GET /api/v1/extensions/-/catalog?q=&market=&refresh=1` | `{markets, extensions: [CatalogItem], platform}`. `q` searches id, name, description, publisher, tags and every translation's name and description (case-insensitive); indexes older than 6 hours are re-read in the background, `refresh=1` waits for all of them to be re-read |
+| `GET /api/v1/extensions/-/catalog/{mid}/{id}/icon?sha256=<package digest>` | Authenticated bundled PNG for a currently trusted registered catalog entry; lazily downloads/verifies the selected package through the existing package cache. Never installs or executes it. Missing, stale, invalid or unavailable artwork returns 404. |
+| `GET /api/v1/extensions/{id}/-/icon?v=<installed version>` | Authenticated PNG read from that installed/local extension root's regular `assets/icon.png`; no symlinks or escaping paths. Missing, stale or invalid artwork returns 404. |
 | `POST /api/v1/extensions/-/catalog/preview` `{market, extension}` (the old field name `plugin` is also accepted) | Download, verify, return a preview (the same as the "Install" preview, plus `market`); if already installed it is an upgrade preview |
 
 `CatalogItem`: `market`, `market_name`, `id`, `name` and `description` (in the request's language, from the entry's `l10n`), `version`, `publisher`, `homepage`, `tags`, `contributes` (extension point → id),
@@ -1119,16 +1123,35 @@ A network read failure keeps the last verified snapshot; a signature failure sup
 All fields can be absent on an older hub or catalog; clients must not require them, invent a count or change install permissions.
 The signed payload and envelope are stored and checked as original bytes; sorting applies only to the client projection.
 
-**Apple client integration (#4780)**: decode `icon_url` and `downloads_updated_at` as optional strings and `downloads` as an optional
-64-bit integer in market items, installed summaries and details. Keep catalog order from the hub; use the same anonymous HTTPS image
-loader and generic-mark fallback in each location. Do not attach hub, market or extension credentials to the logo request. A new URL
-can retry after an earlier image failed. No new feature flag, route or installation permission is needed.
+**Apple client integration (#4780, bundled transport #5461)**: decode `icon_url` and `downloads_updated_at` as optional strings and
+`downloads` as an optional 64-bit integer in market items, installed summaries and details. Keep catalog order from the hub and the
+existing tile, neutral backing, fit-without-crop and fallback. Authenticated relative bundled paths use the client's selected hub/manager
+connection and image cache; legacy absolute HTTPS sources use a separate anonymous loader, never hub or market credentials. A changed
+URL retries after an earlier failure. Older clients that do not yet support the relative path retain their generic mark.
 
-**Logo transport (#4780)**: no hub URL proxy or persistent image cache is added. Public catalog logos follow the existing anonymous
-HTTPS `url` image boundary (see "Pictures through the hub (`ui.image`, #2301)"), not the authenticated `ui.image`/`ref` path meant
-for private extension data. Web uses lazy asynchronous image decoding and no referrer; native clients use their existing image cache.
-This keeps third-party fetches out of the hub (no new SSRF or egress path) and adds no cold web dependency. Clients may need internet
-access to show the logo; offline or blocked hosts keep the generic mark. Public sharing's image-disabled CSP is unchanged.
+### Bundled catalog artwork
+
+Publish `assets/icon.png` with each immutable, versioned package and put `icon: "assets/icon.png"` beside its catalog `manifest`.
+A source manifest may carry this same source-only field, or a repository may keep it in `market.json`; packaged, catalog-manifest and
+runtime responses strip it for strict older hubs. Keep attribution/notices with the assets. PNG must be square, 256–4096 pixels per side
+and at most 2 MiB; 512×512 is recommended. Custom artwork must be identified as custom.
+
+The hub projects `icon_url` to the authenticated relative routes above. Installed/local logos are read from that extension's own regular
+file, with directory/file symlinks refused. Catalog image requests lazily use the existing SHA-256-verified package download/cache,
+then scan the archive without extracting or executing code. ZIP previews additionally bound the central directory to 8 MiB and the
+existing package-file count before allocating entries; unsupported ZIP64/self-extracting layouts keep the generic mark. The catalog JSON
+itself downloads no packages. Concurrent image requests share one download/scan, with at most four different catalog-logo operations
+and four local installed-logo reads at once, and a two-minute catalog request budget. PNG thumbnails
+reuse the image proxy's bounded 256 MiB disk cache for up to 24 hours, keyed by catalog source, extension and package digest. Market
+registration, signature/trust and package identity are checked again before sending any cached or newly read bytes.
+
+Web loads relative paths with its normal hub authorization and displays a local Blob URL; Android uses its authenticated hub image
+connection. Responses are `image/png`, `nosniff`, have a content ETag and `private, max-age=300`; 404 responses use `no-store` so refresh
+can retry. A removed/quarantined catalog cannot expose its cached preview, while a retained installed package can still show its own
+logo. No new publisher image URL, arbitrary filesystem path, preview installation or extension execution is accepted.
+
+Legacy absolute HTTPS `icon_url` remains an anonymous client-side boundary for rolling compatibility. Bundled paths take precedence;
+missing, invalid, stale or unavailable artwork keeps the earlier generic glyph. Public sharing's image-disabled CSP is unchanged.
 
 **Who can do it**: full-access devices can register / delete marketplaces; when a preview comes from a marketplace they can install and upgrade with it (`POST /api/v1/extensions/-/install`, `…/{id}/-/upgrade`, with the permission summary as usual),
 and can roll back and uninstall extensions whose source is recorded as `market:<marketplace id>/<extension id>`. Why: a full-access device can already run arbitrary commands on every computer through an Agent, so opening up marketplaces does not widen the trust boundary;
@@ -1868,6 +1891,7 @@ For items the extension's connector collects into the Inbox, the body of the det
 - `value` is a number (may be negative or fractional); `display` is how to write that value ("¥1.20", "1.2M"); without it the app writes a compact number using `unit` (`1.2M tokens`). The app computes the y-axis ticks itself and writes them as compact numbers.
 - `tone`: if omitted, the app's own data colors (taken in series order, the first is the primary color); if set, a role color (`positive` / `caution` / `danger` / `neutral`). Extensions cannot set colors.
 - `stacked`: stack the bars of multiple series (side by side by default); ignored for line charts.
+- A stacked `bar` whose every series has exactly one point, all values non-negative with a positive total, is **one category's shares** (a persona-card's single day): every client draws it as a horizontal segmented bar — the total above, one capsule split into the parts in the series colors, the legend and rows naming each part and its value — not a lone vertical column. A chart with two or more categories keeps its columns for the comparison. The same predicate on every client (the web's `stackedShare`, iOS `DataChart.isSingleCategoryShare`, Android `ChartMath.singleCategoryShares`; #5386).
 - Clients: tapping or hovering a point shows the `label` and each series' `display` (or number); in compact, no axis text is drawn, only the bars / lines and the first and last labels. With many labels the app writes every few, never overlapping.
 
 **`stat_grid`**: several numbers side by side, so a card can fit summaries like today / 7 days / cost.
@@ -1991,7 +2015,7 @@ it records off-screen ones and draws them when they appear.
 
 Cards in assistant replies use the same components and renderer as extension Views (but are not interactive: `action`, `push`, `field`, `search`, `filter` and `more` have no effect in assistant cards; links work as usual).
 
-- **```` ```persona-view ````**: a View (`{"sections": […]}`) in a code block, or a component directly (`{"type": "metric", …}`). When hub.json has `assistant.persona_view: true`, the assistant prompt teaches it to write these
+- **```` ```persona-view ````**: a View (`{"sections": […]}`) in a code block, or a component directly (`{"type": "metric", …}`). The assistant prompt teaches it to write these
   (`prompts/assistant/claude_md.md`); off by default, to be enabled once every client can draw UI version 3.
 - **```` ```persona-card ````** (#886, old format) still renders: clients **convert it to components** before drawing. The rules are documented in `sdk/go/wire/personacard.go` (the Go reference implementation), consistently across all four clients;
   `schema/extension/examples/persona-card/` contains cases (card → expected View; `null` means it cannot be drawn and stays a code block; iOS shows such a card in words, see below), used by each client's tests:
@@ -1999,7 +2023,7 @@ Cards in assistant replies use the same components and renderer as extension Vie
   - One section; the card's `title` is the section title (a `stat`'s `title` is its `metric`'s `label`); `subtitle` is a leading paragraph of secondary text. Numbers use thousands separators and at most one decimal place (`2,250`, `7.5`), followed by a space and the unit.
   - `stat` → `metric {label: title or "Value", value, detail: note}`.
   - `stacked_bar` → `metric {label: Total, value: total (the sum of parts if absent), detail: note}`; one stacked bar chart, one series per part (beyond 4 parts, the first three plus "Other"; `rest` and "Other" are `neutral`),
-    one point per series with `title` or "Total" as its label; then one `row {title: label, subtitle: note, value}` per part. Use `total`'s unit, or the card's if absent.
+    one point per series with `title` or "Total" as its label; then one `row {title: label, subtitle: note, value}` per part. Use `total`'s unit, or the card's if absent. Since every series has the single category's one point, the chart is the horizontal segmented bar above, not a column (see "New items", `chart`; #5386).
   - `ring` (#3061, one day's total and its parts; `stacked_bar` is for comparing days or people) → one `donut` chart, one series with a point per part (beyond 8 parts, the first seven plus "Other"),
     `center` the total with its unit (left out past 20 characters), `detail: note`; then one `row` per part. When `total` is more than the parts' sum, a "Remaining" part (total minus the sum) comes last.
     Use `total`'s unit, or the card's if absent. iOS draws `donut` / `pie` with `RingChart` (ring, total in the hole, legend with shares); an app that does not know `ring` keeps the code block
@@ -2755,7 +2779,7 @@ Views, components, actions, responses, placements and context all use schema-gen
     Apple still allows editing that saved preference, while web and Android grey it out (mock hub `MOCK_PLUGIN_UPGRADE=disabled`).
   - With `auto_upgrade_paused: "market_removed"` (#1895), **Auto-Update** and **Check for updates** are greyed out and the page says that adding the marketplace again with the same address restores the saved setting and update checks.
   - While the master switch is off (`GET /api/v1/extensions/-/upgrades` says `auto: false`), **Auto-Update** keeps showing the extension's saved value but is greyed out, and its footer says the setting applies again once the master switch is back on (#1828).
-    An unknown master switch (still loading, or an older hub without the route) leaves it editable. Web does this; Apple is #4747, Android #4748.
+    An unknown master switch (still loading, or an older hub without the route) leaves it editable. Web and Apple (`ExtensionSettingsPolicy.canFlipAutoUpgrade`, #4747) do this; Android is #4748.
     A marketplace's delete confirmation first counts the default manager's installed extensions with that `ExtensionView.market`; 0, 1 and several have their own wording, while a read failure or an old hub that omits `market` gets the generic stopped-upgrading note rather than a false 0.
     Covered by `ExtensionSettingsLifecycleTests`, `ExtensionMarketModelTests`, `ExtensionMarketTests.testRemovedMarketKeepsPreferenceButPausesUpdates` and `testRemoveMarketConfirmationCountsAffectedExtensions`.
   - With a new version, "New version 1.1.0" plus small status text: auto-update when idle / auto-update off / needs one more permission: … (orange) / last version failed to start, no further auto-update (orange) / you rolled back from this version, no auto-update to it (orange, `skipped_by: "user"`) / failed to install / incompatible.
@@ -3354,7 +3378,8 @@ The form's upstream has no `tools` switch, so it is auto: it declares the functi
   - **Prefer deletion on failure**: delete whether or not key-presence can be read (idempotent); unreadable presence still returns `secrets_cleared`. If deletion fails, save nothing, return 500 `secret_not_cleared`;
     if config save fails after deletion (database write failure, 409), the error also includes `secrets_cleared` and the old address remains. Invalid form config (400) changes nothing and keeps the key.
 - **Model fallback**: if the selected model's upstream disappears (address cleared, manager.json changed), no error/disconnect: use default model and voice, then send nonfatal `error{code: "model_unavailable"}` after connecting.
-- **`GET /info`**: `{"protocol": 2, "features": ["target", "runs", "asks", "resume", "suspend"], "setup"?: "…", "warnings"?: ["…"]}`, without keys or upstream list. `protocol` is the highest voice-frame version this extension speaks (2 since #3502; clients not sending `protocol: 2` in `start` still use protocol 1 from this section); `features` lists only implemented capabilities (`docs/assistant/voice.md` ("Version negotiation")).
+- **`GET /info`**: `{"protocol": 2, "features": ["target", "runs", "asks", "resume", "suspend", "speak"], "setup"?: "…", "warnings"?: ["…"]}`, without keys or upstream list. `protocol` is the highest voice-frame version this extension speaks (2 since #3502; clients not sending `protocol: 2` in `start` still use protocol 1 from this section); `features` lists only implemented capabilities (`docs/assistant/voice.md` ("Version negotiation")).
+- **`POST /speak`** (#5004, feature `speak`): `{"text", "model"?, "voice"?, "lang"?}` read aloud in its own upstream session (no tools, instructions to say the text exactly as written); answers `200` `audio/pcm` with `X-Persona-Audio-Rate` and the reply's PCM16 as it comes, or, before any audio, `{"error", "code"}` with `400 bad_request`, `403 forbidden` (not a full device), `503 no_upstream`, `502 upstream_forbidden`, `503 upstream_unavailable`, `502 upstream_failed` or `504 no_audio`. The iPhone says meeting answers with it outside a call; details in `docs/assistant/voice.md` ("Reading a text aloud").
 - **Extension env vars**: `PERSONA_EXTENSION_CONFIG` (form values with defaults), `PERSONA_EXTENSION_SECRETS` (`{"key": "…"}`, decrypted only in process environment),
   `PERSONA_VOICE_HUB_CONFIG` (original `config` of the taken-over entry), entry `env`, and `PERSONA_HUB_URL` / `PERSONA_HUB_TOKEN` (manifest `hub_api`, as before);
   legacy `PERSONA_PLUGIN_*` names are also supplied and accepted.

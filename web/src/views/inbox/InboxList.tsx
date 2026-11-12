@@ -14,13 +14,14 @@ import { machineWithHub } from "../../lib/mesh";
 import { href, navigate, onLinkClick } from "../../lib/router";
 import { openedItemState } from "../../lib/inbox-nav";
 import { useInboxSources } from "../../lib/inbox-sources";
-import { subscriptionsHref, useSubscriptionsShown } from "../../lib/subscriptions";
+import { subscriptionsHref, useInboxSourcesShown, useSubscriptionsShown } from "../../lib/subscriptions";
 import { type Manager } from "../../lib/managers";
 import { scoped, useScope, useScoped } from "../../lib/current-assistant";
 import { useStore } from "../../lib/store";
 import type { Interaction } from "../../lib/types";
 import { t } from "../../i18n";
 import { requestRoute } from "../../lib/card-focus";
+import { requestHome } from "../../lib/child-sessions";
 import { Button, Collapse, cx, Dialog, IconButton, Loading, Menu, toast, useMenu, type MenuItem } from "../../ui/atoms";
 import { errorText } from "../../lib/api";
 import { contextMenuProps } from "../../ui/context-menu";
@@ -116,6 +117,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   const [mutesOpen, setMutesOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const subscriptionsShown = useSubscriptionsShown();
+  const sourcesShown = useInboxSourcesShown();
   const [foldersOpen, setFoldersOpen] = useState(false);
   // Clean up all over many items asks first; the items are the ones shown when it was asked.
   const [confirm, setConfirm] = useState<{ items: InboxItem[]; scope: string } | null>(null);
@@ -175,9 +177,9 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     if (!days) return { groups: loaded.map((g, i) => ({ ...g, count: g.items.length, plus: i === loaded.length - 1 && historyMore.includes(group), more: false, range: timeRange(g.key, now) })) };
     const counts = dayGroupCounts(days, now, filtered ? 0 : loaded.find((g) => g.key === "just")?.items.length ?? 0);
     const byKey = new Map(loaded.map((g) => [g.key, g.items]));
-    // complete: a page of its own reached its start, or the list holds it (the done items of its last days, the hub's
-    // inboxKeepDone), or (unfiltered) as many are loaded as the hub counts
-    const complete = (key: string, loadedCount: number) => groupComplete.includes(`${group}|${key}`) || timeRange(key, now).start >= now - LIST_DONE_MS
+    // complete: a page of its own reached its start, or (unfiltered) as many are loaded as the hub counts. The list's
+    // done items don't make a group complete: it carries only the newest of the last days' (#5549), the rest page in.
+    const complete = (key: string, loadedCount: number) => groupComplete.includes(`${group}|${key}`)
       || (!filtered && loadedCount >= (counts.get(key) ?? 0));
     const groupOf = (key: string): DoneGroup => {
       const items = byKey.get(key) ?? [];
@@ -344,7 +346,9 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
               { key: "rules", label: t("inbox-inboxlist.rules_list"), icon: "target", onSelect: () => setRulesOpen(true) },
               { key: "folders", label: t("inbox-folders.settings_menu"), icon: "folder", onSelect: () => setFoldersOpen(true) },
               // source subscriptions (#2041): every subscription, with the Inbox's other settings
-              ...(subscriptionsShown ? [{ key: "subscriptions", label: t("inbox-inboxlist.subscriptions"), icon: "loop" as const, onSelect: () => navigate(subscriptionsHref()) }] : []),
+              // with inbox_sources (#5278): every source of the Inbox, Settings' Inbox Sources (one home for them)
+              ...(subscriptionsShown ? [{ key: "subscriptions", label: sourcesShown ? t("inbox-inboxlist.sources") : t("inbox-inboxlist.subscriptions"), icon: "loop" as const,
+                onSelect: () => navigate(sourcesShown ? "/settings?tab=sources" : subscriptionsHref()) }] : []),
             ]} />
         )}
         {mutesOpen && <MutesDialog onClose={() => setMutesOpen(false)} />}
@@ -547,9 +551,6 @@ function scrollListTo(el: Element | null) {
   if (!el || !box) return;
   box.scrollTo?.({ top: box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top, behavior: scrollBehavior() });
 }
-
-/** How long the list keeps done items (the hub's inboxKeepDone): Done's groups within it are complete without a page. */
-const LIST_DONE_MS = 3 * 86_400_000;
 
 /** A group of Done (#2969): its items loaded so far, its count (the hub's when it has day counts), whether the count
  *  reads "n+" (plus), whether more of its items can load (more) and its time range (where its pages start). */
@@ -833,7 +834,8 @@ const IX_GLYPH: Record<Interaction["kind"], GlyphName | "list" | "terminal"> = {
  * only when one of those changed.
  */
 const AgentRow = memo(function AgentRow({ ix, off = false }: { ix: Interaction; off?: boolean }) {
-  const to = useStore((s) => ix.session_id === "" ? requestRoute(ix) : conversationRoute(ix.machine_id, ix.session_id, s.sessions, s.assistant));
+  // a child session's card opens its parent's page, where it is answered (#5120)
+  const to = useStore((s) => ix.session_id === "" ? requestRoute(ix) : conversationRoute(ix.machine_id, requestHome(ix), s.sessions, s.assistant));
   const persona = to.name === "persona";
   const where = useStore((s) => (persona ? "Persona" : machineWithHub(ix.machine_id, s.machines)));
   const ask = interactionAsk(ix);

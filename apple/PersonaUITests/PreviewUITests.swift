@@ -6,7 +6,7 @@ import XCTest
 /// attaches a screenshot, and picks an element: the Save button, with a line about it, lands over the composer as
 /// Element comment 1. A stopped entry's Start… shows its command, and the page opens once the mock says its port answers.
 /// PERSONA_SHOTS=<dir> keeps each screen (named with PERSONA_STYLE when set); PERSONA_LOOKS=light,dark runs it once in each
-/// appearance (one xcodebuild for both).
+/// appearance (one xcodebuild for both), and `ax` in that list adds a pass at the largest text size (#5114).
 final class PreviewUITests: XCTestCase {
     private var hub: String!
     private let widget = "a1f3c2d4-0000-4000-8000-000000000001"
@@ -61,9 +61,69 @@ final class PreviewUITests: XCTestCase {
         let looks = ProcessInfo.processInfo.environment["PERSONA_LOOKS"]?.split(separator: ",").map(String.init) ?? [""]
         for l in looks {
             look = l
-            if l == "dark" { XCUIDevice.shared.appearance = .dark } else if l == "light" { XCUIDevice.shared.appearance = .light }
-            try pickAndStart()
+            if l == "dark" { XCUIDevice.shared.appearance = .dark } else if l == "light" || l == "ax" { XCUIDevice.shared.appearance = .light }
+            if l == "ax" { try largestText() } else { try pickAndStart() }
         }
+    }
+
+    /// The largest text size (#5114): the list puts Start… under the server's name, the card's bar puts the address on a
+    /// line of its own, and the panel for a picked element stacks its buttons and scrolls.
+    @MainActor private func largestText() throws {
+        _ = try mock("?mode=1")
+        let app = XCUIApplication()
+        let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
+        app.launchArguments = ["-pairURL", pair, "-tab", "dev", "-openSession", "macbook/" + widget, "-openChatsFresh", "YES",
+                              "-holdChromeOpen", "YES", "-openPreviewServers", "YES",
+                              "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launchPinned()
+
+        let web = app.buttons["preview-server-web"]
+        see(web, "the running web server is not listed", timeout: 25, app)
+        let start = app.buttons["preview-start-api"]
+        see(start, "the stopped api has no Start…", app)
+        let name = app.descendants(matching: .any)["preview-server-api"].staticTexts["api"].firstMatch
+        see(name, "no api row", app)
+        XCTAssertGreaterThanOrEqual(start.frame.minY, name.frame.maxY, "Start… is not under the name: \(start.frame) \(name.frame)")
+        XCTAssertTrue(start.isHittable, "Start… is out of reach")
+        sleep(1)
+        shot(app, "servers")
+
+        web.tap()
+        see(app.webViews.staticTexts["Good morning"], "the page did not load through the hub", timeout: 25, app)
+        app.webViews.links["Settings"].firstMatch.tap()
+        let save = app.webViews.buttons["Save changes"].firstMatch
+        see(save, "the settings page did not open", app)
+        let address = app.descendants(matching: .any)["preview-address"]
+        see(address, "no address in the bar", app)
+        XCTAssertGreaterThan(address.frame.width, app.frame.width * 0.8, "the address is not on a line of its own: \(address.frame)")
+        // The card's header is a bar capped at the largest standard size: the chooser beside its buttons, more than a letter.
+        let chooser = app.buttons["link-servers"], close = app.buttons["link-close"]
+        see(chooser, "no server chooser in the header", app)
+        XCTAssertLessThan(chooser.frame.minY, close.frame.maxY, "the header grew past a row: \(chooser.frame) \(close.frame)")
+        XCTAssertGreaterThan(chooser.frame.width, app.frame.width * 0.35, "the server chooser came down to a letter: \(chooser.frame)")
+        sleep(1)
+        shot(app, "page")
+
+        app.buttons["preview-pick"].tap()
+        see(app.descendants(matching: .any)["preview-pick-banner"], "no banner while picking", timeout: 5, app)
+        sleep(1)
+        shot(app, "picking")
+        save.tap()
+        let picked = app.descendants(matching: .any)["preview-picked"]
+        see(picked, "the pick did not come back", timeout: 10, app)
+        let add = app.buttons["preview-note-add"], cancel = app.buttons["preview-note-cancel"]
+        see(cancel, "no Cancel for the comment", timeout: 5, app)
+        sleep(1)
+        shot(app, "picked")
+        // The panel takes its room before the page: what was picked in sight, Add to Message above the keyboard.
+        let panel = app.scrollViews["preview-note-panel"]
+        see(panel, "the comment panel does not scroll at this size", app)
+        XCTAssertGreaterThanOrEqual(picked.frame.minY, panel.frame.minY - 1, "what was picked is scrolled away: \(picked.frame) \(panel.frame)")
+        XCTAssertTrue(add.isHittable, "Add to Message is under the keyboard: \(add.frame) \(panel.frame)")
+        if !cancel.isHittable { panel.swipeUp() }
+        XCTAssertLessThan(add.frame.maxY, cancel.frame.minY, "the buttons are not stacked with Add to Message first")
+        cancel.tap()
+        see(app.buttons["preview-pick"], "the bar did not come back after Cancel", timeout: 5, app)
     }
 
     @MainActor private func pickAndStart() throws {
@@ -139,7 +199,7 @@ final class PreviewUITests: XCTestCase {
         start.tap()
         let command = app.staticTexts["preview-start-command"]
         see(command, "the command is not shown before starting", timeout: 5, app)
-        XCTAssertEqual(command.label, "env PORT=8080 go run ./cmd/api")
+        XCTAssertEqual(command.label, "env 'PORT=8080' go run ./cmd/api")
         sleep(1)
         shot(app, "start")
         app.buttons["preview-start-confirm"].tap()

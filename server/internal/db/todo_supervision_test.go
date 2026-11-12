@@ -124,3 +124,65 @@ func TestReviewDoneTodoCancellation(t *testing.T) {
 		t.Fatalf("cancel missing task: %v", err)
 	}
 }
+
+func TestReviewDoneTodoClosesAFailedStart(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, tc := range []struct {
+		name     string
+		id       string
+		accepted bool
+		doneBy   string
+	}{
+		{name: "cancelled", id: "failed_cancelled", accepted: false, doneBy: DoneByCancelled},
+		{name: "accepted", id: "failed_accepted", accepted: true, doneBy: DoneByReview},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := d.CreateTodo(ctx, TodoRow{ID: tc.id, Title: "Supervised task", CreatedAt: now, UpdatedAt: now, Origin: "main"}); err != nil {
+				t.Fatal(err)
+			}
+			failed, err := d.FailTodo(ctx, tc.id, "synthetic start failure", now)
+			if err != nil || failed.StartError == "" || failed.DoneAt == nil || failed.DoneBy != "" {
+				t.Fatalf("FailTodo = %+v, %v", failed, err)
+			}
+			// Without a review the genuine failed start stays visible as one.
+			stored, err := d.GetTodo(ctx, tc.id)
+			if err != nil || stored.StartError != "synthetic start failure" || stored.DoneBy != "" {
+				t.Fatalf("unreviewed failed start = %+v, %v", stored, err)
+			}
+			closedAt := now.Add(time.Minute)
+			row, closed, err := d.ReviewDoneTodo(ctx, tc.id, "reviewed after the start failed", tc.accepted, closedAt)
+			if err != nil || !closed || row == nil {
+				t.Fatalf("ReviewDoneTodo = %+v, closed=%v, err=%v", row, closed, err)
+			}
+			if row.StartError != "" || row.DoneBy != tc.doneBy || row.DoneAt == nil || !row.DoneAt.Equal(closedAt) {
+				t.Fatalf("closed failed start = %+v", row)
+			}
+			stored, err = d.GetTodo(ctx, tc.id)
+			if err != nil || stored.StartError != row.StartError || stored.DoneBy != row.DoneBy || stored.DoneAt == nil || !stored.DoneAt.Equal(*row.DoneAt) {
+				t.Fatalf("stored failed start = %+v, returned = %+v, err=%v", stored, row, err)
+			}
+		})
+	}
+}
+
+func TestReviewDoneTodoDoesNotReplaceAnOrdinaryClose(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := d.CreateTodo(ctx, TodoRow{ID: "ordinary_close", Title: "Ordinary task", CreatedAt: now, UpdatedAt: now, Origin: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	row, closed, err := d.ReviewDoneTodo(ctx, "ordinary_close", "accepted first", true, now)
+	if err != nil || !closed || row.StartError != "" {
+		t.Fatalf("first close = %+v, closed=%v, err=%v", row, closed, err)
+	}
+	for _, accepted := range []bool{false, true} {
+		if _, closed, err := d.ReviewDoneTodo(ctx, "ordinary_close", "late review", accepted, now.Add(time.Minute)); err != nil || closed {
+			t.Fatalf("late review accepted=%v: closed=%v, err=%v", accepted, closed, err)
+		}
+	}
+	stored, err := d.GetTodo(ctx, "ordinary_close")
+	if err != nil || stored.DoneBy != DoneByReview || stored.DoneReason != "accepted first" || stored.DoneAt == nil || !stored.DoneAt.Equal(now) {
+		t.Fatalf("late reviews replaced the first close: %+v, %v", stored, err)
+	}
+}

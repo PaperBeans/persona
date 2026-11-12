@@ -113,6 +113,9 @@ func (s *Service) inboxHeld(ctx context.Context, sub Subscription, now time.Time
 		return nil, nil, nil
 	}
 	start := from.Add(-catchupBack)
+	if c := sub.CatchupFrom; c != nil && c.After(start) {
+		start = *c // a recipe changed with existing digest: the catch-up is what the new recipe found
+	}
 	// The catch-up is read while it is in the Inbox's window, which ends before its first items can be pruned (a
 	// digest of fewer items would read as a new move).
 	if now.Sub(start) < inboxWindow {
@@ -214,10 +217,25 @@ func (d deliverer) inboxThings(catchup, live []Held) []connector.InboxThing {
 	return out
 }
 
-func (d deliverer) thread(key string) string { return "sub:" + d.sub.ID + ":" + key }
+func (d deliverer) thread(key string) string { return threadPrefix(d.sub.ID) + key }
 
-func (d deliverer) tags() []connector.Tag {
-	return []connector.Tag{{Key: "source", Value: d.sub.ID, Name: d.sub.Label}}
+func threadPrefix(sub string) string { return "sub:" + sub + ":" }
+
+// OwnsThread says whether thread is one subscription id delivered to the Inbox (the item's connector thread, under
+// the subscription's id as its source), deleted since or not: it has no conversation of its own to open.
+func OwnsThread(id, thread string) bool {
+	return id != "" && strings.HasPrefix(thread, threadPrefix(id))
+}
+
+// tags are a thing's: the subscription it came from, and the sender of a row of items (#5306), which the Inbox can mute
+// as it mutes a connector's (lowercased, as people are told apart by name here). A digest, a snapshot and the failure
+// notice have no one sender.
+func (d deliverer) tags(sender string) []connector.Tag {
+	out := []connector.Tag{{Key: "source", Value: d.sub.ID, Name: d.sub.Label}}
+	if name := strings.TrimSpace(sender); name != "" {
+		out = append(out, connector.Tag{Key: connector.TagSender, Value: strings.ToLower(name), Name: name})
+	}
+	return out
 }
 
 // fallback is the tier an item gets when no model can triage it (the subscription's fallback_tier): by default FYI,
@@ -267,7 +285,7 @@ func (d deliverer) threadThing(key string, items []Held) connector.InboxThing {
 	b.WriteString(d.block(last.Item, heldAt(last)))
 	t := connector.InboxThing{Thread: d.thread(key), Kind: cmpOr(last.Kind, d.sub.Recipe.Kind), Label: d.sub.Label,
 		Title: last.Title, Sender: last.Sender, Preview: clip(oneLine(last.Body), previewMost), Context: b.String(),
-		At: heldAt(last), Last: last.UID, Rules: d.rules, Extra: d.fallback(due), Tags: d.tags()}
+		At: heldAt(last), Last: last.UID, Rules: d.rules, Extra: d.fallback(due), Tags: d.tags(last.Sender)}
 	if strings.HasPrefix(last.Link, "https://") {
 		t.URL = last.Link
 	}
@@ -333,16 +351,22 @@ func (d deliverer) digestThing(items []Held) connector.InboxThing {
 	}
 	slices.Sort(uids)
 	title := i18n.T(d.lang, "subscriptions-deliver.digest_title", i18n.Args{"label": d.sub.Label, "count": len(items)})
-	return connector.InboxThing{Thread: d.thread("catchup"), Kind: wire.ConnectorSubscriptionKindSubDigest, Label: d.sub.Label,
+	thread := d.thread("catchup")
+	if c := d.sub.CatchupFrom; c != nil {
+		// What a changed recipe found at once: a row of its own, not the first catch-up's again.
+		title = i18n.T(d.lang, "subscriptions-deliver.digest_title_recipe", i18n.Args{"label": d.sub.Label, "count": len(items)})
+		thread = d.thread("catchup-" + strconv.FormatInt(c.Unix(), 10))
+	}
+	return connector.InboxThing{Thread: thread, Kind: wire.ConnectorSubscriptionKindSubDigest, Label: d.sub.Label,
 		Title: title, Preview: clip(oneLine(cmpOr(items[0].Title, items[0].Body)), previewMost), Context: strings.Join(lines, "\n"),
-		At: heldAt(items[0]), Last: "digest:" + hashOf(uids...)[:24], Rules: d.rules, Extra: d.fallback(false), Tags: d.tags()}
+		At: heldAt(items[0]), Last: "digest:" + hashOf(uids...)[:24], Rules: d.rules, Extra: d.fallback(false), Tags: d.tags("")}
 }
 
 // snapshotThing is a snapshot that changed: the state as the source answered it.
 func (d deliverer) snapshotThing(h Held) connector.InboxThing {
 	return connector.InboxThing{Thread: d.thread("snapshot"), Kind: cmpOr(h.Kind, wire.ConnectorSubscriptionKindSubUpdate),
 		Label: d.sub.Label, Title: cmpOr(h.Title, d.sub.Label), Preview: clip(oneLine(h.Body), previewMost),
-		Context: clip(h.Body, contextBodyMost), At: h.Stored, Last: h.UID, Rules: d.rules, Extra: d.fallback(false), Tags: d.tags()}
+		Context: clip(h.Body, contextBodyMost), At: h.Stored, Last: h.UID, Rules: d.rules, Extra: d.fallback(false), Tags: d.tags("")}
 }
 
 // failing is the subscription's failure notice: FYI by rule once it has not pulled for failingNotice (one a
@@ -366,7 +390,7 @@ func (d deliverer) failing() connector.InboxThing {
 	return connector.InboxThing{Thread: d.thread("failing"), Kind: KindFailing, Label: d.sub.Label,
 		Title:   i18n.T(d.lang, "subscriptions-deliver.failing_title", i18n.Args{"label": d.sub.Label, "since": d.when(*since)}),
 		Preview: reason, Context: reason, At: since.Add(failingNotice), Last: "failing:" + strconv.FormatInt(since.Unix(), 10),
-		Tier: connector.TierFYI, Why: i18n.T(d.lang, "subscriptions-deliver.failing_why"), Tags: d.tags()}
+		Tier: connector.TierFYI, Why: i18n.T(d.lang, "subscriptions-deliver.failing_why"), Tags: d.tags("")}
 }
 
 // ---- the knowledge base ----

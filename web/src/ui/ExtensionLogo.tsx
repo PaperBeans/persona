@@ -1,24 +1,58 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { credentialOwner, subscribeCredentialOwner } from "../lib/api";
+import { acquireExtensionLogo, extensionLogoSource } from "../lib/extension-logo";
+import { defaultManager, managerHeaderFor, onDefaultManager, useChosenManager } from "../lib/manager-choice";
 import { Icon } from "./icons";
 
-/** Catalog artwork is public, anonymous HTTPS content, never a hub-authenticated image. */
-function logoURL(value?: string): string | null {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password ? url.href : null;
-  } catch {
-    return null;
-  }
-}
+const subscribeDefault = (listener: () => void) => onDefaultManager(listener);
 
 /** Keep the caller's existing tile geometry and status tint, including when artwork fails. */
-export function ExtensionLogo({ url, className, iconSize }: { url?: string; className: string; iconSize: number }) {
-  const src = logoURL(url);
-  // Remount on URL changes: a failed image must not prevent newer artwork from loading.
-  return <span aria-hidden="true" data-extension-logo className={`relative ${className}`}>
-    <LogoImage key={src} src={src} iconSize={iconSize} />
+export function ExtensionLogo({ url, manager, className, iconSize }: { url?: string; manager?: string; className: string; iconSize: number }) {
+  const source = extensionLogoSource(url);
+  const owner = useSyncExternalStore(subscribeCredentialOwner, credentialOwner);
+  useChosenManager();
+  const fallbackOwner = useSyncExternalStore(subscribeDefault, defaultManager);
+  const resolvedManager = (manager ?? (source?.path ? managerHeaderFor(source.path) : undefined)) || fallbackOwner;
+  const tile = useRef<HTMLSpanElement>(null);
+  // Remount on URL/owner changes: failed or retired artwork cannot replace a new request.
+  return <span ref={tile} aria-hidden="true" data-extension-logo className={`relative ${className}`}>
+    {source?.path ? <HubLogo key={`${owner}:${resolvedManager}:${source.path}`} path={source.path} manager={resolvedManager} tile={tile} iconSize={iconSize} />
+      : <LogoImage key={source?.publicURL} src={source?.publicURL ?? null} iconSize={iconSize} />}
   </span>;
+}
+
+function HubLogo({ path, manager, tile, iconSize }: { path: string; manager?: string; tile: RefObject<HTMLSpanElement | null>; iconSize: number }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    let objectURL: string | undefined;
+    let request: ReturnType<typeof acquireExtensionLogo> | undefined;
+    const start = () => {
+      if (!active || request) return;
+      request = acquireExtensionLogo(path, manager);
+      request.promise.then(blob => {
+        if (!active) return;
+        objectURL = URL.createObjectURL(blob);
+        setSrc(objectURL);
+      }).catch(() => { /* Keep the existing generic mark on unavailable artwork. */ });
+    };
+    // loading="lazy" on the eventual <img> cannot defer the preceding authenticated fetch.
+    // Observe the existing tile with the default zero margin, including its scrolling ancestors' clipping.
+    let observer: IntersectionObserver | undefined;
+    if (typeof IntersectionObserver !== "undefined" && tile.current) {
+      observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) { observer?.disconnect(); start(); }
+      });
+      observer.observe(tile.current);
+    } else start();
+    return () => {
+      active = false;
+      observer?.disconnect();
+      request?.release();
+      if (objectURL) URL.revokeObjectURL(objectURL);
+    };
+  }, [path, manager, tile]);
+  return <LogoImage key={src} src={src} iconSize={iconSize} />;
 }
 
 function LogoImage({ src, iconSize }: { src: string | null; iconSize: number }) {

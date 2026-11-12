@@ -6,6 +6,8 @@
   "view_draft": "查看草稿",
   "ai_draft": "AI 草拟回复",
   "hand_to_ai": "交给 AI",
+  "open_in_feishu": "在飞书打开",
+  "open_in_lark": "在 Lark 打开",
   "placeholder_title": "选一件事",
   "placeholder_hint": "左边列表里点一件事，详情会在这里打开。",
   "mute": "静音",

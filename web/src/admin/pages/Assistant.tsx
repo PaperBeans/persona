@@ -1,92 +1,30 @@
-// "Assistant cards" (docs/operations/admin.md "Assistant cards", docs/assistant/assistant-views.md "Prompts and toggles", #2023): the switch for the main conversation's
-// rich UI (hub.json's assistant.persona_view), what each app does with it today, and a preview of the example cards.
+// "Assistant cards" (docs/operations/admin.md "Assistant cards", docs/assistant/assistant-views.md "Prompts"): the main
+// conversation's rich UI, always on (#5509), what each app does with it today, and a preview of the example cards.
 // The preview is local only: it draws the synthetic examples with the extensions' components, a press or a form only
 // changes this page's state, and an html card shows its text fallback (no model page runs here). It never calls the hub.
 import { useState } from "react";
 import { t } from "../../i18n";
-import { Button, Dialog, toast } from "../../ui/atoms";
+import { Button } from "../../ui/atoms";
 import { ViewSections } from "../../views/extensions/ViewBody";
-import { Switch } from "../../views/settings/SettingsParts";
 import { fieldValues, type UIAction, type UIItem } from "../../lib/extension-ui";
-import { errorText, getAssistantCards, setPersonaView } from "../api";
 import { example, EXAMPLE_ORDER, previewAction, submitSummary, type ExampleId } from "../assistant-examples";
 import { AdminIcon } from "../icons";
 import { devDialog } from "../router";
-import type { AssistantCards } from "../types";
-import { Card, ErrorBox, Line, Loader, Notice, PageHeader, Segmented, Tag, useLoad, type Tone } from "../parts";
+import { Card, Line, Notice, PageHeader, Segmented, Tag, type Tone } from "../parts";
 
 export function Assistant() {
-  const { data, error, loading, reload, set } = useLoad(getAssistantCards);
-  if (!data) return loading ? <Loader /> : <ErrorBox error={error} onRetry={reload} />;
   return (
     <>
       <PageHeader title={t("admin-pages-assistant.title")} subtitle={t("admin-pages-assistant.subtitle")} />
-      <SwitchCard v={data} onSaved={set} />
       <SupportCard />
       <PreviewCard />
     </>
   );
 }
 
-function SwitchCard({ v, onSaved }: { v: AssistantCards; onSaved: (v: AssistantCards) => void }) {
-  const [asking, setAsking] = useState(() => devDialog() === "enable");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const save = async (on: boolean) => {
-    setBusy(true);
-    setError("");
-    try {
-      const r = await setPersonaView(on);
-      setAsking(false);
-      onSaved(r);
-      toast(on ? t("admin-pages-assistant.saved_on") : t("admin-pages-assistant.saved_off"), "ok");
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Card
-      title={t("admin-pages-assistant.switch_title")}
-      right={v.persona_view ? <Tag tone="green">{t("admin-pages-assistant.state_on")}</Tag> : <Tag>{t("admin-pages-assistant.state_off")}</Tag>}
-      footer={t("admin-pages-assistant.switch_footer")}
-    >
-      <Line label={t("admin-pages-assistant.persona_view")} hint={t("admin-pages-assistant.persona_view_hint")}>
-        <Switch on={v.persona_view} disabled={busy} label={t("admin-pages-assistant.persona_view")} onChange={(on) => (on ? setAsking(true) : void save(false))} />
-      </Line>
-      <Line label={t("admin-pages-assistant.compat")} hint={t("admin-pages-assistant.compat_hint")} />
-      <Line label={t("admin-pages-assistant.html_views")} hint={t("admin-pages-assistant.html_views_hint")}>
-        <Tag tone="orange">{t("admin-pages-assistant.html_fallback_tag")}</Tag>
-      </Line>
-      {error && <p className="px-4 py-2.5 text-[12px] text-red">{error}</p>}
-      <Dialog
-        open={asking}
-        onClose={() => setAsking(false)}
-        title={t("admin-pages-assistant.enable_title")}
-        footer={
-          <>
-            <Button tone="quiet" onClick={() => setAsking(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button tone="primary" busy={busy} onClick={() => void save(true)}>
-              {t("admin-pages-assistant.enable_confirm")}
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-2 text-[12.5px] leading-relaxed text-ink-2">
-          <p>{t("admin-pages-assistant.enable_body")}</p>
-          <p>{t("admin-pages-assistant.enable_body_compat")}</p>
-        </div>
-      </Dialog>
-    </Card>
-  );
-}
-
 const SUPPORT: { key: string; tone: Tone }[] = [
-  { key: "web", tone: "orange" },
-  { key: "apple", tone: "orange" },
+  { key: "web", tone: "green" },
+  { key: "apple", tone: "green" },
   { key: "android", tone: "orange" },
   { key: "watch", tone: "gray" },
 ];

@@ -6,6 +6,8 @@ import { api } from "./api";
 import { onHubEvent, useStore } from "./store";
 
 export const SUBSCRIPTIONS_FEATURE = "source_subscriptions";
+/** The manager's pages are Inbox Sources (#5278): built-in sources beside the subscriptions; Settings has its row. */
+export const INBOX_SOURCES_FEATURE = "inbox_sources";
 
 export { SUBSCRIPTIONS_UI } from "./subscriptions-ui";
 
@@ -27,6 +29,11 @@ export interface SubscriptionCounts {
 /** Whether the manager shows subscriptions (they deliver). */
 export function useSubscriptionsShown(): boolean {
   return useStore((s) => s.features.includes(SUBSCRIPTIONS_FEATURE));
+}
+
+/** Whether the manager draws Inbox Sources (Settings' row, the Inbox menu's item and the page's title say so). */
+export function useInboxSourcesShown(): boolean {
+  return useStore((s) => s.features.includes(INBOX_SOURCES_FEATURE));
 }
 
 /** The summary, read when subscriptions are shown and again whenever one changes (at most once a second); null before. */

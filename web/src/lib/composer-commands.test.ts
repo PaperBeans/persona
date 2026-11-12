@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { agentCommands, paneClaude } from "./composer-commands";
+import { agentCommands, paneClaude, rankCommands, SLASH_LIMIT } from "./composer-commands";
+import { t } from "../i18n";
+import { WORKFLOWS_COMMAND } from "./background-panel";
 import { LOOP_TEXT } from "./loop-command";
 import type { Session } from "./types";
 
@@ -31,11 +33,81 @@ describe("agentCommands", () => {
   });
 });
 
+// /workflows opens the Agent's Background tasks panel (#5421, cindy's): Claude Code Agents only.
+describe("agentCommands' /workflows", () => {
+  const LIST = [{ text: "继续" }, { text: WORKFLOWS_COMMAND }];
+  const has = (s?: Session) => agentCommands(LIST, s).some((c) => c.text === WORKFLOWS_COMMAND);
+  it("is listed for a Claude Code Agent, working or not, in a pane or not", () => {
+    expect(has(session({}))).toBe(true);
+    expect(has(session({ agent: "claude", state: "working", status: "working" }))).toBe(true);
+    expect(has(session({ pane_id: undefined }))).toBe(true);
+  });
+  it("is not listed for the assistant, Codex, another runtime or no session", () => {
+    for (const s of [session({ assistant: true }), session({ agent: "codex" }), session({ source_kind: "codex_app_server" }), session({ agent: "opencode" }), undefined]) expect(has(s)).toBe(false);
+  });
+  it("is Persona's own row: no Agent named as its source", () => {
+    expect(agentCommands(LIST, session({})).find((c) => c.text === WORKFLOWS_COMMAND)).toEqual({ text: WORKFLOWS_COMMAND });
+  });
+});
+
 describe("paneClaude", () => {
   it("is Claude in a herdr pane that takes messages", () => {
     expect(paneClaude(session({}))).toBe(true);
     expect(paneClaude(session({ agent: "claude" }))).toBe(true);
     expect(paneClaude(session({ assistant: true }))).toBe(false);
     expect(paneClaude(undefined)).toBe(false);
+  });
+});
+
+// The palette's row names where an agent's own slash command comes from: the session's agent, not always Claude Code.
+describe("agentCommands' source label", () => {
+  const LIST: { text: string; agent?: boolean; source?: string }[] = [{ text: "继续" }, { text: "/compact", agent: true }];
+  const sources = (s?: Session) => agentCommands(LIST, s).map((c) => c.source);
+  it("is the agent's name on its own commands only", () => {
+    expect(sources(session({}))).toEqual([undefined, t("agent-mark.claude")]);
+    expect(sources(session({ agent: "codex" }))).toEqual([undefined, t("agent-mark.codex")]);
+    expect(sources(undefined)).toEqual([undefined, t("agent-mark.claude")]);
+  });
+  it("leaves the list it was given alone", () => {
+    agentCommands(LIST, session({}));
+    expect(LIST[1]).toEqual({ text: "/compact", agent: true });
+  });
+});
+
+// cindy's ranking (filterSlashCommands): exact, prefix, contains on the name, stable within each; descriptions after.
+describe("rankCommands", () => {
+  const cmd = (word: string, desc = "") => ({ word, desc });
+  const words = (list: { word: string }[]) => list.map((c) => c.word);
+
+  it("puts an exact name first, then names starting with it, then names containing it, each in list order", () => {
+    const list = [cmd("/recompact"), cmd("/context"), cmd("/loop"), cmd("/compact"), cmd("/co"), cmd("/commit")];
+    expect(words(rankCommands(list, "co"))).toEqual(["/co", "/context", "/compact", "/commit", "/recompact"]);
+  });
+
+  it("ignores case and the slash, and lists everything in order for a bare /", () => {
+    const list = [cmd("/Model"), cmd("/loop"), cmd("/今天做了什么")];
+    expect(words(rankCommands(list, "MOD"))).toEqual(["/Model"]);
+    expect(words(rankCommands(list, "今天"))).toEqual(["/今天做了什么"]);
+    expect(words(rankCommands(list, ""))).toEqual(["/Model", "/loop", "/今天做了什么"]);
+  });
+
+  it("matches descriptions only after every name hit, so they never reorder those", () => {
+    const list = [cmd("/model", "Switch model"), cmd("/compact", "Compact the context"), cmd("/context", "Show the context"), cmd("/clear", "清空对话")];
+    expect(words(rankCommands(list, "context"))).toEqual(["/context", "/compact"]);
+    expect(words(rankCommands(list, "SWITCH"))).toEqual(["/model"]);
+    expect(words(rankCommands(list, "对话"))).toEqual(["/clear"]);
+  });
+
+  it("finds nothing for a word nothing has", () => {
+    expect(rankCommands([cmd("/model", "Switch model")], "zzz")).toEqual([]);
+  });
+
+  it("stops at 25 rows", () => {
+    const list = Array.from({ length: 40 }, (_, i) => cmd(`/c${i}`));
+    expect(SLASH_LIMIT).toBe(25);
+    expect(rankCommands(list, "c")).toHaveLength(25);
+    expect(rankCommands(list, "")).toHaveLength(25);
+    // the exact hit is first even when it sits past the limit in the list
+    expect(rankCommands(list, "c39")[0].word).toBe("/c39");
   });
 });

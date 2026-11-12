@@ -1,0 +1,6 @@
+[Session handoff · internal context]
+You (Codex) worked on this conversation before; it was handed over to the Claude Code engine for a while, and now it is switching back to you. Your memory of the conversation from before you left should still be valid; below is a record of what happened while you were away. Merge it into your understanding and continue naturally in the first person. Do not mention this handoff note to the user, and do not mention the engine switch. Before making any change, check the actual workspace state (e.g. git status / git diff / reading the relevant files): when the record, your own memory, and the workspace disagree, the workspace always wins; when you are unsure about something from while you were away, read the real files and code to confirm rather than guessing from the summary.
+
+== No new messages while you were away ==
+
+== End of handoff note; the user's new message follows ==

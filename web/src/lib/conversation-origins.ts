@@ -1,6 +1,7 @@
 // Where an assistant conversation comes from (docs/protocol/protocol.md "Origin of assistant chats", #3264): the user's own (the app, a
-// channel's /new) can be in the sidebar's "Recent" (#4873); the ones the hub opened by itself (the inbox's AI twin, a scheduled
-// task, conversation_new, a plugin's /agent…) are only in "All chats", filtered by origin. Pure functions, tested without a DOM.
+// channel's /new), or one the hub opened by itself (the inbox's AI twin, a scheduled task, conversation_new, a plugin's /agent…).
+// The sidebar's "Recent" lists both (#5195), each of the latter with its group's mark (OriginMark); "All chats" filters by
+// origin. Pure functions, tested without a DOM.
 import { t } from "../i18n";
 import type { IconName } from "../ui/icons";
 import type { BrandId } from "./connectors";
@@ -16,20 +17,29 @@ export type OriginFilter = "all" | "mine" | AutoOrigin;
 
 const USER_ORIGINS = new Set(["", "user", "channel"]);
 
-/** The automatic group a conversation is in; undefined for the user's own (an older hub says nothing: all are). */
-export function autoOrigin(s: Pick<Session, "origin">): AutoOrigin | undefined {
+/** The automatic group a conversation is in; undefined for the user's own (an older hub says nothing: all are).
+ *  `background`: the background supervisor's id (lib/background-supervisor.ts, #5082). That conversation is with the
+ *  scheduled tasks' whatever origin its row carries: never one of the user's own. */
+export function autoOrigin(s: Pick<Session, "origin"> & { session_id?: string }, background?: string): AutoOrigin | undefined {
+  if (background && s.session_id === background) return "task";
   const o = s.origin ?? "";
   if (USER_ORIGINS.has(o)) return undefined;
   return (AUTO_ORIGINS as readonly string[]).includes(o) ? (o as AutoOrigin) : "other";
 }
 
-export const isAutoConversation = (s: Pick<Session, "origin">) => autoOrigin(s) !== undefined;
+export const isAutoConversation = (s: Pick<Session, "origin"> & { session_id?: string }, background?: string) => autoOrigin(s, background) !== undefined;
 
 export function originLabel(o: AutoOrigin): string {
   return t(`assistant-conversations.origin_${o}`);
 }
 
-/** Each group's mark: the sidebar's "Automatic" rows, and an external conversation's (OriginMark). */
+/** What a row's origin mark is named (#5195): where an external conversation came from ("From Lark /agent"), else its
+ *  group's name, as All chats' filter for it says it. */
+export function originMarkLabel(o: AutoOrigin): string {
+  return (EXTERNAL_ORIGINS as readonly string[]).includes(o) ? externalFrom(o as ExternalOrigin) : originLabel(o);
+}
+
+/** Each group's mark (OriginMark), on the rows of the conversations in it: the sidebar's and All chats' (#5195). */
 export const ORIGIN_ICON: Record<AutoOrigin, IconName> = { inbox: "inbox", task: "clock", lark_agent: "at", spawned: "fork", extension: "extension", other: "more" };
 /** A group with a brand of its own draws its mark instead of the icon (#3758). */
 export const ORIGIN_BRAND: Partial<Record<AutoOrigin, BrandId>> = { lark_agent: "lark" };
@@ -65,9 +75,9 @@ export function parseOriginFilter(v: string | undefined): OriginFilter {
   return v === "mine" || (AUTO_ORIGINS as readonly string[]).includes(v ?? "") ? (v as OriginFilter) : "all";
 }
 
-export function matchesOrigin(s: Pick<Session, "origin">, filter: OriginFilter): boolean {
+export function matchesOrigin(s: Pick<Session, "origin"> & { session_id?: string }, filter: OriginFilter, background?: string): boolean {
   if (filter === "all") return true;
-  const o = autoOrigin(s);
+  const o = autoOrigin(s, background);
   return filter === "mine" ? o === undefined : o === filter;
 }
 
@@ -87,22 +97,20 @@ function tally(list: readonly Session[]): OriginTally {
 
 /** The automatic conversations (not archived, not the main one) by group, only the groups that have any, in the
  *  sidebar's order, and all of them together. */
-export function autoConversations(conversations: readonly Session[], main: string | undefined): { total: OriginTally; groups: (OriginTally & { origin: AutoOrigin })[] } {
-  const auto = conversations.filter((c) => c.session_id !== main && !c.archived && isAutoConversation(c));
-  const groups = AUTO_ORIGINS.map((origin) => ({ origin, ...tally(auto.filter((c) => autoOrigin(c) === origin)) })).filter((g) => g.count > 0);
+export function autoConversations(conversations: readonly Session[], main: string | undefined, background?: string): { total: OriginTally; groups: (OriginTally & { origin: AutoOrigin })[] } {
+  const auto = conversations.filter((c) => c.session_id !== main && !c.archived && isAutoConversation(c, background));
+  const groups = AUTO_ORIGINS.map((origin) => ({ origin, ...tally(auto.filter((c) => autoOrigin(c, background) === origin)) })).filter((g) => g.count > 0);
   return { total: tally(auto), groups };
 }
 
-/** How many chats the sidebar's "Recent" lists (#4873); the rest are in "All chats". */
-export const RECENT_LIMIT = 5;
-
-/** The sidebar's "Recent" under Persona chats (#4873): the newest `limit` of the user's own conversations that are not the
- *  main one and not a leader (常驻, listed above it), by last activity (equal times by id, as iOS). The ones the hub opened
- *  by itself stay in "All chats", as "Recent" left them out before #4331. */
-export function recentConversations(conversations: readonly Session[], main: string | undefined, leaders: readonly string[], limit = RECENT_LIMIT): Session[] {
+/** The sidebar's "Recent" under Persona chats (#4873, #5195), newest first: every conversation whoever opened it (the
+ *  user, a scheduled task, Lark /agent, the inbox…; a row says which with its origin's mark) except the main one, the
+ *  leaders (常驻, listed above it), the archived ones and the hub's built-in background supervisor (`background`, its
+ *  id: listed with the scheduled tasks' chats in "All chats" only, #4927), by last activity (equal times by id, as
+ *  iOS). The sidebar shows the first ones (lib/sidebar-recent.ts, #5146). */
+export function recentConversations(conversations: readonly Session[], main: string | undefined, leaders: readonly string[], background?: string): Session[] {
   const lead = new Set(leaders);
   return conversations
-    .filter((c) => c.session_id !== main && !lead.has(c.session_id) && !c.archived && !isAutoConversation(c))
-    .sort((a, b) => byTime(b.updated_at, a.updated_at) || (a.session_id < b.session_id ? -1 : a.session_id > b.session_id ? 1 : 0))
-    .slice(0, limit);
+    .filter((c) => c.session_id !== main && !lead.has(c.session_id) && !c.archived && !(background && c.session_id === background))
+    .sort((a, b) => byTime(b.updated_at, a.updated_at) || (a.session_id < b.session_id ? -1 : a.session_id > b.session_id ? 1 : 0));
 }

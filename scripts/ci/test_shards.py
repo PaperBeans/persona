@@ -16,6 +16,29 @@ server = load("server-shards")
 python = load("python-tests")
 
 
+class ServerShardCommandTests(unittest.TestCase):
+    node = ["example/server/internal/node", "example/server/internal/node/sub"]
+
+    def test_the_node_shard_runs_internal_node_in_its_partitions_beside_its_other_packages(self):
+        runs = server.commands(self.node, "node", "/tmp/db.json", ["^(TestA|TestC)$", "^(TestB)$"])
+        self.assertEqual(len(runs), 3)
+        for run in runs:
+            self.assertEqual(run[run.index("go"):run.index("go") + 7],
+                             ["go", "test", "-json", "-p", "1", "-count=1", "-timeout=10m"])
+            self.assertIn("/tmp/db.json", run)
+        self.assertEqual(runs[0][-1], "example/server/internal/node/sub")
+        self.assertEqual([run[-3:] for run in runs[1:]], [["-run", "^(TestA|TestC)$", "./internal/node"],
+                                                          ["-run", "^(TestB)$", "./internal/node"]])
+
+    def test_other_shards_and_a_node_shard_without_the_package_stay_one_process(self):
+        self.assertEqual(len(server.commands(["example/server/internal/hub"], "managers", "/tmp/db.json")), 1)
+        self.assertEqual(len(server.commands(["example/server/internal/node/sub"], "node", "/tmp/db.json")), 1)
+
+    def test_internal_node_never_runs_without_its_partitions(self):
+        with self.assertRaises(ValueError):
+            server.commands(self.node, "node", "/tmp/db.json", ())
+
+
 class ShardTests(unittest.TestCase):
     def test_every_server_package_is_selected_once(self):
         packages = ["example/server/internal/" + name for name in

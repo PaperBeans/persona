@@ -29,6 +29,8 @@
     <string name="chat_delivery_edit">戻して編集</string>
     <string name="chat_delivery_retry">再試行</string>
     <string name="chat_delivery_delete">削除</string>
+    <string name="chat_delivery_deleted">メッセージを削除しました</string>
+    <string name="chat_delivery_undo">元に戻す</string>
     <string name="chat_delivery_discard">破棄</string>
     <string name="chat_delivery_check">メッセージを確認</string>
     <string name="chat_delivery_resend_title">このメッセージを再送しますか？</string>
@@ -283,7 +285,7 @@
     </plurals>
     <string name="chat_tasks_plan_single">こう始めます</string>
     <string name="chat_tasks_default_model">デフォルトモデル</string>
-    <string name="chat_tasks_read_only">読み取り専用</string>
+    <string name="chat_tasks_read_only">読み取り専用を要求</string>
     <string name="chat_tasks_plan_remember">次回からこの種類は直接開始</string>
     <plurals name="chat_tasks_plan_start_count">
         <item quantity="other">%1$d件を開始</item>
@@ -307,7 +309,7 @@
     <string name="chat_tasks_say">メッセージ</string>
     <string name="chat_tasks_restarting">「%1$s」を再開始しています</string>
     <string name="chat_tasks_restarted">「%1$s」は再試行で開始しました</string>
-    <string name="chat_tasks_receipt_failed_title">%1$sを開始できませんでした</string>
+    <string name="chat_tasks_receipt_failed_title">%1$sを起動できませんでした</string>
     <string name="chat_tasks_receipt_done_title">%1$sが完了しました</string>
     <string name="chat_tasks_receipt_stopped_title">%1$sは止まりました（未完了）</string>
     <string name="chat_tasks_look">見る</string>
@@ -359,8 +361,8 @@
     <string name="chat_today_review_prompt">Larkで私がメンションされたメッセージを確認してください：返信が必要なものを挙げ、下書きできるものは先に下書きしてください</string>
     <string name="chat_today_title">今日知っておくこと</string>
     <string name="chat_today_empty">対応待ちはなく、予定も空いています。</string>
-    <string name="chat_tasks_message_replied">あなたの名前で返信しました</string>
-    <string name="chat_tasks_message_drafted">タスクの進捗から下書きした返信</string>
+    <string name="chat_tasks_message_replied">あなたとして返信しました</string>
+    <string name="chat_tasks_message_drafted">タスクの進捗をもとに作成した返信</string>
     <string name="chat_tasks_message_blank">下書きに未入力の「%1$s」があります。修正するか削除してから送信してください</string>
     <string name="chat_tasks_send">送信</string>
     <string name="chat_tasks_later">後で</string>
@@ -368,7 +370,7 @@
     <string name="chat_tasks_message_filed_title">対応済み・送信しなかった下書き</string>
     <string name="chat_tasks_dock_waiting">%1$s・要対応</string>
     <string name="chat_tasks_dock_interrupted">%1$s・中断</string>
-    <string name="chat_tasks_route_chip">「%1$s」へ ×</string>
+    <string name="chat_tasks_route_chip">「%1$s」に伝える</string>
     <string name="chat_tool_details">ツールの詳細</string>
     <string name="chat_tool_view_file">ファイルを表示</string>
     <string name="chat_tool_plan_title">プラン</string>
@@ -421,6 +423,13 @@
     <string name="chat_work_seconds">%1$d秒</string>
     <string name="chat_work_minutes">%1$d分</string>
     <string name="chat_work_hours_minutes">%1$d時間%2$d分</string>
+    <string name="chat_work_working_for">作業中%1$s</string>
+    <string name="chat_work_done">完了</string>
+    <string name="chat_work_tools">ツール%1$d</string>
+    <string name="chat_work_thoughts">思考%1$d</string>
+    <string name="chat_work_replies">返信%1$d</string>
+    <string name="chat_work_minutes_seconds">%1$d分%2$d秒</string>
+    <string name="chat_work_reading_files">%1$d件のファイルを読み込み中</string>
     <plurals name="chat_work_done_steps">
         <item quantity="other">%1$dステップ</item>
     </plurals>

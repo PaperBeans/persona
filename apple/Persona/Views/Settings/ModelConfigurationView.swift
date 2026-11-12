@@ -8,6 +8,8 @@ struct ModelConfigurationView: View {
     /// In Model Settings' own sheet (`ModelConfigurationLink`). A Mac sheet does not push (it shrank and cut the form off,
     /// #1170): there a category opens over it in a sheet of its own (#1248). In Settings it pushes, as on iOS.
     var inSheet = false
+    /// Sheets opened from other pages keep their existing Model Settings title and navigation.
+    var showsAdvancedProviders = true
     @State private var page = ModelConfigurationModel()
     @State private var scopeExpanded = false
     @State private var editing: ModelPurposeRoute?
@@ -29,6 +31,8 @@ struct ModelConfigurationView: View {
                         categoryLink(category)
                             .accessibilityIdentifier("model-purpose-\(category.id)")
                     }
+                } header: {
+                    Text("Choose models for each use.")
                 }
                 Section {
                     DisclosureGroup(isExpanded: $scopeExpanded) {
@@ -54,9 +58,22 @@ struct ModelConfigurationView: View {
                 EmptyStateView(symbol: Theme.Icon.model, title: String(localized: "No Model Configuration Yet"), message: String(localized: "Connect to a hub that supports model configuration by category to set it up here."))
                     .listRowBackground(Color.clear)
             }
+            if showsAdvancedProviders {
+                Section {
+                    NavigationLink(value: ModelLaunchersRoute()) {
+                        SettingsRow(title: String(localized: "Providers and Keys"), symbol: Theme.Icon.model, tint: Theme.ai)
+                    }
+                    .lineLimit(1)
+                    .accessibilityIdentifier("settings-model-providers")
+                } header: {
+                    Text("Advanced")
+                } footer: {
+                    Text("Manage connections and keys. Choose how a model runs inside each use's advanced settings.")
+                }
+            }
         }
         .themedPage()
-        .detailTitle(String(localized: "Model Settings [Launcher Model Picker 8cbcf7]"))
+        .detailTitle(showsAdvancedProviders ? String(localized: "Models") : String(localized: "Model Settings [Launcher Model Picker 8cbcf7]"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await page.load() }
         .refreshable { await page.load() }
@@ -93,7 +110,7 @@ struct ModelConfigurationView: View {
             Text(category.id == "lark.agent" ? String(localized: "Lark /agent") : category.name).font(Theme.Font.body).lineLimit(1)
             Text(page.modelSummary(category))
                 .font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
-            if ModelConfigurationModel.followsAgents(category) {
+            if ModelConfigurationModel.followsCategory(category) {
                 Text(page.inheritanceStatus(category)).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             if let limit = category.limit {
@@ -132,6 +149,7 @@ struct ModelPurposeEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var page = ModelConfigurationModel()
     @State private var confirmReload = false
+    @State private var advancedExpanded = false
     /// A launcher provider's /model list (#943) for `listFor`; nil: none to pick from (not loaded, older hub, none).
     @State private var launcherList: LauncherModels?
     @State private var listFor = ""
@@ -142,14 +160,11 @@ struct ModelPurposeEditorView: View {
         SettingsForm {
             if let purpose = page.purpose {
                 Section("In Effect") {
-                    if page.isAgentsOverride {
+                    if page.followLabel != nil {
                         LabeledContent("Configuration", value: page.inheritanceStatus(purpose))
                             .accessibilityIdentifier("model-config-inheritance")
                     }
-                    LabeledContent("Model [Assistant View c98e11]", value: page.summary(purpose).isEmpty ? String(localized: "Not set up") : page.summary(purpose))
-                    if let source = purpose.inheritedFrom, !source.isEmpty {
-                        LabeledContent("Inherited From", value: page.isAgentsOverride ? String(localized: "Agents") : source)
-                    }
+                    LabeledContent("Model [Assistant View c98e11]", value: page.modelSummary(purpose))
                     if let limit = purpose.limit {
                         ModelLimitLine(limit: limit, font: Theme.Font.label)
                     } else if let status = purpose.status, !status.isEmpty {
@@ -157,7 +172,6 @@ struct ModelPurposeEditorView: View {
                     }
                 }
                 Section {
-                    if purpose.supports("provider") { providerPicker }
                     if purpose.supports("model") {
                         if purpose.kind == "plugin" { pluginModelPicker }
                         else if let choice = launcherChoice {
@@ -201,22 +215,31 @@ struct ModelPurposeEditorView: View {
                         .lineLimit(1)
                         .accessibilityIdentifier("model-config-effort")
                     }
-                    if !page.runtimes.isEmpty { runtimePicker }
                 } header: {
                     Text("Model Settings [Model Configuration View 082a73]")
                 } footer: {
-                    Text(page.isLarkAgent
-                         ? String(localized: "Only applies to Lark /agent, not other Agents. Empty fields follow Agents. Changing the provider clears the previous model and thinking effort. Choose Follow Agents and save to clear the independent settings.")
-                         : page.isAgentsOverride
-                         ? String(localized: "Only applies to the Inbox's AI twin, not other Agents. Empty fields follow Agents. Changing the provider clears the previous model and thinking effort. Choose Follow Agents and save to clear the independent settings.")
-                         : String(localized: "Every use in this category uses this setting. Leave fields empty to keep the current default. Changing the provider clears the previous model and reasoning effort. Custom model IDs must be supported by the provider."))
+                    Text("Changes take effect from the next run. Current tasks aren't interrupted and past data isn't reprocessed. Permission settings don't change with the model.")
+                }
+                .disabled(page.saving || page.loading)
+                Section {
+                    DisclosureGroup(isExpanded: $advancedExpanded) {
+                        if purpose.supports("provider") { providerPicker }
+                        if !page.runtimes.isEmpty { runtimePicker }
+                        if let source = purpose.inheritedFrom, !source.isEmpty {
+                            LabeledContent("Inherited From", value: page.isAgentsOverride ? String(localized: "Agents") : source)
+                        }
+                        Text(advancedExplanation).font(Theme.Font.caption).foregroundStyle(.secondary)
+                    } label: {
+                        Text("Advanced").lineLimit(1)
+                            .accessibilityIdentifier("model-config-advanced")
+                    }
                 }
                 .disabled(page.saving || page.loading)
                 Section {
                     Button {
                         page.restoreInheritance()
                     } label: {
-                        Label(page.isAgentsOverride ? String(localized: "Follow Agents") : String(localized: "Restore Default"), systemImage: Theme.Icon.undo).lineLimit(1)
+                        Label(page.followLabel ?? String(localized: "Restore Default"), systemImage: Theme.Icon.undo).lineLimit(1)
                     }
                     .accessibilityIdentifier("model-config-restore")
                     .disabled(page.saving || page.loading || page.conflict || page.draft.isEmpty)
@@ -256,6 +279,16 @@ struct ModelPurposeEditorView: View {
         .confirmationDialog("Reloading discards your unsaved edits.", isPresented: $confirmReload, titleVisibility: .visible) {
             Button("Reload [Lark Chat Pins View 7bdd5c]", role: .destructive) { Task { await page.load(purposeID: purposeID) } }
         }
+    }
+
+    private var advancedExplanation: String {
+        page.isMainChatOverride
+            ? String(localized: "Only applies to the background supervisor, the conversation that follows up tasks for the main chat. Empty fields follow Main Chat. Changing the provider clears the previous model and thinking effort. Choose Follow Main Chat and save to clear the independent settings.")
+            : page.isLarkAgent
+            ? String(localized: "Only applies to Lark /agent, not other Agents. Empty fields follow Agents. Changing the provider clears the previous model and thinking effort. Choose Follow Agents and save to clear the independent settings.")
+            : page.isAgentsOverride
+            ? String(localized: "Only applies to the Inbox's AI twin, not other Agents. Empty fields follow Agents. Changing the provider clears the previous model and thinking effort. Choose Follow Agents and save to clear the independent settings.")
+            : String(localized: "Every use in this category uses this setting. Leave fields empty to keep the current default. Changing the provider clears the previous model and reasoning effort. Custom model IDs must be supported by the provider.")
     }
 
     private var saveButton: some View {
@@ -340,7 +373,7 @@ struct ModelPurposeEditorView: View {
         if listFor != provider { launcherList = nil }
         listFor = provider
         listError = nil
-        guard !provider.isEmpty, let api = AppModel.shared.api else { return }
+        guard !provider.isEmpty, let api = page.requestAPI else { return }
         listLoading = true
         defer { if listFor == provider { listLoading = false } }
         do {
@@ -355,7 +388,7 @@ struct ModelPurposeEditorView: View {
 
     private var providerPicker: some View {
         Picker("Model Providers", selection: Binding(get: { page.draft.provider ?? "" }, set: { page.chooseProvider($0) })) {
-            Text(page.isAgentsOverride ? String(localized: "Follow Agents") : String(localized: "Default [Model Configuration View a44f9f]")).tag("")
+            Text(page.followLabel ?? String(localized: "Default [Model Configuration View a44f9f]")).tag("")
             ForEach(page.candidates) { provider in
                 Text(provider.name).tag(provider.id)
             }
@@ -420,14 +453,14 @@ private struct ModelConfigurationSheet: ViewModifier {
                 if let purposeID {
                     ModelPurposeEditorView(purposeID: purposeID, inSheet: true)
                 } else {
-                    ModelConfigurationView(inSheet: true).macSheetDone { showing = false }
+                    ModelConfigurationView(inSheet: true, showsAdvancedProviders: false).macSheetDone { showing = false }
                 }
             }
             .macSheet()
             #else
             NavigationStack {
                 Group {
-                    if let purposeID { ModelPurposeEditorView(purposeID: purposeID) } else { ModelConfigurationView() }
+                    if let purposeID { ModelPurposeEditorView(purposeID: purposeID) } else { ModelConfigurationView(showsAdvancedProviders: false) }
                 }
                 .navigationDestination(for: ModelPurposeRoute.self) { ModelPurposeEditorView(purposeID: $0.id) }
                 .pageToolbar {

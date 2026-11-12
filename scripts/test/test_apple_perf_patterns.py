@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Calls that block the thread they run on may not grow in the Apple sources (docs/apple/performance.md, "Automated checks").
+"""Calls that block the thread they run on, or cost milliseconds each time a view redraws, may not grow in the Apple
+sources (docs/apple/performance.md, "Automated checks").
 
 App targets default to MainActor (`SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor` in apple/project.yml), so a Photos fetch, a
 keychain read, a synchronous file read or a full image decode written in a view, a model or an app-target helper runs on
@@ -36,6 +37,9 @@ PATTERNS = {
     "file-read": re.compile(r"\b(?:Data|String|NSData|NSString)\s*\(\s*contentsOf(?:File)?\s*:"),
     "directory-listing": re.compile(r"\.\s*(?:contentsOfDirectory|subpathsOfDirectory|enumerator)\s*\(\s*(?:at|atPath)\s*:"),
     "defaults-synchronize": re.compile(r"\bUserDefaults\b[^\n]*\.\s*synchronize\s*\(\s*\)"),
+    # P4: a localization lookup with an explicit locale reads the string tables on every call (1-2 ms; #5438).
+    # `interfaceText(_:)` is one; its declaration is not a call.
+    "localized-lookup": re.compile(r"(?<!func )\binterfaceText\s*\(|\bString\s*\(\s*localized:[^\n]*\blocale\s*:"),
     # P8: a full decode of an encoded picture.
     "image-decode": re.compile(r"\b(?:UIImage|NSImage)\s*\(\s*(?:data|contentsOfFile)\s*:"),
     # P9: a frame-rate timeline that never pauses.
@@ -123,8 +127,9 @@ class ApplePerfPatternTests(unittest.TestCase):
     def test_no_file_grows_its_blocking_calls(self):
         counts, _ = scan()
         grown, shrunk = compare(counts, load_baseline())
-        self.assertEqual(grown, [], "a blocking call was added (docs/apple/performance.md, rules P1, P8, P9): move it off "
-                         "the main actor, or mark a call verified to run off it `// perf-ok: <reason>`")
+        self.assertEqual(grown, [], "a blocking call or a per-call localization lookup was added (docs/apple/performance.md, "
+                         "rules P1, P4, P8, P9): move it off the main actor or out of the redraw path (cache a lookup per "
+                         "locale), or mark a verified call `// perf-ok: <reason>`")
         self.assertEqual(shrunk, [], "fewer blocking calls than the baseline: run "
                          "python3 scripts/test/test_apple_perf_patterns.py --update and commit the baseline")
 
@@ -145,6 +150,11 @@ class ApplePerfPatternTests(unittest.TestCase):
         self.assertEqual(calls("TimelineView(.animation(minimumInterval: 1 / 30)) { c in }"), [("unpaused-animation", 1)])
         self.assertEqual(calls("TimelineView(.animation(minimumInterval: 1 / 60, paused: still)) { c in }"), [])
         self.assertEqual(calls("TimelineView(.periodic(from: .now, by: 1)) { c in }"), [])
+        self.assertEqual(calls('Text(interfaceText("Needs You"))'), [("localized-lookup", 1)])
+        self.assertEqual(calls("nonisolated func interfaceText(_ resource: LocalizedStringResource) -> String {"), [])
+        self.assertEqual(calls('let s = String(localized: "Done", locale: .interface)'), [("localized-lookup", 1)])
+        self.assertEqual(calls('let s = String(localized: "Done")'), [])
+        self.assertEqual(calls('let s = interfaceText("Done") // perf-ok: resolved once per locale, StateName.text'), [])
 
     def test_compare(self):
         self.assertEqual(compare({"a": {"x": 2}}, {"a": {"x": 1}}), (["a: x 1 -> 2"], []))

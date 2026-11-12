@@ -9,9 +9,15 @@ final class DefaultLayoutTests: XCTestCase {
 
     @MainActor private func launch(tab: String, retiredArgument: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-demo.on", "YES", "-openWelcome", "YES", "-dev.openChat", "", "-tab", tab,
-                               "-app.tab", tab == "dev" ? "chats" : tab, "-AppleLanguages", "(zh-Hans)",
-                               "-AppleLocale", "zh_CN", "-probes", "YES"]
+        if tab == "settings", let hub = ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"] {
+            let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
+            app.launchArguments = ["-pairURL", pair, "-dev.openChat", "", "-tab", tab, "-app.tab", tab,
+                                   "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN", "-probes", "YES"]
+        } else {
+            app.launchArguments = ["-demo.on", "YES", "-openWelcome", "YES", "-dev.openChat", "", "-tab", tab,
+                                   "-app.tab", tab == "dev" ? "chats" : tab, "-AppleLanguages", "(zh-Hans)",
+                                   "-AppleLocale", "zh_CN", "-probes", "YES"]
+        }
         if retiredArgument {
             app.launchArguments += ["-" + ["ui.", "old", "Layout"].joined(), "YES"]
         }
@@ -34,9 +40,14 @@ final class DefaultLayoutTests: XCTestCase {
 
     @MainActor func testAppearanceHasOnlySupportedChoices() {
         let app = launch(tab: "settings")
+        let appearance = element("settings-appearance", in: app)
+        XCTAssertTrue(element("settings-list", in: app).waitForExistence(timeout: 30))
+        for _ in 0..<8 where !appearance.isHittable { app.swipeUp() }
+        XCTAssertTrue(appearance.exists)
+        appearance.tap()
         let style = element("settings-style", in: app)
-        XCTAssertTrue(style.waitForExistence(timeout: 30))
-        for id in ["settings-persona", "settings-color", "settings-language", "settings-scheme"] {
+        XCTAssertTrue(style.waitForExistence(timeout: 15))
+        for id in ["settings-color", "settings-scheme"] {
             XCTAssertTrue(element(id, in: app).exists, "Missing appearance choice: \(id)")
         }
         XCTAssertFalse(element("settings-layout", in: app).exists)

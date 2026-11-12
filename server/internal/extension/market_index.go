@@ -49,6 +49,7 @@ func (ix *MarketIndex) UnmarshalJSON(data []byte) error {
 // packages.
 type MarketEntry struct {
 	Replaces  string          `json:"replaces,omitempty"`
+	Icon      string          `json:"icon,omitempty"`
 	IconURL   string          `json:"icon_url,omitempty"`
 	Downloads *int64          `json:"downloads,omitempty"`
 	Manifest  json.RawMessage `json:"manifest"`
@@ -131,6 +132,9 @@ func ParseIndex(data []byte) (*MarketIndex, []string, error) {
 		default:
 			seen[m.ID] = true
 			e.Parsed = m
+			if e.Icon != "" && !ValidIconPath(e.Icon) {
+				e.Icon, e.IconURL = "", ""
+			}
 			if !ValidIconURL(e.IconURL) {
 				e.IconURL = ""
 			}

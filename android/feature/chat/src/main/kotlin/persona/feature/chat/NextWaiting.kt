@@ -18,6 +18,14 @@ import persona.core.designsystem.icons.PhIcons
  */
 data class WaitingRequest(val session: SessionKey, val requestId: String, val who: String, val what: String)
 
+/**
+ * The cards other chats wait on you with and how to open one, for a chat whose page does not pass them itself: Persona's
+ * conversation inside the Assistant tab (#4339 C18). The shell provides them.
+ */
+class WaitingElsewhere(val waiting: List<WaitingRequest>, val open: (SessionKey, requestId: String) -> Unit)
+
+val LocalWaitingElsewhere = androidx.compose.runtime.compositionLocalOf<WaitingElsewhere?> { null }
+
 /** What other chats still wait on you with (#4325, web #4091): the first in the list's order, and how many there are. */
 internal data class NextWaiting(val request: WaitingRequest, val count: Int)
 
@@ -34,12 +42,12 @@ internal fun InteractionReply.offersNext(resolution: persona.core.contracts.Reso
         (submission == InteractionSubmission.Answered && resolution.dismiss != true && resolution.cancel != true)
 
 /**
- * Whether the line shows now: offered after an answer here, this chat has no card left, the page can answer and open
- * another chat (not Persona's conversations, not a read-only view), and the keyboard is down (as on the web).
+ * Whether the line shows now: offered after an answer here, this chat has no card left (Persona's conversation counts its
+ * tasks' too), the page can answer and open another chat (not a read-only view), and the keyboard is down (as on the web).
+ * Persona's conversations offer it too, as iOS's `NextNeedsYouStrip` does in every chat (#4339 C18).
  */
-internal fun showsNextWaiting(offered: Boolean, cardsHere: Int, readOnly: Boolean, assistant: Boolean, canOpen: Boolean,
-                              keyboard: Boolean): Boolean =
-    offered && cardsHere == 0 && !readOnly && !assistant && canOpen && !keyboard
+internal fun showsNextWaiting(offered: Boolean, cardsHere: Int, readOnly: Boolean, canOpen: Boolean, keyboard: Boolean): Boolean =
+    offered && cardsHere == 0 && !readOnly && canOpen && !keyboard
 
 /** The cards of [waiting] outside [here] (the same session id on another computer is another chat); null when none is. */
 internal fun nextWaiting(waiting: List<WaitingRequest>, here: SessionKey): NextWaiting? {

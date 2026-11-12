@@ -1,6 +1,13 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Record with ${applicationName}": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Record with ${applicationName}" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用 ${applicationName} 录音" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "${applicationName}で録音" } }
+      }
+    },
     "Record a meeting with ${applicationName}": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Record a meeting with ${applicationName}" } },
@@ -15,11 +22,11 @@
         "ja": { "stringUnit": { "state": "translated", "value": "${applicationName}でこの会議を録音" } }
       }
     },
-    "Start a meeting recording in ${applicationName}": {
+    "Start recording in ${applicationName}": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Start a meeting recording in ${applicationName}" } },
-        "zh-Hans": { "stringUnit": { "state": "translated", "value": "在 ${applicationName} 开始会议录音" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "${applicationName}で会議の録音を開始" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Start recording in ${applicationName}" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "在 ${applicationName} 开始录音" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "${applicationName}で録音を開始" } }
       }
     },
     "${applicationName}, record the meeting": {

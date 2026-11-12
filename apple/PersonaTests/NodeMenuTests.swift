@@ -115,6 +115,16 @@ import Testing
         #expect(!NodeMenu.launchableHere(Launcher(name: "codex", agent: "codex")))
     }
 
+    /// The footer names Codex, and where it starts, only on a computer that has a Codex launcher (#5275).
+    @Test func runHereFooterMentionsCodexOnlyWhereTheComputerHasIt() {
+        let plain = NodeMenu.runHereFooter([Launcher(name: "claude"), Launcher(name: "c2", agent: "claude")])
+        let withCodex = NodeMenu.runHereFooter([Launcher(name: "claude"), Launcher(name: "codex", agent: "codex", promptOptional: true)])
+        #expect(!plain.contains("Codex"))
+        #expect(withCodex.contains("Codex"))
+        #expect(withCodex.hasPrefix(plain), "the Codex line comes after the same first sentence")
+        #expect(NodeMenu.runHereFooter([]) == plain)
+    }
+
     /// Run Agent Here opens the agent it started (#3287): the session `panes/agent` names, on the space's computer and
     /// hub group; an answer that names none leaves the list in front.
     @Test func runHereOpensTheSessionTheAnswerNames() {

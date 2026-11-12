@@ -127,11 +127,16 @@ extension APIClient {
 
     /// Draws (no action) or uses a control (an action, with the fields' values it sends).
     func pluginUI(_ ext: String, _ ui: String, context: ExtensionUIContext, state: String?, action: String? = nil,
-                  values: [String: String]? = nil, manager: String? = nil) async throws -> ExtensionActionResult {
+                  values: [String: String]? = nil, manager: String? = nil, assistant: String? = nil) async throws -> ExtensionActionResult {
         let body = ExtensionUIRequest(context: context, state: state, action: action, values: values)
         let query = manager.map { ["manager": $0] } ?? [:]
-        // The source subscription pages (#2041) are the manager's own, drawn and pressed as an extension page.
-        let path = ext == SubscriptionsUI.id ? SubscriptionsUI.path : extensionPath("/\(ext)/-/ui/\(ui)")
+        // The source subscription pages (#2041) are the manager's own, drawn and pressed as an extension page; only they are
+        // told the assistant's name (#5278).
+        if ext == SubscriptionsUI.id {
+            let sent = SubscriptionsUI.Request(request: body, assistant: assistant)
+            return try JSON.decoder.decode(ExtensionActionResult.self, from: try await request("POST", SubscriptionsUI.path, query: query, body: sent))
+        }
+        let path = extensionPath("/\(ext)/-/ui/\(ui)")
         return try JSON.decoder.decode(ExtensionActionResult.self, from: try await request("POST", path, query: query, body: body))
     }
 }
@@ -165,6 +170,9 @@ extension APIClient {
     struct Deps {
         var api: () -> APIClient?
         var connection: () -> LiveConnection? = { nil }
+        /// The assistant's name as the composer shows it ("Ask {name}…"), for the subscription pages (#5278): every page
+        /// of them gets it, a pushed one (built with its hub's group) too; only those pages are sent it (`pluginUI`).
+        var assistant: () -> String? = { AppModel.shared.persona.name }
         static var live: Deps {
             let group = AppModel.shared.hub?.group ?? ""
             return .init(api: { AppModel.shared.api(group) }, connection: { AppModel.shared.socket(group) })
@@ -717,7 +725,8 @@ extension APIClient {
         if let stream, stream.hasMountedNative || (action != nil && stream.supported != false) { throw ExtensionStreamJSON.Failure.version }
         guard let api = deps.api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
         let generation = stream?.tree?.version
-        let result = try await api.pluginUI(plugin, ui, context: context, state: view?.state ?? initialState, action: action, values: values, manager: selectedManager)
+        let result = try await api.pluginUI(plugin, ui, context: context, state: view?.state ?? initialState, action: action, values: values,
+                                            manager: selectedManager, assistant: plugin == SubscriptionsUI.id ? deps.assistant() : nil)
         guard stream?.supported != true, generation == stream?.tree?.version else { throw ExtensionStreamJSON.Failure.version }
         return result
     }
@@ -729,6 +738,8 @@ extension APIClient {
     /// (`InboxSourceLink`), never another item's.
     static func opens(_ url: URL, item: String?, owner: String? = nil) -> Bool {
         if url.scheme?.lowercased() == "https" { return url.host()?.isEmpty == false && url.user == nil && url.password == nil }
+        // the subscription pages' Set Up with … (#5278): their text to the assistant, never an extension's
+        if SubscriptionsUI.askText(url) != nil { return owner == SubscriptionsUI.id }
         if let settings = ExtensionSettingsLink.extensionID(url) { return owner != nil && settings == owner }
         guard let item, let source = InboxSourceLink.item(url) else { return false }
         return source == item

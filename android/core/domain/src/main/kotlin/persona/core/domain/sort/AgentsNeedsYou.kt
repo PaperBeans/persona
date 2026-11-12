@@ -57,11 +57,16 @@ fun needsYouRows(cards: List<Interaction>, waiting: List<Session>): List<NeedsYo
 }
 
 /**
- * The Agents tab's badge: [rows] less the ones that are not the tab's to announce, a quiet task's agents (the main
- * conversation tells about them) and the muted agents and spaces ([mutes]), as the assistant's count leaves them out.
+ * The rows the Agents tab's badge counts: [rows] less the ones that are not the tab's to announce, a quiet task's agents
+ * (the main conversation tells about them) and the muted agents and spaces ([mutes]), as the assistant's count leaves
+ * them out. The blank page's Needs you lists these too (#4339 C17), so it counts what the badge counts.
  */
-fun needsYouBadge(rows: List<NeedsYouRow>, sessions: Map<SessionKey, Session>, mutes: AgentPreferences): Int =
-    rows.count { row ->
+fun needsYouBadgeRows(rows: List<NeedsYouRow>, sessions: Map<SessionKey, Session>, mutes: AgentPreferences): List<NeedsYouRow> =
+    rows.filter { row ->
         val session = sessions[row.key]
         session?.quiet != true && !mutes.mutes(row.key.path, session?.spaceName?.let { "${row.key.machineId}/$it" })
     }
+
+/** The Agents tab's badge: how many [needsYouBadgeRows] there are. */
+fun needsYouBadge(rows: List<NeedsYouRow>, sessions: Map<SessionKey, Session>, mutes: AgentPreferences): Int =
+    needsYouBadgeRows(rows, sessions, mutes).size

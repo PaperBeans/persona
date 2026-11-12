@@ -44,7 +44,7 @@ func (s *Service) inboxRoutes() {
 			return
 		}
 		if q := r.URL.Query(); q.Has("since") { // only what changed since a list it had (inbox_delta.go)
-			s.writeInboxSince(w, q.Get("sources") == "all", q.Get("since"))
+			s.writeInboxSince(w, inboxShape{all: q.Get("sources") == "all", lean: q.Get("chain") == "last"}, q.Get("since"))
 			return
 		}
 		s.writeInboxList(w, r.URL.Query().Get("sources") == "all") // from each item's kept bytes (inbox_list_memo.go)
@@ -254,8 +254,8 @@ func (s *Service) replyInboxChecked(ctx context.Context, id, text, clientID stri
 	return s.replyInboxFrom(ctx, id, text, clientID, fromCard, changes...)
 }
 
-// inboxList is every open item and the recently done ones, newest first; connectors' only when all (rows stored
-// before Source was set have none, so it is the connector block that tells).
+// inboxList is every open item and the newest of the recently done ones (inbox_list_done.go), newest first;
+// connectors' only when all (rows stored before Source was set have none, so it is the connector block that tells).
 func (s *Service) inboxList(all bool) []InboxItem {
 	out, _ := s.inboxListAt(all)
 	return out
@@ -271,9 +271,10 @@ func (s *Service) inboxListAt(all bool) ([]InboxItem, time.Time) {
 	defer b.mu.Unlock()
 	now := time.Now()
 	cutoff := now.Add(-inboxKeepDone)
+	cut := b.listedDoneCut(cutoff, all)
 	out := make([]InboxItem, 0, len(b.items))
 	for _, it := range b.items {
-		if it.DoneAt != nil && it.DoneAt.Before(cutoff) || !all && it.Connector != nil {
+		if !inboxShows(it, cutoff, cut, all) {
 			continue
 		}
 		it.arrived(now)

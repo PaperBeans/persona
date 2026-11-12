@@ -194,6 +194,11 @@ describe("the main conversation's readiness", () => {
     expect(card?.textContent).toContain("详情");
     // the draft is back in the box, not lost
     expect(textarea().value).toBe("你好");
+    // the same neutral error notice as a model error over the composer (#5313), and its ✕ puts it away
+    expect(card?.hasAttribute("data-error-notice")).toBe(true);
+    expect(card?.className).not.toContain("bg-red-tint");
+    act(() => card!.querySelector<HTMLButtonElement>('[aria-label="关闭错误提示"]')!.click());
+    expect(host.querySelector('[data-testid="readiness-failure"]')).toBeNull();
   });
 
   it("adds a computer in place where the hub lets this device add one", async () => {

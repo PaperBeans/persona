@@ -3,6 +3,7 @@ package assistantwire
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/connectorwire"
 )
@@ -61,6 +62,15 @@ const (
 	// MethodInboxRepoMutes: InboxRepoMutes → {repos}: a source's muted repositories (GitHub's settings page lists and
 	// sets them as its muted_repos); with set, they become the source's repository mutes first (add: added to them).
 	MethodInboxRepoMutes = "inbox.repo_mutes"
+	// MethodInboxMutes: {source?} → {mutes: [InboxMute]}: the mutes, one source's when source is set, for the Inbox
+	// Sources pages (#5278).
+	MethodInboxMutes = "inbox.mutes"
+	// MethodInboxUnmute: {id} → {}: the user unmuted one on those pages; what it filed stays done.
+	MethodInboxUnmute = "inbox.unmute"
+	// MethodInboxTriagePreview: InboxTriagePreview → {verdicts: [InboxTriageVerdict]}: the triage model tries a
+	// subscription's dry-run items as the Inbox would be handed them, one verdict each, at the user's request on the
+	// pages. Nothing is kept: no item, no triage state.
+	MethodInboxTriagePreview = "inbox.triage_preview"
 
 	// EventInboxChanged (the manager tells the extension manager, one way): InboxChanged.
 	EventInboxChanged = "inbox.changed"
@@ -295,6 +305,38 @@ type InboxRepoMutes struct {
 	Set   bool     `json:"set,omitempty"`
 	Add   bool     `json:"add,omitempty"`
 	Repos []string `json:"repos,omitempty"`
+}
+
+// InboxTriagePreview is MethodInboxTriagePreview's params: the source as a round names it (a subscription's id, ""
+// for one not subscribed yet), its kinds' words for the model, and at most 3 things.
+type InboxTriagePreview struct {
+	Source string                     `json:"source"`
+	Name   string                     `json:"name"`
+	Kinds  map[string]string          `json:"kinds,omitempty"`
+	Things []connectorwire.InboxThing `json:"things"`
+}
+
+// InboxTriageVerdict is the model's answer for one thing (tier action, fyi or noise, its summary and reason), or why
+// there is none (state: unconfigured, paused, error, timeout; why in the user's language).
+type InboxTriageVerdict struct {
+	Tier    string `json:"tier,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Urgent  bool   `json:"urgent,omitempty"`
+	State   string `json:"state,omitempty"`
+	Why     string `json:"why,omitempty"`
+}
+
+// InboxMute is one mute as the Inbox keeps it (GET /api/v1/inbox/mutes lists the same): nothing of Source tagged
+// Tag = Value stays in the Inbox.
+type InboxMute struct {
+	ID         string    `json:"id"`
+	Source     string    `json:"source"`
+	SourceName string    `json:"source_name,omitempty"`
+	Tag        string    `json:"tag"`
+	Value      string    `json:"value"`
+	Name       string    `json:"name"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // InboxNeedsYou is EventInboxNeedsYou's params: how many open items are in "Needs you" (status action; the ones not

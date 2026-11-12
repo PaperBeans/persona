@@ -312,6 +312,7 @@ func (n *Node) lostFirstPrompt(id, status string) string {
 	}
 	if status == proto.StatusWorking || n.promptedSince(id, p.at) {
 		n.lostFirst.clear(id)
+		n.dropHandoff(id, nil) // a switch's handoff waiting for this message (engine_switch.go) missed it
 		return ""
 	}
 	return p.why

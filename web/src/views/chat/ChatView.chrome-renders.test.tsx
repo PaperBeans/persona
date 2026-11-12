@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Each item pushed to the open conversation renders ChatView again (its transcript changed). The header and the composer
 // around it did not change, so they stay put: counted through a leaf each one draws (the header's "Session info" dialog,
-// the composer's context chips, the composer footer's mode chips).
+// the composer's context chips, the composer's permission picker).
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -19,8 +19,12 @@ vi.mock("./SessionDialogs", async (load) => {
   return {
     ...real,
     SessionInfoDialog: (p: Parameters<typeof real.SessionInfoDialog>[0]) => (renders.info++, createElement(real.SessionInfoDialog, p)),
-    ModeChips: (p: Parameters<typeof real.ModeChips>[0]) => (renders.modes++, createElement(real.ModeChips, p)),
   };
+});
+vi.mock("./PermissionPicker", async (load) => {
+  const real = await load<typeof import("./PermissionPicker")>();
+  const { createElement } = await import("react");
+  return { ...real, PermissionPicker: (p: Parameters<typeof real.PermissionPicker>[0]) => (renders.modes++, createElement(real.PermissionPicker, p)) };
 });
 vi.mock("../link/ContextChips", async (load) => {
   const real = await load<typeof import("../link/ContextChips")>();
@@ -52,7 +56,6 @@ vi.mock("../../lib/panel", async (load) => ({ ...(await load<typeof import("../.
 vi.mock("../assistant/Persona", () => ({ usePersona: () => ({ name: "Persona" }) }));
 
 import { applyCompleteSessions, reset, type ItemsEvent } from "../../lib/store";
-import { ago } from "../../lib/format";
 import { whenComposer } from "../../lib/links";
 import type { Item, Session } from "../../lib/types";
 import { t } from "../../i18n";
@@ -164,17 +167,95 @@ it("the assistant: the header draws again only when what its face reads changes"
   expect(renders.chips).toBe(0);
 });
 
-it("a Persona conversation's subtitle: its age moves on with the clock while nothing is pushed", async () => {
-  // only the clock and intervals are fake: the pushes and fetches above still settle on real timeouts
-  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
-  const updated = new Date(Date.now() - 10_000).toISOString();
-  await open(<ChatView mid="mac" sid="s1" assistant />, row({ updated_at: updated }));
-  const header = () => host.querySelector("header")?.textContent ?? "";
-  expect(header()).toContain(t("lib-format.just_now"));
+it("a Persona conversation's composer has the model pill, an Agent's too (#5032, #5033)", async () => {
+  await open(<ChatView mid="mac" sid="s1" assistant />);
+  expect(host.querySelector("button[data-model-pill]")).not.toBeNull();
+  expect(host.querySelector(`button[title="${t("chat-sessiondialogs.effort")}"]`)).toBeNull(); // no effort chip
+  act(() => root.render(<></>));
+  await open(<ChatView mid="mac" sid="s1" inPage />);
+  expect(host.querySelector("[data-model-pill]")).not.toBeNull();
+});
 
-  act(() => vi.advanceTimersByTime(3 * 60_000));
-  expect(ago(updated)).not.toBe(t("lib-format.just_now"));
-  expect(header()).toContain(ago(updated));
+it("the top bar is one line (#5421): a Persona conversation's has no subtitle", async () => {
+  await open(<ChatView mid="mac" sid="s1" assistant />, row({ updated_at: new Date(Date.now() - 10_000).toISOString() }));
+  const header = host.querySelector("header")!;
+  expect(header.textContent).not.toContain(t("lib-format.just_now"));
+  expect(header.querySelector("h1")?.textContent).toBe("Checks");
+});
+
+it("double-clicking the title renames it in place: Enter saves the title alone, Esc leaves it and the Agent running (#5421)", async () => {
+  await open(<ChatView mid="mac" sid="s1" inPage />);
+  const title = () => host.querySelector<HTMLElement>("[data-chat-title]");
+  const field = () => host.querySelector<HTMLInputElement>("[data-chat-title-input]");
+  const type = (value: string) => {
+    const input = field()!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const key = (k: string) => field()!.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+
+  act(() => title()!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+  expect(field()).not.toBeNull();
+  expect(field()!.value).toBe("Checks");
+  act(() => type("Network tests"));
+  act(() => key("Escape"));
+  await settle();
+  expect(field()).toBeNull();
+  expect(posted("/sessions/mac/s1/rename")).toHaveLength(0);
+  // Esc in the field did not also stop the working Agent
+  expect(posted("/sessions/mac/s1/interrupt")).toHaveLength(0);
+
+  act(() => title()!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+  act(() => type("Network tests"));
+  await act(async () => {
+    key("Enter");
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  const renamed = posted("/sessions/mac/s1/rename");
+  expect(renamed).toHaveLength(1);
+  expect(JSON.parse(String((renamed[0][1] as RequestInit).body))).toEqual({ title: "Network tests" });
+  expect(title()?.textContent).toBe("Network tests");
+});
+
+it("an in-place rename shows the new title at once and puts the old one back when the save fails (#5421)", async () => {
+  await open(<ChatView mid="mac" sid="s1" inPage />);
+  let fail!: () => void;
+  fetcher.mockImplementation((url: string, init?: RequestInit) =>
+    String(url).endsWith("/rename") && init?.method === "POST"
+      ? new Promise((_, reject) => (fail = () => reject(new TypeError("offline"))))
+      : Promise.resolve(new Response(JSON.stringify(String(url).includes("/items") ? { items: [item(0)], to_seq: 0 } : {}), { status: 200, headers: { "Content-Type": "application/json" } })),
+  );
+  const title = () => host.querySelector<HTMLElement>("[data-chat-title]");
+  act(() => title()!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+  const input = host.querySelector<HTMLInputElement>("[data-chat-title-input]")!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Network tests");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  act(() => void input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+  await settle();
+  expect(title()?.textContent).toBe("Network tests");
+  await act(async () => {
+    fail();
+    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  });
+  expect(title()?.textContent).toBe("Checks");
+});
+
+it("/workflows opens the Background tasks panel at the latest run instead of going to the Agent (#5421)", async () => {
+  const { getPanel, openPanel } = await import("../../lib/panel");
+  const runs = [
+    { task_id: "old", status: "completed", started_at: "2026-11-12T01:00:00Z" },
+    { task_id: "new", status: "running", running: true, started_at: "2026-11-12T02:00:00Z" },
+  ] as Session["workflows"];
+  await open(<ChatView mid="mac" sid="s1" inPage />, row({ workflows: runs }));
+  await act(async () => {
+    whenComposer("mac/s1", (c) => void c.send("/workflows"));
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  expect(posted("/sessions/mac/s1/messages")).toHaveLength(0);
+  expect(getPanel()).toEqual({ kind: "background", mid: "mac", sid: "s1", run: "new" });
+  act(() => openPanel(null));
 });
 
 it("after the pushes, sending and stopping still go out", async () => {

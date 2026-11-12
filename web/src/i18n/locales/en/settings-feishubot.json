@@ -95,5 +95,7 @@
   "larkcli_profile_done": "Done",
   "larkcli_profile_auto_short": "the bot's app",
   "larkcli_profile_default": "lark-cli's default profile",
-  "larkcli_profile_fixed": "{name} (set in the config file)"
+  "larkcli_profile_fixed": "{name} (set in the config file)",
+  "feature_answer_new_card_title": "Answer as a new card",
+  "feature_answer_new_card_detail": "When a run finishes, its answer is sent as a new card at the bottom of the chat, so Lark notifies you, and the progress card folds up. Off: the answer is written into the progress card"
 }

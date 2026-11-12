@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Smaller details of an Agent's chat in iOS's words (docs/plans/android-ios-alignment/chats.md, C9). -->
+<resources>
+    <string name="chat_placeholder_agent">给 %1$s 发消息</string>
+    <string name="chat_getting_ready">%1$s 正在准备…</string>
+    <string name="chat_recap_open_spoken">离开期间回顾：%1$s。点按关闭</string>
+    <string name="chat_plan_sheet_title">计划</string>
+    <string name="chat_plan_sheet_step">第 %1$d 步，共 %2$d 步</string>
+    <plurals name="chat_plan_sheet_all_done">
+        <item quantity="other">%1$d 步全部完成</item>
+    </plurals>
+    <string name="chat_plan_sheet_summary">%1$s · %2$s</string>
+    <string name="chat_plan_pill_opens">显示计划</string>
+    <string name="chat_info_runtime">运行方式</string>
+    <string name="chat_info_runtime_fallback">已退回 CLI：%1$s</string>
+    <string name="chat_info_route">连接</string>
+    <string name="chat_info_route_app_server">app-server（结构化）</string>
+    <string name="chat_info_route_terminal">终端（读屏幕）</string>
+    <string name="chat_info_context_left">上下文余量</string>
+    <string name="chat_info_context_left_value">还剩 %1$d%%</string>
+    <string name="chat_info_context_spoken">上下文%1$s，已用 %2$d%%，窗口 %3$s</string>
+    <string name="chat_info_delegated_section">助手代答过的问题</string>
+    <string name="chat_info_delegated_no_answer">（未回答）</string>
+    <string name="chat_info_delegated_why">理由：%1$s</string>
+    <string name="chat_viewed_screenshot">屏幕截图</string>
+    <string name="chat_viewed_browser">网页截图</string>
+    <string name="chat_viewed_image">图片</string>
+    <string name="chat_viewed_view">查看大图</string>
+    <string name="chat_outbox_retry_now">现在重试</string>
+    <string name="chat_outbox_dont_send">不发了</string>
+    <string name="chat_outbox_resend">重发</string>
+    <string name="chat_outbox_waiting_spoken">等网络，连上后自动发送</string>
+    <string name="chat_outbox_failed_spoken">发送失败，重发或删除</string>
+</resources>

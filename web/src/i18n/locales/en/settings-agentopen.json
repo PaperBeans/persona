@@ -1,0 +1,6 @@
+{
+  "label": "How Agents open",
+  "hint": "Where an Agent or a task opens when you click it in a chat. Side panel keeps the chat next to it; in a phone-sized window it covers the chat. Full page opens it on its own page, with a way back to the chat. Applies to this browser only.",
+  "panel": "Side panel",
+  "page": "Full page"
+}

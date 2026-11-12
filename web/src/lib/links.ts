@@ -4,8 +4,9 @@ import { APP_SCHEMES, assistantPath } from "./compatibility";
 // framed panel would just be blank), Feishu documents and Moments posts open in the side panel's reader (the same links
 // the phone reads natively, FeishuLinks.route) when the hub reads Feishu (feature `lark`; otherwise they are ordinary
 // pages), and persona://session links move to that conversation. This hub's own agent and task pages (/s/<machine>/
-// <session>, /todos?id=…, the links the assistant writes) open in the side panel next to where they were clicked, or
-// move there on a narrow screen, which has no room beside the page; its conversations (/persona/<id>) move there. The
+// <session>, /todos?id=…, the links the assistant writes) open where the browser's setting says (lib/agent-open.ts,
+// #5424): in the side panel next to where they were clicked, the default, or as pages of their own (#5096); on a narrow
+// screen, which has no room beside the page, as pages either way. Its conversations (/persona/<id>) are pages. The
 // hub's own pages are those of this page's origin and of every address the hub advertises (hello's endpoints, its
 // public_url first: the address the assistant writes, which may not be the one this page was opened at).
 //
@@ -15,6 +16,8 @@ import { t } from "../i18n";
 import { useSyncExternalStore } from "react";
 import { uuid } from "./format";
 import { openPanel } from "./panel";
+import { agentOpenMode } from "./agent-open";
+import { leaveChat, taskRoute } from "./handoff";
 import { navigate, parse as parseRoute } from "./router";
 import { BASE, stripBase } from "./base";
 import { contextXML } from "./context-xml";
@@ -24,6 +27,9 @@ import type { PortLink } from "./port-links";
 import { getSession, getState, hubHas, larkOn, onHubEvent } from "./store";
 import { mediaMatches, NARROW } from "./viewport";
 
+/** An Agent's or a task's link opens in the side panel: Agents open there (lib/agent-open.ts) and there is room. */
+const beside = () => agentOpenMode() === "panel" && !mediaMatches(NARROW);
+
 /** What a Feishu document link points at, from the link alone (FeishuDocsKind.from). A wiki link does not say. */
 export type DocKind = "doc" | "sheet" | "bitable" | "mindnote" | "file" | "slides" | "wiki" | "page" | "whiteboard" | "other";
 
@@ -31,8 +37,8 @@ export type LinkRoute =
   | { kind: "doc"; doc: DocKind } // a Feishu cloud document: the panel's reader
   | { kind: "moments"; id: string } // a Moments post: the panel
   | { kind: "session"; mid: string; sid: string } // persona://session/<machine>/<session>: that conversation
-  | { kind: "agent"; mid: string; sid: string } // this hub's /s/<machine>/<session>: that agent's chat in the panel
-  | { kind: "task"; id: string } // this hub's /todos?id=<todo>: that task in the panel
+  | { kind: "agent"; mid: string; sid: string } // this hub's /s/<machine>/<session>: that agent's page
+  | { kind: "task"; id: string } // this hub's /todos?id=<todo>: that task's Agent's page, or its to-do's while it has none
   | { kind: "conversation"; sid: string; mid?: string; manager?: string } // this hub's /persona/<id>: that assistant conversation, in place (with the computer and manager its address names)
   | { kind: "web" } // any other http(s) page: a new tab
   | { kind: "system" } // mailto: / tel:: the browser hands it to the system
@@ -247,13 +253,15 @@ export function openLink(url: string, title?: string, manager?: string) {
     case "session":
       navigate({ name: "session", mid: r.mid, sid: r.sid });
       return;
+    // the side panel on a wide screen while Agents open there (#5424), else a page of its own (#5096, cindy's session
+    // links), the chat keeping its place
     case "agent":
-      if (mediaMatches(NARROW)) navigate({ name: "session", mid: r.mid, sid: r.sid });
-      else openPanel({ kind: "agent", mid: r.mid, sid: r.sid });
+      if (beside()) openPanel({ kind: "agent", mid: r.mid, sid: r.sid });
+      else leaveChat({ name: "session", mid: r.mid, sid: r.sid }, false);
       return;
     case "task":
-      if (mediaMatches(NARROW)) navigate({ name: "todos", id: r.id });
-      else openPanel({ kind: "task", todo: r.id });
+      if (beside()) openPanel({ kind: "task", todo: r.id });
+      else leaveChat(taskRoute(r.id), false);
       return;
     case "conversation":
       navigate({ name: "persona", sid: r.sid, ...(r.mid ? { mid: r.mid } : {}), ...(r.manager ? { manager: r.manager } : {}) });

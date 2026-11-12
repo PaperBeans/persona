@@ -2,7 +2,9 @@ package persona.feature.chat
 
 import persona.core.designsystem.text
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -99,17 +101,26 @@ internal fun retryLine(lines: List<ChatLine>, working: Boolean, canSend: Boolean
 
 /**
  * Claude Code's "while you were away" recap (several in a row are one line): "While you were away · 21 min ago ›"; tapped,
- * the recaps in full in a sheet, newest first (iOS `RecapDrawer`).
+ * the recaps in full in a sheet, newest first (iOS `RecapDrawer`). The chat's open recap ([LocalOpenRecap], Glass) is
+ * drawn in full instead ([RecapStrip]), the earlier ones of its run as the one-line marker above it (iOS `recapInFlow`).
  */
 @Composable
 internal fun RecapLine(items: List<Item>) {
     if (items.isEmpty()) return
+    val shown = LocalOpenRecap.current?.takeIf { it.id == items.last().id }
+    if (shown != null) {
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+            RecapLine(items.dropLast(1))
+            RecapStrip(items.last(), shown.close)
+        }
+        return
+    }
     var open by rememberSaveable(items.first().id) { mutableStateOf(false) }
     val now by rememberNow(60_000)
     val newest = items.last()
     val resources = LocalResources.current
     val label = recapLabel(items.size, parseTime(newest.ts), now, resources)
-    Box(Modifier.fillMaxWidth()) { ChatNoteChip(label, PhIcons.ClockCountdown, onClick = { open = true }) }
+    Box(Modifier.fillMaxWidth()) { ChatNoteChip(label, RecapIcon, onClick = { open = true }) }
     if (open) JSheet({ open = false }, title = stringResource(R.string.chat_recap_title), scrollable = true) {
         items.asReversed().forEachIndexed { index, item ->
             if (index > 0) JDivider(Modifier.padding(vertical = Tokens.Space.m))
@@ -121,6 +132,9 @@ internal fun RecapLine(items: List<Item>) {
         }
     }
 }
+
+/** The recap's mark, folded ([RecapLine]) and open ([RecapStrip]). */
+internal val RecapIcon get() = PhIcons.ClockCountdown
 
 /** "While you were away · 21 min ago", with how many when there are several. */
 internal fun recapLabel(count: Int, newest: Instant?, now: Instant, resources: Resources): String {

@@ -6,10 +6,12 @@ import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } 
 import { t } from "../../i18n";
 import { BASE } from "../../lib/base";
 import { settingsHref } from "./nav";
+import { SUPERVISE_PURPOSE } from "../../lib/background-supervisor";
 import { api, credentialOwner, enc, errorText, subscribeCredentialOwner } from "../../lib/api";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
 import { PERMISSION_MODES } from "../../lib/session-actions";
 import { ConfigurationManager } from "./ConfigurationManager";
+import { AgentAutoNaming, supportsAgentAutoNaming, type AgentAutoNamingState } from "./AgentAutoNaming";
 import { aboutMeSaves } from "./about-me-saves";
 import { ago } from "../../lib/format";
 import { MEMORY_INDEX, memoryEntries, memoryTypeLabel, memoryTypeTone, parseMemory, type MemoryEntry, type MemoryFile } from "../../lib/memory";
@@ -28,8 +30,9 @@ import { TaskTrust } from "./TaskTrust";
 import { PageBoundary } from "../PageBoundary";
 
 const StandingAuthorizations = lazyPage(() => import("./StandingAuthorizations").then((m) => m.StandingAuthorizations));
+const Repositories = lazyPage(() => import("./Repositories").then((m) => m.Repositories));
 
-interface AssistantState {
+interface AssistantState extends AgentAutoNamingState {
   manager?: string;
   default_permission_mode?: string;
   machine_id?: string;
@@ -59,9 +62,16 @@ interface AssistantState {
   /** "Tell supervisors about new messages" (#4293, docs/assistant/unified-entry.md "Supervision (#3124)"): off
    *  by default; unset from a hub before it. */
   inbox_signals?: boolean;
+  /** "The main chat supervises its own tasks" (#4927, #5082, docs/assistant/unified-entry.md "Background supervisor"):
+   *  off by default, which means the built-in background supervisor follows up the tasks no leader supervises; unset
+   *  from a hub before it. */
+  main_supervises_own_tasks?: boolean;
   /** Days a closed session stays listed before it archives itself (#3618, docs/assistant/todos.md "Closed sessions
    *  archive themselves"): 0 is never, at most 3650; unset from a hub before it. */
   archive_closed_days?: number;
+  /** "Suggest the next message" (#4644, docs/assistant/assistant.md "Next-message suggestions"): off by default; unset
+   *  from a hub before it. */
+  next_suggestions?: boolean;
   /** Hours an idle Agent Persona started runs before Persona stops it (#4754, docs/integrations/engines.md "Agents run
    *  in a terminal"); its terminal stays. 0 is never, at most 8760; unset from a hub before it. */
   idle_close_hours?: number;
@@ -147,6 +157,21 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
     } finally { setRetentionBusy(false); setRetentionTries((n) => n + 1); }
   };
 
+  const [suggestBusy, setSuggestBusy] = useState(false);
+  const setSuggestions = async (on: boolean) => {
+    setSuggestBusy(true);
+    setInfo((i) => (i ? { ...i, next_suggestions: on } : i));
+    try {
+      const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: { next_suggestions: on } });
+      setInfo((i) => (i ? { ...i, next_suggestions: r.next_suggestions ?? on } : i));
+    } catch (e) {
+      setInfo((i) => (i ? { ...i, next_suggestions: !on } : i));
+      toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
+    } finally {
+      setSuggestBusy(false);
+    }
+  };
+
   const setFolded = async (on: boolean) => {
     setFoldBusy(true);
     setInfo((i) => (i ? { ...i, main_background_folded: on } : i));
@@ -178,17 +203,17 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
   };
 
   const [agentsBusy, setAgentsBusy] = useState(false);
-  // One field of the Agents group (#3617, #3618, #4293): shown as chosen at once, taken back with the reason when the hub refuses.
-  const setAgents = async (patch: { agent_tasks: boolean } | { inbox_signals: boolean } | { archive_closed_days: number } | { idle_close_hours: number }) => {
+  // One field of the Agents group (#3617, #3618, #4293, #5082): shown as chosen at once, taken back with the reason when the hub refuses.
+  const setAgents = async (patch: { agent_tasks: boolean } | { inbox_signals: boolean } | { main_supervises_own_tasks: boolean } | { archive_closed_days: number } | { idle_close_hours: number }) => {
     const before = info;
     setAgentsBusy(true);
     setInfo((i) => (i ? { ...i, ...patch } : i));
     try {
       const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: patch });
       // what the hub saved, when it says
-      setInfo((i) => (i ? { ...i, agent_tasks: r.agent_tasks ?? i.agent_tasks, inbox_signals: r.inbox_signals ?? i.inbox_signals, archive_closed_days: r.archive_closed_days ?? i.archive_closed_days, idle_close_hours: r.idle_close_hours ?? i.idle_close_hours } : i));
+      setInfo((i) => (i ? { ...i, agent_tasks: r.agent_tasks ?? i.agent_tasks, inbox_signals: r.inbox_signals ?? i.inbox_signals, main_supervises_own_tasks: r.main_supervises_own_tasks ?? i.main_supervises_own_tasks, archive_closed_days: r.archive_closed_days ?? i.archive_closed_days, idle_close_hours: r.idle_close_hours ?? i.idle_close_hours } : i));
     } catch (e) {
-      setInfo((i) => (i && before ? { ...i, agent_tasks: before.agent_tasks, inbox_signals: before.inbox_signals, archive_closed_days: before.archive_closed_days, idle_close_hours: before.idle_close_hours } : i));
+      setInfo((i) => (i && before ? { ...i, agent_tasks: before.agent_tasks, inbox_signals: before.inbox_signals, main_supervises_own_tasks: before.main_supervises_own_tasks, archive_closed_days: before.archive_closed_days, idle_close_hours: before.idle_close_hours } : i));
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally {
       setAgentsBusy(false);
@@ -281,6 +306,15 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         </Row>
       </Group>
 
+      {/* The next-message suggestion for chats without one of their own (#4644): only from a hub that has the setting */}
+      {typeof info?.next_suggestions === "boolean" && (
+        <Group anchor="next-suggestions" footer={t("settings-assistantsettings.next_suggestions_footer")}>
+          <Row label={t("settings-assistantsettings.next_suggestions")}>
+            <Switch on={info.next_suggestions} onChange={(on) => void setSuggestions(on)} disabled={suggestBusy} label={t("settings-assistantsettings.next_suggestions")} />
+          </Row>
+        </Group>
+      )}
+
       <Group title={t("settings-assistantsettings.start_title")} footer={t("settings-assistantsettings.start_footer")}>
         <Row label={t("settings-assistantsettings.start_requested")}>
           <Switch on={info?.start_requested_tasks ?? true} onChange={(on) => void setStartRequested(on)} disabled={!info || startBusy} label={t("settings-assistantsettings.start_requested")} />
@@ -297,9 +331,16 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         <TaskTrust manager={manager} machineName={(id) => machines.find((machine) => machine.id === id)?.name || id} />
       </Group>
 
-      {/* Following up agents, their tasks' new messages, stopping idle ones and tidying closed ones (#3617, #4293, #4754, #3618): each row only from a hub that has its setting */}
-      {(typeof info?.agent_tasks === "boolean" || typeof info?.inbox_signals === "boolean" || typeof info?.idle_close_hours === "number" || typeof info?.archive_closed_days === "number") && (
+      {/* Who follows up the main chat's tasks (#5082), following up agents, their tasks' new messages, stopping idle ones and tidying closed ones (#3617, #4293, #4754, #3618): each row only from a hub that has its setting */}
+      {(supportsAgentAutoNaming(info) || typeof info?.main_supervises_own_tasks === "boolean" || typeof info?.agent_tasks === "boolean" || typeof info?.inbox_signals === "boolean" || typeof info?.idle_close_hours === "number" || typeof info?.archive_closed_days === "number") && info && (
         <Group anchor="agents" title={t("settings-assistantsettings.agents_title")}>
+          {supportsAgentAutoNaming(info) && <AgentAutoNaming info={info} manager={manager} owner={owner}
+            onSaved={(patch) => setInfo((current) => current ? { ...current, ...patch } : current)} />}
+          {typeof info.main_supervises_own_tasks === "boolean" && (
+            <Row label={t("settings-assistantsettings.main_supervises")} hint={t("settings-assistantsettings.main_supervises_hint")} wrapHint>
+              <Switch on={info.main_supervises_own_tasks} onChange={(on) => void setAgents({ main_supervises_own_tasks: on })} disabled={agentsBusy} label={t("settings-assistantsettings.main_supervises")} />
+            </Row>
+          )}
           {typeof info.agent_tasks === "boolean" && (
             <Row label={t("settings-assistantsettings.agent_tasks")} hint={t("settings-assistantsettings.agent_tasks_hint")} wrapHint>
               <Switch on={info.agent_tasks} onChange={(on) => void setAgents({ agent_tasks: on })} disabled={agentsBusy} label={t("settings-assistantsettings.agent_tasks")} />
@@ -332,6 +373,12 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         <a href={BASE + settingsHref("models", "assistant", false, null, "model-config")} className="flex items-center justify-between px-4 py-3 text-[13px] text-ink hover:bg-hover">
           <span>{t("settings-assistantsettings.main_chat_model")}</span><Icon name="chevronRight" size={12} className="text-ink-3" />
         </a>
+        {/* the background supervisor's own model (#5082): only from a hub that has it */}
+        {typeof info?.main_supervises_own_tasks === "boolean" && (
+          <a href={BASE + settingsHref("models", SUPERVISE_PURPOSE, false, null, "model-config")} className="flex items-center justify-between px-4 py-3 text-[13px] text-ink hover:bg-hover">
+            <span>{t("settings-assistantsettings.background_supervisor_model")}</span><Icon name="chevronRight" size={12} className="text-ink-3" />
+          </a>
+        )}
       </Group>
 
       <Group title={t("settings-assistantsettings.default_permissions")} footer={t("settings-assistantsettings.default_permissions_hint")}>
@@ -403,6 +450,12 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
           </button>
         )}
       </Group>
+
+      <PageBoundary page="repositories">
+        <Suspense fallback={<Group title={t("settings-repositories.title")}><Loading /></Group>}>
+          <Repositories manager={manager} owner={owner} />
+        </Suspense>
+      </PageBoundary>
 
       <SkillsGroup manager={manager} />
 

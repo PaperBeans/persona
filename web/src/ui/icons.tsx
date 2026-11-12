@@ -18,6 +18,11 @@ const P: Record<string, React.ReactNode> = {
   collapse: <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />,
   plus: <path d="M12 5v14M5 12h14" />,
   x: <path d="M18 6L6 18M6 6l12 12" />,
+  // a hand-off to an Agent (#5096; Lucide's corner-down-right, as cindy's card), the way back from it (corner-up-left),
+  // and the card's "opens a page" mark (arrow-up-right)
+  cornerDownRight: <path d="M15 10l5 5-5 5M4 4v7a4 4 0 0 0 4 4h12" />,
+  cornerUpLeft: <path d="M9 14 4 9l5-5M20 20v-7a4 4 0 0 0-4-4H4" />,
+  arrowUpRight: <path d="M7 7h10v10M7 17 17 7" />,
   check: <path d="M20 6L9 17l-5-5" />,
   search: <g><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></g>,
   // a prompt with no frame: a command run, and the sidebar's mark for a terminal pane (unlike appWindow, it has no box)
@@ -28,6 +33,8 @@ const P: Record<string, React.ReactNode> = {
   agent: <g><rect x="4" y="8" width="16" height="12" rx="3" /><path d="M12 8V4M9 14h.01M15 14h.01" /></g>,
   todo: <g><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></g>,
   hand: <g><path d="M5 12.5l3.5 3.5L19 5.5" /><path d="M4 19h16" /></g>,
+  // a raised hand (Lucide's hand, as cindy's Default permissions): the composer picker's default mode (#5324)
+  palm: <g><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" /><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" /><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></g>,
   tool: <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />,
   bell: <g><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></g>,
   stop: <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" />,
@@ -36,6 +43,8 @@ const P: Record<string, React.ReactNode> = {
   machine: <g><rect x="2" y="4" width="20" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></g>,
   phone: <g><rect x="6" y="2" width="12" height="20" rx="2" /><path d="M11 18h2" /></g>,
   watch: <g><rect x="6" y="7" width="12" height="10" rx="2" /><path d="M9 7V2h6v5M9 17v5h6v-5" /></g>,
+  // the running bar's background subtasks and its speed card (Lucide's activity, as cindy's)
+  activity: <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />,
   layers: <g><path d="M12 2 2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5M2 12l10 5 10-5" /></g>,
   // a Claude Code workflow run (#2935, #3434; Lucide's workflow): the same mark wherever one is named, in the ai color,
   // as iOS (flowchart) and Android (TreeStructure) draw it
@@ -48,11 +57,15 @@ const P: Record<string, React.ReactNode> = {
   copy: <g><rect x="9" y="9" width="12" height="12" rx="2.5" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></g>,
   quote: <path d="M4 11h5v5H4zM4 11c0-3 1.5-5 4-6M14 11h5v5h-5zM14 11c0-3 1.5-5 4-6" />,
   file: <g><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></g>,
+  // the changed-files card's mark (Lucide's file-diff, as cindy's TurnChangesCard)
+  fileDiff: <g><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" /><path d="M9 10h6M12 13V7M9 17h6" /></g>,
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   git: <g><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="8" r="2.5" /><path d="M6 8.5v7M18 10.5c0 4-6 3-10.5 6" /></g>,
   more: <g fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></g>,
+  // a drag handle: two columns of three dots (the composer's queued messages, #5327)
+  grip: <g fill="currentColor" stroke="none"><circle cx="9" cy="5" r="1.7" /><circle cx="9" cy="12" r="1.7" /><circle cx="9" cy="19" r="1.7" /><circle cx="15" cy="5" r="1.7" /><circle cx="15" cy="12" r="1.7" /><circle cx="15" cy="19" r="1.7" /></g>,
   menu: <path d="M4 7h16M4 12h16M4 17h16" />,
-  // "Branch to new chat": a path that splits in two
+  // "Start a new session" (a branch of the chat): a path that splits in two
   fork: <path d="M16 3h5v5M8 3H3v5M12 22v-8.3a4 4 0 0 0-1.17-2.87L3 3M15 9l6-6" />,
   sidebar: <g><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9 4v16" /></g>,
   loop: <path d="M17 2l4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3" />,
@@ -68,6 +81,12 @@ const P: Record<string, React.ReactNode> = {
   undo: <path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />,
   // a message sent on to another chat (#3899, iOS Theme.Icon.forwardMessage): undo's arrow, turned the other way
   forward: <path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />,
+  // the image editor's (#4991, iOS Theme.Icon.redo / crop / rotateLeft / cropRatio): Redo is undo's arrow turned the
+  // other way, as forward is; a crop's two corners; a frame turned a quarter left; a tall and a wide frame over each other
+  redo: <path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />,
+  crop: <path d="M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2" />,
+  rotateLeft: <g><path d="M20 9V7a2 2 0 0 0-2-2h-6M15 2l-3 3 3 3" /><path d="M20 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" /></g>,
+  ratio: <g><rect x="6" y="2" width="12" height="20" rx="2" /><rect x="2" y="6" width="20" height="12" rx="2" /></g>,
   lock: <g><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></g>,
   // show / hide what a secret field holds while it is typed (Lucide's eye / eye-off)
   eye: <g><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0" /><circle cx="12" cy="12" r="3" /></g>,
@@ -92,6 +111,8 @@ const P: Record<string, React.ReactNode> = {
   square: <rect x="4" y="4" width="16" height="16" rx="2" />,
   at: <g><circle cx="12" cy="12" r="4" /><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94" /></g>,
   info: <g><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></g>,
+  // an error notice's mark (Lucide's circle-alert, as cindy's ErrorNotice)
+  alertCircle: <g><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></g>,
   mail: <g><rect x="2" y="4" width="20" height="16" rx="2.5" /><path d="m22 7-10 6L2 7" /></g>,
   compose: <g><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.4 2.6a1.4 1.4 0 0 1 3 3l-9 9a2 2 0 0 1-.85.5l-2.9.85.85-2.9a2 2 0 0 1 .5-.85z" /></g>,
   translate: <g><path d="m5 8 6 6M4 14l6-6 2-3M2 5h12M7 2h1" /><path d="m22 22-5-10-5 10M14 18h6" /></g>,
@@ -109,6 +130,8 @@ const P: Record<string, React.ReactNode> = {
   wrap: <g><path d="M3 6h18M3 12h15a3 3 0 1 1 0 6h-4M3 18h7" /><path d="m16 16-2 2 2 2" /></g>,
   arrowLeft: <path d="M19 12H5M12 19l-7-7 7-7" />,
   arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
+  // the chat's model change divider (Lucide's arrow-left-right, as cindy's)
+  arrowLeftRight: <path d="M8 3 4 7l4 4M4 7h16M16 21l4-4-4-4M20 17H4" />,
   textSize: <path d="M4 7V4h16v3M9 20h6M12 4v16" />,
   // an extension's entry on the sidebar (docs/extensions/extensions.md "UI slots" nav_page icons; extension, list, bell and doc reuse the above)
   chart: <path d="M3 3v16a2 2 0 0 0 2 2h16M8 17v-4M13 17V8M18 17v-7" />,
@@ -119,7 +142,14 @@ const P: Record<string, React.ReactNode> = {
   money: <g><rect x="2" y="6" width="20" height="12" rx="2.5" /><circle cx="12" cy="12" r="2.5" /><path d="M6 12h.01M18 12h.01" /></g>,
   // a row's icons in an extension's view (docs/extensions/extensions.md "Declarative UI" row icon; the rest reuse the above)
   person: <g><circle cx="12" cy="8" r="4" /><path d="M4.5 21a7.5 7.5 0 0 1 15 0" /></g>,
+  // a lead's Team (#5180; Lucide's users-round, as cindy's Team tab)
+  users: <g><path d="M18 21a8 8 0 0 0-16 0" /><circle cx="10" cy="8" r="5" /><path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3" /></g>,
   star: <path d="M12 2.8l2.84 5.76 6.36.92-4.6 4.49 1.09 6.33L12 17.31l-5.69 2.99 1.09-6.33-4.6-4.49 6.36-.92z" />,
+  // the model panel (#5032, after Cindy's): its rail's Recent and All (Lucide's history and layout-grid), a row's
+  // Customize (Lucide's sliders-horizontal)
+  history: <g><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5M12 7v5l4 2" /></g>,
+  grid: <g><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></g>,
+  sliders: <path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4" />,
   warning: <g><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><path d="M12 9v4M12 17h.01" /></g>,
   tag: <g><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.41l8.71 8.71a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z" /><path d="M7.5 7.5h.01" /></g>,
   // Health (docs/assistant/health.md)

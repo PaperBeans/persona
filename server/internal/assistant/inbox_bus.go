@@ -53,6 +53,35 @@ func inboxRequest(ctx context.Context, s *Service, method string, decode func(an
 			return nil, true, err
 		}
 		return map[string]any{"repos": repos}, true, nil
+	case assistantwire.MethodInboxMutes:
+		var p struct {
+			Source string `json:"source"`
+		}
+		if err := decode(&p); err != nil {
+			return nil, true, err
+		}
+		mutes, err := s.InboxSourceMutes(ctx, p.Source)
+		if err != nil {
+			return nil, true, err
+		}
+		return map[string]any{"mutes": mutes}, true, nil
+	case assistantwire.MethodInboxTriagePreview:
+		var p assistantwire.InboxTriagePreview
+		if err := decode(&p); err != nil {
+			return nil, true, err
+		}
+		return map[string]any{"verdicts": s.InboxTriagePreview(ctx, p)}, true, nil
+	case assistantwire.MethodInboxUnmute:
+		var p struct {
+			ID string `json:"id"`
+		}
+		if err := decode(&p); err != nil {
+			return nil, true, err
+		}
+		if err := s.InboxUnmute(ctx, p.ID); err != nil {
+			return nil, true, err
+		}
+		return map[string]any{}, true, nil
 	}
 	return nil, false, nil
 }

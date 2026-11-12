@@ -96,6 +96,7 @@ the hub's state directory (or its compatible predecessor) or next to the hub's b
 ```
 # persona deployed commits v1
 # repo: <owner>/<name>
+# pr: <N> <full sha>
 <full sha> <subject>
 ```
 
@@ -105,6 +106,21 @@ repository. A PR is found by its merge's subject (a squash merge's `… (#N)`, a
 found, it is deployed, with no network. Not found, GitHub is asked; when GitHub cannot answer (no route, a failure
 pauses it for 10 minutes), it is "not in the running hub" (held, "等部署"), and the open to-dos' sweep leaves such a
 to-do as it is (its PR may still be open). The file is checked first, GitHub only when the file cannot say.
+
+**Deployed before the upstream merge** (#4867): a hub built from a local branch can run a PR that is still open. The PR has
+no merge commit, and GitHub's compare does not know a local commit. So the file names such a PR by a commit of its own,
+`# pr: <N> <sha>`: its head when the deployed commit contains it, else its newest own commit when the PR branch only merged
+its base since. The hub counts the PR as deployed (stage Deploy, then verified as above) only when the file also lists that
+commit, so the commit is in the deployed history.
+
+`scripts/deploy/deployed_commits.py --out <dir>` writes the file for a commit (`--commit`, default `HEAD`). It lists the
+history, and the open PRs it runs, read with the GitHub CLI when that is signed in; `--pr <N>[=<sha>]` names more,
+`--no-open-prs` skips GitHub. It writes under a temporary name and renames. It leaves out commits written before
+2026-11-08 (`--since`): a `(#N)` in them is the previous tracker's number (`CLAUDE.md`, "Old issue numbers"), which the
+hub would take for this repository's PR #N. One such subject once marked an open PR deployed. `scripts/deploy/deploy.sh` writes it beside
+the hub's binary. A hub built and installed by hand, a local `dev` build, gets the same file from
+`python3 scripts/deploy/deployed_commits.py --commit <the built commit> --out "$PERSONA_HOME/bin"`, run in the checkout it
+was built from.
 
 GitHub is read through the hub's GitHub connector when it is signed in, else with `GH_TOKEN` / `GITHUB_TOKEN` from the assistant's environment when set, else anonymously (enough
 for a public repository; a private one without a token stays held as "cannot tell").

@@ -7,10 +7,13 @@ struct TodoDecisionsDeps {
     var api: () -> APIClient?
     var report: (Error) -> Void
     var toast: (Toast) -> Void
+    /// The manager the requests about a to-do name (`TodoStore.named`): its own, whichever assistant is current.
+    var named: (String) -> String? = { _ in nil }
 
     static var live: TodoDecisionsDeps {
         let model = AppModel.shared
-        return TodoDecisionsDeps(api: { model.api }, report: { model.show($0) }, toast: { model.toast = $0 })
+        return TodoDecisionsDeps(api: { model.api }, report: { model.show($0) }, toast: { model.toast = $0 },
+                                 named: { TodoStore.shared.named($0) })
     }
 }
 
@@ -42,6 +45,9 @@ struct TodoDecisionForm: Identifiable, Equatable {
 
     init(deps: Deps = .live) { self.deps = deps }
 
+    /// The hub's client for this to-do's decisions: its manager named.
+    private var client: APIClient? { deps.api()?.manager(deps.named(todoID)) }
+
     var current: [TodoDecision] { TodoDecisionsLogic.current(all ?? []) }
     var revisedCount: Int { (all?.count ?? 0) - current.count }
     var shown: [TodoDecision] { showAll ? all ?? [] : current }
@@ -66,7 +72,7 @@ struct TodoDecisionForm: Identifiable, Equatable {
     }
 
     func load() async {
-        guard let api = deps.api(), !todoID.isEmpty else { return }
+        guard let api = client, !todoID.isEmpty else { return }
         loads += 1
         let n = loads
         do {
@@ -90,7 +96,7 @@ struct TodoDecisionForm: Identifiable, Equatable {
     func add(question: String, choice: String, reason: String, supersedes: TodoDecision?) async -> Bool {
         let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
         let choice = choice.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let api = deps.api(), !question.isEmpty, !choice.isEmpty else { return false }
+        guard let api = client, !question.isEmpty, !choice.isEmpty else { return false }
         do {
             _ = try await api.addTodoDecision(todoID: todoID, question: question, choice: choice, reason: reason,
                                               supersedesID: supersedes?.id ?? "")
@@ -106,7 +112,7 @@ struct TodoDecisionForm: Identifiable, Equatable {
 
     /// Marks `d` as revising the earlier decision `old`; "" undoes it.
     func markSupersedes(_ d: TodoDecision, old: String) async {
-        guard let api = deps.api() else { return }
+        guard let api = client else { return }
         do {
             _ = try await api.setTodoDecisionSupersedes(todoID: todoID, id: d.id, supersedesID: old)
         } catch {

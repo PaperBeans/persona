@@ -130,6 +130,7 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.AgentsNoTodo -> R.string.designsystem_core_agents_no_todo
     CoreText.Key.AgentsManual -> R.string.designsystem_core_agents_manual
     CoreText.Key.AgentsQuietSpaces -> R.string.designsystem_core_agents_quiet_spaces
+    CoreText.Key.AgentsStartedTab -> R.string.designsystem_core_agents_started_tab
     CoreText.Key.CountNeedsYou -> -R.plurals.designsystem_core_count_needs_you
     CoreText.Key.CountWorking -> -R.plurals.designsystem_core_count_working
     CoreText.Key.CountUnread -> -R.plurals.designsystem_core_count_unread
@@ -253,6 +254,32 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.ToolComputerRun -> R.string.designsystem_core_tool_computer_run
     CoreText.Key.ToolBrowserRun -> R.string.designsystem_core_tool_browser_run
     CoreText.Key.ToolBrowserLook -> R.string.designsystem_core_tool_browser_look
+    CoreText.Key.ComputerLookAt -> R.string.designsystem_core_computer_look_at
+    CoreText.Key.ComputerLookAtScreen -> R.string.designsystem_core_computer_look_at_screen
+    CoreText.Key.ComputerScript -> R.string.designsystem_core_computer_script
+    CoreText.Key.ComputerScriptNamed -> R.string.designsystem_core_computer_script_named
+    CoreText.Key.ComputerCheck -> R.string.designsystem_core_computer_check
+    CoreText.Key.ComputerClick -> R.string.designsystem_core_computer_click
+    CoreText.Key.ComputerSpot -> R.string.designsystem_core_computer_spot
+    CoreText.Key.ComputerDoubleClick -> R.string.designsystem_core_computer_double_click
+    CoreText.Key.ComputerRightClick -> R.string.designsystem_core_computer_right_click
+    CoreText.Key.ComputerType -> R.string.designsystem_core_computer_type
+    CoreText.Key.ComputerFillIn -> R.string.designsystem_core_computer_fill_in
+    CoreText.Key.ComputerPress -> R.string.designsystem_core_computer_press
+    CoreText.Key.ComputerScroll -> R.string.designsystem_core_computer_scroll
+    CoreText.Key.ComputerDrag -> R.string.designsystem_core_computer_drag
+    CoreText.Key.ComputerOpen -> R.string.designsystem_core_computer_open
+    CoreText.Key.ComputerSwitchTo -> R.string.designsystem_core_computer_switch_to
+    CoreText.Key.ComputerBringToFront -> R.string.designsystem_core_computer_bring_to_front
+    CoreText.Key.ComputerLookAtWindow -> R.string.designsystem_core_computer_look_at_window
+    CoreText.Key.ComputerScreenshot -> R.string.designsystem_core_computer_screenshot
+    CoreText.Key.ComputerSeeScreen -> R.string.designsystem_core_computer_see_screen
+    CoreText.Key.ComputerZoom -> R.string.designsystem_core_computer_zoom
+    CoreText.Key.ComputerSpace -> R.string.designsystem_core_computer_space
+    CoreText.Key.ComputerControlling -> R.string.designsystem_core_computer_controlling
+    CoreText.Key.ComputerControlled -> R.string.designsystem_core_computer_controlled
+    CoreText.Key.ComputerControllingSpoken -> R.string.designsystem_core_computer_controlling_spoken
+    CoreText.Key.ComputerControlledSpoken -> R.string.designsystem_core_computer_controlled_spoken
     CoreText.Key.ToolAgentRead -> R.string.designsystem_core_tool_agent_read
     CoreText.Key.ToolAgentSend -> R.string.designsystem_core_tool_agent_send
     CoreText.Key.ToolAgentsList -> R.string.designsystem_core_tool_agents_list

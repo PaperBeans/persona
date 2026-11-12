@@ -273,25 +273,34 @@ class HubSessionsRepository(
     }
 
     override suspend fun setListFilter(filter: SessionListFilter) {
-        val changed = lock.withLock {
-            if (mutableListStatus.value.filter == filter) return
+        val filterGeneration = lock.withLock {
+            val status = mutableListStatus.value
+            if (status.filter == filter) return
             // The complete collection is the same for every filter (the view projects it locally): keep the baseline.
-            if (mode == Mode.Complete && filter.requiresCompleteMembership &&
-                mutableListStatus.value.filter.requiresCompleteMembership) {
-                mutableListStatus.update { it.copy(filter = filter) }
+            if (mode == Mode.Complete && filter.requiresCompleteMembership && status.filter.requiresCompleteMembership) {
+                mutableListStatus.value = status.copy(filter = filter)
                 return
             }
+            // The first complete view can project the restored rows locally while its authoritative list loads.
+            val keepFirstPaint = mode == Mode.Unknown && !status.loaded && status.filter == SessionListFilter() &&
+                filter.requiresCompleteMembership
             // A view policy is not a server capability failure. Reprobe pagination when leaving that view.
-            if (mutableListStatus.value.filter.requiresCompleteMembership != filter.requiresCompleteMembership) mode = Mode.Unknown
+            if (status.filter.requiresCompleteMembership != filter.requiresCompleteMembership) mode = Mode.Unknown
             generation++
             activeRequest?.cancel()
             resetPages()
-            if (mode != Mode.Legacy) mutableSessions.value = emptyList()
+            if (mode != Mode.Legacy && !keepFirstPaint) mutableSessions.value = emptyList()
             verifiedLists.value = VerifiedSessionLists()
             mutableListStatus.value = SessionListStatus(paged = mode == Mode.Paged, filter = filter)
-            true
+            generation
         }
-        if (changed) refresh()
+        try {
+            refresh()
+        } catch (cancelled: CancellationException) {
+            // A replacement request in this repository must not cancel the caller's work on other Hubs.
+            currentCoroutineContext().ensureActive()
+            if (lock.withLock { generation == filterGeneration }) throw cancelled
+        }
     }
 
     override suspend fun loadMore() = loadPage(previous = false)
@@ -531,7 +540,7 @@ class HubSessionsRepository(
 
     /** A partial filtered window is NEVER evidence that a machine's other sessions were removed. */
     private fun verifyHeld() {
-        if (connection.state.value != ConnectionState.Online) return
+        if (connection.state.value != ConnectionState.Online || !mutableListStatus.value.loaded) return
         if (mode == Mode.Paged) {
             verifiedLists.value = VerifiedSessionLists(machines = mutableMachines.value)
             return

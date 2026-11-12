@@ -34,7 +34,8 @@ func TestProviderDeepSeekDiscoveryEndpoint(t *testing.T) {
 	var requests []string
 	interceptProbe(t, func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Method+" "+r.URL.String())
-		if r.Header.Get("Authorization") != "Bearer "+fakeKey || r.Header.Get("x-api-key") != fakeKey {
+		// Which header carries the key depends on the probe (models_probe_auth_test.go); one always does.
+		if r.Header.Get("Authorization") != "Bearer "+fakeKey && r.Header.Get("x-api-key") != fakeKey {
 			t.Error("missing probe credentials")
 		}
 		switch r.Method + " " + r.URL.Path {
@@ -99,7 +100,8 @@ func TestProviderDeepSeekDiscoveryStoredCredentialsStayBoundToBase(t *testing.T)
 		return probeResponse(r, 200, `{"data":[]}`), nil
 	})
 	probeResult(t, mux, "/api/v1/launchers/discover", `{"name":"deepseek"}`)
-	if gotURL != "https://api.deepseek.com/models" || key != fakeKey || auth != "Bearer "+fakeKey || team != "hdr-secret-value" {
+	// Saved without auth, it launches with x-api-key, so the probe sends that header alone.
+	if gotURL != "https://api.deepseek.com/models" || key != fakeKey || auth != "" || team != "hdr-secret-value" {
 		t.Fatal("same-origin discovery lost the saved credentials")
 	}
 	// Even another base on the same host must not receive the stored key or custom headers.

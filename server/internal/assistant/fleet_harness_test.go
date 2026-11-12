@@ -36,6 +36,8 @@ type fleetDevs struct {
 	// Notification Center (confirm; LinkRang).
 	linkDesktop bool
 	confirmed   map[string]bool
+	// watched: the sessions an app has open (Watched), by machine and session.
+	watched map[[2]string]bool
 }
 
 type fleetNode struct {
@@ -490,3 +492,19 @@ var errNode = errors.New("the node refused")
 func init() { _ = apierr.ErrOffline }
 
 func (d *fleetDevs) Follow(context.Context, string, string, bool) error { return nil }
+
+func (d *fleetDevs) Watched(id, session string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.watched[[2]string{id, session}]
+}
+
+// watch has an app open machine id's session (on) or close it.
+func (d *fleetDevs) watch(id, session string, on bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.watched == nil {
+		d.watched = map[[2]string]bool{}
+	}
+	d.watched[[2]string{id, session}] = on
+}

@@ -21,6 +21,7 @@ import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.inbox.InboxItem
 import persona.core.domain.inbox.orderHubInbox
 import persona.core.domain.sort.AgentPreferences
+import persona.core.domain.sort.NeedsYouRow
 
 /** How many things the Persona home lists before it says how many more there are. */
 internal const val NeedsYouShown = 3
@@ -41,7 +42,11 @@ sealed interface NeedsYouLine {
     val who: String
     val what: String
 
-    /** An agent's pending request ([kind] is the interaction's: question, plan, permission, screen…). */
+    /**
+     * An agent's pending request ([kind] is the interaction's: question, plan, permission, screen…). On Glass a line is a
+     * session that waits for the user ([needsYouBySession]): [row] is its Needs you row's id, [requestId] its oldest card,
+     * blank when [terminal] says it waits only in its terminal.
+     */
     data class Agent(
         val session: SessionKey,
         val requestId: String,
@@ -49,8 +54,10 @@ sealed interface NeedsYouLine {
         val toolName: String?,
         override val who: String,
         override val what: String,
+        val row: String? = null,
+        val terminal: Boolean = false,
     ) : NeedsYouLine {
-        override val key: String get() = "agent:$requestId"
+        override val key: String get() = row ?: "agent:$requestId"
     }
 
     /** An inbox item the hub sorted into "Needs you"; [lark] tells a Lark message from a mail. [who] is blank when the item
@@ -94,23 +101,48 @@ fun needsYou(
         NeedsYouLine.Agent(request.sessionKey, request.id, request.kind, request.toolName,
             who = agentName(request, bySession[request.sessionKey]), what = oneLine(request.headline.shown))
     }
+    val all: List<NeedsYouLine> = agents + inboxLines(messages)
+    return NeedsYou(all.take(shown), (all.size - shown).coerceAtLeast(0))
+}
+
+/**
+ * The lines of the blank page's Needs you on Glass (#4339 C17): iOS's `ShellNeedsYou`, counting sessions as
+ * `DESIGN_SYSTEM.md` section 4.8 does. One line per row the Agents tab's badge counts ([rows], `ShellCounts.agentRows`:
+ * quiet and muted sessions left out), so the agents among them are the badge's number; a session's line reads its oldest
+ * card, and a session that waits only in its terminal reads "Terminal needs you". Then the inbox's "Needs you", newest
+ * first, as in [needsYou]. All of them: the page shows as many as fit ([needsYouShown]).
+ */
+fun needsYouBySession(rows: List<NeedsYouRow>, sessions: List<Session>, messages: List<NeedsYouMessage>): List<NeedsYouLine> {
+    val bySession = sessions.associateBy { it.key }
+    val agents = rows.map { row ->
+        val card = row.cards.firstOrNull()
+        val session = bySession[row.key]
+        NeedsYouLine.Agent(row.key, card?.id.orEmpty(), card?.kind ?: "screen", card?.toolName,
+            who = agentName(card?.sessionTitle, card?.cwd, session), what = card?.let { oneLine(it.headline.shown) }.orEmpty(),
+            row = row.id, terminal = card == null)
+    }
+    return agents + inboxLines(messages)
+}
+
+/** The inbox items still to do in "Needs you" (not those the AI twin has in hand), newest first. */
+private fun inboxLines(messages: List<NeedsYouMessage>): List<NeedsYouLine> {
     val lark = messages.filter { it.lark }.map { it.item.id }.toSet()
     // "Needs you" by the hub's section (status, else tier), as the inbox page groups it.
-    val inbox = orderHubInbox(messages.filterNot { it.working }.map { it.item }.distinctBy { it.id }.filter { it.needsYou })
+    return orderHubInbox(messages.filterNot { it.working }.map { it.item }.distinctBy { it.id }.filter { it.needsYou })
         .map { item ->
             NeedsYouLine.Inbox(item.id, item.id in lark, item.kind,
                 who = item.title.ifBlank { item.sender.orEmpty() },
                 what = oneLine(item.summary?.takeIf { it.isNotBlank() } ?: item.preview))
         }
-    val all: List<NeedsYouLine> = agents + inbox
-    return NeedsYou(all.take(shown), (all.size - shown).coerceAtLeast(0))
 }
 
 /** The conversation's name as the lists show it: its title, else its folder, else blank (the row then reads "Agent", [needsYouWho]). */
-private fun agentName(request: Interaction, session: Session?): String =
-    request.sessionTitle?.trim()?.takeIf { it.isNotEmpty() && it != "Claude Code" }
+private fun agentName(request: Interaction, session: Session?): String = agentName(request.sessionTitle, request.cwd, session)
+
+private fun agentName(title: String?, cwd: String?, session: Session?): String =
+    title?.trim()?.takeIf { it.isNotEmpty() && it != "Claude Code" }
         ?: session?.title?.trim()?.takeIf { it.isNotEmpty() && it != "Claude Code" }
-        ?: (request.cwd ?: session?.cwd)?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+        ?: (cwd ?: session?.cwd)?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
         .orEmpty()
 
 private fun oneLine(text: String): String = text.replace(Regex("\\s+"), " ").trim()

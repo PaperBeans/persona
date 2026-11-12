@@ -9,17 +9,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.AgentLauncher
+import persona.core.contracts.api.launcherModel
 import persona.core.designsystem.JAction
 import persona.core.designsystem.JActionSheet
 import persona.core.designsystem.JChip
 import persona.core.designsystem.icons.PhIcons
-
-/** Runs Claude Code or Codex: what the assistant can use (web `runsAssistant`, iOS `Launcher.runsAssistant`). */
-internal fun runsAssistant(launcher: AgentLauncher): Boolean =
-    launcher.baseUrl != "(traex)" && launcher.agentType in setOf("claude", "codex")
-
-/** The model a launcher names, short: the last part of a gateway's `provider/model`. */
-internal fun launcherModel(launcher: AgentLauncher): String? = launcher.model?.substringAfterLast('/')?.takeIf(String::isNotBlank)
 
 /**
  * The new conversation's launcher (iOS StarterComposer's model menu, web StarterLauncherChip): a chip over the home's

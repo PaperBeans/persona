@@ -42,10 +42,6 @@ func TestGoldenAssistantClaudeMD(t *testing.T) {
 	golden(t, "assistant_claude_md.bare", s.claudeMD(ctx, "server", false))
 	// lark-cli (docs/plans/plan-lark-cli.md).
 	golden(t, "assistant_claude_md.lark_cli", s.claudeMD(ctx, "server", true))
-	// hub.json assistant.persona_view: cards are persona-view, the extensions' components (#1850).
-	bare.hello.PersonaView = true
-	golden(t, "assistant_claude_md.persona_view", s.claudeMD(ctx, "server", false))
-	bare.hello.PersonaView = false
 
 	// prepare writes it with what the hub says of lark-cli, for the machine it prepares.
 	bare.larkCLI = true
@@ -62,7 +58,7 @@ func TestGoldenAssistantViewRepair(t *testing.T) {
 }
 
 func TestAssistantRichViewPromptExamplesAreValid(t *testing.T) {
-	text := prompts.RenderAssistantClaudeMD(prompts.AssistantClaudeMD{PersonaView: true})
+	text := prompts.RenderAssistantClaudeMD(prompts.AssistantClaudeMD{})
 	blocks := wire.AssistantViewBlocks(text)
 	if len(blocks) != 2 {
 		t.Fatalf("prompt has %d examples, want 2", len(blocks))

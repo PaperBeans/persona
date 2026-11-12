@@ -99,6 +99,7 @@
     <string name="designsystem_core_agents_no_todo">ToDoなし</string>
     <string name="designsystem_core_agents_manual">手動で開いた</string>
     <string name="designsystem_core_agents_quiet_spaces">アイドル中のスペース</string>
+    <string name="designsystem_core_agents_started_tab">起動元</string>
     <plurals name="designsystem_core_count_needs_you">
         <item quantity="other">%1$d件が要対応</item>
     </plurals>
@@ -250,6 +251,32 @@
     <string name="designsystem_core_tool_computer_run">コンピューターを操作</string>
     <string name="designsystem_core_tool_browser_run">ブラウザーを使用</string>
     <string name="designsystem_core_tool_browser_look">ブラウザーを確認</string>
+    <string name="designsystem_core_computer_look_at">%1$sを見る</string>
+    <string name="designsystem_core_computer_look_at_screen">画面全体を見る</string>
+    <string name="designsystem_core_computer_script">スクリプトを実行</string>
+    <string name="designsystem_core_computer_script_named">スクリプトを実行：%1$s</string>
+    <string name="designsystem_core_computer_check">確認</string>
+    <string name="designsystem_core_computer_click">クリック %1$s</string>
+    <string name="designsystem_core_computer_spot">1か所</string>
+    <string name="designsystem_core_computer_double_click">%1$sをダブルクリック</string>
+    <string name="designsystem_core_computer_right_click">%1$sを右クリック</string>
+    <string name="designsystem_core_computer_type">「%1$s」を入力</string>
+    <string name="designsystem_core_computer_fill_in">「%1$s」を入力</string>
+    <string name="designsystem_core_computer_press">%1$sを押す</string>
+    <string name="designsystem_core_computer_scroll">スクロール</string>
+    <string name="designsystem_core_computer_drag">ドラッグ</string>
+    <string name="designsystem_core_computer_open">%1$sを開く</string>
+    <string name="designsystem_core_computer_switch_to">%1$sに切り替え</string>
+    <string name="designsystem_core_computer_bring_to_front">最前面に切り替え</string>
+    <string name="designsystem_core_computer_look_at_window">ウインドウを見る</string>
+    <string name="designsystem_core_computer_screenshot">スクリーンショット</string>
+    <string name="designsystem_core_computer_see_screen">画面の内容を確認</string>
+    <string name="designsystem_core_computer_zoom">拡大して見る</string>
+    <string name="designsystem_core_computer_space">スペース</string>
+    <string name="designsystem_core_computer_controlling">%1$sを操作中・%2$s</string>
+    <string name="designsystem_core_computer_controlled">%1$sを操作しました・%2$s</string>
+    <string name="designsystem_core_computer_controlling_spoken">%1$sを操作中、%2$s</string>
+    <string name="designsystem_core_computer_controlled_spoken">%1$sを操作しました、%2$s</string>
     <string name="designsystem_core_tool_agent_read">エージェントのチャットを読む</string>
     <string name="designsystem_core_tool_agent_send">エージェントにメッセージ</string>
     <string name="designsystem_core_tool_agents_list">エージェント一覧を表示</string>
@@ -451,6 +478,6 @@
     <string name="designsystem_core_always_scope_commands">この会話内のすべてのコマンド</string>
     <string name="designsystem_core_always_scope_read_directory">この会話中、このディレクトリ内のすべての読み取り</string>
     <string name="designsystem_core_always_scope_edit_directory">この会話中、このディレクトリ内のすべてのファイル編集</string>
-    <string name="designsystem_core_always_scope_tool">この会話内でのこのツールのすべての呼び出し</string>
+    <string name="designsystem_core_always_scope_tool">この会話のすべての「%1$s」呼び出し</string>
     <string name="designsystem_core_always_scope_approved">許可した範囲はこの会話中、引き続き許可されます</string>
 </resources>

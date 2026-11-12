@@ -538,7 +538,7 @@ func newInboxHubWith(t *testing.T, kbo *KBOptions) *inboxHub {
 	st := newInboxMemStore()
 	s := New(Options{Hub: f, Store: func() Store { return st }, Logf: testLogf(t), KB: kbo})
 	if kbo != nil {
-		t.Cleanup(s.kbClose)
+		t.Cleanup(s.kbEnd)
 	}
 	in.svc = s
 	h := &inboxHub{Service: s, f: f, in: in, st: st}

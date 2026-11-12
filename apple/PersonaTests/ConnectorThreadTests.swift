@@ -95,6 +95,35 @@ struct ConnectorThreadTests {
         #expect(tg.failure == "Telegram 限流：还要 248 秒")
     }
 
+    /// An item with no conversation of its own (#5537): a subscription's (its source is the subscription) or a
+    /// connector's without threads. The hub answers a page that is none; an older hub said no such connector (404) or
+    /// none to open (409 without a code). None of them is an error to show over the content; signed out still is.
+    @Test func noConversation() async throws {
+        let hub = FakeHub()
+        let path = "/api/v1/connectors/sub_example1/thread"
+        hub.on("GET", path, json: #"{"chat":{"id":"sub:sub_example1:t1","name":"","kind":"none"},"messages":[]}"#)
+        let none = ConnectorThreadModel(connector: "sub_example1", thread: "sub:sub_example1:t1", api: { hub.client })
+        await none.load()
+        #expect(none.loaded && !none.unavailable && none.failure == nil && none.messages.isEmpty)
+        #expect(none.chat?.isChat == false && none.chat?.isGitHub == false)
+
+        for older in [APIError(status: 404, message: #"no connector "sub_example1""#),
+                      APIError(status: 409, message: "Example has no conversations to open")] {
+            hub.on("GET", path) { _ in throw older }
+            let m = ConnectorThreadModel(connector: "sub_example1", thread: "sub:sub_example1:t1", api: { hub.client })
+            await m.load()
+            #expect(m.loaded && m.unavailable)
+            #expect(m.failure == nil, "\(older.status) said over the content")
+        }
+
+        hub.on("GET", "/api/v1/connectors/telegram/thread") { _ in
+            throw APIError(status: 409, message: "Telegram: not signed in", fields: ["code": "unavailable"])
+        }
+        let signedOut = ConnectorThreadModel(connector: "telegram", thread: "u1", api: { hub.client })
+        await signedOut.load()
+        #expect(signedOut.unavailable && signedOut.failure == "Telegram: not signed in")
+    }
+
     /// The fields of a page decode as the hub sends them: media, a quote, an event.
     @Test func decodes() throws {
         let raw = #"""

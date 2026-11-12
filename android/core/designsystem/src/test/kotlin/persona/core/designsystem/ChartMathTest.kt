@@ -77,4 +77,29 @@ class ChartMathTest {
         assertEquals(2, statColumns(4, 600f))
         assertEquals(3, statColumns(6, 360f))
     }
+
+    private fun shareData(kind: JChartKind = JChartKind.Bar, stacked: Boolean = true, values: List<List<Double>>) =
+        JChartData(kind, values.first().indices.map { "d$it" },
+            values.mapIndexed { i, v -> JChartSeries("s$i", v, v.map(Double::toString)) }, stacked)
+
+    @Test fun oneCategoryStackedBarSplitsIntoShares() {
+        val shares = ChartMath.singleCategoryShares(shareData(values = listOf(listOf(300.0), listOf(600.0), listOf(100.0))))
+        assertEquals(listOf(0.3, 0.6, 0.1), shares)
+    }
+
+    @Test fun severalCategoriesStayColumns() {
+        assertNull(ChartMath.singleCategoryShares(shareData(values = listOf(listOf(1.0, 2.0), listOf(3.0, 4.0)))))
+    }
+
+    @Test fun nonStackedBarsLinesNegativesAndZeroTotalsStayColumns() {
+        assertNull(ChartMath.singleCategoryShares(shareData(stacked = false, values = listOf(listOf(100.0), listOf(50.0)))))
+        assertNull(ChartMath.singleCategoryShares(shareData(kind = JChartKind.Line, values = listOf(listOf(100.0)))))
+        assertNull(ChartMath.singleCategoryShares(shareData(values = listOf(listOf(100.0), listOf(-50.0)))))
+        assertNull(ChartMath.singleCategoryShares(shareData(values = listOf(listOf(0.0), listOf(0.0)))))
+        assertNull(ChartMath.singleCategoryShares(JChartData(JChartKind.Bar, emptyList(), emptyList(), stacked = true)))
+    }
+
+    @Test fun aZeroValuePartStillLinesUpWithTheOtherShares() {
+        assertEquals(listOf(0.0, 1.0), ChartMath.singleCategoryShares(shareData(values = listOf(listOf(0.0), listOf(100.0)))))
+    }
 }

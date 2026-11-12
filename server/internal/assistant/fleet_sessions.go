@@ -32,6 +32,7 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 	for _, sess := range list {
 		// Any agent (herdr or headless, started by Persona or not) finishing a turn may notify the phone.
 		was, key := before[sess.SessionID], machine+"/"+sess.SessionID
+		s.availSeen(machine, &sess, was, now) // the owner's wait for a reply (availability.go)
 		prev := was.Status
 		// The turn stopped on background work and its report woke it again within one of the node's list ticks: the
 		// stop never showed, only the woken flag turning on. It is held work all the same (#4187, #4419). By the
@@ -51,6 +52,7 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 				break // a meeting's batch: a side exchange, neither the turn tracker's nor a task's or the Agents' (meeting_turns.go)
 			}
 			s.takeTaskAnswerRetry(machine, sess.SessionID)
+			s.suggestDrop(machine, sess.SessionID) // a new turn: the last one's suggestion goes, a call on its way is cancelled
 			s.turnsBook().working(key, now)
 			s.replyWorked(machine, sess.SessionID) // answered: a question it asks next is a new one (agents_reply.go)
 			ref := SessionRef{MachineID: machine, SessionID: sess.SessionID}
@@ -64,6 +66,7 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 				break
 			}
 			s.notifyFinished(machine, sess.SessionID, s.turnsBook().ended(key, now, backgroundRunning(sess)))
+			s.suggestTurnEnded(machine, sess) // the next message, when nothing else suggests it (suggest_next.go)
 			// A new assistant conversation is named after its first turn; a task from one may be done. After the
 			// items of the turn (a channel's answer is read from them).
 			s.inOrder(func() { go s.TurnEnded(context.Background(), ref) })
@@ -76,12 +79,17 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 		if sess.Status != prev && sess.Status != proto.StatusWorking && !(prev == proto.StatusWorking && (sess.Status == proto.StatusDone || sess.Status == proto.StatusIdle)) {
 			// Stopped with no end seen (a restart, an interrupt, a card): a meeting turn there is over (meeting_turns.go).
 			s.meetingTurnStopped(machine, sess.SessionID, sess, prev == "")
+			if id := sess.SessionID; prev == proto.StatusWorking { // by id: a closure over sess would put every row on the heap
+				s.inOrder(func() { s.availStopped(machine, id, now) }) // its round is over (availability.go)
+			}
 		}
 		if sess.Status == proto.StatusWorking && backgroundRunning(sess) && !s.meetingTurnNow(machine, sess.SessionID) {
 			s.turnsBook().sawBackground(key, now)
 		}
 	}
+	s.availSweep(machine, list, now) // the waits of conversations no longer listed (availability.go)
 	s.fleetKeepPrevious(machine, list)
+	s.roundsSeen(list) // whose round each conversation is on (owner_preempt.go)
 	s.sessionsChanged(machine)
 	// Messages from other conversations, for those no longer running; the todos' links and herdr marks.
 	var connected time.Time
@@ -285,6 +293,7 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 	dir := m.assistantCwd() // once, not a path.Join for each row
 	asks := s.fleet.asks.reader(machine, complete)
 	defer asks.done()
+	suggested := s.hubSuggestions(machine)
 	for i := range list {
 		list[i].MachineID = machine
 		list[i].PendingInteractions = counts[list[i].SessionID]
@@ -295,6 +304,9 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 		if t := shown[list[i].SessionID].Title; t != "" && list[i].Assistant {
 			list[i].Title = t // "MMDD | type | topic", the user's own, "Persona" for the main one (titles.go)
 		}
+		if title := s.agentDisplayName(machine, list[i]); title != "" {
+			list[i].Title = title
+		}
 		if ch := via[[2]string{machine, list[i].SessionID}]; len(ch) > 0 {
 			list[i].Channels = ch // where its messages came from (docs/extensions/channels.md "Source markers")
 		}
@@ -302,6 +314,7 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 			list[i].Archived = shown[list[i].SessionID].Archived
 			v := shown[list[i].SessionID]
 			list[i].Origin, list[i].OriginRef, list[i].OpenedBy = v.Origin, v.OriginRef, v.OpenedBy // origins.go
+			list[i].ModelPick = v.ModelPick                                                         // what its next messages run on (model_pick.go)
 			// Messages from other conversations wait in the assistant while it runs: shown like typed-ahead input, after
 			// the user's own (the node's), and counted so the apps leave them alone: the assistant delivers them when the
 			// turn ends, and the queue's actions are claude's (#4342).
@@ -332,6 +345,7 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 		}
 		s.decorateWork(machine, &list[i], asking)
 		decorateAwaits(&list[i], asks)
+		decorateSuggestion(&list[i], suggested)
 	}
 	s.decorateTodos(machine, list)
 	for i := range list {
@@ -339,6 +353,9 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 		list[i].SpawnFrom, list[i].Chat, list[i].Topic, list[i].Dispatched = "", "", "", nil
 	}
 	s.fillStateMarks(machine, list, time.Now(), complete)
+	if !complete {
+		s.foldSubset(machine, list) // a complete list is folded once its archive is applied (archivedInventory)
+	}
 	return list
 }
 

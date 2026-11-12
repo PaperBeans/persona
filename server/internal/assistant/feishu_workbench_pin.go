@@ -72,7 +72,7 @@ func (s *Service) workbenchStamp(ctx context.Context, c *feishubot.Card) *feishu
 	if strings.Contains(js, `"a":"nav"`) || len(js) > workbenchStampMost {
 		return c
 	}
-	return c.Buttons(wbNavButton(wbT(s.botLang(ctx), "btn_home"), feishubot.Default, "home"))
+	return c.AppendToLinks(wbNavButton(wbT(s.botLang(ctx), "btn_home"), feishubot.Default, "home"))
 }
 
 // summonWorkbench posts a fresh workbench at the bottom of the chat, pins it as the only pin of the bot's, and

@@ -8,6 +8,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/shellcmd"
 )
 
 var (
@@ -58,20 +59,19 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 		v.deny = "不要读或改 lark-cli 的配置和凭据（~/.lark-cli）：飞书用 lark-cli 命令，它自己带登录。"
 		return v
 	}
-	segs, ok := shellSegments(cmd)
+	segs, ok := shellcmd.Split(cmd)
 	if !ok {
 		v.other, v.unparsed, v.unknown = true, true, v.unknown || larkCLIRe.MatchString(cmd) || shellCommandUnknown(cmd, true, depth)
 		return v
 	}
 	vars := map[string]string{}
-	unsafeRedirect := false
 	executableEnv := false
 	for _, s := range segs {
-		if s.subst {
+		if s.ArgSubst {
 			v.unsure, v.other = true, true
 			v.unknown = v.unknown || larkCLIRe.MatchString(cmd)
 		}
-		for _, nested := range s.nested {
+		for _, nested := range s.Nested {
 			child := classifyLarkDepth(nested, gates, cwd, risk, depth+1)
 			if len(child.calls) > 0 || child.unknown || child.unparsed {
 				v.other = true
@@ -81,12 +81,7 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 		if v.deny != "" {
 			return v
 		}
-		// Every redirection participates, including redirects on output filters. A command
-		// outside the small redirect grammar cannot be treated as a classified read.
-		if s.redirect != "" && !safeRedirect(s.redirect) {
-			unsafeRedirect = true
-		}
-		words := s.words
+		words := s.Words
 		// Loop bodies may prefix the invocation with both a shell keyword and environment assignments.
 		for len(words) > 0 && (words[0] == "do" || words[0] == "then" || words[0] == "else") {
 			words = words[1:]
@@ -126,7 +121,7 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 		words, parsed = unwrapCommand(words)
 		if !parsed {
 			v.other = true
-			v.unknown = v.unknown || larkCLIRe.MatchString(s.text)
+			v.unknown = v.unknown || larkCLIRe.MatchString(s.Text)
 			for _, word := range words {
 				v.unknown = v.unknown || strings.ContainsAny(word, "$`*?[]{}")
 			}
@@ -165,9 +160,6 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 				v.other, v.cliWrite, v.unknown = true, true, true
 				continue
 			}
-			if s.redirect != "" && !safeRedirect(s.redirect) {
-				v.other = true
-			}
 			if !c.cliRead() {
 				v.cliWrite = true
 			}
@@ -190,25 +182,22 @@ func classifyLarkDepth(cmd string, gates []proto.CommandGate, cwd string, risk l
 				continue
 			}
 			c.Gate = gate
-			if s.redirect != "" && !safeRedirect(s.redirect) {
-				v.other = true
-			}
 			v.calls = append(v.calls, c)
 		case name == "curl" || name == "wget" || name == "http" || name == "xh":
-			if g, ok := gateAimed(gates, s.text); ok {
+			if g, ok := gateAimed(gates, s.Text); ok {
 				v.deny = "不要直接 curl " + g.Title + " 的接口：用 " + g.Command + "，写操作要先在手机上确认。"
 				return v
 			}
 			v.other = true
-		case larkFilters[name] && len(env) == 0 && (s.redirect == "" || safeRedirect(s.redirect)):
+		case larkFilters[name] && len(env) == 0:
 		default:
 			v.other = true
-			if larkCLIRe.MatchString(s.text) || strings.ContainsAny(name, "$`*?[]{}") || larkCLIRe.MatchString(cmd) && indirectLarkCommand(name) {
+			if larkCLIRe.MatchString(s.Text) || dynamicCommandName(name) || larkCLIRe.MatchString(cmd) && indirectLarkCommand(name) {
 				v.unknown = true // an interpreter, wrapper or script may invoke the CLI
 			}
 		}
 	}
-	if (unsafeRedirect || executableEnv) && (len(v.calls) > 0 || larkCLIRe.MatchString(cmd)) {
+	if executableEnv && (len(v.calls) > 0 || larkCLIRe.MatchString(cmd)) {
 		v.other, v.unknown = true, true
 	}
 	if len(v.calls) == 0 {
@@ -235,6 +224,9 @@ func isAssignment(w string) bool {
 // indirectLarkCommand identifies opaque execution in a command already naming the CLI.
 // Without that context, interpreters and script files stay outside this gate.
 func indirectLarkCommand(name string) bool {
+	if name == "[" || name == "[[" {
+		return false
+	}
 	if strings.ContainsAny(name, "$`*?[]{}~") {
 		return true
 	}
@@ -272,8 +264,8 @@ var larkInterpreter = lazyre.New(`^(?:python|node|perl|ruby|lua|php)(?:[0-9]+(?:
 
 var redirectFD = lazyre.New(`^[0-9]*[<>]&[0-9]+$`)
 
-// safeRedirect checks every target after cleaning it: output stays inside /tmp,
-// or is folded into another descriptor or dropped. Unsupported targets require confirmation.
+// safeRedirect is used only by readsOnlyMemory. It accepts /tmp and /dev/null;
+// readsOnlyMemory rejects /tmp separately. Lark redirect targets are not checked here.
 func safeRedirect(r string) bool {
 	for _, t := range strings.Fields(r) {
 		if strings.ContainsAny(t, "$`*?[]{}~\"'\\") {

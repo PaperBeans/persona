@@ -29,6 +29,7 @@ import persona.core.contracts.api.*
 import persona.core.designsystem.*
 import persona.core.domain.tasks.TasksStore
 import java.io.File
+import java.time.Instant
 
 /**
  * The closeout card above a stopped agent's transcript (#3612), the decision answered on its Needs you row (#3804) and
@@ -211,7 +212,8 @@ class CloseoutShotsTest {
     private val main = SessionKey("computer-a", "main")
     private val stopped = Session("computer-b", "stopped", title = "Migrate the billing tables", state = "idle", status = "idle", lastText = "API error 400")
     private val release = Session("computer-b", "release", title = "Prepare the 2.4 release", state = "idle", status = "idle", lastText = "Ready to release.")
-    private val askedAt = "2026-11-10T08:00:00Z"
+    // Recent, by the real clock the trays read: a task idle for 48 h is shelved and leaves In progress (TodoTriage, #5530).
+    private val askedAt = Instant.now().minusSeconds(2 * 3_600).toString()
     private val decision = Todo("task-release", release.title, origin = "main", createdAt = askedAt, updatedAt = askedAt,
         agents = listOf(TodoAgent(release.machineId, release.sessionId)), supervision = Supervision(state = "needs_user"),
         ask = TodoAsk("decide", "Needs your decision: release 2.4 to everyone now?", "Release now", askedAt,

@@ -26,6 +26,8 @@
     <string name="chat_mention_used_file">File this session used</string>
     <string name="chat_mention_session_detail">%1$s · as context</string>
     <string name="chat_mention_no_match">No file or session matches</string>
+    <string name="chat_mention_reading_folder">Reading folder…</string>
+    <string name="chat_mention_no_match_folder">Nothing matches in this folder</string>
     <string name="chat_mention_quote_session">Another session: %1$s (%2$s)</string>
     <string name="chat_mention_quote_cwd">Folder: %1$s</string>
     <string name="chat_mention_quote_last">It last said: %1$s</string>

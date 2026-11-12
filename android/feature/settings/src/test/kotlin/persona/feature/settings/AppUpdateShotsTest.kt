@@ -15,6 +15,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -60,6 +61,9 @@ class AppUpdateShotsTest {
             }
         }
         rule.waitForIdle()
+        val about = rule.activity.getString(R.string.settings_home_about)
+        rule.onNode(hasScrollAction()).performScrollToNode(hasText(about))
+        rule.onNodeWithText(about).performClick()
         val install = rule.activity.getString(R.string.settings_update_install)
         rule.onNode(hasScrollAction()).performScrollToNode(hasText(install))
         rule.onNodeWithText(install).assertExists()

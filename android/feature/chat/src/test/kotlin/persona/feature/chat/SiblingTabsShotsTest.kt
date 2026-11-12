@@ -51,7 +51,7 @@ class SiblingTabsShotsTest {
         rule.setContent {
             PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
                 Column(Modifier.testTag("shot").width(400.dp).background(PersonaTheme.palette.background)) {
-                    ChatSiblingTabs(lead, all, onOpenSession = {})
+                    ChatSiblingTabs(lead, spaceTabs(lead, all), onOpenSession = {})
                 }
             }
         }

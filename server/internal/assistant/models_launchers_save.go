@@ -2,6 +2,8 @@ package assistant
 
 import (
 	"context"
+	"errors"
+	"maps"
 	"net/url"
 	"slices"
 	"strconv"
@@ -60,6 +62,8 @@ type launcherInput struct {
 	CompactWindow *int                   `json:"compact_window"`
 	MaxContext    *int                   `json:"max_context"`
 	Effort        *string                `json:"effort"`
+	// ViaMachine (kind api): the computer that sends its requests (models_via.go); nil keeps it, "" this manager.
+	ViaMachine *string `json:"via_machine"`
 
 	// The device scope (models_launchers_scope.go); left out keeps what is stored.
 	scopeInput
@@ -105,6 +109,9 @@ func checkHeaders(raw string) error {
 	return nil
 }
 
+// envLimit is how many NAME=value lines a provider's env takes (checkEnv).
+const envLimit = 50
+
 // checkEnv: one NAME=value a line ("export " before it is fine), NAME a shell variable's name; a line starting with #
 // is a comment. The rules of the node's envLine (node/launcherenv.go) and the web's envProblem. The error never quotes
 // a line: a value may be a secret.
@@ -120,7 +127,7 @@ func checkEnv(raw string) error {
 		if !ok || !envName.MatchString(strings.TrimSpace(name)) || strings.ContainsRune(line, 0) {
 			return i18n.Err("assistant-models_launchers.err_env_line", i18n.Args{"line": i + 1})
 		}
-		if lines > 50 {
+		if lines > envLimit {
 			return i18n.Err("assistant-models_launchers.err_env_limit")
 		}
 	}
@@ -240,6 +247,9 @@ func (in launcherInput) applyProvider(s *storedLauncher) {
 
 var errNoPreset = i18n.Err("assistant-models_launchers.err_no_preset")
 
+// maxDisplayName is how long a provider's display name may be, in characters (err_display_name).
+const maxDisplayName = 64
+
 // gatewayHost is the host of a provider's Base URL, lower case; "" without one.
 func gatewayHost(baseURL string) string {
 	u, err := url.Parse(baseURL)
@@ -297,7 +307,7 @@ func (in launcherInput) check() error {
 		return i18n.Err("assistant-models_launchers.err_name")
 	}
 	if in.DisplayName != nil {
-		if d := strings.TrimSpace(*in.DisplayName); utf8.RuneCountInString(d) > 64 || strings.IndexFunc(d, unicode.IsControl) >= 0 {
+		if d := strings.TrimSpace(*in.DisplayName); utf8.RuneCountInString(d) > maxDisplayName || strings.IndexFunc(d, unicode.IsControl) >= 0 {
 			return i18n.Err("assistant-models_launchers.err_display_name")
 		}
 	}
@@ -340,6 +350,29 @@ func checkAPITransport(kind, api, proxy, noProxy string, hasHeaders bool) error 
 		return errAPITransport
 	}
 	return nil
+}
+
+// checkVia: only a direct API connection sends through a computer, and only through one of this manager's: another
+// manager's machines are not its to call (hub ownership.go).
+func (s *Service) checkVia(in launcherInput) error {
+	id := ""
+	if in.ViaMachine != nil {
+		id = strings.TrimSpace(*in.ViaMachine)
+	}
+	if id == "" {
+		return nil
+	}
+	if in.Kind != "api" {
+		return i18n.Err("assistant-models_launchers.err_via_kind")
+	}
+	if s.devs == nil || !s.devs.Has(id) {
+		return errViaMachine(id)
+	}
+	return nil
+}
+
+func errViaMachine(id string) error {
+	return i18n.Err("assistant-models_launchers.err_via_machine", i18n.Args{"machine": strconv.Quote(id)})
 }
 
 // saveLauncher stores in (over old on an update) and tells the nodes.
@@ -400,6 +433,8 @@ func (s *Service) saveLauncher(ctx context.Context, in launcherInput, old *store
 	case in.Agent != "":
 		l.Agent = in.Agent
 	} // no agent in the request (an app without it): an update keeps what is stored
+	// Stored as the agent reaches it (the address Test connection called): a pasted ".../v1" would run as /v1/v1/messages.
+	l.BaseURL = l.LaunchBaseURL()
 	l.Args = in.Args
 	if in.Preset != "" {
 		l.Preset = in.Preset
@@ -426,6 +461,12 @@ func (s *Service) saveLauncher(ctx context.Context, in launcherInput, old *store
 		l.KeySealed = in.keyRefSealed
 	}
 	in.applyProvider(&l)
+	if in.ViaMachine != nil {
+		l.ViaMachine = strings.TrimSpace(*in.ViaMachine)
+	}
+	if l.Kind != "api" {
+		l.ViaMachine = "" // only a direct API connection's requests are the manager's to send
+	}
 	// A bypass list that is the gateway's host alone (iOS's Proxy › No Proxy) follows the gateway to a new address: the
 	// web form and an import send it back as it was, and the old host would leave the new gateway on the proxy (#6238).
 	if old != nil && l.BaseURL != old.BaseURL && onlyHost(l.NoProxy, gatewayHost(old.BaseURL)) {
@@ -473,7 +514,7 @@ func (s *Service) saveLauncher(ctx context.Context, in launcherInput, old *store
 	} else {
 		list = append(list, l)
 	}
-	if err := s.storeManagedWithKeys(ctx, list, keys, newKeys); err != nil {
+	if err := s.storeManagedWithKeys(ctx, list, keys, newKeys, nil); err != nil {
 		return l, err
 	}
 	return l, nil
@@ -483,6 +524,15 @@ func (s *Service) saveLauncher(ctx context.Context, in launcherInput, old *store
 // node credentials can be opened. An unrelated corrupt credential defers publication without discarding
 // readable records or preventing repair. A post-commit read failure cannot clear the nodes' providers.
 func (s *Service) storeManagedLaunchers(ctx context.Context, list []storedLauncher) error {
+	return s.storeManagedAnd(ctx, list, nil)
+}
+
+// errNoSettingsBatch: the store writes one setting at a time, so storeManagedAnd wrote nothing.
+var errNoSettingsBatch = errors.New("the store cannot write several settings in one transaction")
+
+// storeManagedAnd is storeManagedLaunchers that also writes more (other settings) in the same transaction: all of it
+// or nothing. A store that cannot is errNoSettingsBatch, nothing written.
+func (s *Service) storeManagedAnd(ctx context.Context, list []storedLauncher, more map[string]any) error {
 	keys, err := s.readMachineKeys(ctx)
 	if err != nil {
 		return err
@@ -491,11 +541,11 @@ func (s *Service) storeManagedLaunchers(ctx context.Context, list []storedLaunch
 	kept := slices.DeleteFunc(slices.Clone(keys), func(k machineKey) bool {
 		return !slices.ContainsFunc(list, func(l storedLauncher) bool { return l.Name == k.Launcher })
 	})
-	return s.storeManagedWithKeys(ctx, list, keys, kept)
+	return s.storeManagedWithKeys(ctx, list, keys, kept, more)
 }
 
-// storeManagedWithKeys is storeManagedLaunchers with the computers' keys as they are to be (old: as read).
-func (s *Service) storeManagedWithKeys(ctx context.Context, list []storedLauncher, old, keys []machineKey) error {
+// storeManagedWithKeys is storeManagedAnd with the computers' keys as they are to be (old: as read).
+func (s *Service) storeManagedWithKeys(ctx context.Context, list []storedLauncher, old, keys []machineKey, more map[string]any) error {
 	_, publicationErr := s.nodeLaunchers(list)
 	if publicationErr == nil {
 		for _, k := range keys {
@@ -505,16 +555,33 @@ func (s *Service) storeManagedWithKeys(ctx context.Context, list []storedLaunche
 			}
 		}
 	}
-	if !slices.Equal(old, keys) {
-		if keys == nil {
-			keys = []machineKey{}
+	if keys == nil {
+		keys = []machineKey{}
+	}
+	if len(more) > 0 {
+		batch, ok := s.store().(interface {
+			PutSettings(context.Context, map[string]any) error
+		})
+		if !ok {
+			return errNoSettingsBatch
 		}
-		if err := s.putSetting(ctx, launchersMachineKeysKey, keys); err != nil {
+		writes := maps.Clone(more)
+		writes[launchersManagedKey] = list
+		if !slices.Equal(old, keys) {
+			writes[launchersMachineKeysKey] = keys
+		}
+		if err := batch.PutSettings(ctx, writes); err != nil {
 			return err
 		}
-	}
-	if err := s.putSetting(ctx, launchersManagedKey, list); err != nil {
-		return err
+	} else {
+		if !slices.Equal(old, keys) {
+			if err := s.putSetting(ctx, launchersMachineKeysKey, keys); err != nil {
+				return err
+			}
+		}
+		if err := s.putSetting(ctx, launchersManagedKey, list); err != nil {
+			return err
+		}
 	}
 	if publicationErr != nil {
 		s.logf("launchers: saved providers; node publication deferred: %v", publicationErr)

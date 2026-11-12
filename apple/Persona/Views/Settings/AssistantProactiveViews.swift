@@ -273,6 +273,13 @@ struct AssistantRoutinesView: View {
         }
         .task { await load() }
         .refreshable { await page.load() }
+        // Another assistant is current and the page is still up (in Settings; on the Persona page it closes): the task
+        // being edited was the one before's, and the list is read for the one shown now.
+        .onChange(of: model.assistantSwitches) {
+            editing = nil
+            creating = nil
+            Task { await page.restart() }
+        }
     }
 
     private func row(_ t: APIClient.ScheduledTask) -> some View {

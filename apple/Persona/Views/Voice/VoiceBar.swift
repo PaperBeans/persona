@@ -54,7 +54,7 @@ struct VoiceBar: View {
         .modifier(ComposerSurface())
         .shellScaled()
         .modifier(VoiceFeedback(call: call, kind: line.kind, text: line.text, cards: cards.map(\.id)))
-        .sheet(isPresented: $showCaptions) { VoiceTranscriptSheet(call: call, persona: model.persona.name) }
+        .sheet(isPresented: $showCaptions) { VoiceTranscriptSheet(call: call, persona: model.assistantShownName(in: key)) }
         .modelConfigurationSheet(isPresented: $showModel, purposeID: "plugin." + call.extensionID)
         // The voice's model may have changed in the sheet: the call picks it up on a new connection.
         .onChange(of: showModel) { _, open in

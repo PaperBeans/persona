@@ -1,4 +1,8 @@
 {
   "hide": "非表示",
-  "show": "表示"
+  "show": "表示",
+  "use_reference": "参照を使う",
+  "reference_placeholder": "op://vault/item/field",
+  "reference_hint": "必要なときにプロバイダーがキーを渡します。Persona は参照だけを保存します。",
+  "reference_saved": "保存時に参照から値を取れるか確認します。接続テストは保存後に行います。"
 }

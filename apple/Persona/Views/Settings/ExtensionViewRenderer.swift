@@ -515,7 +515,7 @@ struct ExtensionPageView: View {
                 let outcome = await initial.start(page)
                 if let error = outcome.error { app.toast = Toast(error, style: .error) }
                 else if let toast = outcome.toast { app.toast = Toast(toast) }
-                if let url = outcome.url, !app.openIfExtensionSettings(url) { link = LinkTarget(url: url) }
+                if let url = outcome.url, !app.openIfExtensionSettings(url), !app.openIfAsk(url) { link = LinkTarget(url: url) }
             } else { await page.load() }
         }
         .pluginRefresh(page)

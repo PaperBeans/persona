@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Who talks to whom over a task record in Persona's conversation (#4339 C13, iOS ExchangeHeader): "Persona → @task". -->
+    <string name="chat_exchange_header">%1$s → %2$s</string>
+    <string name="chat_exchange_me">Me</string>
+    <string name="chat_exchange_interrupted">Interrupted</string>
+    <!-- A task's report to Persona in a line (iOS ReviewText.reportLine). -->
+    <string name="chat_report_question">Asked Persona: %1$s</string>
+    <string name="chat_report_blocked">Stuck: %1$s</string>
+    <string name="chat_report_done">Says it is done: %1$s</string>
+    <string name="chat_report_step_of">Step %1$d/%2$d · %3$s</string>
+    <string name="chat_report_step">Step %1$d · %2$s</string>
+    <!-- A quiet supervision round folded into one line (iOS SupervisionRecordLine). -->
+    <string name="chat_supervision_record">Supervision record</string>
+    <string name="chat_supervision_record_live">Supervision record · running</string>
+    <!-- A message card on Glass (iOS MessageCard): Edit opens the drafted reply for typing, Done closes it. -->
+    <string name="chat_tasks_message_edit">Edit</string>
+    <string name="chat_tasks_message_edit_done">Done</string>
+</resources>

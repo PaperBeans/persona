@@ -1,0 +1,14 @@
+{
+  "other_provider": "実行中のエージェントでは、まだプロバイダーを切り替えられません",
+  "other_engine": "{from} から {to} への切り替えには新しい会話が必要です",
+  "model_fixed": "実行中の {agent} セッションではモデルを変更できません",
+  "pending_note": "次のメッセージで切り替わります：エージェントは {provider} で再起動し、この会話はそのまま続きます",
+  "switch_scheduled": "切り替えを予約しました：次のメッセージでエージェントが {target} に移ります",
+  "engine_note": "エンジンを切り替えるとコンテキストが再構築され、内容が失われる場合があります",
+  "switch_scheduled_engine": "切り替えを予約しました：次のメッセージ送信時に {agent} · {model} に切り替わります",
+  "engine_dialog_title": "Agent を切り替えますか？",
+  "engine_dialog_body": "新しい Agent エンジンは引き継ぎ要約を通じて続行するため、思考内容などが完全に引き継がれる保証はありません。元に戻せば、元のエンジンのセッションを引き続き利用できます。切り替えによってプロンプトキャッシュも一度中断され、トークン消費が増える可能性があります。",
+  "engine_dialog_skip": "次回から表示しない",
+  "engine_dialog_switch": "Agent を切り替える",
+  "engine_dialog_keep": "現在の Agent を維持"
+}

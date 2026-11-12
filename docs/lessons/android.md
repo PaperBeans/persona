@@ -1,5 +1,20 @@
 # Lessons: Android
 
+## Keep a worktree fixed while Gradle verifies it (#5233)
+
+Do not merge main or edit source while a multi-task Gradle invocation is running in that worktree. Earlier tasks can
+compile the old contracts and later tasks read newly merged tests, producing misleading missing-field and constructor
+errors. Finish or stop that invocation first, update the branch, then verify the fixed revision. A failure is not an
+inherited main defect until a clean, independent main worktree reproduces it.
+
+## Reusing an onboarding checklist for ordinary settings (#5233)
+
+Reusing the full phone-check list is not enough: an ordinary Notifications and background page must also suppress
+assistant/computer setup, skipped-computer summaries and first-run completion/dismissal actions. Otherwise leaving
+settings can clear first-run pending state or dismiss assistant setup. Keep these behaviors behind an explicit
+`backgroundOnly` mode with an unchanged default for onboarding. Preserve old route names separately from new home
+labels, and test owner-switch closure and parent Back navigation after adding a group page.
+
 ## A design-system signature change compiles every caller (#4145)
 
 #4124 added a `Boolean` after `JSectionHeader`'s composable slot. A caller passing the slot as a trailing lambda then bound it to the `Boolean`, and `main` stopped compiling for every Android build. No hosted CI runs on PRs, so the module's own build passing was not enough. Before merging a change to a `core/designsystem` component's parameters, compile `:app:compileDebugKotlin` (every feature's main code) and the test code of the modules that call it. Keep a composable slot last; `scripts/app/android_slot_order.py` checks that (#4146).
@@ -251,6 +266,8 @@ Pitfalls in the new multi-module Android App (`android/`, `docs/android/android.
 
 ## Testing
 
+- A fixture time fed to code that reads the real clock is a time bomb (2026-11-12, #5530). The Assistant's trays build In progress with `System.currentTimeMillis()`, and an open task that hasn't moved for 48 hours, with nothing running, is shelved (`SHELVE_AFTER_MS`). `AssistantTraysShotsTest` and `CloseoutShotsTest` pinned their tasks to `2026-11-10T08:00:00Z`. They passed on the day they merged and failed from 2026-11-12T08:00Z on every commit, so a bisect over the day's merges pointed at nothing. Build such times from `Instant.now()` (as the chat shot tests do), or pass the code a fixed `now` when it takes one (`TodosScreen(now = …)`). To see whether a test will break later, move its date literals back N days in a scratch copy and run it: to code that reads the real clock, that is the same test N days later.
+
 - A screenshot test's fake image loader is global state (#2546). `SingletonImageLoader.setUnsafe` survives into later Robolectric classes using the same sandbox. Reset the singleton and shut down the test-owned loader in teardown. Otherwise a later image-fallback assertion can fail because it receives a successful synthetic bitmap; running only that later class hides the leak. Reproduce with the showcase and native-stream classes together, and retain the original fallback assertion.
 
 - `OkHttpHubConnection` publishes `Revoked` before it reports the last refusing hub through `onMemberRevoked`, outside the lock (HubGroupConnectionTest). A test that reads the callback list right after seeing `Revoked` can miss that last entry under load; one hosted run failed `theConnectionIsRevokedOnlyWhenNoHubOfTheGroupIsLeft` this way while main passed. Widening the gap with a temporary sleep before that report fails the old test every time (`but was:<[(hub-a, true), (hub-b, true)]>`). Production consumers launch their cleanup asynchronously and reach the same end state in either order, so the test now waits for the report it asserts, then checks the exact list.
@@ -289,6 +306,7 @@ Pitfalls in the new multi-module Android App (`android/`, `docs/android/android.
 - Decode images with `ImageDecoder` (corrects EXIF orientation), not `BitmapFactory` (ignores it, displaying camera originals sideways). Bitmaps to draw into / reencode need `ALLOCATOR_SOFTWARE`; hardware bitmaps cannot be drawn into software Canvas. Flatten transparent areas onto white before saving JPEG: JPEG has no alpha, and the encoder otherwise makes them black (`jpegBytes`).
 - `Offset` is a value class with bitwise equality. `coerceIn(-0f, 0f)` can produce `-0f`, unequal to `Offset.Zero`. Return `0f` directly when no range exists (`ImageMath.clampPan`); use tolerance for computed floating-point offsets in tests.
 - Robolectric's default window is 320×470 dp (2026-11-09, #1581). `performClick` taps the node's centre; a node laid out below the window (a tall card set straight into `setContent`, no scroll container) gets nothing, and the test fails as if the button ignored the tap. Give the test a window that fits (`@Config(qualifiers = "zh-w400dp-h1200dp")`) or bring the node into view with `performScrollTo()` first.
+- A Compose dialog that holds a text field never gets idle under Robolectric unless the window is Robolectric's default 320×470 dp (2026-11-12, #4339). A bare `Dialog { BasicTextField(…) }` hung every finder for 60 seconds (`AppNotIdleException`, once an `OutOfMemoryError`) with `w400dp-h1200dp`, `w400dp-h900dp`, `w360dp-h800dp` and `w400dp-h480dp` alike, focusable or not, and passed at the default size; a dialog without the field and the field without the dialog were fine. Test and shoot such a dialog (the history's Rename…, `ConversationRenameTest`) in a class whose qualifiers leave the size alone (`zh-xhdpi`), and reach rows below the window with `performScrollToNode`. On a device the same dialog works (the Agents rename dialog is the same pair).
 
 ## System capabilities
 
@@ -575,6 +593,10 @@ On the JVM, closing a server socket with a blocked accept can defer the actual d
 Keep a message's last rendered parse while its next parse runs; switching to raw text for every delta changes list and code-block geometry twice. Reset that retained state when the message identity or cache changes, and include stream completion in the parse effect keys. The Markdown renderer also defaults to a text-size spring: chat text should use its measured size immediately, without animating every line wrap.
 
 Measure pending and parsed frames with the real chat row and reverse list. A fixed scroll index and offset can still accompany visible height oscillation. Replay both Assistant and Agent styles, completion, rapid deltas, history reading and return-to-latest. Check selection and exact copied text in the APK as well. Write a PASS evidence file only after every assertion has completed; cleanup must not turn an earlier failure into a successful verdict.
+
+## Bound divider settling frames (#4756)
+
+A non-bouncy spring can still overshoot with a fling velocity. Clamp every divider animation frame to the current drag range before writing PaneExpansionState; negative widths can collide with its unset sentinel. Exercise the production splitter in a measured two-pane scaffold at both edges, including collapse and expand. State-only tests miss the visible width reset.
 
 ## Pairing fixtures must follow the default sign-in page (#4623)
 

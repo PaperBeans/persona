@@ -4,12 +4,14 @@
   "quote": "Quote",
   "me": "me",
   "edit": "Edit as new",
-  "fork": "Branch to new chat",
+  "fork": "Start a new session",
   "copy_message": "Copy message",
   "copy_reply": "Copy reply",
   "more": "More",
   "done": "Done",
   "copy_all": "Copy all",
   "use_as_context": "Use as context",
-  "context_title": "{title} · Message"
+  "context_title": "{title} · Message",
+  "fork_chat": "Start a new chat",
+  "cut_short": "This reply did not complete. Its content is for reference only."
 }

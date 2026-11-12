@@ -61,6 +61,31 @@ class GroupRoutingTest {
         assertEquals(SessionKey("m", "s"), other.raw(SessionKey("m~g0a1b2c3d", "s")))
     }
 
+    @Test fun receiptEventsAndMainSendersKeepTheirHubNamespaceWithoutChangingOperationIds() = runBlocking<Unit> {
+        val at = java.time.Instant.parse("2026-11-12T10:00:00.123456789Z")
+        val event = MessageSendStateEvent("m", "s", "same-operation", "processing", at.toString())
+        assertSame(event, primary.event(event))
+        val translated = other.event(event) as MessageSendStateEvent
+        assertEquals("m~g0a1b2c3d", translated.machineId)
+        assertEquals(event.clientMessageId, translated.clientMessageId)
+        assertEquals(event.at, translated.at)
+        val receipts = MutableStateFlow(listOf(MessageSendReceipt(SessionKey("m", "s"), "same-operation", "processing", at)))
+        val source = object : MainConversationSender {
+            override val outbox = MutableStateFlow(emptyList<OutboxMessage>())
+            override val sendReceipts = receipts
+            override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?) = Unit
+        }
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined)
+        try {
+            val wrapped = source.inGroup(other, scope)
+            assertEquals(SessionKey("m~g0a1b2c3d", "s"), wrapped.sendReceipts.value.single().session)
+            assertEquals("same-operation", wrapped.sendReceipts.value.single().clientMessageId)
+            assertNotEquals(source.sendReceipts.value.single().session, wrapped.sendReceipts.value.single().session)
+            receipts.value = emptyList()
+            assertTrue(wrapped.sendReceipts.value.isEmpty())
+        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
+
     @Test fun anotherGroupsFilesReachItsMachineByThePlainId() = runBlocking<Unit> {
         val calls = mutableListOf<String>()
         val files = object : SessionFiles {

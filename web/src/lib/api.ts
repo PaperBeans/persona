@@ -142,7 +142,7 @@ export class HubTimeoutError extends Error {
   }
 }
 
-type ApiOptions = RequestInit & { json?: unknown; token?: string; tokenOwner?: string; isAuthContextCurrent?: () => boolean; onResponse?: (headers: Headers, status: number) => void };
+type ApiOptions = RequestInit & { json?: unknown; token?: string; tokenOwner?: string; isAuthContextCurrent?: () => boolean; onResponse?: (headers: Headers, status: number) => void; readBlob?: (response: Response, signal?: AbortSignal | null) => Promise<Blob> };
 
 /** `tokenOwner`: explicit credentials opt into 401 recovery only while both the token and credential generation are current.
  *  `isAuthContextCurrent`: an optional additional lifetime fence for a request scoped to a view or manager.
@@ -152,7 +152,8 @@ export function api<T>(path: string, init: ApiOptions & { timeout?: number } = {
 }
 
 /** A hub route's bytes (an image it serves, such as a meeting photo's) with `api`'s credentials, headers, time limit and
- *  errors: for what an `<img>` can't fetch itself, since it sends no header (the bearer token, the manager's). */
+ *  errors: for what an `<img>` can't fetch itself, since it sends no header (the bearer token, the manager's).
+ *  `readBlob`: an optional bounded reader; omitted, existing binary callers keep their ordinary blob read. */
 export function apiBlob(path: string, init: ApiOptions & { timeout?: number } = {}): Promise<Blob> {
   return call<Blob>(path, init, true);
 }
@@ -202,7 +203,7 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 async function request<T>(path: string, init: ApiOptions, binary = false): Promise<T> {
-  const { onResponse, isAuthContextCurrent, ...fetchOptions } = init;
+  const { onResponse, isAuthContextCurrent, readBlob, ...fetchOptions } = init;
   const owner = init.token === undefined ? credentialOwner() : init.tokenOwner;
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${init.token ?? getToken()}`);
@@ -244,7 +245,7 @@ async function request<T>(path: string, init: ApiOptions, binary = false): Promi
   }
   if (binary && res.ok) {
     onResponse?.(res.headers, res.status);
-    return (await res.blob()) as T;
+    return (await (readBlob ? readBlob(res, init.signal) : res.blob())) as T;
   }
   const text = await res.text();
   let data: Record<string, unknown> = {};

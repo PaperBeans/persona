@@ -98,6 +98,18 @@ class ModelsTest {
         assertEquals(false, own.alwaysHonored)
     }
 
+    @Test fun interactionDecodesOptionalToolTitles() {
+        val titled = JsonCodec.decodeFromString<Interaction>(
+            """{"id":"ix_titles","kind":"permission","tool_name":"mcp__persona__report_to_supervisor",""" +
+                """"tool_title":"Report to supervisor · Done","tool_name_title":"Report to supervisor"}""",
+        )
+        assertEquals("Report to supervisor · Done", titled.toolTitle)
+        assertEquals("Report to supervisor", titled.toolNameTitle)
+        val oldHub = JsonCodec.decodeFromString<Interaction>("""{"id":"ix_old","kind":"permission","tool_name":"Bash"}""")
+        assertNull(oldHub.toolTitle)
+        assertNull(oldHub.toolNameTitle)
+    }
+
     @Test fun interactionNamesItsAgentAndWhatAlwaysAllows() {
         val codex = JsonCodec.decodeFromString<Interaction>(
             """{"id":"cx","kind":"permission","agent":"codex","reason":"访问网络","always_label":"以后不再问这个命令"}""",
@@ -132,6 +144,18 @@ class ModelsTest {
             """{"id":"ix_1","kind":"permission","tool_name":"Bash","summary":"rm -rf build"}""",
         )
         assertEquals("请求使用 Bash：rm -rf build", (ix.headline).zhAny())
+    }
+
+    @Test fun interactionHeadlineUsesNonblankToolTitleBeforeTheReadableName() {
+        val ix = Interaction(
+            "ix_title", kind = "permission", toolName = "mcp__persona__report_to_supervisor",
+            toolTitle = "Report to supervisor · Done", summary = "Ready",
+        )
+        assertEquals("请求使用 Report to supervisor · Done：Ready", (ix.headline).zhAny())
+        assertEquals("请求使用 Persona · report to supervisor：Ready", (ix.copy(toolTitle = " ").headline).zhAny())
+        assertEquals("请求使用 Persona · report to supervisor：Ready",
+            (ix.copy(toolTitle = null, toolNameTitle = "Report to supervisor").headline).zhAny())
+        assertEquals("请求使用 工具", (Interaction("ix_generic", kind = "permission", toolTitle = " ").headline).zhAny())
     }
 
     @Test fun personaOwnMcpServerShowsAsPersona() {

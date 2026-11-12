@@ -42,6 +42,8 @@ type Check struct {
 	// before they replace or run one (the ssh Redeploy script, install.sh, persona-link node switch). Builds from before
 	// it leave it out (personad).
 	Program string `json:"program,omitempty"`
+	// ResidentHandover says this image can consume a same-PID listener/run-lock descriptor ticket after exec.
+	ResidentHandover bool `json:"resident_handover,omitempty"`
 }
 
 type upload struct {
@@ -62,6 +64,8 @@ type Options struct {
 	// rollback watchdog stops a new version that never confirmed. That watchdog runs detached in a session of its
 	// own, as under launchd, so the supervisor must restart only the node and leave other processes alone.
 	Supervised bool
+	// RequireResidentHandover rejects uploaded legacy images before installation, not after arming their watchdog.
+	RequireResidentHandover bool
 }
 
 // psNoStart is the reason a declared supervisor's node gives when ps cannot report a process's start time (BusyBox's
@@ -71,17 +75,18 @@ const psNoStart = "ps 读不出进程的启动时间，无法核对回滚进程�
 
 // Manager must be shared by all of a resident's connection-scoped Nodes.
 type Manager struct {
-	mu           sync.Mutex
-	exe          string
-	identity     os.FileInfo
-	version      string
-	reason       string
-	needsRestart bool
-	upload       *upload
-	restart      func()
-	timer        *time.Timer
-	sweep        *time.Timer
-	closed       bool
+	mu                      sync.Mutex
+	exe                     string
+	identity                os.FileInfo
+	version                 string
+	reason                  string
+	needsRestart            bool
+	upload                  *upload
+	restart                 func()
+	timer                   *time.Timer
+	sweep                   *time.Timer
+	closed                  bool
+	requireResidentHandover bool
 	// Tests can shorten deadlines without modifying the production environment.
 	timeout    time.Duration
 	startWatch func(string, string, string) error
@@ -90,7 +95,7 @@ type Manager struct {
 // New resolves the actual running file once. The executable is never inferred
 // from HOME, PATH, an attach socket, or the spelling of argv[0].
 func New(version string, restart func(), opts Options) *Manager {
-	m := &Manager{version: version, restart: restart, timeout: ConfirmTimeout, startWatch: startWatchdog}
+	m := &Manager{version: version, restart: restart, timeout: ConfirmTimeout, startWatch: startWatchdog, requireResidentHandover: opts.RequireResidentHandover}
 	xpc := os.Getenv("XPC_SERVICE_NAME")
 	systemd := runtime.GOOS == "linux" && os.Getenv("INVOCATION_ID") != ""
 	launchd := runtime.GOOS == "darwin" && xpc != "" && xpc != "0"
@@ -279,7 +284,7 @@ func (m *Manager) Commit(ctx context.Context, id string, idle func() error) (pro
 	if err := update.CheckReplace(m.exe, u.Path); err != nil {
 		return proto.NodeUpdateCommitResult{}, err
 	}
-	if err := validate(ctx, u.Path, u.Spec); err != nil {
+	if err := validateReplacement(ctx, u.Path, u.Spec, m.requireResidentHandover); err != nil {
 		return proto.NodeUpdateCommitResult{}, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -482,6 +487,10 @@ func (m *Manager) armSweepLocked() {
 }
 
 func validate(ctx context.Context, path string, spec proto.NodeUpdateBeginParams) error {
+	return validateReplacement(ctx, path, spec, false)
+}
+
+func validateReplacement(ctx context.Context, path string, spec proto.NodeUpdateBeginParams, requireHandover bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -528,6 +537,9 @@ func validate(ctx context.Context, path string, spec proto.NodeUpdateBeginParams
 	}
 	if check.Version != spec.Version || check.OS != runtime.GOOS || check.Arch != runtime.GOARCH {
 		return errors.New("node executable self-check version or platform mismatch")
+	}
+	if requireHandover && !check.ResidentHandover {
+		return errors.New("node executable does not support resident listener handover")
 	}
 	// Reopening an already executed signed Mach-O file for writing can make
 	// macOS kill a subsequent self-check. Validation never needs write access.

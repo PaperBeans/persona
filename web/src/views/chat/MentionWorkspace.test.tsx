@@ -4,10 +4,11 @@
 // <persona-context kind="workspace" machine cwd> in front. Agents' composers don't offer workspaces.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadPages } from "../../lib/lazy-page";
 import type { Workspace } from "../../lib/workspace-board";
 import { Composer, type Outgoing } from "./Composer";
-import type { MentionSource } from "./MentionMenu";
+import type { MentionSource } from "./ComposerPanel";
 
 const WORKSPACES: Workspace[] = [
   { id: "w1", machine_id: "laptop", source: "herdr", source_id: "1", title: "weather", cwd: "/home/me/code/weather", branch: "main", online: true, available: true },
@@ -31,6 +32,9 @@ vi.mock("../../lib/api", async (orig) => ({
 
 let host: HTMLDivElement;
 let root: Root;
+
+// the + / @ panel is a lazy chunk: in before the first @
+beforeAll(() => loadPages());
 
 beforeEach(() => {
   Element.prototype.scrollIntoView ??= () => {}; // jsdom has none
@@ -63,7 +67,8 @@ async function type(text: string) {
 }
 
 const key = (k: string) => act(() => void box().dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true })));
-const options = () => [...host.querySelectorAll('[role="option"]')].map((o) => o.textContent ?? "");
+// the panel's resource rows (its own "Add images…" row left out)
+const options = () => [...host.querySelectorAll('[role="option"]:not([data-panel-action])')].map((o) => o.textContent ?? "");
 
 describe("@ workspaces", () => {
   it("lists each workspace with a folder once, with its computer and folder", async () => {
@@ -74,7 +79,6 @@ describe("@ workspaces", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]).toContain("weather");
     expect(rows[0]).toContain("laptop · ~/code/weather · main");
-    expect(rows[0]).toContain("工作区");
     expect(rows[1]).toContain("notes");
   });
 

@@ -39,6 +39,13 @@ own `site/public/style.css`.
   when the file is missing.
 - **Light only.** The previous page also had a dark variant; this one follows the app icon's paper in both schemes.
 
+## Legal pages and support
+
+The privacy and terms pages describe the self-hosted app independently of its distribution channel. Their contact links use
+`/#contact`, the home page's existing product-support footer, which offers email and issue reporting. Keep that anchor stable
+and verify the whole route, not just an HTTP 200 from the legal page. `site/worker.test.mjs` pins both links and their destination.
+The App Store review notes give the Release-compatible offline demo entry and its limits (`release.md`, "External testing").
+
 ## Extensions page
 
 `/extensions/` (`site/public/extensions/index.html`, #4781) lists the extensions of the official market: icon, name,

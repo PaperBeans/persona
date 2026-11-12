@@ -26,6 +26,9 @@ func (h *Manager) decorateMarketMetadata(ctx context.Context, v *ExtensionView, 
 			continue
 		}
 		v.IconURL, v.Downloads, v.DownloadsUpdatedAt = e.IconURL, e.Downloads, s.index.DownloadsUpdatedAt
+		if extension.ValidIconPath(e.Icon) {
+			v.IconURL = ""
+		}
 		return
 	}
 }

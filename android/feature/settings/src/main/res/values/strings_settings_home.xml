@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_home_models">Models</string>
+    <string name="settings_home_models_detail">Choose models for conversations and other features</string>
+    <string name="settings_home_agents">Agent</string>
+    <string name="settings_home_agents_detail">Coding agents and session triage</string>
+    <string name="settings_home_channels_detail">Where you talk with your assistant</string>
+    <string name="settings_notification_background_title">Notifications and background</string>
+    <string name="settings_notification_background_checks_header">Phone checks</string>
+    <string name="settings_home_notifications_detail">Alerts, floating capsule and reliable background connection</string>
+    <string name="settings_home_about">About and updates</string>
+    <string name="settings_home_about_detail">App information and version updates</string>
+    <string name="settings_home_connection">Connection</string>
+    <string name="settings_home_connection_detail">Connection status and troubleshooting</string>
+    <string name="settings_search_placeholder">Search settings</string>
+    <string name="settings_search_empty">No matching settings</string>
+    <string name="settings_search_empty_detail">Try another name or clear the search.</string>
+    <string name="settings_search_models_aliases">provider API key model profile launcher configuration</string>
+    <string name="settings_search_agents_aliases">Claude Code Codex session triage coding runtime</string>
+    <string name="settings_search_notifications_aliases">notification settings notification channel battery keep alive auto start capsule mute desktop lock screen background</string>
+    <string name="settings_search_connectors_aliases">mail email phone Lark Feishu sent as you</string>
+    <string name="settings_search_extensions_aliases">extension plugin marketplace</string>
+    <string name="settings_search_about_aliases">app version check update APK install</string>
+    <string name="settings_search_connection_aliases">Hub server status diagnostics network pairing address</string>
+    <string name="settings_search_appearance_aliases">style theme color dark light</string>
+    <string name="settings_model_add_provider">Add provider</string>
+    <string name="settings_model_how_runs">How models run</string>
+    <string name="settings_model_how_runs_detail">Manage credentials and how each provider connects in Model providers. Changing a model does not change your interface or enabled features.</string>
+    <string name="settings_home_extensions_detail">Manage extra capabilities</string>
+    <string name="settings_home_connectors_detail">Mail, messages and phone data</string>
+</resources>

@@ -2,8 +2,6 @@
   "one_more_step": "あと一歩",
   "chat_only": "今はチャットのみです。パソコンをつなぐと Persona が作業できます。",
   "request_id": "リクエスト ID：{id}",
-  "close": "閉じる",
-  "details": "詳細",
   "copy_details": "詳細をコピー",
   "copy": "コピー",
   "that_computer": "そのパソコン",

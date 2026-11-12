@@ -1,6 +1,8 @@
 package node
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,6 +146,96 @@ func TestWorktreePrepareReadsTheRepository(t *testing.T) {
 	runPullGit(t, w.repo, "checkout", "--detach")
 	if res, _ = request(t, w.n, "worktree.prepare", map[string]any{"workspace_id": "w1"}); res["branch"] != "" || res["repoName"] != "proj" {
 		t.Errorf("detached: %v", res)
+	}
+	if got := w.f.trace("worktree.create", "workspace.create"); len(got) != 0 {
+		t.Errorf("prepare changed something: %v", got)
+	}
+}
+
+func TestWorktreePrepareUsesSnapshotDirectoryForCwd(t *testing.T) {
+	w := worktreeNode(t)
+	w.f.reply("workspace.list", map[string]any{"workspaces": []any{
+		map[string]any{"workspace_id": "w1", "label": "proj", "number": 1},
+	}})
+	w.f.reply("session.snapshot", snapshot(
+		[]any{map[string]any{"workspace_id": "w1", "label": "proj", "number": 1}},
+		[]any{map[string]any{"tab_id": "w1:t1", "workspace_id": "w1", "label": "1", "number": 1}},
+		nil, []any{map[string]any{"pane_id": "w1:p1", "tab_id": "w1:t1", "workspace_id": "w1", "cwd": w.repo}},
+	))
+	listSessions(t, w.n)
+	w.f.reset()
+
+	res, err := request(t, w.n, "worktree.prepare", map[string]any{"cwd": w.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res["root"] != resolved(t, w.repo) || res["path"] != filepath.Join(w.home, ".herdr", "worktrees", "proj") {
+		t.Fatalf("prepare from pane directories = %v", res)
+	}
+}
+
+func TestSpaceHoldingFallsBackToWorkspaceList(t *testing.T) {
+	w := worktreeNode(t)
+	w.f.reply("session.snapshot", herdrFail{Code: "unavailable", Message: "snapshot unavailable"})
+	w.f.reply("workspace.list", map[string]any{"workspaces": []any{
+		map[string]any{"workspace_id": "w1", "label": "proj", "number": 1, "cwd": w.repo},
+	}})
+	h, err := w.n.hostOfKind(host.Herdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.f.reset()
+
+	workspace, err := spaceHolding(context.Background(), h, w.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace != "w1" {
+		t.Fatalf("spaceHolding from workspace.list = %q", workspace)
+	}
+	if got := w.f.trace("workspace.list"); len(got) != 1 {
+		t.Fatalf("workspace.list calls = %v", got)
+	}
+}
+
+func TestSpaceHoldingEmptySnapshotPreservesWorkspaceListError(t *testing.T) {
+	w := worktreeNode(t)
+	w.f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
+	w.f.reply("workspace.list", herdrFail{Code: "unavailable", Message: "workspace list unavailable"})
+	h, err := w.n.hostOfKind(host.Herdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.f.reset()
+
+	_, err = spaceHolding(context.Background(), h, w.repo)
+	if err == nil || !strings.Contains(err.Error(), "workspace list unavailable") || strings.Contains(err.Error(), "不在这台电脑的任何工作区里") {
+		t.Fatalf("spaceHolding with an empty snapshot: %v", err)
+	}
+	if got := w.f.trace("workspace.list"); len(got) != 1 {
+		t.Fatalf("workspace.list calls = %v", got)
+	}
+}
+
+func TestWorktreePrepareDoesNotGuessFromConflictingPaneDirectories(t *testing.T) {
+	w := worktreeNode(t)
+	w.f.reply("workspace.list", map[string]any{"workspaces": []any{
+		map[string]any{"workspace_id": "w1", "label": "proj", "number": 1},
+	}})
+	w.f.reply("session.snapshot", snapshot(
+		[]any{map[string]any{"workspace_id": "w1", "label": "proj", "number": 1}},
+		[]any{map[string]any{"tab_id": "w1:t1", "workspace_id": "w1", "label": "1", "number": 1}},
+		nil, []any{
+			map[string]any{"pane_id": "w1:p1", "tab_id": "w1:t1", "workspace_id": "w1", "cwd": w.repo},
+			map[string]any{"pane_id": "w1:p2", "tab_id": "w1:t1", "workspace_id": "w1", "cwd": filepath.Join(w.home, "other")},
+		},
+	))
+	listSessions(t, w.n)
+	w.f.reset()
+
+	_, err := request(t, w.n, "worktree.prepare", map[string]any{"cwd": w.repo})
+	if err == nil || !strings.Contains(err.Error(), "不在这台电脑的任何工作区里") {
+		t.Fatalf("prepare with conflicting pane directories: %v", err)
 	}
 	if got := w.f.trace("worktree.create", "workspace.create"); len(got) != 0 {
 		t.Errorf("prepare changed something: %v", got)
@@ -461,5 +553,21 @@ func TestPanesListAdvertisesWorktrees(t *testing.T) {
 	setWorktreeSupport(t, false)
 	if !canWorktree(w.n.hosts.Get(host.Herdr)) {
 		t.Error("an older herdr gets the git way")
+	}
+}
+
+// A runtime engine (Paseo, Cindy) is no host on the node and has no checkouts to prepare: worktree.prepare says so with
+// a code the hub acts on across the wire, as any host without checkouts does, not as a missing host (#4946).
+func TestWorktreePrepareOnARuntimeEngineIsUnsupported(t *testing.T) {
+	n, _ := runtimeNode(t)
+	if err := n.useEngine(context.Background(), proto.EnginePaseo); err != nil {
+		t.Fatal(err)
+	}
+	_, err := nodeCall(t, n, "worktree.prepare", map[string]any{"cwd": "/w/app"})
+	if rpcCode(err) != "worktree_unsupported" || !errors.Is(err, host.ErrUnsupported) || err.Error() != "unsupported: paseo cannot do this" {
+		t.Fatalf("prepare on the paseo runtime = %v (code %q)", err, rpcCode(err))
+	}
+	if _, err := nodeCall(t, n, "worktree.prepare", map[string]any{"cwd": "/w/app", "kind": "orca"}); err == nil || rpcCode(err) != "" {
+		t.Fatalf("a missing host is not a runtime without checkouts: %v (code %q)", err, rpcCode(err))
 	}
 }

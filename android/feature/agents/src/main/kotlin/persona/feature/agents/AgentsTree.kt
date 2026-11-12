@@ -72,9 +72,21 @@ internal data class TreeShowAllEntry(val group: AgentListGroup, val count: Int, 
     override val key: String get() = "all:${group.id}"
 }
 
-/** Finished sessions of an active space that are tucked away until asked for. */
-internal data class TreeIdleEntry(val group: AgentListGroup, val hidden: Int, val depth: Int) : AgentTreeEntry {
+/**
+ * Finished sessions of an active space that are tucked away until asked for. On Glass's By Repository ([fold], iOS
+ * `RepoIdleLine`, #4338 A8) the quiet line that folds a working tree's idle agents: folded, what they are; open, the
+ * line after them that folds them again.
+ */
+internal data class TreeIdleEntry(val group: AgentListGroup, val hidden: Int, val depth: Int, val fold: IdleFold? = null) : AgentTreeEntry {
     override val key: String get() = "idle:${group.id}"
+}
+
+/**
+ * The heading of a computer's idle repositories on Glass's By Repository (iOS `quietSection`, "Idle Repositories", #4338
+ * A8): [count] of them, each a row after it ([AgentListGroup.isIdleRepository]), all in one card.
+ */
+internal data class TreeIdleReposEntry(val machine: String, val count: Int) : AgentTreeEntry {
+    override val key: String get() = "idle-repos:$machine"
 }
 
 internal data class TreeChildrenEntry(val parent: AgentSession, val count: Int, val depth: Int, val expanded: Boolean) : AgentTreeEntry {
@@ -98,6 +110,11 @@ internal fun agentTreeEntries(
      * paged list shows every row it leaves, as iOS).
      */
     showAll: Set<String>? = null,
+    /**
+     * By Repository on Glass, as iOS (#4338 A8): each computer's idle repositories after a [TreeIdleReposEntry], and a
+     * working tree's idle agents behind their quiet line ([AgentListGroup.idleFold]) that folds them again once open.
+     */
+    idleRepos: Boolean = false,
 ): List<AgentTreeEntry> {
     val entries = mutableListOf<AgentTreeEntry>()
     fun group(group: AgentListGroup, space: Boolean, depth: Int, first: Boolean) {
@@ -134,8 +151,10 @@ internal fun agentTreeEntries(
             }
         }
         if (cap != null) entries += TreeShowAllEntry(group, group.visibleRows.size, depth, expanded = open)
+        val fold = group.idleFold?.takeIf { idleRepos }
         val hidden = group.rows.size - shown - (group.visibleRows.size - drawn.size)
-        if (hidden > 0) entries += TreeIdleEntry(group, hidden, depth)
+        if (fold != null) entries += TreeIdleEntry(group, fold.rows.size, depth, fold)
+        else if (hidden > 0) entries += TreeIdleEntry(group, hidden, depth)
     }
     val byId = list.groups.associateBy { it.id }
     val treeIds = list.machines.flatMap { it.groups }.toSet()
@@ -148,9 +167,13 @@ internal fun agentTreeEntries(
         if (machine.groups.none(byId::containsKey)) return@forEach
         if (headed) entries += TreeMachineEntry(machine, first = entries.isEmpty())
         if (headed && machine.folded) return@forEach
-        machine.groups.mapNotNull(byId::get).forEachIndexed { index, it ->
+        val groups = machine.groups.mapNotNull(byId::get)
+        // The idle repositories come last, under their heading.
+        val firstIdle = if (idleRepos) groups.indexOfFirst { it.isIdleRepository } else -1
+        groups.forEachIndexed { index, it ->
             // A working tree sits in its repository, gone while the repository is folded.
             if (it.under != null && byId[it.under]?.folded != false) return@forEachIndexed
+            if (index == firstIdle) entries += TreeIdleReposEntry(machine.id, groups.count { g -> g.isIdleRepository })
             group(it, space = true, depth = (if (headed) 1 else 0) + (if (it.under != null) 1 else 0), first = index == 0)
         }
     }
@@ -174,6 +197,74 @@ internal fun agentTreeEntries(
     }
     entries.forEach(::append)
     return nested
+}
+
+/**
+ * Where a line of By Repository sits in its repository's card on Glass (iOS `repoCard`, #4338 A7): [first] its header
+ * (the card's top), [last] the card's last line, [level] levels in from the card's side. The header is level 0, a working
+ * tree's line 1, and the agents' rows sit at their line's level; a repository that holds its agents itself (its main
+ * checkout alone, or idle) has them a level in under its header, as iOS. A computer's idle repositories share one card
+ * after their heading ([TreeIdleReposEntry], iOS's grouped section, #4338 A8), a row each.
+ */
+internal data class RepoCardSlot(val first: Boolean, val last: Boolean, val level: Int)
+
+/** The card slot of every line inside a repository's card, by [AgentTreeEntry.key]; computers and sections have none. */
+internal fun repoCardSlots(entries: List<AgentTreeEntry>): Map<String, RepoCardSlot> {
+    val slots = LinkedHashMap<String, RepoCardSlot>()
+    var base = -1
+    var holdsRows = false
+    var lastKey: String? = null
+    var idleCard = false
+    var first = false
+    fun close() {
+        lastKey?.let { slots[it] = slots.getValue(it).copy(last = true) }
+        lastKey = null
+        base = -1
+    }
+    for (entry in entries) {
+        val group = (entry as? TreeGroupEntry)?.group
+        val repo = group?.repo
+        if (entry is TreeIdleReposEntry) {
+            close()
+            idleCard = true
+            continue
+        }
+        if (group != null && repo == RepoLevel.Repository) {
+            // The next idle repository is a further row of the same card.
+            val joins = idleCard && group.isIdleRepository && lastKey != null
+            if (!group.isIdleRepository) idleCard = false
+            if (!joins) close()
+            first = !joins
+            base = entry.treeDepth
+            holdsRows = group.rows.isNotEmpty()
+        } else if (entry is TreeMachineEntry || entry is TreeGroupEntry && repo == null) {
+            close()
+            idleCard = false
+            continue
+        }
+        if (base < 0) continue
+        val level = when {
+            repo == RepoLevel.Repository -> 0
+            entry is TreeGroupEntry -> entry.treeDepth - base
+            else -> entry.treeDepth - base + if (holdsRows) 1 else 0
+        }
+        slots[entry.key] = RepoCardSlot(first = repo == RepoLevel.Repository && first, last = false, level = level)
+        lastKey = entry.key
+    }
+    close()
+    return slots
+}
+
+/** How deep a line sits in the flattened tree (a computer's heading: 0). */
+private val AgentTreeEntry.treeDepth: Int get() = when (this) {
+    is TreeMachineEntry -> 0
+    is TreeGroupEntry -> depth
+    is TreeRowEntry -> depth
+    is TreeTabEntry -> depth
+    is TreeShowAllEntry -> depth
+    is TreeIdleEntry -> depth
+    is TreeChildrenEntry -> depth
+    is TreeIdleReposEntry -> 0
 }
 
 /** A computer in the filter strip: how many of its sessions the list would show. */
@@ -223,7 +314,8 @@ internal val AgentMachineGroup.headingCounts: List<Pair<Status, Int>>
 
 /**
  * A By Status section's one count, in its state's color (iOS `SectionHeader` with the section's tone): Awaiting reply
- * takes Unread's, Waiting in the background Working's, Muted and Seen the idle one. Null for every other group.
+ * takes Unread's, Waiting in the background Working's (its header draws it lighter: `AgentTreeHeader.waitsInBackground`),
+ * Muted and Seen the idle one. Null for every other group.
  */
 internal val AgentListGroup.stateSectionCounts: List<Pair<Status, Int>>?
     get() {

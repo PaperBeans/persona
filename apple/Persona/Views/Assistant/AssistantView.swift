@@ -41,6 +41,8 @@ struct AssistantView: View {
     @Environment(\.shellRailEdge) private var railEdge
     /// A phone's tabs (iPhone Duo open): the column's own button folds it, at its top (#2623).
     @Environment(\.pageTabSwitch) private var pageTabSwitch
+    /// The conversation's lifted message, drawn over the top bar (`MessageLiftHost`, #3188).
+    @State private var liftHost = MessageLiftHost()
     #if DEBUG
     @State private var showAvatars = false
     #endif
@@ -131,18 +133,15 @@ struct AssistantView: View {
                                 onMachines: places ? { show(.machines) } : nil,
                                 onOpenExtension: places ? { show(.extensionPage($0)) } : { r in drawer.close(); openedExtension = r },
                                 openHealth: { drawer.close(); enterHealth() },
-                                startMeeting: Self.startMeeting(places ? { show(.recordings) } : { drawer.close(); showRecordings = true }),
+                                openRecordingsPage: Self.recordingsPage(places ? { show(.recordings) } : { drawer.close(); showRecordings = true }),
                                 collapse: column && pageTabSwitch ? { toggleSidebar() } : nil)
     }
 
-    /// The sidebar's Meeting Recording: records the meeting (opening Recordings), or `open`s the recording running already.
+    /// The sidebar's Recordings: `open`s the page, which shows the recording running, else Record to start one.
     /// nil off the iPhone and iPad (the Mac records nothing).
-    private static func startMeeting(_ open: @escaping () -> Void) -> (() -> Void)? {
+    private static func recordingsPage(_ open: @escaping () -> Void) -> (() -> Void)? {
         #if os(iOS)
-        return {
-            if RecordingCapture.shared.state != .idle { open() }
-            else { open(); Task { await MeetingRecorder.shared.startMeeting(inForeground: true, openPage: false) } }
-        }
+        return open
         #else
         return nil
         #endif
@@ -172,82 +171,103 @@ struct AssistantView: View {
     /// The drawer the page slides with: the shell's, or its own.
     private var activeDrawer: AssistantDrawer { shell?.drawer ?? drawer }
 
+    /// The stack's root page. Its own property so the stack's modifier chain stays within what Xcode 26.0 can
+    /// type-check in time (#5333).
+    private var root: some View {
+        Group {
+            #if DEBUG
+            let _ = ShellTrace.shared.note("assistant page \(NewChatCheck.name(current, main: model.assistantMain)) pending=\(pending != nil)")
+            #endif
+            if let key = current, pending == nil {
+                // Another assistant's conversation not listed yet: read through the manager it was opened for.
+                ChatView(key: key, style: .assistant, itemManager: model.assistantItemManagers[key])
+                    .id(key)
+                    #if os(iOS)
+                    .environment(\.messageLiftHost, liftHost)
+                    #endif
+                    // The iPad draws the shell's composer too (`ChatComposerKind.padCard`): the assistant's, as on the iPhone.
+                    .environment(\.shellChat, shell != nil || ChatComposerKind.padCard)
+            } else if shell != nil || pageTabSwitch {
+                // A phone's tabs too (iPhone Duo open, #3680): the iPhone's new conversation, with what needs the user
+                // over the composer. The iPad keeps `AssistantHome`.
+                ShellHome(pending: shownStart, error: shownFailure?.reason, launcher: $starterLauncher, mode: $starterMode,
+                          effort: $starterEffort, openInbox: { path.append($0) }, resend: resend, delete: deleteFailed) { text, images in
+                    Task { await start(text, images) }
+                }
+                .onAppear {
+                    NewChatCheck.shared.homeAppeared()
+                    #if DEBUG
+                    ShellTrace.shared.note("home appeared")
+                    #endif
+                }
+            } else {
+                AssistantHome(pending: shownStart, error: shownFailure?.reason, launcher: $starterLauncher, mode: $starterMode,
+                              effort: $starterEffort, resend: resend, delete: deleteFailed) { text, images in
+                    Task { await start(text, images) }
+                }
+                .onAppear { NewChatCheck.shared.homeAppeared() }
+            }
+        }
+    }
+
+    /// The root with its top bar, the lift layer and the pages it pushes: split from `stack` for Xcode 26.0 (#5333).
+    private var dressedRoot: some View {
+        root
+        // No system bar: the top bar floats over the conversation with a fog under it (it scrolls beneath).
+        .toolbarVisibility(.hidden, for: .navigationBar)
+        #if os(iOS) || os(visionOS)
+        .background { RootBarHidden(atRoot: atRoot) }
+        #endif
+        .overlay(alignment: .top) {
+            AssistantTopBar(key: pending == nil ? current : nil,
+                            sidebarIsColumn: widthClass == .regular,
+                            sidebarShown: columns != .detailOnly,
+                            openSidebar: toggleSidebar,
+                            // In a health conversation New opens Health's new conversation page, whose list has the
+                            // space's past ones (#4329); elsewhere the assistant's.
+                            newConversation: currentIsHealth ? { backToRoot(); showHealth = true } : newConversation,
+                            openKnowledge: { showKnowledge = true },
+                            openProfile: { showProfile = true })
+            #if os(macOS)
+            // At the window's edge only with the history list folded away too (#830).
+            .transformEnvironment(\.macTitleRowLeading) { if columns != .detailOnly { $0 = 0 } }
+            #endif
+            #if os(iOS)
+            .liftBlur(liftHost.menu)
+            #endif
+        }
+        #if os(iOS)
+        // A message pressed in the conversation, over the bar too: the whole page dims (#3188).
+        .overlay { if let menu = liftHost.menu { MessageLiftLayer(menu: menu) } }
+        #endif
+        #if os(macOS)
+        // The bar is the title bar's row, as the list beside it (#830); pushed pages keep their own.
+        .ignoresSafeArea(.container, edges: .top)
+        #endif
+        .navigationDestination(isPresented: $showProfile) { AssistantProfileView() }
+        .navigationDestination(isPresented: $showKnowledge) { KnowledgeView() }
+        .navigationDestination(isPresented: $showRecordings) {
+            #if os(iOS) || os(visionOS)
+            RecordingsPage()
+            #else
+            KnowledgeView() // the Mac records nothing: its Knowledge lists the hub's recordings
+            #endif
+        }
+        .navigationDestination(isPresented: $showRoutines) { AssistantRoutinesView() }
+        .navigationDestination(isPresented: $showTodos) { TodosView() }
+        .navigationDestination(item: $openedExtension) { ExtensionNavPage(route: $0) }
+        .navigationDestination(isPresented: $showHealth) {
+            HealthView(disabled: shownStart != nil, launcher: healthLauncherPick) { text, images in
+                Task { await start(text, images, space: Session.healthSpace) }
+            }
+        }
+        .modifier(ShellDestinations(path: $path, enabled: shell != nil || padPlaces))
+        .modifier(ClassicDestinations(enabled: shell == nil && !padPlaces))
+    }
+
     private var stack: some View {
         NavigationStack(path: $path) {
-            Group {
-                #if DEBUG
-                let _ = ShellTrace.shared.note("assistant page \(NewChatCheck.name(current, main: model.assistantMain)) pending=\(pending != nil)")
-                #endif
-                if let key = current, pending == nil {
-                    // Another assistant's conversation not listed yet: read through the manager it was opened for.
-                    ChatView(key: key, style: .assistant, itemManager: model.assistantItemManagers[key])
-                        .id(key)
-                        // The iPad draws the shell's composer too (`ChatComposerKind.padCard`): the assistant's, as on the iPhone.
-                        .environment(\.shellChat, shell != nil || ChatComposerKind.padCard)
-                } else if shell != nil || pageTabSwitch {
-                    // A phone's tabs too (iPhone Duo open, #3680): the iPhone's new conversation, with what needs the user
-                    // over the composer. The iPad keeps `AssistantHome`.
-                    ShellHome(pending: shownStart, error: shownFailure?.reason, launcher: $starterLauncher, mode: $starterMode,
-                              effort: $starterEffort, openInbox: { path.append($0) }, resend: resend, delete: deleteFailed) { text, images in
-                        Task { await start(text, images) }
-                    }
-                    .onAppear {
-                        NewChatCheck.shared.homeAppeared()
-                        #if DEBUG
-                        ShellTrace.shared.note("home appeared")
-                        #endif
-                    }
-                } else {
-                    AssistantHome(pending: shownStart, error: shownFailure?.reason, launcher: $starterLauncher, mode: $starterMode,
-                                  effort: $starterEffort, resend: resend, delete: deleteFailed) { text, images in
-                        Task { await start(text, images) }
-                    }
-                    .onAppear { NewChatCheck.shared.homeAppeared() }
-                }
-            }
-            // No system bar: the top bar floats over the conversation with a fog under it (it scrolls beneath).
-            .toolbarVisibility(.hidden, for: .navigationBar)
-            #if os(iOS) || os(visionOS)
-            .background { RootBarHidden(atRoot: atRoot) }
-            #endif
-            .overlay(alignment: .top) {
-                AssistantTopBar(key: pending == nil ? current : nil,
-                                sidebarIsColumn: widthClass == .regular,
-                                sidebarShown: columns != .detailOnly,
-                                openSidebar: toggleSidebar,
-                                // In a health conversation New opens Health's new conversation page, whose list has the
-                                // space's past ones (#4329); elsewhere the assistant's.
-                                newConversation: currentIsHealth ? { backToRoot(); showHealth = true } : newConversation,
-                                openKnowledge: { showKnowledge = true },
-                                openProfile: { showProfile = true })
-                #if os(macOS)
-                // At the window's edge only with the history list folded away too (#830).
-                .transformEnvironment(\.macTitleRowLeading) { if columns != .detailOnly { $0 = 0 } }
-                #endif
-            }
-            #if os(macOS)
-            // The bar is the title bar's row, as the list beside it (#830); pushed pages keep their own.
-            .ignoresSafeArea(.container, edges: .top)
-            #endif
-            .navigationDestination(isPresented: $showProfile) { AssistantProfileView() }
-            .navigationDestination(isPresented: $showKnowledge) { KnowledgeView() }
-            .navigationDestination(isPresented: $showRecordings) {
-                #if os(iOS) || os(visionOS)
-                RecordingsPage()
-                #else
-                KnowledgeView() // the Mac records nothing: its Knowledge lists the hub's recordings
-                #endif
-            }
-            .navigationDestination(isPresented: $showRoutines) { AssistantRoutinesView() }
-            .navigationDestination(isPresented: $showTodos) { TodosView() }
-            .navigationDestination(item: $openedExtension) { ExtensionNavPage(route: $0) }
-            .navigationDestination(isPresented: $showHealth) {
-                HealthView(disabled: shownStart != nil, launcher: healthLauncherPick) { text, images in
-                    Task { await start(text, images, space: Session.healthSpace) }
-                }
-            }
-            .modifier(ShellDestinations(path: $path, enabled: shell != nil || padPlaces))
-            .modifier(ClassicDestinations(enabled: shell == nil && !padPlaces))
+            dressedRoot
             // Full Screen in an agent's sheet (TasksStore.expand): its page pushed here, as from the Agents tab.
             .onChange(of: TasksStore.shared.fullAgent, initial: true) { _, key in
                 guard let key else { return }
@@ -496,7 +516,8 @@ struct AssistantView: View {
                                                 effort: starterEffort.isEmpty ? nil : starterEffort,
                                                 main: makesMain, space: space, opID: op)
             }
-            if makesMain { await model.refreshAssistant() }
+            // The accepted conversation is visible before a follow-up configuration refresh.
+            if makesMain { Task { await model.refreshAssistant() } }
             Haptics.success()
             model.began(s, text: text, images: images) // the message stays on screen until claude has written it
             withAnimation(Theme.Motion.standard) {
@@ -564,7 +585,7 @@ struct FirstMessagePending: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .chatMark("chat.outbox.sending.start")
-                TypingIndicator(text: String(localized: "\(name) is getting ready…"))
+                TypingIndicator(text: String(localized: "Sending…"))
             }
         }
         .padding(.horizontal, Theme.Space.l) // the chat's list margins
@@ -921,6 +942,11 @@ struct StarterComposer: View {
     @State private var showFiles = false
     @State private var showCamera = false
     @State private var showGlasses = false // Glasses Photo (Persona/Glasses), only when MetaGlasses.isBuiltIn
+    @State private var showScan = false // Scan Document (#3720), only where the device can scan
+    #if os(iOS)
+    /// Add as Context › (#3721): the kind whose picker is open.
+    @State private var contextPick: ContextPickKind?
+    #endif
     @State private var declarations = ExtensionTextContributions()
     #if os(iOS)
     /// The iPhone's 「+」 panel (`AttachSheet`), as in a conversation.
@@ -982,12 +1008,21 @@ struct StarterComposer: View {
 
     private func add(_ img: UIImage) { MessagePhotos.add(img, to: &draft.held.images, model: model) }
 
+    /// A scan's pages: the next message's photos while they fit, else one PDF uploaded as a picked file is (#3720).
+    private func addScan(_ pages: [UIImage]) {
+        #if os(iOS)
+        DocumentScanner.deliver(pages, room: MessagePhotos.limit - images.count, model: model, add: { add($0) }, upload: { upload($0) })
+        #endif
+    }
+
     #if os(iOS)
     /// What + offers besides photos and files, as in a conversation (`AttachMoreSection.common`): no voice call before
     /// the conversation exists, and an agent's quick commands are not Persona's.
     private var moreSections: [AttachMoreSection] {
         var sections = AttachMoreSection.common(voice: nil, camera: CameraPicker.isAvailable ? { showCamera = true } : nil,
-                                                glasses: MetaGlasses.isBuiltIn ? { showGlasses = true } : nil, mention: { typeMention() })
+                                                scan: DocumentScanner.isAvailable ? { showScan = true } : nil,
+                                                glasses: MetaGlasses.isBuiltIn ? { showGlasses = true } : nil, mention: { typeMention() },
+                                                context: { contextPick = $0 })
         if let prompts = AttachMoreSection.prompts(declarations.prompts, fill: { prompt in
             text = ExtensionTextContributions.filling(prompt)
             selection = TextSelection(insertionPoint: text.endIndex)
@@ -1016,14 +1051,14 @@ struct StarterComposer: View {
                         files: { showFiles = true }, allPhotos: { showPhotos = true }, showsMore: true,
                         more: { AttachMoreRows(panel: attachPanel, sections: moreSections) }) { outcome in
             switch outcome {
-            case .then(let ids, let action):
-                Task { await draft.held.addPicked(ids, machine: machine, model: model) }
+            case .then(let picks, let action):
+                Task { await draft.held.addPicked(picks, machine: machine, model: model) }
                 action()
-            case .closed(let ids):
-                Task { await draft.held.addPicked(ids, machine: machine, model: model) }
-            case .send(let ids):
+            case .closed(let picks):
+                Task { await draft.held.addPicked(picks, machine: machine, model: model) }
+            case .send(let picks):
                 Task {
-                    await draft.held.addPicked(ids, machine: machine, model: model)
+                    await draft.held.addPicked(picks, machine: machine, model: model)
                     submit() // the gate first, as the box's Send
                 }
             }
@@ -1075,7 +1110,11 @@ struct StarterComposer: View {
             #if os(iOS) || os(visionOS)
             PasteImageChip(focused: focused) { add($0) }
             #endif
+            #if os(macOS)
             if !images.isEmpty { ComposerImages(images: imagesBinding) }
+            #else
+            if !images.isEmpty { ComposerImages.editable(draft.held) } // a tap marks it up, as in a conversation
+            #endif
             if let token = mentionToken {
                 ComposerMentionMenu(token: token, text: textBinding, selection: $selection, source: mentionSource) { ref in
                     if !quotes.contains(where: { $0.url == ref.url }) { quotes.append(ref) }
@@ -1123,7 +1162,12 @@ struct StarterComposer: View {
         .modifier(attachHost)
         // The Photos library warmed off the main thread, as a conversation's composer does (#4250).
         .task { if attachOpener != nil { AttachLibrary.prewarm() } }
-        .modifier(ComposerCaptureSheets(camera: $showCamera, glasses: $showGlasses) { add($0) })
+        .modifier(ComposerCaptureSheets(camera: $showCamera, glasses: $showGlasses, scan: $showScan, pages: { addScan($0) }) { add($0) })
+        .sheet(item: $contextPick) { kind in
+            ContextPickerSheet(kind: kind) { ref in
+                if !quotes.contains(where: { $0.title == ref.title && $0.text == ref.text }) { quotes.append(ref) }
+            }
+        }
         // The hub's extensions' prompts for the shell's + list, as a conversation's composer reads them.
         .tabActiveTask(id: ExtensionTextSource(group: model.hubGroup, features: model.features(model.hubGroup),
                                                hub: model.api(model.hubGroup)?.config.url.absoluteString, active: phase == .active && shell != nil)) {
@@ -1234,7 +1278,11 @@ struct BeautifulStarterComposer: View {
                 }
             }
             #endif
+            #if os(macOS)
             if !images.isEmpty { ComposerImages(images: imagesBinding) }
+            #else
+            if !images.isEmpty { ComposerImages.editable(draft.held) } // a tap marks it up, as in a conversation
+            #endif
             PromptComposer(placeholder: placeholder ?? String(localized: "Ask \(model.persona.name)…"), text: textBinding, selection: $selection, focused: $focused,
                            hasAttachments: !images.isEmpty || !videos.items.isEmpty || !quotes.isEmpty, disabled: disabled,
                            attach: PromptItems.attachments(camera: false),
@@ -1310,6 +1358,14 @@ struct BeautifulStarterComposer: View {
 struct AssistantToolsRow: View {
     var steps: [ToolStep]
     @State private var open = false
+    @State private var unfold = Unfolding()
+    @Environment(\.chatPin) private var pin
+    /// The line stays where it is in the chat while its steps open under it, folded ones fetched a moment later (#3757).
+    private var pinKey: String { "tools-" + (steps.first?.id ?? "") }
+
+    private func toggle() {
+        toggleInPlace(pin, pinKey, animation: Theme.Motion.standard, unfold: $unfold, closing: open) { open.toggle() }
+    }
 
     private var calls: [ToolCall] { steps.compactMap { if case .call(let c) = $0 { c } else { nil } } }
 
@@ -1320,9 +1376,7 @@ struct AssistantToolsRow: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if AppStyle.current.usesBeautifulUI {
                 // BeautifulUI's chip run, as in an agent's chat: one chip per kind of tool (a spinner while one runs).
-                Button {
-                    withAnimation(Theme.Motion.standard) { open.toggle() }
-                } label: {
+                Button(action: toggle) {
                     ToolChipGroup(ToolRunSummary.chips(calls), isOpen: open, isRunning: running)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(.rect)
@@ -1330,9 +1384,7 @@ struct AssistantToolsRow: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(count) tool calls: \(sources(calls))")
             } else {
-                Button {
-                    withAnimation(Theme.Motion.standard) { open.toggle() }
-                } label: {
+                Button(action: toggle) {
                     HStack(spacing: Theme.Space.sm) {
                         if running {
                             ProgressView().controlSize(.mini)
@@ -1363,8 +1415,10 @@ struct AssistantToolsRow: View {
                     case .thought: EmptyView()
                     }
                 }
+                .unfolding(unfold)
             }
         }
+        .chatPinned(pinKey)
     }
 
     /// Which kinds of data were touched, in plain words.

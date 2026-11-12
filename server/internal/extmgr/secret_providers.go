@@ -67,8 +67,9 @@ type keptWords struct {
 }
 
 // ResolveSecret is reference's value for purpose, from the provider that claims its scheme. approvedBy is who approved
-// this use: "settings" (a reference saved in Settings), "rule" (an Always rule) or the approving device's id; it goes
-// into the record of the use with the reference and the purpose. Errors are *SecretError.
+// this use: "settings" (a reference saved in Settings), "rule" (an Always rule) or "device:<id>" (the device that
+// approved its hand-off card); it goes into the record of the use with the reference and the purpose. Errors are
+// *SecretError.
 func (h *Manager) ResolveSecret(ctx context.Context, reference string, purpose wire.SecretPurpose, approvedBy string) (string, error) {
 	if h.extensions == nil || !h.ready(ctx) {
 		return "", secretErr("provider_off", i18n.Args{"provider": schemeOf(reference)})
@@ -179,7 +180,8 @@ func (ps *extensions) describeSecret(ctx context.Context, reference string) (Sec
 	if err := hp.proc.Call(cctx, "secrets.describe", wire.SecretsDescribeParams{Contribution: prov.Contribution, Reference: reference}, &res); err != nil {
 		return SecretDescription{}, providerError(prov, err, cctx.Err() != nil && ctx.Err() == nil)
 	}
-	d := SecretDescription{Provider: prov.Extension, ProviderName: prov.Name, Title: providerWords(res.Title, 200), Detail: providerWords(res.Detail, 200)}
+	d := SecretDescription{Provider: prov.Extension, ProviderName: prov.Name, Title: providerWords(res.Title, 200),
+		Detail: providerWords(res.Detail, secretDetailMost)}
 	if d.Title == "" {
 		d.Title = reference
 	}
@@ -239,6 +241,12 @@ func providerError(prov extension.SecretProvider, err error, timedOut bool) *Sec
 	return secretErr("failed", args)
 }
 
+// secretDetailMost is the most characters of a provider's detail (secrets.describe) the host keeps, on one line, a
+// longer one cut with "…": what fits after the item's name in a card's line on a phone (docs/extensions/secret-providers.md
+// "Methods"). Every page and card reads the cut one; a provider's own restraint is not relied on.
+const secretDetailMost = 40
+
+// providerWords is s on one line, its words joined by single spaces, cut to most characters with "…".
 func providerWords(s string, most int) string {
 	return clip(strings.Join(strings.Fields(s), " "), most)
 }

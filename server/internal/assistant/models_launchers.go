@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -69,10 +70,12 @@ type storedLauncher struct {
 	DisplayName string `json:"display_name,omitempty"`
 	// Share and ScopeMachines are its device scope (models_launchers_scope.go): "all", "selected", "none"; "" is a
 	// record from before scopes, every confirmed computer as then.
-	Share         string    `json:"share,omitempty"`
-	ScopeMachines []string  `json:"scope_machines,omitempty"`
-	Created       time.Time `json:"created"`
-	Updated       time.Time `json:"updated"`
+	Share         string   `json:"share,omitempty"`
+	ScopeMachines []string `json:"scope_machines,omitempty"`
+	// ViaMachine (kind api): the computer whose node sends this connection's requests (models_via.go); "" the manager.
+	ViaMachine string    `json:"via_machine,omitempty"`
+	Created    time.Time `json:"created"`
+	Updated    time.Time `json:"updated"`
 }
 
 // LauncherView is one launcher for the app: where it comes from, which machines have it; never the key.
@@ -127,6 +130,8 @@ type LauncherView struct {
 	OwnService    string   `json:"own_service,omitempty"`
 	KeyMachines   []string `json:"key_machines,omitempty"`
 	LegacyScope   bool     `json:"legacy_scope,omitempty"`
+	// ViaMachine (managed, kind api): the computer that sends its requests; "" this manager (models_via.go).
+	ViaMachine string `json:"via_machine,omitempty"`
 	// KeyReference (managed): the key is a reference to a provider extension's secret: the reference and what it
 	// names, never the value (launcher_secrets.go). MachineKeyReferences: the same for the computers' own keys.
 	KeyReference         *extmgr.SecretReferenceView            `json:"key_reference,omitempty"`
@@ -147,7 +152,7 @@ func launcherView(l storedLauncher) LauncherView {
 		SubagentForce: l.SubagentForce, HasHeaders: l.HeadersSealed != "", HasEnv: l.EnvSealed != "", Proxy: l.Proxy, NoProxy: l.NoProxy, TimeoutMS: l.TimeoutMS,
 		CompactWindow: l.CompactWindow, MaxContext: l.MaxContext, Effort: l.Effort, Origin: l.Source,
 		Share: l.share(), ScopeMachines: l.ScopeMachines, Delivery: l.delivery(), OwnService: l.ownService(), LegacyScope: l.Share == "",
-		keySealed: l.KeySealed}
+		ViaMachine: l.ViaMachine, keySealed: l.KeySealed}
 }
 
 var managedLauncherName = lazyre.New(`^[A-Za-z_][A-Za-z0-9_-]*$`)
@@ -270,12 +275,35 @@ func (s *Service) readStoredLaunchers(ctx context.Context) (list []storedLaunche
 	return list, nil
 }
 
+// readHiddenLaunchers reads launchers.hidden from the store itself (never a request's memo) for a change to it, made
+// under models.mu so no other hide or restore is lost; a failed read fails the change instead of emptying the list.
+func (s *Service) readHiddenLaunchers(ctx context.Context) ([]string, error) {
+	st := s.store()
+	if st == nil {
+		return nil, i18n.Err("assistant-models.err_no_database")
+	}
+	var list []string
+	_, err := st.Setting(ctx, launchersHiddenKey, &list)
+	return list, err
+}
+
 func (s *Service) hiddenLaunchers(ctx context.Context) []string {
 	var list []string
 	if st := s.store(); st != nil {
 		_, _ = memoSetting(ctx, st, launchersHiddenKey, &list)
 	}
+	if n, _ := ctx.Value(unhiddenKey{}).(string); n != "" && slices.Contains(list, n) {
+		list = slices.DeleteFunc(slices.Clone(list), func(h string) bool { return h == n })
+	}
 	return list
+}
+
+type unhiddenKey struct{}
+
+// withUnhidden has hiddenLaunchers leave name out: a launcher that a configuration or a conversation still names keeps
+// running when it is hidden, as the hide route says; hiding takes it out of the pickers only (#4659).
+func withUnhidden(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, unhiddenKey{}, name)
 }
 
 func (s *Service) putSetting(ctx context.Context, key string, v any) error {

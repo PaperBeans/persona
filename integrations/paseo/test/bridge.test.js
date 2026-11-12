@@ -45,7 +45,7 @@ async function setup(t, o = {}) {
   const logs = []
   const paseo = new PaseoClient({ home, retryMin: 30, retryMax: 100, log: (m) => logs.push(m) })
   const bridge = createPaseoBridge({ paseo, log: (m) => logs.push(m) },
-    { socketPath: node.path, mcpConfig: o.mcpConfig, retryMs: 30, pushDelayMs: 5, refreshMs: 0, awayGrace: o.awayGrace ?? 400, callWait: 1500,
+    { socketPath: node.path, mcpConfig: o.mcpConfig, allowTools: o.allowTools, retryMs: 30, pushDelayMs: 5, refreshMs: 0, awayGrace: o.awayGrace ?? 400, callWait: 1500,
       listMax: o.listMax, pageSize: o.pageSize, closedChecks: o.closedChecks, sweepMs: o.sweepMs ?? 0 })
   bridge.start()
   t.after(() => bridge.stop())
@@ -469,7 +469,7 @@ test('continuing a Claude session: the agent Paseo has, else Paseo imports it un
 })
 
 test("a project's worktrees are one space; a new session at a worktree goes into Paseo's workspace there", async (t) => {
-  const dir = mkdtempSync('/tmp/ppaseo-wt-')
+  const dir = realpathSync(mkdtempSync('/tmp/ppaseo-wt-'))
   t.after(() => rmSync(dir, { recursive: true, force: true }))
   const app = join(dir, 'app')
   const wt = join(dir, 'brave-fox')
@@ -682,6 +682,91 @@ test('a session Persona started keeps its id once archived: a row not running, i
   assert.equal(rows().filter((r) => r.transcript === SID2).length, 1, 'one row for the conversation')
   assert.equal(node.all('runtime.sessions').some((p) => p.sessions.some((r) => r.session_id === SID2) || p.unlisted_transcripts?.includes(SID2)), false,
     'never under its transcript id, in no list')
+})
+
+test('a Persona-started Codex session keeps its id and thread through archive, bridge restart and a new message (#5129)', async (t) => {
+  const thread = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0003'
+  const { fake, node, bridge, paseo, rows, a } = await setup(t)
+  const started = await call(node, 'session.start', { cwd: '/tmp', prompt: 'Check the synthetic project', launcher: 'my-codex' })
+  const sid = started.session.session_id
+  const id = fake.requestsOf('agent.create.request').at(-1).agentId
+  fake.update(id, { persistence: { provider: 'my-codex', sessionId: thread, metadata: { provider: 'codex', threadId: thread } } })
+  const row = () => rows().find((r) => r.session_id === sid)
+  await until('the Codex thread known', () => row()?.codex_thread === thread)
+  await call(node, 'session.close', { session_id: sid })
+  await until('the archived Codex session still listed', () => row()?.status === 'offline')
+  assert.deepEqual([row().session_id, row().codex_thread, row().agent, row().launcher], [sid, thread, 'codex', 'my-codex'])
+  assert.equal(fake.agents.get(id).agent.labels['persona.session'], sid)
+
+  const second = await call(node, 'session.start', { cwd: '/tmp', prompt: 'Check another synthetic project', launcher: 'my-codex' })
+  const secondId = fake.requestsOf('agent.create.request').at(-1).agentId
+  const secondThread = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0005'
+  fake.update(secondId, { persistence: { provider: 'my-codex', sessionId: secondThread } })
+  await until('the second thread known', () => rows().some((r) => r.session_id === second.session.session_id && r.codex_thread === secondThread))
+  await call(node, 'session.close', { session_id: second.session.session_id })
+  await until('both archived Codex conversations listed', () => rows().filter((r) => r.status === 'offline' && [thread, secondThread].includes(r.codex_thread)).length === 2)
+  assert.ok(node.last('runtime.sessions').unlisted_transcripts.every((x) => x && ![thread, secondThread].includes(x)), 'Codex threads never enter the Claude transcript list')
+
+  // An agent started in Paseo itself still leaves the runtime list when archived, even with a valid thread id.
+  fake.update(a.codex.id, { persistence: { provider: 'my-codex', sessionId: '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0004' } })
+  await call(node, 'session.close', { session_id: `paseo-${a.codex.id}` })
+  await until('the Paseo-originated Codex agent gone', () => !rows().some((r) => r.session_id === `paseo-${a.codex.id}`))
+
+  bridge.stop()
+  const again = createPaseoBridge({ paseo: new PaseoClient({ home: paseo.home, retryMin: 30, retryMax: 100 }) },
+    { socketPath: node.path, retryMs: 30, pushDelayMs: 5, refreshMs: 0, callWait: 1500, sweepMs: 0 })
+  const mark = node.events.length
+  again.start()
+  t.after(() => again.stop())
+  const fresh = () => node.events.slice(mark).filter((e) => e.event === 'runtime.sessions').at(-1)?.params.sessions ?? []
+  await until('the archived Codex row read after reconnect', () => fresh().some((r) => r.session_id === sid && r.status === 'offline' && r.codex_thread === thread))
+  assert.ok(fresh().some((r) => r.session_id === second.session.session_id && r.codex_thread === secondThread))
+  assert.equal(fresh().some((r) => r.session_id === `paseo-${a.codex.id}`), false)
+  await call(node, 'session.send', { session_id: sid, text: 'Continue the synthetic check', client_msg_id: 'cm-codex-back' })
+  assert.equal(fake.requestsOf('send_agent_message_request').at(-1).agentId, id)
+  await until('the same Codex session restored', () => fresh().some((r) => r.session_id === sid && r.status === 'working' && r.codex_thread === thread))
+  assert.equal(fake.agents.get(id).agent.archivedAt, null)
+  assert.equal(fake.agents.get(id).agent.labels['persona.session'], sid)
+  assert.equal(fake.requestsOf('agent.create.request').length, 2, 'restoring sends to the original agent instead of creating another')
+  assert.equal(node.all('runtime.sessions').some((p) => p.sessions.some((r) => r.session_id === thread)), false, 'no push renames the session to its thread')
+  assert.equal(fresh().filter((r) => r.codex_thread === thread).length, 1)
+
+  const resumed = await call(node, 'session.start', { cwd: '/tmp', resume: second.session.session_id })
+  assert.equal(fake.requestsOf('import_agent_request').at(-1).sessionId, secondThread)
+  assert.equal(resumed.session.session_id, second.session.session_id)
+  assert.equal(fake.agents.get(secondId).agent.archivedAt, null)
+  assert.equal(fake.requestsOf('agent.create.request').length, 2)
+})
+
+for (const unavailable of ['disabled', 'missing']) test(`an archived Codex resume refuses its ${unavailable} provider instead of importing the thread through Claude (#5129)`, async (t) => {
+  const thread = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0006'
+  const kept = agentSnapshot({ id: 'kept-codex', provider: 'my-codex', labels: { 'persona.session': 'paseo-kept-codex' },
+    archivedAt: new Date().toISOString(), persistence: { provider: 'my-codex', sessionId: thread, metadata: { provider: 'codex' } } })
+  const entries = unavailable === 'missing' ? ENTRIES.filter((e) => e.provider !== 'my-codex')
+    : ENTRIES.map((e) => e.provider === 'my-codex' ? { ...e, enabled: false } : e)
+  const { fake, node, rows } = await setup(t, { entries,
+    agents: [...Object.values(agents()).map((agent) => ({ agent, project: PROJECT })), { agent: kept, project: PROJECT }] })
+  await until('the retained Codex row', () => rows().some((r) => r.session_id === 'paseo-kept-codex'))
+  await assert.rejects(call(node, 'session.start', { cwd: '/tmp', resume: 'paseo-kept-codex' }), (e) => e.code === 'unavailable')
+  assert.equal(fake.requestsOf('import_agent_request').length, 0, 'no provider gets an import for the unavailable Codex session')
+  assert.ok(fake.agents.get(kept.id).agent.archivedAt)
+})
+
+test('archived Codex rows share a thread only once, and a live row takes precedence (#5129)', async (t) => {
+  const thread = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0007'
+  const kept = (id, ago) => ({ agent: agentSnapshot({ id, provider: 'my-codex', labels: { 'persona.session': `paseo-${id}` },
+    archivedAt: new Date(Date.now() - ago).toISOString(), updatedAt: new Date(Date.now() - ago).toISOString(),
+    persistence: { provider: 'my-codex', sessionId: thread } }), project: PROJECT })
+  const old = kept('older-codex', 60_000), latest = kept('newer-codex', 1000)
+  const { fake, rows } = await setup(t, {
+    agents: [...Object.values(agents()).map((agent) => ({ agent, project: PROJECT })), old, latest],
+  })
+  await until('the newest archived Codex record', () => rows().some((r) => r.session_id === 'paseo-newer-codex'))
+  assert.deepEqual(rows().filter((r) => r.codex_thread === thread).map((r) => r.session_id), ['paseo-newer-codex'])
+  const live = agentSnapshot({ id: 'live-codex', provider: 'my-codex', status: 'running', persistence: { provider: 'my-codex', sessionId: thread } })
+  fake.upsert(live, PROJECT)
+  await until('the live Codex row', () => rows().some((r) => r.session_id === 'paseo-live-codex'))
+  assert.deepEqual(rows().filter((r) => r.codex_thread === thread).map((r) => r.session_id), ['paseo-live-codex'])
 })
 
 test('continuing a session an archived agent keeps: Paseo imports it into that agent, its label as it was', async (t) => {
@@ -948,6 +1033,29 @@ test('Paseo restarting: the bridge connects again and keeps the sessions; gone f
     return gone
   }, 5000)
   assert.ok(logs.some((l) => /away/.test(l)))
+})
+
+test("an Agent Persona started calls its own Persona tools without a card; everything else still asks (#4966)", async (t) => {
+  const own = ['mcp__persona__report_to_supervisor', 'mcp__persona__todo_decision_add']
+  const { fake, node, a } = await setup(t, { allowTools: own })
+  node.resolve = () => ({ allow: true })
+  fake.permission(a.labeled.id, { id: 'own-1', provider: 'claude', name: 'mcp__persona__todo_decision_add', kind: 'tool',
+    input: { decision: 'Use the smaller icon' }, suggestions: [{ type: 'addRules', rules: [{ toolName: 'mcp__persona__todo_decision_add' }], behavior: 'allow', destination: 'session' }] })
+  await until('the own tool answered', () => fake.requestsOf('agent_permission_response').length === 1)
+  assert.deepEqual(fake.requestsOf('agent_permission_response')[0].response, { behavior: 'allow' }, 'allowed once: no rule kept, no mode set')
+  assert.equal(node.asked.length, 0, 'no card for it')
+  // Still asked: dispatch and the phone's tools in the same Agent, any tool of an agent made in Paseo's own app, a plan.
+  const asks = [
+    [a.labeled.id, { id: 'dispatch-1', provider: 'claude', name: 'mcp__persona__dispatch_start', kind: 'tool', input: {} }],
+    [a.labeled.id, { id: 'phone-1', provider: 'claude', name: 'mcp__persona__phone_notify', kind: 'tool', input: {} }],
+    [a.claude.id, { id: 'mine-1', provider: 'claude', name: 'mcp__persona__report_to_supervisor', kind: 'tool', input: { kind: 'done', text: 'x' } }],
+  ]
+  for (const [agentId, request] of asks) fake.permission(agentId, request)
+  await until('the others asked', () => node.asked.length === asks.length)
+  assert.deepEqual(node.asked.map((ix) => [ix.session_id, ix.tool_name]).sort(), [
+    ['paseo-e1', 'mcp__persona__dispatch_start'], ['paseo-e1', 'mcp__persona__phone_notify'], [SID, 'mcp__persona__report_to_supervisor'],
+  ].sort())
+  assert.equal(fake.requestsOf('set_agent_mode_request').length, 0)
 })
 
 for (const toolName of ['mcp__persona__report_to_supervisor', 'mcp__jarvis__report_to_supervisor']) {

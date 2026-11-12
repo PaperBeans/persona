@@ -1,4 +1,8 @@
 {
   "hide": "隐藏",
-  "show": "显示"
+  "show": "显示",
+  "use_reference": "使用引用",
+  "reference_placeholder": "op://vault/item/field",
+  "reference_hint": "需要时由它的提供方给出 Key，Persona 只保存引用。",
+  "reference_saved": "保存时检查引用能否取到值，保存后再测连接。"
 }

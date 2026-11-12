@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { parseAPIError } from "./api-errors";
-import { agentStatus, agentsWorking, agentSummary, attachedAgentNotices, buildTaskIndex, loopCadence, loopLabel, loopNext, loopShortLabel, loopTask, nestedSubagents, stableSubagents, subagentEnded, subagentTree, taskBadge, taskPill, terminalCalls, wakeSummary } from "./tasks";
+import { agentStatus, agentSummary, attachedAgentNotices, buildTaskIndex, loopCadence, loopLabel, loopNext, loopShortLabel, loopTask, stableSubagents, subagentEnded, taskBadge, taskPill, terminalCalls, wakeSummary } from "./tasks";
 import type { Item, Subagent } from "./types";
+import type { Step } from "./turns";
+import * as tasksModule from "./tasks";
 
 describe("buildTaskIndex", () => {
   it("finds the call a notice came from by its task id", () => {
@@ -71,42 +73,6 @@ describe("loops", () => {
   });
 });
 
-describe("subagentTree", () => {
-  const sub = (id: string, minutesAgo: number, more: Partial<Subagent> = {}): Subagent => ({
-    id, session_id: `s1@${id}`, started_at: new Date(Date.parse("2026-11-02T10:00:00Z") - minutesAgo * 60_000).toISOString(), ...more,
-  });
-  const shape = (rows: ReturnType<typeof subagentTree>) => rows.map((r) => `${"  ".repeat(r.depth)}${r.agent.id}`);
-
-  it("nests each under its launcher, several levels deep", () => {
-    const rows = subagentTree([
-      sub("e5", 1, { parent_id: "c3", fork: true }),
-      sub("b2", 9),
-      sub("c3", 6, { parent_id: "a1" }),
-      sub("a1", 10, { running: true }),
-      sub("f6", 2, { parent_id: "c3", fork: true }),
-      sub("d4", 5, { parent_id: "a1" }),
-    ]);
-    expect(shape(rows)).toEqual(["a1", "  d4", "  c3", "    e5", "    f6", "b2"]);
-  });
-
-  it("puts one whose launcher is not listed at the top level", () => {
-    expect(shape(subagentTree([sub("a1", 10), sub("k9", 3, { parent_id: "gone" }), sub("c3", 6, { parent_id: "a1" })]))).toEqual(["k9", "a1", "  c3"]);
-  });
-
-  it("orders each level running first, then newest first", () => {
-    const rows = subagentTree([
-      sub("old", 30), sub("new", 1), sub("live", 50, { running: true }),
-      sub("kid-old", 20, { parent_id: "old" }), sub("kid-live", 25, { parent_id: "old", running: true }), sub("kid-new", 2, { parent_id: "old" }),
-    ]);
-    expect(shape(rows)).toEqual(["live", "new", "old", "  kid-live", "  kid-new", "  kid-old"]);
-  });
-
-  it("lists launchers naming each other once, from the top", () => {
-    expect(shape(subagentTree([sub("x", 2, { parent_id: "y" }), sub("y", 1, { parent_id: "x" }), sub("z", 3, { parent_id: "z" })]))).toEqual(["z", "y", "  x"]);
-    expect(subagentTree(undefined)).toEqual([]);
-  });
-});
-
 describe("parseAPIError", () => {
   it("explains common errors", () => {
     expect(parseAPIError("API Error: 401 {\"type\":\"authentication_error\"} · Please run /login")).toMatchObject({ status: 401, transient: false, reason: "登录过期了，要在电脑上重新 /login" });
@@ -165,21 +131,6 @@ describe("a subagent call's card", () => {
     expect(subagentEnded(undefined, undefined)).toBeUndefined();
   });
 
-  it("tells which subagents the agent waits on and what they do (#5602)", () => {
-    const a = (id: string, extra: Partial<Subagent>): Subagent => ({ id, session_id: `s@${id}`, running: true, tool_use_id: `c-${id}`, ...extra });
-    const list = [
-      a("x", { last_tool: { id: "t1", name: "Read", summary: "在读 a.go" }, updated_at: "2026-11-06T10:00:01Z" }),
-      a("y", { last_tool: { id: "t2", name: "Bash", summary: "跑测试" }, updated_at: "2026-11-06T10:00:05Z" }),
-      a("z", {}), // no call yet
-      a("bg", { background: true, last_tool: { id: "t3", name: "Bash", summary: "后台跑" } }),
-      a("done", { running: false }),
-      a("answered", { last_tool: { id: "t4", name: "Grep", summary: "在搜" } }),
-    ];
-    expect(agentsWorking(list, new Set(["c-answered"]))).toEqual({ count: 3, doing: ["跑测试", "在读 a.go"] });
-    expect(agentsWorking([a("bg", { background: true })], new Set())).toBeNull();
-    expect(agentsWorking(undefined, new Set())).toBeNull();
-  });
-
   it("keeps the subagents array while only updated_at moved (#5602)", () => {
     const one = [{ ...meta(true), updated_at: "2026-11-06T10:00:00Z" }];
     const later = [{ ...meta(true), updated_at: "2026-11-06T10:00:01Z" }];
@@ -203,15 +154,51 @@ describe("a subagent call's card", () => {
     expect(agentSummary(undefined, undefined)).toBe("");
   });
 
-  it("lists the ones it launched, level by level", () => {
+});
+
+describe("subagent cards (#5030)", () => {
+  it("modelChipLabel: a Claude id as family and version, GPT as OpenAI writes it, anything else in title case", () => {
+    const { modelChipLabel } = tasksModule;
+    expect(modelChipLabel("claude-haiku-4-5-20251001")).toBe("Haiku 4.5");
+    expect(modelChipLabel("claude-opus-4-8[1m]")).toBe("Opus 4.8");
+    expect(modelChipLabel("claude-fable-5")).toBe("Fable 5");
+    expect(modelChipLabel("us.anthropic.claude-sonnet-4-6")).toBe("Sonnet 4.6");
+    expect(modelChipLabel("gateway/claude-sonnet-4-6")).toBe("Sonnet 4.6");
+    expect(modelChipLabel("gpt-5.4-mini")).toBe("GPT-5.4 Mini");
+    expect(modelChipLabel("gpt-5-codex")).toBe("GPT-5 Codex");
+    expect(modelChipLabel("gpt-5.1-codex-max")).toBe("GPT-5.1 Codex Max");
+    expect(modelChipLabel("gpt-5")).toBe("GPT-5");
+    expect(modelChipLabel("some-future-model")).toBe("Some Future Model");
+    expect(modelChipLabel(undefined)).toBe("");
+    expect(modelChipLabel("  ")).toBe("");
+  });
+
+  it("withNestedSubagents: what a subagent launched is a card of its own, by when it started, after its launcher's call", () => {
+    const { withNestedSubagents, isNestedSubagentStep, nestedSubagentStatus } = tasksModule;
+    const ts = (s: number) => new Date(Date.parse("2026-11-04T10:00:00Z") + s * 1000).toISOString();
+    const step = (id: string, seq: number, s: number, name = "Bash"): Step => ({ kind: "tool", id, use: { id, seq, ts: ts(s), role: "assistant", kind: "tool_use", tool_name: name, tool_use_id: `c-${id}` }, images: [] });
+    const steps = [step("a", 1, 0, "Agent"), step("b", 2, 10), step("c", 3, 30)];
     const all: Subagent[] = [
-      { id: "a", session_id: "s@a" },
-      { id: "b", session_id: "s@b", parent_id: "a" },
-      { id: "c", session_id: "s@c", parent_id: "b" },
-      { id: "d", session_id: "s@d" },
+      { id: "root", session_id: "s@root", tool_use_id: "c-a", running: true, started_at: ts(0) },
+      { id: "kid", session_id: "s@kid", tool_use_id: "c-kid", parent_id: "root", running: false, started_at: ts(20), description: "Look it up", type: "Explore" },
+      { id: "grandkid", session_id: "s@grandkid", tool_use_id: "c-gk", parent_id: "kid", running: true, started_at: ts(5) },
+      { id: "other", session_id: "s@other", tool_use_id: "c-elsewhere", running: true, started_at: ts(1) },
     ];
-    expect(nestedSubagents(all, "a").map((r) => `${r.depth}:${r.agent.id}`)).toEqual(["0:b", "1:c"]);
-    expect(nestedSubagents(all, "d")).toEqual([]);
-    expect(nestedSubagents(all, "zz")).toEqual([]);
+    const out = withNestedSubagents(steps, all);
+    expect(out.map((s) => s.id)).toEqual(["a", "subagent:grandkid", "b", "subagent:kid", "c"]);
+    const kid = out[3];
+    expect(isNestedSubagentStep(kid)).toBe(true);
+    expect(kid.kind === "tool" && kid.use).toMatchObject({ tool_name: "Agent", tool_use_id: "c-kid", tool_input: { description: "Look it up" }, seq: 2 });
+    expect(isNestedSubagentStep(steps[0])).toBe(false);
+    expect(nestedSubagentStatus(all[1])).toBe("completed");
+    expect(nestedSubagentStatus(all[2])).toBe("running");
+    // a fork the node names no call of gets one of its own; launchers naming each other add nothing twice
+    const fork = withNestedSubagents(steps, [all[0], { id: "f", session_id: "s@f", parent_id: "root", started_at: ts(15) }]);
+    expect(fork[2].kind === "tool" && fork[2].use.tool_use_id).toBe("subagent:f");
+    const loop = withNestedSubagents(steps, [all[0], { id: "x", session_id: "s@x", parent_id: "y", tool_use_id: "c-x" }, { id: "y", session_id: "s@y", parent_id: "x", tool_use_id: "c-y" }]);
+    expect(loop).toBe(steps);
+    // nothing nested: the same array
+    expect(withNestedSubagents(steps, [all[0]])).toBe(steps);
+    expect(withNestedSubagents(steps, [])).toBe(steps);
   });
 });

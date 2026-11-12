@@ -4,7 +4,7 @@
 Checks, one line each, light / dark x wide / 390 px: the sidebar's marks have a shape per state (the working one an
 arc turning in 0.9 s, needs-you and done glowing, idle plain, offline hollow); a folded machine shows a mark and a
 monospace count per state, needs you first, where it showed one red badge, and an expanded one keeps the badge; the
-session header, the /terminal tree and the palette use the same marks; the segmented control's thumb slides (mid-slide
+/terminal tree and the palette use the same marks (the session header has none: cindy's top bar says no state, #5421); the segmented control's thumb slides (mid-slide
 position between the two segments) and lands under the chosen one; under prefers-reduced-motion the arc turns more
 slowly instead of stopping and the thumb does not slide.
 
@@ -170,14 +170,12 @@ def pick_session(hub, token):
 def check_header(page, base, where, theme, shots, sess):
     state, mid, sid = sess
     page.goto(f"{base}/s/{mid}/{sid}")
-    header = page.locator("header").first
-    mark = header.locator(f'.status-mark[data-state="{state}"]')
-    expect(mark.first).to_be_visible()
-    if state == "working":
-        assert mark.first.evaluate("e => e.tagName.toLowerCase()") == "svg"
-        assert style(mark, ["animation-name"])["animation-name"] == "spin-long"
+    header = page.locator("main header").first
+    # cindy's top bar (#5421): the Agent's mark with its "on another computer" arc before the title, and no state mark
+    expect(header.locator("[data-agent-device] [data-agent-remote]").first).to_be_attached()
+    assert header.locator(".status-mark").count() == 0, f"{where} {theme}: the session header draws a state mark"
     page.wait_for_timeout(600)
-    ok(f"{where} {theme}: the session header shows the {state} mark")
+    ok(f"{where} {theme}: the session header shows the Agent's mark and no {state} mark")
     if shots:
         page.screenshot(path=os.path.join(shots, f"header-{where}-{theme}.png"), clip={"x": 0, "y": 0, "width": page.viewport_size["width"], "height": 70})
 

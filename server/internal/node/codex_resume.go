@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +98,13 @@ func (n *Node) codexRemoteConnecting(home string) bool {
 // list's holders come from a scan up to 30 seconds old (discoverCodex): a Codex opened on the computer since, or a
 // resume still starting, would be a second writer of the thread.
 func (n *Node) codexHeldNow(path string) bool {
+	open, complete := n.codexOpenNow(path, false)
+	return open || !complete
+}
+
+// codexOpenNow says whether a Codex process has the rollout at path open right now (cliOnly: a Codex CLI, not an
+// app-server, which keeps a thread it has loaded), and whether every process could be listed and read (complete).
+func (n *Node) codexOpenNow(path string, cliOnly bool) (open, complete bool) {
 	n.codices.mu.Lock()
 	scan, checked := n.codices.scan, n.codices.checked
 	n.codices.mu.Unlock()
@@ -108,20 +116,21 @@ func (n *Node) codexHeldNow(path string) bool {
 	case scan != nil:
 		procs = scan()
 	default:
-		return false
+		return false, true
 	}
-	open, read := scanOpenRollouts(procs)
-	if !listed || !read {
-		return true
+	if cliOnly {
+		procs = slices.DeleteFunc(procs, func(p codexProcess) bool { return p.endpoint != "" })
 	}
-	for _, paths := range open {
+	rollouts, read := scanOpenRollouts(procs)
+	complete = listed && read
+	for _, paths := range rollouts {
 		for _, p := range paths {
 			if filepath.Base(p) == filepath.Base(path) {
-				return true
+				return true, complete
 			}
 		}
 	}
-	return false
+	return false, complete
 }
 
 // codexResumeLauncher is the launcher a thread started outside Persona is resumed with: the caller's when it runs

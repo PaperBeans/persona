@@ -177,17 +177,20 @@ export function parentAgentId(agent) {
 }
 
 /**
- * Whether an agent archived in Paseo stays a row of its own, not running (#4771): one of the user's own that ran Claude
- * Code, whose session id is not its transcript's: one Persona started (paseo-<agent id>) or took over, which keeps
+ * Whether an agent archived in Paseo stays a row of its own, not running (#4771, #5129): one of the user's own that ran
+ * Claude Code or Codex, whose session id is not its transcript's or thread's: one Persona started (paseo-<agent id>) or took over, which keeps
  * its id on the persona.session label. Named to the node as a transcript (unlisted_transcripts) it would come back
  * under the transcript's id, and what Persona keeps under the session's own (a to-do's link, a pin, an archive mark)
- * would be left behind. An agent whose id is its transcript's (one started in Paseo itself) is named as before.
+ * would be left behind. Codex requires Persona's valid label: agents started in Paseo itself keep their archive behavior.
  */
 export function archivedUnderOwnId(agent, roots = {}) {
   if (!agent?.archivedAt || parentAgentId(agent)) return false
   const transcript = transcriptOf(agent, roots)
   const id = sessionIdOf(agent, roots)
-  return Boolean(transcript && id && id !== transcript)
+  if (transcript) return Boolean(id && id !== transcript)
+  const label = agent?.labels?.[SESSION_LABEL]
+  const thread = codexThreadOf(agent, roots)
+  return Boolean(thread && typeof label === 'string' && SESSION_ID.test(label) && label !== thread)
 }
 
 /**
@@ -334,6 +337,9 @@ export function agentRow(agent, o = {}) {
     agent: appAgent(root),
     launcher: agent.provider,
   }
+  // When it was created: a delegated agent's card in its creator's chat counts its running time from it (#5120).
+  const created = Date.parse(agent.createdAt)
+  if (created) row.started_at = new Date(created).toISOString()
   // Its Paseo workspace (a worktree, or one of the tasks in a folder) names where in the project it is. It is no slot:
   // a slot is one tab, and the apps draw the agents sharing one as that tab's panes (one row for them all, each named
   // by its agent; one that stopped running "replaced" by another there). A workspace's agents are conversations of

@@ -10,14 +10,31 @@ nonisolated struct RecordingSegment: Codable, Hashable, Sendable {
     /// Wall-clock start of the segment (rolling recordings); nil for old clips.
     var startedAt: Date? = nil
     var kept: RecordingKeep? = nil
+    /// All-day recordings only (docs/assistant/day-recap.md「Chunks」): the chunk's mean RMS level in dBFS over all its
+    /// samples (`RecordingDayLevel`), for skipping silence. nil everywhere else, so old JSON decodes unchanged.
+    var level: Double? = nil
 
     static func fileName(_ index: Int) -> String { String(format: "seg-%03d.m4a", index) }
+    /// The index a `fileName` names; nil for any other file.
+    static func index(fileName name: String) -> Int? {
+        guard name.hasPrefix("seg-"), name.hasSuffix(".m4a") else { return nil }
+        let digits = name.dropFirst(4).dropLast(4)
+        guard !digits.isEmpty, digits.allSatisfy(\.isASCII), let index = Int(digits), index >= 0 else { return nil }
+        return index
+    }
     var endedAt: Date? { startedAt?.addingTimeInterval(duration) }
     /// Wall-clock time of a point on the recording timeline that falls in this segment.
     func wallTime(_ timeline: Double) -> Date? { startedAt?.addingTimeInterval(timeline - start) }
     func overlaps(_ from: Date, _ to: Date) -> Bool {
         guard let startedAt, let endedAt else { return false }
         return startedAt <= to && from <= endedAt
+    }
+
+    /// Whether this day chunk holds audio from `from…to`. Half-open, unlike rolling's `overlaps`: a chunk that ends
+    /// right where the range starts, or starts right where it ends (the one an erase's cut opened), holds none of it.
+    func overlapsDay(_ from: Date, _ to: Date) -> Bool {
+        guard let startedAt, let endedAt else { return false }
+        return startedAt < to && from < endedAt
     }
 }
 
@@ -80,7 +97,7 @@ nonisolated struct RecordingMeeting: Codable, Hashable, Sendable {
 }
 
 nonisolated struct RecordingEntry: Codable, Identifiable, Hashable, Sendable {
-    enum Source: String, Codable, Sendable { case phone, watch }
+    nonisolated enum Source: String, Codable, Sendable { case phone, watch }
     var id: UUID
     var createdAt: Date
     var source: Source
@@ -91,7 +108,9 @@ nonisolated struct RecordingEntry: Codable, Identifiable, Hashable, Sendable {
     var segments: [RecordingSegment] = []
     var marks: [Double] = []
     var endDelivered = false
-    nonisolated enum Kind: String, Codable, Sendable { case clip, rolling }
+    /// `day`: an all-day recording, one per local day (docs/assistant/day-recap.md). An app from before the case can't
+    /// decode such an entry, so the watch records them only for a phone that says it takes them (`recordingDay`).
+    nonisolated enum Kind: String, Codable, Sendable { case clip, rolling, day }
     /// nil means a clip.
     var kind: Kind? = nil
     /// Tombstone: every segment below this index was pruned and must not come back.
@@ -108,13 +127,47 @@ nonisolated struct RecordingEntry: Codable, Identifiable, Hashable, Sendable {
     /// Persona's part in the meeting and the session that attends (#2981); nil for a note, a watch recording, and a
     /// meeting recording Persona was never asked to attend (its upload is then exactly as before).
     var attendance: RecordingAttendance? = nil
+    // All-day recordings only (docs/assistant/day-recap.md「The day recording on the watch」); nil for every other kind.
+    // On the watch `createdAt` is the recording's `recording_started_at`, and `segments` are the chunks the phone has
+    // not acknowledged: the record of an acknowledged, erased or lost seq goes, and the seq is tombstoned
+    // (`prunedBelow` / `prunedAbove`), so it is never used again.
+    /// The local date the day recording belongs to, `YYYY-MM-DD` in `timeZone` (`RecordingDayCalendar`).
+    var day: String? = nil
+    /// The recording's IANA time zone, fixed for it: its `day`, its midnight and the hub's hours are in it, whatever
+    /// zone the device moves to.
+    var timeZone: String? = nil
+    /// Watch: the seq counter (`RecordingLibrary.allocateSeq`), so every seq below it was handed out to a chunk.
+    var nextSeq: Int? = nil
+    /// Watch: the `n` the next control event gets.
+    var nextEvent: Int? = nil
+    /// Watch: control events the phone has not acknowledged yet, in `n` order.
+    var dayEvents: [RecordingDayEvent]? = nil
+    /// Watch: the phone's erase requests already carried out, for answering a repeated one the same way.
+    var dayErases: [RecordingDayEraseDone]? = nil
+    /// Watch: when the day recording ended (its midnight, or when it was closed late); it stays until the phone has
+    /// everything.
+    var closedAt: Date? = nil
+    /// Watch: why the microphone is closed, the reason of the last `paused` event since the last `started` (kept by
+    /// `RecordingLibrary.appendDayEvent`); nil while it records.
+    var gapReason: String? = nil
 
     /// Monotonic per recording: every save moves `updatedAt` forward, so a later upload always carries a larger one.
     var revision: Int64 { Int64(((updatedAt ?? createdAt).timeIntervalSince1970 * 1000).rounded()) }
 
     var isRolling: Bool { kind == .rolling }
-    /// Index the next segment would get; also the segment count to report when a rolling recording ends.
-    var nextIndex: Int { max((segments.map(\.index).max() ?? -1) + 1, prunedBelow ?? 0, (prunedAbove?.max() ?? -1) + 1) }
+    var isDay: Bool { kind == .day }
+    /// The day recording's time zone; nil without a known one.
+    var dayTimeZone: TimeZone? { timeZone.flatMap(TimeZone.init(identifier:)) }
+    /// Watch: a closed day recording the phone has all of: every seq below the counter acknowledged, erased or lost,
+    /// and every event acknowledged. It can go.
+    var isDaySettled: Bool {
+        isDay && closedAt != nil && (dayEvents ?? []).isEmpty && (prunedBelow ?? 0) >= nextIndex
+    }
+    /// Index the next segment would get; also the segment count to report when a rolling recording ends. For a day
+    /// recording on the watch, the seq counter.
+    var nextIndex: Int {
+        max((segments.map(\.index).max() ?? -1) + 1, prunedBelow ?? 0, (prunedAbove?.max() ?? -1) + 1, nextSeq ?? 0)
+    }
     func isPruned(_ index: Int) -> Bool { index < (prunedBelow ?? 0) || (prunedAbove?.contains(index) ?? false) }
     var prunedCount: Int { (prunedBelow ?? 0) + (prunedAbove?.count ?? 0) }
     func isErased(_ segment: RecordingSegment) -> Bool {
@@ -133,15 +186,24 @@ nonisolated struct RecordingEntry: Codable, Identifiable, Hashable, Sendable {
 
     var duration: Double { segments.map { $0.start + $0.duration }.max() ?? 0 }
     var isMeeting: Bool { meeting != nil }
-    /// A meeting being recorded on this phone that Persona attends: asking is open, live lines go to the hub.
+    /// A meeting being recorded on this phone that Persona attends: asking is open, live lines go to the hub. Only with
+    /// someone chosen to attend (`RecordingAttendance.sentRole`, #3862).
     var attended: Bool {
-        active && isMeeting && source == .phone && attendance?.role.attends == true && attendance?.stopped != .unsupported
+        active && isMeeting && source == .phone && attendance?.sentRole.attends == true && attendance?.stopped != .unsupported
     }
     var displayTitle: String {
         guard title.isEmpty else { return title }
+        if isDay, let date = dayTitleDate { return String(localized: "Day · \(date)") }
         let when = createdAt.formatted(date: .abbreviated, time: .shortened)
         if isRolling { return String(localized: "Rolling · \(when)") }
         return isMeeting ? String(localized: "Meeting · \(when)") : String(localized: "Recording · \(when)")
+    }
+    /// A day recording's date as the title shows it: written in the recording's own time zone, so a day recorded in
+    /// Shanghai reads as that date on a phone set to New York too. nil without a valid `day`.
+    private var dayTitleDate: String? {
+        let zone = dayTimeZone ?? .autoupdatingCurrent
+        guard let day, let start = RecordingDayCalendar.start(of: day, in: zone) else { return nil }
+        return start.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, timeZone: zone))
     }
     var sourceTitle: String { source == .watch ? "Apple Watch" : String(localized: "iPhone") }
     var receivedAll: Bool {
@@ -157,6 +219,11 @@ nonisolated struct RecordingEntry: Codable, Identifiable, Hashable, Sendable {
         return all.filter { !attendance.spokenBy($0) }
     }
     var transcript: String { sentences.map { "[\(RecordingFormat.clock($0.start))] \($0.text)" }.joined(separator: "\n") }
+}
+
+nonisolated extension RecordingEntry {
+    /// A meeting recorded on this phone as a room meeting (#3862).
+    var roomMeeting: Bool { isMeeting && source == .phone && attendance?.room == true }
 }
 
 nonisolated struct RecordingTransfer: Codable, Sendable {
@@ -219,6 +286,22 @@ nonisolated enum RecordingAudioSpec {
 }
 
 nonisolated enum RecordingFormat {
+    /// A meeting's span in the date style of the recording page's header ("Jan 15, 17:00–18:00"): the end's time alone on
+    /// the same day, its date too on another (#4875).
+    static func span(_ start: Date, _ end: Date, locale: Locale = .autoupdatingCurrent, timeZone: TimeZone = .autoupdatingCurrent) -> String {
+        var style = Date.IntervalFormatStyle.interval.month().day().hour().minute()
+        style.locale = locale
+        style.timeZone = timeZone
+        return (start..<max(end, start)).formatted(style)
+    }
+
+    /// The hub's `start` / `end` (RFC 3339) as `span`; `fallback`, the hub's fixed-format `when`, when either is missing or
+    /// unreadable (a hub from before them). nil when there is nothing to show.
+    static func span(start: String?, end: String?, fallback: String?) -> String? {
+        if let s = start.flatMap(JSON.parseDate), let e = end.flatMap(JSON.parseDate) { return span(s, e) }
+        return fallback?.isEmpty == false ? fallback : nil
+    }
+
     static func clock(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0, seconds < Double(Int.max) else { return "0:00" }
         let value = Int(seconds)

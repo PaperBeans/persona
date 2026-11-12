@@ -233,7 +233,7 @@ def offscreen_exchanges(page, what):
 
     page.locator("[data-jump-pill]").click()
     at_end(page, what + ", back to the end again")
-    page.locator("header").get_by_role("button", name="更多", exact=True).click()  # the chat's menu, not a message's
+    page.locator("header").get_by_role("button", name="更多操作", exact=True).click()  # the chat's menu, not a message's
     page.get_by_role("menuitem", name="会话内搜索").click()
     page.locator("[data-chat-search] input").fill("第 3 个问题")
     page.locator("[data-search-result]").first.click()

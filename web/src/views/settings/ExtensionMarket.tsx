@@ -203,7 +203,7 @@ export function MarketCatalog({ onBack, onOpen, onMarkets }: { onBack: () => voi
               className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-hover"
               style={{ animation: `fade-up 320ms ${EASE} ${Math.min(i, 8) * 30}ms both` }}
             >
-              <ExtensionLogo url={it.icon_url} iconSize={16} className={cx("flex size-9 shrink-0 items-center justify-center rounded-[9px]", it.installed ? "bg-accent-tint text-accent-ink" : "bg-inset text-ink-3 shadow-hairline")} />
+              <ExtensionLogo url={it.icon_url} manager="" iconSize={16} className={cx("flex size-9 shrink-0 items-center justify-center rounded-[9px]", it.installed ? "bg-accent-tint text-accent-ink" : "bg-inset text-ink-3 shadow-hairline")} />
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-[13px] font-medium text-ink">{it.name}</span>
@@ -333,7 +333,7 @@ export function MarketItem({ market, id, manager, onBack, onInstalled }: { marke
       <Back label={t("settings-extensionmarket.market_title")} onBack={onBack} right={<IconButton icon="retry" label={t("settings-extensionmarket.reload")} onClick={load} disabled={loading} />} />
       <section className="mb-6 overflow-hidden rounded-card bg-surface shadow-card">
         <div className="flex items-center gap-3 px-4 py-3.5">
-          <ExtensionLogo url={it?.icon_url} iconSize={20} className={cx("flex size-11 shrink-0 items-center justify-center rounded-[11px]", it?.installed ? "bg-accent-tint text-accent-ink" : "bg-inset text-ink-3 shadow-hairline")} />
+          <ExtensionLogo url={it?.icon_url} manager={manager ?? ""} iconSize={20} className={cx("flex size-11 shrink-0 items-center justify-center rounded-[11px]", it?.installed ? "bg-accent-tint text-accent-ink" : "bg-inset text-ink-3 shadow-hairline")} />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-[15px] font-semibold text-ink">{it?.name ?? id}</h2>
             <div className="mt-0.5 truncate text-[12px] text-ink-3">{it ? itemLine(it) : loading ? t("settings-extensionmarket.reading") : ""}</div>

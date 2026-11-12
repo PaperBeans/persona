@@ -156,7 +156,7 @@ internal fun AssistantSwitcherContent(
                 list.forEach { manager ->
                     JAssistantSwitcherRow(manager, manager.id == default, switcherLine(res, manager, now),
                         current = manager.id == current.id, badge = waiting[manager.id] ?: 0, onClick = { onPick(manager) },
-                        defaultTag = stringResource(R.string.settings_managers_default).takeIf { manager.id == default && list.size > 1 })
+                        defaultTag = stringResource(R.string.settings_managers_default).takeIf { manager.id == default && roster.isMulti })
                 }
                 failure?.let { JInlineStatus(it.text(), Modifier.padding(Tokens.Space.s), tone = InlineTone.Failed) }
             }

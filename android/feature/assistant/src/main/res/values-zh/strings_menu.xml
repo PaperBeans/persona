@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The title menu's items and what they copy (iOS AssistantTopBar, AssistantCopyText). -->
+<resources>
+    <string name="assistant_details">详细信息</string>
+    <string name="assistant_connection_details">连接详情</string>
+    <string name="assistant_copy_directory">拷贝目录</string>
+    <string name="assistant_copy_info">拷贝信息</string>
+    <string name="assistant_directory_copied">已拷贝工作目录</string>
+    <string name="assistant_info_copied">已拷贝对话信息</string>
+    <string name="assistant_interrupt">中断</string>
+    <string name="assistant_copy_info_quoted">「%1$s」</string>
+    <string name="assistant_copy_info_hub">Persona 助手（hub 上的 Claude）</string>
+    <string name="assistant_copy_info_chat">Persona 助手的对话</string>
+    <string name="assistant_copy_info_chat_named">Persona 助手的对话 %1$s</string>
+    <string name="assistant_copy_info_session">会话 ID：%1$s</string>
+    <string name="assistant_copy_info_machine">所在机器：%1$s</string>
+    <string name="assistant_copy_info_machine_id">%1$s（%2$s）</string>
+    <string name="assistant_copy_info_cwd">工作目录：%1$s</string>
+    <string name="assistant_copy_info_launcher">启动器：%1$s</string>
+    <string name="assistant_copy_info_launcher_model">启动器：%1$s · 模型：%2$s</string>
+    <string name="assistant_copy_info_resume">在那台机器上接着聊：cd %1$s &amp;&amp; claude --resume %2$s</string>
+</resources>

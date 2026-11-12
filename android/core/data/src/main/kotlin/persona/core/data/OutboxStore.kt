@@ -29,6 +29,9 @@ data class OutboxEntry(
     val mainTarget: Boolean = false,
     /** The operation id of the next attempt when it is no longer [clientMessageId] (the hub said none was delivered). */
     val opId: String? = null,
+    /** The original submission's Persona overrides, kept for every retry and after process restoration. */
+    val launcher: String? = null,
+    val model: String? = null,
 ) {
     val operationId: String get() = opId ?: clientMessageId
 }

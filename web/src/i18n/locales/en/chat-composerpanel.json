@@ -1,0 +1,14 @@
+{
+  "label": "Add to your message",
+  "add": "Add",
+  "add_files": "Add files or images…",
+  "add_images": "Add images…",
+  "add_files_hint": "Images attach to the message; other files upload to the session's computer",
+  "search": "Type a keyword to search files and sessions",
+  "no_match": "No matching items",
+  "used_files": "Used in this session",
+  "folder": "Folder",
+  "session_dir": "Session folder",
+  "reading_folder": "Reading folder…",
+  "no_match_in_folder": "Nothing matches in this folder"
+}

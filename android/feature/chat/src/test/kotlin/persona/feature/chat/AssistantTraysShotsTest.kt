@@ -34,6 +34,7 @@ import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.tasks.TasksStore
 import java.io.File
+import java.time.Instant
 
 /** Native JVM evidence of the real ChatPage, not a hand-built tray mock or a device screenshot. */
 @RunWith(AndroidJUnit4::class)
@@ -174,7 +175,8 @@ class AssistantTraysShotsTest {
     @Test
     @Config(sdk = [35], qualifiers = "zh-w400dp-h1000dp-xhdpi")
     fun backgroundWorkUsesOneSpinnerAndRealWaitUsesClockInEveryStyle() {
-        val at = "2026-11-10T08:00:00Z"
+        // Recent, by the real clock the trays read: a task idle for 48 h is shelved and leaves In progress (TodoTriage, #5530).
+        val at = Instant.now().minusSeconds(2 * 3_600).toString()
         val flow = Workflow(taskId = "workflow-fixture", status = "running", running = true, phase = "Adversarial review",
             agentsDone = 5, agentsStarted = 6, agentsRunning = 1, startedAt = at)
         val workers = listOf(

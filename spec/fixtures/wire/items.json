@@ -185,7 +185,8 @@
               "role": "assistant",
               "kind": "thinking",
               "text": "先读取示例文件。"
-            }
+            },
+            "changes": []
           }
         },
         {
@@ -268,7 +269,8 @@
               "role": "assistant",
               "kind": "thinking",
               "text": "先读取示例文件。"
-            }
+            },
+            "changes": []
           }
         },
         {

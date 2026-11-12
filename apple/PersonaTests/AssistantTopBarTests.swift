@@ -177,6 +177,34 @@ struct AssistantTopBarTests {
         #expect(AssistantSidebarGroups.directions(all, leaders: [], main: main).isEmpty)
     }
 
+    /// The sidebar's Recent (#4873, #5195): the newest five chats whoever opened them (an Inbox item's, a scheduled
+    /// task's, a channel's), never the main one, a direction (listed above it) or the background supervisor; nothing
+    /// when no chat is left.
+    @Test func recentIsTheNewestFiveOfTheRest() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func s(_ id: String, hoursAgo: Double?, origin: String? = nil) throws -> Session {
+            var o: [String: Any] = ["session_id": id, "machine_id": "hub", "status": "idle", "title": id, "assistant": true]
+            if let origin { o["origin"] = origin }
+            var x = try JSON.decoder.decode(Session.self, from: JSONSerialization.data(withJSONObject: o))
+            x.updatedAt = hoursAgo.map { now.addingTimeInterval(-$0 * 3600) }
+            return x
+        }
+        let all = [try s("main", hoursAgo: 0), try s("lead", hoursAgo: 0.5), try s("bg", hoursAgo: 0.1, origin: "task"),
+                   try s("inbox", hoursAgo: 0.2, origin: "inbox"), try s("task", hoursAgo: 0.3, origin: "task"),
+                   try s("a", hoursAgo: 1), try s("lark", hoursAgo: 2, origin: "lark_agent"), try s("wx", hoursAgo: 3, origin: "channel"),
+                   try s("e2", hoursAgo: 5), try s("e1", hoursAgo: 5), try s("never", hoursAgo: nil)]
+        let main = all[0].key
+        let recent = AssistantSidebarGroups.recent(all, leaders: ["lead"], main: main, background: "bg")
+        #expect(recent.map(\.sessionID) == ["inbox", "task", "a", "lark", "wx"])
+        let more = AssistantSidebarGroups.recent(all.filter { !["inbox", "task", "a"].contains($0.sessionID) }, leaders: ["lead"],
+                                                 main: main, background: "bg")
+        #expect(more.map(\.sessionID) == ["lark", "wx", "e1", "e2", "never"]) // equal times: by session id; no time: last
+        // An ended direction comes back among the rest; a hub without a background supervisor lists that chat as any other.
+        #expect(AssistantSidebarGroups.recent(all, leaders: [], main: main, background: "bg").map(\.sessionID) == ["inbox", "task", "lead", "a", "lark"])
+        #expect(AssistantSidebarGroups.recent(all, leaders: ["lead"], main: main, background: nil).map(\.sessionID).first == "bg")
+        #expect(AssistantSidebarGroups.recent(Array(all.prefix(3)), leaders: ["lead"], main: main, background: "bg").isEmpty)
+    }
+
     /// A direction's name comes from GET /api/v1/assistant/leaders: current ones with a name only.
     @Test func directionNamesSkipEndedAndBlank() {
         let names = APIClient.directionNames([

@@ -93,7 +93,8 @@ class NewConversationStartTest {
         hub.failNext = true
         send("first synthetic")
         rule.onAllNodesWithText("chat:new-1").assertCountEquals(0)
-        send("first synthetic")
+        // The message stays as a failed bubble (#4339 C18): its Resend goes to the conversation already started.
+        rule.onNodeWithText("Resend").performClick()
         rule.waitUntil(5_000) { hub.targets.size == 2 }
         assertEquals("one conversation, kept for the retry", listOf(SessionKey("mac", "new-1")), hub.starts)
         assertEquals(listOf(SessionKey("mac", "new-1"), SessionKey("mac", "new-1")), hub.targets)

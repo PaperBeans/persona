@@ -345,11 +345,13 @@ internal data class ToolPresentation(
     val title: String, val verb: String, val detail: String? = null, val mono: Boolean = false, val kind: ToolVerb = ToolVerb.Use,
     /** A tool with words of its own ("Operate computer", `namedToolVerb`): the running line says them, not "Running x". */
     val named: Boolean = false,
+    /** What a tool no table knows is about, under its name in words ([detail]); the running line says it after them. */
+    val about: String? = null,
 ) {
-    /** The running line's words for this call: "Reading x", or a named tool's "Operate computer x". */
+    /** The running line's words for this call: "Reading x", a named tool's "Operate computer x", "GitHub · Create issue x". */
     fun running(res: Resources): String = when {
         !named -> res.getString(kind.running, title)
-        title == verb -> verb
+        title == verb -> about?.let { res.getString(R.string.chat_tool_running_named, verb, it) } ?: verb
         else -> res.getString(R.string.chat_tool_running_named, verb, title)
     }
 }
@@ -372,9 +374,16 @@ internal fun toolPresentation(res: Resources, item: Item): ToolPresentation {
     }
     // Persona's own tools, the computer's and the phone's have words of their own (iOS ToolPresentation.verb); any
     // other reads its name in words, another server's MCP tool as "GitHub · Create issue" (#2986), never "Use".
-    val named = if (kind == ToolVerb.Use && name.isNotEmpty())
-        persona.core.domain.namedToolVerb(name)?.resolve(res) ?: persona.core.domain.toolWords(name) else null
+    val table = if (kind == ToolVerb.Use && name.isNotEmpty()) persona.core.domain.namedToolVerb(name)?.resolve(res) else null
+    val words = if (kind == ToolVerb.Use && name.isNotEmpty() && table == null) persona.core.domain.toolWords(name) else null
+    val named = table ?: words
     val verb = named ?: res.getString(kind.label)
+    // A tool no table knows has no icon of its own to say what it is: its name in words stays the title, and what the
+    // call is about (`ToolNaming.subject`, #4339 C1) goes under it, as iOS's row reads the verb, then the subject.
+    if (words != null) {
+        val about = persona.core.domain.toolSubjectText(item).resolve(res).trim().ifBlank { null }
+        return ToolPresentation(words, words, about, kind = kind, named = true, about = about)
+    }
     val path = input?.string("file_path") ?: input?.string("notebook_path")
     if (!path.isNullOrBlank()) {
         val normalized = path.replace('\\', '/')
@@ -385,7 +394,7 @@ internal fun toolPresentation(res: Resources, item: Item): ToolPresentation {
         return ToolPresentation(command.ifBlank { res.getString(R.string.chat_tool_command) }, verb, input?.string("description"), mono = true, kind = kind)
     }
     // A computer_run with steps or a script says what it does (iOS ComputerSteps): "MacBook · Click AC → 6 → ×".
-    val subject = ComputerSteps.subject(res, name, input) ?: persona.core.domain.toolSubjectText(item).resolve(res).trim()
+    val subject = persona.core.domain.ComputerSteps.runSubject(name, input)?.resolve(res) ?: persona.core.domain.toolSubjectText(item).resolve(res).trim()
     return ToolPresentation(subject.ifBlank { when (name) {
         "TodoWrite" -> res.getString(R.string.chat_tool_todo_list)
         "Task", "Agent" -> res.getString(R.string.chat_tool_subagent)
@@ -407,31 +416,72 @@ internal fun WorkItem.Folded.stepCount(): Int = item.fold?.let { it.tools + it.t
 internal fun workSummary(res: Resources, line: ChatLine.Work, recordedDuration: Long?, now: Instant? = null,
     waiting: Boolean = false): String {
     if (line.live && waiting) return res.getString(R.string.chat_chrome_status_needs_you)
-    val count = line.steps.sumOf { if (it is WorkItem.Folded) it.stepCount() else 1 }
+    // As iOS's work line (#4339 C5): while it runs, the step it is on ("Reading a.kt +2 · 39 s"), else "Working 39 s ·
+    // Tools 2 · Thinking 1"; done, "Tools 3 · Thinking 1 · 1m 20s".
+    val counts = workCounts(res, line.steps)
     if (line.live) {
-        val current = line.steps.lastOrNull()
-        val working = res.getString(R.string.chat_work_working)
-        val action = when (current) {
-            is WorkItem.Tool -> if (current.call.running)
-                toolPresentation(res, current.call.use.item).running(res) else working
-            is WorkItem.Thought -> if (current.item.kind == "thinking") res.getString(R.string.chat_work_thinking) else working
-            else -> working
+        val elapsed = now?.let { n -> line.start?.let { workDuration(res, java.time.Duration.between(it, n).seconds) } }
+        workNow(res, line.steps)?.let { (words, more) ->
+            val lead = if (more > 0) " +$more" else ""
+            return if (elapsed == null) words + lead else "$words$lead · $elapsed"
         }
-        val running = if (count > 0) res.getString(R.string.chat_work_step, action, count) else action
-        val elapsed = now?.let { line.durationText(it)?.resolve(res) }.orEmpty()
-        return if (elapsed.isEmpty()) running else res.getString(R.string.chat_work_elapsed, running, elapsed)
+        return (listOf(elapsed?.let { res.getString(R.string.chat_work_working_for, it) } ?: res.getString(R.string.chat_work_working)) + counts)
+            .joinToString(" · ")
     }
-    val seconds = recordedDuration?.takeIf { it >= 0 }
-    val duration = seconds?.let { when {
-        it < 60 -> res.getString(R.string.chat_work_seconds, it)
-        it < 3600 -> res.getString(R.string.chat_work_minutes, it / 60)
-        else -> res.getString(R.string.chat_work_hours_minutes, it / 3600, it % 3600 / 60)
-    } }
-    var summary = res.getQuantityString(R.plurals.chat_work_done_steps, count, count)
-    if (duration != null) summary = res.getString(R.string.chat_work_took, summary, duration)
+    val parts = counts + listOfNotNull(recordedDuration?.takeIf { it >= 0 }?.let { workDuration(res, it) })
+    var summary = if (parts.isEmpty()) res.getString(R.string.chat_work_done) else parts.joinToString(" · ")
     if (line.knownFailedTools > 0)
         summary = res.getQuantityString(R.plurals.chat_work_failed, line.knownFailedTools, summary, line.knownFailedTools)
     if (line.unresolvedTools > 0)
         summary = res.getQuantityString(R.plurals.chat_work_unresolved, line.unresolvedTools, summary, line.unresolvedTools)
     return summary
+}
+
+/** "Tools 3", "Thinking 1", "Replies 1": what a work line did, a fold counted as what it stands for (iOS `WorkSummary`). */
+internal fun workCounts(res: Resources, steps: List<WorkItem>): List<String> {
+    val tools = steps.sumOf { it.tools }
+    val thoughts = steps.sumOf { it.thoughts }
+    val replies = steps.count { it is WorkItem.Narration }
+    return listOfNotNull(tools.takeIf { it > 0 }?.let { res.getString(R.string.chat_work_tools, it) },
+        thoughts.takeIf { it > 0 }?.let { res.getString(R.string.chat_work_thoughts, it) },
+        replies.takeIf { it > 0 }?.let { res.getString(R.string.chat_work_replies, it) })
+}
+
+/** A work line's time as iOS writes it (`WorkLine.duration`): "39 s", "2 min", "1m 20s", "1 hr 5 min". */
+internal fun workDuration(res: Resources, seconds: Long): String {
+    val s = seconds.coerceAtLeast(0)
+    return when {
+        s < 60 -> res.getString(R.string.chat_work_seconds, s)
+        s < 3600 -> if (s % 60 == 0L) res.getString(R.string.chat_work_minutes, s / 60) else res.getString(R.string.chat_work_minutes_seconds, s / 60, s % 60)
+        else -> res.getString(R.string.chat_work_hours_minutes, s / 3600, s % 3600 / 60)
+    }
+}
+
+/** The tools that keep the books rather than do the work: never what the running line names (iOS `WorkNow.quiet`). */
+private val QuietWorkTools = setOf("TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch")
+
+/**
+ * What a running line names (iOS `WorkNow`, #2987): the newest of the calls still running, in its running words, and how
+ * many run beside it; with none running, the latest step (a call, or a thought's first line). Null when the newest
+ * work is folded away or there is no step yet: the line says its counts.
+ */
+internal fun workNow(res: Resources, steps: List<WorkItem>): Pair<String, Int>? {
+    fun base(tool: WorkItem.Tool) = persona.core.domain.toolBaseName(tool.call.use.item.toolName.orEmpty())
+    val running = steps.takeLastWhile { it is WorkItem.Tool && it.call.running }.filterIsInstance<WorkItem.Tool>().filter { base(it) !in QuietWorkTools }
+    if (running.isNotEmpty()) {
+        if (running.size > 1 && running.all { base(it) == "Read" }) return res.getString(R.string.chat_work_reading_files, running.size) to 0
+        return toolPresentation(res, running.last().call.use.item).running(res) to running.size - 1
+    }
+    for (step in steps.asReversed()) when (step) {
+        is WorkItem.Tool -> if (base(step) !in QuietWorkTools) return toolPresentation(res, step.call.use.item).running(res) to 0
+        is WorkItem.Thought -> if (step.item.item.kind != "notice") {
+            val first = step.item.item.text.orEmpty().lineSequence().map(String::trim).firstOrNull(String::isNotEmpty)
+                ?.removeSurrounding("**")
+            return (first ?: res.getString(R.string.chat_work_thinking)) to 0
+        }
+        is WorkItem.Folded -> return null
+        // Words between the steps: not a step the agent took.
+        is WorkItem.Narration -> Unit
+    }
+    return null
 }

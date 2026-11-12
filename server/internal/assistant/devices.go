@@ -48,6 +48,8 @@ type Devices interface {
 	// change or keep them, nor call the devices): a view that keeps a few rows of a busy machine copies only those.
 	SessionsWhere(id string, keep func(*proto.Session) bool) ([]proto.Session, bool)
 	Session(id, session string) (proto.Session, bool)
+	// Watched: the hub watches the session for its apps (session.watch), so one has it open.
+	Watched(id, session string) bool
 	ConnectedAt(id string) time.Time
 	Usage() assistantwire.UsageSummary
 	// CapacitySnapshot is the account-pool capacity view for scheduling (proto.CapacitySnapshot): how many

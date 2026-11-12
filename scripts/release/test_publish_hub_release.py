@@ -150,5 +150,54 @@ class PublisherSetupTests(unittest.TestCase):
             client.exec_command.assert_not_called()
 
 
+    def publish_with(self, extra):
+        """Run the hub publisher up to its remote command with SFTP and SSH fakes; return (connect, client)."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / 'runtime'
+            runtime.mkdir()
+            config = root / 'config.json'
+            config.write_text(json.dumps({'credentials_command': ['credentials'],
+                                         'remote_root': str(runtime), **extra}))
+            (root / 'latest.json').write_text(json.dumps({
+                'build': 1, 'files': {'linux-amd64': {'name': 'artifact.gz'}}}))
+            (root / 'artifact.gz').write_bytes(b'fixture')
+            sftp = Mock()
+            sftp.lstat.side_effect = lambda path: Path(path).lstat()
+            sftp.normalize.side_effect = lambda path: str(Path(path).resolve(strict=True))
+            sftp.mkdir.side_effect = lambda path, mode: Path(path).mkdir(mode=mode)
+            client = MagicMock()
+            client.open_sftp.return_value.__enter__.return_value = sftp
+            stdout, stderr = MagicMock(), Mock()
+            stdout.__iter__.return_value = iter(())
+            stdout.channel.recv_exit_status.return_value = 0
+            stderr.read.return_value = b''
+            client.exec_command.return_value = Mock(), stdout, stderr
+            connect = Mock(return_value=(client, None))
+            with patch('sys.argv', ['publisher', '--config', str(config), '--artifact-dir', directory]), \
+                    patch.object(publisher, 'connect_publisher', connect):
+                try:
+                    publisher.main()
+                finally:
+                    self.last = (connect, client)
+            return client.exec_command.call_args.args[0]
+
+    def test_remote_program_runs_under_python3_by_default(self):
+        self.assertEqual(self.publish_with({}), 'python3 -')
+
+    def test_configured_remote_python_runs_the_program(self):
+        self.assertEqual(self.publish_with({'remote_python': '/opt/python3.13/bin/python3'}),
+                         '/opt/python3.13/bin/python3 -')
+
+    def test_invalid_remote_python_fails_before_connecting(self):
+        for value in ('', 'python3 -c evil', ['python3'], 'py\tthon'):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, 'remote_python'):
+                    self.publish_with({'remote_python': value})
+                connect, client = self.last
+                connect.assert_not_called()
+                client.exec_command.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

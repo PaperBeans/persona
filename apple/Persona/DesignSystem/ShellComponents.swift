@@ -350,7 +350,7 @@ struct ShellPersonaButton: View {
             }
         }
         .accessibilityLabel("Chat History [Shell Components 60636b]")
-        .accessibilityValue([String(localized: "\(model.persona.name), \(state.title)"), inbox ? String(localized: "Something in the Inbox needs you") : nil]
+        .accessibilityValue([String(localized: "\(model.assistantShownName), \(state.title)"), inbox ? String(localized: "Something in the Inbox needs you") : nil]
             .compactMap { $0 }.joined(separator: String(localized: ", ", comment: "List separator")))
         .accessibilityHint("Opens the sidebar")
         .accessibilityIdentifier(id)

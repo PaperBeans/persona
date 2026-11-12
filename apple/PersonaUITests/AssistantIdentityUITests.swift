@@ -98,8 +98,10 @@ final class AssistantIdentityUITests: XCTestCase {
                 app.buttons["字幕全文"].tap()
                 let captions = app.descendants(matching: .any).matching(identifier: "voice-transcript").firstMatch
                 XCTAssertTrue(captions.waitForExistence(timeout: 10), app.debugDescription)
-                let named = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Persona"))
-                XCTAssertGreaterThan(named.count, 0, "voice attribution keeps the persona name for either roster size")
+                // With one assistant the captions name the persona, as before; with several they name the current
+                // assistant (the mock's default one here), as the sidebar's head does.
+                let named = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", count == "single" ? "Persona" : "助手"))
+                XCTAssertGreaterThan(named.count, 0, "voice attribution: the persona's name with one assistant, the current assistant's with several")
                 try shot(app, name: "iphone-\(count)-captions-\(look)")
                 app.terminate()
             }

@@ -201,11 +201,17 @@ func LocalizedBody(status int, code string, err error, l i18n.Lang) map[string]a
 }
 
 var rpcFailureKeys = map[string]string{
-	"timeout":                  "rpc-errors.timeout",
-	"node_unreachable":         "rpc-errors.unreachable",
-	"internal":                 "rpc-errors.failed",
-	"input_draft":              "rpc-errors.input_draft",
-	"dialog_open":              "rpc-errors.dialog_open",
+	"timeout":          "rpc-errors.timeout",
+	"node_unreachable": "rpc-errors.unreachable",
+	"internal":         "rpc-errors.failed",
+	"input_draft":      "rpc-errors.input_draft",
+	"dialog_open":      "rpc-errors.dialog_open",
+	// the first message to a Codex opened with no first message (node/codex_waiting.go, #4961)
+	"codex_not_ready":          "rpc-errors.codex_not_ready",
+	"codex_first_text":         "rpc-errors.codex_first_text",
+	"codex_first_unconfirmed":  "rpc-errors.codex_first_unconfirmed",
+	"codex_waiting":            "rpc-errors.codex_waiting",
+	"codex_no_box":             "rpc-errors.codex_no_box",
 	"prompt_changed":           "rpc-errors.prompt_changed",
 	"attach_busy":              "rpc-errors.attach_busy",
 	proto.CodeTerminalNotReady: "rpc-errors.terminal_not_ready",
@@ -251,6 +257,18 @@ var rpcFailureKeys = map[string]string{
 	"agent_stopped": "rpc-errors.agent_stopped",
 	// a start in a directory whose name can't be typed into a terminal (node/hostorca_launch.go)
 	proto.CodeDirectoryUntypable: "rpc-errors.directory_untypable",
+	// a running Agent's switch to another launcher, picked and carried out by the next message (node/launcher_switch.go)
+	proto.CodeSwitchStale:           "rpc-errors.switch_stale",
+	proto.CodeSwitchPickModel:       "rpc-errors.switch_pick_model",
+	proto.CodeSwitchUnderWay:        "rpc-errors.switch_under_way",
+	proto.CodeSwitchUnsupported:     "rpc-errors.switch_unsupported",
+	proto.CodeSwitchLauncherMissing: "rpc-errors.switch_launcher_missing",
+	proto.CodeSwitchOtherAgent:      "rpc-errors.switch_other_agent",
+	proto.CodeSwitchModelLocked:     "rpc-errors.switch_model_locked",
+	proto.CodeSwitchConfigDir:       "rpc-errors.switch_config_dir",
+	proto.CodeSwitchNotStopped:      "rpc-errors.switch_not_stopped",
+	proto.CodeSwitchFailed:          "rpc-errors.switch_failed",
+	proto.CodeSwitchFailedStopped:   "rpc-errors.switch_failed_stopped",
 }
 
 func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {

@@ -1,6 +1,5 @@
 {
   "title": "Search in chat",
-  "menu": "Search in chat",
   "placeholder": "Search what's loaded",
   "summary": "{hits} matches, {rounds} rounds loaded",
   "truncated": "Showing the first 100 matches. Narrow your search.",
@@ -18,13 +17,5 @@
   "loading_pages_one": "Loading earlier messages, {count} page in",
   "loading_pages_other": "Loading earlier messages, {count} pages in",
   "stop_loading": "Stop",
-  "stopped": "Stopped. What loaded is kept.",
-  "at_start": "This is the start of the chat",
-  "load_failed": "Couldn't load earlier messages. Try again.",
-  "busy": "The chat is updating. Try again in a moment.",
-  "no_progress": "Nothing earlier came in. Try again later.",
-  "page_cap": "Loaded 20 pages. You can load more.",
-  "return": "Back to where you were",
-  "not_found": "Can't find this one in the chat right now. You can go back to where you were.",
-  "origin_changed": "Where you were has changed. Carry on from here."
+  "at_start": "This is the start of the chat"
 }

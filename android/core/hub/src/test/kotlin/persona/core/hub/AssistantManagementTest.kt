@@ -113,6 +113,39 @@ class AssistantManagementTest {
         }
     }
 
+    /** C12 (#4339, iOS `AssistantSidebar`): Rename…, Archived (N) and Unarchive on the routes iOS uses. */
+    @Test fun renameUnarchiveAndTheArchivedListUseTheirRoutes() = runBlocking {
+        MockWebServer().use { server ->
+            val api = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient()).forManager("work")
+            server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+            api.renameConversation(SessionKey("hub", "side-1"), "周报")
+            val rename = server.takeRequest()
+            assertEquals("POST", rename.method)
+            assertEquals("/api/v1/sessions/hub/side-1/rename", rename.requestUrl?.encodedPath)
+            assertEquals("""{"title":"周报"}""", rename.body.readUtf8())
+
+            server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+            api.unarchiveConversation(SessionKey("hub", "side-1"))
+            val unarchive = server.takeRequest()
+            assertEquals("POST", unarchive.method)
+            assertEquals("/api/v1/assistant/conversations/side-1/unarchive", unarchive.requestUrl?.encodedPath)
+
+            // Only the archived ones, never a health chat, each on the list's machine when it names none, newest first.
+            server.enqueue(MockResponse().setBody("""{"machine_id":"hub","main":"main","conversations":[
+                {"machine_id":"hub","session_id":"main","assistant":true,"updated_at":"2026-11-12T09:00:00Z"},
+                {"session_id":"old","assistant":true,"archived":true,"updated_at":"2026-11-10T09:00:00Z"},
+                {"machine_id":"hub","session_id":"health","assistant":true,"archived":true,"space":"health","updated_at":"2026-11-12T08:00:00Z"},
+                {"machine_id":"hub","session_id":"new","assistant":true,"archived":true,"updated_at":"2026-11-11T09:00:00Z"}]}"""))
+            val archived = api.archivedConversations()
+            val list = server.takeRequest()
+            assertEquals("GET", list.method)
+            assertEquals("/api/v1/assistant", list.requestUrl?.encodedPath)
+            assertEquals("1", list.requestUrl?.queryParameter("archived"))
+            assertEquals("the assistant shown", "work", list.requestUrl?.queryParameter(ManagerQuery))
+            assertEquals(listOf(SessionKey("hub", "new"), SessionKey("hub", "old")), archived.map { it.key })
+        }
+    }
+
     @Test fun alwaysGrantsAreListedAndRevokedPerConversationAndAMissingRouteShowsNothing() = runBlocking {
         MockWebServer().use { server ->
             val api = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient())

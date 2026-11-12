@@ -496,19 +496,33 @@ fun DecisionButtons(primary: JAction, modifier: Modifier = Modifier, secondary: 
     }
 }
 
-/** A reply draft has one primary Send and two reversible secondary choices. Stack at large text or narrow widths. */
+/**
+ * A reply draft has one primary Send and two reversible secondary choices. Stack at large text or narrow widths. [edit]
+ * (a message card on Glass, iOS `MessageCard`): Edit / Done beside Send, which opens the draft for typing.
+ */
 @Composable
 fun DraftDecisionButtons(send: JAction, later: JAction, dismiss: JAction, modifier: Modifier = Modifier,
-    busy: Boolean = false, sendModifier: Modifier = Modifier, laterModifier: Modifier = Modifier, dismissModifier: Modifier = Modifier) {
+    busy: Boolean = false, sendModifier: Modifier = Modifier, laterModifier: Modifier = Modifier, dismissModifier: Modifier = Modifier,
+    edit: JAction? = null, editModifier: Modifier = Modifier) {
     val haptics = rememberHaptics()
     @Suppress("NAME_SHADOWING") val send = haptics.tapped(send)
     @Suppress("NAME_SHADOWING") val later = haptics.tapped(later)
     @Suppress("NAME_SHADOWING") val dismiss = haptics.tapped(dismiss)
+    @Suppress("NAME_SHADOWING") val edit = edit?.let { haptics.tapped(it) }
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val stacked = LocalDensity.current.fontScale >= 1.3f || maxWidth < 320.dp
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            JButton(send.label, send.onClick, sendModifier.fillMaxWidth(), kind = JButtonKind.Primary,
-                size = JButtonSize.Large, enabled = send.enabled && !busy, loading = busy)
+            if (edit != null && !stacked) Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                JButton(send.label, send.onClick, sendModifier.weight(1f), kind = JButtonKind.Primary,
+                    size = JButtonSize.Large, enabled = send.enabled && !busy, loading = busy)
+                JButton(edit.label, edit.onClick, editModifier, kind = JButtonKind.Secondary, size = JButtonSize.Large,
+                    enabled = edit.enabled && !busy)
+            } else {
+                JButton(send.label, send.onClick, sendModifier.fillMaxWidth(), kind = JButtonKind.Primary,
+                    size = JButtonSize.Large, enabled = send.enabled && !busy, loading = busy)
+                if (edit != null) JButton(edit.label, edit.onClick, editModifier.fillMaxWidth(), kind = JButtonKind.Secondary,
+                    size = JButtonSize.Large, enabled = edit.enabled && !busy)
+            }
             if (stacked) {
                 JButton(later.label, later.onClick, laterModifier.fillMaxWidth(), kind = JButtonKind.Secondary,
                     size = JButtonSize.Large, enabled = later.enabled && !busy)

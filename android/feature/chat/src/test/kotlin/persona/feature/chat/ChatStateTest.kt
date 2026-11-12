@@ -88,7 +88,7 @@ class ChatStateTest {
         val store = listOf(user) + work + answer
         val closed = timeline.lines(store, false, emptySet()).lines.filterIsInstance<ChatLine.Work>().single()
         assertEquals(2, closed.steps.size)
-        assertEquals("做了 2 步", workSummary(res, closed, null))
+        assertEquals("工具 2", workSummary(res, closed, null))
         val open = timeline.lines(store, false, setOf(closed.id)).lines
         assertEquals(2, open.filterIsInstance<ChatLine.Step>().size)
         assertEquals(2, open.filterIsInstance<ChatLine.End>().single().count)
@@ -155,6 +155,23 @@ class ChatStateTest {
     }
 
     private data class WaitCase(val session: Session, val requests: List<Interaction>, val turn: Boolean, val header: StatusKind)
+
+    @Test fun messageReceiptsOverrideOnlyTheirOwnLocalSendAndNeverManufactureRuntimeWork() {
+        val session = Session("machine", "session", status = "idle")
+        val message = OutboxMessage("client", session.key, "hello", DeliveryState.Sending)
+        val receipt = MessageSendReceipt(session.key, "client", "processing", java.time.Instant.parse("2026-11-12T10:00:00Z"))
+        val snapshot = ChatSnapshot(loading = false)
+        fun state(receipts: List<MessageSendReceipt>, local: String? = "client") =
+            chatStatusState(res, snapshot, session, null, listOf(message), emptyList(), false,
+                submittingId = local, receipts = receipts)
+        assertEquals(StatusKind.Submitting, resolveStatusLine(state(emptyList()))?.kind)
+        assertEquals(StatusKind.Processing, resolveStatusLine(state(listOf(receipt)))?.kind)
+        assertFalse(state(listOf(receipt)).working)
+        assertEquals("idle", session.status)
+        assertEquals(StatusKind.Submitting, resolveStatusLine(state(listOf(receipt.copy(clientMessageId = "another"))))?.kind)
+        assertEquals(StatusKind.Unconfirmed, resolveStatusLine(state(listOf(receipt.copy(state = "unknown"))))?.kind)
+        assertNull(resolveStatusLine(state(listOf(receipt.copy(state = "failed")))))
+    }
 
     @Test fun statusPriorityAndApprovalRulesUseDomainPolicy() {
         val session = Session(sessionId = "session", status = "working")

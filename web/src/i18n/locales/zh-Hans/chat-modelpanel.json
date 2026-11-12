@@ -1,0 +1,14 @@
+{
+  "other_provider": "运行中的 Agent 暂时不能换供应商",
+  "other_engine": "从 {from} 换到 {to} 需要新开对话",
+  "model_fixed": "运行中的 {agent} 会话不能换模型",
+  "pending_note": "下一条消息时切换：Agent 会在 {provider} 上重启，对话保留",
+  "switch_scheduled": "已登记切换：下一条消息发出时，Agent 会换到 {target}",
+  "engine_note": "切换引擎会重建上下文，可能丢失内容",
+  "switch_scheduled_engine": "已登记切换：下一条消息发出时将切换到 {agent} · {model}",
+  "engine_dialog_title": "切换 Agent？",
+  "engine_dialog_body": "新 Agent 引擎会通过交接摘要续接，思考内容等不能保证完美继承；切回时仍可继续原引擎会话。切换还会让 prompt 缓存中断一次，可能造成 Token 消耗的增加。",
+  "engine_dialog_skip": "下次不再提醒",
+  "engine_dialog_switch": "切换 Agent",
+  "engine_dialog_keep": "保留当前 Agent"
+}

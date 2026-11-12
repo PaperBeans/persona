@@ -47,7 +47,12 @@ func NewResolved(resolve func(context.Context) (*Client, error)) *Client {
 func (c *Client) Config() Config { return c.cfg }
 
 func New(cfg Config) *Client {
-	return &Client{cfg: cfg, http: &http.Client{Timeout: 60 * time.Second}}
+	return NewWith(cfg, nil)
+}
+
+// NewWith is New sending its requests through transport (nil: this machine's network).
+func NewWith(cfg Config, transport http.RoundTripper) *Client {
+	return &Client{cfg: cfg, http: &http.Client{Timeout: 60 * time.Second, Transport: transport}}
 }
 
 func (c *Client) key() (string, error) {
@@ -95,7 +100,10 @@ type Message struct {
 type Request struct {
 	System    string
 	Messages  []Message
-	MaxTokens int // output limit for Messages and Chat Completions; Responses is sent none (some relays reject it)
+	MaxTokens int // output limit for Messages and Chat Completions
+	// BoundOutput also enforces MaxTokens on Responses. Cost-sensitive background calls
+	// fail closed when a relay refuses the bound; legacy callers keep their existing behavior.
+	BoundOutput bool
 }
 
 // Usage is what one request spent, as the upstream counted it (zero where it did not say).
@@ -464,6 +472,9 @@ func (c *Client) respond(ctx context.Context, hc *http.Client, key string, r Req
 		input = append(input, map[string]any{"role": m.Role, "content": m.Content})
 	}
 	req := map[string]any{"model": c.cfg.Model, "store": false, "stream": true, "input": input}
+	if r.BoundOutput && r.MaxTokens > 0 {
+		req["max_output_tokens"] = r.MaxTokens
+	}
 	if c.cfg.ReasoningEffort != "" {
 		effort := c.cfg.ReasoningEffort
 		switch strings.ToLower(strings.TrimSpace(effort)) {

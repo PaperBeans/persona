@@ -1,19 +1,28 @@
 package persona.feature.chat
 
 import android.content.res.Resources
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import persona.core.contracts.Item
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
+import persona.core.contracts.api.SessionFileEntry
 
 /**
  * The composer's @ menu (iOS `PromptItems.files` / `sessions`, web `lib/mentions.ts`): files this chat's tools read or
  * wrote (picking one types `@path`, which Claude Code and Codex read as that file), then other agents' sessions
- * (picking one quotes it as a `<persona-context>` before the message, not as text).
+ * (picking one quotes it as a `<persona-context>` before the message, not as text). In Persona's conversations the
+ * conversation's open tasks come first (iOS `TaskMentionList`): picking one routes the next message to it. With
+ * [folders], a word with a slash lists that folder on the computer instead (iOS `MentionRows.browseTarget`).
  */
 @Immutable
 data class ComposerMentions(
@@ -25,7 +34,23 @@ data class ComposerMentions(
     val sessions: List<Session>,
     /** This chat, left out of the sessions. */
     val except: SessionKey?,
+    /** The conversation's open tasks ([mentionTasks]); null outside Persona's conversations. */
+    val tasks: List<MentionTask>? = null,
+    /** Where a typed folder is listed; null: a slash only narrows the files, as before. */
+    val folders: MentionFolders? = null,
 )
+
+/**
+ * Reads a folder on the computer for the @ list (iOS `MentionSource.machine` and `listDir`, the web's `/fs`): New chat's
+ * page reads the assistant's computer. [dir] is absolute, `~`-based, or under [cwd].
+ */
+fun interface MentionFolders {
+    suspend fun entries(dir: String, cwd: String): List<SessionFileEntry>
+}
+
+/** One of the conversation's tasks in the @ menu: its [status] dot, title and where it runs ([place]). */
+@Immutable
+data class MentionTask(val id: String, val title: String, val place: String, val status: persona.core.designsystem.Status)
 
 /** The `@word` being typed just before the caret: [start] is the `@`, [end] the caret. */
 internal data class MentionToken(val start: Int, val end: Int, val query: String)
@@ -86,20 +111,98 @@ internal fun otherSessions(all: List<Session>, except: SessionKey?, query: Strin
 
 internal fun sessionMentionDetail(session: Session): String = listOf(session.agentLabel, session.folderName).filter(String::isNotEmpty).joinToString(" · ")
 
-/** One row of the @ menu: a file to type, or a session to quote. */
+/** One row of the @ menu: a task to route the next message to, a file to type, or a session to quote. */
 internal sealed interface MentionRow {
     val key: String
+    data class Task(val task: MentionTask, override val key: String = "task:${task.id}") : MentionRow
     data class File(val path: String, val insert: String, override val key: String = "file:$path") : MentionRow
     data class Quote(val session: Session, override val key: String = "session:${session.key.path}") : MentionRow
+    /**
+     * An entry of the folder being browsed: typed as `@<typed><name> ` for a file, `@<typed><name>/` for a folder, where
+     * the list then browses on (iOS `MentionRow.Kind.file`).
+     */
+    data class Entry(val name: String, val folder: Boolean, val typed: String) : MentionRow {
+        override val key = "fs:$typed$name"
+        val insert get() = "@$typed$name" + if (folder) "/" else " "
+    }
 }
 
-/** The @ menu for [query]: files whose relative path contains it, then the sessions it matches. */
-internal fun mentionRows(mentions: ComposerMentions, query: String): List<MentionRow> {
+/** What a word with a slash browses (iOS `MentionRows.browseTarget`): the [dir] read, what stays [typed] before a picked name, the rest [filter]s. */
+internal data class MentionBrowse(val dir: String, val typed: String, val filter: String)
+
+/** Where [query] browses: an absolute or `~` path, or one under [cwd]; null without a slash, or for a relative path with no folder to start from. */
+internal fun mentionBrowse(query: String, cwd: String): MentionBrowse? {
+    val slash = query.lastIndexOf('/')
+    if (slash < 0) return null
+    val typed = query.take(slash + 1)
+    val filter = query.drop(slash + 1)
+    val part = typed.trimEnd('/')
+    return when {
+        typed.startsWith("/") -> MentionBrowse(part.ifEmpty { "/" }, typed, filter)
+        typed.startsWith("~") -> MentionBrowse(part.ifEmpty { "~" }, typed, filter)
+        cwd.isEmpty() -> null
+        else -> MentionBrowse(cwd.trimEnd('/') + "/" + part, typed, filter)
+    }
+}
+
+/** The most rows a browsed folder lists (iOS `MentionRows.limit`). */
+private const val BROWSE_LIMIT = 40
+
+/** A name matches what is typed anywhere in it, ignoring case; hidden ones only when the filter starts with ".". */
+private fun nameMatches(name: String, filter: String) =
+    (!name.startsWith(".") || filter.startsWith(".")) && (filter.isEmpty() || name.lowercase().contains(filter.lowercase()))
+
+/** Names that start with [filter] first, then the rest, each keeping its order. */
+private fun byPrefix(entries: List<SessionFileEntry>, filter: String): List<SessionFileEntry> {
+    val f = filter.lowercase()
+    return if (f.isEmpty()) entries else entries.partition { it.name.lowercase().startsWith(f) }.let { (first, rest) -> first + rest }
+}
+
+/**
+ * The @ menu for [query]. A word with a slash, where [ComposerMentions.folders] lists folders, shows that folder's
+ * [listing] alone (null until read): its folders, then its files, each with the names that start with the filter first.
+ * Otherwise the tasks whose title contains it, the files whose relative path does, then the sessions it matches. iOS
+ * lists every task whatever follows the @ in a panel of its own; here they share the files' list, so the typed word
+ * narrows them too.
+ */
+internal fun mentionRows(mentions: ComposerMentions, query: String, listing: List<SessionFileEntry>? = null): List<MentionRow> {
+    val browse = mentions.folders?.let { mentionBrowse(query, mentions.cwd) }
+    if (browse != null) {
+        val hits = listing.orEmpty().filter { nameMatches(it.name, browse.filter) }
+        return (byPrefix(hits.filter { it.dir }, browse.filter) + byPrefix(hits.filterNot { it.dir }, browse.filter))
+            .take(BROWSE_LIMIT).map { MentionRow.Entry(it.name, it.dir, browse.typed) }
+    }
     val q = query.lowercase()
+    val tasks = mentions.tasks.orEmpty().filter { q.isEmpty() || it.title.lowercase().contains(q) }.map { MentionRow.Task(it) }
     val files = mentions.files.map { relativeMentionPath(it, mentions.cwd) to it }
         .filter { (relative, _) -> q.isEmpty() || relative.lowercase().contains(q) }
         .map { (relative, path) -> MentionRow.File(path, "@$relative ") }
-    return files + otherSessions(mentions.sessions, mentions.except, query).map { MentionRow.Quote(it) }
+    return tasks + files + otherSessions(mentions.sessions, mentions.except, query).map { MentionRow.Quote(it) }
+}
+
+/** The folder the @ list is browsing and what was read of it: [listing] is null while it is read. */
+internal data class MentionListing(val browse: MentionBrowse?, val listing: List<SessionFileEntry>?) {
+    /** Browsing, and the folder not read yet: "Reading folder…". */
+    val reading get() = browse != null && listing == null
+}
+
+/**
+ * Reads the folder [query] browses, each folder once while the list is open (iOS `MentionFolders`): after a short pause,
+ * so typing through a path asks only for where it stops; one that can't be read lists nothing.
+ */
+@Composable
+internal fun rememberMentionListing(mentions: ComposerMentions?, query: String?): MentionListing {
+    val folders = mentions?.folders
+    val cwd = mentions?.cwd.orEmpty()
+    val browse = if (folders != null && query != null) mentionBrowse(query, cwd) else null
+    val listings = remember(folders, query != null) { mutableStateMapOf<String, List<SessionFileEntry>>() }
+    LaunchedEffect(listings, browse?.dir) {
+        val dir = browse?.dir ?: return@LaunchedEffect
+        if (folders == null || dir in listings) return@LaunchedEffect
+        delay(120)
+        listings[dir] = try { folders.entries(dir, cwd) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
+    }
+    return MentionListing(browse, browse?.let { listings[it.dir] })
 }
 
 /** The quote for a picked session (iOS `PromptItems.quote`): its title, agent, folder and last words, as context. */

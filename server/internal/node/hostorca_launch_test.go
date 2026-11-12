@@ -5,7 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -163,6 +166,7 @@ func TestOrcaResumesAnOfflineSession(t *testing.T) {
 	o.SetWorktrees(orcarttest.Worktree("repo1::"+projDir, projDir, "refs/heads/main"))
 	const id = "0e000000-0000-4000-8000-000000000003"
 	writeTranscript(t, home, projDir, id, time.Now().Add(-time.Hour), `{"type":"custom-title","customTitle":"x"}`)
+	starts := orcaTypedStarts(o)
 
 	// The start then waits for claude, which the fake never runs: a timeout, not a refusal.
 	_, err := request(t, n, "session.start", map[string]any{"session_id": id, "resume_session_id": id, "cwd": projDir})
@@ -170,7 +174,7 @@ func TestOrcaResumesAnOfflineSession(t *testing.T) {
 		t.Fatalf("resume refused: %v", err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
-	for !strings.Contains(strings.Join(o.Trace("terminal.send"), "\n"), "--resume "+id) {
+	for !strings.Contains(strings.Join(starts(), "\n"), "--resume "+id) {
 		if time.Now().After(deadline) {
 			t.Fatalf("no resume typed; calls: %v", o.Trace())
 		}
@@ -266,5 +270,75 @@ func TestOrcaRunSingleUseGrant(t *testing.T) {
 	// Second Run should be rejected (token already consumed)
 	if err := h.Run(context.Background(), created.Pane, "echo twice"); err == nil {
 		t.Fatalf("second Run expected error, got nil")
+	}
+}
+
+// A new Orca tab has no screen for its first moments (terminal.read answers screen-unavailable): the start waits for
+// the shell's prompt instead of typing into a tty whose shell is not there yet, and then types the short line that
+// sources its start file, so a shell slow to take the terminal cannot cut the command at macOS's 1024-byte canonical
+// line limit and leave it unrun at the prompt (#5450).
+func TestOrcaStartWaitsForTheScreenAndTypesAShortLine(t *testing.T) {
+	withPaneShell(t, "/bin/bash")
+	n, _, o, _, home := orcaNode(t)
+	watchShell(n)
+	n.shellSettle, n.shellQuiet = 10*time.Second, 100*time.Millisecond
+	repoDir := mkdir(t, filepath.Join(home, "proj"))
+	o.SetWorktrees(orcarttest.Worktree("wt-proj", repoDir, "refs/heads/main"))
+	var drawn atomic.Bool
+	var reads atomic.Int32
+	read := make(chan struct{}, 1)
+	o.Handle("terminal.read", func(p map[string]any) any {
+		reads.Add(1)
+		select {
+		case read <- struct{}{}:
+		default:
+		}
+		if !drawn.Load() {
+			return map[string]any{"terminal": map[string]any{"handle": p["terminal"], "tail": []string{}, "source": "screen-unavailable"}}
+		}
+		return map[string]any{"terminal": map[string]any{"handle": p["terminal"], "tail": []string{"bash-5.2$ "}, "source": "screen"}}
+	})
+	if _, err := request(t, n, "session.start", map[string]any{"session_id": startID, "cwd": repoDir, "async": true}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the new tab", func() bool { return len(o.Trace("terminal.create")) > 0 })
+	for reads.Load() < 3 { // no screen across more than one settle poll
+		if w := o.Writes(); len(w) != 0 {
+			t.Fatalf("typed before the tab had a screen: %q", w[0].Text)
+		}
+		select {
+		case <-read:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the tab was not read again: %v", o.Trace())
+		}
+	}
+	drawn.Store(true)
+	waitFor(t, "the start line", func() bool { return len(o.Writes()) > 0 })
+	typed := o.Writes()[0].Text
+	want := "cd -- " + shellQuote(repoDir) + " && . "
+	if !strings.HasPrefix(typed, want) || !strings.HasSuffix(typed, " && true "+shellQuote(startID)+"\r") || len(typed) >= 1024 {
+		t.Errorf("typed %d bytes, not the start file's line: %q", len(typed), typed)
+	}
+}
+
+// orcaTypedStarts has o's terminal.send read the start file an Orca start's typed line (`cd -- <dir> && . <file>…`)
+// sources, while it is still there (typedstart.go), and returns the commands read so far.
+func orcaTypedStarts(o *orcarttest.Fake) func() []string {
+	var mu sync.Mutex
+	var cmds []string
+	o.Handle("terminal.send", func(p map[string]any) any {
+		text, _ := p["text"].(string)
+		_, line, _ := strings.Cut(strings.TrimSuffix(text, "\r"), " && ")
+		if cmd, ok := startFileCommand(line); ok {
+			mu.Lock()
+			cmds = append(cmds, cmd)
+			mu.Unlock()
+		}
+		return map[string]any{"send": map[string]any{"handle": p["terminal"], "accepted": true, "bytesWritten": len(text)}}
+	})
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(cmds)
 	}
 }

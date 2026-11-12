@@ -17,6 +17,10 @@ import java.time.Instant
  * removes and refreshes the markets themselves. Tokens are write-only.
  */
 interface ExtensionMarkets {
+    /** Optional catalog artwork: only the hub's reserved icon routes, never ui.image or an arbitrary URL. */
+    fun iconPath(value: String): String? = value.takeIf(ExtensionIconPath::matches)
+    suspend fun icon(path: String): ByteArray = throw UnsupportedOperationException("Extension icon unavailable")
+
     /** `GET /api/v1/extensions/-/markets`. */
     suspend fun markets(): List<ExtensionMarket>
 

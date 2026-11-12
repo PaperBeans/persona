@@ -1,0 +1,12 @@
+{
+  "title": "{agent} wants to run a command",
+  "risk_delete": "Can't confirm this command won't delete files",
+  "risk_other": "Claude Code warns about this command",
+  "countdown_deny": "Denied automatically in {time}",
+  "countdown_allow": "Allowed automatically in {time}",
+  "countdown_over_deny": "Time's up: Claude Code denies it",
+  "countdown_over_allow": "Time's up: Claude Code allows it",
+  "show_original": "Show original",
+  "hide_original": "Hide original",
+  "show_all": "Show all"
+}

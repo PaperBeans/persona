@@ -228,6 +228,23 @@ func TestSDKOptionsMapTheCLIFlags(t *testing.T) {
 	}
 }
 
+// A guest's stdio config stays separate until the bridge registers its declared tools through the SDK.
+func TestSDKOptionsKeepGuestMCPTools(t *testing.T) {
+	s := sdkStart{id: "guest-1", cwd: "/guest", mcp: map[string]any{"mcpServers": map[string]any{}},
+		guestMCP:     map[string]any{"persona": map[string]any{"command": "personad", "env": map[string]string{"PERSONA_GUEST": "1"}}},
+		allowedTools: "mcp__persona__larkbridge_docs", strictMCP: true}
+	o, err := s.options("/bin/claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := o["tools"]; exists || o["strictMcpConfig"] != true || o["plugins"] != nil {
+		t.Fatalf("guest start: %v", o)
+	}
+	if got, _ := o["guestMcpServers"].(map[string]any)["persona"].(map[string]any)["command"]; got != "personad" {
+		t.Fatalf("guest MCP proxy: %v", o["guestMcpServers"])
+	}
+}
+
 // A managed launcher on the SDK: its key is in the bridge's environment and the pinned settings env, never on a
 // command line.
 func TestAssistantSDKStartKeepsTheKeyOffTheCommandLine(t *testing.T) {
@@ -592,6 +609,10 @@ func TestSDKPrepareAndCommandWithNVMClaude(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", t.TempDir()) // restricted service PATH missing nvm
+	// Not the machine's own Homebrew or /usr/local claude, which agentExecutable would find before nvm's (#5449).
+	systemDirs := agentSystemDirs
+	agentSystemDirs = []string{t.TempDir()}
+	t.Cleanup(func() { agentSystemDirs = systemDirs })
 
 	nvmBin := filepath.Join(home, ".nvm", "versions", "node", "v22.5.0", "bin")
 	if err := os.MkdirAll(nvmBin, 0o755); err != nil {

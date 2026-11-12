@@ -536,6 +536,9 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		if n.programRun(id, src, pass) {
 			continue
 		}
+		if src.path != "" && readCodexOrigin(src.path).guardian { // an approval review of a tool call, not an Agent (#5486)
+			continue
+		}
 		if n.agentFiltered("codex", src.path) && !n.keptSessions()[id] { // another platform's runs (agentfilters.go)
 			continue
 		}

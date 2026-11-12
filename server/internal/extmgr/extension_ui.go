@@ -173,6 +173,9 @@ type uiRequest struct {
 		Size     string `json:"size,omitempty"`
 		// UIVersion is the UI version the app draws: 1 (the first eight items) when it says nothing.
 		UIVersion int `json:"ui_version,omitempty"`
+		// Assistant is the name the app shows for the assistant (its "Ask {name}…"), sent only to the manager's own
+		// pages (subscriptions_ui.go), which name it; never handed to an extension (uiParams).
+		Assistant string `json:"assistant,omitempty"`
 	} `json:"context"`
 	State  string            `json:"state,omitempty"`
 	Action string            `json:"action,omitempty"`

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The title menu's items and what they copy (iOS AssistantTopBar, AssistantCopyText). -->
+<resources>
+    <string name="assistant_details">詳細</string>
+    <string name="assistant_connection_details">接続の詳細</string>
+    <string name="assistant_copy_directory">ディレクトリをコピー</string>
+    <string name="assistant_copy_info">情報をコピー</string>
+    <string name="assistant_directory_copied">作業ディレクトリをコピーしました</string>
+    <string name="assistant_info_copied">チャット情報をコピーしました</string>
+    <string name="assistant_interrupt">中断</string>
+    <string name="assistant_copy_info_quoted">「%1$s」</string>
+    <string name="assistant_copy_info_hub">Personaアシスタント（ハブ上のClaude）</string>
+    <string name="assistant_copy_info_chat">Personaアシスタントのチャット</string>
+    <string name="assistant_copy_info_chat_named">Personaアシスタントのチャット%1$s</string>
+    <string name="assistant_copy_info_session">セッションID：%1$s</string>
+    <string name="assistant_copy_info_machine">マシン：%1$s</string>
+    <string name="assistant_copy_info_machine_id">%1$s（%2$s）</string>
+    <string name="assistant_copy_info_cwd">作業ディレクトリ：%1$s</string>
+    <string name="assistant_copy_info_launcher">ランチャー：%1$s</string>
+    <string name="assistant_copy_info_launcher_model">ランチャー：%1$s · モデル：%2$s</string>
+    <string name="assistant_copy_info_resume">そのマシンで続けるには：cd %1$s &amp;&amp; claude --resume %2$s</string>
+</resources>

@@ -6,7 +6,7 @@
 import { t } from "../i18n";
 import { api, ApiError, errorText, sessionPath } from "./api";
 import { pickedLauncher, pickedModel, conversationKey } from "./assistant-chat";
-import { startConversation } from "./assistant-start";
+import { showLauncherNote, startConversation } from "./assistant-start";
 import { removeStoredValue, storedValue, storeValue } from "./compatibility";
 import { uuid } from "./format";
 import { conversationPage } from "./conversation-page";
@@ -17,6 +17,7 @@ import { apiOp, isTransient, OP_OFFLINE_MS, OP_RETRY_MS } from "./ops";
 import { echoed, isEcho, type Seen, type Sent } from "./echo";
 import { parseUserText, type ChatLine, type UserMessage } from "./turns";
 import type { AssistantInfo, Item } from "./types";
+import { beginMessageSend, settleMessageEcho } from "./message-send";
 
 export interface OutboxImage {
   mime: string;
@@ -170,7 +171,10 @@ export function settleOutbox(mid: string, sid: string, users: Seen[]) {
   const claimed = claimedBy.get(key) ?? new Set<string>();
   claimedBy.set(key, claimed);
   const after = settle(before, users, Date.now(), claimed);
-  if (after.length !== before.length) write(key, after);
+  if (after.length !== before.length) {
+    for (const e of before) if (!after.includes(e) && arrived(e, users)) settleMessageEcho(mid, sid, e.id);
+    write(key, after);
+  }
 }
 
 /** A failed entry's fields for the error its send ended with. */
@@ -303,20 +307,28 @@ export function resetRestoredForTests() {
   restored.clear();
 }
 
-async function deliver(mid: string, sid: string, e: OutboxEntry, clearDraft?: string): Promise<boolean> {
+async function deliver(mid: string, sid: string, e: OutboxEntry, clearDraft?: string, flight = beginMessageSend(mid, sid, e.id, e.text)): Promise<boolean> {
   const key = outboxKey(mid, sid);
   try {
     // stays sending through a gap (a hub restart); the client_msg_id is the op id
-    await inSendOrder(key, () => apiOp(`${sessionPath(mid, sid)}/messages`, {
+    const r = await inSendOrder(key, () => apiOp<{ launcher_note?: string } | undefined>(`${sessionPath(mid, sid)}/messages`, {
+      ...flight.request,
       method: "POST",
       opId: e.id,
       json: { text: e.text, images: e.images.length ? e.images : undefined, client_msg_id: e.id, launcher: e.launcher || undefined, model: e.model || undefined, clear_draft: clearDraft },
     }));
+    if (!flight.current()) return true;
+    flight.finish("delivered");
     update(key, e.id, { state: "sent", acceptedAt: Date.now(), error: undefined, clearable: undefined });
+    showLauncherNote(`${mid}/${sid}`, r?.launcher_note);
     return true;
   } catch (err) {
+    if (!flight.current() || flight.echoed()) return true;
+    flight.finish("failed");
     update(key, e.id, failedWith(err));
     return false;
+  } finally {
+    flight.finish();
   }
 }
 
@@ -329,9 +341,10 @@ export function sendToSession(mid: string, sid: string, out: { text: string; ima
 export function queueToSession(mid: string, sid: string, out: { text: string; images?: OutboxImage[] }, opts: { launcher?: string; model?: string } = {}): { id: string; sent: Promise<boolean> } {
   const key = outboxKey(mid, sid);
   const e: OutboxEntry = { id: uuid(), text: out.text, images: out.images ?? [], at: Date.now(), state: "sending", launcher: opts.launcher, model: opts.model };
+  const flight = beginMessageSend(mid, sid, e.id, e.text);
   noteWritten(e.id, e.at);
   write(key, [...list(key), e]);
-  return { id: e.id, sent: deliver(mid, sid, e) };
+  return { id: e.id, sent: deliver(mid, sid, e, undefined, flight) };
 }
 
 /** One entry of a conversation's outbox, as it stands. */
@@ -356,9 +369,10 @@ export function retryOutboxEntry(mid: string, sid: string, id: string, clearDraf
   if (!e || e.state !== "failed") return { id, sent: Promise.resolve(false) };
   // the hub said it may have gone in: the user looked and wants it sent again, as a new message
   const next: OutboxEntry = { ...e, id: e.newId ? uuid() : e.id, newId: false, state: "sending", error: undefined, acceptedAt: undefined, at: Date.now() };
+  const flight = beginMessageSend(mid, sid, next.id, next.text);
   noteWritten(next.id, next.at);
   write(key, list(key).map((x) => (x.id === id ? next : x)));
-  return { id: next.id, sent: deliver(mid, sid, next, clearDraft) };
+  return { id: next.id, sent: deliver(mid, sid, next, clearDraft, flight) };
 }
 
 /** Drops one message from the conversation's outbox, and its copy kept for reloads; nothing is sent. A failed one is

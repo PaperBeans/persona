@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/json"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -218,26 +217,6 @@ func (p *pages) setup(values map[string]string, dry *subscriptions.DryRun, dryEr
 			existing = &s.Recipe
 		}
 	}
-	// From the model's draft (#2040): its recipe as far as it got (with defaults where a refused one stopped), its dry run
-	// and its note, on the first drawing only.
-	var note string
-	if p.st.G && values == nil {
-		if job, ok := p.env.Drafts.get(p.draftKey()); ok && !job.running {
-			if d := job.draftRecipe(); d != nil && d.Tool == p.st.T {
-				r := withDefaults(*d)
-				existing = &r
-				if dry == nil && dryErr == nil {
-					dry = job.draftDryRun()
-				}
-				if job.err == nil {
-					note = job.result.Note
-				}
-			}
-		}
-	}
-	if note != "" {
-		v.Sections = append(v.Sections, wire.Section{Key: "note", Items: []wire.Component{text("note", note, "secondary")}})
-	}
 	held := func(name, fallback string) string {
 		if values != nil {
 			if v, ok := values[name]; ok {
@@ -310,7 +289,7 @@ func (p *pages) setup(values map[string]string, dry *subscriptions.DryRun, dryEr
 		itemsPath, mode = existing.ItemsPath, existing.Mode
 	}
 	if dry != nil {
-		v.Sections = append(v.Sections, p.dryItems(dry)...)
+		v.Sections = append(v.Sections, p.preview(dry, held("kind", kindOf(existing)), p.fallbackOf())...)
 		paths = dry.Paths
 		if dry.ItemsPath != "" {
 			itemsPath = dry.ItemsPath
@@ -440,46 +419,6 @@ func join(parts []string) string {
 		}
 	}
 	return strings.Join(out, " · ")
-}
-
-// draftKey is the draft the setup page is about: its subscription's, or its source's.
-func (p *pages) draftKey() string {
-	if p.st.ID != "" {
-		return subKey(p.st.ID)
-	}
-	return sourceKey(p.st.C, p.st.S)
-}
-
-// withDefaults fills what a draft refused at choosing its tool leaves empty, as the form's defaults are.
-func withDefaults(r subscriptions.Recipe) subscriptions.Recipe {
-	r.Mode = cmp.Or(r.Mode, wire.ConnectorSubscriptionModeItems)
-	r.Kind = cmp.Or(r.Kind, wire.ConnectorSubscriptionKindSubUpdate)
-	r.GroupBy = cmp.Or(r.GroupBy, "source")
-	return r
-}
-
-// sameRecipe: two recipes pull the same way (their arguments compared as values, not as written).
-func sameRecipe(a, b subscriptions.Recipe) bool {
-	args := func(raw json.RawMessage) (any, bool) {
-		if len(raw) == 0 {
-			raw = emptyArgs
-		}
-		var v any
-		return v, json.Unmarshal(raw, &v) == nil
-	}
-	aa, okA := args(a.Args)
-	ba, okB := args(b.Args)
-	if !okA || !okB || !reflect.DeepEqual(aa, ba) {
-		return false
-	}
-	fields := func(f *wire.ConnectorSubscriptionFields) wire.ConnectorSubscriptionFields {
-		if f == nil {
-			return wire.ConnectorSubscriptionFields{}
-		}
-		return *f
-	}
-	return a.Mode == b.Mode && a.Tool == b.Tool && a.ItemsPath == b.ItemsPath && a.Kind == b.Kind && a.GroupBy == b.GroupBy &&
-		fields(a.Fields) == fields(b.Fields)
 }
 
 var emptyArgs = json.RawMessage(`{}`)

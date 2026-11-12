@@ -44,7 +44,7 @@ struct HubsView: View {
             }
         }
         .themedPage()
-        .detailTitle("hub")
+        .detailTitle(String(localized: "Hub Connection"))
         .sheet(isPresented: $showPair) { PairView() }
         .alert("Name This Group", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField(String(localized: "Name [Add Computer View 677331]"), text: $newName)
@@ -171,7 +171,7 @@ struct HubsView: View {
                         .disabled(model.hubSignOut != nil)
                         .accessibilityIdentifier("hubs.repair.\(g)")
                 }
-                Button(model.groupIDs.count > 1 ? String(localized: "Disconnect This Group…") : String(localized: "Disconnect and Forget Server…"), role: .destructive) { removingGroup = g }
+                Button(model.groupIDs.count > 1 ? String(localized: "Disconnect This Group…") : String(localized: "Disconnect and Forget Hub…"), role: .destructive) { removingGroup = g }
                     .lineLimit(1).formButton()
                     .disabled(model.hubSignOut != nil)
                     .accessibilityIdentifier("hubs.remove.\(g)")
@@ -198,7 +198,7 @@ struct HubsView: View {
                 .accessibilityIdentifier("hubs.repair.\(g)")
             }
             Button(role: .destructive) { removingGroup = g } label: {
-                SettingsRow(title: model.groupIDs.count > 1 ? String(localized: "Disconnect This Group") : String(localized: "Disconnect and Forget Server"), symbol: Theme.Icon.end, tint: Theme.danger)
+                SettingsRow(title: model.groupIDs.count > 1 ? String(localized: "Disconnect This Group") : String(localized: "Disconnect and Forget Hub"), symbol: Theme.Icon.end, tint: Theme.danger)
                     .trailingProgress(model.hubSignOut == .group(g))
             }
             .modifier(SettingsButtonLook())

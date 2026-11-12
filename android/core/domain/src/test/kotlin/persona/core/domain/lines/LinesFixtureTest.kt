@@ -191,6 +191,7 @@ private class Projection(val tasks: TaskIndex, val menu: List<String?>, val now:
             is ChatLine.ApiError -> obj("type" to "api_error", "item_id" to line.item.id, "count" to line.count,
                 "status" to line.info.status, "reason" to line.info.reason)
             is ChatLine.Recaps -> obj("type" to "recaps", "item_ids" to line.items.map { it.id })
+            is ChatLine.Viewed -> obj("type" to "viewed", "image_ids" to line.images.map { it.id })
             is ChatLine.Extra -> obj("type" to "extra", "id" to line.id)
         }
         content.forEach { (key, value) -> put(key, value) }

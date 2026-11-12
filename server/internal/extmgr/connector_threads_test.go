@@ -17,6 +17,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/subscriptions"
 )
 
 // threadsConnector is a chat app with one made-up conversation of 40 messages, a picture, a reply action, and a
@@ -144,12 +145,58 @@ func TestConnectorThreadPages(t *testing.T) {
 		t.Fatalf("rate limited: %d %v", code, out)
 	}
 	c.state.Store(connector.StateNotSignedIn)
-	if code, _ := call(t, mux, "GET", "/api/v1/connectors/example/thread?thread=u1", h.cfg.Token, ""); code != 409 {
-		t.Fatalf("signed out: %d", code)
+	if code, out := call(t, mux, "GET", "/api/v1/connectors/example/thread?thread=u1", h.cfg.Token, ""); code != 409 || out["code"] != "unavailable" {
+		t.Fatalf("signed out: %d %v", code, out)
 	}
-	_ = h.addConnector(&exampleConnector{})
-	if code, _ := call(t, h.routes(), "GET", "/api/v1/connectors/example/thread?thread=u1", h.cfg.Token, ""); code != 409 && code != 404 {
-		t.Fatalf("a connector without threads: %d", code)
+}
+
+// An Inbox item with no conversation of its own (#5537) reads as a page that is not one, with no messages: a
+// subscription's item (its source is the subscription, not a connector; deleted since or not) and a connector's
+// without threads. The apps show what the hub collected for it, older ones too, with no error card. Replies and media
+// still say there is none; an id that is neither is still no connector.
+func TestThreadWithoutConversation(t *testing.T) {
+	ctx := context.Background()
+	h := newTestManager(t)
+	h.store = newMemStore()
+	h.connectors = connector.NewRegistry(nil)
+	if err := h.addConnector(&exampleConnector{}); err != nil {
+		t.Fatal(err)
+	}
+	store := subscriptions.NewMemStore()
+	h.subs = subscriptions.New(subscriptions.Options{Store: store})
+	if err := store.CreateSubscription(ctx, subscriptions.Subscription{ID: "sub_example1", Connector: "mail", Label: "示例邮件"}); err != nil {
+		t.Fatal(err)
+	}
+	mux := h.routes()
+	none := func(path, thread string) {
+		t.Helper()
+		code, out := call(t, mux, "GET", path, h.cfg.Token, "")
+		chat, _ := out["chat"].(map[string]any)
+		if msgs, ok := out["messages"].([]any); code != 200 || !ok || len(msgs) != 0 || chat["kind"] != connector.ThreadKindNone || chat["id"] != thread ||
+			out["before"] != nil {
+			t.Fatalf("%s: %d %v", path, code, out)
+		}
+		if _, ok := chat["name"]; !ok {
+			t.Fatalf("%s: chat without a name (older apps need one): %v", path, chat)
+		}
+	}
+	none("/api/v1/connectors/sub_example1/thread?thread=sub:sub_example1:t1&limit=30", "sub:sub_example1:t1")
+	none("/api/v1/connectors/sub_example1/thread?thread=other", "other")
+	none("/api/v1/connectors/sub_gone/thread?thread=sub:sub_gone:t1", "sub:sub_gone:t1")
+	none("/api/v1/connectors/example/thread?thread=example-org/example-repo%2312", "example-org/example-repo#12")
+	for _, c := range []struct {
+		method, path, body string
+		code               int
+	}{
+		{"GET", "/api/v1/connectors/nope/thread?thread=u1", "", 404},
+		{"GET", "/api/v1/connectors/nope/thread?thread=sub:sub_example1:t1", "", 404},
+		{"GET", "/api/v1/connectors/sub_example1/media?ref=avatar:u1:1", "", 404},
+		{"POST", "/api/v1/connectors/sub_example1/thread/reply", `{"thread":"sub:sub_example1:t1","action":"x","text":"好的"}`, 404},
+		{"POST", "/api/v1/connectors/example/thread/reply", `{"thread":"t1","action":"example_send","text":"好的"}`, 409},
+	} {
+		if code, _ := call(t, mux, c.method, c.path, h.cfg.Token, c.body); code != c.code {
+			t.Errorf("%s %s: %d, want %d", c.method, c.path, code, c.code)
+		}
 	}
 }
 

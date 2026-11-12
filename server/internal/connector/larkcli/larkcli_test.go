@@ -400,6 +400,72 @@ func TestInboxCursorOverlapDedupAndPageCap(t *testing.T) {
 	}
 }
 
+// The cursor stays inboxCursorOverlap behind the newest message, so one search indexes late is still searched for.
+func TestInboxCursorKeepsIndexLagOverlap(t *testing.T) {
+	c := inboxTestConnector(t, "inbox")
+	if _, err := c.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The newest search result is 12:06.
+	if got, want := c.inboxStateForTests().Cursor, "2030-01-01T11:56:00Z"; got != want {
+		t.Fatalf("cursor = %q, want %q", got, want)
+	}
+}
+
+// A direct message search has not indexed yet comes in from the chat's own history, once; one older than the lookback,
+// group chats and the chat list's order beyond inboxDirectChats are left to search.
+func TestInboxDirectChatsSweepFindsWhatSearchMissed(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "args.log")
+	t.Setenv("LARKCLI_FAKE_LOG", logPath)
+	c := inboxTestConnector(t, "inbox_lag")
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	c.now = func() time.Time { return now }
+	moved, err := c.Poll(context.Background())
+	if err != nil || !moved {
+		t.Fatalf("poll = moved=%v err=%v", moved, err)
+	}
+	items := inboxThings(t, c)
+	if len(items) != 2 {
+		t.Fatalf("items = %#v", items)
+	}
+	dm := items["larkcli:chat:oc_lag_dm"]
+	if dm.Kind != "dm" || dm.Title != "Lag Peer" || dm.Last != "om_lag_recent" || !strings.Contains(dm.Preview, "not indexed yet") {
+		t.Fatalf("direct item = %+v", dm)
+	}
+	c.inboxMu.Lock()
+	_, oldTaken := c.inboxSeen["om_lag_old"]
+	_, recentTaken := c.inboxSeen["om_lag_recent"]
+	c.inboxMu.Unlock()
+	if oldTaken || !recentTaken {
+		t.Fatalf("lookback not applied: old taken=%v, recent taken=%v", oldTaken, recentTaken)
+	}
+	bot := items["larkcli:chat:oc_lag_bot"]
+	if bot.Kind != "bot" || bot.Title != "Approval Bot" || bot.Last != "om_lag_bot" {
+		t.Fatalf("bot item = %+v", bot)
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(b)
+	if !strings.Contains(log, "+chat-list --types p2p --sort active_time") ||
+		!strings.Contains(log, "+chat-messages-list --chat-id oc_lag_dm --start 2029-12-31T23:00:00Z") {
+		t.Fatalf("direct chats were not read from history since the lookback: %q", log)
+	}
+	if strings.Contains(log, "--chat-id oc_lag_group --start") {
+		t.Fatalf("a group chat was swept: %q", log)
+	}
+
+	// The next round reads the same history again: nothing new, nothing doubled.
+	moved, err = c.Poll(context.Background())
+	if err != nil || moved {
+		t.Fatalf("second poll = moved=%v err=%v", moved, err)
+	}
+	if again := inboxThings(t, c); len(again) != 2 || again["larkcli:chat:oc_lag_dm"].Last != "om_lag_recent" {
+		t.Fatalf("second round items = %#v", again)
+	}
+}
+
 func TestInboxCoexistsWithGateway(t *testing.T) {
 	c := inboxTestConnector(t, "inbox")
 	c.SetInboxSource("", func(context.Context) bool { return true })

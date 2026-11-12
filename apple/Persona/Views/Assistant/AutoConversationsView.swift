@@ -114,7 +114,8 @@ struct AutoConversationsView: View {
         let from = AutoConversations.source(of: s, tasks: taskChats.known(on: model.api))
         let detail = [filter == .all ? from?.name : nil, [.working, .needsYou, .unread].contains(s.state) ? s.state.label : s.updatedAt.map { Fmt.relative($0) }]
             .compactMap { $0 }.joined(separator: " · ")
-        let external = AutoConversationSource.external(s.origin)
+        // The hub's built-in background supervisor (#5083) stays listed: no Archive, no Pin.
+        let builtIn = model.isBackgroundSupervisor(s.sessionID)
         return Button { open(s.key) } label: {
             HStack(spacing: Theme.Space.m) {
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
@@ -125,7 +126,7 @@ struct AutoConversationsView: View {
                         } else {
                             Text(title).font(Theme.Font.body).foregroundStyle(Color.primary).lineLimit(1)
                         }
-                        if let external { ExternalSourceMark(source: external) } // an extension opened it (#3758)
+                        if let from { AutoSourceMark(source: from) } // what opened it, as in the sidebar (#3758, #5195)
                     }
                     if !detail.isEmpty {
                         Text(detail).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
@@ -139,26 +140,30 @@ struct AutoConversationsView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel([title, filter == .all ? nil : external?.from, detail.isEmpty ? nil : detail].compactMap { $0 }
+        .accessibilityLabel([title, filter == .all ? nil : from?.markLabel, detail.isEmpty ? nil : detail].compactMap { $0 }
             .joined(separator: String(localized: ", ", comment: "Separator between the parts of a VoiceOver label")))
         .accessibilityIdentifier("auto-conversation")
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button { Task { await model.archiveConversation(s.key, true) } } label: {
-                Label("Archive", systemImage: Theme.Icon.archive)
+            if !builtIn {
+                Button { Task { await model.archiveConversation(s.key, true) } } label: {
+                    Label("Archive", systemImage: Theme.Icon.archive)
+                }
+                .tint(Theme.accent)
             }
-            .tint(Theme.accent)
         }
         .contextMenu {
-            // A direction is the hub's, for every device (#4331): a long press makes a conversation one, or ends it.
-            let lead = model.assistantLeaders.contains(s.sessionID)
-            Button {
-                Task { await model.setDirectionLead(s.sessionID, !lead) }
-            } label: {
-                lead ? Label("Unpin [Assistant Sidebar b7c40e]", systemImage: Theme.Icon.unpin)
-                    : Label("Pin [Assistant Sidebar 6d1f2a]", systemImage: Theme.Icon.pin)
-            }
-            Button { Task { await model.archiveConversation(s.key, true) } } label: {
-                Label("Archive", systemImage: Theme.Icon.archive)
+            if !builtIn {
+                // A direction is the hub's, for every device (#4331): a long press makes a conversation one, or ends it.
+                let lead = model.assistantLeaders.contains(s.sessionID)
+                Button {
+                    Task { await model.setDirectionLead(s.sessionID, !lead) }
+                } label: {
+                    lead ? Label("Unpin [Assistant Sidebar b7c40e]", systemImage: Theme.Icon.unpin)
+                        : Label("Pin [Assistant Sidebar 6d1f2a]", systemImage: Theme.Icon.pin)
+                }
+                Button { Task { await model.archiveConversation(s.key, true) } } label: {
+                    Label("Archive", systemImage: Theme.Icon.archive)
+                }
             }
         }
     }

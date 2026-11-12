@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_subagent_label">サブエージェント</string>
+    <string name="chat_subagent_untitled">サブエージェントのタスク</string>
+    <string name="chat_subagent_expand_details">サブエージェントの詳細を展開</string>
+    <string name="chat_subagent_collapse_details">サブエージェントの詳細を折りたたむ</string>
+    <string name="chat_subagent_show_full_result">結果をすべて表示</string>
+    <string name="chat_subagent_hide_full_result">結果を折りたたむ</string>
+    <string name="chat_subagent_status_running">実行中</string>
+    <string name="chat_subagent_status_completed">完了</string>
+    <string name="chat_subagent_status_failed">失敗</string>
+    <string name="chat_subagent_status_stopped">停止済み</string>
+    <string name="chat_subagent_tokens">%1$s tokens</string>
+    <plurals name="chat_subagent_tool_uses">
+        <item quantity="other">%1$d 回のツール使用</item>
+    </plurals>
+    <string name="chat_subagent_last_tool">直近のツール: %1$s</string>
+    <string name="chat_subagent_output_file">出力: %1$s</string>
+    <string name="chat_subagent_running_for">実行時間 %1$s</string>
+</resources>

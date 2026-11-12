@@ -46,3 +46,17 @@ func RenderJSONSchema(in JSONSchema) string { return render("tools/json_schema",
 // RenderJSONSchemaRetry is the turn asking once more after a reply that did not match the schema: problem says
 // what was wrong (tools/json_schema_retry).
 func RenderJSONSchemaRetry(problem string) string { return render("tools/json_schema_retry", problem) }
+
+// NextMessage is the system prompt suggesting the user's next message after a turn (tools/next_message, assistant/suggest_next.go):
+// Language is the user's language by name when it is not Chinese ("" otherwise).
+type NextMessage struct{ Language string }
+
+func RenderNextMessage(n NextMessage) string { return render("tools/next_message", n) }
+
+// NextMessageTurn is one visible message the suggestion model reads: Role "user" or "assistant".
+type NextMessageTurn struct{ Role, Text string }
+
+// RenderNextMessageInput is the chat's last visible messages as the suggestion model reads them (tools/next_message_input).
+func RenderNextMessageInput(turns []NextMessageTurn) string {
+	return render("tools/next_message_input", turns)
+}

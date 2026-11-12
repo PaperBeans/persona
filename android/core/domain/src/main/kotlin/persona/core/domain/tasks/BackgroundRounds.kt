@@ -13,10 +13,15 @@ import persona.core.domain.lines.ChatLine
  * Folding the main conversation's background rounds (#4314, docs/assistant/assistant.md "Background rounds"): a round
  * that another conversation, a scheduled task or a follow-up started is drawn as one line the user can open. Display
  * only: every line stays in the transcript, under that line. [open] holds the fold lines the user opened (the chat's
- * open-line set); [reveal] is an item a search or a link lands on, whose round is drawn open.
+ * open-line set); [reveal] is an item a search or a link lands on, whose round is drawn open. [rounds]: background rounds
+ * fold (the main conversation with the hub's switch on); without it only supervision rounds fold, on Glass
+ * ([AssistantConversation.project]'s `inline`, iOS `SupervisionRecordLine`).
  */
-data class BackgroundFolding(val open: Set<String> = emptySet(), val reveal: String? = null) {
+data class BackgroundFolding(val open: Set<String> = emptySet(), val reveal: String? = null, val rounds: Boolean = true) {
     companion object {
+        /** The source a folded supervision round stands under: drawn "Supervision record" (iOS `SupervisionRecordLine`). */
+        val supervision = MessageSource("supervision")
+
         /** The message sources whose rounds fold (the web's `supervisionRound`, widened by #4314). */
         val kinds = setOf("conversation", "followup", "patrol")
 
@@ -44,7 +49,10 @@ data class BackgroundFolding(val open: Set<String> = emptySet(), val reveal: Str
  */
 data class BackgroundRound(
     val id: String, val source: MessageSource, val live: Boolean, val open: Boolean, val lines: List<ChatLine>,
-)
+) {
+    /** A quiet supervision round (Glass), drawn "Supervision record" rather than with a source mention. */
+    val supervision: Boolean get() = source.kind == BackgroundFolding.supervision.kind
+}
 
 /** Only Persona's visibility tools, not similarly named tools of another MCP server (web `supervisionTool`). */
 fun supervisionTool(name: String?): String? {

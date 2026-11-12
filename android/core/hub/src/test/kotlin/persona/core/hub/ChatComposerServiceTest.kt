@@ -39,6 +39,13 @@ class ChatComposerServiceTest {
                 val fields = JsonCodec.parseToJsonElement(buffer.readUtf8()).jsonObject
                 assertEquals(headers["X-Persona-Op-Id"], fields["client_msg_id"]!!.jsonPrimitive.content)
                 assertEquals("消息", (fields["text"]!!.jsonPrimitive.content).zhAny())
+                if (headers["X-Persona-Op-Id"] == "overrides") {
+                    assertEquals("runtime", fields["launcher"]?.jsonPrimitive?.content)
+                    assertEquals("model-id", fields["model"]?.jsonPrimitive?.content)
+                    return@HttpChatComposerService Response.Builder()
+                        .request(Request.Builder().url("https://example.com/").build())
+                        .protocol(Protocol.HTTP_1_1).code(200).message("test").body("{}".toResponseBody()).build()
+                }
                 attempts++
                 // The retry goes under a new operation id: the hub would answer "operation" from its first try.
                 assertEquals(attempts == 1, headers["X-Persona-Op-Id"] == "operation")
@@ -65,6 +72,8 @@ class ChatComposerServiceTest {
             service.retryRefused("operation", true)
             fail("A delivered message must not be retried")
         } catch (_: ComposerOperationException) { }
+        assertEquals(MessageTransportResult.Accepted,
+            service.send(MessageRequest(scope, session, "消息", "overrides", launcher = "runtime", model = "model-id")))
         assertEquals(2, attempts)
     }
 

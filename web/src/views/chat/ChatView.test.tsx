@@ -3,14 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Outgoing } from "./Composer";
 import type { Item, Session } from "../../lib/types";
 import { getFeedState, setRoute } from "../../lib/feed";
+import { outboxKey, type OutboxEntry } from "../../lib/outbox";
 import { toast } from "../../ui/atoms";
 import { t } from "../../i18n";
-import { ChatView, footerRows } from "./ChatView";
+import { ChatView, ComposerSource, footerRows } from "./ChatView";
 
 const captured = vi.hoisted(() => ({
   onSend: undefined as ((out: Outgoing) => Promise<boolean>) | undefined,
   session: { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "idle" } as Session,
   items: [] as Item[],
+  /** The chat's outbox (lib/outbox.ts), by outboxKey. */
+  outbox: {} as Record<string, OutboxEntry[]>,
   error: "",
   loading: false,
   /** Set: the hub could not say what this chat is (useRuntimeSession's notice, no row). */
@@ -26,7 +29,7 @@ vi.mock("./Composer", async (importOriginal) => {
     Composer: ({ onSend }: { onSend: (out: Outgoing) => Promise<boolean> }) => {
       captured.onSend = onSend;
       captured.linkManager = useLinkManager();
-      return null;
+      return <div data-testid="composer" />;
     },
   };
 });
@@ -38,7 +41,7 @@ vi.mock("../../lib/store", async (importOriginal) => {
   return {
     ...store,
     getSession: () => captured.session,
-    useStore: <T,>(select: (s: ReturnType<typeof store.getState>) => T) => select({ ...store.getState(), sessions: { hub: [captured.session] } }),
+    useStore: <T,>(select: (s: ReturnType<typeof store.getState>) => T) => select({ ...store.getState(), sessions: { hub: [captured.session] }, outbox: captured.outbox }),
   };
 });
 vi.mock("../../lib/runtime-session", async (importOriginal) => {
@@ -64,9 +67,20 @@ vi.mock("../../lib/router", async (importOriginal) => ({
   useRoute: () => ({ name: "session", mid: "hub", id: "c1" }),
 }));
 vi.mock("../assistant/Persona", () => ({ usePersona: () => ({ name: "Persona" }) }));
+// a reply's Forward and Use as context drawn in the page: they are in its menus (the bar's ⋯ since #5314), which open
+// on a click, so the chat's actions are read here as those menus read them
+vi.mock("./MessageActions", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./MessageActions")>();
+  const { useChatActions } = await import("./chat-actions");
+  function MessageActions(p: Parameters<typeof real.MessageActions>[0]) {
+    const chat = useChatActions();
+    const pick = p.itemId ? { itemId: p.itemId, text: p.text, isUser: false } : undefined;
+    return <>{p.children}{real.messageContextActions(p.text, chat, pick).map((a) => <button key={a.key} type="button" aria-label={a.label} />)}{p.bar && <div data-reply-bar="" />}</>;
+  }
+  return { ...real, MessageActions };
+});
 vi.mock("../assistant/AssistantChat", () => ({
   AssistantFace: () => null,
-  AssistantLauncherChip: () => null,
   CompactionStrip: () => null,
   useAssistantMenu: () => ({ items: [], dialogs: null }),
 }));
@@ -92,6 +106,7 @@ beforeEach(() => {
   setRoute("c1", null);
   captured.onSend = undefined;
   captured.items = [];
+  captured.outbox = {};
   captured.error = "";
   captured.loading = false;
   delete captured.session.source_kind;
@@ -136,22 +151,61 @@ describe("ChatView composer task routing", () => {
 });
 
 describe("ChatView message context availability", () => {
-  // Forward (#3899) goes from any chat but a subagent's read-only view, Persona's included, even one that can't send here
+  // Forward (#3899) goes from any chat, Persona's included, even one that can't send here
   it.each([
-    [false, false, true, true, true],
-    [true, false, true, true, true],
-    [false, true, true, false, false],
-    [false, false, false, true, false],
-  ])("uses the chat's actual send capability (assistant=%s, readOnly=%s, send=%s)", (assistant, readOnly, send, forward, context) => {
+    [false, true, true, true],
+    [true, true, true, true],
+    [false, false, true, false],
+  ])("uses the chat's actual send capability (assistant=%s, send=%s)", (assistant, send, forward, context) => {
     captured.items = [{ id: "reply#0", seq: 1, kind: "text", role: "assistant", text: "A reply" }];
     if (!send) {
       captured.session.source_kind = "codex_history";
       captured.session.capabilities = { read: true };
     }
-    const html = renderToStaticMarkup(<ChatView mid="hub" sid="c1" assistant={assistant} readOnly={readOnly} />);
+    const html = renderToStaticMarkup(<ChatView mid="hub" sid="c1" assistant={assistant} />);
     expect(html.includes('aria-label="转发"')).toBe(forward);
     expect(html.includes('aria-label="交给 Persona"')).toBe(false);
     expect(html.includes('aria-label="作为上下文"')).toBe(context);
+  });
+});
+
+// #5314: a message of yours on its way draws the turn it answers finished for a moment (the live line steps aside):
+// its last words get no reply bar until the chat's work is over, so the bar does not come and go.
+describe("the reply bar while a message is sent", () => {
+  it("is held back on the last exchange while the chat is at work, and there once it is idle", () => {
+    captured.items = [
+      { id: "u1#0", seq: 1, kind: "text", role: "user", text: "Look at it" },
+      { id: "a2#0", seq: 2, kind: "text", role: "assistant", text: "It is fine." },
+    ];
+    expect(renderToStaticMarkup(<ChatView mid="hub" sid="c1" />)).toContain("data-reply-bar");
+    captured.outbox = { [outboxKey("hub", "c1")]: [{ id: "m1", text: "And the tests?", images: [], at: Date.now(), state: "sending" }] };
+    const html = renderToStaticMarkup(<ChatView mid="hub" sid="c1" />);
+    expect(html).toContain("It is fine.");
+    expect(html).not.toContain("data-reply-bar");
+  });
+});
+
+describe("Agent context usage", () => {
+  it("leaves the header and appears in the row below the composer, at the right of the folder; no empty row when there is neither", () => {
+    const was = captured.session;
+    try {
+      captured.session = { ...was, agent: "claude", context_tokens: 78000, context_window: 200000 };
+      const html = renderToStaticMarkup(<ChatView mid="hub" sid="c1" />);
+      const header = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
+      expect(header).not.toContain("61%");
+      expect(html).toContain('data-composer-usage');
+      expect(html).toContain('aria-valuenow="61"');
+      expect(html.indexOf('data-testid="composer"')).toBeLessThan(html.indexOf("data-composer-usage"));
+      expect(html.indexOf("data-composer-source")).toBeLessThan(html.indexOf('aria-valuenow="61"'));
+      captured.session = { ...was, agent: "claude", context_tokens: undefined, context_window: undefined };
+      const unknown = renderToStaticMarkup(<ChatView mid="hub" sid="c1" />);
+      expect(unknown).toContain("data-composer-source");
+      expect(unknown).not.toContain("aria-valuenow");
+      captured.session = { ...was, agent: "claude", cwd: "", context_tokens: undefined, context_window: undefined };
+      expect(renderToStaticMarkup(<ChatView mid="hub" sid="c1" />)).not.toContain('data-composer-usage');
+    } finally {
+      captured.session = was;
+    }
   });
 });
 
@@ -192,16 +246,25 @@ it("keeps a remembered Agent chat on screen when its refresh fails", () => {
   expect(html).not.toContain(t("chat-chatview.retry"));
 });
 
-describe("composer footer rows (#3533)", () => {
-  it("lists launcher, model and folder in full, each labelled", () => {
+describe("the line under the composer (#3533, #5324)", () => {
+  it("lists the folder in full, labelled; the launcher and model are the model pill's (#5032)", () => {
     const s = { machine_id: "m", session_id: "s", launcher: "claude", model: "anthropic/claude-opus-5-5", cwd: "/Users/me/code/weather" } as Session;
-    expect(footerRows(s).map((r) => [r.key, r.label, r.hint])).toEqual([
-      ["launcher", "claude", t("chat-sessiondialogs.launcher")],
-      ["model", "claude-opus-5-5", t("chat-sessiondialogs.model")],
-      ["folder", "~/code/weather", t("chat-sessiondialogs.folder")],
-    ]);
+    expect(footerRows(s).map((r) => [r.key, r.label, r.hint])).toEqual([["folder", "~/code/weather", t("chat-sessiondialogs.folder")]]);
   });
-  it("leaves out what is missing and, in a Persona conversation, the launcher and model", () => {
+  it("the line under the box keeps the folder and where it comes from, without the launcher or the model (#5032, #5324)", () => {
+    const s = { machine_id: "m", session_id: "s", status: "idle", agent: "claude", launcher: "gateway-cc", model: "claude-opus-5-5", effort: "high", permission_mode: "plan", cwd: "/Users/me/code/weather" } as Session;
+    const html = renderToStaticMarkup(<ComposerSource session={s} />);
+    expect(html).toContain("data-composer-source");
+    expect(html).toContain("~/code/weather");
+    expect(html).toContain('title="/Users/me/code/weather"');
+    expect(html).not.toContain("gateway-cc");
+    expect(html).not.toContain("opus");
+    // the permission picker is in the composer's toolbar now, not on this line
+    expect(html).not.toContain(t("lib-session-actions.mode_plan"));
+    // a Persona conversation shows no folder
+    expect(renderToStaticMarkup(<ComposerSource session={{ ...s, assistant: true }} assistant />)).not.toContain("weather");
+  });
+  it("leaves out what is missing, and in a Persona conversation the folder too", () => {
     const s = { machine_id: "m", session_id: "s", launcher: "claude", model: "opus", cwd: "/code" } as Session;
     expect(footerRows(s, true)).toEqual([]);
     expect(footerRows(s).every((r) => r.wrap)).toBe(true);

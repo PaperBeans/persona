@@ -50,10 +50,13 @@ type codexPayload struct {
 	Reason string          `json:"reason"`
 	Info   *struct {
 		Total struct {
-			OutputTokens int `json:"output_tokens"`
+			OutputTokens int   `json:"output_tokens"`
+			TotalTokens  int64 `json:"total_tokens"`
 		} `json:"total_token_usage"`
 		Last struct {
-			InputTokens int `json:"input_tokens"`
+			InputTokens       int   `json:"input_tokens"`
+			CachedInputTokens int64 `json:"cached_input_tokens"`
+			OutputTokens      int64 `json:"output_tokens"`
 		} `json:"last_token_usage"`
 		ModelContextWindow int `json:"model_context_window"`
 	} `json:"info"`
@@ -259,7 +262,7 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 			}
 		}
 		meta.codexWorked(out)
-		return out
+		return meta.codexModel(out)
 	}
 	var p codexPayload
 	if json.Unmarshal(l.Payload, &p) != nil {
@@ -276,6 +279,7 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		if p.Model != "" {
 			meta.Model = p.Model
 		}
+		meta.codexTurnModel = p.Model
 		meta.PermissionMode, meta.CodexSandbox, meta.ModeAt = p.ApprovalPolicy, p.SandboxPolicy.Type, l.Timestamp
 		if p.Effort != "" {
 			meta.Effort, meta.EffortAt = p.Effort, l.Timestamp
@@ -298,6 +302,8 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 			if p.Info.ModelContextWindow > 0 {
 				meta.ContextWindow = p.Info.ModelContextWindow
 			}
+			last := p.Info.Last
+			meta.codexRequest(p.Info.Total.TotalTokens, int64(last.InputTokens), last.CachedInputTokens, last.OutputTokens)
 		}
 		if p.RateLimits != nil { // none: the provider gave none this time, the last ones stand
 			if until, ok := p.RateLimits.fullUntil(); ok {
@@ -307,7 +313,8 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		return nil
 	case "task_started":
 		meta.TurnOpen, meta.TurnClosed = true, false
-		meta.codexTurnID, meta.codexUserID = p.TurnID, ""
+		meta.codexTurnID, meta.codexUserID, meta.codexTurnModel = p.TurnID, "", ""
+		meta.codexUsage = proto.TokenUsage{}
 		meta.clearTurnError()
 		meta.turnWorked = false
 		meta.turnParts = nil
@@ -326,12 +333,14 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 			}
 		}
 		meta.turnWorked = false
+		usage := meta.codexTurnUsage()
 		ms, ok := recordedMilliseconds(p.DurationMS)
 		if !ok || strings.TrimSpace(p.TurnID) == "" || (meta.codexTurnID != "" && meta.codexTurnID != p.TurnID) {
 			return nil
 		}
 		it := mk(0, "", "system", "turn_duration")
 		it.TurnDuration = &proto.TurnDuration{DurationMS: ms, Source: "codex_task_complete", TurnID: p.TurnID, UserItemID: meta.codexUserID}
+		it.Usage = usage // the turn's requests, summed (item_usage.go)
 		return []proto.Item{it}
 	case "turn_aborted":
 		meta.TurnOpen, meta.TurnClosed = false, true
@@ -339,6 +348,7 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		meta.turnWorked = false
 		it := mk(0, "", "system", proto.KindNotice)
 		it.Text = InterruptedNotice
+		it.Usage = meta.codexTurnUsage() // what the turn used before it was stopped
 		return []proto.Item{it}
 	case "thread_goal_updated":
 		return meta.codexGoalUpdated(p.Goal, l.Timestamp, func() proto.Item { return mk(0, "", "system", proto.KindNotice) })
@@ -351,7 +361,21 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 	}
 	out := codexItemLines(seq, l.Timestamp, p.Item, meta)
 	meta.codexWorked(out)
-	return out
+	return meta.codexModel(out)
+}
+
+// codexModel marks the agent's items with the model of the turn they came in (Item.Model): none before the turn's
+// turn_context, as a window starting at the turn would have none either.
+func (m *Meta) codexModel(items []proto.Item) []proto.Item {
+	if m.codexTurnModel == "" {
+		return items
+	}
+	for i := range items {
+		if items[i].Role == "assistant" {
+			items[i].Model = m.codexTurnModel
+		}
+	}
+	return items
 }
 
 // codexWorked notes the turn did some work when the items are the agent's (a message, reasoning, a tool call):

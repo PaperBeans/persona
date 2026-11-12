@@ -242,6 +242,12 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
         PushRegistrar.shared.registerIfPossible()
     }
 
+    /// Back from System Settings › Notifications with Persona allowed after a denial: register now, not at the next
+    /// launch (#1861).
+    func applicationDidBecomeActive(_ notification: Notification) {
+        PushRegistrar.shared.foreground()
+    }
+
     func application(_ application: NSApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         PushRegistrar.shared.didRegister(token: deviceToken)
     }

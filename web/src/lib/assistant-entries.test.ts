@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../../../spec/fixtures/entries/cases.json";
-import { assistantEntries } from "./assistant-entries";
+import { assistantEntries, decisionLaterKey } from "./assistant-entries";
 import type { FeedItem, TaskPlan } from "./feed";
 import type { Todo } from "./todos";
 import type { Interaction, Session } from "./types";
@@ -57,5 +57,50 @@ describe("a parked task in the Assistant's entries", () => {
     const at = "2026-11-05T08:00:00Z";
     expect(keys(entries(todo("parked", at), at))).toEqual({ needsYou: [], running: ["task:todo_1"], shelved: [] });
     expect(keys(entries(todo("", at), at)).running).toEqual([]);
+  });
+});
+
+describe("review dismissal with an interrupted Agent", () => {
+  const at = "2026-11-10T08:00:00.123456789Z";
+  const todo: Todo = {
+    id: "task", title: "Example rollout", origin: "main", created_at: at, updated_at: at,
+    agents: [{ machine_id: "box", session_id: "worker", linked_at: at }],
+    supervision: { supervisor: "main", state: "needs_user", reviews: [{ at, verdict: "needs_user", note: "Choose the rollout route." }] },
+    decision_review: { review_at: at, dismissal_id: "dismiss-demo" },
+  };
+  const session: Session = { machine_id: "box", session_id: "worker", title: "Example Agent", cwd: "/example", state: "idle", status: "idle", updated_at: at, turn_error: "Synthetic transient error", turn_error_kind: "transient" };
+  const input = { conversation: "main", main: "main", todos: [todo], sessions: [session], interactions: [], plans: {}, feed: [],
+    cards: [{ id: "task:task", todo_id: todo.id, at, updated_at: at, state: "working" as const }] };
+
+  it("honors a same-round dismissal despite an old runtime error", () => {
+    expect(assistantEntries(input).needsYou).toEqual([]);
+  });
+
+  it("honors Later for the same review despite an old runtime error", () => {
+    const deferredTodo = { ...todo, decision_review: { review_at: at } };
+    expect(assistantEntries({ ...input, todos: [deferredTodo], deferred: { [decisionLaterKey(deferredTodo)]: true } }).needsYou).toEqual([]);
+  });
+
+  it("does not hide a new review one nanosecond later", () => {
+    const next = "2026-11-10T08:00:00.123456790Z";
+    const newer = { ...todo, supervision: { ...todo.supervision!, reviews: [{ at: next, verdict: "needs_user" as const }] } };
+    expect(assistantEntries({ ...input, todos: [newer], deferred: { [decisionLaterKey(todo)]: true } }).needsYou.map((r) => r.key)).toEqual(["task:task"]);
+  });
+
+  it("keeps a pending Agent question visible with its own home", () => {
+    const interaction = { id: "question", machine_id: "box", session_id: "worker", kind: "question", created_at: at } as Interaction;
+    const got = assistantEntries({ ...input, interactions: [interaction], deferred: { [decisionLaterKey(todo)]: true } });
+    expect(got.needsYou.map((r) => r.key)).toEqual(["task:task"]);
+    expect(got.needsYou[0]).toMatchObject({ asks: [interaction] });
+  });
+
+  it("keeps Agent input visible even while its interaction has not loaded", () => {
+    const got = assistantEntries({ ...input, sessions: [{ ...session, state: "needs_you" }], deferred: { [decisionLaterKey(todo)]: true } });
+    expect(got.needsYou.map((r) => r.key)).toEqual(["task:task"]);
+  });
+
+  it("keeps an interruption without a review decision visible", () => {
+    const interrupted = { ...todo, supervision: undefined, decision_review: undefined };
+    expect(assistantEntries({ ...input, todos: [interrupted] }).needsYou.map((r) => r.key)).toEqual(["task:task"]);
   });
 });

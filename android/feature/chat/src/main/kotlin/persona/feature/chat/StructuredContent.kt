@@ -44,7 +44,7 @@ internal fun MessageContent(item: Item, user: Boolean, update: ChatTextUpdate? =
         .let { if (hideCloseout) persona.core.domain.sort.stripCloseout(it) else it }
     val model = remember(text, item.from, user) { messageModel(text, item.from, user) }
     val uri = LocalUriHandler.current
-    Column(Modifier.fillMaxWidth().messageMenu(MessageTarget(item.id, model.plain, user, model.editText()))) {
+    Column(Modifier.fillMaxWidth().messageMenu(MessageTarget(item.id, model.plain, user, model.editText(), time = item.ts))) {
         MessageContextGroup(model.contexts, "${item.id}/contexts", uri::openUri, alignEnd = user)
         AttachedFileCards(model.attached, alignEnd = user)
         // a reply still being written: its quotes do not fold yet (#2984)
@@ -123,7 +123,11 @@ internal fun userBubbleTime(ts: String, locale: java.util.Locale, zone: java.tim
  */
 @Composable
 internal fun MergedUserBubble(items: List<Item>, updates: Map<String, ChatTextUpdate> = emptyMap(),
-    onLastLine: ((Int) -> Unit)? = null, images: (@Composable () -> Unit)? = null, menu: Boolean = true) {
+    onLastLine: ((Int) -> Unit)? = null, images: (@Composable () -> Unit)? = null, menu: Boolean = true,
+    /** A message only in the outbox, in this state: its menu offers what fits one not sent ([MessageTarget.pending]). */
+    pending: persona.core.contracts.api.DeliveryState? = null,
+    /** An unsent message's look on Glass ([OutboxBubble]): its bubble faded, its state's mark before it. */
+    faded: Boolean = false, leading: (@Composable () -> Unit)? = null) {
     // Keyed on this bubble's own texts: [updates] is the whole chat's, and changes with every streamed chunk of a reply.
     val texts = bubbleTexts(items, updates)
     val models = remember(items, texts) { items.mapIndexed { index, item -> messageModel(texts[index], item.from, user = true) } }
@@ -132,9 +136,9 @@ internal fun MergedUserBubble(items: List<Item>, updates: Map<String, ChatTextUp
     val photos = remember(models) { models.flatMap { it.images }.distinct() }
     val files = remember(models) { models.flatMap { it.files }.distinct().take(6) }
     val attached = remember(models) { models.flatMap { it.attached }.distinctBy { it.path } }
-    val target = remember(models, items) {
+    val target = remember(models, items, pending) {
         MessageTarget(items.firstOrNull()?.id.orEmpty(), models.joinToString("\n\n") { it.plain }.trim(), true,
-            models.joinToString("\n\n") { it.editText() }.trim())
+            models.joinToString("\n\n") { it.editText() }.trim(), pending, items.lastOrNull()?.ts)
     }
     val timestamp = items.lastOrNull()?.ts
     val locale = currentLocale
@@ -164,7 +168,7 @@ internal fun MergedUserBubble(items: List<Item>, updates: Map<String, ChatTextUp
         AttachedFileCards(attached)
         if (fromCard) Text(stringResource(R.string.chat_from_card), Modifier.align(Alignment.End).padding(bottom = Tokens.Space.xs),
             style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1)
-        if (bubble) UserBubbleFrame(Modifier.messageMenu(target.takeIf { menu }), footer = footer, own = own) {
+        if (bubble) UserBubbleFrame(Modifier.messageMenu(target.takeIf { menu }), footer = footer, own = own, faded = faded, leading = leading) {
             images?.invoke()
             if (photos.isNotEmpty()) {
                 AttachedPhotoRow(photos)
@@ -185,10 +189,10 @@ internal fun ThoughtContent(text: String, id: String, collapsed: Boolean, last: 
         val thought = stringResource(R.string.chat_work_thought)
         TimelineStep(PhIcons.Lightbulb, thought, verb = thought, last = last, onClick = { open = !open })
         if (open) {
-            Column(Modifier.padding(start = Tokens.Space.m)) {
+            Column(Modifier.workDetail(Tokens.Space.m)) {
                 ChatMarkdown(text, id, PersonaTheme.type.callout, PersonaTheme.palette.ink2)
             }
-            ReaderEntry(text, thought)
+            Box(Modifier.workDetail()) { ReaderEntry(text, thought) }
         }
     }
 }

@@ -30,6 +30,7 @@ type clientOpResult struct {
 
 func (h *Hub) withClientOp(kind string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
 		// Only clients that send X-Persona-Op-Id use receipts. Messages without it (today's iOS) are deduplicated by
 		// client_msg_id in sendMessage (sent_messages), so a non-UUID client_msg_id must still go through.
 		id := r.Header.Get("X-Persona-Op-Id")
@@ -68,9 +69,15 @@ func (h *Hub) withClientOp(kind string, next http.HandlerFunc) http.HandlerFunc 
 		valid := len(bytes.TrimSpace(raw)) == 0 || json.Valid(raw)
 		canonical, _ := json.Marshal([]any{kind, json.RawMessage(target), valid, opDigestParams(kind, raw, params)})
 		sum := sha256.Sum256(canonical)
+		var timing *sendTiming
+		if kind == "message" {
+			timing = &sendTiming{hub: h, id: proto.SendTraceID(id), start: started}
+			timing.mark("admission_started", true)
+		}
 		op, claimed, err := h.store.BeginClientOp(r.Context(), db.ClientOp{
 			ID: id, DeviceID: principalOf(r.Context()).ID, Kind: kind, Target: target, Digest: hex.EncodeToString(sum[:]),
 		})
+		timing.mark("admission_done", err == nil && op != nil)
 		if err != nil || op == nil {
 			writeErr(w, http.StatusServiceUnavailable, errors.New("operation receipt unavailable"))
 			return

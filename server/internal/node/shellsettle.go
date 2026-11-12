@@ -9,6 +9,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/orcart"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -85,8 +86,10 @@ func lastLine(screen string) string {
 
 // settleShell waits until the shell of the tab a start made, pane, is at rest before the start types into it: only
 // shells in front of the pane (or a host that cannot say) and its screen unchanged for shellQuietFor. After
-// shellSettleWait it returns nil anyway, as the start went on before. A screen that cannot be read returns at once. A
-// startup question on the last line is waited out for shellQuestionWait; one still there ends the start: shellWaiting.
+// shellSettleWait it returns nil anyway, as the start went on before. A screen that cannot be read returns at once,
+// but one the host has not drawn yet is waited for: a new Orca tab has none for its first ~100 ms, and typing then
+// reaches the tty before the shell does (#5450). A startup question on the last line is waited out for
+// shellQuestionWait; one still there ends the start: shellWaiting.
 func (n *Node) settleShell(ctx context.Context, pane string) error {
 	if n.shellPause > 0 {
 		time.Sleep(n.shellPause)
@@ -98,7 +101,7 @@ func (n *Node) settleShell(ctx context.Context, pane string) error {
 	var asked time.Time // since when a question has been on screen
 	for {
 		screen, err := n.readPane(ctx, pane, "visible", 60)
-		if err != nil {
+		if err != nil && !errors.Is(err, orcart.ErrNoScreen) {
 			return nil
 		}
 		now := time.Now()

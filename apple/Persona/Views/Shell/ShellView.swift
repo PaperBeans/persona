@@ -112,18 +112,13 @@ struct ShellView: View {
                          onMachines: { go(.machines) },
                          onOpenExtension: { go(.extensionPage($0)) },
                          openHealth: { go(.health) },
-                         startMeeting: startMeeting)
+                         openRecordingsPage: openRecordingsPage)
     }
 
-    /// The drawer's Meeting Recording: records the meeting and opens Recordings (`MeetingRecorder`), or opens the
-    /// recording already running.
-    private var startMeeting: (() -> Void)? {
+    /// The drawer's Recordings: the page, which shows the recording running, else Record to start one.
+    private var openRecordingsPage: (() -> Void)? {
         #if os(iOS)
-        return {
-            shell.drawer.close()
-            if RecordingCapture.shared.state != .idle { go(.recordings) }
-            else { Task { await MeetingRecorder.shared.startMeeting(inForeground: true) } }
-        }
+        return { go(.recordings) }
         #else
         return nil
         #endif

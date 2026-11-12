@@ -11,15 +11,48 @@ extension AppModel {
     /// The roster of the hub-level group's hub; nil from a hub before managers, or until it is read.
     var managerRoster: ManagerRoster? { managerRosters[hub?.group ?? ""] }
 
+    /// The name beside the Persona face where a page says whose it is (the sidebar's foot, the Mac's status line, the
+    /// voice captions): the current assistant's on a hub with several, as the sidebar's head says it (the face stays the
+    /// persona's, picked in Appearance); the persona's with one assistant, as before.
+    var assistantShownName: String { assistantManager?.name ?? persona.name }
+
+    /// The same for what is said in conversation `key` (a voice call's captions): another assistant's conversation
+    /// opened from elsewhere names its own, as the top bar does.
+    func assistantShownName(in key: SessionKey) -> String { otherAssistant(of: key)?.name ?? assistantShownName }
+
     /// Reads group's roster again. A hub without one (404) has none; one that can't be read now keeps the last.
     func refreshManagerRoster(_ group: String) async {
         guard let api = api(group) else { return }
         let read = managerRosterReads[group, default: 0] + 1
         managerRosterReads[group] = read
-        let roster = await ManagerRoster.read(api, keeping: managerRosters[group])
-        guard read == managerRosterReads[group], managerRosters[group] != roster else { return }
-        let was = managerRosters[group].map { shownOwner($0, group: group) }
+        let answer = await ManagerRoster.ask(api)
+        guard read == managerRosterReads[group] else { return }
         let wasPick = assistantPick(in: group)
+        let roster: ManagerRoster?
+        switch answer {
+        case .list(let list):
+            roster = ManagerRoster(list)
+            // The inbox counts go beside the roster, which carries none: a count that moved leaves the roster as it was,
+            // and nothing that reads the roster is drawn again.
+            let counts = Dictionary(list.managers.compactMap { m in m.inboxNeedsYou.map { (m.id, $0) } }, uniquingKeysWith: { a, _ in a })
+            if inboxNeedsYou[group] ?? [:] != counts { inboxNeedsYou[group] = counts }
+            if managerRosterUnsupported.contains(group) { managerRosterUnsupported.remove(group) }
+            if rostersKept.contains(group) { rostersKept.remove(group) }
+        case .absent:
+            roster = nil
+            if rostersKept.contains(group) { rostersKept.remove(group) }
+            if inboxNeedsYou[group] != nil { inboxNeedsYou[group] = nil }
+            if !managerRosterUnsupported.contains(group) { managerRosterUnsupported.insert(group) }
+        case .unread:
+            roster = managerRosters[group]
+        }
+        guard managerRosters[group] != roster || assistantPick(in: group) != wasPick else {
+            // The same roster and pick, yet what the pages list or ask may have changed: the hub answered a roster the
+            // last launch kept, or that it has none (a kept pick stopped counting).
+            if group == hub?.group { followScope() }
+            return
+        }
+        let was = managerRosters[group].map { shownOwner($0, group: group) }
         let wasOffline = group == hub?.group && assistantManagerOffline != nil
         let defaultMoved = managerRosters[group] != nil && roster != nil && managerRosters[group]?.defaultID != roster?.defaultID
         if defaultMoved {
@@ -45,10 +78,12 @@ extension AppModel {
         guard group == hub?.group else { return }
         // The manager the Persona page showed left the roster (or the hub has one manager again), the default moved, or the
         // shown one is back online: the page reads its manager again. Only the first and a pick kept from the last launch
-        // that names a manager only now that the roster is read change the current assistant.
+        // that names a manager only now that the roster is read change the current assistant. Whether it changed goes by
+        // who is shown, not by what a request names (`assistantPick`), which turns nil and back as the default moves
+        // onto or off the one shown while that one stays.
         let now = roster.map { shownOwner($0, group: group) }
         let back = wasOffline && assistantManagerOffline == nil
-        let switched = (was != nil && was != now) || assistantPick(in: group) != wasPick
+        let switched = was != nil ? was != now : assistantPick(in: group) != wasPick
         if defaultMoved || back || switched { assistantManagerChanged(switched: switched) } else { relistAssistant() }
     }
 
@@ -82,7 +117,9 @@ extension AppModel {
 
     /// `assistantManagerID` for group's Persona page.
     func assistantPick(in group: String) -> String? {
-        guard let roster = managerRosters[group], roster.isMulti, let pick = assistantPicks[group] else { return nil }
+        guard let pick = assistantPicks[group], !managerRosterUnsupported.contains(group) else { return nil }
+        guard let roster = managerRosters[group] else { return pick }
+        guard roster.isMulti else { return nil }
         return roster.named(pick)
     }
 
@@ -183,6 +220,26 @@ extension AppModel {
     /// default's (docs/assistant/managers.md "Grouping"). Until a roster is read, its stamp: the default may have moved,
     /// and naming the default is harmless. The Rules and Muted lists name their stamp too.
     func itemManager(_ manager: String?) -> String? { managerRoster.map { $0.naming(manager) } ?? manager }
+
+    /// The manager the requests of a Persona conversation name (its feed, a reply draft's Send and Do Not Handle, a plan's
+    /// Start or Don't Start, a briefing question's Handled): the conversation's own, none for the default's. Some of those
+    /// routes name no conversation, so the hub would take them to the default manager whichever assistant the conversation
+    /// is. By its listing, else by what it was opened for (`assistantItemManagers`), else the current assistant, on whose
+    /// page it shows.
+    func feedManager(of conversation: String, group: String) -> String? {
+        feedManager(listed: sessionsNow.first { $0.assistant && $0.group == group && $0.sessionID == conversation },
+                    opened: assistantItemManagers.first { $0.key.group == group && $0.key.sessionID == conversation }?.value, group: group)
+    }
+
+    /// The same for a page that holds its conversation's session (`listed`; nil while it is not listed) and the manager
+    /// it was opened for. With one installed manager, or no roster, none is named (docs/assistant/managers.md "The
+    /// current assistant"): there is only the hub's own to ask, as before.
+    func feedManager(listed: Session?, opened: String?, group: String) -> String? {
+        guard let roster = managerRosters[group], roster.isMulti else { return nil }
+        if let listed { return roster.naming(listed.manager) }
+        if let opened { return roster.naming(opened) }
+        return assistantPick(in: group)
+    }
 
     /// The manager of `machine` while a hub with several managers has that manager offline: the computer comes back
     /// with it, and Reconnect, which goes through it, can't work meanwhile. nil otherwise.

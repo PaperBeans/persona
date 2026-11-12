@@ -148,5 +148,6 @@
   "source_noreply_choice": "不要回复到提问的地方",
   "source_report_unreachable": "结论没能回到提问的地方：{error}",
   "source_report_notice": "将在 {minutes} 分钟后回复到原消息下：{text}（发 /noreply 取消）",
-  "source_report_notice_chat": "将在 {minutes} 分钟后回复到原消息下：{text}（回复这条并发 /noreply 取消）"
+  "source_report_notice_chat": "将在 {minutes} 分钟后回复到原消息下：{text}（回复这条并发 /noreply 取消）",
+  "answer_below": "回复见下方"
 }

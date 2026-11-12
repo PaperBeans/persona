@@ -6,6 +6,7 @@ import SwiftUI
 /// computers. The form is `ProviderScopeForm`; the editor that opened it holds it and sends it.
 struct ProviderComputersPage: View {
     @Environment(AppModel.self) private var model
+    private let requestScope = AssistantSettingsRequestScope(AppModel.shared)
     @Binding var scope: ProviderScopeForm
     /// The stored provider (its `key_machines`, `legacy_scope`); nil for a new one.
     var old: LauncherView?
@@ -30,7 +31,7 @@ struct ProviderComputersPage: View {
         #endif
     }
 
-    private var machines: [Machine] { model.hubMachines }
+    private var machines: [Machine] { requestScope.machines(model) }
     private func machine(_ id: String) -> Machine? { machines.first { $0.id == id } }
     private func name(_ id: String) -> String { machine(id)?.name ?? id }
     private var stored: [String] { old?.keyMachines ?? [] }
@@ -228,6 +229,7 @@ struct ProviderComputersPage: View {
 /// The Computers row the editors show: what the scope comes to in a few words, its page behind it.
 struct ProviderComputersRow: View {
     @Environment(AppModel.self) private var model
+    private let requestScope = AssistantSettingsRequestScope(AppModel.shared)
     @Binding var scope: ProviderScopeForm
     var old: LauncherView?
     var kind: String
@@ -240,7 +242,7 @@ struct ProviderComputersRow: View {
         } label: {
             LabeledContent(String(localized: "Computers")) {
                 Text(scope.rowSummary(legacy: old?.legacyScope == true && scope == ProviderScopeForm(view: old),
-                                      name: { id in model.hubMachines.first { $0.id == id }?.name ?? id }))
+                                      name: { id in requestScope.machines(model).first { $0.id == id }?.name ?? id }))
                 .foregroundStyle(scope.problem == nil ? Color.secondary : Theme.danger)
             }
             .lineLimit(1)
@@ -258,7 +260,7 @@ enum ProviderComputersDemo {
     static func launcher(_ state: String, machines: [Machine]) -> LauncherView {
         let ids = machines.filter { !$0.isPending }.prefix(2).map(\.id)
         var l = LauncherView(name: "demo_scope", source: "persona", baseURL: "https://gateway.example.com", model: "glm-5", hasKey: true,
-                             kind: state == "api" ? "api" : "launcher", api: "messages", auth: "bearer")
+                             kind: state == "api" || state == "via" ? "api" : "launcher", api: "messages", auth: "bearer")
         l.share = "all"
         l.delivery = "on_demand"
         l.ownService = "skip"
@@ -274,6 +276,9 @@ enum ProviderComputersDemo {
             l.ownService = "use"
             l.legacyScope = true
         case "api": l.ownService = "use"
+        case "via": // Send Through on the first computer, the wizard at Connect (#4775)
+            l.ownService = "use"
+            l.viaMachine = ids.first
         default: break
         }
         return l

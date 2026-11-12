@@ -17,8 +17,10 @@ export interface ChatActions {
   images: () => Item[];
   /** "Forward" (#3899): opens Forward to for a message of this chat, including when this chat is read-only. */
   forward?: (pick: ForwardPick) => void;
-  /** "Branch to new chat" from a reply (its item id): set only when the session can be forked. */
+  /** "Start a new session" from a reply (its item id): set only when the session can be forked. */
   fork?: (itemId: string) => void;
+  /** A Persona conversation, for everyday words (docs/protocol/i18n.md "Glossary"): "Start a new chat", not "session". */
+  assistant?: boolean;
   /** "Rewind to here" (#2436) on a message of yours: set for a session in a terminal that takes messages. `block` is why it is
    *  off for now ("" = on: Claude only, working…), live: it changes each time the session starts or stops working, and only
    *  an open menu reads it, so that does not render every message's actions again. `run` goes back to before the message

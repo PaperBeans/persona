@@ -21,6 +21,12 @@ import UIKit
     }
 
     private(set) var state: State = .none
+    /// `minutes_state` behind what is shown: `pending` over shown minutes while newer ones are written (Updating), `failed`
+    /// when those didn't come (the shown ones stay).
+    private(set) var status: String?
+    /// The transcript expired on the hub (`trimmed_at`): its minutes stay, and none can be written again.
+    private(set) var trimmed = false
+    /// A write (Regenerate, Add to To-Dos) or the read-back after it is on its way: no other one starts meanwhile.
     private(set) var asking = false
     /// Bumped by Try Again: the page's polling starts over (its task is keyed on it).
     private(set) var round = 0
@@ -32,7 +38,8 @@ import UIKit
     nonisolated struct Answer: Decodable, Sendable {
         struct Meta: Decodable {
             var state: String?
-            enum CodingKeys: String, CodingKey { case state = "minutes_state" }
+            var trimmedAt: String?
+            enum CodingKeys: String, CodingKey { case state = "minutes_state", trimmedAt = "trimmed_at" }
         }
         struct Detail: Decodable {
             var minutes: RecordingMinutes?
@@ -55,6 +62,8 @@ import UIKit
         do {
             let answer = try await Self.fetch(entry.id, api)
             state = Self.state(minutes: answer.detail.minutes, status: answer.detail.meta?.state, meeting: meeting, synced: synced)
+            status = answer.detail.meta?.state
+            trimmed = answer.detail.meta?.trimmedAt?.isEmpty == false
             #if os(iOS)
             MinutesRelay.shared.note(entry, state: state)
             #endif
@@ -84,39 +93,94 @@ import UIKit
         }
     }
 
-    /// Writes them again (`POST /api/v1/recordings/{id}/minutes`): after a failure, or when they missed something.
+    /// Writes them again (`POST /api/v1/recordings/{id}/minutes`): after a failure, or when they missed something. Minutes
+    /// shown stay while the new ones are written (Updating), as the hub keeps them.
     func regenerate(_ id: UUID) async {
         guard let api = api(), !asking else { return }
         asking = true
         defer { asking = false }
         do {
             _ = try await api.request("POST", "/api/v1/recordings/\(id.uuidString.lowercased())/minutes")
-            state = .writing
+            if case .ready = state { status = "pending" } else { state = .writing }
             round += 1
+        } catch let error as APIError where error.code == "transcript_expired" {
+            trimmed = true
+            AppModel.shared.toast = Toast(String(localized: "The transcript has expired. Only these minutes are kept."), style: .error)
         } catch let error as APIError where error.status == 409 {
             // The transcript isn't complete on the hub yet: the minutes come once it is.
-            state = .waitingForSync
+            if case .ready = state {} else { state = .waitingForSync }
             round += 1
         } catch {
             AppModel.shared.toast = Toast(String(localized: "Couldn't ask the hub for new minutes: \(error.localizedDescription)"), style: .error)
         }
     }
 
-    /// Whether to ask again soon: while they are on their way.
+    /// Whether Regenerate goes with the minutes shown: the whole transcript is on the hub, nothing is being written, and
+    /// it hasn't expired (#4062, as the web and Android offer it).
+    func canRegenerate(_ entry: RecordingEntry, synced: Bool) -> Bool {
+        guard case .ready = state else { return false }
+        return synced && !trimmed && status != "pending" && !entry.active && entry.transcribedAll
+    }
+
+    /// Newer minutes are being written over the ones shown.
+    var updating: Bool {
+        if case .ready = state { return status == "pending" }
+        return false
+    }
+
+    /// `{"todos": [Todo], "minutes": Minutes}`: only the minutes, with the confirmed actions' `todo_id`, are read.
+    nonisolated struct Added: Decodable, Sendable { var minutes: RecordingMinutes? }
+
+    /// Makes the action items `ids` to-dos (`POST /api/v1/recordings/{id}/minutes/todos` with the version shown), then
+    /// reads the recording back before anything else is sent. Minutes rewritten since they were shown (`409
+    /// minutes_stale`) are shown as they are now, and nothing is sent again: the user sees the new ones first.
+    func add(_ ids: [String], to entry: RecordingEntry, synced: Bool) async {
+        guard case .ready(let minutes) = state, let version = minutes.version, !ids.isEmpty, let api = api(), !asking else { return }
+        asking = true
+        defer { asking = false }
+        struct Body: Encodable { var version: Int; var actions: [String] }
+        do {
+            let answer: Added = try await api.post("/api/v1/recordings/\(entry.id.uuidString.lowercased())/minutes/todos",
+                                                   body: Body(version: version, actions: ids))
+            if let minutes = answer.minutes { state = .ready(minutes) }
+            Haptics.success()
+            AppModel.shared.toast = Toast(ids.count == 1 ? String(localized: "Added to To-Dos")
+                                          : String(localized: "Added \(ids.count) to To-Dos"), style: .success)
+        } catch let error as APIError where error.code == "minutes_stale" {
+            AppModel.shared.toast = Toast(String(localized: "The minutes changed. Showing the latest version; review the action items before adding them."), style: .error)
+        } catch {
+            AppModel.shared.toast = Toast(String(localized: "Couldn't add to To-Dos: \(error.localizedDescription)"), style: .error)
+        }
+        await load(entry, synced: synced)
+    }
+
+    /// The minutes once the hub has written them, else nil.
+    var ready: RecordingMinutes? {
+        if case .ready(let minutes) = state { minutes } else { nil }
+    }
+
+    /// Whether to ask again soon: while they are on their way, or newer ones are.
     var waiting: Bool {
         switch state {
         case .writing, .waitingForSync, .waitingForText: true
+        case .ready: status == "pending"
         default: false
         }
     }
 }
 
 /// The minutes' sections in a recording's page: when and where, who was there, key points, decisions, action items and open questions, each
-/// with the time it was said (a tap shows that line of the transcript); Copy and Share. Before they exist, what they wait for.
+/// with the time it was said (a tap shows that line of the transcript); Copy and Share. Before they exist, what they wait for. An item
+/// that cites a meeting photo (#3862 phase 3) shows its thumbnail on the iPhone (`MinutesPhoto`). On iPhone the ready minutes
+/// are the page's Summary instead (`RecordingMinutesSummary`, #5026), which shows those thumbnails too; these sections then
+/// show only what the minutes wait for. visionOS keeps them all.
 struct RecordingMinutesSections: View {
     var entry: RecordingEntry
     var model: RecordingMinutesModel
+    /// The hub has this revision of its text (Regenerate needs the whole transcript there).
+    var synced: Bool
     var jump: (Double) -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         switch model.state {
@@ -166,24 +230,18 @@ struct RecordingMinutesSections: View {
             if let title = minutes.title, !title.isEmpty, title != entry.displayTitle {
                 Text(title).font(Theme.Font.bodyStrong)
             }
-            let line = [minutes.when, minutes.place].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
+            // When in the app's own date style, as the header above it (#4875), and where.
+            let line = [minutes.whenLine, minutes.place].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
             if !line.isEmpty {
                 Label(line, systemImage: Theme.Icon.calendarEvent).font(Theme.Font.secondary).foregroundStyle(.secondary).lineLimit(2)
+                    .accessibilityIdentifier("minutes-when")
             }
             if !minutes.attendees.isEmpty {
                 Label(ListFormatter.localizedString(byJoining: minutes.attendees), systemImage: Theme.Icon.people)
                     .font(Theme.Font.secondary).foregroundStyle(.secondary).lineLimit(2)
             }
-            HStack(spacing: Theme.Space.m) {
-                Button { copy(minutes) } label: { Label("Copy", systemImage: Theme.Icon.copy).lineLimit(1) }
-                    .themedButton()
-                    .accessibilityIdentifier("minutes-copy")
-                ShareLink(item: text(minutes), subject: Text(entry.displayTitle)) {
-                    Label("Share", systemImage: Theme.Icon.share).lineLimit(1)
-                }
-                .themedButton()
-                .accessibilityIdentifier("minutes-share")
-            }
+            RecordingMinutesActions(entry: entry, minutes: minutes)
+            RecordingMinutesUpdates(entry: entry, model: model, synced: synced)
         } header: {
             Text("Minutes")
         }
@@ -192,20 +250,58 @@ struct RecordingMinutesSections: View {
         }
         items(String(localized: "Key Points"), Theme.Icon.keyPoint, minutes.points)
         items(String(localized: "Decisions"), Theme.Icon.decision, minutes.decisions)
-        items(String(localized: "Action Items"), Theme.Icon.todo, minutes.actions)
+        actions(minutes)
         items(String(localized: "Open Questions"), Theme.Icon.openQuestion, minutes.openQuestions)
     }
 
     @ViewBuilder private func items(_ heading: String, _ symbol: String, _ list: [RecordingMinutes.Item]) -> some View {
         if !list.isEmpty {
             Section(heading) {
-                ForEach(Array(list.enumerated()), id: \.offset) { _, item in row(item, symbol) }
+                ForEach(Array(list.enumerated()), id: \.offset) { _, item in row(item, symbol) { EmptyView() } }
             }
         }
     }
 
-    private func row(_ item: RecordingMinutes.Item, _ symbol: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+    /// The action items, each offered as a to-do the user confirms (docs/assistant/meeting-minutes.md, #4062): Add to To-Dos,
+    /// or Added once it is one; Add All when more than one is left. A hub that doesn't name its actions offers neither.
+    @ViewBuilder private func actions(_ minutes: RecordingMinutes) -> some View {
+        if !minutes.actions.isEmpty {
+            let offered = minutes.version != nil
+            let left = minutes.actions.filter { !$0.added }.compactMap(\.id)
+            Section(String(localized: "Action Items")) {
+                ForEach(Array(minutes.actions.enumerated()), id: \.offset) { _, item in
+                    row(item, Theme.Icon.todo) {
+                        if item.added {
+                            Chip(text: String(localized: "Added [Recording Minutes a4062d]"), look: .tint(Theme.positive), compact: true)
+                                .accessibilityIdentifier("minutes-added")
+                        } else if offered, let id = item.id, !id.isEmpty {
+                            Button { Task { await model.add([id], to: entry, synced: synced) } } label: {
+                                Label("Add to To-Dos", systemImage: Theme.Icon.add).lineLimit(1).minimumScaleFactor(0.8)
+                            }
+                            .themedButton()
+                            .disabled(model.asking)
+                            .accessibilityLabel(String(localized: "Add to To-Dos: \(item.text)"))
+                            .accessibilityIdentifier("minutes-add")
+                        }
+                    }
+                }
+                if offered, left.count > 1 {
+                    Button { Task { await model.add(left, to: entry, synced: synced) } } label: {
+                        Label("Add All", systemImage: Theme.Icon.add).lineLimit(1)
+                    }
+                    .disabled(model.asking)
+                    .accessibilityIdentifier("minutes-add-all")
+                }
+            }
+        }
+    }
+
+    /// A point, decision, action item or open question: its words, who and by when, its time; `below` under the words (an
+    /// action item's Add to To-Dos). At the accessibility sizes the time goes under the words, which then have the row's
+    /// width: beside it they broke every three characters and Add to To-Dos read "+ …" (#4062).
+    private func row<Below: View>(_ item: RecordingMinutes.Item, _ symbol: String, @ViewBuilder below: () -> Below) -> some View {
+        let large = typeSize.isAccessibilitySize
+        return HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             ThemedIcon(symbol).font(Theme.Font.secondary).foregroundStyle(Theme.accent)
                 .scaledFrame(width: Theme.Size.iconXS)
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
@@ -213,29 +309,153 @@ struct RecordingMinutesSections: View {
                 if let byline = RecordingMinutes.byline(item) {
                     Text(byline).font(Theme.Font.caption).foregroundStyle(.secondary)
                 }
+                #if os(iOS)
+                if let photo = item.photo { MinutesPhoto(recording: entry.id, n: photo) }
+                #endif
+                if large { time(item) }
+                below()
             }
             Spacer(minLength: Theme.Space.s)
-            if let at = item.at {
-                Button { jump(at) } label: {
-                    Chip(text: RecordingFormat.clock(at), look: .tint(Theme.accent), compact: true)
-                        .scaledFrame(minWidth: Theme.Size.tapTarget, minHeight: Theme.Size.tapTarget)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(String(localized: "Show in transcript at \(RecordingFormat.clock(at))"))
-                .accessibilityIdentifier("minutes-time")
-            }
+            if !large { time(item) }
         }
     }
 
-    private func text(_ minutes: RecordingMinutes) -> String {
+    /// When it was said: a tap shows that line of the transcript.
+    @ViewBuilder private func time(_ item: RecordingMinutes.Item) -> some View {
+        if let at = item.at {
+            Button { jump(at) } label: {
+                Chip(text: RecordingFormat.clock(at), look: .tint(Theme.accent), compact: true)
+                    .scaledFrame(minWidth: Theme.Size.tapTarget, minHeight: Theme.Size.tapTarget)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String(localized: "Show in transcript at \(RecordingFormat.clock(at))"))
+            .accessibilityIdentifier("minutes-time")
+        }
+    }
+}
+
+/// The minutes' Copy and Share: Markdown rendered on the phone (`RecordingMinutes.text`), headed by the minutes' title or
+/// else the recording's name. In the minutes' sections, and on iPhone under the Summary | Transcript switch, where they
+/// stay whichever view shows (#5026). At the accessibility sizes they stack, so neither is cut to "…".
+struct RecordingMinutesActions: View {
+    var entry: RecordingEntry
+    var minutes: RecordingMinutes
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        // At the accessibility sizes one above the other: side by side, both read "…".
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.s))
+            : AnyLayout(HStackLayout(spacing: Theme.Space.m))
+        layout {
+            Button { copy() } label: { Label("Copy", systemImage: Theme.Icon.copy).lineLimit(1) }
+                .themedButton()
+                .accessibilityIdentifier("minutes-copy")
+            ShareLink(item: text, subject: Text(entry.displayTitle)) {
+                Label("Share", systemImage: Theme.Icon.share).lineLimit(1)
+            }
+            .themedButton()
+            .accessibilityIdentifier("minutes-share")
+        }
+    }
+
+    private var text: String {
         minutes.text(title: entry.displayTitle)
     }
 
-    private func copy(_ minutes: RecordingMinutes) {
-        UIPasteboard.general.string = text(minutes)
+    private func copy() {
+        UIPasteboard.general.string = text
         Haptics.success()
         AppModel.shared.toast = Toast(String(localized: "Minutes copied"), style: .success)
     }
 }
+
+/// What is happening to the minutes shown (#4062): Updating while newer ones are written (these stay until they come), a
+/// failed rewrite (these are the earlier ones), an expired transcript (only these are kept), and Regenerate while it can
+/// be asked for. Rows of the minutes' sections; on iPhone, lines of the Summary's header card (#5026), `boxed`, where
+/// Regenerate is a button of its own beside the card's other controls rather than a row.
+struct RecordingMinutesUpdates: View {
+    var entry: RecordingEntry
+    var model: RecordingMinutesModel
+    var synced: Bool
+    var boxed = false
+
+    var body: some View {
+        if model.updating {
+            HStack(spacing: Theme.Space.s) {
+                ProgressView()
+                Text("Updating the minutes…").font(Theme.Font.body)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("minutes-updating")
+        } else if model.status == "failed" {
+            Text("The new minutes couldn't be written. These are the earlier ones.")
+                .font(Theme.Font.caption).foregroundStyle(Theme.danger)
+        }
+        if model.trimmed {
+            Text("The transcript has expired. Only these minutes are kept.").font(Theme.Font.caption).foregroundStyle(.secondary)
+        }
+        if model.canRegenerate(entry, synced: synced) {
+            if boxed { regenerate.themedButton() } else { regenerate }
+        }
+    }
+
+    /// Whether any of it shows: the Summary's header card is there for it too.
+    static func shows(_ entry: RecordingEntry, _ model: RecordingMinutesModel, synced: Bool) -> Bool {
+        model.updating || model.status == "failed" || model.trimmed || model.canRegenerate(entry, synced: synced)
+    }
+
+    private var regenerate: some View {
+        Button { Task { await model.regenerate(entry.id) } } label: {
+            Label("Regenerate", systemImage: Theme.Icon.retry).lineLimit(1)
+        }
+        .disabled(model.asking)
+        .accessibilityIdentifier("minutes-regenerate")
+    }
+}
+
+#if os(iOS)
+/// The meeting photo a minutes item cites (#3862 phase 3; docs/assistant/meeting-minutes.md "Phase 3: photos", "Minutes"):
+/// its thumbnail under the item's words, a tap opens it full screen; Photo removed once the hub's list was read and no
+/// longer has it (deleted, or a trimmed recording's); nothing while the list isn't read yet (offline), which isn't a
+/// delete. Its own view, the only part of the minutes that reads the recording's photos (`MeetingPhotos.Album`), which
+/// it reads once if no page has.
+struct MinutesPhoto: View {
+    var recording: UUID
+    /// The photo's number at the hub (`n`).
+    var n: Int
+
+    @State private var viewing: MeetingPhotoItem?
+
+    private var album: MeetingPhotos.Album { MeetingPhotos.shared.album(recording) }
+
+    var body: some View {
+        let photos = album
+        Group {
+            if let item = photos.numbers[n].flatMap({ photos.items[$0] }) {
+                Button { viewing = item } label: {
+                    MeetingPhotoThumb(recording: recording, photoID: item.photoID, n: item.n, ready: item.hasImage)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text([String(localized: "Photo"), item.at.map { RecordingFormat.clock($0) }].compactMap { $0 }
+                    .joined(separator: ", ")))
+                .accessibilityAddTraits(.isImage)
+                .accessibilityIdentifier("minutes-photo")
+            } else if photos.loaded {
+                Text("Photo removed").font(Theme.Font.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("minutes-photo-removed")
+            } else {
+                // The list not read yet: the photo's place, until it is.
+                MeetingPhotoThumb(recording: recording, photoID: "", n: nil, ready: false)
+                    .accessibilityLabel(Text("Photo"))
+            }
+        }
+        .task(id: recording) {
+            if !photos.loaded { await MeetingPhotos.shared.refresh(recording) }
+        }
+        .fullScreenCover(item: $viewing) { item in MeetingPhotoViewer(recording: recording, item: item) }
+    }
+}
+#endif
 #endif

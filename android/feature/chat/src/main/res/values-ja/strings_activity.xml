@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A loop and background work in an Agent chat's header and their sheet (#4339 C8, iOS ActivityChips and ActivitySheet). -->
+<resources>
+    <string name="chat_activity_loop">ループ</string>
+    <string name="chat_activity_running">実行中</string>
+    <string name="chat_activity_next">次回%1$s</string>
+    <string name="chat_activity_loop_running">ループ実行中</string>
+    <string name="chat_activity_looping">ループ中</string>
+    <string name="chat_activity_looping_cadence">ループ中 · %1$s</string>
+    <string name="chat_activity_looping_spoken">ループ中、%1$s</string>
+    <string name="chat_activity_tap_to_view">%1$s、タップして表示</string>
+    <string name="chat_activity_list_separator">"、"</string>
+    <string name="chat_activity_cron">スケジュール%1$s</string>
+    <string name="chat_activity_next_wakeup">次回の起動%1$s（%2$s）</string>
+    <string name="chat_activity_running_round">この回を実行中</string>
+    <string name="chat_activity_hours_minutes_left">あと%1$d時間%2$d分</string>
+    <string name="chat_activity_stop">ループを停止</string>
+    <string name="chat_activity_stop_title">このループを停止しますか？</string>
+    <string name="chat_activity_stop_text">エージェントにメッセージを送り、次回の起動を予定しないよう伝えます。実行中の回は最後まで完了します。</string>
+    <string name="chat_activity_title_loop">ループ</string>
+    <string name="chat_activity_title_background">バックグラウンドタスク</string>
+    <string name="chat_activity_title_both">ループとバックグラウンドタスク</string>
+    <string name="chat_activity_background_first">%1$s · %2$s</string>
+    <string name="chat_activity_view_output">出力を表示</string>
+    <string name="chat_activity_seconds">%1$d秒</string>
+    <string name="chat_activity_minutes_seconds">%1$d分%2$d秒</string>
+    <string name="chat_activity_hours_minutes">%1$d時間%2$d分</string>
+    <string name="chat_activity_expand">展開</string>
+    <string name="chat_activity_collapse">折りたたむ</string>
+    <string name="chat_activity_background_command">バックグラウンドコマンド</string>
+    <string name="chat_activity_subagent">サブエージェント</string>
+    <plurals name="chat_activity_background_count">
+        <item quantity="other">バックグラウンドタスク%1$d件</item>
+    </plurals>
+    <plurals name="chat_activity_every_seconds">
+        <item quantity="other">%1$d秒ごと</item>
+    </plurals>
+    <plurals name="chat_activity_every_minutes">
+        <item quantity="other">%1$d分ごと</item>
+    </plurals>
+    <plurals name="chat_activity_every_hours">
+        <item quantity="other">%1$d時間ごと</item>
+    </plurals>
+    <plurals name="chat_activity_minutes_left">
+        <item quantity="other">あと%1$d分</item>
+    </plurals>
+    <plurals name="chat_activity_hours_left">
+        <item quantity="other">あと%1$d時間</item>
+    </plurals>
+</resources>

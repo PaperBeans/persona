@@ -47,6 +47,30 @@ struct AssistantSwitcherTests {
         #expect(AssistantSwitcherText.line(nowhere, now: Self.start) == "在线", "no host reported: just online")
     }
 
+    /// VoiceOver hears what a row and the header show: how much waits beside another assistant, nothing beside the
+    /// current one, and on the header that another assistant has something waiting.
+    @Test func whatWaitsIsSpoken() throws {
+        let roster = try Self.list()
+        let work = try #require(roster.managers.first { $0.id == "m-1" })
+        #expect(AssistantSwitcherText.spoken(work, now: Self.start, current: false, isDefault: true, waiting: 3)
+                == "工作, 在线 · MacBook Pro, 默认, 3 件等你处理")
+        #expect(AssistantSwitcherText.spoken(work, now: Self.start, current: true, isDefault: true, waiting: 3)
+                == "工作, 在线 · MacBook Pro, 默认, 当前", "the current one's row shows no count")
+        #expect(AssistantSwitcherText.spoken(work, now: Self.start, current: false, isDefault: false) == "工作, 在线 · MacBook Pro")
+        #expect(AssistantSwitcherText.spokenHeader(work, now: Self.start, othersWaiting: false) == "工作, 在线 · MacBook Pro")
+        #expect(AssistantSwitcherText.spokenHeader(work, now: Self.start, othersWaiting: true) == "工作, 在线 · MacBook Pro, 别的助手有事等你处理")
+    }
+
+    /// In place of an empty inbox or to-do list while the current assistant is offline: the hub's merged lists have
+    /// nothing of it.
+    @Test func anOfflineAssistantsListsSayItIsOffline() throws {
+        let roster = try Self.list()
+        let home = try #require(roster.managers.first { $0.id == "m-2" })
+        #expect(AssistantOfflineNotice.title(home) == "家里 离线")
+        #expect(AssistantOfflineNotice.message(home).hasPrefix("最后同步于") && AssistantOfflineNotice.message(home).hasSuffix("它上线后这里会更新。"))
+        #expect(AssistantOfflineNotice.message(HubManager(id: "x", name: "x", online: false)) == "它上线后这里会更新。")
+    }
+
     @Test func avatarColorsAreTheSameOnEveryClient() throws {
         func hue(_ id: String, default d: String = "assistant") -> Int? {
             AssistantSwitcherText.hue(HubManager(id: id, name: id, online: true), defaultID: d)

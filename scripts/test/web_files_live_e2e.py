@@ -80,7 +80,7 @@ def open_files(page, base):
 def open_files_phone(page, base):
     """On a phone the session header keeps Files in its ⋯ menu."""
     page.goto(f"{base}/s/{MID}/{SID}")
-    page.locator("main header").get_by_role("button", name="更多", exact=True).click()
+    page.locator("main header").get_by_role("button", name="更多操作", exact=True).click()
     page.get_by_role("menuitem", name="文件").or_(page.get_by_role("menuitemcheckbox", name="文件")).click()
     expect(page.locator("aside[aria-label=文件]")).to_be_visible()
 

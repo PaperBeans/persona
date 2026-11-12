@@ -73,6 +73,7 @@
     <string name="agents_grouping_project">按项目</string>
     <string name="agents_menu_compact">细列表</string>
     <string name="agents_menu_detailed">详细列表</string>
+    <string name="agents_menu_display">显示</string>
     <string name="agents_menu_collapse_all">全部折叠</string>
     <string name="agents_menu_expand_all">全部展开</string>
     <string name="agents_menu_machines">机器监控</string>
@@ -90,7 +91,7 @@
     <string name="agents_new_session_unavailable">这个版本的 App 还不能新建会话。</string>
     <string name="agents_close">关闭</string>
     <string name="agents_approve_blocked">这个会话不允许在手机上审批，请打开会话或到电脑上处理。</string>
-    <string name="agents_request_fields_elsewhere">这个请求要先填写内容才能允许，请到网页或 iPhone 上处理；在这里仍可以拒绝。</string>
+    <string name="agents_request_fields_elsewhere">这个请求要先填写内容才能允许，请打开它的对话填写；在这里仍可以拒绝。</string>
     <string name="agents_connection_certificate_text">hub 的证书和配对时不一样，不会自动重连。确认是自己换了证书后，请重新扫码配对。</string>
     <string name="agents_connection_revoked_text">配对已失效，请重新扫码配对。</string>
     <string name="agents_connection_local_network_text">需要本地网络权限，授权后再连接。</string>
@@ -143,6 +144,8 @@
     <string name="agents_repo_repository">仓库</string>
     <string name="agents_repo_main_checkout">主工作树</string>
     <string name="agents_repo_worktree">工作树</string>
+    <string name="agents_repo_actions">仓库操作</string>
+    <string name="agents_idle_repositories">空闲的仓库</string>
     <string name="agents_card_question">Claude 在问你</string>
     <string name="agents_card_question_by">%1$s 在问你</string>
     <string name="agents_card_permission">在等你批准</string>
@@ -257,6 +260,7 @@
     <string name="agents_directory">目录</string>
     <string name="agents_space_tab">标签 %1$d</string>
     <string name="agents_space_new_tab">在此开新标签</string>
+    <string name="agents_space_new_tab_card">在这个空间开新标签</string>
     <string name="agents_new_choose_directory">选择目录</string>
     <string name="agents_new_back">返回</string>
     <string name="agents_new_parent">上一级</string>

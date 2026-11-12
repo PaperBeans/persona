@@ -382,6 +382,19 @@ describe("Feishu bot dialog", () => {
     expect(onlyConclusions().disabled).toBe(false);
   });
 
+  it("hides answer as a new card for a hub from before it", async () => {
+    await open(saved());
+    expect(document.body.querySelector(`[role="switch"][aria-label="${t("settings-feishubot.feature_answer_new_card_title")}"]`)).toBeNull();
+  });
+
+  it("switches answer as a new card on its own, off by default", async () => {
+    const newCard = () => document.body.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${t("settings-feishubot.feature_answer_new_card_title")}"]`)!;
+    await open(saved({ features: { ...saved().features, answer_new_card: false } }));
+    expect(newCard().getAttribute("aria-checked")).toBe("false");
+    await act(async () => newCard().click());
+    expect(calls.update[0].body).toEqual({ features: { answer_new_card: true } });
+  });
+
   it("switches the workbench on its own, off by default", async () => {
     const workbench = () => document.body.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${t("settings-feishubot.feature_workbench_title")}"]`)!;
     await open(saved({ features: { ...saved().features, workbench: false } }));

@@ -12,7 +12,6 @@ DELETE /api/v1/auth/tokens/{id}
 DELETE /api/v1/looks/uploads/{id} # the hub keeps the looks: personas/ is its own directory (look_uploads.go)
 DELETE /api/v1/managers/{id}
 DELETE /api/v1/sessions/{mid}/{sid}
-GET /api/v1/admin/assistant
 GET /api/v1/admin/devices
 GET /api/v1/admin/owner-subjects # trusted authentication subject enrollment
 POST /api/v1/admin/owner-subjects # trusted authentication subject enrollment
@@ -179,7 +178,6 @@ POST /api/v1/sessions/{mid}/{sid}/screen/before
 POST /api/v1/sessions/{mid}/{sid}/seen
 POST {bus.JoinPath}
 POST {peerPairPath}
-PUT /api/v1/admin/assistant
 PUT /api/v1/admin/hub
 PUT /api/v1/admin/machines/{id}
 PUT /api/v1/admin/network/access

@@ -439,8 +439,15 @@ final class TasksStore {
         }
     }
 
+    /// The hub's client for a plan's own routes: they name no conversation, so the plan's conversation's manager is
+    /// named (`AppModel.feedManager`), whichever assistant is current.
+    private func client(for plan: TaskPlan) -> APIClient? {
+        let model = AppModel.shared
+        return model.api?.manager(model.feedManager(of: plan.conversation, group: model.hub?.group ?? ""))
+    }
+
     func start(_ plan: TaskPlan, edits: [PlanTask]? = nil, remember: Bool = false) async {
-        guard let api = AppModel.shared.api, !busyPlans.contains(plan.id) else { return }
+        guard let api = client(for: plan), !busyPlans.contains(plan.id) else { return }
         busyPlans.insert(plan.id)
         defer { busyPlans.remove(plan.id) }
         do {
@@ -468,7 +475,7 @@ final class TasksStore {
     }
 
     func dismiss(_ plan: TaskPlan) async {
-        guard let api = AppModel.shared.api, !busyPlans.contains(plan.id) else { return }
+        guard let api = client(for: plan), !busyPlans.contains(plan.id) else { return }
         busyPlans.insert(plan.id)
         defer { busyPlans.remove(plan.id) }
         do {

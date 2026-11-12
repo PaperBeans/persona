@@ -1,0 +1,17 @@
+{
+  "store": "Couldn't confirm the repository references were read or saved. Refresh before retrying; a change may have taken effect.",
+  "remote": "Use an HTTPS or git SSH repository URL without credentials, a query or a fragment. Choose a provider for a self-hosted instance.",
+  "metadata": "Couldn't read these details. Use a name and up to 10 aliases of at most 80 characters each, and a purpose of at most 500 characters.",
+  "duplicate": "This assistant already has a reference to that repository.",
+  "conflict": "The saved references changed, or this undo has expired. Reload and retry.",
+  "not_found": "This repository reference is no longer bound to this assistant.",
+  "full": "This assistant can save up to 200 repository references.",
+  "readonly": "This device can only view repository references.",
+  "unavailable": "Couldn't confirm this repository exists. It may be private, invisible or unavailable. Check the address and visibility; nothing was saved.",
+  "authentication": "The instance requires authentication or refused the anonymous check. Existence is unconfirmed; nothing was saved.",
+  "rate_limited": "The instance limited verification requests. Retry later; nothing was saved.",
+  "inconclusive": "The response didn't confirm this repository's identity. Sign-in pages and redirects aren't verification; nothing was saved.",
+  "network": "Couldn't reach the repository metadata service. Check the connection and retry; nothing was saved.",
+  "timeout": "The repository check timed out. Retry; nothing was saved.",
+  "unsafe_target": "This destination isn't allowed for repository checks. Private instances need an explicitly trusted instance and network in the assistant's configuration; nothing was saved."
+}

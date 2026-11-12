@@ -76,6 +76,8 @@ class HttpChatComposerService internal constructor(
             put("text", persona.core.contracts.ProtocolCompatibility.messageForHub(message.text))
             put("client_msg_id", message.opId)
             message.clearDraft?.let { put("clear_draft", it) }
+            message.launcher?.let { put("launcher", it) }
+            message.model?.let { put("model", it) }
         }.toString().toRequestBody(jsonType)
         return try {
             request(api("sessions", message.session.machineId, message.session.sessionId, "messages"), body, message.headers).use { response ->

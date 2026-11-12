@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A loop and background work in an Agent chat's header and their sheet (#4339 C8, iOS ActivityChips and ActivitySheet). -->
+<resources>
+    <string name="chat_activity_loop">循环</string>
+    <string name="chat_activity_running">执行中</string>
+    <string name="chat_activity_next">下次 %1$s</string>
+    <string name="chat_activity_loop_running">循环执行中</string>
+    <string name="chat_activity_looping">循环中</string>
+    <string name="chat_activity_looping_cadence">循环中 · %1$s</string>
+    <string name="chat_activity_looping_spoken">循环中，%1$s</string>
+    <string name="chat_activity_tap_to_view">%1$s，点按查看</string>
+    <string name="chat_activity_list_separator">"，"</string>
+    <string name="chat_activity_cron">按计划 %1$s</string>
+    <string name="chat_activity_next_wakeup">下次唤醒 %1$s（%2$s）</string>
+    <string name="chat_activity_running_round">正在执行这一轮</string>
+    <string name="chat_activity_hours_minutes_left">还有 %1$d 小时 %2$d 分</string>
+    <string name="chat_activity_stop">停止循环</string>
+    <string name="chat_activity_stop_title">停止这个循环？</string>
+    <string name="chat_activity_stop_text">会给 Agent 发一条消息，让它不再安排下一次唤醒。正在执行的这一轮会先做完。</string>
+    <string name="chat_activity_title_loop">循环</string>
+    <string name="chat_activity_title_background">后台任务</string>
+    <string name="chat_activity_title_both">循环与后台任务</string>
+    <string name="chat_activity_background_first">%1$s · %2$s</string>
+    <string name="chat_activity_view_output">看输出</string>
+    <string name="chat_activity_seconds">%1$d 秒</string>
+    <string name="chat_activity_minutes_seconds">%1$d 分 %2$d 秒</string>
+    <string name="chat_activity_hours_minutes">%1$d 时 %2$d 分</string>
+    <string name="chat_activity_expand">展开</string>
+    <string name="chat_activity_collapse">收起</string>
+    <string name="chat_activity_background_command">后台命令</string>
+    <string name="chat_activity_subagent">子代理</string>
+    <plurals name="chat_activity_background_count">
+        <item quantity="other">%1$d 个后台任务</item>
+    </plurals>
+    <plurals name="chat_activity_every_seconds">
+        <item quantity="other">每 %1$d 秒</item>
+    </plurals>
+    <plurals name="chat_activity_every_minutes">
+        <item quantity="other">每 %1$d 分钟</item>
+    </plurals>
+    <plurals name="chat_activity_every_hours">
+        <item quantity="other">每 %1$d 小时</item>
+    </plurals>
+    <plurals name="chat_activity_minutes_left">
+        <item quantity="other">还有 %1$d 分钟</item>
+    </plurals>
+    <plurals name="chat_activity_hours_left">
+        <item quantity="other">还有 %1$d 小时</item>
+    </plurals>
+</resources>

@@ -30,6 +30,7 @@
 | --- | --- | --- |
 | `needsYou` | 需要你 | `StatusPalette.needsYou` |
 | `working` | 工作中 | `StatusPalette.working` |
+| `backgroundWaiting` | Waiting in the background | `StatusPalette.backgroundWaiting`: working's dot at 0.6, `.secondary` words, working's dot at 0.08 as the tint |
 | `unread` | 完成未看 | `StatusPalette.unread` |
 | `idle` | 已看 | `StatusPalette.idle` |
 | `offline` | 未运行 | `StatusPalette.offline` |

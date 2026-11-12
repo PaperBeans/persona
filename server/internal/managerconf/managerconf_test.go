@@ -101,7 +101,7 @@ func TestMoveTakesTheManagerSectionsOnce(t *testing.T) {
 			t.Errorf("manager.json took the hub's %s", k)
 		}
 	}
-	// assistant is split: the manager's keys moved, the hub's (external, persona_view) did not.
+	// assistant is split: the manager's keys moved, the rest (external, the retired persona_view) did not.
 	if compact(t, mine["assistant"]) != `{"launcher":"claude","machine":"server","notes":"- Code is in ~/code","owner":"Example"}` {
 		t.Errorf("manager.json's assistant %s", mine["assistant"])
 	}

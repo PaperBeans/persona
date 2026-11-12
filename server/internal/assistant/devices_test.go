@@ -66,6 +66,7 @@ func (f *fakeDevices) SessionsWhere(string, func(*proto.Session) bool) ([]proto.
 	return nil, false
 }
 func (f *fakeDevices) Session(string, string) (proto.Session, bool) { return proto.Session{}, false }
+func (f *fakeDevices) Watched(string, string) bool                  { return false }
 func (f *fakeDevices) ConnectedAt(string) time.Time                 { return time.Time{} }
 func (f *fakeDevices) Usage() assistantwire.UsageSummary            { return assistantwire.UsageSummary{} }
 func (f *fakeDevices) CapacitySnapshot(context.Context) proto.CapacitySnapshot {

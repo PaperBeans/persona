@@ -4,8 +4,11 @@ import persona.core.contracts.ProtocolCompatibility
 
 import persona.core.contracts.CoreText.Key
 import persona.core.contracts.CoreText
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -156,44 +159,122 @@ private fun personaToolVerb(n: String): Key? = when (n) {
 }
 
 /** One line of what the call is about: the command, the file, the pattern… ([toolSubjectText] in [CoreText.words]). */
-fun toolSubject(it: Item): String = CoreText.words(toolSubjectText(it))
+fun toolSubject(it: Item, pick: Boolean = true): String = CoreText.words(toolSubjectText(it, pick))
 
 /**
  * [toolSubject] as words to resolve: computer_state without an app reads "machine · whole screen" (iOS
- * `ToolPresentation.subject`), so that part follows the app's language.
+ * `ToolPresentation.subject`), so that part follows the app's language. A tool no table knows (another server's, a new
+ * one) takes the field of its input that says the most ([ToolNaming.subject]); [pick] false leaves it "" (a permission
+ * card has its own fallback). Unlike iOS, a tool a table names but no case here does (agent_read) keeps "": the rows of
+ * Glass and Brief show no verb, and a picked subject would take its words' place.
  */
-fun toolSubjectText(it: Item): CoreText {
+fun toolSubjectText(it: Item, pick: Boolean = true): CoreText {
     val i = it.toolInput as? JsonObject
-    if (i != null && toolBaseName(it.toolName.orEmpty()) == "computer_state") {
+    if (i != null && ToolNaming.tableName(it.toolName.orEmpty()) == "computer_state") {
         fun s(k: String) = (i[k] as? JsonPrimitive)?.content?.takeIf(String::isNotEmpty)
         val app = s("app")?.let(CoreText::plain) ?: CoreText.of(Key.ToolWholeScreen)
         return CoreText.joined(" · ", listOfNotNull(s("machine")?.let(CoreText::plain), app))
     }
-    return CoreText.plain(plainToolSubject(it))
+    val picked = pick && namedToolVerb(it.toolName.orEmpty()) == null
+    return CoreText.plain(plainToolSubject(it) ?: if (picked) ToolNaming.subject(it.toolInput) else "")
 }
 
-private fun plainToolSubject(it: Item): String {
-    val i = it.toolInput as? JsonObject ?: return ""
+/** The subject of a tool a case here knows (iOS `ToolPresentation.subject`); null for any other. */
+private fun plainToolSubject(it: Item): String? {
+    val name = it.toolName.orEmpty()
+    // Another server's tool is that server's, never the built-in one of the same bare name ("mcp__files__Read").
+    if (ToolNaming.isOtherMcp(name)) return null
+    val i = it.toolInput as? JsonObject ?: return null
     fun s(k: String) = (i[k] as? JsonPrimitive)?.content
-    return when (it.toolName) {
+    return when (name) {
         "Bash" -> s("description") ?: s("command")?.lineSequence()?.firstOrNull().orEmpty()
         "Read", "Edit", "MultiEdit", "Write", "NotebookEdit" -> (s("file_path") ?: s("notebook_path")).orEmpty().substringAfterLast('/')
         "Grep", "Glob" -> s("pattern").orEmpty()
         "WebFetch" -> s("url").orEmpty().removePrefix("https://").removePrefix("http://").substringBefore('/')
-        "WebSearch", "ToolSearch" -> s("query").orEmpty()
+        "WebSearch" -> s("query").orEmpty()
         "Task", "Agent" -> s("description").orEmpty()
         "Skill" -> s("skill") ?: s("command").orEmpty()
         "AskUserQuestion" -> firstQuestion(i)
         "ExitPlanMode" -> s("plan")?.lineSequence()?.firstOrNull { l -> l.isNotBlank() }?.trimStart('#', ' ').orEmpty()
-        else -> namedToolSubject(toolBaseName(it.toolName.orEmpty()), ::s) { firstQuestion(i) }
+        else -> claudeCodeToolSubject(name, i) ?: namedToolSubject(toolBaseName(name), ::s) { firstQuestion(i) }
     }
 }
 
 private fun firstQuestion(i: JsonObject) =
     runCatching { i["questions"]!!.jsonArray[0].jsonObject["question"]!!.jsonPrimitive.content }.getOrDefault("")
 
-/** The subject of Persona's own, the computer's, the phone's and mail tools (iOS `ToolPresentation.subject`). */
-private fun namedToolSubject(n: String, field: (String) -> String?, questions: () -> String): String {
+/**
+ * The subject of Claude Code's newer tools (iOS `ToolPresentation.subject`): the to-do a task-list call names, else its
+ * number; who a message went to and what about; the files sent; where a code lookup looked. Null for any other tool.
+ */
+private fun claudeCodeToolSubject(n: String, i: JsonObject): String? {
+    fun s(k: String) = (i[k] as? JsonPrimitive)?.takeUnless { it is JsonNull }?.content?.takeIf(String::isNotEmpty)
+    fun line(t: String?) = t?.let(ToolNaming::firstLine)
+    fun file(k: String) = s(k)?.let(ToolNaming::lastPathComponent)
+    return when (n) {
+        "PowerShell" -> s("description") ?: line(s("command")).orEmpty()
+        "NotebookRead" -> file("file_path") ?: file("notebook_path") ?: ""
+        // "select:WebFetch,Monitor" loads those two by name.
+        "ToolSearch" -> s("query").orEmpty().let { q -> if (q.startsWith("select:")) q.removePrefix("select:").split(',').joinToString(", ") else q }
+        "Monitor" -> s("description") ?: line(s("command")) ?: ((i["ws"] as? JsonObject)?.get("url") as? JsonPrimitive)?.contentOrNull.orEmpty()
+        // The node's name for its run: its `name`, the name in its script's meta, else its script file's (#3436).
+        "Workflow" -> s("name") ?: s("script")?.let { workflowMetaName.find(it)?.groupValues?.get(1) } ?: s("scriptPath")?.let(::workflowScriptName) ?: ""
+        "TaskCreate" -> s("subject") ?: line(s("description")).orEmpty()
+        "TaskUpdate" -> s("subject") ?: s("activeForm") ?: s("taskId")?.let { "#$it" } ?: ""
+        "TaskGet" -> s("taskId")?.let { "#$it" } ?: ""
+        "TaskList", "ListAgents", "CronList", "ExitWorktree" -> ""
+        "TaskStop", "KillShell", "KillBash", "TaskOutput", "BashOutput" -> s("task_id") ?: s("shell_id") ?: s("bash_id") ?: ""
+        // Who it went to and what about: Claude's own one-line summary, else the message's first line.
+        "SendMessage" -> listOfNotNull(s("to") ?: s("recipient"), s("summary") ?: line(s("message") ?: s("content"))
+            ?: ((i["message"] as? JsonObject)?.get("type") as? JsonPrimitive)?.contentOrNull?.let(ToolNaming::humanize)).joinToString(" · ")
+        "ScheduleWakeup" -> line(s("reason")).orEmpty()
+        "CronCreate" -> listOfNotNull(s("cron"), line(s("prompt"))).joinToString(" · ")
+        "CronDelete" -> s("id").orEmpty()
+        "RemoteTrigger" -> listOfNotNull(s("action")?.let(ToolNaming::humanize), s("trigger_id")).joinToString(" · ")
+        // Where it looked: the symbol searched for, else the file and line.
+        "LSP" -> s("query")?.takeIf { s("operation") == "workspaceSymbol" } ?: listOfNotNull(file("filePath"), s("line")).joinToString(":")
+        "EnterWorktree" -> s("name") ?: file("path") ?: ""
+        "SendUserFile" -> {
+            val listed = ((i["files"] ?: i["file_paths"] ?: i["paths"]) as? JsonArray).orEmpty().mapNotNull { f ->
+                (f as? JsonPrimitive)?.takeIf { it.isString }?.content ?: (f as? JsonObject)?.let { o ->
+                    ((o["path"] ?: o["file_path"]) as? JsonPrimitive)?.contentOrNull
+                }
+            } + listOfNotNull(s("file_path"), s("path"))
+            if (listed.isNotEmpty()) listed.joinToString(", ") { ToolNaming.lastPathComponent(it) }
+            else line(s("caption")) ?: ToolNaming.subject(i)
+        }
+        "Artifact" -> s("title") ?: file("file_path") ?: s("url") ?: ""
+        "PushNotification" -> line(s("message")).orEmpty()
+        // One finding by what it says (iOS counts several: "2 findings", not here yet).
+        "ReportFindings" -> ((i["findings"] as? JsonArray)?.singleOrNull() as? JsonObject)?.let { f ->
+            line(((f["short_summary"] ?: f["summary"]) as? JsonPrimitive)?.contentOrNull)
+        }.orEmpty()
+        "WaitForMcpServers" -> ((i["servers"] ?: i["server_names"]) as? JsonArray).orEmpty()
+            .mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }.joinToString(", ").ifEmpty { s("server").orEmpty() }
+        "ListMcpResourcesTool" -> s("server").orEmpty()
+        "ReadMcpResourceTool" -> s("uri") ?: s("server") ?: ""
+        else -> null
+    }
+}
+
+/** The `name: '…'` a workflow script's meta gives it (iOS `workflowName`, the node's `wfNameRe`). */
+private val workflowMetaName = Regex("\\bname:\\s*['\"`]([^'\"`\n]+)['\"`]")
+
+/**
+ * A workflow's name from its script file, as the node has it (iOS `workflowScriptName`): the file's name without ".js"
+ * and the run id Claude Code adds ("…/parity-audit-wf_c1d9daf8.js" is "parity-audit").
+ */
+private fun workflowScriptName(path: String): String {
+    val base = path.split('/', '\\').last().removeSuffix(".js")
+    val cut = base.indexOf("-wf_")
+    return if (cut > 0) base.substring(0, cut) else base
+}
+
+/**
+ * The subject of Persona's own, the computer's, the phone's and mail tools (iOS `ToolPresentation.subject`); null for a
+ * tool none of them is, whose subject comes from its input ([ToolNaming.subject]).
+ */
+private fun namedToolSubject(n: String, field: (String) -> String?, questions: () -> String): String? {
     fun s(k: String) = field(k)?.takeIf(String::isNotEmpty)
     fun firstLine(t: String?) = t?.trim()?.lineSequence()?.firstOrNull().orEmpty()
     return when (n) {
@@ -201,12 +282,11 @@ private fun namedToolSubject(n: String, field: (String) -> String?, questions: (
         "conversation_rename" -> listOfNotNull(s("kind"), s("topic")).joinToString(" | ")
         "conversation_new", "conversation_send" -> firstLine(s("text"))
         "conversation_read", "conversation_archive", "conversation_unarchive" -> s("id").orEmpty().take(8)
-        "Monitor" -> s("description") ?: firstLine(s("command"))
         // ask_user is the assistant's own question tool (docs/assistant/assistant.md); it takes AskUserQuestion's questions.
         "ask_user" -> questions()
         "computer_run", "browser_look" -> s("machine").orEmpty()
         "browser_run" -> listOfNotNull(s("machine"), s("script")?.let(::firstLine)?.takeIf(String::isNotEmpty)).joinToString(" · ")
-        else -> if (n.startsWith("phone_") || n.startsWith("mail_")) n.split('_').drop(1).joinToString(" ") else ""
+        else -> if (n.startsWith("phone_") || n.startsWith("mail_")) n.split('_').drop(1).joinToString(" ") else null
     }
 }
 
@@ -214,8 +294,9 @@ private fun namedToolSubject(n: String, field: (String) -> String?, questions: (
 fun toolDetail(it: Item): String {
     val i = it.toolInput as? JsonObject ?: return ""
     fun s(k: String) = (i[k] as? JsonPrimitive)?.content
+    // A shell's command line ("$ go test ./...", "PS> dir", a Monitor's command or address, iOS `ToolNaming.commandLine`).
+    ToolNaming.commandLine(it.toolName.orEmpty(), i)?.let { return it }
     return when (it.toolName) {
-        "Bash" -> "$ " + s("command").orEmpty()
         "Edit" -> "--- " + s("file_path").orEmpty() + "\n" +
             s("old_string").orEmpty().lines().joinToString("\n") { "- $it" } + "\n" +
             s("new_string").orEmpty().lines().joinToString("\n") { "+ $it" }

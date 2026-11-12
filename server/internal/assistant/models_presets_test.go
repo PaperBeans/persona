@@ -215,6 +215,7 @@ func TestLauncherNameFor(t *testing.T) {
 		{"builtin/deepseek", "deepseek", 1},
 		{"builtin/kimi-intl", "kimi-intl", 1},
 		{"team/My Gateway", "my-gateway", 1},
+		{"team/My -- Gateway", "my-gateway", 1}, // a run of others is one -
 		{"team/9router", "p-9router", 1},
 		{"team/智谱", "provider", 1},
 		{"team/test", "test-2", 2}, // reserved: a /api/v1/launchers/<word> route
@@ -258,12 +259,9 @@ func TestAddFromABuiltinPresetWithOnlyTheKey(t *testing.T) {
 	if v.Name != "glm-2" || v.DisplayName != "智谱（工作）" {
 		t.Fatalf("a second one: %+v", v)
 	}
-	// Without a preset the display name can be Chinese too, the name still has to be given.
+	// Without a preset the display name can be Chinese too (an empty name there: TestAddWithoutAPresetGetsAName).
 	if code, out := postLauncher(t, s, "zh-Hans", `{"name":"mine","display_name":"我的模型","base_url":"https://gw.example.com","model":"m"}`); code != 200 {
 		t.Fatalf("%d %s", code, out)
-	}
-	if code, _ := postLauncher(t, s, "zh-Hans", `{"name":"","display_name":"我的模型","base_url":"https://gw.example.com","model":"m"}`); code != 400 {
-		t.Fatalf("no preset, no name: %d", code)
 	}
 	if code, _ := postLauncher(t, s, "zh-Hans", `{"preset":"builtin/glm","display_name":"a\nb"}`); code != 400 {
 		t.Fatalf("a display name with a line break: %d", code)
@@ -477,20 +475,21 @@ func TestAssignOnlyChangesCategoriesStillAtTheirDefault(t *testing.T) {
 
 func TestProviderTestWithAPresetUsesItsDefaultModel(t *testing.T) {
 	s, f, _ := modelService(t)
-	var model, auth string
+	var model, key, auth string
 	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Model string `json:"model"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		model, auth = body.Model, r.Header.Get("Authorization")
+		model, key, auth = body.Model, r.Header.Get("x-api-key"), r.Header.Get("Authorization")
 		_, _ = w.Write([]byte(`{"type":"message","content":[]}`))
 	}))
 	defer gw.Close()
 	f.presets = []LauncherPreset{{ID: "team/gw", Extension: "team", Name: "GW", Kind: "launcher", BaseURL: gw.URL,
 		Models: []extension.ProviderModel{{ID: "gw-large"}, {ID: "gw-small"}}}}
 	out := probeResult(t, s, "/api/v1/launchers/test", `{"preset":"team/gw","api_key":"`+fakeKey+`"}`)
-	if out["ok"] != true || out["model"] != "gw-large" || model != "gw-large" || auth != "Bearer "+fakeKey {
+	// The preset names no auth, so a provider saved from it launches with x-api-key, and the probe sends that alone.
+	if out["ok"] != true || out["model"] != "gw-large" || model != "gw-large" || key != fakeKey || auth != "" {
 		t.Fatalf("the preset's address and default model: %v (sent %q)", out, model)
 	}
 	out = probeResult(t, s, "/api/v1/launchers/test", `{"preset":"team/gw","api_key":"`+fakeKey+`","model":"gw-small"}`)

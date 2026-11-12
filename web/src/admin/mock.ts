@@ -13,7 +13,7 @@
 import { setTransport } from "./api";
 import { installMockFollower, mockLogs, mockMetrics, mockOverview } from "./mock-metrics";
 import type { CatalogItem, Market } from "../lib/extension-market";
-import type { UsageSource, UsageSources, AdminMachine, AdminExtension, AssistantCards, AdminState, Device, DiscoveredHub, MeshView, MetricsWindow, NetworkView, Overview, Peer, PermissionLine, ExtensionPreview } from "./types";
+import type { UsageSource, UsageSources, AdminMachine, AdminExtension, AdminState, Device, DiscoveredHub, MeshView, MetricsWindow, NetworkView, Overview, Peer, PermissionLine, ExtensionPreview } from "./types";
 
 const SELF = "0d9e8f7a-6b5c-4d3e-8f2a-1b0c9d8e7f6a";
 const OFFICE = "6f1c2a9e-0b7d-4c55-9e3a-2b8f41d07c11";
@@ -159,7 +159,6 @@ export function installMock(scenario: string) {
     { hub_id: "a24d77c0-91e2-4f1b-8f2d-5c0b3e6a9d42", name: "书房 NAS", addresses: ["https://192.0.2.20:18662", "https://[2001:db8::20]:18662"], fp: "q3J8pX0m-Vb7kQ2sT9yH4eW1rL6uN5cD8fG0aZ3iK7o", version: "v1.4.0" },
     { hub_id: "c8e1f5b3-2d6a-4e9f-b7c0-1a3d5f7e9b24", name: "客厅迷你主机", addresses: ["https://192.0.2.31:18662"], fp: "M2nB5vC8xZ1aS4dF7gH0jK3lQ6wE9rT2yU5iO8pA1sD", version: "v1.3.8" },
   ];
-  const assistant: AssistantCards = { persona_view: false };
   const network: NetworkView = {
     listen: ":18660",
     public_url: "http://hub.example.com:18660",
@@ -442,12 +441,6 @@ export function installMock(scenario: string) {
       case "POST /devices/pair":
         if (mesh.role === "member") return memberHub();
         return json({ pair_url: "persona://pair?url=http%3A%2F%2Fhub.example.com%3A18660&token=jp_mock", url: network.public_url, expires_at: later(10), fp: network.tls?.fp, qr: { size: 29, rows: fakeQr() } });
-      case "GET /assistant":
-        return json(assistant);
-      case "PUT /assistant":
-        if (typeof body.persona_view !== "boolean") return fail(400, "bad_request");
-        assistant.persona_view = body.persona_view;
-        return json(assistant);
       case "GET /network":
         return json({ ...network, restart });
       case "PUT /network/access":

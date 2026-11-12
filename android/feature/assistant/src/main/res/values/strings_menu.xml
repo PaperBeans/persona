@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The title menu's items and what they copy (iOS AssistantTopBar, AssistantCopyText). -->
+<resources>
+    <string name="assistant_details">Details</string>
+    <string name="assistant_connection_details">Connection details</string>
+    <string name="assistant_copy_directory">Copy directory</string>
+    <string name="assistant_copy_info">Copy info</string>
+    <string name="assistant_directory_copied">Working directory copied</string>
+    <string name="assistant_info_copied">Chat info copied</string>
+    <string name="assistant_interrupt">Interrupt</string>
+    <string name="assistant_copy_info_quoted">“%1$s”</string>
+    <string name="assistant_copy_info_hub">Persona assistant (Claude on the hub)</string>
+    <string name="assistant_copy_info_chat">Persona assistant chat</string>
+    <string name="assistant_copy_info_chat_named">Persona assistant chat %1$s</string>
+    <string name="assistant_copy_info_session">Session ID: %1$s</string>
+    <string name="assistant_copy_info_machine">Machine: %1$s</string>
+    <string name="assistant_copy_info_machine_id">%1$s (%2$s)</string>
+    <string name="assistant_copy_info_cwd">Working directory: %1$s</string>
+    <string name="assistant_copy_info_launcher">Launcher: %1$s</string>
+    <string name="assistant_copy_info_launcher_model">Launcher: %1$s · Model: %2$s</string>
+    <string name="assistant_copy_info_resume">To continue on that machine: cd %1$s &amp;&amp; claude --resume %2$s</string>
+</resources>

@@ -231,6 +231,9 @@ type FeishuFeatures struct {
 	// ReportSteps: the task report card also carries the execution steps (a finished turn with the stage bar and what the
 	// agent said, interrupted, closed), the card as it was before #3218. Off: only goal-level changes are pushed.
 	ReportSteps bool `json:"report_steps"`
+	// AnswerNewCard: a finished run's answer goes out as a new card and its progress card is folded, so the answer is
+	// the chat's newest message and Lark notifies on it (#5396).
+	AnswerNewCard bool `json:"answer_new_card"`
 }
 
 // FeishuStatus is feishu.status's answer.

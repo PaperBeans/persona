@@ -28,6 +28,8 @@ object PersonaIcons {
     val attachment: PhIcon get() = PhIcons.Paperclip
     /** SF Symbol `chevron.left`. */
     val back: PhIcon get() = PhIcons.CaretLeft
+    /** SF Symbol `gearshape.2`. */
+    val backgroundTask: PhIcon get() = PhIcons.GearSix
     /** SF Symbol `clock.fill`. */
     val backgroundWaiting: PhIcon get() = PhIcons.Clock
     /** SF Symbol `macwindow`. */
@@ -64,6 +66,8 @@ object PersonaIcons {
     val darkMode: PhIcon get() = PhIcons.Moon
     /** SF Symbol `trash`. */
     val delete: PhIcon get() = PhIcons.Trash
+    /** SF Symbol `stethoscope`. */
+    val diagnostics: PhIcon get() = PhIcons.Gauge
     /** SF Symbol `mic`. */
     val dictate: PhIcon get() = PhIcons.Microphone
     /** SF Symbol `mic.fill`. */
@@ -76,6 +80,8 @@ object PersonaIcons {
     val done: PhIcon get() = PhIcons.Check
     /** SF Symbol `arrow.down`. */
     val down: PhIcon get() = PhIcons.ArrowDown
+    /** SF Symbol `pencil.and.scribble`. */
+    val draftReply: PhIcon get() = PhIcons.NotePencil
     /** SF Symbol `pencil`. */
     val edit: PhIcon get() = PhIcons.PencilSimple
     /** SF Symbol `pencil.line`. */
@@ -122,8 +128,12 @@ object PersonaIcons {
     val gitUpstream: PhIcon get() = PhIcons.Cloud
     /** SF Symbol `target`. */
     val goal: PhIcon get() = PhIcons.Target
+    /** SF Symbol `rectangle.3.group.bubble`. */
+    val groupChat: PhIcon get() = PhIcons.ChatsCircle
     /** SF Symbol `paperplane`. */
     val handToAI: PhIcon get() = PhIcons.PaperPlaneTilt
+    /** SF Symbol `checkmark.bubble`. */
+    val handledElsewhere: PhIcon get() = PhIcons.Checks
     /** SF Symbol `heart`. */
     val health: PhIcon get() = PhIcons.Heart
     /** SF Symbol `heart.fill`. */
@@ -236,6 +246,8 @@ object PersonaIcons {
     val privacy: PhIcon get() = PhIcons.ShieldCheck
     /** SF Symbol `shield`. */
     val protection: PhIcon get() = PhIcons.Shield
+    /** SF Symbol `arrow.triangle.pull`. */
+    val pullRequest: PhIcon get() = PhIcons.GitDiff
     /** SF Symbol `arrowshape.down`. */
     val queueDown: PhIcon get() = PhIcons.ArrowDown
     /** SF Symbol `arrowshape.up`. */
@@ -252,10 +264,16 @@ object PersonaIcons {
     val repair: PhIcon get() = PhIcons.Wrench
     /** SF Symbol `arrowshape.turn.up.left`. */
     val reply: PhIcon get() = PhIcons.ArrowBendUpLeft
+    /** SF Symbol `arrow.up.message`. */
+    val reported: PhIcon get() = PhIcons.ChatCircle
     /** SF Symbol `arrow.clockwise`. */
     val retry: PhIcon get() = PhIcons.ArrowClockwise
     /** SF Symbol `play.fill`. */
     val run: PhIcon get() = PhIcons.Play
+    /** SF Symbol `safari`. */
+    val safari: PhIcon get() = PhIcons.GlobeSimple
+    /** SF Symbol `alarm`. */
+    val schedule: PhIcon get() = PhIcons.Clock
     /** SF Symbol `display`. */
     val screen: PhIcon get() = PhIcons.Monitor
     /** SF Symbol `magnifyingglass`. */
@@ -306,6 +324,8 @@ object PersonaIcons {
     val todo: PhIcon get() = PhIcons.ListChecks
     /** SF Symbol `translate`. */
     val translate: PhIcon get() = PhIcons.Translate
+    /** SF Symbol `tray.and.arrow.up`. */
+    val unarchive: PhIcon get() = PhIcons.ArrowUUpLeft
     /** SF Symbol `arrow.uturn.backward`. */
     val undo: PhIcon get() = PhIcons.ArrowUUpLeft
     /** SF Symbol `bell`. */

@@ -152,11 +152,13 @@ import Testing
         let data = try JSONEncoder().encode(registry)
         let writes = Counter()
         let kc = KeychainAccess(read: { $0 == "hubs" ? .found(data) : .missing }, write: { _, _ in writes.add(); return false }, delete: { _ in writes.add() })
-        let api = try await ShareTargets.client(kc) { $0.first }
+        // A @Sendable pick: `client` is nonisolated, and Xcode 26.0 won't send this MainActor test's closure to it (#5364).
+        let first: @Sendable ([HubRoute.Candidate]) async -> HubRoute.Candidate? = { $0.first }
+        let api = try await ShareTargets.client(kc, pick: first)
         #expect(api.config.url == config.url)
         #expect(api.group == "")
         await #expect(throws: HubStore.NotPaired.self) {
-            _ = try await ShareTargets.client(KeychainAccess(read: { _ in .missing }, write: { _, _ in writes.add(); return false }, delete: { _ in writes.add() })) { $0.first }
+            _ = try await ShareTargets.client(KeychainAccess(read: { _ in .missing }, write: { _, _ in writes.add(); return false }, delete: { _ in writes.add() }), pick: first)
         }
         #expect(writes.count == 0)
         // The extension's own reads never write: the real one is read-only.

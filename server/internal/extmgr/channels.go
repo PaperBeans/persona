@@ -136,7 +136,7 @@ func (h *Manager) feishuChannel(ctx context.Context) channel.View {
 		{ID: "main", On: f.Main}, {ID: "cards", On: f.Cards}, {ID: "all_cards", On: f.AllCards},
 		{ID: "pushes", On: f.Pushes}, {ID: "sync", On: f.Sync}, {ID: "agents", On: f.Agents},
 		{ID: "reports", On: f.Reports}, {ID: "board", On: f.Board}, {ID: "only_conclusions", On: f.OnlyConclusions},
-		{ID: "report_steps", On: f.ReportSteps},
+		{ID: "report_steps", On: f.ReportSteps}, {ID: "answer_new_card", On: f.AnswerNewCard},
 		{ID: "workbench", On: f.Workbench},
 	}
 	for i := range out.Features {
@@ -383,6 +383,8 @@ func (h *Manager) configureFeishu(ctx context.Context, enabled *bool, features m
 				f.OnlyConclusions = on
 			case "report_steps":
 				f.ReportSteps = on
+			case "answer_new_card":
+				f.AnswerNewCard = on
 			default:
 				return errors.New(i18n.T(h.botLang(ctx), "hub-channels.no_feature", i18n.Args{"feature": id}))
 			}

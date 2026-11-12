@@ -329,8 +329,7 @@ nonisolated enum ConnectorRow: Hashable, Identifiable {
     }
 }
 
-/// Settings › Connectors' list of the hub's connectors (GET /api/v1/connectors?all=1) and, when the hub has several managers,
-/// each manager's under its name (docs/assistant/managers.md "Grouping"): one id can be there once per manager.
+/// Settings › Connectors: a flat list of the current assistant's connectors.
 @Observable final class ConnectorsListModel {
     struct Deps {
         var api: () -> APIClient?
@@ -338,36 +337,35 @@ nonisolated enum ConnectorRow: Hashable, Identifiable {
     }
 
     private(set) var connectors: [HubConnector] = []
-    /// The hub's managers, read with the list; nil from a hub without a roster.
     private(set) var roster: ManagerRoster?
+    private(set) var manager: String?
     @ObservationIgnored private let deps: Deps
+    @ObservationIgnored private var context: APIClient?
+    @ObservationIgnored private var read = 0
 
     init(deps: Deps = .live) { self.deps = deps }
 
-    /// The hub's connectors under each manager's name (mail and Lark keep their own rows); nil with one manager.
-    var groups: [ManagerGroup<HubConnector>]? {
-        roster?.groups(connectors.filter { $0.id != "mail" && $0.id != "lark" }) { $0.manager }
-    }
+    var groups: [ManagerGroup<HubConnector>]? { nil }
+    func rows(lark: Bool) -> [ConnectorRow] { ConnectorRow.rows(connectors, lark: lark) }
+    func manager(of c: HubConnector) -> String? { manager }
 
-    /// The Connectors section's own rows: mail and Lark, and the hub's connectors too unless they are grouped.
-    func rows(lark: Bool) -> [ConnectorRow] {
-        let all = ConnectorRow.rows(connectors, lark: lark)
-        guard groups != nil else { return all }
-        return all.filter { if case .hub = $0 { false } else { true } }
-    }
-
-    /// The manager a connector's page and requests name: nil for the default's.
-    func manager(of c: HubConnector) -> String? { roster?.named(c.manager) }
-
-    /// An older hub has no connectors (feature "connectors", `listed` false): its list stays as it was. Unreadable, it
-    /// stays too.
     func load(listed: Bool) async {
-        guard listed, let api = deps.api() else { return }
-        let last = roster
-        async let managers = ManagerRoster.read(api, keeping: last)
+        guard let api = deps.api()?.currentAssistantSettings() else { return }
+        if !api.sameSettingsScope(as: context) {
+            connectors = []
+            roster = nil
+        }
+        context = api
+        manager = api.managerID
+        read += 1
+        let revision = read
+        guard listed else { return }
+        async let managers = ManagerRoster.read(api.manager(nil), keeping: roster)
         guard let list = try? await api.connectors(all: true) else { return }
-        roster = await managers
-        connectors = list
+        let roster = await managers
+        guard revision == read, !Task.isCancelled, api.sameSettingsScope(as: deps.api()) else { return }
+        self.roster = roster
+        connectors = ManagerRoster.settingsItems(list, roster: roster, manager: manager, stamped: { $0.manager })
     }
 }
 
@@ -406,11 +404,9 @@ struct ConnectorsSection: View {
     @State private var bot: FeishuBotStatus?
 
     var body: some View {
-        let groups = hub.groups
         Section {
             Group {
-                #if os(iOS) || os(visionOS)
-                // A Mac is a desktop, not the phone: the hub never calls its tools (AppModel.registration).
+                #if os(visionOS)
                 NavigationLink(value: SettingsPage.phoneData) {
                     ConnectorRowLabel(title: ConnectorText.device, symbol: Theme.Icon.thisDevice, value: ConnectorText.deviceSummary())
                 }
@@ -441,23 +437,9 @@ struct ConnectorsSection: View {
         } header: {
             SettingsHeading(String(localized: "Connectors"))
         } footer: {
-            if groups?.isEmpty ?? true { footer }
+            footer
         }
-        .task(id: model.settingsPath.count) { await load() } // again when a page closes: it may have changed them
-        if let groups {
-            ForEach(groups) { group in
-                Section {
-                    Group {
-                        ForEach(group.items, id: \.listKey) { c in hubRow(c) }
-                    }
-                    .bareListRow()
-                } header: {
-                    ManagerHeading(manager: group.manager, count: group.items.count)
-                } footer: {
-                    if group.id == groups.last?.id { footer }
-                }
-            }
-        }
+        .task(id: "\(model.assistantManagerID ?? "")|\(model.settingsPath.count)|\(model.config?.url.absoluteString ?? "")") { await load() }
     }
 
     /// A hub connector's row, opening its manager's copy.
@@ -474,7 +456,10 @@ struct ConnectorsSection: View {
     }
 
     private func load() async {
-        guard let api = model.api else { return }
+        guard let api = model.api?.currentAssistantSettings() else { return }
+        accounts = nil
+        lark = nil
+        bot = nil
         // An older hub has no connectors (feature "connectors"): its list stays as it was.
         let listed = model.hubFeatures.contains("connectors")
         async let a = try? api.mailAccounts()
@@ -482,6 +467,7 @@ struct ConnectorsSection: View {
         async let b = try? api.feishuBot()
         await hub.load(listed: listed)
         let (accs, st, bs) = await (a, l, b)
+        guard !Task.isCancelled, api.sameSettingsScope(as: model.api) else { return }
         if let accs { accounts = accs }
         if let st { lark = st }
         if let bs { bot = bs }
@@ -525,6 +511,7 @@ struct FeishuConnectorView: View {
     @State private var accounts: APIClient.LarkAccounts?
     @State private var loading = true
     @State private var failure: String?
+    @State private var capturedAPI: APIClient?
 
     var body: some View {
         SettingsForm {
@@ -583,7 +570,7 @@ struct FeishuConnectorView: View {
 
             Section {
                 if let source = model.hub?.messagingSources.first, let page = source.settingsUi {
-                    NavigationLink("Message Tweaks") { ExtensionPageView(plugin: source.`extension`, ui: page, title: String(localized: "Message Tweaks")) }
+                    NavigationLink("Message Tweaks") { ExtensionPageView(plugin: source.`extension`, ui: page, title: String(localized: "Message Tweaks"), manager: capturedAPI?.managerID) }
                 } else if model.api?.messagingSource == nil {
                     NavigationLink("Message Tweaks") { LarkMessageDisplaySettingsView() }
                 } else {
@@ -659,11 +646,13 @@ struct FeishuConnectorView: View {
     }
 
     private func load() async {
+        if capturedAPI == nil { capturedAPI = model.api?.currentAssistantSettings() }
+        guard let api = capturedAPI else { return }
         loading = true
         defer { loading = false }
-        async let list = try? await model.api?.larkAccounts() // a hub from before several accounts: none
+        async let list = try? await api.larkAccounts() // a hub from before several accounts: none
         do {
-            status = try await model.api?.larkStatus()
+            status = try await api.larkStatus()
             failure = nil
         } catch {
             failure = error.shown.map { String(localized: "Couldn't get Lark's status: \($0)") }
@@ -690,11 +679,16 @@ struct HubConnectorView: View {
     /// Its source subscriptions (#2041): the entry row's counts, nil while it is hidden.
     @State private var subscriptions: SubscriptionCounts?
 
+    init(id: String, manager: String? = nil) {
+        self.id = id
+        self.manager = manager ?? AppModel.shared.assistantManagerID
+    }
+
     var body: some View {
         SettingsForm {
             // A connector that is only a channel's binding (WeChat's): the channel is where it is set up.
             if ChannelDirectory.shared.list.contains(where: { $0.id == id && $0.source == "plugin" }) {
-                ChannelLinkSection(channelID: id)
+                ChannelLinkSection(channelID: id, manager: manager)
             }
             Section {
                 HStack(spacing: Theme.Space.m) {

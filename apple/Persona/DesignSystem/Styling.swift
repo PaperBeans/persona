@@ -208,10 +208,6 @@ extension View {
 }
 
 extension Theme {
-    /// A path linked in the user's bubble (underlined): the accent, as links in replies, on a pale bubble;
-    /// on a colored one (white words) its words' color, where the accent would not show.
-    static var userBubbleLink: Color { Quote.tint }
-
     /// The line a file was opened at (`path:12`), marked across the code view.
     static var lineFocus: Color { accent.opacity(Quote.flashOpacity) }
 

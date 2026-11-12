@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_exchange_header">%1$s → %2$s</string>
+    <string name="chat_exchange_me">自分</string>
+    <string name="chat_exchange_interrupted">中断</string>
+    <string name="chat_report_question">Persona に確認：%1$s</string>
+    <string name="chat_report_blocked">行き詰まり：%1$s</string>
+    <string name="chat_report_done">完了の報告：%1$s</string>
+    <string name="chat_report_step_of">ステップ %1$d/%2$d · %3$s</string>
+    <string name="chat_report_step">ステップ %1$d · %2$s</string>
+    <string name="chat_supervision_record">監督記録</string>
+    <string name="chat_supervision_record_live">監督記録 · 処理中</string>
+    <string name="chat_tasks_message_edit">編集</string>
+    <string name="chat_tasks_message_edit_done">完了</string>
+</resources>

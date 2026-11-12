@@ -181,6 +181,24 @@ class NodeArtifactTests(unittest.TestCase):
                 artifacts.publish_nodes(self.root, self.staged, self.manifest, health(self.manifest))
         self.assertEqual(self.pointer.resolve(), old)
 
+    def test_native_self_check_accepts_capabilities_beside_its_identity(self):
+        announced = json.loads(native_result(self.manifest))
+        announced['resident_handover'] = True  # nodeupdate.Self capabilities grow from release to release
+        with patch.object(artifacts.subprocess, 'check_output', return_value=json.dumps(announced).encode()):
+            destination = artifacts.publish_nodes(self.root, self.staged, self.manifest, health(self.manifest))
+        self.assertEqual(self.pointer.resolve(), destination)
+
+    def test_native_self_check_still_refuses_any_identity_difference(self):
+        right = json.loads(native_result(self.manifest))
+        answers = [dict(right, os='darwin'), dict(right, arch='arm64'), dict(right, program='persona-node'),
+                   {key: value for key, value in right.items() if key != 'version'}, [right]]
+        for answer in answers:
+            with self.subTest(answer=answer), \
+                    patch.object(artifacts.subprocess, 'check_output', return_value=json.dumps(answer).encode()):
+                with self.assertRaisesRegex(ValueError, 'self-check differs'):
+                    artifacts.publish_nodes(self.root, self.staged, self.manifest, health(self.manifest))
+            self.assertFalse(self.pointer.exists())
+
     def test_immutable_manifest_binary_and_version_cannot_change(self):
         destination = self.publish()
         for mutation in ['manifest', 'binary', 'version']:

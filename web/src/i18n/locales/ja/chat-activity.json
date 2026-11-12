@@ -1,17 +1,10 @@
 {
-  "label_loop": "ループ中、{loop}",
-  "label_background_other": "バックグラウンドタスク{count}件",
-  "label_loop_and_background_other": "ループ中、{loop}、バックグラウンドタスク{count}件",
-  "open_label": "{label}。クリックして表示",
-  "background_chip": "バックグラウンド",
-  "title_loop": "ループ",
-  "title_background": "バックグラウンドタスク",
-  "title_both": "ループとバックグラウンドタスク",
-  "looping": "ループ中",
-  "looping_every": "ループ中 · {cadence}",
+  "section_running": "実行中",
+  "section_completed": "完了",
+  "empty": "このセッションにバックグラウンドタスクはまだありません",
+  "back": "戻る",
+  "loop": "ループ",
   "stop_loop": "ループを停止",
   "stop_loop_explain": "エージェントにメッセージを送り、次の起動を予約しないようにします。実行中の回は最後まで続きます。",
-  "background_count": "バックグラウンドタスク{count}",
-  "copy_command": "コマンドをコピー",
-  "view_output": "出力を表示"
+  "copy_command": "コマンドをコピー"
 }

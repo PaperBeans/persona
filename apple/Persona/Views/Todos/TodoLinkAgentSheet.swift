@@ -21,11 +21,26 @@ struct TodoLinkAgentSheet: View {
         return currentTodoID == nil ? String(localized: "Link to To-Do") : String(localized: "Move to Another To-Do")
     }
 
+    /// The computer the agent or the project is on: its to-dos are its assistant's (`owner`).
+    private var machine: Machine? {
+        let id = switch target {
+        case .agent(let machine, _, _): machine
+        case .space(let project): project.machineID
+        }
+        return model.namedMachine(model.hubRef(id))
+    }
+
+    /// Whose to-dos are offered and whose a new one is: the assistant's whose computer the agent or the project is on
+    /// (another assistant's agent opened from a notification is linked to its own assistant's to-dos, not to the
+    /// current one's); the current assistant's while that computer isn't known.
+    private var owner: TodoStore.Owner { machine.map { TodoStore.Owner.of($0.manager) } ?? .current }
+
     private var openTodos: [TodoItem] {
         let appModel: AppModel = model
         let group = appModel.hub?.group ?? ""
         let sessions = TodosLogic.linkedSessions(of: store.todos, hubGroup: group, session: appModel.session)
-        return TodosLogic.sortTodos(store.openTodos, lookup: TodosLogic.makeSessionLookup(sessions))
+        let offered = machine.map { store.openTodos(of: $0.manager) } ?? store.openTodos
+        return TodosLogic.sortTodos(offered, lookup: TodosLogic.makeSessionLookup(sessions))
     }
 
     var body: some View {
@@ -122,7 +137,7 @@ struct TodoLinkAgentSheet: View {
         let title = draft.newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         submit {
-            if let message = try await store.createAndLink(title: title, target: target) {
+            if let message = try await store.createAndLink(title: title, target: target, owner: owner) {
                 AppModel.shared.toast = Toast(message, style: .error)
             }
         }

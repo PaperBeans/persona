@@ -97,7 +97,7 @@ struct SourceMessage: View, Equatable {
             }
             if folds {
                 Button {
-                    toggleInPlace(pin, pinKey, animation: Theme.Motion.state) { open.toggle() }
+                    toggleInPlace(pin, pinKey, animation: Theme.Motion.state, closing: open) { open.toggle() }
                 } label: {
                     Text(open ? String(localized: "Collapse") : String(localized: "Expand"))
                         .font(Theme.Font.captionStrong)

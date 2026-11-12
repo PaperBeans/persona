@@ -134,7 +134,11 @@ struct TaskSentList: View {
     var conversation: String
     @State private var open = false
     @State private var shown: String?
+    @State private var unfold = Unfolding()
+    @Environment(\.chatPin) private var pin
     private var store: TasksStore { .shared }
+    /// The chat keeps the tapped line where it is while what it opens comes in under it (#3757).
+    private var headKey: String { "sent-list-" + todoID }
 
     var body: some View {
         let sent = SentToAgents.sent(store.feed(conversation), todo: todoID)
@@ -142,7 +146,7 @@ struct TaskSentList: View {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Button {
                     Haptics.tap()
-                    withAnimation(Theme.Motion.state) { open.toggle() }
+                    toggleInPlace(pin, headKey, animation: Theme.Motion.state, unfold: $unfold, closing: open) { open.toggle() }
                 } label: {
                     HStack(spacing: Theme.Space.xs) {
                         ThemedIcon(Theme.Icon.routeToTask).font(Theme.Font.labelStrong)
@@ -160,8 +164,10 @@ struct TaskSentList: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("task-sent")
                 .accessibilityValue(open ? String(localized: "Expanded") : String(localized: "Collapsed [Assistant Sidebar e64447]"))
+                .chatPinned(headKey)
                 if open {
                     ForEach(sent) { entry($0) }
+                        .unfolding(unfold)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
@@ -174,7 +180,9 @@ struct TaskSentList: View {
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
             Button {
                 Haptics.tap()
-                withAnimation(Theme.Motion.state) { shown = isOpen ? nil : item.id }
+                toggleInPlace(pin, "sent-entry-" + item.id, animation: Theme.Motion.state, closing: isOpen) {
+                    shown = isOpen ? nil : item.id
+                }
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                     Text(AssistantScheduleText.hm(item.at))
@@ -199,6 +207,7 @@ struct TaskSentList: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("task-sent-entry")
+            .chatPinned("sent-entry-" + item.id)
             if isOpen { AgentSentText(text: text).transition(.opacity) }
         }
         .padding(.horizontal, Theme.Space.m)

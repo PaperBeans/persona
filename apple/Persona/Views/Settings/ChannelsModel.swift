@@ -125,7 +125,7 @@ enum ChannelText {
     }
 
     /// The settings page a channel's `settings_url` opens; nil for one this app does not know.
-    static func page(_ url: String?) -> SettingsPage? {
+    static func page(_ url: String?, manager: String? = nil) -> SettingsPage? {
         guard let url, url.hasPrefix("settings/") else { return nil }
         let rest = url.dropFirst("settings/".count)
         switch rest {
@@ -138,10 +138,10 @@ enum ChannelText {
             // settings/extensions/<id>, or settings/plugins/<id> as hubs from before the rename write it (#1844).
             for prefix in ["extensions/", "plugins/"] where rest.hasPrefix(prefix) {
                 let id = String(rest.dropFirst(prefix.count))
-                if !id.isEmpty, !id.contains("/") { return .plugin(id) }
+                if !id.isEmpty, !id.contains("/") { return .plugin(id, manager: manager) }
             }
             if rest.hasPrefix("connectors/"), case let id = String(rest.dropFirst("connectors/".count)), !id.isEmpty, !id.contains("/") {
-                return .connector(id)
+                return .connector(id, manager: manager)
             }
             return nil
         }
@@ -211,22 +211,28 @@ enum ChannelText {
     private(set) var loading = false
     private(set) var error: String?
     @ObservationIgnored private let deps: Deps
+    @ObservationIgnored private var context: APIClient?
+    @ObservationIgnored private var read = 0
+    private(set) var sections: [ChannelText.Section] = []
 
     init(deps: Deps = .live) { self.deps = deps }
 
-    var sections: [ChannelText.Section] { ChannelText.sections(channels ?? []) }
-
     func load() async {
-        guard !loading else { return }
+        guard let api = deps.api()?.currentAssistantSettings() else { return }
+        if !api.sameSettingsScope(as: context) { channels = nil; sections = []; error = nil }
+        context = api
+        read += 1
+        let revision = read
         loading = true
-        defer { loading = false }
+        defer { if revision == read { loading = false } }
         do {
-            guard let api = deps.api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
             let l = try await api.channels()
+            guard revision == read, !Task.isCancelled, api.sameSettingsScope(as: deps.api()) else { return }
             channels = l
-            ChannelDirectory.shared.update(l)
+            sections = ChannelText.sections(l)
             error = nil
         } catch {
+            guard revision == read, !Task.isCancelled, api.sameSettingsScope(as: deps.api()) else { return }
             self.error = error.localizedDescription
         }
     }
@@ -241,6 +247,7 @@ enum ChannelText {
     }
 
     let id: String
+    let manager: String?
     private(set) var detail: HubChannelDetail?
     private(set) var loading = false
     private(set) var busy = false
@@ -249,10 +256,13 @@ enum ChannelText {
     private(set) var testResult: String?
     @ObservationIgnored private let deps: Deps
 
-    init(id: String, deps: Deps = .live) {
+    init(id: String, manager: String? = nil, deps: Deps = .live) {
         self.id = id
+        self.manager = manager
         self.deps = deps
     }
+
+    private var api: APIClient? { deps.api()?.manager(manager) }
 
     var channel: HubChannel? { detail?.channel }
 
@@ -287,7 +297,7 @@ enum ChannelText {
     }
 
     func test() async {
-        guard let api = deps.api() else { return }
+        guard let api else { return }
         busy = true
         defer { busy = false }
         do {
@@ -308,7 +318,7 @@ enum ChannelText {
 
     @discardableResult private func run(_ call: @escaping (APIClient) async throws -> HubChannelDetail) async -> Bool {
         do {
-            guard let api = deps.api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
+            guard let api else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
             detail = try await call(api)
             error = nil
             return true

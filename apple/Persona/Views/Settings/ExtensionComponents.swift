@@ -61,10 +61,14 @@ struct ExtensionComponentRowLabel<Trailing: View>: View {
             .clipShape(.circle)
             .accessibilityHidden(true)
         } else if let i = row.icon, !i.isEmpty {
+            // The icon and its column stop growing at the largest standard size, where the glyph still fits: past it the
+            // glyph followed the text to 3 × while the column stopped at `sizeScale`'s 1.6 ×, and spilled into the
+            // title and past the inset (#4841). The title keeps growing; the default sizes are unchanged.
             ThemedIcon(ExtensionUIStyle.icon(i))
                 .font(Theme.Font.heading)
                 .foregroundStyle(Theme.accent)
                 .scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .accessibilityHidden(true)
         }
     }
@@ -349,7 +353,7 @@ enum ExtensionOutcome {
         } else if let t = o.toast {
             app.toast = Toast(t, style: .success)
         }
-        if let url = o.url, !app.openIfExtensionSettings(url) { link.wrappedValue = LinkTarget(url: url) }
+        if let url = o.url, !app.openIfExtensionSettings(url), !app.openIfAsk(url) { link.wrappedValue = LinkTarget(url: url) }
     }
 }
 
@@ -366,6 +370,24 @@ struct ExtensionChartItem: View {
     /// The x axis: the first series' labels (the others line up with them).
     private var labels: [String] { series.first?.points.map(\.label) ?? [] }
 
+    private var mapped: [DataChart.Series] {
+        series.enumerated().map { i, s in
+            DataChart.Series(name: s.name?.isEmpty == false ? s.name! : String(localized: "Series \(i + 1)"),
+                             color: ExtensionUIStyle.series(s.tone), values: s.points.map(\.value),
+                             displays: s.points.map(\.display))
+        }
+    }
+
+    /// A stacked bar of one category (a single day's parts): it is a horizontal segmented bar, not a lone column.
+    private var singleShare: [SegmentedShareBar.Share]? {
+        let mapped = mapped
+        guard DataChart.isSingleCategoryShare(kind: item.kind == "line" ? .line : .bar, stacked: item.stacked == true, series: mapped) else { return nil }
+        let total = mapped.reduce(0) { $0 + $1.values[0] }
+        return mapped.enumerated().map { i, s in
+            SegmentedShareBar.Share(id: i, color: s.color ?? DataChart.hues[i % DataChart.hues.count], ratio: s.values[0] / total)
+        }
+    }
+
     var body: some View {
         if !labels.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -375,13 +397,12 @@ struct ExtensionChartItem: View {
                 if item.kind == ExtensionChartKind.donut || item.kind == ExtensionChartKind.pie, let s = series.first {
                     RingChart(parts: s.points.map { RingChart.Part(label: $0.label, value: $0.value, display: $0.display ?? format($0.value)) },
                               center: item.center, pie: item.kind == ExtensionChartKind.pie)
+                } else if let shares = singleShare {
+                    if series.count > 1 { shareLegend }
+                    SegmentedShareBar(shares: shares)
                 } else {
                 DataChart(kind: item.kind == "line" ? .line : .bar, labels: labels,
-                          series: series.enumerated().map { i, s in
-                              DataChart.Series(name: s.name?.isEmpty == false ? s.name! : String(localized: "Series \(i + 1)"),
-                                               color: ExtensionUIStyle.series(s.tone), values: s.points.map(\.value),
-                                               displays: s.points.map(\.display))
-                          },
+                          series: mapped,
                           stacked: item.stacked == true, format: format, compact: compact)
                 // Drawn again with other values, the bars and lines move to them (#37).
                 .animation(reduceMotion ? nil : Theme.Motion.layout, value: item.series)
@@ -391,6 +412,20 @@ struct ExtensionChartItem: View {
                 }
             }
             .padding(.vertical, Theme.Space.xs)
+        }
+    }
+
+    /// The color and name of each share, one line that wraps on a narrow card (the rows below carry the values).
+    private var shareLegend: some View {
+        let shares = singleShare ?? []
+        return HStack(spacing: Theme.Space.m) {
+            ForEach(Array(series.enumerated()), id: \.offset) { i, s in
+                HStack(spacing: Theme.Space.xs) {
+                    Circle().fill(shares.first { $0.id == i }?.color ?? DataChart.hues[i % DataChart.hues.count])
+                        .scaledFrame(width: Theme.Size.dot, height: Theme.Size.dot)
+                    Text(s.name?.isEmpty == false ? s.name! : String(localized: "Series \(i + 1)")).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
         }
     }
 

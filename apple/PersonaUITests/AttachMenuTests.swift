@@ -1,10 +1,11 @@
 import XCTest
 
 /// The composer's + (#3225), in a conversation and in a new one (#3805). On the iPhone a tap opens the photo / file panel
-/// and touch and hold opens a menu of what the panel's More tab lists, in the same order: Voice Chat, Take Photo,
-/// Mention a File or Session, an Agent's Quick Commands in a submenu, then extension prompts. A new conversation has the
-/// same, less what needs a conversation (Voice Chat). The iPad's + is that menu, with Photos and Files first. Against
-/// scripts/mock/mock_hub.py (PERSONA_MOCK_HUB); `-showCameraRows YES` lists Take Photo, since the simulator has no camera.
+/// and touch and hold opens a menu of what the panel's More tab lists, in the same order: Voice Chat, Take Photo, Scan
+/// Document (#3720), (Persona's main conversation) Meeting Recording (#3723), Mention a File or Session, an Agent's Quick
+/// Commands in a submenu, then extension prompts. A new conversation has the same, less what needs a conversation (Voice
+/// Chat). The iPad's + is that menu, with Photos and Files first. Against scripts/mock/mock_hub.py (PERSONA_MOCK_HUB);
+/// `-showCameraRows YES` lists Take Photo and Scan Document, since the simulator can't take or scan.
 /// TEST_RUNNER_PERSONA_SHOTS=<dir> keeps screenshots, in light and dark (`-ui.scheme`) and in the BeautifulUI style too.
 /// Voice Chat is in the menu on the iPad too, as it was before (`VoicePlatform.phone`: iPhone, iPad and Vision Pro, #4896).
 final class AttachMenuTests: XCTestCase {
@@ -33,10 +34,11 @@ final class AttachMenuTests: XCTestCase {
             for scheme in schemes {
                 let app = launch(Self.persona, scheme: scheme, style: style)
                 openMenu(app)
-                for id in ["composer-menu-camera", "composer-menu-mention", "composer-menu-voice"] {
+                for id in ["composer-menu-camera", "composer-menu-scan", "composer-menu-mention", "composer-menu-voice", "composer-menu-meeting"] {
                     XCTAssertTrue(item(app, id).waitForExistence(timeout: 5), "no \(id) in the menu:\n\(app.debugDescription)")
                 }
                 XCTAssertFalse(commands(app).exists, "Quick Commands in Persona's conversation")
+                XCTAssertTrue(addContext(app).exists, "no Add as Context in Persona's menu:\n\(app.debugDescription)")
                 photosAndFiles(app)
                 shot("attach-menu-persona", scheme, style)
                 mention(app)
@@ -51,10 +53,11 @@ final class AttachMenuTests: XCTestCase {
             for scheme in schemes {
                 let app = launch(Self.new, scheme: scheme, style: style)
                 openMenu(app)
-                for id in ["composer-menu-camera", "composer-menu-mention"] {
+                for id in ["composer-menu-camera", "composer-menu-scan", "composer-menu-mention"] {
                     XCTAssertTrue(item(app, id).waitForExistence(timeout: 5), "no \(id) in the menu:\n\(app.debugDescription)")
                 }
                 XCTAssertFalse(item(app, "composer-menu-voice").exists, "Voice Chat before the conversation exists")
+                XCTAssertFalse(item(app, "composer-menu-meeting").exists, "Meeting Recording outside the main conversation")
                 XCTAssertFalse(commands(app).exists, "Quick Commands in a new conversation")
                 photosAndFiles(app)
                 shot("attach-menu-new", scheme, style)
@@ -72,7 +75,10 @@ final class AttachMenuTests: XCTestCase {
             let quick = commands(app)
             XCTAssertTrue(quick.waitForExistence(timeout: 5), "no Quick Commands:\n\(app.debugDescription)")
             XCTAssertTrue(item(app, "composer-menu-mention").exists, "no Mention:\n\(app.debugDescription)")
+            XCTAssertTrue(item(app, "composer-menu-scan").exists, "no Scan Document:\n\(app.debugDescription)")
+            XCTAssertTrue(addContext(app).exists, "no Add as Context in an Agent's menu:\n\(app.debugDescription)")
             XCTAssertTrue(item(app, "composer-menu-voice").exists, "no Voice Chat in an Agent's menu")
+            XCTAssertFalse(item(app, "composer-menu-meeting").exists, "Meeting Recording in an Agent's menu")
             XCTAssertFalse(item(app, "attach-clear").exists, "the commands are not folded")
             shot("attach-menu-agent", scheme)
             quick.tap()
@@ -100,16 +106,53 @@ final class AttachMenuTests: XCTestCase {
                 let more = app.buttons["attach-tab-more"]
                 XCTAssertTrue(more.waitForExistence(timeout: 5), "a tap did not open the panel (\(name)):\n\(app.debugDescription)")
                 more.tap()
-                for id in ["composer-menu-camera", "composer-menu-mention"] {
+                for id in ["composer-menu-camera", "composer-menu-scan", "composer-menu-mention"] {
                     XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5), "no \(id) in More (\(name)):\n\(app.debugDescription)")
                 }
                 XCTAssertEqual(app.buttons["composer-menu-voice"].exists, name != "new", "Voice Chat in More (\(name))")
-                // The list draws what is on screen: the first command, not /clear at the bottom.
+                XCTAssertEqual(app.buttons["composer-menu-meeting"].exists, name == "persona", "Meeting Recording in More (\(name))")
+                // The list draws what is on screen: the first command, not /clear at the bottom. An Agent's list is
+                // longer than the resting sheet: tapping the tab shown opens it all the way.
                 let command = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'attach-command-'")).firstMatch
+                if name == "agent", !command.waitForExistence(timeout: 2) {
+                    more.tap()
+                    _ = command.waitForExistence(timeout: 5)
+                }
                 XCTAssertEqual(command.exists, name == "agent", "the commands in More (\(name))")
                 shot("attach-panel-more-\(name)", scheme, style)
                 app.terminate()
             }
+        }
+    }
+
+    /// Add as Context › To-do… (#3721): the picker lists the hub's to-dos; a pick goes over the box as a quote.
+    @MainActor func testAddAsContextPutsAToDoOverTheBox() throws {
+        guard !isPad else { throw XCTSkip("the iPhone's panel; the iPad's menu lists the same rows") }
+        for scheme in schemes {
+            let app = launch(Self.persona, scheme: scheme)
+            let plus = plusButton(app)
+            sleep(2)
+            plus.tap()
+            let more = app.buttons["attach-tab-more"]
+            XCTAssertTrue(more.waitForExistence(timeout: 5), "no panel:\n\(app.debugDescription)")
+            more.tap()
+            let todo = app.buttons["attach-context-todo"]
+            XCTAssertTrue(todo.waitForExistence(timeout: 5), "no To-do… in More:\n\(app.debugDescription)")
+            shot("attach-panel-more-context", scheme)
+            todo.tap()
+            let row = app.buttons["context-pick-row"].firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 10), "the picker lists no to-dos:\n\(app.debugDescription)")
+            shot("context-picker-todo", scheme)
+            row.tap()
+            let quote = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "待办 · ")).firstMatch
+            XCTAssertTrue(quote.waitForExistence(timeout: 10), "the pick is not over the box:\n\(app.debugDescription)")
+            XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "引用选中的文字")).firstMatch.exists,
+                           "a to-do is quoted as a whole, not as selected text")
+            shot("context-picked-todo", scheme)
+            // The conversation keeps its quotes: the pick goes again, or the next tests' screenshots show it.
+            app.buttons["取消引用"].firstMatch.tap()
+            sleep(2) // drafts are saved a moment later
+            app.terminate()
         }
     }
 
@@ -167,10 +210,15 @@ final class AttachMenuTests: XCTestCase {
 
     /// A menu row by its identifier, or by its title where UIKit's menu drops the identifier (zh-Hans, as the tests run).
     @MainActor private func item(_ app: XCUIApplication, _ id: String) -> XCUIElement {
-        let titles = ["composer-menu-voice": "语音对话", "composer-menu-camera": "拍照", "composer-menu-mention": "提及文件或会话",
-                      "attach-clear": "清空上下文"]
+        let titles = ["composer-menu-voice": "语音对话", "composer-menu-camera": "拍照", "composer-menu-scan": "扫描文稿",
+                      "composer-menu-mention": "提及文件或会话", "composer-menu-meeting": "会议录音", "attach-clear": "清空上下文"]
         let title = titles[id] ?? (id.hasPrefix("attach-command-") ? String(id.dropFirst("attach-command-".count)) : id)
         return app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH %@", id, title)).firstMatch
+    }
+
+    /// The Add as Context submenu (#3721), by its title.
+    @MainActor private func addContext(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "作为上下文")).firstMatch
     }
 
     /// The Quick Commands submenu: by its title too, as a submenu may not carry its identifier through UIKit's menu.

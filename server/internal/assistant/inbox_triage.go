@@ -141,6 +141,11 @@ func (s *Service) askTriage(ctx context.Context, it *InboxItem, timeout time.Dur
 	b.mu.Lock()
 	last, input, rules := it.Last, b.triageInput(it), strings.TrimSpace(it.Rules)
 	b.mu.Unlock()
+	return last, s.triageModel(ctx, input, rules, timeout)
+}
+
+// triageModel asks the triage model about one item's prompt input under rules (its source's; "" the Inbox's).
+func (s *Service) triageModel(ctx context.Context, input, rules string, timeout time.Duration) (v triageVerdict) {
 	if rules == "" {
 		rules = s.inboxConfig(ctx).Rules
 	}
@@ -175,7 +180,7 @@ func (s *Service) askTriage(ctx context.Context, it *InboxItem, timeout time.Dur
 		v.state, v.why = triageFailed, i18n.T(l, "assistant-inbox_triage.failed")
 	}
 	v.err = err
-	return last, v
+	return v
 }
 
 // ruleTier is the fallback tier, without a model: people talking to me need me, groups are FYI, bots and lists are

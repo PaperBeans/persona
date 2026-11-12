@@ -22,6 +22,8 @@
     <string name="chat_mention_used_file">このセッションで使ったファイル</string>
     <string name="chat_mention_session_detail">%1$s · コンテキストとして</string>
     <string name="chat_mention_no_match">一致するファイルやセッションはありません</string>
+    <string name="chat_mention_reading_folder">フォルダを読み込み中…</string>
+    <string name="chat_mention_no_match_folder">このフォルダに一致する項目はありません</string>
     <string name="chat_mention_quote_session">別のセッション：%1$s（%2$s）</string>
     <string name="chat_mention_quote_cwd">フォルダ：%1$s</string>
     <string name="chat_mention_quote_last">最近の発言：%1$s</string>

@@ -79,12 +79,44 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 		if a, ok := n.agent(id); ok && a.Agent != "" {
 			kind = a.Agent
 		}
+		// The switch the user picked, which their own message carries out (launcher_switch.go, engine_switch.go), read
+		// once for the turn. One kept with the record waits for the hub's copy of it after a node restart.
+		var ps *proto.PendingSwitch
+		if opts.ApplySwitch && (kind == "claude" || kind == "codex") {
+			_ = n.state.loaded(ctx)
+			ps = n.pendingSwitch(id)
+		}
+		if ps != nil && ps.Agent != "" {
+			// The user's own message carries out the switch to the other engine they picked (engine_switch.go): the
+			// agent is quit and the other engine started in the same terminal with the message behind a handoff, before
+			// a Codex's app-server would take the message. While the agent is busy the message goes to it as always and
+			// the switch waits; a failed switch is dropped with nothing typed.
+			if handled, err := n.applyEngineSwitch(ctx, id, pane, kind, *ps, text, images, opts); handled {
+				return err
+			}
+		}
 		if kind == "codex" && n.codexJoined(id) {
 			// On its app-server (codex_daemon.go): a turn or a steer, nothing typed — a draft in its box stays as it is.
 			return n.sendCodex(ctx, id, text, images)
 		}
 		if err := n.checkPaneFor(ctx, pane, kind, opts); err != nil { // sendsafe.go
 			return err
+		}
+		if kind == "claude" && ps != nil && ps.Agent == "" { // one to the other engine waits, above
+			// The user's own message carries out the switch to another launcher they picked (launcher_switch.go): the
+			// agent is quit and resumed there, in the same terminal, and the message goes to it. While the agent is busy
+			// the message goes on the launcher it runs on and the switch waits; a failed switch is dropped with nothing
+			// typed.
+			switched := false
+			if pane, switched, err = n.applySwitch(ctx, id, pane, *ps); err != nil {
+				return err
+			}
+			// The new claude came up behind a dialog of its own (start returns early then): the text would answer it.
+			if switched {
+				if err := n.checkPane(ctx, pane, "claude", ""); err != nil {
+					return err
+				}
+			}
 		}
 	} else {
 		// A session of the desktop app's sidebar that nothing runs: the app opens it, and the message goes to its inbox,
@@ -133,6 +165,23 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 			}
 		}
 	}
+	// A switch to Claude Code whose first message a dialog held back (engine_switch.go): its handoff goes in front of
+	// this message, whoever sends it, and is cleared once the message is in. One the session got a message since (typed
+	// at the computer, or one sent with it whose arrival was not confirmed) or that it works without is dropped instead:
+	// put in front again, it would come twice or after the conversation went on.
+	var handoff *pendingHandoff
+	if kind == "claude" {
+		if st, ok := n.state.get(id); ok && st.PendingHandoff != nil {
+			handoff = st.PendingHandoff
+			if a, _ := n.agent(id); a.AgentStatus == proto.StatusWorking || n.promptedSince(id, handoff.At) {
+				n.logf("session %s: its pending handoff is dropped: the session got a message since", id)
+				n.dropHandoff(id, handoff)
+				handoff = nil
+			} else {
+				text = handoff.message(text)
+			}
+		}
+	}
 	paths, err := n.saveImages(images)
 	if err != nil {
 		return err
@@ -161,7 +210,11 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 		n.typing.typed(pane, text)
 		n.lostFirst.clear(id) // the message the start could not deliver went in now, or another one
 		if kind == "claude" {
-			return n.afterPrompt(ctx, id, pane, text, typedAt, watch) // sendsafe_submit.go
+			err := n.afterPrompt(ctx, id, pane, text, typedAt, watch) // sendsafe_submit.go
+			if handoff != nil && err == nil {
+				n.dropHandoff(id, handoff) // in with this message (not when that is not known: promptedSince tells then)
+			}
+			return err
 		}
 	}
 	return uncertain(err)
@@ -283,6 +336,9 @@ func keepImagePaths(text string) string {
 }
 
 func (n *Node) keys(ctx context.Context, id string, keys []string, text string) error {
+	if err := n.switchingRefusal(id); err != nil { // a launcher switch, maybe on the last connection's Node
+		return err
+	}
 	n.dropSuggestion(id) // whatever goes in replaces or sends it
 	pane, err := n.paneFor(ctx, id)
 	if err != nil {

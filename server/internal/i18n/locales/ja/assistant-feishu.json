@@ -148,5 +148,6 @@
   "source_noreply_choice": "依頼の場所には返信しない",
   "source_report_unreachable": "結果を依頼の場所に投稿できませんでした：{error}",
   "source_report_notice": "{minutes}分後に元のメッセージの下へ投稿します：{text}（取り消すには /noreply を送ってください）",
-  "source_report_notice_chat": "{minutes}分後に元のメッセージの下へ投稿します：{text}（取り消すにはこのメッセージに /noreply と返信してください）"
+  "source_report_notice_chat": "{minutes}分後に元のメッセージの下へ投稿します：{text}（取り消すにはこのメッセージに /noreply と返信してください）",
+  "answer_below": "回答は下にあります"
 }

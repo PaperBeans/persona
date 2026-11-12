@@ -87,6 +87,10 @@ func (n *Node) stoppable(id string, retire bool) (unlock func(), a host.Agent, o
 		return no(notRetirable, "assistant conversations are not stopped")
 	case n.externalCodex(id) || h != nil || known || terminalOnly:
 		return no(noTerminal, "this session belongs to another tool")
+	case n.restarting(id):
+		// Refused at once rather than after the lock below, which a message carrying out a launcher switch holds for
+		// minutes: stopping the agent it starts then would leave the switch for nothing (launcher_switch.go).
+		return no(notRetirable, "still starting")
 	}
 	unlock = n.typing.lock(id) // not while a message is on its way in (a send may be resuming it right now)
 	fail := func(code, why string) (func(), host.Agent, bool, error) {
@@ -236,9 +240,7 @@ func (n *Node) resumeOtherWith(ctx context.Context, id string, st sessionState, 
 		if argv, err = n.codexReadonlyArgs(st.Launcher, argv, st.AppMode); err != nil {
 			return err // Refuse conflicting permissions before creating a workspace, tab or attachment.
 		}
-		if st.Model != "" {
-			argv = append(withoutModelArgs(argv), "--model", st.Model)
-		}
+		argv = codexExecutionArgs(argv, modelExecution{Model: st.Model})
 	}
 	paths, err := n.saveImages(images)
 	if err != nil {
@@ -259,8 +261,9 @@ func (n *Node) resumeOtherWith(ctx context.Context, id string, st sessionState, 
 	return uncertain(n.resumeCodex(ctx, launch, id, st, argv, text, ws, tab))
 }
 
-// resumeCodex runs `<launcher words> resume <id> -- <message>` (through codex-start, like a new Codex) in a new tab
-// and waits until the engine shows that Codex in it.
+// resumeCodex runs `<launcher words> resume <id> -- <message>` (through codex-start, like a new Codex, in the thread's
+// directory) in a new tab and waits until the engine shows that Codex in it. In a pane it was given (adoptedPane: a
+// switch between engines, engine_switch.go) it runs there once its shell is at rest.
 func (n *Node) resumeCodex(ctx context.Context, launch host.Launcher, id string, st sessionState, argv []string, prompt, ws, tabName string) error {
 	if codexOnRemote(argv) {
 		argv = append(argv, "-C", st.Cwd)
@@ -272,7 +275,7 @@ func (n *Node) resumeCodex(ctx context.Context, launch host.Launcher, id string,
 	}
 	defer os.RemoveAll(dir)
 	file := filepath.Join(dir, "start.json")
-	b, _ := json.Marshal(codexStartFile{Argv: argv, Prompt: prompt, Agent: herdrAgentFor(launch, "codex")})
+	b, _ := json.Marshal(codexStartFile{Argv: argv, Prompt: prompt, Agent: herdrAgentFor(launch, "codex"), Dir: st.Cwd})
 	if err := os.WriteFile(file, b, 0o600); err != nil {
 		return err
 	}
@@ -281,10 +284,20 @@ func (n *Node) resumeCodex(ctx context.Context, launch host.Launcher, id string,
 		return err
 	}
 	pane := created.Pane.String()
-	time.Sleep(300 * time.Millisecond) // the fresh shell loads ~/.zshrc; typed input is buffered either way
+	if adoptedPane(ctx) != nil {
+		// A shell that just took the agent's exit back: at rest before the line goes in (shellsettle.go).
+		if err := n.settleShell(ctx, pane); err != nil {
+			return err
+		}
+	} else {
+		time.Sleep(300 * time.Millisecond) // the fresh shell loads ~/.zshrc; typed input is buffered either way
+	}
 	shells := paneShells(ctx, created)
 	done, err := n.runAgentCommand(ctx, launch, created, ws, "", n.agentCommand(shellQuote(n.bin)+" codex-start "+shellQuote(file), shellQuote, shells...), shells...) // typedstart.go
 	if err != nil {
+		if adoptedPane(ctx) != nil && prompt != "" && n.codexMessageMayHaveGone(ctx, pane, file) {
+			return unconfirmedStart(err) // a switch's message may be in it (engine_switch.go)
+		}
 		return err // the tab is closed: no pane to bind
 	}
 	defer done()
@@ -300,7 +313,11 @@ func (n *Node) resumeCodex(ctx context.Context, launch host.Launcher, id string,
 		select {
 		case <-wait.Done():
 			screen, _ := n.readPane(context.WithoutCancel(ctx), pane, "recent-unwrapped", 30)
-			return fmt.Errorf("Codex 没有在新标签页里接上会话 %s\n%s", id, lastLines(screen, 12))
+			err := fmt.Errorf("Codex 没有在新标签页里接上会话 %s\n%s", id, lastLines(screen, 12))
+			if adoptedPane(ctx) != nil && prompt != "" && n.codexMessageMayHaveGone(ctx, pane, file) {
+				return unconfirmedStart(err) // a switch's message may be in it (engine_switch.go)
+			}
+			return err
 		case <-time.After(500 * time.Millisecond):
 		}
 	}

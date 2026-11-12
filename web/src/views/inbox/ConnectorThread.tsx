@@ -19,6 +19,8 @@ import { Markdown } from "../../ui/Markdown";
 import { ImageViewer } from "../chat/ImageViewer";
 import { scrollBehavior } from "../../ui/stream/motion";
 import { Monogram } from "./InboxParts";
+import { LarkInboxContent } from "./LarkInboxContent";
+import { ConnectorReadNotice, ConnectorReplyTarget, conversationFailure, type ConversationFailure } from "./ConnectorReadNotice";
 
 /** A link the system handles (sms:, tg://) goes to it; a web page opens in a tab. */
 export function openSystem(url: string) {
@@ -28,7 +30,7 @@ export function openSystem(url: string) {
 
 const clock = (iso: string) => {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return Number.isNaN(d.getTime()) || d.getFullYear() < 1900 ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
 export function ConnectorBody({ item }: { item: InboxItem }) {
@@ -43,7 +45,8 @@ function ConnectorThreadBody({ item, manager }: { item: InboxItem; manager?: str
   const id = item.source;
   const thread = item.connector?.thread ?? "";
   const [page, setPage] = useState<ThreadPage | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ConversationFailure | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [older, setOlder] = useState(false);
   // Apply responses synchronously so a history continuation sees a replaced window even in one React batch.
   const currentPage = useRef<ThreadPage | null>(null);
@@ -75,11 +78,14 @@ function ConnectorThreadBody({ item, manager }: { item: InboxItem; manager?: str
       currentPage.current = next;
       setPage(next);
       setFailure(null);
+      setLoaded(true);
     } catch (e) {
       if (!current()) return;
       // Said over the text only when it is worth saying (a rate limit, the connector unavailable); a thread that
-      // simply has no page of its own (a CI run) falls back quietly. "" is failed, null still loading.
-      setFailure(e instanceof ApiError && (e.status === 429 || e.status === 409) ? errorText(e) : "");
+      // simply has no page of its own (a CI run; a subscription's item, which an older manager answers with 404
+      // `no connector`, #5537) falls back quietly; a source without conversations is noted, the rest said.
+      setFailure(e instanceof ApiError && e.status === 404 ? null : conversationFailure(e));
+      setLoaded(true);
     }
   }, [id, thread, manager]);
   // Again when the item moves (a new message came in).
@@ -159,18 +165,21 @@ function ConnectorThreadBody({ item, manager }: { item: InboxItem; manager?: str
     return true;
   };
 
-  if (!page && failure === null) return <div className="p-5"><Loading label={t("inbox-connectorthread.loading", { name: item.account_name || id })} /></div>;
-  if (!page || (!isChatThread(page.chat) && !isGitHubThread(page.chat))) return <ConnectorText item={item} problem={page ? undefined : failure || undefined} />;
-  // Drafts, quotes and pending-send state belong to this manager's item and thread.
+  if (!page && !loaded) return <div className="p-5"><Loading label={t("inbox-connectorthread.loading", { name: item.account_name || id })} /></div>;
+  if (!page || (!isChatThread(page.chat) && !isGitHubThread(page.chat) && !(id === "larkcli" && !page.chat.kind))) return <><ConnectorReplyTarget item={item} /><ConnectorText item={item} problem={failure || undefined} onRetry={() => void load()} /></>;
   const composerKey = JSON.stringify([manager || defaultManager(), item.id, id, thread]);
-  return isGitHubThread(page.chat)
-    ? <GitHubThread key={composerKey} id={id} item={item} page={page} older={older} onOlder={() => void loadOlder()} onSend={send} />
-    : <ChatThread key={composerKey} id={id} page={page} older={older} onOlder={() => void loadOlder()} onReach={reach} onSend={send} />;
+  return <>
+    <ConnectorReplyTarget item={item} page={page} />
+    {failure && <div className="shrink-0 px-4 py-2"><ConnectorReadNotice failure={failure} onRetry={() => void load()} /></div>}
+    {isGitHubThread(page.chat)
+      ? <GitHubThread key={composerKey} id={id} item={item} page={page} older={older} onOlder={() => void loadOlder()} onSend={send} />
+      : <ChatThread key={composerKey} id={id} page={{ ...page, chat: { ...page.chat, name: page.chat.name || item.title } }} older={older} onOlder={() => void loadOlder()} onReach={reach} onSend={send} />}
+  </>;
 }
 
 // ── what the hub collected (no thread page) ──────────────
 
-function ConnectorText({ item, problem }: { item: InboxItem; problem?: string }) {
+function ConnectorText({ item, problem, onRetry }: { item: InboxItem; problem?: ConversationFailure; onRetry: () => void }) {
   const [context, setContext] = useState<string | null>(null);
   const [failure, setFailure] = useState("");
   const c = item.connector;
@@ -193,20 +202,15 @@ function ConnectorText({ item, problem }: { item: InboxItem; problem?: string })
                 {tightCJK(t("inbox-connectorthread.open_in", { name: item.account_name || item.source }))}
               </Button>
             )}
-            {c?.reply_to && c.can_reply && <p className="min-w-0 text-[12px] text-ink-3">{t("inbox-connectorthread.reply_goes", { how: c.reply_to })}</p>}
+            {item.source !== "larkcli" && c?.reply_to && c.can_reply && <p className="min-w-0 text-[12px] text-ink-3">{t("inbox-connectorthread.reply_goes", { how: c.reply_to })}</p>}
           </div>
         )}
-        {problem && (
-          <p className="flex items-start gap-2 rounded-[10px] bg-inset px-3 py-2 text-[12px] text-ink-2 shadow-hairline">
-            <Icon name="info" size={13} className="mt-0.5 shrink-0 text-ink-3" />
-            <span className="min-w-0 break-words">{t("inbox-connectorthread.thread_failed", { error: problem })}</span>
-          </p>
-        )}
+        {problem && <ConnectorReadNotice failure={problem} onRetry={onRetry} />}
         <p className="text-[12px] font-medium text-ink-3">{t("inbox-connectorthread.content")}</p>
         {context === null && !failure ? <Loading /> : failure ? (
           <p className="text-[12.5px] text-red">{t("inbox-connectorthread.content_failed", { error: failure })}</p>
         ) : (
-          <div className="text-[13px] leading-relaxed break-words whitespace-pre-wrap text-ink select-text">{context || item.preview}</div>
+          <div className="text-[13px] leading-relaxed break-words whitespace-pre-wrap text-ink select-text">{context || item.preview || t("inbox-connectorthread.no_collected_content")}</div>
         )}
       </div>
     </div>
@@ -372,18 +376,23 @@ function Bubble({ id, m, head, group, lit, onQuote, onReply }: {
   onQuote?: () => void;
   onReply?: () => void;
 }) {
-  if (m.event) return <p data-mid={m.id} className="px-2 py-2 text-center text-[11.5px] text-ink-3">{m.text}</p>;
+  if (m.event) return <p data-mid={m.id} className="px-2 py-2 text-center text-[11.5px] text-ink-3">{m.text || t("inbox-connectorthread.message_unavailable")}</p>;
   const mine = !!m.mine;
+  // The content component validates the full envelope once; layout only needs a candidate check.
+  const larkCard = id === "larkcli" && /^\s*<card(?:\s|>)/.test(m.text || "");
   const pictures = (m.media ?? []).filter((x) => (x.kind === "image" || x.kind === "sticker" || x.kind === "video") && (x.ref || x.thumb));
   const others = (m.media ?? []).filter((x) => !pictures.includes(x));
   const bare = !m.text && !m.reply_to && !others.length; // only pictures: no bubble around them
   return (
-    <div data-mid={m.id} className={cx("group/msg flex items-start gap-2 rounded-[16px] motion-safe:transition-colors motion-safe:duration-300", head ? "mt-2.5" : "mt-0.5", mine && "flex-row-reverse", lit && "bg-accent-tint")}>
-      {!mine && <span className="w-8 shrink-0">{head && <Monogram name={m.sender.name} size={32} src={m.sender.avatar ? mediaURL(id, m.sender.avatar) : undefined} />}</span>}
-      <div className={cx("flex min-w-0 max-w-[78%] flex-col", mine ? "items-end" : "items-start")}>
-        {head && group && !mine && <span className="mb-0.5 px-1 text-[11.5px] font-medium text-ink-2">{m.sender.name}</span>}
+    <div data-mid={m.id} className={cx("group/msg flex items-start gap-2 rounded-[16px] motion-safe:transition-colors motion-safe:duration-300", head || larkCard ? "mt-2.5" : "mt-0.5", mine && "flex-row-reverse", lit && "bg-accent-tint")}>
+      {!mine && <span className="w-8 shrink-0">{(head || larkCard) && <Monogram name={m.sender.name} size={32} src={m.sender.avatar ? mediaURL(id, m.sender.avatar) : undefined} />}</span>}
+      <div className={cx("flex min-w-0 flex-col", larkCard ? "w-full max-w-full" : "max-w-[78%]", mine ? "items-end" : "items-start")}>
+        {(head || larkCard) && (group || id === "larkcli") && !mine && <span className="mb-0.5 px-1 text-[11.5px] font-medium text-ink-2">{m.sender.name || t("inbox-connectorthread.unknown_sender")}</span>}
         {pictures.map((x, i) => <Picture key={i} id={id} media={x} />)}
-        {!bare && (
+        {larkCard ? <div className="w-full min-w-0">
+          {m.reply_to && <button type="button" onClick={onQuote} className="mb-2 block w-full truncate border-l-2 border-line-strong pl-2 text-left text-xs text-ink-3" aria-label={t("inbox-connectorthread.quote_jump", { text: m.reply_to.text || t("inbox-connectorthread.a_message") })}>{m.reply_to.from || m.reply_to.text || t("inbox-connectorthread.a_message")}</button>}
+          <LarkInboxContent key={m.id} text={m.text!} markdown />
+        </div> : !bare && (
           <div className={cx("rounded-[16px] px-3 py-1.5 text-[13px] leading-relaxed break-words", mine ? "bg-user-bubble text-ink" : "bg-surface text-ink shadow-card", pictures.length > 0 && "mt-1")}>
             {m.reply_to && (() => {
               const quote = `${m.reply_to.from ? t("inbox-connectorthread.quoted_sender", { name: m.reply_to.from }) : ""}${m.reply_to.text || t("inbox-connectorthread.a_message")}`;
@@ -401,7 +410,7 @@ function Bubble({ id, m, head, group, lit, onQuote, onReply }: {
                 <span className="truncate">{mediaLine(x)}</span>
               </p>
             ))}
-            {m.text && <span className="whitespace-pre-wrap select-text">{m.text}</span>}
+            {m.text && (id === "larkcli" ? <LarkInboxContent key={m.id} text={m.text} markdown={m.format === "markdown"} /> : m.format === "markdown" ? <Markdown text={m.text} small /> : <span className="whitespace-pre-wrap select-text">{m.text}</span>)}
           </div>
         )}
         <span className="mt-0.5 flex items-center gap-1.5 px-1 text-[10.5px] text-ink-3 tabular-nums">

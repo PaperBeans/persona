@@ -14,7 +14,7 @@ Persona is an Agent product for everyone. Assistant is for everyday people and m
 
 **How to check the audience**: the issue and PR name the intended audience. For an everyday-facing flow, verify that someone with no programming or Agent-tool knowledge can understand the task and next action without choosing a runtime or repository. For specialist work, name its home in Agents or advanced settings and explain why the detail is needed there.
 
-These six principles decide product questions before any visual rule applies. They cover UI, settings and defaults, and how numbers and states are counted, on every client and in the hub. Each one has a few rules and a "How to check" that a reviewer can verify on a PR. Visual and interaction detail lives in `docs/design/DESIGN_SYSTEM.md`; known gaps against Apple's Human Interface Guidelines are in `docs/design/HIG_AUDIT.md`. Ideas taken from the HIG are rewritten here as Persona rules, not quoted.
+These seven principles decide product questions before any visual rule applies. They cover UI, settings and defaults, and how numbers and states are counted, on every client and in the hub. Each one has a few rules and a "How to check" that a reviewer can verify on a PR. Visual and interaction detail lives in `docs/design/DESIGN_SYSTEM.md`; known gaps against Apple's Human Interface Guidelines are in `docs/design/HIG_AUDIT.md`. Ideas taken from the HIG are rewritten here as Persona rules, not quoted.
 
 Where they apply: requirements (the issue's acceptance criteria), development (the PR template's self-check) and acceptance (the reviewer checks the evidence below). See "How the principles enter the workflow" at the end.
 
@@ -78,6 +78,20 @@ A principle that no one checks is a wish: every rule here ends in evidence someo
 - A violation found after merge becomes a case below, and, where it can, a test or check that catches it next time.
 
 **How to check**: the linked issue has acceptance criteria; the PR body has the self-check with evidence (screenshots, test names, commands and their output) for each item marked done.
+
+## 7. Fast, local-first and stateful
+
+Never leave the user waiting without feedback; make the work itself faster, not just its indicator.
+
+- Show local feedback immediately, using local state before network work. A message starts as Sending and becomes
+  Processing when the hub receives it, without waiting for scheduling, process startup or the model's first output.
+- Receipt is not delivery or execution. Reconcile optimistic state with authoritative outcomes; show queued work,
+  uncertain delivery and failure honestly, preserve recoverable input, and never retry an uncertain send as a new one.
+- Measure the full path and remove avoidable waits without changing the user's model, permissions or answer quality.
+
+**How to check**: measure send-to-feedback and send-to-execution separately, before and after in an isolated environment.
+A received message shows Processing within one second in that environment; attach light/dark screenshots and tests for
+failure rollback, delayed execution and stale updates. Name any unmeasured production or model boundary.
 
 ## Cases
 

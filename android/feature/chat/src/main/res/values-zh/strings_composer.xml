@@ -22,6 +22,8 @@
     <string name="chat_mention_used_file">本会话用过的文件</string>
     <string name="chat_mention_session_detail">%1$s · 作为上下文</string>
     <string name="chat_mention_no_match">没有对得上的文件或会话</string>
+    <string name="chat_mention_reading_folder">正在读取文件夹…</string>
+    <string name="chat_mention_no_match_folder">这个文件夹里没有对得上的</string>
     <string name="chat_mention_quote_session">另一个会话：%1$s（%2$s）</string>
     <string name="chat_mention_quote_cwd">目录：%1$s</string>
     <string name="chat_mention_quote_last">它最近说：%1$s</string>

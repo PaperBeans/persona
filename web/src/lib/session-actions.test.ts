@@ -36,13 +36,13 @@ describe("mutes", () => {
 
 describe("modes", () => {
   it("labels the known ones and keeps unknown ids", () => {
-    expect(modeTitle("plan")).toBe("只做计划");
+    expect(modeTitle("plan")).toBe("计划模式");
     expect(modeTitle("weird")).toBe("weird");
     expect(modeTitle(undefined)).toBe("");
     expect(effortTitle("xhigh")).toBe("很高");
   });
 
-  it("never offers 全部放行 on a running session that can't reach it", () => {
+  it("never offers 完全访问 on a running session that can't reach it", () => {
     expect(SWITCHABLE_MODES.some((m) => m.id === "bypassPermissions")).toBe(false);
     expect(switchableModes(false)).toBe(SWITCHABLE_MODES);
     expect(switchableModes(undefined)).toBe(SWITCHABLE_MODES);
@@ -50,7 +50,7 @@ describe("modes", () => {
     expect(canSwitchToBypass(s({ permission_mode: "acceptEdits" }))).toBe(false);
   });
 
-  it("offers 全部放行 to an agent whose Claude was started so it can reach it, or is in it now (#1379)", () => {
+  it("offers 完全访问 to an agent whose Claude was started so it can reach it, or is in it now (#1379)", () => {
     expect(canSwitchToBypass(s({ bypass_available: true, permission_mode: "plan" }))).toBe(true);
     expect(canSwitchToBypass(s({ permission_mode: "bypassPermissions" }))).toBe(true);
     const ids = switchableModes(false, "claude", true).map((m) => m.id);
@@ -58,7 +58,7 @@ describe("modes", () => {
     expect(switchableModes(false, "claude", true).find((m) => m.id === "bypassPermissions")?.detail).not.toContain("新开");
   });
 
-  it("lets an assistant conversation switch to every mode, 全部放行 included (#2416)", () => {
+  it("lets an assistant conversation switch to every mode, 完全访问 included (#2416)", () => {
     const ids = switchableModes(true).map((m) => m.id);
     expect(ids).toEqual(["default", "acceptEdits", "plan", "auto", "bypassPermissions"]);
     expect(switchableModes(false, "agy").map((m) => m.id)).toEqual(ids);

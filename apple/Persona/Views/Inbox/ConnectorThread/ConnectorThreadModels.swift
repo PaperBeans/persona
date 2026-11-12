@@ -259,10 +259,18 @@ nonisolated enum ThreadLayout {
             (chat, messages, before, failure, unavailable) = (page.chat, page.messages, page.before, nil, false)
         } catch {
             if error.isCancellation { return }
-            failure = Self.said(error)
+            failure = Self.noConversation(error) ? nil : Self.said(error)
             unavailable = messages.isEmpty
         }
         loaded = true
+    }
+
+    /// An older hub's way of saying the item has no conversation of its own (#5537): no such connector (404: a
+    /// subscription's item, its source the subscription) or none to open (409 without `unavailable`: a connector
+    /// without threads). The page shows what the hub collected without an error, as a newer hub's `none` page does.
+    private static func noConversation(_ error: Error) -> Bool {
+        guard let e = error as? APIError else { return false }
+        return e.status == 404 || e.status == 409 && e.code != "unavailable"
     }
 
     /// The page before the oldest shown; false when there is none or it could not be read.

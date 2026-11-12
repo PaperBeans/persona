@@ -48,6 +48,7 @@ class HubChatRepository(
         val ready = CompletableDeferred<Unit>()
         val state = MutableStateFlow(ChatSnapshot(verified = false))
         var subscribed = false
+        var subscriptionReady = CompletableDeferred<Unit>()
         var seenHistory: String? = null
         var references = 0
         /** Closed, but still subscribed until [release] runs. */
@@ -88,6 +89,7 @@ class HubChatRepository(
                 when (event) {
                     is ItemsEvent -> existing(SessionKey(event.machineId, event.sessionId))?.let { entry ->
                         entry.ready.await()
+                        synchronized(entries) { if (entry.subscribed) entry.subscriptionReady.complete(Unit) }
                         val actions = entry.lock.withLock {
                             val gap = entry.reducer.apply(event.items, event.history, event.fromSeq, event.toSeq,
                                 event.backlog, event.hasMore, event.moreAfter)
@@ -154,7 +156,7 @@ class HubChatRepository(
                         catchUp(entry)
                     } }
                 } else retainedEntries().forEach { entry ->
-                    synchronized(entries) { entry.subscribed = false }
+                    synchronized(entries) { entry.subscribed = false; entry.subscriptionReady = CompletableDeferred() }
                     entry.lock.withLock {
                         entry.currentSessions = null
                         entry.machineOnline = null
@@ -227,7 +229,9 @@ class HubChatRepository(
             return result
         }
         override suspend fun editQueue(session: Session, keep: List<Int>) = delegate.editQueue(session, keep)
+        override suspend fun sendQueuedNow(session: Session) = delegate.sendQueuedNow(session)
         override suspend fun info(session: Session) = delegate.info(session)
+        override suspend fun interactionHistory(session: Session) = delegate.interactionHistory(session)
         override suspend fun restoreModel(session: Session) = delegate.restoreModel(session)
         override suspend fun fork(session: Session, atItemId: String): String {
             // A finished streamed reply keeps showing its draft id; the node only knows the transcript one (#5305).
@@ -301,6 +305,28 @@ class HubChatRepository(
                 }
             }
         } finally { withContext(NonCancellable) { cache.release(session) } }
+    }
+
+    /** Keep this send subscribed before POST, including while the main queue is binding its first conversation. */
+    suspend fun withSendSubscription(session: SessionKey, send: suspend () -> persona.core.contracts.api.MessageTransportResult): persona.core.contracts.api.MessageTransportResult = coroutineScope {
+        val mounted = CompletableDeferred<Unit>()
+        val observer = launch(start = CoroutineStart.UNDISPATCHED) { observe(session).collect { mounted.complete(Unit) } }
+        try {
+            // Older hubs may send no initial items event. Bound this barrier and retain the legacy HTTP/outbox fallback.
+            withTimeoutOrNull(3_000) {
+                mounted.await()
+                val ready = synchronized(entries) {
+                    val entry = entries[session] ?: return@synchronized null
+                    if (!entry.subscribed) entry.subscribed = connection.send(buildJsonObject {
+                        envelope("subscribe", session).forEach { (key, value) -> put(key, value) }
+                        put("lazy_images", true); put("fold_work", true)
+                    })
+                    entry.subscriptionReady
+                }
+                ready?.await()
+            }
+            send()
+        } finally { observer.cancelAndJoin() }
     }
 
     override suspend fun loadOlder(session: SessionKey) {

@@ -130,6 +130,16 @@ JSON
       inbox:+messages-send|inbox:+messages-reply|inbox_pages:+messages-send|inbox_pages:+messages-reply)
         cat "$base/send_result.json"
         ;;
+      inbox_lag:+messages-search) cat "$base/inbox_lag_search.json" ;;
+      inbox_lag:+chat-list) cat "$base/inbox_lag_chats.json" ;;
+      inbox_lag:+chat-messages-list|inbox_lag:+threads-messages-list)
+        # Chat history, by chat: what message search had not indexed yet.
+        case " $* " in
+          *" oc_lag_bot "*) cat "$base/inbox_lag_bot.json" ;;
+          *" oc_lag_dm "*) cat "$base/inbox_lag_dm.json" ;;
+          *) cat "$base/inbox_lag_search.json" ;;
+        esac
+        ;;
       *:+chat-list) cat "$base/chats.json" ;;
       *:+chat-messages-list|*:+threads-messages-list) cat "$base/messages.json" ;;
       *:+messages-search|*:+chat-search) cat "$base/search.json" ;;

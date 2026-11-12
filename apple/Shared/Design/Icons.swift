@@ -99,6 +99,8 @@ extension Theme {
         static let askFirst = "hand.raised"
         /// bypassPermissions: nothing is asked.
         static let allowEverything = "exclamationmark.shield"
+        /// The auto permission mode: the agent judges the risk itself.
+        static let autoMode = "wand.and.sparkles"
         static let permissions = "lock.shield"
         /// The two little arrows after a value that opens a menu of choices.
         static let choices = "chevron.up.chevron.down"
@@ -122,12 +124,27 @@ extension Theme {
         static let edit = "pencil"
         /// Draw on a picture (the image viewer's Markup, into the composer).
         static let markup = "pencil.tip.crop.circle"
+        /// The image editor's tools (`ImageEditor`): a box round what matters, a free line, cropping and turning the
+        /// picture, the line's width, a crop's shape.
+        static let markupBox = "rectangle"
+        static let markupPen = "scribble"
+        static let crop = "crop"
+        static let rotateLeft = "rotate.left"
+        static let lineWidth = "lineweight"
+        static let cropRatio = "aspectratio"
         static let compose = "square.and.pencil"
         /// Speech to text in the composer (a tap starts, a second one ends).
         static let dictate = "mic"
         static let dictating = "mic.fill"
         /// A long recording as context, distinct from the composer's dictation.
         static let recording = "waveform.circle"
+        /// All-Day Recording (docs/assistant/day-recap.md): the mode, its switch on the phone, its button and page on the
+        /// watch, and its state while it records. A record mark, not `recording`'s waveform: that is one recording, this
+        /// the mode that keeps recording all day.
+        static let allDay = "record.circle"
+        /// All-day recording paused by the system or a failure, waiting for a tap to continue: a state, beside its words,
+        /// not the Pause control (`pause`).
+        static let allDayPaused = "pause.circle"
         static let pause = "pause.fill"
         /// Back and ahead 15 seconds in something that plays (an audio file).
         static let skipBack = "gobackward.15"
@@ -171,6 +188,7 @@ extension Theme {
         /// Loads the in-app page again (the link sheet's header).
         static let reload = retry
         static let undo = "arrow.uturn.backward"
+        static let redo = "arrow.uturn.forward"
         static let interrupt = "stop.fill"
         static let stopLoop = "stop.circle"
         static let run = "play.fill"
@@ -370,6 +388,8 @@ extension Theme {
         static let photo = "photo"
         static let photos = "photo.on.rectangle"
         static let camera = "camera"
+        /// Scan Document: the document camera (VisionKit), the composer's item next to Take Photo (#3720).
+        static let scanDocument = "doc.viewfinder"
         /// Glasses Photo: a photo taken with the Meta glasses (Persona/Glasses), the composer's glasses item.
         static let glasses = "eyeglasses"
         static let list = "list.bullet.rectangle"
@@ -467,6 +487,8 @@ extension Theme {
         /// The assistant operating an iPhone through a Mac (the extension iphone): its section, its tools.
         static let phoneControl = "iphone.radiowaves.left.and.right"
         static let watch = "applewatch"
+        static let storage = "internaldrive"
+        static let scanCode = "qrcode.viewfinder"
         static let handoff = "iphone.and.arrow.forward"
         /// The default web browser (open a link outside the app).
         static let safari = "safari"
@@ -630,6 +652,18 @@ extension Theme {
         static let openQuestion = "questionmark.circle.dashed"
         /// A meeting's minutes as a whole (the watch's Meeting Minutes).
         static let minutes = "note.text"
+        /// A meeting's private mark (#3862, Private Meeting): its minutes are never used when Persona answers in later
+        /// meetings. What stays private, as Health's note says it.
+        static let privateMeeting = privacy
+        /// Just Me (#3862): a question asked during a meeting that only its asker sees, answered in the main chat and
+        /// never said aloud.
+        static let justMe = "person.crop.circle.badge.questionmark"
+        /// A meeting marked inside an all-day recording (the watch's Mark Meeting, the day's timeline): a meeting, so the
+        /// same symbol.
+        static let meetingMark = meeting
+        /// The hub's recap of a recorded day (docs/assistant/day-recap.md): the Day Recap section and the Today row. Its own
+        /// symbol rather than `minutes`: a recap covers a whole day, a meeting's minutes one meeting.
+        static let dayRecap = "text.book.closed"
         /// People in the knowledge base.
         static let people = "person.3"
         /// A tap on the screen, in tips and features.

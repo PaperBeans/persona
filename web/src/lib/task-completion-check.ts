@@ -10,6 +10,8 @@ export interface TaskDoneCheck {
   would_close: boolean;
   skip: string;
   delivery?: TodoDelivery;
+  /** The hub wrote the result to the task (Re-check applies it, #4867); false or absent: nothing changed. */
+  applied: boolean;
 }
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -18,11 +20,12 @@ const text = (value: unknown): string => typeof value === "string" ? value.trim(
 
 export async function checkTaskCompletion(id: string, manager: string, signal: AbortSignal): Promise<TaskDoneCheck> {
   const raw = record(await api<unknown>(`/todos/${enc(id)}/done-check`, {
-    method: "POST", headers: itemHeaders(manager), signal, timeout: pastHub(90_000),
+    method: "POST", json: { apply: true }, headers: itemHeaders(manager), signal, timeout: pastHub(90_000),
   }));
   const delivery = record(raw.delivery);
   return {
     verdict: text(raw.verdict), reason: text(raw.reason), would_close: raw.would_close === true, skip: text(raw.skip),
+    applied: raw.applied === true,
     ...(raw.delivery && typeof raw.delivery === "object" && !Array.isArray(raw.delivery) ? {
       delivery: { state: text(delivery.state), gate: text(delivery.gate), unblock: text(delivery.unblock) },
     } : {}),

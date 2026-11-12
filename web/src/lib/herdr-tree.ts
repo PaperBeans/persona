@@ -1,6 +1,7 @@
 // The sidebar's "By machine" tree, laid out the way herdr arranges agents: machine → workspace (a herdr space) → tab (a
-// slot) → panes. A Session is one agent pane; the sessions of one slot are that tab's panes, which the chat shows as
-// tabs of their own (PaneTabs). Hosts without tabs (Paseo, botmux, runtimes) list their sessions right under the
+// slot) → panes. A Session is one agent pane; the sessions of one slot are that tab's panes. When the tab's first pane is an
+// Agent, the hub folds the others under it as its workers (lib/team.ts, #5180): the lists hold the lead alone and its page
+// has them in its Team panel, so a tab here lists several panes only when they are peers. Hosts without tabs (Paseo, botmux, runtimes) list their sessions right under the
 // space; sessions outside any space go to the machine's "Other". Shell panes never reach the hub, so they are not here.
 // A space the host nests under another (Orca's child worktrees, `parent_space_id`) is listed inside its parent, as
 // Orca's sidebar does with "N children"; when the parent has no live agent the child stays at the top (#2073).
@@ -10,6 +11,7 @@ import { isSpacePinned, type AgentPins } from "./pins";
 import type { Route, SessionView } from "./router";
 import type { AgentState, Machine, Session } from "./types";
 import { byTime } from "./times";
+import { homeKey } from "./folded-rows";
 
 // docs/protocol/agent-states.md "Unified states": what a folded row shows for everything under it, and which pane a tab opens on.
 const URGENCY: AgentState[] = ["needs_you", "working", "unread", "idle", "unknown", "offline"];
@@ -73,17 +75,9 @@ export function tabGroups(sessions: readonly Session[]): TabGroup[] {
   });
 }
 
-const sameSpace = (a: Session, b: Session) => a.machine_id === b.machine_id && (a.space_kind ?? "") === (b.space_kind ?? "") && a.space_id === b.space_id;
-
-/** The agents in the same tab as `s` (same machine, space and slot), in pane order; just `[s]` without a slot. */
-export function tabSessions(all: Session[], s: Session): Session[] {
-  if (!s.slot_id || !s.space_id) return [s];
-  const tab = all.filter((x) => !x.assistant && sameSpace(x, s) && x.slot_id === s.slot_id && (x.session_id === s.session_id || stateOf(x) !== "offline"));
-  if (!tab.some((x) => x.session_id === s.session_id)) tab.push(s);
-  return tab.sort(paneOrder);
-}
-
 type HomeBucket = "needs" | "working" | "unread";
+/** A pending card as the overview places it: on its session, or on the parent a child session folds under (#5120). */
+type CardOf = Parameters<typeof homeKey>[0];
 
 // How the overview orders a bucket's rows (and so which of a tab's equally urgent panes speaks for it): the longest
 // working first, by when it started; the others the latest first, by when they last changed. A negative `before`
@@ -100,8 +94,9 @@ const BUCKET_ORDER: Record<HomeBucket, (a: Session, b: Session) => number> = {
  *  state, though the tab still lists it. Each tab's `lead` is, of its panes in that state, the one the bucket orders
  *  first (the longest working, the latest to ask or finish): its time and words are the row's, and the rows are
  *  ordered by it the way single agents are — working tabs the longest working first, the others the latest first. */
-export function homeTaskGroups(sessions: readonly Session[], interactions: readonly { machine_id: string; session_id: string }[]): Record<HomeBucket, TabGroup[]> {
-  const asked = new Set(interactions.map((i) => `${i.machine_id}/${i.session_id}`));
+export function homeTaskGroups(sessions: readonly Session[], interactions: readonly CardOf[]): Record<HomeBucket, TabGroup[]> {
+  // a child session's card is its parent's (#5120): the parent waits in Needs you's cards, not in a row of its own too
+  const asked = new Set(interactions.map(homeKey));
   const carded = (s: Session) => stateOf(s) === "needs_you" && asked.has(`${s.machine_id}/${s.session_id}`);
   const out: Record<HomeBucket, TabGroup[]> = { needs: [], working: [], unread: [] };
   for (const g of tabGroups(sessions.filter((s) => !s.assistant && stateOf(s) !== "offline"))) {
@@ -121,7 +116,7 @@ export function homeTaskGroups(sessions: readonly Session[], interactions: reado
  *  all of them, as before tabs were rows, though some sit in tabs filed under needs-you or working — and where that
  *  action goes: "Done, not seen yet"'s header, beside the summary when that section is empty, nowhere when none is unread;
  *  and whether there is nothing to do (no card waiting either). */
-export function homeOverview(sessions: readonly Session[], interactions: readonly { machine_id: string; session_id: string }[]) {
+export function homeOverview(sessions: readonly Session[], interactions: readonly CardOf[]) {
   const groups = homeTaskGroups(sessions, interactions);
   const unread = sessions.filter((s) => !s.assistant && stateOf(s) === "unread");
   const markAllAt: "section" | "summary" | undefined = !unread.length ? undefined : groups.unread.length ? "section" : "summary";

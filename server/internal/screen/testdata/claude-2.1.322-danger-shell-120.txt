@@ -1,0 +1,33 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Opus 5.5 with xhigh effort · API Usage Billing
+ ▝▝   ▝▝   /private/tmp/danger-lab/work
+
+
+❯ Run exactly this one Bash command and nothing else, do not change or quote it, with the description "Count the
+  example names in first-screen chunks": cd ./dist && F=(${(f)"$(grep -oE '(src|href)="\./assets/[^"]+\.js"' index.html
+  | sed -E 's/.*="\.\///; s/"$//' | sort -u)"}); echo "${#F[@]} files"; for k in alpha_name beta_name gamma_name
+  delta_name epsilon_name; do echo "$k: $(cat "${F[@]}" | grep -o "$k" | wc -l | xargs)"; done
+
+  Counting the example names in first-screen chunks
+  ⎿  $ cd ./dist && F=(${(f)"$(grep -oE '(src|href)="\./assets/[^"]+\.js"' index.html | sed -E 's/.*="\.\///; s/"$//' |
+     sort -u)"}); echo "${#F[@]} files"; for k in alpha_name beta_name gamma_name delta_name epsilon_name; do echo "$k:
+     $(cat "${F[@]}" | grep -o "$k" | wc -l | xargs)"; done
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ Count the example names in first-screen chunks
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ cd ./dist && F=(${(f)"$(grep -oE '(src|href)="\./assets/[^"]+\.js"' index.html | sed -E 's/.*="\.\///; s/"$//' |
+ │ sort -u)"}); echo "${#F[@]} files"; for k in alpha_name beta_name gamma_name delta_name epsilon_name; do echo "$k:
+ │ $(cat "${F[@]}" | grep -o "$k" | wc -l | xargs)"; done
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ Dangerous rm operation not ruled out — the shell may read this command differently than it was parsed
+ ⚠ Claude Code will automatically block this request in 1:58, to avoid holding up an unattended session
+
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend

@@ -156,7 +156,10 @@ targets:
         # iPad: every orientation (Split View and Stage Manager need it).
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown,
                                                 UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
-        UIBackgroundModes: [remote-notification, audio]
+        # processing: all-day recording's catch-up (docs/assistant/day-recap.md), a BGProcessingTask that transcribes and
+        # uploads what the watch sent while the phone sat in the background, run while charging (RecordingDayCatchUp).
+        UIBackgroundModes: [remote-notification, audio, processing]
+        BGTaskSchedulerPermittedIdentifiers: [persona.recording.day-catchup]
         # CarPlay (docs/apple/carplay.md): the voice conversation scene. Only CarPlay is declared; the phone window stays SwiftUI's own.
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -180,7 +183,7 @@ targets:
         # The hub is usually reached over plain HTTP inside a private network (docs/operations/config.md).
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSCameraUsageDescription: "Persona uses the camera to scan the pairing QR code printed by `personad hub pair`, for example when you first connect to your hub."
+        NSCameraUsageDescription: "Persona uses the camera to scan the pairing QR code printed by `personad hub pair`, and to take a photo you add to a chat or a meeting, for example a whiteboard during a meeting."
         NSFaceIDUsageDescription: "Persona asks for Face ID before it types a Mac's remembered password on that Mac's lock screen, when you tap One-Tap Unlock on the Mac's page."
         NSContactsUsageDescription: "Persona lets Claude look up your contacts when you ask, for example to find a colleague's phone number or email before drafting a message."
         # The iPhone system integrations (docs/apple/phone-tools.md, #2278 / #2284 / #2285).
@@ -593,6 +596,9 @@ targets:
       - path: Shared
       # What the watch face's Milk Frog draws, for the debug preview of it (-openWatchItem complication).
       - path: PersonaWatchWidgets/PetComplicationView.swift
+      # The All-Day Recording complication's view, for its debug preview (-openWatchItem allday-complication). Its
+      # snapshot (Shared/Recording/AllDaySnapshot.swift) comes with Shared.
+      - path: PersonaWatchWidgets/AllDayComplicationView.swift
     dependencies:
       - target: PersonaWatchWidgets
     entitlements:
@@ -613,7 +619,8 @@ targets:
           - CFBundleURLSchemes: [persona]
         WKCompanionAppBundleIdentifier: $(PERSONA_BUNDLE_ID)
         UIBackgroundModes: [audio]
-        NSMicrophoneUsageDescription: "Persona records audio you start on Apple Watch, for example a meeting or a spoken note, then transfers it to your iPhone for on-device transcription; only the text is saved to the knowledge base on your hub."
+        # Also PersonaWatch/InfoPlist.xcstrings (en identical, zh-Hans, ja).
+        NSMicrophoneUsageDescription: "Persona records audio you start on Apple Watch, for example a meeting, a spoken note, or your whole day with All-Day Recording. The audio goes to your iPhone and is transcribed there; only the text is saved to the knowledge base on your hub, which can write a recap of your day from it."
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:
@@ -694,6 +701,8 @@ targets:
       - path: Shared/Design/ExtensionSurfaceTokens.swift
       # The Milk Frog on the watch face (docs/apple/persona.md): what the watch app wrote into the watch App Group.
       - path: Shared/WatchPetSnapshot.swift
+      # The All-Day Recording complication: the state the watch app wrote into the watch App Group.
+      - path: Shared/Recording/AllDaySnapshot.swift
       - path: Shared/Design/WatchFaceTokens.swift
       - path: Shared/Localization
     entitlements:
@@ -784,6 +793,7 @@ targets:
       - path: PersonaTests/DelegateTests.swift
       - path: PersonaTests/GitReadFailureTests.swift
       - path: PersonaTests/ChatSupervisionLinesTests.swift
+      - path: PersonaTests/ChatSendFeedbackTests.swift
       - path: PersonaTests/SubagentResultTests.swift
       - path: PersonaTests/SubagentDeliveryTests.swift
       - path: PersonaTests/SupervisionTests.swift

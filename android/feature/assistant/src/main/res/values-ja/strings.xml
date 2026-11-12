@@ -33,6 +33,7 @@
     <string name="assistant_compact">コンテキストを圧縮</string>
     <string name="assistant_new_main">新しいメインチャット</string>
     <string name="assistant_archive">アーカイブ</string>
+    <string name="assistant_archived">アーカイブ済み</string>
     <string name="assistant_copy_session_id">セッションIDをコピー</string>
     <string name="assistant_new_main_title">新しいメインチャットを開始しますか？</string>
     <string name="assistant_new_main_text">現在のメインチャットは「旧メインチャット・%1$sまで」としてアーカイブされ、後から見つけられます。次に送るメッセージから新しいメインチャットが始まります。</string>
@@ -78,14 +79,24 @@
     <string name="assistant_search_chats">チャットを検索</string>
     <string name="assistant_start_main">メインチャットを開始</string>
     <string name="assistant_main_chat">メインチャット</string>
+    <!-- The drawer's newest eligible chats, between 常驻 and All chats (#4922, #5196) -->
+    <string name="assistant_recent">最近</string>
     <string name="assistant_directions">常駐</string>
+    <string name="assistant_background_supervisor">バックグラウンド監督</string>
     <string name="assistant_origin_inbox">受信箱</string>
+    <string name="assistant_origin_task">定期タスク</string>
+    <string name="assistant_origin_lark_agent">Lark /agent</string>
+    <string name="assistant_origin_spawned">チャットから</string>
+    <string name="assistant_origin_extension">拡張機能</string>
+    <string name="assistant_origin_other">その他</string>
+    <string name="assistant_origin_from">%1$sから</string>
+    <string name="assistant_origin_from_extension">拡張機能から</string>
     <string name="assistant_empty_title">チャットはまだありません</string>
     <string name="assistant_empty_detail">メッセージを送って、Personaと話してみましょう。</string>
     <string name="assistant_no_match">一致するチャットはありません</string>
     <string name="assistant_no_match_detail">別のキーワードでお試しください。</string>
     <string name="assistant_more">その他</string>
-    <string name="assistant_home">ホームに戻る</string>
+    <string name="assistant_back_to_main">メインチャットに戻る</string>
     <string name="assistant_todos">ToDo</string>
     <string name="assistant_open_settings">設定</string>
     <string name="assistant_make_leader">常駐にする</string>
@@ -121,6 +132,9 @@
     <plurals name="assistant_needs_you_more">
         <item quantity="other">受信トレイにあと%1$d件</item>
     </plurals>
+    <plurals name="assistant_needs_you_more_agents">
+        <item quantity="other">ほかに%1$d件の要対応</item>
+    </plurals>
     <string name="assistant_home_setup_lead">あと一歩で始められます。</string>
     <string name="assistant_suggest_local_detail">説明を開く</string>
     <string name="assistant_suggest_needs_calendar">スマホのカレンダーを使います</string>
@@ -144,4 +158,17 @@
     <string name="assistant_health_history">ヘルスケアのチャット</string>
     <string name="assistant_health_new">新しいヘルスケアのチャット</string>
     <string name="assistant_health_load_failed">ヘルスケアのチャットを読み込めませんでした</string>
+    <string name="assistant_rename_menu">名前を変更…</string>
+    <string name="assistant_rename_title">名前を変更</string>
+    <string name="assistant_rename_field">セッション名</string>
+    <string name="assistant_save">保存</string>
+    <string name="assistant_renamed">名前を変更しました</string>
+    <string name="assistant_copy_diagnostics">診断情報をコピー</string>
+    <string name="assistant_diagnostics_copied">診断情報をコピーしました</string>
+    <string name="assistant_end_menu">終了…</string>
+    <string name="assistant_archived_count">アーカイブ済み（%1$d）</string>
+    <string name="assistant_archived_empty">アーカイブしたチャットはありません</string>
+    <string name="assistant_archived_empty_detail">チャット一覧でチャットを左にスワイプするとアーカイブでき、ここに表示されます。</string>
+    <string name="assistant_unarchive">アーカイブ解除</string>
+    <string name="assistant_unarchived">アーカイブを解除しました</string>
 </resources>

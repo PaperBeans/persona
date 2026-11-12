@@ -257,7 +257,48 @@ nonisolated struct ExtensionSecret: Codable, Hashable, Sendable, Identifiable {
     /// The value's last four characters, only when it is set and the extension asked for them (#5906): to tell which
     /// key it is without showing it.
     var hint: String?
+    /// It holds a provider's reference, not a value (docs/extensions/secret-providers.md).
+    var reference: SecretReference?
     var id: String { name }
+}
+
+/// A secret provider's reference a setting holds: whose it is, the reference and what it names in words.
+nonisolated struct SecretReference: Codable, Hashable, Sendable {
+    var provider: String
+    var providerName: String
+    var reference: String
+    var title: String?
+    private enum CodingKeys: String, CodingKey { case provider, reference, title, providerName = "provider_name" }
+}
+
+/// A setting that holds one of a provider's references: another extension's secret, or a model provider's key (on one
+/// computer when `machine` is set).
+nonisolated struct ExtensionSecretUser: Codable, Hashable, Sendable, Identifiable {
+    var kind: String
+    var `extension`: String?
+    var extensionName: String?
+    var secret: String?
+    var secretTitle: String?
+    var launcher: String?
+    var launcherName: String?
+    var machine: String?
+    var reference: String
+    var id: String { [kind, `extension` ?? launcher ?? "", secret ?? machine ?? ""].joined(separator: "/") }
+    private enum CodingKeys: String, CodingKey {
+        case kind, `extension`, secret, launcher, machine, reference
+        case extensionName = "extension_name", secretTitle = "secret_title", launcherName = "launcher_name"
+    }
+}
+
+/// An "Always" of a hand-off card: this reference for this launcher on this computer, asked no more in the user's own
+/// conversations.
+nonisolated struct HandoffRule: Codable, Hashable, Sendable, Identifiable {
+    var id: String
+    var reference: String
+    var launcher: String
+    var machine: String
+    var by: String?
+    var at: String?
 }
 
 /// A line of what a plugin may do (`permissions`).
@@ -288,11 +329,14 @@ nonisolated struct HubExtensionDetail: Decodable, Hashable, Sendable {
     var contributions: [ExtensionContributionSwitch]?
     var depends: [ExtensionDependencyStatus]?
     var extensionPack: [ExtensionPackMember]?
+    /// A secret provider's: the settings that hold its references, and its Always rules for hand-offs.
+    var secretUsers: [ExtensionSecretUser]
+    var handoffRules: [HandoffRule]
 
     private struct Form: Decodable { var fields: [ExtensionField]? }
     private enum CodingKeys: String, CodingKey {
         case publisher, homepage, origin, form, config, secrets, permissions, ui, contributions, depends
-        case extensionPack = "extension_pack"
+        case extensionPack = "extension_pack", secretUsers = "secret_users", handoffRules = "handoff_rules"
         case previousVersion = "previous_version", readOnly = "read_only", nodeMachines = "node_machines"
     }
 
@@ -313,6 +357,8 @@ nonisolated struct HubExtensionDetail: Decodable, Hashable, Sendable {
         contributions = try c.decodeIfPresent([ExtensionContributionSwitch].self, forKey: .contributions)
         depends = try c.decodeIfPresent([ExtensionDependencyStatus].self, forKey: .depends)
         extensionPack = try c.decodeIfPresent([ExtensionPackMember].self, forKey: .extensionPack)
+        secretUsers = try c.decodeIfPresent([ExtensionSecretUser].self, forKey: .secretUsers) ?? []
+        handoffRules = try c.decodeIfPresent([HandoffRule].self, forKey: .handoffRules) ?? []
     }
 }
 
@@ -369,6 +415,14 @@ extension APIClient {
         try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/secrets/\(name)"), body: ["value": value]))
     }
 
+    func setExtension(_ id: String, secret name: String, reference: String) async throws -> HubExtensionDetail {
+        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("PUT", extensionPath("/\(id)/-/secrets/\(name)"), body: ["reference": reference]))
+    }
+
+    func removeHandoffRule(_ id: String, rule: String) async throws -> HubExtensionDetail {
+        try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("DELETE", extensionPath("/\(id)/-/handoff-rules/\(rule)")))
+    }
+
     func clearExtension(_ id: String, secret name: String) async throws -> HubExtensionDetail {
         try JSON.decoder.decode(HubExtensionDetail.self, from: try await request("DELETE", extensionPath("/\(id)/-/secrets/\(name)")))
     }
@@ -398,6 +452,7 @@ enum ExtensionText {
 
     /// A secret's row: set (with its last four characters when the hub gives them, #5906), or not set (required).
     static func secretState(_ s: ExtensionSecret) -> String {
+        if let r = s.reference { return String(localized: "From \(r.providerName.isEmpty ? r.provider : r.providerName)", comment: "A secret that holds a secret provider's reference") }
         guard s.set else { return s.required == true ? String(localized: "Not set (required)") : String(localized: "Not set") }
         guard let hint = s.hint, !hint.isEmpty else { return String(localized: "Set") }
         return String(localized: "Set · ends in \(hint)", comment: "A secret that is set, with its last four characters")
@@ -529,7 +584,7 @@ enum ExtensionText {
     }
 }
 
-/// Settings › Extensions: the list, under each manager's name when the hub has several (docs/assistant/managers.md "Grouping").
+/// Settings › Extensions: only the current assistant's installed extensions.
 @Observable final class ExtensionsModel {
     struct Deps {
         var api: () -> APIClient?
@@ -538,44 +593,52 @@ enum ExtensionText {
     }
 
     private(set) var plugins: [HubExtension]?
-    /// The hub's managers, read with the list; nil from a hub without a roster.
     private(set) var roster: ManagerRoster?
-    /// The hub has plugin markets: the list shows Extension Market.
+    private(set) var manager: String?
     private(set) var markets = false
     private(set) var loading = false
     private(set) var error: String?
+    private(set) var missing = false
     @ObservationIgnored private let deps: Deps
+    @ObservationIgnored private var context: APIClient?
+    @ObservationIgnored private var read = 0
 
     init(deps: Deps = .live) { self.deps = deps }
 
-    /// The hub has no extensions to list (404: an older hub, or Demo Mode): the Mac says so instead of the error.
-    private(set) var missing = false
-
-    /// The list under each manager's name; nil with one manager (or none known): one list, as before.
-    var groups: [ManagerGroup<HubExtension>]? { plugins.flatMap { list in roster?.groups(list) { $0.manager } } }
-
-    /// The manager an extension's page and requests name: nil for the default's.
-    func manager(of p: HubExtension) -> String? { roster?.named(p.manager) }
+    /// Kept for callers that inspect grouping; a current-assistant list never groups.
+    var groups: [ManagerGroup<HubExtension>]? { nil }
+    func manager(of p: HubExtension) -> String? { manager }
 
     func load() async {
-        guard !loading else { return }
+        guard let api = deps.api()?.currentAssistantSettings() else { return }
+        if !api.sameSettingsScope(as: context) {
+            plugins = nil
+            markets = false
+            roster = nil
+            error = nil
+        }
+        context = api
+        manager = api.managerID
+        read += 1
+        let revision = read
         loading = true
-        defer { loading = false }
+        defer { if revision == read { loading = false } }
         do {
-            guard let api = deps.api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
-            let last = roster
-            async let managers = ManagerRoster.read(api, keeping: last)
+            async let managers = ManagerRoster.read(api.manager(nil), keeping: roster)
             let list = try await api.pluginList()
-            roster = await managers
-            plugins = list.plugins.sorted {
+            let roster = await managers
+            guard revision == read, !Task.isCancelled, api.sameSettingsScope(as: deps.api()) else { return }
+            self.roster = roster
+            plugins = ManagerRoster.settingsItems(list.plugins, roster: roster, manager: manager, stamped: { $0.manager }).sorted {
                 ExtensionPopularity.precedes(downloads: $0.downloads, name: $0.name, identity: $0.listKey,
                                              downloads: $1.downloads, name: $1.name, identity: $1.listKey)
             }
-            for p in list.plugins where p.auth != nil { deps.auth.received(p.id, p.auth, manager: manager(of: p)) }
+            for p in plugins ?? [] where p.auth != nil { deps.auth.received(p.id, p.auth, manager: manager) }
             markets = list.markets
             error = nil
             missing = false
         } catch {
+            guard revision == read, !Task.isCancelled, api.sameSettingsScope(as: deps.api()) else { return }
             self.error = error.localizedDescription
             missing = (error as? APIError)?.status == 404
         }
@@ -757,6 +820,20 @@ nonisolated enum ExtensionSecretSave: Equatable, Sendable {
         var refusal: String?
         let ok = await run(preservingDraft: true, refused: { refusal = $0 }) { api in try await api.setExtension(self.id, secret: name, value: value) }
         return ok ? .saved : refusal.map(ExtensionSecretSave.refused) ?? .failed
+    }
+
+    /// Saves a provider's reference in a secret's place (docs/extensions/secret-providers.md).
+    func setSecretReference(_ name: String, reference: String) async -> ExtensionSecretSave {
+        let reference = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reference.isEmpty else { return .failed }
+        var refusal: String?
+        let ok = await run(preservingDraft: true, refused: { refusal = $0 }) { api in try await api.setExtension(self.id, secret: name, reference: reference) }
+        return ok ? .saved : refusal.map(ExtensionSecretSave.refused) ?? .failed
+    }
+
+    /// Removes one of a provider's Always rules: the next hand-off it covered asks again.
+    func removeHandoffRule(_ rule: String) async {
+        await run(preservingDraft: true) { api in try await api.removeHandoffRule(self.id, rule: rule) }
     }
 
     func clearSecret(_ name: String) async {

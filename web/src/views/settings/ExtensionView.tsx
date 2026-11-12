@@ -327,7 +327,7 @@ export function LegacyExtensionUI({
     setBusy(action.id);
     const mine = ++asked.current;
     try {
-      const r = outcome(await actUI(extension, top.ui, action.id, { context, state: stateRef.current, values: sent, manager }), context?.item);
+      const r = outcome(await actUI(extension, top.ui, action.id, { context, state: stateRef.current, values: sent, manager }), context?.item, extension);
       // what it says to do is still done; the view it answers only while nothing was asked since
       const latest = mine === asked.current;
       if (r.view && latest) show(r.view, !!(extra && "q" in extra)); // a search keeps what is typed
@@ -337,6 +337,8 @@ export function LegacyExtensionUI({
       if (r.source) onOpenSource?.();
       // an extension's own settings (persona://settings/extensions/<id>) open in the app
       if (r.settings) navigate(r.settings);
+      // the subscription pages' Set Up with … (persona://ask): the text to the assistant's main conversation, which opens
+      if (r.ask) askAssistant(r.ask);
       if (r.push) push(r.push);
       if (r.pop) pop();
       if (r.reload) load();
@@ -381,7 +383,7 @@ export function LegacyExtensionUI({
     const at = asked.current;
     let r: ReturnType<typeof outcome> | null = null;
     try {
-      r = outcome(await actUI(extension, top.ui, c.action.id, { context, state: stateRef.current, values: { ...c.action.values, [c.name]: value }, manager }), context?.item);
+      r = outcome(await actUI(extension, top.ui, c.action.id, { context, state: stateRef.current, values: { ...c.action.values, [c.name]: value }, manager }), context?.item, extension);
     } catch (e) {
       toast(t("settings-extensionview.action_failed", { error: errorText(e) }), "error");
     }
@@ -710,4 +712,12 @@ function LauncherSection({ place, launcher, machine }: { place: UIPlace; launche
       <ExtensionUI extension={place.extension} ui={place.id} context={context} embedded onUnsupported={() => setGone(true)} />
     </div>
   );
+}
+
+/** Sends the subscription pages' Set Up with … text to the assistant's main conversation (Ask Persona), loading the
+ *  outbox only then; a conversation that can't start says so. */
+function askAssistant(text: string) {
+  void import("../../lib/outbox")
+    .then((m) => m.askPersona(text))
+    .catch((e: unknown) => toast(t("settings-extensionview.action_failed", { error: errorText(e) }), "error"));
 }

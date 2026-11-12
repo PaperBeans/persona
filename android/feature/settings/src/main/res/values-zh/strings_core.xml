@@ -4,6 +4,7 @@
     <string name="settings_style_transparency">透明效果</string>
     <string name="settings_style_glass_auto">Android 13 以上用折射玻璃，更早的系统用模糊玻璃；省电模式下，或者滑动明显掉帧时，自动换成不透明的面板。</string>
     <string name="settings_style_glass_reduced">所有浮层都用不透明的面板，最省电，文字也最清楚。</string>
+    <string name="settings_agents_layout">Agents 列表布局</string>
     <string name="settings_default">默认</string>
     <string name="settings_preview_row1_title">补齐网络层的单元测试</string>
     <string name="settings_preview_row1_preview">网络层的测试用哪个框架？</string>
@@ -16,9 +17,9 @@
     <string name="settings_preview_row3_time">25 分钟前</string>
     <string name="settings_preview_detail">1 个空间，3 个会话</string>
     <string name="settings_avatar_demo">体验模式只有默认形象。</string>
-    <string name="settings_avatar_intro">顶栏和对话列表里 Persona 的名字和脸；hub 支持时你的各台设备一起换。颜色跟着界面风格走，不另外改 App 的颜色。扩展可以加形象；hub 上的形象包和扩展的形象选中时下载到手机。桌面图标不变。</string>
+    <string name="settings_avatar_intro">顶栏和对话列表里 Persona 的名字和脸；Hub 支持时你的各台设备一起换。颜色跟着界面风格走，不另外改 App 的颜色。扩展可以加形象；Hub 上的形象包和扩展的形象选中时下载到手机。桌面图标不变。</string>
     <string name="settings_avatar_from_extension">来自 %1$s</string>
-    <string name="settings_avatar_on_hub">hub 上的形象</string>
+    <string name="settings_avatar_on_hub">Hub 上的形象</string>
     <string name="settings_avatar_download">选中后下载</string>
     <string name="settings_avatar_states">%1$s的五种状态</string>
     <string name="settings_avatar_new_from_photo">从照片新建</string>
@@ -27,7 +28,7 @@
     <string name="settings_avatar_from_image">用你的图片做的</string>
     <string name="settings_avatar_delete">删除形象</string>
     <string name="settings_avatar_delete_title">删除「%1$s」？</string>
-    <string name="settings_avatar_delete_text">会从 hub 和你的其他设备上删除。正在用它的地方会换回默认形象。</string>
+    <string name="settings_avatar_delete_text">会从 Hub 和你的其他设备上删除。正在用它的地方会换回默认形象。</string>
     <string name="settings_avatar_upload_title">新形象</string>
     <string name="settings_avatar_upload_crop">裁剪</string>
     <string name="settings_avatar_upload_crop_hint">拖动来移动照片，双指捏合来缩放。</string>
@@ -39,7 +40,7 @@
     <string name="settings_avatar_upload_send">上传</string>
     <string name="settings_avatar_upload_retry">再试一次</string>
     <string name="settings_avatar_upload_not_downloaded">形象做好了，但没能下载到这台设备，再试一次。</string>
-    <string name="settings_avatar_upload_unreachable">连不上 hub，检查连接后再试一次。</string>
+    <string name="settings_avatar_upload_unreachable">连不上 Hub，检查连接后再试一次。</string>
     <string name="settings_avatar_upload_unreadable">打不开这张图片，换一张试试。</string>
     <string name="settings_avatar_upload_too_small">图片太小了，请选每边至少 %1$d 像素的图片。</string>
     <string name="settings_avatar_upload_unprepared">这张图片处理不了，换一张试试。</string>
@@ -82,7 +83,7 @@
     <string name="settings_cleanup_failed">手机上的数据没清理完，再清理一次。</string>
     <string name="settings_devices_title">设备</string>
     <string name="settings_devices_unavailable">设备管理暂不可用</string>
-    <string name="settings_check_pairing_and_hub">请检查配对和 hub 版本。</string>
+    <string name="settings_check_pairing_and_hub">请检查配对和 Hub 版本。</string>
     <string name="settings_devices_loading">正在读取设备…</string>
     <string name="settings_devices_empty">暂无已配对设备</string>
     <string name="settings_devices_empty_detail">配对后可在这里查看和撤销设备。</string>
@@ -103,7 +104,7 @@
     <string name="settings_devices_note">每台设备有自己的凭据，丢了哪台就撤销哪台，其他设备不受影响。手表只能看和回答，不能改设置、开关 Agent。</string>
     <string name="settings_devices_revoke_this_title">撤销本机？</string>
     <string name="settings_devices_revoke_title">撤销这台设备？</string>
-    <string name="settings_devices_revoke_this_text">本机将退出配对，并清除这个 hub 的本地数据。再次使用需要重新配对。</string>
+    <string name="settings_devices_revoke_this_text">本机将退出配对，并清除这个 Hub 的本地数据。再次使用需要重新配对。</string>
     <string name="settings_devices_revoke_text">撤销后，这台设备会断开连接，再次使用需要重新配对。</string>
     <string name="settings_notify_prefs_header">这台设备的通知偏好</string>
     <string name="settings_notify_prefs_unavailable">通知偏好暂不可用</string>
@@ -155,7 +156,7 @@
     <string name="settings_diag_current_path">当前路径</string>
     <string name="settings_diag_last_received">最后收包</string>
     <string name="settings_diag_last_disconnect">最近断线原因</string>
-    <string name="settings_diag_legacy_hub">hub 版本太旧，不能公网直连。</string>
+    <string name="settings_diag_legacy_hub">Hub 版本太旧，不能公网直连。</string>
     <string name="settings_diag_candidates">候选地址</string>
     <string name="settings_diag_waiting">等待探测结果</string>
     <string name="settings_diag_waiting_detail">运行连接尚无候选探测结果。</string>
@@ -172,11 +173,11 @@
     <string name="settings_diag_heartbeat_foreground">前台间隔</string>
     <string name="settings_diag_heartbeat_background">后台间隔</string>
     <string name="settings_diag_pong_timeout">等待 pong 超时</string>
-    <string name="settings_diag_heartbeat_note">以下是 hub 确认的配置，实际收包频率未实测。</string>
+    <string name="settings_diag_heartbeat_note">以下是 Hub 确认的配置，实际收包频率未实测。</string>
     <string name="settings_diag_records">连接记录</string>
-    <string name="settings_diag_no_summary">尚未取得 hub 的断线汇总</string>
+    <string name="settings_diag_no_summary">尚未取得 Hub 的断线汇总</string>
     <string name="settings_diag_no_records">暂无记录</string>
-    <string name="settings_diag_no_records_detail">尚无 hub 连接时段记录。</string>
+    <string name="settings_diag_no_records_detail">尚无 Hub 连接时段记录。</string>
     <string name="settings_diag_session">连接时段</string>
     <string name="settings_diag_connected_at">连接时间</string>
     <string name="settings_diag_disconnected_at">断开时间</string>
@@ -185,7 +186,7 @@
     <string name="settings_diag_cellular">蜂窝网络测试</string>
     <string name="settings_diag_cellular_result">测试结果</string>
     <string name="settings_ready_cellular_confirmed">用户确认已试通</string>
-    <string name="settings_diag_ddns">家宽地址变化后，在外面可能找不回 hub。建议给 hub 配一个 DDNS 名字；没有域名时，可以回家连内网重试。</string>
+    <string name="settings_diag_ddns">家宽地址变化后，在外面可能找不回 Hub。建议给 Hub 配一个 DDNS 名字；没有域名时，可以回家连内网重试。</string>
     <string name="settings_diag_reprobe">重新探测</string>
     <string name="settings_reading_ellipsis">正在读取…</string>
     <string name="settings_diag_last_pairing">最近一次配对</string>
@@ -198,7 +199,7 @@
     <string name="settings_connection_updating">更新中…</string>
     <string name="settings_connection_waiting_network">等待网络</string>
     <string name="settings_connection_needs_local_network">需要本地网络权限</string>
-    <string name="settings_connection_certificate_changed">hub 的证书变了</string>
+    <string name="settings_connection_certificate_changed">Hub 的证书变了</string>
     <string name="settings_connection_revoked">配对已失效</string>
     <string name="settings_install_confirm_failed">无法打开安装确认页，请回到更新页面重试。</string>
     <string name="settings_install_no_confirm">安装器没有提供确认页面，请重试。</string>
@@ -210,11 +211,11 @@
     <string name="settings_lock_test_title">锁屏测试</string>
     <string name="settings_lock_test_scheduling">正在预约</string>
     <string name="settings_lock_test_start">开始锁屏测试</string>
-    <string name="settings_lock_test_scheduled">已预约，请现在锁屏。hub 会按预约发送测试通知，回来后查看结果。</string>
-    <string name="settings_lock_test_schedule_failed">不知道约上没有。先刷新记录；还是没有的话，看看连接、hub 版本和这台手机的配对。</string>
+    <string name="settings_lock_test_scheduled">已预约，请现在锁屏。Hub 会按预约发送测试通知，回来后查看结果。</string>
+    <string name="settings_lock_test_schedule_failed">不知道约上没有。先刷新记录；还是没有的话，看看连接、Hub 版本和这台手机的配对。</string>
     <string name="settings_lock_test_due">预约时间：%1$s</string>
-    <string name="settings_lock_test_sent">hub 尝试发送：%1$s</string>
-    <string name="settings_lock_test_received">hub 收到回报：%1$s</string>
+    <string name="settings_lock_test_sent">Hub 尝试发送：%1$s</string>
+    <string name="settings_lock_test_received">Hub 收到回报：%1$s</string>
     <string name="settings_lock_test_shown">App 已经把通知交给系统了。有没有弹出、响铃、亮屏，要你自己看一下。</string>
     <string name="settings_lock_test_not_shown">App 收到了测试，但通知没显示出来。看看通知权限和通知渠道。</string>
     <string name="settings_lock_test_shown_unknown">通知展示结果未知，请按实际情况确认。</string>
@@ -224,14 +225,14 @@
     <string name="settings_lock_test_feedback_failed">请检查通知权限、锁屏通知和后台设置，再测试一次。</string>
     <string name="settings_lock_test_none">未实测</string>
     <string name="settings_lock_test_none_detail">预约锁屏测试后，在这里查看设备回报。</string>
-    <string name="settings_disconnects_note">并行连接分别计数，hub 重启造成的离线时段不计入最长值。</string>
+    <string name="settings_disconnects_note">并行连接分别计数，Hub 重启造成的离线时段不计入最长值。</string>
     <string name="settings_lock_test_refresh">刷新测试结果</string>
     <string name="settings_lock_test_status_scheduled">等待预约到期</string>
-    <string name="settings_lock_test_status_sent">hub 试着发了，但设备还没回话，不知道到没到。</string>
+    <string name="settings_lock_test_status_sent">Hub 试着发了，但设备还没回话，不知道到没到。</string>
     <string name="settings_lock_test_status_received">设备已回报收到测试事件</string>
     <string name="settings_lock_test_status_unavailable">到期时没有可用连接，请检查后台设置后重新测试。</string>
-    <string name="settings_lock_test_status_interrupted">测试被 hub 重启中断，请重新预约。</string>
-    <string name="settings_lock_test_status_unknown">测试状态未知，请刷新或更新 hub。</string>
+    <string name="settings_lock_test_status_interrupted">测试被 Hub 重启中断，请重新预约。</string>
+    <string name="settings_lock_test_status_unknown">测试状态未知，请刷新或更新 Hub。</string>
     <string name="settings_system_anco">卓易通</string>
     <string name="settings_system_hyperos">澎湃 OS</string>
     <string name="settings_system_harmony">鸿蒙</string>
@@ -258,7 +259,7 @@
     <string name="settings_ready_task_lock">最近任务加锁</string>
     <string name="settings_ready_task_lock_detail">打开最近任务，长按 Persona 卡片或打开卡片菜单，选择加锁。跳过后，一键清理可能关闭连接。</string>
     <string name="settings_ready_local_network">本地网络</string>
-    <string name="settings_ready_local_network_detail">未允许时，在家里可能无法连接 hub。</string>
+    <string name="settings_ready_local_network_detail">未允许时，在家里可能无法连接 Hub。</string>
     <string name="settings_network_none">没有可用网络</string>
     <string name="settings_network_summary">IPv6：%1$s\nVPN：%2$s\n网页登录：%3$s</string>
     <string name="settings_network_ipv6_ok">有全局地址和默认路由</string>
@@ -272,7 +273,7 @@
     <string name="settings_update_check_failed">检查更新失败，请稍后重试。</string>
     <string name="settings_off">关闭</string>
     <string name="settings_retry_cleanup">重试清理</string>
-    <string name="settings_try_demo">没有 hub？先体验一下</string>
+    <string name="settings_try_demo">没有 Hub？先体验一下</string>
     <string name="settings_style_title">界面风格</string>
     <string name="settings_avatar_title">形象</string>
     <string name="settings_about_persona">关于 Persona</string>
@@ -281,15 +282,15 @@
     <string name="settings_phone_data_caption">剪贴板只能在 App 打开时读取。Android 不提供提醒事项数据源。</string>
     <string name="settings_phone_data_manage">管理权限</string>
     <string name="settings_title">设置</string>
-    <string name="settings_demo_notice">示例数据，不会连接 hub 或安装更新</string>
+    <string name="settings_demo_notice">示例数据，不会连接 Hub 或安装更新</string>
     <string name="settings_demo_mode">体验模式</string>
-    <string name="settings_demo_connect">连接我的 hub</string>
+    <string name="settings_demo_connect">连接我的 Hub</string>
     <string name="settings_not_paired">尚未配对</string>
     <string name="settings_hub_computers_online">电脑在线</string>
-    <string name="settings_hub_address">hub 地址</string>
-    <string name="settings_row_hubs">hub</string>
-    <string name="settings_row_hubs_subtitle">添加、改名和断开 hub</string>
-    <string name="settings_row_hub_update">hub 版本</string>
+    <string name="settings_hub_address">Hub 地址</string>
+    <string name="settings_row_hubs">Hub 连接</string>
+    <string name="settings_row_hubs_subtitle">添加、改名和断开 Hub</string>
+    <string name="settings_row_hub_update">Hub 版本</string>
     <string name="settings_row_hub_update_subtitle">版本、检查和安装更新、自动更新</string>
     <string name="settings_row_pairing">配对</string>
     <string name="settings_row_pairing_subtitle">扫码、粘贴链接或手动输入</string>
@@ -330,9 +331,9 @@
     <string name="settings_update_allow_unknown">请允许安装未知应用，返回后再次点“下载并安装”。</string>
     <string name="settings_update_verified">下载和校验完成，请在系统页面确认安装。</string>
     <string name="settings_update_failed">更新未完成。请检查下载连接、校验信息和安装权限后重试。</string>
-    <string name="settings_disconnect_forget">断开并忘记服务器</string>
+    <string name="settings_disconnect_forget">断开并忘记 Hub</string>
     <string name="settings_disconnect_title">断开配对？</string>
-    <string name="settings_disconnect_text">将断开与 hub 的连接，清除本机凭据和这个 hub 的本地数据。再次使用需要重新配对。</string>
+    <string name="settings_disconnect_text">将断开与 Hub 的连接，清除本机凭据和这个 Hub 的本地数据。再次使用需要重新配对。</string>
     <string name="settings_disconnect">断开</string>
     <string name="settings_ready_title">准备清单</string>
     <string name="settings_ready_channels_header">系统通知渠道</string>
@@ -356,7 +357,7 @@
     <string name="settings_offline">离线</string>
     <string name="settings_ready_row_persona_version">Persona 版本</string>
     <string name="settings_ready_row_terminal">终端</string>
-    <string name="settings_ready_node_mismatch">这台电脑上的 Persona 和 hub 版本不一致。等这台电脑在线时，到 Agents 里打开它，点「重新部署」。</string>
+    <string name="settings_ready_node_mismatch">这台电脑上的 Persona 和 Hub 版本不一致。等这台电脑在线时，到 Agents 里打开它，点「重新部署」。</string>
     <string name="settings_ready_skip_machines">跳过电脑检查</string>
     <string name="settings_ready_skipped_machines">已跳过电脑检查，稍后可在 Agents 查看在线状态和版本。</string>
     <string name="settings_ready_skip_lock">跳过锁屏测试</string>
@@ -386,7 +387,7 @@
     <string name="settings_translation_lark_about">飞书消息很多，默认不翻译；只翻译这里选中的会话里别人发的消息。</string>
     <string name="settings_translation_lark_chats">要翻译的飞书会话</string>
     <string name="settings_translation_remove_chat">不再翻译「%1$s」</string>
-    <string name="settings_translation_note">这些设置存在这台手机上，并会发给 hub：hub 按它提前翻好新邮件，打开时直接显示译文。</string>
+    <string name="settings_translation_note">这些设置存在这台手机上，并会发给 Hub：Hub 按它提前翻好新邮件，打开时直接显示译文。</string>
     <string name="settings_translation_lark_read_failed">读不到飞书会话</string>
     <string name="settings_translation_picker_title">要翻译的会话</string>
     <string name="settings_translation_search">搜索会话</string>
@@ -401,24 +402,24 @@
     <string name="settings_not_configured">未配置</string>
     <string name="settings_triage_title">会话分诊</string>
     <string name="settings_triage_demo">体验模式不分诊会话。</string>
-    <string name="settings_triage_read_failed">读不到 hub 上的设置：%1$s</string>
+    <string name="settings_triage_read_failed">读不到 Hub 上的设置：%1$s</string>
     <string name="settings_triage_save_failed">没改成：%1$s</string>
     <string name="settings_triage_model">分诊模型</string>
-    <string name="settings_triage_about">Agent 每停下一轮，hub 用分诊模型读它最后的回复（每轮一次），在列表里写出做完了什么或在等什么，做完的不再算完成未看。</string>
-    <string name="settings_triage_actions_header">hub 替你做</string>
+    <string name="settings_triage_about">Agent 每停下一轮，Hub 用分诊模型读它最后的回复（每轮一次），在列表里写出做完了什么或在等什么，做完的不再算完成未看。</string>
+    <string name="settings_triage_actions_header">Hub 替你做</string>
     <string name="settings_triage_decide">要你决定的开卡片</string>
     <string name="settings_triage_continue">出错自动继续</string>
     <string name="settings_triage_wake">到点叫醒</string>
-    <string name="settings_triage_actions_about">模型服务临时出错（503 等）后自动发「继续」，最多 3 次；在等部署、CI 或另一个 Agent 的，到点叫醒它自己去查。这两项会让 Agent 用它自己的模型再跑一轮。推代码、部署、给别人发消息这类事 hub 只会问你，不会自己做。</string>
+    <string name="settings_triage_actions_about">模型服务临时出错（503 等）后自动发「继续」，最多 3 次；在等部署、CI 或另一个 Agent 的，到点叫醒它自己去查。这两项会让 Agent 用它自己的模型再跑一轮。推代码、部署、给别人发消息这类事 Hub 只会问你，不会自己做。</string>
     <string name="settings_triage_closeout">要收尾记录</string>
     <string name="settings_triage_closeout_about">Agent 干了活却没交代做完没有、合没合、部署没有、还缺什么就停下时，拦它一次让它补上这份记录；会多花它自己模型的一小轮</string>
     <string name="settings_triage_reply_reminder">看过没回时提醒</string>
     <string name="settings_triage_reply_reminder_about">Agent 问了你、你看过 30 分钟还没回，就提醒一次；只按规则判断，不花 token。</string>
     <plurals name="settings_notify_long_turn">
-        <item quantity="other">hub 配置的长任务门槛：%1$d 秒</item>
+        <item quantity="other">Hub 配置的长任务门槛：%1$d 秒</item>
     </plurals>
     <plurals name="settings_notify_done_delay">
-        <item quantity="other">hub 配置的完成通知等待时间：%1$d 秒（实际送达时间未实测）</item>
+        <item quantity="other">Hub 配置的完成通知等待时间：%1$d 秒（实际送达时间未实测）</item>
     </plurals>
     <plurals name="settings_diag_millis">
         <item quantity="other">%1$d 毫秒</item>
@@ -430,7 +431,7 @@
         <item quantity="other">%1$d 秒</item>
     </plurals>
     <plurals name="settings_disconnects_summary">
-        <item quantity="other">hub 记录：过去 24 小时断开 %1$d 次，最长离线 %2$s 秒。</item>
+        <item quantity="other">Hub 记录：过去 24 小时断开 %1$d 次，最长离线 %2$s 秒。</item>
     </plurals>
     <plurals name="settings_hub_computers_count">
         <item quantity="other">%1$d 台</item>

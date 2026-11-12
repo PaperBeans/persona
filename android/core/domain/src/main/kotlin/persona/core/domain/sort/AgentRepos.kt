@@ -46,6 +46,8 @@ fun repoOf(cwd: String, repoRoot: String? = null): RepoPlace {
  */
 data class AgentWorktree(
     val id: String, val name: String, val path: String, val main: Boolean, val members: List<AgentSession>, val branch: String? = null,
+    /** The node placed its sessions in git (#1805) and named no branch: HEAD is detached there ([worktreeLine]). */
+    val detached: Boolean = false,
 )
 
 /** One repository on one computer, its working trees the main checkout first, then by name. */
@@ -133,7 +135,8 @@ fun agentRepos(rows: List<AgentSession>): List<AgentRepo> =
             // A linked tree takes the name its host gave it (#4497), its branch staying beside it. The main checkout keeps
             // its name: several workspaces can share it. So does a tree with an Orca session in it, which Orca names (web `orcaTrees`).
             val hostName = if (main || inTree.any { it.session.spaceKind == "orca" }) null else hostPlaceName(inTree)
-            AgentWorktree(id, hostName ?: branch ?: if (path == repo) name else baseName(path), path, main, inTree, branch)
+            AgentWorktree(id, hostName ?: branch ?: if (path == repo) name else baseName(path), path, main, inTree, branch,
+                detached = branch == null && inTree.any { !it.session.worktree.isNullOrBlank() })
         }.sortedWith(compareBy<AgentWorktree> { !it.main }.thenComparing({ it.name to it.path }, byName))
         AgentRepo("repo/$machine/$repo", machine, name, repo, trees)
     }.sortedWith(compareBy<AgentRepo, Pair<String, String>>(byName) { it.name to it.path }.thenBy { it.machineId })

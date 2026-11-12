@@ -4,6 +4,7 @@
     <string name="settings_style_transparency">透明効果</string>
     <string name="settings_style_glass_auto">Android 13以降は屈折ガラス、それより前はぼかしガラスを使います。省電力モードのときやスクロールでコマ落ちするときは、自動で不透明なパネルに切り替えます。</string>
     <string name="settings_style_glass_reduced">すべてのオーバーレイに不透明なパネルを使います。もっとも省電力で、文字もいちばん読みやすくなります。</string>
+    <string name="settings_agents_layout">Agents 一覧のレイアウト</string>
     <string name="settings_default">デフォルト</string>
     <string name="settings_preview_row1_title">ネットワーク層の単体テストを追加</string>
     <string name="settings_preview_row1_preview">ネットワーク層のテストはどのフレームワークを使いますか？</string>

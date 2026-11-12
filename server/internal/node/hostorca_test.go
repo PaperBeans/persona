@@ -854,8 +854,9 @@ func TestNotRunningOnAnEngineWithoutResume(t *testing.T) {
 	if code, _ := refusalOf(t, err); code != agentStopped {
 		t.Fatalf("a message to a stopped agent: %v", err)
 	}
+	starts := orcaTypedStarts(o)
 	_, _ = request(t, n, "session.start", map[string]any{"resume_session_id": sidA})
-	if s := strings.Join(o.Trace("terminal.send"), "\n"); !strings.Contains(s, "--resume "+sidA) || !strings.Contains(s, "claude-gpt") {
+	if s := strings.Join(starts(), "\n"); !strings.Contains(s, "--resume "+sidA) || !strings.Contains(s, "claude-gpt") {
 		t.Fatalf("gone: not resumed with its launcher; calls %v", o.Trace())
 	}
 	const unknown = "0e000000-0000-4000-8000-0000000000ff" // no Claude transcript: not Orca's to resume

@@ -220,8 +220,9 @@ struct ShellNeedsYou: View {
         // `-showHomeState empty`: nothing needs the user (screenshots).
         if UserDefaults.standard.string(forKey: "showHomeState") == "empty" { return [] }
         #endif
-        let agents = model.pendingInteractions.filter { !model.isMuted($0.sessionKey) }.map(Line.agent)
-        let inbox = InboxStore.shared.items
+        // The current assistant's, as its Agents and Inbox pages list them.
+        let agents = model.scopedInteractions.filter { !model.isMuted($0.sessionKey) }.map(Line.agent)
+        let inbox = InboxStore.shared.scopedItems
             .filter { !$0.isDone && $0.triage == .action }
             .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
             .map(Line.inbox)

@@ -296,6 +296,15 @@ class RepositoryTests(unittest.TestCase):
                 self.assertEqual(self.catalog.values[f"status.{mode}.{state}.text"], base)
                 for part, opacity in (("dot", dot_alpha), ("tint", tint_alpha)):
                     self.assertEqual(self.catalog.values[f"status.{mode}.{state}.{part}"], {**base, "alpha": base["alpha"] * opacity})
+        # Waiting in the background: Working's dot made lighter, its words the secondary gray.
+        waiting = re.search(r'static let backgroundWaiting = StatusTone\(dot: working.dot.opacity\(([0-9.]+)\), text: .secondary, tint: working.dot.opacity\(([0-9.]+)\)\)', swift)
+        self.assertIsNotNone(waiting, "StatusPalette.backgroundWaiting not found")
+        dot_alpha, tint_alpha = map(float, waiting.groups())
+        for mode in gen.MODES:
+            working = self.catalog.values[f"status.{mode}.working.dot"]
+            self.assertEqual(self.catalog.values[f"status.{mode}.backgroundWaiting.text"], self.catalog.values[f"system.{mode}.secondary"])
+            for part, opacity in (("dot", dot_alpha), ("tint", tint_alpha)):
+                self.assertEqual(self.catalog.values[f"status.{mode}.backgroundWaiting.{part}"], {**working, "alpha": working["alpha"] * opacity})
 
     def test_ios_theme_explicit_colors_match(self):
         # Since 2026-11-01 iOS keeps a look as UI style × theme color (apple/Shared/Design): each catalog style is its component

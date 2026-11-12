@@ -12,6 +12,9 @@ type agentCall struct {
 	Status string
 }
 
+// AgentTerminal says whether an agent's TaskNote status is final: the node then reports what the agent used.
+func AgentTerminal(status string) bool { return agentTerminal(status) }
+
 func agentTerminal(status string) bool {
 	switch status {
 	case "completed", "failed", "killed", "stopped", "ended":

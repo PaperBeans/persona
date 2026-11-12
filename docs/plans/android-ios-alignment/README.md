@@ -1,6 +1,6 @@
 # Plan: align the Android app with iOS (#4194)
 
-Status: plan, written 2026-11-11 against `main` at 309b3fe76; the two area documents against c57caeddc. The owner settled eight of the questions, the spec settles a ninth, and two are open (below). Each phase and each area has its own issue and its own document, with the requirements first and the technical design second. When a phase is done, its rules move into `docs/design/DESIGN_SYSTEM.md` and `docs/android/android-design.md` and its document is deleted; when every phase is done, this folder goes.
+Status: plan, written 2026-11-11 against `main` at 309b3fe76; the two area documents against c57caeddc. The owner settled nine of the questions, the spec settles a tenth, and one is open (below). Each phase and each area has its own issue and its own document, with the requirements first and the technical design second. When a phase is done, its rules move into `docs/design/DESIGN_SYSTEM.md` and `docs/android/android-design.md` and its document is deleted; when every phase is done, this folder goes.
 
 ## Goal
 
@@ -21,7 +21,7 @@ Someone who uses Persona on an iPhone and on an Android phone gets the same app:
 | 1 | The needs-you color (DS-01) | Blue, as iOS shows it today | Nothing visible changes. `spec/tokens`, Android's generated value and the docs say blue; the web's amber is a separate fix. |
 | 2 | The contrast policy | Follow iOS | Android uses the iOS color values and the iOS floors: links 3:1, white on accent 3.5:1, bubble text 4.5:1. The text contrast rule in `DESIGN_SYSTEM.md` gets the matching exception. |
 | 3 | Swiping between home destinations, dragging out the sidebar | Not on Android | The avatar at the top left opens the sidebar and the switcher changes pages, as today. The swipe that closes an Agents row stays, since nothing competes with it. |
-| 4 | Where pending requests sit in a chat | Open | Proposal: as on iOS, a card above the composer, which stays usable. |
+| 4 | Where pending requests sit in a chat | Follow iOS (2026-11-12) | The request cards stack above the composer, which stays usable; each folds to a one-line preview, and past half the page they collapse into "N pending". `DESIGN_SYSTEM.md` section 4.8 is corrected with the change ([phase 2](phase-2-interactions.md), T6; [chats](chats.md), C10). |
 | 5 | The Inbox swipe direction | Follow iOS | The owner keeps Android's own direction only where it is a platform convention, and Android has none for swipe actions. |
 | 6 | An in-app text size on Android | Open | Proposal: Small, Standard and Large, as on iOS. |
 | 7 | Feedback | One layer, modeled on the iOS toast | Snackbars, per-page hosts and in-app system toasts all go through one component. |
@@ -30,7 +30,7 @@ Someone who uses Persona on an iPhone and on an Android phone gets the same app:
 | 10 | Android's assistant home page | Drop it, as on iOS | New Chat is the only blank page, and Back from a conversation goes to the main conversation ([chats](chats.md), C11). |
 | 11 | The Agent chat header's terminal and permission-mode buttons | Drop both, as on iOS | The terminal opens from ⋯ and the work line, the mode from the composer's model menu ([chats](chats.md), C3 and C7). |
 
-Questions 4 and 6 are tracked in #4208. Decisions 10 and 11 were taken there on 2026-11-11.
+Question 6 is tracked in #4208. Decisions 10 and 11 were taken there on 2026-11-11, decision 4 on 2026-11-12.
 
 ## Phases
 

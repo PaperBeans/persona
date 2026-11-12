@@ -57,7 +57,7 @@ import java.io.File
 
 /**
  * The chat page's parity batch with iOS / the web (#2967), in every style, light and dark: Persona's own tools in
- * words, ask_user opened with what was picked, "View sub-agent" under a Task step, a fenced block coloured by its
+ * words, ask_user opened with what was picked, "View sub-agent" under a Task step (Brief and Board; Glass draws the task card), a fenced block coloured by its
  * language, the "Step N/M" pill, a message dragged left to quote, the plan card's three approvals, and the message
  * menu's "Branch to new chat" / "Rewind to here". PNGs in `build/chat-parity-shots/` (or `-Dpersona.shots=<dir>`).
  */
@@ -142,7 +142,8 @@ class ChatParityShotsTest {
         rule.onNodeWithText("读 Agent 对话", substring = true, useUnmergedTree = true).assertExists()
         rule.onNodeWithText("MacBook · 点 AC → 6 → × → 7 → =", substring = true, useUnmergedTree = true).assertExists()
         rule.onNodeWithText("调用 Persona · lark doc fetch", substring = true, useUnmergedTree = true).assertExists()
-        rule.onNodeWithText("查看子 Agent", substring = true, useUnmergedTree = true).assertExists()
+        // Glass draws the Task as its task card, which is never a conversation of its own: no "View sub-agent" (#5045).
+        rule.onNodeWithText("查看子 Agent", substring = true, useUnmergedTree = true).assertDoesNotExist()
         rule.onNodeWithText("批准，每步确认", substring = true, useUnmergedTree = true).assertExists()
         // ask_user opened: the questions, what was picked.
         rule.onNodeWithText("周末的会挪到哪天？", substring = true, useUnmergedTree = true).performClick()
@@ -154,6 +155,7 @@ class ChatParityShotsTest {
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
             rule.waitForIdle()
+            if (s != AppStyle.Glass) rule.onNodeWithText("查看子 Agent", substring = true, useUnmergedTree = true).assertExists()
             save(rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap(), "parity-${s.name.lowercase()}-${if (d) "dark" else "light"}")
         }
     }

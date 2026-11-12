@@ -43,13 +43,49 @@ func newMeetingFixture(t *testing.T) *meetingFixture {
 	setSettings(t, s, func(v *Settings) { v.Main = "c-main" })
 	model := &meetingModelFake{reply: `{"question":"","answer":"We kept the cap.","sources":[]}`}
 	s.meetingModel = model
+	feed := trackAttendFeed(s)
 	srv := httptest.NewServer(s)
 	m := &meetingFixture{t: t, s: s, f: f, srv: srv, model: model}
 	t.Cleanup(func() {
 		m.idle()
 		srv.Close()
+		feed.stop()
 	})
 	return m
+}
+
+// attendFeedTracker runs the attending feed's looks on real timers and, at the end of a test, waits for the ones
+// already running: a look writes the recording's live log, which must not land in the test's directory while it is
+// being removed (#5510). One that comes due after stop does nothing.
+type attendFeedTracker struct {
+	mu      sync.Mutex
+	stopped bool
+	running sync.WaitGroup
+}
+
+func trackAttendFeed(s *Service) *attendFeedTracker {
+	tr := &attendFeedTracker{}
+	s.attend.feed.after = func(d time.Duration, fn func()) func() bool {
+		return time.AfterFunc(d, func() {
+			tr.mu.Lock()
+			if tr.stopped {
+				tr.mu.Unlock()
+				return
+			}
+			tr.running.Add(1)
+			tr.mu.Unlock()
+			defer tr.running.Done()
+			fn()
+		}).Stop
+	}
+	return tr
+}
+
+func (tr *attendFeedTracker) stop() {
+	tr.mu.Lock()
+	tr.stopped = true
+	tr.mu.Unlock()
+	tr.running.Wait()
 }
 
 // idle waits until no question is being answered (they write into the test's directory).

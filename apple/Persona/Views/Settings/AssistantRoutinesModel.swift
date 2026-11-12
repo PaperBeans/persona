@@ -30,6 +30,13 @@ struct AssistantDeps {
     private(set) var error: String?
     @ObservationIgnored private let deps: Deps
     @ObservationIgnored private var centralModels: Bool?
+    /// The hub's client as the page first read with it (it names the current assistant then, `APIClient.showing`): what
+    /// the page reads again and writes goes to the assistant whose tasks it shows, also once another is current.
+    /// `restart` moves the page to that one.
+    @ObservationIgnored private var client: APIClient?
+    /// The latest read: an older one that answers after it doesn't land.
+    @ObservationIgnored private var reads = 0
+    private var api: APIClient? { client ?? deps.api() }
 
     init(deps: Deps = .live) { self.deps = deps }
 
@@ -41,22 +48,43 @@ struct AssistantDeps {
     var upcoming: [AssistantUpcoming] { Array(AssistantUpcoming.merge(tasks).prefix(4)) }
 
     func load() async {
-        guard let api = deps.api() else { return }
+        guard let api else { return }
+        if client == nil { client = api }
+        reads += 1
+        let read = reads
         async let h = try? api.scheduleRuns()
         do {
-            tasks = try await api.scheduledTasks()
+            let list = try await api.scheduledTasks()
+            guard read == reads else { return }
+            tasks = list
             error = nil
         } catch {
+            guard read == reads else { return }
             self.error = error.shown ?? self.error
         }
-        lastRuns = await h ?? []
+        let runs = await h ?? []
+        guard read == reads else { return }
+        lastRuns = runs
         loaded = true
+    }
+
+    /// Another assistant is current while the page is up (where it stays: Settings): the page starts over on that one.
+    /// Nothing of the one before is left on it, and a change to its tasks still on its way went to it.
+    func restart() async {
+        client = nil
+        reads += 1
+        tasks = []
+        lastRuns = []
+        loaded = false
+        error = nil
+        centralModels = nil
+        await load()
     }
 
     /// Adds `t` (no id yet) or saves it; returns it as saved. Optimistic: a toggle does not bounce back while saving;
     /// a failure reports and reloads what the hub has.
     func save(_ t: Item) async -> Item? {
-        guard let api = deps.api() else { return nil }
+        guard let api else { return nil }
         if let i = tasks.firstIndex(where: { $0.id == t.id && !t.id.isEmpty }) {
             withAnimation(Theme.Motion.standard) { tasks[i] = t }
         }
@@ -80,7 +108,7 @@ struct AssistantDeps {
     }
 
     func delete(_ t: Item) async {
-        guard let api = deps.api(), !t.id.isEmpty else { return }
+        guard let api, !t.id.isEmpty else { return }
         withAnimation { tasks.removeAll { $0.id == t.id } }
         do {
             try await api.deleteTask(t.id)
@@ -93,7 +121,7 @@ struct AssistantDeps {
 
     /// Run Now: opens the conversation it went to. A one-off is done after it (the hub drops it from the list).
     func run(_ t: Item) async {
-        guard let api = deps.api() else { return }
+        guard let api else { return }
         if t.repeats == .once { withAnimation { tasks.removeAll { $0.id == t.id } } }
         do {
             let key = try await api.runTask(t.id)

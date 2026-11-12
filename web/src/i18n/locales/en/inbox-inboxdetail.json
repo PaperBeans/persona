@@ -6,6 +6,8 @@
   "view_draft": "View draft",
   "ai_draft": "AI draft reply",
   "hand_to_ai": "Hand to AI",
+  "open_in_feishu": "Open in Feishu",
+  "open_in_lark": "Open in Lark",
   "placeholder_title": "Pick an item",
   "placeholder_hint": "Click an item in the list to see its details here.",
   "mute": "Mute",

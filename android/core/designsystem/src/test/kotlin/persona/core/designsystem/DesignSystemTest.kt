@@ -32,6 +32,19 @@ class DesignSystemTest {
         assertEquals(UiText.Res(R.string.designsystem_line_answering), resolveStatusLine(StatusLineState(answering = true, blocked = true))?.message)
     }
 
+    @Test fun messageSendingAndProcessingAreNotRuntimeWorkingOrApprovalAnswers() {
+        val sending = resolveStatusLine(StatusLineState(submitting = true))!!
+        assertEquals(UiText.Res(R.string.designsystem_message_sending), sending.message)
+        assertEquals(Status.Idle, sending.status)
+        val processing = resolveStatusLine(StatusLineState(processing = true))!!
+        assertEquals(StatusLineKind.Processing, processing.kind)
+        assertEquals(UiText.Res(R.string.designsystem_message_processing), processing.message)
+        assertEquals(Status.Idle, processing.status)
+        assertEquals(UiText.Res(R.string.designsystem_line_answering), resolveStatusLine(StatusLineState(answering = true, processing = true))?.message)
+        assertEquals(StatusLineKind.NeedsYou, resolveStatusLine(StatusLineState(blocked = true, processing = true))?.kind)
+        assertEquals(StatusLineKind.Unconfirmed, resolveStatusLine(StatusLineState(unconfirmed = true, processing = true))?.kind)
+    }
+
     @Test
     fun everyStyleKeepsTheStatusesApart() {
         for (style in AppStyle.entries) for (dark in listOf(false, true)) {

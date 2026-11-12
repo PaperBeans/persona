@@ -34,11 +34,16 @@ type ThreadPage struct {
 	Before   string          `json:"before,omitempty"`
 }
 
+// ThreadKindNone is the kind of the page the hub answers for a thread with no conversation of its own (a
+// subscription's item, a connector's without threads): no messages, and the apps show what the hub collected about
+// the item, as for any kind they do not draw.
+const ThreadKindNone = "none"
+
 // ThreadChat is the conversation the thread is.
 type ThreadChat struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
-	Kind    string `json:"kind"` // dm | group | channel (bubbles), pr | issue (GitHub's thread)
+	Kind    string `json:"kind"` // dm | group | channel (bubbles), pr | issue (GitHub's thread), none (ThreadKindNone)
 	URL     string `json:"url,omitempty"`
 	Avatar  string `json:"avatar,omitempty"`  // media ref
 	Members int    `json:"members,omitempty"` // a group's

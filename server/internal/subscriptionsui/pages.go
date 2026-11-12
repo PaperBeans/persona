@@ -1,5 +1,6 @@
 // Package subscriptionsui draws the source subscription pages (#2041, docs/extensions/subscriptions.md "Pages") as
-// declarative UI: the list, a source, its recipe, picking a tool and setting it up, its runs, and the small pickers.
+// declarative UI: Inbox Sources (#5278: every built-in source and subscription), a source, its recipe, picking a tool
+// and setting it up, its runs, and the small pickers.
 // extmgr serves it at POST /api/v1/subscriptions/-/ui with the request and answer of an extension page, so every app
 // draws it with the renderer it already has. Everything people read is localized here; the service gives codes.
 package subscriptionsui
@@ -28,13 +29,10 @@ type Service interface {
 	Update(ctx context.Context, id string, p subscriptions.Patch, by subscriptions.Actor) (subscriptions.Subscription, error)
 	RunNow(ctx context.Context, id string, by subscriptions.Actor) (subscriptions.Subscription, error)
 	Delete(ctx context.Context, id string, withData bool, by subscriptions.Actor) error
-	// Features says which later stages are in (Generate: #2040).
-	Features() subscriptions.Features
-	// Generate drafts a recipe with the model (#2040): for a subscription, saved; for a source, only answered.
-	Generate(ctx context.Context, in subscriptions.GenerateRequest, by subscriptions.Actor) (subscriptions.Generated, error)
-	// ModelOf is what a model purpose runs on now ("kb", "inbox.triage"); RecipeModel the one drafting uses.
+	// ModelOf is what a model purpose runs on now ("kb", "inbox.triage").
 	ModelOf(ctx context.Context, purpose string) subscriptions.ModelInfo
-	RecipeModel(ctx context.Context) subscriptions.ModelInfo
+	// PreviewThings are a dry run's items as sub would hand them to the Inbox, for trying triage on them (#5278).
+	PreviewThings(sub subscriptions.Subscription, items []subscriptions.Preview) subscriptions.TriagePreview
 	// Push makes or fills the device's push source (#3848); no items only makes it.
 	Push(ctx context.Context, by subscriptions.Actor, in subscriptions.PushRequest) (subscriptions.PushResult, error)
 }
@@ -50,12 +48,17 @@ type Env struct {
 	// Name is a connector's name as people know it (its extension's); the id when it says "".
 	Name func(connector string) string
 	// Native says where Persona already reads a catalog source's service ("mail:example.com") itself, such as
-	// "me@example.com" for a mail account; "" when it does not.
+	// "me@example.com" for a mail account; "" when it does not. Builtin's answer comes first when there is one.
 	Native func(service string) string
+	// Builtin are the sources that bring things in themselves (#5278); nil: the pages list subscriptions only.
+	Builtin BuiltinSources
+	// Assistant is the name the app shows for the assistant ("Ask {name}…"), for Set Up with it; "" names it the
+	// assistant.
+	Assistant string
+	// Triage has the triage model try a preview's items (#5278): one verdict each, nothing kept; nil: not offered.
+	Triage func(ctx context.Context, tp subscriptions.TriagePreview) ([]Verdict, error)
 	// UIVersion is the UI version the app draws (6 when 0): an older app gets icons it knows.
 	UIVersion int
-	// Drafts are the model drafts the manager keeps (#2040); nil: drafting is not offered.
-	Drafts *Drafts
 	// Platform is the asking app's (the UI context's): only "ios" offers to add its own Shortcuts source (#3848).
 	Platform string
 }
@@ -108,8 +111,6 @@ type state struct {
 	Ext string `json:"ext,omitempty"`
 	// I is where a tool's items are (a recipe's items_path), as the setup page's dry run found it.
 	I string `json:"i,omitempty"`
-	// G: the setup page starts from the model's draft for this source or subscription (#2040).
-	G bool `json:"g,omitempty"`
 }
 
 const (
@@ -123,7 +124,14 @@ const (
 	pageFallback = "fallback"
 	pageRules    = "rules"
 	pageRaw      = "raw"
+	pageBuiltin  = "builtin" // a built-in source (c: its connector)
+	pageMutes    = "mutes"   // what is muted of a source (c: its connector or subscription)
+	pageMore     = "more"    // the sources to subscribe to by choosing a tool
 )
+
+// PagesID is the id the apps draw the pages under, as if an extension's (their SubscriptionsUI.id / SUBSCRIPTIONS_UI):
+// an `extension_ui` invalidate for it redraws them.
+const PagesID = "-subscriptions"
 
 func parseState(raw string) state {
 	var s state
@@ -145,28 +153,24 @@ type pages struct {
 	st  state
 	// models are the purposes' models as asked once for this request.
 	models map[string]subscriptions.ModelInfo
+	// listed are the built-in sources as read once for this request.
+	listed *[]Builtin
+	// try is the preview a source's page was asked for (its dry run), shown on it.
+	try *tried
 }
 
-// modelOf is what a purpose runs on, asked of the assistant at most once a request ("recipe": drafting's).
+// modelOf is what a purpose runs on, asked of the assistant at most once a request.
 func (p *pages) modelOf(purpose string) subscriptions.ModelInfo {
 	if m, ok := p.models[purpose]; ok {
 		return m
 	}
-	var m subscriptions.ModelInfo
-	if purpose == "recipe" {
-		m = p.svc.RecipeModel(p.ctx)
-	} else {
-		m = p.svc.ModelOf(p.ctx, purpose)
-	}
+	m := p.svc.ModelOf(p.ctx, purpose)
 	if p.models == nil {
 		p.models = map[string]subscriptions.ModelInfo{}
 	}
 	p.models[purpose] = m
 	return m
 }
-
-// canDraft: the manager keeps drafts and the model stage is in.
-func (p *pages) canDraft() bool { return p.env.Drafts != nil && p.svc.Features().Generate }
 
 func (p *pages) t(key string, args ...i18n.Args) string {
 	return i18n.T(p.env.Lang, "subscriptions-pages."+key, args...)
@@ -193,6 +197,12 @@ func (p *pages) draw() wire.View {
 		v = p.rules()
 	case pageRaw:
 		v = p.raw("")
+	case pageBuiltin:
+		v = p.builtinPage()
+	case pageMutes:
+		v = p.mutes()
+	case pageMore:
+		v = p.more()
 	default:
 		v = p.list()
 	}

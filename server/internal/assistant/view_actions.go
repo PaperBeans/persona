@@ -67,20 +67,11 @@ func decodeViewBody(w http.ResponseWriter, r *http.Request, def string, into any
 	return true
 }
 
-// viewActionGate is what both card routes require: a full device, persona_view (and html_views for the bridge) and
-// durable storage. Extension tokens never reach here: the hub grants them no scope for these routes.
-func (s *Service) viewActionGate(w http.ResponseWriter, r *http.Request, html bool) (viewActionStore, bool) {
+// viewActionGate is what both card routes require: a full device and durable storage. Extension tokens never reach
+// here: the hub grants them no scope for these routes.
+func (s *Service) viewActionGate(w http.ResponseWriter, r *http.Request) (viewActionStore, bool) {
 	if !fullRole(r) {
 		apierr.WriteBody(w, http.StatusForbidden, apierr.Body(http.StatusForbidden, "permission_denied", errors.New("read-only role cannot reply from a card")))
-		return nil, false
-	}
-	hello := s.hello(r.Context())
-	if !hello.PersonaView {
-		apierr.Write(w, http.StatusForbidden, errors.New("assistant views are disabled"))
-		return nil, false
-	}
-	if html && !hello.HTMLViews {
-		apierr.Write(w, http.StatusForbidden, errors.New("assistant HTML views are disabled"))
 		return nil, false
 	}
 	st, ok := s.store().(viewActionStore)
@@ -142,7 +133,7 @@ func (s *Service) viewActionRoutes() {
 }
 
 func (s *Service) postViewAction(w http.ResponseWriter, r *http.Request) {
-	st, ok := s.viewActionGate(w, r, false)
+	st, ok := s.viewActionGate(w, r)
 	if !ok {
 		return
 	}
@@ -229,7 +220,7 @@ func writeAlreadyAnswered(w http.ResponseWriter, a db.AssistantViewActionRow) {
 // postHTMLViewAction is the bridge of a keyed html component (persona.reply / persona.open), each call confirmed
 // natively by the user. A reply is the card's one selection, exclusive with its declared replies; open locks nothing.
 func (s *Service) postHTMLViewAction(w http.ResponseWriter, r *http.Request) {
-	st, ok := s.viewActionGate(w, r, true)
+	st, ok := s.viewActionGate(w, r)
 	if !ok {
 		return
 	}
@@ -459,10 +450,8 @@ func (s *Service) deliverViewAction(parent context.Context, conversation, key st
 	if session, known := s.session(ctx, a.MachineID, a.Conversation); !known || !session.Assistant {
 		status, reason = "pending", i18n.T(s.lang(ctx), "assistant-view_actions.waiting_machine")
 	} else {
-		params := map[string]any{"session_id": a.Conversation, "client_msg_id": a.MessageID, "text": a.Text, "resume_only": true}
-		err = s.sendModel(ctx, a.MachineID, a.Conversation, params)
-		if err == nil {
-			s.UserSpoke(ctx, SessionRef{MachineID: a.MachineID, SessionID: a.Conversation})
+		var params map[string]any
+		if params, err = s.viewActionParams(ctx, *a); err == nil {
 			err = s.sendOnce(ctx, a.MachineID, params)
 		}
 		if err != nil {
@@ -484,11 +473,23 @@ func (s *Service) deliverViewAction(parent context.Context, conversation, key st
 	}
 }
 
+// viewActionParams are the session.send_once parameters of a view action's message: the owner's own, as one they
+// typed is (what it runs on, UserSpoke, and a round they did not start preempted: owner_preempt.go).
+func (s *Service) viewActionParams(ctx context.Context, a db.AssistantViewActionRow) (map[string]any, error) {
+	params := map[string]any{"session_id": a.Conversation, "client_msg_id": a.MessageID, "text": a.Text, "resume_only": true}
+	if err := s.sendModel(ctx, a.MachineID, a.Conversation, params, s.lang(ctx)); err != nil {
+		return nil, err
+	}
+	s.UserSpoke(ctx, SessionRef{MachineID: a.MachineID, SessionID: a.Conversation})
+	s.ownerInterjects(a.Conversation, params)
+	return params, nil
+}
+
 func (s *Service) viewActionLoop(ctx context.Context) {
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
 	for {
-		if s.hello(ctx).PersonaView && !s.hello(ctx).Assistant.Standby {
+		if !s.hello(ctx).Assistant.Standby {
 			if st, ok := s.store().(viewActionStore); ok {
 				pending, err := st.PendingAssistantViewActions(ctx, 20)
 				if err == nil {

@@ -71,13 +71,17 @@ internal fun catalogDownloads(res: Resources, value: Long?): String? = value?.ta
 
 /** The same decorative mark on catalog rows, catalog details and installed extensions, including every fallback state. */
 @Composable
-internal fun ExtensionLogo(url: String?) {
-    val safe = remember(url) { catalogLogoUrl(url) }
+internal fun ExtensionLogo(url: String?, api: ExtensionManagement? = null, pictures: coil3.ImageLoader? = null) {
+    val hubPath = remember(url, api) { url?.let { api?.iconPath(it) } }
+    val safe = remember(url, hubPath) { hubPath?.let(::ExtensionHubPicture) ?: catalogLogoUrl(url) }
     val context = LocalContext.current
     val pixels = with(LocalDensity.current) { Tokens.Size.iconS.roundToPx() }
-    key(safe) {
+    key(safe, pictures) {
         val request = remember(safe, context, pixels) { safe?.let { ImageRequest.Builder(context).data(it).size(pixels).build() } }
-        val painter = request?.let { rememberAsyncImagePainter(it) }
+        val painter = request?.let {
+            if (safe is ExtensionHubPicture) pictures?.let { loader -> rememberAsyncImagePainter(it, loader) }
+            else rememberAsyncImagePainter(it)
+        }
         val loaded = painter?.state?.collectAsState()?.value is AsyncImagePainter.State.Success
         // JRow's custom-leading gap is 2 dp shorter than its legacy leading-icon gap; keep the old title alignment.
         Box(Modifier.padding(end = Tokens.Space.xxs).size(Tokens.Size.iconS).testTag(if (loaded) "extension-logo-loaded" else "extension-logo-fallback")) {
@@ -96,7 +100,10 @@ fun ExtensionMarketPage(extensions: ExtensionManagement?, onBack: () -> Unit, on
         return
     }
     val res = LocalResources.current
-    val model = remember(extensions, res) { CatalogModel(extensions, res) }
+    val assistant = currentAssistant()
+    val api = rememberPinned(extensions, listOf(listOf("extensions"), listOf("plugins")), assistant.id)
+    val model = remember(api, res) { CatalogModel(api, res) }
+    val logoLoader = rememberExtensionLogoLoader(api)
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
     val feedback = LocalAppFeedback.current
@@ -139,7 +146,7 @@ fun ExtensionMarketPage(extensions: ExtensionManagement?, onBack: () -> Unit, on
             itemsIndexed(list, key = { _, it -> "plugin-${it.market}-${it.id}" }) { index, extension ->
                 JGroupItem(GroupPosition.of(index, list.size)) {
                     JRow(extension.label, subtitle = catalogSubtitle(res, extension, showMarket = state.market == null && state.markets.size > 1), subtitleLines = 4,
-                        leading = { ExtensionLogo(extension.iconUrl) },
+                        leading = { ExtensionLogo(extension.iconUrl, api, logoLoader) },
                         trailing = CatalogText.badge(res, extension)?.let { badge -> { JTag(badge, standingTone(extension)) } },
                         chevron = true, onClick = { onExtension(extension) })
                 }
@@ -253,6 +260,7 @@ fun ExtensionCatalogPage(
     val api = rememberPinned(extensions, listOf("extensions", "plugins").flatMap { base ->
         listOf(listOf(base, extensionId), listOf(base, "-", "catalog"), listOf(base, "-", "install"), listOf(base, "-", "operations"))
     }, owner)
+    val logoLoader = rememberExtensionLogoLoader(api)
     val model = remember(api, marketId, extensionId, res, manager) {
         CatalogExtensionModel(api, marketId, extensionId, res, manager = manager)
     }
@@ -293,7 +301,7 @@ fun ExtensionCatalogPage(
                 JEmptyState(stringResource(R.string.settings_ext_market_missing_title), stringResource(R.string.settings_ext_market_missing_text), icon = PhIcons.Cube)
             }
         }
-        if (extension != null) catalogExtensionBody(extension, state, res, onOpenInstalled = { onInstalled(extension.id) },
+        if (extension != null) catalogExtensionBody(extension, state, res, api, logoLoader, onOpenInstalled = { onInstalled(extension.id) },
             operation = { op -> OperationSteps(op, busy = state.acting, modifier = Modifier.padding(top = Tokens.Space.m),
                 onRetry = { scope.launch { model.retry() } }, onClose = { scope.launch { model.closeOperation() } },
                 onReview = { scope.launch { model.review() } }) })
@@ -330,7 +338,8 @@ fun ExtensionCatalogPage(
 }
 
 private fun LazyListScope.catalogExtensionBody(
-    extension: CatalogExtension, state: CatalogExtensionState, res: Resources, onOpenInstalled: () -> Unit,
+    extension: CatalogExtension, state: CatalogExtensionState, res: Resources, extensions: ExtensionManagement,
+    logoLoader: coil3.ImageLoader?, onOpenInstalled: () -> Unit,
     operation: @Composable (ExtensionOperation) -> Unit,
 ) {
     item("header") {
@@ -338,7 +347,7 @@ private fun LazyListScope.catalogExtensionBody(
             // Why it cannot be installed is said in red below; the header keeps to the version.
             val line = if (CatalogText.standing(extension) == CatalogStanding.Unavailable) extension.version else CatalogText.line(res, extension)
             val subtitle = listOfNotNull(line, catalogDownloads(res, extension.downloads)).joinToString("\n")
-            JRow(extension.label, subtitle = subtitle, subtitleLines = 3, leading = { ExtensionLogo(extension.iconUrl) },
+            JRow(extension.label, subtitle = subtitle, subtitleLines = 3, leading = { ExtensionLogo(extension.iconUrl, extensions, logoLoader) },
                 trailing = CatalogText.badge(res, extension)?.let { badge -> { JTag(badge, standingTone(extension)) } })
         }
     }

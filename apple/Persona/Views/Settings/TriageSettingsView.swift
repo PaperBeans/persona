@@ -57,7 +57,8 @@ struct TriageSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             if model == nil {
-                let api = { [app] in app.api }
+                let scope = AssistantSettingsRequestScope(app)
+                let api = { scope.api(app) }
                 model = TriageSettingsModel(deps: .init(
                     load: {
                         guard let api = api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }

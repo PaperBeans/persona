@@ -13,6 +13,11 @@ export interface Manifest {
   publisher?: string;
   homepage?: string;
   /**
+   * Source-only square PNG artwork: 256–4096 pixels, at most 2 MiB. Catalog entry icon carries this path; strip it
+   * from packaged and runtime manifests for compatibility.
+   */
+  icon?: "assets/icon.png";
+  /**
    * What the market shows and searches (docs "Extension market"): at most 16, each 1 to 24 characters. Packages and
    * indexes carry the manifest without them (hubs before tags refuse an unknown field); the index entry carries them
    * instead.
@@ -4719,6 +4724,8 @@ export interface KBDetail {
   segments?: KBRecordingSegment[];
   /** A recording's meeting minutes, once written (docs/assistant/meeting-minutes.md); kept as the hub sends them. */
   minutes?: unknown;
+  /** An all-day recording's day recap, once written (docs/assistant/day-recap.md); kept as the hub sends them. */
+  recap?: unknown;
   /** A topic's knowledge points (docs/assistant/knowledge.md "Topics"). */
   points?: KBTopicPoint[];
 }
@@ -4769,6 +4776,11 @@ export interface KBRecordingSegment {
   start: number;
   end: number;
   text: string;
+  /**
+   * An all-day recording's line number: the segment's 1-based position in its uploads (docs/assistant/day-recap.md);
+   * absent on other recordings.
+   */
+  n?: number;
 }
 
 /**

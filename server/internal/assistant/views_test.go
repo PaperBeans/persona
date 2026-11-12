@@ -81,7 +81,6 @@ func (f *fakeViewsStore) Feed(_ context.Context, c string, since time.Time, limi
 func newViewService(t *testing.T) (*Service, *fakeHub, *fakeViewsStore) {
 	t.Helper()
 	f := newFakeHub().withMachine()
-	f.hello.PersonaView = true
 	f.setSessions("server", proto.Session{SessionID: "conversation-a", Assistant: true}, proto.Session{SessionID: "conversation-b", Assistant: true}, proto.Session{SessionID: "ordinary", Assistant: false})
 	st := &fakeViewsStore{}
 	s := newServiceOn(t, f, st)
@@ -151,20 +150,13 @@ func TestViewToolsRejectInvalidAndNonAssistant(t *testing.T) {
 	if _, err := s.toolView(ctx, "server", "conversation-a", "view_show", json.RawMessage(`{"view":{"sections":[]}}`)); err == nil || !strings.Contains(err.Error(), "fallback") {
 		t.Fatalf("bad view: %v", err)
 	}
+	// An older hub's persona_view false is not read: the tools are always there and work (#5509).
 	f.mu.Lock()
 	f.hello.PersonaView = false
 	f.mu.Unlock()
-	if _, err := s.toolView(ctx, "server", "conversation-a", "view_show", valid); err == nil {
-		t.Fatal("disabled feature accepted")
+	if _, err := s.toolView(ctx, "server", "conversation-a", "view_show", valid); err != nil {
+		t.Fatalf("view_show with an older hub's switch off: %v", err)
 	}
-	for _, tool := range s.Tools(ctx) {
-		if strings.HasPrefix(tool.Name, "view_") {
-			t.Fatal("disabled view tool listed")
-		}
-	}
-	f.mu.Lock()
-	f.hello.PersonaView = true
-	f.mu.Unlock()
 	n := 0
 	for _, tool := range s.Tools(ctx) {
 		if strings.HasPrefix(tool.Name, "view_") {

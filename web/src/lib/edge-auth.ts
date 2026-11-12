@@ -4,6 +4,7 @@
 // reloads the page once so the layer takes over and sends the browser to its sign-in. Never a retry loop: one reload per
 // RELOAD_GUARD_MS, and a plain network failure (offline) is not an interception.
 import { BASE } from "./base";
+import { restoreImportLink } from "./import-link";
 
 export const RELOAD_GUARD_MS = 60_000;
 const KEY = "persona.edge-reload";
@@ -24,6 +25,8 @@ export function reloadForSignIn(now = Date.now(), storage: Pick<Storage, "getIte
   } catch {
     return false; // no way to guard it: never risk a loop
   }
+  // a provider import link not opened yet would be lost: the reloaded page opens it again (#5420)
+  restoreImportLink();
   reload();
   return true;
 }

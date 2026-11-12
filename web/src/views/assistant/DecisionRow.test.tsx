@@ -8,11 +8,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
 import { getFeedState, loadFeed, type FeedItem, type TaskPlan } from "../../lib/feed";
 import { clock } from "../../lib/format";
+import { setAgentOpenMode } from "../../lib/agent-open";
 import { closePanel, getPanel } from "../../lib/panel";
 import { decisionLaterKey } from "../../lib/assistant-entries";
 import { putTodo, refresh, refreshTodos, reset } from "../../lib/store";
 import type { Todo, TodoAsk } from "../../lib/todos";
 import { AssistantActionBar } from "./Tasks";
+import * as atoms from "../../ui/atoms";
+
+// where a click went as a page (set to Full page, #5096); the side panel says where it went otherwise (getPanel)
+const opened = () => location.pathname + location.search;
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const at = "2026-11-10T08:00:00Z";
@@ -48,6 +53,10 @@ let host: HTMLDivElement;
 let root: Root;
 let posts: { path: string; body: unknown }[];
 let status: number;
+let turnError: boolean;
+let needsInput: boolean;
+let postGate: Promise<void> | undefined;
+let listStatus: number;
 
 async function mount() {
   todo = { id: "decision-task", title: "Demo release", origin: conversation, plan_id: plan.id, created_at: at, updated_at: at,
@@ -56,6 +65,7 @@ async function mount() {
     const path = String(url);
     if (init?.method === "POST") {
       posts.push({ path, body: JSON.parse(String(init.body)) });
+      if (postGate) await postGate;
       if (status !== 200) return new Response(JSON.stringify({ error: "The computer is offline" }), { status, headers: { "Content-Type": "application/json" } });
       if (path.endsWith("/decision-dismiss")) {
         todo = { ...todo, decision_review: { review_at: at, dismissal_id: "dismiss-demo" } };
@@ -67,9 +77,10 @@ async function mount() {
       }
       return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
     }
+    if (path.includes("/todos") && listStatus !== 200) return new Response("{}", { status: listStatus });
     const body = path.includes("/feed") ? { items: feed, plans: { [plan.id]: plan }, task_cards: [{ id: `plan:${plan.id}:0`, plan_id: plan.id, index: 0, todo_id: todo.id, at, updated_at: at, state: "accepted" }] }
       : path.includes("/todos") ? { todos: [todo] }
-      : path.includes("/sessions") ? { sessions: [{ machine_id: "demo", session_id: "worker", title: "Demo agent", state: "idle", status: "idle", updated_at: at }] } : {};
+      : path.includes("/sessions") ? { sessions: [{ machine_id: "demo", session_id: "worker", title: "Demo agent", state: needsInput ? "needs_you" : "idle", status: "idle", updated_at: at, ...(turnError ? { turn_error: "Synthetic transient error", turn_error_kind: "transient" } : {}) }] } : {};
     return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
   }));
   await act(async () => {
@@ -89,10 +100,16 @@ beforeEach(() => {
   ask = decision;
   posts = [];
   status = 200;
+  turnError = false;
+  needsInput = false;
+  postGate = undefined;
+  listStatus = 200;
 });
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+  history.replaceState(null, "", "/");
+  setAgentOpenMode("panel");
   closePanel();
   reset();
   delete getFeedState().plans[plan.id];
@@ -192,8 +209,19 @@ describe("a decision in the Needs you tray", () => {
     await mount();
     const other = [...row().querySelectorAll("button")].find((b) => b.textContent === t("assistant-decisionrow.another"))!;
     act(() => other.click());
+    // in the side panel, the default (#5424)
     expect(getPanel()).toMatchObject({ kind: "task", todo: "decision-task" });
+    expect(opened()).toBe("/");
     expect(posts).toEqual([]);
+  });
+
+  it("opens the task's Agent page from Other…, set to Full page (#5096)", async () => {
+    setAgentOpenMode("page");
+    await mount();
+    const other = [...row().querySelectorAll("button")].find((b) => b.textContent === t("assistant-decisionrow.another"))!;
+    act(() => other.click());
+    expect(getPanel()).toBeNull();
+    expect(opened()).toBe("/s/demo/worker");
   });
 
   it("says it went back to Persona while a decision answered with a fixed response still waits", async () => {
@@ -219,7 +247,8 @@ describe("a decision in the Needs you tray", () => {
   it("dismisses the exact review, never accepts an option or completes the task", async () => {
     await mount();
     const buttons = row().querySelector("[data-decision-actions]")!.querySelectorAll<HTMLButtonElement>("button");
-    await act(async () => { buttons[1].click(); optionButtons()[0].click(); buttons[0].click(); });
+    const firstOption = optionButtons()[0];
+    await act(async () => { buttons[1].click(); firstOption.click(); buttons[0].click(); });
     expect(posts).toEqual([{ path: expect.stringContaining("/todos/decision-task/decision-dismiss"), body: { review_at: at } }]);
     expect(row()).toBeNull();
     expect(todo.done_at).toBeUndefined();
@@ -258,6 +287,90 @@ describe("a decision in the Needs you tray", () => {
     status = 200;
     await act(async () => { optionButtons()[0].click(); dismiss.click(); });
     expect(posts.map((p) => p.path.split("/").at(-1))).toEqual(["decision-dismiss", "accept"]);
+  });
+
+  it.each(["legacy", "structured"])("optimistically hides an interrupted %s review through stale reads, confirmation, refresh and Undo", async (kind) => {
+    if (kind === "legacy") ask = undefined;
+    turnError = true;
+    await mount();
+    const toast = vi.spyOn(atoms, "toast");
+    let finish!: () => void;
+    postGate = new Promise<void>((resolve) => { finish = resolve; });
+    const deferredKey = decisionLaterKey(todo);
+    act(() => row().querySelector("[data-decision-actions]")!.querySelectorAll<HTMLButtonElement>("button")[1].click());
+    expect(row()).toBeNull();
+    expect(getFeedState().later[deferredKey]).toBe(true);
+    await act(async () => refreshTodos());
+    expect(row()).toBeNull();
+    await act(async () => { finish(); await Promise.resolve(); });
+    expect(getFeedState().later[deferredKey]).toBeFalsy();
+    expect(row()).toBeNull();
+    await act(async () => refreshTodos());
+    expect(row()).toBeNull();
+    expect(todo.done_at).toBeUndefined();
+    const undo = toast.mock.calls.find(([text]) => text === t("assistant-decisionrow.dismissed"))?.[2];
+    expect(undo).toBeDefined();
+    await act(async () => undo!.run());
+    expect(row()).not.toBeNull();
+    expect(posts.map((p) => p.path.split("/").at(-1))).toEqual(["decision-dismiss", "decision-undo-dismiss"]);
+    toast.mockRestore();
+  });
+
+  it.each(["legacy", "structured"])("restores an optimistically hidden interrupted %s review only on failure", async (kind) => {
+    if (kind === "legacy") ask = undefined;
+    turnError = true;
+    await mount();
+    const toast = vi.spyOn(atoms, "toast");
+    let finish!: () => void;
+    postGate = new Promise<void>((resolve) => { finish = resolve; });
+    const deferredKey = decisionLaterKey(todo);
+    act(() => row().querySelector("[data-decision-actions]")!.querySelectorAll<HTMLButtonElement>("button")[1].click());
+    expect(row()).toBeNull();
+    status = 503;
+    await act(async () => { finish(); await Promise.resolve(); });
+    expect(row()).not.toBeNull();
+    expect(getFeedState().later[deferredKey]).toBeFalsy();
+    const dismiss = row().querySelector("[data-decision-actions]")!.querySelectorAll<HTMLButtonElement>("button")[1];
+    expect(dismiss.disabled).toBe(false);
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("The computer is offline"), "error");
+    status = 200;
+    await act(async () => dismiss.click());
+    expect(row()).toBeNull();
+    expect(posts).toHaveLength(2);
+    toast.mockRestore();
+  });
+
+  it.each(["legacy", "structured"])("Later also hides an interrupted %s review, but not a new round", async (kind) => {
+    if (kind === "legacy") ask = undefined;
+    turnError = true;
+    await mount();
+    act(() => row().querySelector("[data-decision-actions]")!.querySelector<HTMLButtonElement>("button")!.click());
+    expect(row()).toBeNull();
+    await act(async () => refreshTodos());
+    expect(row()).toBeNull();
+    expect(posts).toEqual([]);
+    const next = "2026-11-11T08:00:00.123456789Z";
+    await act(async () => putTodo({ ...todo, supervision: { ...todo.supervision!, reviews: [{ at: next, verdict: "needs_user" }] }, decision_review: { review_at: next }, ask: ask && { ...ask, asked_at: next } }));
+    expect(row()).not.toBeNull();
+  });
+
+  it("keeps a successful dismissal hidden even if its follow-up list read fails", async () => {
+    turnError = true;
+    await mount();
+    listStatus = 503;
+    await act(async () => row().querySelector("[data-decision-actions]")!.querySelectorAll<HTMLButtonElement>("button")[1].click());
+    expect(row()).toBeNull();
+    expect(getFeedState().later[decisionLaterKey(todo)]).toBeFalsy();
+  });
+
+  it("keeps real Agent input visible and finishes loading after dismissal succeeds", async () => {
+    needsInput = true;
+    await mount();
+    await act(async () => row().querySelector("[data-decision-actions]")!.querySelectorAll<HTMLButtonElement>("button")[1].click());
+    expect(row()).not.toBeNull();
+    const dismiss = row().querySelector("[data-decision-actions]")!.querySelectorAll<HTMLButtonElement>("button")[1];
+    expect(dismiss.disabled).toBe(false);
+    expect(dismiss.querySelector("[role=status]")).toBeNull();
   });
 
   it("leaves an ask without options as it was: one Take button, no decision row", async () => {

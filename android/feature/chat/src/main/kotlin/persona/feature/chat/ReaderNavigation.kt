@@ -38,9 +38,12 @@ internal fun DiffNavigation(diff: ToolDiff, list: LazyListState, expand: () -> U
     }
 }
 
-/** Reverse-layout lists need an overlay; regular sticky headers would attach to the wrong edge. */
+/**
+ * Reverse-layout lists need an overlay; regular sticky headers would attach to the wrong edge. [rowIds] are the list's
+ * row keys in order (outbox bubbles included), so the scroll after collapsing finds the line wherever a bubble sits.
+ */
 @Composable
-internal fun WorkCollapseOverlay(lines: List<ChatLine>, list: LazyListState, outboxCount: Int, onCollapse: (String) -> Unit,
+internal fun WorkCollapseOverlay(lines: List<ChatLine>, list: LazyListState, rowIds: List<String>, onCollapse: (String) -> Unit,
     modifier: Modifier = Modifier) {
     val byId = remember(lines) { lines.associateBy { it.id } }
     val current by remember(lines, list) {
@@ -59,12 +62,12 @@ internal fun WorkCollapseOverlay(lines: List<ChatLine>, list: LazyListState, out
         }
     }
     var pending by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(lines, pending) {
+    LaunchedEffect(lines, rowIds, pending) {
         val id = pending ?: return@LaunchedEffect
         if ((byId[id] as? ChatLine.Work)?.open != false) return@LaunchedEffect
         withFrameNanos { }
-        val index = lines.indexOfFirst { it.id == id }
-        if (index >= 0) list.scrollToItem(index + outboxCount)
+        val index = byId[id]?.let { rowIds.indexOf(it.contentKey) } ?: -1
+        if (index >= 0) list.scrollToItem(index)
         pending = null
     }
     current?.let { work ->

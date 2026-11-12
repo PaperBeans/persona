@@ -144,20 +144,26 @@ struct CommentCard: View {
     }
 }
 
-/// A comment block at the top of a sent bubble, drawn as its quotes are: its kind, number and place, then its note; a
-/// tap opens it to the whole note and the code (the agent got the block as written).
+/// A comment block at the top of a sent bubble, drawn as its quotes are, in the bubble's colors (`ink`): its kind,
+/// number and place, then its note; a tap opens it to the whole note and the code (the agent got the block as written).
 struct CommentQuote: View {
     var comment: MessageComment
     var number: Int
+    var ink: Theme.UserBubbleInk
+    @Environment(\.chatPin) private var pin
     @State private var open = false
+    /// What the chat's pin knows it by (this view's, kept while it is drawn).
+    @State private var pinKey = "comment-" + UUID().uuidString
 
     var body: some View {
         let heading = [comment.heading(number), comment.shortLocation].joined(separator: " · ")
         QuoteCard(heading: heading, summary: open ? comment.full : comment.summary, lines: open ? .max : 2,
-                  tint: Theme.Quote.tint, ink: Theme.Quote.summary) {
+                  tint: ink.words, ink: ink.words, fill: ink.quoteFill) {
             Haptics.tap()
-            withAnimation(Theme.Motion.state) { open.toggle() }
+            // In the chat its top stays where it is and the note opens under it (#3757).
+            toggleInPlace(pin, pinKey, animation: Theme.Motion.state, closing: open) { open.toggle() }
         }
         .accessibilityIdentifier("bubble.comment")
+        .chatPinned(pinKey)
     }
 }

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A loop and background work in an Agent chat's header and their sheet (#4339 C8, iOS ActivityChips and ActivitySheet). -->
+<resources>
+    <string name="chat_activity_loop">Loop</string>
+    <string name="chat_activity_running">Running</string>
+    <string name="chat_activity_next">Next %1$s</string>
+    <string name="chat_activity_loop_running">Loop running</string>
+    <string name="chat_activity_looping">Looping</string>
+    <string name="chat_activity_looping_cadence">Looping · %1$s</string>
+    <string name="chat_activity_looping_spoken">Looping, %1$s</string>
+    <string name="chat_activity_tap_to_view">%1$s, tap to view</string>
+    <string name="chat_activity_list_separator">", "</string>
+    <string name="chat_activity_cron">Cron %1$s</string>
+    <string name="chat_activity_next_wakeup">Next wake-up %1$s (%2$s)</string>
+    <string name="chat_activity_running_round">Running this round</string>
+    <string name="chat_activity_hours_minutes_left">%1$d h %2$d min left</string>
+    <string name="chat_activity_stop">Stop Loop</string>
+    <string name="chat_activity_stop_title">Stop this loop?</string>
+    <string name="chat_activity_stop_text">This sends the agent a message asking it not to schedule another wake-up. The current round finishes first.</string>
+    <string name="chat_activity_title_loop">Loop</string>
+    <string name="chat_activity_title_background">Background Task</string>
+    <string name="chat_activity_title_both">Loop &amp; Background Tasks</string>
+    <string name="chat_activity_background_first">%1$s · %2$s</string>
+    <string name="chat_activity_view_output">View Output</string>
+    <string name="chat_activity_seconds">%1$d s</string>
+    <string name="chat_activity_minutes_seconds">%1$dm %2$ds</string>
+    <string name="chat_activity_hours_minutes">%1$dh %2$dm</string>
+    <string name="chat_activity_expand">Expand</string>
+    <string name="chat_activity_collapse">Collapse</string>
+    <string name="chat_activity_background_command">Background command</string>
+    <string name="chat_activity_subagent">Subagent</string>
+    <plurals name="chat_activity_background_count">
+        <item quantity="one">%1$d background task</item>
+        <item quantity="other">%1$d background tasks</item>
+    </plurals>
+    <plurals name="chat_activity_every_seconds">
+        <item quantity="one">Every %1$d second</item>
+        <item quantity="other">Every %1$d seconds</item>
+    </plurals>
+    <plurals name="chat_activity_every_minutes">
+        <item quantity="one">Every %1$d minute</item>
+        <item quantity="other">Every %1$d minutes</item>
+    </plurals>
+    <plurals name="chat_activity_every_hours">
+        <item quantity="one">Every %1$d hour</item>
+        <item quantity="other">Every %1$d hours</item>
+    </plurals>
+    <plurals name="chat_activity_minutes_left">
+        <item quantity="one">%1$d minute left</item>
+        <item quantity="other">%1$d minutes left</item>
+    </plurals>
+    <plurals name="chat_activity_hours_left">
+        <item quantity="one">%1$d hour left</item>
+        <item quantity="other">%1$d hours left</item>
+    </plurals>
+</resources>

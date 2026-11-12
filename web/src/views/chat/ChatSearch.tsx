@@ -76,7 +76,7 @@ export function ChatSearch({
     try {
       setNotice(await onLoadEarlier(setPages, () => stop.current));
     } catch {
-      setNotice(t("chat-chatsearch.load_failed"));
+      setNotice(t("chat-chatview.search_load_failed"));
     } finally {
       setLoading(false);
     }

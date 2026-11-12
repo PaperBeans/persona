@@ -26,7 +26,6 @@ func TestAssistantInlineCardActionSurvivesHTTPBusRelay(t *testing.T) {
 	t.Cleanup(database.Close)
 	h := newTestHub(t)
 	h.store = database
-	h.cfg.Assistant.PersonaView = true
 	connectAssistant(t, h)
 	mux := h.routes()
 	for _, item := range []string{"item", "trusted#0", "escaped%value?"} {

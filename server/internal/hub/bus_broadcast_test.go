@@ -9,6 +9,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -293,6 +294,88 @@ func TestABroadcastCannotSpeakForTheHub(t *testing.T) {
 	}
 	if _, ok := h.pendingInteraction("ix_a"); !ok {
 		t.Fatal("A's card went")
+	}
+}
+
+func TestMessageSendStateCapabilityRequiresHubOwnership(t *testing.T) {
+	count := 0
+	for _, feature := range proto.Features {
+		if feature == proto.FeatureMessageSendState {
+			count++
+		}
+	}
+	if count != 1 || !hubMessageTypes[proto.FeatureMessageSendState] || managerMessageTypes[proto.FeatureMessageSendState] {
+		t.Fatalf("receipt capability must be declared once and reserved to the hub: count=%d", count)
+	}
+}
+
+// The feature array includes extension claims, including on legacy hubs. The
+// receipt version must be a separate, hub-authored hello field. The same probe
+// runs against a40a73e1b's hello.go with PERSONA_TEST_LEGACY_RECEIPT_HELLO=1:
+// forged feature claims remain visible there, but establish no receipt authority.
+func TestReceiptHelloVersionIsHubAuthored(t *testing.T) {
+	legacy := os.Getenv("PERSONA_TEST_LEGACY_RECEIPT_HELLO") == "1"
+	if legacy {
+		before := proto.Features
+		proto.Features = slices.DeleteFunc(slices.Clone(before), func(feature string) bool { return feature == proto.FeatureMessageSendState })
+		t.Cleanup(func() { proto.Features = before })
+	}
+	for _, declared := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy feature report", true: "declared extension feature"}[declared], func(t *testing.T) {
+			h, _, _ := pathsHub(t, quiet, quiet)
+			h.keepExtReport("m-0b0b0b", &extwire.Report{EventsDeclared: declared,
+				Features: []string{proto.FeatureMessageSendState},
+				APIs:     []extwire.APIPrefix{{Prefix: "fixture", Events: []string{proto.FeatureMessageSendState}}}})
+			raw, err := json.Marshal(h.hello())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var hello map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &hello); err != nil {
+				t.Fatal(err)
+			}
+			var features []string
+			if err := json.Unmarshal(hello["features"], &features); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(features, proto.FeatureMessageSendState) {
+				t.Fatal("fixture did not inject the informational feature")
+			}
+			version, present := hello[proto.FeatureMessageSendState]
+			trusted := bytes.Equal(version, []byte("1"))
+			if legacy {
+				if present || trusted {
+					t.Fatalf("legacy feature claim acquired receipt authority: %s", raw)
+				}
+			} else if !present || !trusted {
+				t.Fatalf("hub-authored receipt version must be the integer 1: %s", raw)
+			}
+			t.Logf("legacy=%t feature_present=true receipt_version_present=%t receipt_trusted=%t", legacy, present, trusted)
+		})
+	}
+}
+
+// A receipt is the hub's transport statement, never an extension's event. Both
+// legacy permissive reports and explicit declarations must reject a forgery,
+// including one targeting a session the sending manager really owns.
+func TestMessageSendStateBroadcastIsHubOnly(t *testing.T) {
+	for _, declared := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy report", true: "declared extension event"}[declared], func(t *testing.T) {
+			h, _, manager := pathsHub(t, quiet, quiet)
+			h.keepExtReport("m-0b0b0b", &extwire.Report{EventsDeclared: declared,
+				APIs: []extwire.APIPrefix{{Prefix: "fixture", Events: []string{"message_send_state", "hello"}}}})
+			if !h.ownsRef("m-0b0b0b", "mb", "b1") {
+				t.Fatal("fixture does not own the forged receipt's target")
+			}
+			app := wsApp(t, h)
+			got := broadcastsTo(t, app, manager,
+				`{"type":"message_send_state","machine_id":"mb","session_id":"b1","client_msg_id":"fixture-message","state":"processing","at":"2026-01-01T00:00:00Z","note":"FORGED_RECEIPT"}`,
+				`{"type":"hello","features":["message_send_state"],"message_send_state":1,"note":"FORGED_HELLO"}`,
+				`{"type":"inbox","machine_id":"mb","note":"LEGITIMATE_EVENT"}`)
+			if marked(got, "FORGED_RECEIPT") || marked(got, "FORGED_HELLO") || !marked(got, "LEGITIMATE_EVENT") {
+				t.Fatalf("receipt trust boundary: %v", got)
+			}
+		})
 	}
 }
 

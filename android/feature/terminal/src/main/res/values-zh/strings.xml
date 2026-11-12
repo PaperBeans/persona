@@ -5,6 +5,7 @@
     <string name="terminal_control_watching">只读</string>
     <string name="terminal_select_text">选择文本</string>
     <string name="terminal_display_settings">显示设置</string>
+    <string name="terminal_close">关闭终端</string>
     <string name="terminal_retry">重试</string>
     <string name="terminal_busy_title">接管终端？</string>
     <string name="terminal_busy_text">电脑上另一个程序正在使用这个终端。接管后，它会断开连接，终端按手机尺寸显示。</string>

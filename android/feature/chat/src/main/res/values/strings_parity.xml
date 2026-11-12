@@ -26,23 +26,5 @@
     <string name="chat_rewind_running">Rewinding…</string>
     <string name="chat_tool_open_subagent">View sub-agent</string>
     <string name="chat_tool_no_answer">No answer</string>
-    <string name="chat_computer_script">Run script</string>
-    <string name="chat_computer_script_named">Run script: %1$s</string>
-    <string name="chat_computer_somewhere">a spot</string>
-    <string name="chat_computer_click">Click %1$s</string>
-    <string name="chat_computer_double_click">Double-click %1$s</string>
-    <string name="chat_computer_right_click">Right-click %1$s</string>
-    <string name="chat_computer_type">Type “%1$s”</string>
-    <string name="chat_computer_set_value">Fill “%1$s”</string>
-    <string name="chat_computer_press">Press %1$s</string>
-    <string name="chat_computer_scroll">Scroll</string>
-    <string name="chat_computer_drag">Drag</string>
-    <string name="chat_computer_launch">Open %1$s</string>
-    <string name="chat_computer_front">Switch to %1$s</string>
-    <string name="chat_computer_window">Look at window</string>
-    <string name="chat_computer_screenshot">Take screenshot</string>
-    <string name="chat_computer_tree">See what\'s on screen</string>
-    <string name="chat_computer_zoom">Zoom in</string>
-    <string name="chat_computer_check">Check</string>
-    <string name="chat_computer_space">Space</string>
+    <string name="chat_computer_pill_opens">Show the steps</string>
 </resources>

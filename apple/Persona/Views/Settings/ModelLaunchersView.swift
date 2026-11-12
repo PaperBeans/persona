@@ -10,6 +10,7 @@ struct ModelLauncherRoute: Hashable { var name: String }
 /// claude of each machine — the hidden ones, and how each machine's list came in (offline, timed out, failed).
 struct ModelLaunchersView: View {
     @Environment(AppModel.self) private var model
+    private let requestScope = AssistantSettingsRequestScope(AppModel.shared)
     @State private var launchers: [LauncherView]?
     /// How each machine's list came in; nil from an older hub.
     @State private var sync: [LauncherSync]?
@@ -139,7 +140,8 @@ struct ModelLaunchersView: View {
         #if DEBUG
         // `-openLauncherEditor YES` opens the form Other Connection Types leads to, `-openLauncherEditor preset` on From Extension;
         // `-openProviderWizard pick|connect|models|import` the provider sheet at that step; `-openProviderComputers
-        // all|selected|none|legacy|keys|api` a made-up provider's Computers page (`new` goes with `-openProviderWizard models`).
+        // all|selected|none|legacy|keys|api` a made-up provider's Computers page (`new` goes with `-openProviderWizard models`);
+        // `via` an API connection sending through a computer, at Connect.
         .onAppear {
             if UserDefaults.standard.string(forKey: "openLauncherEditor") != nil { adding = .pick }
             if let s = UserDefaults.standard.string(forKey: "openProviderWizard") { adding = ProviderWizardStep(rawValue: s) ?? .pick }
@@ -148,13 +150,13 @@ struct ModelLaunchersView: View {
             guard let s = ProviderComputersDemo.state, s != "new", UserDefaults.standard.string(forKey: "openProviderWizard") == nil else { return }
             // The made-up provider runs on the hub's computers: wait (3 s at most) for their list.
             var waited = 0
-            while model.hubMachines.isEmpty, waited < 30 {
+            while requestScope.machines(model).isEmpty, waited < 30 {
                 try? await Task.sleep(for: .milliseconds(100))
                 waited += 1
             }
-            computersDemo = ProviderComputersDemo.launcher(s, machines: model.hubMachines)
+            computersDemo = ProviderComputersDemo.launcher(s, machines: requestScope.machines(model))
         }
-        .sheet(item: $computersDemo) { l in ProviderWizard(existing: l, start: .models, showComputers: true) }
+        .sheet(item: $computersDemo) { l in ProviderWizard(existing: l, start: ProviderComputersDemo.state == "via" ? .connect : .models, showComputers: ProviderComputersDemo.state != "via") }
         #endif
         .confirmationDialog("Delete Launcher “\(pendingDelete?.name ?? "")”?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             titleVisibility: .visible, presenting: pendingDelete) { l in
@@ -306,7 +308,7 @@ struct ModelLaunchersView: View {
 
     /// Takes the row out at once, then asks the hub; a failure puts it back and says why.
     private func delete(_ l: LauncherView) async {
-        guard let api = model.api, let i = launchers?.firstIndex(where: { $0.name == l.name }) else { return }
+        guard let api = requestScope.api(model), let i = launchers?.firstIndex(where: { $0.name == l.name }) else { return }
         _ = withAnimation(Theme.Motion.standard) { launchers?.remove(at: i) }
         do {
             try await api.deleteLauncher(l.name)
@@ -320,7 +322,7 @@ struct ModelLaunchersView: View {
 
     /// Moves the row at once, then asks the hub; a failure puts it back and says why.
     private func setHidden(_ l: LauncherView, _ hide: Bool) async {
-        guard let api = model.api, let i = launchers?.firstIndex(where: { $0.name == l.name }) else { return }
+        guard let api = requestScope.api(model), let i = launchers?.firstIndex(where: { $0.name == l.name }) else { return }
         withAnimation(Theme.Motion.standard) { launchers?[i].hidden = hide }
         do {
             if hide { try await api.deleteLauncher(l.name) } else { try await api.restoreLauncher(l.name) }
@@ -338,7 +340,7 @@ struct ModelLaunchersView: View {
     }
 
     private func load() async {
-        guard let api = model.api else { return }
+        guard let api = requestScope.api(model) else { return }
         do {
             (launchers, sync) = try await api.launcherList()
             error = nil
@@ -389,6 +391,7 @@ struct LauncherRow: View {
 /// masked) on each machine and can be hidden or brought back.
 struct ModelLauncherDetailView: View {
     @Environment(AppModel.self) private var model
+    private let requestScope = AssistantSettingsRequestScope(AppModel.shared)
     @Environment(\.dismiss) private var dismiss
     var name: String
     @State private var launcher: LauncherView?
@@ -534,7 +537,10 @@ struct ModelLauncherDetailView: View {
         .extensionPushes(pluginSections.map { Array($0.models.values) } ?? [])
         .task(id: model.hubFeatures.hasExtensionFeature("manager")) {
             guard model.hubFeatures.hasExtensionFeature("manager") else { return }
-            let sections = pluginSections ?? ExtensionLauncherModel(launcher: name)
+            let scope = requestScope
+            let api = scope.api(model)
+            let sections = pluginSections ?? ExtensionLauncherModel(launcher: name, deps: .init(
+                api: { api }, connection: { model.socket(scope.group) }))
             pluginSections = sections
             await sections.load()
         }
@@ -583,7 +589,7 @@ struct ModelLauncherDetailView: View {
     }
 
     private func check(_ machines: [String]) async {
-        guard let api = model.api else { return }
+        guard let api = requestScope.api(model) else { return }
         for id in machines { checks[id] = .some(nil) }
         await withTaskGroup(of: (String, LauncherCheck).self) { group in
             for id in machines {
@@ -599,7 +605,7 @@ struct ModelLauncherDetailView: View {
     }
 
     private func load() async {
-        guard let api = model.api else { return }
+        guard let api = requestScope.api(model) else { return }
         do {
             launcher = try await api.launcher(name)
             error = nil
@@ -609,7 +615,7 @@ struct ModelLauncherDetailView: View {
     }
 
     private func delete() async {
-        guard let api = model.api else { return }
+        guard let api = requestScope.api(model) else { return }
         do {
             try await api.deleteLauncher(name)
             model.launchersChanged()
@@ -619,7 +625,7 @@ struct ModelLauncherDetailView: View {
     }
 
     private func restore() async {
-        guard let api = model.api else { return }
+        guard let api = requestScope.api(model) else { return }
         do {
             try await api.restoreLauncher(name)
             model.launchersChanged()
@@ -632,6 +638,7 @@ struct ModelLauncherDetailView: View {
 /// Add a launcher, or change one Persona keeps.
 struct LauncherEditor: View {
     @Environment(AppModel.self) private var model
+    private let requestScope = AssistantSettingsRequestScope(AppModel.shared)
     @Environment(\.dismiss) private var dismiss
     var existing: LauncherView?
     var saved: () async -> Void
@@ -811,7 +818,7 @@ struct LauncherEditor: View {
     }
 
     private func save() async {
-        guard let api = model.api else { return }
+        guard let api = requestScope.api(model) else { return }
         saving = true
         defer { saving = false }
         var input = LauncherInput(name: name.trimmingCharacters(in: .whitespaces), baseURL: baseURL.trimmingCharacters(in: .whitespaces),
@@ -824,7 +831,7 @@ struct LauncherEditor: View {
                                   args: kind == "api" ? [] : args.split(whereSeparator: \.isWhitespace).map(String.init),
                                   apiKey: apiKey.isEmpty ? nil : apiKey, kind: kind,
                                   api: kind == "api" ? protocolName : "messages", auth: usesResponses ? "api_key" : auth)
-        if scopeShown { scope.apply(to: &input, old: existing, machines: model.hubMachines, kind: kind) }
+        if scopeShown { scope.apply(to: &input, old: existing, machines: requestScope.machines(model), kind: kind) }
         do {
             try await api.saveLauncher(input, isNew: isNew)
             model.launchersChanged()

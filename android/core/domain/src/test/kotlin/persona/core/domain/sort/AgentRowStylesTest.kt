@@ -1,0 +1,114 @@
+package persona.core.domain.sort
+
+import org.junit.Assert.*
+import org.junit.Test
+import persona.core.contracts.Session
+
+/**
+ * The Agents list's row styles (#4338 A9): one display made of the two stored values, with iOS's cases
+ * (`AgentRowStyleTests.aDisplayIsAStyleOrCompactList`), the parts each display draws (`AgentRowStyles.swift`:
+ * `avatarRow`, `twoLineRow`, `cardRow`; `CompactSlotRow`), and State Cards' state word.
+ */
+class AgentRowStylesTest {
+    private fun row(state: String = "working", f: Session.() -> Session = { this }) = AgentSession(
+        Session(machineId = "m", sessionId = "s", title = "Ship the widget", cwd = "/w/app", state = state, agent = "claude").f())
+
+    @Test fun aDisplayIsAStyleOrCompactList() {
+        assertEquals(AgentListDisplay.Avatar, AgentListDisplay.of(AgentRowStyle.Avatar, list = false))
+        assertEquals(AgentListDisplay.TwoLines, AgentListDisplay.of(AgentRowStyle.TwoLines, list = false))
+        assertEquals(AgentListDisplay.Cards, AgentListDisplay.of(AgentRowStyle.Cards, list = false))
+        // Compact List whatever style was chosen before it, which it keeps.
+        for (style in AgentRowStyle.entries) assertEquals(AgentListDisplay.CompactList, AgentListDisplay.of(style, list = true))
+        assertNull(AgentListDisplay.CompactList.style)
+        assertEquals(AgentRowStyle.entries, AgentListDisplay.entries.mapNotNull { it.style })
+        assertEquals(AgentRowStyle.Avatar, AgentRowStyle.Default)
+        assertEquals(AgentListDisplay.Avatar, AgentListDisplay.Default)
+        // In iOS's order, as ⋯ › Display and Settings list them.
+        assertEquals(listOf("Avatar", "TwoLines", "Cards", "CompactList"), AgentListDisplay.entries.map { it.name })
+    }
+
+    @Test fun aStoredStyleReadsByItsNameAndAnythingElseIsAvatar() {
+        assertEquals(AgentRowStyle.Cards, AgentRowStyle.fromPreference("Cards"))
+        assertEquals(AgentRowStyle.TwoLines, AgentRowStyle.fromPreference("TwoLines"))
+        for (value in listOf(null, "", "compact", "removed-value")) assertEquals(AgentRowStyle.Avatar, AgentRowStyle.fromPreference(value))
+    }
+
+    @Test fun eachDisplayDrawsTheParts() {
+        // A: the mark in its well, the state on the corner; the words; the place line (source, place, model, to-do, bell).
+        with(AgentListDisplay.Avatar.rowParts) {
+            assertEquals(AgentRowLeading.Well, leading)
+            assertFalse(markBesideTitle)
+            assertTrue(placeLine)
+            assertFalse(sourceAfterWords)
+            assertFalse(stateAtFoot)
+            assertFalse(card)
+            // iOS gives the words two lines; Android's Avatar row keeps the one it had.
+            assertEquals(1, wordLines)
+        }
+        // B: the dot alone, the mark beside the title; one line of words with the source at its end; no model or to-do.
+        with(AgentListDisplay.TwoLines.rowParts) {
+            assertEquals(AgentRowLeading.Dot, leading)
+            assertTrue(markBesideTitle)
+            assertEquals(1, wordLines)
+            assertFalse(placeLine)
+            assertTrue(sourceAfterWords)
+            assertFalse(stateAtFoot)
+            assertFalse(card)
+        }
+        // C: a card, its state's bar down the edge; two lines of words; the state in words at the foot with the place line.
+        with(AgentListDisplay.Cards.rowParts) {
+            assertEquals(AgentRowLeading.Bar, leading)
+            assertTrue(markBesideTitle)
+            assertEquals(2, wordLines)
+            assertTrue(placeLine)
+            assertFalse(sourceAfterWords)
+            assertTrue(stateAtFoot)
+            assertTrue(card)
+        }
+        // Compact List: one line, the mark then the state; no words, no place line.
+        with(AgentListDisplay.CompactList.rowParts) {
+            assertEquals(AgentRowLeading.MarkAndState, leading)
+            assertFalse(markBesideTitle)
+            assertEquals(0, wordLines)
+            assertFalse(placeLine)
+            assertFalse(card)
+        }
+    }
+
+    @Test fun stateCardsSpellEveryStateButSeen() {
+        fun card(r: AgentSession, muted: Boolean = false) = r.cardStateWord(muted)?.english()
+        assertEquals("Needs you", card(row("needs_you")))
+        assertEquals("Working", card(row()))
+        assertEquals("Unread", card(row("unread")))
+        assertEquals("Awaiting reply", card(row("idle") { copy(awaitsReply = true) }))
+        assertEquals("Waiting in the background", card(row { copy(backgroundWaiting = true) }))
+        // Seen says nothing (iOS: a quiet one's word is left out), nor a muted one.
+        assertNull(card(row("idle")))
+        assertNull(card(row("needs_you"), muted = true))
+        assertNull(card(row("idle") { copy(awaitsReply = true) }, muted = true))
+    }
+
+    @Test fun rowContentTakesTheDisplaysStateWord() {
+        fun word(r: AgentSession, display: AgentListDisplay, section: Boolean = false) =
+            r.rowContent(AgentRowContext(stateSection = section), display = display).stateWord?.english()
+        // Avatar and Two Lines: only what the dot can't say.
+        for (display in listOf(AgentListDisplay.Avatar, AgentListDisplay.TwoLines)) {
+            assertEquals("Needs you", word(row("needs_you"), display))
+            assertNull(word(row(), display))
+            assertNull(word(row("unread"), display))
+        }
+        // State Cards: the state spelled out, but not under a section that names it.
+        assertEquals("Working", word(row(), AgentListDisplay.Cards))
+        assertEquals("Unread", word(row("unread"), AgentListDisplay.Cards))
+        assertNull(word(row(), AgentListDisplay.Cards, section = true))
+        assertNull(word(row("idle"), AgentListDisplay.Cards))
+        // The rest of the row is the same in every display.
+        val s = row { copy(spaceName = "weather", slotName = "widget") }
+        val avatar = s.rowContent(AgentRowContext(located = true))
+        for (display in AgentListDisplay.entries) {
+            val content = s.rowContent(AgentRowContext(located = true), display = display)
+            assertEquals(avatar.place, content.place)
+            assertEquals(avatar.model, content.model)
+        }
+    }
+}

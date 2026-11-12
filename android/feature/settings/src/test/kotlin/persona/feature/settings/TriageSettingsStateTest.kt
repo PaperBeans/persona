@@ -37,7 +37,7 @@ class TriageSettingsStateTest {
         assertNull(failed.switches)
         assertFalse(failed.loading)
         assertFalse(failed.unsupported)
-        assertEquals("读不到 hub 上的设置：连不上 hub", failed.readError?.resolve(res))
+        assertEquals("读不到 Hub 上的设置：连不上 hub", failed.readError?.resolve(res))
 
         api.readFailure = null
         model.load()

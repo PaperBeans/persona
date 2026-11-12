@@ -4,7 +4,7 @@ import { CSRF_HEADERS } from "../lib/compatibility";
 import { currentLanguage, t } from "../i18n";
 import { previewConsent } from "../lib/extension-model";
 import { catalogOf, catalogQuery, marketView, type Catalog, type Market, type ExtensionRemovalResult } from "../lib/extension-market";
-import type { AddedMachine, AdminExtension, AdminExtensions, AssistantCards, ConnectorRepair, ExtensionMetrics, ExtensionPreview, LinkPair, LogLine, LogsPage, MeshView, MetricsOverview, MetricsWindow, UsageSource, UsageSourceInput, UsageSources, UsageSourceType, UsageTestResult } from "./types";
+import type { AddedMachine, AdminExtension, AdminExtensions, ConnectorRepair, ExtensionMetrics, ExtensionPreview, LinkPair, LogLine, LogsPage, MeshView, MetricsOverview, MetricsWindow, UsageSource, UsageSourceInput, UsageSources, UsageSourceType, UsageTestResult } from "./types";
 
 export class AdminError extends Error {
   status: number;
@@ -153,11 +153,6 @@ export const linkPair = (id: string) => adminApi<LinkPair>(`/machines/${enc(id)}
 
 export const repairConnector = (id: string, pairLink: string, address?: string) =>
   adminApi<ConnectorRepair>(`/machines/${enc(id)}/connector`, "POST", { pair_link: pairLink, address: address || undefined });
-
-// ── the assistant's cards (docs/operations/admin.md "Assistant cards"): one switch, live at once; the preview never calls the hub ──
-
-export const getAssistantCards = () => adminApi<AssistantCards>("/assistant");
-export const setPersonaView = (on: boolean) => adminApi<AssistantCards>("/assistant", "PUT", { persona_view: on });
 
 // ── extensions (docs/operations/admin.md "Extensions"): install, upgrade, roll back, uninstall, switch ──
 

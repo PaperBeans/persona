@@ -155,6 +155,10 @@ internal fun NotificationPreferences(
             }
         }
         if (prefs?.muteWhileDesktop != null) desktopMuteItems(controller, desktops, onDesktops)
+        else if (desktops.isNotEmpty() && onDesktops != null) item("desktops-presence") {
+            // Older hubs still expose signed-in computers even when phone muting preferences are unavailable.
+            DesktopPresenceRow(desktops, muted = false, selected = false, position = GroupPosition.Single, onClick = onDesktops)
+        }
         if (available && state.preferences == null) item {
             Action(stringResource(if (state.busy) R.string.settings_reading else R.string.settings_retry_read), enabled = !state.busy) { scope.launch { controller.loadPreferences() } }
         }

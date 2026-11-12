@@ -8,11 +8,16 @@ import { parseUserText, tagAttrs, type AttachedFile } from "./turns";
 /** The order to re-queue in when message `index` moves `by` places (−1 up, +1 down; #6088): every message, that one moved.
  *  Null when it cannot move that way. */
 export function moved(count: number, index: number, by: number): number[] | null {
-  const to = index + by;
-  if (index < 0 || index >= count || to < 0 || to >= count || by === 0) return null;
+  return by === 0 ? null : movedTo(count, index, index + by);
+}
+
+/** The order to re-queue in when message `from` is put at place `to` (the queue's drag handle, dragged or ↑ ↓ Home End;
+ *  #5327): every message, that one moved, the others in their order. Null when it stays or either place is outside. */
+export function movedTo(count: number, from: number, to: number): number[] | null {
+  if (from === to || from < 0 || from >= count || to < 0 || to >= count) return null;
   const order = Array.from({ length: count }, (_, i) => i);
-  order.splice(index, 1);
-  order.splice(to, 0, index);
+  order.splice(from, 1);
+  order.splice(to, 0, from);
   return order;
 }
 

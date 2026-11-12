@@ -157,6 +157,9 @@ export function Button({
   busy,
   title,
   href,
+  expanded,
+  testId,
+  size,
 }: {
   children: React.ReactNode;
   tone?: BtnTone;
@@ -169,8 +172,15 @@ export function Button({
   title?: string;
   /** Opens this in a new tab, as a link (noopener, noreferrer: the page gets no handle on this one, nor its address). */
   href?: string;
+  /** A button that shows or hides something: whether it is shown (aria-expanded). */
+  expanded?: boolean;
+  /** `data-testid`, for the tests and screenshot scripts that press it. */
+  testId?: string;
+  /** "sm": 28 px tall (a row of actions inside a card, as the error notice's). A height in `className` does not win
+   *  over the 32 px one here: the classes are joined, not merged, and the stylesheet's order decides. */
+  size?: "sm";
 }) {
-  const base = "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-control px-3 text-[12.5px] font-medium transition-[background-color,color,transform,opacity,filter] duration-150";
+  const base = cx("inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-control px-3 text-[12.5px] font-medium transition-[background-color,color,transform,opacity,filter] duration-150", size === "sm" ? "h-7" : "h-8");
   if (href && !disabled && !busy) {
     // an <a> is never :enabled, so the link has its own hover / press
     const links: Record<BtnTone, string> = {
@@ -181,7 +191,7 @@ export function Button({
       danger: "bg-danger-fill text-white hover:brightness-105",
     };
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" title={title} onClick={onClick} className={cx(base, "active:scale-[0.96]", links[tone], className)}>
+      <a href={href} target="_blank" rel="noopener noreferrer" title={title} data-testid={testId} onClick={onClick} className={cx(base, "active:scale-[0.96]", links[tone], className)}>
         {icon ? <Icon name={icon} size={14} stroke={2.1} /> : null}
         {children}
       </a>
@@ -202,6 +212,8 @@ export function Button({
       disabled={disabled || busy}
       // the spinner is aria-hidden, so without this a busy button just reads as disabled
       aria-busy={busy || undefined}
+      aria-expanded={expanded}
+      data-testid={testId}
       onClick={onClick}
       className={cx(
         base,
@@ -341,6 +353,7 @@ export function Menu({
   side = "bottom",
   width = 208,
   header,
+  container,
 }: {
   items: MenuItem[];
   anchor: HTMLElement | null;
@@ -351,6 +364,9 @@ export function Menu({
   side?: "top" | "bottom";
   width?: number;
   header?: string;
+  /** Where the menu is put instead of the page's body: a full-screen layer above the menus' own (the image editor),
+   *  whose look (its `dark`) the menu then takes. */
+  container?: Element | null;
 }) {
   const id = useId();
   const [subs, setSubs] = useState<Sub[]>([]); // the open submenus: depth d (d ≥ 1) is subs[d - 1]
@@ -572,7 +588,7 @@ export function Menu({
         <MenuPanel key={`${s.from}-${i}`} {...panelProps(i + 1)} place={{ rect: s.rect, width }} loading={s.loading} loadError={s.error} />
       ))}
     </>,
-    document.body,
+    container ?? document.body,
   );
 }
 
@@ -756,7 +772,7 @@ function MenuRow({ item: it, asking, working, refCb, onHover, onChoose }: { item
       ref={refCb}
       role={it.radio ? "menuitemradio" : "menuitem"}
       type="button"
-      title={it.state ? `${it.label} · ${STATE_LABEL[it.state]}` : undefined}
+      title={it.state ? `${it.label} · ${STATE_LABEL[it.state]}` : it.tip}
       disabled={it.disabled}
       aria-haspopup={it.children ? "menu" : undefined}
       aria-keyshortcuts={it.accel}
@@ -951,6 +967,8 @@ export function Dialog({
   children,
   width = 440,
   footer,
+  labelledBy,
+  describedBy,
 }: {
   open: boolean;
   onClose: () => void;
@@ -958,6 +976,10 @@ export function Dialog({
   children: React.ReactNode;
   width?: number;
   footer?: React.ReactNode;
+  /** With no `title`: the id of the heading the body draws itself (a confirmation laid out as one block). */
+  labelledBy?: string;
+  /** The id of the text that says what the dialog asks. */
+  describedBy?: string;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -992,7 +1014,8 @@ export function Dialog({
         ref={panel}
         role="dialog"
         aria-modal={open || undefined}
-        aria-labelledby={shown.title ? titleId : undefined}
+        aria-labelledby={shown.title ? titleId : labelledBy}
+        aria-describedby={describedBy}
         tabIndex={-1}
         className="flex max-h-[calc(88vh-(--spacing(8)))] w-full max-w-(--dialog-w) animate-[slide-up_220ms_var(--ease-out-strong)_both] flex-col overflow-hidden rounded-[14px] bg-surface shadow-overlay outline-none max-sm:max-h-[calc(var(--kb-h)*0.9)] max-sm:max-w-none max-sm:animate-none max-sm:rounded-b-none max-sm:transition-transform max-sm:duration-300 max-sm:ease-(--ease-out-strong) max-sm:starting:translate-y-full"
         style={{ "--dialog-w": `${width}px` } as React.CSSProperties}

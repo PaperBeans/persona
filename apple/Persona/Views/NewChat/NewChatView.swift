@@ -127,6 +127,10 @@ struct NewChatView: View {
     /// The launcher runs Codex: it starts with its first message (Codex makes the thread then) and the start waits for it.
     private var codex: Bool { launchers.first(where: { $0.name == runLauncher })?.isCodex == true }
 
+    /// A Codex this computer opens only with its first message (an older computer); a newer one opens it waiting for
+    /// one, sent later here or typed in its terminal (docs/integrations/codex.md「Starting without a first message」).
+    private var codexNeedsFirst: Bool { launchers.first(where: { $0.name == runLauncher })?.needsFirstMessage == true }
+
     /// The list for `runLauncher`; nil: none to pick (not loaded, an older hub).
     private var models: LauncherModels? { modelList.list }
     private var modelsLoading: Bool { modelList.loading }
@@ -167,8 +171,11 @@ struct NewChatView: View {
     /// Why this computer can't start with it (its Claude Code is known to be too old); nil when it can.
     private var ultracodeBlocked: String? { ultracodeShown ? Ultracode.startBlocked(claudeVersion: machine?.claudeVersion) : nil }
 
-    private var promptHint: String { codex ? String(localized: "What should Codex do? (Required: Codex starts a session only after the first message)")
-                                       : String(localized: "What should Claude do? (Optional)") }
+    private var promptHint: String {
+        if codexNeedsFirst { return String(localized: "What should Codex do? (Required: Codex starts a session only after the first message)") }
+        if codex { return String(localized: "What should Codex do? (Optional: you can also send it later, here or in its terminal)") }
+        return String(localized: "What should Claude do? (Optional)")
+    }
 
     /// Nothing missing for Start Chat, and the machine's own launchers and directories are in.
     private var ready: Bool {
@@ -177,7 +184,7 @@ struct NewChatView: View {
     }
 
     private var codexNeedsMessage: Bool {
-        codex && contextBlock == nil && prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        codexNeedsFirst && contextBlock == nil && prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// What the attachments hold the start back for (a Codex launcher, uploads still going); nil: nothing.
@@ -537,6 +544,11 @@ struct NewChatView: View {
                     attachments.upload([url], to: ref, model: model)
                 }
             }
+            // `-showNewAgentPrompt YES`: once this computer's launchers are in, First Message scrolled into view and
+            // focused, for screenshots of its hint (#4961).
+            .onChange(of: defaultsFor) { _, now in
+                if !now.isEmpty, UserDefaults.standard.bool(forKey: "showNewAgentPrompt") { promptRequests += 1 }
+            }
             #endif
             .interactiveDismissDisabled(starting)
             // A list makes only the rows on screen: First Message is scrolled into view before it can take the focus.
@@ -573,8 +585,9 @@ struct NewChatView: View {
                        addsProvider: ref.group == (model.hub?.group ?? ""))
     }
 
-    /// The machines offered: this hub's when a todo is handed over (`onlyGroup`), else all of them.
-    private var machinesShown: [Machine] { Self.offered(model.machines, onlyGroup: onlyGroup) }
+    /// The machines offered: the current assistant's (`AppModel.scopedMachines`), and of them this hub's when a todo is
+    /// handed over (`onlyGroup`).
+    private var machinesShown: [Machine] { Self.offered(model.scopedMachines(), onlyGroup: onlyGroup) }
 
     /// Not one waiting to be confirmed (the hub refuses it, 409 machine_pending): it is not the user's yet.
     static func offered(_ machines: [Machine], onlyGroup: String?) -> [Machine] {
@@ -583,6 +596,9 @@ struct NewChatView: View {
 
     /// The remembered machine belongs to another hub than the one the todo is on.
     private var machineOutsideGroup: Bool { onlyGroup.map { machine?.group != $0 } ?? false }
+
+    /// The remembered machine is another assistant's than the one whose computers are offered.
+    private var machineOutsideScope: Bool { machine.map { !model.assistantScope.has($0.manager, group: $0.group) } ?? false }
 
     /// The setups that started an Agent here before (#2134), one store for the app.
     private var recents: RecentSetupsStore { .shared }
@@ -659,7 +675,7 @@ struct NewChatView: View {
 
     /// Remember the last machine, but fall back to the first online one (machines may arrive after the sheet opens).
     private func pickDefaultMachine() {
-        if machine == nil || machine?.online == false || machine?.isPending == true || machineOutsideGroup,
+        if machine == nil || machine?.online == false || machine?.isPending == true || machineOutsideGroup || machineOutsideScope,
            let m = machinesShown.first(where: \.online) ?? machinesShown.first {
             machineID = m.ref.path
         }
@@ -932,7 +948,8 @@ struct NewChatView: View {
             let outgoing = contextBlock.map { p.isEmpty ? $0 : "\($0)\n\n\(p)" } ?? p
             if codex {
                 // Codex picks its thread's id once it has the first message: it goes with the start, which answers
-                // with that thread (one session, already working on it).
+                // with that thread (one session, already working on it). With none, the start answers with Codex
+                // waiting for it (Session.awaitingFirstMessage).
                 let s = try await api.start(.init(machineID: ref.id, cwd: dir, launcher: launcher, prompt: contextBlock == nil ? prompt : outgoing,
                                                   workspaceID: targetPreset?.workspaceID, host: targetPreset?.host, model: sentModel, tabName: name.isEmpty ? nil : name,
                                                   nameHint: nameHint ?? (p.isEmpty ? nil : p), todoID: todoID))

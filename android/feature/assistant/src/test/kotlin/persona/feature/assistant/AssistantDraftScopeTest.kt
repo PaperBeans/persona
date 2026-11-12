@@ -174,9 +174,12 @@ class AssistantDraftScopeTest {
         text("助手提交稿")
         rule.onNodeWithContentDescription("发送").performClick()
         rule.waitForIdle()
+        rule.onNodeWithText("发送中").assertExists()
         pick("工作")
+        rule.onNodeWithText("发送中").assertDoesNotExist()
         text("工作保留稿")
         pick("助手")
+        rule.onNodeWithText("发送中").assertExists()
         assertEquals("助手提交稿", persisted(a))
         rule.onNodeWithContentDescription("发送").assertIsNotEnabled()
         rule.runOnIdle { hub.gate.complete(Unit) }
@@ -228,7 +231,8 @@ class AssistantDraftScopeTest {
         text("工作稿")
         pick("助手")
         rule.onNodeWithText("codex-test · 仅这一次").assertExists()
-        rule.onNodeWithContentDescription("发送").performClick()
+        // The failed first message waits as a bubble on its assistant's page (#4339 C18): Resend sends it again.
+        rule.onNodeWithText("重发").performClick()
         rule.waitForIdle()
         assertEquals(1, created.size)
         assertEquals(listOf(firstTarget, firstTarget), hub.targets)

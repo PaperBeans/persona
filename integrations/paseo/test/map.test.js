@@ -81,12 +81,13 @@ test('a row: its space, the agent the apps know, model, modes and transcript', (
   const a = agentSnapshot({
     provider: 'my-claude', cwd: '/w/proj', workspaceId: 'wks_9', title: '  修登录  ', model: 'claude-x[1m]', currentModeId: 'acceptEdits',
     effectiveThinkingOptionId: 'max', persistence: { sessionId: CLAUDE_SID, metadata: { provider: 'claude' } }, updatedAt: '2026-11-04T10:00:00.000Z',
+    createdAt: '2026-11-04T09:58:00.000Z',
   })
   const row = agentRow(a, { roots, project: { projectKey: 'prj', projectName: 'proj', workspaceName: '登录修复' } })
   assert.deepEqual(row, {
     session_id: CLAUDE_SID, title: '修登录', cwd: '/w/proj', status: 'idle', updated_at: '2026-11-04T10:00:00.000Z',
     rev: Date.parse('2026-11-04T10:00:00.000Z'), space_id: 'prj', space_name: 'proj', slot_name: '登录修复',
-    agent: 'claude', launcher: 'my-claude',
+    agent: 'claude', launcher: 'my-claude', started_at: '2026-11-04T09:58:00.000Z',
     model: 'claude-x[1m]', permission_mode: 'acceptEdits', effort: 'max', transcript: CLAUDE_SID,
   })
   const g = agentRow(agentSnapshot({ id: 'g1', provider: 'grok', cwd: '/w/x', currentModeId: 'yolo', status: 'error', lastError: 'boom' }),
@@ -113,12 +114,30 @@ test("an archived agent keeps its row when its id is not its transcript's: a ses
     "another agent created it: its creator's conversation says what it did")
   assert.equal(archivedUnderOwnId({ ...started, persistence: null }, roots), false, 'no transcript: nothing to read')
   assert.equal(archivedUnderOwnId(agentSnapshot({ id: 'c1', provider: 'my-codex', archivedAt: at, labels: { 'persona.session': 'paseo-c1' } }), roots),
-    false, 'not Claude Code: no transcript the node reads')
+    false, 'Codex without a known thread: no conversation to retain yet')
   // Its row: the session's own id, not running, its transcript the conversation.
   const row = agentRow(started, { roots, project: { projectKey: 'prj', projectName: 'proj' }, archived: true })
   assert.deepEqual([row.session_id, row.status, row.transcript, row.title, row.space_id, row.updated_at], ['paseo-a1', 'offline', CLAUDE_SID, 'T', 'prj', at])
   assert.equal(agentRow({ ...started, status: 'idle' }, { roots, archived: true }).status, 'offline', 'whatever its record says')
   assert.equal(agentRow(started, { roots }), undefined, 'without archived: no row, as before')
+})
+
+test('an archived Codex conversation keeps a Persona-owned id, without changing Paseo-originated agents (#5129)', () => {
+  const roots = providerRoots({ ...CONFIG, 'codex-alias': { extends: 'my-codex' } })
+  const thread = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0003'
+  const codex = agentSnapshot({ id: 'cx1', provider: 'codex-alias', archivedAt: '2026-11-04T10:00:00.000Z',
+    labels: { 'persona.session': 'paseo-cx1' },
+    persistence: { sessionId: thread, metadata: { provider: 'codex', threadId: thread } } })
+  assert.equal(archivedUnderOwnId(codex, roots), true)
+  const row = agentRow(codex, { roots, archived: true })
+  assert.deepEqual([row.session_id, row.status, row.codex_thread, row.transcript], ['paseo-cx1', 'offline', thread, undefined])
+  assert.equal(archivedUnderOwnId({ ...codex, labels: {} }, roots), false, 'Paseo-originated agents keep their current archive behavior')
+  assert.equal(archivedUnderOwnId({ ...codex, labels: { 'persona.session': '../invalid' } }, roots), false, 'a rejected label is not Persona ownership')
+  assert.equal(archivedUnderOwnId({ ...codex, labels: { 'persona.session': thread } }, roots), false, 'no different id to preserve')
+  assert.equal(archivedUnderOwnId({ ...codex, archivedAt: null }, roots), false)
+  assert.equal(archivedUnderOwnId({ ...codex, labels: { ...codex.labels, 'paseo.parent-agent-id': 'boss' } }, roots), false)
+  assert.equal(archivedUnderOwnId({ ...codex, persistence: null }, roots), false, 'no known Codex thread yet')
+  assert.equal(archivedUnderOwnId({ ...codex, persistence: null, runtimeInfo: { sessionId: thread } }, roots), true, 'a known runtime thread also identifies the conversation')
 })
 
 test("a delegated agent is its creator's subtask: its parent, no waiting to be looked at; the unfinished ones are the creator's background work", () => {
@@ -141,6 +160,8 @@ test("a delegated agent is its creator's subtask: its parent, no waiting to be l
 
   const row = agentRow(child({ status: 'running' }), { roots, parent: CLAUDE_SID, quiet: true })
   assert.deepEqual([row.is_subagent, row.parent_session_id, row.status], [true, CLAUDE_SID, 'working'])
+  assert.equal(row.started_at, '2026-11-04T09:00:00.000Z', 'when it was created: its card counts its running time from it')
+  assert.equal(agentRow(child({ createdAt: undefined }), { roots }).started_at, undefined, 'never a time it was not created at')
   assert.equal(agentRow(child({ status: 'idle', requiresAttention: true }), { roots, parent: CLAUDE_SID, quiet: true }).status, 'idle')
   const own = agentRow(child({ status: 'running' }), { roots })
   assert.deepEqual([own.is_subagent, own.parent_session_id], [undefined, undefined], 'its creator is not listed beside it: a row of its own')

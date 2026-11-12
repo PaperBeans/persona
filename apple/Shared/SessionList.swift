@@ -15,11 +15,19 @@ nonisolated struct SessionListQuery: Hashable, Sendable {
     var source: String = ""
     var provider: String = ""
     var text: String = ""
+    /// One manager's sessions only (docs/protocol/protocol.md "One manager's sessions"): its id, sent only to a hub whose
+    /// hello has `sessions_manager` (`sessionsManagerFeature`); an older hub would ignore the key and answer with every
+    /// manager's, its totals and counts with them. Part of the query, so a list for another manager starts over: a
+    /// cursor is bound to its filters.
+    var manager: String = ""
+
+    static let sessionsManagerFeature = "sessions_manager"
 
     var parameters: [String: String] {
         var out = ["summary": "1", "limit": String(Self.pageSize)]
         for (key, value) in [("state", state), ("machine_id", machine), ("project", project), ("group", group),
-                             ("source", source), ("provider", provider), ("q", String(text.prefix(256)))] where !value.isEmpty {
+                             ("source", source), ("provider", provider), ("q", String(text.prefix(256))),
+                             ("manager", manager)] where !value.isEmpty {
             out[key] = value
         }
         return out
@@ -102,6 +110,16 @@ extension APIClient {
             }
         }
         return nil
+    }
+
+    /// Every manager's sessions in Needs You as list rows, the newest first and at most 200 of them, from a hub with
+    /// bounded lists (`sessions_list`): what the assistant switcher's counts go by (`AppModel.readNeedsYou`).
+    func sessionsNeedingYou() async throws -> [Session] {
+        let data = try await request("GET", "/api/v1/sessions", query: ["state": AgentState.needsYou.rawValue, "summary": "1", "limit": "200"])
+        let page = try await Task.detached(priority: .utility) {
+            try JSON.decoder.decode(SessionListPage<Session>.self, from: data)
+        }.value
+        return stamp(page.sessions)
     }
 
     func sessionListCounts(_ query: SessionListQuery, personal: Bool = false) async throws -> SessionListCounts {

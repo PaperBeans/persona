@@ -83,6 +83,39 @@
           "$description": "StatusTone 默认 Color.secondary.opacity(0.08)；系统色为跨端回退，非设备采样"
         }
       },
+      "backgroundWaiting": {
+        "dot": {
+          "$type": "color",
+          "$value": {
+            "colorSpace": "srgb",
+            "components": [
+              0.9098039215686274,
+              0.5372549019607843,
+              0.047058823529411764
+            ],
+            "alpha": 0.6
+          },
+          "$description": "StatusPalette.backgroundWaiting.dot: working.dot.opacity(0.6), Working's amber made lighter"
+        },
+        "text": {
+          "$type": "color",
+          "$value": "{system.light.secondary}",
+          "$description": "StatusPalette.backgroundWaiting.text: .secondary (a lighter amber is too faint for small text)"
+        },
+        "tint": {
+          "$type": "color",
+          "$value": {
+            "colorSpace": "srgb",
+            "components": [
+              0.9098039215686274,
+              0.5372549019607843,
+              0.047058823529411764
+            ],
+            "alpha": 0.08
+          },
+          "$description": "StatusPalette.backgroundWaiting.tint: working.dot.opacity(0.08)"
+        }
+      },
       "unread": {
         "dot": {
           "$type": "color",
@@ -331,6 +364,39 @@
             "alpha": 0.048
           },
           "$description": "StatusTone 默认 Color.secondary.opacity(0.08)；系统色为跨端回退，非设备采样"
+        }
+      },
+      "backgroundWaiting": {
+        "dot": {
+          "$type": "color",
+          "$value": {
+            "colorSpace": "srgb",
+            "components": [
+              1.0,
+              0.6980392156862745,
+              0.1411764705882353
+            ],
+            "alpha": 0.6
+          },
+          "$description": "StatusPalette.backgroundWaiting.dot: working.dot.opacity(0.6), Working's amber made lighter"
+        },
+        "text": {
+          "$type": "color",
+          "$value": "{system.dark.secondary}",
+          "$description": "StatusPalette.backgroundWaiting.text: .secondary (a lighter amber is too faint for small text)"
+        },
+        "tint": {
+          "$type": "color",
+          "$value": {
+            "colorSpace": "srgb",
+            "components": [
+              1.0,
+              0.6980392156862745,
+              0.1411764705882353
+            ],
+            "alpha": 0.08
+          },
+          "$description": "StatusPalette.backgroundWaiting.tint: working.dot.opacity(0.08)"
         }
       },
       "unread": {

@@ -71,6 +71,15 @@ public nonisolated struct ChatFollow: Equatable, Sendable {
     /// A finger moved the list (the scroll phase's `tracking` / `interacting`).
     public mutating func touched() { touching = true }
 
+    /// The finger lifted without having scrolled the list (a tap on a row or a button in it, a press held still): nothing
+    /// was scrolled, so nothing is decided and the list goes on as it was (anchored stays anchored). Taken for the end of
+    /// a scroll, every tap on a tool row near the newest end decided "following" and ended the anchor, and the next step
+    /// took the list to the newest end, the rows just opened off the top (#3005).
+    public mutating func tapped() {
+        touching = false
+        draggedAway = false
+    }
+
     /// The user's scrolling ended (the finger lifted, or its glide stopped): where it stopped decides.
     public mutating func released() {
         guard touching else { return }
@@ -107,8 +116,9 @@ public nonisolated struct ChatFollow: Equatable, Sendable {
 
     /// A header was tapped open or closed. Opening something is not taking the list: whatever it was doing (following
     /// at the newest, reading further up) it goes back to once the header has settled. `anchored` (a running work line
-    /// opened at the newest end, its header raised under the top bar): held until the user takes the list, folds it, or
-    /// goes back to the newest; following would scroll the header away, holding back would freeze the turn (#1046).
+    /// opened at the newest end, its header raised under the top bar; one opened or folded where the chat would follow):
+    /// held until the user takes the list or goes back to the newest (↓, sending, a fold that took the list there);
+    /// following would scroll the header away, holding back would freeze the turn (#1046).
     public mutating func hold(anchored: Bool = false) {
         if mode != .holding {
             resume = mode == .landing ? (near ? .following : .reading) : mode
@@ -119,6 +129,45 @@ public nonisolated struct ChatFollow: Equatable, Sendable {
         }
         mode = .holding
         self.anchored = anchored
+    }
+
+    /// How the chat holds a row opened or closed in place (`toggledRow`).
+    public enum RowHold: Equatable, Sendable {
+        /// For a moment, while it settles; then the list goes on as it was.
+        case moment
+        /// Where it is, until the user takes the list, taps ↓ or sends.
+        case kept
+        /// Opened at the newest end while following: it rises, what opened growing up from the newest end, which stays
+        /// on screen, and what comes in next does the same; once it reaches the top bar it is kept there, the newest end
+        /// goes off the screen and ↓ shows (#3757).
+        case rising
+    }
+
+    /// A row in the chat opened or closed in place (a tool call, a thought, a card: `toggleInPlace`): the user reads it.
+    /// Where what comes in next would take the list to the newest end (following, or about to go back to it), the list
+    /// is held instead, anchored as a work line opened at the newest end is, until the user takes the list, taps ↓ or
+    /// sends. Left following, the next step, the turn's answer or the next turn took the list to the newest end, the rows
+    /// the user had just opened off the top (#3005). At the newest end (`atNewest`), following or anchored with the newest
+    /// end still on screen, a row is not kept still: what opened under it, and what comes in after, grow up from the
+    /// newest end, the row rising with them to the top bar (`rising`); kept still, it pushed the newest end off below
+    /// the composer. A row closed there while following leaves the list following, back at the newest end (#3757).
+    /// Reading further up, nothing comes in meanwhile (held back) and it stays reading.
+    public mutating func toggledRow(closing: Bool = false, atNewest: Bool = false) -> RowHold {
+        guard followsNext else { return .moment }
+        if atNewest {
+            if closing, !anchored { return .moment }
+            hold(anchored: true)
+            return .rising
+        }
+        hold(anchored: true)
+        return .kept
+    }
+
+    /// What comes in next would take the list to the newest end once no finger holds it: following, held for a moment on
+    /// the way back to it, or anchored (held where the user reads instead of following). A row is toggled by a tap, its
+    /// finger still down (`touching`) when the row's action runs.
+    public var followsNext: Bool {
+        mode == .holding ? anchored || resume == .following : mode == .following
     }
 
     /// The header has settled. A finger that took the list meanwhile has decided already (`released`); an anchored

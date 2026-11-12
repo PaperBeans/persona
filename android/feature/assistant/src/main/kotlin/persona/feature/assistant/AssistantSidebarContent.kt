@@ -51,10 +51,15 @@ fun AssistantSidebarContent(
     val resources = LocalResources.current
     val copy = rememberCopy()
     val feedback = LocalAppFeedback.current
+    val haptics = persona.core.designsystem.rememberHaptics()
+    val archivedWords = stringResource(R.string.assistant_archived)
     val words = conversationWords()
     var query by rememberSaveable(choice.hubId, choice.shown) { mutableStateOf("") }
     var ended by remember(management) { mutableStateOf(emptySet<SessionKey>()) }
     var archived by remember(management) { mutableStateOf(emptySet<SessionKey>()) }
+    // Rename… and Archived (N) (iOS `AssistantSidebar`): titles given here and the archived conversations.
+    val history = rememberConversationHistory(management?.takeUnless { demo }, repository)
+    val openKeys = remember(received.conversations) { openKeys(received.conversations) }
     var ending by remember { mutableStateOf<Pair<Session, AssistantManagement>?>(null) }
     var busy by remember { mutableStateOf(false) }
     var leaderBusy by remember { mutableStateOf(false) }
@@ -78,10 +83,10 @@ fun AssistantSidebarContent(
             finally { leaderBusy = false }
         }
     }
-    val groups = remember(received, query, ended, archived, words) {
-        conversationGroups(received.copy(conversations = received.conversations.filter { it.key !in archived }.map {
+    val groups = remember(received, query, ended, archived, words, history.titles) {
+        conversationGroups(received.copy(conversations = history.titled(received.conversations.filter { it.key !in archived }.map {
             if (it.key in ended) it.copy(status = "offline", state = "offline") else it
-        }), query, words)
+        })), query, words)
     }
     Column(Modifier.fillMaxHeight()) {
         failure?.let { JNotice(it, status = Status.NeedsYou) }
@@ -97,7 +102,6 @@ fun AssistantSidebarContent(
                     AssistantInfo.Launcher, AssistantInfo.Settings -> onAction(AssistantSidebarAction.Launcher)
                 } },
                 onNew = { onAction(AssistantSidebarAction.NewConversation) },
-                onHome = { onAction(AssistantSidebarAction.Home) },
                 // The health space (docs/assistant/health.md): the Assistant page opens its newest chat or its new-chat page.
                 onHealth = if (demo) null else ({ onAction(AssistantSidebarAction.Health) }),
                 onSettings = onSettings,
@@ -105,9 +109,12 @@ fun AssistantSidebarContent(
                 onCopy = { copy(it.sessionId, resources.getString(R.string.assistant_copied_session_id)) },
                 onArchive = management?.takeUnless { demo }?.let { target -> { session: Session ->
                     archived = archived + session.key
+                    // As iOS: a tap now, "Archived" once the hub has it (DESIGN_SYSTEM.md 4.3).
+                    haptics(persona.core.designsystem.Haptic.Tap)
                     operationScope.launch {
                         try {
                             target.archiveConversation(session.key)
+                            feedback?.notice(archivedWords, persona.core.designsystem.FeedbackStyle.Success)
                             onRetired(session.key)
                             repository.refresh()
                             archived = archived - session.key
@@ -116,11 +123,16 @@ fun AssistantSidebarContent(
                     }
                 } },
                 onLeader = if (management != null && !demo) ({ session: Session -> setLeader(session) }) else null,
+                onRename = if (management != null && !demo) ({ session: Session -> history.renaming = session }) else null,
+                onDiagnostics = { copy(conversationDiagnostics(it), resources.getString(R.string.assistant_diagnostics_copied)) },
+                archivedCount = history.shownArchived(openKeys).size, onArchived = { history.archivedOpen = true },
                 onTodos = onTodos, todoCount = todoCount, showTodos = showTodos,
                 settingsCount = settingsCount, settingsDot = settingsDot, settingsBadge = settingsBadge,
                 pages = pages, onPage = onPage, switcher = switcher)
         }
     }
+    ConversationHistoryDialogs(history, received.conversations, operationScope, onOpen = onOpen,
+        notice = { feedback?.notice(it, persona.core.designsystem.FeedbackStyle.Success) }, failure = ::failed)
     ending?.let { (session, target) ->
         JDialog(onDismiss = { if (!busy) ending = null }, title = stringResource(R.string.assistant_end_title),
             text = stringResource(R.string.assistant_end_text, session.conversationTitle(words)),

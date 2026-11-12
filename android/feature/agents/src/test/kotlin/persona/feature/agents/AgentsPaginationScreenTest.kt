@@ -132,7 +132,7 @@ class AgentsPaginationScreenTest {
 
     @Test
     @Config(sdk = [35], qualifiers = "en-w400dp-h420dp-xhdpi")
-    fun pagedFirstPageShowsOneVisibleSpinnerInAShortWindow() {
+    fun pagedFirstPageShowsOneVisibleLoadingStateInAShortWindow() {
         val repository = PagedRepository(rowCount = 0, status = SessionListStatus(paged = true, loaded = false, loading = true))
         val model = model(repository)
         rule.setContent { PersonaTheme(reduceMotion = true) { AgentsScreen(model, Nowhere, AgentsMetadata()) } }
@@ -145,7 +145,7 @@ class AgentsPaginationScreenTest {
 
     @Test
     @Config(sdk = [35], qualifiers = "en-w400dp-h420dp-xhdpi")
-    fun pagedFirstPageFailureShowsRetryInsteadOfASpinner() {
+    fun pagedFirstPageFailureShowsRetryInsteadOfPlaceholders() {
         val repository = PagedRepository(rowCount = 0, status = SessionListStatus(paged = true, loaded = false, failed = true))
         val model = model(repository)
         rule.setContent { PersonaTheme(reduceMotion = true) { AgentsScreen(model, Nowhere, AgentsMetadata()) } }

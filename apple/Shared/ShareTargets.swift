@@ -141,14 +141,15 @@ nonisolated enum ShareTargets {
     }
 
     /// Sends `text` and `images` to `target` as the composer would, the same `clientMsgID` on a retry; a new chat starts
-    /// with them as its first message. Returns the session it went to.
+    /// with them as its first message. Marked as the share sheet's (`via`): what another app hands over never counts as
+    /// typed in the app. Returns the session it went to.
     static func send(_ api: APIClient, to target: ShareTarget, text: String, images: [ImagePayload], clientMsgID: String) async throws -> SessionKey {
         switch target.kind {
         case .newChat:
-            return try await api.startConversation(prompt: text, images: images, opID: UUID(uuidString: clientMsgID)).key
+            return try await api.startConversation(prompt: text, images: images, via: .share, opID: UUID(uuidString: clientMsgID)).key
         case .main, .conversation, .agent:
             guard let k = target.key else { throw APIError(status: 404, message: "no session") }
-            try await api.send(k, text: text, images: images, clientMsgID: clientMsgID, opID: UUID(uuidString: clientMsgID))
+            try await api.send(k, text: text, images: images, clientMsgID: clientMsgID, via: .share, opID: UUID(uuidString: clientMsgID))
             return k
         }
     }

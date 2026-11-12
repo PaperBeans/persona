@@ -73,6 +73,8 @@
         <item quantity="other">コンピューターがオフラインです。状態が古い可能性があります（%1$d分前）</item>
     </plurals>
     <string name="designsystem_line_answering">選択を送信中…</string>
+    <string name="designsystem_message_sending">送信中</string>
+    <string name="designsystem_message_processing">処理中</string>
     <string name="designsystem_line_sending">送信中…</string>
     <string name="designsystem_line_unconfirmed">前回の操作の結果は未確認です</string>
     <plurals name="designsystem_line_needs_you_count">
@@ -125,8 +127,23 @@
     </plurals>
     <!-- A herdr tab of several agents (#2320) -->
     <string name="designsystem_tab_launcher">起点</string>
+    <!-- An Agents row's third line on Glass (#4338 A9): the to-do chip and the muted bell, for TalkBack -->
+    <string name="designsystem_row_todo">ToDo：%1$s</string>
+    <string name="designsystem_row_muted">通知はミュート中</string>
+    <string name="designsystem_row_style_avatar">アバター</string>
+    <string name="designsystem_row_style_two_lines">2 行</string>
+    <string name="designsystem_row_style_cards">状態カード</string>
+    <string name="designsystem_row_style_list">コンパクトリスト</string>
+    <string name="designsystem_row_style_avatar_summary">アバター、タイトルと時刻、最新の発言 1 行、実行場所。</string>
+    <string name="designsystem_row_style_two_lines_summary">エージェントごとに 2 行：タイトルと時刻、最新の発言 1 行。</string>
+    <string name="designsystem_row_style_cards_summary">エージェントごとに 1 枚のカード。左端に状態の色があり、あなたを待つカードは色付きです。</string>
+    <string name="designsystem_row_style_list_summary">エージェントごとに 1 行：状態、タイトル、時刻。</string>
     <plurals name="designsystem_tab_agents">
         <item quantity="other">%1$d個のエージェント</item>
+    </plurals>
+    <string name="designsystem_space_card_starter">%1$s・起動元</string>
+    <plurals name="designsystem_space_card_pending">
+        <item quantity="other">%1$s・未処理%2$d件</item>
     </plurals>
     <string name="designsystem_group_expand">グループを展開</string>
     <string name="designsystem_group_collapse">グループを折りたたむ</string>
@@ -136,10 +153,26 @@
     <string name="designsystem_machine_monitor">マシンモニター</string>
     <string name="designsystem_details">詳細</string>
     <string name="designsystem_space">スペース</string>
+    <string name="designsystem_repository">リポジトリ</string>
+    <string name="designsystem_main_worktree">メインのワークツリー</string>
+    <string name="designsystem_worktree">ワークツリー</string>
+    <string name="designsystem_worktree_primary">メイン</string>
+    <string name="designsystem_worktree_detached">Detached HEAD</string>
+    <string name="designsystem_worktree_offline">このコンピューターは現在オフラインです</string>
+    <string name="designsystem_worktree_idle">アイドル</string>
     <string name="designsystem_expand_named">%1$sを展開</string>
     <string name="designsystem_collapse_named">%1$sを折りたたむ</string>
     <plurals name="designsystem_idle_more">
         <item quantity="other">ほかに待機中%1$d件</item>
+    </plurals>
+    <plurals name="designsystem_idle_count">
+        <item quantity="other">アイドル%1$d件</item>
+    </plurals>
+    <plurals name="designsystem_idle_hide">
+        <item quantity="other">アイドルの%1$d個を折りたたむ</item>
+    </plurals>
+    <plurals name="designsystem_idle_show">
+        <item quantity="other">アイドル中の%1$d個のエージェントを展開</item>
     </plurals>
     <string name="designsystem_folded">折りたたみ済み</string>
     <string name="designsystem_attachment_uploading">アップロード中</string>
@@ -195,6 +228,19 @@
     <string name="designsystem_editor_picture">編集する画像</string>
     <string name="designsystem_editor_undo">取り消す</string>
     <string name="designsystem_editor_clear">クリア</string>
+    <!-- The image editor's crop, turn, widths and redo (#4992, iOS ImageEditor) -->
+    <string name="designsystem_markup_crop">切り抜き</string>
+    <string name="designsystem_editor_rotate">回転</string>
+    <string name="designsystem_editor_reset">リセット</string>
+    <string name="designsystem_editor_redo">やり直す</string>
+    <string name="designsystem_editor_shape">縦横比</string>
+    <string name="designsystem_editor_shape_free">自由形式</string>
+    <string name="designsystem_editor_shape_original">オリジナル</string>
+    <string name="designsystem_editor_shape_square">正方形</string>
+    <string name="designsystem_editor_width">線の太さ</string>
+    <string name="designsystem_editor_width_thin">細い</string>
+    <string name="designsystem_editor_width_medium">中</string>
+    <string name="designsystem_editor_width_thick">太い</string>
     <string name="designsystem_viewer_load_failed">画像を読み込めませんでした</string>
     <string name="designsystem_viewer_action_failed">操作は完了しませんでした。再試行してください</string>
     <string name="designsystem_render_too_slow">描画に時間がかかりすぎました</string>

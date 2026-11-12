@@ -1,0 +1,9 @@
+{
+  "just_now": "just now",
+  "minutes_ago_one": "{count} minute ago",
+  "minutes_ago_other": "{count} minutes ago",
+  "hours_ago_one": "{count} hour ago",
+  "hours_ago_other": "{count} hours ago",
+  "days_ago_one": "{count} day ago",
+  "days_ago_other": "{count} days ago"
+}

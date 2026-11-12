@@ -16,18 +16,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 
+/**
+ * The Agents page's surface: under By Repository on the Glass home, the repository page's gray, with each repository a
+ * card on it ([LocalRepoCard], iOS's grouped card): the system page's white in light, a step lighter than the page in dark.
+ */
 @Composable
 fun JAgentHomeSurface(repository: Boolean, content: @Composable () -> Unit) {
     val palette = PersonaTheme.palette
     val home = LocalHomeChrome.current != null && PersonaTheme.style == AppStyle.Glass && repository
-    CompositionLocalProvider(LocalPalette provides if (home) palette.copy(
-        background = if (palette.dark) HomeTokens.repositoryDark else HomeTokens.repositoryLight,
-    ) else palette) { content() }
+    val page = if (palette.dark) HomeTokens.repositoryDark else HomeTokens.repositoryLight
+    CompositionLocalProvider(
+        LocalPalette provides if (home) palette.copy(background = page) else palette,
+        LocalRepoCard provides if (home) { if (palette.dark) palette.sunken.compositeOver(page) else palette.background } else null,
+    ) { content() }
 }
 
 /** The iPhone's filters wrap into another line instead of adding a horizontal navigation strip. */
@@ -43,16 +50,19 @@ fun HomeAgentFilters(bays: List<Bay>, selected: Int, onSelect: (Int) -> Unit, mo
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
         bays.forEachIndexed { index, bay ->
             val chosen = index == selected
-            // The chosen chip takes its own state's color, the accent for "All" (iOS `QuickFilterBar`, #4338 A11).
-            val tint = bay.status?.let { palette.status(it).text } ?: palette.accent
+            // The chosen chip takes its own state's color, the accent for "All" (iOS `QuickFilterBar`, #4338 A11); Waiting in
+            // the background its lighter tone, whose words are the secondary gray. Like iOS's opacity, the fill and edge scale
+            // the tint's own alpha.
+            val tone = bay.status?.let { palette.status(it, bay.waiting) }
+            val tint = tone?.text ?: palette.accent
             Row(Modifier.clip(CircleShape)
-                .background(if (chosen) tint.copy(alpha = HomeTokens.filterSelectedAlpha) else palette.sunken)
-                .border(Tokens.Space.xxs / 2, if (chosen) tint.copy(alpha = HomeTokens.filterStrokeAlpha) else Color.Transparent, CircleShape)
+                .background(if (chosen) tint.copy(alpha = tint.alpha * HomeTokens.filterSelectedAlpha) else palette.sunken)
+                .border(Tokens.Space.xxs / 2, if (chosen) tint.copy(alpha = tint.alpha * HomeTokens.filterStrokeAlpha) else Color.Transparent, CircleShape)
                 .clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = chosen }
                 .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                bay.icon?.let { icon -> bay.status?.let { JIcon(icon, null, size = Tokens.Size.iconXS, tint = palette.status(it).dot, selected = true, decorative = true) } }
-                    ?: bay.status?.let { JStatusDot(it) }
+                bay.icon?.let { icon -> tone?.let { JIcon(icon, null, size = Tokens.Size.iconXS, tint = it.dot, selected = true, decorative = true) } }
+                    ?: bay.status?.let { JStatusDot(it, waiting = bay.waiting) }
                 Text(bay.label, style = PersonaTheme.type.callout.copy(fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Medium),
                     color = if (chosen) tint else palette.ink, maxLines = 1, softWrap = false)
                 if (index != 0) bay.count?.let { Text("$it", style = PersonaTheme.type.callout, color = if (chosen) tint else palette.ink2, maxLines = 1) }

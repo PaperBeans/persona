@@ -14,6 +14,7 @@ struct KnowledgeView: View {
     @State private var kind: KBKind = .projects
     @State private var tag: String?
     @State private var lists: [KBKind: KBList] = [:]
+    @State private var listContext: APIClient?
     @State private var error: String?
     @State private var query = ""
     @State private var results: [KBResult]?
@@ -105,8 +106,9 @@ struct KnowledgeView: View {
         // Always shown: the drawer that hides on scroll folded away as soon as results replaced the list (the chips
         // row goes), taking the typed text out of sight (2026-10-31).
         .pageSearchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: String(localized: "Search profiles and chat history"))
-        .task(id: query) { await search() }
-        .task(id: "\(kind.rawValue)|\(tag ?? "")") { await load() }
+        .task(id: "\(query)|\(model.assistantManagerID ?? "")|\(model.config?.url.absoluteString ?? "")") { await search() }
+        .task(id: "\(kind.rawValue)|\(tag ?? "")|\(model.assistantManagerID ?? "")|\(model.config?.url.absoluteString ?? "")") { await load() }
+        .environment(\.knowledgeSettingsAPI, listContext)
         .onChange(of: kind) { showIgnored = false }
         .refreshable { await load() }
         #if os(macOS)
@@ -273,9 +275,23 @@ struct KnowledgeView: View {
         }
     }
 
+    private func scopedAPI() -> APIClient? {
+        guard let api = model.api?.currentAssistantSettings() else { return nil }
+        if !api.sameSettingsScope(as: listContext) {
+            lists = [:]
+            results = nil
+            resultsFor = ""
+            error = nil
+            searchError = nil
+            opener?.open = nil
+        }
+        listContext = api
+        return api
+    }
+
     private func search() async {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty, let api = model.api else { results = nil; resultsFor = ""; searchError = nil; return }
+        guard !q.isEmpty, let api = scopedAPI() else { results = nil; resultsFor = ""; searchError = nil; return }
         // Coming back from an entry the task runs again for the same text: keep what is shown.
         if q == resultsFor, results != nil { return }
         try? await Task.sleep(for: .milliseconds(300)) // typing
@@ -283,12 +299,12 @@ struct KnowledgeView: View {
         searchError = nil // the last search's error is not this one's: wait for this one (#3377)
         do {
             let found = try await api.kbFind(q)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, api.sameSettingsScope(as: model.api) else { return }
             results = found
             resultsFor = q
             searchError = nil
         } catch {
-            guard !Task.isCancelled, let shown = error.shown else { return }
+            guard !Task.isCancelled, api.sameSettingsScope(as: model.api), let shown = error.shown else { return }
             // The page shows results before an error: the last text's results stayed and hid it (#3377).
             results = nil
             resultsFor = ""
@@ -297,12 +313,15 @@ struct KnowledgeView: View {
     }
 
     private func load() async {
-        guard !(kind == .recordings && localRecordings), let api = model.api else { return }
+        guard let api = scopedAPI(), !(kind == .recordings && localRecordings) else { return }
+        let kind = kind
         do {
             let l = try await api.kbList(kind, tag: tag)
+            guard !Task.isCancelled, api.sameSettingsScope(as: model.api) else { return }
             lists[kind] = l
             error = nil
         } catch {
+            guard !Task.isCancelled, api.sameSettingsScope(as: model.api) else { return }
             self.error = error.shown
         }
     }
@@ -326,6 +345,7 @@ struct KnowledgeView: View {
 extension EnvironmentValues {
     /// Entries open beside the list (`KBOpenEntry`); nil: they push.
     @Entry var kbOpenEntry: KBOpenEntry?
+    @Entry var knowledgeSettingsAPI: APIClient?
 }
 
 /// A row that opens its entry: beside the list where there is a `KBOpenEntry` (the open one selected, in the shell's
@@ -581,6 +601,8 @@ struct KBHitRow: View {
 
 struct KnowledgeDetailView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.knowledgeSettingsAPI) private var inheritedAPI
+    @State private var capturedAPI: APIClient?
     @Environment(\.openURL) private var openURL
     var entry: KBEntry
     /// Opened from a search: the places it was found come first.
@@ -685,6 +707,7 @@ struct KnowledgeDetailView: View {
         #endif
         .sheet(isPresented: $editing) {
             KBTagEditor(entry: shown) { await load() }
+                .environment(\.knowledgeSettingsAPI, capturedAPI)
         }
         #if DEBUG && os(macOS)
         // `-showKBEditor YES` with `-showKnowledgeEntry <kind>/<id>`: the tag editor open (Mac screenshots).
@@ -708,6 +731,7 @@ struct KnowledgeDetailView: View {
             }
         }
         .task { await load() }
+        .environment(\.knowledgeSettingsAPI, capturedAPI)
         .refreshable { await load() }
         #if os(macOS)
         .macRefreshes { await load() }
@@ -952,7 +976,9 @@ struct KnowledgeDetailView: View {
     }
 
     /// The entry as last loaded (a linked row or a search hit starts with only its name or id).
-    private var shown: KBEntry {
+    private var shown: KBEntry { Self.shown(entry, detail: detail) }
+
+    nonisolated static func shown(_ entry: KBEntry, detail: KBDetailResponse?) -> KBEntry {
         guard let m = detail?.detail.meta else { return entry }
         var e = entry
         if let n = m["name"]?.string ?? m["title"]?.string, !n.isEmpty { e.name = n }
@@ -964,12 +990,18 @@ struct KnowledgeDetailView: View {
         return e
     }
 
-    private var context: ContextRef {
+    private var context: ContextRef { Self.contextRef(entry, detail: detail) }
+
+    /// The entry as context for the agent: Hand to AI and Ask Persona here, and the composer's Add as Context › Knowledge
+    /// Note… (#3721), whose block leads back here (`persona://kb/<kind>/<id>`). Its summary (else its line), the latest of
+    /// its timeline and where it is in the knowledge base.
+    static func contextRef(_ entry: KBEntry, detail: KBDetailResponse?, link: Bool = false) -> ContextRef {
         let kindTitle = KBKind(rawValue: entry.kind)?.title ?? ""
         var text = detail?.detail.summary ?? entry.oneLine ?? ""
         if let log = detail?.detail.log, !log.isEmpty { text += "\n\n时间线（最近）：\n" + log.suffix(10).joined(separator: "\n") } // i18n-ignore
         if let path = detail?.detail.path { text += "\n\n知识库目录：\(path)" } // i18n-ignore
-        return ContextRef(kind: "context", title: "\(kindTitle) · \(shown.name)", url: "", text: text)
+        let url = link ? "persona://kb/\(entry.kind)/\(entry.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? entry.id)" : ""
+        return ContextRef(kind: "context", title: "\(kindTitle) · \(shown(entry, detail: detail).name)", url: url, text: text)
     }
 
     private var agentPrompt: String {
@@ -977,11 +1009,21 @@ struct KnowledgeDetailView: View {
     }
 
     private func ask() async {
-        await model.askPersona(context.xml + "\n\n说说「\(shown.name)」现在怎么样了：最新进展、在等我的事、接下来该做什么，能替我处理的先处理。") // i18n-ignore
+        let prompt = context.xml + "\n\n说说「\(shown.name)」现在怎么样了：最新进展、在等我的事、接下来该做什么，能替我处理的先处理。" // i18n-ignore
+        guard let api = capturedAPI else { return }
+        if api.sameSettingsScope(as: model.api) {
+            await model.askPersona(prompt)
+        } else {
+            do {
+                let session = try await api.startConversation(prompt: prompt)
+                model.openAssistantConversation(session.key)
+            } catch { model.show(error) }
+        }
     }
 
     private func load() async {
-        guard let api = model.api else { return }
+        if capturedAPI == nil { capturedAPI = inheritedAPI ?? model.api?.currentAssistantSettings() }
+        guard let api = capturedAPI else { return }
         do {
             detail = try await api.kbDetail(entry.kind, id: entry.id, query: query)
             error = nil
@@ -1025,6 +1067,8 @@ struct KBMomentRow: View {
 /// One archived Moments post: its text and every comment as the crawler kept them, long ones in chunks.
 struct KBMomentView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.knowledgeSettingsAPI) private var inheritedAPI
+    @State private var capturedAPI: APIClient?
     var ref: KBMomentRef
     @State private var chunks: [String]?
     @State private var error: String?
@@ -1057,7 +1101,8 @@ struct KBMomentView: View {
     }
 
     private func load() async {
-        guard let api = model.api else { return }
+        if capturedAPI == nil { capturedAPI = inheritedAPI ?? model.api?.currentAssistantSettings() }
+        guard let api = capturedAPI else { return }
         do {
             let post = try await api.kbMoment(ref.id)
             if let f = post.post?.feed, !f.isEmpty { feed = f }
@@ -1161,6 +1206,8 @@ struct KBMessageText: View {
 /// One day of a chat's archive, opened at a found message (marked, and scrolled to), with the days around it.
 struct KBDayView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.knowledgeSettingsAPI) private var inheritedAPI
+    @State private var capturedAPI: APIClient?
     var chat: String
     var chatName: String
     @State var day: String
@@ -1246,7 +1293,8 @@ struct KBDayView: View {
     }
 
     private func load() async {
-        guard let api = model.api else { return }
+        if capturedAPI == nil { capturedAPI = inheritedAPI ?? model.api?.currentAssistantSettings() }
+        guard let api = capturedAPI else { return }
         do {
             page = try await api.kbDay(chat: chat, day: day)
             error = nil
@@ -1340,6 +1388,8 @@ struct KBLinkRow: View {
 /// Importance, relevance, tags (and a project's kind / status) set by hand; the hub keeps them over the automatic ones.
 struct KBTagEditor: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.knowledgeSettingsAPI) private var inheritedAPI
+    @State private var capturedAPI: APIClient?
     @Environment(\.dismiss) private var dismiss
     var entry: KBEntry
     var saved: () async -> Void
@@ -1401,6 +1451,7 @@ struct KBTagEditor: View {
                 }
             }
             .onAppear {
+                if capturedAPI == nil { capturedAPI = inheritedAPI ?? model.api?.currentAssistantSettings() }
                 importance = entry.importance?.isEmpty == false ? entry.importance! : "P2"
                 relevance = Double(entry.relevance)
                 tags = (entry.tags ?? []).joined(separator: " ")
@@ -1419,7 +1470,7 @@ struct KBTagEditor: View {
     }
 
     private func save() async {
-        guard let api = model.api else { return }
+        guard let api = capturedAPI else { return }
         saving = true
         defer { saving = false }
         let isProject = entry.kind == KBKind.projects.rawValue

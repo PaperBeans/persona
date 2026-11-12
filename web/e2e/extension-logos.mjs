@@ -1,5 +1,5 @@
 // Actual production app in owned shared-Chrome contexts, using ego-linux's native CDP pattern.
-// Build first; node web/e2e/extension-logos.mjs <absolute-output-directory> [--cdp http://127.0.0.1:9222] [--icons-dir <directory>]
+// Build first; node web/e2e/extension-logos.mjs <absolute-output-directory> [--cdp http://127.0.0.1:9222] [--icons-dir <directory>] [--bundled]
 // Optional brand snapshots read github.png, notion.png and telegram.png from --icons-dir; no PNG enters the repository.
 // No discover/auto-attach, default context, existing target navigation, Browser.close or target disposal.
 // Fixture servers stop; all owned contexts/pages and the shared Chrome remain open.
@@ -12,6 +12,7 @@ import { preview } from "vite";
 const web = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = process.argv[2], cdpIndex = process.argv.indexOf("--cdp");
 const cdp = cdpIndex >= 0 ? process.argv[cdpIndex + 1] : "http://127.0.0.1:9222";
+const bundled = process.argv.includes("--bundled");
 const iconsIndex = process.argv.indexOf("--icons-dir"), iconsDir = iconsIndex >= 0 ? process.argv[iconsIndex + 1] : null;
 if (iconsDir) assert.ok(isAbsolute(iconsDir), "--icons-dir must be absolute");
 assert.ok(output && isAbsolute(output) && !resolve(output).startsWith(resolve(web, "..") + "/"));
@@ -29,16 +30,23 @@ const items = (iconsDir ? [
   { id: "zero-downloads", name: "Zero Downloads", description: "A new package with an explicit zero download count.", downloads: 0, icon_url: artwork + "zero.svg" },
   { id: "legacy-package", name: "Legacy Package", description: "An older API response without artwork or download statistics." },
 ]).map((item) => ({ ...item, market: market.id, market_name: market.name, version: "1.2.0", publisher: "Example publisher", permissions: [], downloads_updated_at: market.downloads_updated_at }));
+if (bundled) for (const item of items) {
+  if (item.icon_url && item.id !== "calm-calendar") item.icon_url = `/api/v1/extensions/-/catalog/official/${item.id}/icon?sha256=${"a".repeat(64)}`;
+}
 market.extensions = items.length;
-const extensions = items.map((item) => ({ ...item, kind: "process", source: "installed", status: "running", enabled: true, origin: `market:official/${item.id}`, config: {}, form: { fields: [] } }));
+const extensions = items.map((item) => ({ ...item,
+  ...(bundled && item.icon_url?.startsWith("/") ? { icon_url: `/api/v1/extensions/${item.id}/-/icon?v=${item.version}` } : {}),
+  kind: "process", source: "installed", status: "running", enabled: true, origin: `market:official/${item.id}`, config: {}, form: { fields: [] } }));
 const calls = [], screenshots = [], errors = [], targets = [], sockets = [];
-let browser, vite, mock, page, verdict = "FAIL";
+let browser, vite, mock, page, fixtureInit, verdict = "FAIL";
 const cleanup = async () => {
   sockets.forEach((socket) => socket.close());
   if (vite) await new Promise((done) => vite.httpServer.close(done));
   if (mock) { mock.closeAllConnections(); await new Promise((done) => mock.close(done)); }
 };
 const deadline = setTimeout(() => { console.error("WEB_EXTENSION_LOGOS TIMEOUT"); void cleanup().finally(() => process.exit(124)); }, 240_000);
+// A custom 256px square PNG for the authenticated fixture, not a publisher's official logo.
+const bundledPNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAAQMAAABmvDolAAAABlBMVEXUaD////8tfBWfAAAAi0lEQVR42u3YsQ2AIBRFUYyFpSM4iqPpaI7iCJYUxk/LD8TXCLG4t+U0JErxQiAiIurbbFmxArYcWAW4c9uL88GDowCjB2cBJg+u90vUrrF4cDcAqwcPAADoBWL2nwJ+DvhoAbwPAN4HAO8DgPcBAAB8AjpMPXJukoOVnLzkaCZnNz3cyemPiIioZQk6QdpJ++i31AAAAABJRU5ErkJggg==", "base64");
 const svg = (kind) => {
   const color = kind === "calendar" ? "#27747f" : kind === "zero" ? "#7a5af8" : "#d4683f";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect width="96" height="96" rx="20" fill="${color}"/><rect x="25" y="19" width="46" height="58" rx="5" fill="white"/><path d="M35 35h26M35 47h26M35 59h18" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round"/></svg>`;
@@ -82,8 +90,20 @@ try {
   mock = createServer(async (req, res) => {
     const path = new URL(req.url, "http://127.0.0.1").pathname; calls.push({ method: req.method, path });
     const json = (data) => { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(data)); };
+    if (bundled && path.endsWith("/icon")) {
+      assert.equal(req.headers.authorization, "Bearer synthetic-browser-token");
+      assert.equal(req.headers["x-persona-client"], "web/1");
+      assert.equal(req.headers.cookie, "fixture-hub-cookie=synthetic");
+      assert.equal(req.headers.referer, undefined);
+      const missing = path.includes("/broken-artwork/");
+      res.writeHead(missing ? 404 : 200, { "Content-Type": missing ? "application/json" : "image/png" });
+      return res.end(missing ? JSON.stringify({ error: "Not found" }) : bundledPNG);
+    }
     if (path === "/api/v1/managers") return json({ default: "assistant", managers: [{ id: "assistant", name: "Persona", online: true, builtin: true }] });
-    if (path.endsWith("/-/catalog")) return json({ markets: [market], extensions: items });
+    if (path.endsWith("/-/catalog")) {
+      assert.equal(req.headers["x-persona-client"], "web/1");
+      return json({ markets: [market], extensions: items });
+    }
     if (path.endsWith("/-/markets")) return json({ markets: [market] });
     if (path.endsWith("/-/upgrades")) return json({ auto: false, upgrades: [] });
     if (path.endsWith("/extensions") || path.endsWith("/plugins")) return json({ extensions, can_install: true, markets: true });
@@ -98,7 +118,10 @@ try {
   const version = await (await fetch(cdp + "/json/version")).json(); browser = await connect(version.webSocketDebuggerUrl);
   for (const language of iconsDir ? ["en"] : ["en", "zh-Hans", "ja"]) for (const scheme of ["light", "dark"]) for (const size of language === "en" ? ["standard", "large"] : ["large"]) for (const width of !iconsDir && language === "en" ? [1440, 390] : [1440]) {
     const { browserContextId } = await browser.send("Target.createBrowserContext");
-    await browser.send("Storage.setCookies", { browserContextId, cookies: [{ name: "fixture-logo-cookie", value: "synthetic", domain: "example.com", path: "/", secure: true, sameSite: "None" }] });
+    await browser.send("Storage.setCookies", { browserContextId, cookies: [
+      { name: "fixture-logo-cookie", value: "synthetic", domain: "example.com", path: "/", secure: true, sameSite: "None" },
+      { name: "fixture-hub-cookie", value: "synthetic", domain: "127.0.0.1", path: "/", sameSite: "Lax" },
+    ] });
     const seeded = await browser.send("Storage.getCookies", { browserContextId });
     assert.ok(seeded.cookies.some((cookie) => cookie.name === "fixture-logo-cookie"), "The no-Cookie assertion must run with a real cookie on the logo host");
     for (const [surface, sub] of [["official-list", "-market"], ["market-detail", `-market/official/${items[0].id}`], ["installed-list", ""], ["installed-detail", items[0].id]]) {
@@ -111,6 +134,7 @@ try {
       await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }, { name: "prefers-reduced-motion", value: "reduce" }] });
       const init = `localStorage.setItem('persona.token','synthetic-browser-token');localStorage.setItem('persona.language',${JSON.stringify(language)});localStorage.setItem('persona.theme',${JSON.stringify(scheme)});localStorage.setItem('persona.text-size',${JSON.stringify(size)});
         class FixtureSocket extends EventTarget { static CONNECTING=0;static OPEN=1;static CLOSING=2;static CLOSED=3;readyState=0; constructor(){super();setTimeout(()=>{this.readyState=1;this.dispatchEvent(new Event('open'));this.onopen?.(new Event('open'));},0);} send(raw){const m=JSON.parse(raw);if(m.type==='client_hello'){for(const data of [{type:'hello',server_version:'fixture',hub_name:'Fixture hub',features:['extensions','managers'],resumed:false},{type:'machines',machines:[]},{type:'sessions',sessions:[]}])setTimeout(()=>{const e=new MessageEvent('message',{data:JSON.stringify(data)});this.dispatchEvent(e);this.onmessage?.(e);},0);}else if(m.type==='app_ping')setTimeout(()=>{const e=new MessageEvent('message',{data:JSON.stringify({type:'pong'})});this.dispatchEvent(e);this.onmessage?.(e);},0);}close(){this.readyState=3;} } window.WebSocket=FixtureSocket;`;
+      fixtureInit = init;
       await page.send("Page.addScriptToEvaluateOnNewDocument", { source: init });
       await page.send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
       const ownedPage = page;
@@ -126,7 +150,7 @@ try {
         return ownedPage.send("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
       });
       await page.send("Page.navigate", { url: `${appURL}/settings?tab=extensions${sub ? `&extension=${sub}` : ""}` });
-      await wait(`document.querySelectorAll('[data-extension-logo]').length > 0 && [...document.querySelectorAll('[data-extension-logo] img')].every(img=>img.complete&&img.naturalWidth>0&&getComputedStyle(img).opacity==='1')`);
+      await wait(`document.querySelector('[data-extension-logo] img')?.naturalWidth > 0 && [...document.querySelectorAll('[data-extension-logo] img')].every(img=>img.complete&&img.naturalWidth>0&&getComputedStyle(img).opacity==='1')`);
       await evaluate("document.fonts.ready.then(()=>true)");
       await evaluate("Promise.all(document.getAnimations().filter(a=>Number.isFinite(a.effect?.getComputedTiming().iterations)).map(a=>a.finished.catch(()=>{}))).then(()=>true)");
       assert.equal(await evaluate("document.querySelector('vite-error-overlay')!==null"), false);
@@ -143,6 +167,7 @@ try {
         assert.equal(counts.length, iconsDir ? 3 : 4); if (!iconsDir) assert.ok(counts[3].includes("0"));
       } else {
         const scope = surface === "installed-detail" ? "document.querySelector('[data-extension-settings]').parentElement" : "document";
+        await wait(`${scope}.querySelector('[data-extension-logo] img')?.naturalWidth > 0`);
         assert.ok((await evaluate(`${scope}.querySelector('[data-extension-downloads]').textContent`)).includes("18,420"));
         assert.equal(await evaluate(`${scope}.querySelector('[data-extension-logo] img').naturalWidth>0`), true);
       }
@@ -155,6 +180,38 @@ try {
       await capture(`${language}-${surface}-${width}-${size}-${scheme}.png`);
     }
   }
+  if (bundled) {
+    // Real viewport acceptance: mounting a long catalog must not download every package before it is seen.
+    const prototype = items[0];
+    items.splice(0, items.length, ...Array.from({ length: 102 }, (_, i) => ({ ...prototype,
+      id: `lazy_${i}`, name: `Example Notes ${i}`, downloads: 102 - i,
+      icon_url: `/api/v1/extensions/-/catalog/official/lazy_${i}/icon?sha256=${"b".repeat(64)}`,
+    })));
+    market.extensions = items.length;
+    const { browserContextId } = await browser.send("Target.createBrowserContext");
+    const { targetId } = await browser.send("Target.createTarget", { url: "about:blank", browserContextId });
+    targets.push({ targetId, browserContextId, surface: "lazy-catalog-102" });
+    await browser.send("Storage.setCookies", { browserContextId, cookies: [{ name: "fixture-hub-cookie", value: "synthetic", domain: "127.0.0.1", path: "/", sameSite: "Lax" }] });
+    const target = (await (await fetch(cdp + "/json/list")).json()).find(t => t.id === targetId);
+    page = await connect(target.webSocketDebuggerUrl);
+    await page.send("Page.enable"); await page.send("Runtime.enable");
+    page.on("Runtime.exceptionThrown", e => errors.push(e.exceptionDetails.exception?.description || e.exceptionDetails.text));
+    await page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
+    await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }, { name: "prefers-reduced-motion", value: "reduce" }] });
+    await page.send("Page.addScriptToEvaluateOnNewDocument", { source: fixtureInit + ";localStorage.setItem('persona.language','en');localStorage.setItem('persona.theme','light');localStorage.setItem('persona.text-size','standard');" });
+    await page.send("Page.navigate", { url: `${appURL}/settings?tab=extensions&extension=-market` });
+    await wait("document.querySelectorAll('[data-extension-logo]').length===102 && document.querySelector('[data-extension-logo] img')?.naturalWidth>0");
+    await evaluate("document.fonts.ready.then(()=>new Promise(r=>setTimeout(r,250)))");
+    const lazyCalls = () => calls.filter(call => call.path.startsWith("/api/v1/extensions/-/catalog/official/lazy_"));
+    assert.ok(lazyCalls().length > 0 && lazyCalls().length < 20, "Only viewport rows may request package artwork");
+    assert.ok(!lazyCalls().some(call => call.path.endsWith("/lazy_101/icon")), "The unseen final row must not fetch");
+    await capture("en-lazy-catalog-102-top-light.png");
+    await evaluate("document.querySelectorAll('[data-extension-logo]')[101].scrollIntoView({block:'center'})");
+    await wait("document.querySelectorAll('[data-extension-logo]')[101].querySelector('img')?.naturalWidth>0");
+    assert.ok(lazyCalls().some(call => call.path.endsWith("/lazy_101/icon")), "Scrolling the final row into view loads it");
+    assert.ok(lazyCalls().length < 35, "Jumping to the end must not fetch the intervening rows");
+    await capture("en-lazy-catalog-102-bottom-light.png");
+  }
   assert.deepEqual(errors, []); assert.ok(calls.every((call) => call.method === "GET")); verdict = "PASS";
 } catch (error) {
   console.error(error); process.exitCode = 1;
@@ -162,6 +219,6 @@ try {
 } finally {
   try { await cleanup(); } catch (error) { console.error(error); verdict = "FAIL"; process.exitCode = 1; }
   clearTimeout(deadline);
-  await writeFile(join(output, "result.json"), JSON.stringify({ verdict, fixture: iconsDir ? "brand-package snapshot simulation" : "generic compatibility snapshot simulation", online_hub: false, download_counts: "synthetic snapshot values, not live registry statistics", screenshots, calls, errors, targets, shared_browser_kept_open: true }, null, 2));
+  await writeFile(join(output, "result.json"), JSON.stringify({ verdict, fixture: bundled ? "authenticated bundled PNG and anonymous legacy artwork simulation" : iconsDir ? "brand-package snapshot simulation" : "generic compatibility snapshot simulation", online_hub: false, download_counts: "synthetic snapshot values, not live registry statistics", screenshots, calls, errors, targets, shared_browser_kept_open: true }, null, 2));
   console.log(`WEB_EXTENSION_LOGOS ${verdict} screenshots=${screenshots.length} output=${output}`);
 }

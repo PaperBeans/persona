@@ -71,5 +71,6 @@
   "load_older": "Show older",
   "loading_older": "Loading…",
   "older_failed": "Couldn't load older items: {error}",
-  "subscriptions": "Subscriptions"
+  "subscriptions": "Subscriptions",
+  "sources": "Inbox Sources"
 }

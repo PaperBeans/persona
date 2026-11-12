@@ -22,7 +22,9 @@ each mail account's latest page, reading at most 4 accounts concurrently and del
 `settle`, event grouping's `group.tool` / `group.fallback` / `group.append`, read hub triage rules, AI twin configuration, and plugin-provided connectors
 (`inbox.config`), and current translation model (`inbox.translate_fingerprint`). On item changes, the manager emits `inbox.changed`; outside the bus read loop, hub
 sends plugins the `inbox.changed` event and Apps `{"type":"inbox"}` (one slow plugin reader does not block others). Hub asks the manager for items needed by plugin detail slot `inbox_item`,
-items when deleting a source's data, and GitHub Settings' muted repositories (`inbox.item`, `inbox.forget`, `inbox.repo_mutes`).
+items when deleting a source's data, and GitHub Settings' muted repositories (`inbox.item`, `inbox.forget`, `inbox.repo_mutes`). The Inbox Sources
+pages (#5278, `docs/extensions/subscriptions.md` "Pages") list and remove a source's mutes (`inbox.mutes`, `inbox.unmute`) and have the triage model try a
+subscription's dry run on request (`inbox.triage_preview`: nothing kept).
 Hub still enforces its own boundary: reply-only devices (Watch) may send only text, not change document state or send `/agent …` (which starts an Agent when sent as the user).
 Hub rejects these before forwarding (403; the manager checks too). Connector settings, including credentials, remain hub APIs; only muted repositories belong to the manager.
 
@@ -77,12 +79,17 @@ or the manager restarts and retries). A previous interrupted send (hub stopped o
   Later messages always merge into the newest (`UpdatedAt`, ties by ID, `threadIndex.openFor`, #3796); the old item stays unchanged.
 - Included Lark messages: gateway `unread` scope (Lark Unread, excluding muted chats) + `mentions` scope (mentions of me in muted groups still count).
   When `lark.cli` is enabled and is the primary source (or the gateway is absent / unavailable), the built-in `larkcli` connector polls `im +messages-search --start … --as user` every two minutes (minimum one minute, with a bounded page count). It keeps messages that mention me or @all, messages in direct chats, and replies in topics where I posted, replied or was mentioned; my own messages never create an item. Overlapping pages are deduplicated by `message_id`, consecutive messages in one chat/topic are one row, and context comes from `+chat-messages-list` / `+threads-messages-list`. A later message from me marks that row replied. The cursor and topic set are kept in Postgres settings, not files under `~/.persona`.
+  Search indexes most messages at once but some only minutes later (a direct message was seen arriving in search about ten minutes after it was sent), and a message indexed after the cursor passed its time used to be lost. So the cursor stays 10 minutes behind the newest message it saw, and every round also reads the 10 most recently active direct chats (`+chat-list --types p2p --sort active_time`) from their own history since an hour ago (`+chat-messages-list --start`), which has no indexing delay; the `message_id` ledger drops what was already collected. Mentions in group chats still rely on search and its 10-minute overlap. A failed direct-chat read keeps what search found that round and reports the error (`server/internal/connector/larkcli/inbox.go`, `sweepDirectChats`).
   As a maintainer opt-in addition, `larkcli` has an `inbox_all_chats` connector option containing chat ids whose every new incoming message is collected. The default is an empty list; this option is intentionally separate from the L4 collection rules.
   Private chat → `dm`, bot / AI private chat → `bot`, group mentions of me / everyone → `mention`, unmuted group → `group`; unread older than 7 days is excluded.
   Only other people's messages count; your own messages never make a chat Needs you.
 - Messages sent by the app bound to `lark-cli` (the `appId` reported by `lark-cli auth status --json`) are marked seen and omitted to prevent Persona's own bot replies from looping back into the Inbox. If that app id is unavailable, the connector keeps the existing behavior; messages from other apps remain eligible.
 - Mail: unread messages in each account's latest 40 Inbox messages, within 7 days. The list API reads only the first 2 KB of body (HTML mail often contains nothing but `<style>`),
   so new mails fetch the full body again (IMAP `BODY.PEEK`, without marking read) for preview and AI context (`BodyOf` tracks which mail was read).
+- Mail's **Add to Inbox** (#5307; Settings › Connectors › Mail and Settings › Inbox Sources, `PUT /api/v1/connectors/mail/settings {inbox}`) is on
+  until turned off and kept with the other connector switches. Off, the mail rounds read no account (`readMail`), so the mail items the
+  Inbox has stay as they are (and its accounts' read errors as last read); search, replies and the knowledge base go on. Turned on again, the
+  next round is a full one and reads mail at once. `mail` declares no inbox capability: `Manifest.InboxSwitch` gives it the switch.
 
 ## Docs: mentions in sheets, bases, and documents (2026-10-31)
 
@@ -308,14 +315,16 @@ All sources work alike. Long-press an Inbox row for Done / Reopen plus available
 Muting handles this item and other covered open items in the same source, reason "Muted: <name>," with toast "Muted ‘…’; future items will not enter the Inbox."
 The handling chain says "Muted, done" for existing items, newly admitted items and grouped events; `done_by=read` stays unchanged for compatibility.
 Muted under More at the Inbox's top right lists all mutes (name, source · repository / chat / sender), with swipe-left or long-press Unmute. Unmuting admits only future items; already handled ones stay handled.
+Settings › Inbox Sources (#5278) shows the same mutes per source on each built-in source's page, with Unmute (`inbox.mutes`, `inbox.unmute`).
 
 - **APIs**: `GET /api/v1/inbox/mutes` (creation order, oldest first); `POST /api/v1/inbox/mutes {item_id, tag}` mutes the item's value for `tag` (read from the item,
   not supplied by the client; nonexistent item 404, missing tag 400), returning `{mute, settled}` with additionally handled items. `DELETE /api/v1/inbox/mutes/{id}` unmutes.
   Item `mutes` lists allowed mute targets, which the menu renders.
 
 - **Manager** (`assistant/inbox_mutes.go`): mutes live in `inbox_mutes` settings (source + tag + value + name). Each collection handles covered open items, so future
-  messages arrive already done. Item mute targets (`mutes`): connector `InboxThing.Tags` (`repo`, `chat`, `sender`); Lark chat (`lark.feed_id`)
-  and latest group speaker (`lark.sender_id`); lowercase mail sender address. Lark Docs and Moments items have none.
+  messages arrive already done. Item mute targets (`mutes`): connector `InboxThing.Tags` (`repo`, `chat`, `sender`; a subscription's rows carry
+  their newest item's `sender`, #5306); Lark chat (`lark.feed_id`) and latest group speaker (`lark.sender_id`); lowercase mail sender address.
+  Lark Docs and Moments items have none.
 - **GitHub muted repositories**: formerly GitHub connector setting `muted_repos`, now source `github`, tag `repo` mutes. On manager connection,
   hub migrates old entries through `inbox.repo_mutes` and clears them from GitHub settings. Settings › Connectors › GitHub (and old Apps) still read / write `muted_repos`;
   hub translates through the manager, so both entry points share the same data.
@@ -350,7 +359,7 @@ Each item can be filed under a **folder path**: a `/`-separated string such as `
 - **Stability**: an item the model filed keeps its folder when new messages come in. Only unfiled items are asked about. An item the user filed (`folder_by: user`, even into no folder) is never touched by the model.
 - **Paths** are normalized the same way everywhere (`normalizeFolder`, `web/src/lib/inbox-folders.ts`): segments trimmed, inner whitespace collapsed, control characters, empty, `.` and `..` segments dropped, each segment ≤ 40 characters, ≤ 6 levels, ≤ 200 bytes. Case is kept.
 - **Data**: `folder` and `folder_by` (`model` | `user`) on the item (listed), `folder_of` as bookkeeping (not listed). Items are JSON rows in `inbox_items`, so there is no migration. The settings `{enabled, rules}` are kept under the settings key `inbox_folders`. **Off by default**: it spends model calls and adds the folder bar, so the user turns it on.
-- **APIs**: `GET /api/v1/inbox/folders[?sources=all]` → `{enabled, rules, folders: [{path, count, open}]}` (the folders the listed items are filed in, exactly, most used first). `PUT /api/v1/inbox/folders {enabled?, rules?}` → the same (turning it on starts a pass). `PUT /api/v1/inbox/{id}/folder {folder}`: a path files it by hand, `""` takes it out of every folder (the model leaves it alone too), and `null` hands it back to the model. A path that normalizes to nothing is 400, and a failed write is rolled back (500). It answers with the listed item.
+- **APIs**: `GET /api/v1/inbox/folders[?sources=all]` → `{enabled, rules, folders: [{path, count, open}]}` (the folders the items of the list's window are filed in, most used first: open items and those done within 3 days, so `count` also counts done items past the list's newest 200). `PUT /api/v1/inbox/folders {enabled?, rules?}` → the same (turning it on starts a pass). `PUT /api/v1/inbox/{id}/folder {folder}`: a path files it by hand, `""` takes it out of every folder (the model leaves it alone too), and `null` hands it back to the model. A path that normalizes to nothing is 400, and a failed write is rolled back (500). It answers with the listed item.
 - **Web**: with folders on (or any item filed), a folder bar sits under the filter chips: crumbs from **All folders** down to the folder picked, and the folders right under it as chips with their open counts (plus **Unfiled** at the top). Picking a folder filters the list, its sections and **Clean up all** to that folder and everything under it. Agents waiting are left out, and the choice is remembered like the other filters. Rows show their folder when the list is not already in it. **Move to folder…** is in a row's menu and the item's header, with the folders in use as suggestions, **Let AI decide** and **No folder**. **Folders…** in the ⋯ menu turns automatic filing on and edits the folder rules.
 - **Assistant tools** (#3099, `assistant/inbox_folders.go`, descriptions in `prompts/mcp/inbox/`): `inbox_folders` lists the folders in use across every source (path, items, open) and whether automatic filing is on; with `folder` it also lists the items filed there and below, with `unfiled: true` the items in no folder, open first and then newest first, at most 50, each with the id `inbox_move` takes. `inbox_move {items, folder}` makes the same move as `PUT /api/v1/inbox/{id}/folder` (`setInboxFolder`): a path files the items by hand, `""` takes them out of every folder, and the model leaves them alone afterwards. It has no "back to the model" form. Every id is checked first: an unknown id, or a path that normalizes to nothing, moves nothing. A failed write leaves that item as it was and names it in the error.
 - **Not yet**: iOS, Mac and Android browse and move by folder (they ignore the new fields until then), and policies can't target a folder.
@@ -370,7 +379,8 @@ with a chronological **handling chain**. Additive only: IDs, sources, existing f
 | `recap` | Manager-written summary: background, progress, blockers; plain text, up to 600 characters |
 | `handling` | Bound handling chat: `{owner: "manager", state, machine_id?, session_id?, since, error?}`; `state` is `looking` (AI reviewing) / `agent` (its sub-chat working) / `waiting` (confirmed action sent, awaiting response) / `done` (turn finished with suggestion or conclusion) / `failed` (failure / timeout, returns to Needs you without suggestion) |
 | `suggestion` | At most one current suggestion (see "Handling chats and suggestions") |
-| `chain` | Chronological handling chain, oldest first, latest 50 entries at most |
+| `chain` | Chronological handling chain, oldest first, latest 50 entries at most. A list asked with `chain=last` (`docs/protocol/protocol.md`, "Inbox delta") gives a done item its newest entry alone |
+| `chain_count` | Only in a list asked with `chain=last`: how many entries a done item's chain has, when it has more than the one listed |
 | `related` | Cross-atomic relationships: `[{id, title, source}]`; tap to jump to that item, each retaining its own state |
 
 **Section calculation** (`status()`): collapsed stays collapsed (noise never upgrades); reply / Agent suggestion → Needs you; handling chat reviewing / sub-chat working → Working (urgent stays Needs you);
@@ -506,6 +516,7 @@ To-dos do not store a separate tree. Code: `assistant/inbox_parent.go`.
   Moments, and other connectors (their events / setting changes also trigger this full round); mail every 3 minutes. Previously every Lark event read all of them (#674). Pull-to-refresh
   (`POST /api/v1/inbox/refresh`) collects everything immediately (a failed collect answers `502 inbox_refresh_failed` instead of the list, see "Ownership" above). Changes write `inbox_items` and push `{"type":"inbox"}`, prompting App refetch; new plugin-connector items store / push only after triage ("AI triage").
 - **Done** is recorded only in Persona (`done_at`, `done_by=user`; ignored items use `dismissed`, see "Clean up all"; one replaced by the new thread rule uses `superseded`). It does not change Lark or mail read state. Done items remain listed for 3 days, reopenable at the bottom,
+  at most the newest 200 of them by `done_at` (`inboxListDone`; after thousands are marked done at once the list stayed small, and the rest are on Done's history),
   and the manager holds them in memory for 8 days (meanwhile preventing old still-unread Lark messages from resurfacing); it loads only open items and those done within 8 days.
 - **History** (#2200): done rows stay in `inbox_items` for 90 days (`inboxKeepHistory`); the manager deletes older ones at load and from the collection rounds at most hourly.
   `GET /api/v1/inbox/done` pages them newest done first (`inbox_history.go`, `docs/protocol/protocol.md`), keyset on `(done_at, id)`: a bulk action files many items at one instant,
@@ -592,12 +603,15 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
   it came out washed like a stuck title's, and on an iPhone the scroll edge blurred every row above it once a title stuck (#4218).
   Done's title has Jump To (its groups with counts; picking one unfolds it, loads it if it isn't, and scrolls to its first row, since an iOS `List` can't scroll to a header)
   and Fold all / Unfold all.
-- **Done's history**: past the list's 3 days, Done reads each manager's `GET /api/v1/inbox/done` ("History" under "Lifecycle"; 100 a page; on iOS the default manager's).
+- **Done's history**: past what the list holds (its 3 days, at most 200 done items), Done reads each manager's `GET /api/v1/inbox/done` ("History" under "Lifecycle"; 100 a page; on iOS the default manager's).
   Items the hub didn't stamp with a manager get the default one when there are several, so the per-manager filter keeps them. Done from history reopens through the item's own manager.
   - **With day counts** (#2969; "Days" under "Lifecycle", #2967): when the list is shown the apps ask for the counts in this device's zone, and Done lists every group they name
     with its exact count, loaded or not (Today less what Just now holds). Groups older than today start folded, so nothing more loads until one opens: opening a group, or
-    picking it in Jump To, loads its first page from its end (`before=<the group's end>`, no `before_id`), and Show Older inside it loads the next, until a page reaches
-    the group's start. The groups the list holds (its 3 days) are complete without a page. Filtered or searched, the hub's counts don't apply: Done shows the groups with
+    picking it in Jump To, loads its first page from its end (`before=<the group's end>`, no `before_id`; on the web, past the oldest done item the list holds when that falls in the group, so the page brings rows the list doesn't have), and Show Older inside it loads the next, until a page reaches
+    the group's start, or (unfiltered) once as many are loaded as the hub counts. The list's own done rows show at once, but its 3 days page like the rest, since it carries
+    only their newest 200 (web, #5549). iOS builds (#5558) and web bundles from before that take the groups of the list's 3 days as complete without a page, so past 200 done
+    items in 3 days they show the newest 200 there and the counts; the history still pages them all. A web link to a done item neither the list nor a loaded page has
+    reads it by id (`GET /api/v1/inbox/{id}`). Filtered or searched, the hub's counts don't apply: Done shows the groups with
     matching items, counted as loaded and "n+" until complete, and Show Older under Done loads the newest group the hub counts that hasn't all come.
   - **Without them** (a hub from before #2967: 404 / 405): the first page from the newest when the list is shown, the next from Show Older at the end of Done; the last
     group's count reads "n+" while older pages remain. Old hubs without the history (404 / 405) quietly have none.

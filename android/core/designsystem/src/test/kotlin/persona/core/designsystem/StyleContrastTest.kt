@@ -124,7 +124,7 @@ class StyleContrastTest {
             } else emptyList()
             val words = listOf("ink" to p.ink, "ink2" to p.ink2, "ink3" to p.ink3, "accent" to p.accent,
                 "needsYou" to p.needsYou.text, "working" to p.working.text, "done" to p.done.text,
-                "idle" to p.idle.text, "offline" to p.offline.text, "danger" to p.danger.text,
+                "idle" to p.idle.text, "offline" to p.offline.text, "danger" to p.danger.text, "backgroundWaiting" to p.backgroundWaiting.text,
                 "sourceFeishu" to p.sourceFeishu.text, "sourceTerminal" to p.sourceTerminal.text,
                 "diffAdd" to p.diffAdd, "diffDel" to p.diffDel)
             for (background in backgrounds) for ((name, fill) in listOf("page" to Color.Transparent,
@@ -164,6 +164,7 @@ class StyleContrastTest {
         for ((name, colors, floor) in listOf(
             Triple("needsYou", p.needsYou, 4.5), Triple("working", p.working, 4.5), Triple("done", p.done, 4.5),
             Triple("danger", p.danger, 4.5), Triple("idle", p.idle, 4.5), Triple("offline", p.offline, 4.5),
+            Triple("backgroundWaiting", p.backgroundWaiting, 4.5),
         )) {
             add(Check("$name.text on background", colors.text, p.background, floor, glass = null))
             add(Check("$name.text on surface", colors.text, p.surface, floor, glass = null))
@@ -172,7 +173,7 @@ class StyleContrastTest {
         add(Check("ink3 on surface", p.ink3, p.surface, 4.5, glass = null))
         add(Check("ink3 on statusSurface", p.ink3, p.statusSurface, 4.5, glass = null))
         for ((name, colors) in listOf("needsYou" to p.needsYou, "working" to p.working, "done" to p.done,
-            "idle" to p.idle, "offline" to p.offline, "danger" to p.danger)) {
+            "idle" to p.idle, "offline" to p.offline, "danger" to p.danger, "backgroundWaiting" to p.backgroundWaiting)) {
             add(Check("$name.text on statusSurface", colors.text, p.statusSurface, 4.5, glass = null))
         }
         for ((name, colors) in listOf("danger" to p.danger, "done" to p.done, "working" to p.working)) {

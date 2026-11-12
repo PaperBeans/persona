@@ -11,9 +11,11 @@ data class AssistantConversation(val foreground: List<ChatLine>, val background:
     companion object {
         /**
          * [folding]: the main conversation folds its background rounds (#4314, [BackgroundFolding]); null leaves every
-         * round as it was.
+         * round as it was. [inline] (Glass, #4339 C13, iOS `ChatLines.lines`): a quiet round stays in the conversation
+         * rather than going to the background record: a supervision round folds into one "Supervision record" line
+         * (with [folding]), and the scheduled and follow-up rounds read as they are unless the background rounds fold.
          */
-        fun project(lines: List<ChatLine>, items: List<Item>, folding: BackgroundFolding? = null): AssistantConversation {
+        fun project(lines: List<ChatLine>, items: List<Item>, folding: BackgroundFolding? = null, inline: Boolean = false): AssistantConversation {
             val quiet = mutableSetOf<String>()
             val hints = mutableSetOf<String>()
             var background = false
@@ -30,12 +32,15 @@ data class AssistantConversation(val foreground: List<ChatLine>, val background:
                     val systemHint = injected?.kind == "system" && injected.state != "supervise"
                     if (systemHint) hints += item.id
                     else {
-                        background = source?.kind in setOf("supervision", "patrol", "routine", "schedule") ||
+                        background = !inline && (source?.kind in setOf("supervision", "patrol", "routine", "schedule") ||
                             (source?.kind == "followup" && !source.conversationId.isNullOrBlank() && injected?.state != "wake") ||
                             (injected?.kind == "followup" && injected.state in setOf("once", "daily", "interval")) ||
-                            injected?.kind in setOf("supervision", "routine", "patrol", "schedule")
+                            injected?.kind in setOf("supervision", "routine", "patrol", "schedule"))
                         // A round lasts until the next genuine input, a queued one included; a folded one is drawn, not moved.
-                        round = folding?.let { BackgroundFolding.sourceOf(item) }?.let { folded ->
+                        round = folding?.let { f ->
+                            BackgroundFolding.supervision.takeIf { inline && source?.kind == it.kind }
+                                ?: BackgroundFolding.sourceOf(item)?.takeIf { f.rounds }
+                        }?.let { folded ->
                             background = false
                             rounds[item.id] = folded to mutableListOf()
                             item.id
@@ -59,6 +64,8 @@ data class AssistantConversation(val foreground: List<ChatLine>, val background:
                     is ChatLine.Work -> line.id in quietGroups
                     is ChatLine.Step -> line.groupId in quietGroups || line.step.originalId() in hints
                     is ChatLine.End -> line.groupId in quietGroups
+                    // What a quiet run's work looked at goes with its work line.
+                    is ChatLine.Viewed -> "w-" + line.id.removePrefix("vi-") in quietGroups
                     is ChatLine.ApiError -> line.id in quiet
                     is ChatLine.Recaps, is ChatLine.Wakes -> true
                     is ChatLine.Extra -> (line.payload as? AssistantExtra.Feed)?.item?.let(AssistantTaskCards::isBackgroundEvent) == true
@@ -93,6 +100,7 @@ data class AssistantConversation(val foreground: List<ChatLine>, val background:
                     ?.also { workRound[line.id] = it }
                 is ChatLine.Step -> workRound[line.groupId]
                 is ChatLine.End -> workRound[line.groupId]
+                is ChatLine.Viewed -> workRound["w-" + line.id.removePrefix("vi-")]
                 is ChatLine.ApiError -> roundOf[line.item.id]
                 else -> null
             }

@@ -2,7 +2,6 @@ package subscriptionsui
 
 import (
 	"cmp"
-	"slices"
 
 	"github.com/nwverse/persona/sdk/go/wire"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -47,80 +46,6 @@ func (p *pages) gone() wire.View {
 func (p *pages) failed(title string, err error) wire.View {
 	return wire.View{Title: title, Sections: []wire.Section{{Items: []wire.Component{
 		{Type: "empty", Key: "failed", Title: p.t("failed.title"), Detail: p.t("failed.detail"), Icon: "warning", IconColor: "red"}}}}}
-}
-
-// ① The list: what needs attention, what is on, what could be subscribed; for everything, one extension or one connector.
-func (p *pages) list() wire.View {
-	v := wire.View{Title: p.t("title.list")}
-	subs, _, err := p.svc.List(p.ctx, subscriptions.Filter{Connector: p.st.C, Extension: p.st.Ext})
-	if err != nil {
-		return p.failed(v.Title, err)
-	}
-	v.Sections = append(v.Sections, wire.Section{Items: []wire.Component{text("intro", p.t("list.intro"), "secondary")}})
-	var attention, on, off []wire.Component
-	for _, s := range subs {
-		r := row("s."+s.ID, s.Label)
-		r.Icon, r.IconColor = p.icon(s.Icon), colorFor(s.Connector+"/"+s.Source)
-		r.Subtitle, r.Badge = p.stateLine(s), p.stateBadge(s.State)
-		r.Action = open(state{P: pageSource, ID: s.ID}, s.Label)
-		switch s.State {
-		case subscriptions.StateFailing, subscriptions.StateNeedsRecipe:
-			attention = append(attention, r)
-		case subscriptions.StateOff:
-			off = append(off, r)
-		default:
-			on = append(on, r)
-		}
-	}
-	add := func(key, title string, items []wire.Component) {
-		if len(items) > 0 {
-			v.Sections = append(v.Sections, wire.Section{Key: key, Title: title, Items: items})
-		}
-	}
-	add("attention", p.t("list.attention"), attention)
-	add("on", p.t("list.on"), on)
-	add("off", p.t("list.off"), off)
-	available := 0
-	// This device's Shortcuts source (#3848) before the connectors' sources: it is the one source of its own.
-	if p.st.C == "" && p.st.Ext == "" {
-		if sec, ok := p.pushSection(subs); ok {
-			v.Sections = append(v.Sections, sec)
-			available++
-		}
-	}
-	cats, _ := p.svc.Catalogs(p.ctx)
-	slices.SortFunc(cats, func(a, b subscriptions.Catalog) int {
-		return cmp.Compare(p.env.Name(a.Connector), p.env.Name(b.Connector))
-	})
-	for _, c := range cats {
-		if p.st.C != "" && c.Connector != p.st.C || p.st.Ext != "" && c.Extension != p.st.Ext {
-			continue
-		}
-		var items []wire.Component
-		for _, src := range c.Sources {
-			n := subscribable(src)
-			if n == 0 || len(src.Subscriptions) > 0 {
-				continue
-			}
-			r := row("a."+c.Connector+"/"+src.ID, src.Name)
-			r.Icon, r.IconColor = p.icon(src.Icon), colorFor(c.Connector+"/"+src.ID)
-			r.Subtitle = p.t("list.tools", i18n.Args{"count": n})
-			if where := p.env.Native(src.Service); where != "" {
-				r.Subtitle, r.Badge = p.t("list.native"), badge(p.t("badge.duplicate"), "caution")
-			}
-			r.Action = open(state{P: pageSource, C: c.Connector, S: src.ID}, src.Name)
-			items = append(items, r)
-		}
-		available += len(items)
-		add("avail."+c.Connector, p.t("list.available", i18n.Args{"name": p.env.Name(c.Connector)}), items)
-	}
-	if len(subs) == 0 && available == 0 {
-		v.Sections = append(v.Sections, wire.Section{Key: "none", Items: []wire.Component{
-			{Type: "empty", Key: "none", Title: p.t("list.none_title"), Detail: p.t("list.none_detail"), Icon: "bell"}}})
-	} else if n := len(v.Sections); n > 0 {
-		v.Sections[n-1].Footer = p.t("list.footer")
-	}
-	return v
 }
 
 // confirm is what a destination's switch asks before it turns on: what, how often, where it is kept, which model.
@@ -207,7 +132,14 @@ func (p *pages) source() wire.View {
 	fb := row("h.fallback", p.t("source.fallback"))
 	fb.Value = p.t("tier." + cmp.Or(s.FallbackTier, "default"))
 	fb.Action = open(state{P: pageFallback, ID: s.ID}, p.t("source.fallback"))
-	v.Sections = append(v.Sections, wire.Section{Key: "how", Title: p.t("source.how"), Items: []wire.Component{recipe, rules, fb}})
+	how := wire.Section{Key: "how", Title: p.t("source.how"), Items: []wire.Component{recipe, rules, fb}}
+	if p.env.Builtin != nil { // who is muted of it, by sender (#5306), as a built-in source's
+		how.Items = append(how.Items, p.mutesRow(s.ID))
+	}
+	how.Items = append(how.Items, p.askRow("ask.line_subscription"))
+	v.Sections = append(v.Sections, how)
+	v.Sections = append(v.Sections, wire.Section{Key: "try", Items: []wire.Component{p.previewPress()}})
+	v.Sections = append(v.Sections, p.previewOf(s.Recipe.Kind, s.FallbackTier)...)
 	del := button("b.delete", p.t("source.delete"), "delete")
 	del.Role = "destructive"
 	del.Action.Confirm = p.t("source.delete_confirm", i18n.Args{"source": s.Label})
@@ -294,9 +226,9 @@ func (p *pages) newSource() wire.View {
 		own.Icon, own.IconColor = "check", "green"
 		other := row("h.pick", p.t("new.other"))
 		other.Action = open(state{P: pageTools, C: p.st.C, S: p.st.S}, p.t("title.tools"))
-		how.Items = []wire.Component{own, other}
+		how.Items = []wire.Component{own, p.askRow("ask.line_source"), other}
 	} else {
-		how.Items = p.draftItems(&v, sourceKey(p.st.C, p.st.S), state{P: pageSetup, C: p.st.C, S: p.st.S}, false)
+		how.Items = []wire.Component{p.askRow("ask.line_source")}
 		pick := row("h.pick", p.t("new.pick"))
 		pick.Subtitle = p.t("list.tools", i18n.Args{"count": subscribable(*src)})
 		pick.Icon, pick.IconColor = "search", "blue"
@@ -304,7 +236,12 @@ func (p *pages) newSource() wire.View {
 		how.Items = append(how.Items, pick)
 		how.Footer = p.t("new.pick_footer")
 	}
-	v.Sections = append(v.Sections, how, p.switches("", src.Name, kind, every, false, false, len(src.Recipes) > 0, false))
+	v.Sections = append(v.Sections, how)
+	if len(src.Recipes) > 0 {
+		v.Sections = append(v.Sections, wire.Section{Key: "try", Items: []wire.Component{p.previewPress()}})
+		v.Sections = append(v.Sections, p.previewOf(kind, "")...)
+	}
+	v.Sections = append(v.Sections, p.switches("", src.Name, kind, every, false, false, len(src.Recipes) > 0, false))
 	freq := row("f.interval", p.t("source.interval"))
 	freq.Value = every
 	v.Sections = append(v.Sections, wire.Section{Key: "freq", Title: p.t("source.freq"), Items: []wire.Component{freq},
@@ -320,9 +257,6 @@ func (p *pages) recipe(dry *subscriptions.DryRun, dryErr error) wire.View {
 	}
 	_, src := p.cached(s.Connector, s.Source)
 	v := wire.View{Title: p.t("source.recipe"), State: state{P: pageRecipe, ID: s.ID}.String()}
-	if job, ok := p.env.Drafts.get(subKey(s.ID)); ok && !job.running && job.err == nil && dry == nil && dryErr == nil {
-		dry = job.draftDryRun() // just regenerated: what its check pulled
-	}
 	v.Sections = append(v.Sections, wire.Section{Key: "what", Title: p.t("recipe.what"), Items: []wire.Component{
 		text("plain", p.plain(s, src), "body")}})
 	examples := map[string]string{}
@@ -364,10 +298,7 @@ func (p *pages) recipe(dry *subscriptions.DryRun, dryErr error) wire.View {
 		v.Sections = append(v.Sections, wire.Section{Key: "dry", Title: p.t("dry.title"), Items: []wire.Component{
 			text("dry.err", p.t("dry.failed"), "secondary")}})
 	case dry != nil:
-		v.Sections = append(v.Sections, p.dryItems(dry)...)
-	}
-	if items := p.draftItems(&v, subKey(s.ID), state{P: pageSetup, ID: s.ID, C: s.Connector, S: s.Source}, true); len(items) > 0 {
-		v.Sections = append(v.Sections, wire.Section{Key: "draft", Title: p.t("draft.title"), Items: items})
+		v.Sections = append(v.Sections, p.preview(dry, s.Recipe.Kind, s.FallbackTier)...)
 	}
 	try := button("b.dry", p.t("recipe.dry_run"), "dry_run")
 	edit := row("x.tool", p.t("recipe.edit"))
@@ -377,62 +308,8 @@ func (p *pages) recipe(dry *subscriptions.DryRun, dryErr error) wire.View {
 	raw := row("x.raw", p.t("recipe.raw"))
 	raw.Action = open(state{P: pageRaw, ID: s.ID}, p.t("recipe.raw"))
 	v.Sections = append(v.Sections, wire.Section{Key: "edit", Footer: p.origin(s) + " " + p.t("recipe.no_model"),
-		Items: []wire.Component{try, edit, other, raw}})
+		Items: []wire.Component{try, p.askRow("ask.line_recipe"), edit, other, raw}})
 	return v
-}
-
-// dryItems are a dry run's items and its checks.
-func (p *pages) dryItems(dry *subscriptions.DryRun) []wire.Section {
-	var out []wire.Section
-	items := wire.Section{Key: "dry", Title: p.t("dry.title")}
-	if dry.Error != nil {
-		items.Items = append(items.Items, text("dry.err", p.t("dry.error", i18n.Args{"problem": p.problemText(dry.Error)}), "secondary"))
-	}
-	for i, it := range dry.Items {
-		r := row("dry."+itoa(i), it.Title)
-		var bits []string
-		if it.Sender != "" {
-			bits = append(bits, it.Sender)
-		}
-		if it.Time != nil {
-			bits = append(bits, *it.Time)
-		}
-		r.Subtitle = join(bits)
-		if it.New {
-			r.Badge = badge(p.t("dry.new"), "positive")
-		} else {
-			r.Badge = badge(p.t("dry.seen"), "neutral")
-		}
-		items.Items = append(items.Items, r)
-	}
-	if dry.Shape != nil {
-		shape := p.t("dry.shape_text")
-		if dry.Shape.Type == "json" {
-			shape = p.t("dry.shape_json", i18n.Args{"count": dry.Count})
-		}
-		if dry.MaybeMore {
-			shape += " " + p.t("dry.maybe_more")
-		}
-		items.Items = append(items.Items, text("dry.shape", shape, "caption"))
-	}
-	if len(items.Items) > 0 {
-		out = append(out, items)
-	}
-	if len(dry.Checks) > 0 {
-		checks := wire.Section{Key: "checks", Title: p.t("checks.title")}
-		for _, c := range dry.Checks {
-			r := row("c."+c.Key, p.t("check."+c.Key))
-			if c.OK {
-				r.Icon, r.IconColor = "check", "green"
-			} else {
-				r.Icon, r.IconColor = "warning", "red"
-				r.Subtitle = p.problemText(c.Error)
-			}
-			checks.Items = append(checks.Items, r)
-		}
-		out = append(out, checks)
-	}
-	return out
 }
 
 // ④ Pick a tool: the ones that can be subscribed, then the ones that can't and why.
@@ -584,8 +461,11 @@ func (p *pages) fallback() wire.View {
 	return wire.View{Title: p.t("source.fallback"), Sections: []wire.Section{sec}}
 }
 
-// ⑨ Triage rules: free text, this subscription only.
+// ⑨ Triage rules: free text, this subscription only (or a built-in source's own).
 func (p *pages) rules() wire.View {
+	if p.st.ID == "" && p.st.C != "" {
+		return p.builtinRulesPage()
+	}
 	s, _, err := p.svc.Get(p.ctx, p.st.ID)
 	if err != nil {
 		return p.gone()
@@ -606,75 +486,4 @@ func modelName(m subscriptions.ModelInfo) string {
 		return m.Provider
 	}
 	return m.Provider + " · " + m.Model
-}
-
-// draftItems are the rows of a draft by the model (#2040) for key: the press that starts one (asking first what goes to
-// which model), one running (the page draws again when it is done), or what it came to. setup is the setup page a draft
-// opens in; regenerate: a subscription's, whose draft is saved when it passes. Nothing without the model stage.
-func (p *pages) draftItems(v *wire.View, key string, setup state, regenerate bool) []wire.Component {
-	if !p.canDraft() {
-		return nil
-	}
-	job, ok := p.env.Drafts.get(key)
-	switch {
-	case ok && job.running:
-		v.RefreshAfter = 30 // the manager redraws the pages when it is done; this is the fallback
-		r := row("g.running", p.t("draft.running"))
-		r.Subtitle, r.Icon, r.IconColor = p.t("draft.running_line"), "clock", "blue"
-		return []wire.Component{r}
-	case ok && job.err == nil:
-		note := row("g.done", p.t("draft.done"))
-		if regenerate {
-			note.Title = p.t("draft.regenerated")
-		}
-		note.Icon, note.IconColor = "check", "green"
-		items := []wire.Component{note}
-		if job.result.Note != "" { // the model's own words on what it chose: whole, not cut to a subtitle's line
-			items = append(items, text("g.note", job.result.Note, "secondary"))
-		}
-		if !regenerate {
-			review := row("g.review", p.t("draft.review"))
-			st := setup
-			st.T, st.G = job.result.Recipe.Tool, true
-			review.Action = open(st, p.t("title.setup"))
-			items = append(items, review)
-		}
-		return items
-	case ok:
-		failed := row("g.failed", p.t("draft.failed"))
-		failed.Icon, failed.IconColor = "warning", "orange"
-		if se, isProblem := job.err.(*subscriptions.Error); isProblem {
-			failed.Subtitle = p.problemText(&subscriptions.Problem{Code: se.Code})
-		} else {
-			failed.Subtitle = p.t("problem.other")
-		}
-		items := []wire.Component{failed}
-		if d := job.draftRecipe(); d != nil && d.Tool != "" {
-			goOn := row("g.continue", p.t("draft.continue"))
-			st := setup
-			st.T, st.G = d.Tool, true
-			goOn.Action = open(st, p.t("title.setup"))
-			items = append(items, goOn)
-		}
-		return append(items, p.draftPress(regenerate, "draft.again"))
-	}
-	return []wire.Component{p.draftPress(regenerate, map[bool]string{false: "draft.start", true: "draft.regenerate"}[regenerate])}
-}
-
-// draftPress starts a draft, after saying what goes to which model; without a model it only says so.
-func (p *pages) draftPress(regenerate bool, title string) wire.Component {
-	r := row("g.draft", p.t(title))
-	r.Icon, r.IconColor = p.icon("robot"), "purple"
-	m := p.modelOf("recipe")
-	if !m.OK {
-		r.Subtitle = p.t("draft.no_model")
-		return r
-	}
-	r.Subtitle = p.t("draft.start_line")
-	id := "draft"
-	if regenerate {
-		id = "regenerate"
-	}
-	r.Action = &wire.Action{ID: id, Confirm: p.t("draft.consent", i18n.Args{"provider": modelName(m)})}
-	return r
 }

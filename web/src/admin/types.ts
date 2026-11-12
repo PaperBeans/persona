@@ -357,11 +357,6 @@ export interface LogsPage {
   kept: number;
 }
 
-/** GET/PUT /api/v1/admin/assistant: hub.json's assistant.persona_view (docs/operations/admin.md "Assistant cards"). */
-export interface AssistantCards {
-  persona_view: boolean;
-}
-
 // ── usage sources (docs/server/usage-windows.md "Account-pool gateways", docs/operations/admin.md): account-pool gateways feeding the sidebar's usage bars ──
 
 export type UsageSourceType = "relay" | "generic";

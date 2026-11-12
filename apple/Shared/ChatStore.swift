@@ -358,7 +358,11 @@ nonisolated enum ChatBlock: Identifiable, Hashable, Sendable {
                     reopenedAt = lastIndex
                     current = raw
                 }
-                if item.wake == true, current != nil {
+                if item.modelRefusal != nil {
+                    // An upstream refusal (#4489): a line of its own after the exchange, never folded into the work row.
+                    if current == nil { current = Turn(id: row.id) }
+                    current!.trailing.append(row)
+                } else if item.wake == true, current != nil {
                     // A background task woke the idle agent: still the same exchange (the answer is picked at close).
                     current!.wakes.append(item)
                     current!.process.append(row)
@@ -478,9 +482,32 @@ final class ChatStore {
     var screenUpdatedAt: Date?
     var error: String?
     var isLoadingOlder = false
+    /// This client's latest send survives replacement of its pending bubble by transcript echo.
+    var sendFeedback: ChatSendFeedback?
     /// Messages sent from this phone that the transcript has not shown yet: drawn at the end right away, and a failed one
     /// before the first message written after it (`ChatLines.placeFailed`).
-    var pending: [PendingMessage] = []
+    var pending: [PendingMessage] = [] {
+        didSet {
+            rebuildQueuePhotoMarks()
+            restoreSendFeedbackIfNeeded()
+        }
+    }
+    /// The Persona queue's own messages, kept to derive their photo marks again when the outbox changes.
+    @ObservationIgnored private var ownQueue: [String] = []
+    /// Local photo counts for the own queue rows, derived once per queue/outbox change rather than in a view body (P4).
+    private(set) var queuePhotoMarks: [Int] = []
+
+    func updateQueuePhotoMarks(queued: [String]?, own: Int) {
+        ownQueue = Array((queued ?? []).prefix(max(0, own)))
+        rebuildQueuePhotoMarks()
+    }
+
+    private func rebuildQueuePhotoMarks() {
+        let marks = ownQueue.map { raw in
+            pending.first { PendingMessage.same($0.text, raw) }?.images.count ?? 0
+        }
+        if marks != queuePhotoMarks { queuePhotoMarks = marks }
+    }
     /// When this phone wrote the messages it sent whose copies have arrived, by their id (`Item.clientMsgID`, upper
     /// case): a failed message goes by the phone's own times, not by when the computer wrote a copy (a queued message
     /// is written when the agent takes it in, minutes later; its clock may differ) (#6023). This run's only.
@@ -553,6 +580,7 @@ final class ChatStore {
     /// cache, several exchanges behind). Without a span (an older hub) batches are trusted, as before.
     @discardableResult
     func apply(_ new: [Item], span: ItemSpan, backlog: Bool = false, hasMore: Bool? = nil, moreAfter: Bool = false) -> Gap {
+        let new = new.publicRefusals()
         arrivedAt = .now
         defer { newestArrived() }
         if let h = span.history, let mine = history, h != mine {
@@ -604,6 +632,7 @@ final class ChatStore {
     }
 
     func merge(_ new: [Item], backlog: Bool = false, hasMore: Bool? = nil) {
+        let new = new.publicRefusals()
         if backlog || !new.isEmpty { error = nil } // data arrived: a stale "machine is offline" no longer applies
         // A replayed disk cache can hold an id twice. Keep the newest copy before indexing, but only after collecting
         // promotion evidence; ids is already a Set, so a count mismatch finds this without scanning every ordinary merge.
@@ -682,6 +711,7 @@ final class ChatStore {
             for it in added {
                 if let i = pending.firstIndex(where: { PendingMessage.arrived($0, as: it) }) {
                     let p = pending.remove(at: i)
+                    if sendFeedback?.id == p.id { sendFeedback?.echo(sequence: it.seq) }
                     if let at = p.createdAt {
                         if writtenAt.count >= 500 { writtenAt = writtenAt.filter { $0.value > at.addingTimeInterval(-86400) } }
                         writtenAt[p.id.uuidString] = at
@@ -690,6 +720,13 @@ final class ChatStore {
                 }
             }
             if pending.count != before { onArrived?() }
+        }
+        if var feedback = sendFeedback, feedback.phase != .finished {
+            for item in added {
+                feedback.echo(item)
+                if feedback.answered(by: item) { feedback.finish(feedback.id) }
+            }
+            if feedback != sendFeedback { sendFeedback = feedback }
         }
         // Streamed items arrive in order: only older pages / reconnect backlogs need the sort.
         if !inOrder { items = Self.ordered(items) }
@@ -1026,6 +1063,7 @@ final class ChatStore {
 
     /// Starts over from the latest page: what came in between was too much to fetch, and a hole would never fill.
     func replace(with latest: [Item], hasMore: Bool, span: ItemSpan = ItemSpan()) {
+        let latest = latest.publicRefusals()
         arrivedAt = .now
         defer { newestArrived() }
         // Pushes that came in while the page was on its way, past what it holds, stay (the next push finds the hole
@@ -1311,6 +1349,9 @@ nonisolated enum ScreenParser {
         /// The tab that submits every answer ("Review your answers"); incomplete: a question has none yet.
         var review = false
         var incomplete = false
+        /// A permission prompt for a shell command, as the hub reads it (#5266): nil for any other dialog, and from a hub
+        /// before it.
+        var commandAsk: CommandAsk?
 
         init(header: String?, question: String, detail: String?, options: [Option]) {
             self.header = header
@@ -1478,10 +1519,12 @@ nonisolated enum ChatCache {
     /// v14: injected supervision levels and folded promotion are retained, including client evidence on replaced folds.
     /// v16: tool results carry `outcome` (docs/protocol/protocol.md "Tool outcomes", #4303); older copies have none, and
     /// their denied or interrupted calls would stay red.
+    /// v17: refusal notices carry `model_refusal` and their text is the refusal's words (#4489); an older hub made it the
+    /// record's whole line, which v16's copies would keep showing.
     /// Bump it whenever the item structure or the text the hub gives an item changes.
-    static let folder = "chats-v16"
+    static let folder = "chats-v17"
     /// The folder before, removed on the first launch with this one.
-    private static let previous = "chats-v15"
+    private static let previous = "chats-v16"
 
     /// Once per launch, before the first copy is read or written (a static let runs once, on whichever thread asks first).
     private static let dropOlder: Void = {
@@ -1616,8 +1659,11 @@ nonisolated struct PendingMessage: Identifiable, Hashable, Codable, Sendable {
     /// When its sends started coming back waiting while its group's link was up (AppModel.settleSend, `OutboxWait`);
     /// in memory only: a relaunch starts the run again.
     var stalledSince: Date?
+    /// How the app wrote it when the user did not type it (a card's button): sent with it, so it never counts as the
+    /// user's own words for a secret hand-off's Always rule.
+    var via: APIClient.MessageVia?
 
-    private enum CodingKeys: String, CodingKey { case id, text, images, state, failure, inboxHandOff, createdAt, mayHaveArrived, refused }
+    private enum CodingKeys: String, CodingKey { case id, text, images, state, failure, inboxHandOff, createdAt, mayHaveArrived, refused, via }
 
     /// Only on this phone as far as it knows: failed, or waiting for the network. Deleting it (its long press, its mark's
     /// menu) drops the bubble and its outbox entry and sends nothing (#4626). One being sent may be arriving and a sent

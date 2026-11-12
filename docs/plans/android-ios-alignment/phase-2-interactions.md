@@ -24,7 +24,7 @@ Haptics, hit targets and the feedback layer are in [phase 1](phase-1-tokens-and-
 
 ### Waiting for the owner
 
-**Q4. Where pending requests sit.** iOS stacks the request cards above the composer, which stays usable; past half the page they collapse into "N pending", permissions first, and each card folds to a one-line preview when its header is tapped. Android draws one request at a time in place of the composer, with "n / total" paging, and hides the composer, the queue strip and the source note until the request is answered or folded. `DESIGN_SYSTEM.md` section 4.8 describes paging ("1 of 3, one open at a time"), which matches Android, not the iOS code. Proposal: follow the iOS code, and correct section 4.8 in the same PR. This is a large change (section 1.4).
+**Q4. Where pending requests sit.** iOS stacks the request cards above the composer, which stays usable; past half the page they collapse into "N pending", permissions first, and each card folds to a one-line preview when its header is tapped. Android draws one request at a time in place of the composer, with "n / total" paging, and hides the composer, the queue strip and the source note until the request is answered or folded. `DESIGN_SYSTEM.md` section 4.8 describes paging ("1 of 3, one open at a time"), which matches Android, not the iOS code. Proposal: follow the iOS code, and correct section 4.8 in the same PR. This is a large change (section 1.4). Decided (2026-11-12): follow the iOS code (T6).
 
 **Q6. Text size.** iOS offers Small, Standard and Large, one step below or above the system size; sizes that go with the text (icons, buttons, avatars) scale with it, up to 1.6 times. Android only follows the system font scale, and its icons and controls don't scale. Proposal: the same setting on Android, in Settings › Interface style.
 
@@ -127,7 +127,7 @@ Risks: overriding density inside the theme instead would compound and could lose
 1. T2 and T1: small, independent PRs.
 2. T3, after the motion tokens of phase 1.
 3. T4, then T5.
-4. T6 and T7, after the owner answers Q4 and Q6.
+4. T6 (Q4 was decided on 2026-11-12: follow iOS), then T7 after the owner answers Q6.
 
 ### Verification
 

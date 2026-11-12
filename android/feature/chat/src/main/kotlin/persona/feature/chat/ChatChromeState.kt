@@ -88,6 +88,10 @@ internal class ChatChromeState(
     suspend fun info(session: Session): SessionInfo =
         actions?.info(session) ?: throw UnsupportedOperationException(res.getString(R.string.chat_action_info_unavailable))
 
+    /** Session info's questions the assistant answered for this session ([delegatedHistory]); none without the actions. */
+    suspend fun delegatedAnswers(session: Session): List<DelegatedAnswer> =
+        delegatedHistory(actions?.interactionHistory(session).orEmpty())
+
     suspend fun loadMute(session: Session) {
         try { muted = actions?.isMuted(session) }
         catch (error: CancellationException) { throw error }

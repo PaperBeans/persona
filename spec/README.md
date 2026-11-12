@@ -19,10 +19,13 @@ spec/
     injected/         hub 注入给模型的消息怎么认
     comments/         comment blocks a message leads with (web and iOS)
     sync/             chat sync scenarios: hub state, frames with faults, what each device shows
+    fold-changes/     the files a run of work changed, counted by the hub and the web alike
     attention/        Persona Link's "Needs you" summary against the web badge
     entries/          the Assistant's two composer entries, Needs you and In progress
     needs-you/        the Agents tab's Needs you: one row per waiting session, what its header, filter and badge count
     triage/           the To-dos page's sections (status SOP), checked by the web app and the hub
+    provider-import-link/ provider import links: what the web builds and what the hub reads
+    tool-names/       tool names, subjects and arguments in words, checked by Android (iOS later)
     tokens/           设计 token 的校验夹具（如该领域提供）
   tokens/             设计 token 的来源文件，见 D7
 ```
@@ -44,6 +47,9 @@ spec/
 | needs-you | [README](fixtures/needs-you/README.md): the Agents tab's Needs you section, one row per session that waits for the user, and what its header, filter and badge count, checked by iOS and Android (#3580) |
 | triage | [README](fixtures/triage/README.md): the To-dos page's sections (the status SOP), related rows and counts, checked by the web app and the hub (#3483) |
 | sync | [README](fixtures/sync/README.md): stories of one chat on one or more devices (sends, cards, reconnects, hub restarts, wakes, long chats) with faults, checked at every step by Go, the clients and the end-to-end runs (#1073) |
+| tool-names | [README](fixtures/tool-names/README.md): a tool no table names in words ("GitHub · Create issue"), what its call is about, a shell's command line and its arguments as a key/value list, checked by Android; iOS's own tests hold the same cases until it reads them (#4339) |
+| fold-changes | [README](fixtures/fold-changes/README.md): the files a run of work's successful edits changed and their lines, counted by the hub for a fold and by the web for the same calls unfolded (#5157) |
+| provider-import-link | [README](fixtures/provider-import-link/README.md): provider import links (cindy v1), the payload and fragment the web builds for a provider and what the hub reads from a link, checked by Go, the mock hub and the web app (#5420) |
 | tokens | 见各自 [README](tokens/README.md)；校验夹具如放在 `fixtures/tokens/`，结构由该领域 README 说明 |
 
 ## 夹具约定

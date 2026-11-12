@@ -19,8 +19,11 @@ import (
 
 const (
 	inboxWindow   = 7 * 24 * time.Hour // older unread chats / mail are history, not inbox
-	inboxKeepDone = 3 * 24 * time.Hour // done items stay listed (for undo) this long
+	inboxKeepDone = 3 * 24 * time.Hour // done items are the list's (for undo) this long, the newest inboxListDone of them
 	inboxForget   = 8 * 24 * time.Hour // and are held in memory (so old unread messages don't come back) this long
+	// inboxListDone: of those, a list carries the newest this many (inbox_list_done.go); Done pages the rest from the
+	// history.
+	inboxListDone = 200
 	// inboxKeepHistory: done items stay in the database this long, paged by GET /api/v1/inbox/done (inbox_history.go);
 	// inboxPurgeEvery is how often the rounds delete those past it.
 	inboxKeepHistory = 90 * 24 * time.Hour
@@ -100,7 +103,10 @@ type InboxItem struct {
 	Handling   *InboxHandling    `json:"handling,omitempty"`
 	Suggestion *InboxSuggestion  `json:"suggestion,omitempty"`
 	Chain      []InboxChainEntry `json:"chain,omitempty"`
-	Related    []InboxRelated    `json:"related,omitempty"`
+	// ChainCount is set only in a list asked with chain=last (inbox_list_memo.go, #4742): a done item's chain is then
+	// its newest entry alone, and this is how many it has. GET /api/v1/inbox/{id} has them all.
+	ChainCount int            `json:"chain_count,omitempty"`
+	Related    []InboxRelated `json:"related,omitempty"`
 	// Handoffs are the latest conversations the event was handed to (inbox_handoff.go), oldest first.
 	Handoffs []InboxHandoff `json:"handoffs,omitempty"`
 

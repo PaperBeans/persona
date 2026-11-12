@@ -128,7 +128,7 @@ Changes made in the admin console are written back to `~/.persona/hub.json`:
 | Computers | `/admin/machines` | **Add computer** at the top, two kinds: **Computer connects** (kind link: fill in id / name, generates a persona-link pairing link, with install instructions for Mac / Linux / Windows) and **Hub connects** (kind service: paste the link printed by `persona-link pair --listen` on that computer; the address can be edited and a socks5 proxy filled in); ssh computers can no longer be added. Each computer's status (online / offline / error, connection method, node version) and **every route** (method, via which hub, usable or not, RTT, which one is in use, [mesh.md](../server/mesh.md) ("One computer, multiple routes")); "Re-pair" when a service computer's connector has been assigned to another hub; rename (the pencil by its name: written to hub.json and taken at once, without a restart or reconnect; empty is its id), reconnect, delete (computers configured only on a member hub cannot be renamed or deleted here) |
 | Devices | `/admin/devices` | Device credential list, revoke, generate the phone pairing QR code; on a member hub it only points you to the primary hub's admin console |
 | Extensions | `/admin/extensions` (the old `/admin/plugins` still opens) | This hub's extensions: list, toggle, install (a directory or package on the hub machine, an https link with sha256, upload, remote socket; preview what it can do first, install only after agreeing), upgrade (clearly flagged when permissions grow), roll back, uninstall (optionally keeping data), and the extension market (register markets, browse the catalog, install / upgrade from a market); see "Extensions" below and [extensions.md](../extensions/extensions.md) ("Admin console: extensions") |
-| Assistant cards | `/admin/assistant` | The main chat rich UI switch `assistant.persona_view`, what each client actually supports, local previews of example cards ("Assistant cards" below) |
+| Assistant cards | `/admin/assistant` | What each client actually supports of the main chat's rich UI (always on), local previews of example cards ("Assistant cards" below) |
 | Usage sources | `/admin/usage` | Subscription quota sources from account-pool gateways (such as relay gateways) (`docs/server/usage-windows.md` ("Account-pool gateways"), #2595): master switch and read interval, source list (name, type, address, status: last read, account / window counts, failure reason; a toggle per source), add / edit (type, name, address, Key) and **Test connection** (reads once without saving, reporting how many accounts, windows and providers it sees), delete (confirmed in place). The Key is write-only; changing the address of a source that has a saved Key requires entering it again |
 | Network & access | `/admin/network` | Public address / TLS / candidate addresses (editable, take effect after restart), `security` settings (read-only), the admin console's access scope (narrow only), change the admin password |
 | Advanced › Linked hubs | `/admin/peers` | Rarely needed (installing a single hub is recommended): hubs in the group (primary / member, online, term, **Make primary**, with a confirmation first when the old primary is unreachable), discovered hubs, generate / enter a link code, link status and RTT, disconnect ([mesh.md](../server/mesh.md)) |
@@ -165,8 +165,6 @@ not signed in or session expired is 401 `login_required`, a wrong CSRF token is 
 | `GET devices` | `{"devices": [{id, name, kind, role, created_at, last_seen, machine_id}]}` |
 | `DELETE devices/{id}` | Revoke |
 | `POST devices/pair` | Phone pairing: `{"pair_url", "url", "expires_at", "fp", "qr": {"size", "rows": ["0101…"]}}` (`rows` is one string of `0` / `1` per row, without the quiet zone) |
-| `GET assistant` | `{"persona_view"}`: hub.json's `assistant.persona_view` (the changed value if the admin console changed it) |
-| `PUT assistant` `{"persona_view"}` | Write hub.json's `assistant.persona_view` (off = delete the key); other keys in `assistant` and other fields in the file are kept as is; effective on the hub immediately (for the assistant prompt see "Assistant cards" below); missing field 400 `bad_request` |
 | `GET network` | `listen`, `public_url`, `tls` (`listen`, `port`, `fp`), `advertise`, `advertise_ipv6`, `advertise_lan`, `endpoints`, `security` (`trusted_cidrs`, `allow_public_plaintext`, `plaintext_loopback_only`), `admin` (`access`, `cidrs`, `session_hours`, `from_env`, `container`), `you` (`address`, `tls`, `allowed`: whether each of the four scopes would let you in), `restart` |
 | `PUT network/access` `{"access", "cidrs", "force"}` | Narrow the access scope; 403 `widen_cli_only`, 409 `from_env` / `would_lock_you_out`, 400 `invalid_cidr` |
 | `PUT network/public` `{"public_url", "tls_listen", "advertise"}` | Change the public address / TLS listener / candidate addresses (omitted fields unchanged), effective after restart |
@@ -219,16 +217,14 @@ using the same registry and checks as `personad extension`, plus:
 
 ## Assistant cards
 
-Page `web/src/admin/pages/Assistant.tsx`, API `server/internal/hub/admin_assistant.go` (#2023; design in [assistant-views.md](../assistant/assistant-views.md) ("Prompts and toggles")).
+Page `web/src/admin/pages/Assistant.tsx` (#2023; design in [assistant-views.md](../assistant/assistant-views.md) ("Prompts")). It calls no hub API.
 
-- **Switch**: `assistant.persona_view`. Before enabling, a dialog confirms client versions (iPhone must wait for the corresponding TestFlight); disabling asks nothing and returns the assistant to persona-card, supported by every client.
-  No hub restart: every hub read of this switch uses `h.assistantPersonaView()` (the changed value if the admin console changed it, otherwise startup `h.cfg`), including Hello. After changing it, the hub sends `manager.updated` to the connected assistant process (`assistantUpdated`, which keeps its own Hello), then requests its tool list again (`assistantToolsFollow`; `view_show` and others appear / disappear with the switch), so card tools and actions, body-card registration and channel forwarding catch up within one second.
-  **The assistant prompt does not change immediately**: CLAUDE.md is only rewritten when preparing the assistant directory (opening a new chat, or the app opening the chat page to warm up a new process). The assistant process reads CLAUDE.md and the tool list at startup; an already-running process keeps those startup values until restarted. New code reading this switch must not read `h.cfg.Assistant.PersonaView` directly. `assistant.html_views` is managed separately by the hub (#2019); this page only explains that it runs when this switch is on and that client has passed security acceptance.
+- **No switch**: the assistant's cards, HTML ones included, are always on (#5509). The page had a switch for `assistant.persona_view` and the hub its `GET` / `PUT assistant` endpoints; both are gone, and the hub no longer reads that key or `assistant.html_views`.
 - **Client support**: states what the web, Apple, Android and watch / notification clients can do in the current implementation; the version actually installed on each client is what matters.
 - **Example previews**: synthetic data from `schema/extension/examples/assistant/`, rendered by the web's shared component (`views/extensions/ViewBody.tsx`). Local to this page: selecting options, filling forms and submitting only change this page's state and show "In a real chat this would send back…",
-  never calling chat or action APIs; HTML examples show only the text fallback, with no iframe or scripts. `web/src/admin/assistant-examples.test.tsx` scans the source to ensure the page only calls these two admin APIs.
+  never calling chat or action APIs; HTML examples show only the text fallback, with no iframe or scripts. `web/src/admin/assistant-examples.test.tsx` scans the source to ensure the page calls no API.
 - Verification: `python3 scripts/test/admin_assistant_e2e.py <web address> [--shots <directory>]` (dev server `/admin/assistant?mock=app`; wide / narrow × light / dark, recording requests made during previews, which must be zero).
-  Screenshots: `?dialog=enable` opens the confirmation; `?dialog=example-form` and similar directly select an example.
+  Screenshots: `?dialog=example-form` and similar directly select an example.
 
 ## Choosing at deploy time
 
@@ -239,6 +235,13 @@ Page `web/src/admin/pages/Assistant.tsx`, API `server/internal/hub/admin_assista
 | Docker | `PERSONA_ADMIN_ACCESS` in `.env` (plus `PERSONA_ADMIN_CIDRS` for `cidrs`); when unset, the entrypoint prints a reminder and uses hub.json (omitted means `lan`) |
 
 The prompt explains all four options and their risks (see the admin access section of `scripts/deploy/install.sh`; `deploy.sh` uses it unchanged, so the public installer and deployment ask the same question).
+
+The public installer chooses English, Simplified Chinese or Japanese from `LC_ALL` (when set), then `LANG`; Chinese
+locales use `zh-Hans`, Japanese locales use `ja`, and every other, missing or unknown locale uses `en`. Pass
+`--lang en`, `--lang zh-Hans` or `--lang ja` after `sh -s --` to override it, for example
+`curl … | sh -s -- --lang ja --hub`. The override changes only the installer's own prompts, errors, explanations and summary;
+programs it runs choose their language separately. `scripts/deploy/deploy.sh` uses the same admin-access catalog and
+follows its environment locale.
 
 ## Security trade-offs
 

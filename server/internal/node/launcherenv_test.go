@@ -78,6 +78,34 @@ func TestManagedEnvUnchangedForOldLaunchers(t *testing.T) {
 	}
 }
 
+// A provider stored with a trailing /v1 before the hub dropped it on saving (#4886) still launches against
+// <base>/v1/messages, as its Test connection did; Codex and agy bases are not ANTHROPIC_BASE_URL and keep theirs.
+func TestManagedEnvDropsATrailingV1FromMessagesBases(t *testing.T) {
+	for _, c := range []struct {
+		l         proto.ManagedLauncher
+		key, want string
+	}{
+		{proto.ManagedLauncher{Name: "a", BaseURL: "https://gw.example.com/v1", APIKey: "sk-test-1"}, "ANTHROPIC_BASE_URL", "https://gw.example.com"},
+		{proto.ManagedLauncher{Name: "a", BaseURL: "https://gw.example.com/team/v1", Model: "m1"}, "ANTHROPIC_BASE_URL", "https://gw.example.com/team"},
+		{proto.ManagedLauncher{Name: "a", Kind: "api", API: "messages", BaseURL: "https://gw.example.com/v1"}, "ANTHROPIC_BASE_URL", "https://gw.example.com"},
+		{proto.ManagedLauncher{Name: "a", Agent: "omp", BaseURL: "https://gw.example.com/v1"}, "ANTHROPIC_BASE_URL", "https://gw.example.com"},
+		{proto.ManagedLauncher{Name: "a", Agent: "codex", API: "messages", BaseURL: "https://api.example.com/v1"}, "OPENAI_BASE_URL", "https://api.example.com/v1"},
+		{proto.ManagedLauncher{Name: "a", Agent: "agy", BaseURL: "https://gemini.example.com/v1"}, "GOOGLE_GEMINI_BASE_URL", "https://gemini.example.com/v1"},
+	} {
+		if got := envValue(managedEnv(c.l), c.key); got != c.want {
+			t.Errorf("%+v: %s=%q, want %q", c.l, c.key, got, c.want)
+		}
+		if c.key == "ANTHROPIC_BASE_URL" {
+			if got := managedSettingsEnv(c.l)[c.key]; got != c.want {
+				t.Errorf("settings env %+v: %s=%q, want %q", c.l, c.key, got, c.want)
+			}
+			if got := providerEnv(c.l, "", "", true)[c.key]; got != c.want {
+				t.Errorf("main conversation %+v: %s=%q, want %q", c.l, c.key, got, c.want)
+			}
+		}
+	}
+}
+
 func TestProviderEnv(t *testing.T) {
 	const gw = "https://gw.example.com"
 	models := []proto.ProviderModel{
@@ -169,6 +197,78 @@ func TestProviderEnv(t *testing.T) {
 			}
 			if !ok || gv != v {
 				t.Errorf("%s: %s=%q (set %v), want %q", c.name, k, gv, ok, v)
+			}
+		}
+	}
+}
+
+// An explicit tier, small or subagent model with a window of 1M or more in the provider's models gets [1m]: Claude
+// Code runs it with the 1M window only then, and drops the marker before calling the gateway (#5149). One between 200K
+// and 1M stays unmarked: marked, Claude Code would count it as 1M, and nothing per model holds it to its size.
+func TestProviderEnvExplicitModelsGetTheirOwnWindow(t *testing.T) {
+	models := []proto.ProviderModel{
+		{ID: "std", ContextWindow: 200000}, {ID: "small", ContextWindow: 128000}, {ID: "mid", ContextWindow: 400000},
+		{ID: "wide", ContextWindow: 1000000}, {ID: "wider", ContextWindow: 2000000},
+	}
+	vars := []struct {
+		key string
+		set func(*proto.ManagedLauncher, string)
+	}{
+		{"ANTHROPIC_DEFAULT_OPUS_MODEL", func(l *proto.ManagedLauncher, m string) { l.OpusModel = m }},
+		{"ANTHROPIC_DEFAULT_SONNET_MODEL", func(l *proto.ManagedLauncher, m string) { l.SonnetModel = m }},
+		{"ANTHROPIC_DEFAULT_FABLE_MODEL", func(l *proto.ManagedLauncher, m string) { l.FableModel = m }},
+		{"ANTHROPIC_DEFAULT_HAIKU_MODEL", func(l *proto.ManagedLauncher, m string) { l.HaikuModel = m }},
+		{"ANTHROPIC_SMALL_FAST_MODEL", func(l *proto.ManagedLauncher, m string) { l.SmallModel = m }},
+		{"CLAUDE_CODE_SUBAGENT_MODEL", func(l *proto.ManagedLauncher, m string) { l.SubagentModel = m }},
+	}
+	for _, c := range []struct{ name, model, want string }{
+		{"1M window", "wide", "wide[1m]"},
+		{"over 1M", "wider", "wider[1m]"},
+		{"between 200K and 1M", "mid", "mid"},
+		{"marked already", "wide[1m]", "wide[1m]"},
+		{"marked, listed without a window", "other[1m]", "other[1m]"},
+		{"200K", "std", "std"},
+		{"under 200K", "small", "small"},
+		{"no window known", "other", "other"},
+	} {
+		for _, v := range vars {
+			for _, session := range []string{"std", "wide"} {
+				// A launcher provider: an API one has no small or subagent model to save.
+				l := proto.ManagedLauncher{Name: "p", BaseURL: "https://gw.example.com", APIKey: "sk-test-k",
+					Model: session, Models: models}
+				v.set(&l, c.model)
+				env := providerEnv(l, "", "", false)
+				if got := env[v.key]; got != c.want {
+					t.Errorf("%s, session model %s: %s=%q, want %q", c.name, session, v.key, got, c.want)
+				}
+				if want := map[string]string{"std": "std", "wide": "wide[1m]"}[session]; env["ANTHROPIC_MODEL"] != want {
+					t.Errorf("%s, %s set: ANTHROPIC_MODEL=%q, want %q", c.name, v.key, env["ANTHROPIC_MODEL"], want)
+				}
+			}
+		}
+	}
+	// The Haiku tier follows an explicit small model by that model's window, and a tier left empty the session's model.
+	l := proto.ManagedLauncher{Name: "p", BaseURL: "https://gw.example.com", APIKey: "sk-test-k", Model: "std",
+		Models: models, SmallModel: "wide", SonnetModel: "small"}
+	env := providerEnv(l, "", "", false)
+	for k, want := range map[string]string{
+		"ANTHROPIC_MODEL": "std", "ANTHROPIC_DEFAULT_HAIKU_MODEL": "wide[1m]", "ANTHROPIC_SMALL_FAST_MODEL": "wide[1m]",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": "small", "ANTHROPIC_DEFAULT_OPUS_MODEL": "std", "CLAUDE_CODE_SUBAGENT_MODEL": "std",
+	} {
+		if env[k] != want {
+			t.Errorf("small model wide: %s=%q, want %q", k, env[k], want)
+		}
+	}
+	// A session started on another model: the empty tiers follow it, the explicit ones keep their own. A session model
+	// between 200K and 1M is still marked, its window held by the process's compact window and context limit.
+	for _, c := range []struct{ session, model, sonnet string }{{"wider", "wider[1m]", "small"}, {"mid", "mid[1m]", "small"}} {
+		env = providerEnv(l, c.session, "", false)
+		for k, want := range map[string]string{
+			"ANTHROPIC_MODEL": c.model, "ANTHROPIC_DEFAULT_OPUS_MODEL": c.model, "ANTHROPIC_DEFAULT_SONNET_MODEL": c.sonnet,
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL": "wide[1m]",
+		} {
+			if env[k] != want {
+				t.Errorf("session on %s: %s=%q, want %q", c.session, k, env[k], want)
 			}
 		}
 	}

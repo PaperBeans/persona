@@ -15,11 +15,16 @@ nonisolated struct MachineChoice: Equatable, Identifiable {
     /// With several groups, with the group's name (`Machine.title`).
     var name: String
     var symbol: String
+    /// Whose it is, for the menus that list the current assistant's computers (`AssistantScope`).
+    var group: String
+    var manager: String?
 
     @MainActor init(_ m: Machine) {
         id = m.ref.path
         name = m.title
         symbol = m.symbol
+        group = m.group
+        manager = m.manager
     }
 }
 
@@ -37,19 +42,22 @@ struct AgentsListMenu: View {
         /// Not `openMonitor` / `openMachines`: a stored property's name is in the Release binary, and those are DEBUG
         /// launch arguments the release check looks for (TestFlight 50 stopped on one).
         private var onMachines: () -> Void = {}
+        private var onTerminals: () -> Void = {}
 
         /// `sections`: the fold ids of what the list shows now.
         func update(sections: [String], foldAll: @escaping ([String]) -> Void, unfoldAll: @escaping () -> Void,
-                    onMachines: @escaping () -> Void) {
+                    onMachines: @escaping () -> Void, onTerminals: @escaping () -> Void = {}) {
             self.sections = sections
             self.foldAll = foldAll
             self.unfoldAll = unfoldAll
             self.onMachines = onMachines
+            self.onTerminals = onTerminals
         }
 
         func collapse() { foldAll(sections) }
         func expand() { unfoldAll() }
         func machinesPage() { onMachines() }
+        func terminalsPage() { onTerminals() }
     }
 
     @StoredValue("dev.machineFilter") private var machineFilter = ""
@@ -70,8 +78,10 @@ struct AgentsListMenu: View {
     var inline = false
 
     var body: some View {
-        // Only the machines' names and icons: not their live state, which changes with every push.
-        let machines = model.machineChoices
+        // Only the machines' names and icons: not their live state, which changes with every push. The current
+        // assistant's, as the list is its agents.
+        let scope = model.assistantScope
+        let machines = model.machineChoices.filter { scope.has($0.manager, group: $0.group) }
         let chosen = machines.first { $0.id == machineFilter }
         let hub = model.isMultiHub ? HubFilter.group(hubFilter).map { model.groupName($0) } : nil
         if inline {
@@ -137,6 +147,10 @@ struct AgentsListMenu: View {
             Section {
                 Button { actions.machinesPage() } label: {
                     Label("Machines", systemImage: Theme.Icon.machines)
+                }
+                // Every terminal on the computers, plain ones too (#4754): watch, type, close.
+                Button { actions.terminalsPage() } label: {
+                    Label("Terminals", systemImage: Theme.Icon.terminal)
                 }
             }
     }

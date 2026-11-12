@@ -2,10 +2,12 @@ package devices
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/nodeproto"
@@ -23,13 +25,14 @@ var errSwitched = errors.New("moved to a better path")
 
 // nodeConn is one connection to the node, its node.info answered.
 type nodeConn struct {
-	path   *nodePath
-	via    string // the transport it took: local | ssh | tailcat | link | service | hub
-	pipe   *nodePipe
-	peer   *rpc.Peer
-	info   proto.NodeInfo
-	served chan error
-	cancel context.CancelFunc
+	path       *nodePath
+	via        string // the transport it took: local | ssh | tailcat | link | service | hub
+	pipe       *nodePipe
+	peer       *rpc.Peer
+	info       proto.NodeInfo
+	served     chan error
+	cancel     context.CancelFunc
+	restarting atomic.Bool // the resident announced exec before ending this connection
 }
 
 func (c *nodeConn) close() {
@@ -80,7 +83,7 @@ func (m *Machine) run(ctx context.Context) {
 		err := m.serve(ctx, conn)
 		next := m.takeNext()
 		planned := next != nil
-		m.d.pathEnded(conn.path, true, err, time.Since(start), planned)
+		m.d.pathEnded(conn.path, true, err, time.Since(start), planned || conn.restarting.Load())
 		conn.close()
 		m.detach(err, planned)
 		conn = next
@@ -195,6 +198,28 @@ func (m *Machine) establish(ctx context.Context, p *nodePath) (*nodeConn, error)
 }
 
 func (m *Machine) establishVia(ctx context.Context, p *nodePath, via string) (*nodeConn, error) {
+	deadline := time.Now().Add(40 * time.Second)
+	for {
+		c, err := m.establishViaOnce(ctx, p, via, time.Until(deadline))
+		if err == nil || !handshakeInterrupted(err) {
+			return c, err
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if time.Until(deadline) <= 0 {
+			return nil, context.DeadlineExceeded
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(min(100*time.Millisecond, time.Until(deadline))):
+		}
+	}
+}
+
+// Repeating this pre-operation handshake is safe: only engine selection and node.info have been sent.
+func (m *Machine) establishViaOnce(ctx context.Context, p *nodePath, via string, wait time.Duration) (*nodeConn, error) {
 	cctx, cancel := context.WithCancel(ctx)
 	var l *nodePipe
 	var err error
@@ -211,16 +236,45 @@ func (m *Machine) establishVia(ctx context.Context, p *nodePath, via string) (*n
 		return nil, err
 	}
 	peer := rpc.New("h", l.w)
+	// A model request sent through this computer stops there when the manager stops waiting (an older node ignores it).
+	peer.Cancels = map[string]bool{proto.MethodModelHTTP: true}
 	// Every event goes on to the hub, the forwarded ports' bytes among them (the hub is their end, ports.go there).
-	peer.OnEvent = m.onEvent
-	peer.OnRequest = m.onRequest
 	c := &nodeConn{path: p, via: via, pipe: l, peer: peer, served: make(chan error, 1), cancel: cancel}
+	peer.OnRequest = func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if method == "state.load" {
+			var barrier struct {
+				RestartBarrier *bool `json:"restart_barrier"`
+			}
+			if json.Unmarshal(params, &barrier) == nil && barrier.RestartBarrier != nil {
+				if !*barrier.RestartBarrier {
+					c.restarting.Store(false)
+				}
+				return m.residentRestartBarrier(ctx, peer, *barrier.RestartBarrier)
+			}
+		}
+		return m.onRequest(ctx, method, params)
+	}
+	peer.OnEvent = func(event string, params json.RawMessage) {
+		if event == nodeproto.EventRestarting {
+			c.restarting.Store(true)
+			m.mu.Lock()
+			if m.peer == peer {
+				m.reloadUntil = time.Now().Add(m.reconnectGrace)
+				peer.SuspendCalls()
+			}
+			m.mu.Unlock()
+			return
+		}
+		m.onEvent(event, params)
+	}
 	go func() { c.served <- peer.Serve(cctx, l.r) }()
 
-	ictx, icancel := context.WithTimeout(cctx, 40*time.Second)
-	// The engine first, before anything else the node is asked: it then never lists or watches the wrong one.
-	m.useEngine(ictx, peer)
-	err = peer.Call(ictx, "node.info", map[string]any{}, &c.info)
+	ictx, icancel := context.WithTimeout(cctx, wait)
+	// The engine first. An explicit reload refusal or closed handshake is retried; old nodes keep their fallback.
+	err = m.useEngine(ictx, peer)
+	if !handshakeInterrupted(err) {
+		err = peer.Call(ictx, "node.info", map[string]any{}, &c.info)
+	}
 	icancel()
 	if err != nil {
 		c.close()
@@ -228,7 +282,10 @@ func (m *Machine) establishVia(ctx context.Context, p *nodePath, via string) (*n
 			p.src.tailcatReset()
 		}
 		if msg := l.lastErr(); msg != "" {
-			return nil, fmt.Errorf("%s", msg)
+			if restartingError(err) {
+				return nil, fmt.Errorf("%s: %w", msg, err)
+			}
+			return nil, errors.New(msg) // SSH/authentication/startup diagnostics are real failures, not an exec handshake
 		}
 		return nil, err
 	}
@@ -241,6 +298,7 @@ func (m *Machine) serve(ctx context.Context, c *nodeConn) error {
 	m.d.pathConnected(p)
 	m.mu.Lock()
 	m.peer, m.info, m.online, m.err, m.lastSeen = c.peer, c.info, true, "", time.Now().UTC()
+	m.reloadUntil = time.Time{}
 	m.connectedAt = m.lastSeen
 	m.forgetOpenedLocked()     // a new connection has nothing of the hub's open yet
 	m.herdrAsked = time.Time{} // node.info just said; this node may answer herdr.server.status where the last did not

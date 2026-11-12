@@ -75,9 +75,13 @@ function launchOpIds() {
  *  waits about 10 s each time), or lost to a hub restart (nobody knows how it went). */
 async function launchOp<T>(path: string, opId: string, signal: AbortSignal, json: unknown): Promise<T> {
   for (;;) {
-    const r = await apiOp<T & { state?: string }>(path, { method: "POST", signal, json, opId });
+    const r = await apiOp<T & { state?: string; launcher_note?: string; session?: Session }>(path, { method: "POST", signal, json, opId });
     if (r.state === "unknown") throw new ApiError(202, t("lib-new-agent.outcome_unknown"), { delivered: "unknown" });
-    if (r.state !== "pending") return r;
+    if (r.state === "pending") continue;
+    // a default launcher the computer lacks gave way to another (#4661): said once, as for the main chat; loaded only
+    // then, so New Agent's first screen does not carry it
+    if (r.launcher_note) void import("./assistant-start").then((m) => m.showLauncherNote(`${r.session?.machine_id}/${r.session?.session_id}`, r.launcher_note));
+    return r;
   }
 }
 
@@ -112,16 +116,23 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
         launcher: launch.launcher || undefined, agent_type: launch.agentType, work_session: launch.workSession,
         model: launch.model || undefined, host: launch.host || undefined, todo_id: launch.todoId || undefined,
       };
-      const startWithPrompt = async (required: boolean) => {
+      // A Codex (and a compatible CLI) takes its first message with the start. With none, a computer that can opens
+      // Codex waiting for one (docs/integrations/codex.md "Starting without a first message"); an older one refuses.
+      const startWithPrompt = async () => {
         if (launch.attachments.length) throw new Error(t("lib-new-agent.launcher_no_attachments"));
-        if (required && !launch.text) throw new Error(t("lib-new-agent.launcher_needs_text"));
-        const r = await launchOp<{ session: Session }>("/sessions", launch.startPromptOpId, controller.signal, { ...target, prompt: launch.text });
+        let r: { session: Session };
+        try {
+          r = await launchOp<{ session: Session }>("/sessions", launch.startPromptOpId, controller.signal, { ...target, prompt: launch.text || undefined });
+        } catch (e) {
+          if (!launch.text && e instanceof ApiError && (e.code === "codex_needs_prompt" || e.code === "work_prompt_required")) throw new Error(t("lib-new-agent.launcher_needs_text"));
+          throw e;
+        }
         update({ outgoing: { text: "", images: [] } });
         return r.session;
       };
       let session: Session;
       if (launch.inlinePrompt) {
-        session = await startWithPrompt(launch.agentType === "codex");
+        session = await startWithPrompt();
       } else {
         try {
           const r = await launchOp<{ session: Session }>("/sessions", launch.startOpId, controller.signal, {
@@ -131,7 +142,7 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
           session = r.session;
         } catch (e) {
           if (!(e instanceof ApiError) || e.code !== "codex_needs_prompt") throw e;
-          session = await startWithPrompt(true);
+          session = await startWithPrompt();
         }
       }
       if (!getState().launches[id]) return;

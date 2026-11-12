@@ -16,8 +16,15 @@ nonisolated struct ManagerRoster: Equatable, Sendable {
     /// The default manager: the roster's `default`, else the one marked default, else the hub's own assistant.
     var defaultID: String
 
+    /// The managers without their inbox counts (`HubManager.inboxNeedsYou`): those move with every change of an inbox,
+    /// and a roster is what pages compare to know whether to draw again. `AppModel.inboxNeedsYou` keeps them.
     init(managers: [HubManager], defaultID: String? = nil) {
-        self.managers = managers
+        self.managers = managers.map { m in
+            guard m.inboxNeedsYou != nil else { return m }
+            var m = m
+            m.inboxNeedsYou = nil
+            return m
+        }
         self.defaultID = defaultID.flatMap { $0.isEmpty ? nil : $0 } ?? managers.first(where: \.isDefault)?.id ?? Self.assistant
     }
 
@@ -52,20 +59,47 @@ nonisolated struct ManagerRoster: Equatable, Sendable {
         return installed.compactMap { m in byOwner[m.id].map { ManagerGroup(manager: m, items: $0) } }
     }
 
+    /// What asking a hub for its roster came to: the list, none (a hub without one: 404 with no code), or no answer now.
+    nonisolated enum Answer: Sendable {
+        case list(APIClient.ManagerList)
+        case absent
+        case unread
+    }
+
+    static func ask(_ api: APIClient) async -> Answer {
+        do {
+            return .list(try await api.managers())
+        } catch let e as APIError where e.status == 404 && e.code == nil {
+            return .absent
+        } catch {
+            return .unread
+        }
+    }
+
     /// The roster for a page about to group: nil from a hub without one (404 with no code), the page's last one when
     /// it can't be read now.
     static func read(_ api: APIClient, keeping last: ManagerRoster?) async -> ManagerRoster? {
-        do {
-            return ManagerRoster(try await api.managers())
-        } catch let e as APIError where e.status == 404 && e.code == nil {
-            return nil
-        } catch {
-            return last
+        switch await ask(api) {
+        case .list(let list): ManagerRoster(list)
+        case .absent: nil
+        case .unread: last
         }
     }
 }
 
 extension ManagerRoster {
+    /// A merged settings list belongs to the current assistant only. Before the roster arrives,
+    /// a saved non-default pick still filters by its stamp; a legacy default list stays intact.
+    nonisolated static func settingsItems<T>(_ items: [T], roster: ManagerRoster?, manager: String?,
+                                             stamped: (T) -> String?) -> [T] {
+        if let roster {
+            let owner = roster.owner(manager)
+            return items.filter { roster.owner(stamped($0)) == owner }
+        }
+        guard let manager else { return items }
+        return items.filter { stamped($0) == manager }
+    }
+
     /// The name of manager `id`, for the page of one of its things to say whose it is; nil for the default's page
     /// (`id` nil), or when the roster can't be read or lacks it.
     static func name(of id: String?, _ api: APIClient?) async -> String? {
@@ -81,60 +115,10 @@ nonisolated struct ManagerGroup<T>: Identifiable {
     var id: String { manager.id }
 }
 
-/// Something each manager keeps for itself, read from it (the inbox's rules and mutes): `manager` names whose it is on
-/// the requests about it; nil is the default's.
-nonisolated protocol ManagerStamped: Sendable {
-    var manager: String? { get set }
-}
-
-/// One manager's share of a list each manager keeps for itself: what it answered, or why it couldn't be read.
-nonisolated struct ManagerShare<T: Sendable>: Identifiable, Sendable {
-    var manager: HubManager
-    var items: [T]
-    /// Why its items couldn't be read, in words; nil when they were.
-    var failed: String?
-    var id: String { manager.id }
-}
-
 extension ManagerRoster {
     /// The manager a request about something stamped `manager` names: none while that is the default, and the one it came
     /// from after another became the default.
     func naming(_ manager: String?) -> String? { manager == defaultID ? nil : manager }
-
-    /// What lists read from each manager follow: which are installed and online, and which is the default; none with one.
-    var readKey: [String] { isMulti ? [defaultID] + installed.map { "\($0.id):\($0.online)" } : [] }
-
-    /// `read` asked of every installed manager at once, each one named (the default's too: the device's idea of it may be
-    /// stale, and what it answers is stamped with the one asked), the default first, their items stamped with its id. One
-    /// that fails gets `said`'s words; nil when the reading was cancelled.
-    @MainActor
-    func readEach<T: ManagerStamped>(_ api: APIClient, said: (HubManager, any Error) -> String,
-                                     _ read: @escaping @Sendable (APIClient) async throws -> [T]) async -> [ManagerShare<T>]? {
-        let managers = installed
-        let answers = await withTaskGroup(of: (Int, Result<[T], any Error>).self) { group in
-            for (i, m) in managers.enumerated() {
-                let id = m.id, client = api.manager(id)
-                group.addTask {
-                    do {
-                        return (i, .success(try await read(client).map { var x = $0; x.manager = id; return x }))
-                    } catch {
-                        return (i, .failure(error))
-                    }
-                }
-            }
-            var all = [Result<[T], any Error>?](repeating: nil, count: managers.count)
-            for await (i, answer) in group { all[i] = answer }
-            return all
-        }
-        if Task.isCancelled { return nil }
-        return zip(managers, answers).map { m, answer in
-            switch answer {
-            case .success(let items)?: ManagerShare(manager: m, items: items)
-            case .failure(let error)?: ManagerShare(manager: m, items: [], failed: said(m, error))
-            case nil: ManagerShare(manager: m, items: [])
-            }
-        }
-    }
 }
 
 /// A group's heading on a page grouped by manager: its dot, its name and how many (none for a list it couldn't read), and
@@ -171,12 +155,5 @@ struct ManagerHeading: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("manager-heading-\(manager.id)")
-    }
-
-    /// As a plain list's row above its manager's rows (the inbox's Rules and Muted lists).
-    func listRow() -> some View {
-        listRowInsets(EdgeInsets(top: Theme.Space.l, leading: Theme.Space.page, bottom: Theme.Space.xs, trailing: Theme.Space.page))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
     }
 }

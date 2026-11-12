@@ -6,8 +6,8 @@ import { t } from "../../i18n";
 import { settingsTab } from "../../lib/channels";
 import type { IconName } from "../../ui/icons";
 
-export type Tab = "general" | "persona" | "notifications" | "models" | "agents" | "channels" | "connectors" | "extensions" | "shortcuts" | "devices" | "hub" | "managers" | "knowledge" | "avatar";
-export const TABS: Tab[] = ["general", "persona", "notifications", "models", "agents", "channels", "connectors", "extensions", "shortcuts", "devices", "hub", "managers", "knowledge", "avatar"];
+export type Tab = "general" | "persona" | "notifications" | "models" | "agents" | "channels" | "connectors" | "sources" | "extensions" | "shortcuts" | "devices" | "hub" | "managers" | "knowledge" | "avatar";
+export const TABS: Tab[] = ["general", "persona", "notifications", "models", "agents", "channels", "connectors", "sources", "extensions", "shortcuts", "devices", "hub", "managers", "knowledge", "avatar"];
 export const AGENT_KINDS = ["claude", "codex", "agy", "omp"] as const;
 export type AgentTab = (typeof AGENT_KINDS)[number];
 export type SettingsSection = "providers" | "model-config" | "translation" | AgentTab;
@@ -40,6 +40,8 @@ export const TAB_INFO: Record<Tab, { label: string; icon: IconName; hint: string
   agents: { label: t("settings-nav.tab_agents"), icon: "terminal", hint: t("settings-nav.hint_agents") },
   channels: { label: t("settings-nav.tab_channels"), icon: "chat", hint: t("settings-nav.hint_channels") },
   connectors: { label: t("settings-nav.tab_connectors"), icon: "link", hint: t("settings-nav.hint_connectors") },
+  // the manager's pages of every source of the Inbox (#5278), shown with inbox_sources
+  sources: { label: t("settings-nav.tab_sources"), icon: "inbox", hint: t("settings-nav.hint_sources") },
   extensions: { label: t("settings-nav.tab_extensions"), icon: "extension", hint: t("settings-nav.hint_extensions") },
   shortcuts: { label: t("settings-nav.tab_shortcuts"), icon: "keyboard", hint: t("settings-nav.hint_shortcuts") },
   devices: { label: t("settings-nav.tab_devices"), icon: "key", hint: t("settings-nav.hint_devices") },
@@ -52,7 +54,7 @@ export const TAB_INFO: Record<Tab, { label: string; icon: IconName; hint: string
  *  ("<name>'s settings", with Switch); this device's; and the hub's, the same whichever assistant is current. */
 export type NavGroup = "assistant" | "device" | "hub";
 export const NAV_GROUPS: { key: NavGroup; tabs: Tab[] }[] = [
-  { key: "assistant", tabs: ["models", "persona", "channels", "connectors", "extensions", "knowledge", "agents"] },
+  { key: "assistant", tabs: ["models", "persona", "channels", "connectors", "sources", "extensions", "knowledge", "agents"] },
   { key: "device", tabs: ["general", "notifications", "shortcuts"] },
   { key: "hub", tabs: ["hub", "managers", "avatar", "devices"] },
 ];

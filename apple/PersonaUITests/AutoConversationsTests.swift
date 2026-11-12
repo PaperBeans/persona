@@ -1,17 +1,18 @@
 import XCTest
 
-/// Auto Chats in Persona's sidebar (#3264): the conversations Persona opened by itself (Inbox's AI twin, scheduled tasks,
-/// Lark /agent…) are not in Recent but in one row, closed at first, that still says one waits for the user; open, a row for
-/// each source, which opens All Chats filtered to it. Against scripts/mock/mock_hub.py with
-/// MOCK_AUTO_CONVERSATIONS=1 (PERSONA_MOCK_HUB). SHOT_DIR keeps the screenshots (closed, open, the list).
+/// The conversations Persona opened by itself (#3264: Inbox's AI twin, scheduled tasks, Lark /agent…) in Persona's sidebar:
+/// since #4331 there is no Auto Chats row; Recent (#4873, #5195) lists the newest chats whoever opened them, each one
+/// Persona opened with its source's mark, and All Chats lists every one, opening on All, with a filter for each source.
+/// Against scripts/mock/mock_hub.py with MOCK_AUTO_CONVERSATIONS=1 (PERSONA_AUTO_HUB; MOCK_EXTERNAL=1 too or not).
+/// SHOT_DIR keeps the screenshots (the sidebar, All Chats as it opens, the list filtered to Inbox).
 final class AutoConversationsTests: XCTestCase {
     private var hub: String!
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        guard let hub = ProcessInfo.processInfo.environment["PERSONA_MOCK_HUB"] else {
-            throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_AUTO_CONVERSATIONS=1 (PERSONA_MOCK_HUB)")
+        guard let hub = ProcessInfo.processInfo.environment["PERSONA_AUTO_HUB"] else {
+            throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_AUTO_CONVERSATIONS=1 (PERSONA_AUTO_HUB)")
         }
         self.hub = hub
     }
@@ -21,19 +22,20 @@ final class AutoConversationsTests: XCTestCase {
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app.launchArguments = ["-pairURL", pair, "-tab", "assistant", "-newAssistant", "YES", "-dev.openChat", ""]
         app.launchPinned()
-        openSidebar(timeout: 20)
     }
 
-    /// The drawer's button on the phone; the iPad's column is there already.
-    @MainActor private func openSidebar(timeout: TimeInterval) {
+    /// The drawer's button on the phone; the iPad's column is there already. Returns the All Chats row.
+    @MainActor private func openSidebar(timeout: TimeInterval = 20) -> XCUIElement {
         let menu = app.buttons["assistant-sidebar-button"].firstMatch
-        let group = app.buttons["sidebar-auto"].firstMatch
+        let all = app.buttons["sidebar-all-chats"].firstMatch
         let end = Date().addingTimeInterval(timeout)
-        while Date() < end && !menu.exists && !group.exists { usleep(250_000) }
-        if group.exists && group.isHittable { return }
+        while Date() < end && !menu.exists && !all.exists { usleep(250_000) }
+        if all.exists && all.isHittable { return all }
         XCTAssertTrue(menu.exists, "no sidebar button:\n\(app.debugDescription)")
         sleep(1)
         menu.tapCenter()
+        XCTAssertTrue(all.waitForExistence(timeout: 10), "no 全部对话 row:\n\(app.debugDescription)")
+        return all
     }
 
     @MainActor private func shot(_ name: String) {
@@ -51,44 +53,48 @@ final class AutoConversationsTests: XCTestCase {
         app.buttons.matching(identifier: "sidebar-conversation").matching(NSPredicate(format: "label BEGINSWITH %@", prefix)).firstMatch
     }
 
-    @MainActor func testClosedOpenAndList() {
+    /// The sidebar: Recent has the newest five whoever opened them (#5195); the ones Persona opened carry their source's
+    /// mark, named in the row's label as their filter is; no Auto Chats row any more.
+    @MainActor func testRecentListsEveryChatWithItsSourceMark() {
         launch()
-        let group = app.buttons["sidebar-auto"].firstMatch
-        XCTAssertTrue(group.waitForExistence(timeout: 10), "no 自动对话 row:\n\(app.debugDescription)")
-        // The device remembers it open (assistant.autoOpen): an earlier run may have left it so.
-        if app.buttons["sidebar-auto-inbox"].exists {
-            group.tap()
-            XCTAssertTrue(app.buttons["sidebar-auto-inbox"].waitForNonExistence(timeout: 3), "did not close")
-        }
-        // Closed: the user's own in Recent, Persona's own not; the row says one waits for the user.
-        XCTAssertTrue(conversation("帮我约周五").exists, "the user's own conversation is not in 最近")
-        XCTAssertFalse(conversation("1105 | 收件箱").exists, "an inbox conversation is still in 最近")
-        // Ten with an origin, and the mock's scheduled tasks' own conversations (known the #2838 way).
-        XCTAssertTrue(group.label.hasPrefix("自动对话 1"), group.label)
-        XCTAssertTrue(group.label.contains("1 个需要你"), group.label)
-        XCTAssertFalse(app.buttons["sidebar-auto-inbox"].exists, "open before it was tapped")
+        let all = openSidebar()
+        // The mock's newest after the main chat: three Inbox ones (6, 12, 40 minutes), Lark /agent's (2 hours), a
+        // scheduled task's (3 hours); the user's own (5 hours and older) are in All Chats.
+        XCTAssertTrue(conversation("1105 | 收件箱 | 回复韩梅梅").waitForExistence(timeout: 10), "the newest, an Inbox one, is not in 最近:\n\(app.debugDescription)")
+        let task = conversation("1105 | 定时 | 晨间简报")
+        XCTAssertTrue(task.exists, "a scheduled task's conversation is not in 最近")
+        XCTAssertTrue(task.label.contains("定时任务"), "its mark is not named: \(task.label)")
+        let lark = app.buttons.matching(identifier: "sidebar-conversation").matching(NSPredicate(format: "label CONTAINS %@", "来自 飞书 /agent")).firstMatch
+        XCTAssertTrue(lark.exists, "Lark /agent's conversation is not in 最近 with its mark")
+        XCTAssertEqual(app.buttons.matching(identifier: "sidebar-conversation").count, 5, "最近 lists five")
+        XCTAssertFalse(conversation("帮我约周五").exists, "an older conversation of the user's is in 最近")
+        XCTAssertFalse(app.buttons["sidebar-auto"].exists, "the Auto Chats row is back")
+        XCTAssertTrue(all.exists)
         sleep(1)
-        shot("closed")
+        shot("sidebar")
+    }
 
-        // Open: a row for each source, and All Chats.
-        group.tap()
-        let inbox = app.buttons["sidebar-auto-inbox"].firstMatch
-        XCTAssertTrue(inbox.waitForExistence(timeout: 3), "no 收件箱 row")
-        XCTAssertTrue(inbox.label.hasPrefix("收件箱 6 个，1 个需要你"), inbox.label)
-        for id in ["task", "lark_agent", "spawned", "all"] {
-            XCTAssertTrue(app.buttons["sidebar-auto-" + id].exists, "no \(id) row")
+    /// All Chats: it opens on All, every time (the last pick is not kept), with a filter for each source; a row opens
+    /// its conversation.
+    @MainActor func testAllChatsFiltersBySource() {
+        launch()
+        openSidebar().tap()
+        let inbox = app.buttons["auto-filter-inbox"].firstMatch
+        XCTAssertTrue(inbox.waitForExistence(timeout: 5), "no 收件箱 filter:\n\(app.debugDescription)")
+        for id in ["task", "lark_agent", "spawned", "mine", "all"] {
+            XCTAssertTrue(app.buttons["auto-filter-" + id].exists, "no \(id) filter")
         }
+        XCTAssertTrue(app.buttons["auto-filter-all"].isSelected, "全部 is not the filter All Chats opens on")
         sleep(1)
-        shot("open")
-
-        // A source's row: All Chats filtered to it.
+        shot("list-opens-on-all")
         inbox.tap()
+        XCTAssertTrue(inbox.isSelected, "收件箱 is not the chosen filter")
         let rows = app.buttons.matching(identifier: "auto-conversation")
-        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "the list did not open")
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "收件箱's list is empty")
         XCTAssertEqual(rows.count, 6, "收件箱's list")
-        XCTAssertTrue(app.buttons["auto-filter-inbox"].isSelected, "收件箱 is not the chosen filter")
         sleep(1)
         shot("list-inbox")
+
         app.buttons["auto-filter-mine"].firstMatch.tap()
         XCTAssertTrue(app.buttons["auto-filter-mine"].isSelected, "我的 is not the chosen filter")
         XCTAssertTrue(rows.matching(NSPredicate(format: "label BEGINSWITH %@", "帮我约周五")).firstMatch.waitForExistence(timeout: 3), "我的 lacks the user's own")
@@ -99,31 +105,12 @@ final class AutoConversationsTests: XCTestCase {
         XCTAssertGreaterThan(rows.count, 6, "全部's list")
         shot("list-all")
 
-        // A row opens its conversation (the sheet and the drawer go).
-        rows.matching(NSPredicate(format: "label BEGINSWITH %@", "1105 | 收件箱 | 回复韩梅梅")).firstMatch.tap()
+        // A row opens its conversation (the sheet and the drawer go); All Chats opens on All again, not on the pick.
+        inbox.tap()
+        rows.matching(NSPredicate(format: "label BEGINSWITH %@", "1105 | 收件箱 | 周会纪要确认")).firstMatch.tap()
         XCTAssertTrue(rows.firstMatch.waitForNonExistence(timeout: 5), "the list stayed")
-
-        // Back in the sidebar, it closes again.
-        openSidebar(timeout: 5)
-        XCTAssertTrue(group.waitForExistence(timeout: 5))
-        if !app.buttons["sidebar-auto-inbox"].exists { group.tap() }
-        XCTAssertTrue(app.buttons["sidebar-auto-inbox"].waitForExistence(timeout: 3))
-        group.tap()
-        XCTAssertTrue(app.buttons["sidebar-auto-inbox"].waitForNonExistence(timeout: 3), "did not close")
-    }
-
-    /// The new shell's drawer: the same group, in its own rows (no marks, rounder).
-    @MainActor func testInTheShell() {
-        launch()
-        let group = app.buttons["sidebar-auto"].firstMatch
-        XCTAssertTrue(group.waitForExistence(timeout: 10), "no 自动对话 row in the shell:\n\(app.debugDescription)")
-        if !app.buttons["sidebar-auto-inbox"].exists { group.tap() }
-        XCTAssertTrue(app.buttons["sidebar-auto-inbox"].waitForExistence(timeout: 3), "did not open")
-        sleep(1)
-        shot("shell-open")
-        group.tap()
-        XCTAssertTrue(app.buttons["sidebar-auto-inbox"].waitForNonExistence(timeout: 3), "did not close")
-        sleep(1)
-        shot("shell-closed")
+        openSidebar(timeout: 5).tap()
+        XCTAssertTrue(app.buttons["auto-filter-all"].firstMatch.waitForExistence(timeout: 5), "All Chats did not open again")
+        XCTAssertTrue(app.buttons["auto-filter-all"].isSelected, "All Chats kept the last pick (收件箱)")
     }
 }

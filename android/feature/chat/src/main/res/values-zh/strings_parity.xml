@@ -26,23 +26,5 @@
     <string name="chat_rewind_running">正在回退…</string>
     <string name="chat_tool_open_subagent">查看子 Agent</string>
     <string name="chat_tool_no_answer">没有回答</string>
-    <string name="chat_computer_script">运行脚本</string>
-    <string name="chat_computer_script_named">运行脚本：%1$s</string>
-    <string name="chat_computer_somewhere">一处</string>
-    <string name="chat_computer_click">点 %1$s</string>
-    <string name="chat_computer_double_click">双击 %1$s</string>
-    <string name="chat_computer_right_click">右键 %1$s</string>
-    <string name="chat_computer_type">输入「%1$s」</string>
-    <string name="chat_computer_set_value">填「%1$s」</string>
-    <string name="chat_computer_press">按 %1$s</string>
-    <string name="chat_computer_scroll">滚动</string>
-    <string name="chat_computer_drag">拖动</string>
-    <string name="chat_computer_launch">打开 %1$s</string>
-    <string name="chat_computer_front">切到 %1$s</string>
-    <string name="chat_computer_window">看窗口</string>
-    <string name="chat_computer_screenshot">截屏</string>
-    <string name="chat_computer_tree">看屏幕上有什么</string>
-    <string name="chat_computer_zoom">放大看</string>
-    <string name="chat_computer_check">检查</string>
-    <string name="chat_computer_space">空格</string>
+    <string name="chat_computer_pill_opens">查看步骤</string>
 </resources>

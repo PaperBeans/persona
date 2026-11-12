@@ -746,6 +746,9 @@ func (s *Service) readinessProbe(ctx context.Context, machine, launcher string) 
 		b.probing = nil
 		b.mu.Unlock()
 	}()
+	// The check goes on when the client stops waiting (its own time ran out, the page closed): its result is kept, and
+	// a try within readinessProbeReuse gets it instead of starting another check that is cut off at the same point (#1892).
+	ctx = context.WithoutCancel(ctx)
 	cctx, cancel := context.WithTimeout(ctx, healthCheckTimeout)
 	defer cancel()
 	var res proto.LauncherCheck
@@ -753,7 +756,11 @@ func (s *Service) readinessProbe(ctx context.Context, machine, launcher string) 
 		// Not the model's answer (the machine could not be asked): said, not kept.
 		return &proto.LauncherCheck{Error: i18n.Localize(err, s.requestCtxLang(ctx))}
 	}
-	if err := s.readinessUpdate(ctx, func(r *readinessRecord) {
+	// Detached from the client, the save needs its own deadline: one the database does not answer would hold the
+	// readiness lock, and every readiness request behind it, for good.
+	wctx, wcancel := context.WithTimeout(ctx, historyTimeout)
+	defer wcancel()
+	if err := s.readinessUpdate(wctx, func(r *readinessRecord) {
 		now := time.Now().UTC()
 		r.Probe = &readinessProbe{Machine: machine, Launcher: launcher, At: now, Check: res}
 		if res.OK && r.AnsweredAt == nil {

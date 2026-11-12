@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "cases": [
+    {"name": "words_snake_case", "check": "humanize", "input": "create_issue", "expected": "Create issue"},
+    {"name": "words_camel_case", "check": "humanize", "input": "createIssue", "expected": "Create issue"},
+    {"name": "words_kebab_case", "check": "humanize", "input": "list-pull-requests", "expected": "List pull requests"},
+    {"name": "words_acronym_in_camel_case", "check": "humanize", "input": "getPRComments", "expected": "Get PR comments"},
+    {"name": "words_leading_acronym", "check": "humanize", "input": "HTTPServerStart", "expected": "HTTP server start"},
+    {"name": "words_plain", "check": "humanize", "input": "browser_take_screenshot", "expected": "Browser take screenshot"},
+    {"name": "words_spelled_inside", "check": "humanize", "input": "search_github_repos", "expected": "Search GitHub repos"},
+    {"name": "words_spelled_last", "check": "humanize", "input": "get_url", "expected": "Get URL"},
+    {"name": "words_spelled_first_keeps_its_case", "check": "humanize", "input": "ios_build", "expected": "iOS build"},
+    {"name": "words_pascal_case", "check": "humanize", "input": "ShareOnboardingGuide", "expected": "Share onboarding guide"},
+    {"name": "words_one_letter", "check": "humanize", "input": "x", "expected": "X"},
+    {"name": "words_empty", "check": "humanize", "input": "", "expected": ""},
+
+    {"name": "server_spelled", "check": "server_name", "input": "github", "expected": "GitHub"},
+    {"name": "server_two_words", "check": "server_name", "input": "chrome-devtools", "expected": "Chrome DevTools"},
+    {"name": "server_snake_case", "check": "server_name", "input": "google_drive", "expected": "Google Drive"},
+    {"name": "server_plugin_named_once", "check": "server_name", "input": "plugin_context7_context7", "expected": "Context7"},
+    {"name": "server_plugin_and_server", "check": "server_name", "input": "plugin_lark_docs", "expected": "Lark Docs"},
+    {"name": "server_claude_ai_connector", "check": "server_name", "input": "claude_ai_Gmail", "expected": "Gmail"},
+    {"name": "server_acronym", "check": "server_name", "input": "ide", "expected": "IDE"},
+    {"name": "server_capitalized", "check": "server_name", "input": "linear", "expected": "Linear"},
+
+    {"name": "mcp_server_and_tool", "check": "mcp_label", "input": "mcp__github__create_issue", "expected": "GitHub · Create issue"},
+    {"name": "mcp_camel_case_tool", "check": "mcp_label", "input": "mcp__ide__getDiagnostics", "expected": "IDE · Get diagnostics"},
+    {"name": "mcp_plugin_server", "check": "mcp_label", "input": "mcp__plugin_playwright_playwright__browser_navigate", "expected": "Playwright · Browser navigate"},
+    {"name": "mcp_claude_ai_connector", "check": "mcp_label", "input": "mcp__claude_ai_Gmail__search_threads", "expected": "Gmail · Search threads"},
+    {"name": "mcp_built_in_bare_name_is_the_servers", "check": "mcp_label", "input": "mcp__files__Read", "expected": "Files · Read"},
+    {"name": "mcp_personas_own_tool_is_not_another_servers", "check": "mcp_label", "input": "mcp__persona__agent_read", "expected": null},
+    {"name": "mcp_built_in_tool_is_no_mcp_tool", "check": "mcp_label", "input": "Read", "expected": null},
+
+    {"name": "table_name_of_another_servers_tool", "check": "table_name", "input": "mcp__files__Read", "expected": "mcp__files__Read"},
+    {"name": "table_name_of_personas_tool", "check": "table_name", "input": "mcp__persona__ask_user", "expected": "ask_user"},
+    {"name": "table_name_of_a_built_in_tool", "check": "table_name", "input": "Read", "expected": "Read"},
+
+    {"name": "subject_description_first_line", "check": "subject", "input": {"title": "T", "description": "D\nmore"}, "expected": "D"},
+    {"name": "subject_title_before_name", "check": "subject", "input": {"name": "N", "title": "T"}, "expected": "T"},
+    {"name": "subject_path_by_file_name", "check": "subject", "input": {"path": "/a/b/Store.swift", "query": "q"}, "expected": "Store.swift"},
+    {"name": "subject_url_whole", "check": "subject", "input": {"url": "https://example.com", "pattern": "p"}, "expected": "https://example.com"},
+    {"name": "subject_first_string_by_field_name", "check": "subject", "input": {"zeta": "z", "alpha": "  a  ", "count": 3}, "expected": "a"},
+    {"name": "subject_numbers_flags_and_blanks_say_nothing", "check": "subject", "input": {"count": 3, "on": true, "note": "   "}, "expected": ""},
+    {"name": "subject_of_no_object", "check": "subject", "input": ["x"], "expected": ""},
+
+    {"name": "row_another_servers_tool", "check": "tool_subject", "tool": "mcp__github__create_issue", "input": {"owner": "o", "repo": "r", "title": "Crash on launch"}, "expected": "Crash on launch"},
+    {"name": "row_another_servers_tool_with_a_built_in_name", "check": "tool_subject", "tool": "mcp__events__Monitor", "input": {"stream": "deploys", "description": "Watch deploys"}, "expected": "Watch deploys"},
+    {"name": "row_task_create", "check": "tool_subject", "tool": "TaskCreate", "input": {"subject": "Write tests", "description": "…"}, "expected": "Write tests"},
+    {"name": "row_task_update_number", "check": "tool_subject", "tool": "TaskUpdate", "input": {"taskId": "3", "status": "completed"}, "expected": "#3"},
+    {"name": "row_task_update_active_form", "check": "tool_subject", "tool": "TaskUpdate", "input": {"taskId": "3", "activeForm": "Writing tests"}, "expected": "Writing tests"},
+    {"name": "row_task_list", "check": "tool_subject", "tool": "TaskList", "input": {}, "expected": ""},
+    {"name": "row_task_stop", "check": "tool_subject", "tool": "TaskStop", "input": {"task_id": "b7f2"}, "expected": "b7f2"},
+    {"name": "row_send_message_summary", "check": "tool_subject", "tool": "SendMessage", "input": {"to": "researcher", "summary": "assign task 1", "message": "start on task #1"}, "expected": "researcher · assign task 1"},
+    {"name": "row_send_message_first_line", "check": "tool_subject", "tool": "SendMessage", "input": {"to": "lead", "message": "Tests pass.\nDetails below"}, "expected": "lead · Tests pass."},
+    {"name": "row_send_message_structured", "check": "tool_subject", "tool": "SendMessage", "input": {"to": "lead", "message": {"type": "shutdown_response"}}, "expected": "lead · Shutdown response"},
+    {"name": "row_tool_search_select", "check": "tool_subject", "tool": "ToolSearch", "input": {"query": "select:WebFetch,Monitor"}, "expected": "WebFetch, Monitor"},
+    {"name": "row_tool_search_words", "check": "tool_subject", "tool": "ToolSearch", "input": {"query": "slack send"}, "expected": "slack send"},
+    {"name": "row_monitor_command", "check": "tool_subject", "tool": "Monitor", "input": {"command": "tail -f log\n# more"}, "expected": "tail -f log"},
+    {"name": "row_monitor_websocket", "check": "tool_subject", "tool": "Monitor", "input": {"ws": {"url": "wss://events.example.com"}}, "expected": "wss://events.example.com"},
+    {"name": "row_powershell", "check": "tool_subject", "tool": "PowerShell", "input": {"command": "Get-ChildItem"}, "expected": "Get-ChildItem"},
+    {"name": "row_lsp_file_and_line", "check": "tool_subject", "tool": "LSP", "input": {"operation": "findReferences", "filePath": "/a/ToolViews.swift", "line": 120, "character": 4}, "expected": "ToolViews.swift:120"},
+    {"name": "row_lsp_symbol", "check": "tool_subject", "tool": "LSP", "input": {"operation": "workspaceSymbol", "query": "ToolNaming", "filePath": "/a/b.swift", "line": 1}, "expected": "ToolNaming"},
+    {"name": "row_cron_create", "check": "tool_subject", "tool": "CronCreate", "input": {"cron": "7 * * * *", "prompt": "check CI\nthen report"}, "expected": "7 * * * * · check CI"},
+    {"name": "row_schedule_wakeup_reason", "check": "tool_subject", "tool": "ScheduleWakeup", "input": {"delaySeconds": 300, "reason": "wait for CI"}, "expected": "wait for CI"},
+    {"name": "row_enter_worktree", "check": "tool_subject", "tool": "EnterWorktree", "input": {"path": "/r/.claude/worktrees/fix-1"}, "expected": "fix-1"},
+    {"name": "row_send_user_file", "check": "tool_subject", "tool": "SendUserFile", "input": {"files": ["/tmp/report.pdf", "/tmp/chart.png"]}, "expected": "report.pdf, chart.png"},
+    {"name": "row_push_notification", "check": "tool_subject", "tool": "PushNotification", "input": {"message": "Build done", "status": "proactive"}, "expected": "Build done"},
+    {"name": "row_notebook_edit", "check": "tool_subject", "tool": "NotebookEdit", "input": {"notebook_path": "/n/analysis.ipynb"}, "expected": "analysis.ipynb"},
+    {"name": "row_report_one_finding", "check": "tool_subject", "tool": "ReportFindings", "input": {"findings": [{"file": "a.swift", "summary": "Crashes on nil", "short_summary": "Nil crash", "failure_scenario": "…"}]}, "expected": "Nil crash"},
+    {"name": "row_workflow_script_file", "check": "tool_subject", "tool": "Workflow", "input": {"scriptPath": "/r/.claude/workflows/parity-audit-wf_c1d9daf8.js"}, "expected": "parity-audit"},
+
+    {"name": "command_bash", "check": "command_line", "tool": "Bash", "input": {"command": "ls"}, "expected": "$ ls"},
+    {"name": "command_powershell", "check": "command_line", "tool": "PowerShell", "input": {"command": "dir"}, "expected": "PS> dir"},
+    {"name": "command_monitor", "check": "command_line", "tool": "Monitor", "input": {"command": "tail -f x"}, "expected": "$ tail -f x"},
+    {"name": "command_monitor_websocket", "check": "command_line", "tool": "Monitor", "input": {"ws": {"url": "wss://e.example.com"}}, "expected": "wss://e.example.com"},
+    {"name": "command_other_tool", "check": "command_line", "tool": "Read", "input": {}, "expected": null},
+    {"name": "command_another_servers_bash", "check": "command_line", "tool": "mcp__shell__Bash", "input": {"command": "ls"}, "expected": null},
+
+    {
+      "name": "arguments_key_value_list",
+      "check": "arguments",
+      "input": {
+        "repo": "persona",
+        "title": "Crash on launch",
+        "body": "Steps:\n1. Open\n2. Crash",
+        "labels": ["bug", "ios"],
+        "draft": false,
+        "assignee": null,
+        "meta": {"b": true, "a": "x/y"},
+        "blank": " ",
+        "none": []
+      },
+      "expected": [
+        {"id": "title", "label": "Title", "value": "Crash on launch", "code": false, "lines": 1},
+        {"id": "assignee", "label": "Assignee", "value": "null", "code": true, "lines": 1},
+        {"id": "body", "label": "Body", "value": "Steps:\n1. Open\n2. Crash", "code": false, "lines": 3},
+        {"id": "draft", "label": "Draft", "value": "false", "code": true, "lines": 1},
+        {"id": "labels", "label": "Labels", "value": "bug, ios", "code": true, "lines": 1},
+        {"id": "meta", "label": "Meta", "value": "{\"a\":\"x/y\",\"b\":true}", "code": true, "lines": 1},
+        {"id": "repo", "label": "Repo", "value": "persona", "code": true, "lines": 1}
+      ]
+    },
+    {"name": "arguments_skipped_field", "check": "arguments", "input": {"file_path": "/a"}, "skipping": ["file_path"], "expected": []},
+    {"name": "arguments_of_no_object", "check": "arguments", "input": "x", "expected": []},
+    {
+      "name": "arguments_blank_lines_close_up",
+      "check": "arguments",
+      "input": {"body": "Exporting takes 41 s.\n\n\n   \nSteps: Settings > Export.\r\n\r\nLast year.", "code": "def f():\n\n    return 1\n"},
+      "expected": [
+        {"id": "body", "label": "Body", "value": "Exporting takes 41 s.\nSteps: Settings > Export.\nLast year.", "code": false, "lines": 3},
+        {"id": "code", "label": "Code", "value": "def f():\n    return 1", "code": false, "lines": 3}
+      ]
+    },
+    {
+      "name": "arguments_one_line_between_blank_lines",
+      "check": "arguments",
+      "input": {"note": "\n\n  Only this\n\n"},
+      "expected": [{"id": "note", "label": "Note", "value": "Only this", "code": false, "lines": 1}]
+    },
+    {
+      "name": "arguments_huge_numbers",
+      "check": "arguments",
+      "input": {"limit": 1e20, "ids": [18446744073709551615, 7]},
+      "expected": [
+        {"id": "ids", "label": "IDs", "value": "1.8446744073709552e+19, 7", "code": true, "lines": 1},
+        {"id": "limit", "label": "Limit", "value": "1e+20", "code": true, "lines": 1}
+      ]
+    },
+    {
+      "name": "arguments_long_value_capped",
+      "check": "arguments",
+      "input": {"query": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+      "expected": [{"id": "query", "label": "Query", "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "code": true, "lines": 1}]
+    }
+  ]
+}

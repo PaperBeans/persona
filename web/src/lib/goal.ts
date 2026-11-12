@@ -8,13 +8,7 @@ export function goalStatusLabel(g: GoalInfo): string {
   return known.has(g.status) ? t(`agent-goal.status_${g.status}`) : g.status;
 }
 
-/** "active" while worked on, "done" once it holds, "stopped" when it stopped short: picks the chip's colors. */
-export function goalTone(g: GoalInfo): "active" | "done" | "stopped" {
-  if (g.status === "active") return "active";
-  return g.status === "complete" ? "done" : "stopped";
-}
-
-/** The objective's first line, for the header's chip. */
+/** The objective's first line, for the goal bar over the composer. */
 export function goalHeadline(g: GoalInfo): string {
   return (g.objective.split("\n").find((l) => l.trim()) ?? g.objective).trim();
 }

@@ -66,6 +66,21 @@ const pickFile = (file: File) =>
 
 const trayImages = () => host.querySelectorAll("img").length;
 
+/** Waits inside act until `check` passes: the "/" palette is a lazy chunk. */
+const until = async (check: () => void) => {
+  for (let i = 0; i < 200; i++) {
+    await act(async () => {
+      await new Promise((ok) => setTimeout(ok, 5));
+    });
+    try {
+      return check();
+    } catch {
+      // not yet
+    }
+  }
+  check();
+};
+
 describe("double Esc recalls the last message", () => {
   const recall = vi.fn();
   const mount = (props: Partial<React.ComponentProps<typeof Composer>> = {}) => act(() => root.render(
@@ -230,7 +245,7 @@ describe("Composer image object URLs", () => {
 describe("Composer file upload that finishes after the box moved on", () => {
   const box = () => host.querySelector("textarea")!;
   const renderOn = (draftKey: string) => act(() => root.render(<Composer draftKey={draftKey} machineId="m1" placeholder="" onSend={async () => true} />));
-  const spinning = () => !host.querySelector('button[aria-label="添加图片或文件"] svg');
+  const spinning = () => !host.querySelector("button[data-composer-plus] svg");
   const pickNotes = async () => {
     await pickFile(new File(["notes"], "notes.txt", { type: "text/plain" }));
     expect(uploads).toHaveLength(1);
@@ -357,6 +372,26 @@ describe("Composer suggestion", () => {
     show({ onSend, working: true });
     show({ onSend });
     expect(pill()).not.toBeNull();
+  });
+
+  it("is spent by any message sent, until the agent has worked", async () => {
+    show();
+    act(() => pill()!.querySelector("button")!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
+    show();
+    expect(pill()).toBeNull();
+    show({ working: true });
+    show();
+    expect(pill()).not.toBeNull();
+  });
+
+  it("has no one-tap send when it is risky, and still fills in", () => {
+    const onSend = vi.fn(async () => true);
+    act(() => root.render(<Composer draftKey="s" placeholder="" suggestion="push to main" suggestionRisky onSend={onSend} />));
+    expect(pill()!.querySelectorAll("button").length).toBe(1);
+    act(() => pill()!.querySelector("button")!.click());
+    expect(host.querySelector("textarea")!.value).toBe("push to main");
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("is not there while the agent works or something is in the box", () => {
@@ -555,12 +590,21 @@ describe("Composer Escape the box uses itself", () => {
     act(() => {
       box().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, ...init }));
     });
-  const menuOpen = () => host.querySelector(".bottom-full") !== null;
+  const menuOpen = () => host.querySelector("[data-slash-palette]") !== null;
 
-  it("closes the / menu without reaching the window", () => {
+  it("closes the / menu without reaching the window", async () => {
     render("a");
     typeInto("/");
-    expect(menuOpen()).toBe(true);
+    await until(() => expect(menuOpen()).toBe(true));
+    escape();
+    expect(menuOpen()).toBe(false);
+    expect(seen).not.toHaveBeenCalled();
+  });
+
+  it("closes it with nothing matching too", async () => {
+    render("a");
+    typeInto("/zzz");
+    await until(() => expect(menuOpen()).toBe(true));
     escape();
     expect(menuOpen()).toBe(false);
     expect(seen).not.toHaveBeenCalled();
@@ -582,7 +626,7 @@ describe("Composer Escape the box uses itself", () => {
 });
 
 describe("sending while another send is in flight", () => {
-  const sendButton = () => host.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-composer.send")}"]`)!;
+  const sendButton = () => host.querySelector<HTMLButtonElement>('button[data-testid="composer-send"]')!;
   const type = (key: string, text: string) => act(() => void sendDraft(key, { type: "replace", text }));
   const click = (el: Element) => act(() => el.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 
@@ -646,5 +690,102 @@ describe("sending while another send is in flight", () => {
       expect(document.activeElement).toBe(other);
       other.remove();
     });
+  });
+});
+
+// #5032: an Agent's model pill sits at the right of the bottom row, before voice and send, and the card is the container
+// whose width it takes its modes from
+describe("the trailing slot", () => {
+  it("draws what it is given right before voice and send, inside the composer container", () => {
+    localStorage.setItem("draft:trailing", "hello"); // a draft: voice is the small icon, send stays
+    act(() => root.render(<Composer draftKey="trailing" placeholder="" onSend={async () => true} footer={<span data-footer />} trailing={<span data-pill />} voice={{ mode: "explain", label: "voice", onClick: () => {} }} />));
+    const pill = host.querySelector("[data-pill]")!;
+    const row = pill.parentElement!;
+    const order = [...row.children].map((c) => (c.matches("[data-pill]") ? "pill" : c.querySelector("[data-footer]") ? "footer" : c.getAttribute("data-testid") ?? c.getAttribute("aria-label") ?? c.tagName));
+    const at = order.indexOf("pill");
+    expect(order[at - 1]).toBe("footer");
+    expect(order.slice(at + 1)).toEqual(["composer-voice", "composer-send"]);
+    expect(row.closest("[class*='@container/composer']")).not.toBeNull();
+  });
+});
+
+// #5325: the "/" palette (cindy's): ranked rows, the keys staying in the box, "No matching commands", and where it is offered
+describe("the / palette", () => {
+  const box = () => host.querySelector("textarea")!;
+  const typeInto = (text: string) =>
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box(), text);
+      box().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  const key = (name: string) =>
+    act(() => {
+      box().dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true }));
+    });
+  const palette = () => host.querySelector("[data-slash-palette]");
+  const rows = () => [...host.querySelectorAll("[role=option]")].map((o) => o.textContent);
+  const focused = () => host.querySelector("[role=option][aria-selected=true]")?.textContent;
+  beforeEach(() => {
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("fine"), addEventListener() {}, removeEventListener() {} }));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("lists the commands ranked for what follows the slash, without the hint line", async () => {
+    render("p");
+    typeInto("/co");
+    await until(() => expect(rows()).toEqual(["compact", "context"]));
+    typeInto("/");
+    expect(rows()).toHaveLength(9); // with /workflows (#5421)
+    expect(palette()!.textContent).not.toContain("Esc");
+  });
+
+  it("moves with ↑ ↓, wrapping, and Enter puts the focused command in the box", async () => {
+    render("p");
+    typeInto("/co");
+    await until(() => expect(focused()).toBe("compact"));
+    key("ArrowUp");
+    expect(focused()).toBe("context");
+    key("ArrowDown");
+    expect(focused()).toBe("compact");
+    key("Enter");
+    expect(box().value).toBe("/compact");
+    expect(palette()).toBeNull();
+  });
+
+  it("Tab picks too, and a text command puts its words in the box", async () => {
+    render("p");
+    typeInto(t("chat-composer.cmd_continue_word"));
+    await until(() => expect(focused()).toBe(t("chat-composer.cmd_continue_word").slice(1)));
+    key("Tab");
+    expect(box().value).toBe(t("chat-composer.cmd_continue_text"));
+  });
+
+  it("says No matching commands, and Enter then sends the words as they are", async () => {
+    const onSend = vi.fn(async () => true);
+    render("p", onSend);
+    typeInto("/review");
+    await until(() => expect(palette()!.textContent).toBe(t("chat-slashpalette.no_match")));
+    await act(async () => {
+      box().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ text: "/review" }));
+  });
+
+  it("closes on a press outside the composer and opens again on typing", async () => {
+    render("p");
+    typeInto("/");
+    await until(() => expect(palette()).not.toBeNull());
+    act(() => document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+    expect(palette()).toBeNull();
+    typeInto("/c");
+    expect(palette()).not.toBeNull();
+  });
+
+  it("is not offered where there are no commands", async () => {
+    act(() => root.render(<Composer draftKey="none" placeholder="" onSend={async () => true} commands={[]} />));
+    typeInto("/");
+    await act(async () => {
+      await new Promise((ok) => setTimeout(ok, 20));
+    });
+    expect(palette()).toBeNull();
   });
 });

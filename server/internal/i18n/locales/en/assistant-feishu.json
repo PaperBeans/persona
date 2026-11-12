@@ -148,5 +148,6 @@
   "source_noreply_choice": "Don't report back to where it was asked",
   "source_report_unreachable": "Couldn't post the outcome where it was asked: {error}",
   "source_report_notice": "Will be posted under the original message in {minutes} minutes: {text} (send /noreply to cancel)",
-  "source_report_notice_chat": "Will be posted under the original message in {minutes} minutes: {text} (reply to this with /noreply to cancel)"
+  "source_report_notice_chat": "Will be posted under the original message in {minutes} minutes: {text} (reply to this with /noreply to cancel)",
+  "answer_below": "Answered below"
 }

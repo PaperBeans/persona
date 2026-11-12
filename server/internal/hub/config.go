@@ -124,12 +124,8 @@ type AssistantProfile struct {
 	// one-time code (`persona-hub manager-code`, `persona-manager join --builtin`): the hub neither starts it nor gives
 	// it a new token (docs/assistant/managers.md "The built-in manager as its own service").
 	Mode string `json:"mode,omitempty"`
-	// PersonaView: the assistant is taught ```persona-view (a View of the extensions' components, #1850) instead of
-	// ```persona-card. Off until every app the user has draws it (UI version 3); a persona-card draws on all of them.
-	PersonaView bool `json:"persona_view,omitempty"`
-	// HTMLViews: cards' html components may run (sandboxed, where a client passed its security checks) and call the
-	// persona.reply / persona.open bridge. Only with PersonaView; nil (absent) is on, false turns them into fallback.
-	HTMLViews *bool `json:"html_views,omitempty"`
+	// assistant.persona_view and assistant.html_views are no longer read: the assistant's cards, HTML ones included,
+	// are always on (#5509, docs/assistant/assistant-views.md "Prompts"); sayRetiredKeys logs a hub.json that still has them.
 }
 
 // Built-in manager modes (AssistantProfile.Mode).
@@ -149,9 +145,6 @@ func (p AssistantProfile) StartsBuiltin() bool {
 func (p AssistantProfile) ServiceBound() bool {
 	return !p.External && p.Mode == AssistantModeService
 }
-
-// HTMLViewsOn is assistant.html_views with its default (on); it means nothing while PersonaView is off.
-func (p AssistantProfile) HTMLViewsOn() bool { return p.HTMLViews == nil || *p.HTMLViews }
 
 type SharingConfig struct {
 	PublicOrigin string `json:"public_origin,omitempty"`
@@ -544,6 +537,43 @@ func writePair(w io.Writer, cfg *Config) {
 	fmt.Fprintf(w, "Server: %s\nToken:  %s\n\n用 Persona App 扫码配对：\n\n", cfg.PublicURL, cfg.Token)
 	qrterminal.GenerateHalfBlock(cfg.PairURL(), qrterminal.L, w)
 	fmt.Fprintf(w, "\nMac 上拷贝这条链接，在 Persona 的「连接 hub」里粘贴：\n%s\n", cfg.PairURL())
+}
+
+// retiredAssistantKeys are hub.json's assistant keys this hub no longer reads (#5509): the assistant's cards, HTML
+// ones included, are always on. A file that still has them works as before.
+var retiredAssistantKeys = []string{"persona_view", "html_views"}
+
+// sayRetiredKeys says once, as the hub starts, which retired keys hub.json still has, so an edit to one is not taken
+// for a switch.
+func (h *Hub) sayRetiredKeys() {
+	if h.cfg == nil || h.cfg.dir == "" {
+		return
+	}
+	b, err := os.ReadFile(filepath.Join(h.cfg.dir, "hub.json"))
+	if err != nil {
+		return
+	}
+	if found := retiredKeysIn(b); len(found) > 0 {
+		h.logf("config: hub.json's %s are no longer read and can be removed: the assistant's cards are always on",
+			strings.Join(found, ", "))
+	}
+}
+
+// retiredKeysIn is each of retiredAssistantKeys hub.json b has, as "assistant.<key>".
+func retiredKeysIn(b []byte) []string {
+	var file struct {
+		Assistant map[string]json.RawMessage `json:"assistant"`
+	}
+	if json.Unmarshal(b, &file) != nil {
+		return nil
+	}
+	var found []string
+	for _, k := range retiredAssistantKeys {
+		if _, ok := file.Assistant[k]; ok {
+			found = append(found, "assistant."+k)
+		}
+	}
+	return found
 }
 
 // sayMovedSections says once, as the hub starts, which of the manager's sections hub.json still has: the hub reads

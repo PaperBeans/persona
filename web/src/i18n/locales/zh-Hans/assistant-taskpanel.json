@@ -6,5 +6,7 @@
   "start_failed": "Agent 没开起来",
   "retry": "重试",
   "remove": "移除任务",
-  "starting": "正在开 Agent，开好以后这里就是它的对话。"
+  "starting": "正在开 Agent，开好以后这里就是它的对话。",
+  "open_in_new_window": "在新窗口打开",
+  "switch_agent": "切换 Agent"
 }

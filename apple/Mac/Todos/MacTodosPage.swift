@@ -28,7 +28,7 @@ struct MacTodosPage: View {
 
     private var allTodos: [TodoItem] {
         let lookup = TodosLogic.makeSessionLookup(AppModel.shared.sessionsNow)
-        return TodosLogic.sortTodos(store.todos, lookup: lookup)
+        return TodosLogic.sortTodos(store.scopedTodos, lookup: lookup)
     }
 
     private var openList: [TodoItem] {
@@ -42,7 +42,7 @@ struct MacTodosPage: View {
     /// The list by status section (docs/assistant/todo-status-sop.md), related to-dos merged into one row.
     private var triaged: TodoTriageResult {
         let lookup = TodosLogic.makeSessionLookup(AppModel.shared.allSessions(inFront: inFront))
-        return TodoTriageLogic.triageTodos(store.todos.filter(matchesQuery), lookup: lookup, now: clock, restored: restored)
+        return TodoTriageLogic.triageTodos(store.scopedTodos.filter(matchesQuery), lookup: lookup, now: clock, restored: restored)
     }
 
     /// A folded section is open when the user opened it, while searching, or (Other open) when nothing above it shows.
@@ -111,7 +111,7 @@ struct MacTodosPage: View {
                 selectedTodoID = openList.first?.id ?? doneList.first?.id
             }
         }
-        .onChange(of: store.todos) { _, todos in
+        .onChange(of: store.scopedTodos) { _, todos in
             // The selected todo can vanish from any path: the row menu, the detail page's delete (its dismiss
             // runs on the page's own stack root and does nothing here), or a push delete from another device.
             // Without this the id keeps pointing at the gone todo and the detail shows its tombstone forever.
@@ -132,7 +132,7 @@ struct MacTodosPage: View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 TodosModeBar(view: $viewMode, mode: $calendarMode)
-                TodoCalendarView(todos: store.todos, mode: $calendarMode, anchor: $calendarAnchor,
+                TodoCalendarView(todos: store.scopedTodos, mode: $calendarMode, anchor: $calendarAnchor,
                                  open: { id in
                                      selectedTodoID = id
                                      calendarDetail = true
@@ -242,7 +242,10 @@ struct MacTodosPage: View {
             .scrollContentBackground(.hidden)
             // Over the list, not a row of it: a sidebar list's row is one line, and the message was cut to it.
             .overlay(alignment: .top) {
-                if openList.isEmpty && doneList.isEmpty {
+                // The hub's merged list has nothing of an assistant that is offline: said so, not offered as a first to-do.
+                if openList.isEmpty && doneList.isEmpty, let offline = model.assistantManagerOffline {
+                    AssistantOfflineNotice(manager: offline)
+                } else if openList.isEmpty && doneList.isEmpty {
                     EmptyStateView(
                         symbol: Theme.Icon.todo,
                         title: isSearching ? String(localized: "No matching to-dos") : String(localized: "No to-dos yet"),

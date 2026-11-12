@@ -94,6 +94,22 @@ describe("Machines", () => {
     expect(alert()).toBeNull();
   });
 
+  // #5494: the grid has three columns from 2xl; md:col-span-2 alone left a full-row item two cells and put the next card beside it.
+  const fullRow = (el: Element | null | undefined) => {
+    expect(el?.classList.contains("col-span-full")).toBe(true);
+    expect(el?.parentElement?.className).toContain("2xl:grid-cols-3");
+  };
+
+  it("spans every column with the error notice and the empty state", async () => {
+    replies = [503];
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    fullRow(alert());
+    const empty = [...host.querySelectorAll("div")].find((d) => d.parentElement?.className.includes("2xl:grid-cols-3") && d.textContent?.includes("看不到"));
+    fullRow(empty);
+    expect(host.innerHTML).not.toMatch(/(?<![\w:-])md:col-span-2/);
+  });
+
   it("calls the offline card's button 重新连接, as the machine's page does (#3634)", async () => {
     fake.machines = [{ id: "mac", name: "电脑 A", online: false }];
     act(() => root.render(<Machines onToggleSidebar={() => {}} />));

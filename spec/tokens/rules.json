@@ -96,6 +96,14 @@
           "level": "warn"
         },
         {
+          "id": "status-backgroundWaiting",
+          "foreground": "status.{mode}.backgroundWaiting.text",
+          "background": "semantic.{style}.{mode}.pageBackground",
+          "minimum": 4.5,
+          "description": "Waiting in the background's words on the page (iOS draws them in the secondary gray)",
+          "level": "warn"
+        },
+        {
           "id": "status-unread",
           "foreground": "status.{mode}.unread.text",
           "background": "semantic.{style}.{mode}.pageBackground",
@@ -199,6 +207,15 @@
           "canvas": "semantic.{style}.{mode}.pageBackground",
           "minimum": 4.5,
           "description": "状态标签小字：透明浅底先叠在页面，再检查正文对比度",
+          "level": "warn"
+        },
+        {
+          "id": "status-backgroundWaiting-tint",
+          "foreground": "status.{mode}.backgroundWaiting.text",
+          "background": "status.{mode}.backgroundWaiting.tint",
+          "canvas": "semantic.{style}.{mode}.pageBackground",
+          "minimum": 4.5,
+          "description": "Waiting in the background's words on its soft fill, the fill laid on the page first",
           "level": "warn"
         },
         {

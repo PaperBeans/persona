@@ -4,11 +4,11 @@
 // is lib/provider-scope.ts; ProviderWizard holds the form and sends it.
 import { useState } from "react";
 import { addableWork, choosable, keyMachines, ownServiceOf, scopeProblem, type ScopeForm, type ScopeView, type Share } from "../../lib/provider-scope";
-import { useStore } from "../../lib/store";
+import { hubHas, useStore } from "../../lib/store";
 import { Switch } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { Segmented } from "../assistant/parts";
-import { CheckMark, Disclosure, Labelled, SecretField } from "./ProviderFields";
+import { CheckMark, Disclosure, KeyField, Labelled } from "./ProviderFields";
 import { t } from "../../i18n";
 
 export function ProviderScope({ scope, setScope, old, kind, agent, assign = false }: {
@@ -22,6 +22,8 @@ export function ProviderScope({ scope, setScope, old, kind, agent, assign = fals
   assign?: boolean;
 }) {
   const machines = useStore((s) => s.machines);
+  // A computer's own key may be a secret provider's reference (docs/extensions/secret-providers.md "Launcher keys").
+  const keyRefs = useStore((s) => hubHas(s.features, "launcher_secret_references"));
   const [keysOpen, setKeysOpen] = useState(false);
   const name = (id: string) => machines.find((m) => m.id === id)?.name || id;
   const problem = scopeProblem(scope);
@@ -105,11 +107,14 @@ export function ProviderScope({ scope, setScope, old, kind, agent, assign = fals
             const removed = scope.remove.includes(id);
             const typed = !!scope.keys[id]?.trim();
             return (
-              <SecretField
+              <KeyField
                 key={id}
                 label={t("settings-providerscope.key_for", { machine: name(id) })}
                 value={scope.keys[id] ?? ""}
                 onChange={(v) => setScope((x) => ({ ...x, keys: { ...x.keys, [id]: v } }))}
+                byReference={!!scope.key_refs?.[id]}
+                stored={old?.machine_key_references?.[id]}
+                onByReference={keyRefs ? (on) => setScope((x) => ({ ...x, key_refs: { ...x.key_refs, [id]: on }, keys: { ...x.keys, [id]: "" } })) : undefined}
                 placeholder={has && !removed ? t("settings-providerscope.replace_key") : t("settings-providerscope.uses_provider_key")}
                 hint={
                   has && !removed && !typed ? (

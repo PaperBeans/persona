@@ -31,18 +31,22 @@ import persona.core.designsystem.icons.PhIcons
 
 /**
  * A status mark: a glowing dot in glass, a dot in brief, a small square holder on the board.
- * Decorative for accessibility; always pair it with visible text.
+ * Decorative for accessibility; always pair it with visible text. [waiting]: the working agents it stands for only wait in
+ * the background, so Glass draws it in that state's lighter tone ([PersonaPalette.backgroundWaiting]) without the darker rim.
  */
 @Composable
-fun JStatusDot(status: Status, modifier: Modifier = Modifier, size: Dp = 8.dp) {
-    val tone = PersonaTheme.palette.status(status)
+fun JStatusDot(status: Status, modifier: Modifier = Modifier, size: Dp = 8.dp, waiting: Boolean = false) {
+    val tone = PersonaTheme.palette.status(status, waiting)
     when (PersonaTheme.style) {
         AppStyle.Glass -> {
             val breath = needsYouBreath(status == Status.NeedsYou && !PersonaTheme.reduceMotion)
+            // the lighter dot keeps its glow as light as itself, and no darker rim
+            val lighter = waiting && status == Status.Working
+            val glow = tone.dot.copy(alpha = if (lighter) tone.dot.alpha * 0.55f else 0.55f)
             Canvas(modifier.size(size).clearAndSetSemantics {}) {
-                drawCircle(Brush.radialGradient(listOf(tone.dot.copy(alpha = 0.55f), Color.Transparent), radius = this.size.minDimension), radius = this.size.minDimension)
+                drawCircle(Brush.radialGradient(listOf(glow, Color.Transparent), radius = this.size.minDimension), radius = this.size.minDimension)
                 drawCircle(tone.dot)
-                drawCircle(tone.text, style = Stroke(1.dp.toPx()))
+                if (!lighter) drawCircle(tone.text, style = Stroke(1.dp.toPx()))
                 breath?.let { drawBreathingRing(tone.dot, this.size.minDimension / 2, it()) }
             }
         }
@@ -182,7 +186,7 @@ fun PendingBadge(status: PendingStatus, modifier: Modifier = Modifier, reason: S
     }
 }
 
-enum class StatusLineKind { Ended, MachineOffline, Submitting, Unconfirmed, NeedsYou, Stopping, Working, Waiting }
+enum class StatusLineKind { Ended, MachineOffline, Submitting, Unconfirmed, NeedsYou, Stopping, Working, Waiting, Processing }
 
 data class StatusLineState(
     val ended: Boolean = false,
@@ -200,6 +204,8 @@ data class StatusLineState(
     val workDetail: String? = null,
     val waiting: Boolean = false,
     val waitingDetail: String? = null,
+    /** Hub receipt only: does not imply that a model or tool has started. */
+    val processing: Boolean = false,
 )
 
 /** Pages show [message] (`message.text()`, or [localizedText]) in their own language. */
@@ -219,7 +225,7 @@ fun resolveStatusLine(state: StatusLineState): StatusLineContent? = with(state) 
         ended || replaced -> line(StatusLineKind.Ended, Status.Offline, if (replaced) R.string.designsystem_line_replaced else R.string.designsystem_line_ended)
         machineOffline -> StatusLineContent(StatusLineKind.MachineOffline, Status.Offline,
             minutes?.let { UiText.Plural(R.plurals.designsystem_line_machine_offline_since, it) } ?: UiText.Res(R.string.designsystem_line_machine_offline))
-        submitting || answering -> line(StatusLineKind.Submitting, Status.Idle, if (answering) R.string.designsystem_line_answering else R.string.designsystem_line_sending)
+        submitting || answering -> line(StatusLineKind.Submitting, Status.Idle, if (answering) R.string.designsystem_line_answering else R.string.designsystem_message_sending)
         unconfirmed -> line(StatusLineKind.Unconfirmed, Status.Unknown, R.string.designsystem_line_unconfirmed)
         pendingRequests > 0 || blocked -> when {
             pendingRequests > 1 -> StatusLineContent(StatusLineKind.NeedsYou, Status.NeedsYou,
@@ -228,6 +234,7 @@ fun resolveStatusLine(state: StatusLineState): StatusLineContent? = with(state) 
             else -> line(StatusLineKind.NeedsYou, Status.NeedsYou, R.string.designsystem_line_needs_you)
         }
         stopping -> line(StatusLineKind.Stopping, Status.Working, R.string.designsystem_line_stopping)
+        processing -> line(StatusLineKind.Processing, Status.Idle, R.string.designsystem_message_processing)
         working -> if (detail != null) line(StatusLineKind.Working, Status.Working, R.string.designsystem_line_working_on, detail) else line(StatusLineKind.Working, Status.Working, R.string.designsystem_line_working)
         waiting -> waitingDetail?.takeIf { it.isNotBlank() }?.let { StatusLineContent(StatusLineKind.Waiting, Status.Waiting, UiText.Plain(it)) }
             ?: line(StatusLineKind.Waiting, Status.Waiting, R.string.designsystem_line_waiting)
@@ -281,7 +288,8 @@ fun StatusLine(
             when {
                 caution -> JIcon(PhIcons.HourglassMedium, null, size = 16.dp, tint = color)
                 style == AppStyle.Brief && line.kind == StatusLineKind.NeedsYou -> Box(Modifier.size(10.dp).clip(CircleShape).background(palette.marker).border(1.5.dp, palette.ink, CircleShape))
-                style == AppStyle.Brief && (line.kind == StatusLineKind.Working || line.kind == StatusLineKind.Stopping) -> JSpinner(Modifier.size(14.dp), stroke = 1.8.dp)
+                line.kind in setOf(StatusLineKind.Submitting, StatusLineKind.Processing) ||
+                    (style == AppStyle.Brief && (line.kind == StatusLineKind.Working || line.kind == StatusLineKind.Stopping)) -> JSpinner(Modifier.size(14.dp), stroke = 1.8.dp)
                 style == AppStyle.Board -> JStatusMark(status, animated = line.kind == StatusLineKind.Working)
                 else -> JStatusDot(status, size = 8.dp)
             }

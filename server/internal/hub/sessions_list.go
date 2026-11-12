@@ -27,6 +27,11 @@ const (
 	// featureSessionsPageCounts: a paged GET /api/v1/sessions takes with_counts=1 and answers with the page plus the
 	// counts ?counts=1 would give for the same filters (pageWithCounts), one read where a refresh took two (#4858).
 	featureSessionsPageCounts = "sessions_page_counts"
+	// featureSessionsHierarchy: a paged GET /api/v1/sessions takes roots=1 (the child sessions folded under a listed
+	// parent left out of the rows and counts, the parents counted by their folded state) and parent_session_id=<sid>
+	// with machine_id (the children folded under that session), docs/protocol/protocol.md "Session hierarchy" (#5120).
+	// An older hub reads neither key, so an app sends them only to a hub that says this.
+	featureSessionsHierarchy = "sessions_hierarchy"
 )
 
 // pageWithCounts is a page with its view's current counts (with_counts=1): what a separate ?counts=1 read with the
@@ -121,7 +126,11 @@ func (h *Hub) indexStampedLocked(mid string, list []proto.Session, stamp bool, m
 		items = make([]sessionlist.Item, len(ids))
 	}
 	for k, i := range rows {
-		items[k] = indexedRow(mid, ids[k], &list[i], stamp, manager, full[list[i].SessionID], items[k])
+		root := list[i].FoldedUnder() // the paged list folds it only under a row it lists (roots, parent_session_id)
+		if !seen[root] {
+			root = ""
+		}
+		items[k] = indexedRow(mid, ids[k], &list[i], stamp, manager, root, full[list[i].SessionID], items[k])
 	}
 	// The machine's manager goes with its batch (?manager=<id>, sessionsManager): the one a kept list is stamped with,
 	// else the one its rows came stamped with (stamped: every row of a machine carries its manager).
@@ -133,11 +142,12 @@ func (h *Hub) indexStampedLocked(mid string, list []proto.Session, stamp bool, m
 	h.listCache.machines[mid] = true
 }
 
-// indexedRow is row's item in the paged index (row stamped with manager when stamp), raw its encoding and indexed what
-// the index holds under id (the zero Item for none). When indexed's Full is raw with the same pane_source, its Summary
-// is what row's is too: the summary is cut from the fields raw encodes. Both are then kept, and the item is unchanged
-// for Replace, rather than marshalled again. The scalars are always read from row.
-func indexedRow(mid, id string, row *proto.Session, stamp bool, manager string, raw json.RawMessage, indexed sessionlist.Item) sessionlist.Item {
+// indexedRow is row's item in the paged index (row stamped with manager when stamp), folded under root ("" for none: a
+// session of the same batch, sessionlist.Fold.Root), raw its encoding and indexed what the index holds under id (the
+// zero Item for none). When indexed's Full is raw with the same pane_source, its Summary is what row's is too: the
+// summary is cut from the fields raw encodes. Both are then kept, and the item is unchanged for Replace, rather than
+// marshalled again. The scalars are always read from row.
+func indexedRow(mid, id string, row *proto.Session, stamp bool, manager, root string, raw json.RawMessage, indexed sessionlist.Item) sessionlist.Item {
 	project := row.RepoRoot
 	if project == "" {
 		project = row.WorkspaceCwd
@@ -153,6 +163,7 @@ func indexedRow(mid, id string, row *proto.Session, stamp bool, manager string, 
 	item := sessionlist.Item{
 		ID: id, Machine: mid, Project: project, Group: group, PaneSource: pane,
 		State: row.State, BackgroundWaiting: row.BackgroundWaiting, Source: row.SourceKind, Provider: row.Agent, UpdatedAt: row.UpdatedAt,
+		Fold: indexedFold(row, root, indexed.Fold),
 	}
 	// What q finds a row by: the fields the apps' own searches read, the branch too (#4770).
 	text := [...]string{row.Title, row.Cwd, row.RepoRoot, row.Branch, row.SpaceName, row.SlotName, row.AgentName, row.LastText}
@@ -175,6 +186,22 @@ func indexedRow(mid, id string, row *proto.Session, stamp bool, manager string, 
 	}{pane})
 	item.SearchText = strings.Join(text[:], "\n")
 	return item
+}
+
+// indexedFold is row's sessionlist.Fold folded under root: nil when it folds under none and shows its own state and
+// background wait (a row without children), else was when that is the same fold, else a new one. Folds are shared
+// between copies of an item and never written in place.
+func indexedFold(row *proto.Session, root string, was *sessionlist.Fold) *sessionlist.Fold {
+	kids := row.Children()
+	fold := sessionlist.Fold{Root: root, State: row.FoldedState(), BackgroundWaiting: row.BackgroundWaiting && kids.Working == 0 && kids.NeedsYou == 0}
+	switch {
+	case fold == sessionlist.Fold{State: row.State, BackgroundWaiting: row.BackgroundWaiting}:
+		return nil
+	case was != nil && *was == fold:
+		return was
+	}
+	kept := fold // only a new fold goes to the heap: &fold would put every row's there
+	return &kept
 }
 
 // paneSourceKey is what runtimeListFields puts between a row's fields and its pane_source value.
@@ -312,14 +339,15 @@ func runtimeSummary(s proto.Session) runtimeRowSummary {
 		SpaceKind: s.SpaceKind, SpaceID: s.SpaceID, SpaceName: s.SpaceName, SpaceIndex: s.SpaceIndex,
 		ParentSpaceID: s.ParentSpaceID, SlotID: s.SlotID, SlotName: s.SlotName, SlotIndex: s.SlotIndex, PaneIndex: s.PaneIndex,
 		WorkspaceID: s.WorkspaceID, TabID: s.TabID, PaneID: s.PaneID,
-		Assistant: s.Assistant, Archived: s.Archived, ArchiveChangedAt: s.ArchiveChangedAt, Space: s.Space,
+		Assistant: s.Assistant, Archived: s.Archived, ArchiveChangedAt: s.ArchiveChangedAt, Space: s.Space, ModelPick: s.ModelPick,
 		Starting: s.Starting, StartError: rowText(s.StartError, startErrorRow(s)), StartedByPersona: s.StartedByPersona,
 		StartErrorCode: s.StartErrorCode, StartErrorArgs: s.StartErrorArgs,
 		ReadOnlyReason: rowText(s.ReadOnlyReason, 180), Origin: s.Origin, OriginRef: s.OriginRef, OpenedBy: s.OpenedBy,
 		TurnError: rowText(s.TurnError, 180), TurnErrorKind: s.TurnErrorKind, TurnErrorCode: s.TurnErrorCode,
 		TurnErrorResetsAt: s.TurnErrorResetsAt, TurnErrorResumes: s.TurnErrorResumes,
 		PendingInteractions: s.PendingInteractions, Rev: s.Rev, Quiet: s.Quiet,
-		Model: s.Model, ContextTokens: s.ContextTokens, ContextWindow: s.ContextWindow,
+		Model: s.Model, Effort: s.Effort, ContextTokens: s.ContextTokens, ContextWindow: s.ContextWindow,
+		Hierarchy: s.Hierarchy, // folded_under, children, started_at: the child cards and the parent's state (#5120)
 	}
 	if s.Work != nil {
 		out.Work = &proto.WorkState{Phase: s.Work.Phase, On: s.Work.On, Line: rowText(s.Work.Line, 180),
@@ -567,7 +595,7 @@ func ownPage(index *sessionlist.Index, opts sessionlist.Options, own []string, p
 		return json.Unmarshal([]byte(id), &k) != nil || !keep(k[0])
 	})
 	counts, err := ownCounts(index, sessionlist.Options{Since: opts.Since, State: opts.State, Project: opts.Project, Group: opts.Group,
-		Source: opts.Source, Provider: opts.Provider, Q: opts.Q, Manager: opts.Manager}, own)
+		Source: opts.Source, Provider: opts.Provider, Q: opts.Q, Manager: opts.Manager, Roots: opts.Roots}, own)
 	if err != nil {
 		return sessionlist.Page{}, err
 	}

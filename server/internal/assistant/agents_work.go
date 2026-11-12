@@ -211,10 +211,17 @@ type workBook struct {
 	generation   map[[2]string]uint64          // user activity invalidates in-flight triage
 	tried        map[[2]string]triedTurn       // the turn a triage was last attempted on, and when
 	sent         map[[2]string]time.Time       // when the manager itself last sent the session something
-	seen         map[[2]string]time.Time       // the turn whose first look was recorded
-	started      map[[2]string]time.Time       // local time of the latest turn-start event
-	viewed       map[[2]string]bool            // a view since that event
-	approved     map[[2]string]approval        // a risky next step the user said yes to, for the wait it ends
+	// told is when anything of this manager last sent the session a message (Service.call), the triage's own sends
+	// and every other (a supervisor's rework, a task's follow-up, the assistant's session tool); would is the triage
+	// action that alone would have gone on with the session's last stop had its switch been on (actOn). Both are for
+	// the weekly setup block's counts (setup_suggest.go) and are not kept over a restart: what they cannot say is
+	// not counted.
+	told     map[[2]string]time.Time
+	would    map[[2]string]string
+	seen     map[[2]string]time.Time // the turn whose first look was recorded
+	started  map[[2]string]time.Time // local time of the latest turn-start event
+	viewed   map[[2]string]bool      // a view since that event
+	approved map[[2]string]approval  // a risky next step the user said yes to, for the wait it ends
 	// answering marks cards whose answer is being delivered to the agent: a repeated callback in the send window
 	// (a redelivered webhook, a second tap, phone and watch together) is the same answer, not a second one.
 	answering map[string]bool
@@ -243,6 +250,8 @@ func (b *workBook) init() {
 		b.generation = map[[2]string]uint64{}
 		b.tried = map[[2]string]triedTurn{}
 		b.sent = map[[2]string]time.Time{}
+		b.told = map[[2]string]time.Time{}
+		b.would = map[[2]string]string{}
 		b.seen = map[[2]string]time.Time{}
 		b.started = map[[2]string]time.Time{}
 		b.viewed = map[[2]string]bool{}

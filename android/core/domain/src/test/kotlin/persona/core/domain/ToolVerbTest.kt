@@ -125,6 +125,7 @@ class ToolVerbTest {
         assertEquals("macbook · open()", subject("mcp__persona__browser_run", """{"machine":"macbook","script":"  open()\nnext()"}"""))
         assertEquals("calendar events", subject("mcp__persona__phone_calendar_events", "{}"))
         assertEquals("send", subject("mcp__persona__mail_send", "{}"))
-        assertEquals("", subject("mcp__github__create_issue", """{"title":"x"}"""))
+        // Another server's tool: the field that says the most (iOS `ToolNaming.subject`, #4339 C1).
+        assertEquals("x", subject("mcp__github__create_issue", """{"title":"x"}"""))
     }
 }

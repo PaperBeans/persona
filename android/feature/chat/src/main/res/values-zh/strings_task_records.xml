@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_exchange_header">%1$s → %2$s</string>
+    <string name="chat_exchange_me">我</string>
+    <string name="chat_exchange_interrupted">已打断</string>
+    <string name="chat_report_question">问 Persona：%1$s</string>
+    <string name="chat_report_blocked">卡住了：%1$s</string>
+    <string name="chat_report_done">说做完了：%1$s</string>
+    <string name="chat_report_step_of">第 %1$d/%2$d 步 · %3$s</string>
+    <string name="chat_report_step">第 %1$d 步 · %2$s</string>
+    <string name="chat_supervision_record">督办记录</string>
+    <string name="chat_supervision_record_live">督办记录 · 处理中</string>
+    <string name="chat_tasks_message_edit">改一下</string>
+    <string name="chat_tasks_message_edit_done">改好了</string>
+</resources>

@@ -68,12 +68,13 @@ class HttpExtensionManagement internal constructor(
     /** The hub answers only under `/api/v1/plugins` (before #1844). */
     private val legacy: Boolean = false,
     private val streamConnection: OkHttpHubConnection? = null,
+    private val iconBase: () -> String? = { streamConnection?.route?.value?.endpoint?.url },
 ) : ExtensionManagement {
     override val nativeStream = streamConnection?.let { connection ->
         extensionStreamBindings(connection) { "paired" to "primary" }
     } ?: flowOf(null)
     constructor(connection: OkHttpHubConnection, available: Flow<Boolean>, legacy: Boolean = false) : this({ path, method, body ->
-        connection.request(path, method, body)
+        connection.request(path, method, body, buffered = !persona.core.contracts.api.ExtensionIconPath.matches(path))
     }, available, legacy = legacy, streamConnection = connection)
 
     private val base = if (legacy) "api/v1/plugins" else "api/v1/extensions"
@@ -141,6 +142,41 @@ class HttpExtensionManagement internal constructor(
     override suspend fun uiAction(
         extension: String, ui: String, action: String, context: ExtensionUiContext?, state: String?, values: Map<String, String>?,
     ): ExtensionUiResult = read(uiCall(extension, ui, uiBody(context, state, action, values)), ExtensionUiResult.serializer())
+
+    /** Resolve only an exact icon route on the current connection, retaining its raw path for validation. */
+    override fun iconPath(value: String): String? {
+        if (persona.core.contracts.api.ExtensionIconPath.matches(value)) return value
+        // URI keeps raw dot/percent segments intact. Do not authorize a URL after normalization.
+        return runCatching {
+            val target = java.net.URI(value)
+            val base = java.net.URI(iconBase() ?: return null)
+            fun port(uri: java.net.URI) = if (uri.port != -1) uri.port else if (uri.scheme == "https") 443 else 80
+            if (target.scheme !in setOf("https", "http") || target.scheme != base.scheme || target.host == null ||
+                !target.host.equals(base.host, ignoreCase = true) || port(target) != port(base) ||
+                target.rawUserInfo != null || target.rawFragment != null) return null
+            val prefix = base.rawPath.orEmpty().trimEnd('/')
+            val raw = target.rawPath.orEmpty() + (target.rawQuery?.let { "?$it" } ?: "")
+            if (!raw.startsWith("$prefix/api/v1/")) return null
+            raw.removePrefix(prefix).takeIf(persona.core.contracts.api.ExtensionIconPath::matches)
+        }.getOrNull()
+    }
+
+    /** Catalog icons have their own allowlist; the signed ui.image route stays unchanged. */
+    override suspend fun icon(path: String): ByteArray = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        require(persona.core.contracts.api.ExtensionIconPath.matches(path)) { "Invalid extension icon path" }
+        request(path, "GET", null).use { response ->
+            if (!response.isSuccessful) throw HubFailure.from(response)
+            val type = response.header("Content-Type").orEmpty().substringBefore(';').trim().lowercase()
+            if (type != "image/png") throw HubFailure(HubError.Protocol)
+            val body = response.body ?: throw HubFailure(HubError.Protocol)
+            if (body.contentLength() > MaxIconBytes) throw HubFailure(HubError.Protocol)
+            body.source().use { source ->
+                source.request(MaxIconBytes + 1L)
+                if (source.buffer.size > MaxIconBytes) throw HubFailure(HubError.Protocol)
+                source.buffer.readByteArray().takeIf { it.isNotEmpty() } ?: throw HubFailure(HubError.Protocol)
+            }
+        }
+    }
 
     /**
      * A picture the extension serves (UI version 6) at the path the hub signed for it. Only a path of the hub's own image
@@ -425,6 +461,7 @@ class HttpExtensionManagement internal constructor(
         fun isImagePath(path: String?): Boolean = path != null && ImagePath.matches(path)
         private val ImageTypes = setOf("image/png", "image/jpeg", "image/webp", "image/gif")
         /** The hub takes at most 4 MB from an extension; a little room over it. */
+        private const val MaxIconBytes = 2L * 1024 * 1024
         const val MaxImageBytes = 5L * 1024 * 1024
 
         /** This phone's time zone (IANA) and the app's language with the phone's region (a BCP 47 tag), the platform and the UI version it draws. */

@@ -1,0 +1,10 @@
+{
+  "latest": "Latest speed",
+  "history": "Generation speed history",
+  "description": "Latest generation interval. Excludes tools and waits.",
+  "unit": "tok/s",
+  "average": "Turn average",
+  "output": "Output",
+  "peak": "Peak",
+  "close": "Close"
+}

@@ -182,6 +182,8 @@ private fun ChatMarkdownBody(text: String, id: String, bodyStyle: TextStyle, col
  */
 @Composable
 internal fun CodeText(text: String, language: String = "", syntax: Boolean = false, bar: Boolean = false) {
+    // In a picture the whole code shows, with nothing to tap (iOS's card theme).
+    if (LocalInPicture.current) return CodeBody(text, language, syntax && language.isNotBlank())
     var expanded by remember(text) { mutableStateOf(false) }
     val preview = remember(text, expanded) { if (expanded) text else text.lineSequence().take(40).joinToString("\n") }
     val copy = rememberCopy()
@@ -202,6 +204,9 @@ internal fun CodeText(text: String, language: String = "", syntax: Boolean = fal
         }
     }
 }
+
+/** True where messages are drawn into a picture (Share's card, [MessageShareCard]): code blocks lose their Copy bar and "Show all". */
+internal val LocalInPicture = staticCompositionLocalOf { false }
 
 /** A code block's code: links in it tappable, coloured by [language] when [colour]; [header] inside its box, on top. */
 @Composable
@@ -286,6 +291,8 @@ internal fun ChatLineContent(
     hideTaskPrompts: Boolean = false,
     /** This line is the turn's error and the hub named its fix ([TurnErrorFix]): an answer, a notice or an API error draws the card. */
     turnFix: TurnErrorFix? = null,
+    /** Opens the session's terminal: the live work line's mark on Glass ([ChatTerminalPlaces.onWorkLine]). */
+    onTerminal: (() -> Unit)? = null,
 ) {
     val res = LocalResources.current
     if (turnFix != null) {
@@ -315,7 +322,7 @@ internal fun ChatLineContent(
                     MessageContent(it, false, textUpdates[it.id], boxed = true, hideCloseout = hideCloseout)
                 }
             }
-            "thinking" -> if (!style.hideThoughts) ThoughtContent(line.row.item?.text.orEmpty(), line.id, style.collapseThoughts)
+            "thinking" -> if (!style.hidesThoughts()) ThoughtContent(line.row.item?.text.orEmpty(), line.id, style.collapseThoughts)
             "image" -> line.row.item?.item?.let { ChatPicture(session, it, loader) }
             "recap" -> line.row.item?.item?.let { RecapLine(listOf(it)) }
             else -> line.row.item?.item?.refusal?.let { RefusalNotice(it) }
@@ -324,6 +331,7 @@ internal fun ChatLineContent(
                 ?: ChatSystemLine(line.row.item?.text.orEmpty(), line.row.item?.task?.failed == true)
         }
         is ChatLine.Recaps -> RecapLine(line.items.map { it.item })
+        is ChatLine.Viewed -> ViewedImagesRow(line.images, session, loader)
         is ChatLine.Extra -> {
             val round = line.payload as? persona.core.domain.tasks.BackgroundRound
             if (round != null) BackgroundRoundLine(round, onToggle) else AssistantExtraLine(line.payload, LocalAssistantTaskHost.current)
@@ -333,23 +341,33 @@ internal fun ChatLineContent(
             line.images.forEach { ChatPicture(session, it.item, loader, alignEnd = true) }
         }
         is ChatLine.Work -> Column(Modifier.fillMaxWidth()) {
-            // No live preview: ordinary tools, thoughts and intermediate text stay inside the expandable summary.
-            if (style.compactToolSummary) AssistantWorkSummary(line, onToggle)
+            // No live preview: ordinary tools, thoughts and intermediate text stay inside the expandable summary. On Glass
+            // Persona's work line is the Agent chat's, ticking while it runs (iOS has one `WorkLine`, #4339 C13).
+            if (style.compactToolSummary && PersonaTheme.style != AppStyle.Glass) AssistantWorkSummary(line, onToggle)
             else {
                 // Waiting on you, the turn stays the live one (it folds and opens as while it runs), but its line says it
                 // waits: no "Working", no clock, no spinner, as the header says "Waiting for you".
                 val waits = waiting && line.live
                 val now by rememberNow(1_000, enabled = line.live && !waits)
                 WorkGroup(workSummary(res, line, recordedDuration, now.takeIf { line.live }, waiting = waits), line.open,
-                    { onToggle(line.id) }, running = line.live && !waits) {}
+                    { onToggle(line.id) }, running = line.live && !waits,
+                    onTerminal = onTerminal?.takeIf { ChatTerminalPlaces.onWorkLine(line.live, PersonaTheme.style) },
+                    terminalLabel = stringResource(R.string.chat_screen_open_terminal)) {}
             }
         }
-        is ChatLine.Step -> WorkStep(line.step, session, loader, onFold, folding, foldErrors, onFullText, style, textUpdates, workRunning, lastWorkStep, plan)
+        // Every open step sits on the work line's rail, the plan and its items too (Glass, iOS's timeline, #4339 C5).
+        is ChatLine.Step -> Box(Modifier.fillMaxWidth().workRail(lastWorkStep)) {
+            WorkStep(line.step, session, loader, onFold, folding, foldErrors, onFullText, style, textUpdates, workRunning, lastWorkStep, plan)
+        }
         is ChatLine.End -> TimelineMark(pluralStringResource(R.plurals.chat_content_collapse_steps, line.count, line.count),
             Modifier.heightIn(min = 44.dp).clickable(role = Role.Button) { onToggle(line.groupId) })
         is ChatLine.Wakes -> ChatSystemLine(pluralStringResource(R.plurals.chat_content_wakes, line.turn.wakes.size, line.turn.wakes.size))
     }
 }
+
+/** Persona's thoughts stay out of its conversation, except on Glass: there its work line counts them and opens to them, as iOS's does. */
+@Composable
+private fun ChatRenderStyle.hidesThoughts(): Boolean = hideThoughts && PersonaTheme.style != AppStyle.Glass
 
 @Composable
 private fun AssistantWorkSummary(line: ChatLine.Work, onToggle: (String) -> Unit) {
@@ -398,6 +416,11 @@ private fun WorkStep(step: WorkItem, session: SessionKey, loader: ImageLoader, o
                     return
                 }
             }
+            // Glass draws a subagent as its task card, running or done (#5045, DESIGN_SYSTEM.md 4.7 "Task cards").
+            if (PersonaTheme.style == AppStyle.Glass && Subagents.isAgent(call)) {
+                SubagentCard(call, live = running, assistant = style == ChatRenderStyle.Assistant)
+                return
+            }
             var open by remember(call.id) { mutableStateOf(false) }
             val diff = remember(call.use.item) { toolDiff(call.use.item) }
             val todos = remember(call.use.item) { todoEntries(call.use.item) }
@@ -427,13 +450,14 @@ private fun WorkStep(step: WorkItem, session: SessionKey, loader: ImageLoader, o
                     },
                     last = last, mono = presentation.mono, added = diff?.added ?: 0, removed = diff?.removed ?: 0,
                     onClick = { open = !open })
-                if (todos != null) TodoList(todos, call.failed)
+                if (todos != null) Box(Modifier.workDetail()) { TodoList(todos, call.failed) }
                 if (call.name == "Task" || call.name == "Agent") SubagentEntry(call.use.item.toolUseId)
                 if (call.failed && !open && call.result?.task?.kind != "agent") call.result?.text?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, maxLines = 3, overflow = TextOverflow.Ellipsis, color = PersonaTheme.palette.danger.text,
+                    Text(it, Modifier.workDetail(), maxLines = 3, overflow = TextOverflow.Ellipsis, color = PersonaTheme.palette.danger.text,
                         style = PersonaTheme.type.caption)
                 }
-                if (open) Column(Modifier.fillMaxWidth().padding(start = Tokens.Space.m),
+                // Right of the rail on Glass, under the step's words (iOS's timeline, `detailLeading`).
+                if (open) Column(Modifier.fillMaxWidth().workDetail(Tokens.Space.m),
                     verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                     if (diff != null) {
                         toolPath(call.use.item)?.let { DiffHeader(it, diff.added, diff.removed) }
@@ -471,7 +495,7 @@ private fun WorkStep(step: WorkItem, session: SessionKey, loader: ImageLoader, o
 
         is WorkItem.Narration -> MessageContent(step.item.item, false, textUpdates[step.item.id])
         is WorkItem.Thought -> if (step.item.kind == "thinking") {
-            if (!style.hideThoughts) ThoughtContent(textUpdates[step.item.id]?.text ?: step.item.text.orEmpty(), step.item.id, style.collapseThoughts, last)
+            if (!style.hidesThoughts()) ThoughtContent(textUpdates[step.item.id]?.text ?: step.item.text.orEmpty(), step.item.id, style.collapseThoughts, last)
         }
         else step.item.compaction?.let { TimelineMark(it.label.text()) }
             ?: step.item.takeIf { it.task != null }?.let { TaskNoteLine(it, last, onFullText) }
@@ -497,10 +521,15 @@ private fun PlanStep(plan: LinePlan, running: Boolean, nested: Boolean = false) 
 private fun userPictures(images: List<Item>, session: SessionKey, loader: ImageLoader): (@Composable () -> Unit)? =
     if (images.isEmpty()) null else ({ images.forEach { image -> ChatPicture(session, image, loader, alignEnd = true) } })
 
-/** A message not in the transcript yet (the outbox): no long-press menu, its own status line has the actions. */
+/**
+ * A message not in the transcript yet (the outbox): its status line has the delivery actions; with its [pending] state its long
+ * press opens the menu for a message not sent ("Copy", "Select", "Share", "Delete"), without one none.
+ */
 @Composable
-internal fun UserBubble(text: String) {
-    MergedUserBubble(listOf(Item("pending", role = "user", kind = "text", text = text)), menu = false)
+internal fun UserBubble(text: String, id: String = "pending", pending: persona.core.contracts.api.DeliveryState? = null,
+    faded: Boolean = false, leading: (@Composable () -> Unit)? = null) {
+    MergedUserBubble(listOf(Item(id, role = "user", kind = "text", text = text)), menu = pending != null, pending = pending,
+        faded = faded, leading = leading)
 }
 
 @Composable

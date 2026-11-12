@@ -26,23 +26,5 @@
     <string name="chat_rewind_running">巻き戻し中…</string>
     <string name="chat_tool_open_subagent">サブエージェントを見る</string>
     <string name="chat_tool_no_answer">回答なし</string>
-    <string name="chat_computer_script">スクリプトを実行</string>
-    <string name="chat_computer_script_named">スクリプトを実行：%1$s</string>
-    <string name="chat_computer_somewhere">ある場所</string>
-    <string name="chat_computer_click">%1$s をクリック</string>
-    <string name="chat_computer_double_click">%1$s をダブルクリック</string>
-    <string name="chat_computer_right_click">%1$s を右クリック</string>
-    <string name="chat_computer_type">「%1$s」を入力</string>
-    <string name="chat_computer_set_value">「%1$s」を入力欄に設定</string>
-    <string name="chat_computer_press">%1$s を押す</string>
-    <string name="chat_computer_scroll">スクロール</string>
-    <string name="chat_computer_drag">ドラッグ</string>
-    <string name="chat_computer_launch">%1$s を開く</string>
-    <string name="chat_computer_front">%1$s に切り替え</string>
-    <string name="chat_computer_window">ウィンドウを見る</string>
-    <string name="chat_computer_screenshot">スクリーンショット</string>
-    <string name="chat_computer_tree">画面の内容を見る</string>
-    <string name="chat_computer_zoom">拡大して見る</string>
-    <string name="chat_computer_check">確認</string>
-    <string name="chat_computer_space">スペース</string>
+    <string name="chat_computer_pill_opens">ステップを表示</string>
 </resources>

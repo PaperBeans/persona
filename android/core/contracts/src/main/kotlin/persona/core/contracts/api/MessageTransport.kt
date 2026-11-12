@@ -18,6 +18,9 @@ data class MessageRequest(
      * until the hub answered an attempt as not delivered, then a new one (the hub replays the first answer for an id).
      */
     val opId: String = clientMessageId,
+    /** Persona conversation overrides carried by this message; absent fields keep the hub's default. */
+    val launcher: String? = null,
+    val model: String? = null,
 ) {
     val headers: Map<String, String> get() = ProtocolCompatibility.operationHeaders(opId)
 }

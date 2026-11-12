@@ -1,20 +1,36 @@
 import SwiftUI
 
 /// Meetings on the watch's home list (docs/apple/recording.md「Apple Watch」): Meeting Recording, one tap to record the meeting
-/// in the room; while something records, the same card opens it. Then the meetings' minutes, once the phone relays some.
+/// in the room; while something records, the same card opens it. While all-day recording runs it is Mark Meeting
+/// instead: one microphone, so the meeting is marked in the day (docs/assistant/day-recap.md). Then the meetings'
+/// minutes, once the phone relays some.
 struct WatchMeetingEntries: View {
     @Environment(WatchModel.self) private var model
     @State private var capture = RecordingCapture.shared
+    @State private var allDay = WatchAllDay.shared
     var open: () -> Void
 
     var body: some View {
-        Button(action: open) {
-            Label(capture.state == .idle ? String(localized: "Meeting Recording") : String(localized: "Recording… Open"),
-                  systemImage: Theme.Icon.recording)
-                .font(Theme.Font.secondaryMedium).lineLimit(1)
+        if capture.allDay {
+            Button { allDay.markMeeting() } label: {
+                VStack(alignment: .leading, spacing: Theme.Watch.lineSpacing) {
+                    Label("Mark Meeting", systemImage: Theme.Icon.meetingMark).font(Theme.Font.secondaryMedium).lineLimit(1)
+                    if allDay.feedback == .meetingMarked {
+                        Text("Meeting marked").font(Theme.Font.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .watchCard()
+            .accessibilityIdentifier("watch-meeting-mark")
+        } else {
+            Button(action: open) {
+                Label(capture.state == .idle ? String(localized: "Meeting Recording") : String(localized: "Recording… Open"),
+                      systemImage: Theme.Icon.recording)
+                    .font(Theme.Font.secondaryMedium).lineLimit(1)
+            }
+            .watchCard()
+            .accessibilityIdentifier("watch-meeting-recording")
         }
-        .watchCard()
-        .accessibilityIdentifier("watch-meeting-recording")
         if !model.minutes.meetings.isEmpty {
             NavigationLink { WatchMinutesList() } label: {
                 Label("Meeting Minutes", systemImage: Theme.Icon.minutes).font(Theme.Font.secondaryMedium).lineLimit(1)

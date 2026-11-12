@@ -15,6 +15,7 @@ import persona.core.domain.lines.LineOptions
 import persona.core.domain.lines.ChatLine
 import persona.core.domain.lines.chatLines
 import persona.core.domain.lines.isLiveStatus
+import persona.core.domain.lines.placeFailed
 import java.time.Instant
 import persona.core.domain.lines.Fold as LineFold
 import persona.core.domain.lines.TaskNote as LineTask
@@ -222,7 +223,7 @@ internal class SyncDevice(val name: String, private val run: SyncRun, private va
 
     // ── What it drew ──
 
-    /** The chat page as ChatScreen draws it: the transcript's lines, then the outbox's bubbles; the cards; the state. */
+    /** The chat page as ChatScreen draws it: lines, with a failed send before the first line written after it. */
     fun view(): SyncView {
         val items = snapshot.items
         val streaming = snapshot.streamingItemIds
@@ -231,15 +232,19 @@ internal class SyncDevice(val name: String, private val run: SyncRun, private va
         // ChatTimeline.lines: no turn_duration lines; the page follows the latest (no frozen window, no open work).
         val lines = chatLines(items.filter { it.kind != "turn_duration" }.map(::lineItem),
             LineOptions(live = isLiveStatus(row?.status))).lines
+        val bubbles = chatBubbles(sender.outbox.value, key, items)
+        val writtenAt = disk.outbox.entries.value.associate { it.clientMessageId to it.createdAt }
+        val placed = placeFailed(lines, bubbles, writtenAt)
+        fun bubble(message: persona.core.contracts.api.OutboxMessage) =
+            SyncView.Message("user", message.text, if (message.state in FAILED) "failed" else "pending")
         for (line in lines) {
+            placed.before[line.id].orEmpty().forEach { out += bubble(it) }
             val item = (line as? ChatLine.Row)?.row?.takeIf { it.type == "user" || it.type == "reply" }?.item?.item ?: continue
             if (item.id in streaming) continue
             out += if (item.role == "user") SyncView.Message("user", item.text.orEmpty(), "shown")
                 else SyncView.Message("agent", item.text.orEmpty(), null)
         }
-        // Below every line (ChatScreen's list starts with them, from the bottom).
-        for (bubble in chatBubbles(sender.outbox.value, key, items))
-            out += SyncView.Message("user", bubble.text, if (bubble.state in FAILED) "failed" else "pending")
+        placed.rest.forEach { out += bubble(it) }
         val cards = taps.shown(interactions.pending.value).filter { it.sessionKey == key }
             .associate { it.id to if (taps.answerable(it, clock())) "open" else "answering" }
         val live = items.firstOrNull { it.id in streaming }?.text
@@ -366,5 +371,7 @@ internal class HubReply(reply: SyncReply) : java.io.IOException(
     override val status: Int? = reply.status.takeUnless { reply.cut }
     override val code: String? = reply.body.str("code").takeUnless { reply.cut }
     val body = reply.body
-    val cutOff = reply.cut || reply.status in setOf(502, 503, 504)
+    /** As HubChatTransport.cutOff: a 5xx from something in front of the hub; the hub's own (a code, `delivered`) is an answer. */
+    val cutOff = reply.cut || reply.status in setOf(502, 503, 504) &&
+        reply.body.str("code").isNullOrEmpty() && reply.body["delivered"] == null
 }

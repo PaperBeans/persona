@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api";
 import {
-  actUI, applyBadge, barSpans, blocks, chartExtent, compactNumber, edgeLabels, extensionSettingsHref, fieldValues, inboxItemPlace, inboxSourceItem, isHttps, isUnsupported, labelWidth, linear, niceTicks, numberProblem, outcome,
-  percent, placesOf, pointText, readView, refreshDelay, renderUI, seriesColors, submitValues, thinLabels, toneOf, uiContext, uiIcon, uiPlaces, UI_VERSION, type UIPlace, type UIView,
+  actUI, applyBadge, askText, barSpans, blocks, chartExtent, compactNumber, edgeLabels, extensionSettingsHref, fieldValues, inboxItemPlace, inboxSourceItem, isHttps, isUnsupported, labelWidth, linear, niceTicks, numberProblem, outcome,
+  percent, placesOf, pointText, readView, refreshDelay, renderUI, seriesColors, stackedShare, submitValues, thinLabels, toneOf, uiContext, uiIcon, uiPlaces, UI_VERSION, type UIPlace, type UIView,
 } from "./extension-ui";
 
 // The hub's features as the extension routes read them (lib/extension-api.ts): a hub with the new routes, unless a test
@@ -227,6 +227,18 @@ describe("收件箱条目（inbox_item）", () => {
     expect(outcome(src)).not.toHaveProperty("source"); // not drawn for an inbox item: nothing opens
     expect(outcome({ open_url: "https://example.com/c" }, "lark:F1:1051")).toEqual({ view: undefined, reload: false, toast: undefined, url: "https://example.com/c" });
   });
+  it("takes persona://ask only from the subscription pages, and sends the assistant's name to them (#5278)", () => {
+    const link = "persona://ask?text=" + encodeURIComponent("<persona-context kind=\"context\" title=\"Source\" url=\"\">\nconnector: apps\n</persona-context>\n\nHelp me");
+    expect(askText(link)).toBe("<persona-context kind=\"context\" title=\"Source\" url=\"\">\nconnector: apps\n</persona-context>\n\nHelp me");
+    for (const bad of ["persona://ask?text=", "persona://ask?text=%20", "persona://ask/x?text=a", "persona://asks?text=a", "https://example.com/ask?text=a", "persona://ask?text=" + "a".repeat(8001)]) {
+      expect(askText(bad)).toBeUndefined();
+    }
+    expect(outcome({ open_url: link }, undefined, "-subscriptions")).toHaveProperty("ask");
+    expect(outcome({ open_url: link }, undefined, "example-gateway")).not.toHaveProperty("ask"); // an extension can't send as the user
+    expect(outcome({ open_url: link })).not.toHaveProperty("ask");
+    expect(uiContext({ assistant: "Claude" })).toMatchObject({ assistant: "Claude" });
+    expect(uiContext()).not.toHaveProperty("assistant");
+  });
   it("opens an extension's own settings in the app (persona://settings/extensions/<id>)", () => {
     expect(extensionSettingsHref("persona://settings/extensions/example-gateway")).toBe("/settings?tab=extensions&extension=example-gateway");
     expect(extensionSettingsHref("persona://settings/extensions/a%20b")).toBe("/settings?tab=extensions&extension=a%20b");
@@ -326,5 +338,31 @@ describe("图", () => {
     expect(seriesColors([{ points: [] }, { tone: "positive", points: [] }, { points: [] }, { tone: "pink" as never, points: [] }, { points: [] }, { points: [] }, { points: [] }])).toEqual([
       "var(--series-1)", "var(--green)", "var(--series-2)", "var(--ink-3)", "var(--series-3)", "var(--series-4)", "var(--series-1)",
     ]);
+  });
+});
+
+describe("单类目的 stacked bar 画横向分段条（#5386）", () => {
+  const onePoint = (name: string, value: number) => ({ name, points: [{ label: "今天", value }] });
+  it("splits one category's stacked bar into shares adding up to 1", () => {
+    const shares = stackedShare({ kind: "bar", stacked: true, series: [onePoint("午餐", 300), onePoint("加餐", 600), onePoint("还能吃", 100)] });
+    expect(shares?.map((p) => p.ratio)).toEqual([0.3, 0.6, 0.1]);
+    expect(shares?.map((p) => p.series)).toEqual([0, 1, 2]);
+  });
+  it("keeps columns for a stacked bar with several categories", () => {
+    const twoDays = [
+      { name: "午餐", points: [{ label: "周一", value: 300 }, { label: "周二", value: 320 }] },
+      { name: "加餐", points: [{ label: "周一", value: 600 }, { label: "周二", value: 580 }] },
+    ];
+    expect(stackedShare({ kind: "bar", stacked: true, series: twoDays })).toBeNull();
+  });
+  it("stays a column when it is not stacked, is a line, holds a negative, or totals zero", () => {
+    expect(stackedShare({ kind: "bar", stacked: false, series: [onePoint("a", 100), onePoint("b", 50)] })).toBeNull();
+    expect(stackedShare({ kind: "line", stacked: true, series: [onePoint("a", 100)] })).toBeNull();
+    expect(stackedShare({ kind: "bar", stacked: true, series: [onePoint("a", 100), onePoint("b", -50)] })).toBeNull();
+    expect(stackedShare({ kind: "bar", stacked: true, series: [onePoint("a", 0), onePoint("b", 0)] })).toBeNull();
+    expect(stackedShare({ kind: "bar", stacked: true, series: [] })).toBeNull();
+  });
+  it("keeps a zero-value part aligned with the other shares", () => {
+    expect(stackedShare({ kind: "bar", stacked: true, series: [onePoint("a", 0), onePoint("b", 100)] })?.map((p) => p.ratio)).toEqual([0, 1]);
   });
 });

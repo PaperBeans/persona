@@ -6,7 +6,7 @@ import Observation
 /// Supports 404 gracefully (older hubs without todos support: hides entrance, no error).
 @MainActor @Observable
 final class TodoStore {
-    static let shared = TodoStore()
+    static let shared = TodoStore(managers: .live)
 
     private(set) var todos: [TodoItem] = [] {
         didSet {
@@ -32,14 +32,66 @@ final class TodoStore {
     @ObservationIgnored private var lastPushed: [String: TodoItem]
     @ObservationIgnored private let cacheWriter: (@MainActor ([TodoItem]) -> Void)?
     @ObservationIgnored private let hubListChanged: @MainActor () -> Void
+    @ObservationIgnored private let managers: Managers
     @ObservationIgnored private let saver = Debouncer(.seconds(1))
     private static let stateName = "todo-items"
+
+    /// Whose a to-do is on a hub with several managers (docs/assistant/managers.md "Pages"): the list is the hub's merged
+    /// one, each to-do stamped with its `manager`; the pages list the current assistant's, a new one is made for it, and
+    /// a change to one goes to its own manager.
+    struct Managers {
+        /// The current assistant's scope; nil with one manager (nothing is filtered or named).
+        var scope: @MainActor () -> AssistantScope?
+        /// The manager a request about a thing stamped with one names (`AppModel.itemManager`): none for the default's.
+        var naming: @MainActor (String?) -> String?
+        /// Whether the hub answered its roster in this run (`AppModel.rosterAsked`): before it has, a new to-do names
+        /// no manager (`AppModel.namedAssistant`).
+        var known: @MainActor () -> Bool = { true }
+        /// The app's, asked each time: the store is first made while `AppModel.shared` restores what it saved.
+        static var live: Managers {
+            .init(scope: { AppModel.shared.assistantScope }, naming: { AppModel.shared.itemManager($0) },
+                  known: { AppModel.shared.rosterAsked })
+        }
+        /// As `model` has them (the app's; a test's own model).
+        static func of(_ model: AppModel) -> Managers {
+            .init(scope: { [weak model] in model?.assistantScope }, naming: { [weak model] in model?.itemManager($0) },
+                  known: { [weak model] in model?.rosterAsked == true })
+        }
+        /// One manager: a store of a test's own, which goes by no app's roster.
+        static var one: Managers { .init(scope: { nil }, naming: { _ in nil }) }
+    }
+
+    /// Whose a new to-do is: the current assistant's, or the assistant's whose thing (an agent, a project's computer)
+    /// it is made for, by that thing's `manager` stamp.
+    enum Owner {
+        case current
+        case of(String?)
+    }
+
+    /// The manager a new to-do of `owner` is made for and stamped with; nil with one manager, and before the roster is
+    /// read.
+    private func manager(of owner: Owner) -> String? {
+        guard managers.known(), let scope = managers.scope() else { return nil }
+        switch owner {
+        case .current: return scope.current
+        case .of(let stamp): return scope.owner(stamp)
+        }
+    }
+
+    /// The open to-dos a thing stamped `manager` (an agent, a project's computer) can be linked to: its own
+    /// assistant's, whichever is current (docs/assistant/managers.md "Pages"). All of them with one manager.
+    func openTodos(of manager: String?) -> [TodoItem] {
+        guard let scope = managers.scope() else { return todos.filter { !$0.isDone } }
+        let owner = scope.owner(manager)
+        return todos.filter { !$0.isDone && scope.owner($0.manager) == owner }
+    }
 
     init(cachedTodos: [TodoItem]? = nil,
          cacheWriter: (@MainActor ([TodoItem]) -> Void)? = { StateCache.save(TodoStore.stateName, $0) },
          hubListChanged: @escaping @MainActor () -> Void = {
         WatchSync.shared.push(summary: AppModel.shared.watchSummary()) // its questions name their tasks
-    }) {
+    }, managers: Managers = .one) {
+        self.managers = managers
         let initial = cachedTodos ?? StateCache.load(Self.stateName, as: [TodoItem].self) ?? []
         let initialIndex = Self.index(initial)
         todos = initial
@@ -56,10 +108,33 @@ final class TodoStore {
         return result
     }
 
-    var openTodos: [TodoItem] { todos.filter { !$0.isDone } }
-    /// The To-dos badge (the drawer, the Mac's sidebar): open todos, quiet tasks left out (#1731, the main conversation
-    /// tells about them). The list itself still has them.
-    var badgeCount: Int { todos.count(where: { !$0.isDone && !$0.quiet }) }
+    /// The to-dos the pages list: the current assistant's, on a hub with several. `todos` stays whole: an agent's to-do
+    /// and a quiet task are found whichever assistant's they are, and another assistant's opens from a link as itself.
+    var scopedTodos: [TodoItem] {
+        guard let scope = managers.scope() else { return todos }
+        return todos.filter { scope.has($0.manager) }
+    }
+    var openTodos: [TodoItem] { scopedTodos.filter { !$0.isDone } }
+    /// The To-dos badge (the drawer, the Mac's sidebar): the current assistant's open todos, quiet tasks left out (#1731,
+    /// the main conversation tells about them). The list itself still has them.
+    var badgeCount: Int { scopedTodos.count(where: { !$0.isDone && !$0.quiet }) }
+
+    /// The manager a request about to-do `id` names: its own, as the list stamped it, whichever assistant is current
+    /// (docs/protocol/protocol.md "Per-manager routing"); none for the default's, or one the list doesn't have.
+    func named(_ id: String) -> String? { managers.naming(byID[id]?.manager) }
+
+    /// The client a change to to-do `id` goes through: the one given (tests) or the hub's, naming the to-do's manager.
+    private func client(for id: String, _ injected: APIClient?) -> APIClient? {
+        (injected ?? AppModel.shared.api)?.manager(named(id))
+    }
+
+    /// An answer about one to-do comes from its manager without a stamp: it keeps the one the list gave it.
+    private func stamped(_ answer: TodoItem, as manager: String?) -> TodoItem {
+        guard answer.manager == nil, let manager else { return answer }
+        var answer = answer
+        answer.manager = manager
+        return answer
+    }
 
     func forget() {
         generation += 1
@@ -92,8 +167,9 @@ final class TodoStore {
         await reads.refresh(afterCurrent: true) { [self] in await fetch(api: api) }
     }
 
+    /// The hub's merged list, every manager's: read with none named, also after a change that named one.
     private func fetch(api injected: APIClient? = nil) async {
-        guard let api = injected ?? AppModel.shared.api else { return }
+        guard let api = (injected ?? AppModel.shared.api)?.manager(nil) else { return }
         let requestedGeneration = generation
         let requestedRevision = mutationRevision
         activeReadRevision = requestedRevision
@@ -142,10 +218,13 @@ final class TodoStore {
         byID[id]
     }
 
-    func create(title: String, notes: String? = nil, due: APIClient.TodoPlanChange.Due? = nil, api injected: APIClient? = nil) async throws -> TodoItem {
-        guard let api = injected ?? AppModel.shared.api else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
+    /// A new to-do is the current assistant's (or `owner`'s): its manager is named, and the answer stamped with it.
+    func create(title: String, notes: String? = nil, due: APIClient.TodoPlanChange.Due? = nil, owner: Owner = .current,
+                api injected: APIClient? = nil) async throws -> TodoItem {
+        let made = manager(of: owner)
+        guard let api = (injected ?? AppModel.shared.api)?.manager(managers.naming(made)) else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
         let targetGeneration = generation
-        let created = try await api.createTodo(title: title, notes: notes, due: due)
+        let created = try await stamped(api.createTodo(title: title, notes: notes, due: due), as: made)
         guard generation == targetGeneration else { return created }
         mutationRevision += 1
         var updated = todos
@@ -155,9 +234,10 @@ final class TodoStore {
     }
 
     func update(id: String, title: String? = nil, notes: String? = nil, done: Bool? = nil, api injected: APIClient? = nil) async throws -> TodoItem {
-        guard let api = injected ?? AppModel.shared.api else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
+        guard let api = client(for: id, injected) else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
         let targetGeneration = generation
-        let res = try await api.updateTodo(id: id, title: title, notes: notes, done: done)
+        let owner = byID[id]?.manager
+        let res = try await stamped(api.updateTodo(id: id, title: title, notes: notes, done: done), as: owner)
         guard generation == targetGeneration else { return res }
         mutationRevision += 1
         var updated = todos
@@ -173,9 +253,10 @@ final class TodoStore {
     /// Changes a todo's due date, reminder or priority (#1683).
     @discardableResult
     func updatePlan(id: String, _ change: APIClient.TodoPlanChange, api injected: APIClient? = nil) async throws -> TodoItem {
-        guard let api = injected ?? AppModel.shared.api else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
+        guard let api = client(for: id, injected) else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
         let targetGeneration = generation
-        let res = try await api.updateTodoPlan(id: id, change)
+        let owner = byID[id]?.manager
+        let res = try await stamped(api.updateTodoPlan(id: id, change), as: owner)
         guard generation == targetGeneration else { return res }
         mutationRevision += 1
         var updated = todos
@@ -217,7 +298,7 @@ final class TodoStore {
     }
 
     func delete(id: String, api injected: APIClient? = nil) async throws {
-        guard let api = injected ?? AppModel.shared.api else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
+        guard let api = client(for: id, injected) else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
         let targetGeneration = generation
         try await api.deleteTodo(id: id)
         guard generation == targetGeneration else { return }
@@ -228,7 +309,7 @@ final class TodoStore {
     }
 
     func linkAgent(todoID: String, machineID: String, sessionID: String, api injected: APIClient? = nil) async throws {
-        guard let api = injected ?? AppModel.shared.api else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
+        guard let api = client(for: todoID, injected) else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
         let targetGeneration = generation
         do {
             try await api.linkTodoAgent(todoID: todoID, machineID: machineID, sessionID: sessionID)
@@ -244,7 +325,7 @@ final class TodoStore {
     }
 
     func unlinkAgent(todoID: String, machineID: String, sessionID: String, api injected: APIClient? = nil) async throws {
-        guard let api = injected ?? AppModel.shared.api else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
+        guard let api = client(for: todoID, injected) else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
         let targetGeneration = generation
         do {
             try await api.unlinkTodoAgent(todoID: todoID, machineID: machineID, sessionID: sessionID)
@@ -263,7 +344,7 @@ final class TodoStore {
     @discardableResult
     func setSpace(todoID: String, space: TodoItem.Space, linked: Bool, api injected: APIClient? = nil) async throws -> Bool {
         guard !changingSpaces else { throw APIError(status: 409, message: String(localized: "Updating projects. Try again in a moment.")) }
-        guard let api = injected ?? AppModel.shared.api else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
+        guard let api = client(for: todoID, injected) else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
         let targetGeneration = generation
         changingSpaces = true
         defer { if generation == targetGeneration { changingSpaces = false } }
@@ -329,11 +410,11 @@ final class TodoStore {
     }
 
     /// Creation failure throws; a later link failure returns a message that preserves the created todo.
-    func createAndLink(title: String, target: TodoLinkTarget, api: APIClient? = nil) async throws -> String? {
+    func createAndLink(title: String, target: TodoLinkTarget, owner: Owner = .current, api: APIClient? = nil) async throws -> String? {
         if target.isSpace && changingSpaces {
             throw APIError(status: 409, message: String(localized: "Updating projects. Try again in a moment."))
         }
-        let created = try await create(title: title, api: api)
+        let created = try await create(title: title, owner: owner, api: api)
         do {
             try await link(target, to: created.id, api: api)
             return nil

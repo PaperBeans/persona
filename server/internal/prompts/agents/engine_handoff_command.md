@@ -1,0 +1,1 @@
+{{if .Hint}}{{ctx .Hint}}{{else}}{{ctx .Command}}{{if eq .Status "exit"}} → exit {{.Exit}}{{else if eq .Status "tests_failed"}} → tests failed{{else if eq .Status "timed_out"}} → timed out{{else if .Status}} → {{.Status}}{{end}}{{end}}

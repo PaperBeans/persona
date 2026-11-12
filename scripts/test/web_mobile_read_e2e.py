@@ -139,7 +139,7 @@ def check_pending(page, tag):
     long = "\n".join(f"第 {i} 行：这是一条很长的消息，发出去以后还没送到的时候也要收起来" for i in range(20))
     box = page.locator("main textarea").first
     box.fill(long)
-    page.locator('main button[aria-label="发送"]').first.click()
+    page.locator('main button[aria-label="发送"], main button[aria-label="排队发送"]').first.click()
     pend = page.locator("main [data-user-bubble]").filter(has_text="发送中").last
     expect(pend).to_be_visible()
     folded = pend.locator("[data-folded]")

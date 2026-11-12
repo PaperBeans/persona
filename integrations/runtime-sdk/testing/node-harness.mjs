@@ -9,15 +9,21 @@ import { Peer } from '../lib/wire.js'
 import { until } from './fake-node.js'
 
 /**
- * @param {{ personad: string, keep?: boolean, home?: string, env?: Record<string, string> }} opts - home: an existing
+ * @param {{ personad: string, keep?: boolean, home?: string, env?: Record<string, string>, signal?: AbortSignal }} opts - home: an existing
  *   HOME to use (a resident node's, startResident): `personad node --stdio` then relays to the resident node, as the
  *   hub's ssh does. Left in place. env: more of the node's environment (HERDR_SOCKET_PATH for a herdr of the run's own).
  */
-export async function startNode({ personad, keep = false, home: given, env = {} }) {
+export async function startNode({ personad, keep = false, home: given, env = {}, signal }) {
   const root = given ? undefined : mkdtempSync(join('/tmp', 'jrt-e2e-'))
   const home = given ?? join(root, 'home')
-  mkdirSync(home, { recursive: true })
-  const child = spawn(personad, ['node', '--stdio'], { env: { PATH: '/usr/bin:/bin', ...env, HOME: home }, stdio: ['pipe', 'pipe', 'pipe'] })
+  let child
+  try {
+    mkdirSync(home, { recursive: true })
+    child = spawn(personad, ['node', '--stdio'], { env: { PATH: '/usr/bin:/bin', ...env, HOME: home }, stdio: ['pipe', 'pipe', 'pipe'] })
+  } catch (error) {
+    if (!keep && root) rmSync(root, { recursive: true, force: true })
+    throw error
+  }
   const log = []
   child.stderr.on('data', (d) => log.push(String(d)))
   const stdio = {
@@ -58,7 +64,6 @@ export async function startNode({ personad, keep = false, home: given, env = {} 
       }
     },
   })
-  h.info = await h.hub.call('node.info', {}, { timeoutMs: 40_000 })
   /** Call the node as the hub does. */
   h.call = (method, params = {}, timeoutMs = 30_000) => h.hub.call(method, params, { timeoutMs })
   /** Items pushed for a session so far, in order. */
@@ -75,11 +80,44 @@ export async function startNode({ personad, keep = false, home: given, env = {} 
   /** The last pushed list. */
   h.sessions = () => h.events.filter((e) => e.event === 'sessions.changed').at(-1)?.params.sessions ?? []
   h.deltas = (sid) => h.events.filter((e) => e.event === 'session.delta' && e.params.session_id === sid).map((e) => e.params.text)
-  h.stop = () => {
+  // Own the child before the first RPC: a failed handshake must not leave an unreturned process behind.
+  const exited = new Promise((resolve) => {
+    child.once('exit', resolve)
+    child.once('error', resolve) // a failed spawn has no PID and emits no exit
+  })
+  const waitForExit = async (ms) => {
+    let timer
     try {
-      child.kill('SIGTERM')
-    } catch {}
+      return await Promise.race([exited.then(() => true), new Promise((resolve) => { timer = setTimeout(() => resolve(false), ms) })])
+    } finally { clearTimeout(timer) }
+  }
+  let stopping
+  // Preserve the synchronous cleanup contract used by older standalone E2Es before process.exit().
+  h.stop = () => {
+    try { child.kill('SIGTERM') } catch {}
     if (!keep && root) rmSync(root, { recursive: true, force: true })
+  }
+  /** Stop and reap this child before removing its temporary home. Safe to await more than once. */
+  h.stopAndWait = () => stopping ??= (async () => {
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM')
+      if (!await waitForExit(5000)) {
+        child.kill('SIGKILL')
+        if (!await waitForExit(5000)) throw new Error('node did not exit after SIGKILL')
+      }
+    }
+    h.hub.close()
+    child.stdin.destroy()
+    child.stdout.destroy()
+    child.stderr.destroy()
+    if (!keep && root) rmSync(root, { recursive: true, force: true })
+  })()
+  child.stdin.on('error', (error) => h.hub.close(error))
+  try {
+    h.info = await h.hub.call('node.info', {}, { timeoutMs: 40_000, signal })
+  } catch (error) {
+    await h.stopAndWait()
+    throw error
   }
   return h
 }

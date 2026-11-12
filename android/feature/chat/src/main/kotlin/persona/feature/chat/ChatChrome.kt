@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import persona.core.contracts.*
 import persona.core.contracts.api.*
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.sort.SessionRename
 import persona.core.domain.sort.canAttach
@@ -38,6 +39,10 @@ internal fun ChatHeader(
     onOpenTodo: ((String) -> Unit)? = null,
     agentShares: (() -> AgentShares)? = null,
     worktrees: (() -> persona.core.contracts.api.AgentCreationService?)? = null,
+    /** Opens the session's terminal: ⋯'s Terminal, and the header's button on Brief and Board ([ChatTerminalPlaces]). */
+    onTerminal: (() -> Unit)? = null,
+    /** The chat has a terminal it can't open from here: Brief's and Board's header button explains it instead. */
+    onTerminalHelp: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -59,7 +64,7 @@ internal fun ChatHeader(
     LaunchedEffect(menu, dialog, sharing, modeOverlay) { onOverlay(menu || dialog != null || sharing != null || modeOverlay) }
     DisposableEffect(Unit) { onDispose { onOverlay(false) } }
     val line = resolveStatusLine(statusState)
-    val status = line?.status ?: Status.entries.firstOrNull { it.name == session?.agentState?.name } ?: Status.Unknown
+    val status = headerStatus(statusState, session)
     // How long it has worked this turn, in minutes (the work line in the chat has the seconds): read again every 30 s.
     val since = session?.takeIf { status == Status.Working && it.backgroundWorking != true }?.stateSince?.let(::parseTime)
     val now by produceState(java.time.Instant.now(), since) {
@@ -76,7 +81,9 @@ internal fun ChatHeader(
         statusText = linkTitle ?: when (line?.kind) {
             StatusLineKind.Ended -> stringResource(if (statusState.replaced) R.string.chat_chrome_status_replaced else R.string.chat_chrome_status_ended)
             StatusLineKind.MachineOffline -> stringResource(R.string.chat_chrome_status_machine_offline)
-            StatusLineKind.Submitting -> stringResource(R.string.chat_chrome_status_submitting)
+            StatusLineKind.Submitting -> if (statusState.answering) stringResource(R.string.chat_chrome_status_submitting)
+                else stringResource(persona.core.designsystem.R.string.designsystem_message_sending)
+            StatusLineKind.Processing -> stringResource(persona.core.designsystem.R.string.designsystem_message_processing)
             StatusLineKind.Unconfirmed -> stringResource(R.string.chat_chrome_status_unconfirmed)
             StatusLineKind.NeedsYou -> stringResource(R.string.chat_chrome_status_needs_you)
             StatusLineKind.Stopping -> stringResource(R.string.chat_chrome_status_stopping)
@@ -91,9 +98,22 @@ internal fun ChatHeader(
         source = session?.let { chatPlace(it, machine?.displayName, it.sourceSubtitle?.text()) },
         sourceShort = session?.let { chatPlace(it, machine?.displayName, it.sourceSubtitle?.text(), short = true) },
         busy = connection in setOf(ConnectionState.Connecting, ConnectionState.Updating),
-        onTitleClick = onDetails,
+        // Glass's title opens Session Info, as iOS's (#4339 C4), or why the hub is out of reach while it is; Brief and
+        // Board keep the status sheet.
+        onTitleClick = when (ChatTitleTap.of(PersonaTheme.style, online = linkTitle == null, hasSession = session != null)) {
+            ChatTitleTap.SessionInfo -> ({ dialog = "info" })
+            ChatTitleTap.Connection -> ({ dialog = "connection" })
+            ChatTitleTap.Status -> onDetails
+        },
         agentMark = session?.agentMark,
+        titleClickLabel = if (PersonaTheme.style == AppStyle.Glass)
+            stringResource(if (linkTitle == null) R.string.chat_chrome_title_info else R.string.chat_chrome_title_connection) else null,
     ) {
+        // Glass opens the terminal from ⋯ and the work line, as iOS (#4339 C7); Brief and Board keep their header.
+        val headerTerminal = onTerminal ?: onTerminalHelp
+        if (headerTerminal != null && ChatTerminalPlaces.inHeader(PersonaTheme.style))
+            JIconButton(PersonaIcons.terminal, stringResource(if (onTerminal != null) R.string.chat_screen_open_terminal else R.string.chat_screen_terminal_help),
+                headerTerminal)
         actions()
         // The permission mode, always in view and changed here (#3957, iOS #3719).
         if (session != null && SessionModes.showsInHeader(session)) HeaderModeButton(session, state, online && !readOnly) { modeOverlay = it }
@@ -104,6 +124,8 @@ internal fun ChatHeader(
         session?.todo?.let { todo ->
             add(JAction(stringResource(R.string.chat_chrome_todo, todo.title), PhIcons.ListChecks) { onOpenTodo?.invoke(todo.id) })
         }
+        // iOS's first item after the to-do: the terminal comes up over the chat.
+        onTerminal?.let { add(JAction(stringResource(R.string.chat_chrome_terminal), PersonaIcons.terminal, onClick = it)) }
         onSearch?.let { add(JAction(stringResource(R.string.chat_chrome_search), PhIcons.MagnifyingGlass, onClick = it)) }
         onFiles?.let { add(JAction(stringResource(R.string.chat_chrome_files), PhIcons.FolderSimple, onClick = it)) }
         onGit?.let { add(JAction(gitLabel, onClick = it)) }
@@ -227,6 +249,25 @@ internal fun ChatActionsSheet(actions: List<JAction>, onDismiss: () -> Unit, tit
             }
         }
     }
+}
+
+/** The state the header shows: the status line's (an ended chat, an offline machine, a request), else the session's. */
+internal fun headerStatus(state: StatusLineState, session: Session?): Status =
+    resolveStatusLine(state)?.status ?: Status.entries.firstOrNull { it.name == session?.agentState?.name } ?: Status.Unknown
+
+/**
+ * The slim bar an Agent chat's header folds into on Glass (iOS `compactChrome`, #4339 C4): back, the agent's mark, the
+ * state's dot and the title, or "Connecting…" while the hub is out of reach; a tap opens the header again.
+ */
+@Composable
+internal fun ChatSlimHeader(
+    session: Session?, statusState: StatusLineState, connection: ConnectionState?, onBack: () -> Unit, onOpen: () -> Unit,
+) {
+    val title = session?.displayTitle ?: stringResource(R.string.chat_chrome_title_default)
+    val link = connectionTitle(connection)
+    val haptics = rememberHaptics()
+    ChatSlimBar(title, stringResource(R.string.chat_chrome_slim_open, link ?: title), onOpen = { haptics(Haptic.Tap); onOpen() },
+        onBack = onBack, status = headerStatus(statusState, session), agentMark = session?.agentMark, linkText = link)
 }
 
 /** The states the line under the title names by its dot only (iOS `ChatView.quiet`). */

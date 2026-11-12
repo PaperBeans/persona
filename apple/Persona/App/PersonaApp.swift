@@ -74,10 +74,16 @@ struct PersonaApp: App {
         .onChange(of: phase, initial: true) { old, new in
             if new == .active {
                 model.retryRegistry() // launched in the background before the first unlock: the pairing reads now
+                PushRegistrar.shared.foreground() // notifications allowed in Settings since a denial: register now (#1861)
                 model.resumeLinks()
                 model.refreshExtensionSurfaces()
                 // Rolling recordings expire even when no segment arrives and the recording page stays closed.
                 RecordingRollingKeeper.shared.schedule()
+                // All-day recording: what waited while the app was away (a model can download now, a 403 pause ends), and
+                // the audio past its retention.
+                RecordingDayTranscriber.shared.foreground()
+                RecordingDaySync.shared.foreground()
+                RecordingDayKeeper.shared.schedule()
                 LiveActivityController.shared.look(model.fleetLook) { model.fleetFaces }
                 // The home screen icon in step with the Avatar and Light & Dark (a scheme from a launch argument, a switch the system
                 // cut short, the old App Icon setting); nothing happens when it already is, so no alert.
@@ -99,8 +105,13 @@ struct PersonaApp: App {
                 // Closed, the hub knows the phone is away and wakes it with a silent push instead; and nothing opens it
                 // again until the app is back (the network returning, a refresh ending: LiveConnection.suspended).
                 model.suspendLinks()
+                // All-day recording: a run or request in progress finishes only inside a grant of background time, and a
+                // model download a run started in front stops.
+                RecordingDayTranscriber.shared.background()
+                RecordingDaySync.shared.background()
                 #if os(iOS)
                 QuickAction.publish() // the home screen menu with the conversations' titles as they are now (#2191)
+                RecordingDayCatchUp.scheduleIfNeeded() // transcribe and upload the day's backlog while charging
                 #endif
             }
         }
@@ -112,6 +123,13 @@ struct PersonaApp: App {
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    #if os(iOS)
+    /// Upright on an iPhone, but for the live screen's page (`AppOrientation`, #3075).
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        AppOrientation.mask
+    }
+    #endif
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         ErrorReports.installExceptionHandler(queue: .shared) // first: a crash while launching is reported too (#5621)
         _ = KeyboardState.shared // watches the keyboard from the start: a card may come while it is already up
@@ -181,6 +199,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
         #if os(iOS) || os(visionOS)
         PagePerf.runIfAsked()
+        PagePerf.offsetIfAsked()
         FrameProbe.listenIfAsked()
         #endif
         // Every tab a UI test can ask for. One it asks for and this does not know leaves the tab the last run saved
@@ -254,8 +273,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let automation = false
         #endif
         PhoneRecordingReceiver.shared.start()
+        // All-day recording (docs/assistant/day-recap.md): its lanes follow the day store before WatchConnectivity can
+        // deliver a chunk, and the catch-up task is registered before launching finishes, as the system requires.
+        RecordingDayTranscriber.shared.start()
+        RecordingDaySync.shared.start()
+        #if os(iOS)
+        RecordingDayCatchUp.register()
+        #endif
         #if DEBUG
         RecordingSamples.showMeetingIfAsked() // `-showMeetingSample recording|paused|interrupted|minutes|pending`
+        #if os(iOS)
+        Task { await RecordingSamples.installDaySampleIfAsked() } // `-showDaySample today|paused|recap|pending|failed`
+        #endif
+        #if os(iOS)
+        // `-openDayCatchUp YES`: runs the all-day catch-up now (the simulator never runs background tasks).
+        if UserDefaults.standard.bool(forKey: "openDayCatchUp") { Task { _ = await RecordingDayCatchUp.catchUp() } }
+        #endif
         #endif
         WatchSync.shared.activate()
         AppModel.shared.start()

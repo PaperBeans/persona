@@ -166,7 +166,8 @@ async function sendNote(page, where, expect) {
   await input.fill(expect.note);
   await shot(page, `${where}-3-composer`);
   const before = (await sentTo()).length;
-  await page.locator("main").getByRole("button", { name: "Send", exact: true }).last().click();
+  // the round button is "Queue message" while the chat's agent works (#5324)
+  await page.locator("main").getByRole("button", { name: /^(Send|Queue message)$/ }).last().click();
   // what the hub got: one message, the forward block, then the note
   let sent;
   for (let i = 0; i < 50 && !sent; i++) {

@@ -823,19 +823,24 @@ struct ToolDetail: View {
     }
 }
 
-/// The Raw Input switch under a tool's detail in words, showing or hiding the JSON the tool was called with.
+/// The Raw Input switch under a tool's detail in words, showing or hiding the JSON the tool was called with. In the chat
+/// it stays under the finger, what it opens under it (`toggleInPlace`, #3757); elsewhere it animates as before.
 struct RawInputToggle: View {
     @Binding var raw: Bool
+    /// Its place for the chat's pin, unique in the chat (from the call's id).
+    var pinKey: String
+    @Environment(\.chatPin) private var pin
 
     var body: some View {
         Button {
-            withAnimation(Theme.Motion.state) { raw.toggle() }
+            toggleInPlace(pin, pinKey, animation: Theme.Motion.state, closing: raw) { raw.toggle() }
         } label: {
             Label(raw ? String(localized: "Hide Raw Input") : String(localized: "Raw Input"), systemImage: raw ? Theme.Icon.collapse : Theme.Icon.expand)
                 .font(Theme.Font.label).lineLimit(1)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
+        .chatPinned(pinKey)
     }
 }
 
@@ -868,7 +873,7 @@ struct ToolArgumentsDetail: View {
                     }
                 }
                 .accessibilityIdentifier("tool-arguments")
-                RawInputToggle(raw: $raw).accessibilityIdentifier("tool-raw")
+                RawInputToggle(raw: $raw, pinKey: "raw-" + item.id).accessibilityIdentifier("tool-raw")
                 if raw { CodeBlock(text: ToolTextMemo.input(item, scope: scope), maxLines: 14) }
             }
         }
@@ -1027,6 +1032,9 @@ struct CodeBlock: View {
     /// Clipped, the last `maxLines` lines show instead of the first (an output that ends with why it failed).
     var keepsEnd = false
     @State private var full = false
+    @Environment(\.chatPin) private var pin
+    /// What the chat's pin knows the block by: a block has no id of its own, and this view's is kept while it is drawn.
+    @State private var pinKey = "code-" + UUID().uuidString
 
     var body: some View {
         let lines = ToolTextMemo.codeLines(text)
@@ -1044,9 +1052,15 @@ struct CodeBlock: View {
                 MacHoverButton(title: String(localized: "Copy [Readiness Views d37380]"), symbol: Theme.Icon.copy) { MacHover.copy(text) }
             }
             if clipped {
-                Button("Show All \(lines.count) Lines [Tool Views 3aed77]") { withAnimation { full = true } }.font(Theme.Font.labelMedium)
+                // In the chat its top stays where it is and the rest opens under it (#3757): animated, the block grew
+                // around the tap and moved what was above it.
+                Button("Show All \(lines.count) Lines [Tool Views 3aed77]") {
+                    toggleInPlace(pin, pinKey, animation: Theme.Motion.standard) { full = true }
+                }
+                .font(Theme.Font.labelMedium)
             }
         }
+        .chatPinned(pinKey)
     }
 }
 
@@ -1669,7 +1683,7 @@ struct ComputerToolDetail: View {
             }
             ForEach(Array(call.images.enumerated()), id: \.offset) { i, img in Base64Image(payload: img, gallery: call.images, index: i) }
             ScreenEntry(call: call)
-            RawInputToggle(raw: $raw).accessibilityIdentifier("computer-raw")
+            RawInputToggle(raw: $raw, pinKey: "raw-" + call.id).accessibilityIdentifier("computer-raw")
             if raw {
                 CodeBlock(text: input, maxLines: 14)
                 if let result = call.result {

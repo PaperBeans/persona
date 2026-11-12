@@ -8,7 +8,8 @@ import persona.core.contracts.api.ManagerRoster
 import persona.core.contracts.api.waiting
 import persona.core.domain.inbox.InboxInteraction
 import persona.core.domain.sort.AgentPreferences
-import persona.core.domain.sort.needsYouBadge
+import persona.core.domain.sort.NeedsYouRow
+import persona.core.domain.sort.needsYouBadgeRows
 import persona.core.domain.sort.needsYouCards
 import persona.core.domain.sort.needsYouRows
 import persona.core.domain.sort.needsYouWaiting
@@ -45,9 +46,12 @@ internal class ShellCounts(
      * cards it has, and each card on no session, less quiet and muted ones (spec/fixtures/needs-you), the number iOS and
      * the web read. [requests] are its cards outside its own conversations.
      */
-    fun agentsWaiting(requests: List<Interaction>): Int {
+    fun agentsWaiting(requests: List<Interaction>): Int = agentRows(requests).size
+
+    /** The rows [agentsWaiting] counts, oldest first: what the blank page's Needs you lists on Glass (#4339 C17). */
+    fun agentRows(requests: List<Interaction>): List<NeedsYouRow> {
         val waiting = needsYouWaiting(sessions.filter { current.ownsOn(it.machineId, it.manager) })
-        return needsYouBadge(needsYouRows(needsYouCards(requests, byKey), waiting), byKey, mutes)
+        return needsYouBadgeRows(needsYouRows(needsYouCards(requests, byKey), waiting), byKey, mutes)
     }
 
     /** The current assistant's open to-dos, quiet ones left out: the sidebar's count beside To-dos. */

@@ -6,6 +6,7 @@
     <string name="terminal_control_watching">Read-only</string>
     <string name="terminal_select_text">Select text</string>
     <string name="terminal_display_settings">Display settings</string>
+    <string name="terminal_close">Close terminal</string>
     <string name="terminal_retry">Retry</string>
     <string name="terminal_busy_title">Take over the terminal?</string>
     <string name="terminal_busy_text">Another program on the computer is using this terminal. Taking over disconnects it, and the terminal is sized for your phone.</string>

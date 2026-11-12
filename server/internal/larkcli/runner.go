@@ -484,6 +484,58 @@ func (r *Runner) ListMessages(ctx context.Context, chatID, thread, before string
 	return page, nil
 }
 
+// ListDirectChats lists the user's direct (p2p) chats, most recently active
+// first. It needs the user identity, like every Inbox read.
+func (r *Runner) ListDirectChats(ctx context.Context, limit int) (ChatList, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	out, err := r.execute(ctx, []string{"im", "+chat-list", "--types", "p2p", "--sort", "active_time", "--page-size", fmt.Sprint(limit)}, outputJSON)
+	if err != nil {
+		return ChatList{}, err
+	}
+	var page ChatList
+	if err := decodeData(out, &page); err != nil {
+		return ChatList{}, cliError(KindOther, errors.New("invalid chat list JSON"))
+	}
+	return page, nil
+}
+
+// ListMessagesSince reads one chat's messages created at or after start
+// (RFC 3339), newest page only, returned oldest first. Unlike message search it
+// reads the chat history itself, which has no indexing delay.
+func (r *Runner) ListMessagesSince(ctx context.Context, chatID, start string, limit int) (MessagePage, error) {
+	if chatID == "" {
+		return MessagePage{}, errors.New("chat_id is required")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	args := []string{"im", "+chat-messages-list", "--chat-id", chatID}
+	if start != "" {
+		args = append(args, "--start", start)
+	}
+	args = append(args, "--order", "desc", "--page-size", fmt.Sprint(limit), "--no-reactions")
+	out, err := r.execute(ctx, args, outputJSON)
+	if err != nil {
+		return MessagePage{}, err
+	}
+	var page MessagePage
+	if err := decodeData(out, &page); err != nil {
+		return MessagePage{}, cliError(KindOther, errors.New("invalid message list JSON"))
+	}
+	for i, j := 0, len(page.Messages)-1; i < j; i, j = i+1, j-1 {
+		page.Messages[i], page.Messages[j] = page.Messages[j], page.Messages[i]
+	}
+	return page, nil
+}
+
 // SearchMessages searches the user's messages. It deliberately disables
 // reaction enrichment: reactions are an optional second permission and are not
 // needed by the read-tool contract.

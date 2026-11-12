@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -56,7 +57,8 @@ var errWorkAssistant = i18n.Err("assistant-start.work_machine")
 func (s *Service) claudeMD(ctx context.Context, here string, larkCLI bool) string {
 	hello := s.hello(ctx)
 	d := prompts.AssistantClaudeMD{Owner: strings.TrimSpace(hello.Owner), Notes: s.notes(ctx), ExtraDirs: s.kbExtraDirs(ctx),
-		KnowledgeDir: s.kb.dir, LarkCLI: larkCLI, PersonaView: hello.PersonaView, Language: answerLanguage(hello.Locale)}
+		KnowledgeDir: s.kb.dir, LarkCLI: larkCLI, Language: answerLanguage(hello.Locale),
+		BackgroundSupervisor: s.backgroundOn(s.settings(ctx))}
 	devices := s.devices(ctx)
 	if i := slices.IndexFunc(devices, func(d Device) bool { return d.ID == here }); i >= 0 {
 		d.OnHub = devices[i].Kind == "local"
@@ -253,6 +255,9 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	}
 	params := map[string]any{"cwd": cwd, "launcher": p.Launcher, "text": p.Text, "images": p.Images, "permission_mode": p.PermissionMode,
 		"effort": p.Effort, "is_main": main}
+	if p.Model != "" {
+		params["model"] = p.Model // picked with the first message, as with a message (sendModel): a typed id too
+	}
 	if p.ConfigDir != "" {
 		params["config_dir"] = p.ConfigDir
 	}
@@ -263,8 +268,9 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	if p.NewSessionID != "" {
 		params["new_session_id"] = p.NewSessionID // node/assistant_guest.go: under this id, once
 	}
+	// Its first message's (node/node.go assistant.send).
 	if p.ClientMsgID != "" {
-		params["client_msg_id"] = p.ClientMsgID // its first message's (node/node.go assistant.send)
+		params["client_msg_id"] = p.ClientMsgID
 	}
 	purpose := p.Purpose
 	if purpose == "" {
@@ -277,6 +283,7 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 			return proto.Session{}, refusal
 		case mainChatGone:
 			delete(params, "launcher")
+			delete(params, "model") // picked for the launcher that is gone, not for the one it falls back to
 		}
 	}
 	if err := s.applyModel(ctx, purpose, params); err != nil {
@@ -285,10 +292,16 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	if params["launch"] != "headless" {
 		return proto.Session{}, badRequest(fmt.Errorf("purpose %q requires headless launch for assistant.send", purpose))
 	}
-	if err := s.finishMainChatModel(ctx, machine, purpose, params, false); err != nil {
+	if _, err := s.finishMainChatModel(ctx, machine, purpose, params, false); err != nil {
 		return proto.Session{}, err
 	}
 	used, _ := params["launcher"].(string)
+	if model, _ := params["model"].(string); p.Model != "" && model == p.Model {
+		// A launcher that sets its own --model, or whose agent takes none, would not run it (model_pick.go).
+		if err := s.pickedModelRefusal(ctx, machine, used, model); err != nil {
+			return proto.Session{}, refusePick(http.StatusBadRequest, err)
+		}
+	}
 	var res struct {
 		SessionID string `json:"session_id"`
 	}
@@ -303,6 +316,7 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	sess := proto.Session{SessionID: res.SessionID, Cwd: cwd, Status: proto.StatusWorking, Launcher: used, PermissionMode: p.PermissionMode,
 		Effort: p.Effort, StartedByPersona: true, UpdatedAt: time.Now().UTC()}
 	sess.MachineID, sess.Assistant, sess.State, sess.Space = machine, true, proto.StateWorking, p.Space
+	sess.Model, _ = params["model"].(string) // what it was started with ("": the launcher's default)
 	return sess, nil
 }
 
@@ -320,7 +334,7 @@ func (s *Service) start(ctx context.Context, p StartParams) (proto.Session, erro
 	return s.startConversationOn(ctx, p, false)
 }
 
-func (s *Service) startConversationOn(ctx context.Context, p StartParams, main bool) (proto.Session, error) {
+func (s *Service) startConversationOn(ctx context.Context, p StartParams, main bool) (sess proto.Session, err error) {
 	machine := p.MachineID
 	if machine == "" {
 		machine = s.settings(ctx).MachineID
@@ -335,18 +349,36 @@ func (s *Service) startConversationOn(ctx context.Context, p StartParams, main b
 	// manager's authorization until the resulting conversation's origin is recorded.
 	finishStart := s.beginAssistantStart(machine)
 	defer finishStart()
-	sess, err := s.startOn(ctx, machine, p, main)
+	guestID := ""
+	if p.GuestTools != nil {
+		if p.NewSessionID != "" {
+			guestID = p.NewSessionID
+		} else {
+			guestID = newGuestSessionID()
+			p.NewSessionID = guestID
+		}
+		// The Agent SDK bridge discovers its tools before assistant.send returns. Register the guest's restriction
+		// first, as roomCreate does, so that first discovery is the declared list rather than an empty one.
+		if err := s.guestSet(ctx, machine, guestID, p.GuestTools); err != nil {
+			return proto.Session{}, err
+		}
+		defer func() {
+			if sess.SessionID != guestID {
+				if err := s.guestDrop(context.WithoutCancel(ctx), guestID); err != nil {
+					s.logf("assistant: forget an unstarted guest conversation %s: %v", short(guestID), err)
+				}
+			}
+		}()
+	}
+	sess, err = s.startOn(ctx, machine, p, main)
 	if errors.Is(err, ErrNoDevice) && p.MachineID == "" {
 		return proto.Session{}, s.missingAssistantMachine(ctx)
 	}
 	if err != nil {
 		return sess, err
 	}
-	if p.GuestTools != nil {
-		if err := s.guestSet(ctx, sess.MachineID, sess.SessionID, p.GuestTools); err != nil {
-			// The node runs it restricted either way; here its calls are refused until the store is readable again.
-			s.logf("assistant: note guest conversation %s: %v", short(sess.SessionID), err)
-		}
+	if guestID != "" && sess.SessionID != guestID {
+		return sess, errors.New("the node did not start the guest under its registered session id")
 	}
 	sess.Origin, sess.OriginRef, sess.OpenedBy = firstNonEmpty(p.Origin, OriginUser), p.OriginRef, p.OpenedBy
 	s.originSet(ctx, sess.MachineID, sess.SessionID, sess.Origin, sess.OriginRef, sess.OpenedBy)
@@ -365,6 +397,9 @@ func (s *Service) Start(ctx context.Context, p StartParams) (proto.Session, erro
 	if p.Origin == "" || p.Origin == OriginUser {
 		p.Text = prompts.ProtectUserMessage(p.Text)
 	}
+	// The first message gets no client_msg_id of the manager's own (#5200): the node would tag its line with it, and the
+	// iPhone app, which matches its pending bubble by the id a line carries, would show the message twice. So it is not
+	// a message the hub vouched for, and an Always rule does not cover the turn it starts (the card is shown).
 	sess, err := s.start(ctx, p)
 	if err != nil {
 		return proto.Session{}, err
@@ -395,6 +430,9 @@ type mainHandoff struct {
 		Role string `json:"role"`
 		Text string `json:"text"`
 	} `json:"recent,omitempty"`
+	// Pick: the model pick of a main conversation cleared in place (clearMain), for the next one to start on and keep
+	// (model_pick.go). A new main conversation (newMain) starts on the default, so its handoff has none.
+	Pick *modelPick `json:"pick,omitempty"`
 }
 
 // mainBook holds the main conversation still while it changes, and the handoff with no database.
@@ -435,9 +473,37 @@ func (s *Service) startMain(ctx context.Context, p StartParams) (proto.Session, 
 	}
 	p.MachineID, p.Purpose, p.Main = "", "", false
 	p.Origin, p.OriginRef, p.OpenedBy = OriginUser, "", "" // the main conversation is the user's, whatever channel opened it
+	// A cleared main conversation's pick, unless this start names its own launcher or model.
+	carried := handoff.Pick
+	if carried != nil && (p.Launcher != "" || p.Model != "") {
+		carried = nil
+	}
+	if carried != nil {
+		// Held to what a message on it is held to: one that can't run here any more refuses this start, saying why
+		// with the same codes, and is dropped, so the next start runs on the default. Never a silent fallback.
+		if err := s.modelPickRefusal(ctx, s.settings(ctx).MachineID, carried.Launcher, s.requestCtxLang(ctx), true); err != nil {
+			s.dropCarriedPick(ctx, handoff)
+			if !storedPickRefused(err) {
+				err = refusePick(http.StatusBadRequest, err) // it can't run assistant chats
+			}
+			return proto.Session{}, err
+		}
+		// The start's own effort (iOS sends its last one with every start) is the first message's; the pick keeps its.
+		p.Launcher, p.Model = carried.Launcher, carried.Model
+		if p.Effort == "" {
+			p.Effort = carried.Effort
+		}
+	}
 	sess, err := s.startConversationOn(ctx, p, true)
 	if err != nil {
+		var refused *pickError
+		if carried != nil && errors.As(err, &refused) {
+			s.dropCarriedPick(ctx, handoff) // its model can't reach that launcher's agent (pickedModelRefusal)
+		}
 		return proto.Session{}, err
+	}
+	if carried != nil {
+		s.keepStartPick(ctx, &sess, carried.Launcher, carried.Model, carried.Effort)
 	}
 	if _, err := s.updateSettings(ctx, func(v *Settings) error {
 		*v = s.effective(ctx, *v)
@@ -446,17 +512,29 @@ func (s *Service) startMain(ctx context.Context, p StartParams) (proto.Session, 
 	}); err != nil {
 		s.logf("assistant: save main: %v", err)
 	}
-	if handoff.From != "" {
+	if handoff.From != "" || handoff.Pick != nil {
 		next := mainHandoff{} // used
-		if empty {
-			next, next.For = handoff, sess.SessionID
+		if empty && handoff.From != "" {
+			next, next.For, next.Pick = handoff, sess.SessionID, nil
 		}
 		if err := s.saveHandoff(ctx, next); err != nil {
 			s.logf("assistant: what the old main conversation left: %v", err)
 		}
 	}
 	s.settingsChanged(ctx)
+	if handoff.From != "" {
+		s.handOverMainTasks(context.WithoutCancel(ctx), handoff.From, sess.SessionID) // its open tasks follow (main_handover.go)
+	}
 	return sess, nil
+}
+
+// dropCarriedPick saves h, what a main conversation left, without the pick a /clear carried (clearMain): it can't run,
+// or New main chat starts on the default. The caller holds s.main.mu.
+func (s *Service) dropCarriedPick(ctx context.Context, h mainHandoff) {
+	h.Pick = nil
+	if err := s.saveHandoff(ctx, h); err != nil {
+		s.logf("assistant: drop the cleared main conversation's model pick: %v", err)
+	}
 }
 
 // newMain puts the main conversation away: what it left is kept for the next one (carry), it is no longer the main
@@ -471,6 +549,9 @@ func (s *Service) newMain(ctx context.Context, carry bool, expect string) (strin
 		return "", false, &rpc.Error{Code: "main_changed", Message: i18n.T(s.lang(ctx), "assistant-start.main_changed")}
 	}
 	if old == "" {
+		if h := s.loadHandoff(ctx); h.Pick != nil { // after /clear: the next one starts fresh, on the default
+			s.dropCarriedPick(ctx, h)
+		}
 		return "", false, nil
 	}
 	machine, c, found := s.findSession(ctx, old, cfg.mainRouteMachine())
@@ -496,6 +577,87 @@ func (s *Service) newMain(ctx context.Context, carry bool, expect string) (strin
 	if err := s.saveHandoff(ctx, handoff); err != nil {
 		return "", false, err
 	}
+	if err := s.putAwayMain(ctx, machine, old, now); err != nil {
+		return "", false, err
+	}
+	s.logf("assistant: main conversation %s put away (carried over: %v)", short(old), carried)
+	return old, carried, nil
+}
+
+// clearMain clears the main conversation's context in place (the apps' "Clear context" and /clear, as Cindy's /clear
+// does): it is put away as newMain puts it, with no summary carried over, then its process is closed whether it works or
+// not (a turn stops, and nothing it ran in the background starts another turn there) and a question it waits on is
+// taken back. What an earlier newMain left for the next conversation is dropped too, so the next message to the main
+// conversation starts a new one with a fresh context (startMain): no --resume, no handoff. Its model pick goes with it
+// (mainHandoff.Pick): the context is cleared, not the model the user picked. Nothing is deleted, and the work it handed
+// out (tasks, their Agents) goes on. It answers the old conversation's id ("" when there was none).
+func (s *Service) clearMain(ctx context.Context, expect string) (string, error) {
+	// past the checks it goes through as one change, even when the app stops waiting for the answer
+	ctx = context.WithoutCancel(ctx)
+	old, machine, c, found, err := s.clearMainLocked(ctx, expect)
+	if err != nil || old == "" {
+		return old, err
+	}
+	// after the lock: the node may be slow, and every message to the main conversation waits on that lock
+	if found {
+		s.closeMain(ctx, machine, c)
+	}
+	s.logf("assistant: main conversation %s cleared", short(old))
+	return old, nil
+}
+
+// clearMainLocked is clearMain's change under s.main.mu: the check, the handoff dropped and the conversation put away.
+func (s *Service) clearMainLocked(ctx context.Context, expect string) (old, machine string, c proto.Session, found bool, err error) {
+	s.main.mu.Lock()
+	defer s.main.mu.Unlock()
+	cfg := s.settings(ctx)
+	old = cfg.Main
+	if expect != "" && expect != old {
+		return "", "", c, false, &rpc.Error{Code: "main_changed", Message: i18n.T(s.lang(ctx), "assistant-start.main_changed")}
+	}
+	cleared := mainHandoff{}
+	if old == "" {
+		cleared.Pick = s.loadHandoff(ctx).Pick // cleared again before a new one started: the pick still waits for it
+	} else if p, ok := s.modelPickOf(ctx, cfg.mainRouteMachine(), old); ok {
+		cleared.Pick = &p // the context is cleared, not the model the user picked for the main conversation
+	}
+	if err := s.saveHandoff(ctx, cleared); err != nil {
+		return "", "", c, false, err
+	}
+	if old == "" {
+		return "", "", c, false, nil
+	}
+	machine, c, found = s.findSession(ctx, old, cfg.mainRouteMachine())
+	if !found {
+		machine = cfg.mainRouteMachine()
+	}
+	if err := s.putAwayMain(ctx, machine, old, time.Now().UTC()); err != nil {
+		return "", "", c, false, err
+	}
+	return old, machine, c, found, nil
+}
+
+// closeMain ends the main conversation's process once clearMain has put it away: its turn stops as with the Stop
+// button, and a question it waits on is taken back. Only Persona's own headless process is closed: one the user resumed
+// in a terminal (a pane) is theirs, and the node's session.close would close that terminal. Unlike the Stop button it
+// does not stop a Feishu request the conversation reports on (UserStopped): that would interrupt the Agents working on
+// the tasks it handed out, which a clear leaves running. A failure is only logged: an offline machine runs no turn.
+func (s *Service) closeMain(ctx context.Context, machine string, c proto.Session) {
+	s.withdrawAskUser(c.SessionID)
+	if c.PaneID != "" {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := s.call(cctx, machine, "session.close", map[string]any{"session_id": c.SessionID}, nil); err != nil {
+		s.logf("assistant: close the main conversation %s: %v", short(c.SessionID), err)
+	}
+}
+
+// putAwayMain makes old no longer the main conversation: first among the former ones (its machine keeps listing it),
+// renamed "旧主对话 · 至 M月D日" by the user's hand (autonaming leaves it) and archived; sending to it again brings it back
+// (unarchiveOnSend). The caller holds s.main.mu.
+func (s *Service) putAwayMain(ctx context.Context, machine, old string, now time.Time) error {
 	if _, err := s.updateSettings(ctx, func(v *Settings) error {
 		*v = s.effective(ctx, *v)
 		v.Main, v.MainMachineID = "", ""
@@ -506,7 +668,7 @@ func (s *Service) newMain(ctx context.Context, carry bool, expect string) (strin
 		}
 		return nil
 	}); err != nil {
-		return "", false, err
+		return err
 	}
 	local := now.In(s.location(ctx))
 	s.titleSet(machine, old, fmt.Sprintf("旧主对话 · 至 %d月%d日", local.Month(), local.Day()), titleByUser)
@@ -514,8 +676,7 @@ func (s *Service) newMain(ctx context.Context, carry bool, expect string) (strin
 		s.logf("assistant: archive the old main conversation %s: %v", short(old), err)
 	}
 	s.settingsChanged(ctx)
-	s.logf("assistant: main conversation %s put away (carried over: %v)", short(old), carried)
-	return old, carried, nil
+	return nil
 }
 
 // findSession is the session id on the machine preferred, else on any machine (false when none lists it).
@@ -594,6 +755,7 @@ func (s *Service) startRoutes() {
 			Prompt         string        `json:"prompt"`
 			Images         []proto.Image `json:"images"`
 			Launcher       string        `json:"launcher"`
+			Model          string        `json:"model"` // the first message's model (#5033): a model id, typed or listed
 			PermissionMode string        `json:"permission_mode"`
 			Effort         string        `json:"effort"`
 			Main           bool          `json:"main"` // becomes the main conversation
@@ -607,8 +769,13 @@ func (s *Service) startRoutes() {
 			ReportTasks bool `json:"report_tasks"`
 			// Guest: a guest conversation (guest.go): only these connector tools, nothing of the assistant's.
 			Guest *GuestSpec `json:"guest"`
+			// Via: how the user's app sent its first message when not typed in the app itself: "intent" (Siri,
+			// Shortcuts, an App Intent, which may run on a locked phone), "share" (the share sheet) or "card" (a card's
+			// button that wrote it). Such a message never counts as the user's own words (secret_handoff.go
+			// handoffUserTurn, the decision on #3962).
+			Via string `json:"via"`
 		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20)).Decode(&in); err != nil {
+		if err := decodeLargeBody(w, r, &in, 32<<20); err != nil {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
@@ -622,6 +789,10 @@ func (s *Service) startRoutes() {
 		}
 		if in.Space != "" && in.Space != SpaceHealth {
 			apierr.Write(w, http.StatusBadRequest, fmt.Errorf("space %q: health or none", in.Space))
+			return
+		}
+		if in.Model = strings.TrimSpace(in.Model); checkModelID(in.Model) != nil {
+			apierr.Write(w, http.StatusBadRequest, checkModelID(in.Model))
 			return
 		}
 		if in.Space != "" && in.Main {
@@ -648,16 +819,26 @@ func (s *Service) startRoutes() {
 		}
 		origin, ref := requestOrigin(r, in.Purpose)
 		sentence := in.Prompt // as the owner wrote it, for the route (route.go)
+		own := false          // only the user's words in it, as filled in (workspace_mention.go fillWorkspaces)
 		if in.Guest == nil {
-			in.Prompt = s.withWorkspaces(ctx, in.Prompt) // as SendParams does for the next messages
+			in.Prompt, own = s.fillWorkspaces(ctx, in.Prompt) // as SendParams does for the next messages
 		}
 		// The main conversation is the assistant's, on its machine.
-		sess, err := s.Start(ctx, StartParams{Text: in.Prompt, Images: in.Images, Launcher: in.Launcher, PermissionMode: in.PermissionMode,
+		ctx, note := withLauncherNote(ctx)
+		sess, err := s.Start(ctx, StartParams{Text: in.Prompt, Images: in.Images, Launcher: in.Launcher, Model: in.Model, PermissionMode: in.PermissionMode,
 			Effort: in.Effort, Purpose: in.Purpose, MachineID: in.MachineID, Main: in.Main, Space: in.Space, Origin: origin, OriginRef: ref,
-			OpenedBy: requestOpener(r), GuestTools: guestTools})
-		if err != nil {
+			OpenedBy: requestOpener(r), GuestTools: guestTools, Human: own && in.Via == "" && assistantwire.HumanStartOf(r.Context())})
+		var refused *pickError
+		switch {
+		case errors.As(err, &refused):
+			apierr.Write(w, refused.status, refused.err)
+			return
+		case err != nil:
 			apierr.Call(w, err)
 			return
+		}
+		if in.Purpose == "" && in.Guest == nil {
+			s.keepStartPick(ctx, &sess, in.Launcher, in.Model, in.Effort) // its later messages keep what it started on
 		}
 		if in.ReportTasks && !in.Main {
 			s.markReporter(ctx, sess.MachineID, sess.SessionID)
@@ -665,6 +846,10 @@ func (s *Service) startRoutes() {
 		// The owner's New chat: is it a direction? In the background; nothing waits for it (route.go).
 		if origin == OriginUser && !in.Main && in.Guest == nil && in.Space == "" && in.Purpose == "" && !in.ReportTasks {
 			go s.routeNewChat(sess.MachineID, sess.SessionID, sentence)
+		}
+		if *note != "" {
+			apierr.WriteJSON(w, map[string]any{"session": sess, "launcher_note": *note})
+			return
 		}
 		apierr.WriteJSON(w, map[string]any{"session": sess})
 	})
@@ -716,6 +901,21 @@ func (s *Service) startRoutes() {
 		}
 		apierr.WriteJSON(w, map[string]any{"ok": true, "archived": old, "carried": carried})
 	})
+	s.handle("POST /api/v1/assistant/main/clear", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Expect string `json:"expect"` // the main conversation the app shows: refused when it is another by now
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil && !errors.Is(err, io.EOF) {
+			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
+		old, err := s.clearMain(r.Context(), in.Expect)
+		if err != nil {
+			apierr.Call(w, err)
+			return
+		}
+		apierr.WriteJSON(w, map[string]any{"ok": true, "archived": old})
+	})
 }
 
 // ---- what the hub asks about a message or a rename ----
@@ -739,27 +939,80 @@ func (s *Service) appLang(ctx context.Context, lang string) i18n.Lang {
 // filled in (sendModel) and, the first one to a new main conversation started empty, what the old one left before
 // its text. A conversation the machine does not list (yet) that is not the main one keeps what it runs on.
 func (s *Service) SendParams(ctx context.Context, p SendParams) (map[string]any, error) {
+	return s.messageParams(ctx, p, true)
+}
+
+// messageParams is SendParams for a message that is the owner's own (owner), or one the manager writes in their
+// place (a channel's "answer again"), which preempts nothing.
+func (s *Service) messageParams(ctx context.Context, p SendParams, owner bool) (map[string]any, error) {
 	if p.Params == nil {
 		p.Params = map[string]any{}
 	}
 	delete(p.Params, "source") // app input cannot claim an automated author
 	delete(p.Params, "message_source")
-	if text, ok := p.Params["text"].(string); ok {
-		p.Params["text"] = prompts.ProtectUserMessage(text)
+	if id, _ := p.Params["client_msg_id"].(string); id != "" {
+		s.availOwnerSent(p.MachineID, p.SessionID, id, time.Now()) // a replay opens no reply wait (availability.go)
 	}
-	return s.sendParams(ctx, p)
+	text, said := p.Params["text"].(string)
+	if said {
+		p.Params["text"] = prompts.ProtectUserMessage(text)
+	} else {
+		_, said = p.Params["images"] // the node asking what its own message runs on carries neither (NodeAnswer)
+	}
+	sent, _ := p.Params["text"].(string)
+	id, _ := p.Params["client_msg_id"].(string)
+	// How the user's app sent it when not typed in the app itself ("intent", "share"): it never counts as their own
+	// words (secret_handoff.go handoffUserTurn), and is not passed on.
+	via, marked := p.Params["via"]
+	if text, ok := via.(string); via == nil || ok && text == "" {
+		marked = false // a mark of any other kind still marks it
+	}
+	delete(p.Params, "via")
+	params, own, err := s.sendParamsOwn(ctx, p)
+	switch {
+	case !p.Human || !own || marked: // anyone else's id, a person's carrying another's words (a mail handed on, the
+		// old main conversation's) or sent by Siri or the share sheet, never counts, nor does a person's id once
+		// another sent it (secret_handoff.go)
+		s.humanSent.voidSend(p.SessionID, id)
+	case err == nil: // the hub's word: a person's own app sent it (handoffUserTurn)
+		s.humanSent.note(p.SessionID, id, sent)
+	}
+	if err == nil && said && owner {
+		s.ownerInterjects(p.SessionID, params)
+	}
+	return params, err
+}
+
+// ownerInterjects: params are the owner's own message to conversation id, ready to send. On a round they did not
+// start it is read at once, whatever interject_background says (owner_preempt.go).
+func (s *Service) ownerInterjects(id string, params map[string]any) {
+	if s.ownerPreempts(id) {
+		params["interject_background"] = true
+	}
+	s.ownerSent(id)
 }
 
 // sendParams also serves manager-generated notices, which must not be marked as
 // user-authored merely because they share the app's model-selection path.
 func (s *Service) sendParams(ctx context.Context, p SendParams) (map[string]any, error) {
+	params, _, err := s.sendParamsOwn(ctx, p)
+	return params, err
+}
+
+// sendParamsOwn is sendParams, and whether the message's text holds only the sender's own words as it goes (own,
+// workspace_mention.go fillWorkspaces): no context block an app put in it, workspace mentions aside where they were
+// filled in, and not what the old main conversation left (handoffFor). A text that is not filled in (a guest's, a
+// conversation the manager does not list) is the sender's only with no context block at all.
+func (s *Service) sendParamsOwn(ctx context.Context, p SendParams) (map[string]any, bool, error) {
 	params := p.Params
 	if params == nil {
 		params = map[string]any{}
 	}
+	text, _ := params["text"].(string)
+	own := !contextTagRe.MatchString(text)
 	params["is_main"] = false
 	if err := s.roomRefusesSend(ctx, p.MachineID, p.SessionID, p.Lang); err != nil {
-		return nil, err // an ended room: 409 meeting_ended (meeting_room.go)
+		return nil, false, err // an ended room: 409 meeting_ended (meeting_room.go)
 	}
 	if s.isGuest(ctx, p.MachineID, p.SessionID) {
 		// A guest conversation keeps what it started on: no launcher, model, runtime or mode picked for a message
@@ -767,26 +1020,35 @@ func (s *Service) sendParams(ctx context.Context, p SendParams) (map[string]any,
 		for _, k := range []string{"launcher", "model", "effort", "model_fingerprint", "runtime", "permission_mode"} {
 			delete(params, k)
 		}
-		return params, nil
+		return params, own, nil
 	}
 	cfg := s.settings(ctx)
 	main := cfg.Main != "" && cfg.Main == p.SessionID && cfg.mainRouteMachine() == p.MachineID
 	if !main {
 		if _, known := s.session(ctx, p.MachineID, p.SessionID); !known {
-			return params, nil
+			return params, own, nil
 		}
 	}
-	if err := s.sendModel(ctx, p.MachineID, p.SessionID, params); err != nil {
-		return nil, badRequest(err, s.appLang(ctx, p.Lang)) // a typed model that is no id is the app's user's to read
+	if err := s.sendModel(ctx, p.MachineID, p.SessionID, params, s.appLang(ctx, p.Lang)); err != nil {
+		var other *launcherOtherKind
+		if errors.As(err, &other) {
+			return nil, false, other.rpcError(s.appLang(ctx, p.Lang)) // 409 launcher_other_kind, with the kinds for the app
+		}
+		if storedPickRefused(err) {
+			return nil, false, err // the conversation's pick is out of scope or gone: its code goes to the app (model_pick.go)
+		}
+		return nil, false, badRequest(err, s.appLang(ctx, p.Lang)) // a typed model that is no id is the app's user's to read
 	}
 	if text, ok := params["text"].(string); ok {
-		text = s.withWorkspaces(ctx, text) // an @-mentioned workspace: where it is and what worked there (workspace_mention.go)
+		text, own = s.fillWorkspaces(ctx, text) // an @-mentioned workspace: where it is and what worked there (workspace_mention.go)
 		if main {
-			text = s.handoffFor(ctx, p.SessionID, text)
+			left := s.handoffFor(ctx, p.SessionID, text)
+			own = own && left == text // what the old main conversation left is not the sender's words
+			text = left
 		}
 		params["text"] = text
 	}
-	return params, nil
+	return params, own, nil
 }
 
 // sendModel puts into p (a message for one of the assistant's conversations, sid on machine) which launcher and model
@@ -800,7 +1062,11 @@ func (s *Service) sendParams(ctx context.Context, p SendParams) (map[string]any,
 // A model picked for this message may be one the launcher's list does not have (typed in the chip, #1644): it has to
 // be a model id, and it is kept. Only a model carried over from what the conversation ran is held to the list (and the
 // ids typed for that launcher before), so a model the gateway dropped does not fail every later turn.
-func (s *Service) sendModel(ctx context.Context, machine, sid string, p map[string]any) error {
+//
+// A message that picks neither a launcher nor a model runs on the conversation's own pick when it has one (PUT
+// …/conversations/{id}/model, model_pick.go), its effort under the message's own: that is the user's choice for the
+// conversation, so it is never replaced; a pick that can't run here refuses the message, saying why in lang.
+func (s *Service) sendModel(ctx context.Context, machine, sid string, p map[string]any, lang i18n.Lang) error {
 	cfg := s.settings(ctx)
 	p["is_main"] = cfg.Main != "" && cfg.Main == sid && cfg.mainRouteMachine() == machine
 	if cfg.InterjectBackground != nil && *cfg.InterjectBackground {
@@ -817,6 +1083,16 @@ func (s *Service) sendModel(ctx context.Context, machine, sid string, p map[stri
 	}
 	l, _ := p["launcher"].(string)
 	asked := l != "" // picked in the chat's menu for this message
+	if asked {
+		if err := s.otherKindPick(ctx, machine, sid, l); err != nil {
+			return err // another agent kind can't resume this conversation: refused, not swapped on the node
+		}
+	}
+	if !asked && !picked {
+		if pick, ok := s.modelPickOf(ctx, machine, sid); ok {
+			return s.sendOnPick(ctx, machine, sid, p, pick, lang)
+		}
+	}
 	if l == "" && !followsSetting {
 		if c, known := s.session(ctx, machine, sid); known {
 			l = c.Launcher // no launcher picked: the one this conversation runs
@@ -856,7 +1132,21 @@ func (s *Service) sendModel(ctx context.Context, machine, sid string, p map[stri
 	} else if err := s.applyModel(ctx, "assistant", p); err != nil {
 		return err
 	}
-	return s.finishMainChatModel(ctx, machine, "assistant", p, pickedLauncher)
+	_, err := s.finishMainChatModel(ctx, machine, "assistant", p, pickedLauncher)
+	return err
+}
+
+// sendOnPick puts conversation sid's pick into p (sendModel): its launcher, model and effort (an effort sent with the
+// message wins), checked and fingerprinted like a message's pick. One that can't run on machine, or runs the other
+// agent kind (launcher_kind.go), refuses the message.
+func (s *Service) sendOnPick(ctx context.Context, machine, sid string, p map[string]any, pick modelPick, lang i18n.Lang) error {
+	if err := s.modelPickRefusal(ctx, machine, pick.Launcher, lang, true); err != nil {
+		return err
+	}
+	if err := s.otherKindPick(ctx, machine, sid, pick.Launcher); err != nil {
+		return err
+	}
+	return s.applyPick(ctx, p, pick)
 }
 
 // isTaskConversation: sid on machine is a scheduled task's own conversation.
@@ -877,6 +1167,9 @@ func (s *Service) Rename(ctx context.Context, p RenameParams) (json.RawMessage, 
 	title, _ := params["title"].(string)
 	if strings.TrimSpace(title) != "" && s.isMain(ctx, p.SessionID) {
 		return nil, badRequest(errRenameMain, s.lang(ctx)) // the apps show the persona there (#1313)
+	}
+	if c, found := s.session(ctx, p.MachineID, p.SessionID); found && !c.Assistant {
+		return s.renameAgent(ctx, p, c)
 	}
 	if c, _ := s.session(ctx, p.MachineID, p.SessionID); c.Agent == "codex" {
 		delete(params, "title") // only the assistant's title for Codex (its conversation_rename does the same)

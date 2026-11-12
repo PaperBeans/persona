@@ -57,6 +57,16 @@ extension AppModel {
         openExtensionSettings(id)
         return true
     }
+
+    /// The subscription pages' Set Up with … (`persona://ask`, #5278; `ExtensionViewModel.opens` lets only them answer
+    /// it): Settings' sheet closes and the text goes to the assistant's main conversation, which opens (`askPersona`; a
+    /// sheet of the pages closes on its reveal).
+    func openIfAsk(_ url: URL) -> Bool {
+        guard let text = SubscriptionsUI.askText(url) else { return false }
+        shellSettings = false
+        Task { await askPersona(text) }
+        return true
+    }
 }
 
 /// Reuses the regular extension pages with their links, push/pop and invalidation refresh; no separate renderer for notifications.

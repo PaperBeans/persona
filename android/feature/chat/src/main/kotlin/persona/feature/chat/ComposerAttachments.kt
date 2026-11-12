@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.compose.foundation.horizontalScroll
@@ -22,6 +23,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -31,6 +33,7 @@ import persona.core.contracts.api.ComposerOperationException
 import persona.core.contracts.api.DraftUploadState
 import persona.core.contracts.api.MessageTransport
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import java.io.File
 import java.util.UUID
@@ -55,7 +58,11 @@ internal fun attachmentName(context: Context, uri: Uri): String =
         if (it.moveToFirst()) it.getString(0) else null
     } ?: context.getString(R.string.chat_attach_default_name)
 
-internal fun selectAttachment(context: Context, uri: Uri, image: Boolean): ComposerAttachment {
+/**
+ * [uri] as an attachment of the draft. [video]: one from the photo picker, sent as it is up to the hub's 200 MB (iOS
+ * compresses a longer one; Android refuses it as it does any file over the limit), its length read for its card.
+ */
+internal fun selectAttachment(context: Context, uri: Uri, image: Boolean, video: Boolean = false): ComposerAttachment {
     val resolver = context.contentResolver
     runCatching { resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
     val name = runCatching { attachmentName(context, uri) }.getOrDefault(context.getString(R.string.chat_attach_default_name))
@@ -64,12 +71,26 @@ internal fun selectAttachment(context: Context, uri: Uri, image: Boolean): Compo
             if (it.moveToFirst() && !it.isNull(0)) it.getLong(0).takeIf { bytes -> bytes >= 0 } else null
         }
     }.getOrNull()
-    val attachment = ComposerAttachment(UUID.randomUUID().toString(), name, uri.toString(), image, size = size)
+    val attachment = ComposerAttachment(UUID.randomUUID().toString(), name, uri.toString(), image, size = size,
+        video = video && !image, duration = if (video && !image) videoDuration(context, uri) else null)
     // A file over the limit is refused before anything is copied; retrying could not help, so it can only be removed.
     if (!image) oversizeReason(name, size, context.resources)?.let { return attachment.copy(uploadState = DraftUploadState.Invalid, error = it) }
     return if (attachmentReadable(context, attachment)) attachment else attachment.copy(
         uploadState = DraftUploadState.Invalid, error = context.getString(R.string.chat_attach_lost_permission))
 }
+
+/** A video's length in seconds, or null when the phone cannot read it. Call off the main thread. */
+internal fun videoDuration(context: Context, uri: Uri): Double? = runCatching {
+    val retriever = MediaMetadataRetriever()
+    try {
+        retriever.setDataSource(context, uri)
+        retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.takeIf { it > 0 }?.let { it / 1000.0 }
+    } finally { retriever.release() }
+}.getOrNull()
+
+/** Whether a picked item is a video (else a picture), by the type its provider gives. */
+internal fun isVideo(context: Context, uri: Uri): Boolean =
+    runCatching { context.contentResolver.getType(uri) }.getOrNull()?.startsWith("video/") == true
 
 /** App-owned camera URIs need no provider grant; external URIs must survive process death. */
 internal fun attachmentReadable(context: Context, attachment: ComposerAttachment): Boolean {
@@ -171,8 +192,9 @@ internal fun ComposerAttachment.thumbnailState(service: ChatComposerService?): A
 }
 
 /**
- * Photos as a row of thumbnails (iOS); files keep one row each with their name, state, "Retry" and ✕. A tap on a photo
- * that is on the computer goes to [onEdit] (marked up before sending); one still uploading or failed is not offered.
+ * Photos as a row of thumbnails (iOS); files keep one row each with their name, state, "Retry" and ✕, a video with its
+ * mark and, once on the computer, its size and length (iOS `VideoAttachmentsBar`). A tap on a photo that is on the
+ * computer goes to [onEdit] (marked up before sending); one still uploading or failed is not offered.
  */
 @Composable
 internal fun ComposerAttachmentPreviews(
@@ -206,14 +228,16 @@ internal fun ComposerAttachmentPreviews(
             }
         }
         if (files.isNotEmpty()) Column(Modifier.heightIn(max = 140.dp).verticalScroll(rememberScrollState())) {
+            val resources = LocalResources.current
             files.forEach { attachment ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    JIcon(PhIcons.File, null, tint = PersonaTheme.palette.ink2)
+                    JIcon(if (attachment.video) PersonaIcons.video else PhIcons.File, null, tint = PersonaTheme.palette.ink2)
                     Spacer(Modifier.width(Tokens.Space.s))
                     Column(Modifier.weight(1f)) {
                         Text(attachment.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink)
                         Text(attachment.error ?: when {
+                            attachment.video && attachment.path != null -> attachment.attachedFile()?.let { attachedDetail(it, resources) }.orEmpty()
                             attachment.path != null -> stringResource(R.string.chat_attach_uploaded)
                             service == null -> stringResource(R.string.chat_attach_no_service)
                             else -> stringResource(R.string.chat_attach_uploading)

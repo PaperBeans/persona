@@ -95,5 +95,7 @@
   "larkcli_profile_done": "閉じる",
   "larkcli_profile_auto_short": "ボットのアプリに合わせる",
   "larkcli_profile_default": "lark-cli の既定プロファイル",
-  "larkcli_profile_fixed": "{name}（設定ファイルで指定）"
+  "larkcli_profile_fixed": "{name}（設定ファイルで指定）",
+  "feature_answer_new_card_title": "回答を新しいカードで送る",
+  "feature_answer_new_card_detail": "ひと区切りしたら回答をチャットのいちばん下に新しいカードとして送り（Lark が通知します）、進捗カードはその場で折りたたみます。オフのときは回答を進捗カードに書き込みます"
 }

@@ -1,4 +1,7 @@
 {
+ "apple/LiveActivity/FleetIslandViews.swift": {
+  "localized-lookup": 4
+ },
  "apple/LiveActivity/FleetPersona.swift": {
   "directory-listing": 2,
   "file-read": 1,
@@ -135,11 +138,20 @@
  "apple/Shared/ExtensionSurfaceStore.swift": {
   "file-read": 1
  },
+ "apple/Shared/ExtensionSystemWidget.swift": {
+  "localized-lookup": 5
+ },
+ "apple/Shared/FleetState.swift": {
+  "localized-lookup": 31
+ },
  "apple/Shared/Keychain.swift": {
   "keychain-read": 2
  },
  "apple/Shared/NativeStateMigration.swift": {
   "keychain-read": 1
+ },
+ "apple/Shared/PasswordLogin.swift": {
+  "localized-lookup": 7
  },
  "apple/Shared/PushCrypto.swift": {
   "keychain-read": 2
@@ -151,6 +163,9 @@
  "apple/Shared/StateCache.swift": {
   "directory-listing": 1,
   "file-read": 1
+ },
+ "apple/Shared/StateNames.swift": {
+  "localized-lookup": 16
  },
  "apple/Shared/WatchPetSnapshot.swift": {
   "file-read": 1

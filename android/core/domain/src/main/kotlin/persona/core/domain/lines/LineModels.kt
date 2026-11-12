@@ -192,6 +192,11 @@ sealed interface ChatLine {
     data class Recaps(val items: List<LineItem>) : ChatLine {
         override val id get() = "rc-" + items.first().id
     }
+    /**
+     * What an exchange's work looked at, between its work line and its answer ([ViewedImages], iOS `ChatLine.viewed`). Its id
+     * stays as pictures come in and the answer changes, so the strip grows sideways in place.
+     */
+    data class Viewed(override val id: String, val images: List<ViewedImage>) : ChatLine
     /** What the assistant's conversation adds to the transcript (docs/assistant/unified-entry.md, `tasks.AssistantLines`): the
      *  hub's feed items, quick results, day lines; [payload] is drawn by the chat's host. */
     data class Extra(override val id: String, val payload: Any) : ChatLine

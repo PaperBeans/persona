@@ -52,6 +52,9 @@ type fleetBook struct {
 	// screenHandedBack: screen card id -> the card handed back to the computer (fleet_ix_screen.go screenHandedBackLocked):
 	// the same dialog still on screen gets no new card until the agent moves on (#4867).
 	screenHandedBack map[string]screenGone
+	// handoffBy: hand-off card id -> the approval that claimed it, with the device the hub vouched for (secret_handoff.go:
+	// only such an approval counts).
+	handoffBy map[string]handoffClaim
 	// upgradeEvery / upgradeFor override screenUpgradeEvery / screenUpgradeFor (0: those; upgradeScreenCard). Tests
 	// shorten them on their own Service before any session list comes, so an upgrade loop another test left running
 	// never reads what this one writes (#4554).
@@ -75,6 +78,10 @@ type fleetBook struct {
 	shown   map[string][]proto.Session
 	// asks: what each session's last words ask, while they stay the same (fleet_asks.go).
 	asks asksMemo
+	// folds: what each machine's last complete list folded its children under (fleet_fold.go), for the rows and
+	// cards sent without the rest of the list.
+	foldMu sync.Mutex
+	folds  map[string]sessionFold
 
 	// rep is the last snapshot's parts the session lists show (fleetTakeSnapshot).
 	rep fleetReport

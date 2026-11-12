@@ -1,6 +1,18 @@
 package persona.feature.terminal
 
 import android.content.ClipboardManager
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.horizontalScroll
@@ -10,29 +22,49 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import persona.core.contracts.SessionKey
+import persona.core.contracts.api.TerminalTransport
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
+import kotlin.math.roundToInt
 import persona.core.terminal.ModifierState
 import persona.core.terminal.TerminalModifiers
 
 @Composable
-fun TerminalScreen(model: TerminalViewModel, onBack: () -> Unit, sessionTitle: String = model.key.sessionId) {
+fun TerminalScreen(model: TerminalViewModel, onBack: () -> Unit, sessionTitle: String = model.key.sessionId) =
+    TerminalPage(model, onBack, sessionTitle, grab = null)
+
+/**
+ * The terminal, as a page of its own ([grab] null: the title, what it shows and the controls in the page's bar) or over
+ * a chat ([TerminalCover]): no title, and a bar that drags it down, with Close.
+ */
+@Composable
+internal fun TerminalPage(model: TerminalViewModel, onBack: () -> Unit, sessionTitle: String, grab: TerminalGrab?) {
     val state by model.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val context = LocalContext.current
@@ -64,17 +96,21 @@ fun TerminalScreen(model: TerminalViewModel, onBack: () -> Unit, sessionTitle: S
     // A terminal redraws all the time (every frame of the program, every wheel line): glass over it re-blurred its
     // bars and edges on each of those frames, on top of a slow link (2026-11-01). Its page is opaque in every style.
     CompositionLocalProvider(LocalGlassLevel provides GlassLevel.Solid) {
-    JPage(sessionTitle, modifier = Modifier.imePadding(), topBar = {
-        JTopBar(sessionTitle, subtitle = terminalSubtitle(state), onBack = onBack, actions = {
-            val watching = active || state.control == TerminalControl.Starting
-            // Taking over needs the stream: a screen read once a second (an old hub or node) can only be watched.
-            JChip(stringResource(when {
-                active -> R.string.terminal_control_active; watching -> R.string.terminal_control_starting; else -> R.string.terminal_control_watching
-            }), selected = active,
-                onClick = if (watching) ({ model.watch() }) else if (state.online && state.streaming) ({ model.takeOver() }) else null)
-            JIconButton(PhIcons.Copy, stringResource(R.string.terminal_select_text), { selecting = model.screenText() }, enabled = state.loaded)
-            JIconButton(PhIcons.SlidersHorizontal, stringResource(R.string.terminal_display_settings), { display = true })
-        })
+    val control: @Composable () -> Unit = {
+        val watching = active || state.control == TerminalControl.Starting
+        // Taking over needs the stream: a screen read once a second (an old hub or node) can only be watched.
+        JChip(stringResource(when {
+            active -> R.string.terminal_control_active; watching -> R.string.terminal_control_starting; else -> R.string.terminal_control_watching
+        }), selected = active,
+            onClick = if (watching) ({ model.watch() }) else if (state.online && state.streaming) ({ model.takeOver() }) else null)
+    }
+    val tools: @Composable () -> Unit = {
+        JIconButton(PhIcons.Copy, stringResource(R.string.terminal_select_text), { selecting = model.screenText() }, enabled = state.loaded)
+        JIconButton(PhIcons.SlidersHorizontal, stringResource(R.string.terminal_display_settings), { display = true })
+    }
+    JPage(sessionTitle, modifier = Modifier.imePadding(), edges = grab == null, topBar = {
+        if (grab == null) JTopBar(sessionTitle, subtitle = terminalSubtitle(state), onBack = onBack, actions = { control(); tools() })
+        else TerminalCoverBar(terminalSubtitle(state), grab, control, tools)
     }, bottomBar = {
         TerminalKeyBar(state.modifiers, typing, { key, action, quick -> if (typing) model.modifier(key, action, quick) }, model::press, keyboard,
             toggleKeyboard = { if (typing) keyboard = !keyboard }, paste = { if (typing) pasteClipboard() })
@@ -96,7 +132,8 @@ fun TerminalScreen(model: TerminalViewModel, onBack: () -> Unit, sessionTitle: S
                     view.font(state.fontSize)
                     view.render(state, wrap, palette.terminalText.toArgb(), palette.terminalBackground.toArgb()); view.keyboard(keyboard && typing)
                 }, onRelease = { it.keyboard(false); canvas = null })
-                if (notRunning) TerminalNotRunning(state.resumable, state.resuming, model::resume, Modifier.matchParentSize())
+                // Over a chat it drags down like the bar: there is no output under the finger to scroll (iOS #4328).
+                if (notRunning) TerminalNotRunning(state.resumable, state.resuming, model::resume, Modifier.matchParentSize().then(grab?.drag ?: Modifier))
                 else if (!state.loaded) JSpinner(Modifier.align(Alignment.Center))
             }
         }
@@ -127,6 +164,106 @@ private fun TerminalNotRunning(resumable: Boolean, resuming: Boolean, onResume: 
                 icon = PhIcons.TerminalWindow,
                 action = if (resumable) ({ JButton(stringResource(if (resuming) R.string.terminal_resuming else R.string.terminal_resume), onResume,
                     size = JButtonSize.Small, loading = resuming, enabled = !resuming) }) else null)
+        }
+    }
+}
+
+/**
+ * A session's live terminal over its chat (iOS `TerminalCover`, #4339 C7): it comes up from the bottom and takes the
+ * page under the status bar, with no title. Its bar drags it back down and has Close; Back closes it too. The model
+ * lives in the page's own store, so the terminal comes back up on its last screen.
+ */
+@Composable
+fun TerminalCover(key: SessionKey, open: Boolean, onClose: () -> Unit, transport: TerminalTransport, resumer: TerminalResumer? = null) {
+    val context = LocalContext.current.applicationContext
+    TerminalCoverFrame(open, onClose) { grab ->
+        val model = viewModel(key = "terminal-cover:${key.machineId}:${key.sessionId}") {
+            TerminalViewModel(key, transport, preferences = SharedTerminalPreferences(context), resumer = resumer)
+        }
+        TerminalPage(model, onClose, key.sessionId, grab)
+    }
+}
+
+/** What drags the cover down ([drag]: its bar, and the not-running state) and what closes it. */
+internal class TerminalGrab(val drag: Modifier, val close: () -> Unit)
+
+/** DESIGN_SYSTEM.md 4.2, "Terminal cover drag": let go past this, it closes (iOS 140 pt). */
+private val CoverCloseDistance = 140.dp
+
+/** How far a flick carries on, in seconds at its speed (UIKit's normal deceleration, iOS's predicted end). */
+private const val CoverGlide = 0.5f
+
+/** iOS `TerminalCover`'s release: past [closeAt], or flung so its glide would end past three times that (420 pt). */
+internal fun coverCloses(distance: Float, velocity: Float, closeAt: Float): Boolean =
+    distance > closeAt || distance + velocity * CoverGlide > closeAt * 3
+
+/**
+ * The cover: the page under it dimmed, less as the cover goes down, and its taps kept from the page; [content] slides
+ * up into the space under the status bar. Only the bar drags it ([TerminalGrab]): the terminal under the bar keeps its
+ * own scrolling and taps. Let go short of [coverCloses], it springs back.
+ */
+@Composable
+internal fun TerminalCoverFrame(open: Boolean, onClose: () -> Unit, content: @Composable (TerminalGrab) -> Unit) {
+    val close by rememberUpdatedState(onClose)
+    val reduce = PersonaTheme.reduceMotion
+    val motion = PersonaTheme.motion
+    val palette = PersonaTheme.palette
+    // A host's bar above the page (LocalChromeInsets): the cover starts under it, as the page's own bar does.
+    val hostTop = LocalChromeInsets.current.top
+    BackHandler(open) { close() }
+    val slide: FiniteAnimationSpec<IntOffset> = motion.layout?.spec() ?: tween(motion.standard, easing = FastOutSlowInEasing)
+    AnimatedVisibility(open, Modifier.fillMaxSize(), enter = EnterTransition.None, exit = ExitTransition.None) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val closeAt = with(LocalDensity.current) { CoverCloseDistance.toPx() }
+            val height = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+            var offset by remember { mutableFloatStateOf(0f) }
+            val scope = rememberCoroutineScope()
+            var settle by remember { mutableStateOf<Job?>(null) }
+            val dragging = rememberDraggableState { delta -> settle?.cancel(); offset = (offset + delta).coerceAtLeast(0f) }
+            val drag = Modifier.draggable(dragging, Orientation.Vertical, onDragStopped = { velocity ->
+                if (coverCloses(offset, velocity, closeAt)) close()
+                else settle = scope.launch {
+                    if (reduce) offset = 0f else animate(offset, 0f, animationSpec = motion.enter()) { value, _ -> offset = value }
+                }
+            })
+            Box(Modifier.fillMaxSize()
+                .animateEnterExit(enter = if (reduce) EnterTransition.None else fadeIn(tween(motion.standard)),
+                    exit = if (reduce) ExitTransition.None else fadeOut(tween(motion.standard)))
+                .graphicsLayer { alpha = 1f - (offset / height).coerceIn(0f, 1f) }
+                .background(palette.scrim)
+                .pointerInput(Unit) {})
+            Box(Modifier.fillMaxSize()
+                .animateEnterExit(enter = if (reduce) EnterTransition.None else slideInVertically(slide) { it },
+                    exit = if (reduce) ExitTransition.None else slideOutVertically(slide) { it })
+                .offset { IntOffset(0, offset.roundToInt()) }
+                .padding(top = hostTop).statusBarsPadding().padding(top = Tokens.Space.xs)
+                .clip(PersonaTheme.shapes.sheetShape)
+                .testTag("terminal_cover")) {
+                CompositionLocalProvider(LocalChromeInsets provides ChromeInsets()) { content(TerminalGrab(drag) { close() }) }
+            }
+        }
+    }
+}
+
+/**
+ * The cover's bar (iOS `TerminalPanel.grabBar`), there in every state: the handle, then the take-over chip, what the
+ * terminal shows ([subtitle]), the tools and Close. Dragged down it takes the cover with it.
+ */
+@Composable
+private fun TerminalCoverBar(subtitle: String?, grab: TerminalGrab, control: @Composable () -> Unit, tools: @Composable () -> Unit) {
+    val palette = PersonaTheme.palette
+    Column(Modifier.fillMaxWidth().then(grab.drag).padding(top = Tokens.Space.s).testTag("terminal_bar")) {
+        Box(Modifier.align(Alignment.CenterHorizontally).size(Tokens.Space.xxl, Tokens.Space.xs)
+            .clip(PersonaTheme.shapes.controlShape).background(palette.ink3))
+        Row(Modifier.fillMaxWidth().padding(start = pagePadding, end = Tokens.Space.xs), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+            control()
+            Text(subtitle.orEmpty(), Modifier.weight(1f), style = PersonaTheme.type.caption, color = palette.ink2,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                tools()
+                JIconButton(PersonaIcons.close, stringResource(R.string.terminal_close), grab.close)
+            }
         }
     }
 }
@@ -176,7 +313,7 @@ private fun TerminalKeyBar(
     val keyNames = keyNameSources.mapValues { (_, name) -> if (name is Int) stringResource(name) else name.toString() }
     ComposerFrame(trailing = {
         JChip(stringResource(if (keyboard) R.string.terminal_keyboard_hide else R.string.terminal_keyboard_show), selected = keyboard, icon = PhIcons.Keyboard,
-                modifier = Modifier.heightIn(min = 48.dp).semantics {
+                modifier = Modifier.heightIn(min = Tokens.MinTouch.android).semantics {
                     role = Role.Button; contentDescription = keyboardDescription
                     onClick { currentToggle(); true }
                 }.pointerInput(Unit) { detectTapGestures(onTap = { currentToggle() }, onDoubleTap = { currentPress("enter") }) })

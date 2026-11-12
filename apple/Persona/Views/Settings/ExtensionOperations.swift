@@ -200,14 +200,15 @@ extension APIClient {
 
     /// Installs or upgrades with the preview agreed to, as the hub answers when it is done; a local operation says
     /// what is going on meanwhile. The result is how it ended.
-    func installWithoutSteps(_ id: String, name: String?, preview: ExtensionPreview) async -> ExtensionOperation {
+    func installWithoutSteps(_ id: String, name: String?, preview: ExtensionPreview, manager: String? = nil) async -> ExtensionOperation {
         let upgrade = preview.upgrade == true
-        let local = ExtensionOperation(id: Self.localID(), kind: upgrade ? .upgrade : .install, extensionID: id, name: name,
+        var local = ExtensionOperation(id: Self.localID(), kind: upgrade ? .upgrade : .install, extensionID: id, name: name,
                                        version: preview.manifest.version, from: preview.from, market: preview.market,
                                        startedAt: .now, updatedAt: .now)
+        local.manager = manager
         received(local)
         do {
-            guard let api = deps.api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
+            let api = try api(manager)
             if upgrade { _ = try await api.upgradeExtension(id, preview: preview) } else { _ = try await api.installExtension(preview: preview) }
             return finish(local, error: nil)
         } catch {
@@ -217,17 +218,18 @@ extension APIClient {
 
     /// Removes, as the hub answers when it is done (a hub with operations pushes the steps meanwhile; an older one
     /// gets a local operation). A refusal before anything started (has_dependents) is thrown for the caller to ask.
-    func uninstall(_ id: String, name: String?, cascade: Bool, members: Bool) async throws -> ExtensionRemovalResult {
-        let local = stepped ? nil : ExtensionOperation(id: Self.localID(), kind: .uninstall, extensionID: id, name: name,
+    func uninstall(_ id: String, name: String?, cascade: Bool, members: Bool, manager: String? = nil) async throws -> ExtensionRemovalResult {
+        var local = stepped ? nil : ExtensionOperation(id: Self.localID(), kind: .uninstall, extensionID: id, name: name,
                                                        startedAt: .now, updatedAt: .now)
+        local?.manager = manager
         if let local { received(local) }
         do {
-            guard let api = deps.api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
+            let api = try api(manager)
             let result = try await api.uninstallExtension(id, cascade: cascade, members: members)
             if let local { _ = finish(local, error: nil) }
             return result
         } catch let e as APIError where e.code == "has_dependents" {
-            if let local { operations[local.id] = nil }
+            if let local { operations[local.storeKey] = nil }
             throw e
         } catch {
             if let local { _ = finish(local, error: error) }
@@ -244,7 +246,7 @@ extension APIClient {
         op.errorCode = (error as? APIError)?.code
         op.endedAt = .now
         op.updatedAt = .now
-        operations[op.id] = op
+        operations[op.storeKey] = op
         return op
     }
 

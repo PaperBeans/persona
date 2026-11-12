@@ -42,8 +42,14 @@ func (s *Service) fleetHandler(next http.Handler) http.Handler {
 		res.AnsweredBy, res.Reason = "", "" // only the assistant's interaction_answer says it answered
 		res.Remembered = false              // only the manager's own "Always allow" answers say so
 		id := r.PathValue("id")
-		if err := s.resolve(id, res); err != nil {
+		var approver *assistantwire.HandoffApprover // the device the hub vouched may approve a hand-off card
+		if a, ok := assistantwire.HandoffApproverOf(r.Context()); ok {
+			approver = &a
+		}
+		if err := s.resolveApproved(id, res, approver); err != nil {
 			switch {
+			case errors.Is(err, errHandoffElsewhere):
+				apierr.WriteCode(w, http.StatusForbidden, proto.CodeSecretHandoffElsewhere, err)
 			case errors.Is(err, errNotPending):
 				s.writeEnded(r.Context(), w, id, res, err)
 			case errors.Is(err, errInvalidElicitation), errors.Is(err, errInvalidQuestionCancel):
@@ -178,6 +184,9 @@ func (s *Service) localFleetDeviceCall(ctx context.Context, p DeviceCall) (json.
 			sess.Assistant = m.isAssistant(sess)
 			if sess.Assistant {
 				sess.Space = identity.SpaceOf(sess.Cwd)
+			}
+			if title := s.agentDisplayName(m.ID, sess); title != "" {
+				sess.Title = title
 			}
 			// The node fills in no unified state: the callers that ask whether it works or waits for the user
 			// (sessionBusy, waitTurnEnd, a repair's end) read the manager's, as the lists have it.

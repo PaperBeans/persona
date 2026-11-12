@@ -96,9 +96,10 @@ class ReportCardShotsTest {
         return AssistantTaskHost(store, "main", emptyList(), { it }, {}, { throw it }, {})
     }
 
-    private fun assertOriginalBodyWithoutEvidence() {
-        rule.onNodeWithTag("report-card").assertIsDisplayed()
-        val node = rule.onNodeWithTag("report-body").assertTextEquals(body).fetchSemanticsNode()
+    /** Brief and Board draw the report as its card; Glass as iOS's "task → @Persona" exchange (#4339 C13). */
+    private fun assertOriginalBodyWithoutEvidence(glass: Boolean = false) {
+        rule.onNodeWithTag(if (glass) "exchange-report" else "report-card").assertIsDisplayed()
+        val node = rule.onNodeWithTag(if (glass) "exchange-text" else "report-body", useUnmergedTree = glass).assertTextEquals(body).fetchSemanticsNode()
         val annotated = node.config[SemanticsProperties.Text].single()
         assertEquals(body, annotated.text)
         assertEquals(listOf("https://example.com/results"), annotated.getLinkAnnotations(0, annotated.length)
@@ -125,8 +126,8 @@ class ReportCardShotsTest {
             style = s; dark = d
             Snapshot.sendApplyNotifications()
             rule.waitForIdle()
-            assertOriginalBodyWithoutEvidence()
-            rule.onNodeWithText("Fictional verification").assertIsDisplayed()
+            assertOriginalBodyWithoutEvidence(glass = s == AppStyle.Glass)
+            rule.onNodeWithText(if (s == AppStyle.Glass) "Fictional verification → @Persona" else "Fictional verification").assertIsDisplayed()
             val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
             if (!d) light[s] = bitmap.copy(Bitmap.Config.ARGB_8888, false)
             else assertFalse("Light and dark must differ for $s", light.getValue(s).sameAs(bitmap))
@@ -141,7 +142,7 @@ class ReportCardShotsTest {
         val api = Api(report().copy(ref = "missing-task"))
         val host = host(api)
         rule.setContent {
-            PersonaTheme(reduceMotion = true) {
+            PersonaTheme(style = AppStyle.Brief, reduceMotion = true) {
                 val feeds by host.tasks.feeds.collectAsStateWithLifecycle()
                 feeds["main"].orEmpty().forEach { AssistantExtraLine(AssistantExtra.Feed(it), host) }
             }

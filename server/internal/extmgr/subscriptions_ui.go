@@ -3,7 +3,6 @@ package extmgr
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/extension"
@@ -42,7 +41,9 @@ func (h *Manager) subscriptionUI(w http.ResponseWriter, r *http.Request) {
 		By:        subscriptions.Actor{ID: actorOf(ctx), Name: p.Name},
 		Name:      h.subscriptionConnectorName,
 		Native:    h.subscriptionNative,
-		Drafts:    h.subscriptionDrafts(),
+		Builtin:   builtinSources{h},
+		Assistant: in.Context.Assistant,
+		Triage:    h.triagePreview,
 		Platform:  in.Context.Platform,
 	}
 	res, err := subscriptionsui.Handle(ctx, h.subs, env, subscriptionsui.Request{State: in.State, Action: in.Action, Values: in.Values})
@@ -81,39 +82,6 @@ func (h *Manager) subscriptionConnectorName(id string) string {
 // mail account on that domain, or the connector whose links live on that host; "" when nothing does. Only a hint for
 // the pages: subscribing stays possible.
 func (h *Manager) subscriptionNative(service string) string {
-	kind, domain, ok := strings.Cut(strings.ToLower(service), ":")
-	if !ok || domain == "" {
-		return ""
-	}
-	if kind == "mail" && h.mail != nil {
-		if accounts, err := h.mail.ListAccounts(); err == nil {
-			for _, a := range accounts {
-				if _, d, ok := strings.Cut(strings.ToLower(a.Email), "@"); ok && d == domain {
-					return a.Email
-				}
-			}
-		}
-	}
-	for _, c := range h.connectors.All() {
-		if !h.connectors.Enabled(c.ID()) {
-			continue
-		}
-		for _, host := range c.Manifest().Hosts {
-			if host = strings.ToLower(host); host == domain || strings.HasSuffix(host, "."+domain) {
-				return h.subscriptionConnectorName(c.ID())
-			}
-		}
-	}
-	return ""
-}
-
-// subscriptionDrafts keeps the model drafts the pages start (#2040); one that finishes redraws the pages on every app,
-// as an extension's invalidate does for its own.
-func (h *Manager) subscriptionDrafts() *subscriptionsui.Drafts {
-	h.subDraftsOnce.Do(func() {
-		h.subDrafts = subscriptionsui.NewDrafts(func() {
-			h.broadcast(map[string]any{"type": "extension_ui", "extension": subscriptionsui.PagesID, "invalidate": true})
-		})
-	})
-	return h.subDrafts
+	_, where := builtinSources{h}.Native(service)
+	return where
 }

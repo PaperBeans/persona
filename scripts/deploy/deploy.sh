@@ -21,8 +21,10 @@ fi
 source "$PWD/scripts/deploy/default-branch.sh"
 # Normalize caller overrides before reading deployment options; never print their values.
 eval "$(python3 scripts/persona_identity.py --env)"
-# The question and its explanations live in install.sh (the public installer asks the same).
-eval "$(sed -n '/^# >>> admin access/,/^# <<< admin access/p' scripts/deploy/install.sh)"
+# The question, its explanations and their language catalog live in install.sh (the public installer asks the same).
+eval "$(sed -n -e '/^# >>> install language/,/^# <<< install language/p' \
+  -e '/^# >>> admin access/,/^# <<< admin access/p' scripts/deploy/install.sh)"
+INSTALL_LANG=$(install_language)
 ADMIN_ACCESS="${PERSONA_ADMIN_ACCESS:-}"
 ADMIN_CIDRS="${PERSONA_ADMIN_CIDRS:-}"
 ARGS=()
@@ -337,7 +339,7 @@ for t in "${TARGETS[@]}"; do
     "$HUB")
       python3 ../scripts/persona_identity.py --service hub --prepare --prefix ../scripts/deploy/db.sh | ssh "$PERSONA_HUB_SSH" 'bash -s'
       for plat in "${PLATFORMS[@]}"; do
-        remote_state "$PERSONA_HUB_SSH" 'mkdir -p "$PERSONA_HOME/bin/nodes"; n="$PERSONA_HOME/bin/nodes/'"personad-$plat"'"; rm -f "$n.version"; cat > "$n"' < "bin/personad-$plat"
+        remote_state "$PERSONA_HUB_SSH" 'mkdir -p "$PERSONA_HOME/bin/nodes"; n="$PERSONA_HOME/bin/nodes/'"personad-$plat"'"; rm -f "$n.version"; cat > "$n.new" && mv "$n.new" "$n"' < "bin/personad-$plat"
         # This deploy's personad is the hub's version: a version file beside it (a release's build put there by hand,
         # docs/operations/docker.md "Node builds") would say it is another, so it went above.
         # persona-node says which build it is in a file beside it, and Redeploy sends it only while that is the hub's
@@ -351,6 +353,14 @@ for t in "${TARGETS[@]}"; do
       hub_plat=$(machine_platform "$t") || exit 2
       install_bin "$t" "bin/personad-$hub_plat"
       for p in persona-hub persona-manager; do install_program "$t" "$hub_plat" "$p"; done
+      # What this build contains, beside its binary: the hub's deploy checks read it before asking GitHub, and it names
+      # the open PRs the build runs (docs/assistant/todo-status-sop.md "Without GitHub"). Never fails the deploy.
+      if python3 ../scripts/deploy/deployed_commits.py ${COMMIT:+--commit "${COMMIT%-dirty}"} --out bin/deployed-commits.txt; then
+        remote_state "$PERSONA_HUB_SSH" 'cat > "$PERSONA_HOME/bin/deployed-commits.txt.new" && mv "$PERSONA_HOME/bin/deployed-commits.txt.new" "$PERSONA_HOME/bin/deployed-commits.txt"' < bin/deployed-commits.txt ||
+          echo "hub: deployed-commits.txt not written; its deploy checks ask GitHub" >&2
+      else
+        echo "hub: deployed-commits.txt not made; its deploy checks ask GitHub" >&2
+      fi
       ensure_herdr "$t"
       hub_admin_access
       python3 ../scripts/persona_identity.py --service hub --prepare --prefix ../scripts/deploy/hub-systemd.sh | ssh "$PERSONA_HUB_SSH" 'bash -s'

@@ -36,6 +36,7 @@ repository's.
 | One main-thread work item during scrolling, typing or an animation | ≤ 16 ms (one frame at 60 Hz; 8 ms on 120 Hz ProMotion screens is the goal) | Time Profiler, Animation Hitches, `FrameStats` |
 | Any single main-thread block, anywhere (first tap, page open, push) | < 100 ms; Apple calls a delay over 100 ms noticeable | `MainThreadWatchdog`, Time Profiler, Hangs instrument, `sample <pid>` |
 | A hang | none ≥ 250 ms, the point where Apple's tools report a hang; one found is a bug to fix before release | Hangs instrument, Xcode Organizer, MetricKit |
+| Assistant ⇄ Agents switch (`PerfAssistantTests/testTabSwitchAssistantAgents`) | hitch < 10 ms/s and no frame over 100 ms; on 2026-11-12 the simulator measured 32–55 ms/s and a worst frame of 225–330 ms (optimized build, `assistant` suite data), over budget and tracked in #5438 | `scripts/app/perf-test.sh assistant`, `sample` while switching |
 | Hitch time ratio while scrolling | < 5 ms/s (Apple: good under 5, warning 5–10, critical above 10) | `XCTHitchMetric`, `scripts/app/perf-test.sh` |
 | View bodies per hub push, page at rest | the numbers in `docs/apple/ios-state.md` ("Cost of one push"): Agents list 1 / 2, chats 0 | `RenderBudgetTests` |
 | Main-thread time per hub push | no regression against the tables in `docs/operations/testing.md` ("Whole App (any page)") | `-perfCounts YES`, `-showPagePerf YES` |
@@ -151,7 +152,9 @@ check, not overload, inheritance or default-argument analysis; same-named classe
 
 **Rule.** No sorting, filtering, grouping or counting over collections, no `DateFormatter` / `NumberFormatter` creation,
 no `Regex` / `NSRegularExpression` compilation, no Markdown or `AttributedString` parsing, no JSON and no image decoding
-in `body` or in computed properties `body` calls. Derive once per change in the model and store the result.
+in `body` or in computed properties `body` calls. Derive once per change in the model and store the result. Localized
+words with an explicit locale (`interfaceText(_:)`, `String(localized:…, locale:)`) are resolved once per locale and kept,
+not looked up on every redraw.
 
 **Why.** `body` runs whenever anything it read changes, and in lists for every row that is laid out. Work in it is paid on
 every push and every frame of a scroll.
@@ -159,15 +162,36 @@ every push and every frame of a scroll.
 **Counter-examples.**
 - `apple/Persona/Views/Inbox/Lark/LarkInline.swift:303`: compiles a regular expression on every call, from every Lark card node's `body`.
 - `apple/Persona/Views/Knowledge/KnowledgeView.swift:1092`: a new `DateFormatter` per call from `body` (`apple/Persona/Views/Knowledge/KnowledgeView.swift:826`).
+- `apple/Shared/StateNames.swift`: `StateName.text` calls `interfaceText(_:)` each time it is read. With an explicit locale,
+  `String(localized:)` reads the string tables on every call (1–2 ms each on the simulator, against the cached lookup of
+  the default locale). The Agents filter chips (`QuickFilterBar.plainChips` → `AgentFilter.title`) and row badges read it
+  on every redraw: 1153 ms of main-thread time over 20 Assistant ⇄ Agents switches, about 57 ms per switch, measured with
+  `sample` on an optimized build (#5438).
 - Fixed before: the Agents list grouped, sorted, folded and counted every session in `body` on every push until `AgentsFeed` and
   `AgentListProjection` moved that into the model (`docs/apple/ios-state.md`, steps 1 and 3); Markdown re-parsed finished blocks while streaming until `StreamChunks`.
 
 **Do.** Derived data lives in the model (`AgentsFeed`, `AgentListProjection`, `AppModel.badges`), keyed by a small revision,
 derived off the main actor when large (`docs/lessons/ios.md`, "Cached Agent-list projections (#1231)"). Formatters are
-`static let`, or use `Date.FormatStyle`, which caches.
+`static let`, or use `Date.FormatStyle`, which caches. Words drawn on every redraw are resolved once per locale:
 
-**Check.** Review. Measure with the SwiftUI instrument (Xcode 26: long view body updates) or `PerfTrace.body` counts with
-`-perfCounts YES`.
+```swift
+// Wrong: a table lookup every time a chip or a badge redraws.
+var text: String { interfaceText("Needs You [State Names]") }
+
+// Right: once per interface locale, then a dictionary read (#5438).
+var text: String {
+    let key = interfaceTextLocale.identifier + "|" + rawValue
+    if let known = Self.resolved.withLock({ $0[key] }) { return known }
+    let text = interfaceText("Needs You [State Names]") // perf-ok: resolved once per locale
+    Self.resolved.withLock { $0[key] = text }
+    return text
+}
+```
+
+**Check.** The ratchet counts `localized-lookup`: every `interfaceText(` call and every `String(localized:…, locale:)`
+(63 in 5 files when the rule was added); a new one fails unless its line says why it is fine (`// perf-ok: resolved once per
+locale`). The rest is review: measure with the SwiftUI instrument (Xcode 26: long view body updates) or `PerfTrace.body`
+counts with `-perfCounts YES`.
 
 ### P5. A view reads only what it draws
 
@@ -184,7 +208,10 @@ in one place, move that read into a small child view. Actions read unobserved va
 - Fixed before: the chat subtitle read `machines`, so every machine heartbeat recomputed the page and all its rows
   (`docs/apple/ios-state.md`, step 5); writing a trace array in `body` made `RootView` observe it and redraw for ever (commit `d2289dee5`).
 
-**Do.** Follow `docs/apple/ios-state.md` ("Keeping redraws small"). Write-only records are `@ObservationIgnored`.
+**Do.** Follow `docs/apple/ios-state.md` ("Keeping redraws small"). Write-only records are `@ObservationIgnored`. A store
+many pages share hands each one a projection of its own key, built per change: `MeetingPhotos.Album` is one recording's
+photos with each row's content worked out, so the meeting thread reads only their order, each photo row reads the rest,
+and another recording's uploads redraw neither.
 
 **Check.** `RenderBudgetTests` (views per push) and `AllSessionsReadersTests` (who may read `allSessions`) fail on
 regressions; add a `PerfTrace.body("Name")` to a new heavy view so its count shows up.
@@ -203,6 +230,8 @@ wrongly and all are rebuilt. `AnyView` hides the type, so SwiftUI cannot diff th
 - `apple/Persona/Views/Chat/ComposerParts.swift:168`: the composer's attached images, which can be removed, use `id: \.offset`.
 - `apple/Persona/Views/Inbox/Lark/LarkCard.swift:305-335`: Lark cards inside chat rows are trees of `AnyView`.
 - Fixed before: one `VStack` of all rows inside a `LazyVStack` laid out hundreds of rows at once and blanked the page (`docs/lessons/ios.md`, "Chat lists and scrolling").
+- Fixed before: an Agent's 33,000-character report was one row (one MarkdownUI document laid out whole, twice, with every table's decoration
+  re-run per scrolled frame); long finished answers are now lazy rows of about 24 lines (`AnswerParts`, #4970).
 
 **Do.** Give each element an `Identifiable` id from the hub (`SessionKey`, item ids). `\.offset` is fine only over a
 constant array built in the same expression (a fixed set of chips).
@@ -245,6 +274,8 @@ decode takes tens of milliseconds. `UIImage(data:)` decodes lazily at first draw
   first draw of each avatar decodes on the main thread (cached afterwards).
 - `apple/Persona/Views/Inbox/Lark/LarkAttachmentView.swift:33` and `apple/Persona/Views/Session/CompareView.swift:249`: `UIImage(data:)` in `body`, on every render.
 - `apple/Persona/Views/Chat/PhotoAttach.swift:35`: picked photos decoded, scaled and encoded on the main actor.
+- `apple/Persona/Views/Machines/ClipboardSection.swift:131`: the clipboard preview builds `UIImage(data:)` from the
+  computer's full-size picture in `body`, so every redraw of the machine page decodes it again (#3281, listed in #5414).
 
 **Do.** Follow `LarkMedia` (`apple/Persona/Views/Inbox/Lark/LarkMedia.swift:101-120`): download, then
 `Task.detached { decode(data, maxPixel:) }` with a `nonisolated` ImageIO thumbnail, in-flight requests shared, an `NSCache`
@@ -270,12 +301,18 @@ a running `TimelineView(.animation)` relayouts the window every frame (`docs/les
 - `apple/PersonaWatch/PersonaWatchApp.swift:285-288`: an endless poll whose `try?` sleep swallows cancellation.
 - Fixed before: hidden chats kept their transcript subscription and read owner after a tab switch (`docs/lessons/ios.md`,
   "Retained chat visibility").
+- The other side of the same rule: `.tabActiveTask` restarts every time its page comes back, so what it does is paid on
+  every switch. `apple/Persona/Views/Chat/ChatView.swift` refetches the user-input index (`loadUserInputIndex`, #4912) each
+  time the chat is in front again, and writes it to `@State`, which redraws the chat. Work that only needs to happen when
+  its input changed is keyed by that input (`.tabActiveTask(id: revision)`) and skipped when the result is already held.
 
 **Do.** `.tabActiveTask { … }` for polling; `TimelineView(.animation(paused: !visible || reduceMotion))`; persistent
 animations on the Mac in Core Animation (`MacBreathingRing`).
 
 **Check.** The ratchet counts `TimelineView(.animation…)` without `paused:`; `ContinuousMotionTests`; `HoldSourceTests`
-(no timers in model-following feeds). Leaks and the memory graph after leaving the page.
+(no timers in model-following feeds). Leaks and the memory graph after leaving the page. Work that reruns on every return
+cannot be found by text: `PerfAssistantTests/testTabSwitchAssistantAgents` measures the Assistant ⇄ Agents switch against
+its budget ("Budgets"); a page with its own switch-back cost gets a test of the same shape.
 
 ### P10. Launch draws the first frame first
 
@@ -308,7 +345,9 @@ they draw and never load whole transcripts.
 lower limits than the app. A cache with no bound is a leak with extra steps.
 
 **Do.** Give caches a cost; drop them on `UIApplication.didReceiveMemoryWarningNotification`; release retained stores on
-`onTabVisibility` disappear.
+`onTabVisibility` disappear. Full-size decodes of user pictures run one at a time and let the original go as soon as it
+is downscaled (`MeetingPhotos` prepares a pick's photos in turn, and `MeetingPhotoPipeline.prepare` drops the original
+before Vision reads the small copy), so four 48 MP photos picked during a recording never sit in memory at once.
 
 **Check.** Allocations with generations (open and close a page 10 times; "Budgets"), the memory graph debugger for leaked
 stores and models, `XCTMemoryMetric` for a scenario test.
@@ -333,6 +372,9 @@ Start from a reproduction, measure the base, change one thing, measure again.
    "Jank measurement (dropped frames)").
 2. **Use your own simulator** through `scripts/app/sim-boot.sh` and an isolated mock hub (`scripts/mock/mock_hub.py` on your
    own port) with heavy data (`MOCK_AGENTS=1`, `MOCK_LONG_ASSISTANT=1`, `MOCK_LONG_HISTORY=1`).
+   Before measuring, check that the app is active (`scripts/app/personactl.py`'s `state` answers `appState: active`). An app
+   left inactive, for example under an unanswered system prompt (#5089), keeps its hub links suspended and measures nothing;
+   restart the simulator with `sim-boot.sh --reslim`, or use `--profile stock`.
 3. **Find the main thread's time.**
    - `sample <pid> 10 1 -file out.txt` while reproducing: no Instruments authorization needed; aggregate the main thread.
    - Instruments: Time Profiler (attach to the simulator app's PID); Hangs (reports main-thread blocks over the
@@ -368,7 +410,8 @@ Report the device or simulator, OS, build settings, data set, number of runs and
 
 | Check | What it does | State |
 | --- | --- | --- |
-| `scripts/test/test_apple_perf_patterns.py` | Ratchet over Swift under `apple/` (tests excluded): Photos fetches, `SecItemCopyMatching`, `Data` / `String(contentsOf:)`, directory listings, `UserDefaults.synchronize()`, `UIImage(data:)` / `(contentsOfFile:)` / `NSImage(data:)`, and `TimelineView(.animation…)` without `paused:`. Each file's counts (`scripts/test/apple_perf_baseline.json`) may only go down; a call verified to run off the main thread is marked `// perf-ok: <reason>`. After removing calls, run it with `--update`; `--list` prints every counted call. Runs in `scripts/ci/python-tests.py`. | Implemented |
+| `scripts/test/test_apple_perf_patterns.py` | Ratchet over Swift under `apple/` (tests excluded): Photos fetches, `SecItemCopyMatching`, `Data` / `String(contentsOf:)`, directory listings, `UserDefaults.synchronize()`, `UIImage(data:)` / `(contentsOfFile:)` / `NSImage(data:)`, `TimelineView(.animation…)` without `paused:`, and localization lookups with an explicit locale (`interfaceText(`,
+`String(localized:…, locale:)`; P4). Each file's counts (`scripts/test/apple_perf_baseline.json`) may only go down; a call verified to run off the main thread is marked `// perf-ok: <reason>`. After removing calls, run it with `--update`; `--list` prints every counted call. Runs in `scripts/ci/python-tests.py`. | Implemented |
 | `RenderBudgetTests`, `AllSessionsReadersTests`, `AppStorageRatchetTests`, `HoldSourceTests`, `ContinuousMotionTests` | Views per push, who reads `allSessions`, files still holding `@AppStorage`, no self-managed waits, every unending animation stops under Reduce Motion | Existing |
 | `scripts/app/perf-test.sh` | Scroll, navigation and composer hitches per page | Existing, run by hand |
 | Isolation-aware lint | Flag the patterns above only where the compiler says the call is on the main actor (SwiftSyntax or a SourceKit index over the isolation of the enclosing declaration), so the ratchet can become a hard zero | Proposed, #4262 |

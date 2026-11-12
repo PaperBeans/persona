@@ -102,12 +102,13 @@ struct PersonaShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: StartMeetingRecordingIntent(),
             phrases: [
+                "Record with \(.applicationName)",
                 "Record a meeting with \(.applicationName)",
                 "Record this meeting with \(.applicationName)",
-                "Start a meeting recording in \(.applicationName)",
+                "Start recording in \(.applicationName)",
                 "\(.applicationName), record the meeting",
             ],
-            shortTitle: "Record a Meeting",
+            shortTitle: "Record [Recordings Section ef2821]",
             systemImageName: "waveform.circle" // icon: App Shortcuts take only a literal (Theme.Icon.recording)
         )
         #endif

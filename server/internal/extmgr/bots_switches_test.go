@@ -6,8 +6,8 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 )
 
-// The Lark bot's switches that came after the others: the board (#6052) and only_conclusions (#1226).
-var laterBotSwitches = []string{"board", "only_conclusions"}
+// The Lark bot's switches that came after the others: the board (#6052), only_conclusions (#1226) and answer_new_card (#5396).
+var laterBotSwitches = []string{"board", "only_conclusions", "answer_new_card"}
 
 // Each is off by default and for settings saved before it; an app that does not know it leaves it as it was; the
 // assistant's feishu.status says it and feishu.configure sets it.

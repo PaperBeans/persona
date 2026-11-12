@@ -7,23 +7,27 @@ import SwiftUI
 /// attending.
 struct MeetingSettingsView: View {
     @Environment(AppModel.self) private var model
+    @State private var capturedAPI: APIClient?
+    @State private var role: MeetingAttendance?
+    @State private var saving = false
 
     var body: some View {
         SettingsForm {
             Section {
                 Picker(String(localized: "Persona in Meetings"), selection: Binding(
-                    get: { MeetingAttendees.defaultRole(model) },
-                    set: { role in Task { await model.setMeetingAttendanceDefault(role) } })) {
+                    get: { role ?? .off },
+                    set: { role in Task { await save(role) } })) {
                     ForEach(MeetingAttendance.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.inline)
                 .labelsHidden()
                 .accessibilityIdentifier("settings-meeting-attendance")
+                .disabled(role == nil || saving)
             } header: {
                 Text("Persona in Meetings")
             } footer: {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Text(MeetingAttendees.defaultRole(model).detail)
+                    if let role { Text(role.detail) }
                     Text("Each meeting recording starts with this. To change it for one meeting, pick another on the Recordings page before you start.")
                 }
             }
@@ -41,7 +45,27 @@ struct MeetingSettingsView: View {
         .themedPage()
         .navigationTitle(String(localized: "Meetings"))
         .navigationBarTitleDisplayMode(.inline)
-        .task { if model.assistantConfig == nil { await model.refreshAssistant() } }
+        .task { await load() }
+    }
+
+    private func load() async {
+        if capturedAPI == nil { capturedAPI = model.api?.currentAssistantSettings() }
+        guard let api = capturedAPI else { return }
+        do {
+            let settings = try await api.assistant()
+            role = settings.meetingAttendanceDefault.flatMap(MeetingAttendance.init(rawValue:)) ?? .off
+        } catch { model.show(error) }
+    }
+
+    private func save(_ next: MeetingAttendance) async {
+        guard !saving, let api = capturedAPI else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            _ = try await api.setAssistant(meetingAttendanceDefault: next.rawValue)
+            role = next
+            if api.sameSettingsScope(as: model.api) { await model.refreshAssistant() }
+        } catch { model.show(error) }
     }
 }
 #endif

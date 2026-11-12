@@ -1,0 +1,12 @@
+{
+  "title": "{agent}がコマンドを実行しようとしています",
+  "risk_delete": "このコマンドでファイルが削除されないか確認できません",
+  "risk_other": "Claude Codeがこのコマンドについて警告しています",
+  "countdown_deny": "{time}後に自動で拒否されます",
+  "countdown_allow": "{time}後に自動で許可されます",
+  "countdown_over_deny": "時間切れのため、Claude Codeが自動で拒否します",
+  "countdown_over_allow": "時間切れのため、Claude Codeが自動で許可します",
+  "show_original": "原文を表示",
+  "hide_original": "原文を隠す",
+  "show_all": "すべて表示"
+}

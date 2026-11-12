@@ -20,8 +20,21 @@ struct StyleSpecTests {
     }
 
     static func contrast(_ a: Color, _ b: Color, _ style: UIUserInterfaceStyle) -> Double {
-        let la = luminance(rgb(a, style)), lb = luminance(rgb(b, style))
+        contrast(rgb(a, style), rgb(b, style))
+    }
+
+    private static func contrast(_ a: (Double, Double, Double), _ b: (Double, Double, Double)) -> Double {
+        let la = luminance(a), lb = luminance(b)
         return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+    }
+
+    /// `top` (with its opacity) laid over `under`, as drawn.
+    private static func over(_ top: Color, _ under: (Double, Double, Double), _ style: UIUserInterfaceStyle) -> (Double, Double, Double) {
+        let u = UIColor(top).resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        u.getRed(&r, green: &g, blue: &b, alpha: &a)
+        func mix(_ x: CGFloat, _ y: Double) -> Double { Double(x * a) + y * Double(1 - a) }
+        return (mix(r, under.0), mix(g, under.1), mix(b, under.2))
     }
 
     static func hex(_ c: Color, _ style: UIUserInterfaceStyle = .light) -> UInt32 {
@@ -69,6 +82,36 @@ struct StyleSpecTests {
     @Test func theAccentAsALink() {
         let found = Self.below(3) { ($0.accent, $0.page) }
         #expect(found.isEmpty, "the accent on the page under 3:1: \(found)")
+    }
+
+    /// What sits in the user's own message (#5204): its words, and the blocks it opens with (quotes, forwards, text to
+    /// change, comments), whose rule, heading and words are the words' color, ≥ 4.5:1 on the block's fill laid over the
+    /// bubble; a path linked in the words ≥ 3:1. On Persona's main conversation's box and on the style's bubble, at its
+    /// top and its deepened bottom. The style's white words of a colored bubble once drew blocks at 1.35:1 on the box.
+    @Test func whatSitsInTheUsersBubble() {
+        var found: [String] = []
+        for boxed in [true, false] {
+            for style in AppStyle.allCases {
+                for (name, colors) in Self.colors {
+                    let ink = Theme.UserBubbleInk.of(StyleSpec(style.component, colors), boxed: boxed)
+                    for (look, ui) in Self.appearances {
+                        let top = Self.rgb(ink.bubble, ui)
+                        // `Theme.deepening`: 12% toward black at the bottom.
+                        let ends = ink.deepens ? [top, (top.0 * 0.88, top.1 * 0.88, top.2 * 0.88)] : [top]
+                        for (end, under) in zip(["top", "bottom"], ends) {
+                            let block = Self.over(ink.quoteFill, under, ui)
+                            let at = "\(boxed ? "box" : "bubble") \(style.rawValue)+\(name) \(look) \(end)"
+                            for (what, a, b, floor) in [("words", ink.words, under, 4.5), ("block", ink.words, block, 4.5),
+                                                        ("link", ink.link, under, 3.0)] {
+                                let c = Self.contrast(Self.rgb(a, ui), b)
+                                if c < floor { found.append("\(at) \(what): \(String(format: "%.2f", c))") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        #expect(found.isEmpty, "under the floor in the user's bubble: \(found)")
     }
 
     /// The quieter Markdown headings (H4–H6, `Theme.Reply.secondaryInk`, #3863) are text: ≥ 4.5:1 on every page and

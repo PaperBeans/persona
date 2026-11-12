@@ -43,14 +43,18 @@ import kotlinx.coroutines.launch
 import persona.core.contracts.api.PersonaInfo
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
+import persona.core.domain.sort.AgentListDisplay
+import persona.core.domain.sort.AgentListDisplaySettings
+import persona.core.domain.sort.AgentRowStyle
 
 /**
  * Settings › Interface style: three styles, applied at once and remembered on this phone, then "Theme color" (iOS `ThemeColor`) and "Appearance"
  * (iOS `ColorSchemeChoice`); both default to what the app always did (the style's own colors, the system's appearance).
- * Each style option shows a small live preview drawn with the real components of that style.
+ * Each style option shows a small live preview drawn with the real components of that style. On Glass, "Agents list
+ * layout" ([agentsDisplay]) last.
  */
 @Composable
-fun AppearanceSettings(modifier: Modifier = Modifier) {
+fun AppearanceSettings(modifier: Modifier = Modifier, agentsDisplay: AgentListDisplaySettings? = null) {
     val store = LocalAppStyleStore.current ?: return
     val current by store.style.collectAsState()
     val glass by store.glass.collectAsState()
@@ -77,7 +81,79 @@ fun AppearanceSettings(modifier: Modifier = Modifier) {
                 style = PersonaTheme.type.caption, color = palette.ink3,
             )
         }
+        // Glass draws the Agents list in the chosen row style (#4338 A9); Brief and Board keep Compact and Detailed (decision 8).
+        if (current == AppStyle.Glass && agentsDisplay != null) AgentsListLayout(agentsDisplay)
     }
+}
+
+/**
+ * "Agents list layout" (iOS Settings › Appearance › Agents List Layout, `LayoutSettingsPage`): the four ways Glass draws
+ * the Agents list, each with two agents drawn that way and what it shows; the same choice as the Agents page's ⋯ › Display.
+ */
+@Composable
+private fun AgentsListLayout(settings: AgentListDisplaySettings) {
+    val chosen by settings.display.collectAsState(AgentListDisplay.Default)
+    val scope = rememberCoroutineScope()
+    JSectionHeader(stringResource(R.string.settings_agents_layout))
+    AgentListDisplay.entries.forEach { display ->
+        LayoutOption(display, selected = display == chosen) {
+            scope.launch {
+                // Kept with the list's settings of the hub group the phone is paired with; none to keep while unpaired.
+                try { settings.setDisplay(display) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) {}
+            }
+        }
+        Spacer(Modifier.height(Tokens.Space.m))
+    }
+}
+
+/** One way to draw the Agents list (iOS `LayoutChoice`): its name, two agents drawn that way, and what it shows. */
+@Composable
+private fun LayoutOption(display: AgentListDisplay, selected: Boolean, onClick: () -> Unit) {
+    val palette = PersonaTheme.palette
+    Column(Modifier.option(selected, onClick).testTag("layout-agents-${display.name}").padding(Tokens.Space.m),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(display.label, Modifier.weight(1f), style = PersonaTheme.type.headline, color = palette.ink, maxLines = 1)
+            // The card is the radio button; this one only shows the state, so a screen reader stops once.
+            JRadio(selected, null)
+        }
+        LayoutPreview(display)
+        Text(display.summary, style = PersonaTheme.type.caption, color = palette.ink2)
+    }
+}
+
+/**
+ * The two agents a layout option draws (iOS `LayoutSamples`): one waiting for you, one at work, on the page's color as
+ * the list draws them. A picture: screen readers skip it and taps reach the option around it.
+ */
+@Composable
+private fun LayoutPreview(display: AgentListDisplay) {
+    val claude = AgentMarkSpec(AgentMarkKind.Claude, "Claude Code", null)
+    Box(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.cardShape).background(PersonaTheme.palette.background).clearAndSetSemantics {}) {
+        Column(Modifier.fillMaxWidth().padding(Tokens.Space.s)) {
+            LayoutSamples.forEachIndexed { index, sample ->
+                AgentRow(
+                    stringResource(sample.title), sample.status, onClick = {}, position = GroupPosition.of(index, LayoutSamples.size),
+                    preview = stringResource(sample.preview), time = stringResource(sample.time),
+                    // As the list words them: Needs you before the words; State Cards spell every state out at the foot.
+                    statusText = sample.status.localizedLabel.takeIf { sample.status == Status.NeedsYou || display == AgentListDisplay.Cards },
+                    compact = display == AgentListDisplay.CompactList, style = display.style ?: AgentRowStyle.Default,
+                    agentMark = claude, place = RowPlace(sample.tab),
+                )
+            }
+        }
+        Box(Modifier.matchParentSize().pointerInput(Unit) {})
+    }
+}
+
+/** iOS's two layout samples: the one waiting for you on its "tests" tab, the one at work on its "widget" tab. */
+private val LayoutSamples by lazy { listOf(LayoutSample(PreviewRows[0], "tests"), LayoutSample(PreviewRows[1], "widget")) }
+
+private class LayoutSample(row: PreviewRow, val tab: String) {
+    @StringRes val title = row.title
+    val status = row.status
+    @StringRes val preview = row.preview
+    @StringRes val time = row.time
 }
 
 @Composable

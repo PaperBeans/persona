@@ -319,7 +319,6 @@ func TestAssistantContextViewErrorsAreTheConnectionsMachine(t *testing.T) {
 	ctx := context.Background()
 	h := snapshotHub(t, false)
 	h.store = store
-	h.cfg.Assistant.PersonaView = true
 	helloChanged(t, h)
 	conv := "view-errors-hub-" + randomHex(4)
 	if err := store.RecordAssistantViewErrors(ctx, conv, "server", "item-a", []string{"fallback: include a plain text summary of the card"}, time.Now().UTC()); err != nil {

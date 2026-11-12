@@ -119,18 +119,23 @@ private struct SubscriptionCountsLoader: ViewModifier {
     }
 }
 
-/// The pages from the Inbox's menu, every subscription: a sheet, as the Inbox's Muted and Rules are.
+/// The pages from the Inbox's menu, every subscription (every source of the Inbox with `inbox_sources`, #5278): a sheet, as
+/// the Inbox's Muted and Rules are. It closes when the pages hand something to the assistant (Set Up with …).
 struct SubscriptionsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         NavigationStack {
-            ExtensionPageView(plugin: SubscriptionsUI.id, ui: SubscriptionsUI.page, title: String(localized: "Subscriptions [Source Subscriptions]"))
+            ExtensionPageView(plugin: SubscriptionsUI.id, ui: SubscriptionsUI.page,
+                              title: app.hubFeatures.contains(SubscriptionsUI.sourcesFeature) ? String(localized: "Inbox Sources")
+                                  : String(localized: "Subscriptions [Source Subscriptions]"))
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
                         Button { dismiss() } label: { Text("Done [Extension System Presentation c0b3fb]").lineLimit(1) }
                     }
                 }
         }
+        .onChange(of: app.assistantReveal) { dismiss() }
     }
 }

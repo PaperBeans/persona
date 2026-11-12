@@ -83,6 +83,7 @@
     <string name="agents_grouping_project">By project</string>
     <string name="agents_menu_compact">Compact list</string>
     <string name="agents_menu_detailed">Detailed list</string>
+    <string name="agents_menu_display">Display</string>
     <string name="agents_menu_collapse_all">Collapse all</string>
     <string name="agents_menu_expand_all">Expand all</string>
     <string name="agents_menu_machines">Machine monitor</string>
@@ -100,7 +101,7 @@
     <string name="agents_new_session_unavailable">Creating sessions isn\'t connected in this app yet.</string>
     <string name="agents_close">Close</string>
     <string name="agents_approve_blocked">This session can\'t be approved from the phone. Open the session or handle it on the computer.</string>
-    <string name="agents_request_fields_elsewhere">This request needs details filled in before it can be allowed. Allow it on the web or on iPhone; you can still deny it here.</string>
+    <string name="agents_request_fields_elsewhere">This request needs details filled in before it can be allowed: open its chat to fill them in. You can still deny it here.</string>
     <string name="agents_connection_certificate_text">The hub\'s certificate differs from the one used at pairing, so the app won\'t reconnect on its own. If you changed it yourself, scan the code to pair again.</string>
     <string name="agents_connection_revoked_text">This pairing is no longer valid. Scan the code to pair again.</string>
     <string name="agents_connection_local_network_text">Local network access is needed. Allow it, then connect.</string>
@@ -154,6 +155,9 @@
     <string name="agents_repo_repository">Repository</string>
     <string name="agents_repo_main_checkout">Main worktree</string>
     <string name="agents_repo_worktree">Worktree</string>
+    <string name="agents_repo_actions">Repository actions</string>
+    <!-- A computer's repositories with nothing going on, one row each (iOS "Idle Repositories", #4338 A8) -->
+    <string name="agents_idle_repositories">Idle repositories</string>
     <string name="agents_card_question">Claude has a question</string>
     <string name="agents_card_question_by">%1$s has a question</string>
     <string name="agents_card_permission">Waiting for your approval</string>
@@ -271,6 +275,7 @@
     <string name="agents_directory">Directory</string>
     <string name="agents_space_tab">Tab %1$d</string>
     <string name="agents_space_new_tab">New tab here</string>
+    <string name="agents_space_new_tab_card">Open a new tab in this space</string>
     <string name="agents_new_choose_directory">Choose directory</string>
     <string name="agents_new_back">Back</string>
     <string name="agents_new_parent">Up one level</string>

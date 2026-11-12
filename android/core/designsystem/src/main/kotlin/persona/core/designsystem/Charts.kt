@@ -7,10 +7,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -196,6 +198,23 @@ object ChartMath {
     /** The label under [x] px of a plot [width] px wide with [n] equal slots. */
     fun indexAt(x: Float, width: Float, n: Int): Int = if (n <= 0 || width <= 0f) 0 else floor(x / width * n).toInt().coerceIn(0, n - 1)
 
+    /**
+     * A stacked bar chart of one category — every series has exactly one point, all non-negative and adding above
+     * zero: it reads as a horizontal segmented bar (one day's parts), so return each series' share of the total
+     * (0…1, adding up to 1). Null when the chart has several categories, is not a stacked bar, or holds a negative or
+     * zero total: it keeps the usual columns. The same rule on every app (docs/extensions/extensions.md「New items」
+     * chart; issue #5386).
+     */
+    fun singleCategoryShares(data: JChartData): List<Double>? {
+        if (data.kind != JChartKind.Bar || !data.stacked || data.series.isEmpty()) return null
+        if (data.series.any { it.values.size != 1 }) return null
+        val values = data.series.map { it.values[0] }
+        if (values.any { !it.isFinite() || it < 0 }) return null
+        val total = values.sum()
+        if (total <= 0.0) return null
+        return values.map { it / total }
+    }
+
     /** A donut's or a pie's slices: each value's share of the sum (negatives count as none); all none when the sum is not more than 0. */
     fun shares(values: List<Double>): List<Double> {
         val clean = values.map { if (it.isFinite() && it > 0) it else 0.0 }
@@ -279,9 +298,29 @@ fun JChart(data: JChartData, modifier: Modifier = Modifier, compact: Boolean = f
                 s.name?.let { labeled.format(it, values) } ?: values
             }
         }
-        ChartPlot(data, chartValues(data), colors, compact, index, onPick = { picked = it },
-            Modifier.fillMaxWidth().height(if (compact) 72.dp else if (hasVolume(data)) 220.dp else 180.dp).semantics { contentDescription = summary })
+        // A stacked bar of one category (a single day's parts) is a horizontal segmented bar, not a lone column.
+        val shares = remember(data) { ChartMath.singleCategoryShares(data) }
+        if (shares != null) {
+            JSegmentedShareBar(shares, colors, Modifier.fillMaxWidth().semantics { contentDescription = summary })
+        } else {
+            ChartPlot(data, chartValues(data), colors, compact, index, onPick = { picked = it },
+                Modifier.fillMaxWidth().height(if (compact) 72.dp else if (hasVolume(data)) 220.dp else 180.dp).semantics { contentDescription = summary })
+        }
         if (detail != null) Text(detail, style = type.caption, color = palette.ink3)
+    }
+}
+
+/**
+ * One horizontal capsule split into a single category's shares (a single day's stacked parts): each share takes its
+ * part of the width in its series' color, a 2dp gap between touching segments. It carries no text — the legend above
+ * and the card's rows below name each part and its value.
+ */
+@Composable
+fun JSegmentedShareBar(ratios: List<Double>, colors: List<Color>, modifier: Modifier = Modifier) {
+    Row(modifier.height(Tokens.Space.m).clip(CircleShape), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
+        ratios.forEachIndexed { i, ratio ->
+            if (ratio > 0.0) Box(Modifier.weight(ratio.toFloat()).fillMaxHeight().background(colors[i]))
+        }
     }
 }
 

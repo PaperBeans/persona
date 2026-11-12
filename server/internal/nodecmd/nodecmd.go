@@ -98,7 +98,7 @@ func Run(ctx context.Context, stop func(), args []string, b Build) (handled bool
 		}
 		runSysmon(ctx, n)
 	case "node-update-check":
-		return true, json.NewEncoder(os.Stdout).Encode(nodeupdate.Check{Version: b.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Program: b.Program})
+		return true, json.NewEncoder(os.Stdout).Encode(nodeupdate.Check{Version: b.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Program: b.Program, ResidentHandover: node.ResidentHandoverSupported})
 	case "node-update-watch":
 		return true, runNodeUpdateWatch(ctx, rest)
 	default:

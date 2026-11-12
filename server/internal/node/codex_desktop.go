@@ -472,10 +472,16 @@ type codexOrigin struct {
 	cli     bool
 	// exec: a one-shot run a program started (`codex exec`, an SDK, the App's background runs) or a subagent of one:
 	// nobody's conversation, not listed in Agents (programRun).
-	exec   bool
-	sub    bool
-	root   string // session_id identifies the shared root on newer Codex versions
-	parent string // the thread that spawned this subagent
+	exec bool
+	sub  bool
+	// guardian: an approval review, a subagent of source {"subagent": {"other": "guardian"}} that Codex runs on a tool
+	// call before the call runs. Its rollout holds only the review's request and assessment: not listed (#5486).
+	guardian bool
+	root     string // session_id identifies the shared root on newer Codex versions
+	parent   string // the thread that spawned this subagent
+	// started holds when the thread began, the session_meta line's time (Session.StartedAt), made once for every row
+	// of the thread: a hierarchy is never written once set, so the rows share it. Nil when the line has no time.
+	started *proto.SessionHierarchy
 }
 
 var codexOrigins sync.Map // path → codexOrigin (the first line never changes)
@@ -494,8 +500,9 @@ func readCodexOrigin(path string) codexOrigin {
 		return codexOrigin{}
 	}
 	var m struct {
-		Type    string `json:"type"`
-		Payload struct {
+		Timestamp string `json:"timestamp"`
+		Type      string `json:"type"`
+		Payload   struct {
 			Originator   string          `json:"originator"`
 			Parent       string          `json:"parent_thread_id"`
 			SessionID    string          `json:"session_id"`
@@ -507,6 +514,9 @@ func readCodexOrigin(path string) codexOrigin {
 		return codexOrigin{} // not written yet: read again next time
 	}
 	o := codexOrigin{desktop: m.Payload.Originator == "Codex Desktop" || m.Payload.Originator == "codex_work_desktop", cli: m.Payload.Originator == "codex-tui" || m.Payload.Originator == "codex_cli_rs"}
+	if at, err := time.Parse(time.RFC3339Nano, m.Timestamp); err == nil && !at.IsZero() {
+		o.started = &proto.SessionHierarchy{StartedAt: at.UTC()}
+	}
 	var source string
 	if json.Unmarshal(m.Payload.Source, &source) != nil {
 		source = "" // an object: a subagent
@@ -517,10 +527,12 @@ func readCodexOrigin(path string) codexOrigin {
 			ThreadSpawn struct {
 				Parent string `json:"parent_thread_id"`
 			} `json:"thread_spawn"`
+			Other string `json:"other"`
 		} `json:"subagent"`
 	}
 	if json.Unmarshal(m.Payload.Source, &spawn) == nil {
 		o.parent = spawn.Subagent.ThreadSpawn.Parent
+		o.guardian = spawn.Subagent.Other == "guardian"
 	}
 	o.parent = firstNonEmpty(m.Payload.Parent, o.parent)
 	var fields map[string]json.RawMessage

@@ -15,7 +15,7 @@ Before phases 1 to 3 change code, everyone works from the same decisions and the
 
 ### R2. The open questions get answers
 
-- Question 4, where pending requests sit in a chat. Proposal: as the iOS code does, the request cards stack above the composer, which stays usable, and each folds to a one-line preview. `DESIGN_SYSTEM.md` section 4.8 describes paging instead and is corrected with the change ([phase 2](phase-2-interactions.md), Q4).
+- Question 4, where pending requests sit in a chat. Decided 2026-11-12: as the iOS code does, the request cards stack above the composer, which stays usable, and each folds to a one-line preview. `DESIGN_SYSTEM.md` section 4.8 describes paging instead and is corrected with the change ([phase 2](phase-2-interactions.md), Q4).
 - Question 6, an in-app text size on Android. Proposal: Small, Standard and Large, as on iOS, one step below or above the system's size.
 - The owner answers in #4208. The answers join the README's table and are recorded as in R1. Nothing that depends on a question is built before its answer.
 

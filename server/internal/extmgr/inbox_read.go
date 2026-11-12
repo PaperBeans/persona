@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
@@ -37,7 +38,9 @@ func (h *Manager) readInbox(ctx context.Context, round inboxRound) assistantwire
 // accounts' order; an account that can't be read is left out and named in Failed with why (the manager keeps what it
 // had and the apps say it is behind). nil without mail or when the accounts can't be listed.
 func (h *Manager) readMail(ctx context.Context) *assistantwire.InboxMailRead {
-	if h.mail == nil || h.connectors.Get("mail") == nil {
+	// Add to Inbox off (#5307): no mail round, so the manager keeps the mail items it has; search, replies and the
+	// knowledge base go on.
+	if h.mail == nil || h.connectors.Get("mail") == nil || !h.connectors.Feeds("mail", connector.FeedInbox) {
 		return nil
 	}
 	accounts, err := h.mail.ListAccounts()
@@ -60,9 +63,11 @@ func (h *Manager) readMail(ctx context.Context) *assistantwire.InboxMailRead {
 	out := &assistantwire.InboxMailRead{Accounts: []assistantwire.InboxMailAccount{}}
 	var health map[string]string // the accounts' status after the round (mail settings'), read once one failed
 	checked := false
+	now := time.Now()
 	for i, acc := range read {
 		if acc != nil {
 			out.Accounts = append(out.Accounts, *acc)
+			h.inboxReads.note("mail:"+accounts[i].ID, now, "")
 			continue
 		}
 		code := mailReadErrorOf(errs[i])
@@ -81,6 +86,7 @@ func (h *Manager) readMail(ctx context.Context) *assistantwire.InboxMailRead {
 			}
 		}
 		out.Failed = append(out.Failed, assistantwire.InboxMailFailed{ID: accounts[i].ID, Email: accounts[i].Email, ReadError: code})
+		h.inboxReads.note("mail:"+accounts[i].ID, now, code)
 	}
 	return out
 }
@@ -161,9 +167,11 @@ func (h *Manager) readConnectors(ctx context.Context) []assistantwire.InboxSourc
 		if err != nil {
 			h.logf("inbox: %s: %v", c.ID(), err)
 			src.ReadError = readErrorOf(err) // the manager keeps what it had and the apps say it is behind
+			h.inboxReads.note(c.ID(), time.Now(), src.ReadError)
 			out = append(out, src)
 			continue
 		}
+		h.inboxReads.note(c.ID(), time.Now(), "")
 		h.vetThings(c, things)
 		src.Things = things
 		_, src.Group = connector.As[connector.Grouper](c)

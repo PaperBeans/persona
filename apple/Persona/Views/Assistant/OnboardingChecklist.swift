@@ -227,29 +227,35 @@ private struct ChecklistRow: View {
 
 /// Settings' top row while the main conversation still needs something: N steps left, back to the checklist.
 struct ChecklistSettingsRow: View {
+    var inSection = true
     @Environment(AppModel.self) private var model
     @State private var open = false
 
     var body: some View {
         let n = OnboardingChecklistModel.left(model.readiness.current)
         if n > 0 {
-            Section {
-                Button { open = true } label: {
-                    HStack(spacing: Theme.Space.m) {
-                        ThemedIcon(Theme.Icon.todo).font(Theme.Font.heading).foregroundStyle(Theme.caution)
-                        VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                            Text("\(n) steps to go").font(Theme.Font.heading).foregroundStyle(Color.primary).lineLimit(1)
-                            Text(OnboardingChecklistModel.leftSummary(model.readiness.current)).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                        Spacer(minLength: 0)
-                        ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)
-                    }
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("settings.checklist")
+            Group {
+                if inSection { Section { button(n) } }
+                else { button(n) }
             }
             .sheet(isPresented: $open) { OnboardingChecklistView(fromSettings: true) }
         }
+    }
+
+    private func button(_ n: Int) -> some View {
+        Button { open = true } label: {
+            HStack(spacing: Theme.Space.m) {
+                ThemedIcon(Theme.Icon.todo).font(Theme.Font.heading).foregroundStyle(Theme.caution)
+                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                    Text("\(n) steps to go").font(Theme.Font.heading).foregroundStyle(Color.primary).lineLimit(1)
+                    Text(OnboardingChecklistModel.leftSummary(model.readiness.current)).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("settings.checklist")
     }
 }

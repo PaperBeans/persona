@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ type handoffManager struct {
 	raw     []string // the audits' params as they came
 	fail    error    // what an audit is answered, when set (nothing recorded)
 	tries   int      // the audits asked
+	sends   []assistantwire.SendParams
 }
 
 func (m *handoffManager) handle(_ context.Context, method string, params json.RawMessage) (any, error) {
@@ -44,6 +46,15 @@ func (m *handoffManager) handle(_ context.Context, method string, params json.Ra
 		m.mu.Unlock()
 		return assistantwire.HTTPResponse{Status: http.StatusOK, Header: map[string][]string{"Content-Type": {"application/json"}},
 			Body: []byte(`{"ok":true}`)}, nil
+	case assistantwire.MethodSendParams:
+		var p assistantwire.SendParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		m.mu.Lock()
+		m.sends = append(m.sends, p)
+		m.mu.Unlock()
+		return map[string]any{"params": p.Params}, nil
 	case extwire.MethodHubCall:
 		var c extwire.HubCall
 		if err := json.Unmarshal(params, &c); err != nil {
@@ -76,6 +87,122 @@ func (m *handoffManager) took() ([]assistantwire.HTTPRequest, []extwire.Audit, [
 	return r, a, raw
 }
 
+// handoffBusHub is a hub with handoffManager on the bus as the assistant.
+func handoffBusHub(t *testing.T) (*Hub, *handoffManager) {
+	t.Helper()
+	h := newTestHub(t)
+	h.store = &tokenStore{memStore: *newMemStore(), rows: map[string]db.DeviceToken{}, rev: map[string]bool{}}
+	if h.busStore() == nil {
+		h.bus.idents = &memIdents{}
+	}
+	busMux := http.NewServeMux()
+	h.busRoutes(busMux)
+	busSrv := httptest.NewServer(busMux)
+	t.Cleanup(busSrv.Close)
+	m := &handoffManager{}
+	raw := dialRawBusWith(t, busSrv, busToken(t, h, assistantwire.AssistantID, "assistant"), m.handle)
+	if err := raw.call("manager.hello", map[string]any{"id": assistantwire.AssistantID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	return h, m
+}
+
+// A message for an assistant conversation is marked as a person's own (SendParams.Human) only when the hub's auth
+// found a full device's credential: never an extension's, an answer-only device's, the hub's own token, or a client's
+// word for it.
+func TestAssistantSendsSayWhetherAPersonSentThem(t *testing.T) {
+	h, m := handoffBusHub(t)
+	for _, c := range []struct {
+		name  string
+		who   *principal
+		human bool
+	}{
+		{"a full device", &principal{ID: "d1", Name: "iPhone", Role: roleFull}, true},
+		{"an extension's token", &principal{ID: "x1", Role: roleExtension, Extension: "helper"}, false},
+		{"an answer-only device", &principal{ID: "w1", Role: roleAnswer}, false},
+		{"a computer's link", &principal{ID: "l1", Role: roleLink, Machine: "box"}, false},
+		{"the hub's own token", &principal{Role: roleFull}, false},
+		{"no credential", nil, false},
+	} {
+		ctx := context.Background()
+		if c.who != nil {
+			ctx = context.WithValue(ctx, principalKey{}, *c.who)
+		}
+		if _, err := h.asstOf("").SendParams(ctx, "box", "s1", map[string]any{"client_msg_id": "c1", "human": true}); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		m.mu.Lock()
+		got := m.sends[len(m.sends)-1]
+		m.mu.Unlock()
+		if got.Human != c.human {
+			t.Fatalf("%s: human %v, want %v", c.name, got.Human, c.human)
+		}
+	}
+}
+
+// A new conversation's start (its first message) is marked as a person's own (HTTPRequest.Human) by the same test as a
+// message: a full device's credential only, never an extension's, a computer link's, an answer-only device's or the hub's
+// own token, nor a client's word for it (a header or the body); and no other relayed request carries the mark.
+func TestAConversationsFirstMessageIsAPersonsOnlyFromAFullDevice(t *testing.T) {
+	h, m := handoffBusHub(t)
+	start := h.startConversationOnce()
+	for _, c := range []struct {
+		name  string
+		who   *principal
+		human bool
+	}{
+		{"a full device", &principal{ID: "d1", Name: "iPhone", Role: roleFull}, true},
+		{"the hub's own token", &principal{Role: roleFull}, false},
+		{"an extension's token", &principal{ID: "x1", Role: roleExtension, Extension: "helper", Manager: assistantwire.AssistantID}, false},
+		{"a computer's link", &principal{ID: "l1", Role: roleLink, Machine: "box"}, false},
+		{"an answer-only device", &principal{ID: "w1", Role: roleAnswer}, false},
+		{"no credential", nil, false},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant/conversations", strings.NewReader(`{"prompt":"fix CI","human":true}`))
+		req.Header.Set("X-Persona-Human", "1")
+		if c.who != nil {
+			req = req.WithContext(context.WithValue(req.Context(), principalKey{}, *c.who))
+		}
+		w := httptest.NewRecorder()
+		start(w, req)
+		relayed, _, _ := m.took()
+		if c.human && (w.Code != http.StatusOK || len(relayed) != 1) {
+			t.Fatalf("%s: %d, relayed %d", c.name, w.Code, len(relayed))
+		}
+		for _, r := range relayed {
+			if r.Human != c.human {
+				t.Fatalf("%s: human %v, want %v", c.name, r.Human, c.human)
+			}
+		}
+	}
+	// Any other relayed request of a full device: not marked.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant/conversations/s1/compact", strings.NewReader(`{}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey{}, principal{ID: "d1", Role: roleFull}))
+	h.forwardSend(httptest.NewRecorder(), req, assistantwire.AssistantID)
+	if relayed, _, _ := m.took(); len(relayed) != 1 || relayed[0].Human {
+		t.Fatalf("another request was marked: %+v", relayed)
+	}
+}
+
+// The client_msg_id the manager gives a conversation's first message (assistantwire.FirstMessageIDPrefix) is never an
+// app's: a send that names one is refused before anything is typed, so no later line can carry it.
+func TestAnAppNeverSendsAFirstMessagesID(t *testing.T) {
+	h := newTestHub(t)
+	var sends atomic.Int32
+	pipeNode(t, h, "box", func(context.Context) error { sends.Add(1); return nil })
+	m := h.byID["box"]
+	m.mu.Lock()
+	m.sessions = []proto.Session{{SessionID: "s1", Capabilities: &proto.SessionCapabilities{Send: true}}}
+	m.mu.Unlock()
+	code, out := call(t, h.routes(), "POST", sendPath, h.cfg.Token, `{"text":"fix CI","client_msg_id":"`+assistantwire.FirstMessageIDPrefix+`0123"}`)
+	if code != http.StatusBadRequest || out["code"] != "client_msg_id_reserved" || sends.Load() != 0 {
+		t.Fatalf("a send with a first message's id: %d %v, typed %d", code, out, sends.Load())
+	}
+	if code, out := call(t, h.routes(), "POST", sendPath, h.cfg.Token, `{"text":"fix CI","client_msg_id":"c-1"}`); code != http.StatusOK || sends.Load() != 1 {
+		t.Fatalf("an app's own id: %d %v, typed %d", code, out, sends.Load())
+	}
+}
+
 // handoffCard is a hand-off card of two providers' values (one named twice); its items' titles end in a marker that no
 // record may carry.
 func handoffCard(id, kind string) proto.Interaction {
@@ -95,20 +222,7 @@ func handoffCard(id, kind string) proto.Interaction {
 // approve reaches the manager outside the headers, on a hand-off card and on a card the hub does not hold, and on no
 // other card.
 func TestOnlyADeviceThatShowsTheHandoffCardApprovesIt(t *testing.T) {
-	h := newTestHub(t)
-	h.store = &tokenStore{memStore: *newMemStore(), rows: map[string]db.DeviceToken{}, rev: map[string]bool{}}
-	if h.busStore() == nil {
-		h.bus.idents = &memIdents{}
-	}
-	busMux := http.NewServeMux()
-	h.busRoutes(busMux)
-	busSrv := httptest.NewServer(busMux)
-	t.Cleanup(busSrv.Close)
-	m := &handoffManager{}
-	raw := dialRawBusWith(t, busSrv, busToken(t, h, assistantwire.AssistantID, "assistant"), m.handle)
-	if err := raw.call("manager.hello", map[string]any{"id": assistantwire.AssistantID}, nil); err != nil {
-		t.Fatal(err)
-	}
+	h, m := handoffBusHub(t)
 	mux := h.routes()
 	master := h.cfg.Token
 	_, phone := call(t, mux, "POST", "/api/v1/auth/tokens", master, `{"name":"iPhone","kind":"phone"}`)

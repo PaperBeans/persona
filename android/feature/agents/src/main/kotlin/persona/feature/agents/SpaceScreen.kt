@@ -1,6 +1,7 @@
 package persona.feature.agents
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -9,14 +10,18 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import persona.core.contracts.*
 import persona.core.designsystem.*
+import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.sort.*
 import persona.core.domain.answer.firstBySession
+import persona.core.domain.answer.rowLine
+import persona.core.domain.modelShortName
 import java.time.Instant
 
 /**
- * One herdr space in tab order, with the same actions as the home list. A page of its own ([spaceEntries]): beside
- * the list in a wide window, pushed on a phone; [onDismiss] goes back.
+ * One herdr space, with the same actions as the home list. A page of its own ([spaceEntries]): beside the list in a
+ * wide window, pushed on a phone; [onDismiss] goes back. Glass draws it as iOS's `SpaceView` ([spaceCards]); Brief and
+ * Board keep its rows in tab order.
  */
 @Composable
 internal fun SpaceScreen(
@@ -29,16 +34,23 @@ internal fun SpaceScreen(
     /** The name to show before the sessions are read; until then ([loaded] false) the page shows no empty state. */
     title: String = "",
     loaded: Boolean = true,
+    /** Opens a computer's page, from the computer at the top of the cards (iOS opens its projects; Android has its details). */
+    onMachine: ((String) -> Unit)? = null,
 ) {
     val cards = remember(pending) { pending.firstBySession() }
+    val grid = AgentSpaceLayout.cards
+    val machine = machines.firstOrNull { it.id == space?.machineId }
     Box(Modifier.fillMaxSize()) {
+        // The cards name the computer in their first line, under a large title as on iOS.
         JListPage(title = space?.name ?: title.ifBlank { stringResource(R.string.agents_space) }, onBack = onDismiss,
-            subtitle = machines.firstOrNull { it.id == space?.machineId }?.displayName,
+            subtitle = machine?.displayName?.takeUnless { grid }, largeTitle = grid,
             actions = { space?.let { spaceMenu(it) } }) {
             if (space == null) {
                 if (loaded) item("empty") {
                     JEmptyState(stringResource(R.string.agents_space_empty), stringResource(R.string.agents_space_empty_hint), icon = PhIcons.Robot)
                 }
+            } else if (grid) {
+                spaceCards(space, machine, pending, cards, preferences, busy, canStart, now, onOpen, onNewTab, sessionMenu, onMachine)
             } else {
                 item("location") {
                     JRow(stringResource(R.string.agents_directory), subtitle = space.cwd, leadingIcon = PhIcons.FolderSimple)
@@ -68,4 +80,57 @@ internal fun SpaceScreen(
         }
         JToastHost(toast, Modifier.align(Alignment.TopCenter).statusBarsPadding())
     }
+}
+
+/**
+ * The space as iOS's `SpaceView` lays it out: the computer (it opens the computer's page) and the folder shortened with
+ * ~, then a card per agent two to a row, the most urgent first ([spaceCardOrder]), and a dashed card that opens a new tab
+ * there while one can be started. A card's long press offers the row's actions; it has no swipe.
+ */
+private fun LazyListScope.spaceCards(
+    space: AgentSpace, machine: Machine?, pending: List<Interaction>, cards: Map<SessionKey, Interaction>,
+    preferences: AgentsPreferencesSnapshot, busy: Boolean, canStart: Boolean, now: Instant,
+    onOpen: (AgentSession) -> Unit, onNewTab: (AgentSpace) -> Unit, sessionMenu: @Composable (AgentSession) -> List<JAction>,
+    onMachine: ((String) -> Unit)?,
+) {
+    item("location") {
+        AgentSpaceLocation(machine?.displayName ?: space.machineId, shortPath(space.cwd, machine?.home),
+            icon = machine?.deviceIcon ?: PersonaIcons.machine, onMachine = onMachine?.let { open -> { open(space.machineId) } })
+        if (busy) JLinearProgress(null)
+    }
+    val order = spaceCardOrder(space.members)
+    val tabs = agentTabs(order, preferences.mutes)
+    // null: the new tab's card, last
+    val cells: List<AgentSession?> = order + if (canStart) listOf(null) else emptyList()
+    cells.chunked(2).forEachIndexed { index, pair ->
+        item(pair.joinToString("|") { it?.id ?: "new-tab" }, contentType = "space-cards") {
+            val cell: @Composable (AgentSession?) -> Unit = { row ->
+                if (row == null) AgentNewTabCard(stringResource(R.string.agents_space_new_tab_card), { onNewTab(space) }, Modifier.fillMaxHeight(), enabled = !busy)
+                else SpaceCard(row, row.session.tabKey?.let(tabs::get), pending.count { it.sessionKey == row.session.key }, cards[row.session.key],
+                    preferences.mutes.mutes(row), now, { onOpen(row) }, sessionMenu)
+            }
+            AgentCardRow(Modifier.padding(top = if (index == 0) Tokens.Space.l else Tokens.Space.m),
+                end = { if (pair.size > 1) cell(pair[1]) }) { cell(pair[0]) }
+        }
+    }
+}
+
+/** One agent's card ([AgentSlotCard]); its long press opens the row's actions. */
+@Composable
+private fun SpaceCard(
+    row: AgentSession, tab: AgentTab?, requests: Int, card: Interaction?, muted: Boolean, now: Instant,
+    onOpen: () -> Unit, sessionMenu: @Composable (AgentSession) -> List<JAction>,
+) {
+    var menu by remember { mutableStateOf(false) }
+    val session = row.session
+    val state = when {
+        row.waitsInBackground -> CoreText.of(CoreText.Key.StateBackgroundWaiting).text()
+        row.asksYou && !muted -> CoreText.of(CoreText.Key.StateAwaitingReply).text()
+        else -> row.state.label
+    }
+    AgentSlotCard(session.displayTitle, row.state.designStatus, state, onOpen, Modifier.fillMaxHeight(),
+        stateTone = row.rowStatus(muted), tab = session.slotLabel, pane = tab?.paneName(row), agent = session.agentLabel,
+        starter = tab?.launcher?.id == row.id, pending = requests, preview = session.rowLine(card, now, muted)?.text(),
+        model = modelShortName(session.model).ifEmpty { null }, waiting = row.waitsInBackground, onLongClick = { menu = true })
+    if (menu) JActionSheet(sessionMenu(row), { menu = false }, title = session.displayTitle)
 }

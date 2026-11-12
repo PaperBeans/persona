@@ -33,6 +33,7 @@
     <string name="assistant_compact">压缩上下文</string>
     <string name="assistant_new_main">新建主对话</string>
     <string name="assistant_archive">归档</string>
+    <string name="assistant_archived">已归档</string>
     <string name="assistant_copy_session_id">拷贝会话 ID</string>
     <string name="assistant_new_main_title">新建主对话？</string>
     <string name="assistant_new_main_text">当前的主对话会归档，改名为「旧主对话 · 至 %1$s」，以后仍能找到。发出的下一条消息会开始新的主对话。</string>
@@ -78,14 +79,24 @@
     <string name="assistant_search_chats">搜索对话</string>
     <string name="assistant_start_main">开始主对话</string>
     <string name="assistant_main_chat">主对话</string>
+    <!-- The drawer's newest eligible chats, between 常驻 and All chats (#4922, #5196) -->
+    <string name="assistant_recent">最近</string>
     <string name="assistant_directions">常驻</string>
+    <string name="assistant_background_supervisor">后台督办</string>
     <string name="assistant_origin_inbox">收件箱</string>
+    <string name="assistant_origin_task">定时任务</string>
+    <string name="assistant_origin_lark_agent">飞书 /agent</string>
+    <string name="assistant_origin_spawned">对话派生</string>
+    <string name="assistant_origin_extension">扩展</string>
+    <string name="assistant_origin_other">其他</string>
+    <string name="assistant_origin_from">来自 %1$s</string>
+    <string name="assistant_origin_from_extension">来自扩展</string>
     <string name="assistant_empty_title">还没有对话</string>
     <string name="assistant_empty_detail">发一句话，开始和 Persona 聊聊。</string>
     <string name="assistant_no_match">没有找到匹配的对话</string>
     <string name="assistant_no_match_detail">换个关键词再试试。</string>
     <string name="assistant_more">更多</string>
-    <string name="assistant_home">返回首页</string>
+    <string name="assistant_back_to_main">回到主对话</string>
     <string name="assistant_todos">待办</string>
     <string name="assistant_open_settings">设置</string>
     <string name="assistant_make_leader">设为常驻</string>
@@ -121,6 +132,9 @@
     <plurals name="assistant_needs_you_more">
         <item quantity="other">还有 %1$d 件在收件箱</item>
     </plurals>
+    <plurals name="assistant_needs_you_more_agents">
+        <item quantity="other">还有 %1$d 件需要你</item>
+    </plurals>
     <string name="assistant_home_setup_lead">还差一步就能开始。</string>
     <string name="assistant_suggest_local_detail">打开说明</string>
     <string name="assistant_suggest_needs_calendar">会用到手机日历</string>
@@ -144,4 +158,17 @@
     <string name="assistant_health_history">健康对话</string>
     <string name="assistant_health_new">新的健康对话</string>
     <string name="assistant_health_load_failed">没读到健康对话</string>
+    <string name="assistant_rename_menu">重命名…</string>
+    <string name="assistant_rename_title">重命名</string>
+    <string name="assistant_rename_field">会话名</string>
+    <string name="assistant_save">保存</string>
+    <string name="assistant_renamed">已重命名</string>
+    <string name="assistant_copy_diagnostics">拷贝诊断</string>
+    <string name="assistant_diagnostics_copied">已拷贝诊断</string>
+    <string name="assistant_end_menu">结束…</string>
+    <string name="assistant_archived_count">已归档（%1$d）</string>
+    <string name="assistant_archived_empty">没有归档的对话</string>
+    <string name="assistant_archived_empty_detail">在对话列表里左滑一个对话就能归档，它会收在这里。</string>
+    <string name="assistant_unarchive">取消归档</string>
+    <string name="assistant_unarchived">已取消归档</string>
 </resources>

@@ -29,6 +29,8 @@
     <string name="chat_delivery_edit">Edit</string>
     <string name="chat_delivery_retry">Retry</string>
     <string name="chat_delivery_delete">Delete</string>
+    <string name="chat_delivery_deleted">Message deleted</string>
+    <string name="chat_delivery_undo">Undo</string>
     <string name="chat_delivery_discard">Discard</string>
     <string name="chat_delivery_check">Check message</string>
     <string name="chat_delivery_resend_title">Resend this message?</string>
@@ -299,7 +301,7 @@
     </plurals>
     <string name="chat_tasks_plan_single">Start it like this</string>
     <string name="chat_tasks_default_model">Default model</string>
-    <string name="chat_tasks_read_only">Read-only</string>
+    <string name="chat_tasks_read_only">Read-only requested</string>
     <string name="chat_tasks_plan_remember">Start ones like these directly next time</string>
     <plurals name="chat_tasks_plan_start_count">
         <item quantity="one">Start %1$d task</item>
@@ -325,9 +327,9 @@
     <string name="chat_tasks_say">Message</string>
     <string name="chat_tasks_restarting">“%1$s” is starting again</string>
     <string name="chat_tasks_restarted">“%1$s” started after a retry</string>
-    <string name="chat_tasks_receipt_failed_title">Didn\'t start: %1$s</string>
-    <string name="chat_tasks_receipt_done_title">Done: %1$s</string>
-    <string name="chat_tasks_receipt_stopped_title">Stopped, not done yet: %1$s</string>
+    <string name="chat_tasks_receipt_failed_title">%1$s didn\'t start</string>
+    <string name="chat_tasks_receipt_done_title">%1$s is done</string>
+    <string name="chat_tasks_receipt_stopped_title">%1$s stopped, not done yet</string>
     <string name="chat_tasks_look">View</string>
     <string name="chat_tasks_finished_line">“%1$s” is done</string>
     <string name="chat_tasks_resumed_line">“%1$s” continued after the interruption</string>
@@ -391,7 +393,7 @@
     <string name="chat_tasks_message_filed_title">Handled elsewhere, draft not sent</string>
     <string name="chat_tasks_dock_waiting">%1$s · Needs you</string>
     <string name="chat_tasks_dock_interrupted">%1$s · Interrupted</string>
-    <string name="chat_tasks_route_chip">To “%1$s” ×</string>
+    <string name="chat_tasks_route_chip">Message “%1$s”</string>
     <string name="chat_tool_details">Tool details</string>
     <string name="chat_tool_view_file">View file</string>
     <string name="chat_tool_plan_title">Plan</string>
@@ -443,7 +445,14 @@
     <string name="chat_work_elapsed">%1$s, %2$s</string>
     <string name="chat_work_seconds">%1$d s</string>
     <string name="chat_work_minutes">%1$d min</string>
-    <string name="chat_work_hours_minutes">%1$d h %2$d min</string>
+    <string name="chat_work_hours_minutes">%1$d hr %2$d min</string>
+    <string name="chat_work_working_for">Working %1$s</string>
+    <string name="chat_work_done">Done</string>
+    <string name="chat_work_tools">Tools %1$d</string>
+    <string name="chat_work_thoughts">Thinking %1$d</string>
+    <string name="chat_work_replies">Replies %1$d</string>
+    <string name="chat_work_minutes_seconds">%1$dm %2$ds</string>
+    <string name="chat_work_reading_files">Reading %1$d files</string>
     <plurals name="chat_work_done_steps">
         <item quantity="one">%1$d step</item>
         <item quantity="other">%1$d steps</item>

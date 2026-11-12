@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -57,6 +58,18 @@ type sessionState struct {
 	// Ultracode: what was last seen of ultracode in the process Persona runs this session in (ultracode.go). Written
 	// by setUltracode only, which never makes a record for a session that has none.
 	Ultracode *ultracodeRecord `json:"ultracode_process,omitempty"`
+	// PendingSwitch: a switch to another launcher waiting for the next message (launcher_switch.go), kept with the
+	// record so a node restart neither loses it nor carries it out without the message. Written by setPendingSwitch,
+	// which never makes a record; cleared by the start that carries it out (which writes a new record).
+	PendingSwitch *proto.PendingSwitch `json:"pending_switch,omitempty"`
+	// EngineHistory: the conversation's earlier stretches this session continues after a switch between Claude Code
+	// and Codex (engine_switch.go, Session.engine_history), oldest first. Only the session running the conversation now
+	// has it: the switch that moves the conversation on gives it to the next session and clears it here. A start that
+	// resumes the session keeps it.
+	EngineHistory []proto.EngineLeg `json:"engine_history,omitempty"`
+	// PendingHandoff: the handoff of a switch to this session whose first message a dialog held back (engine_switch.go
+	// startEngine): put in front of the next message sent to the session, then cleared (send.go).
+	PendingHandoff *pendingHandoff `json:"pending_handoff,omitempty"`
 }
 
 func newState() *stateFile { return &stateFile{Sessions: map[string]sessionState{}} }
@@ -184,6 +197,138 @@ func (s *stateFile) setUltracode(id string, rec ultracodeRecord) bool {
 	return true
 }
 
+// setPendingSwitch changes the pending launcher switch of a session Persona started (nil: none) and nothing else of its
+// record, under the lock, as setUltracode does; false when the session has no record (not Persona's, or not loaded
+// yet): nothing is written for it.
+func (s *stateFile) setPendingSwitch(id string, ps *proto.PendingSwitch) bool {
+	return s.update(id, func(v *sessionState) bool {
+		if v.PendingSwitch == nil && ps == nil {
+			return false
+		}
+		if ps != nil {
+			c := *ps
+			ps = &c
+		}
+		v.PendingSwitch = ps
+		return true
+	})
+}
+
+// restoreLaunch puts back what a start that failed to carry out a launcher switch wrote over (start writes a whole new
+// record before the agent is up): the launcher, model, directory, start time and plan mode of prev, the record as it
+// was, with the rest as it is now (an ultracode observation made since stays), and no pending switch: a failed switch
+// is dropped (launcher_switch.go). launcher is the one to put back when there was no record before (the start made one).
+func (s *stateFile) restoreLaunch(id string, prev sessionState, had bool, launcher string) {
+	s.mu.Lock()
+	v, ok := s.Sessions[id]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	if had {
+		v.Launcher, v.Model, v.ModelFingerprint, v.ModelEffort = prev.Launcher, prev.Model, prev.ModelFingerprint, prev.ModelEffort
+		v.Cwd, v.StartedAt, v.PlanThen = prev.Cwd, prev.StartedAt, prev.PlanThen
+	} else {
+		v.Launcher, v.Model, v.ModelFingerprint = launcher, "", ""
+	}
+	v.PendingSwitch = nil
+	s.Sessions[id] = v
+	persist := s.persist
+	s.mu.Unlock()
+	if persist != nil {
+		persist(id, v)
+	}
+}
+
+// adoptSwitch takes v, what a launcher switch carried out on another Node wrote of session id (switch_share.go), and
+// writes it through this Node's hub: the fields the switch owns (launcher, model, directory, start time, plan mode,
+// pane, pending switch, the conversation's earlier stretches and a handoff waiting for the next message) over this
+// Node's record, the rest of it as this Node has
+// it (an ultracode observation the new claude's hooks made on this connection); v whole when there is no record.
+func (s *stateFile) adoptSwitch(id string, v sessionState) {
+	s.mu.Lock()
+	if cur, ok := s.Sessions[id]; ok {
+		cur.Launcher, cur.Model, cur.ModelFingerprint, cur.ModelEffort = v.Launcher, v.Model, v.ModelFingerprint, v.ModelEffort
+		cur.Cwd, cur.StartedAt, cur.PlanThen, cur.Pane, cur.PendingSwitch = v.Cwd, v.StartedAt, v.PlanThen, v.Pane, v.PendingSwitch
+		cur.EngineHistory, cur.PendingHandoff = v.EngineHistory, v.PendingHandoff // a switch to another engine (engine_switch.go)
+		v = cur
+	}
+	s.Sessions[id] = v
+	persist := s.persist
+	s.mu.Unlock()
+	if persist != nil {
+		persist(id, v)
+	}
+}
+
+// update changes session id's record with change under the lock and writes it through when change says it changed;
+// false when the session has no record: nothing is written for it.
+func (s *stateFile) update(id string, change func(v *sessionState) bool) bool {
+	s.mu.Lock()
+	v, ok := s.Sessions[id]
+	if !ok {
+		s.mu.Unlock()
+		return false
+	}
+	if !change(&v) {
+		s.mu.Unlock()
+		return true
+	}
+	s.Sessions[id] = v
+	persist := s.persist
+	s.mu.Unlock()
+	if persist != nil {
+		persist(id, v)
+	}
+	return true
+}
+
+// putBack puts session id's record back as it was (prev) before a start that did not come up wrote over it: a switch
+// to the other engine resuming the conversation's earlier session (engine_switch.go). Without a record before (had
+// false), the one the start made keeps no history and no switch: it names nothing the list would leave out.
+func (s *stateFile) putBack(id string, prev sessionState, had bool) {
+	if had {
+		s.put(id, prev)
+		return
+	}
+	s.update(id, func(v *sessionState) bool {
+		if v.EngineHistory == nil && v.PendingSwitch == nil {
+			return false
+		}
+		v.EngineHistory, v.PendingSwitch = nil, nil
+		return true
+	})
+}
+
+// setEngineHistory sets the conversation's earlier stretches on session id's record (nil: none), when it has one.
+func (s *stateFile) setEngineHistory(id string, legs []proto.EngineLeg) {
+	s.update(id, func(v *sessionState) bool {
+		if proto.SameEngineHistory(v.EngineHistory, legs) {
+			return false
+		}
+		v.EngineHistory = slices.Clone(legs)
+		return true
+	})
+}
+
+// engineHistories are the records that carry earlier stretches, by session id (nil when none does): one look for a
+// whole session list (sessions.go).
+func (s *stateFile) engineHistories() map[string][]proto.EngineLeg {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out map[string][]proto.EngineLeg
+	for id, v := range s.Sessions {
+		if len(v.EngineHistory) == 0 {
+			continue
+		}
+		if out == nil {
+			out = map[string][]proto.EngineLeg{}
+		}
+		out[id] = v.EngineHistory
+	}
+	return out
+}
+
 func (s *stateFile) get(id string) (sessionState, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -217,7 +362,9 @@ func (s *stateFile) setPane(id, pane string) {
 	s.put(id, v)
 }
 
-func (s *stateFile) put(id string, v sessionState) {
+// put reports only whether its persistence callback was invoked, not whether the
+// one-way notification reached durable storage.
+func (s *stateFile) put(id string, v sessionState) bool {
 	s.mu.Lock()
 	if old, ok := s.Sessions[id]; ok && old.CreationID != "" {
 		v.CreationID, v.Incarnation = old.CreationID, old.Incarnation
@@ -227,5 +374,7 @@ func (s *stateFile) put(id string, v sessionState) {
 	s.mu.Unlock()
 	if persist != nil {
 		persist(id, v)
+		return true
 	}
+	return false
 }

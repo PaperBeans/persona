@@ -41,6 +41,7 @@ func (d *mirrorDevices) Event(string, json.RawMessage) bool     { return false }
 func (d *mirrorDevices) Handler(next http.Handler) http.Handler { return next }
 func (d *mirrorDevices) Has(string) bool                        { return false } // node calls go through the hub, as before
 func (d *mirrorDevices) SetKeep(map[string][]string)            {}
+func (d *mirrorDevices) Watched(string, string) bool            { return false } // no suggestions in these tests
 
 func (d *mirrorDevices) CallNode(ctx context.Context, id, method string, params json.RawMessage) (json.RawMessage, error) {
 	m := d.h.localMachine(id)
