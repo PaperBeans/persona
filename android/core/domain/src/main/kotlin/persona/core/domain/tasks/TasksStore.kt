@@ -236,8 +236,8 @@ class TasksStore(
         }
     }
 
-    suspend fun createTodo(title: String, notes: String = ""): Todo {
-        val created = api.createTodo(title, notes)
+    suspend fun createTodo(title: String, notes: String = "", due: TodoDue? = null): Todo {
+        val created = api.createTodo(title, notes, due)
         reloadTodos()
         return created
     }

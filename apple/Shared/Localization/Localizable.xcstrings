@@ -576,6 +576,29 @@
         }
       }
     },
+    "%@'s Settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@'s Settings"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 的设置"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@の設定"
+          }
+        }
+      }
+    },
     "%@'s settings": {
       "extractionState": "manual",
       "localizations": {
@@ -1613,6 +1636,29 @@
         }
       }
     },
+    "Only %@'s own settings are shown. To change another assistant's, switch to it first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only %1$@'s own settings are shown. To change another assistant's, switch to it first."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只显示「%1$@」自己的内容。要改别的助手，先切换过去。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%1$@」の設定だけを表示しています。ほかのアシスタントを変更するには、先に切り替えてください。"
+          }
+        }
+      }
+    },
     "Only the current assistant's settings are shown. Switch assistants to change another's settings.": {
       "extractionState": "manual",
       "localizations": {
@@ -1862,6 +1908,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "これらのサイトはこのMacのego liteでログアウトされます。ego上でのご自身のログインも同様です。"
+          }
+        }
+      }
+    },
+    "These two groups are the same whichever assistant is current." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These two groups are the same whichever assistant is current."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这两组和当前是哪个助手无关。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この 2 つのグループは、どのアシスタントを選んでいても同じです。"
           }
         }
       }
@@ -22570,6 +22639,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Already connected to %@. To switch hubs, disconnect in Settings › Hub › Devices & Pairing first." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Already connected to %1$@. To switch hubs, disconnect in Settings › Hub › Devices & Pairing first."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すでに%1$@に接続しています。ハブを切り替えるには、先に「設定 › Hub › デバイスとペアリング」で接続を解除してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已经连着 %1$@：要换 hub，先在 设置 › Hub › 设备与配对 里断开"
+          }
+        }
+      }
     },
     "Already dealt with, so this reply wasn't sent." : {
       "localizations" : {
@@ -141930,6 +142021,29 @@
         }
       }
     },
+    "These settings belong to the default assistant “%@”." : {
+      "comment" : "Settings › Model Settings while another assistant than the default is current",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These settings belong to the default assistant “%@”."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これはデフォルトアシスタント「%@」の設定です。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是默认助手「%@」的设置。"
+          }
+        }
+      }
+    },
     "These settings take their values from this provider. Saving a setting lets it keep taking its value.": {
       "extractionState": "manual",
       "localizations": {
@@ -149458,6 +149572,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Translation uses the model of the default assistant “%@”, not the current assistant's." : {
+      "comment" : "Settings › Translation while another assistant than the default is current",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Translation uses the model of the default assistant “%@”, not the current assistant's."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "翻訳にはデフォルトのアシスタント「%@」のモデルが使われます（現在のアシスタントのモデルではありません）。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "翻译用的是默认助手「%@」的模型，不是当前助手的。"
+          }
+        }
+      }
     },
     "Translation: %@" : {
       "localizations" : {

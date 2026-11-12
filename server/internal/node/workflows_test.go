@@ -248,8 +248,10 @@ func TestWorkflowLongLaunchLine(t *testing.T) {
 			bgSyncLimit = 1 << 10
 			fresh := &Node{home: n.home, paths: n.paths, bgScans: map[string]*bgScan{}}
 			deadline := time.Now().Add(5 * time.Second)
+			poll := time.NewTicker(10 * time.Millisecond)
+			defer poll.Stop()
 			for s = list(fresh); len(s.Workflows) == 0 && time.Now().Before(deadline); s = list(fresh) {
-				time.Sleep(10 * time.Millisecond)
+				<-poll.C
 			}
 			if len(s.Workflows) != 1 || s.Workflows[0].Running || s.Workflows[0].Status != proto.WorkflowCompleted || s.Workflows[0].Name != "area-audit" {
 				t.Fatalf("first read after the end: %+v", s.Workflows)

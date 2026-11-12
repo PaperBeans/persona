@@ -53,6 +53,26 @@ struct ExtensionAuthTests {
         #expect(none == nil)
     }
 
+    @Test func anExplicitDefaultPageFollowsAnUnscopedAuthPush() {
+        let store = ExtensionAuthStore()
+        store.received("lookup", ExtensionAuth(title: "", state: .pending), manager: "assistant")
+        #expect(store.auth("lookup", manager: "assistant", else: nil)?.state == .pending)
+        #expect(store.auth("lookup", else: nil)?.state == .pending)
+        #expect(store.byKey.count == 1, "the explicit default id is stored under the default key")
+
+        store.received("lookup", ExtensionAuth(title: "", state: .signedIn, account: "me@example.com"))
+        #expect(store.auth("lookup", manager: "assistant", else: nil)?.account == "me@example.com",
+                "a nil-tagged push updates the explicitly routed default page")
+        #expect(store.auth("lookup", else: nil)?.state == .signedIn)
+        #expect(store.byKey.count == 1)
+
+        store.received("lookup", ExtensionAuth(title: "", state: .pending), manager: "work")
+        #expect(store.auth("lookup", manager: "work", else: nil)?.state == .pending)
+        #expect(store.auth("lookup", manager: "assistant", else: nil)?.state == .signedIn,
+                "a non-default assistant stays separate")
+        #expect(store.byKey.count == 2)
+    }
+
     @Test func theToolsStepAndNext() throws {
         let op = try decode(ExtensionOperation.self, #"""
         {"id":"op1","kind":"install","extension":"lookup","state":"running","step":"tools",

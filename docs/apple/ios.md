@@ -2173,10 +2173,14 @@ The shared iPhone, iPad and Mac settings page has three groups:
 | This Device | Appearance & Display, Language & Dictation, Notifications, Translation, Storage, Health, This iPhone, About |
 | Hub | Hub Connection, Hub Version, Assistants, Avatar, Devices & Pairing |
 
-With several installed assistants, the first heading shows the current assistant's avatar, name and existing switcher,
-with scope guidance. With one, it keeps the chosen Persona face and name without a switcher. The health space remains
-bound to the default assistant. The avatar is shared across devices; theme color, interface style, text size, list layout
-and light/dark appearance remain device preferences. The layout page is titled **Agents List Layout**.
+Whenever the hub answers a roster, with one or many installed assistants, the first heading is **<name>'s Settings**,
+with the current assistant's first-letter avatar and state dot plus **Switch**. Switch opens the same assistant
+popover/list as the sidebar. The first group's footer is **Only <name>'s own settings are shown. To change another
+assistant's, switch to it first.** A legacy hub without a roster keeps the neutral **Current Assistant's Settings**
+heading, without Switch or that first-group footer. The second group has no footer; the third group's footer is
+**These two groups are the same whichever assistant is current.** It covers both This Device and Hub. The health space
+remains bound to the default assistant. The avatar is shared across devices; theme color, interface style, text size,
+list layout and light/dark appearance remain device preferences. The layout page is titled **Agents List Layout**.
 
 Models replaces the two separate model-provider and model-configuration entries. Common purpose/model choices come first;
 providers and keys sit under Advanced, and a purpose's runtime/provider choices are folded in its editor. Agent collects
@@ -2184,6 +2188,21 @@ Claude Code, Codex and Session Triage. Applying runtime settings to all online c
 computers in the current Hub. Connectors, extensions, markets, channels and knowledge selection use a captured assistant
 request context; switching assistants returns Settings to the list, and a late response cannot replace the new scope.
 An explicitly manager-bound detail link still opens that assistant's copy without changing the app's pick.
+
+The rest of the first group follows the same rule. Skills, Auto-Start Tasks (`TaskTrustModel`), Outlook sign-in on Add Mail
+Account, an extension form's launcher picker, each page's Subscriptions entry (`SettingsPage.subscriptions(state:manager:)`)
+and the extension operations a page reads (`ExtensionOperations.reload(manager:)`, which replaces that assistant's alone) go to
+the assistant the page opened for. An assistant without the chat connector (its manager answers 404) shows it Not set up, with
+no Message Tweaks. Links from a page of the default assistant's things name it by its id while another one is current
+(`AppModel.settingsRoute`): an extension page's settings link opens its own page's copy (`ExtensionViewModel.Outcome.settingsOwner`),
+Messages' Settings the default's chat connector page (`SettingsPage.feishu(manager:)`, which says whose it is), and the voice
+entry the default's voice extension. What runs on the default assistant whichever is current keeps the default's model
+settings (`ModelSettingsOwner`): Translation's model (with a line saying so while another assistant is current), a voice
+call's model, the inbox triage banner's Set Up, and the /agent model on the default's chat connector page. The badges on the
+ways to Settings count the default's extension entries only while it is current, since Settings shows the current
+assistant's under Extensions. While another assistant is current, that route may keep the default assistant's explicit id
+on the page's requests. Extension operation and auth storage canonicalize the id to the default/nil key, so a push with
+no manager still updates the explicitly routed page; another assistant's id remains a separate key.
 
 About shows the app version and a folded Diagnostics section containing the build commit and last new-chat check.
 Devices & Pairing retains the device list, pairing again, Watch sync and confirmed disconnect. Mobile permissions,
@@ -2195,7 +2214,9 @@ ModelLaunchersRoute and existing DEBUG page-opening arguments continue to work. 
 `-openAppearance` argument accepts `search:<query>`; no new DEBUG switch is introduced.
 
 Regression coverage: `SettingsNavigationTests`, `AssistantSettingsScopeTests`, `SettingsResourceScopeTests`,
-`ManagerSwitchTests`, and `SettingsNavigationUITests` / `ModelsSettingsHierarchyTests`. A remembered assistant pick
+`ManagerSwitchTests`, `SettingsFollowAssistantTests`, `SettingsHomeTests`, `SettingsOwnerLinksTests`, `ModelSettingsOwnerTests`,
+`SettingsSubscriptionsOwnerTests`, `SettingsBadgeTests`, `ExtensionOperationsTests`, and `SettingsNavigationUITests` /
+`ModelsSettingsHierarchyTests`. A remembered assistant pick
 routes settings before the roster arrives; only a confirmed legacy-roster 404 suppresses it, without erasing the pick.
 These tests do not claim that an installed TestFlight app was updated.
 

@@ -186,6 +186,8 @@ extension APIClient {
         var error: String?
         var lines: ExtensionUIStreamFileLines?
         var cancelled = false
+        /// Whose extension settings the link opens when it is an extension's settings link: an extension page's own.
+        var settingsOwner: ExtensionSettingsOwner = .current
     }
 
     private(set) var fileLines: [String: ExtensionUIStreamFileLines] = [:]
@@ -234,7 +236,7 @@ extension APIClient {
             }
             if result.pop == true { popped = true }
             let url = result.openUrl.flatMap(URL.init(string:)).flatMap { Self.opens($0, item: context.item, owner: plugin) ? $0 : nil }
-            return Outcome(toast: result.toast, url: url, lines: result.lines)
+            return Outcome(toast: result.toast, url: url, lines: result.lines, settingsOwner: linkOwner(url))
         } catch {
             return stream.visible ? Outcome(error: String(localized: "Couldn't Load This Page")) : Outcome(cancelled: true)
         }
@@ -289,6 +291,10 @@ extension APIClient {
     @ObservationIgnored private let initialState: String?
     @ObservationIgnored private let initialManager: String?
     var selectedManager: String? { stream?.manager ?? initialManager }
+
+    /// Whose extension settings a link in an answer opens (`Outcome.settingsOwner`): this page's assistant's; with no
+    /// link, the default, so an answer without one compares as before.
+    private func linkOwner(_ url: URL?) -> ExtensionSettingsOwner { url == nil ? .current : .page(selectedManager) }
 
     /// When the view on screen was last drawn (its `refresh_after` counts from here).
     private(set) var drawnAt: Date?
@@ -465,7 +471,7 @@ extension APIClient {
         if let p = r.push, depth < Self.maxDepth { pushed = p }
         if r.pop == true { popped = true }
         let url = r.openUrl.flatMap(URL.init(string:)).flatMap { Self.opens($0, item: context.item, owner: plugin) ? $0 : nil }
-        return Outcome(toast: r.toast?.isEmpty == false ? r.toast : nil, url: url)
+        return Outcome(toast: r.toast?.isEmpty == false ? r.toast : nil, url: url, settingsOwner: linkOwner(url))
     }
 
     /// A `segmented` picked: shown picked at once, and its action sent with `{name: value}` (and the page's fields when it
@@ -630,7 +636,7 @@ extension APIClient {
             if let p = r.push, depth < Self.maxDepth { pushed = p }
             if r.pop == true { popped = true }
             let url = r.openUrl.flatMap(URL.init(string:)).flatMap { Self.opens($0, item: context.item, owner: plugin) ? $0 : nil }
-            return Outcome(toast: r.toast?.isEmpty == false ? r.toast : nil, url: url)
+            return Outcome(toast: r.toast?.isEmpty == false ? r.toast : nil, url: url, settingsOwner: linkOwner(url))
         } catch let e as APIError where Self.isUnsupported(e) {
             unsupported = true
             return Outcome()

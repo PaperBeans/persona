@@ -137,6 +137,32 @@ func TestTodoTools(t *testing.T) {
 	})
 }
 
+// A task whose agent never started stays visible to the assistant, with why, instead of reading as finished work (#6014).
+func TestTodoToolsFailedStart(t *testing.T) {
+	todoStores(t, func(t *testing.T, e *todoEnv, _ *db.DB) {
+		ctx := context.Background()
+		task, err := e.s.createTodo(ctx, "Fix the build", "", "conv1", "plan_failed")
+		if err != nil {
+			t.Fatal(err)
+		}
+		reason := "claude did not start within 3m0s: the tab's shell had not run it yet"
+		if err := e.s.failTodo(ctx, task.ID, reason); err != nil {
+			t.Fatal(err)
+		}
+		line := task.ID + ` "Fix the build" [failed to start, task]`
+		for _, args := range []map[string]any{nil, {"status": "done"}} {
+			list, err := e.tool("todo_list", args)
+			if err != nil || !strings.Contains(list, line) {
+				t.Fatalf("list %v: %s %v", args, list, err)
+			}
+		}
+		got, err := e.tool("todo_get", map[string]any{"id": task.ID})
+		if err != nil || !strings.Contains(got, line) || !strings.Contains(got, "failed to start: "+reason) {
+			t.Fatalf("get: %s %v", got, err)
+		}
+	})
+}
+
 // Deleting is confirmed on the phone every time: declined, the to-do stays; allowed, it is gone. Completing a task
 // (agents work on it) is confirmed too; the user's own to-do is not.
 func TestTodoToolsConfirm(t *testing.T) {

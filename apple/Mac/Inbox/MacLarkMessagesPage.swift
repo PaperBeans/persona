@@ -244,8 +244,9 @@ private struct MacLarkMessagesContent: View {
         }
     }
 
+    /// The default assistant's chat connector page, whose account these chats follow (`SettingsPage.feishu`).
     private func openConnectionSettings() {
-        model.settingsPath = NavigationPath([SettingsPage.feishu])
+        model.settingsPath = NavigationPath([SettingsPage.feishu(manager: model.settingsRoute(nil))])
         MacShellState.shared.go(.settings, model)
     }
 }

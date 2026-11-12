@@ -75,6 +75,8 @@ fun ChatScreen(
     sessionKey: SessionKey, repository: ChatRepository, sender: MessageSender,
     interactions: InteractionCenter, sessions: SessionsRepository, onBack: () -> Unit,
     onTerminal: ((SessionKey) -> Unit)? = null,
+    /** Resume in Terminal (#5565): open the terminal and resume there; null when the shell has no terminal. */
+    onResumeInTerminal: ((SessionKey) -> Unit)? = null,
     chrome: ChatChromeBindings = ChatChromeBindings(),
     pendingBadge: @Composable () -> Unit = { PendingBadge(PendingStatus.NeedsReview) },
     readingKey: ChatReadingKey? = null,
@@ -101,7 +103,8 @@ fun ChatScreen(
         key(sessionKey, scopedReadingKey) {
             val readOnlyRefusal = androidx.compose.ui.res.stringResource(R.string.chat_read_only_history)
             val pageSender = remember(sender, historyReadOnly) { if (historyReadOnly) ReadOnlyMessageSender(sender, readOnlyRefusal) else sender }
-            ChatPage(sessionKey, repository, pageSender, interactions, sessions, onBack, onTerminal, chrome, scopedReadingKey, anchorStore ?: local?.anchors,
+            ChatPage(sessionKey, repository, pageSender, interactions, sessions, onBack, onTerminal, onResumeInTerminal, chrome,
+                scopedReadingKey, anchorStore ?: local?.anchors,
                 renderStyle, textUpdates,
                 composerService, composerState ?: rememberChatComposerState(), onDraftChanged, onContextCleared, statusBindings,
                 embedded, showTopBar, historyReadOnly, historyFooter, historySession)
@@ -114,7 +117,7 @@ fun ChatScreen(
 private fun ChatPage(
     key: SessionKey, repository: ChatRepository, sender: MessageSender,
     interactions: InteractionCenter, sessions: SessionsRepository, onBack: () -> Unit,
-    onTerminal: ((SessionKey) -> Unit)?, chrome: ChatChromeBindings,
+    onTerminal: ((SessionKey) -> Unit)?, onResumeInTerminal: ((SessionKey) -> Unit)?, chrome: ChatChromeBindings,
     readingKey: ChatReadingKey?, anchorStore: ChatAnchorStore?,
     renderStyle: ChatRenderStyle, textUpdates: Map<String, ChatTextUpdate>,
     composerService: ChatComposerService?, composer: ChatComposerState,
@@ -576,6 +579,7 @@ private fun ChatPage(
     // A session without a terminal (a Codex thread, an agent runtime's) has nothing to open or explain (#4339 C7).
     val hasTerminal = ChatTerminalPlaces.has(readOnly, canTerminal, renderStyle)
     val agentTerminal = terminal?.takeIf { hasTerminal }
+    val resumeInTerminal: (() -> Unit)? = onResumeInTerminal?.let { action -> { action(key) } }
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
 
     fun followEnd() {
@@ -1156,6 +1160,7 @@ private fun ChatPage(
                                         onOpenTodo = chrome.onOpenTodo, agentShares = chrome.agentShares, worktrees = chrome.worktrees,
                                         onSearch = { search.open(chatList) { timeline.freeze(currentItems); timelineVersion++ } },
                                         onTerminal = agentTerminal, onTerminalHelp = if (hasTerminal && terminal == null) ({ terminalHelp = true }) else null,
+                                        onResumeInTerminal = resumeInTerminal,
                                         turnStart = runningSince)
                                     // The space's other tabs under the title (iOS SiblingTabs); not for the assistant's conversation.
                                     if (tabs && session != null && onOpenSibling != null) {

@@ -497,6 +497,12 @@ Select Text copies only a segment (`SelectTextTests`: Agent reply with code bloc
 `TEST_RUNNER_PERSONA_MOCK_HUB=http://127.0.0.1:<port>`, style `TEST_RUNNER_PERSONA_UI_STYLE=beautiful`, `TEST_RUNNER_PERSONA_SHOTS=<directory>` (named by simulator appearance).
 Run a new UI test against unfixed code first to confirm it fails, then apply the fix.
 
+Settings navigation and its assistant switcher (`SettingsNavigationUITests`) use `PERSONA_SETTINGS_HUB`, passed to `xcodebuild` as
+`TEST_RUNNER_PERSONA_SETTINGS_HUB=http://127.0.0.1:<dedicated port>` with an ordinary isolated `mock_hub.py`. The single-assistant
+case reads `PERSONA_SETTINGS_SINGLE_HUB` (`TEST_RUNNER_PERSONA_SETTINGS_SINGLE_HUB` in the command) and skips without it; point it to a
+second mock started with `MOCK_MANAGERS=1 PORT=<other dedicated port> python3 scripts/mock/mock_hub.py`. Select the suite with
+`-only-testing:PersonaUITests/SettingsNavigationUITests`.
+
 Agents tab navigation (#5641): `AgentsTabNavigationTests/testDispatchBackThenAgentsAlwaysShowsList` opens a dispatched
 Agent from Assistant, goes Back, and selects Agents five times; it checks the list's visible control, navigation root
 and absence of an Agent detail. `testNativeTabReselectionAndSwitchBackShowList` runs on iPad's native tabs and checks

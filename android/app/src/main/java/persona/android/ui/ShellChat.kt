@@ -77,7 +77,9 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
     var openedLine by rememberSaveable { mutableStateOf<Int?>(null) }
     // The terminal comes up over the chat (iOS TerminalCover, #4339 C7), from ⋯, the work line or a request's Open terminal.
     var terminalOpen by rememberSaveable(route.machineId, route.sessionId) { mutableStateOf(false) }
-    val resumer = remember(session) { SessionTerminalResumer({ session.sessions.sessions.value }, { session.agentsWiring.state.value.creation }) }
+    // Resume in Terminal (#5565): the cover resumes the stopped Agent as it comes up.
+    var resumeOnOpen by rememberSaveable(route.machineId, route.sessionId) { mutableStateOf(false) }
+    val resumer = remember(session) { SessionTerminalResumer({ session.sessions.sessions.value }, { session.agentsWiring.state.value.creation }, { session.sessions.machines.value }) }
     val handToPersona = rememberHandToPersona(wiring?.mainSender, navigator)
     var insertionFocused by remember { mutableStateOf(false) }
     var git by remember { mutableStateOf<persona.core.contracts.api.SessionGitStatus?>(null) }
@@ -96,7 +98,8 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
         Box(Modifier.fillMaxSize()) {
             // Keep the composer and conversation mounted while browsing the session directory.
             ChatScreen(key, session.chats, session.sender, session.interactions, session.sessions, { if (!closed) navigator.back() },
-                onTerminal = if (terminal != null && !assistant) ({ focus.clearFocus(); terminalOpen = true }) else null,
+                onTerminal = if (terminal != null && !assistant) ({ focus.clearFocus(); resumeOnOpen = false; terminalOpen = true }) else null,
+                onResumeInTerminal = if (terminal != null && !assistant) ({ focus.clearFocus(); resumeOnOpen = true; terminalOpen = true }) else null,
                 chrome = ChatChromeBindings(
                     onFiles = if (filesAvailable) ({ open(FilesPane.Files) }) else null,
                     onGit = if (filesAvailable && git?.isRepo == true) ({ open(FilesPane.Git) }) else null,
@@ -145,7 +148,8 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
                 }, initialPane = pane!!, initialPath = openedPath, initialLine = openedLine,
                     connection = connectionState)
             }
-            if (terminal != null && !assistant) persona.feature.terminal.TerminalCover(key, terminalOpen, { terminalOpen = false }, terminal, resumer)
+            if (terminal != null && !assistant) persona.feature.terminal.TerminalCover(
+                key, terminalOpen, { terminalOpen = false; resumeOnOpen = false }, terminal, resumer, resumeOnOpen = resumeOnOpen)
         }
     }
 }
