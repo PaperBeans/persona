@@ -450,6 +450,9 @@ func (s *Service) sessions(ctx context.Context, machine string) ([]proto.Session
 // sessionsMuted is sessions, and which of them are muted (the agent or its space: pushes off), by session id, as
 // sessions.list says.
 func (s *Service) sessionsMuted(ctx context.Context, machine string) ([]proto.Session, map[string]bool, error) {
+	if list, muted, ok, err := s.localSessions(machine); ok {
+		return list, muted, err
+	}
 	var res struct {
 		Sessions []proto.Session `json:"sessions"`
 		Muted    []string        `json:"muted"`

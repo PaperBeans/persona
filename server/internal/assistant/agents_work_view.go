@@ -51,21 +51,14 @@ func (v *workView) sessions(machine string) []proto.Session {
 	if list, ok := v.lists[machine]; ok {
 		return list
 	}
-	var res struct {
-		Sessions []proto.Session `json:"sessions"`
-		Muted    []string        `json:"muted"`
-	}
-	if err := v.s.call(v.ctx, machine, DeviceSessionsList, map[string]any{}, &res); err != nil {
+	list, muted, err := v.s.sessionsMuted(v.ctx, machine)
+	if err != nil {
 		v.s.logf("work: sessions of %s: %v", machine, err)
 		v.failed[machine] = true
 	}
-	v.lists[machine] = res.Sessions
-	muted := map[string]bool{}
-	for _, id := range res.Muted {
-		muted[id] = true
-	}
+	v.lists[machine] = list
 	v.muted[machine] = muted
-	return res.Sessions
+	return list
 }
 
 func (v *workView) session(machine, sid string) (proto.Session, bool) {
