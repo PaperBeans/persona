@@ -22,7 +22,8 @@ import (
 // What a ~/.zshrc launcher really sets, for its page in Settings › Models: reading the function's text misses everything a
 // helper (`_claude_proxy URL TOKEN MODEL WINDOW`) or a local variable does, so the node runs the launcher in a
 // subshell with `claude`, `codex`, `traex`, `command` and `env` stubbed out: instead of starting anything they print
-// the environment and arguments the agent would have got. probeScript is that harness; parseProbe reads its output.
+// the environment and arguments the agent would have got. `command env …` goes to the env stub, not to the real
+// /usr/bin/env, which would start the real agent (#5972). probeScript is that harness; parseProbe reads its output.
 
 const probeMarker = "__PERSONA_LAUNCHER_PROBE__"
 
@@ -63,7 +64,7 @@ function traex { __jp_report traex "$@"; }
 function dsh { __jp_report dsh "$@"; }
 function agy { __jp_report agy "$@"; }
 function omp { __jp_report omp "$@"; }
-function command { case "$1" in claude|codex|traex|dsh|agy|omp) local w=$1; shift; __jp_report $w "$@" ;; *) builtin command "$@" ;; esac; }
+function command { case "$1" in claude|codex|traex|dsh|agy|omp) local w=$1; shift; __jp_report $w "$@" ;; env) shift; env "$@" ;; *) builtin command "$@" ;; esac; }
 function env {
   while [[ $# -gt 0 ]]; do
     case "$1" in

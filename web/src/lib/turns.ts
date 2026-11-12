@@ -98,11 +98,19 @@ export interface Segment {
   usage?: TurnUsage;
 }
 
-function blockOrder(a: Item, b: Item) {
+function blockPart(id: string) {
+  return Number(id.split("#")[1] ?? 0);
+}
+
+function blockOrder(a: Pick<Item, "id" | "seq">, b: Pick<Item, "id" | "seq">) {
   if (a.seq !== b.seq) return a.seq - b.seq;
-  const ia = Number(a.id.split("#")[1] ?? 0);
-  const ib = Number(b.id.split("#")[1] ?? 0);
-  return ia - ib;
+  return blockPart(a.id) - blockPart(b.id);
+}
+
+/** Fold bounds are seq + numeric block, not seq alone: a final answer can share the fold's last line. */
+function insideFold(i: Item, f: Item) {
+  if (!f.fold || blockOrder(i, f) < 0 || i.seq > f.fold.through_seq) return false;
+  return i.seq < f.fold.through_seq || !f.fold.through_id || blockPart(i.id) <= blockPart(f.fold.through_id);
 }
 
 export function sortItems(items: Item[]): Item[] {
@@ -120,14 +128,15 @@ export function mergeItems(have: Item[], batch: Item[]): Item[] {
     byId.set(it.id, next);
   }
   const all = [...byId.values()];
-  const work = all.filter((i) => i.kind === "tool_use" || i.kind === "tool_result" || i.kind === "thinking");
+  const work = all.filter((i) => i.kind === "tool_use" || i.kind === "tool_result" || i.kind === "thinking" ||
+    (i.kind === "text" && i.role === "assistant")); // text inside a fold's range is its narration; outside it is the answer
   const promotedFolds = all.filter((i) => i.fold?.supervision_user);
-  const kept = all.filter((f) => f.kind !== "fold" || !f.fold || !work.some((i) => i.seq >= f.seq && i.seq <= f.fold!.through_seq));
+  const kept = all.filter((f) => f.kind !== "fold" || !f.fold || !work.some((i) => insideFold(i, f)));
   // An overlapping page may replace only part of a fold. Its authoritative promotion must survive that replacement,
   // even if the real visibility tool is on the part that has not arrived yet, or a later receipt says silent.
   if (!promotedFolds.length) return sortItems(kept);
   const realWork = new Set(work);
-  return sortItems(kept.map((i) => realWork.has(i) && promotedFolds.some((f) => i.seq >= f.seq && i.seq <= f.fold!.through_seq) ? { ...i, supervisionUser: true } : i));
+  return sortItems(kept.map((i) => realWork.has(i) && promotedFolds.some((f) => insideFold(i, f)) ? { ...i, supervisionUser: true } : i));
 }
 
 /** `have` without what a fold of this fresh page now stands for. Left in, a step kept from before the fold existed
@@ -135,7 +144,7 @@ export function mergeItems(have: Item[], batch: Item[]): Item[] {
 export function withoutFolded(have: Item[], page: Item[]): Item[] {
   const folds = page.filter((f) => f.fold);
   if (!folds.length) return have;
-  return have.filter((i) => !((i.kind === "thinking" || i.kind === "fold" || i.tool_use_id) && folds.some((f) => i.seq >= f.seq && i.seq <= f.fold!.through_seq)));
+  return have.filter((i) => !((i.kind === "thinking" || (i.kind === "text" && i.role === "assistant") || i.kind === "fold" || i.tool_use_id) && folds.some((f) => insideFold(i, f))));
 }
 
 // Only the canonical persona-context tag is recognized.
@@ -445,9 +454,9 @@ export function pickSubject(inp: Record<string, unknown>): string {
 
 const baseFileName = (p: string) => p.split(/[/\\]/).filter(Boolean).pop() ?? p;
 
-type Pick = (...keys: string[]) => string;
+type PickToolField = (...keys: string[]) => string;
 /** What Claude Code's newer tools are about (iOS ToolPresentation.subject). */
-const CLAUDE_TOOL_CHIP: Record<string, (inp: Record<string, unknown>, pick: Pick) => string> = {
+const CLAUDE_TOOL_CHIP: Record<string, (inp: Record<string, unknown>, pick: PickToolField) => string> = {
   TaskCreate: (_, pick) => pick("subject", "description"),
   TaskUpdate: (inp, pick) => pick("subject", "activeForm") || (inp.taskId != null ? `#${String(inp.taskId)}` : ""),
   TaskGet: (inp) => (inp.taskId != null ? `#${String(inp.taskId)}` : ""),

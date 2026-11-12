@@ -36,7 +36,7 @@ Continuation filenames may append `_<segment UUID>` after the thread UUID. The a
 | Rollout | In the chat |
 | --- | --- |
 | `event_msg/item_completed` UserMessage | User message |
-| AgentMessage `phase=commentary` | Thinking (narration between tools, folded into work rows) |
+| AgentMessage `phase=commentary` | Assistant text (narration between tools) |
 | AgentMessage `phase=final_answer` | Reply |
 | Reasoning (with `summary_text`) | Thinking |
 | CommandExecution | `Bash` (strip the `/bin/zsh -lc` wrapper), result is `aggregated_output`, nonzero exit code marks failure |
@@ -46,6 +46,8 @@ Continuation filenames may append `_<segment UUID>` after the thread UUID. The a
 | ContextCompaction | "Context compacted" notice |
 | `event_msg/turn_aborted` | "Interrupted" notice |
 | `turn_context` / `token_count` | Model, approval policy, context tokens |
+
+Commentary is ordinary assistant text on the wire, so it can answer a mid-turn question in the latest-text slot. Latest-page folding keeps the newest commentary visible until a final answer follows it; earlier commentary and commentary on historical pages fold into completed work through an internal-only narration marker. It is not counted as thinking or exposed as another item kind. The iOS `ChatCache` version changes with this kind mapping so cached thinking items cannot hide the answers.
 
 Codex's own XML in UserMessage (all rollouts on the local and hub machines scanned 2026-10-26):
 `<send_user_message_question_reply>` (answers to Codex `request_user_input`, containing JSON) displays the answer itself, one "question: answer" line per question;

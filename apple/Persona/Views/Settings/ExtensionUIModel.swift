@@ -455,10 +455,13 @@ extension APIClient {
     /// it is still busy keeps its new controls disabled after the state clears (#1937); an answer with nothing in it is
     /// drawn again first, still busy, so nothing else starts meanwhile.
     private func take(_ r: ExtensionActionResult, searched: Bool = false, done: () -> Void = {}) async -> Outcome {
-        let again = r.view == nil && r.toast == nil && r.openUrl == nil && r.push == nil && r.pop != true
+        // UI version 5: `items` replace the components with their keys, and nothing else is drawn again.
+        let items = r.view == nil ? (r.items ?? []) : []
+        let again = r.view == nil && items.isEmpty && r.toast == nil && r.openUrl == nil && r.push == nil && r.pop != true
             ? try? await call(nil, values: nil) : nil
         done()
         if let v = r.view { show(v, keeping: [:], searched: searched) } else if let v = again?.view { show(v, keeping: values) }
+        if !items.isEmpty { replace(items) }
         if let p = r.push, depth < Self.maxDepth { pushed = p }
         if r.pop == true { popped = true }
         let url = r.openUrl.flatMap(URL.init(string:)).flatMap { Self.opens($0, item: context.item, owner: plugin) ? $0 : nil }
@@ -646,7 +649,44 @@ extension APIClient {
         ExtensionMotion.redraw(from: view, to: v) { view = v }
     }
 
-    /// The fields' values as the extension gets them: every field of the view, by name.
+    /// The page drawn again, keeping the diffs loaded since (by `load`) that it gives without their lines again: the
+    /// extension does not have to remember what was opened (UI version 5).
+    private func keepingLoaded(_ next: ExtensionView) -> ExtensionView {
+        var loaded: [String: ExtensionComponent] = [:]
+        for c in components {
+            if case .diff(let d) = c, let k = c.key, !(d.hunks ?? []).isEmpty { loaded[k] = c }
+        }
+        guard !loaded.isEmpty else { return next }
+        var v = next
+        for i in v.sections.indices {
+            v.sections[i].items = v.sections[i].items.map { c in
+                guard case .diff(let d) = c, (d.hunks ?? []).isEmpty, d.load != nil, let k = c.key, let kept = loaded[k] else { return c }
+                return kept
+            }
+        }
+        return v
+    }
+
+    /// Sends an action that does not hold the page (UI version 5's `mark_viewed`, a diff's `context`): nothing waits for
+    /// it, its answer's `items` or view are drawn, an answer with neither draws nothing, its `lines` come back for the
+    /// page, and only a failure is told (the page puts back what it showed at once).
+    func quiet(_ action: ExtensionAction, with chosen: [String: String]) async -> Outcome {
+        let sent = chosen.merging(action.values ?? [:]) { _, own in own }
+        if let stream, stream.supported != false {
+            do {
+                let frozen = try stream.freeze(action, values: sent)
+                return await performFrozen(frozen)
+            } catch { return Outcome(error: String(localized: "Couldn't Load This Page")) }
+        }
+        do {
+            let r = try await call(action.id, values: sent)
+            if let v = r.view { show(v, keeping: values) } else if let items = r.items, !items.isEmpty { replace(items) }
+            // A diff's hidden lines (`context`): for the page to keep, nothing drawn again.
+            return Outcome(lines: r.lines.map { ExtensionUIStreamFileLines(path: $0.path, side: $0.side, start: $0.start, lines: $0.lines, total: $0.total) })
+        } catch {
+            return Outcome(error: error.localizedDescription)
+        }
+    }
     var submitted: [String: String] {
         var out: [String: String] = [:]
         for item in components {
@@ -688,7 +728,7 @@ extension APIClient {
     }
 
     private func show(_ v: ExtensionView?, keeping typed: [String: String] = [:], searched: Bool = false) {
-        guard let v else { return }
+        guard let v = v.map(keepingLoaded) else { return }
         ExtensionMotion.redraw(from: view, to: v) { view = v }
         fileLines = fileLines.filter { key, lines in v.sections.flatMap(\.items).contains { item in
             guard item.key == key else { return false }

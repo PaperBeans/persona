@@ -121,7 +121,7 @@ struct ExtensionCodeHostingTests {
 
     @Test func theExamplesTreeOpensAtTheSelectedFile() throws {
         let v = try Self.view("View.code-review.json")
-        let state = CodePageState()
+        let state = CodePageState.scratch()
         let blocks = CodePageBlocks.of(v, sections: v.sections.indices.filter { v.sections[$0].pane == "side" }, state: state,
                                    look: .unified, canComment: true)
         let rows = blocks.compactMap { b -> String? in if case .treeRow(_, _, let r, _) = b { r.node.path } else { nil } }
@@ -132,7 +132,7 @@ struct ExtensionCodeHostingTests {
 
     @Test func threadsGoUnderTheirLinesAndTheCommentBoxWhereItWasOpened() throws {
         let v = try Self.view("View.code-review.json")
-        let state = CodePageState()
+        let state = CodePageState.scratch()
         let mains = v.sections.indices.filter { v.sections[$0].pane != "side" }
         var blocks = CodePageBlocks.of(v, sections: mains, state: state, look: .unified, canComment: true)
         let ids = blocks.map(\.id)
@@ -154,7 +154,7 @@ struct ExtensionCodeHostingTests {
         else { Issue.record("the comment box follows the line it was opened on") }
 
         // Folding a file leaves its header only.
-        state.toggle(diff: "diff:src/upload/retry.go", collapsed: false)
+        state.toggle(diff: "diff:src/upload/retry.go", initially: false)
         blocks = CodePageBlocks.of(v, sections: mains, state: state, look: .unified, canComment: true)
         #expect(!blocks.contains { if case .diffLine(_, _, let d, _, _, _) = $0 { d.path == "src/upload/retry.go" } else { false } })
         #expect(blocks.contains { if case .diffHeader(_, _, let d, true) = $0 { d.path == "src/upload/retry.go" } else { false } })
@@ -163,7 +163,7 @@ struct ExtensionCodeHostingTests {
     @Test func sideBySideLaysTheDiffOutInPairs() throws {
         let v = try Self.view("View.code-review.json")
         let mains = v.sections.indices.filter { v.sections[$0].pane != "side" }
-        let blocks = CodePageBlocks.of(v, sections: mains, state: CodePageState(), look: .split, canComment: true)
+        let blocks = CodePageBlocks.of(v, sections: mains, state: CodePageState.scratch(), look: .split, canComment: true)
         // client.go (modified): its removed lines face the added ones.
         #expect(blocks.contains { if case .diffPair(_, _, let d, let l?, let r?, _, _) = $0 { d.path == "src/upload/client.go" && l.kind == .del && r.kind == .add } else { false } })
         #expect(!blocks.contains { if case .diffLine(_, _, let d, _, _, _) = $0 { d.path == "src/upload/client.go" } else { false } })
@@ -177,7 +177,7 @@ struct ExtensionCodeHostingTests {
         let d = ExtensionDiffComponent(key: "big", path: "big.go", hunks: [ExtensionHunk(oldStart: 1, newStart: 1, lines: raw)])
         let v = ExtensionView(sections: [ExtensionSection(items: [.diff(d)])])
         let started = Date()
-        let blocks = CodePageBlocks.of(v, sections: [0], state: CodePageState(), look: .unified, canComment: true)
+        let blocks = CodePageBlocks.of(v, sections: [0], state: CodePageState.scratch(), look: .unified, canComment: true)
         #expect(blocks.count >= 20_000)
         #expect(Date().timeIntervalSince(started) < 2, "laying out 20 000 lines is quick (they are drawn lazily)")
     }
@@ -247,7 +247,7 @@ struct ExtensionCodeHostingTests {
         let json = #"{"sections":[{"items":[{"type":"hologram","key":"x"},{"type":"diff","path":"a.go","hunks":[{"old_start":1,"new_start":1,"lines":[" a"]}]}]}]}"#
         let v = try JSONDecoder().decode(ExtensionView.self, from: Data(json.utf8))
         #expect(v.wantsCodePage)
-        let blocks = CodePageBlocks.of(v, sections: [0], state: CodePageState(), look: .unified, canComment: false)
+        let blocks = CodePageBlocks.of(v, sections: [0], state: CodePageState.scratch(), look: .unified, canComment: false)
         #expect(!blocks.contains { if case .legacy = $0 { true } else { false } }, "the unknown component is not drawn")
         #expect(blocks.contains { if case .diffLine = $0 { true } else { false } })
     }
@@ -255,7 +255,7 @@ struct ExtensionCodeHostingTests {
     @Test func aDiffMissingItsPathIsLeftOut() throws {
         let json = #"{"sections":[{"items":[{"type":"diff","hunks":[]},{"type":"text","text":"still here"}]}]}"#
         let v = try JSONDecoder().decode(ExtensionView.self, from: Data(json.utf8))
-        let blocks = CodePageBlocks.of(v, sections: [0], state: CodePageState(), look: .unified, canComment: false)
+        let blocks = CodePageBlocks.of(v, sections: [0], state: CodePageState.scratch(), look: .unified, canComment: false)
         #expect(!blocks.contains { if case .diffHeader = $0 { true } else { false } }, "nothing to anchor a diff without a path to")
         #expect(blocks.contains { if case .legacy = $0 { true } else { false } }, "the rest of the section is drawn")
     }

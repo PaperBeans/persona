@@ -39,6 +39,8 @@ export interface InboxSuggestion {
   machine_id?: string;
   changes?: DocChange[];
   at?: string;
+  /** The conversation the item was handed to that handed it in (Hand to AI); absent for the item's own AI twin. */
+  conversation?: { machine_id: string; session_id: string };
 }
 
 export type ChainLink =

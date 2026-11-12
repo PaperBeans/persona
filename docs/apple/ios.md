@@ -52,7 +52,7 @@ Chat page:
   (`WorkCardSlice`: top corners on first step, bottom corners on Collapse N steps, backgrounds extending halfway into spacing to join neighbors), thin separators starting at the text column; tool rows 44pt high.
   **Liquid Glass (default) has no card** (requested 2026-10-31: cards did not match chat home, `StyleSpec.workList = .timeline`): steps sit directly on the page, with a thin left vertical line from first step
   through Collapse N steps, circular tool icons on it (page background behind icons masks the line), medium-weight tool verbs; intermediate Agent remarks use smaller gray text (`AssistantText(quiet:)`),
-  reading as process rather than reply; thinking, folded steps, to-dos, tool details and Collapse start at the text column right of the line. Other styles keep cards (`.card`).
+  reading as process rather than reply; thinking, folded steps, to-dos, tool details and Collapse start at the text column right of the line. The icon column's leading edge is flush with the assistant reply bubble (`WorkCardSlice.iconLeading` = `Theme.Space.flush` inside the list margin; a card keeps `Theme.Space.m`), and the rail runs through the icon centres, including at larger text sizes (`Theme.sizeScale`). Other styles keep cards (`.card`).
   Background slices extend halfway into spacing (`WorkCardSlice.bridge = Theme.Space.l / 2`): the old hard-coded 7 for 14pt spacing left 2pt white seams after spacing changed to 16.
 - One `DiffView` (Claude Edit / MultiEdit / Write supplies old/new text; Codex unified diff), sharing Git row models (`DiffText.Line` / `parse`):
   header filename, directory, +N −N (opens file); only ± and row backgrounds are colored, code uses body color; long lines scroll horizontally with right fade; beyond 40 lines show beginning + Expand all.
@@ -1353,6 +1353,7 @@ Windows shows the PowerShell line → countdown (the `ConnectDeviceText` algorit
 "A computer wants to join: <name> (macOS). Is it yours?", "It's my computer" / "No". Errors use Chinese text by `code` (`AddComputerText.failure`); `tls_required` uses the hub's message, and unknown codes show the hub's `error`.
 
 - Entry points: the Machines page's empty state and toolbar "+", the Agents empty state with no computers, Mac's File › Add Computer…; only shown when the hub has `machines_add` (otherwise the Machines page keeps its original text).
+- The current assistant (`docs/assistant/managers.md` "The current assistant"): a new computer's `add.manager` is the roster's real id of the hub-level group's current assistant (the default's too, one assistant too). Before a roster is known (none kept from the last launch, and the hub has not answered in this run) with no kept pick, Next waits up to 5 seconds for the hub's answer (`AddAssistant.unknown`, settled by `AppModel.managerRosterUnsupported`, the hub's 404); a hub that says it has no roster (404) is settled at once and gets the request as before `add.manager`, as does one that never answers. A read that failed leaves the roster last read, or the kept pick; a new code for a computer names none. When the assistant the computer is under (the reply's `manager`; if missing, the hub's own assistant for a new computer and the listed one for a reused one) is not the one asked for, the waiting screen says "This computer was added under <name>." (several assistants only). With the current assistant offline (several assistants, roster known) the form is replaced by an explanation and Next is off. `no_manager`, `installing`, `assistant_offline` and `owners_unknown` show the hub's own words (`AddComputerText.failure`). The 3-computer limit is shown as the hub's `too_many_pending` words, with no list of the computers in the way (the hub counts every assistant's).
 - Other pages can open it with `AppModel.openAddComputer()` (readiness `add_computer`), `AppModel.openConfirmComputer(ref)` (`confirm_computer`; without a machine, use `pendingToConfirm()`: online pending computers first),
   both setting `AppModel.addComputer`, presented by `.addComputerPresentation()` at the root; pages that are themselves sheets use `.addComputerSheet($request)` on themselves.
 - Lists and the Machines page: `trust == "pending"` comes first, labeled "Waiting for your confirmation"; online offers "It's my computer" / "No", offline offers "Delete" (buttons only with hub feature `machine_trust`); `error_code` gets Chinese text
@@ -2069,9 +2070,10 @@ installing opens its install code: the one this header made while it lasts, else
 keeps no code to show again). What the list presents (the name alert, the code sheet, Settings) waits until the popover is
 gone (its `onDisappear`), not for a fixed delay: UIKit refuses a presentation while the popover is still leaving. At the
 accessibility text sizes the header leaves out the face so the name fits, and the list gives way to the screen's width. The
-header and its list show from two installed assistants on (an offline one counts, one still installing doesn't); with one, or on
-a hub without a roster, the sidebar keeps the look without assistant identity (#3975, `AppModel.showsAssistantIdentity`), as the
-web app and Android do.
+header and its list appear once a roster is known (read in this run, or kept from the last launch) and the current assistant
+can be shown, including with one installed assistant (an offline one counts, one still installing doesn't). A one-assistant
+roster has no Default chip, and **New Assistant** and **Manage Assistants…** stay below it. On a hub without a roster,
+`AppModel.showsAssistantSwitcher` is false and the sidebar keeps the persona's name as its title.
 
 The pick is the manager's id per group (`AppModel.assistantPicks`), kept on this device across launches (`AssistantPickStore`,
 the app's defaults); no pick follows the hub's default. A pick whose manager leaves the roster goes back to the default, and one

@@ -337,9 +337,11 @@ preserving genuine assistant questions. User messages and tool records remain av
 Native model errors can be omitted from the JSONL export even when ACP reports a completed prompt. When an idle
 summary has unexported steps, the companion reads at most the final eight native steps with `GetCascadeTrajectorySteps`.
 The result is cached against the summary and exported branch. Discovery opens the native service through read-only
-session listing. An omitted terminal error becomes a conversation notice and populates the existing `turn_error`
+session listing. An omitted terminal error uses the shared assistant-text `API Error:` representation for the existing error card
+and populates the session's `turn_error`
 fields, including a subscription reset timestamp supplied in native quota metadata. New input and rewinds invalidate
 that result. Rejected ACP prompts also publish their failure through the session's error state.
+The history token includes the error format so connected clients refresh items cached before this representation.
 
 The implemented integration is for the **Antigravity CLI (`agy`)**, not the Antigravity desktop app. With the node running,
 start `node integrations/antigravity/companion.mjs` from the repository root. The companion connects to the node's runtime

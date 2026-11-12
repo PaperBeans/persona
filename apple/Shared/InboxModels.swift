@@ -64,6 +64,22 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
     /// GET /api/v1/inbox/{id} has them all (InboxChainSection reads it when the item opens). nil: `chain` is all of it.
     var chainCount: Int?
     var related: [Related]?
+    /// The conversations it was handed to with Hand to AI's main chat (#1194), oldest first: they may write back to
+    /// it, and the main conversation offers "Wrap up" for it (#5932). Older hubs leave it out.
+    var handoffs: [Handoff]?
+
+    /// One hand-off of the item to a conversation (POST /api/v1/inbox/{id}/handoff).
+    nonisolated struct Handoff: Codable, Hashable, Sendable {
+        var machineID: String
+        var sessionID: String
+        var at: Date?
+
+        enum CodingKeys: String, CodingKey {
+            case at
+            case machineID = "machine_id"
+            case sessionID = "session_id"
+        }
+    }
 
     /// One thing an item can be muted by: a repository, a chat or a sender of its source.
     nonisolated struct MuteOption: Codable, Hashable, Sendable {
@@ -268,7 +284,7 @@ nonisolated struct InboxItem: Codable, Identifiable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, source, kind, account, title, sender, avatar, preview, count, tier, summary, reason, read, lark, mail, doc, moment, context, agent, translations, connector, mutes, version, parent
-        case status, urgent, recap, handling, suggestion, chain, related, manager
+        case status, urgent, recap, handling, suggestion, chain, related, manager, handoffs
         case accountName = "account_name", startedAt = "started_at", updatedAt = "updated_at", doneAt = "done_at", doneBy = "done_by"
         case chainCount = "chain_count"
     }

@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/kbwire"
 	"github.com/nwverse/persona/server/internal/lazyre"
 )
@@ -101,6 +102,9 @@ type Engine struct {
 	// DayRecordingName is a day recording's name in the owner's language for its day (YYYY-MM-DD), unless the user
 	// titled it; nil or "": the knowledge base's own.
 	DayRecordingName func(day string) string
+	// OwnerLanguage is the owner's language on the hub (an i18n code): what a recording that says no language of its
+	// own has its minutes, summary and recap written in (language.go); nil or not one of the hub's: zh-Hans.
+	OwnerLanguage func() i18n.Lang
 	// HandleKey is the hub's key for the senders' identity hints (handles.go); without it none are kept.
 	HandleKey []byte
 	// TopicsOn says whether the knowledge points curation runs (topics.go; assistant.kb_topics). nil: it does.

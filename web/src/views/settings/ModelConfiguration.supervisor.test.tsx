@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 // Model settings lists the background supervisor's purpose (#5082) right after Main chat, in Main chat's group, with what
-// it is for. The hub answers it by its own id and leaves it out of the catalog; a hub without it lists nothing new.
+// it is for. A hub since #5806 lists it in the catalog (last among its own purposes) and is asked nothing more; one before
+// that answers it by its own id and leaves it out of the catalog; a hub without it lists nothing new. Each purpose
+// shows the hub's description under its name (#5806).
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,16 +27,25 @@ const agents: ModelPurpose = { ...base, id: "agent.new", category_id: "agent.new
 const supervise: ModelPurpose = { ...base, id: "assistant.supervise", category_id: "assistant", parent: "assistant", name: "Background supervisor", group: "Assistant", launch: "headless", inherited_from: "Main chat" };
 
 /** What the hub does with the purpose: answers it by id (as built, #4927), also lists it, or has none (an older hub). */
-let mode: "detail" | "listed" | "none" | "failing";
+let mode: "detail" | "listed" | "described" | "none" | "failing";
 let patches: Record<string, unknown>[];
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
+const DESCRIPTIONS: Record<string, string> = {
+  assistant: "Talks with you, splits work into tasks and hands them out.",
+  "agent.new": "The agents that do the tasks on your computers.",
+  "assistant.supervise": "Follows up and reviews the tasks Persona hands out. Nobody waits on it.",
+};
+const described = (p: ModelPurpose): ModelPurpose => ({ ...p, description: DESCRIPTIONS[p.id] });
+/** The paths the page asked the hub for, in order. */
+const requested = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input).split("?")[0]);
 const hub = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const path = String(input).split("?")[0];
   if (init?.method === "PATCH") {
     patches.push(JSON.parse(String(init.body)));
     return json({ purpose: { ...supervise, override: { model: "small-model" }, effective: { ...supervise.effective, model: "small-model" }, revision: 2 }, providers });
   }
-  if (path.endsWith("/model-config")) return json({ purposes: mode === "listed" ? [main, supervise, agents] : [main, agents], providers });
+  // a hub since #5806 lists the row last among its own purposes, each with its description since #5086
+  if (path.endsWith("/model-config")) return json({ purposes: mode === "listed" ? [main, agents, supervise] : mode === "described" ? [described(main), described(agents), described(supervise)] : [main, agents], providers });
   if (path.endsWith("/purposes/assistant.supervise")) return mode === "none" ? json({ error: "not found" }, 404) : mode === "failing" ? json({ error: "hub busy" }, 503) : json({ purpose: supervise, providers });
   if (path.endsWith("/models")) return json({ error: "unavailable" }, 404);
   throw new Error(`Unexpected request: ${path}`);
@@ -91,10 +102,34 @@ describe("the background supervisor's model purpose (#5082)", () => {
     expect(vi.mocked(fetch).mock.calls.some(([input, init]) => (init as RequestInit | undefined)?.method === "PATCH" && String(input).endsWith("/model-config/purposes/assistant.supervise"))).toBe(true);
   });
 
-  it("is listed once when the hub's catalog has it itself", async () => {
+  it("a hub that lists it in the catalog (#5806): one row, moved up to right after Main chat, and no request by its id", async () => {
     mode = "listed";
     await render();
+    // the hub lists it last among its own purposes
     expect(rows().map((r) => r.dataset.modelPurpose)).toEqual(["assistant", "assistant.supervise", "agent.new"]);
+    expect(rows()[1].parentElement).toBe(rows()[0].parentElement);
+    expect(requested().filter((p) => p.endsWith("/purposes/assistant.supervise"))).toEqual([]);
+    expect(requested().filter((p) => p.endsWith("/model-config"))).toHaveLength(1);
+  });
+
+  it("a hub that leaves it out of the catalog is still asked by its id, once", async () => {
+    await render();
+    expect(requested().filter((p) => p.endsWith("/purposes/assistant.supervise"))).toHaveLength(1);
+  });
+
+  it("shows each purpose's description under its name, the hub's own (#5806)", async () => {
+    mode = "described";
+    await render();
+    const [mainRow, row, agentsRow] = rows();
+    const description = (r: HTMLElement) => r.querySelector<HTMLElement>('[data-testid="purpose-description"]');
+    expect(description(mainRow)!.textContent).toBe("Talks with you, splits work into tasks and hands them out.");
+    // the hub's sentence, not this page's own for the background supervisor
+    expect(description(row)!.textContent).toBe("Follows up and reviews the tasks Persona hands out. Nobody waits on it.");
+    expect(description(agentsRow)!.textContent).toBe("The agents that do the tasks on your computers.");
+    // right under the name: before the model and the pill that says how it runs
+    const hint = description(mainRow)!.parentElement!;
+    expect(hint.firstElementChild).toBe(description(mainRow));
+    expect(hint.previousElementSibling!.textContent).toBe("Main chat");
   });
 
   it("has no row on a hub before it, and the rest loads as before", async () => {

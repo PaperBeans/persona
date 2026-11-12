@@ -85,6 +85,10 @@ class AvailabilityFollowupsMockTests(unittest.TestCase):
         self.assertEqual((made["kind"], made["creates"], made["revision"]), ("standing_authorization", "standing_authorization", 2))
         todo = next(t for t in call(base, "/api/v1/todos")["todos"] if t["id"] == "todo_review")
         self.assertNotIn("suggestion", todo["ask"])
+        # the grant is listed where the apps list standing authorizations, and can be revoked there
+        grants = call(base, "/api/v1/assistant/standing-authorizations")
+        self.assertEqual((grants["revision"], [g["actions"] for g in grants["authorizations"]]), (2, [["merge"]]))
+        self.assertEqual(grants["authorizations"][0], made["authorization"])
         self.assertEqual(status(base, "/api/v1/assistant/rule-suggestions/rs_mock_merge/always", {}), 404, "answered already")
         self.assertEqual(status(base, "/api/v1/assistant/rule-suggestions/rs_mock_merge/not-now", {}), 404)
 
@@ -96,6 +100,16 @@ class AvailabilityFollowupsMockTests(unittest.TestCase):
         card = next(x for x in call(base, "/api/v1/interactions")["interactions"] if x["id"] == "ix_tests")
         self.assertNotIn("suggestion", card)
         self.assertEqual(status(base, "/api/v1/assistant/rule-suggestions/rs_never/always", {}), 404, "never earned")
+
+        # /mock/reset offers them all again (a run that answers them starts each pass from the same cards)
+        gone = call(base, "/api/v1/assistant/standing-authorizations/" + made["authorization"]["id"], method="DELETE")
+        self.assertEqual((gone["revision"], gone["authorizations"]), (3, []))
+        self.assertEqual(status(base, "/api/v1/assistant/standing-authorizations/sa_never", method="DELETE"), 404)
+        call(base, "/mock/reset")
+        self.assertNotIn("macbook|/Users/me/code/weather|edit", [k["key"] for k in call(base, "/api/v1/task-trust")["kinds"]])
+        todo = next(t for t in call(base, "/api/v1/todos")["todos"] if t["id"] == "todo_review")
+        self.assertEqual(todo["ask"]["suggestion"]["id"], "rs_mock_merge")
+        self.assertEqual(call(base, "/api/v1/assistant/rule-suggestions/rs_mock_delegate/not-now", {}), {"ok": True})
 
     def test_without_the_flags_no_card_carries_any_of_it(self):
         base = self.serve(MOCK_TODO_ASKS="1", MOCK_TASKS="1")

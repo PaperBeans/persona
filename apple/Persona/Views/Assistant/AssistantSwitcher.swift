@@ -1,14 +1,15 @@
 import SwiftUI
 
-// The assistant switcher (docs/assistant/managers.md "Clients"): the sidebar's header names the current assistant (the
-// interface's word for a manager) with whether it is online and where it runs, and opens the hub's assistants as a
-// list: one row each with its state, the current one checked, the default marked, one still installing with its code's
-// time left, and beside every other one than the current how much waits for the user there (`AssistantBadges`: its
-// agents waiting and its inbox's Needs You), then New Assistant and Manage Assistants… (Settings › Assistants). The
-// header's face carries a mark while another assistant has something waiting. Picking one makes it the current
-// assistant on this device (`AppModel.selectAssistantManager`, kept for each hub across launches); picking one still
-// installing shows how to install it. It shows from two installed assistants on (`ManagerRoster.isMulti`):
-// with one, or on a hub without a roster, the sidebar keeps the persona's name and avatar.
+// The assistant switcher (docs/assistant/managers.md "Clients"): whenever the hub supplies a roster with an installed
+// current assistant, including a single assistant, the sidebar's header names it (the interface's word for a manager)
+// with whether it is online and where it runs, and opens the hub's assistants as a list: one row each with its state, the
+// current one checked, the default marked only when there are several installed assistants, one still installing with its
+// code's time left, and beside every other one than the current how much waits for the user there (`AssistantBadges`: its
+// agents waiting and its inbox's Needs You), then New Assistant and Manage Assistants… (Settings › Assistants). A
+// single-assistant roster therefore has one row without Default, followed by those two actions. The header's face carries
+// a mark while another assistant has something waiting. Picking one makes it the current assistant on this device
+// (`AppModel.selectAssistantManager`, kept for each hub across launches); picking one still installing shows how to
+// install it. Without a roster, or without an installed current assistant, the sidebar keeps the old Persona header.
 
 /// What the switcher says and how it marks an assistant, kept apart from the views to test.
 enum AssistantSwitcherText {

@@ -152,6 +152,8 @@ class ContinuityReducer {
 
     private fun Item.isWork(): Boolean = when (kind) {
         "thinking", "tool_use", "tool_result", "fold" -> true
+        // A fold range can contain Codex commentary; assistant text outside that range is the final answer.
+        "text" -> role == "assistant"
         "image" -> toolUseId != null
         else -> false
     }

@@ -101,6 +101,8 @@ nonisolated enum InterruptLook: Equatable, Sendable {
 nonisolated struct FeedItem: Codable, Hashable, Identifiable, Sendable {
     enum Kind: String, Codable, Sendable {
         case plan, task, answered, receipt, routed, today, message, view, notice, review, report, brief, unknown
+        /// A hand-off conversation's write-back to an inbox item (#5932): `ref` is the item, `body` a `HandoffCardBody`.
+        case inboxSuggestion = "inbox_suggestion"
         init(from decoder: Decoder) throws {
             self = Kind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
         }

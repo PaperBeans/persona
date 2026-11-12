@@ -712,6 +712,17 @@ The same rules on the web (`web/src/lib/inbox-groups.ts`) and iOS / iPad (`Perso
   so the apps show one line, "Inbox: an update on “title”", not the model's text as a user bubble): reject, instruct, handback, a confirmed reply sent (which files the item as replied:
   nobody there follows the other side's answer) and an Agent started (as that conversation's own task; the chain's `agent` entry links it). A confirmed conclusion files the item as
   usual; a processing conversation still on the item is told it is over.
+  **The write-back in the chat** (#5932): a reply or a conclusion handed in that way is also a card in that conversation (feed kind `inbox_suggestion`,
+  `assistant/inbox_handoff_card.go`; `docs/protocol/protocol.md` "Tasks and the chat feed"), under the turn that wrote it: the item's title and source, its
+  recap folded to three lines, the reply (editable) or the conclusion, and Send / Got It with Later. The card is a snapshot of that suggestion version; the
+  apps read the item for the rest, so the item stays the one home of the request and Needs you counts it once: while the item's suggestion is still that
+  version from that conversation the card confirms it (`POST /api/v1/inbox/{id}/suggestion`, the same path as the item's card); otherwise it says how it
+  ended (replied as you, the user answered at the source, handled without it, or no longer current). An Agent suggestion, a handback and a recap alone
+  get no card. While items handed to the main conversation are open, its composer shows "Wrap up: <title>" for the two most recently handed (web
+  `views/assistant/HandoffCard.tsx`, iOS `HandoffCardView.swift`): it hands the item over again with a fixed ask for the final summary and reply, so the
+  block naming the item goes with it and nothing goes to anyone else. `prompts/inbox/handoff.md` tells the conversation to write back when the user wants
+  a reply or a conclusion or the matter is settled, and again whenever it changes. The web's card has "Open in Inbox"; iOS has no way yet to open an
+  item from the chat, so its card leaves rejecting and instructing to the item's page. Mock: `MOCK_TASKS=1 MOCK_HANDOFF_CARD=1` (`sent`: the reply went).
   "Also mark as done" is off by default for the main chat (it may still write back) and on for the other targets; switching targets follows that default until the user sets the box,
   whose choice then stays. Checked, the item is filed once the hand-off is answered, and a later `inbox_suggest` on it is refused as already filed.
   Not covered: later messages on the item are not forwarded to the main conversation (it reads the source with its tools when asked), and filing the item is not told there.
