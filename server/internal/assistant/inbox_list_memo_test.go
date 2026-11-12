@@ -203,6 +203,9 @@ func TestInboxChangesAreListedBeforeTheirSave(t *testing.T) {
 			return listed()
 		}, chained(ChainAgent, "sess-handed")},
 		{"event's conversation being started", func(t *testing.T, h *inboxHub, c *replyRacingConnector, it *InboxItem, listed func() InboxItem) InboxItem {
+			// Like a handling pass, own starts while observing them; collection can now queue a pass with the twin off.
+			h.inbox.handing.Lock()
+			defer h.inbox.handing.Unlock()
 			h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
 			h.inbox.mu.Lock()
 			it.Agent = &InboxAgent{State: AgentQueued, Task: "look"}

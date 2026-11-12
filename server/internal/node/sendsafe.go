@@ -118,6 +118,11 @@ type sendOpts struct {
 	// switch out before it is typed (launcher_switch.go). Without it (any other sender) the message goes on the launcher
 	// the agent runs on and the switch keeps waiting.
 	ApplySwitch bool `json:"apply_switch"`
+	// SwitchNow: the assistant's agent_switch (#5973), which picked the switch a moment before. It is carried out with
+	// this message now or not at all: where apply_switch alone would type the message on the launcher the agent runs on
+	// and keep the switch waiting (the agent busy, a draft or a dialog in the box), the message is refused with nothing
+	// typed and the switch is dropped, so none waits for the user's next message (switchNowRefusal).
+	SwitchNow bool `json:"switch_now"`
 	// readBox: a screen that cannot be read refuses (unreadBoxMessage) instead of passing for an empty box. After a
 	// command that may still sit in the box (ultracode.go), not knowing is not enough to type after it.
 	readBox bool

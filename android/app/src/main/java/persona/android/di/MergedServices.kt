@@ -41,6 +41,14 @@ internal fun mergedSessions(stacks: GroupStacks): SessionsRepository = object : 
     override val sessions = stacks.merged(emptyList<Session>(), { s ->
         s.mapped(s.repositories.shownSessions) { list -> list.map(::session) }
     }) { it.flatten() }
+    override val adoptedSessions = stacks.merged(emptyList<Session>(), { s ->
+        s.mapped(s.repositories.sessions.adoptedSessions) { list -> list.map(::session) }
+    }) { it.flatten() }
+    override val startedThreads = stacks.merged(emptyMap<SessionKey, Session>(), { s ->
+        s.mapped(s.repositories.sessions.startedThreads) { entries ->
+            entries.map { (previous, thread) -> key(previous) to session(thread) }.toMap()
+        }
+    }) { maps -> maps.fold(emptyMap()) { acc, one -> acc + one } }
     override val listStatus = stacks.merged(SessionListStatus(), { stack ->
         combine(stack.repositories.sessions.listStatus, listNamespaces) { status, namespaces ->
             if (namespaces?.contains(stack.names.namespace) == false) SessionListStatus(loaded = true)
@@ -87,6 +95,9 @@ internal fun mergedSessions(stacks: GroupStacks): SessionsRepository = object : 
     // A session just started (async start) and a machine whose engine changed go to their own group, in its plain ids.
     override suspend fun adopt(session: Session) = stacks.use(GroupKeys.namespaceOf(session.machineId)) {
         it.repositories.sessions.adopt(it.names.rawSession(session))
+    }
+    override suspend fun adoptThread(previous: SessionKey, session: Session) = stacks.use(GroupKeys.namespaceOf(previous.machineId)) {
+        it.repositories.sessions.adoptThread(it.names.raw(previous), it.names.rawSession(session))
     }
     override suspend fun applyMachine(machine: Machine) = stacks.use(GroupKeys.namespaceOf(machine.id)) {
         it.repositories.sessions.applyMachine(if (it.names.plain) machine else machine.copy(id = GroupKeys.raw(machine.id)))

@@ -79,6 +79,9 @@ func continuityWork(i proto.Item) bool {
 	switch i.Kind {
 	case proto.KindThinking, proto.KindToolUse, proto.KindToolResult, proto.KindFold:
 		return true
+	case proto.KindText:
+		// Within a fold range assistant text is narration; a final answer outside the range stays.
+		return i.Role == "assistant"
 	case proto.KindImage:
 		return i.ToolUseID != ""
 	}

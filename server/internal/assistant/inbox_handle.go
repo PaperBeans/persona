@@ -154,11 +154,13 @@ func (b *inboxBook) escalate(since, now time.Time) []*inboxWrite {
 		if !handled && (twin == TwinNever || it.Tier != TierAction && twin != TwinFirst || it.TriagedAt != it.Last) {
 			continue
 		}
+		// A URL-only link has an Agent record but has never asked the twin to work. It follows the same age
+		// limit as an unlinked item; an established conversation can still receive its later messages.
+		if (a == nil || a.Of == "" && a.StartedAt == nil && a.SessionID == "") && !it.UpdatedAt.After(since) {
+			continue
+		}
 		w := beginWrite(it)
 		if a == nil {
-			if !it.UpdatedAt.After(since) {
-				continue
-			}
 			a = &InboxAgent{State: AgentQueued}
 			it.Agent = a
 		}

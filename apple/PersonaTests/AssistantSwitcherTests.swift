@@ -48,7 +48,8 @@ struct AssistantSwitcherTests {
     }
 
     /// VoiceOver hears what a row and the header show: how much waits beside another assistant, nothing beside the
-    /// current one, and on the header that another assistant has something waiting.
+    /// current one, and on the sidebar's header that another assistant has something waiting. Settings speaks its full
+    /// title and state instead, without a waiting message for a dot it does not draw.
     @Test func whatWaitsIsSpoken() throws {
         let roster = try Self.list()
         let work = try #require(roster.managers.first { $0.id == "m-1" })
@@ -59,6 +60,8 @@ struct AssistantSwitcherTests {
         #expect(AssistantSwitcherText.spoken(work, now: Self.start, current: false, isDefault: false) == "工作, 在线 · MacBook Pro")
         #expect(AssistantSwitcherText.spokenHeader(work, now: Self.start, othersWaiting: false) == "工作, 在线 · MacBook Pro")
         #expect(AssistantSwitcherText.spokenHeader(work, now: Self.start, othersWaiting: true) == "工作, 在线 · MacBook Pro, 别的助手有事等你处理")
+        #expect(AssistantSwitcherText.spokenSettingsHeader(title: "工作 的设置", manager: work, now: Self.start)
+                == "工作 的设置, 在线 · MacBook Pro")
     }
 
     /// In place of an empty inbox or to-do list while the current assistant is offline: the hub's merged lists have

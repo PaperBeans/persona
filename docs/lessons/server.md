@@ -1,5 +1,28 @@
 # Lessons: hub / node and networking
 
+## A name taken from a counter of attempts is not a free name (2026-11-13, #6024)
+
+The hub edge named each new slot by alternating on a counter of slots started (`'a' + slots%2`), assuming every
+start replaces the slot before it. A failed standby does not: after one, the next standby got the serving slot's own
+name and so its socket paths (`slot-<name>-<port>.sock`), and when that standby failed too, the edge's clean-up of
+"its" sockets deleted the serving slot's. The old hub kept running, the edge could no longer dial it, and every
+connection waited `HoldMax` and was closed, with nothing exiting for the service manager to restart. Self-update
+retries a version that failed in standby at the next hourly check, so two failed attempts were enough. Name a
+resource after what is in use now (the slot that served last), not after how many attempts were made, and let a
+process's clean-up remove only what it made: the edge notes any socket file already at a slot's path when it starts
+it and leaves that file alone. A test of one failed switch passed for this reason; test failures in a row.
+
+## A new file in the knowledge base is searched unless `searchable` says otherwise (2026-11-13, #5991)
+
+Search reads every `.md` and `.json` file of the data dir it is not told to skip, profile files before any message
+day, and every file under a `messages/` directory as a day. Live ingestion's receipts (`chats/<id>/.receipts.json`,
+the source and every message id and time on one line) were documented as "not searched" but never added to
+`searchable` (`server/internal/kb/find.go`), nor were the ingestion intent (`.ingest.json`) and a chat's zone marker
+(`messages/.zone`). A query of digits, a date or the source's name matched the receipts of every chat and filled the
+limit before any message was read; Chinese queries looked fine, so nobody noticed. Whoever writes a new bookkeeping
+file into the data dir adds it to `searchable` in the same change and checks it with a search over real ingested
+chats that asks for digits and ASCII words, not only with a fixture line that names the file.
+
 ## An app connection's read loop must not wait for a node (2026-11-13, #5915)
 
 `subscribe` and `unsubscribe` called the node (`session.watch` / `session.unwatch`, up to 10 s each) from the app

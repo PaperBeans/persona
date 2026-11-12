@@ -1177,6 +1177,10 @@ export function AnsweredCard({ card }: { card: Answered }) {
   );
 }
 
+/** What is drawn right under a card: views/assistant/Tasks puts the suggested rule's line here (#5802), whose code
+ *  loads with the first card that carries one. A slot, not an import: Tasks imports this file. */
+export const underCard: { line?: (ix: Interaction & { disabled?: boolean }) => React.ReactNode; /** The cards (by id) Always was answered on: their line stays to say what was made. */ made?: Set<string> } = {};
+
 export function InteractionCard({ ix }: { ix: Interaction }) {
   // a child session's card on its parent's page (#5120): its row is the one the parent's chat holds (a paging hub's
   // summary, which the store's complete rows never have)
@@ -1202,7 +1206,9 @@ export function InteractionCard({ ix }: { ix: Interaction }) {
       <AskedByVoice.Provider value={asked}>
         <SendingAnswer.Provider value={line}>
           <AskedFrom.Provider value={from}>
+            {/* a question a supervisor passed up may carry a suggested rule: its line goes under the card (#5802) */}
             <fieldset disabled={!canApprove || pending} className={canApprove ? "contents" : undefined}>{card}</fieldset>
+            {underCard.line?.(canApprove ? ix : { ...ix, disabled: true })}
           </AskedFrom.Provider>
         </SendingAnswer.Provider>
       </AskedByVoice.Provider>

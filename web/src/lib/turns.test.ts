@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatLines, freshWords, humanizeTool, isLoopTick, mcpServerName, mergeItems, parseUserText, pickSubject, segments, openRecap, personaToolVerb, toolChip, toolDisplayName, toolLabel, formatDuration } from "./turns";
+import { chatLines, freshWords, humanizeTool, isLoopTick, mcpServerName, mergeItems, withoutFolded, parseUserText, pickSubject, segments, openRecap, personaToolVerb, toolChip, toolDisplayName, toolLabel, formatDuration } from "./turns";
 import type { Item } from "./types";
 
 const u = (seq: number, text: string, extra: Partial<Item> = {}): Item => ({ id: `u${seq}#0`, seq, role: "user", kind: "text", text, ...extra });
@@ -74,6 +74,27 @@ describe("mergeItems", () => {
     expect(have.map((i) => i.id)).toEqual(["u1#0", "fold:t3#0", "a5#0"]);
     const next = mergeItems(have, [tool(3, "x"), res(4, "x")]);
     expect(next.map((i) => i.id)).toEqual(["u1#0", "t3#0", "r4#0", "a5#0"]);
+  });
+
+  it("opens a narration-only fold and clears its text when a folded page arrives again", () => {
+    const f: Item = { id: "fold:a2#0", seq: 2, role: "assistant", kind: "fold", fold: { items: 3, tools: 0, thoughts: 0, through_seq: 4 } };
+    const have = mergeItems([], [u(1, "go"), f, a(5, "done")]);
+    const expanded = mergeItems(have, [a(2, "first"), a(3, "second"), a(4, "third")]);
+    expect(expanded.map((i) => i.id)).toEqual(["u1#0", "a2#0", "a3#0", "a4#0", "a5#0"]);
+
+    const refolded = mergeItems(withoutFolded(expanded, [f]), [f]);
+    expect(refolded.map((i) => i.id)).toEqual(["u1#0", "fold:a2#0", "a5#0"]);
+  });
+
+  it("uses numeric block bounds for narration on the same line as the final answer", () => {
+    const f: Item = { id: "fold:2#2", seq: 2, role: "assistant", kind: "fold", fold: { items: 2, tools: 0, thoughts: 0, through_seq: 2, through_id: "2#10" } };
+    const narration: Item = { id: "2#3", seq: 2, role: "assistant", kind: "text", text: "progress" };
+    const answer: Item = { id: "2#11", seq: 2, role: "assistant", kind: "text", text: "done" };
+    const expanded = mergeItems([f, answer], [narration]);
+    expect(expanded.map((i) => i.id)).toEqual(["2#3", "2#11"]);
+
+    const refolded = mergeItems(withoutFolded(expanded, [f]), [f]);
+    expect(refolded.map((i) => i.id)).toEqual(["fold:2#2", "2#11"]);
   });
 });
 

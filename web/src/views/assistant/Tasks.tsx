@@ -60,14 +60,20 @@ import { AcceptRow, BriefCard } from "./Brief";
 // A plan task's brief (#3822) comes with the first plan card that has one, as the decision row does.
 const PlanBrief = lazy(() => import("./TaskBrief").then((m) => ({ default: m.PlanBrief })));
 
-// A decision's row comes with the tray's first decision, not with the first screen (startup-preload's budget).
-const TaskDecision = lazy(() => import("./TaskDecision").then((m) => ({ default: m.TaskDecision })));
+// A decision's row comes with the tray's first decision, not with the first screen (startup-preload's budget); the
+// same chunk has a suggested rule's line (#5802), which comes with the first card that carries one.
+const NeedsYouPart = lazy(() => import("./TaskDecision"));
+/** The suggested rule's line of a card, drawn right after it; nothing for a card without the field, unless Always
+ *  was answered on it here (the line then says what was made, though the hub sent the card again without the field). */
+const ruleLine = (of: RuleCard) => (of.suggestion || underCard.made?.has(of.id!)) && <Suspense fallback={null}><NeedsYouPart rule={of} /></Suspense>;
+underCard.line = ruleLine;
 import { SentLine } from "./Sent";
 import { feedWake, HandoffCard, HandoffCards, taskHandoffs, whyNotStarted, type Handoff } from "./Handoff";
 import { latestReview, parkedLine, progressLine } from "../../lib/supervision";
 import { namedLauncher, providerIdNote, providerTitle, useProviderNames } from "../../lib/provider-names";
 import { useChosenManager, useLinkManager } from "../../lib/manager-choice";
-import { AnsweredCard, InteractionCard } from "../chat/Interactions";
+import { AnsweredCard, InteractionCard, underCard } from "../chat/Interactions";
+import type { RuleCard } from "../../lib/rule-suggestion";
 import { cardLine } from "../chat/dock";
 import { interactionKicker } from "../../lib/row-line";
 import { MessageActions } from "../chat/MessageActions";
@@ -296,6 +302,8 @@ export function PlanCard({ plan }: { plan: TaskPlan }) {
     return all.some((e) => Object.keys(e).length) ? all : undefined;
   };
   return (
+    // an open plan may carry a suggested rule: its line goes under the card (#5802)
+    <>
     <div className="flex flex-col gap-3 rounded-card bg-surface p-4 shadow-card">
       <div className="flex items-center gap-1.5 text-[12px] font-medium text-ink-2">
         <Icon name="list" size={13} />
@@ -336,6 +344,8 @@ export function PlanCard({ plan }: { plan: TaskPlan }) {
         />
       </Suspense>}
     </div>
+    {ruleLine(plan)}
+    </>
   );
 }
 
@@ -458,6 +468,8 @@ export const FeedLineView = memo(function FeedLineView({ item, simplified = fals
       return <BriefCard item={item} />;
     case "message":
       return item.ref && !isLater ? <MessageCard item={item} /> : null;
+    case "inbox_suggestion":
+      return item.ref ? <Suspense fallback={null}><LazyHandoffCard item={item} /></Suspense> : null;
     case "notice": {
       // a line the hub wrote (#4305): small and centered, as the chat's own notices
       const text = feedNotice(item);
@@ -888,6 +900,8 @@ function useSayToPersona(conversation: string) {
 // ── message cards ──
 
 const LazyMessageDraft = lazy(() => import("./MessageDraft"));
+// a hand-off conversation's write-back (#5932): loaded with the first such card
+const LazyHandoffCard = lazy(() => import("./HandoffCard").then((m) => ({ default: m.HandoffCard })));
 export const draftTasks = { useTodo, useTaskNow, progressOf, TaskMark, openTask };
 
 function MessageCard({ item }: { item: FeedItem }) {
@@ -1126,7 +1140,8 @@ function foldedRow(item: NeedsYouItem): { title: string; line?: string; kicker: 
   if (item.kind === "agent") return item.asks.length ? { title: sessionTitle(item.session), line: cardLine(item.asks[0]), kicker: interactionKicker(item.asks[0]) } : undefined;
   if (item.asks.length) return { title: item.todo.title, line: cardLine(item.asks[0]), kicker: interactionKicker(item.asks[0]) };
   const ask = openAsk(item.todo);
-  if (isDecision(item.todo) || ask) return { title: item.todo.title, line: ask?.verdict, kicker: stateName("needs_you") };
+  // a decision held for the briefing says so folded too (#5803): why it did not ring
+  if (isDecision(item.todo) || ask) return { title: item.todo.title, line: ask?.verdict, kicker: ask?.for_briefing === true ? t("todos.ask_held") : stateName("needs_you") };
   return undefined;
 }
 
@@ -1193,7 +1208,7 @@ function NeedsYouBody({ item, nested = false }: { item: NeedsYouItem; nested?: b
   if (isDecision(todo))
     return (
       <Suspense fallback={<div data-needs-row={rowKey} className="truncate rounded-control bg-field px-3 py-2.5 text-[12px] text-ink-2">{todo.title}</div>}>
-        <TaskDecision key={todo.id + (todo.supervision?.reviews?.at(-1)?.at || todo.decision_review?.review_at || ask?.asked_at)} rowKey={rowKey} hideTitle={nested} todo={todo} />
+        <NeedsYouPart key={todo.id + (todo.supervision?.reviews?.at(-1)?.at || todo.decision_review?.review_at || ask?.asked_at)} rowKey={rowKey} hideTitle={nested} decision={todo} />
       </Suspense>
     );
   if (ask) return <div data-needs-row={rowKey}><AcceptRow stacked hideTitle={nested} key={todo.id + ask.asked_at} row={{ id: todo.id, title: todo.title, waited_s: Math.max(0, (Date.now() - Date.parse(ask.asked_at)) / 1000), outcome: ask.outcome, verdict: ask.verdict, recommend: ask.recommend, asked_at: ask.asked_at }} /></div>;

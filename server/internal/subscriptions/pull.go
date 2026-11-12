@@ -64,12 +64,15 @@ func checkRecipe(r Recipe) *Problem {
 	if err != nil {
 		return &Problem{CodeBadRecipe, "The recipe is not valid: " + firstLine(err.Error())}
 	}
+	if p := checkPagination(r); p != nil {
+		return p
+	}
 	for _, p := range recipePaths(r) {
 		if _, err := parsePath(p); err != nil {
 			return &Problem{CodeBadRecipe, err.Error()}
 		}
 	}
-	if _, err := fillArgs(r.Args, vars(time.Now(), time.UTC)); err != nil {
+	if _, err := fillPullArgs(r, time.Now(), time.UTC, nil); err != nil {
 		return &Problem{CodeBadArgs, err.Error()}
 	}
 	return nil
@@ -77,6 +80,11 @@ func checkRecipe(r Recipe) *Problem {
 
 func recipePaths(r Recipe) []string {
 	ps := []string{cmpOr(r.ItemsPath, "$")}
+	for _, p := range []string{r.NextCursorPath, r.NextPagePath} {
+		if p != "" {
+			ps = append(ps, p)
+		}
+	}
 	if f := r.Fields; f != nil {
 		for _, p := range []string{f.ID, f.Thread, f.Title, f.Sender, f.Time, f.Body, f.Link, f.DueDate} {
 			if p != "" {
@@ -94,28 +102,46 @@ func firstLine(s string) string {
 
 // pulled is what one call of a recipe gave: its items mapped (items mode) or the one snapshot.
 type pulled struct {
-	args      map[string]any
-	itemsPath string // where the items were read
-	shape     *Shape
-	first     any // the first item, for the field pickers
-	items     []mapped
-	snapshot  *Item
-	snapHash  string
-	weak      bool // an item had no id: dedup by content hash
-	timeBad   bool
-	noTitle   bool // items came, none had a title
-	problem   *Problem
-	retry     time.Duration // rate_limited: how long the connector asked to wait
-	connError bool          // the connector itself could not be reached
+	args         map[string]any
+	itemsPath    string // where the items were read
+	shape        *Shape
+	first        any // the first item, for the field pickers
+	items        []mapped
+	snapshot     *Item
+	snapHash     string
+	weak         bool // an item had no id: dedup by content hash
+	timeBad      bool
+	noTitle      bool // items came, none had a title
+	problem      *Problem
+	continuation *Continuation // the next page to request, nil at the terminal page
+	retry        time.Duration // rate_limited: how long the connector asked to wait
+	connError    bool          // the connector itself could not be reached
 }
 
-// pull calls the recipe's tool once for what came after since and reads what it answers.
-func pull(ctx context.Context, c connector.Connector, source string, r Recipe, since time.Time, loc *time.Location, label string) pulled {
+// pull calls the recipe's tool once for one page of the original window and reads what it answers. current is the
+// durable position committed by the preceding page, nil for a new window. A non-nil continuation in the result is
+// committed only with this page's items; nil means this was the terminal page.
+func pull(ctx context.Context, c connector.Connector, source string, r Recipe, since, until time.Time, loc *time.Location,
+	label string, current *Continuation, inputSchema json.RawMessage) pulled {
 	var p pulled
-	args, err := fillArgs(r.Args, vars(since, loc))
+	if problem := checkPagination(r); problem != nil {
+		p.problem = problem
+		return p
+	}
+	if problem := checkContinuation(r, current); problem != nil {
+		p.problem = problem
+		return p
+	}
+	args, err := fillPullArgs(r, since, loc, current)
 	if err != nil {
 		p.problem = &Problem{CodeBadArgs, err.Error()}
 		return p
+	}
+	if len(inputSchema) > 0 {
+		if err := checkArgs(inputSchema, args); err != nil {
+			p.problem = &Problem{CodeBadArgs, "The arguments do not fit the tool: " + firstLine(err.Error())}
+			return p
+		}
 	}
 	p.args = args
 	raw, _ := json.Marshal(args)
@@ -178,6 +204,7 @@ func pull(ctx context.Context, c connector.Connector, source string, r Recipe, s
 		titled = titled || m.hasTitle
 	}
 	p.noTitle = len(arr) > 0 && !titled
+	p.continuation, p.problem = nextContinuation(r, res, args, current, since, until, len(arr))
 	return p
 }
 

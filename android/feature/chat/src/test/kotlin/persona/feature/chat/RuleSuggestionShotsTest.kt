@@ -71,7 +71,7 @@ import persona.core.domain.tasks.todoRuleCard
 /**
  * The rule a card suggests after the same answer three times (#4929) and the mark of a decision held for the next
  * briefing (#4930), under the three cards that carry them: an open plan, a to-do's decision and a question a supervisor
- * passed up. Every style, light and dark; native JVM captures in `build/rule-suggestion-shots/` (or
+ * passed up. Every style, light and dark; native JVM captures in `build/reports/tests/rule-suggestion-shots/` (CI uploads the reports folder) (or
  * `-Dpersona.shots=<dir>`), not device screenshots.
  */
 @RunWith(AndroidJUnit4::class)
@@ -82,7 +82,7 @@ class RuleSuggestionShotsTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     @After fun close() = scope.cancel()
 
-    private fun out(): File = File(System.getProperty("persona.shots") ?: "build/rule-suggestion-shots").also { it.mkdirs() }
+    private fun out(): File = File(System.getProperty("persona.shots") ?: "build/reports/tests/rule-suggestion-shots").also { it.mkdirs() }
 
     private val where = RuleScope("example-node", "Example node", "/code/example")
     private val start = RuleSuggestion("rs_start", "plan_start",

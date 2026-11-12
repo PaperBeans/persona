@@ -27,7 +27,14 @@ struct SettingsView: View {
         return s.version
     }
 
-    nonisolated private struct SlotsKey: Hashable, Sendable { var source: ExtensionSlots.Source; var depth: Int; var revision: Int }
+    /// What the Extensions row's count and the slots are read again for; the current assistant too, as a switch from
+    /// Settings' own heading leaves the path as it is.
+    nonisolated private struct SlotsKey: Hashable, Sendable {
+        var source: ExtensionSlots.Source
+        var depth: Int
+        var revision: Int
+        var manager: String?
+    }
 
     /// Translation's row value: off, or the target language.
     private var translationSummary: String { translating ? TranslationPrefs.name(of: translateTarget) : String(localized: "state.off", defaultValue: "Off") }
@@ -160,11 +167,14 @@ struct SettingsView: View {
                     .accessibilityIdentifier("settings-machines")
             }
             .bareListRow()
-        } header: { SettingsAssistantHeading() }
+        } header: { SettingsAssistantHeading() } footer: {
+            SettingsAssistantFooter()
+        }
         .task(id: model.hubFeatures.contains(AssistantReadiness.feature)) {
             if !model.isDemo { await model.refreshReadiness(force: false) }
         }
-        .task(id: SlotsKey(source: ExtensionSlots.source(model), depth: model.settingsPath.count, revision: model.managersRevision)) {
+        .task(id: SlotsKey(source: ExtensionSlots.source(model), depth: model.settingsPath.count, revision: model.managersRevision,
+                           manager: model.assistantManagerID)) {
             guard let api = model.api else { return }
             let context = api.currentAssistantSettings()
             let loaded = try? await context.plugins()
@@ -199,8 +209,6 @@ struct SettingsView: View {
         } header: {
             SettingsHeading(String(localized: "This Device [Settings Scope]"))
                 .accessibilityIdentifier("settings-group-device")
-        } footer: {
-            Text("These settings stay the same when you switch assistants.")
         }
     }
 
@@ -230,7 +238,7 @@ struct SettingsView: View {
             SettingsHeading(String(localized: "Hub"))
                 .accessibilityIdentifier("settings-group-hub")
         } footer: {
-            Text("These settings stay the same when you switch assistants.")
+            Text(SettingsAssistantHeading.commonGroupsFooter)
         }
     }
 
@@ -336,7 +344,7 @@ struct SettingsView: View {
         else if d.bool(forKey: "openCodexSettings") { p.append(SettingsPage.codex) }
         else if d.bool(forKey: "openClaudeSettings") { p.append(SettingsPage.claude) } // with its Blocked Config Folders
         else if d.bool(forKey: "openConnectorMail") || d.bool(forKey: "addMail") { p.append(SettingsPage.mail) }
-        else if d.bool(forKey: "openConnectorFeishu") { p.append(SettingsPage.feishu) }
+        else if d.bool(forKey: "openConnectorFeishu") { p.append(SettingsPage.feishu()) }
         else if d.bool(forKey: "openConnectorGitHub") { p.append(SettingsPage.connector("github")) }
         else if d.bool(forKey: "openConnectorTelegram") { p.append(SettingsPage.connector("telegram")) }
         else if let id = d.string(forKey: "openConnectorPlugin") { p.append(SettingsPage.connector(id)) } // a plugin's connector by its id
@@ -389,7 +397,10 @@ enum SettingsPage: Hashable {
     /// Settings › Meetings (#2981): Persona's default role in a recorded meeting.
     case meetings
     #endif
-    case persona, themeColor, style, colorScheme, language, assistant, claude, codex, devices, phoneData, mail, feishu, feishuBot, notifications, storage, translation, modelConfiguration
+    case persona, themeColor, style, colorScheme, language, assistant, claude, codex, devices, phoneData, mail, feishuBot, notifications, storage, translation, modelConfiguration
+    /// Settings › Connectors › the chat connector; `manager`: whose (Messages' Settings names the default's, whose
+    /// account its chats follow; nil: the current assistant's).
+    case feishu(manager: String? = nil)
     case models, agents, appearance, about, pairing, computers
     /// Settings › Session Triage (docs/assistant/agent-work.md「开关」).
     case triage
@@ -411,8 +422,9 @@ enum SettingsPage: Hashable {
     /// otherwise; `manager`: the plugin's (nil: the default's).
     case pluginPage(plugin: String, ui: String, title: String, manager: String? = nil)
     /// The source subscription pages (#2041, docs/extensions/subscriptions.md "Pages"), drawn by the manager; `state` opens them on
-    /// one extension's or one connector's (`SubscriptionsUI.state`), nil on every subscription.
-    case subscriptions(state: String? = nil)
+    /// one extension's or one connector's (`SubscriptionsUI.state`), nil on every subscription. `manager`: whose (a page's
+    /// of its own manager's things; nil: the current assistant's).
+    case subscriptions(state: String? = nil, manager: String? = nil)
     /// Settings › Inbox Sources (#5278): the same pages unnarrowed, every source of the Inbox, once the manager reports
     /// `inbox_sources`.
     case inboxSources
@@ -465,7 +477,7 @@ private struct SettingsDestinations: ViewModifier {
     }
 
     @ViewBuilder private func destination(_ page: SettingsPage) -> some View {
-        if page.belongsToCurrentAssistant, let manager = model.assistantManagerOffline {
+        if page.belongsToCurrentAssistant(in: model), let manager = model.assistantManagerOffline {
             SettingsForm {
                 Section { ManagerOfflineNote(manager: manager) }
             }
@@ -506,7 +518,7 @@ private struct SettingsDestinations: ViewModifier {
         case .devices: DevicesView()
         case .phoneData: PhoneDataView()
         case .mail: MailAccountsView(inSheet: false)
-        case .feishu: FeishuConnectorView()
+        case .feishu(let manager): FeishuConnectorView(manager: manager)
         case .connector(let id, let manager):
             if id == "imessage" { MessagesConnectorView(manager: manager ?? model.assistantManagerID) } else { HubConnectorView(id: id, manager: manager) }
         case .feishuBot: FeishuBotView()
@@ -534,8 +546,9 @@ private struct SettingsDestinations: ViewModifier {
         case .plugins: ExtensionsView()
         case .plugin(let id, let manager): ExtensionDetailView(id: id, manager: manager)
         case .pluginPage(let plugin, let ui, let title, let manager): ExtensionPageView(plugin: plugin, ui: ui, title: title, manager: manager ?? model.assistantManagerID)
-        case .subscriptions(let state):
-            ExtensionPageView(plugin: SubscriptionsUI.id, ui: SubscriptionsUI.page, title: String(localized: "Subscriptions [Source Subscriptions]"), state: state, manager: model.assistantManagerID)
+        case .subscriptions(let state, let manager):
+            ExtensionPageView(plugin: SubscriptionsUI.id, ui: SubscriptionsUI.page, title: String(localized: "Subscriptions [Source Subscriptions]"), state: state,
+                              manager: manager ?? model.assistantManagerID)
         case .inboxSources:
             ExtensionPageView(plugin: SubscriptionsUI.id, ui: SubscriptionsUI.page, title: String(localized: "Inbox Sources"), manager: model.assistantManagerID)
         case .pluginMarket: ExtensionMarketView()

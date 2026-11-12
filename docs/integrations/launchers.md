@@ -222,6 +222,7 @@ A key bought for one computer (an isolated container the assistant runs on) shou
 Reading only the text of a ~/.zshrc function cannot reveal what helpers such as `_claude_proxy URL TOKEN MODEL WINDOW` or local variables ultimately set. node therefore actually runs the launcher in a
 subshell, replacing `claude` / `codex` / the internal Codex-fork CLI / `dsh` / `command` / `env` with stubs that print only the environment and arguments the Agent would receive. Comparing these with the shell's own
 environment counts only changes made by the launcher (a launcher running `dsh` is recognized as DSH; DSH is not actually started, and it is no longer launched as Claude).
+`command env … claude` is read like `env … claude`: the `command` stub hands `env` to the `env` stub. It used to pass it to the real `/usr/bin/env`, which started the real claude and left the launcher unseen (#5972).
 If Claude arguments include `--settings` (`alias work="claude --settings ~/.claude/settings.work.json"`, last one wins, file or inline JSON),
 that settings file's `env` overrides the detected environment (settings take priority, as in Claude Code). Gateway and key often live there; without reading it, the page misses the gateway and “Quota” assumes there is none (#1378).
 If unreadable, behavior stays as before.

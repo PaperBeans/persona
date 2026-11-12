@@ -68,6 +68,12 @@ describe("exact worktree action admission", () => {
     target.host = "future"; catalog.workspaces[0].source = "future"; machines[0].engine_hosts = ["future"];
     expect(resolve()).toMatchObject({ writable: true, canRename: false, canCreate: false, canDelete: false });
   });
+  it("closes herdr workspaces and deletes only a verified linked checkout", () => {
+    target.host = "herdr"; catalog.workspaces[0].source = "herdr";
+    expect(resolve()).toMatchObject({ canClose: true, canDelete: false });
+    expect(resolveWorktreeAction(target, { catalog, machines, writable: true, linkedWorktree: true }).canDelete).toBe(true);
+    expect(resolve(false).canClose).toBe(false);
+  });
 });
 
 it("opens the first direct Agent, including pins, without using descendants or another owner/machine/host", () => {

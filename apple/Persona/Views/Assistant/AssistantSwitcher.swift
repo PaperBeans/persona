@@ -1,14 +1,15 @@
 import SwiftUI
 
-// The assistant switcher (docs/assistant/managers.md "Clients"): the sidebar's header names the current assistant (the
-// interface's word for a manager) with whether it is online and where it runs, and opens the hub's assistants as a
-// list: one row each with its state, the current one checked, the default marked, one still installing with its code's
-// time left, and beside every other one than the current how much waits for the user there (`AssistantBadges`: its
-// agents waiting and its inbox's Needs You), then New Assistant and Manage Assistants… (Settings › Assistants). The
-// header's face carries a mark while another assistant has something waiting. Picking one makes it the current
-// assistant on this device (`AppModel.selectAssistantManager`, kept for each hub across launches); picking one still
-// installing shows how to install it. It shows from two installed assistants on (`ManagerRoster.isMulti`):
-// with one, or on a hub without a roster, the sidebar keeps the persona's name and avatar.
+// The assistant switcher (docs/assistant/managers.md "Clients"): whenever the hub supplies a roster with an installed
+// current assistant, including a single assistant, the sidebar's header names it (the interface's word for a manager)
+// with whether it is online and where it runs, and opens the hub's assistants as a list: one row each with its state, the
+// current one checked, the default marked only when there are several installed assistants, one still installing with its
+// code's time left, and beside every other one than the current how much waits for the user there (`AssistantBadges`: its
+// agents waiting and its inbox's Needs You), then New Assistant and Manage Assistants… (Settings › Assistants). A
+// single-assistant roster therefore has one row without Default, followed by those two actions. The header's face carries
+// a mark while another assistant has something waiting. Picking one makes it the current assistant on this device
+// (`AppModel.selectAssistantManager`, kept for each hub across launches); picking one still installing shows how to
+// install it. Without a roster, or without an installed current assistant, the sidebar keeps the old Persona header.
 
 /// What the switcher says and how it marks an assistant, kept apart from the views to test.
 enum AssistantSwitcherText {
@@ -50,6 +51,11 @@ enum AssistantSwitcherText {
         var parts = [m.name, line(m, now: now)]
         if othersWaiting { parts.append(String(localized: "Another assistant has something waiting for you")) }
         return parts.joined(separator: ", ")
+    }
+
+    /// Settings' full scope title and the current assistant's line; its header draws no other-assistant waiting dot.
+    static func spokenSettingsHeader(title: String, manager m: HubManager, now: Date) -> String {
+        [title, line(m, now: now)].joined(separator: ", ")
     }
 }
 
@@ -117,15 +123,22 @@ struct AssistantWaitingDot: View {
     }
 }
 
-/// The sidebar's header: the Persona face (the one picked in Appearance), the current assistant's name with an arrow,
-/// and its state. A tap opens the list. `compact`: one line without the face, for a title bar's row (the Mac).
+/// The sidebar's header by default: the Persona face (the one picked in Appearance), the current assistant's name with
+/// an arrow, and its state. Settings uses `identityStyle` for its named scope heading with the same popover. A tap
+/// opens the list. `compact`: one line without the face, for a title bar's row (the Mac).
 struct AssistantSwitcherHeader: View {
+    enum IdentityStyle {
+        case sidebar
+        case settings(title: String, defaultID: String)
+    }
+
     @Environment(AppModel.self) private var model
     @Environment(\.dynamicTypeSize) private var typeSize
     var manager: HubManager
     var nameFont: Font
     var compact = false
     var showsSwitchLabel = false
+    var identityStyle: IdentityStyle = .sidebar
     /// Opens Settings on the page `AppModel.settingsPath` names.
     var openSettings: () -> Void
 
@@ -149,21 +162,27 @@ struct AssistantSwitcherHeader: View {
         let showsFace = !compact && !typeSize.isAccessibilitySize
         Button { listShown.toggle() } label: {
             HStack(spacing: Theme.Space.m) {
-                if showsFace {
-                    PersonaAvatar(size: Theme.Size.avatar)
-                        .overlay(alignment: .bottomTrailing) { AssistantStateDot(tone: ManagersText.status(manager, now: .now).tone) }
-                        .overlay(alignment: .topTrailing) { if othersWaiting { AssistantWaitingDot() } }
-                }
-                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                    HStack(spacing: Theme.Space.xs) {
-                        Text(manager.name).font(nameFont).foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.7)
-                        ThemedIcon(Theme.Icon.expand).font(Theme.Font.labelStrong).foregroundStyle(.secondary)
-                        if othersWaiting && !showsFace { AssistantWaitingDot() }
+                switch identityStyle {
+                case .sidebar:
+                    if showsFace {
+                        PersonaAvatar(size: Theme.Size.avatar)
+                            .overlay(alignment: .bottomTrailing) { AssistantStateDot(tone: ManagersText.status(manager, now: .now).tone) }
+                            .overlay(alignment: .topTrailing) { if othersWaiting { AssistantWaitingDot() } }
                     }
-                    if !compact {
-                        Text(AssistantSwitcherText.line(manager, now: .now)).font(Theme.Font.label).foregroundStyle(.secondary)
-                            .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                    VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                        HStack(spacing: Theme.Space.xs) {
+                            Text(manager.name).font(nameFont).foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.7)
+                            ThemedIcon(Theme.Icon.expand).font(Theme.Font.labelStrong).foregroundStyle(.secondary)
+                            if othersWaiting && !showsFace { AssistantWaitingDot() }
+                        }
+                        if !compact {
+                            Text(AssistantSwitcherText.line(manager, now: .now)).font(Theme.Font.label).foregroundStyle(.secondary)
+                                .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                        }
                     }
+                case let .settings(title, defaultID):
+                    AssistantMonogram(manager: manager, defaultID: defaultID, now: .now, surface: Theme.pageBackground)
+                    Text(title).font(nameFont).foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.7)
                 }
                 if showsSwitchLabel {
                     Spacer(minLength: Theme.Space.s)
@@ -175,10 +194,10 @@ struct AssistantSwitcherHeader: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(AssistantSwitcherText.spokenHeader(manager, now: .now, othersWaiting: othersWaiting))
+        .accessibilityLabel(spokenHeader(othersWaiting: othersWaiting))
         .accessibilityHint("Switches assistants")
         .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("assistant-switcher")
+        .accessibilityIdentifier(switchIdentifier)
         .popover(isPresented: $listShown, arrowEdge: .top) {
             AssistantSwitcherList(pick: pick, create: { afterList(.create) }, manage: { afterList(.manage) })
                 .presentationCompactAdaptation(.popover)
@@ -204,6 +223,22 @@ struct AssistantSwitcherHeader: View {
             listShown = true
         }
         #endif
+    }
+
+    private func spokenHeader(othersWaiting: Bool) -> String {
+        switch identityStyle {
+        case .sidebar:
+            return AssistantSwitcherText.spokenHeader(manager, now: .now, othersWaiting: othersWaiting)
+        case let .settings(title, _):
+            return AssistantSwitcherText.spokenSettingsHeader(title: title, manager: manager, now: .now)
+        }
+    }
+
+    private var switchIdentifier: String {
+        switch identityStyle {
+        case .sidebar: return "assistant-switcher"
+        case .settings: return "settings-assistant-switch"
+        }
     }
 
     /// The name's color: the Mac's title rows have their own label color.

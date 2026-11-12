@@ -88,6 +88,7 @@ fun Session.askingLine(card: Interaction?): CoreText? =
  * its work stands once the hub triaged its turn (docs/assistant/agent-work.md), else its last words.
  */
 fun Session.rowLine(card: Interaction?, now: Instant, muted: Boolean = false): CoreText? = askingLine(card)
+    ?: CoreText.of(Key.CodexWaiting).takeIf { awaitingFirstMessage && agentState == AgentState.Idle }
     ?: reasonPreview?.let(CoreText::plain)
     ?: replyLine?.takeIf { awaitsReply && agentState == AgentState.Idle && !muted }?.let(CoreText::plain)
     ?: workLine(now) ?: lastText?.takeIf(String::isNotBlank)?.let(CoreText::plain)

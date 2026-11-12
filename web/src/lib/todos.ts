@@ -2,6 +2,7 @@ import { formatDate, t } from "../i18n";
 import { currentHeaders, noteItemManager } from "./manager-choice";
 import { acceptanceStands, reviewState, type Supervision } from "./supervision";
 import type { LineageStep, TaskBrief } from "./brief";
+import type { RuleSuggestion } from "./rule-suggestion";
 import { api, ApiError, enc } from "./api";
 import { contextBody } from "./context-body";
 import { parseAPIError, retryable } from "./api-errors";
@@ -143,6 +144,12 @@ export interface TodoAsk {
   /** The fixed answer already given while the decision still waits (`explain_first`: Persona is to ask again with the
    *  background; the options stay answerable meanwhile). */
   response?: string;
+  /** `true` while a decision that can wait is held for the next briefing: nothing was pushed for it (#4930, #5803;
+   *  views/assistant/BriefingMark). Absent otherwise, and from an older hub. */
+  for_briefing?: boolean;
+  /** The rule the hub suggests once the owner gave this go-ahead for this directory three times (#4929,
+   *  lib/rule-suggestion.ts). Absent otherwise. */
+  suggestion?: RuleSuggestion;
 }
 
 /** One option of a decision: its label, which is the answer, and what choosing it leads to. */

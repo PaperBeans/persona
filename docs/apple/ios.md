@@ -52,7 +52,7 @@ Chat page:
   (`WorkCardSlice`: top corners on first step, bottom corners on Collapse N steps, backgrounds extending halfway into spacing to join neighbors), thin separators starting at the text column; tool rows 44pt high.
   **Liquid Glass (default) has no card** (requested 2026-10-31: cards did not match chat home, `StyleSpec.workList = .timeline`): steps sit directly on the page, with a thin left vertical line from first step
   through Collapse N steps, circular tool icons on it (page background behind icons masks the line), medium-weight tool verbs; intermediate Agent remarks use smaller gray text (`AssistantText(quiet:)`),
-  reading as process rather than reply; thinking, folded steps, to-dos, tool details and Collapse start at the text column right of the line. Other styles keep cards (`.card`).
+  reading as process rather than reply; thinking, folded steps, to-dos, tool details and Collapse start at the text column right of the line. The icon column's leading edge is flush with the assistant reply bubble (`WorkCardSlice.iconLeading` = `Theme.Space.flush` inside the list margin; a card keeps `Theme.Space.m`), and the rail runs through the icon centres, including at larger text sizes (`Theme.sizeScale`). Other styles keep cards (`.card`).
   Background slices extend halfway into spacing (`WorkCardSlice.bridge = Theme.Space.l / 2`): the old hard-coded 7 for 14pt spacing left 2pt white seams after spacing changed to 16.
 - One `DiffView` (Claude Edit / MultiEdit / Write supplies old/new text; Codex unified diff), sharing Git row models (`DiffText.Line` / `parse`):
   header filename, directory, +N −N (opens file); only ± and row backgrounds are colored, code uses body color; long lines scroll horizontally with right fade; beyond 40 lines show beginning + Expand all.
@@ -1353,6 +1353,7 @@ Windows shows the PowerShell line → countdown (the `ConnectDeviceText` algorit
 "A computer wants to join: <name> (macOS). Is it yours?", "It's my computer" / "No". Errors use Chinese text by `code` (`AddComputerText.failure`); `tls_required` uses the hub's message, and unknown codes show the hub's `error`.
 
 - Entry points: the Machines page's empty state and toolbar "+", the Agents empty state with no computers, Mac's File › Add Computer…; only shown when the hub has `machines_add` (otherwise the Machines page keeps its original text).
+- The current assistant (`docs/assistant/managers.md` "The current assistant"): a new computer's `add.manager` is the roster's real id of the hub-level group's current assistant (the default's too, one assistant too). Before a roster is known (none kept from the last launch, and the hub has not answered in this run) with no kept pick, Next waits up to 5 seconds for the hub's answer (`AddAssistant.unknown`, settled by `AppModel.managerRosterUnsupported`, the hub's 404); a hub that says it has no roster (404) is settled at once and gets the request as before `add.manager`, as does one that never answers. A read that failed leaves the roster last read, or the kept pick; a new code for a computer names none. When the assistant the computer is under (the reply's `manager`; if missing, the hub's own assistant for a new computer and the listed one for a reused one) is not the one asked for, the waiting screen says "This computer was added under <name>." (several assistants only). With the current assistant offline (several assistants, roster known) the form is replaced by an explanation and Next is off. `no_manager`, `installing`, `assistant_offline` and `owners_unknown` show the hub's own words (`AddComputerText.failure`). The 3-computer limit is shown as the hub's `too_many_pending` words, with no list of the computers in the way (the hub counts every assistant's).
 - Other pages can open it with `AppModel.openAddComputer()` (readiness `add_computer`), `AppModel.openConfirmComputer(ref)` (`confirm_computer`; without a machine, use `pendingToConfirm()`: online pending computers first),
   both setting `AppModel.addComputer`, presented by `.addComputerPresentation()` at the root; pages that are themselves sheets use `.addComputerSheet($request)` on themselves.
 - Lists and the Machines page: `trust == "pending"` comes first, labeled "Waiting for your confirmation"; online offers "It's my computer" / "No", offline offers "Delete" (buttons only with hub feature `machine_trust`); `error_code` gets Chinese text
@@ -2069,9 +2070,10 @@ installing opens its install code: the one this header made while it lasts, else
 keeps no code to show again). What the list presents (the name alert, the code sheet, Settings) waits until the popover is
 gone (its `onDisappear`), not for a fixed delay: UIKit refuses a presentation while the popover is still leaving. At the
 accessibility text sizes the header leaves out the face so the name fits, and the list gives way to the screen's width. The
-header and its list show from two installed assistants on (an offline one counts, one still installing doesn't); with one, or on
-a hub without a roster, the sidebar keeps the look without assistant identity (#3975, `AppModel.showsAssistantIdentity`), as the
-web app and Android do.
+header and its list appear once a roster is known (read in this run, or kept from the last launch) and the current assistant
+can be shown, including with one installed assistant (an offline one counts, one still installing doesn't). A one-assistant
+roster has no Default chip, and **New Assistant** and **Manage Assistants…** stay below it. On a hub without a roster,
+`AppModel.showsAssistantSwitcher` is false and the sidebar keeps the persona's name as its title.
 
 The pick is the manager's id per group (`AppModel.assistantPicks`), kept on this device across launches (`AssistantPickStore`,
 the app's defaults); no pick follows the hub's default. A pick whose manager leaves the roster goes back to the default, and one
@@ -2171,10 +2173,14 @@ The shared iPhone, iPad and Mac settings page has three groups:
 | This Device | Appearance & Display, Language & Dictation, Notifications, Translation, Storage, Health, This iPhone, About |
 | Hub | Hub Connection, Hub Version, Assistants, Avatar, Devices & Pairing |
 
-With several installed assistants, the first heading shows the current assistant's avatar, name and existing switcher,
-with scope guidance. With one, it keeps the chosen Persona face and name without a switcher. The health space remains
-bound to the default assistant. The avatar is shared across devices; theme color, interface style, text size, list layout
-and light/dark appearance remain device preferences. The layout page is titled **Agents List Layout**.
+Whenever the hub answers a roster, with one or many installed assistants, the first heading is **<name>'s Settings**,
+with the current assistant's first-letter avatar and state dot plus **Switch**. Switch opens the same assistant
+popover/list as the sidebar. The first group's footer is **Only <name>'s own settings are shown. To change another
+assistant's, switch to it first.** A legacy hub without a roster keeps the neutral **Current Assistant's Settings**
+heading, without Switch or that first-group footer. The second group has no footer; the third group's footer is
+**These two groups are the same whichever assistant is current.** It covers both This Device and Hub. The health space
+remains bound to the default assistant. The avatar is shared across devices; theme color, interface style, text size,
+list layout and light/dark appearance remain device preferences. The layout page is titled **Agents List Layout**.
 
 Models replaces the two separate model-provider and model-configuration entries. Common purpose/model choices come first;
 providers and keys sit under Advanced, and a purpose's runtime/provider choices are folded in its editor. Agent collects
@@ -2182,6 +2188,21 @@ Claude Code, Codex and Session Triage. Applying runtime settings to all online c
 computers in the current Hub. Connectors, extensions, markets, channels and knowledge selection use a captured assistant
 request context; switching assistants returns Settings to the list, and a late response cannot replace the new scope.
 An explicitly manager-bound detail link still opens that assistant's copy without changing the app's pick.
+
+The rest of the first group follows the same rule. Skills, Auto-Start Tasks (`TaskTrustModel`), Outlook sign-in on Add Mail
+Account, an extension form's launcher picker, each page's Subscriptions entry (`SettingsPage.subscriptions(state:manager:)`)
+and the extension operations a page reads (`ExtensionOperations.reload(manager:)`, which replaces that assistant's alone) go to
+the assistant the page opened for. An assistant without the chat connector (its manager answers 404) shows it Not set up, with
+no Message Tweaks. Links from a page of the default assistant's things name it by its id while another one is current
+(`AppModel.settingsRoute`): an extension page's settings link opens its own page's copy (`ExtensionViewModel.Outcome.settingsOwner`),
+Messages' Settings the default's chat connector page (`SettingsPage.feishu(manager:)`, which says whose it is), and the voice
+entry the default's voice extension. What runs on the default assistant whichever is current keeps the default's model
+settings (`ModelSettingsOwner`): Translation's model (with a line saying so while another assistant is current), a voice
+call's model, the inbox triage banner's Set Up, and the /agent model on the default's chat connector page. The badges on the
+ways to Settings count the default's extension entries only while it is current, since Settings shows the current
+assistant's under Extensions. While another assistant is current, that route may keep the default assistant's explicit id
+on the page's requests. Extension operation and auth storage canonicalize the id to the default/nil key, so a push with
+no manager still updates the explicitly routed page; another assistant's id remains a separate key.
 
 About shows the app version and a folded Diagnostics section containing the build commit and last new-chat check.
 Devices & Pairing retains the device list, pairing again, Watch sync and confirmed disconnect. Mobile permissions,
@@ -2193,7 +2214,9 @@ ModelLaunchersRoute and existing DEBUG page-opening arguments continue to work. 
 `-openAppearance` argument accepts `search:<query>`; no new DEBUG switch is introduced.
 
 Regression coverage: `SettingsNavigationTests`, `AssistantSettingsScopeTests`, `SettingsResourceScopeTests`,
-`ManagerSwitchTests`, and `SettingsNavigationUITests` / `ModelsSettingsHierarchyTests`. A remembered assistant pick
+`ManagerSwitchTests`, `SettingsFollowAssistantTests`, `SettingsHomeTests`, `SettingsOwnerLinksTests`, `ModelSettingsOwnerTests`,
+`SettingsSubscriptionsOwnerTests`, `SettingsBadgeTests`, `ExtensionOperationsTests`, and `SettingsNavigationUITests` /
+`ModelsSettingsHierarchyTests`. A remembered assistant pick
 routes settings before the roster arrives; only a confirmed legacy-roster 404 suppresses it, without erasing the pick.
 These tests do not claim that an installed TestFlight app was updated.
 

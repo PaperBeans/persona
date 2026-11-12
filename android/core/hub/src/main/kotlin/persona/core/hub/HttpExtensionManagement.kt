@@ -95,7 +95,7 @@ class HttpExtensionManagement internal constructor(
     override fun adminNetworkUrl(id: String): String? = iconBase()?.toHttpUrlOrNull()?.newBuilder()
         ?.addPathSegments("admin/extensions")
         ?.query(null)
-        ?.addEncodedQueryParameter("extension", java.net.URLEncoder.encode(id, Charsets.UTF_8).replace("+", "%20"))
+        ?.addEncodedQueryParameter("extension", java.net.URLEncoder.encode(id, "UTF-8").replace("+", "%20"))
         ?.fragment("network")
         ?.build()?.toString()
 

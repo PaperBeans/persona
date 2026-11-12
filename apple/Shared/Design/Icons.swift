@@ -52,6 +52,8 @@ extension Theme {
         /// Some of a group picked (the inbox's Select, #2059).
         static let partlyChecked = "minus.circle.fill"
         static let uncheckedBox = "square"
+        /// A box ticked: a file marked viewed in a code review (`TickBoxToggleStyle`), a done to-do in a document.
+        static let checkedBox = "checkmark.square.fill"
         static let todo = "checklist"
         /// Recent, or waiting to come back (reconnecting, last used).
         static let recent = "clock.arrow.circlepath"
@@ -323,6 +325,8 @@ extension Theme {
         static let forward = "chevron.forward"
         static let expand = "chevron.down"
         static let collapse = "chevron.up"
+        /// All of the lines hidden between a diff's hunks shown at once (UI version 5's `context`, #827): arrows out of a line.
+        static let unfoldLines = "arrow.up.and.line.horizontal.and.arrow.down"
         /// Holding the mic: slide this way to drop what was heard, or up to keep dictating hands-free (`DictationHold`).
         static let slideToCancel = back
         static let slideToLock = collapse

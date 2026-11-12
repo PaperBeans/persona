@@ -115,6 +115,11 @@ extension AppModel {
         return roster.installed.first { $0.id == id }
     }
 
+    /// Whether the shared sidebar header shows the assistant switcher. This display gate includes a single installed
+    /// assistant; no roster or no installed current assistant keeps the old Persona header. Behavior gates (filtering,
+    /// badges, extra requests, and manager request parameters) remain controlled by `ManagerRoster.isMulti`.
+    var showsAssistantSwitcher: Bool { managerRoster != nil && currentAssistant != nil }
+
     /// `assistantManagerID` for group's Persona page.
     func assistantPick(in group: String) -> String? {
         guard let pick = assistantPicks[group], !managerRosterUnsupported.contains(group) else { return nil }
@@ -299,6 +304,12 @@ extension ManagerRoster {
     static func pushed(by manager: String?, defaultID: String?) -> String? {
         let id = manager ?? assistant
         return id == (defaultID ?? assistant) ? nil : id
+    }
+
+    /// The manager for a storage key. Unlike a raw push, storage's nil already means the default assistant, not the
+    /// hub's own assistant, so name that default before applying the push rule.
+    static func stored(_ manager: String?, defaultID: String?) -> String? {
+        pushed(by: manager ?? defaultID, defaultID: defaultID)
     }
 
     /// The installed manager a thing stamped `manager` belongs to, when it is offline on a hub with several managers;

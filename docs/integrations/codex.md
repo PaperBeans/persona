@@ -36,7 +36,7 @@ Continuation filenames may append `_<segment UUID>` after the thread UUID. The a
 | Rollout | In the chat |
 | --- | --- |
 | `event_msg/item_completed` UserMessage | User message |
-| AgentMessage `phase=commentary` | Thinking (narration between tools, folded into work rows) |
+| AgentMessage `phase=commentary` | Assistant text (narration between tools) |
 | AgentMessage `phase=final_answer` | Reply |
 | Reasoning (with `summary_text`) | Thinking |
 | CommandExecution | `Bash` (strip the `/bin/zsh -lc` wrapper), result is `aggregated_output`, nonzero exit code marks failure |
@@ -46,6 +46,8 @@ Continuation filenames may append `_<segment UUID>` after the thread UUID. The a
 | ContextCompaction | "Context compacted" notice |
 | `event_msg/turn_aborted` | "Interrupted" notice |
 | `turn_context` / `token_count` | Model, approval policy, context tokens |
+
+Commentary is ordinary assistant text on the wire, so it can answer a mid-turn question in the latest-text slot. Latest-page folding keeps the newest commentary visible until a final answer follows it; earlier commentary and commentary on historical pages fold into completed work through an internal-only narration marker. It is not counted as thinking or exposed as another item kind. The iOS `ChatCache` version changes with this kind mapping so cached thinking items cannot hide the answers.
 
 Codex's own XML in UserMessage (all rollouts on the local and hub machines scanned 2026-10-26):
 `<send_user_message_question_reply>` (answers to Codex `request_user_input`, containing JSON) displays the answer itself, one "question: answer" line per question;
@@ -273,7 +275,7 @@ and answers with a **waiting row** for the pane (`node/codex_waiting.go`).
 - **Clients**: launchers of nodes that start Codex this way carry `prompt_optional: true`. The manager marks its own managed Codex launchers so when the node's Codex launchers are marked.
   - New Agent offers the first message as optional for those launchers only. The web's work picker reads `prompt_required: false` from the start options.
   - The row says "Waiting for its first message" (it is not Needs you, not unread, and sends no push). Its chat says Codex is open on the computer and takes the first message.
-  - Web and iOS follow the answer's `session` to the thread, and follow the pane when the message was typed in the terminal (`web/src/lib/codex-waiting.ts`, iOS `ChatView.codexThread`). Android: not yet.
+  - Web, iOS and Android follow the first message answer's `session` from a waiting row to the thread, and follow the same computer's pane in the already-loaded session list when the message was typed in the terminal (`web/src/lib/codex-waiting.ts`, iOS `ChatView.codexThread`, Android `codexThreadOf` in `CodexWaiting.kt`). Android replaces the open route; it does not fetch extra pages when a filter excludes the thread.
 - **Verified**: Codex 0.153.4 and herdr 0.9.3 on a Mac (2026-11-12), two Codex in one directory:
   - the App's first message (quotes, `$HOME`, backticks, newline, Chinese, 2,098 characters) reached the rollout unchanged, attached in 1.9 seconds;
   - the other row's message, typed in its terminal, attached to its own thread;

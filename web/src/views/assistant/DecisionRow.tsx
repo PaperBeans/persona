@@ -15,6 +15,7 @@ import { askOptions, type AskOption, type AskResponse, type Todo, type TodoAsk }
 import { Button, IconButton, Menu, toast, useMenu } from "../../ui/atoms";
 import type { MenuItem } from "../../ui/menu-model";
 import { RecommendedTag } from "../../ui/RecommendedTag";
+import { BriefingMark } from "./BriefingMark";
 
 /** Where answering the round stands: not yet, being sent, or answered (with what the row then says). */
 type Answering = { state: "idle" } | { state: "busy"; key: string } | { state: "done"; text: string };
@@ -170,6 +171,8 @@ export function DecisionRow({ todo, ask, rowKey, admission, onBusyChange, blocke
           {ask.cost_of_waiting && <span data-decision-cost>{t("assistant-decisionrow.cost", { cost: ask.cost_of_waiting })}</span>}
         </p>
       )}
+      {/* held for the briefing (#5803): nothing was pushed for it, which is why it did not ring */}
+      {ask.for_briefing && answering.state !== "done" && <BriefingMark />}
       {ask.response && answering.state !== "done" && (
         <p data-decision-response={ask.response} className="truncate text-[12px] text-ink-2">
           {t("assistant-decisionrow.responded")}

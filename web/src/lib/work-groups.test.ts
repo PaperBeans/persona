@@ -138,6 +138,19 @@ describe("a finished exchange", () => {
   });
 });
 
+describe("Codex commentary as assistant text (#5853)", () => {
+  it("answers a mid-turn question in the text slot, then stays readable as folded narration", () => {
+    const items = [user("u1", 0, "What is the current status?"), ...tool("check", "Bash", 1000), say("status", "The focused tests pass; the full run is next.", 2000), ...tool("verify", "Bash", 3000)];
+    const running = blocks(items, true);
+    expect(topSteps(running)).toEqual(["status"]);
+    expect(folded(running, "status")).toBe(false);
+
+    const done = blocks([...items, say("final", "All checks passed.", 4000)]);
+    expect(topSteps(done)).toEqual(["final"]);
+    expect(groups(done)[0].children.map(shape)).toEqual([["check"], "status", ["verify"]]);
+  });
+});
+
 describe("while the agent works", () => {
   it("the tail run is live; its clock starts at your message", () => {
     const b = blocks([user("u1", 0), think("th1", 5951)], true);

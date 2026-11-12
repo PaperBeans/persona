@@ -249,6 +249,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         if let kind = d.string(forKey: "showTestNotification").flatMap(InteractionKind.init(rawValue:)) {
             let place = d.string(forKey: "showTestNotificationIn")
             Task { await AppDelegate.postTestNotification(kind, in: place) }
+        } else if d.string(forKey: "showTestNotification") == "decide" {
+            Task { await AppDelegate.postDecideTestNotification() }
         } else if let sample = d.string(forKey: "showTestNotification"),
                   ["extension-background", "extension-foreground", "extension-tap"].contains(sample) {
             Task { await AppDelegate.postExtensionTestNotification(sample) }
@@ -410,6 +412,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let ixID = info["interaction_id"] as? String
         let extensionNotice = info["extension_notification"] != nil
         let pair = PairPush(info) // a pairing receipt (#4199); nil from an older hub: a plain notification
+        let decision = NotificationActions.decision(action: action, info: info) // Take Recommendation on a decision's push
         #if os(iOS)
         let pushedRecording = MeetingTalk.recordingID(info) // a meeting's minutes (#3862 phase 6)
         #endif
@@ -443,6 +446,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                 if let key, let reply = NotificationActions.replyText(action: action, text: text) {
                     // Reply on a finished turn: sent in the background, like a button (#3449).
                     AppDelegate.inBackground("reply-from-notification", done: done) { await NotificationActions.sendReply(key, text: reply) }
+                    return
+                }
+                if let decision {
+                    // Take Recommendation on a decision's push (#2056): answered in the background, the app stays where it is.
+                    AppDelegate.inBackground("take-recommendation", done: done) { await NotificationActions.take(decision, group: key?.group ?? ref?.group) }
                     return
                 }
                 if let ixID, let resolution = NotificationActions.resolution(action: action, text: text) {
@@ -517,6 +525,35 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let (machine, session) = place.flatMap { p in p.firstIndex(of: "/").map { (String(p[..<$0]), String(p[p.index(after: $0)...])) } } ?? ("test", "test")
         content.userInfo = ["interaction_id": "ix_test_\(kind.rawValue)", "machine_id": machine, "session_id": session]
         try? await center.add(UNNotificationRequest(identifier: "test-\(kind.rawValue)", content: content,
+                                                     trigger: UNTimeIntervalNotificationTrigger(timeInterval: 3, repeats: false)))
+    }
+    /// `-showTestNotification decide` (#2056): what a decision's push looks like (`decidePayloadIn` in
+    /// server/internal/hub/push_payload.go), for the first to-do the paired hub lists with a recommendation, its round as
+    /// the hub sent it; delivered 3 s after the app goes to the background.
+    static func postDecideTestNotification() async {
+        let center = UNUserNotificationCenter.current()
+        _ = try? await center.requestAuthorization(options: [.alert, .sound])
+        for _ in 0..<60 where await center.notificationSettings().authorizationStatus != .authorized {
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        TasksStore.shared.reloadTodos()
+        var found: (TodoItem, TodoAsk)?
+        for _ in 0..<40 {
+            found = TasksStore.shared.todos.values.sorted { $0.id < $1.id }
+                .compactMap { t in t.openAsk.flatMap { $0.recommend?.isEmpty == false ? (t, $0) : nil } }.first
+            if found != nil { break }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        guard let (todo, ask) = found else { return }
+        for await _ in NotificationCenter.default.notifications(named: UIApplication.didEnterBackgroundNotification) { break }
+        let content = UNMutableNotificationContent()
+        content.title = "等你决定" // i18n-ignore: the hub's push.json decide_title
+        content.body = ask.verdict ?? todo.title
+        content.subtitle = todo.title
+        content.categoryIdentifier = NotificationActions.decideCategory
+        content.userInfo = ["machine_id": "test", "session_id": "test",
+                            "todo": ["id": todo.id, "asked_at": ask.askedAt, "recommend": ask.recommend ?? ""]]
+        try? await center.add(UNNotificationRequest(identifier: "test-decide", content: content,
                                                      trigger: UNTimeIntervalNotificationTrigger(timeInterval: 3, repeats: false)))
     }
     static func postExtensionTestNotification(_ sample: String) async {

@@ -413,10 +413,12 @@ nonisolated extension Item {
         return Int(id[id.index(after: hash)...]) ?? 0
     }
 
-    /// Work a fold may stand for: tool calls, their results and images, thoughts, folds.
+    /// Work a fold may stand for: tool calls, their results and images, thoughts, narration text, folds.
     var isWork: Bool {
         switch kind {
         case .thinking, .toolUse, .toolResult, .fold: true
+        // Only a fold's range distinguishes narration from a final assistant answer.
+        case .text: role == "assistant"
         case .image: toolUseID != nil
         default: false
         }
@@ -1521,10 +1523,11 @@ nonisolated enum ChatCache {
     /// their denied or interrupted calls would stay red.
     /// v17: refusal notices carry `model_refusal` and their text is the refusal's words (#4489); an older hub made it the
     /// record's whole line, which v16's copies would keep showing.
+    /// v18: Codex commentary is assistant text rather than thinking; older cached items would keep hiding mid-turn answers.
     /// Bump it whenever the item structure or the text the hub gives an item changes.
-    static let folder = "chats-v17"
+    static let folder = "chats-v18"
     /// The folder before, removed on the first launch with this one.
-    private static let previous = "chats-v16"
+    private static let previous = "chats-v17"
 
     /// Once per launch, before the first copy is read or written (a static let runs once, on whichever thread asks first).
     private static let dropOlder: Void = {

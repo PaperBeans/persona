@@ -2,10 +2,10 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, ApiError, enc, errorText } from "../../lib/api";
 import { extRoot } from "../../lib/extension-api";
 import {
-  agentsOverride, chooseProvider, draftFor, providerAgent, providerName, modelConfiguration, modelPurpose, modelSummary, providersFor, runtimeChoices, runtimeLabel, saveModelPurpose, supportsField, withPurposeAfter,
+  providerAgent, providerName, modelPurpose, modelSummary, runtimeLabel,
   type ModelBinding, type ModelConfigurationBody, type ModelDraft, type ModelProvider, type ModelPurpose, type ModelPurposeBody,
 } from "../../lib/model-config";
-import { executionForm, purposeDescription, purposeGroups, purposeLaunch } from "../../lib/model-config-execution";
+import { agentsOverride, catalogLists, chooseProvider, draftFor, executionForm, modelConfiguration, providersFor, purposeDescription, purposeGroups, purposeLaunch, runtimeChoices, saveModelPurpose, supportsField, withPurposeAfter } from "../../lib/model-config-execution";
 import { SUPERVISE_PURPOSE } from "../../lib/background-supervisor";
 import { effortChoices, providerModels, takesEffort } from "../../lib/launcher-models";
 import { useStore } from "../../lib/store";
@@ -35,11 +35,13 @@ function ModelConfigurationForManager({ manager, open, onOpen, onProviders }: { 
   const [query, setQuery] = useState("");
   const load = async () => {
     try {
-      // the background supervisor's purpose is read by its own id and listed after Main chat (#5082). Only a hub that
+      // the background supervisor's purpose is listed right after Main chat (#5082). A hub since #5806 has it in the
+      // catalog; one before that answers it by its own id only, so only then is it asked for. There, only a hub that
       // says it has none (404) lists none: any other failure is the page's error, with its retry, not a missing row
       const absent = (e: unknown) => { if (e instanceof ApiError && e.status === 404) return undefined; throw e; };
-      const [catalog, supervise] = await Promise.all([modelConfiguration(manager), modelPurpose(SUPERVISE_PURPOSE, manager).catch(absent)]);
-      setData(withPurposeAfter(catalog, supervise?.purpose, "assistant"));
+      const catalog = await modelConfiguration(manager);
+      const supervise = catalogLists(catalog, SUPERVISE_PURPOSE) ? undefined : await modelPurpose(SUPERVISE_PURPOSE, manager).catch(absent);
+      setData(withPurposeAfter(catalog, SUPERVISE_PURPOSE, "assistant", supervise?.purpose));
       setError("");
     } catch (e) {
       setError(e instanceof ApiError && e.status === 404 ? t("settings-modelconfiguration.unsupported") : errorText(e));
@@ -105,13 +107,14 @@ function PurposeRow({ purpose: p, providers, sourceName, onOpen }: { purpose: Mo
     <div className="flex items-center pr-1">
       <div className="min-w-0 flex-1">
         <Row label={p.id === "agent.new" ? t("newagent.title") : p.name} onClick={onOpen} wrapHint hint={<>
+          {/* what the purpose is for, right under its name (#5806); the model and how it runs follow */}
+          {description && <div data-testid="purpose-description" className="mb-1 whitespace-normal">{description}</div>}
           <div className="truncate">{modelSummary(p, providers)}</div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <Pill wrap>{form.label} · {form.backend}</Pill>
             {inheritance && <span className="whitespace-normal">{inheritance}</span>}
             {p.status && <span>{p.status}</span>}
           </div>
-          {description && <div data-testid="purpose-description" className="mt-1 whitespace-normal">{description}</div>}
         </>} />
       </div>
       <button type="button" className="flex size-11 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-hover focus-visible:outline-accent"

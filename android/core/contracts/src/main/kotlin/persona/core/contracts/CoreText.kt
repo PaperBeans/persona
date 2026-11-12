@@ -96,6 +96,7 @@ data class CoreText(val key: Key, val args: List<Any> = emptyList()) {
         StateWaiting("Waiting"),
         StateMuted("Muted"),
         StateIdle("Seen"),
+        CodexWaiting("Waiting for its first message"),
         StateNotRunning("Not running"),
         StateUnknown("Unknown"),
         AgentsNoTodo("No to-do"),
