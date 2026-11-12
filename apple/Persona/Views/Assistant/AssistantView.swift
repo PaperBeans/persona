@@ -257,7 +257,7 @@ struct AssistantView: View {
         .navigationDestination(isPresented: $showTodos) { TodosView() }
         .navigationDestination(item: $openedExtension) { ExtensionNavPage(route: $0) }
         .navigationDestination(isPresented: $showHealth) {
-            HealthView(disabled: shownStart != nil, launcher: healthLauncherPick) { text, images in
+            HealthView(disabled: shownStart != nil, launcher: healthLauncherPick, mode: $starterMode, effort: $starterEffort) { text, images in
                 Task { await start(text, images, space: Session.healthSpace) }
             }
         }
@@ -934,6 +934,8 @@ struct StarterComposer: View {
         @Binding var launcher: String?
         @Binding var mode: String
         @Binding var effort: String
+        /// Health's new conversation (#3825): with none picked, the launcher is Health's (the default manager's).
+        var health = false
     }
 
     @State private var launchers: [Launcher] = []
@@ -1122,7 +1124,7 @@ struct StarterComposer: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if let shell {
-                ShellComposerBar(placeholder: String(localized: "Ask \(model.persona.name)"), text: textBinding, selection: $selection, focused: $focused,
+                ShellComposerBar(placeholder: placeholder ?? String(localized: "Ask \(model.persona.name)"), text: textBinding, selection: $selection, focused: $focused,
                                  canSend: canSend, hasAttachments: !images.isEmpty || !videos.items.isEmpty || !quotes.isEmpty,
                                  modesTitle: StarterModesMenu.title(modes: shell, launchers: launchers, model: model),
                                  quotes: quotesBinding, history: "assistant.new", gate: gate, openAttach: attachOpener, send: submit) {
@@ -1527,6 +1529,11 @@ private extension AppModel {
         guard let name = defaultAssistant?.launcher, !name.isEmpty else { return nil }
         return name
     }
+
+    /// The launcher a new conversation starts with when none is picked: Health's on its page (#3825), else Persona's.
+    func launcherSetting(_ modes: StarterComposer.ShellModes) -> String? {
+        modes.health ? healthLauncherSetting : starterLauncherSetting
+    }
 }
 
 /// The shell composer's model menu for a conversation not started yet (#1091): the launcher it starts with (that is the
@@ -1541,7 +1548,7 @@ struct StarterModesMenu: View {
     /// menu's Reading / Couldn't Load Settings section is reachable on the iPhone path.
     @MainActor static func title(modes: StarterComposer.ShellModes, launchers: [Launcher], model: AppModel) -> SessionModes.ComposerTitle? {
         let effort = SessionModes.effort(modes.effort)?.title
-        guard let name = modes.launcher ?? model.starterLauncherSetting else {
+        guard let name = modes.launcher ?? model.launcherSetting(modes) else {
             return SessionModes.ComposerTitle(model: model.assistantConfigLoadFailed ? String(localized: "Couldn't Load Settings") : String(localized: "Reading"), effort: effort)
         }
         let launcher = launchers.first { $0.name == name }
@@ -1553,7 +1560,7 @@ struct StarterModesMenu: View {
         if modes.mode == "bypassPermissions" { // said first, as in a running conversation's menu (SessionModesMenu)
             Section { BypassWarning() }
         }
-        if modes.launcher ?? model.starterLauncherSetting == nil {
+        if modes.launcher ?? model.launcherSetting(modes) == nil {
             // Settings are not read yet: the menu says so (and offers a retry) instead of a launcher name (#4200).
             Section("Model [Assistant View c98e11]") {
                 if model.assistantConfigLoadFailed {
@@ -1577,7 +1584,7 @@ struct StarterModesMenu: View {
             }
         } else if !launchers.isEmpty {
             Section("Model [Assistant View c98e11]") { // switches, so the title is drawn (#4322, `MenuChoice`)
-                let current = modes.launcher ?? model.assistantConfig?.launcher ?? ""
+                let current = modes.launcher ?? model.launcherSetting(modes) ?? ""
                 ForEach(launchers) { l in
                     MenuChoice(id: l.name, selected: current, pick: { modes.launcher = $0 }) {
                         Text(SessionModes.modelName(l.model).map { "\(l.name) · \($0)" } ?? l.name)

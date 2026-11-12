@@ -1,6 +1,558 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Always adds this kind of task to Auto-Start Tasks: it starts without asking first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Always adds this kind of task to Auto-Start Tasks: it starts without asking first."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「常に」を選ぶと、この種類のタスクが「自動で開始するタスク」に追加され、確認なしで開始されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点「始终」会把这类任务加进「直接开的任务」：以后不先问就直接开。"
+          }
+        }
+      }
+    },
+    "Always adds a rule to Auto-Start Tasks: tasks that change files in %@ on %@ start without asking first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Always adds a rule to Auto-Start Tasks: tasks that change files in %1$@ on %2$@ start without asking first."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「常に」を選ぶと「自動で開始するタスク」にルールが追加されます：%2$@ の %1$@ でファイルを変更するタスクは、確認なしで開始されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点「始终」会在「直接开的任务」里加一条规则：%2$@ 上 %1$@ 里要改文件的任务，以后不先问就直接开。"
+          }
+        }
+      }
+    },
+    "Always creates a standing authorization to merge in %@ on %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Always creates a standing authorization to merge in %1$@ on %2$@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「常に」を選ぶと、%2$@ の %1$@ でのマージを許可する継続的な承認が作成されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点「始终」会新建一条长期授权：允许在 %2$@ 的 %1$@ 里合并。"
+          }
+        }
+      }
+    },
+    "Always creates a standing authorization to push in %@ on %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Always creates a standing authorization to push in %1$@ on %2$@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「常に」を選ぶと、%2$@ の %1$@ でのプッシュを許可する継続的な承認が作成されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点「始终」会新建一条长期授权：允许在 %2$@ 的 %1$@ 里推送。"
+          }
+        }
+      }
+    },
+    "Always creates a standing authorization to deploy to test in %@ on %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Always creates a standing authorization to deploy to test in %1$@ on %2$@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「常に」を選ぶと、%2$@ の %1$@ でのテスト環境へのデプロイを許可する継続的な承認が作成されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点「始终」会新建一条长期授权：允许在 %2$@ 的 %1$@ 里部署到测试环境。"
+          }
+        }
+      }
+    },
+    "Always creates a standing authorization for “%@” in %@ on %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Always creates a standing authorization for “%1$@” in %2$@ on %3$@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「常に」を選ぶと、%3$@ の %2$@ での「%1$@」を許可する継続的な承認が作成されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点「始终」会新建一条长期授权：允许在 %3$@ 的 %2$@ 里执行「%1$@」。"
+          }
+        }
+      }
+    },
+    "Always stores no rule and turns nothing on. It only puts this suggestion away for 30 days." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Always stores no rule and turns nothing on. It only puts this suggestion away for 30 days."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「常に」を選んでもルールは保存されず、何もオンになりません。この提案が 30 日間表示されなくなるだけです。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点「始终」不会保存任何规则，也不会开启任何设置，只是 30 天内不再提这条建议。"
+          }
+        }
+      }
+    },
+    "Only when: %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only when: %1$@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "条件：%1$@。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "条件：%1$@。"
+          }
+        }
+      }
+    },
+    "checks pass [Rule Suggestion]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "checks pass"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チェックが通っている"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查通过"
+          }
+        }
+      }
+    },
+    "no conflicts [Rule Suggestion]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "no conflicts"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コンフリクトがない"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有冲突"
+          }
+        }
+      }
+    },
+    "Kept as your words: “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kept as your words: “%1$@”."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたの言葉として記録されます：「%1$@」。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会记下你的原话：「%1$@」。"
+          }
+        }
+      }
+    },
+    "Rule added: these tasks start without asking first. It is listed, and removed, in the assistant's profile under Auto-Start Tasks." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rule added: these tasks start without asking first. It is listed, and removed, in the assistant's profile under Auto-Start Tasks."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ルールを追加しました。これらのタスクは確認なしで開始されます。アシスタントのプロフィールの「自動で開始するタスク」で確認・削除できます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "规则已添加：这类任务以后不先问就直接开。可以在助手资料的「直接开的任务」里查看和移除。"
+          }
+        }
+      }
+    },
+    "Standing authorization added. It is listed, and removed, in the web app's settings for Persona, under Standing authorizations." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standing authorization added. It is listed, and removed, in the web app's settings for Persona, under Standing authorizations."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "継続的な承認を追加しました。Web 版の設定の Persona ページにある「継続的な承認」で確認・削除できます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长期授权已添加。可以在网页版「设置」的 Persona 页的「长期授权」里查看和移除。"
+          }
+        }
+      }
+    },
+    "Done. Nothing was stored." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done. Nothing was stored."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了しました。何も保存されていません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好了。没有保存任何规则。"
+          }
+        }
+      }
+    },
+    "Nothing was stored and nothing was turned on. The apps have no switch for this yet: it is turned on in the assistant's configuration file on the hub's computer (%@)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing was stored and nothing was turned on. The apps have no switch for this yet: it is turned on in the assistant's configuration file on the hub's computer (%1$@)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "何も保存されず、何もオンになっていません。このスイッチはまだアプリにありません。ハブのコンピュータにあるアシスタントの設定ファイル（%1$@）でオンにします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有保存任何规则，也没有开启任何设置。App 里暂时还没有这个开关：要在 hub 所在机器上助手的配置文件里开启（%1$@）。"
+          }
+        }
+      }
+    },
+    "The standing authorizations changed meanwhile. Try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The standing authorizations changed meanwhile. Try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "継続的な承認がその間に変更されました。もう一度お試しください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长期授权刚才有变动，请再试一次。"
+          }
+        }
+      }
+    },
+    "Couldn't save your answer: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't save your answer: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回答を保存できませんでした：%1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能保存你的选择：%1$@"
+          }
+        }
+      }
+    },
+    "Not Now [Rule Suggestion]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not Now"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今はしない"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先不用"
+          }
+        }
+      }
+    },
+    "Always [Rule Suggestion]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Always"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "常に"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "始终"
+          }
+        }
+      }
+    },
+    "Comes with your next briefing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Comes with your next briefing"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "次のブリーフィングでお届けします"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "随下一次简报一起给你"
+          }
+        }
+      }
+    },
+    "Recommended setup" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recommended setup"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "おすすめの設定"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建议的设置"
+          }
+        }
+      }
+    },
+    "From Persona's own records of the last 7 days, unless a line names its own period. Nothing was changed: each of these stays as it is until you change it yourself." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "From Persona's own records of the last 7 days, unless a line names its own period. Nothing was changed: each of these stays as it is until you change it yourself."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 自身の過去 7 日間の記録から計算しました（期間を明記している項目を除く）。何も変更していません。以下はどれも、あなたが自分で変更するまで今のままです。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据 Persona 自己过去 7 天的记录算出，写明了自己时间范围的那一项除外。什么都没有改动：下面每一项在你自己改动之前都保持原样。"
+          }
+        }
+      }
+    },
+    "Open Settings [Brief Setup]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Settings"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定を開く"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开设置"
+          }
+        }
+      }
+    },
+    "That page is in the web app's settings for Persona." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That page is in the web app's settings for Persona."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このページは Web 版の Persona の設定にあります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这一页在网页版「设置」的 Persona 页里。"
+          }
+        }
+      }
+    },
     "%@ Wants to Run a Command" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -171748,6 +172300,121 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已移到「已完成」"
+          }
+        }
+      }
+    },
+    "Download" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロード"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载"
+          }
+        }
+      }
+    },
+    "Save to Photos" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save to Photos"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真に保存"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "存到照片"
+          }
+        }
+      }
+    },
+    "Saved to Files" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved to Files"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「ファイル」に保存しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已存到「文件」"
+          }
+        }
+      }
+    },
+    "Touch and hold for more ways to save" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Touch and hold for more ways to save"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "長押しで別の保存方法を選べます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长按可以换一种存法"
+          }
+        }
+      }
+    },
+    "Couldn’t save to Photos: %@. Touch and hold Download to save it to Files." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t save to Photos: %1$@. Touch and hold Download to save it to Files."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真に保存できませんでした：%1$@。「ダウンロード」を長押しすると「ファイル」に保存できます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能存到照片：%1$@。长按「下载」可以改存到「文件」。"
           }
         }
       }

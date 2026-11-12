@@ -200,6 +200,14 @@ final class TasksStore {
         if plans[plan.id] != plan { plans[plan.id] = plan }
     }
 
+    /// A suggested rule was answered, or is no longer offered (#5802): the plans held here drop it. The hub sends no
+    /// plan event for it and a feed read brings only what came since, so nothing else would take it off them.
+    func ruleSuggestionSettled(_ id: String) {
+        for (key, plan) in plans where plan.suggestion?.id == id {
+            plans[key] = plan.withoutSuggestion
+        }
+    }
+
     private func merge(_ items: [FeedItem], into conversation: String) {
         guard !items.isEmpty else {
             if feeds[conversation] == nil { feeds[conversation] = [] }

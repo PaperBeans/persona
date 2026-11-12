@@ -108,6 +108,12 @@ struct ModelConfigurationView: View {
     private func categoryLabel(_ category: ModelPurpose) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.xxs) {
             Text(category.id == "lark.agent" ? String(localized: "Lark /agent") : category.name).font(Theme.Font.body).lineLimit(1)
+            // What the use is for, in the hub's sentence (#5806); a hub from before sends none, and the row is as it was.
+            if let note = category.purposeNote {
+                Text(note).font(Theme.Font.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("model-purpose-note-\(category.id)")
+            }
             Text(page.modelSummary(category))
                 .font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
             if ModelConfigurationModel.followsCategory(category) {

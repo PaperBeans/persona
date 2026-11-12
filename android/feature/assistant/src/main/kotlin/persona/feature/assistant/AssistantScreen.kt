@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -810,8 +811,8 @@ fun AssistantScreen(
         val hasComposer = active == null || !hasChat || demo
         val blankPage = active == null && !viewingMainQueue && !healthPage
         val needsOverComposer = PersonaTheme.style == AppStyle.Glass
-        // The @ list takes their room while it is open (iOS `MentionMenuOpen`): with the keyboard up all three did not fit.
-        val shellLines = if (needsOverComposer && blankPage && onOpenNeed != null && !mentionOpen) shellNeedsYou else emptyList()
+        // They step aside while the @ list is open (`NeedsStepAside`); the dock keeps the page's backdrop meanwhile, as iOS's does.
+        val shellLines = if (needsOverComposer && blankPage && onOpenNeed != null) shellNeedsYou else emptyList()
         Box(Modifier.fillMaxSize().then(if (shellLines.isEmpty()) Modifier else Modifier.onSizeChanged { needsRoom.pageSize(it) })) {
         JPage(
             title = LocalPersonaName.current,
@@ -863,7 +864,7 @@ fun AssistantScreen(
                             actionLabel = stringResource(ReadinessActionId.AddComputer.label),
                             onAction = { runReadinessAction(ReadinessActionId.AddComputer) })
                     }
-                    if (shellLines.isNotEmpty()) {
+                    if (shellLines.isNotEmpty()) NeedsStepAside(mentionOpen, Modifier.testTag("shell-needs-aside")) {
                         ShellNeedsYou(shellLines, { needsRoom.height(needsFade) }, requireNotNull(onOpenNeed), onMore = { more ->
                             if (more.opensAgents) navigator.selectTab(AppTab.Agents) else onOpenInbox?.invoke() ?: navigator.navigate(InboxRoute)
                         }, Modifier.padding(horizontal = Tokens.Space.m))

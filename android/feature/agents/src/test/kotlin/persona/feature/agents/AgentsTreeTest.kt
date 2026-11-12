@@ -220,16 +220,63 @@ class AgentsTreeTest {
             at("d", "needs_you"), at("e", "unread")), machines, settings = MachineSpaceTree)
         val space = list.groups.single()
         assertEquals(2, space.waitingInBackground)
-        assertEquals(listOf(1, 1, 1), space.headingCounts.map { it.second })
+        assertEquals(listOf(1, 1, 1, 0), space.headingCounts.map { it.second })
         assertEquals(2, list.machines.single().waitingInBackground)
         assertEquals(listOf(1, 1, 1, 0), list.machines.single().headingCounts.map { it.second })
         // Nothing waits: Working counts them all, as before.
         val plain = buildAgentList(listOf(at("a", "working"), at("b", "working")), machines, settings = MachineSpaceTree).groups.single()
         assertEquals(0, plain.waitingInBackground)
-        assertEquals(listOf(0, 2, 0), plain.headingCounts.map { it.second })
+        assertEquals(listOf(0, 2, 0, 0), plain.headingCounts.map { it.second })
         // A paged list takes the hub's count for the space (`SessionListCounts.backgroundWaiting`): Working there includes them.
         val counted = space.copy(totalCount = 4, stateCounts = AgentState.entries.associateWith { if (it == AgentState.Working) 3 else 0 }, waitingInBackground = 2)
-        assertEquals(listOf(0, 1, 0), counted.headingCounts.map { it.second })
+        assertEquals(listOf(0, 1, 0, 0), counted.headingCounts.map { it.second })
+    }
+
+    @Test fun aSpaceHeadingCountsItsIdleAgentsAfterTheClockAsTheComputerDoes() {
+        // iOS `SpaceHeader` draws `StateCounts`, whose last count is the idle agents (Idle and Unknown; the ones that only wait
+        // in the background are counted apart): a gray dot and a number (#4338 A5). The computer heading counts the same.
+        fun at(id: String, state: String, waiting: Boolean = false) = AgentSession(Session(machineId = "mac", sessionId = id, state = state,
+            spaceId = "app", spaceName = "app", backgroundWaiting = waiting, updatedAt = "2026-01-01T00:00:00Z"))
+        val list = buildAgentList(listOf(at("a", "needs_you"), at("b", "working"), at("c", "working", waiting = true), at("d", "unread"),
+            at("e", "idle"), at("f", "idle"), at("g", "unknown")), machines, settings = MachineSpaceTree)
+        val space = list.groups.single()
+        assertEquals(listOf(persona.core.designsystem.Status.NeedsYou, persona.core.designsystem.Status.Working, persona.core.designsystem.Status.Unread,
+            persona.core.designsystem.Status.Idle), space.headingCounts.map { it.first })
+        assertEquals(listOf(1, 1, 1, 3), space.headingCounts.map { it.second })
+        assertEquals(1, space.waitingInBackground)
+        assertEquals("the computer's heading counts the same", list.machines.single().headingCounts.map { it.second }, space.headingCounts.map { it.second })
+        // A paged list takes the hub's counts for the space: Idle and Unknown both.
+        val counted = space.copy(totalCount = 9, stateCounts = mapOf(AgentState.Working to 2, AgentState.Idle to 4, AgentState.Unknown to 1), waitingInBackground = 1)
+        assertEquals(listOf(0, 1, 0, 5), counted.headingCounts.map { it.second })
+        // A section (Pinned, a history project) is no iOS `SpaceHeader`: it keeps its three counts.
+        assertEquals(listOf(1, 1, 1), space.sectionCounts.map { it.second })
+        // A quiet space says how many sessions it has instead of counts (nothing changes there); a subtask under its parent is not counted.
+        val child = AgentSession(Session(machineId = "mac", sessionId = "h", state = "idle", spaceId = "app", spaceName = "app", sourceKind = "runtime",
+            isSubagent = true, parentSessionId = "e", updatedAt = "2026-01-01T00:00:00Z"))
+        assertEquals(listOf(1, 1, 1, 3), buildAgentList(listOf(at("a", "needs_you"), at("b", "working"), at("c", "working", waiting = true), at("d", "unread"),
+            at("e", "idle"), at("f", "idle"), at("g", "unknown"), child), machines, settings = MachineSpaceTree).groups.single().headingCounts.map { it.second })
+    }
+
+    @Test fun byProjectNamesTheFirstSixAgentsThatNMoreIdleKeepsOutOfSight() {
+        // iOS `IdleFoldRow` (#4338 A8): beside the count, the first six hidden agents' tab names, else their titles.
+        fun at(id: String, state: String, tab: String? = null, title: String = "", index: Int? = null) = AgentSession(Session(machineId = "mac", sessionId = id,
+            state = state, title = title, spaceId = "w1", spaceName = "app", slotId = tab, slotName = tab, slotIndex = index, updatedAt = "2026-01-01T00:00:0${id.length}Z"))
+        val list = listOf(at("build", "working", tab = "build"), at("a", "idle", tab = "review"), at("b", "idle", tab = "docs"), at("c", "idle", title = "Sort receipts"),
+            at("d", "idle", tab = "deps"), at("e", "idle", tab = "lint"), at("f", "idle", tab = "types"), at("g", "idle", tab = "perf"), at("h", "idle", tab = "ci"))
+        val closed = agentTreeEntries(buildAgentList(list, machines, settings = MachineSpaceTree), "mac", tabs = true, hideIdle = true)
+            .filterIsInstance<TreeIdleEntry>().single()
+        assertEquals(8, closed.hidden)
+        assertEquals("six names at most", 6, closed.tabs.size)
+        assertTrue("a tab name, else the title", "Sort receipts" in closed.tabs)
+        assertEquals(setOf("review", "docs", "Sort receipts", "deps", "lint", "types", "perf", "ci").containsAll(closed.tabs), true)
+        // Once opened, the row that folds them has no names to give; a space with nothing hidden has no row.
+        assertTrue(agentTreeEntries(buildAgentList(list, machines, settings = MachineSpaceTree.copy(expandedIdle = setOf("mac/w1"))), "mac", tabs = true, hideIdle = true)
+            .filterIsInstance<TreeIdleEntry>().single().tabs.isEmpty())
+        // An idle agent that a busy tab brought along is on screen already: it is not named beside the count.
+        val withTab = listOf(at("x", "working", tab = "shared"), at("y", "idle", tab = "shared"), at("z", "idle", tab = "alone"), at("w", "working", tab = "main"))
+        val one = agentTreeEntries(buildAgentList(withTab, machines, settings = MachineSpaceTree), "mac", tabs = true, hideIdle = true).filterIsInstance<TreeIdleEntry>().single()
+        assertEquals(1, one.hidden)
+        assertEquals(listOf("alone"), one.tabs)
     }
 
     @Test fun byProjectOnGlassEndsItsOpenedIdleAgentsWithARowThatFoldsThemAgain() {

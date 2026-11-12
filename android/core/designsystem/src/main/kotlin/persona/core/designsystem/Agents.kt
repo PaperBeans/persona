@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
@@ -46,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import persona.core.contracts.CoreText
 import persona.core.domain.sort.AgentListDisplay
@@ -200,7 +202,10 @@ internal fun StateCounts(counts: List<Pair<Status, Int>>, waiting: Int = 0, ligh
             clockDrawn = true
             count(waiting, waitingWords) { JIcon(persona.core.designsystem.icons.PersonaIcons.backgroundWaiting, null, size = Caret, tint = palette.backgroundWaiting.dot, decorative = true) }
         }
-        count(n, "$n ${stringResource(status.labelRes)}") { JStatusDot(status, size = Dot, waiting = lighter) }
+        // Idle is spoken as iOS says it ("3 idle"), not by the state's own name (Seen).
+        count(n, if (status == Status.Idle) pluralStringResource(R.plurals.designsystem_idle_count, n, n) else "$n ${stringResource(status.labelRes)}") {
+            JStatusDot(status, size = Dot, waiting = lighter)
+        }
     }
     if (waiting > 0 && !clockDrawn) count(waiting, waitingWords) {
         JIcon(persona.core.designsystem.icons.PersonaIcons.backgroundWaiting, null, size = Caret, tint = palette.backgroundWaiting.dot, decorative = true)
@@ -337,14 +342,20 @@ fun AgentSpaceHeader(
 /**
  * "N more idle": opens the finished sessions an active space keeps tucked away. [depth] is the space's. Once they are
  * [open] (Glass's By project, iOS `collapseRow`, #4338 A8) the row follows them as "Hide N Idle" in the accent and folds them
- * again.
+ * again. Closed, on Glass, it names the first of them: [tabs] (their tab names, at most six) as chips in a row of their own
+ * that does not take touches and fades out toward the end of the line (iOS `IdleFoldRow`), in [compact] lists as one line of
+ * words after the count (iOS `CompactFoldRow`). Brief and Board keep the count alone.
  */
 @Composable
-fun AgentIdleRow(hidden: Int, onClick: () -> Unit, modifier: Modifier = Modifier, depth: Int = 1, open: Boolean = false) {
+fun AgentIdleRow(
+    hidden: Int, onClick: () -> Unit, modifier: Modifier = Modifier, depth: Int = 1, open: Boolean = false,
+    tabs: List<String> = emptyList(), compact: Boolean = false,
+) {
     if (open) {
         AgentFoldRow(persona.core.designsystem.icons.PersonaIcons.collapse, pluralStringResource(R.plurals.designsystem_idle_hide, hidden, hidden), onClick, modifier, depth)
         return
     }
+    val names = if (PersonaTheme.style == AppStyle.Glass) tabs.take(IdleTabNames) else emptyList()
     val start = Step * depth + (Caret - markSize) / 2
     Row(
         modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
@@ -354,6 +365,41 @@ fun AgentIdleRow(hidden: Int, onClick: () -> Unit, modifier: Modifier = Modifier
         Text(pluralStringResource(R.plurals.designsystem_idle_more, hidden, hidden), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1)
         Spacer(Modifier.width(Tokens.Space.xs))
         JIcon(PhIcons.CaretDown, null, size = Caret, tint = PersonaTheme.palette.ink3)
+        if (names.isNotEmpty()) {
+            Spacer(Modifier.width(Tokens.Space.s))
+            if (compact) Text(names.joinToString(" · "), style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            else Row(Modifier.weight(1f).fadeOutAtEnd().horizontalScroll(rememberScrollState(), enabled = false), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+                names.forEach { IdleTabChip(it) }
+            }
+        }
+    }
+}
+
+/** How many of the hidden agents "N more idle" names (iOS `IdleFoldRow`: `sessions.prefix(6)`). */
+private const val IdleTabNames = 6
+
+/** iOS's neutral `Chip`: a tab's name in a capsule of the chip fill, in the secondary words. */
+@Composable
+private fun IdleTabChip(text: String) {
+    val palette = PersonaTheme.palette
+    Text(text, Modifier.clip(CircleShape).background(if (palette.dark) Tokens.Common.Dark.Fill.chip else Tokens.Common.Light.Fill.chip)
+        .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xxs),
+        style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.Medium), color = palette.ink2, maxLines = 1, softWrap = false)
+}
+
+/**
+ * A line's last half fading out (iOS `.mask(LinearGradient(.black, .black, .clear))`): the first half whole, the rest to nothing
+ * at the end. Only the gradient's alpha counts (the mask keeps what it covers), so any palette ink will do.
+ */
+@Composable
+private fun Modifier.fadeOutAtEnd(): Modifier {
+    val solid = PersonaTheme.palette.ink
+    return graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithContent {
+        drawContent()
+        val rtl = layoutDirection == LayoutDirection.Rtl
+        drawRect(Brush.horizontalGradient(0f to solid, 0.5f to solid, 1f to solid.copy(alpha = 0f),
+            startX = if (rtl) size.width else 0f, endX = if (rtl) 0f else size.width), blendMode = BlendMode.DstIn)
     }
 }
 

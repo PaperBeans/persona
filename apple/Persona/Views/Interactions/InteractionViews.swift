@@ -299,13 +299,16 @@ struct InteractionPanel: View {
     /// The form asks to keep its end in sight (`CardFormKeepsEnd`), and where its scroll area is.
     @State private var keepsEnd = false
     @State private var formPosition = ScrollPosition(edge: .top)
+    /// The suggested rule's line under the form (#5802) while it is drawn: what of the card the form may not have.
+    @State private var suggestionHeight: CGFloat = 0
 
     /// The form's cap while the keyboard is up (`cardFits`): the area less the card's header and margins; at least a tap
     /// target, so a sliver of a form never shows (a small iPhone with the shell's composer leaves the cards little more).
     private func cap(for available: CGFloat) -> CGFloat {
         guard available > 0, headerHeight > 0 else { return .infinity }
         let row = headerAway ? 0 : headerHeight + Theme.Space.m // the row and the gap under it
-        return max(available - row - Theme.Space.m - Theme.Space.l, Theme.Size.tapTarget) // and the margins
+        let line = suggestionHeight > 0 ? suggestionHeight + Theme.Space.m : 0 // a suggested rule's line and its gap
+        return max(available - row - line - Theme.Space.m - Theme.Space.l, Theme.Size.tapTarget) // and the margins
     }
 
     private var fitsCap: CGFloat { cap(for: fits) }
@@ -355,6 +358,10 @@ struct InteractionPanel: View {
                     .frame(height: room > 0 ? min(formHeight == 0 ? room : formHeight, room * 0.55, fitsCap) : nil)
                     .transition(.opacity)
                 }
+                // A standing rule the hub suggests on a question a supervisor passed up (#5802); nothing otherwise.
+                RuleSuggestionLine(suggestion: interaction.suggestion,
+                                   card: .interaction(uid: interaction.uid, manager: interaction.manager),
+                                   group: interaction.group, height: $suggestionHeight)
             }
         }
         .padding(.horizontal, Theme.Space.l)

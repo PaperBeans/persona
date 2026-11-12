@@ -2837,6 +2837,83 @@ TODO_ASKS = {
     "todo_task_release": {"verdict": "✅ 做完了：已部署，按下面验收"},
 } if os.environ.get("MOCK_TODO_ASKS") == "1" else {}
 TODO_ASKED_AT = ago(hours=2)
+# MOCK_ASK_HELD=1 (#4930, #5803, docs/assistant/todos.md "Decisions that can wait"): with MOCK_TODO_ASKS, the PR
+# check's decision is held for the next briefing (`ask.for_briefing`), so the apps mark it.
+if os.environ.get("MOCK_ASK_HELD") == "1" and "todo_review" in TODO_ASKS:
+    TODO_ASKS["todo_review"]["for_briefing"] = True
+
+# MOCK_RULE_SUGGESTIONS=1 (#4929, #5802, docs/assistant/unified-entry.md "A rule after the same answer three times"):
+# the standing rule the hub suggests after the same answer three times, one of each kind: on the PR check's decision
+# (with MOCK_TODO_ASKS; `ask.suggestion`), on the network tests' question card (`interaction.suggestion`) and, with
+# MOCK_TASKS, on the open plan (`TaskPlan.suggestion`, filled in where the plan is read). POST
+# /api/v1/assistant/rule-suggestions/{id}/always and …/not-now answer one: it is gone from every card, and a second
+# answer is 404, as one the answers no longer earn.
+RULE_SUGGESTIONS = {
+    "rs_mock_merge": {
+        "id": "rs_mock_merge", "kind": "standing_authorization",
+        "text": "You approved this 3 times. Always allow merging in /Users/me/code/weather on MacBook once checks pass and there are no conflicts?",
+        "scope": {"machine_id": "macbook", "machine": "MacBook", "directory": "/Users/me/code/weather", "action": "merge",
+                  "conditions": ["ci_green", "no_conflicts"], "quote": "Merge the PR now? → Yes"},
+        "creates": "standing_authorization", "count": 3},
+    "rs_mock_start": {
+        "id": "rs_mock_start", "kind": "plan_start",
+        "text": "You started tasks like this 3 times. Always start tasks that change files in /Users/me/code/weather on MacBook directly?",
+        "scope": {"machine_id": "macbook", "machine": "MacBook", "directory": "/Users/me/code/weather"},
+        "creates": "tasks.trust", "count": 3},
+    "rs_mock_delegate": {
+        "id": "rs_mock_delegate", "kind": "delegate",
+        # The hub's own words (server/internal/i18n/locales/en/assistant-rule_suggest.json "delegate"), Settings and all.
+        "text": "You took the recommendation 3 times. Let Persona answer agents' own-call questions for you? You can turn this on in Settings.",
+        "scope": {}, "creates": "", "setting": "agents.delegate", "count": 3},
+} if os.environ.get("MOCK_RULE_SUGGESTIONS") == "1" else {}
+RULE_SUGGESTIONS_ANSWERED = set()  # answered with Always or Not now
+RULE_SUGGESTION_ON = {"todo_review": "rs_mock_merge", "ix_tests": "rs_mock_delegate", "plan_mock_3": "rs_mock_start"}
+
+
+def rule_suggestion(card):
+    """The suggestion the card (a to-do, a pending card or a plan, by id) carries now; None once it was answered."""
+    sid = RULE_SUGGESTION_ON.get(card)
+    return RULE_SUGGESTIONS.get(sid) if sid not in RULE_SUGGESTIONS_ANSWERED else None
+
+
+def suggested_plan(plan):
+    """A plan as the apps read it: an open one with the rule suggested for it, never kept with the plan."""
+    sg = rule_suggestion(plan["id"]) if plan.get("state") == "open" else None
+    return dict(plan, suggestion=sg) if sg else plan
+
+
+def rule_suggestions_area(h, method, p):
+    """POST /api/v1/assistant/rule-suggestions/{id}/always | not-now (MOCK_RULE_SUGGESTIONS=1)."""
+    m = re.fullmatch(r"/api/v1/assistant/rule-suggestions/([^/]+)/(always|not-now)", p)
+    if not m or method != "POST":
+        return False
+    sg = RULE_SUGGESTIONS.get(m.group(1))
+    if not sg or sg["id"] in RULE_SUGGESTIONS_ANSWERED:
+        h.send_json({"error": "This suggestion is no longer offered."}, 404)
+        return True
+    RULE_SUGGESTIONS_ANSWERED.add(sg["id"])
+    if m.group(2) == "not-now":
+        h.send_json({"ok": True})
+    elif sg["kind"] == "plan_start":
+        key = "macbook|/Users/me/code/weather|edit"
+        if MOCK_TASKS and not any(k["key"] == key for k in TASK_TRUST):
+            TASK_TRUST.append({"key": key, "machine": "macbook", "cwd": "/Users/me/code/weather", "readonly": False})
+        h.send_json({"ok": True, "kind": sg["kind"], "creates": "tasks.trust", "key": key})
+    elif sg["kind"] == "standing_authorization":
+        h.send_json({"ok": True, "kind": sg["kind"], "creates": "standing_authorization", "revision": 2,
+                     "authorization": {"id": "sa_mock_1", "action": "merge", "machine_id": "macbook", "directory": "/Users/me/code/weather",
+                                       "conditions": ["ci_green", "no_conflicts"], "quote": sg["scope"]["quote"]}})
+    else:
+        h.send_json({"ok": True, "kind": sg["kind"], "creates": "", "setting": sg["setting"]})
+    push_todos()  # a decision is worded again without the line; a pending card is sent again without it
+    for send, _ in list(LIVE):
+        try:
+            for ix in mock_interactions():
+                if RULE_SUGGESTION_ON.get(ix["id"]) == sg["id"]:
+                    send({"type": "interaction", "interaction": ix})
+        except Exception:
+            pass
+    return True
 if _TODO_LIST and _TODO_LIST != "calm":  # MOCK_TODO_LIST: the cache decision waits on the owner
     TODO_ASKS["tl_cache"] = {"outcome": "decide", "verdict": "🤔 要你拍板：测试已通过，是否继续更换缓存方案？",
                              "recommend": "保留当前缓存，下次再评估新方案"}
@@ -2858,6 +2935,8 @@ def sorted_todos():
     for t in out:
         if t.get("done_at") is None and t["id"] in TODO_ASKS and t["id"] not in BRIEF_ACCEPTED:
             t["ask"] = dict(TODO_ASKS[t["id"]], asked_at=TODO_ASKED_AT)
+            if sg := rule_suggestion(t["id"]):
+                t["ask"]["suggestion"] = sg
         if t.get("done_at") is None and t["id"] in TODO_ORPHANED:
             t["orphaned"] = {"reason": TODO_ORPHANED[t["id"]], "since": TODO_ORPHANED_SINCE}
     return out
@@ -6266,6 +6345,39 @@ if MOCK_TASKS:
             "progress": [{"id": "todo_task_widget", "title": "小组件横屏崩溃", "stage": "develop"}, {"id": "todo_task_tests", "title": "补齐网络层的单元测试"}],
             "progress_total": 2}),
     ]
+    # MOCK_BRIEF_SETUP=1 (#5085, #5804, docs/assistant/assistant.md "Recommended setup"): the briefing is the week's
+    # first, so its `brief` item carries the computed setup lines, in the hub's own words
+    # (server/internal/i18n/locales/en/assistant-setup_suggest.json): one with a settings page in every app (the triage's
+    # switch), the lower tier for the background supervisor (its purpose's page of Model Settings), the remembered kinds
+    # of task (a plan card's checkbox), the standing authorizations (a page only the web app has) and one that no app
+    # has a switch for.
+    if os.environ.get("MOCK_BRIEF_SETUP") == "1":
+        next(_i for _i in TASK_FEED[ASK1] if _i["kind"] == "brief")["body"]["setup"] = [
+            {"id": "triage_wake", "setting": "agents.triage.wake", "count": 4,
+             "text": "Session triage, \"Wake on schedule\": 4 times an agent waiting on something else (CI, a deploy, another agent) "
+                     "was set going again by hand; it would have been woken to check for itself. Cost: each wake runs a turn of "
+                     "the agent on its own model. Where: Session triage in Settings."},
+            {"id": "supervisor_tier", "setting": "assistant.supervise", "count": 24,
+             "text": "A lower tier for the background supervisor: in the last 30 days it made 24 acceptances on Opus that have "
+                     "since had their day to be reopened in; reopened among them: 1. Its provider also has Sonnet, one tier down "
+                     "and not its smallest. Cost and risk: a lower tier spends less on every review, but accepting a task is a "
+                     "judgment call, so more accepted tasks may be reopened. Where: Background supervisor in Model settings; "
+                     "Persona changed nothing."},
+            {"id": "task_trust", "setting": "tasks.trust", "count": 3,
+             "text": "Start tasks directly: 3 plans waited for Start although you had already started tasks of the same kind "
+                     "(same computer and directory); a remembered kind starts without asking. Cost: those tasks start, and "
+                     "spend tokens, before you have read the plan. Where: \"Start these right away from now on\" on a plan card."},
+            {"id": "standing_authorizations", "setting": "assistant.standing_authorizations", "count": 6,
+             "text": "Standing authorizations: 6 times you approved a merge, a push or a test deploy that you had already "
+                     "approved in the same directory; a standing authorization would not have asked again. Cost: Persona then "
+                     "does that step there without asking, within the conditions on the authorization. Where: Standing "
+                     "authorizations in Settings."},
+            {"id": "delegate", "setting": "agents.delegate", "count": 5,
+             "text": "Let Persona answer agents' own-call questions: 5 times you answered an agent's question with exactly what "
+                     "the conversation supervising it recommended; Persona would have answered those for you. Cost: one model "
+                     "call per question, and the answer reaches the agent before you see it. Where: there is no switch for it "
+                     "in the apps yet; it is turned on in the assistant's configuration file on the hub's computer "
+                     "(agents.delegate, enabled: true), as the configuration guide describes."}]
     # MOCK_TASKS_REPORTS=1: supervised tasks whose agents report to Persona (#5112): the widget task's latest progress
     # on its card, the tests task's question and Persona cutting in on it in the feed; reviews (#3124): the widget fix
     # sent back once, the release notes accepted and closed by the review.
@@ -6880,7 +6992,7 @@ def tasks_area(h, method, p, raw):
     if method == "GET" and p.startswith("/api/v1/assistant/conversations/") and p.endswith("/feed"):
         conv = p.split("/")[5]
         items = TASK_FEED.get(conv, [])
-        plans = {i["ref"]: TASK_PLANS[i["ref"]] for i in items if i["kind"] == "plan" and i["ref"] in TASK_PLANS}
+        plans = {i["ref"]: suggested_plan(TASK_PLANS[i["ref"]]) for i in items if i["kind"] == "plan" and i["ref"] in TASK_PLANS}
         h.send_json({"items": items, "plans": plans})
         return True
     if method == "POST" and p.startswith("/api/v1/assistant/conversations/") and p.endswith("/today"):
@@ -6898,7 +7010,7 @@ def tasks_area(h, method, p, raw):
         return True
     if method == "GET" and p.startswith("/api/v1/task-plans/"):
         plan = TASK_PLANS.get(p.split("/")[4])
-        h.send_json({"plan": plan} if plan else {"error": "plan not found"}, 200 if plan else 404)
+        h.send_json({"plan": suggested_plan(plan)} if plan else {"error": "plan not found"}, 200 if plan else 404)
         return True
     if method == "POST" and p.startswith("/api/v1/task-plans/") and p.endswith(("/start", "/dismiss")):
         pid = p.split("/")[4]
@@ -7814,6 +7926,7 @@ def mock_interactions():
     # worker's card says so too (folded_as, #5180)
     folds = {(r["machine_id"], r["session_id"]): {k: r[k] for k in ("folded_under", "folded_as") if r.get(k)}
              for r in all_sessions() if r.get("folded_under")}
+    out = [dict(x, suggestion=sg) if (sg := rule_suggestion(x["id"])) else x for x in out]  # MOCK_RULE_SUGGESTIONS
     return [dict(x, **folds[(x.get("machine_id"), x.get("session_id"))]) if (x.get("machine_id"), x.get("session_id")) in folds else x for x in out]
 
 
@@ -11173,6 +11286,17 @@ MODEL_CATEGORY_FOR = {pid: {"主对话": "assistant", "Agents": "agent.new", "�
 
 
 SUPERVISE_PURPOSE = "assistant.supervise"
+# MOCK_SUPERVISE_LISTED=1 (#5806, docs/assistant/model-config.md "The background supervisor in the catalog"): a hub that
+# lists the background supervisor's use in the catalog, as its last built-in purpose, and sends each built-in purpose's
+# one-sentence `description` (#5086). Without it the catalog is a hub's from before: the use is answered by its id only.
+SUPERVISE_LISTED = os.environ.get("MOCK_SUPERVISE_LISTED") == "1"
+MODEL_DESCRIPTIONS = {
+    "assistant": "Talks with you, splits work and hands it out.",
+    "agent.new": "The Agents Persona starts on your computers.",
+    "kb": "Translation, drafts, summaries and titles.",
+    "inbox.triage": "Sorts the Inbox and judges what needs you.",
+    SUPERVISE_PURPOSE: "Follows up the tasks no leader supervises, in the background.",
+}
 
 
 def supervise_model_purpose():
@@ -11194,7 +11318,19 @@ def supervise_model_purpose():
                    kind="launcher", override=binding, effective=effective, revision=stored["revision"],
                    inherited_from=main["name"], fields=["provider", "model", "effort"],
                    provider_ids=main["provider_ids"], status="未验证")
+    if SUPERVISE_LISTED:
+        purpose["description"] = MODEL_DESCRIPTIONS[SUPERVISE_PURPOSE]
     return {"purpose": purpose, "providers": catalog["providers"]}
+
+
+def listed_model_configuration():
+    """GET /api/v1/model-config. MOCK_SUPERVISE_LISTED: with the background supervisor's use, the row the hub answers
+    by its id, as the last built-in purpose (before an extension's)."""
+    catalog = model_configuration()
+    if SUPERVISE_LISTED and (own := supervise_model_purpose()):
+        at = next((n for n, x in enumerate(catalog["purposes"]) if x["id"].startswith("plugin.")), len(catalog["purposes"]))
+        catalog["purposes"].insert(at, own["purpose"])
+    return catalog
 
 
 def model_configuration(include_uses=False):
@@ -11223,6 +11359,8 @@ def model_configuration(include_uses=False):
                            provider_ids=[p["id"] for p in providers if p["kind"] == kind], status="未验证")
             if pid in MODEL_SCOPES:
                 purpose["uses"] = [{"name": use} for use in MODEL_SCOPES[pid]]
+            if SUPERVISE_LISTED and pid in MODEL_DESCRIPTIONS:
+                purpose["description"] = MODEL_DESCRIPTIONS[pid]
             # MOCK_MODEL_LIMIT=1: the default API connection is out of quota for 23 more minutes (docs/assistant/model-config.md "Upstream rate limits").
             if os.environ.get("MOCK_MODEL_LIMIT") and effective["provider"] == "legacy.ai":
                 purpose["limit"] = {"reason": "quota", "until": later(minutes=23)}
@@ -21007,7 +21145,7 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/v1/assistant":
             q = parse_qs(urlparse(self.path).query)
             return self.send_json(assistant_state(q.get("space", [""])[0], q.get("archived", [""])[0] == "1"))
-        if p == "/api/v1/model-config": return self.send_json(model_configuration())
+        if p == "/api/v1/model-config": return self.send_json(listed_model_configuration())
         if p == "/api/v1/model-config/purposes/" + SUPERVISE_PURPOSE and (own := supervise_model_purpose()):
             return self.send_json(own)
         if p.startswith("/api/v1/model-config/purposes/"):
@@ -21793,6 +21931,7 @@ class H(BaseHTTPRequestHandler):
         if plugin_connector_area(self, self.command, p, self.last_body): return
         if mail_area(self, self.command, p, parse_qs(urlparse(self.path).query)): return
         if MOCK_LARK and fs_post(self, p, parse_qs(urlparse(self.path).query), self.last_body): return  # area: feishu chat page
+        if rule_suggestions_area(self, self.command, p): return
         if tasks_area(self, self.command, p, self.last_body): return
         if main_actions_area(self, self.command, p, self.last_body): return
         m = re.fullmatch(r"/api/v1/assistant/conversations/([^/]+)/(archive|unarchive)", p)
@@ -23794,6 +23933,11 @@ MOCK_HELP.append("MOCK_MARKDOWN=1  任务往来和回执里带 **粗体**、`代
 MOCK_HELP.append("MOCK_TASK_RENAMED=1  整理发布说明这个任务在回执写好后改了名：回执应显示新名字「写本周发布说明」（#3036）")
 MOCK_HELP.append("MOCK_AUTO_CONVERSATIONS=1  助手对话带来源 origin（feature conversation_origin）：另有 10 段自动对话（收件箱 6、定时任务 2、飞书 /agent、对话派生），侧边栏「最近」和用户自己的一起列、带来源标记，「全部对话」按来源筛（#3264、#5195）")
 MOCK_HELP.append("MOCK_EXTERNAL=1  和 MOCK_AUTO_CONVERSATIONS=1 一起用：飞书 /agent 那段带上请求和上下文，另加一段别的扩展开的（origin extension），两段都是外部的（#3758）")
+MOCK_HELP.append("MOCK_RULE_SUGGESTIONS=1  A standing rule suggested after the same answer three times (#5802): on the PR check's decision "
+                 "(with MOCK_TODO_ASKS=1), on the network tests' question card and, with MOCK_TASKS=1, on the open plan; Always and Not now answer it")
+MOCK_HELP.append("MOCK_ASK_HELD=1  With MOCK_TODO_ASKS=1: the PR check's decision is held for the next briefing (for_briefing, #5803)")
+MOCK_HELP.append("MOCK_BRIEF_SETUP=1  With MOCK_TASKS=1: the morning briefing carries the week's recommended setup lines (#5804)")
+MOCK_HELP.append("MOCK_SUPERVISE_LISTED=1  The model catalog lists assistant.supervise itself and every built-in purpose has a description (#5806)")
 MOCK_HELP.append("MOCK_BACKGROUND_SUPERVISOR=1  The hub's built-in background supervisor conversation exists (#4927): origin task with no origin_ref, "
                  "named by GET /api/v1/assistant as background_supervisor, and archiving it is refused. Without it the setting "
                  "main_supervises_own_tasks and the model use assistant.supervise (answered by its own id, not in the catalog) are still there; MOCK_LEGACY_HUB has none of them")

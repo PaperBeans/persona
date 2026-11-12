@@ -38,6 +38,10 @@ struct BriefCard: View {
                 Divider()
                 progress
             }
+            if !brief.setup.isEmpty {
+                Divider()
+                BriefSetupSection(lines: brief.setup)
+            }
         }
         .card(padding: Theme.Space.l)
         .accessibilityElement(children: .contain)
@@ -150,6 +154,64 @@ struct BriefCard: View {
 
     private static func clock(_ date: Date) -> String {
         date.formatted(.dateTime.hour(.defaultDigits(amPM: .omitted)).minute())
+    }
+}
+
+// MARK: - Recommended setup
+
+/// The week's recommended setup (#5085, #5804; docs/assistant/assistant.md "Recommended setup"): the hub's own counts
+/// and words, drawn as they came. Open Settings is all a line does, and only where the app has its page: nothing is
+/// turned on from here.
+private struct BriefSetupSection: View {
+    var lines: [BriefBody.Setup]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            BriefHead(symbol: Theme.Icon.settings, tint: .secondary, title: String(localized: "Recommended setup"))
+            BriefNote(String(localized: "From Persona's own records of the last 7 days, unless a line names its own period. Nothing was changed: each of these stays as it is until you change it yourself."))
+            ForEach(lines) { line in
+                BriefSetupRow(line: line, open: action(line))
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("brief.setup")
+    }
+
+    /// Open Settings for a line whose mechanism is turned on at a page of this app; nil otherwise, and the line has
+    /// no button.
+    private func action(_ line: BriefBody.Setup) -> (() -> Void)? {
+        guard let page = line.page else { return nil }
+        return { BriefSetupPages.open(page) }
+    }
+}
+
+/// One mechanism: the hub's whole line, and Open Settings when the app has its page.
+private struct BriefSetupRow: View {
+    var line: BriefBody.Setup
+    var open: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                Text(line.text).font(Theme.Font.secondary)
+                if line.isOnTheWebOnly {
+                    Text("That page is in the web app's settings for Persona.")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("brief.setup.web.\(line.id)")
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let open {
+                Button(action: open) { Text("Open Settings [Brief Setup]").lineLimit(1) }
+                    .font(Theme.Font.captionStrong)
+                    .themedButton()
+                    .accessibilityIdentifier("brief.setup.open.\(line.id)")
+            }
+        }
+        .padding(.vertical, Theme.Space.xs)
+        .accessibilityIdentifier("brief.setup.\(line.id)")
     }
 }
 
@@ -277,6 +339,7 @@ struct BriefAcceptRow: View {
                     Text("Recommended: \(option)").font(Theme.Font.caption).foregroundStyle(.secondary)
                 }
                 Text(briefMeta(row)).font(Theme.Font.caption).foregroundStyle(.secondary)
+                if row.forBriefing { BriefHeldMark(id: row.id) }
                 HStack(spacing: Theme.Space.s) {
                     Spacer(minLength: 0)
                     ViewThatFits(in: .horizontal) {
@@ -288,6 +351,7 @@ struct BriefAcceptRow: View {
                     }
                 }
                 .padding(.top, Theme.Space.xs)
+                RuleSuggestionLine(suggestion: row.suggestion, card: .todo(row.id, round: row.askedAt ?? ""), group: group)
             }
             .padding(.vertical, Theme.Space.xs)
         }
@@ -349,6 +413,23 @@ struct BriefAcceptRow: View {
         case .gotIt: String(localized: "Noted")
         case .recommendation: String(localized: "Recommendation taken")
         }
+    }
+}
+
+/// A decision that can wait (#4930, #5803): nothing was pushed for it, it comes with the next briefing. Only a to-do's
+/// own row carries it (`TodoAsk.row`); a briefing's rows never do.
+private struct BriefHeldMark: View {
+    var id: String
+
+    var body: some View {
+        Label {
+            Text("Comes with your next briefing").lineLimit(1)
+        } icon: {
+            ThemedIcon(Theme.Icon.today)
+        }
+        .font(Theme.Font.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityIdentifier("brief.held.\(id)")
     }
 }
 

@@ -1047,9 +1047,11 @@ supervisor" below, `setup_suggest_tier.go`); every rule of this section holds fo
   a page (`docs/web/web.md`). The model is also given the lines and copies them at the end of its answer when no
   Lark card goes out, as it does the briefing's other rows. The Android app draws the `setup` list on its briefing
   card too, with **Open settings** on the lines whose mechanism has a page there (#5802, `docs/android/android.md`
-  "Rule suggestions, held decisions, recommended setup and purpose descriptions"). The iOS app does not draw `setup`
-  yet: an owner who uses only that, without the Lark card, reads the lines in the model's answer, which is the
-  model's copy and not checked against the computed lines.
+  "Rule suggestions, held decisions, recommended setup and purpose descriptions"), and so do the Apple apps (#5804,
+  `docs/apple/ios.md` "Briefing card"), with a button on the lines whose mechanism has a page there (Session Triage,
+  the background supervisor's model). An app that does not draw `setup` leaves its owner, without
+  the Lark card, to read the lines in the model's answer, which is the model's copy and not checked against the
+  computed lines.
 - **Where a mechanism is turned on.** Session triage's three switches, the standing authorizations and the
   remembered kinds of task are on the assistant's own settings page in the web app (`/settings?tab=persona`; iOS
   Settings › General, Android Settings › AI); the lines name the switch by the label it has there. The background

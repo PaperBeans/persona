@@ -4,8 +4,9 @@ import XCTest
 /// and touch and hold opens a menu of what the panel's More tab lists, in the same order: Voice Chat, Take Photo, Scan
 /// Document (#3720), (Persona's main conversation) Meeting Recording (#3723), Mention a File or Session, an Agent's Quick
 /// Commands in a submenu, then extension prompts. A new conversation has the same, less what needs a conversation (Voice
-/// Chat). The iPad's + is that menu, with Photos and Files first. Against scripts/mock/mock_hub.py (PERSONA_MOCK_HUB);
-/// `-showCameraRows YES` lists Take Photo and Scan Document, since the simulator can't take or scan.
+/// Chat), and so does Health's (#3825). The iPad's + is that menu, with Photos and Files first. Against
+/// scripts/mock/mock_hub.py (PERSONA_MOCK_HUB); `-showCameraRows YES` lists Take Photo and Scan Document, since the
+/// simulator can't take or scan.
 /// TEST_RUNNER_PERSONA_SHOTS=<dir> keeps screenshots, in light and dark (`-ui.scheme`) and in the BeautifulUI style too.
 /// Voice Chat is in the menu on the iPad too, as it was before (`VoicePlatform.phone`: iPhone, iPad and Vision Pro, #4896).
 final class AttachMenuTests: XCTestCase {
@@ -14,13 +15,16 @@ final class AttachMenuTests: XCTestCase {
     /// The main conversation, named: the Persona tab otherwise opens on whatever the last launch left (a new one).
     private static let persona = tab + ["-openAssistant", "server/b2e4d6f8-0000-4000-8000-000000000001"]
     private static let new = tab + ["-newAssistant", "YES"]
+    /// Health's new conversation page (#3825).
+    private static let health = tab + ["-openShellPage", "health"]
     private static let agent = ["-openSession", "macbook/a1f3c2d4-0000-4000-8000-000000000002"] // weather › tests: working, Claude in herdr
     private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
     private var shots: Bool { ProcessInfo.processInfo.environment["PERSONA_SHOTS"] != nil }
     /// Both looks when screenshots are kept; light alone otherwise.
     private var schemes: [String] { shots ? ["light", "dark"] : ["light"] }
-    /// The default style, and BeautifulUI's when screenshots are kept (its components, the same composer in the shell).
-    private var styles: [String] { shots ? ["glass", "beautiful"] : ["glass"] }
+    /// The default style and BeautifulUI's when screenshots are kept (its components, the same composer in the shell);
+    /// otherwise the run's (`UITestStyle`).
+    private var styles: [String] { shots ? ["glass", "beautiful"] : [UITestStyle.name] }
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -67,6 +71,67 @@ final class AttachMenuTests: XCTestCase {
         }
     }
 
+    /// Health's new conversation (#3825): Persona's new conversation's composer and menu, less Voice Chat.
+    @MainActor func testHealthMenu() {
+        for style in styles {
+            for scheme in schemes {
+                let app = launch(Self.health, scheme: scheme, style: style)
+                openMenu(app)
+                for id in ["composer-menu-camera", "composer-menu-scan", "composer-menu-mention"] {
+                    XCTAssertTrue(item(app, id).waitForExistence(timeout: 5), "no \(id) in Health's menu:\n\(app.debugDescription)")
+                }
+                XCTAssertFalse(item(app, "composer-menu-voice").exists, "Voice Chat before the health conversation exists")
+                XCTAssertFalse(item(app, "composer-menu-meeting").exists, "Meeting Recording outside the main conversation")
+                XCTAssertFalse(commands(app).exists, "Quick Commands in Health's new conversation")
+                photosAndFiles(app)
+                shot("attach-menu-health", scheme, style)
+                app.terminate()
+            }
+        }
+    }
+
+    /// Health's model button (#3825): Persona's new conversation's menu, the effort and, a level down, the permission mode.
+    /// As there, the button is in the box's open row: a short draft opens it, with the keyboard put away so the menu has room.
+    @MainActor func testHealthModelMenu() {
+        for style in styles {
+            for scheme in schemes {
+                let app = launch(Self.health, scheme: scheme, style: style)
+                let field = app.descendants(matching: .any)["shell-composer-field"].firstMatch
+                XCTAssertTrue(field.waitForExistence(timeout: 40), "no composer on Health's page:\n\(app.debugDescription)")
+                sleep(2) // the page settles
+                for _ in 0..<3 where !app.keyboards.firstMatch.exists {
+                    field.tap()
+                    _ = app.keyboards.firstMatch.waitForExistence(timeout: 4)
+                }
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 12) + "ok")
+                let hide = app.buttons["shell-composer-dismiss-keyboard"].firstMatch
+                if hide.waitForExistence(timeout: 5) { hide.tap() }
+                _ = app.keyboards.firstMatch.waitForNonExistence(timeout: 5)
+                let modes = app.buttons["shell-composer-modes"].firstMatch
+                XCTAssertTrue(modes.waitForExistence(timeout: 10), "no model button on Health's page:\n\(app.debugDescription)")
+                modes.tap()
+                // The mock hub's launchers, an effort level (its detail may follow in the label, as in `MenuSectionTitleTests`),
+                // and the permission mode's submenu.
+                for (what, format, title) in [("the launchers", "label BEGINSWITH %@", "claude"),
+                                              ("the effort", "label MATCHES %@", "^中([,，\\n][\\s\\S]*)?$"),
+                                              ("the permission mode", "label BEGINSWITH %@", "权限模式")] {
+                    let row = app.descendants(matching: .any).matching(NSPredicate(format: format, title)).firstMatch
+                    XCTAssertTrue(row.waitForExistence(timeout: 5), "no \(what) in Health's model menu:\n\(app.debugDescription)")
+                }
+                shot("health-model-menu", scheme, style)
+                // The page keeps its draft: it goes again, or the next screenshots show it.
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+                for _ in 0..<3 where !app.keyboards.firstMatch.exists {
+                    field.tap()
+                    _ = app.keyboards.firstMatch.waitForExistence(timeout: 4)
+                }
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 12))
+                sleep(2) // drafts are saved a moment later
+                app.terminate()
+            }
+        }
+    }
+
     /// An Agent's conversation: Quick Commands fold into a submenu, with /clear dimmed while the Agent works.
     @MainActor func testAgentMenu() {
         for scheme in schemes {
@@ -95,8 +160,8 @@ final class AttachMenuTests: XCTestCase {
     /// menu's rows (an Agent's commands under them).
     @MainActor func testATapOpensThePanel() throws {
         guard !isPad else { throw XCTSkip("the iPad's + is the menu") }
-        var pages = [("persona", Self.persona, "glass"), ("agent", Self.agent, "glass"), ("new", Self.new, "glass")]
-        if shots { pages += [("persona", Self.persona, "beautiful"), ("new", Self.new, "beautiful")] }
+        var pages = [("persona", Self.persona, "glass"), ("agent", Self.agent, "glass"), ("new", Self.new, "glass"), ("health", Self.health, "glass")]
+        if shots { pages += [("persona", Self.persona, "beautiful"), ("new", Self.new, "beautiful"), ("health", Self.health, "beautiful")] }
         for scheme in schemes {
             for (name, args, style) in pages {
                 let app = launch(args, scheme: scheme, style: style)
@@ -109,7 +174,7 @@ final class AttachMenuTests: XCTestCase {
                 for id in ["composer-menu-camera", "composer-menu-scan", "composer-menu-mention"] {
                     XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5), "no \(id) in More (\(name)):\n\(app.debugDescription)")
                 }
-                XCTAssertEqual(app.buttons["composer-menu-voice"].exists, name != "new", "Voice Chat in More (\(name))")
+                XCTAssertEqual(app.buttons["composer-menu-voice"].exists, name != "new" && name != "health", "Voice Chat in More (\(name))")
                 XCTAssertEqual(app.buttons["composer-menu-meeting"].exists, name == "persona", "Meeting Recording in More (\(name))")
                 // The list draws what is on screen: the first command, not /clear at the bottom. An Agent's list is
                 // longer than the resting sheet: tapping the tab shown opens it all the way.
@@ -226,17 +291,19 @@ final class AttachMenuTests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label == %@", "attach-menu-commands", "快捷指令")).firstMatch
     }
 
-    /// Always with a style: the app writes the style it launched with back to its settings on a fresh install.
-    @MainActor private func launch(_ extra: [String], scheme: String, style: String = "glass") -> XCUIApplication {
+    /// Always with a style: the app writes the style it launched with back to its settings on a fresh install. This test
+    /// names its styles itself, so not `launchPinned()`: its `-ui.style` comes later and wins, and the BeautifulUI
+    /// screenshots came out in Liquid Glass.
+    @MainActor private func launch(_ extra: [String], scheme: String, style: String = UITestStyle.name) -> XCUIApplication {
         let app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app.launchArguments = ["-pairURL", pair, "-showCameraRows", "YES", "-ui.scheme", scheme, "-ui.style", style] + extra
-        app.launchPinned()
+        app.launchPersona()
         return app
     }
 
     /// The whole screen: a menu is drawn in a window of its own.
-    @MainActor private func shot(_ name: String, _ scheme: String, _ style: String = "glass") {
+    @MainActor private func shot(_ name: String, _ scheme: String, _ style: String = UITestStyle.name) {
         sleep(1)
         let s = XCUIScreen.main.screenshot()
         let file = name + (isPad ? "-ipad" : "") + (style == "glass" ? "" : "-" + style) + "-" + scheme

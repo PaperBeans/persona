@@ -45,9 +45,13 @@ import Observation
 
     var isAgentsOverride: Bool { purpose.map(Self.followsAgents) ?? false }
 
-    /// The background supervisor's use (#5083, docs/assistant/model-config.md): the hub's catalog leaves it out and
-    /// answers for it by its own id, so the list asks for it apart. An older hub has none (404) and lists none.
+    /// The background supervisor's use (#5083, docs/assistant/model-config.md): a hub since #5806 lists it in the
+    /// catalog, and the list reads it there. A hub before that leaves it out and answers for it by its own id, so the
+    /// list asks for it apart; a hub from before the use has none (404) and lists none.
     static let supervise = "assistant.supervise"
+
+    /// The catalog lacks the use (`supervise`): only then is it asked for by its id.
+    static func asksApart(_ catalog: [ModelPurpose]) -> Bool { !catalog.contains { $0.id == supervise } }
 
     /// The background supervisor's use with fields of its own: it follows Main Chat while they are empty.
     static func followsMainChat(_ p: ModelPurpose) -> Bool { p.id == supervise && p.hasWritableFields }
@@ -143,12 +147,12 @@ import Observation
                 draft = result.purpose.override
                 loadedPurposeID = purposeID
             } else {
-                // The background supervisor's use is not in the catalog: asked for by its id, beside the catalog.
-                let supervise = Self.supervise
-                async let apart = try? api.modelPurpose(supervise)
                 let result = try await api.modelConfiguration()
-                let extra = await apart
-                purposes = Self.listing(result.purposes, apart: extra?.purpose)
+                // A hub that lists the background supervisor's use is not asked for it again (#5806); one from before
+                // answers for it by its id only, and its row goes after the catalog as before.
+                var apart: ModelPurposeDetail?
+                if Self.asksApart(result.purposes) { apart = try? await api.modelPurpose(Self.supervise) }
+                purposes = Self.listing(result.purposes, apart: apart?.purpose)
                 providers = result.providers
                 if !purposes.isEmpty && categories.isEmpty {
                     error = String(localized: "This hub doesn't support model configuration by category yet. Update the server first.")

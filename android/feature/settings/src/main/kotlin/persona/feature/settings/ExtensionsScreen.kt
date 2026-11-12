@@ -174,6 +174,7 @@ fun ExtensionPage(
     val api = rememberPinned(extensions, extensionPrefixes(extensionId) + listOf(listOf("extensions", "-", "catalog"),
         listOf("extensions", "-", "upgrades"), listOf("plugins", "-", "catalog"), listOf("plugins", "-", "upgrades")), owner)
     val res = LocalResources.current
+    val uri = LocalUriHandler.current
     val model = remember(api, extensionId, res, owner) { ExtensionModel(api, extensionId, res, owner) }
     val logoLoader = rememberExtensionLogoLoader(api)
     val state by model.state.collectAsState()
@@ -289,7 +290,8 @@ fun ExtensionPage(
         }, information = {
             if (detail != null) {
                 contributions(detail, state.busy || state.saving || state.loadFailed, res) { item, on -> scope.launch { model.setContribution(item, on) } }
-                sandbox(detail.extension.sandbox)
+                sandbox(detail.extension.sandbox, detail.extension.name.ifBlank { extensionId },
+                    onAllow = api.adminNetworkUrl(extensionId)?.let { url -> { uri.openUri(url) } })
                 permissions(detail)
             }
         })

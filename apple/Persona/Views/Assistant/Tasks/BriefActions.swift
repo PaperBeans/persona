@@ -108,3 +108,24 @@ import SwiftUI
         }
     }
 }
+
+/// Where a recommended-setup line's Open Settings goes (#5804): the Settings page its mechanism is turned on at.
+@MainActor enum BriefSetupPages {
+    /// The Settings pages to show, in order.
+    static func path(_ page: BriefBody.Setup.Page) -> NavigationPath {
+        var path = NavigationPath()
+        switch page {
+        case .triage:
+            path.append(SettingsPage.triage)
+        case .superviseModel:
+            path.append(SettingsPage.modelConfiguration)
+            path.append(ModelPurposeRoute(id: ModelConfigurationModel.supervise))
+        }
+        return path
+    }
+
+    static func open(_ page: BriefBody.Setup.Page, in model: AppModel = .shared) {
+        model.settingsPath = path(page)
+        model.showSettings()
+    }
+}
