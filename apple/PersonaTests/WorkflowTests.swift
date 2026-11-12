@@ -72,6 +72,22 @@ import Testing
         #expect(!bg.isBackgroundWorking && bg.stateLabel == "工作中" && bg.backgroundCount == 1)
     }
 
+    /// A summary row (`summary=1`, the Agents list's Recent grouping, #5888) sends `running_workflows` and the newest
+    /// run's `workflow_progress` instead of `workflows`: the row keeps its workflow line and 「工作中（后台）」.
+    @Test func aSummaryRowReadsItsWorkflowProgress() throws {
+        let progress = #""waiting":true,"background_count":1,"background_tasks_count":0,"running_workflows":1,"workflow_progress":{"task_id":"w","name":"parity-audit","status":"running","running":true,"phase":"Verify","phase_index":2,"phase_count":2,"agents_started":185,"agents_done":169}"#
+        let s = try session(progress)
+        #expect(s.workflows == nil)
+        #expect(s.runningWorkflows.map(\.title) == ["parity-audit"] && s.leadWorkflow?.phaseLabel == "Verify 2/2")
+        #expect(s.isBackgroundWorking && s.stateLabel == "工作中（后台）")
+        // A count without progress (an older runtime's background entry) still reads as background work.
+        let counted = try session(#""waiting":true,"background_count":1,"running_workflows":1"#)
+        #expect(counted.runningWorkflows.isEmpty && counted.isBackgroundWorking)
+        // A row that carries `workflows` reads only those.
+        let ended = try session(progress + #","workflows":[{"task_id":"w","status":"completed","running":false}]"#)
+        #expect(ended.runningWorkflows.isEmpty && !ended.isBackgroundWorking)
+    }
+
     /// The hub decides the state: a running workflow on an idle agent (an older hub) is not drawn as working, and the
     /// assistant's own conversation never reads as background.
     @Test func stateStaysTheHubs() throws {

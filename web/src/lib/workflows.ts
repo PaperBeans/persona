@@ -16,8 +16,10 @@ export function workflowStatus(w: Workflow): WorkflowStatus {
   return (["failed", "killed", "stalled"] as const).find((s) => s === w.status) ?? "completed";
 }
 
-/** Its runs still running. */
+/** Its runs still running. A summary row (`summary=1`) has no `workflows`: its `workflow_progress`, the newest running
+ *  run without its agents and phases, stands for them (#5888). */
 export function runningWorkflows(s: Session | undefined): Workflow[] {
+  if (!s?.workflows && s?.workflow_progress?.running) return [s.workflow_progress];
   return (s?.workflows ?? []).filter((w) => w.running);
 }
 
@@ -42,7 +44,7 @@ export function workflowName(w: Workflow): string {
 /** "Verify 2/2", "Verify", "" */
 export function workflowPhase(w: Workflow): string {
   if (!w.phase) return "";
-  const n = w.phases?.length ?? 0;
+  const n = w.phases?.length || w.phase_count || 0; // a summary row's run has no phases, only how many (#5888)
   return w.phase_index && n ? `${w.phase} ${w.phase_index}/${n}` : w.phase;
 }
 

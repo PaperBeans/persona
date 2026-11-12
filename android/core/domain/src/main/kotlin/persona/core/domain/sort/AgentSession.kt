@@ -33,7 +33,9 @@ data class AgentSession(
      * "Working (Background)" where a state is spelled out ([stateWord]). iOS reads it off the running workflows, not off the
      * hub's `background_working`, and not for the assistant's own conversation.
      */
-    val isBackgroundWorking: Boolean get() = !session.assistant && state == AgentState.Working && session.runningWorkflows.isNotEmpty()
+    val isBackgroundWorking: Boolean get() = !session.assistant && state == AgentState.Working &&
+        // a summary row's count also covers a run it sends no progress for (an older runtime's background entry, #5888)
+        (session.runningWorkflows.isNotEmpty() || (session.workflows == null && (session.runningWorkflowsCount ?: 0) > 0))
     fun awaitsReply(mutes: AgentPreferences): Boolean = asksYou && !mutes.mutes(this)
     /** Kept out of the idle folds and quiet spaces: not quiet, waiting to be woken, or Awaiting Reply ([awaitsReply]). */
     fun stays(mutes: AgentPreferences): Boolean = !isQuiet || isWaiting || awaitsReply(mutes)

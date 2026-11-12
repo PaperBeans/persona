@@ -55,5 +55,10 @@
   "switch_failed_stopped": "The agent couldn’t start on the other model provider and has stopped; the switch was dropped. Your message wasn’t sent. Check its terminal, or use Resume on its terminal page.",
   "switch_stale": "The agent moved to another model provider since you picked this one. Look at the provider it runs on now, then pick again.",
   "switch_pick_model": "Persona can’t see which model that model provider runs by default, and without one the conversation would keep its current model. Pick a model of that provider.",
-  "switch_under_way": "The agent is moving to another model provider right now. Try again once it runs; nothing was done."
+  "switch_under_way": "The agent is moving to another model provider right now. Try again once it runs; nothing was done.",
+  "rewind_busy": "Wait for the session to become idle before rewinding.",
+  "rewind_unsupported": "This session does not support the requested rewind.",
+  "rewind_mismatch": "The selected message moved. Reload the conversation before rewinding.",
+  "rewind_nothing": "There is no message to rewind to.",
+  "rewind_failed": "Rewind could not be confirmed. Reload the conversation to check its current history."
 }

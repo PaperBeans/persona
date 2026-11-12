@@ -266,9 +266,18 @@ internal fun ChatActionsSheet(actions: List<JAction>, onDismiss: () -> Unit, tit
     }
 }
 
-/** The state the header shows: the status line's (an ended chat, an offline machine, a request), else the session's. */
-internal fun headerStatus(state: StatusLineState, session: Session?): Status =
-    resolveStatusLine(state)?.status ?: Status.entries.firstOrNull { it.name == session?.agentState?.name } ?: Status.Unknown
+/**
+ * The state the header shows: the status line's (an ended chat, an offline machine, a request), else the session's. The status
+ * line's own "Waiting" (a loop or background work on a chat that is not working) is not a state of the session: the header says
+ * the session's own, as iOS does (`stateWords`, `StatusDot`), so a seen chat with a loop says nothing in words and has Seen's dot,
+ * and a finished one says Unread; the loop and the background work have their pill (Glass) and their chips above the composer.
+ * A chat the hub counts as working keeps it: its words are [stateLabel]'s.
+ */
+internal fun headerStatus(state: StatusLineState, session: Session?): Status {
+    val own = Status.entries.firstOrNull { it.name == session?.agentState?.name } ?: Status.Unknown
+    val line = resolveStatusLine(state) ?: return own
+    return if (line.kind == StatusLineKind.Waiting && own != Status.Working) own else line.status
+}
 
 /**
  * The slim bar an Agent chat's header folds into on Glass (iOS `compactChrome`, #4339 C4): back, the agent's mark, the

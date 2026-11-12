@@ -85,9 +85,9 @@ class PlanCardConversationTest {
 
     private lateinit var api: Api
 
-    /** [alone]: the card by itself, given the plan as the tray's sheet captured it, not the conversation's lines. */
+    /** [alone]: that plan's card by itself, given as the tray's sheet captured it, not the conversation's lines. */
     private fun show(style: AppStyle, dark: MutableState<Boolean> = mutableStateOf(false), plans: List<TaskPlan> = listOf(plan),
-        items: List<FeedItem> = feed, alone: Boolean = false) {
+        items: List<FeedItem> = feed, alone: TaskPlan? = null) {
         api = Api(plans)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val store = TasksStore(api, Connection(), scope)
@@ -108,7 +108,7 @@ class PlanCardConversationTest {
                     listOf(NavItem("assistant", "Assistant", persona.core.designsystem.icons.PhIcons.House)), "assistant", onSelect = {}, leading = {})) {
                     Column(Modifier.fillMaxWidth().testTag("plan-shot").background(PersonaTheme.palette.background)
                         .padding(Tokens.Space.l), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                        if (alone) PlanCard(plan, host)
+                        if (alone != null) PlanCard(alone, host)
                         else lines.forEach { line -> key(line.contentKey) {
                             ChatLineContent(line, session, loader, null, onToggle = {}, onFold = {}, folding = emptySet(),
                                 foldErrors = emptyMap(), onFullText = {}, style = ChatRenderStyle.Assistant)
@@ -146,7 +146,7 @@ class PlanCardConversationTest {
             // the number disc only when there are several tasks
             rule.onNodeWithText("1").assertIsDisplayed()
             rule.onNodeWithText("2").assertIsDisplayed()
-            for (chip in listOf("Work laptop", "shop", "Default model", "Can edit files", "Build server", "app", "opus", "Read-only requested"))
+            for (chip in listOf("Work laptop", "shop", "Default model", "Can edit files", "Build server", "app", "Opus", "Read-only requested"))
                 rule.onNodeWithText(chip).assertIsDisplayed()
             rule.onNodeWithText("It only touches the docs folder").assertIsDisplayed()
             // the choice, then the three actions in iOS's order
@@ -189,12 +189,43 @@ class PlanCardConversationTest {
 
     @Test fun aCardLeftOpenFollowsItsPlanOnceStartedInsteadOfOfferingStartAgain() {
         // The tray's sheet keeps the plan it was opened with; the card reads the store's latest of it.
-        show(AppStyle.Glass, alone = true)
+        show(AppStyle.Glass, alone = plan)
         rule.onNodeWithTag("plan-start-plan").performClick(); settle()
         assertEquals("plan" to false, api.started)
         rule.onAllNodesWithTag("plan-start-plan").assertCountEquals(0)
         rule.onNodeWithText("✓ Started 2 tasks").assertIsDisplayed()
     }
+
+    private val named = TaskPlan("named", "main", listOf(
+        PlanTask("Look at the raw id", machine = "mac", cwd = "/w/a", model = "claude-opus-4-8[1m]"),
+        PlanTask("Start on a launcher", machine = "mac", cwd = "/w/b", launcher = "claude-kimi"),
+        PlanTask("Start on the default", machine = "mac", cwd = "/w/c"),
+    ), "open", at(5))
+
+    private fun namesTheModels() {
+        rule.onNodeWithText("Opus 4.8").assertIsDisplayed()
+        rule.onNodeWithText("Claude Kimi").assertIsDisplayed()
+        rule.onNodeWithText("Default model").assertIsDisplayed()
+        // never the raw id on the card (DESIGN_SYSTEM.md 5.6); iOS writes it as it is
+        rule.onAllNodesWithText("claude-opus-4-8[1m]").assertCountEquals(0)
+        rule.onAllNodesWithText("claude-kimi").assertCountEquals(0)
+    }
+
+    @Test fun glassNamesAModelByItsShortNameAndTheEditFieldKeepsTheRawValue() {
+        show(AppStyle.Glass, plans = listOf(named), items = listOf(FeedItem("named-feed", "main", at(5), "plan", "named")))
+        namesTheModels()
+        // what the task starts with stays as it is: the field holds the raw id, which is what Start sends
+        rule.onNodeWithTag("plan-edit-named").performClick(); settle()
+        rule.onNode(hasText("claude-opus-4-8[1m]") and hasSetTextAction()).assertExists()
+    }
+
+    private fun aTraySheetsCardNamesTheModelsToo(style: AppStyle) {
+        show(style, plans = listOf(named), alone = named)
+        namesTheModels()
+    }
+
+    @Test fun briefsCardNamesTheModelsToo() = aTraySheetsCardNamesTheModelsToo(AppStyle.Brief)
+    @Test fun boardsCardNamesTheModelsToo() = aTraySheetsCardNamesTheModelsToo(AppStyle.Board)
 
     @Test fun startTheseDirectlyGoesWithStart() {
         show(AppStyle.Glass)

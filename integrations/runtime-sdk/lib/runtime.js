@@ -60,6 +60,8 @@ export function defaultSocketPath() {
  * @property {(params: {cwd: string, prompt?: string}) => Promise<{session: object}>} [start]
  * @property {(params: {session_id: string, title: string}) => Promise<void>} [rename]
  * @property {(params: {session_id: string}) => Promise<void>} [close]
+ * @property {(params: {session_id: string, prompt: string, occurrence: number, prompts_after?: number, restore: string}) => Promise<object>} [rewind] -
+ *   native conversation rewind, with target validation and rewritten history published through append.
  * @property {(params: {session_id: string}) => Promise<void>} [archive] - the runtime's own reversible archive of an
  *   idle session, without stopping or closing anything (caps.archive: only with unarchive too). The session the user
  *   archives in Persona is archived here as well; already archived answers as done.
@@ -236,6 +238,7 @@ export function createRuntime(driver, options) {
     if (typeof driver.modes === 'function' && options.modelSwitch === true) caps.model = true
     if (typeof driver.models === 'function') caps.models = true
     if (typeof driver.check === 'function') caps.check = true
+    if (typeof driver.rewind === 'function') caps.rewind = true
     // Its own archive, both ways: an archive Persona could not undo is not offered.
     if (typeof driver.archive === 'function' && typeof driver.unarchive === 'function') caps.archive = true
     if (options.resume === true && caps.start) caps.resume = true
@@ -752,6 +755,11 @@ export function createRuntime(driver, options) {
       case 'session.interrupt':
         await need(driver.interrupt, 'interrupt')(params)
         return { ok: true }
+      case 'session.rewind': {
+        const result = await need(driver.rewind, 'rewind')(params)
+        schedulePush()
+        return result
+      }
       case 'session.rename':
         await need(driver.rename, 'rename')(params)
         schedulePush()

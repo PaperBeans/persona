@@ -25,7 +25,7 @@ export interface ChatActions {
    *  off for now ("" = on: Claude only, working…), live: it changes each time the session starts or stops working, and only
    *  an open menu reads it, so that does not render every message's actions again. `run` goes back to before the message
    *  (its UserMessage.id) and puts it in the composer, rejecting with the reason in the message. */
-  rewind?: { block: LiveValue<string>; run: RewindRun };
+  rewind?: { block: LiveValue<string>; code?: boolean; run: RewindRun };
 }
 
 export type RewindRun = (messageId: string, text: string, restore: RewindRestore) => Promise<void>;

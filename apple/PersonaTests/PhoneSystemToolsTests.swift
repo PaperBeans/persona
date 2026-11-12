@@ -97,7 +97,9 @@ struct PhoneSystemToolsTests {
         #expect(card.contains("Family"))
         #expect(card.contains(String(notes.prefix(200))))
         #expect(!card.contains(String(notes.prefix(201))))
-        #expect(card.contains(CardTime.text(start)) && card.contains(CardTime.text(end)))
+        let timeZone = try #require(TimeZone(secondsFromGMT: 8 * 3600))
+        #expect(card.contains(CardTime.text(start, timeZone: timeZone)))
+        #expect(card.contains(CardTime.text(end, timeZone: timeZone)))
         #expect(!card.contains("2027-01-15T15:00:00+08:00"))
     }
 

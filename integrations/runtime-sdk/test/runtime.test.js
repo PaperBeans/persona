@@ -692,3 +692,20 @@ test('a card for a new session waits for a slow list already under way, then for
   const card = order.findIndex((e) => e[0] === 'card')
   assert.ok(order.slice(0, card).some((e) => e[0] === 'list' && e[1].includes('new')), JSON.stringify(order))
 })
+
+
+test('native rewind is advertised and returns the driver result with a refreshed inventory', async (t) => {
+  const node = await startFakeNode(t)
+  let called
+  const result = { prompt: 'Example', restore: 'conversation', input_cleared: true, code_restored: false }
+  const rt = createRuntime(minimal({ listSessions: async () => [{ session_id: 's1', status: 'idle', rev: called ? 2 : 1 }], rewind: async (params) => { called = params; return result } }), { runtime: 'toy', socketPath: node.path, pushDelayMs: 5 })
+  t.after(() => rt.stop())
+  rt.start()
+  await node.ready
+  assert.equal(node.hello.caps.rewind, true)
+  await until('initial rewind inventory', () => node.last('runtime.sessions'))
+  const params = { session_id: 's1', prompt: 'Example', occurrence: 1, prompts_after: 0, restore: 'conversation' }
+  assert.deepEqual(await node.peer.call('session.rewind', params), result)
+  assert.deepEqual(called, params)
+  await until('inventory after rewind', () => node.all('runtime.sessions').length > 1)
+})

@@ -836,6 +836,39 @@ Now every locked field has a holder, and writes follow **the user > an extension
 - The answer carries `before`: each written field's previous value (`summary` the old text), so the extension can keep its own undo log; undo is another `kb.update` with those values, plus `unlock` when the field was free before.
 - **Without extensions nothing changes**: no write adds `provenance`; the user's writes only remove entries that exist. The legacy `hub_api` HTTP `PUT` from an extension token still counts as the user.
 
+### Fields each kind takes
+
+Every write path (`kb.update`, HTTP `PUT`, the assistant's `kb_update`) takes only the fields the entry's kind uses (`kb/fields.go`). Everything else is taken out of the update before it applies, so it is neither written, nor locked, nor attributed. The answer names it in `ignored: [{field, reason}]` (the assistant's tool says "Not saved: …"); fields used are written as before. Any kind takes `importance`, `relevance`, `tags`, `pinned` and `lock`, and in addition:
+
+| Kind | Also takes |
+| --- | --- |
+| projects | `name`, `project_kind`, `status`, `goal`, `my_role`, `note`, `summary`, `log` (with `source`), `aliases` / `remove_aliases`, `chats` / `remove_chats`, `people` / `remove_people`, `dirs`, `merge_into` |
+| chats | `name`, `summary`, `projects` / `remove_projects`, `remove_people` |
+| people | `note`, `status`, `profile`, `projects` / `remove_projects`, `remove_chats` |
+| docs, meetings, events | `note`, `projects` / `remove_projects` |
+| topics | `name`, `note`, `aliases` / `remove_aliases` (`summary` is refused: it is written from the points) |
+| recordings | `projects` / `remove_projects` |
+
+A person's `summary` and `log` used to be dropped without a word (and `summary` was even locked, for nothing): summary.md is written from what is known of the person. What an extension knows of them goes in its `profile`.
+
+### Person profiles
+
+A person's summary.md (`WritePersonSummary`) is written from what is known: the user's confirmed facts (`pinned`), the note, the projects and chats, the direct chat's summary. What a writer has learned about the person (an extension that keeps track of the people the user deals with, or the user) goes in a **profile** of its own, in four parts kept apart (`kb/profile.go`):
+
+| Part | What | Each item |
+| --- | --- | --- |
+| `facts` | Their role, what they are in charge of, how they relate to the user | `text`, `sources` |
+| `views` | What the user said of them, in the user's own words | `text` (quoted), `sources` |
+| `inferences` | What the writer infers and nobody stated; only a hint | `text`, `basis` (required), `sources` |
+| `commitments` | Promises and to-dos between them, either way | `text`, `owes` (`user`: the user to them; `them`: they to the user), `due?` (YYYY-MM-DD), `done?`, `sources` |
+
+- **Sources** are required on every item (1 to 5): a knowledge-base path (`chats/<id>/messages/<day>.md`, `recordings/<id>`), a URL, or `user` for the user's own word.
+- **Bounds**: at most 30 items a part, 500 characters a text, 300 a basis, and 8000 bytes for one profile as summary.md shows it. A profile that breaks a rule is refused whole (`invalid_params` over RPC, 400 over HTTP) and nothing of the update is written; nothing is cut to fit.
+- **Whose**: each writer has its own (`ext:<id>` for an extension, `user` for the user's writes). A write of `profile` replaces only the writer's own as a whole; one with no items removes it. Nobody else's profile, nor the person's `pinned` and `note`, is touched, so a profile never conflicts with another holder and adds nothing to `locked_fields` or `provenance`. The answer's `before.profile` is the writer's profile before (or `null`).
+- **Stored** in `people/<id>/profiles.json`, outside meta.json and outside search.
+- **Shown** in summary.md after the pinned facts and the note. There is one section per writer (the user's first, then the extensions' by id), headed with who wrote it, when, and that it is the user's private knowledge, for reference only and never to be passed on to the person or written into anything sent to others. Each part has its own subheading, and every line carries its part (`[事实]`, `[用户原话]`, `[推断·仅供参考]` with its basis, `[承诺·…]`), so a line a search returns still says whether it is a fact or a guess. All profiles together are at most 16000 bytes; a profile that would go past that is named but not shown.
+- **Read**: `kb_get` and `kb.get` show it in `summary`, and `kb.get` also gives `profiles` by writer as written, for an extension to read its own back. `kb_search` and `kb.search` find its lines in summary.md, labelled. An ignored person (`status: ignored`) has no summary.md, so its profiles are kept but not shown.
+
 ### Built-in organization and extensions side by side (#6100)
 
 An extension that curates (a daily and weekly pass: triage, sourced summaries, deterministic checks, proposals for review, merges and splits) runs **on top of** the built-in pipeline, not instead of it:

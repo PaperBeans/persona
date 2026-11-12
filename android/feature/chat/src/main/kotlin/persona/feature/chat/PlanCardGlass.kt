@@ -147,8 +147,7 @@ private fun GlassPlanTask(number: Int, task: PlanTask, numbered: Boolean, host: 
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
             JChip(host.machineName(task.machine), icon = PersonaIcons.laptop)
             JChip(task.project, icon = PersonaIcons.folder)
-            JChip(task.model?.takeIf(String::isNotBlank) ?: task.launcher?.takeIf(String::isNotBlank) ?: stringResource(R.string.chat_tasks_default_model),
-                icon = PersonaIcons.cpu)
+            JChip(planModelLabel(task), icon = PersonaIcons.cpu)
             // iOS: a read-only task says so, in the accent; else the permission it starts with, when one is set.
             if (task.readonly == true) JChip(stringResource(R.string.chat_tasks_read_only), icon = PersonaIcons.view, accent = true)
             else task.permission?.takeIf(String::isNotEmpty)?.let { JChip(permissionLabel(it)) }

@@ -71,6 +71,7 @@ type codexHistoryMark struct {
 	Updated int64  `json:"updated"`
 	History string `json:"history"`
 	Size    int64  `json:"size"`
+	Lineage string `json:"lineage,omitempty"`
 }
 
 // codexHistoryDBPath is the newest history database in home (thread_history_1.sqlite in 2026-11).
@@ -126,11 +127,18 @@ func (n *Node) codexAppHistoryPath(src codexSource, pass *codexListPass) string 
 	if p == "" {
 		return ""
 	}
-	if _, ok := codexAppThreadOf(withoutGoneRollout(src, pass)); !ok {
-		return ""
-	}
 	if _, err := pass.stat(p); err != nil {
 		return ""
+	}
+	t, paginated := codexPaginatedThreadOf(src)
+	mark, _ := readCodexHistoryMark(p)
+	if !paginated || !codexContinuationPath(t.RolloutPath) && !codexContinuationPath(mark.Lineage) {
+		if withoutGoneRollout(src, pass).path != "" {
+			return ""
+		}
+		if _, ok := codexAppThreadOf(withoutGoneRollout(src, pass)); !ok {
+			return ""
+		}
 	}
 	return p
 }
@@ -140,6 +148,14 @@ func (n *Node) codexAppHistoryChat(id string) (codexSource, codexAppThread, bool
 	src, ok := n.codexSource(id)
 	if !ok || n.codexBlocked(id) || n.ownedAssistantSource(id) { // as findTranscriptPath: no transcript of these here
 		return codexSource{}, codexAppThread{}, false
+	}
+	if t, paginated := codexPaginatedThreadOf(src); paginated {
+		if _, thread, err := n.codexOwner(id); err == nil && thread.path != "" {
+			t.RolloutPath = thread.path
+		}
+		if codexContinuationPath(t.RolloutPath) {
+			return src, t, true
+		}
 	}
 	src = withoutGoneRollout(src, nil)
 	if src.path != "" || rolloutPath(src.home, src.thread) != "" {
@@ -153,22 +169,22 @@ func (n *Node) codexAppHistoryChat(id string) (codexSource, codexAppThread, bool
 // App's databases changed since: the turns finished since are appended, or the file is written anew. One writer at a
 // time, across processes too (two nodes on one computer share the state directory): the others wait for its write (up to
 // codexAppHistoryLockWait), so a chat opened by several requests at once has its transcript for each.
-func (n *Node) refreshCodexAppHistory(id string) {
+func (n *Node) refreshCodexAppHistory(id string) error {
 	src, t, ok := n.codexAppHistoryChat(id)
 	if !ok {
-		return
+		return nil
 	}
 	p := n.codexAppHistoryFile(src)
 	if p == "" {
-		return
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return
+		return err
 	}
 	release, err := lockCodexAppHistory(p + ".lock")
 	if err != nil {
 		n.logf("codex app history %s: %v", src.thread, err)
-		return
+		return err
 	}
 	defer release()
 	mark, size := readCodexHistoryMark(p)
@@ -177,21 +193,25 @@ func (n *Node) refreshCodexAppHistory(id string) {
 	if db != "" {
 		history = fileStamp(db) + fileStamp(db+"-wal")
 	}
-	if mark.Updated == t.UpdatedAtMs && mark.History == history && mark.Size == size {
-		return // up to date
+	if mark.Updated == t.UpdatedAtMs && mark.History == history && mark.Size == size && (!t.Paginated || mark.Lineage == t.RolloutPath) {
+		return nil // up to date
 	}
 	if db == "" {
-		return
+		return nil
 	}
 	codexAppHistoryFailed.Lock()
 	f, failed := codexAppHistoryFailed.byPath[p]
 	codexAppHistoryFailed.Unlock()
 	if failed && f.updated == t.UpdatedAtMs && (time.Since(f.at) < codexAppHistoryRetrySoon || f.history == history && time.Since(f.at) < codexAppHistoryRetry) {
-		return
+		return errors.New("Codex history is waiting to retry a failed read")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), codexAppHistoryWait)
 	defer cancel()
-	grow := mark.Size >= 0 && mark.Size == size && mark.TurnID != ""
+	lineage := ""
+	if t.Paginated {
+		lineage = t.RolloutPath
+	}
+	grow := mark.Size >= 0 && mark.Size == size && mark.TurnID != "" && mark.Lineage == lineage
 	res, err := writeCodexAppHistory(ctx, db, t, p, mark, grow)
 	if errors.Is(err, errCodexHistoryChanged) { // a written turn is not what it was (the App rolled back): anew
 		res, err = writeCodexAppHistory(ctx, db, t, p, codexHistoryMark{Turn: -1}, false)
@@ -199,7 +219,7 @@ func (n *Node) refreshCodexAppHistory(id string) {
 	if err == nil {
 		_, size = readCodexHistoryMark(p)
 		err = writeCodexHistoryMark(p, codexHistoryMark{Turn: res.turn, TurnID: res.turnID, Status: res.status,
-			Updated: t.UpdatedAtMs, History: history, Size: size})
+			Updated: t.UpdatedAtMs, History: history, Size: size, Lineage: lineage})
 	}
 	codexAppHistoryFailed.Lock()
 	if err != nil {
@@ -210,9 +230,17 @@ func (n *Node) refreshCodexAppHistory(id string) {
 	codexAppHistoryFailed.Unlock()
 	if err != nil {
 		n.logf("codex app history %s: %v", src.thread, err)
-		return
+		return err
 	}
-	pruneCodexAppHistory(filepath.Dir(p), codexHomeTag(src.home), codexAppThreads(src.home))
+	live := map[string]codexAppThread{}
+	for id, row := range codexAppThreads(src.home) {
+		live[id] = row
+	}
+	for id, row := range codexPaginatedThreads(src.home) {
+		live[id] = row
+	}
+	pruneCodexAppHistory(filepath.Dir(p), codexHomeTag(src.home), live)
+	return nil
 }
 
 // lockCodexAppHistory takes the lock at path, waiting up to codexAppHistoryLockWait for another writer (of this process
@@ -329,10 +357,14 @@ func writeCodexAppHistory(ctx context.Context, db string, t codexAppThread, path
 	oneLine := func(col string) string {
 		return `REPLACE(REPLACE(COALESCE(` + col + `, ''), char(10), ' '), char(13), ' ')`
 	}
-	q := fmt.Sprintf(`SELECT t.rollout_ordinal, t.turn_id, t.status, COALESCE(t.duration_ms, -1), `+oneLine("t.error_json")+`, `+
-		`COALESCE(i.created_at_ms, 0), COALESCE(i.item_type, ''), `+oneLine("i.item_json")+` FROM thread_turns t `+
-		`LEFT JOIN thread_items i ON i.thread_id = t.thread_id AND i.turn_id = t.turn_id AND t.rollout_ordinal > %d `+
-		`WHERE t.thread_id = '%s' AND t.rollout_ordinal >= %d ORDER BY t.rollout_ordinal, i.rollout_ordinal`, from, t.ID, from)
+	cte, err := codexHistoryTurnsSQL(filepath.Dir(db), t)
+	if err != nil {
+		return res, err
+	}
+	q := cte + fmt.Sprintf(`SELECT t.history_ordinal, t.turn_id, t.status, COALESCE(t.duration_ms, -1), `+oneLine("t.error_json")+`, `+
+		`COALESCE(i.created_at_ms, 0), COALESCE(i.item_type, ''), `+oneLine("i.item_json")+` FROM history t `+
+		`LEFT JOIN thread_items i ON i.thread_id = t.thread_id AND i.turn_id = t.turn_id AND t.history_ordinal > %d `+
+		`WHERE t.history_ordinal >= %d ORDER BY t.history_ordinal, i.rollout_ordinal`, from, from)
 	cmd := exec.CommandContext(ctx, sqlite, "-readonly", "-bail", "-noheader", "-list", "-separator", "\x1f", "-cmd", ".timeout 2000", codexDBTarget(db), q)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -395,6 +427,14 @@ func writeCodexAppHistory(ctx context.Context, db string, t codexAppThread, path
 		}
 	}
 	at := time.UnixMilli(t.UpdatedAtMs)
+	if t.Paginated && !grow {
+		originator := "Codex"
+		if t.Source == "vscode" {
+			originator = "Codex Desktop"
+		}
+		line(at, "session_meta", map[string]any{"id": t.ID, "cwd": t.Cwd, "originator": originator, "source": t.Source})
+		metaWritten = true
+	}
 	var cur *turn
 	changed := false
 	r := bufio.NewReaderSize(stdout, 1<<20)
@@ -462,7 +502,7 @@ func writeCodexAppHistory(ctx context.Context, db string, t codexAppThread, path
 	switch {
 	case grow: // appended
 		return res, nil
-	case res.turn < 0: // no finished turn: no transcript, as before (one written before the App rolled back goes)
+	case res.turn < 0 && !t.Paginated: // an App-only chat without a completed turn keeps its previous behavior
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return res, err
 		}

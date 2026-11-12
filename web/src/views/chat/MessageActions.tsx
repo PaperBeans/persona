@@ -92,7 +92,7 @@ type Rewind = NonNullable<ChatActions["rewind"]>;
 /** "Rewind to here" (#2436) on a message of yours: "Conversation only" / "Code and conversation", the second asking again (it puts files back too). Off
  *  with the reason as its hint while the session cannot ("Claude only", "Working"…). Each choice waits for the node inside the
  *  menu (it drives Claude's own /rewind, up to a minute) and shows the failure there. */
-export function rewindActions(messageId: string | undefined, text: string, rewind: { block: string; run: Rewind["run"] } | undefined): Action[] {
+export function rewindActions(messageId: string | undefined, text: string, rewind: { block: string; code?: boolean; run: Rewind["run"] } | undefined): Action[] {
   if (!messageId || !rewind || !text.trim()) return [];
   const go = (restore: RewindRestore) => () => rewind.run(messageId, text, restore);
   return [
@@ -105,7 +105,7 @@ export function rewindActions(messageId: string | undefined, text: string, rewin
       onSelect: () => {},
       children: [
         { key: "rewind-conversation", label: t("rewind.conversation"), inline: true, onSelect: go("conversation") },
-        { key: "rewind-code", label: t("rewind.code_and_conversation"), danger: true, confirm: t("rewind.confirm_code"), inline: true, onSelect: go("code_and_conversation") },
+        ...(rewind.code === false ? [] : [{ key: "rewind-code", label: t("rewind.code_and_conversation"), danger: true, confirm: t("rewind.confirm_code"), inline: true, onSelect: go("code_and_conversation") }]),
       ],
     },
   ];
@@ -179,7 +179,7 @@ export function MessageActions({
   const rewindBlock = useWhileOpen(rewind?.block, Boolean(anchor || moreAnchor), "");
   const extras = [
     ...moreActions(itemId, chat?.fork, chat?.assistant),
-    ...rewindActions(messageId, text, rewind && { block: rewindBlock, run: rewind.run }),
+    ...rewindActions(messageId, text, rewind && { block: rewindBlock, code: rewind.code, run: rewind.run }),
     ...deleteActions(onDelete),
   ];
   const contextActions = side ? actions.filter((a) => a.key === "forward" || a.key === "context") : [];

@@ -24,6 +24,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import persona.core.contracts.BackgroundTask
+import persona.core.contracts.LoopInfo
 import persona.core.contracts.Machine
 import persona.core.contracts.Session
 import persona.core.contracts.Workflow
@@ -37,7 +38,8 @@ import java.time.Instant
  * The first words of an Agent chat's header line (#4339, iOS `ChatView.stateWords`) and the folded slim bar's dot, in every
  * style, light and dark: a turn that has run 22 minutes and one over an hour, then a turn that ended while a workflow runs
  * ("Working (Background)"), while all the background work only waits ("Waiting in the background", the clock for a dot on
- * Glass) and while a busy background command runs ("Working"). PNGs in `build/header-words-shots/`.
+ * Glass) and while a busy background command runs ("Working"); then a seen chat with a loop or background work, which says
+ * nothing in words (iOS). PNGs in `build/header-words-shots/`.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -68,6 +70,11 @@ class ChatHeaderWordsShotsTest {
             backgroundWaiting = true, background = listOf(command)), null),
         Scene(base.copy(sessionId = "s5", title = "Build the release", status = "idle", state = "working", backgroundWorking = true,
             background = listOf(command)), null),
+        // seen, with a /loop that has not fired yet, or with background work the hub does not count as working: iOS says nothing in
+        // words (it was the status line's "Waiting")
+        Scene(base.copy(sessionId = "s6", title = "Check the build every hour", status = "idle", state = "idle",
+            loop = LoopInfo(kind = "loop", prompt = "check the build")), null),
+        Scene(base.copy(sessionId = "s7", title = "Serve the docs", status = "idle", state = "idle", background = listOf(command)), null),
     )
 
     @Test fun everyStyle() {

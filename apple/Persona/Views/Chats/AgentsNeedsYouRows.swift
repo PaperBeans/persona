@@ -66,7 +66,9 @@ nonisolated extension AgentsNeedsYou {
 }
 
 /// A session that waits for the user with no card read (a prompt only its terminal shows), in the Needs You section:
-/// a card's header, the session's place, its last line; a tap opens the session, whose terminal answers it.
+/// a card's header, the session's place, why it waits (the hub's reason, else its last line); a tap opens the session,
+/// whose terminal answers it. One with no terminal Persona can reach (a Claude Code run in a plain terminal, #5889)
+/// waits on its computer: it says so, with no chevron, and a tap opens the conversation only to read what it asks.
 struct NeedsYouWaitingCard: View {
     var session: Session?
     var machine: String?
@@ -77,11 +79,11 @@ struct NeedsYouWaitingCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(spacing: Theme.Space.s) {
-                ThemedIcon(InteractionKind.screen.symbol)
+                ThemedIcon(NeedsYouWaitingCard.symbol(session))
                     .foregroundStyle(StatusPalette.needsYou.dot)
                     .scaledFrame(width: Theme.Size.icon) // the cards' icon column
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                    Text(InteractionKind.screen.title).font(Theme.Font.heading).lineLimit(1)
+                    Text(Self.title(session)).font(Theme.Font.heading).lineLimit(1)
                     Text(NeedsYouWaitingCard.place(session, machine: machine))
                         .font(Theme.Font.label)
                         .foregroundStyle(.secondary)
@@ -89,10 +91,12 @@ struct NeedsYouWaitingCard: View {
                 }
                 Spacer()
                 #if !os(macOS)
-                ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)
+                if !Self.onComputer(session) {
+                    ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)
+                }
                 #endif
             }
-            if let line = session?.lastText?.trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty {
+            if let line = Self.line(session) {
                 Text(line)
                     .font(Theme.Font.body).lineHeight(.body)
                     .lineLimit(3)
@@ -105,6 +109,26 @@ struct NeedsYouWaitingCard: View {
         .onTapGesture(perform: open)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
+    }
+
+    /// Only its computer can answer it: no terminal Persona can reach (`Session.canTerminal`).
+    static func onComputer(_ session: Session?) -> Bool { session.map { !$0.canTerminal } ?? false }
+
+    /// A terminal's mark, or the computer's when only its computer can answer it.
+    static func symbol(_ session: Session?) -> String {
+        onComputer(session) ? Theme.Icon.machine : InteractionKind.screen.symbol
+    }
+
+    /// "Terminal Needs You", or "Waiting on Your Computer" when only its computer can answer it.
+    static func title(_ session: Session?) -> String {
+        onComputer(session) ? String(localized: "Waiting on Your Computer") : InteractionKind.screen.title
+    }
+
+    /// Why it waits, in its host's words, else its last line.
+    static func line(_ session: Session?) -> String? {
+        [session?.attentionReason, session?.lastText]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
     }
 
     /// The session's name and its computer, as a card's place line reads.
@@ -142,12 +166,12 @@ struct CompactWaitingRow: View {
 
     var body: some View {
         HStack(spacing: CompactList.gap) {
-            ThemedIcon(InteractionKind.screen.symbol)
+            ThemedIcon(NeedsYouWaitingCard.symbol(session))
                 .font(CompactList.metaStrong)
                 .foregroundStyle(StatusPalette.needsYou.dot)
                 .scaledFrame(width: CompactList.mark)
             HStack(alignment: .firstTextBaseline, spacing: CompactList.gap) {
-                Text(InteractionKind.screen.title).font(CompactList.titleUnread).lineLimit(1).fixedSize()
+                Text(NeedsYouWaitingCard.title(session)).font(CompactList.titleUnread).lineLimit(1).fixedSize()
                 Text(NeedsYouWaitingCard.place(session, machine: machine))
                     .font(CompactList.meta).foregroundStyle(.secondary).lineLimit(1)
             }

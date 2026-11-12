@@ -1,6 +1,7 @@
 import { SNAPSHOT_RE, SNAPSHOT_END_RE } from '../../runtime-sdk/lib/compat.js'
 // Mapping between Antigravity CLI (agy) transcripts / ACP updates and Persona runtime items.
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { basename, join } from 'node:path'
 import { appToolName, clipInput, light, snippet } from '../../runtime-sdk/index.js'
 
@@ -241,10 +242,14 @@ const MAX_TRANSCRIPT_CACHE_BYTES = 64 * 1024 * 1024
 let transcriptCacheBytes = 0
 
 export function readTranscriptSteps(brainDir, full = false) {
+  return readTranscript(brainDir, full).steps
+}
+
+export function readTranscript(brainDir, full = false) {
   const file = join(brainDir, '.system_generated', 'logs', full ? 'transcript_full.jsonl' : 'transcript.jsonl')
   const fallback = full ? join(brainDir, '.system_generated', 'logs', 'transcript.jsonl') : null
   const target = existsSync(file) ? file : fallback && existsSync(fallback) ? fallback : null
-  if (!target) return []
+  if (!target) return { steps: [], branch: '' }
   try {
     const info = statSync(target, { bigint: true })
     const version = [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':')
@@ -257,18 +262,30 @@ export function readTranscriptSteps(brainDir, full = false) {
       if (settled && cached.version === version) {
         transcriptCache.set(target, cached)
         transcriptCacheBytes += cached.size
-        return cached.steps
+        return cached.transcript
       }
     }
     const raw = readFileSync(target, 'utf8')
     const out = []
+    let branch = ''
     for (const line of raw.split('\n')) {
       const trimmed = line.trim()
       if (!trimmed) continue
       try {
-        out.push(JSON.parse(trimmed))
+        const step = JSON.parse(trimmed)
+        const previous = out.at(-1)
+        const index = step?.step_index
+        if (Number.isInteger(index) && Number.isInteger(previous?.step_index) && index <= previous.step_index) {
+          // Native exports append replacement steps after a rewind. A status update keeps the step's identity.
+          if (index < previous.step_index || step.type !== previous.type || step.created_at !== previous.created_at) {
+            branch = createHash('sha256').update(trimmed).digest('hex').slice(0, 20)
+          }
+          while (out.length && out.at(-1).step_index >= index) out.pop()
+        }
+        out.push(step)
       } catch {}
     }
+    const transcript = { steps: out, branch }
     const size = Number(info.size)
     if (settled && size <= MAX_TRANSCRIPT_CACHE_BYTES) {
       while (transcriptCache.size >= MAX_CACHED_TRANSCRIPTS || transcriptCacheBytes + size > MAX_TRANSCRIPT_CACHE_BYTES) {
@@ -276,12 +293,12 @@ export function readTranscriptSteps(brainDir, full = false) {
         transcriptCacheBytes -= transcriptCache.get(oldest).size
         transcriptCache.delete(oldest)
       }
-      transcriptCache.set(target, { version, size, steps: out })
+      transcriptCache.set(target, { version, size, transcript })
       transcriptCacheBytes += size
     }
-    return out
+    return transcript
   } catch {
-    return full ? readTranscriptSteps(brainDir, false) : []
+    return full ? readTranscript(brainDir, false) : { steps: [], branch: '' }
   }
 }
 

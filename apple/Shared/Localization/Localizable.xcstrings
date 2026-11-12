@@ -599,6 +599,64 @@
         }
       }
     },
+    "%lld expired" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld expired"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld 个已过期"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld件期限切れ"
+          }
+        }
+      }
+    },
+    "%lld sites" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld site"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld sites"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld 个网站"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lldサイト"
+          }
+        }
+      }
+    },
     "Agent tools and automation for this assistant's computers.": {
       "extractionState": "manual",
       "localizations": {
@@ -802,6 +860,87 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Claude Code 提醒这条命令可能有风险"
+          }
+        }
+      }
+    },
+    "Clear %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear %1$lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除 %1$lld 个"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld件を消去"
+          }
+        }
+      }
+    },
+    "Clear Sign-ins for %lld Sites?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Clear Sign-in for %1$lld Site?"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Clear Sign-ins for %1$lld Sites?"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除 %1$lld 个网站的登录？"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lldサイトのログインを消去しますか？"
+          }
+        }
+      }
+    },
+    "Clear Sign-in…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear Sign-in…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除登录…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ログインを消去…"
           }
         }
       }
@@ -1106,6 +1245,52 @@
         }
       }
     },
+    "Expiring First" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expiring First"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快过期的在前"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "期限が近い順"
+          }
+        }
+      }
+    },
+    "First expires %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "First expires %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最早 %1$@ 过期"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最短で%1$@に期限切れ"
+          }
+        }
+      }
+    },
     "Hide Original" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1267,6 +1452,29 @@
         }
       }
     },
+    "No Matching Sites" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Matching Sites"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有匹配的网站"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一致するサイトはありません"
+          }
+        }
+      }
+    },
     "No minutes, and Persona stays out.": {
       "extractionState": "manual",
       "localizations": {
@@ -1309,6 +1517,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "一致する設定がありません"
+          }
+        }
+      }
+    },
+    "No site's domain contains “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No site's domain contains “%1$@”."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有网站的域名包含「%1$@」。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ドメインに「%1$@」を含むサイトはありません。"
           }
         }
       }
@@ -1520,6 +1751,29 @@
         }
       }
     },
+    "Search Sites" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search Sites"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索网站"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイトを検索"
+          }
+        }
+      }
+    },
     "Switch": {
       "extractionState": "manual",
       "localizations": {
@@ -1585,6 +1839,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "アシスタントを切り替えても、これらの設定は変わりません。"
+          }
+        }
+      }
+    },
+    "These sites will be signed out in ego lite on this Mac. This includes your own sign-ins in ego." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These sites will be signed out in ego lite on this Mac. This includes your own sign-ins in ego."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这些网站在这台 Mac 的 ego lite 里会退出登录。你自己在 ego 里的登录也一样。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これらのサイトはこのMacのego liteでログアウトされます。ego上でのご自身のログインも同様です。"
           }
         }
       }
@@ -2878,6 +3155,29 @@
           }
         }
       }
+    },
+    "Waiting on Your Computer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting on Your Computer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コンピューターで対応待ち"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在电脑上等你处理"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Walking [Place Map]" : {
       "extractionState" : "manual",

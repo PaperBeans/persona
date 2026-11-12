@@ -68,9 +68,9 @@ struct SettingsView: View {
             #endif
             .themedPage()
             #if os(macOS)
-            .searchable(text: $search, prompt: Text("Search Settings"))
+            .pageSearchable(text: $search, prompt: String(localized: "Search Settings"))
             #else
-            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: Text("Search Settings"))
+            .pageSearchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: String(localized: "Search Settings"))
             #endif
             .onChange(of: search) { searchResults = SettingsCatalog.search(search) }
             .onChange(of: model.assistantManagerID) {

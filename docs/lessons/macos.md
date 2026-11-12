@@ -282,6 +282,11 @@ Each page has its own `NSHostingView`, with `isHidden` set while inactive. Pitfa
   New pages need this too, or every push computes an extra page. To identify pages still updating, temporarily add `Self._printChanges()` to body;
   only a normal exit (`osascript … quit`) flushes stdout; `kill` loses it all.
 - Detaching a hidden hosting view from the window (`removeFromSuperview`) makes things worse: about 30 ms more per push.
+- A sheet presented by a page that goes behind another one no longer closes (2026-11-13, #5921). Hand to AI opened where
+  the item went (Persona or Agents, so the Inbox page was hidden) and then called `dismiss()`: the sheet stayed over the
+  other section, and Cancel did nothing until the app quit. Close the sheet first and move the window only once it is
+  gone (the sheet's `onDisappear`, or `.sheet(onDismiss:)`); never change `selectedTab`, `openChat` or the assistant's
+  conversation while a page's sheet is up.
 - “After the first frame” is not one `DispatchQueue.main.async`: it can run before that round's Core Animation commit, putting toolbar rearrangement back in the first frame.
   Schedule another `async` from a run-loop `beforeWaiting` observer ordered after Core Animation commit.
 - Without `sizeThatFits` on `NSViewRepresentable`, SwiftUI measures the embedded view with Auto Layout (`systemLayoutSizeFitting`) every time it renders the shell.

@@ -24,12 +24,15 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.contracts.BackgroundTask
+import persona.core.contracts.LoopInfo
 import persona.core.contracts.Machine
 import persona.core.contracts.Session
 import persona.core.contracts.Workflow
 import persona.core.contracts.api.ChatSnapshot
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.Status
+import persona.core.designsystem.StatusLineState
 import persona.core.domain.sort.AgentSession
 import java.time.Instant
 
@@ -68,6 +71,14 @@ class ChatHeaderWordsTest {
             background = listOf(command)), now.minusSeconds(40 * 60)),
         // seen: its dot says it, not words
         Scene("seen", base.copy(sessionId = "s7", status = "idle", state = "idle"), now.minusSeconds(40 * 60)),
+        // seen, with a /loop that has not fired yet or background work the hub does not count as working: iOS says nothing in words
+        // (the Agents list's "Waiting" group is the list's, and the loop has its pill and chips); not the status line's own "Waiting"
+        Scene("loop", base.copy(sessionId = "s8", status = "idle", state = "idle", loop = LoopInfo(kind = "loop", prompt = "check the build")),
+            now.minusSeconds(40 * 60)),
+        Scene("tasks", base.copy(sessionId = "s9", status = "idle", state = "idle", background = listOf(command)), now.minusSeconds(40 * 60)),
+        // finished and not seen yet, with a loop: its own word
+        Scene("unread", base.copy(sessionId = "s10", status = "idle", state = "unread", loop = LoopInfo(kind = "loop", prompt = "check the build")),
+            now.minusSeconds(40 * 60)),
     )
 
     private var style by mutableStateOf(AppStyle.Glass)
@@ -103,8 +114,11 @@ class ChatHeaderWordsTest {
         says("wait", "Waiting in the background")
         says("busy", "Working")
         doesNotSay("busy", "Waiting")
-        // Seen says nothing in words: the place leads the line.
+        // Seen says nothing in words: the place leads the line, with a loop or background work too (iOS `stateWords`)
         doesNotSay("seen", "Seen")
+        for (tag in listOf("loop", "tasks")) { doesNotSay(tag, "Waiting"); doesNotSay(tag, "Seen") }
+        says("unread", "Unread")
+        doesNotSay("unread", "Waiting")
     }
 
     @Config(qualifiers = "zh-w400dp-h1200dp")
@@ -116,6 +130,8 @@ class ChatHeaderWordsTest {
         says("flow", "工作中（后台）")
         says("wait", "后台等待中")
         says("busy", "工作中")
+        says("unread", "完成未看")
+        for (tag in listOf("loop", "tasks")) doesNotSay(tag, "待唤醒")
     }
 
     @Config(qualifiers = "ja-w400dp-h1200dp")
@@ -127,6 +143,8 @@ class ChatHeaderWordsTest {
         says("flow", "作業中（バックグラウンド）")
         says("wait", "バックグラウンドで待機中")
         says("busy", "作業中")
+        says("unread", "未確認")
+        for (tag in listOf("loop", "tasks")) doesNotSay(tag, "待機中")
     }
 
     /** The words are shared behaviour: Brief and Board read the same ones as Glass. */
@@ -139,6 +157,25 @@ class ChatHeaderWordsTest {
             says("wait", "Waiting in the background")
             says("busy", "Working")
         }
+    }
+
+    @Test fun theHeaderSaysTheSessionsStateNotTheStatusLinesWaiting() {
+        val loop = base.copy(status = "idle", state = "idle", loop = LoopInfo(kind = "loop"))
+        val kept = { s: Session, state: StatusLineState -> headerStatus(state, s) }
+        val waiting = chatStatusState(androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().resources,
+            ChatSnapshot(items = emptyList(), loading = false), loop, machine, emptyList(), emptyList(), answering = false)
+        // the status line says Waiting for a loop (a kind of its own), the header says Seen
+        assertEquals(persona.core.designsystem.StatusLineKind.Waiting, persona.core.designsystem.resolveStatusLine(waiting)?.kind)
+        assertEquals(Status.Idle, kept(loop, waiting))
+        assertEquals(Status.Unread, kept(loop.copy(state = "unread"), waiting))
+        // a chat the hub counts as working (its turn ended, background commands go on) keeps the status line's Waiting for its dot;
+        // its words are `stateLabel`'s ("Working", "Working (Background)", "Waiting in the background")
+        assertEquals(Status.Waiting, kept(loop.copy(state = "working", backgroundWorking = true, background = listOf(command)), waiting))
+        // the states the status line really knows stay: an ended chat, an offline computer, a request
+        val ended = StatusLineState(ended = true, waiting = true)
+        assertEquals(Status.Offline, kept(loop, ended))
+        assertEquals(Status.NeedsYou, kept(loop, StatusLineState(pendingRequests = 1, waiting = true)))
+        assertEquals(Status.Working, kept(loop, StatusLineState(working = true, waiting = true)))
     }
 
     @Test fun minutesCountFromTheTurnThatRunsNowAndOnlyWhileItRuns() {

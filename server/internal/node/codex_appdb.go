@@ -38,7 +38,9 @@ type codexAppThread struct {
 	RolloutPath string `json:"rolloutPath"`
 	Title       string `json:"title"`
 	Cwd         string `json:"cwd"`
+	Source      string `json:"source"`
 	UpdatedAtMs int64  `json:"updatedAtMs"`
+	Paginated   bool   `json:"-"`
 }
 
 func (t codexAppThread) updated() time.Time { return time.UnixMilli(t.UpdatedAtMs) }
@@ -147,15 +149,19 @@ func fileStamp(path string) string {
 
 // readCodexAppThreads reads the unarchived rows of ids (validID only: they are put in the query as they are).
 func readCodexAppThreads(ctx context.Context, db string, ids []string) (map[string]codexAppThread, error) {
+	return readCodexThreads(ctx, db, `archived = 0 AND id IN ('`+strings.Join(ids, "', '")+`')`)
+}
+
+func readCodexThreads(ctx context.Context, db, where string) (map[string]codexAppThread, error) {
 	sqlite, err := exec.LookPath("sqlite3")
 	if err != nil {
 		return nil, err
 	}
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	q := `SELECT id, rollout_path AS rolloutPath, COALESCE(NULLIF(name, ''), title) AS title, cwd, ` +
+	q := `SELECT id, rollout_path AS rolloutPath, COALESCE(NULLIF(name, ''), title) AS title, cwd, source, ` +
 		`COALESCE(updated_at_ms, updated_at * 1000) AS updatedAtMs FROM threads ` +
-		`WHERE archived = 0 AND id IN ('` + strings.Join(ids, "', '") + `')`
+		`WHERE ` + where
 	out, err := exec.CommandContext(cctx, sqlite, "-readonly", "-bail", "-json", "-cmd", ".timeout 2000", codexDBTarget(db), q).Output()
 	if err != nil {
 		return nil, err

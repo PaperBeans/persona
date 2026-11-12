@@ -105,6 +105,8 @@ func searchable(rel string) bool {
 		return false // photos.json (recording_photos.go): digests and deletions; photos.md has the photos' words
 	case len(parts) == 3 && parts[0] == KindPerson && parts[2] == "handles.json":
 		return false
+	case len(parts) == 3 && parts[0] == KindPerson && parts[2] == profilesFile:
+		return false // summary.md shows the profiles, each line labelled with its part (profile.go)
 	case len(parts) == 3 && parts[0] == KindProject && parts[2] == "moments-judged.json":
 		return false
 	case len(parts) == 3 && parts[0] == KindTopic && parts[2] == topicPointsFile:

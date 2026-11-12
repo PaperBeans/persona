@@ -312,7 +312,8 @@ struct ProviderWizardTests {
         }
         let page = ModelConfigurationModel(deps: .init(api: { hub.client }))
         await page.load()
-        #expect(page.modelSummary(page.purposes[0]) == "glm-5 · Agent SDK")
+        // The ordinary summary names only the model and effort; How It Runs carries the runtime (#5354).
+        #expect(page.modelSummary(page.purposes[0]) == "glm-5")
         await page.load(purposeID: "assistant")
         #expect(page.runtimes == ["cli", "agentsdk"])
         page.draft.runtime = AssistantRuntime.agentSDK

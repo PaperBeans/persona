@@ -286,6 +286,11 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 	if kind == KindTopic {
 		d.Points = e.Store.TopicPoints(id)
 	}
+	if kind == KindPerson {
+		if all := e.Store.profiles(SafeID(id)); len(all) > 0 {
+			d.Profiles = all
+		}
+	}
 	var refs struct {
 		Projects []string `json:"projects"`
 		Chats    []string `json:"chats"`
@@ -398,6 +403,12 @@ func (e *Engine) Apply(kind, id string, u Update) (string, error) {
 	if e.Store.ReadOnly() {
 		return "", ErrReadOnly
 	}
+	u = stripUnsupported(kind, u) // what the kind does not use is neither applied nor locked (Unsupported says it)
+	if err := checkProfile(u.Profile); err != nil {
+		return "", err
+	}
+	profile := u.Profile
+	u.Profile = nil
 	e.Store.applyMu.Lock()
 	defer e.Store.applyMu.Unlock()
 	if kind == KindProject {
@@ -407,7 +418,21 @@ func (e *Engine) Apply(kind, id string, u Update) (string, error) {
 	if err == nil && u.MergeInto == "" {
 		err = e.claim(kind, out, u, "", nil, nil)
 	}
+	if err == nil && profile != nil {
+		_, err = e.putProfile(out, UserWriter, profile)
+	}
 	return out, err
+}
+
+// putProfile replaces writer's profile of person pid and writes the person's summary.md again; it answers the profile
+// it replaced (nil for none).
+func (e *Engine) putProfile(pid, writer string, p *PersonProfile) (*PersonProfile, error) {
+	before, err := e.Store.putProfile(pid, writer, p, time.Now())
+	if err != nil {
+		return before, err
+	}
+	e.WritePersonSummary(pid)
+	return before, nil
 }
 
 func (e *Engine) apply(kind, id string, u Update) (string, error) {

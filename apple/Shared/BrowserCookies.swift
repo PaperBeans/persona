@@ -30,6 +30,57 @@ nonisolated struct BrowserCookieSite: Codable, Hashable, Sendable, Identifiable 
     var id: String { domain }
 }
 
+extension BrowserCookieSite {
+    /// Every cookie of the site has expired: its latest one is past.
+    nonisolated func expired(at now: Date = .now) -> Bool { expires.map { $0 <= now } ?? false }
+}
+
+/// A computer's sign-ins on its page (#5821, docs/design/DESIGN_SYSTEM.md「Long lists on a detail page」): a few are
+/// listed in place, more fold behind one summary row that opens the whole list, searched by domain and in an order. The
+/// web's lib/cookies.ts (`SITES_IN_PLACE`, `siteList`, `siteSummary`) does the same; BrowserCookiesTests holds this one.
+nonisolated enum BrowserSiteList {
+    /// How many sites the page lists in place.
+    static let inPlace = 3
+
+    enum Order: String, CaseIterable, Sendable {
+        /// By domain.
+        case name
+        /// The soonest to expire first: expired ones on top, those that end with the browser last.
+        case expiry
+    }
+
+    /// What the folded row says: how many sites, when the first still signed in expires, how many have expired.
+    struct Summary: Equatable, Sendable {
+        var count: Int
+        var first: Date?
+        var expired: Int
+    }
+
+    /// The sites whose domain holds `query` (any case, the spaces around it ignored), in `order`.
+    static func shown(_ sites: [BrowserCookieSite], query: String, order: Order) -> [BrowserCookieSite] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let found = q.isEmpty ? sites : sites.filter { $0.domain.lowercased().contains(q) }
+        switch order {
+        case .name:
+            return found.sorted { $0.domain < $1.domain }
+        case .expiry:
+            return found.sorted { a, b in
+                let x = a.expires ?? .distantFuture, y = b.expires ?? .distantFuture
+                return x != y ? x < y : a.domain < b.domain
+            }
+        }
+    }
+
+    static func summary(_ sites: [BrowserCookieSite], now: Date = .now) -> Summary {
+        var out = Summary(count: sites.count, first: nil, expired: 0)
+        for s in sites {
+            guard let at = s.expires else { continue }
+            if at <= now { out.expired += 1 } else if out.first.map({ at < $0 }) ?? true { out.first = at }
+        }
+        return out
+    }
+}
+
 /// What the hub answers about the sign-ins: the sites now, and what an import or a clear did.
 nonisolated struct BrowserCookies: Codable, Sendable {
     var sites: [BrowserCookieSite]
