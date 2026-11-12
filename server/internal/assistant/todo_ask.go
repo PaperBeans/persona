@@ -101,8 +101,8 @@ func (s *Service) todoAsks(ctx context.Context) map[string]todoAsk {
 
 // askChanged: a to-do's ask came up, was taken or ended: the apps read the to-dos again ({"type":"todos"}) and the board
 // follows.
-func (s *Service) askChanged(ctx context.Context) {
-	s.event(ctx, map[string]any{"type": "todos"})
+func (s *Service) askChanged(context.Context) {
+	s.todosPushSoon() // with the rest of the write that changed it
 	s.boardChanged()
 }
 

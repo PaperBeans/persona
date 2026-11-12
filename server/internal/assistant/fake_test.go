@@ -84,6 +84,7 @@ type fakeHub struct {
 	failNotify    int              // notify.request fails this many more times as when the hub is away and nothing was kept
 	refuseNotify  error            // notify.request is the hub's refusal (answered) while set
 	events        []string         // the type of each event the apps were sent
+	onBroadcast   func()           // runs once an event is recorded, while Broadcast has not returned yet
 	liveEvents    []map[string]any // the meeting_live events as sent
 	snaps         []Snapshot
 
@@ -631,10 +632,13 @@ func (f *fakeHub) Broadcast(_ context.Context, b Broadcast) {
 		_ = json.Unmarshal(b.Message, &live)
 		f.liveEvents = append(f.liveEvents, live)
 	}
-	receipt := f.readHooks.receipt
+	receipt, during := f.readHooks.receipt, f.onBroadcast
 	f.mu.Unlock()
 	if receipt != nil && ev.Type == "assistant_feed" && ev.Item.Kind == feedReceipt {
 		receipt(ev.Item)
+	}
+	if during != nil {
+		during()
 	}
 }
 
@@ -1293,5 +1297,22 @@ func setModel(t *testing.T, s *Service, purpose string, b ModelBinding) {
 	r := modelRecordOf(t, s, purpose)
 	if err := s.saveModel(context.Background(), purpose, modelRecord{Revision: r.Revision, Binding: b}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// todosTold waits (real time) until no {"type":"todos"} waits for the rest of its write (todosPushSoon): the events
+// the apps were sent so far include every to-do change made so far.
+func todosTold(t testing.TB, s *Service) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(2 * time.Millisecond) { // sleep-ok: waits for the settle timer
+		s.tpush.mu.Lock()
+		n := s.tpush.sending
+		s.tpush.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a todos event still waits after 5 s")
+		}
 	}
 }

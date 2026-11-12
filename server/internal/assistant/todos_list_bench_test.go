@@ -231,3 +231,62 @@ func TestTodosEventsOnePerTaskStep(t *testing.T) {
 		}
 	}
 }
+
+// The {"type":"todos"} of a write waits todosSettle for the rest of it; a change from the moment it goes out, even
+// while it does, sends another: every change is followed by an event sent after it.
+func TestTodosEventWaitsForTheRestOfTheWrite(t *testing.T) {
+	f := newFakeHub()
+	s := New(Options{Hub: f, Logf: testLogf(t)})
+	clock := newFakeClock()
+	s.tpush.after = clock.After
+	sent := func() int {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		n := 0
+		for _, e := range f.events {
+			if e == "todos" {
+				n++
+			}
+		}
+		return n
+	}
+	ctx := context.Background()
+	for range 5 {
+		s.todosChanged(ctx)
+	}
+	if n := sent(); n != 0 {
+		t.Fatalf("%d todos events before the write settled, want 0", n)
+	}
+	clock.advance(todosSettle - time.Millisecond)
+	if n := sent(); n != 0 {
+		t.Fatalf("%d todos events before todosSettle, want 0", n)
+	}
+	clock.advance(time.Millisecond)
+	if n := sent(); n != 1 {
+		t.Fatalf("five changes in one write sent %d todos events, want 1", n)
+	}
+	clock.advance(time.Hour)
+	if n := sent(); n != 1 {
+		t.Fatalf("%d todos events with nothing changed since, want 1", n)
+	}
+
+	// A change made while the event goes out (the hub's Broadcast running) is told by one of its own after it.
+	s.todosChanged(ctx)
+	f.mu.Lock()
+	f.onBroadcast = func() { s.todosChanged(ctx) }
+	f.mu.Unlock()
+	clock.advance(todosSettle)
+	f.mu.Lock()
+	f.onBroadcast = nil
+	f.mu.Unlock()
+	if n := sent(); n != 2 {
+		t.Fatalf("%d todos events, want 2", n)
+	}
+	if clock.pending() != 1 {
+		t.Fatalf("%d events waiting after a change made while one went out, want 1", clock.pending())
+	}
+	clock.advance(todosSettle)
+	if n := sent(); n != 3 {
+		t.Fatalf("%d todos events, want 3", n)
+	}
+}

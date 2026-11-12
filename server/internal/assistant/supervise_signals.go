@@ -370,7 +370,8 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 	s.autoReviewTick(ctx, now)
 	s.askTick(now) // cards held past their time go up a rung (ask_route.go)
 	routed := s.routedSessions()
-	tasks := s.todosOf(ctx, "*")
+	// Only the open tasks: everything below passes the finished ones by, and there can be thousands of them.
+	tasks := s.todosWhere(ctx, "*", func(t *Todo) bool { return t.DoneAt == nil })
 	s.backfillBriefs(ctx, tasks) // tasks from before briefs get one from what they still have (task_brief.go)
 	for _, t := range tasks {
 		if t.Supervision == nil || t.DoneAt != nil {

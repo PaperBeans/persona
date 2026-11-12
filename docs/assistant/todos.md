@@ -202,7 +202,7 @@ Only present when the session is currently associated (`released_at` and `dismis
 The internal `spawn_from` field carried in session reports is stripped before hub pushes to clients.
 
 ### Live WebSocket pushes
-- `{"type":"todos"}`: broadcast on to-do creation, edit, deletion, whole-project link/unlink, Agent association changes, a change of its chat thread, or when its `ask` comes up, is taken or ends ("Waiting for the owner"); clients refetch `GET /api/v1/todos`. The hub sends one per write, so they come in bursts: the App (`TodoStore`) and the web (`todosPushed` in `web/src/lib/store.ts`) keep one such read out at a time, and a push that lands while it is out asks for a single read after it.
+- `{"type":"todos"}`: broadcast on to-do creation, edit, deletion, whole-project link/unlink, Agent association changes, a change of its chat thread, or when its `ask` comes up, is taken or ends ("Waiting for the owner"); clients refetch `GET /api/v1/todos`. The manager sends one per write: the changes made within 100 ms of the first (`todosSettle`; one step of a task writes its to-do from several places) go out as one event, and a change made after it went out sends another, so the last read of every change starts after it (#5995). Separate writes still come in bursts: the App (`TodoStore`) and the web (`todosPushed` in `web/src/lib/store.ts`) keep one such read out at a time, and a push that lands while it is out asks for a single read after it.
 - Session-change push: when to-do/association changes affect sessions, assistant reports a new snapshot; hub compares which computer's sessions changed and re-pushes that computer's `sessions` event.
 
 ### Status codes and roles

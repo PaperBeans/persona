@@ -398,3 +398,15 @@ leader and read an answer full of its own labels. A leader's `todo_create` now o
 tree shows pieces no Agent has worked on as `planned`. Two traps found on the way: such a piece has an `origin`, so the
 To-dos SOP shelves it after 48 h untouched like any agent-made to-do (it leaves the tree; the leader touching it keeps it),
 and the stuck rule must not count a piece that never started, or every planned piece older than a day reported stuck.
+
+## One `todos` event per write, and nothing that copies every finished task on a timer (#5995)
+
+Every `{"type":"todos"}` makes every app read the whole `GET /api/v1/todos` (about 1 MB at ~500 to-dos), and one step of
+a task writes its to-do from several places milliseconds apart (the to-do, its report, its check, its supervision, its
+leader): one supervised task sent 16 events. The event now goes through `todosPushSoon` and waits `todosSettle` (100 ms)
+for the rest of the write, so each step sends one. Two traps: `askChanged` and the orphan pass broadcast `todos` on
+their own and kept a step at two until they used the same path, so never call `s.event` with `todos` directly; and tests
+that count events right after a write must wait with `todosTold` first. A pass that runs on a timer and looks only at
+open tasks takes them with `todosWhere`, not `todosOf(ctx, "*")`, which deep-copies every finished one too (27 MB per
+30 s at 4,000). The direction tree is not such a pass: a finished task decides whether a failed start in its row
+still counts, so it reads them all.
