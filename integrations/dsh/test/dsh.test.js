@@ -191,6 +191,73 @@ test('starts a session from the phone and lists it before its first prompt', asy
   await until('listed', () => n.last('runtime.sessions')?.sessions.some((s) => s.session_id === 'session-new'))
 })
 
+// The real controller derives cwd from a workspaceId; retain that behavior while recording its public request.
+function recordCreations(ctl, workspacePath) {
+  const requests = [], create = ctl.create
+  ctl.create = async (request) => {
+    requests.push(request)
+    return create({ cwd: request.cwd ?? workspacePath })
+  }
+  return requests
+}
+
+for (const selected of ['/w/project', '/w/project-alias']) test(`a new DSH session joins the workspace resolved for ${selected} (#5485)`, async (t) => {
+  const matched = { id: 'workspace-project', path: '/w/project' }
+  const ws = { ...workspace(), async resolveByPath(path) {
+    return ['/w/project', '/w/project-alias'].includes(path) ? matched : undefined
+  } }
+  const { n, ctl, rt } = await setup(t, { workspace: ws })
+  const requests = recordCreations(ctl, matched.path)
+  rt.start()
+  await n.ready
+  const { session } = await n.peer.call('session.start', { cwd: selected, prompt: 'Check the synthetic project' })
+  assert.deepEqual(requests, [{ workspaceId: matched.id }], 'DSH receives workspaceId alone so it attaches the new session')
+  assert.equal(session.session_id, 'session-new')
+  assert.equal(ctl.prompts[0].sessionId, session.session_id)
+  assert.equal(ctl.sessions.get(session.session_id).summary.cwd, matched.path)
+})
+
+test('a directory without an exact DSH workspace keeps cwd-only creation (#5485)', async (t) => {
+  const ws = { ...workspace(), async resolveByPath() { return undefined } }
+  const { n, ctl, rt } = await setup(t, { workspace: ws })
+  const requests = recordCreations(ctl)
+  rt.start()
+  await n.ready
+  await n.peer.call('session.start', { cwd: '/w/unmatched' })
+  assert.deepEqual(requests, [{ cwd: '/w/unmatched' }])
+})
+
+for (const [name, ws] of [['absent', undefined], ['archive-only', workspace()]]) test(`an ${name} workspace service preserves cwd-only creation (#5485)`, async (t) => {
+  const { n, ctl, rt } = await setup(t, { workspace: ws })
+  const requests = recordCreations(ctl)
+  rt.start()
+  await n.ready
+  await n.peer.call('session.start', { cwd: '/w/new' })
+  assert.deepEqual(requests, [{ cwd: '/w/new' }])
+})
+
+test('a new directory keeps the DSH controller creation path (#5485)', async (t) => {
+  const ws = { ...workspace(), async resolveByPath() { throw Object.assign(new Error('directory does not exist'), { code: 'ENOENT' }) } }
+  const { n, ctl, rt } = await setup(t, { workspace: ws })
+  const requests = recordCreations(ctl)
+  rt.start()
+  await n.ready
+  await n.peer.call('session.start', { cwd: '/w/new-directory' })
+  assert.deepEqual(requests, [{ cwd: '/w/new-directory' }], 'the controller creates directories that do not exist yet')
+})
+
+test('a failed DSH workspace lookup creates no ungrouped session (#5485)', async (t) => {
+  const ws = { ...workspace(), async resolveByPath() { throw new Error('workspace lookup unavailable') } }
+  const { n, ctl, rt } = await setup(t, { workspace: ws })
+  const requests = recordCreations(ctl)
+  rt.start()
+  await n.ready
+  await assert.rejects(n.peer.call('session.start', { cwd: '/w/project', prompt: 'Do not create on failed lookup' }), /workspace lookup unavailable/)
+  assert.deepEqual(requests, [])
+  assert.equal(ctl.sessions.size, 0)
+  assert.deepEqual(ctl.prompts, [])
+})
+
 test('a watched session gets its new events as continuous items and the live text as deltas', async (t) => {
   const { n, ctl, ev, rt } = await setup(t)
   ctl.add('session-w', {}, [text(0, 'user', 'one'), text(1, 'assistant', 'a1')])

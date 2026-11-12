@@ -170,7 +170,7 @@ private fun StatusWord(status: SubagentStatus, word: String) {
     val color = if (status == SubagentStatus.Failed) palette.danger.text else palette.ink2
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
         when (status) {
-            SubagentStatus.Running -> JSpinner(Modifier.size(Tokens.Space.m), color = palette.ink2, stroke = Tokens.Space.xxs)
+            SubagentStatus.Running -> JSpinner(Modifier.size(Tokens.Space.Standard.m), color = palette.ink2, stroke = Tokens.Space.Standard.xxs)
             SubagentStatus.Failed -> JIcon(PersonaIcons.error, null, size = Tokens.Space.m, tint = color, decorative = true)
             SubagentStatus.Stopped -> JIcon(PersonaIcons.interrupt, null, size = Tokens.Space.m, tint = color, decorative = true)
             SubagentStatus.Completed -> JIcon(PersonaIcons.done, null, size = Tokens.Space.m, tint = color, decorative = true)

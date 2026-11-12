@@ -24,7 +24,6 @@
   "preview_failed": "Couldn't preview: {error}",
   "reload": "Reload",
   "reading": "Loading…",
-  "cant_install": "Can't install: {problem}",
   "uninstall": "Uninstall",
   "upgrade_to": "Update to {version}",
   "install": "Install",

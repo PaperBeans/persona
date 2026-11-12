@@ -18,6 +18,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/clitext"
+	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // The mesh from the command line on the hub's machine (docs/server/mesh.md "Admin APIs and CLI"): the same peers API as the admin page,
@@ -40,9 +41,10 @@ func PairPeer(ctx context.Context) error {
 		return err
 	}
 	fmt.Println(code.Code)
-	fmt.Fprintf(os.Stderr, "\n这是这台 hub 的互联码，%d 分钟内有效，只能用一次。\n"+
-		"在另一台 hub 上：管理界面「互联 › 输入互联码」里粘贴；或者在那台机器上运行 personad hub peer add '<互联码>'。\n",
-		max(1, int(time.Until(code.ExpiresAt).Round(time.Minute).Minutes())))
+	fmt.Fprintln(os.Stderr, "\n"+i18n.T(i18n.Terminal(), "hub-cli.peer_code_hint", i18n.Args{
+		"count":   max(1, int(time.Until(code.ExpiresAt).Round(time.Minute).Minutes())),
+		"command": clitext.Named("personad hub peer add"),
+	}))
 	return nil
 }
 
@@ -62,11 +64,12 @@ func PeerCommand(ctx context.Context, args []string, stdin io.Reader, out io.Wri
 	if err != nil {
 		return err
 	}
+	l := i18n.Terminal()
 	switch args[0] {
 	case "add":
 		code := args[1]
 		if code == "-" {
-			if code, err = readPeerCode(ctx, stdin); err != nil {
+			if code, err = readPeerCode(ctx, l, stdin); err != nil {
 				return err
 			}
 		}
@@ -74,7 +77,8 @@ func PeerCommand(ctx context.Context, args []string, stdin io.Reader, out io.Wri
 		if err := cfg.adminCall(ctx, http.MethodPost, "/api/v1/admin/cli/peers", map[string]string{"code": code}, &p); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "已和「%s」（%s）互联：%s\n", clitext.Inert(p.Name), clitext.Inert(p.HubID), peerStateText(p))
+		fmt.Fprintln(out, i18n.T(l, "hub-cli.peer_added", i18n.Args{"name": clitext.Inert(p.Name), "id": clitext.Inert(p.HubID),
+			"state": peerStateText(l, p)}))
 		return nil
 	case "list":
 		var res struct {
@@ -97,33 +101,42 @@ func PeerCommand(ctx context.Context, args []string, stdin io.Reader, out io.Wri
 			return err // stopped (Ctrl-C): not an older hub without the mesh route
 		} else if err == nil {
 			if mesh.Role == "center" {
-				fmt.Fprintf(out, "这台是中心（任期 %d）。\n", mesh.Term)
+				fmt.Fprintln(out, i18n.T(l, "hub-cli.mesh_center", i18n.Args{"term": mesh.Term}))
 			} else {
-				state := "在线"
+				state := i18n.T(l, "hub-cli.center_online")
 				if !mesh.Center.Online {
-					state = "连不上"
+					state = i18n.T(l, "hub-cli.center_offline")
 				}
-				fmt.Fprintf(out, "这台是成员，中心是「%s」（%s，%s，任期 %d）。\n", clitext.Inert(mesh.Center.Name), clitext.Inert(mesh.Center.HubID), state, mesh.Term)
+				fmt.Fprintln(out, i18n.T(l, "hub-cli.mesh_member", i18n.Args{"name": clitext.Inert(mesh.Center.Name),
+					"id": clitext.Inert(mesh.Center.HubID), "state": state, "term": mesh.Term}))
 			}
 		}
 		if len(res.Peers) == 0 {
-			fmt.Fprintln(out, "还没有互联的 hub。")
+			fmt.Fprintln(out, i18n.T(l, "hub-cli.peers_empty"))
 		}
 		// Names, ids and addresses are other hubs' text (a discovered one's is any LAN host's mDNS advert): inert, one
 		// line per hub.
 		for _, p := range res.Peers {
-			role := map[string]string{"center": "中心", "member": "成员"}[p.Role]
-			fmt.Fprintf(out, "%s  %s  %s  %s  %d 台电脑\n", clitext.Inert(p.HubID), clitext.Inert(p.Name), role, peerStateText(p), p.Machines)
+			role := p.Role
+			switch p.Role {
+			case "center":
+				role = i18n.T(l, "hub-cli.role_center")
+			case "member":
+				role = i18n.T(l, "hub-cli.role_member")
+			}
+			fmt.Fprintln(out, i18n.T(l, "hub-cli.peer_line", i18n.Args{"id": clitext.Inert(p.HubID), "name": clitext.Inert(p.Name),
+				"role": clitext.Inert(role), "state": peerStateText(l, p), "count": p.Machines}))
 		}
 		for _, d := range res.Discovered {
-			fmt.Fprintf(out, "局域网里发现：%s  %s  %s\n", clitext.Inert(d.HubID), clitext.Inert(d.Name), clitext.Inert(strings.Join(d.Addresses, " ")))
+			fmt.Fprintln(out, i18n.T(l, "hub-cli.discovered", i18n.Args{"id": clitext.Inert(d.HubID), "name": clitext.Inert(d.Name),
+				"addresses": clitext.Inert(strings.Join(d.Addresses, " "))}))
 		}
 		return nil
 	case "remove":
 		if err := cfg.adminCall(ctx, http.MethodDelete, "/api/v1/admin/cli/peers/"+args[1], nil, nil); err != nil {
 			return err
 		}
-		fmt.Fprintln(out, "已断开并撤销。")
+		fmt.Fprintln(out, i18n.T(l, "hub-cli.peer_removed"))
 		return nil
 	case "center":
 		target, confirm := "", false
@@ -151,19 +164,20 @@ func PeerCommand(ctx context.Context, args []string, stdin io.Reader, out io.Wri
 		}
 		err := cfg.adminCall(ctx, http.MethodPost, "/api/v1/admin/cli/peers/"+target+"/center", map[string]bool{"confirm": confirm}, &res)
 		if err != nil {
-			if strings.Contains(err.Error(), "连不上：确认") {
-				return fmt.Errorf("%w（确认就加 --confirm）", err)
+			// The hub's code says the current center is unreachable (peer_admin.go), whatever language its text is in.
+			if refused := (*adminCallError)(nil); errors.As(err, &refused) && refused.code == "confirm_required" {
+				return &cliError{i18n.T(l, "hub-cli.center_confirm_hint", i18n.Args{"error": err}), err}
 			}
 			return err
 		}
-		fmt.Fprintf(out, "中心现在是「%s」（任期 %d）。\n", clitext.Inert(res.Center.Name), res.Term)
+		fmt.Fprintln(out, i18n.T(l, "hub-cli.center_now", i18n.Args{"name": clitext.Inert(res.Center.Name), "term": res.Term}))
 		return nil
 	}
 	return fmt.Errorf("unknown peer command %q", args[0]) // checkPeerArgs let through a command this switch lacks
 }
 
 // readPeerCode reads `peer add -`'s code, a line on stdin; Ctrl-C (ctx) ends the wait.
-func readPeerCode(ctx context.Context, stdin io.Reader) (string, error) {
+func readPeerCode(ctx context.Context, l i18n.Lang, stdin io.Reader) (string, error) {
 	type read struct {
 		line string
 		err  error
@@ -178,7 +192,7 @@ func readPeerCode(ctx context.Context, stdin io.Reader) (string, error) {
 		return "", ctx.Err()
 	case r := <-got:
 		if r.err != nil && r.line == "" {
-			return "", fmt.Errorf("读不到互联码：%w", r.err)
+			return "", &cliError{i18n.T(l, "hub-cli.code_unreadable", i18n.Args{"error": r.err}), r.err}
 		}
 		return strings.TrimSpace(r.line), nil
 	}
@@ -236,25 +250,50 @@ func checkPeerArgs(args []string) error {
 	return nil
 }
 
-func peerStateText(p peerItem) string {
-	s := map[string]string{"connected": "已连接", "connecting": "连接中", "offline": "连不上", "refused": "对方不认这台的凭据"}[p.State]
-	if s == "" {
-		s = p.State
+// peerStates are a peer link's states as the command line words them.
+var peerStates = map[string]string{"connected": "hub-cli.state_connected", "connecting": "hub-cli.state_connecting",
+	"offline": "hub-cli.state_offline", "refused": "hub-cli.state_refused"}
+
+func peerStateText(l i18n.Lang, p peerItem) string {
+	s := clitext.Inert(p.State)
+	if key := peerStates[p.State]; key != "" {
+		s = i18n.T(l, key)
 	}
 	if p.RTTMS != nil {
-		s += fmt.Sprintf("（%d ms）", *p.RTTMS)
+		s += i18n.T(l, "hub-cli.state_rtt", i18n.Args{"ms": *p.RTTMS})
 	}
 	if p.Error != "" {
-		s += "：" + clitext.Inert(p.Error)
+		s += i18n.T(l, "hub-cli.state_error", i18n.Args{"error": clitext.Inert(p.Error)})
 	}
 	return s
 }
 
-// adminCall calls this machine's hub over loopback with the master token, for at most adminCallLimit.
+// cliError is a command's error in the terminal's language, wrapping what it is about (errors.Is / As see err).
+type cliError struct {
+	text string
+	err  error
+}
+
+func (e *cliError) Error() string { return e.text }
+func (e *cliError) Unwrap() error { return e.err }
+
+// adminCallError is the hub refusing an adminCall: its text (in the terminal's language, which the call asks for)
+// and its apierr code, what a command checks instead of the text.
+type adminCallError struct {
+	status int
+	code   string
+	text   string
+}
+
+func (e *adminCallError) Error() string { return e.text }
+
+// adminCall calls this machine's hub over loopback with the master token, for at most adminCallLimit. The hub answers
+// in the terminal's language (i18n.Terminal, #5520), not in the user language an app last set.
 func (c *Config) adminCall(ctx context.Context, method, path string, body, out any) error {
+	l := i18n.Terminal()
 	_, port, err := net.SplitHostPort(c.Listen)
 	if n, perr := strconv.Atoi(port); err != nil || perr != nil || n <= 0 || n > 65535 {
-		return errors.New("hub.json 的 listen 没有有效端口")
+		return errors.New(i18n.T(l, "hub-cli.listen_invalid"))
 	}
 	callCtx, cancel := context.WithTimeout(ctx, adminCallLimit)
 	defer cancel()
@@ -269,6 +308,7 @@ func (c *Config) adminCall(ctx context.Context, method, path string, body, out a
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Content-Type", "application/json") // the admin API takes JSON writes only
+	req.Header.Set("Accept-Language", string(l))
 	transport := &http.Transport{Proxy: nil}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -280,7 +320,7 @@ func (c *Config) adminCall(ctx context.Context, method, path string, body, out a
 		if callCtx.Err() != nil {
 			return fmt.Errorf("the hub on 127.0.0.1:%s did not answer within %s: it may be stuck, or another program is listening on hub.json's port", port, adminCallLimit)
 		}
-		return errors.New("无法连接本机 hub：hub 可能没在运行，或没监听回环地址")
+		return errors.New(i18n.T(l, "hub-cli.hub_unreachable"))
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -289,7 +329,12 @@ func (c *Config) adminCall(ctx context.Context, method, path string, body, out a
 		if why == "" {
 			why = resp.Status
 		}
-		return fmt.Errorf("hub 回了 %d：%s", resp.StatusCode, why)
+		var refusal struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(b, &refusal)
+		return &adminCallError{status: resp.StatusCode, code: refusal.Code,
+			text: i18n.T(l, "hub-cli.hub_answered", i18n.Args{"status": resp.StatusCode, "error": why})}
 	}
 	if out != nil {
 		return json.Unmarshal(b, out)

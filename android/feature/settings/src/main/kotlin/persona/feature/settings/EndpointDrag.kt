@@ -259,10 +259,10 @@ internal fun Grip(color: Color, modifier: Modifier = Modifier) {
     }
 }
 
-private val GripDot = Tokens.Space.xs
-private val GripGap = Tokens.Space.xs + Tokens.Space.xxs
-internal val GripWidth = Tokens.Space.m
-private val GripHeight = Tokens.Space.l
+private val GripDot = Tokens.Space.Standard.xs
+private val GripGap = Tokens.Space.Standard.xs + Tokens.Space.Standard.xxs
+internal val GripWidth = Tokens.Space.Standard.m
+private val GripHeight = Tokens.Space.Standard.l
 
 /** The band along each edge of the list where a held row scrolls it: one touch target. */
 private val EdgeZone = Tokens.MinTouch.android

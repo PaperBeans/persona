@@ -21,7 +21,8 @@ import (
 // dayLayout is how a due day is written (the API's due_date, the tools' due).
 const dayLayout = "2006-01-02"
 
-// setPlan takes the plan of row (a stored todo, or one made in memory), and the project it is in (todo_project.go).
+// setPlan takes the plan of row (a stored todo, or one made in memory), the project it is in (todo_project.go) and when
+// the owner last saw it (todo_seen.go).
 func (t *Todo) setPlan(row db.TodoRow) {
 	t.DueAt, t.DueDate = row.DueAt, ""
 	if row.DueDate != nil {
@@ -30,9 +31,11 @@ func (t *Todo) setPlan(row db.TodoRow) {
 	t.RemindAt, t.RemindedAt, t.Priority = row.RemindAt, row.RemindedAt, row.Priority
 	t.Project = row.Project
 	t.Kind = row.Kind
+	t.SeenAt = row.SeenAt
 }
 
-// keepPlan writes t's plan and project into row: a row made in memory for a change that is not to them keeps them.
+// keepPlan writes t's plan, project and seen mark into row: a row made in memory for a change that is not to them keeps
+// them.
 func (t *Todo) keepPlan(row *db.TodoRow) {
 	row.DueAt, row.DueDate = t.DueAt, nil
 	if d, err := time.Parse(dayLayout, t.DueDate); err == nil {
@@ -41,6 +44,7 @@ func (t *Todo) keepPlan(row *db.TodoRow) {
 	row.RemindAt, row.RemindedAt, row.Priority = t.RemindAt, t.RemindedAt, t.Priority
 	row.Project = t.Project
 	row.Kind = t.Kind
+	row.SeenAt = t.SeenAt
 }
 
 // todoRowOf is todo t as a row (what memory has of it; the store-less PATCH changes it).

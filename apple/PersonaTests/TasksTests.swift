@@ -1,4 +1,5 @@
 import Foundation
+import MapKit
 import Testing
 @testable import Persona
 
@@ -208,6 +209,98 @@ struct TasksTests {
         #expect(QuickResult(toolCall("mcp__persona__phone_reminders_list", result: #"{"id":"x"}"#)) == nil) // a read is no result card
         #expect(QuickResult(toolCall("mcp__persona__phone_reminders_create", result: #"{"error":"denied"}"#, error: true)) == nil)
         #expect(QuickResult(toolCall("mcp__persona__phone_reminders_create", result: nil)) == nil) // still running
+    }
+
+    /// Where the phone is and the places a search found become a map card (#5543); a failed, empty or running call
+    /// does not, and neither do coordinates out of range.
+    @Test func placeMapsComeFromTheLocationTools() throws {
+        let here = try #require(PlaceMapResult(toolCall("mcp__persona__phone_location_current",
+            result: #"{"latitude":31.23,"longitude":121.47,"accuracy_meters":12,"address":{"formatted":"上海市黄浦区人民大道"}}"#)))
+        #expect(here.kind == .here && here.places.count == 1 && here.places[0].address == "上海市黄浦区人民大道")
+        let nearby = try #require(PlaceMapResult(toolCall("phone_maps_search_nearby", result: """
+            {"query":"cafe","places":[{"name":"A","address":"x","latitude":31.231,"longitude":121.475,"distance_meters":180},
+            {"name":"","address":"Road 2","latitude":31.229,"longitude":121.476},{"name":"Bad","latitude":91,"longitude":0}]}
+            """)))
+        #expect(nearby.kind == .places && nearby.places.map(\.name) == ["A", nil])
+        #expect(nearby.places[0].distance == 180 && nearby.places[1].distance == nil)
+        #expect(PlaceMapText.title(nearby.places[1], number: 2) == "Road 2")
+        let search = try #require(PlaceMapResult(toolCall("mcp__persona__phone_location_search",
+            result: #"{"count":1,"places":[{"name":"Office","latitude":31.2,"longitude":121.4}]}"#)))
+        #expect(search.kind == .places && search.places.count == 1)
+        let many = (0..<20).map { #"{"name":"P\#($0)","latitude":31.2,"longitude":121.4}"# }.joined(separator: ",")
+        #expect(PlaceMapResult(toolCall("phone_maps_search_nearby", result: #"{"places":[\#(many)]}"#))?.places.count == PlaceMapResult.most)
+        #expect(PlaceMapResult(toolCall("phone_maps_search_nearby", result: #"{"count":0,"places":[]}"#)) == nil)
+        #expect(PlaceMapResult(toolCall("phone_location_current", result: #"{"error":"denied"}"#, error: true)) == nil)
+        #expect(PlaceMapResult(toolCall("phone_location_current", result: nil)) == nil) // still running
+        // Navigate is a hand-off only when Maps opened (`opened: maps`, below).
+        #expect(PlaceMapResult(toolCall("phone_maps_navigate", result: #"{"latitude":31.2,"longitude":121.4}"#)) == nil)
+    }
+
+    /// Directions handed to Maps become a card too (#5545): the destination, its name and the mode it went with. A
+    /// failure, a result Maps didn't open or coordinates out of range draw nothing; a mode Persona doesn't know is left out.
+    @Test func mapsHandoffsComeFromTheNavigateTool() throws {
+        let walk = try #require(PlaceMapResult(toolCall("mcp__persona__phone_maps_navigate", result: """
+            {"opened":"maps","destination":"安静书房咖啡","latitude":31.2291,"longitude":121.4769,"mode":"walking",
+            "note":"Directions are open in the Maps app; navigation runs there, not in Persona."}
+            """)))
+        #expect(walk.kind == .handoff && walk.mode == .walking && walk.places.count == 1)
+        #expect(PlaceMapText.destination(walk.places[0]) == "安静书房咖啡")
+        #expect(PlaceMapText.handoff(.walking) == PlaceMapText.mode(.walking) + " · " + PlaceMapText.handoff(nil))
+        let unnamed = try #require(PlaceMapResult(toolCall("phone_maps_navigate",
+            result: #"{"opened":"maps","latitude":31.2,"longitude":121.4,"mode":"helicopter"}"#)))
+        #expect(unnamed.mode == nil && unnamed.places[0].name == nil)
+        #expect(PlaceMapText.destination(unnamed.places[0]) == String(localized: "Destination [Place Map]"))
+        #expect(PlaceMapResult(toolCall("phone_maps_navigate", result: #"{"error":"Maps did not open"}"#, error: true)) == nil)
+        #expect(PlaceMapResult(toolCall("phone_maps_navigate", result: #"{"opened":"maps","latitude":120,"longitude":121.4}"#)) == nil)
+        #expect(PlaceMapResult(toolCall("phone_maps_navigate", result: nil)) == nil) // still running
+        // Only a route or a hand-off carries a mode.
+        #expect(PlaceMapResult(toolCall("phone_location_current", result: #"{"latitude":31.2,"longitude":121.4,"mode":"walking"}"#))?.mode == nil)
+    }
+
+    /// A route worked out without opening anything becomes a card (#5544): the destination, its mode, time and distance,
+    /// and the line to draw. A transit route has no line; a line with a bad point is dropped, the card kept.
+    @Test func routesComeFromTheRouteTool() throws {
+        let walk = try #require(PlaceMapResult(toolCall("mcp__persona__phone_maps_route", result: """
+            {"destination":"安静书房咖啡","latitude":31.2291,"longitude":121.4769,"mode":"walking","distance_meters":420,
+            "expected_seconds":330,"line":[[31.2304,121.4737],[31.2299,121.4752],[31.2291,121.4769]],"from":"current_location"}
+            """)))
+        #expect(walk.kind == .route && walk.mode == .walking && walk.seconds == 330 && walk.places[0].distance == 420)
+        #expect(walk.line.count == 3 && walk.line.first?.latitude == 31.2304)
+        #expect(PlaceMapText.route(walk) == [PlaceMapText.mode(.walking), PlaceMapText.duration(330), PlaceMapText.distance(420)].joined(separator: " · "))
+        // The map holds the whole line, the start too.
+        let region = walk.region()
+        #expect(region.center.latitude + region.span.latitudeDelta / 2 >= 31.2304)
+        let transit = try #require(PlaceMapResult(toolCall("phone_maps_route",
+            result: #"{"latitude":31.2,"longitude":121.4,"mode":"transit","distance_meters":8000,"expected_seconds":2100}"#)))
+        #expect(transit.line.isEmpty && transit.mode == .transit)
+        let bad = try #require(PlaceMapResult(toolCall("phone_maps_route",
+            result: #"{"latitude":31.2,"longitude":121.4,"line":[[31.2,121.4],[95,121.4]]}"#)))
+        #expect(bad.line.isEmpty && bad.seconds == nil && PlaceMapText.route(bad) == nil)
+        #expect(PlaceMapResult(toolCall("phone_maps_route", result: #"{"error":"no route"}"#, error: true)) == nil)
+        #expect(PlaceMapResult(toolCall("phone_maps_route", result: nil)) == nil) // still running
+        // A route's time reads in minutes, at least one.
+        #expect(PlaceMapText.duration(5) == PlaceMapText.duration(60))
+    }
+
+    /// The map shows every place, and one place is not drawn at street level.
+    @Test func placeMapRegionHoldsEveryPlace() throws {
+        let r = try #require(PlaceMapResult(toolCall("phone_maps_search_nearby",
+            result: #"{"places":[{"name":"A","latitude":31.20,"longitude":121.40},{"name":"B","latitude":31.24,"longitude":121.48}]}"#)))
+        let region = r.region()
+        #expect(abs(region.center.latitude - 31.22) < 0.0001 && region.span.latitudeDelta >= 0.04 && region.span.longitudeDelta >= 0.08)
+        let one = try #require(PlaceMapResult(toolCall("phone_location_current", result: #"{"latitude":31.2,"longitude":121.4}"#)))
+        #expect(one.region().span.latitudeDelta > 0.004)
+    }
+
+    /// A map card goes where a reminder's card goes: right after its turn's work line.
+    @Test func placeMapFollowsItsWork() {
+        let call = toolCall("mcp__persona__phone_location_current", result: #"{"latitude":31.2,"longitude":121.4}"#)
+        let work = ChatLine.work(id: "wt-1", items: [.step(.call(call))], live: false, start: .now, end: .now)
+        #expect(ChatLines.quickResults([user(1, 5), work, answer(2, 4)]).map(\.id) == ["1#0", "wt-1", "map-10#0", "2#0"])
+        // A hand-off to Maps goes to the same place (#5545).
+        let handoff = toolCall("mcp__persona__phone_maps_navigate", result: #"{"opened":"maps","latitude":31.2,"longitude":121.4}"#, seq: 20)
+        let handoffWork = ChatLine.work(id: "wt-2", items: [.step(.call(handoff))], live: false, start: .now, end: .now)
+        #expect(ChatLines.quickResults([user(1, 5), handoffWork, answer(2, 4)]).map(\.id) == ["1#0", "wt-2", "map-20#0", "2#0"])
     }
 
     /// A turn's quick result goes right after its work line, after the line's open steps.

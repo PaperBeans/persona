@@ -336,6 +336,54 @@ class MeetingConversationMockTests(Conversation, unittest.TestCase):
         self.assertEqual(self.call("POST", f"/api/v1/recordings/{empty}/followup", {"id": bad_id, "text": "x"})[1]["code"], "no_material")
         self.assertEqual(self.call("POST", f"/api/v1/recordings/{empty}/followup", {"id": str(uuid.uuid4()), "text": "x"})[1]["created"], True)
 
+    def test_followup_from_any_recording(self):
+        """Talk about this meeting (#3862 phase 6): a note, and a meeting that never had a room (uploaded while the
+        manager had no meeting conversation), get their follow-up once ended; without ended_at they wait as any does."""
+        ended = "2026-11-10T15:00:00+08:00"
+        note, bare = str(uuid.uuid4()), str(uuid.uuid4())
+        self.upload(note, kind="note", title="Voice memo", segments=LINES, complete=True)
+        self.assertEqual(self.call("POST", f"/api/v1/recordings/{note}/followup", {"id": str(uuid.uuid4()), "text": "x"})[1]["code"], "meeting_running")
+        self.call("POST", "/mock/meeting_conversation", {"on": False})
+        try:
+            self.upload(bare, segments=LINES, complete=True, ended_at=ended)
+        finally:
+            self.call("POST", "/mock/meeting_conversation", {"on": True})
+        self.upload(note, kind="note", title="Voice memo", segments=LINES, complete=True, ended_at=ended, revision=int(time.time() * 1000) + 5)
+        for rid in (note, bare):
+            call = str(uuid.uuid4())
+            status, made = self.call("POST", f"/api/v1/recordings/{rid}/followup", {"id": call, "text": "What did we decide?"})
+            self.assertEqual((status, made["created"], made["client_msg_id"]), (200, True, f"followup-{call}"), rid)
+            first = self.items(made["followup"]["session_id"])[0]["text"]
+            self.assertIn("Bo: Who owns the regression test?", first)
+            self.assertTrue(first.endswith("\n\nWhat did we decide?"))
+            self.assertEqual(self.meta(rid)["followup"], made["followup"])
+            self.assertNotIn("room", self.meta(rid))  # no room was made for it
+
+    def test_a_trimmed_recording_without_minutes_has_nothing_to_talk_about(self):
+        """A trimmed recording's material is its minutes alone (the hub's meta.json keeps `chars`): an all-day recording
+        past recording_days keeps its recap and has no minutes."""
+        day = str(uuid.uuid4())
+        status, _ = self.upload(day, kind="day", day="2026-11-10", tz="UTC", part=1, started_at="2026-11-10T08:00:00Z", device="watch",
+                                duration=0, coverage={"to": 10000, "gaps": []}, segments=LINES, complete=True)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.call("POST", "/mock/recording_trim", {"id": day})[0], 200)
+        self.assertNotIn("minutes", self.call("GET", f"/api/v1/kb/recordings/{day}")[1]["detail"])
+        self.assertEqual(self.call("POST", f"/api/v1/recordings/{day}/followup", {"id": str(uuid.uuid4()), "text": "x"})[1]["code"], "no_material")
+
+    def test_kb_search_takes_a_kind(self):
+        """GET /api/v1/kb-search?kind= searches one kind as kb_search does (#3862 phase 6); an unknown kind is a 400."""
+        rid = str(uuid.uuid4())
+        self.upload(rid, title="App review", segments=LINES, complete=True)
+        kinds = lambda hits: {h["path"].split("/", 1)[0] for h in hits}
+        self.assertLessEqual({"projects", "recordings"}, kinds(self.call("GET", "/api/v1/kb-search?q=app")[1]["hits"]))
+        status, only = self.call("GET", "/api/v1/kb-search?q=app&kind=recordings")
+        self.assertEqual((status, kinds(only["hits"])), (200, {"recordings"}))
+        self.assertTrue(any(rid in h["path"] for h in only["hits"]))
+        self.assertNotIn("recordings", kinds(self.call("GET", "/api/v1/kb-search?q=app&kind=projects")[1]["hits"]))
+        results = self.call("GET", "/api/v1/kb-search?q=app&kind=recordings&results=1")[1]["results"]
+        self.assertTrue(results and {r["entry"]["kind"] for r in results} == {"recordings"})
+        self.assertEqual(self.call("GET", "/api/v1/kb-search?q=app&kind=nope")[0], 400)
+
     def test_just_me_goes_to_the_main_chat(self):
         rid = str(uuid.uuid4())
         self.upload(rid, room={"attendance": "off"})

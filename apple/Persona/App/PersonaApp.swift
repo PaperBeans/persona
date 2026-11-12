@@ -409,6 +409,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let ixID = info["interaction_id"] as? String
         let extensionNotice = info["extension_notification"] != nil
         let pair = PairPush(info) // a pairing receipt (#4199); nil from an older hub: a plain notification
+        #if os(iOS)
+        let pushedRecording = MeetingTalk.recordingID(info) // a meeting's minutes (#3862 phase 6)
+        #endif
         let noteID = response.notification.request.identifier
         let event = ExtensionNotificationEvent(id: response.notification.request.identifier, info: info,
                                               category: response.notification.request.content.categoryIdentifier,
@@ -446,6 +449,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                     AppDelegate.resolveFromNotification(ixID, group: key?.group ?? ref?.group, resolution, action: action, done: done)
                     return
                 }
+                #if os(iOS)
+                // A meeting's minutes (#3862 phase 6): the meeting's thread when its recording is on this phone; else, and
+                // from a hub that doesn't name it, the session the push names, as before.
+                if let recording = MeetingTalk.threadToOpen(pushedRecording, interaction: ixID, action: action,
+                                                            onPhone: { RecordingLibrary.shared.entry($0) != nil }) {
+                    MeetingRecorder.openMeeting(recording)
+                    done()
+                    return
+                }
+                #endif
                 // No interaction: a turn finished ("Done"), opened at its answer like from the list.
                 if action != UNNotificationDismissActionIdentifier { AppDelegate.openFromNotification(key, finished: ixID == nil) }
                 done()

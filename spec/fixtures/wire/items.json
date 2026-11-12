@@ -384,6 +384,59 @@
     }
   },
   {
+    "name": "items_reply_models",
+    "description": "助手条目携带写出它的模型，用户条目没有。",
+    "source": [
+      "server/internal/proto/item.go: Item.Model",
+      "docs/web/web.md: Model pill and model panel"
+    ],
+    "derived": true,
+    "decoder": "items",
+    "input": {
+      "has_more": false,
+      "items": [
+        {
+          "id": "entry_reply_a#0",
+          "seq": 1,
+          "ts": "2026-01-02T03:04:05Z",
+          "role": "assistant",
+          "kind": "text",
+          "text": "示例回答。",
+          "model": "example-model"
+        },
+        {
+          "id": "entry_ask#0",
+          "seq": 2,
+          "ts": "2026-01-02T03:04:05Z",
+          "role": "user",
+          "kind": "text",
+          "text": "换个模型再看。"
+        },
+        {
+          "id": "entry_reply_b#0",
+          "seq": 3,
+          "ts": "2026-01-02T03:04:05Z",
+          "role": "assistant",
+          "kind": "tool_use",
+          "tool_use_id": "call_model",
+          "tool_name": "Read",
+          "tool_input": {
+            "file_path": "/home/user/project/example.txt"
+          },
+          "model": "work-model"
+        }
+      ]
+    },
+    "expected": {
+      "accepted": true,
+      "fields": {
+        "/items/0/model": "example-model",
+        "/items/1/model": null,
+        "/items/2/model": "work-model"
+      }
+    }
+  },
+  {
     "name": "items_http_after",
     "description": "HTTP 增量页保留连续性、后续页标记和图片占位。",
     "source": [

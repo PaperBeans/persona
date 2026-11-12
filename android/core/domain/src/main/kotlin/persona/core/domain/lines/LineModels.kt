@@ -200,6 +200,11 @@ sealed interface ChatLine {
     /** What the assistant's conversation adds to the transcript (docs/assistant/unified-entry.md, `tasks.AssistantLines`): the
      *  hub's feed items, quick results, day lines; [payload] is drawn by the chat's host. */
     data class Extra(override val id: String, val payload: Any) : ChatLine
+    /**
+     * The replies' model changed here ([ModelChanges], the web's `ModelChangeDivider`, #5055): the exchange after this
+     * line was written by [to], the visible one before it by [from], as the transcript names them.
+     */
+    data class ModelChange(override val id: String, val from: String, val to: String) : ChatLine
 }
 
 data class WorkSummary(val full: List<CoreText>, val short: List<CoreText>) {

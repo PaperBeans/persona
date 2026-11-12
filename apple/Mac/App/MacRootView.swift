@@ -219,7 +219,7 @@ private struct MacShell: View {
                 // The connection state lives at the sidebar's foot; folded away, it comes to the page's (only while
                 // the hub is out of reach: Knowledge and Machines have no title spot of their own that says so).
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if sidebarHidden { MacConnectionFooter().background(Theme.systemSidebar) }
+                    if sidebarHidden { MacConnectionFooter().background(Theme.macSidebar) }
                 }
         }
         // No toolbar band across the window: the sections column reaches up behind the traffic lights, and the bar's
@@ -307,7 +307,7 @@ private struct MacShell: View {
                 // The plugins' pages go with Machines and Settings, right before Settings (docs/extensions/extensions.md「UI slots」).
                 if section == .settings { pluginRows }
                 MacSidebarRow(icon: section.icon, title: section.title, selected: section == shown && shell.pluginPage == nil,
-                              badge: badge(section), identifier: "mac.section.\(section.rawValue)") { shell.go(section, model) }
+                              badge: badge(section), identifier: "mac.section.\(section.rawValue)", column: .sections) { shell.go(section, model) }
             }
             Spacer(minLength: 0)
             // The subscription accounts' windows (docs/server/usage-windows.md), as the web's sidebar ends; nothing without any.
@@ -324,7 +324,7 @@ private struct MacShell: View {
         .frame(width: Theme.Size.macSidebarIdeal)
         .frame(maxHeight: .infinity, alignment: .top)
         .ignoresSafeArea(.container, edges: .top)
-        .background(Theme.systemSidebar)
+        .background(Theme.macSidebar)
         .transition(.move(edge: .leading))
     }
 
@@ -334,7 +334,7 @@ private struct MacShell: View {
             let key = ExtensionSlots.key(p)
             MacSidebarRow(icon: ExtensionSlots.icon(p.icon), title: p.title, selected: shell.pluginPage == key,
                           badge: p.badge.map { Int($0.text).map(MacSidebarRow.Badge.count) ?? .word($0.text) },
-                          identifier: "mac.plugin.\(key)") { shell.pluginPage = key }
+                          identifier: "mac.plugin.\(key)", column: .sections) { shell.pluginPage = key }
         }
     }
 

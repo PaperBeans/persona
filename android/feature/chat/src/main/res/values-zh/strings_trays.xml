@@ -52,4 +52,8 @@
     <string name="chat_tasks_dismiss_draft">不处理</string>
     <string name="chat_tasks_draft_dismissed">已选择不处理，草稿没有发送</string>
     <string name="chat_tasks_undo_draft">撤销</string>
+    <!-- Over a task's card above Persona's composer: how many more its tasks ask (iOS TaskQuestions). -->
+    <plurals name="chat_stack_more">
+        <item quantity="other">还有 %1$d 件</item>
+    </plurals>
 </resources>

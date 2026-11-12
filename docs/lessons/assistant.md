@@ -1,5 +1,11 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- Count repeated conditional instructions at the runtime-send boundary, not just in a prompt golden (#5665).
+  Two adjacent decision blocks repeated the same handling rules, but the newer one also required recording the choice.
+  Remove the older copy, retain the newer obligations, and check both decision gating and the actual synthetic
+  `DeviceAssistantSend` text. This proves literal deduplication, not a stable-policy refactor or provider-context savings.
+
+
 - Proven `prompt` source can describe either a terminal tool label or a first-message fallback (#5269).
   Ordinary Claude inventory falls back to the first message for a bare tool label but not its spinner-prefixed
   form, so spinner normalization alone still lets a generated name disappear. Accept recognizable bad fallback

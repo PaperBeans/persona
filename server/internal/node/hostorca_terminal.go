@@ -75,7 +75,7 @@ func (h *orcaHost) front(ctx context.Context, paneKey string, prompt bool) (orca
 	if err != nil {
 		return t, host.Mark(fmt.Errorf("orca: cannot tell what runs in %s: %w", paneKey, err), host.ErrNotDelivered)
 	}
-	if len(procs[paneKey]) == 0 {
+	if len(h.procsIn(procs, paneKey)) == 0 {
 		return t, host.Mark(fmt.Errorf("orca: %w %s", errNotInFront, paneKey), host.ErrNotDelivered)
 	}
 	var st *orcart.AgentStatus
@@ -275,7 +275,8 @@ func (h *orcaHost) RenameSlot(ctx context.Context, slot, name string) error {
 		return orcaErr(err)
 	}
 	for _, term := range terms {
-		if term.TabID == slot && term.IsLocal() && term.Writable && !term.Orphaned {
+		// An orphaned terminal this host made, listed under its own tab (#5547), is renamed as any other.
+		if term.TabID == slot && term.IsLocal() && term.Writable && (!term.Orphaned || h.rekeyedKey(term.PaneKey())) {
 			return orcaErr(h.onTerminal(ctx, term, true, func(target orcart.Target) error {
 				return h.c.RenameTerminal(ctx, target, name)
 			}))
@@ -293,6 +294,11 @@ func (h *orcaHost) Close(ctx context.Context, pane host.PaneRef, _, _ string) er
 	t, err := h.terminal(ctx, pane.ID, false)
 	if err == nil {
 		err = h.onTerminal(ctx, t, true, func(tg orcart.Target) error { return h.c.Close(ctx, tg) })
+	}
+	if err == nil {
+		h.mu.Lock()
+		delete(h.made, pane.ID)
+		h.mu.Unlock()
 	}
 	if errors.Is(err, errNoOrcaTerminal) || orcart.IsCode(err, "terminal_handle_stale") ||
 		orcart.IsCode(err, "terminal_gone") || orcart.IsCode(err, "terminal_exited") {

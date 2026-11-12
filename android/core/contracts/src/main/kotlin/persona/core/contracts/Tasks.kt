@@ -152,6 +152,8 @@ data class Todo(
     @SerialName("done_by") val doneBy: String? = null,
     @SerialName("done_reason") val doneReason: String? = null,
     @WireTime @SerialName("reopened_at") val reopenedAt: String? = null,
+    /** When the owner last looked at it in Just finished: Got it, or opening it (#5707); one seen since it got there is Done. */
+    @WireTime @SerialName("seen_at") val seenAt: String? = null,
     /** Why the task's agent did not start (#1077): the hub ended the todo with it; "Retry" clears it (#1396). */
     @SerialName("start_error") val startError: String? = null,
     /** Opened from the main conversation while "Notify main-chat tasks only in the main chat" was on (#1731): not in the to-dos badge. */

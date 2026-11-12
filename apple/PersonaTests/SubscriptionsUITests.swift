@@ -3,6 +3,7 @@ import Testing
 @testable import Persona
 
 /// Source subscriptions (#2041): the pages under their reserved id, the entry rows' counts and the event that redraws them.
+@MainActor
 struct SubscriptionsUITests {
     @Test func thePagesFirstStateNamesTheScope() throws {
         #expect(SubscriptionsUI.state() == nil)

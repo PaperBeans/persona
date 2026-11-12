@@ -94,17 +94,17 @@ fun MessageItem(
                 Spacer(Modifier.width(Tokens.Space.m))
             }
             JAvatar(group ?: sender, size = if (prominent) 42.dp else 38.dp, icon = avatarIcon, badge = badge, badgeColor = badgeColor, image = avatar)
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(12.dp.dense))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(heading ?: group ?: sender, style = type.headline, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                    sourceLabel?.let { Spacer(Modifier.width(6.dp)); Text(it, style = type.caption, color = palette.ink3, maxLines = 1) }
-                    if (unread > 0) { Spacer(Modifier.width(6.dp)); JBadge(unread) }
+                    sourceLabel?.let { Spacer(Modifier.width(6.dp.dense)); Text(it, style = type.caption, color = palette.ink3, maxLines = 1) }
+                    if (unread > 0) { Spacer(Modifier.width(6.dp.dense)); JBadge(unread) }
                     Spacer(Modifier.weight(1f))
-                    time?.let { Spacer(Modifier.width(8.dp)); Text(it, style = type.micro, color = palette.ink3, maxLines = 1) }
+                    time?.let { Spacer(Modifier.width(8.dp.dense)); Text(it, style = type.micro, color = palette.ink3, maxLines = 1) }
                 }
                 if (group != null || heading != null) Text(sender, style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink3, maxLines = 1)
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(2.dp.dense))
                 if (titleIcon == null) Text(title, style = if (prominent) type.bodyStrong else type.body, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 else Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(title, Modifier.weight(1f, fill = false), style = if (prominent) type.bodyStrong else type.body, color = palette.ink,
@@ -114,13 +114,13 @@ fun MessageItem(
                 }
                 preview?.let {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (status == Status.Working) { JSpinner(Modifier.size(12.dp), stroke = 1.6.dp); Spacer(Modifier.width(6.dp)) }
+                        if (status == Status.Working) { JSpinner(Modifier.size(12.dp), stroke = 1.6.dp); Spacer(Modifier.width(6.dp.dense)) }
                         Text(it, style = type.callout, color = if (status == Status.Working && style != AppStyle.Brief) palette.working.text else palette.ink2, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 if (attachment != null || tags.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Spacer(Modifier.height(8.dp.dense))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp.dense)) {
                         attachment?.let { JChip(it, icon = PhIcons.Paperclip) }
                         tags.forEach { JTag(it) }
                     }
@@ -132,21 +132,21 @@ fun MessageItem(
     val modifier = if (dimmed) modifier.alpha(0.45f) else modifier
     when {
         style == AppStyle.Board -> {
-            val shape = RoundedCornerShape(10.dp)
+            val shape = RoundedCornerShape(10.dp.corner)
             Column(
-                modifier.fillMaxWidth().padding(bottom = if (position.last) 0.dp else 8.dp).clip(shape)
+                modifier.fillMaxWidth().padding(bottom = if (position.last) 0.dp else 8.dp.dense).clip(shape)
                     .background(palette.surface).holder(status?.let { palette.status(it).dot } ?: palette.idle.dot, Tokens.Space.xxs)
-                    .border(1.dp, palette.line, shape).then(click).padding(start = 18.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+                    .border(1.dp, palette.line, shape).then(click).padding(start = 18.dp.dense, end = 12.dp.dense, top = 12.dp.dense, bottom = 12.dp.dense),
                 content = body,
             )
         }
         // JCard clips only inside this modifier: the clip here keeps the selection plate within the card's corners.
         prominent && style == AppStyle.Glass -> JCard(
-            modifier.padding(bottom = if (position.last) 0.dp else 12.dp).clip(PersonaTheme.shapes.cardShape).selectedRow(selected).onSecondaryClick(onLongClick),
-            onClick = onClick, onLongClick = onLongClick, padding = 16.dp, content = body,
+            modifier.padding(bottom = if (position.last) 0.dp else 12.dp.dense).clip(PersonaTheme.shapes.cardShape).selectedRow(selected).onSecondaryClick(onLongClick),
+            onClick = onClick, onLongClick = onLongClick, padding = 16.dp.dense, content = body,
         )
         else -> JGroupItem(position, modifier) {
-            Column(click.padding(horizontal = if (style == AppStyle.Brief) 0.dp else 14.dp, vertical = 14.dp), content = body)
+            Column(click.padding(horizontal = if (style == AppStyle.Brief) 0.dp else 14.dp.dense, vertical = 14.dp.dense), content = body)
         }
     }
 }
@@ -156,32 +156,32 @@ fun MessageItem(
 fun DraftPreview(text: String, modifier: Modifier = Modifier, label: String = stringResource(R.string.designsystem_draft_ready), actions: (@Composable RowScope.() -> Unit)? = null) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
-    Column(modifier.fillMaxWidth().padding(top = 12.dp)) {
+    Column(modifier.fillMaxWidth().padding(top = Tokens.Space.m)) {
         when (PersonaTheme.style) {
             AppStyle.Brief -> {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     JIcon(PhIcons.Sparkle, null, size = 14.dp, tint = palette.ink, selected = true)
-                    Spacer(Modifier.width(2.dp))
+                    Spacer(Modifier.width(2.dp.dense))
                     MarkerText(label, type.micro.copy(fontWeight = FontWeight.Bold))
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp.dense))
                 Row(Modifier.height(IntrinsicSize.Min)) {
                     Box(Modifier.width(2.dp).fillMaxHeight().clip(CircleShape).background(palette.line))
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(12.dp.dense))
                     Text(text, style = type.callout, color = palette.ink2, maxLines = 4, overflow = TextOverflow.Ellipsis)
                 }
             }
-            else -> Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 6.dp else 18.dp)).background(palette.statusSurface).padding(12.dp)) {
+            else -> Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 6.dp.corner else 18.dp.corner)).background(palette.statusSurface).padding(12.dp.dense)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     JIcon(PhIcons.Sparkle, null, size = 14.dp, tint = palette.accent, selected = true)
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(6.dp.dense))
                     Text(label, style = type.caption.copy(fontWeight = FontWeight.SemiBold), color = palette.accent, maxLines = 1)
                 }
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(6.dp.dense))
                 Text(text, style = type.callout, color = palette.ink, maxLines = 5, overflow = TextOverflow.Ellipsis)
             }
         }
-        actions?.let { Spacer(Modifier.height(12.dp)); Row(horizontalArrangement = Arrangement.spacedBy(8.dp), content = it) }
+        actions?.let { Spacer(Modifier.height(12.dp.dense)); Row(horizontalArrangement = Arrangement.spacedBy(8.dp.dense), content = it) }
     }
 }
 
@@ -205,25 +205,25 @@ fun HubCard(
                 AppStyle.Glass -> JAppMark(HomeTokens.settingsGlyph)
                 AppStyle.Brief -> Box(Modifier.size(52.dp).clip(CircleShape).background(palette.action), contentAlignment = Alignment.Center) {
                     Text(stringResource(R.string.designsystem_brand_persona).take(1), style = type.title.copy(fontSize = androidx.compose.ui.unit.TextUnit(22f, androidx.compose.ui.unit.TextUnitType.Sp), fontWeight = FontWeight.Bold), color = palette.onAction)
-                    Box(Modifier.align(Alignment.BottomEnd).size(14.dp).clip(CircleShape).background(palette.surface).padding(2.dp).clip(CircleShape).background(tone.dot))
+                    Box(Modifier.align(Alignment.BottomEnd).size(14.dp).clip(CircleShape).background(palette.surface).padding(2.dp.dense).clip(CircleShape).background(tone.dot))
                 }
                 AppStyle.Board -> Unit
             }
-            if (PersonaTheme.style != AppStyle.Board) Spacer(Modifier.width(14.dp))
+            if (PersonaTheme.style != AppStyle.Board) Spacer(Modifier.width(14.dp.dense))
             Column(Modifier.weight(1f)) {
                 Text(name, style = type.title, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (busy) { JSpinner(Modifier.size(12.dp), stroke = 1.6.dp); Spacer(Modifier.width(6.dp)) }
-                    else if (PersonaTheme.style == AppStyle.Brief) { Box(Modifier.size(8.dp).clip(CircleShape).background(tone.dot)); Spacer(Modifier.width(6.dp)) }
+                    if (busy) { JSpinner(Modifier.size(12.dp), stroke = 1.6.dp); Spacer(Modifier.width(6.dp.dense)) }
+                    else if (PersonaTheme.style == AppStyle.Brief) { Box(Modifier.size(8.dp).clip(CircleShape).background(tone.dot)); Spacer(Modifier.width(6.dp.dense)) }
                     Text(statusText, style = type.callout, color = if (PersonaTheme.style == AppStyle.Glass) tone.text else palette.ink2, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             if (onClick != null) JIcon(PhIcons.CaretRight, null, size = 18.dp, tint = palette.ink3)
         }
         if (facts.isNotEmpty()) {
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(14.dp.dense))
             if (PersonaTheme.style == AppStyle.Board) Fields(facts.map { "${it.second} ${it.first}".trim() })
-            else Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            else Row(horizontalArrangement = Arrangement.spacedBy(16.dp.dense)) {
                 facts.forEach { (label, value) ->
                     Column(Modifier.weight(1f)) {
                         Text(value, style = type.label, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)

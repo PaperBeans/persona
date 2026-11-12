@@ -253,7 +253,7 @@ internal fun TerminalCoverFrame(open: Boolean, onClose: () -> Unit, content: @Co
 private fun TerminalCoverBar(subtitle: String?, grab: TerminalGrab, control: @Composable () -> Unit, tools: @Composable () -> Unit) {
     val palette = PersonaTheme.palette
     Column(Modifier.fillMaxWidth().then(grab.drag).padding(top = Tokens.Space.s).testTag("terminal_bar")) {
-        Box(Modifier.align(Alignment.CenterHorizontally).size(Tokens.Space.xxl, Tokens.Space.xs)
+        Box(Modifier.align(Alignment.CenterHorizontally).size(Tokens.Space.Standard.xxl, Tokens.Space.Standard.xs)
             .clip(PersonaTheme.shapes.controlShape).background(palette.ink3))
         Row(Modifier.fillMaxWidth().padding(start = pagePadding, end = Tokens.Space.xs), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {

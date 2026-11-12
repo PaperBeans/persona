@@ -75,7 +75,8 @@ internal data class TreeShowAllEntry(val group: AgentListGroup, val count: Int, 
 /**
  * Finished sessions of an active space that are tucked away until asked for. On Glass's By Repository ([fold], iOS
  * `RepoIdleLine`, #4338 A8) the quiet line that folds a working tree's idle agents: folded, what they are; open, the
- * line after them that folds them again.
+ * line after them that folds them again. On Glass's By project the same [fold] is only the open state, the "Hide N Idle" row
+ * after the opened agents (iOS `collapseRow`); [hidden] counts them either way.
  */
 internal data class TreeIdleEntry(val group: AgentListGroup, val hidden: Int, val depth: Int, val fold: IdleFold? = null) : AgentTreeEntry {
     override val key: String get() = "idle:${group.id}"
@@ -115,6 +116,11 @@ internal fun agentTreeEntries(
      * working tree's idle agents behind their quiet line ([AgentListGroup.idleFold]) that folds them again once open.
      */
     idleRepos: Boolean = false,
+    /**
+     * By project on Glass (iOS `collapseRow`, #4338 A8): a space's idle agents, once opened, end with a "Hide N Idle" row
+     * ([TreeIdleEntry.fold]) that folds them again. Closed, "N more idle" opens them as before.
+     */
+    hideIdle: Boolean = false,
 ): List<AgentTreeEntry> {
     val entries = mutableListOf<AgentTreeEntry>()
     fun group(group: AgentListGroup, space: Boolean, depth: Int, first: Boolean) {
@@ -155,6 +161,11 @@ internal fun agentTreeEntries(
         val hidden = group.rows.size - shown - (group.visibleRows.size - drawn.size)
         if (fold != null) entries += TreeIdleEntry(group, fold.rows.size, depth, fold)
         else if (hidden > 0) entries += TreeIdleEntry(group, hidden, depth)
+        else if (hideIdle) group.idleFold?.takeIf { it.open }?.let { idle ->
+            // The idle agents "N more idle" opened, not those a tab brought along with its busy ones (iOS: whole idle tabs).
+            val opened = idle.rows.count { row -> row.session.tabKey?.let(byTab::get)?.members?.none { it.stays(mutes) } ?: true }
+            if (opened > 0) entries += TreeIdleEntry(group, opened, depth, idle)
+        }
     }
     val byId = list.groups.associateBy { it.id }
     val treeIds = list.machines.flatMap { it.groups }.toSet()
@@ -343,9 +354,15 @@ internal val TodoState?.countTone: Status
         else -> Status.Idle
     }
 
+/**
+ * A space's (or repository's, or working tree's) heading counts: needing you, working, unread. The agents that only wait in
+ * the background are out of Working and drawn apart ([AgentListGroup.waitingInBackground], a clock), as the computer's
+ * ([AgentMachineGroup.headingCounts]) and iOS's `StateCounts`.
+ */
 internal val AgentListGroup.headingCounts: List<Pair<Status, Int>>
     get() = listOf(AgentState.NeedsYou, AgentState.Working, AgentState.Unread).map { state ->
         // A repository with working trees holds no rows itself (its trees do): it counts from stateCounts.
-        state.designStatus to if (totalCount != null || rows.isEmpty()) stateCounts?.get(state) ?: 0
+        val count = if (totalCount != null || rows.isEmpty()) stateCounts?.get(state) ?: 0
             else rows.count { !it.isNestedSubtask && it.state == state }
+        state.designStatus to if (state == AgentState.Working) (count - waitingInBackground).coerceAtLeast(0) else count
     }

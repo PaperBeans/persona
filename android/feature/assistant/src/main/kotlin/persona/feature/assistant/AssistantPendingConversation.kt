@@ -15,6 +15,7 @@ import persona.core.contracts.api.DeliveryState
 import persona.core.contracts.api.OutboxMessage
 import persona.core.contracts.api.PendingMainConversation
 import persona.core.designsystem.*
+import persona.core.designsystem.dense
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.FailureReason
 import persona.core.domain.mapOperationFailure
@@ -33,8 +34,8 @@ internal fun AssistantPendingConversation(
 ) {
     LazyColumn(modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = pagePadding, end = pagePadding,
-            top = contentPadding.calculateTopPadding() + 12.dp, bottom = contentPadding.calculateBottomPadding() + 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            top = contentPadding.calculateTopPadding() + 12.dp.dense, bottom = contentPadding.calculateBottomPadding() + 16.dp.dense),
+        verticalArrangement = Arrangement.spacedBy(12.dp.dense)) {
         if (demo) item { AssistantDemoNotice() }
         item { StatusLine(assistantStatus(session, messages, receipts = receipts)) }
         if (messages.isEmpty()) item {
@@ -42,7 +43,7 @@ internal fun AssistantPendingConversation(
         }
         items(messages, key = { it.clientMessageId }) { message ->
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                verticalArrangement = Arrangement.spacedBy(4.dp.dense)) {
                 UserBubble(message.text)
                 if (receipts.any { it.clientMessageId == message.clientMessageId && it.processing })
                     Text(stringResource(persona.core.designsystem.R.string.designsystem_message_processing),

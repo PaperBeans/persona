@@ -252,9 +252,16 @@ value written back into state that changes the layout loops for ever and hangs t
   written back with different tolerances and cycled with period 4 (commit `4939f5960`).
 - Fixed before: each machine's session list landed as its own SwiftUI update; they now coalesce for 25 ms
   (`AppModel.sessionsCoalesce`, `apple/Persona/App/AppModel.swift:1646`).
+- Fixed before: the chat's programmatic jumps animated SwiftUI's `ScrollPosition` (`withAnimation { position.scrollTo(…) }`),
+  a SwiftUI update every frame that put the content at a new fractional pixel offset and drew every text layer on screen
+  again. With CoreGraphics' 1 MB glyph cache, a long Chinese answer had its glyphs rendered anew each frame (#5076,
+  docs/lessons/ios.md「Animated jumps redraw every text they pass」). Jumps to the newest end now move the
+  `UIScrollView` (`ChatJumpRun`); jumps to a line keep SwiftUI's (a far one measured a longer frame on the list).
 
 **Do.** Batch into one main-actor hop per frame or per short window (`applyPendingSessions`); compare before assigning;
-round geometry to whole points and write it back only when it moved by at least a point.
+round geometry to whole points and write it back only when it moved by at least a point. Animate a long list's
+programmatic scroll on its `UIScrollView` (a display link, whole pixels; `ChatJumpRun`), never by animating SwiftUI's
+scroll position; put a far target a screen short first (`ChatJump`).
 
 **Check.** `-perfCounts YES` push time and bodies; the mock hub's `/mock/churn` and `/mock/say?stream=1` drive the load
 (`docs/operations/testing.md`, "Persona page (long main chat)").

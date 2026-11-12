@@ -153,20 +153,6 @@ class ChatSessionInfoTest {
             listOf<Long>(172_000, 1_000_000, 1_260_000, 800, 999, 999_499, 999_500, 999_600, 1_960_000).map(ContextUsage::short))
     }
 
-    /** iOS `Delegated.history`: resolved questions the assistant answered, newest first; other cards and answers left out. */
-    @Test fun theQuestionsTheAssistantAnswered() {
-        fun record(id: String, kind: String = "question", status: String = "resolved", by: String? = "assistant", at: String? = null) =
-            persona.core.contracts.InteractionRecord(persona.core.contracts.Interaction(id, kind = kind), status,
-                persona.core.contracts.Resolution(answers = mapOf("Which?" to "A"), answeredBy = by, reason = "why $id"), at)
-        val answers = delegatedHistory(listOf(
-            record("old", at = "2026-11-10T01:00:00Z"), record("mine", by = null), record("plan", kind = "plan"),
-            record("expired", status = "expired"), record("new", at = "2026-11-12T01:00:00Z"), record("undated"),
-        ))
-        assertEquals(listOf("new", "old", "undated"), answers.map { it.interaction.id })
-        assertEquals("why new", answers.first().reason)
-        assertEquals(mapOf("Which?" to "A"), answers.first().answers)
-    }
-
     /** #582 (iOS `infoShown` / `stateWord`): the ultracode row says on, off or unknown, for the user's running Claude Code on a hub that has it. */
     @Test fun ultracodeRowSaysOnOffOrUnknown() {
         val claude = Session(machineId = "m", sessionId = "s1", agent = "claude", status = "idle")

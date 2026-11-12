@@ -20,15 +20,18 @@ work. An agent writing "done" in its reply does not finish anything; its turn en
 
 ## Sections
 
+In the page's order (#5707): what the owner has to act on first, then the unfinished work, then what just finished,
+then the folded ones, Done last. The same order decides which member leads a merged row ("Related to-dos").
+
 | Section | Shown | What it holds |
 | :--- | :--- | :--- |
 | Waiting on you | open | Something only the owner can move: an answer, an approval, a decision, a retry |
 | Working | open | An agent is running on it now |
-| Just finished | open | Worth a look: closed, accepted or deployed in the last 24 hours, or a turn nobody has seen / a review not done yet (those stay until seen or reviewed) |
 | PR to merge | open | Its work stopped at a pull request that is still open and nothing runs: however old, it stays here, with the PR link and how long since it moved |
-| Other open | folded | Open, recently active, none of the above (an agent stopped and seen, a reminder of the user's own) |
+| Other open | open | Open, recently active, none of the above (an agent stopped and seen, a reminder of the user's own) |
+| Just finished | open | Worth a look: closed, accepted or deployed in the last 24 hours, or a turn nobody has seen / a review not done yet (those stay until seen or reviewed); the owner has not seen it since (see "Seen") |
 | Shelved | folded | No activity for 48 hours and nothing running (see "Shelving") |
-| Done | folded | Closed, accepted or deployed more than 24 hours ago |
+| Done | folded | Closed, accepted or deployed more than 24 hours ago or seen since; a finished turn the owner has seen since it last moved |
 
 ## Decision table
 
@@ -37,15 +40,16 @@ The first rule that holds wins.
 | # | Rule | Condition | Section |
 | :--- | :--- | :--- | :--- |
 | 1 | `failed_start` | The task's agent never started (`start_error`) | Waiting on you; Done once 48 hours passed |
-| 1a | `superseded` | Rule 1, and its row (see "Related to-dos") has a to-do that really finished: closed without a start error (#3713) | Just finished for 24 hours, then Done; behind that to-do in the row, never leading it |
+| 1a | `superseded` | Rule 1, and its row (see "Related to-dos") has a to-do that really finished: closed without a start error (#3713) | Just finished for 24 hours or until seen, then Done; behind that to-do in the row, never leading it |
 | 2 | `agent_asks` | An agent waits on the owner (question, approval, plan) or was cut off by a model error | Waiting on you |
 | 3 | `owner_decides` | Open, and the review says `needs_user`, or its ask is a decision or "cannot be done" | Waiting on you |
 | 4 | `agent_running` | An agent is working or starting | Working |
-| 5 | `closed` | `done_at` is set | Just finished for 24 hours, then Done |
-| 6 | `accepted` | The latest review accepted it and no review came since, even when the hub reopened it (see "Accepted tasks") | Just finished for 24 hours after the review, then Done |
-| 7 | `deployed` | `delivery.state` is `live` | Just finished for 24 hours, then Done |
-| 8 | `finished_unseen` | An agent finished a turn nobody has seen, the review is pending, or its ask says done / please verify | Just finished |
+| 5 | `closed` | `done_at` is set | Just finished for 24 hours or until seen, then Done |
+| 6 | `accepted` | The latest review accepted it and no review came since, even when the hub reopened it (see "Accepted tasks") | Just finished for 24 hours after the review or until seen, then Done |
+| 7 | `deployed` | `delivery.state` is `live` | Just finished for 24 hours or until seen, then Done |
+| 8 | `finished_unseen` | An agent finished a turn nobody has seen, the review is pending, or its ask says done / please verify; not seen since it last moved | Just finished |
 | 9 | `pr_open` | Its PR is open (rule "PR / delivery" above); a `pr_url` whose stage is Merge or later is a merged PR, never this (#3205) | PR to merge |
+| 9a | `seen` | Rule 8's signals, seen by the owner since it last moved (see "Seen"); not an open concern | Done |
 | 10 | `stale` | Shelvable (see "Shelving") and no activity for 48 hours | Shelved |
 | 11 | `rest` | Anything else | Other open |
 
@@ -131,6 +135,31 @@ Once deployed (checked as above), a task's "Please verify" is accepted by the su
 (`by_assistant` on the ask, stage Verified, no Lark card): the owner is not asked for each one. Only a big feature, a
 to-do with priority `high`, still asks the owner with the card, as before.
 
+## Seen
+
+Just finished used to empty itself only by time: a to-do the owner had already looked at stayed there for 24 hours, on
+top of the list (#5707). Now the owner files it:
+
+- **Got it** on a Just finished row (a button under its words, and on iOS a leading swipe action) marks it seen. The row
+  goes to Done at once, before the hub answers; a toast says so with **Undo**, which takes the mark off. A failed write
+  puts the row back and says why.
+- **Opening it** counts too: the iPhone marks it seen when its page opens (the list behind has it in Done on the way
+  back); the web when the page leaves it (another to-do, the list, another page), so its row does not move while it is
+  read. Nothing is said about it. The Mac (frozen) and Android do neither yet; both file what another device marked.
+- The mark is the to-do's `seen_at` on the hub (`PUT` / `DELETE /api/v1/todos/{id}/seen`, feature `todo_seen`), so every
+  device agrees. It is not activity: `updated_at` stays, so it neither shelves nor unshelves anything. A client of a hub
+  without `todo_seen` offers neither.
+- A to-do is **seen** when `seen_at` is at or after the moment that put it in Just finished: its `done_at` (rules 1a and
+  5), its accepting review (6), its delivery (7), or its last activity (8). Anything that happens after the mark (a
+  reopen, a new close, a new turn, a review) brings it back to Just finished until it is seen again or its 24 hours pass.
+- A finished turn seen (rule 9a) is filed under Done even though the to-do is not closed: the owner has looked, and it
+  no longer counts as open. A PR still waiting on the owner keeps it in PR to merge, an open concern in Other open.
+- Checks: the shared cases (`*_seen*`, `unfinished_before_just_finished_and_seen_in_done`), `server/internal/assistant/todo_seen_test.go`,
+  `web/src/views/Todos.seen.test.tsx`, `apple/PersonaTests/TodoTriageTests.swift` and `TodosLogicTests.swift`. In a
+  browser and the simulator against the mock hub (`MOCK_TODO_LIST=1`; `MOCK_TODO_SEEN=off` is a hub without it):
+  `node web/e2e/todo-seen.mjs <web URL> [--phase before|after] [--shots <dir>]` and the UI test `TodoSeenTests`
+  (`TEST_RUNNER_PERSONA_TODOS_HUB`, `TEST_RUNNER_PERSONA_SHOTS`).
+
 ## Header count
 
 The web's header reads "N open · N shelved · N done" beside the title on wider screens (a phone leaves it out); it counts what the list's filter shows, whatever is searched (#3740). The iOS and
@@ -138,7 +167,8 @@ Android lists have no such line (#3712): it said again what the sections say, so
 to-dos its rows list (a merged row's related ones too), in the section's state color, and the counts follow a search and the
 list's filter (#3740). **Open** counts to-dos that are not closed, not accepted or deployed,
 and not shelved: Waiting on you, Working, PR to merge, Other open, and Just finished rows still open (a finished turn
-is not a closed to-do; only a review or the user closes it). **Done** counts closed, accepted and deployed ones. The
+is not a closed to-do; only a review or the user closes it; once the owner has seen it, rule 9a, it is in Done and not
+counted). **Done** counts closed, accepted and deployed ones. The
 sidebar's To-dos badge shows the same open count without quiet tasks (#1731), as before; the page lists and counts them. A task whose agent never started (rule 1) counts as open while it waits on the owner.
 
 ## Shelving

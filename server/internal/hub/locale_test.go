@@ -281,3 +281,47 @@ func TestInjectedLineLanguage(t *testing.T) {
 		t.Fatalf("en one: %q", got)
 	}
 }
+
+// A hub set up by the installer starts in the language the installer ran in (hub.json initial_locale, #5519) until a
+// device says one; the first device's language is still taken, a saved language still wins, and a hub with none
+// recorded (or one it does not know) keeps zh-Hans.
+func TestUserLangStartsInTheInstallLanguage(t *testing.T) {
+	ctx := context.Background()
+	store := &settingsStore{vals: map[string][]byte{}}
+	h := newTestHub(t)
+	h.cfg.InitialLocale = i18n.En
+	h.store = store
+	h.loadUserLang(ctx)
+	quiet := &client{out: make(chan []byte, 16), role: roleFull, hub: h}
+	if h.userLang() != i18n.En || quiet.lang() != i18n.En || h.contextLang(ctx) != i18n.En {
+		t.Fatalf("before any device: user %s, conn %s", h.userLang(), quiet.lang())
+	}
+	if store.puts != 0 {
+		t.Fatalf("the install language is not saved as the user's: %d writes", store.puts)
+	}
+	helloFrom(h, "dev_phone", `{"locale":"ja"}`)
+	if h.userLang() != i18n.Ja || string(store.vals[userLocaleSetting]) != `"ja"` {
+		t.Fatalf("the first device's language is the user's: %s / %s", h.userLang(), store.vals[userLocaleSetting])
+	}
+	helloFrom(h, "dev_mac", `{"locale":"en"}`)
+	if h.userLang() != i18n.Ja {
+		t.Fatalf("another device connecting must not change it: %s", h.userLang())
+	}
+
+	saved := newTestHub(t)
+	saved.cfg.InitialLocale = i18n.En
+	saved.store = &settingsStore{vals: map[string][]byte{userLocaleSetting: []byte(`"zh-Hans"`)}}
+	saved.loadUserLang(ctx)
+	if saved.userLang() != i18n.ZhHans {
+		t.Fatalf("a saved language wins over the install language: %s", saved.userLang())
+	}
+
+	for _, l := range []i18n.Lang{"", "fr"} {
+		none := newTestHub(t)
+		none.cfg.InitialLocale = l
+		none.loadUserLang(ctx)
+		if none.userLang() != i18n.ZhHans {
+			t.Fatalf("initial_locale %q: %s", l, none.userLang())
+		}
+	}
+}

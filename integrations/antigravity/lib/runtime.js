@@ -313,7 +313,7 @@ export function createAgyRuntime(options = {}) {
   }
 
   function historyOf(rawId) {
-    return `agy:${rawId}`
+    return `agy:${rawId}:full`
   }
 
   function readConversationStates() {
@@ -347,7 +347,7 @@ export function createAgyRuntime(options = {}) {
   function syncTranscriptAppend(rawId) {
     const pid = toPersonaId(rawId)
     const bDir = brainDirOf(rawId)
-    const steps = readTranscriptSteps(bDir, false)
+    const steps = readTranscriptSteps(bDir, true)
     if (steps.length === 0) return
     const { items: allItems, toSeq } = stepsToItems(steps, { brainDir: bDir, full: false })
     const prevSeq = lastPushedSeq.get(pid) ?? 0
@@ -420,7 +420,7 @@ export function createAgyRuntime(options = {}) {
     })
 
     return chosen.map(({ rawId, pid, summary, native, cwd, mtimeMs, running, hasTranscript }) => {
-      const steps = readTranscriptSteps(brainDirOf(rawId), false)
+      const steps = readTranscriptSteps(brainDirOf(rawId), true)
       const parsed = stepsToItems(steps, { brainDir: brainDirOf(rawId), full: false })
       if (!lastPushedSeq.has(pid)) lastPushedSeq.set(pid, parsed.toSeq)
       let status = running ? 'working' : transcriptStatus(steps, native)
@@ -460,14 +460,14 @@ export function createAgyRuntime(options = {}) {
   async function items(params) {
     const rawId = toAgyId(params.session_id)
     const bDir = brainDirOf(rawId)
-    const steps = readTranscriptSteps(bDir, false)
+    const steps = readTranscriptSteps(bDir, true)
     const { items: allItems, toSeq } = stepsToItems(steps, { brainDir: bDir, full: false })
     return page(allItems, params, { history: historyOf(rawId), toSeq })
   }
 
   async function cursor(sessionId) {
     const rawId = toAgyId(sessionId)
-    const steps = readTranscriptSteps(brainDirOf(rawId), false)
+    const steps = readTranscriptSteps(brainDirOf(rawId), true)
     const { toSeq } = stepsToItems(steps, { brainDir: brainDirOf(rawId), full: false })
     return toSeq
   }

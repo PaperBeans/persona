@@ -47,6 +47,10 @@ type catalogError struct{ kind, err error }
 func (e *catalogError) Error() string   { return e.err.Error() }
 func (e *catalogError) Unwrap() []error { return []error{e.kind, e.err} }
 
+// Text is the reason in l: a translated reason inside another kind of error (a rate limit is also ErrRateLimited)
+// still reads in the client's language.
+func (e *catalogError) Text(l i18n.Lang) string { return i18n.Localize(e.err, l) }
+
 func catalogFailure(kind, err error) error {
 	if err == nil || errors.Is(err, kind) {
 		return err
@@ -230,18 +234,26 @@ func parseCatalog(raw []byte, trusted string) (*Fetched, error) {
 	if len(raw) > IndexMost {
 		return nil, i18n.Err("extension-market_security.catalog")
 	}
+	// A web page or another document says what it is (notCatalog); a JSON object strictJSON refuses stays malformed.
+	if !json.Valid(raw) {
+		return nil, notCatalog(raw)
+	}
 	if err := strictJSON(raw); err != nil {
 		return nil, i18n.Err("extension-market_security.catalog")
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
-		return nil, i18n.Err("extension-market_security.catalog")
+		return nil, notCatalog(raw)
 	}
 	payload := raw
 	var signatures []catalogSignature
 	_, hasPayload := fields["payload"]
 	_, hasSignatures := fields["signatures"]
 	if hasPayload || hasSignatures {
+		if p := bytes.TrimSpace(fields["payload"]); !hasSignatures && len(p) > 0 && p[0] != '"' {
+			// Not an envelope at all: some other document with a "payload" (a GitHub file page's own data).
+			return nil, notCatalog(raw)
+		}
 		if !hasPayload || !hasSignatures || len(fields) != 2 {
 			return nil, i18n.Err("extension-market_security.catalog")
 		}

@@ -67,6 +67,7 @@ func TestBotStepLines(t *testing.T) {
 		{"mcp__persona__phone_shortcuts_run", `{"name":"回家模式"}`, "运行快捷指令 `回家模式`"},
 		{"mcp__persona__phone_media_play", `{"query":"lofi"}`, "放音乐 `lofi`"},
 		{"mcp__persona__phone_maps_navigate", `{"name":"Cafe","latitude":31.2,"longitude":121.4}`, "在地图里导航 `Cafe`"},
+		{"mcp__persona__phone_maps_route", `{"name":"Cafe","latitude":31.2,"longitude":121.4,"mode":"walking"}`, "查路线 `Cafe`"},
 		{"mcp__persona__mail_search", `{"query":"发票"}`, "查邮件 `发票`"},
 		{"mcp__persona__mail_send", `{"to":"me@example.com"}`, "发邮件 `me@example.com`"},
 		{"mcp__persona__kb_search", `{"query":"周报"}`, "查知识库 `周报`"},

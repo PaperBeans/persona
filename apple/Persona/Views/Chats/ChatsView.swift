@@ -377,6 +377,16 @@ struct ChatsView: View {
                     spaceAt = spaceAt.filter { $0.key < p.count }
                     if p.isEmpty, !leaving { AppModel.rememberChat(nil); model.chatSwitched = [:] } // back at the list: next launch starts here
                 }
+                .onChange(of: model.agentsListReveal) { _, request in
+                    let previousPath = path
+                    stackStill.whenStill {
+                        // A newer targeted open wins, even if the stable-stack opener already consumed it.
+                        guard !leaving, model.agentsNavigationRevision == request, path == previousPath,
+                              model.openChat == nil, model.openPersonalAgent == nil else { return }
+                        spaceAt = [:]
+                        if !path.isEmpty { path = NavigationPath() }
+                    }
+                }
                 .onChange(of: model.openChat, initial: true) { _, key in
                     // Not before the list is on screen: a push into a stack whose root has not appeared yet built the
                     // chat three times (a TabView launch onto a chat, `-openSession` / a notification: items
@@ -403,8 +413,11 @@ struct ChatsView: View {
                     // Not over a personal agent's conversation asked for (#4519): that one is what the app came up for.
                     if path.isEmpty, model.openChat == nil, model.openPersonalAgent == nil, model.selectedTab == .chats,
                        let v = AppModel.rememberedChat {
+                        let request = model.agentsNavigationRevision
                         DispatchQueue.main.async {
-                            if path.isEmpty, model.openChat == nil, model.openPersonalAgent == nil, AppModel.rememberedChat == v, !leaving {
+                            if path.isEmpty, model.openChat == nil, model.openPersonalAgent == nil,
+                               model.selectedTab == .chats, model.agentsNavigationRevision == request,
+                               AppModel.rememberedChat == v, !leaving {
                                 model.openChat = SessionKey(path: v)
                             }
                         }
@@ -1358,7 +1371,7 @@ private struct AgentsList: View {
             cardRow(ix)
         } else if let first = row.cards.first {
             if compact {
-                NavigationLink(value: first.sessionKey) {
+                agentNavigationLink(first.sessionKey) {
                     CompactInteractionRow(interaction: first, machine: machine(first.machineRef)?.title, more: row.cards.count - 1)
                 }
                 #if os(macOS)
@@ -1393,7 +1406,7 @@ private struct AgentsList: View {
             .accessibilityIdentifier("agents.interaction")
         } else if compact {
             // Compact List: one row like an agent's; the chat answers it.
-            NavigationLink(value: ix.sessionKey) {
+            agentNavigationLink(ix.sessionKey) {
                 CompactInteractionRow(interaction: ix, machine: machine(ix.machineRef)?.title)
             }
             #if os(macOS)
@@ -1438,7 +1451,7 @@ private struct AgentsList: View {
         let s = session(row.key)
         let place = s.flatMap { machine($0.machineRef)?.title }
         if compact {
-            NavigationLink(value: row.key) {
+            agentNavigationLink(row.key) {
                 CompactWaitingRow(session: s, machine: place, since: row.since)
             }
             .listRowInsets(CompactList.rowInsets)
@@ -2892,7 +2905,23 @@ private struct AgentsList: View {
                 .macOptionClick { MacShellState.shared.chatWindow = s.key }
         }
         #else
-        NavigationLink(value: s.key) { content() }
+        agentNavigationLink(s.key, content: content)
+        #endif
+    }
+
+    /// A split sidebar's value link owns selection outside the bound detail path. Use the path on iOS so tab
+    /// selection can clear every Agent detail, without rebuilding the list and losing its state.
+    @ViewBuilder private func agentNavigationLink<Content: View>(_ key: SessionKey, @ViewBuilder content: () -> Content) -> some View {
+        #if os(iOS)
+        // A split's sidebar can read compact: use the parent page's layout, not the column's width class.
+        if !ownsTop {
+            Button { openFromList(key) } label: { content() }
+                .buttonStyle(.plain)
+        } else {
+            NavigationLink(value: key, label: content)
+        }
+        #else
+        NavigationLink(value: key, label: content)
         #endif
     }
 }

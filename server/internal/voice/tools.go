@@ -47,6 +47,7 @@ func runTool(ctx context.Context, hub *hubClient, l i18n.Lang, name, args string
 	res := prompts.VoiceToolResult{Lang: string(l), Tool: name}
 	var in struct {
 		Query     string `json:"query"`
+		Kind      string `json:"kind"` // search_knowledge: one kind only, as kb_search takes it (recordings for meetings)
 		MachineID string `json:"machine_id"`
 		SessionID string `json:"session_id"`
 		Text      string `json:"text"`
@@ -61,7 +62,7 @@ func runTool(ctx context.Context, hub *hubClient, l i18n.Lang, name, args string
 			res.Code = "bad_args"
 			break
 		}
-		hits, err := hub.searchKnowledge(ctx, in.Query)
+		hits, err := hub.searchKnowledge(ctx, in.Query, strings.TrimSpace(in.Kind))
 		if err != nil {
 			res.Code, res.Reason = "failed", hubReason(err)
 			break

@@ -206,6 +206,7 @@ func (it *InboxItem) listed() InboxItem {
 	if g := currentSuggestion(it); g != nil {
 		g := *g
 		g.Changes, g.Cwd = slices.Clone(g.Changes), ""
+		g.MailTarget = nil // the reply's internal conflict check, not a client's target to choose
 		c.Suggestion = &g
 		if c.Handling == nil && g.Conversation == nil && it.Agent != nil { // an old draft: its conversation is done with this round
 			c.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingDone, MachineID: it.Agent.MachineID, SessionID: it.Agent.SessionID}

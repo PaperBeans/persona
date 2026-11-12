@@ -18,6 +18,7 @@ import SwiftUI
 /// `WaitingBadge`, beside the menu rather than in its label, and reads the agents itself.
 struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
     @Binding var tab: AppTab
+    @Environment(AppModel.self) private var model
     /// Across the top bar, or down the side rail on iPhone Duo (`ShellSideRail`): a segment there is the page's symbol over
     /// its name, as a tab bar's item on the side.
     var axis: Axis = .horizontal
@@ -66,6 +67,7 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
         guard chosen == value else { return false }
         // No menu to open (the switch over a phone's tabs, iPhone Duo open, #3680): the chosen segment is a plain button,
         // not an empty menu that VoiceOver called List Options.
+        if value == .chats, let shell, !shell.workAtRoot { return false }
         if value == .chats, WorkMenu.self == EmptyView.self { return false }
         if value == .assistant, ChatMenu.self == EmptyView.self { return false }
         guard let pager = shell?.pager else { return true }
@@ -119,12 +121,12 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
             #if DEBUG
             ShellTrace.shared.note("switch \(value) chosen=\(chosen)")
             #endif
+            if chosen != value { Haptics.tap() }
+            model.selectHomeTab(value)
             if let shell {
-                // Also while the strip slides: the last tap is where it ends.
-                if chosen != value { Haptics.tap() }
+                // Also while the strip slides, or when the same tab is reselected: the last tap wins.
                 shell.select(ShellState.index(for: value))
             } else if tab != value {
-                Haptics.tap()
                 tab = value
             }
         } label: {

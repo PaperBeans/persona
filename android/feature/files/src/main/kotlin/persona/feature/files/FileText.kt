@@ -25,6 +25,7 @@ import persona.core.designsystem.JLoading
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import persona.core.designsystem.dense
 
 internal enum class FileLineKind { Code, Context, Add, Delete, Info }
 internal data class FileTextLine(val text: String, val old: Int? = null, val new: Int? = null, val kind: FileLineKind = FileLineKind.Code)
@@ -134,10 +135,10 @@ internal fun FileText(text: String, diff: Boolean = false, modifier: Modifier = 
                         val marker = when (line.kind) { FileLineKind.Add -> "+"; FileLineKind.Delete -> "−"; else -> " " }
                         val number = if (diff) "${line.old?.toString().orEmpty().padStart(4)} ${line.new?.toString().orEmpty().padStart(4)} $marker"
                             else line.new?.toString().orEmpty()
-                        Text(number, Modifier.width(gutter).padding(end = 8.dp), style = style,
+                        Text(number, Modifier.width(gutter).padding(end = 8.dp.dense), style = style,
                             color = if (diff) tone else muted, textAlign = TextAlign.End, maxLines = 1, softWrap = false)
                         Box(Modifier.weight(1f).horizontalScroll(horizontal)) {
-                            Text(data.spans[index], Modifier.width(width).padding(end = 16.dp), style = style,
+                            Text(data.spans[index], Modifier.width(width).padding(end = 16.dp.dense), style = style,
                                 color = if (line.kind == FileLineKind.Info) muted else normal, maxLines = 1, softWrap = false)
                         }
                     }

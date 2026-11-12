@@ -228,15 +228,15 @@ TEXT
 	en:hub_setup_next) printf '%s' 'Next, set up this computer as the hub (%s hub setup):' ;;
 	zh-Hans:hub_setup_next) printf '%s' '接着把这台电脑设成 hub（%s hub setup）：' ;;
 	ja:hub_setup_next) printf '%s' '次に、このコンピュータを hub として設定します（%s hub setup）：' ;;
-	en:hub_setup_incomplete) printf '%s' 'The hub is not ready yet. Follow the Next steps above, then run %s hub setup to continue; completed steps will not be repeated.' ;;
-	zh-Hans:hub_setup_incomplete) printf '%s' 'hub 还没装好：按上面的「下一步」处理后，运行 %s hub setup 接着装（已经做好的不会重做）。' ;;
-	ja:hub_setup_incomplete) printf '%s' 'hub の設定はまだ完了していません。上の「次の手順」に従い、%s hub setup を実行して続けてください。完了済みの手順は繰り返されません。' ;;
+	en:hub_setup_incomplete) printf '%s' 'The hub is not ready yet. Follow the Next steps above, then run %s hub setup --lang %s to continue; completed steps will not be repeated.' ;;
+	zh-Hans:hub_setup_incomplete) printf '%s' 'hub 还没装好：按上面的「下一步」处理后，运行 %s hub setup --lang %s 接着装（已经做好的不会重做）。' ;;
+	ja:hub_setup_incomplete) printf '%s' 'hub の設定はまだ完了していません。上の「次の手順」に従い、%s hub setup --lang %s を実行して続けてください。完了済みの手順は繰り返されません。' ;;
 	en:hub_upgraded) printf '%s' 'This computer is already the hub. personad was upgraded; restart the hub to use the new version (Linux: systemctl --user restart personad). To check the setup, run: %s hub setup' ;;
 	zh-Hans:hub_upgraded) printf '%s' '这台已经是 hub，personad 升级好了；重启 hub 后用上新版本（Linux：systemctl --user restart personad）。要检查一遍：%s hub setup' ;;
 	ja:hub_upgraded) printf '%s' 'このコンピュータはすでに hub です。personad を更新しました。新しい版を使うには hub を再起動してください（Linux：systemctl --user restart personad）。設定確認：%s hub setup' ;;
-	en:hub_run_next) printf '%s' 'To run the hub on this computer, run %s hub setup (or repeat the install command with --hub). A home needs only one hub.' ;;
-	zh-Hans:hub_run_next) printf '%s' '要让这台电脑跑 hub：运行 %s hub setup（或重跑安装命令并加 --hub）。全家只要一台 hub。' ;;
-	ja:hub_run_next) printf '%s' 'このコンピュータで hub を動かすには、%s hub setup を実行してください（または --hub を付けてインストールを再実行）。家庭には hub が 1 台あれば十分です。' ;;
+	en:hub_run_next) printf '%s' 'To run the hub on this computer, run %s hub setup --lang %s (or repeat the install command with --hub). A home needs only one hub.' ;;
+	zh-Hans:hub_run_next) printf '%s' '要让这台电脑跑 hub：运行 %s hub setup --lang %s（或重跑安装命令并加 --hub）。全家只要一台 hub。' ;;
+	ja:hub_run_next) printf '%s' 'このコンピュータで hub を動かすには、%s hub setup --lang %s を実行してください（または --hub を付けてインストールを再実行）。家庭には hub が 1 台あれば十分です。' ;;
 	en:messaging_connectors) printf '%s' 'Messaging connectors are installed from the hub extension marketplace.' ;;
 	zh-Hans:messaging_connectors) printf '%s' '消息连接器从 hub 的扩展市场安装。' ;;
 	ja:messaging_connectors) printf '%s' 'メッセージ用コネクタは hub の拡張機能マーケットからインストールします。' ;;
@@ -712,7 +712,7 @@ node_service() {
 install_node() {
 	fetch_link || fail node_link_required
 	if [ -z "$PAIR" ] && [ -z "$LISTEN_SET" ] && (: </dev/tty) 2>/dev/null; then
-		install_text node_connect_help >/dev/tty
+		install_format node_connect_help >/dev/tty
 		printf '\n' >/dev/tty
 		prompt node_connect_choose
 		read -r how </dev/tty || how=
@@ -829,15 +829,17 @@ fi
 
 # The machine that runs the hub: personad hub setup does the rest (hub.json, the database, the service, the phone's
 # QR code and the admin URL, docs/assistant/onboarding.md 4.1). Running it again is safe, so an upgrade with --hub runs it too.
+# PERSONA_INSTALL_LANG: a new hub starts in the language this installer ran in (hub.json initial_locale, #5519); an
+# environment variable, which an older personad ignores rather than refusing an unknown flag.
 if [ "$ROLE" = hub ]; then
 	unswitch_node
 	get_hub_programs # the person said so at the question above, after personad was installed
 	echo ""
 	say hub_setup_next "$DEST/personad"
-	if "$DEST/personad" hub setup; then
+	if PERSONA_INSTALL_LANG="$INSTALL_LANG" "$DEST/personad" hub setup; then
 		exit 0
 	fi
-	warn hub_setup_incomplete "$DEST/personad"
+	warn hub_setup_incomplete "$DEST/personad" "$INSTALL_LANG"
 	exit 1
 fi
 # A hub that has run has a token in hub.json; set_admin_access above may have written one with admin.access only.
@@ -845,6 +847,6 @@ if [ -f "$STATE/hub.json" ] && grep -Eq '"token"[[:space:]]*:[[:space:]]*"[^"]' 
 	say hub_upgraded "$DEST/personad"
 	exit 0
 fi
-say hub_run_next "$DEST/personad"
+say hub_run_next "$DEST/personad" "$INSTALL_LANG"
 say messaging_connectors
 say other_computers

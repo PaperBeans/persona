@@ -202,6 +202,12 @@ class AddressHintTests(unittest.TestCase):
             self.assertEqual(pc.problems("mail " + address + " now", []), [address])
         self.assertEqual(pc.problems("mail " + email + " now", [], emails=False), [])
 
+    def test_personal_company_and_attribution_emails_are_not_allowlisted(self):
+        # #5747: #5559 allow-listed whole domains, which would also let an employee's personal company address through.
+        for address in ("employee.name@" + "bytedance.com", "noreply@" + "moonshot.cn", "noreply@" + "moonshot.ai"):
+            with self.subTest(address=address):
+                self.assertEqual(pc.problems("Co-Authored-By: Someone <" + address + ">", []), [address])
+
     def test_lines_without_the_hint_have_no_addresses(self):
         for line in ["@Override", "a @ b.io", "v1.2", "1. 2. 3. 4", "x@ example", "end."]:
             with self.subTest(line=line):

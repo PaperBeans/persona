@@ -36,8 +36,8 @@ fun JInlineStatus(
     }
     Row(
         modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.clip(PersonaTheme.shapes.controlShape).background(fill)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 12.dp.dense, vertical = 8.dp.dense),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp.dense),
     ) {
         when (tone) {
             InlineTone.Busy -> JSpinner(Modifier.size(14.dp), color = ink, stroke = 1.8.dp)

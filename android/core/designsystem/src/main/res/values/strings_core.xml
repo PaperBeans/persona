@@ -104,9 +104,12 @@
     <string name="designsystem_core_state_awaiting_reply">Awaiting reply</string>
     <string name="designsystem_core_state_working">Working</string>
     <string name="designsystem_core_state_background_waiting">Waiting in the background</string>
+    <string name="designsystem_core_state_working_background">Working (Background)</string>
     <string name="designsystem_core_state_waiting">Waiting</string>
     <string name="designsystem_core_state_muted">Muted</string>
     <string name="designsystem_core_state_idle">Seen</string>
+    <string name="designsystem_core_state_not_running">Not running</string>
+    <string name="designsystem_core_state_unknown">Unknown</string>
     <string name="designsystem_core_agents_no_todo">No to-do</string>
     <string name="designsystem_core_agents_manual">Opened by hand</string>
     <string name="designsystem_core_agents_quiet_spaces">Idle spaces</string>

@@ -9,6 +9,8 @@
   "address_taken": "Another marketplace already uses this address",
   "bad_signature": "The marketplace’s signature is invalid: {err}",
   "no_package": "No package for this hub ({platform})",
+  "source_needs_linux": "Not installable on this hub yet: this kind of extension (a source extension) runs only on a hub running Linux.",
+  "source_needs_runtime": "Not installable on this hub yet: this kind of extension (a source extension) needs a pinned source runtime set up on the hub first (extension_runtime in the extension manager's manager.json).",
   "bad_signature_install": "The marketplace’s signature is invalid, so nothing is installed or updated from it for now: {err}",
   "not_in_market": "This marketplace has no extension {id}",
   "token_and_token_from": "Give either token or token_from, not both",

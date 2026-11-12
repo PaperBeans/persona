@@ -504,6 +504,7 @@ type voiceRun struct {
   Excludes `elicitation` (original design included it): hub `GET /api/v1/interactions` sends forms only to connected clients declaring `elicitation` (`hub/elicitation.go`); the extension's hub token cannot receive them, so interception, snapshots, and status never include them. A terminal form occupies the keyboard; node sending returns `dialog_open`.
 - **Fold**: only **after new instruction receives 200**, call `newRun.Fold(old)`. Rejected or `unknown` messages are not folded or added to any run's `MsgIDs`; otherwise the run waits `channel.QueuedMost` (10 minutes) for a message that will never appear (`voice/runs.go`).
 - **Tools**:
+  - `search_knowledge {query, kind?}` (`mcp/voice/search_knowledge.md`) is `GET /api/v1/kb-search`; its optional `kind` (the kinds `kb_search` takes, `recordings` for past meetings, #3862 phase 6) searches one kind only. A hub from before ignores it and searches every kind; an unknown one is the hub's 400, a failed search.
   - Non-full role: only `ask_persona` (3.7).
   - Protocol 2 bound target: read-only `search_knowledge`, `list_agents`, plus **`delegate_task`** (`mcp/voice/delegate_task.md`: bound-chat delegation, `task` may carry `状态：` (status), `停止：` (stop), `回答：` (answer)); remove `send_to_agent`, `ask_persona`, which bypass the bound target.
     Original design kept only two read-only tools, but the tested service **cannot delegate without tools** (lessons "Other behavior"), so #3502 adds this bound-chat-only tool. Like `ask_persona`, its call stays open and returns the round reply.

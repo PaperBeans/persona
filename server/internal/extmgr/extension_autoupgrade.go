@@ -397,6 +397,8 @@ func (u *extensionUpgrades) candidateIn(p *extension.Extension, l i18n.Lang) (up
 		up.State, up.Detail = upgradeIncompatible, i18n.T(l, "hub-extension_autoupgrade.no_package", i18n.Args{"platform": extension.Platform()})
 	case engines != nil:
 		up.State, up.Detail = upgradeIncompatible, i18n.Localize(engines, l)
+	case u.h.cantRunHere(m) != nil:
+		up.State, up.Detail = upgradeIncompatible, i18n.Localize(u.h.cantRunHere(m), l)
 	case s.Skipped[id] == m.Version:
 		up.State, up.Detail = upgradeSkipped, i18n.T(l, "hub-extension_autoupgrade.skipped")
 		if s.SkippedBy[id] == skippedByUser {

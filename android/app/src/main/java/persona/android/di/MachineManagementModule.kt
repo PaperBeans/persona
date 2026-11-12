@@ -107,12 +107,16 @@ object MachineManagementModule {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Provides @Singleton fun providers(runtime: ConnectionRuntime, application: Application): ProviderSetup = object : ProviderSetup {
         private fun api() = HttpProviderSetup(runtime.connection())
+        override fun ownsMachine(id: String) = GroupKeys.namespaceOf(id) == runtime.selected.value?.namespace
         override val builtinPresets: Flow<Boolean> = (application as PersonaApp).hub
             .flatMapLatest { hub -> hub?.connection?.serverFeatures ?: flowOf(emptySet()) }
             .map { BuiltinPresetsFeature in it }.distinctUntilChanged()
         override val launcherScope: Flow<Boolean> = (application as PersonaApp).hub
             .flatMapLatest { hub -> hub?.connection?.serverFeatures ?: flowOf(emptySet()) }
             .map { LauncherScopeFeature in it }.distinctUntilChanged()
+        override val launcherImportParse: Flow<Boolean> = (application as PersonaApp).hub
+            .flatMapLatest { hub -> hub?.connection?.serverFeatures ?: flowOf(emptySet()) }
+            .map { LauncherImportParseFeature in it }.distinctUntilChanged()
         override suspend fun presets() = api().presets()
         override suspend fun add(provider: NewProvider) = api().add(provider)
         override suspend fun create(provider: NewProvider) = api().create(provider)
@@ -124,8 +128,9 @@ object MachineManagementModule {
         override suspend fun remove(name: String) = api().remove(name)
         override suspend fun restore(name: String) = api().restore(name)
         override suspend fun check(name: String, machine: String?) = api().check(name, machine)
-        override suspend fun importPreview(machine: String) = api().importPreview(machine)
-        override suspend fun import(machine: String, providers: List<String>) = api().import(machine, providers)
+        override suspend fun importPreview(machine: String, alias: String?) = api().importPreview(machine, alias)
+        override suspend fun import(machine: String, providers: List<String>, alias: String?) = api().import(machine, providers, alias)
+        override suspend fun parse(text: String) = api().parse(text)
     }
 
     // Machines › "Add computer" (docs/assistant/onboarding.md 4.2): a new computer on the selected group's hub; a code again, the machine list

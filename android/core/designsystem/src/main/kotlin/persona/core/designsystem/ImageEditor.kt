@@ -379,7 +379,7 @@ private fun ColorSwatch(option: MarkupColor, chosen: Boolean, onClick: () -> Uni
     ) {
         Box(
             // A 0.dp border is a hairline in Compose, so the ring is added only when chosen.
-            Modifier.size(34.dp).then(if (chosen) Modifier.border(2.5.dp, palette.ink, CircleShape) else Modifier).padding(4.dp)
+            Modifier.size(34.dp).then(if (chosen) Modifier.border(2.5.dp, palette.ink, CircleShape) else Modifier).padding(4.dp.dense)
                 .clip(CircleShape).background(option.color).border(1.dp, palette.ink3, CircleShape),
         )
     }

@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import android.content.res.Resources
+import persona.core.contracts.Machine
 import persona.core.contracts.api.ModelConfiguration
 import persona.core.contracts.api.ModelPurpose
 import persona.core.contracts.api.ProviderSetup
@@ -29,18 +30,19 @@ import kotlinx.coroutines.launch
 internal fun ModelConfigurationPage(
     models: ModelConfiguration?, onBack: () -> Unit, onPurpose: (String, String) -> Unit,
     providers: ProviderSetup? = null, onProviders: (() -> Unit)? = null,
+    machines: List<Machine> = emptyList(),
 ) {
     val owner = currentAssistant().id
     val default = LocalManagerRoster.current?.defaultManagerId
     key(models, owner) {
         ModelConfigurationDetails(models, onBack, { onPurpose(it, owner) },
-            remember(providers, owner, default) { providers?.namingOwner(owner, default) }, owner, onProviders)
+            remember(providers, owner, default) { providers?.namingOwner(owner, default) }, owner, onProviders, machines)
     }
 }
 
 @Composable
 private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () -> Unit, onPurpose: (String) -> Unit,
-    providers: ProviderSetup?, owner: String, onProviders: (() -> Unit)?) {
+    providers: ProviderSetup?, owner: String, onProviders: (() -> Unit)?, machines: List<Machine>) {
     if (models == null) {
         JListPage(title = stringResource(R.string.settings_home_models), onBack = onBack) {
             item { JNotice(stringResource(R.string.settings_src_model_demo)) }
@@ -62,7 +64,7 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
     LaunchedEffect(model) { model.load() }
     if (adding != null && providers != null) {
         NewProviderPage(providers, onBack = { adding = null }, onSaved = { adding = null; scope.launch { model.load() } },
-            preferPreset = adding == "preset", manager = owner)
+            preferPreset = adding == "preset", manager = owner, machines = machines)
         return
     }
     val catalog = state.catalog
@@ -131,17 +133,19 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
 
 /** One AI use: what is in effect, and its own provider, model and effort (blank: inherit). */
 @Composable
-fun ModelPurposePage(models: ModelConfiguration?, purposeId: String, onBack: () -> Unit, providers: ProviderSetup? = null, manager: String? = null) {
+fun ModelPurposePage(models: ModelConfiguration?, purposeId: String, onBack: () -> Unit, providers: ProviderSetup? = null, manager: String? = null,
+    machines: List<Machine> = emptyList()) {
     val owner = manager?.takeIf(String::isNotBlank) ?: LocalManagerRoster.current?.defaultManagerId
         ?: persona.core.contracts.api.ManagerRoster.ASSISTANT_MANAGER
     val default = LocalManagerRoster.current?.defaultManagerId
     key(models, purposeId, owner) {
-        ModelPurposeDetails(models, purposeId, onBack, remember(providers, owner, default) { providers?.namingOwner(owner, default) }, owner)
+        ModelPurposeDetails(models, purposeId, onBack, remember(providers, owner, default) { providers?.namingOwner(owner, default) }, owner, machines)
     }
 }
 
 @Composable
-private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, onBack: () -> Unit, providers: ProviderSetup?, owner: String) {
+private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, onBack: () -> Unit, providers: ProviderSetup?, owner: String,
+    machines: List<Machine>) {
     if (models == null) {
         JListPage(title = stringResource(R.string.settings_src_model_title), onBack = onBack) { item { JNotice(stringResource(R.string.settings_src_model_demo)) } }
         return
@@ -159,7 +163,8 @@ private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, 
     LaunchedEffect(model, state.listProvider) { model.loadModels() }
     if (adding && providers != null) {
         // A provider added from here is picked for this use (the edit is kept; saving is still the user's).
-        NewProviderPage(providers, onBack = { adding = false }, onSaved = { id -> adding = false; scope.launch { model.providerAdded(id) } }, manager = owner)
+        NewProviderPage(providers, onBack = { adding = false }, onSaved = { id -> adding = false; scope.launch { model.providerAdded(id) } }, manager = owner,
+            machines = machines)
         return
     }
     fun save(restore: Boolean) {

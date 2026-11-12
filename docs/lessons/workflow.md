@@ -252,3 +252,13 @@ forks with the same branch name cancelling each other. A reusable workflow's
 another lane from accidentally cancelling the caller, while allowing its direct
 and reusable invocations to deduplicate the same branch/lane. Keep every shard,
 set `max-parallel`, and measure normal-load PRs separately from peak queues.
+
+## Two fixes for the same breakage both merged (2026-11-12, #5609)
+
+- #5554 and #5608 fixed the same token drift (#5589) within the hour, each adding `Theme.Size.slimBar` in a different
+  place of `Theme.swift`. Git merged both without a conflict, and `main` declared it twice: no Apple target compiled.
+  A clean squash merge says nothing about whether the result builds.
+- Right before merging a fix for something on `main` that others hit too (a failing check, a broken build), fetch
+  `main`, look at what landed since your branch (`git log HEAD..origin/main -- <your files>`), and merge it into your
+  branch. If someone fixed it already, close yours. A lane that a pre-commit hook or a failing check sends to a fix
+  should look for an open PR with that fix before writing one.

@@ -107,6 +107,9 @@ type Todo struct {
 	// Kind: "concern" for something the owner raised in the main conversation (#3561, concerns.go), which closes only
 	// once its outcome was reported to them; left out for a to-do or a task. Set when it is made, never changed.
 	Kind string `json:"kind,omitempty"`
+	// SeenAt: when the owner last looked at it in Just finished, by Got it or by opening it (#5707, todo_seen.go); a to-do
+	// seen since it got there is filed under Done (todo_triage.go). Absent when never seen.
+	SeenAt *time.Time `json:"seen_at,omitempty"`
 	// Brief: what was asked when the work was handed out, with its log, and Lineage: the to-dos that carried the work
 	// (#3822, task_brief.go). Filled in where the apps read the to-dos (withBrief); absent for a to-do with no brief.
 	Brief   *TaskBrief    `json:"brief,omitempty"`
@@ -122,6 +125,7 @@ type todoStore interface {
 	CreateTodo(ctx context.Context, t db.TodoRow) error
 	UpdateTodo(ctx context.Context, id string, title *string, notes *string, done *bool, updatedAt time.Time) (*db.TodoRow, error)
 	EditTodo(ctx context.Context, id string, e db.TodoEdit, updatedAt time.Time) (*db.TodoRow, error)
+	SeeTodo(ctx context.Context, id string, at *time.Time) (*db.TodoRow, error)
 	ClaimTodoReminder(ctx context.Context, id string, remindAt, now time.Time) (bool, error)
 	RetitleTodo(ctx context.Context, id, from, to string, at time.Time) (*db.TodoRow, bool, error)
 	FailTodo(ctx context.Context, id, startError string, at time.Time) (*db.TodoRow, error)
@@ -743,6 +747,7 @@ func (s *Service) todoRoutes() {
 	s.taskReviewDismissalRoutes()
 	s.todoDecisionRoutes()
 	s.todoThreadRoutes()
+	s.todoSeenRoutes()
 	s.todoRetitleRoute()
 	// GET /api/v1/todos: list all todos (newest created_at first), agents sorted (active first, then released); a todo
 	// waiting for the owner carries its ask (todo_ask.go), an open one nobody works on why (tasks_orphan.go)

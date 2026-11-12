@@ -1,7 +1,8 @@
 import SwiftUI
 
 // Things the assistant did on the phone in a second (docs/assistant/unified-entry.md「Dispatch: express intent, do not choose a project」, done in a second): a reminder or an event it added
-// is drawn as its result under the turn's work line, with Undo, instead of hiding in "Tools N".
+// is drawn as its result under the turn's work line, with Undo, instead of hiding in "Tools N"; places a location tool
+// found are drawn there as a map (PlaceMap.swift, #5543).
 
 /// A reminder or an event a tool call added, read from the call's result.
 nonisolated struct QuickResult: Hashable, Sendable {
@@ -57,15 +58,22 @@ extension ChatLines {
             out.append(line)
             switch line.content {
             case .work(_, let items, _, _, _):
-                pending = items.compactMap { if case .step(.call(let c)) = $0 { QuickResult(c).map { .quick($0) } } else { nil } }
+                pending = items.compactMap { if case .step(.call(let c)) = $0 { quickLine(c) } else { nil } }
             case .row(.tools(let steps)):
-                pending = steps.compactMap { if case .call(let c) = $0 { QuickResult(c).map { .quick($0) } } else { nil } }
+                pending = steps.compactMap { if case .call(let c) = $0 { quickLine(c) } else { nil } }
             default:
                 break
             }
         }
         flush()
         return out
+    }
+
+    /// A call's result card: a reminder or an event it added, or the places it found on a map (`PlaceMapResult`).
+    private static func quickLine(_ call: ToolCall) -> ChatLine? {
+        if let q = QuickResult(call) { return .quick(q) }
+        if let m = PlaceMapResult(call) { return .placeMap(m) }
+        return nil
     }
 }
 

@@ -356,7 +356,8 @@ struct LarkAvatar: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        Monogram(name: name, size: size * Theme.sizeScale(typeSize), fill: Theme.monogramFill, font: Self.font(size))
+        let disc = Theme.monogram(name)
+        Monogram(name: name, size: size * Theme.sizeScale(typeSize), fill: disc.fill, ink: disc.ink, font: Self.font(size))
     }
 
     /// The letter's text level for an avatar `size` points across at the default text size: about 0.4 of it, as before.

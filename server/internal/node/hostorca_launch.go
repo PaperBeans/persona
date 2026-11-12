@@ -55,6 +55,7 @@ func (h *orcaHost) createTerminal(ctx context.Context, space, cwd, label string)
 		h.launches = map[string]orcaLaunch{}
 	}
 	h.launches[t.PaneKey()] = orcaLaunch{terminal: *t, cwd: cwd}
+	h.track(*t)
 	h.mu.Unlock()
 
 	return &host.Created{
@@ -134,13 +135,25 @@ func (h *orcaHost) resolveWorktree(ctx context.Context, trees []orcart.Worktree,
 		}
 	}
 
-	// 4. Fallback: if cwd is not in any worktree (e.g. user home ~ or an external directory),
-	// pick the first available local worktree as the container for the terminal, and cd into cwd in Run.
+	// 4. Fallback: if cwd is not in any worktree (e.g. user home ~ or an external directory), the terminal goes into a
+	// local worktree as its container and Run cds into cwd: the one Orca's window shows, else the first. Orca's UI
+	// does not adopt a terminal made in a worktree it is not showing: it becomes an orphaned background terminal under
+	// a new pane key (#5547).
+	var first *orcart.Worktree
 	for i := range trees {
 		w := &trees[i]
-		if w.HostID == "" || w.HostID == "local" {
+		if w.HostID != "" && w.HostID != "local" {
+			continue
+		}
+		if w.Active {
 			return w, nil
 		}
+		if first == nil {
+			first = w
+		}
+	}
+	if first != nil {
+		return first, nil
 	}
 
 	return nil, host.Mark(
@@ -217,12 +230,15 @@ func (h *orcaHost) Run(ctx context.Context, pane host.PaneRef, command string) e
 	if err != nil {
 		return orcaInputErr(err)
 	}
+	// By its handle, not its pane key: Orca re-keys a terminal its UI did not adopt, orphaned, with the same handle
+	// and process (#5547), and a background terminal still runs what it is sent. Orphaned is accepted only so: the
+	// terminal this host made, re-keyed. A handle that changed is not ours (#972).
 	for _, t := range terms.Terminals {
-		if t.PaneKey() != pane.ID {
+		if t.Handle != launch.terminal.Handle {
 			continue
 		}
-		if t.Handle != launch.terminal.Handle || t.IncarnationID != launch.terminal.IncarnationID ||
-			!t.IsLocal() || !t.Writable || t.Orphaned || t.AgentIdentity != "" {
+		if t.IncarnationID != launch.terminal.IncarnationID || !t.IsLocal() || !t.Writable || t.AgentIdentity != "" ||
+			t.Orphaned && t.PaneKey() == launch.terminal.PaneKey() {
 			break
 		}
 		return orcaInputErr(h.c.Send(ctx, launch.terminal.Target(), "cd -- "+shellQuote(launch.cwd)+" && "+command+"\r"))

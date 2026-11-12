@@ -300,6 +300,7 @@ xcrun simctl launch --terminate-running-process $SIM <bundle id> \
   Markdown in a task's words (#2363): add `MOCK_MARKDOWN=1` to put **bold**, `code` and a heading in that message, that report and the release notes receipt (`MOCK_TASKS_AT=19.9`); they render, with no raw marks, in either layout.
   A renamed task's receipt (#3036): `MOCK_TASK_RENAMED=1` renames the release notes task after its receipt was written; iOS / Mac and Android draw that receipt with the new name ("写本周发布说明"), not the one in the receipt (the web's assistant chats list tasks in the Progress tray, by the to-do's name, and draw no receipts).
   Task answer records (#1231): "Complete network-layer unit tests" has three full question/answer pairs; "Fix widget landscape crash" is an old summary-only record. `MOCK_TASKS=1 MOCK_TASKS_NO_ASKS=1 MOCK_TASKS_AT=23` puts them at bottom; `AnsweredLineTests` (`PERSONA_SHOTS`, collapsed/expanded) opens then collapses them.
+  Place maps (#5543): `MOCK_TASKS=1 MOCK_PLACE_MAP=1 MOCK_TASKS_NO_ASKS=1` ends the main chat with "where am I" (`phone_location_current`) and a nearby café search (`phone_maps_search_nearby`, four made-up places), each with its map card under the work line, then the walk to the second café worked out as a route (`phone_maps_route`, its line on the card, #5544) and handed to Maps (`phone_maps_navigate`) with the hand-off's card last (#5545).
   What Persona sent to its tasks' agents (#1542): `MOCK_TASKS=1 MOCK_TASKS_SENT=1 MOCK_TASKS_NO_ASKS=1` adds, at the bottom, a task card whose long hand-off it takes in ("1 instruction sent"), a rework to the widget task as a folded line, and the user's own word to the unit-test task as a bubble; `SentToAgentTests` (`PERSONA_SHOTS`: folded, card list open, line open). With `MOCK_TASKS_AT=1559` the bottom is yesterday's blog-migration card, now a line, with its hand-off as a folded line under it (#1668).
   The hub's notice line (#4305): `MOCK_TASKS=1 MOCK_TASKS_NOTICE=1 MOCK_TASKS_NO_ASKS=1` adds "电脑和模型接好了，定时任务恢复运行，这次是「早报」" as the conversation's last line, small and centered.
   What didn't go through overnight on the Today card (#4124): `MOCK_TODAY_FAILED=1` (with `MOCK_TASKS=1`) adds a task whose Agent didn't start, a failed scheduled run and a skipped one, with `failed_total` 5, so the row says how many in all and "2 more"; without it the card is as before.
@@ -489,6 +490,17 @@ Long-press message toolbar (`MessageMenuTests`: release after 0.4 / 0.8 / 1.5 / 
 Select Text copies only a segment (`SelectTextTests`: Agent reply with code block, main-chat reply with bold/list; `MOCK_SELECT_TEXT` has a user message with `__init__.py`, `2*3*4`, `# …`, and a reply with fences/math/indented code/separator; double-tap first word, clipboard exactly that word; `testQuoteThePickedWords` picks a word, taps Quote first in the edit menu, and checks the composer quote and the sent bubble carry only that word). Use `MOCK_CHAT_READ=1 MOCK_SELECT_TEXT=1 MOCK_ECHO_SENT=1`,
 `TEST_RUNNER_PERSONA_MOCK_HUB=http://127.0.0.1:<port>`, style `TEST_RUNNER_PERSONA_UI_STYLE=beautiful`, `TEST_RUNNER_PERSONA_SHOTS=<directory>` (named by simulator appearance).
 Run a new UI test against unfixed code first to confirm it fails, then apply the fix.
+
+Agents tab navigation (#5641): `AgentsTabNavigationTests/testDispatchBackThenAgentsAlwaysShowsList` opens a dispatched
+Agent from Assistant, goes Back, and selects Agents five times; it checks the list's visible control, navigation root
+and absence of an Agent detail. `testNativeTabReselectionAndSwitchBackShowList` runs on iPad's native tabs and checks
+reselection from a detail and three Assistant/Agents round trips. Use
+`PORT=<dedicated port> python3 apple/PersonaUITests/Fixtures/dispatch_hub.py` (defaults to a single assistant),
+`TEST_RUNNER_PERSONA_MOCK_HUB=http://127.0.0.1:<port>`, and `TEST_RUNNER_PERSONA_SHOTS=<directory>`;
+`TEST_RUNNER_PERSONA_SHOTS_APPEARANCE=<name>` names evidence and `TEST_RUNNER_PERSONA_UI_TEXT_SIZE=UICTContentSizeCategoryAccessibilityXXXL`
+checks the largest text. Set actual appearance with `xcrun simctl ui <udid> appearance light|dark`.
+Run `PersonaTests/AgentsTabNavigationTests` too: explicit selection cancels restoration, reselection returns to the list,
+notification/link targets are preserved, and a consumed newer target invalidates an older deferred list reset.
 
 ### Simulators: always `scripts/app/sim-boot.sh`, slim by default (simslim, #2287, #2801)
 
@@ -741,6 +753,8 @@ Long-scroll uses `XCTOSSignpostMetric`; simulator reports duration, not dropped 
   no computer name repeated in group headers, computer title collapses whole section, machine filter removes headers. Repository/worktree inference: `AgentRepoTreeTests`.
   `MOCK_WORKTREES=1`: weather widget Agent in `.worktrees/widget` (idle peer),
   idle in `.claude/worktrees/fix-crash`, all-idle notes repo on MacBook. Both groupings, light/dark, all three renderings (default, `-ui.style beautiful`, compact).
+  `MOCK_SHARED_FOLDER=1` (#5715): Mac Studio's `atlas` folder is claimed by two repositories, its own three Agents' and a
+  Codex App chat's that names `/Users/me/code`; each worktree line's count matches the Agents under it.
   `-openWelcome YES` removes prior pairing (Keychain hub beats demo); `-demo.on YES` enters demo.
   All `launchPersona()` / `launchPinned()` launches auto-add `-openWelcome YES` when demo on without `-pairURL`, never reuse previous mock pairing.
 
@@ -1217,6 +1231,14 @@ real planning session that scrolled badly. `MOCK_LONG_REPORT=<items.json>` serve
 tool outputs cut to the page's 4 KB as the hub does). DEBUG `-showAnswerWhole YES` draws every answer as one row, as before #4970, so one
 optimized build measures before and after; `-showAnswerPartLines <n>` changes the part size. Measure with `-showPagePerf` (open, first glide,
 glide back) and the chat's own `-showAutoScroll` (its sweep is programmatic animated jumps, its glide moves the chat's list).
+
+`MOCK_LONG_REPORT=cjk` (#5076) serves the same chat with a report as varied in its Chinese characters as a real one (about 10,900 of them,
+some 800 distinct; `MOCK_LONG_REPORT=1` repeats one sentence and has about 100): what CoreGraphics' 1 MB glyph cache has to hold. The chat's
+animated jumps to the newest end and `-showAutoScroll`'s sweep run on its list (`ChatJumpRun`); DEBUG `-showSwiftUIJumps YES` animates
+SwiftUI's scroll position instead, as before #5076, so one build measures both (jumps to a line animate SwiftUI's either way). `-showAutoScroll` has a `hop` segment after the sweep (eight jumps of 600 pt, `frames-hop.json`), and
+`-showJumpPerf YES` measures the jumps a user makes, three of each (`frames-jump-<end|send|quote|call|near>-<n>.json`, and
+`jump-perf.txt` with where each left the list): ↓ and sending from 8000 pt into the history, and from the newest end to a quote of the longest
+answer, to the oldest tool call (`MOCK_LONG_REPORT=cjk` has a plain call before its subagents) and to the oldest line on screen.
 
 2026-11-12, iPhone 17 Pro simulator (iOS 27), optimized Debug build, one build measured both ways (`-showAnswerWhole YES` is
 before); median / worst. Opening was measured under the heavy-job lock, scrolling was not (other builds ran, load 18–105; runs interleaved).

@@ -133,7 +133,7 @@ fun ChatSlimBar(
             ) {
                 val words = PersonaTheme.type.caption.copy(fontWeight = FontWeight.SemiBold)
                 if (linkText != null) {
-                    JSpinner(Modifier.size(Tokens.Size.markXS), stroke = Tokens.Space.xxs)
+                    JSpinner(Modifier.size(Tokens.Size.markXS), stroke = Tokens.Space.Standard.xxs)
                     Text(linkText, style = words, color = palette.ink2, maxLines = 1)
                 } else {
                     agentMark?.let { JAgentMark(it, size = Tokens.Size.markXS) }

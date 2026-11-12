@@ -32,6 +32,8 @@ data class OutboxEntry(
     /** The original submission's Persona overrides, kept for every retry and after process restoration. */
     val launcher: String? = null,
     val model: String? = null,
+    /** It carries out the session's waiting launcher switch ([persona.core.contracts.api.MessageSender.sendApplyingSwitch]). */
+    val applySwitch: Boolean = false,
 ) {
     val operationId: String get() = opId ?: clientMessageId
 }

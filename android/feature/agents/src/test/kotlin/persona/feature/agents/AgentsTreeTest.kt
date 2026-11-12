@@ -212,6 +212,55 @@ class AgentsTreeTest {
         assertEquals(glass.filterNot { it is TreeIdleReposEntry }.map { it.key }, plain.map { it.key })
     }
 
+    @Test fun byProjectHeadingsCountTheAgentsThatOnlyWaitInTheBackgroundApartFromWorking() {
+        // iOS `StateCounts` (#4338 A7): Working leaves them out and the heading draws them with a clock, as the computer's does.
+        fun at(id: String, state: String, waiting: Boolean = false) = AgentSession(Session(machineId = "mac", sessionId = id, state = state,
+            spaceId = "app", spaceName = "app", backgroundWaiting = waiting, updatedAt = "2026-01-01T00:00:00Z"))
+        val list = buildAgentList(listOf(at("a", "working"), at("b", "working", waiting = true), at("c", "working", waiting = true),
+            at("d", "needs_you"), at("e", "unread")), machines, settings = MachineSpaceTree)
+        val space = list.groups.single()
+        assertEquals(2, space.waitingInBackground)
+        assertEquals(listOf(1, 1, 1), space.headingCounts.map { it.second })
+        assertEquals(2, list.machines.single().waitingInBackground)
+        assertEquals(listOf(1, 1, 1, 0), list.machines.single().headingCounts.map { it.second })
+        // Nothing waits: Working counts them all, as before.
+        val plain = buildAgentList(listOf(at("a", "working"), at("b", "working")), machines, settings = MachineSpaceTree).groups.single()
+        assertEquals(0, plain.waitingInBackground)
+        assertEquals(listOf(0, 2, 0), plain.headingCounts.map { it.second })
+        // A paged list takes the hub's count for the space (`SessionListCounts.backgroundWaiting`): Working there includes them.
+        val counted = space.copy(totalCount = 4, stateCounts = AgentState.entries.associateWith { if (it == AgentState.Working) 3 else 0 }, waitingInBackground = 2)
+        assertEquals(listOf(0, 1, 0), counted.headingCounts.map { it.second })
+    }
+
+    @Test fun byProjectOnGlassEndsItsOpenedIdleAgentsWithARowThatFoldsThemAgain() {
+        // iOS `agentRows` and `collapseRow` (#4338 A8): "N more idle" opens the idle agents; once open, "Hide N Idle" follows them.
+        fun at(id: String, state: String, tab: String? = null) = AgentSession(Session(machineId = "mac", sessionId = id, state = state,
+            spaceId = "w1", spaceName = "app", slotId = tab, updatedAt = "2026-01-01T00:00:00Z"))
+        // Two idle agents of their own, and a tab of two peers of which only one is idle: it shows with its tab, and is
+        // neither "more idle" nor hidden again.
+        val list = listOf(at("build", "working"), at("review", "idle"), at("research", "idle"), at("x", "working", tab = "tab"), at("y", "idle", tab = "tab"))
+        fun entries(expanded: Set<String> = emptySet(), hideIdle: Boolean = true, query: String = "") =
+            agentTreeEntries(buildAgentList(list, machines, settings = MachineSpaceTree.copy(expandedIdle = expanded, query = query)), "mac",
+                tabs = true, hideIdle = hideIdle).filterIsInstance<TreeIdleEntry>()
+        // Closed: "N more idle", as before, with no fold.
+        val closed = entries().single()
+        assertEquals(2, closed.hidden)
+        assertNull(closed.fold)
+        // Open: the row that folds them again, counting the same two.
+        val open = entries(setOf("mac/w1")).single()
+        assertEquals(2, open.hidden)
+        assertTrue(open.fold!!.open)
+        assertEquals("idle:mac/w1", open.key)
+        // Brief and Board (no hideIdle) have no such row; a search shows every agent and has none either.
+        assertTrue(entries(setOf("mac/w1"), hideIdle = false).isEmpty())
+        assertTrue(entries(setOf("mac/w1"), query = "re").isEmpty())
+        // Nothing hidden by "N more idle" when open means nothing to fold: a space whose idle agents are all in a busy tab.
+        val inTab = listOf(at("x", "working", tab = "tab"), at("y", "idle", tab = "tab"), at("z", "working"))
+        val allShown = agentTreeEntries(buildAgentList(inTab, machines, settings = MachineSpaceTree.copy(expandedIdle = setOf("mac/w1"))), "mac",
+            tabs = true, hideIdle = true)
+        assertTrue(allShown.none { it is TreeIdleEntry })
+    }
+
     @Test fun aSharedCheckoutPathKeepsEachRepositoryAndItsSessionsInTheTree() {
         val path = "/home/user"
         fun at(id: String, repo: String) = AgentSession(Session(machineId = "mac", sessionId = id,

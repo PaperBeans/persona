@@ -396,7 +396,7 @@ IPV4_HINT = re.compile(r"\d\.\d")
 EMAIL_HINT = re.compile(r"[A-Za-z0-9._%+-]@[A-Za-z0-9-]")
 # Placeholders (example domains, public mail providers, noreply) are fine; so are made-up TLDs (the fixture redactor
 # scrambles domains): only addresses at a real-looking domain of somebody's are flagged.
-OK_EMAIL_DOMAINS = re.compile(r"(^|\.)(example(\.(com|org|net))?|test|invalid|localhost|users\.noreply\.github\.com|anthropic\.com|moonshot\.cn|moonshot\.ai|bytedance\.com|"
+OK_EMAIL_DOMAINS = re.compile(r"(^|\.)(example(\.(com|org|net))?|test|invalid|localhost|users\.noreply\.github\.com|anthropic\.com|"
                               r"apple\.com|gmail\.com|googlemail\.com|outlook\.com|hotmail\.com|icloud\.com|yahoo\.com|"
                               r"qq\.com|163\.com|126\.com|foxmail\.com|yeah\.net|188\.com|"
                               r"substack\.com|beehiiv\.com|"  # newsletter platforms (kb tests that their senders are not people)

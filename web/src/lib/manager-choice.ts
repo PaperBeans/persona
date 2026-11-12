@@ -80,6 +80,59 @@ export function notePickedName(name: string | null) {
   }
 }
 
+/** The assistant identity the sidebar last showed, for that same head while the roster loads again. Unlike the pick,
+ *  this includes the default and is display-only: it never chooses a manager or adds a routing header or query. */
+export interface ShownIdentity {
+  id: string;
+  name: string;
+}
+
+export const DISPLAY_IDENTITY_KEY = `persona.shownAssistant${BASE ? `:${BASE}` : ""}`;
+
+function storedShownIdentity(): ShownIdentity | null {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(DISPLAY_IDENTITY_KEY) ?? "null");
+    if (!value || typeof value !== "object") return null;
+    const { id, name } = value as Record<string, unknown>;
+    return typeof id === "string" && id && typeof name === "string" && name ? { id, name } : null;
+  } catch {
+    return null; // unavailable storage or malformed JSON: the in-memory identity still lasts this page
+  }
+}
+
+let rememberedIdentity: ShownIdentity | null = storedShownIdentity();
+const identityListeners = new Set<() => void>();
+
+/** The last displayable current assistant, independent of the pick and its request-routing state. */
+export function shownIdentity(): ShownIdentity | null {
+  return rememberedIdentity;
+}
+
+/** Records (or clears) the identity for the sidebar's head. Null is for a fresh roster with no installed current
+ *  assistant, a genuinely old hub, and test cleanup; merely reloading or failing to read a roster does not call it. */
+export function noteShownIdentity(identity: ShownIdentity | null) {
+  const unchanged = rememberedIdentity?.id === identity?.id && rememberedIdentity?.name === identity?.name;
+  if (unchanged && identity) return;
+  rememberedIdentity = identity;
+  try {
+    if (identity) localStorage.setItem(DISPLAY_IDENTITY_KEY, JSON.stringify(identity));
+    else localStorage.removeItem(DISPLAY_IDENTITY_KEY);
+  } catch {
+    // as storedChoice: no storage still leaves the identity available for this page
+  }
+  if (!unchanged) identityListeners.forEach((l) => l());
+}
+
+const subscribeShownIdentity = (l: () => void) => {
+  identityListeners.add(l);
+  return () => void identityListeners.delete(l);
+};
+
+/** The remembered head identity, re-rendering when a fresh roster changes or invalidates it. */
+export function useShownIdentity(): ShownIdentity | null {
+  return useSyncExternalStore(subscribeShownIdentity, shownIdentity, shownIdentity);
+}
+
 /** The roster's default manager: whose an item without `manager` is. */
 export function defaultManager(): string {
   return rosterDefault;
@@ -353,7 +406,7 @@ export function useChosenManager(): string | null {
   return useSyncExternalStore(onManagerChoice, chosenManager, chosenManager);
 }
 
-/** Tests: back to the default, the hub's own assistant, not known yet. */
+/** Tests: back to the default, the hub's own assistant, not known yet, with no remembered head identity. */
 export function resetManagerChoice() {
   chosen = null;
   chosenName = null;
@@ -363,4 +416,6 @@ export function resetManagerChoice() {
   rosterDefault = BUILTIN_MANAGER;
   defaultSettled = false;
   emit();
+  // Choice listeners may note the roster's current identity; tests still end with every remembered display gone.
+  noteShownIdentity(null);
 }

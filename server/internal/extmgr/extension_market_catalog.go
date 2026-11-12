@@ -89,14 +89,16 @@ func marketName(l i18n.Lang, rec extension.MarketRecord) string {
 }
 
 func (h *Manager) marketView(s *marketState) MarketView {
-	v := MarketView{ID: s.rec.ID, Spec: s.rec.Spec, Name: marketName(h.userLang(), s.rec), HasToken: s.rec.TokenSealed != "", Warnings: s.rec.Warnings,
-		Error: s.rec.Error, FetchedAt: s.rec.FetchedAt, AddedAt: s.rec.AddedAt, Official: extension.IsOfficialMarket(s.rec.Spec),
+	l := h.userLang()
+	// The error and warnings are kept as the last read wrote them; they are shown in the owner's language, like the name.
+	v := MarketView{ID: s.rec.ID, Spec: s.rec.Spec, Name: marketName(l, s.rec), HasToken: s.rec.TokenSealed != "", Warnings: []string{},
+		Error: i18n.MarketText(l, s.rec.Error), FetchedAt: s.rec.FetchedAt, AddedAt: s.rec.AddedAt, Official: extension.IsOfficialMarket(s.rec.Spec),
 		Signature: MarketSignatureView{State: s.rec.Signature.State, KeyID: s.rec.Signature.KeyID}}
 	if v.Signature.State == "" { // a market read before #1848
 		v.Signature.State = extension.SigUnsigned
 	}
-	if v.Warnings == nil {
-		v.Warnings = []string{}
+	for _, w := range s.rec.Warnings {
+		v.Warnings = append(v.Warnings, i18n.MarketText(l, w))
 	}
 	if s.index != nil {
 		v.Description, v.Homepage, v.Extensions = s.index.Description, s.index.Homepage, len(s.index.Extensions)
@@ -194,10 +196,12 @@ func (h *Manager) catalogItem(l i18n.Lang, s *marketState, e *extension.MarketEn
 		Publisher: m.Publisher, Homepage: m.Homepage, IconURL: catalogIconURL(s.rec.ID, e), Downloads: e.Downloads, DownloadsUpdatedAt: s.index.DownloadsUpdatedAt,
 		Tags: append([]string{}, e.Tags...), Contributes: m.Contributions(), Permissions: extension.ExplainIn(l, m)}
 	if s.rec.Signature.Bad() || (extension.IsOfficialMarket(s.rec.Spec) && (s.rec.Signature.State != extension.SigSigned || s.rec.Signature.KeyID != keyIDOf(extension.Official.SigningKey))) {
-		it.Problem = i18n.T(l, "hub-extension_market.bad_signature", i18n.Args{"err": s.rec.Error})
+		it.Problem = i18n.T(l, "hub-extension_market.bad_signature", i18n.Args{"err": i18n.MarketText(l, s.rec.Error)})
 	} else if e.PackageFor(extension.Platform()) == nil {
 		it.Problem = i18n.T(l, "hub-extension_market.no_package", i18n.Args{"platform": extension.Platform()})
 	} else if _, err := extension.CheckEngines(m, h.build.Number); err != nil {
+		it.Problem = i18n.Localize(err, l)
+	} else if err := h.cantRunHere(m); err != nil {
 		it.Problem = i18n.Localize(err, l)
 	}
 	cur := h.extensions.reg.GetExact(m.ID)

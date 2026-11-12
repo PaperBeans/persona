@@ -111,8 +111,8 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 	if t.ReservedTodoID == "" {
 		t.ReservedTodoID = firstNonEmpty(t.ReuseTodo, t.TodoID, "todo_"+randomHex(8))
 	}
-	var sourceCwd string // the inferred cwd's workspace, and whether another task writes there
-	var busy bool
+	var sourceCwd string // the inferred cwd's workspace, and the other task that writes there
+	var owner *Todo
 	if t.Workspace == nil || t.WorkspaceInferred {
 		mode := workspaceNone
 		if !t.Readonly {
@@ -129,8 +129,8 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 				if !source.Available || !path.IsAbs(source.Cwd) {
 					return i18n.ErrEnglish("assistant-tasks_workspace.unavailable", i18n.Args{"path": t.Cwd})
 				}
-				sourceCwd, busy = source.Cwd, s.taskWorkspaceOwner(ctx, t.Machine, source.Cwd, t.TodoID) != nil
-				if s.taskWorkspacePreference(ctx) == preferNew || busy {
+				sourceCwd, owner = source.Cwd, s.taskWorkspaceOwner(ctx, t.Machine, source.Cwd, t.TodoID)
+				if s.taskWorkspacePreference(ctx) == preferNew || owner != nil {
 					mode = workspaceNew
 				}
 			}
@@ -185,11 +185,24 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 		res.Branch = firstNonEmpty(t.Workspace.Branch, "task/"+firstNonEmpty(t.TodoID, t.ReservedTodoID))
 		var prep proto.WorktreePrepare
 		if err := s.call(ctx, t.Machine, DeviceWorktreePrepare, map[string]any{"cwd": t.Cwd}, &prep); err != nil {
+			if repositoryWithoutCommits(err) {
+				// Nothing is committed, so no checkout can be made; the folder itself is the only workspace (#5548).
+				if !t.WorkspaceInferred || sourceCwd == "" {
+					return i18n.ErrEnglish("assistant-tasks_workspace.no_commits", i18n.Args{"machine": t.Machine, "path": t.Cwd})
+				}
+				if owner != nil {
+					return i18n.ErrEnglish("assistant-tasks_workspace.busy_no_commits",
+						i18n.Args{"id": owner.ID, "title": owner.Title, "machine": t.Machine, "path": sourceCwd})
+				}
+				res.Branch = ""
+				t.Workspace, res.Path = &TaskWorkspace{Mode: workspaceExisting, Existing: t.Cwd}, path.Clean(sourceCwd)
+				break
+			}
 			if t.WorkspaceInferred && sourceCwd != "" && engineCannotPrepare(err) {
 				// An engine without checkouts (Paseo, Cindy, or a host without checkout support) runs the task in its cwd,
 				// as tasks did before workspaces: a busy cwd is shared rather than claimed, a free one is reused.
 				res.Branch = ""
-				if busy {
+				if owner != nil {
 					t.Workspace, res.Shared = &TaskWorkspace{Mode: workspaceNone}, true
 				} else {
 					t.Workspace, res.Path = &TaskWorkspace{Mode: workspaceExisting, Existing: t.Cwd}, path.Clean(sourceCwd)
@@ -214,6 +227,12 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 func engineCannotPrepare(err error) bool {
 	var re *rpc.Error
 	return errors.As(err, &re) && re.Code == proto.CodeWorktreeUnsupported
+}
+
+// repositoryWithoutCommits: the node refused a checkout because the cwd's repository has no commit yet.
+func repositoryWithoutCommits(err error) bool {
+	var re *rpc.Error
+	return errors.As(err, &re) && re.Code == proto.CodeWorktreeNoCommits
 }
 
 // taskWorkspaceOwner checks durable active task links, and the gap between

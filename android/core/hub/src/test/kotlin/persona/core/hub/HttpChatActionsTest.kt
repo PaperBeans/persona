@@ -81,6 +81,47 @@ class HttpChatActionsTest {
         }
     }
 
+    /**
+     * #5055: a pick on another launcher records a switch (`launcher` with `from`, the model and effort for it), verified by
+     * the row's `pending_switch`; the session's own launcher drops one; a model switches alone on its own launcher.
+     */
+    @Test fun aLauncherSwitchIsRecordedWithWhereTheAppSawItAndVerified() = runBlocking {
+        MockWebServer().use { server ->
+            val actions = actions(server)
+            val agent = Session("m", "s1", launcher = "example")
+            server.enqueue(MockResponse().setBody("{}"))
+            assertEquals(ChatActionResult.Done, actions.execute(agent, ChatAction.Modes(launcher = "work", from = "example", model = "glm-5.3", effort = "high")))
+            assertEquals(buildJsonObject { put("launcher", "work"); put("from", "example"); put("model", "glm-5.3"); put("effort", "high") },
+                JsonCodec.parseToJsonElement(server.takeRequest().body.readUtf8()))
+            server.enqueue(MockResponse().setBody("{}"))
+            assertEquals(ChatActionResult.Done, actions.execute(agent, ChatAction.Modes(model = "sonnet")))
+            assertEquals(buildJsonObject { put("model", "sonnet") }, JsonCodec.parseToJsonElement(server.takeRequest().body.readUtf8()))
+        }
+        val waiting = JsonCodec.decodeFromString<Session>("""{"machine_id":"m","session_id":"s1","launcher":"example","effort":"low",
+            "pending_switch":{"launcher":"work","model":"glm-5.3","effort":"high","at":"2026-11-12T10:00:00Z"}}""")
+        assertTrue("the switch waits: its model and effort are the switch's", modesApplied(waiting, ChatAction.Modes(launcher = "work", from = "example", model = "glm-5.3", effort = "high")))
+        assertFalse(modesApplied(waiting, ChatAction.Modes(launcher = "other", from = "example")))
+        assertTrue("carried out by now", modesApplied(waiting.copy(launcher = "work", pendingSwitch = null), ChatAction.Modes(launcher = "work", from = "example")))
+        assertFalse("its own launcher drops it", modesApplied(waiting, ChatAction.Modes(launcher = "example", from = "example")))
+        assertTrue(modesApplied(waiting.copy(pendingSwitch = null), ChatAction.Modes(launcher = "example", from = "example")))
+        assertTrue(modesApplied(waiting.copy(model = "SONNET"), ChatAction.Modes(model = "sonnet")))
+    }
+
+    /** The complete row a summary leaves out (`sessions_lookup`): one exact lookup, its machine kept. */
+    @Test fun theCompleteRowIsOneExactLookup() = runBlocking {
+        MockWebServer().use { server ->
+            val actions = actions(server)
+            server.enqueue(MockResponse().setBody("""{"sessions":[{"session_id":"s/1","launcher":"example","pending_switch":{"launcher":"work"}}],"total":1}"""))
+            val row = actions.completeRow(Session("m", "s/1"))
+            val request = server.takeRequest()
+            assertEquals("/api/v1/sessions?summary=0&limit=1&machine_id=m&session_id=s%2F1", request.path)
+            assertEquals(SessionKey("m", "s/1"), row?.key)
+            assertEquals("work", row?.pendingSwitch?.launcher)
+            server.enqueue(MockResponse().setBody("""{"sessions":[]}"""))
+            assertNull(actions.completeRow(Session("m", "gone")))
+        }
+    }
+
     /** #582: the after-resume notice is dismissed with `ultracode_dismiss_lost` and verified by the notice being gone. */
     @Test fun theAfterResumeNoticeIsDismissed() = runBlocking {
         MockWebServer().use { server ->

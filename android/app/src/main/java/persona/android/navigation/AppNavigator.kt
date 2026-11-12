@@ -23,7 +23,12 @@ internal class AppNavigator(
     init { stacks.values.forEach(::restoreSecondaryParents) }
 
     override fun selectTab(tab: AppTab) {
-        if (tab != selectedTab()) openedFrom.clear()
+        openedFrom.clear()
+        // Explicit Agents selection opens its list; targeted session navigation uses onSelectTab directly.
+        if (tab == AppTab.Agents) {
+            val stack = stacks.getValue(tab)
+            while (stack.size > 1) stack.removeAt(stack.lastIndex)
+        }
         onSelectTab(tab)
         ErrorBreadcrumbs.shared.navigation("tab:${tab.name}")
     }

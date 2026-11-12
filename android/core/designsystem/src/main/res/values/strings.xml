@@ -10,6 +10,9 @@
     <string name="designsystem_status_unknown">Unknown</string>
     <string name="designsystem_status_waiting">Waiting</string>
     <string name="designsystem_status_muted">Muted</string>
+    <!-- Layout density (Settings › Appearance › Layout density) -->
+    <string name="designsystem_density_standard">Standard</string>
+    <string name="designsystem_density_compact">Compact</string>
     <!-- Interface styles (Settings › Appearance › Interface style) and glass -->
     <string name="designsystem_style_glass">Glass</string>
     <string name="designsystem_style_glass_summary">Frosted glass floats over the status light and glows amber when something is waiting for you</string>
@@ -59,12 +62,14 @@
     <string name="designsystem_decision_other">Needs you</string>
     <string name="designsystem_decision_open_chat">Open chat</string>
     <string name="designsystem_decision_open_full">Open full page</string>
-    <string name="designsystem_decision_previous">Previous</string>
-    <string name="designsystem_decision_next">Next</string>
     <string name="designsystem_decision_advice">Persona: %1$s</string>
     <string name="designsystem_decision_recommended">Suggested</string>
-    <string name="designsystem_decision_position">Request %1$d of %2$d</string>
     <string name="designsystem_decision_option_position">Option %1$d of %2$d</string>
+    <!-- The pending requests above a chat's composer while they scroll (iOS PendingCards). -->
+    <plurals name="designsystem_decision_pending">
+        <item quantity="one">%1$d pending</item>
+        <item quantity="other">%1$d pending</item>
+    </plurals>
     <!-- Where an outgoing message stands -->
     <string name="designsystem_pending_sending">Sending</string>
     <string name="designsystem_pending_waiting">Sends when connected</string>
@@ -151,7 +156,7 @@
     <string name="designsystem_row_style_two_lines">Two lines</string>
     <string name="designsystem_row_style_cards">State cards</string>
     <string name="designsystem_row_style_list">Compact list</string>
-    <string name="designsystem_row_style_avatar_summary">The agent\'s avatar, its title and time, a line of what it last said, and where it runs.</string>
+    <string name="designsystem_row_style_avatar_summary">The agent\'s avatar, its title and time, two lines of what it last said, and where it runs.</string>
     <string name="designsystem_row_style_two_lines_summary">Two lines per agent: its title and time, then one line of what it last said.</string>
     <string name="designsystem_row_style_cards_summary">A card per agent, its state\'s color down the side; the one waiting for you is tinted.</string>
     <string name="designsystem_row_style_list_summary">One line per agent: its state, title and time.</string>
@@ -319,6 +324,7 @@
     <string name="designsystem_qr_code">QR code</string>
     <string name="designsystem_queue_actions">Queued message actions</string>
     <string name="designsystem_queue_item">Item %1$d: %2$s</string>
+    <string name="designsystem_queue_item_note">Item %1$d: %2$s. %3$s</string>
     <string name="designsystem_draft_ready">Persona drafted a reply</string>
     <!-- Connection details (the title's sheet while the hub is out of reach) -->
     <string name="designsystem_connection_online">Connected to the hub</string>

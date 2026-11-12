@@ -255,6 +255,7 @@ Only through the hub tunnel, no new externally exposed port:
 - **Once connected**:
   - View Only (`viewOnly`) by default. Switching View Only / Take Over in the top bar hands keyboard and mouse (touch) input to that Mac.
   - Scale to the window (`scaleViewport`), without changing the Mac's resolution.
+  - On a Mac with several displays, the top bar's Displays menu shows one of them ("Displays" below).
   - On disconnection, offer Reconnect.
 - **Without `crypto.subtle`**: ARD login AES-encrypts the account and password; noVNC's AES uses browser `crypto.subtle`. Pages opened over HTTP (hub LAN address, App WebView) aren't secure contexts and lack `crypto.subtle`.
   - `aes.ts` supplies an AES-CBC-encryption-only substitute when missing.
@@ -330,7 +331,8 @@ It signs in with the login keychain's generic password `persona-vnc-bench` (adde
 macOS Screen Sharing sends one framebuffer with every display, laid out as System Settings › Displays arranges them. On iOS, iPadOS
 and visionOS the VNC page's "…" › Displays offers All Displays (the default) or one display; one display is cropped out of the
 framebuffer, zooming and panning stay inside it, and touches still send whole-framebuffer pixels. The choice is kept per Mac on the
-device (`VNCDisplayChoice`, as Mouse / Trackpad Mode). The Mac app, the web page and Picture in Picture show every display.
+device (`VNCDisplayChoice`, as Mouse / Trackpad Mode). The web page offers the same choice ("On the web" below); the Mac app and
+Picture in Picture show every display.
 
 Where the layout comes from (`VNCDisplays`), most trusted first:
 
@@ -350,6 +352,30 @@ Without a GUI session (logged out, a node started as a daemon) `osascript` sees 
 Known gaps: the aspect check cannot catch an arrangement whose bounding box happens to have the framebuffer's shape while the server
 sends something else (four equal displays in a 2 × 2 grid, of which the server sends one); such a crop would be wrong. The menu numbers
 displays left to right, then top to bottom, by their top-left corners.
+
+**On the web** (#5685, `web/src/screen/displays.ts`): the top bar's Displays menu (All Displays / Display N, shown only with two or more
+displays to offer; on a narrow screen the button keeps only its icon). The rules are the app's, with these differences:
+
+- **Layout from the node only**: noVNC reads ExtendedDesktopSize but keeps only the first screen's id, so the page uses the `displays`
+  of the computer / browser status it fetches before connecting, with the same scaling, 2% aspect check and ids (`display-<n>`). macOS's
+  server sends no ExtendedDesktopSize (see "Frames" above), so on a Mac this is the app's result too.
+- **Crop**: noVNC keeps scaling its whole framebuffer to its container. The page sizes that container to the framebuffer at the scale
+  that makes the chosen display fit the page, and puts it inside a box the display's size that clips the rest. noVNC maps the pointer
+  through its canvas, so input lands in whole-framebuffer pixels without touching noVNC. A mouse drag that leaves the box is sent again
+  at the nearest whole pixel inside it, and a touch gesture's position (noVNC's gesture events carry it in their detail) is moved there,
+  as the app keeps touches on the display.
+- **Kept**: per Mac in this browser (`localStorage` `persona.screen.display.<machine id>`). The page asks for the status again when the
+  framebuffer changes size (a display plugged in or out, another resolution), so a chosen display that comes back is shown again
+  without a reload, and as the menu opens, so its list is the Mac's as the choice is made. Two displays of one size swapped while the
+  menu stays closed keep the old crop until it opens.
+- **Loading**: the menu (`screen/DisplayMenu.tsx`) is a chunk of its own, so its words (`screen-displays`) stay out of the first
+  screen's catalog. It is fetched while a Mac whose status lists several displays connects, and the page crops to a kept display only
+  once it is in, so a cropped picture always has the menu to go back. One that would not load (offline, the hub redeployed) leaves
+  every display shown and is asked for again as the connection moves on.
+- Pages an app embeds (`embed=1`) have no top bar: they show every display and ignore a choice this browser kept.
+- **Tests**: `web/src/screen/displays.test.ts`, `ScreenView.displays.test.tsx`, and in a real browser against the mock hub
+  (`MOCK_COMPUTER=ready MOCK_SCREEN=fake MOCK_SCREEN_DISPLAYS=2:node`) `node web/e2e/screen-displays.mjs <web URL> <mock hub URL>`: the
+  chosen display fills its box, a click lands on it, drags out over a fractional edge and the top edge stay on it, a new page reopens it.
 
 ### App
 

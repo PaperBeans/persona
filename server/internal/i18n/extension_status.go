@@ -19,7 +19,8 @@ var extensionStatusTemplates = sync.OnceValue(func() []deploymentTemplate {
 			strings.HasPrefix(key, "extension-version.") || strings.HasPrefix(key, "extension-identity.") || key == "hub-extensions.missing" ||
 			key == "hub-extensions.socket_path_too_long" || key == "extension-market_git.git_missing" ||
 			key == "extension-market_git.git_too_old" ||
-			key == "extension-sandbox.probe_tmp"
+			key == "extension-sandbox.probe_tmp" ||
+			strings.HasPrefix(key, "extension-source.") // why a source extension can't be checked or started here (#5639)
 	})
 })
 

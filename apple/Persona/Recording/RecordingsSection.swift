@@ -677,6 +677,9 @@ struct RecordingsPage: View {
     private static var sampleOpened = false
     #endif
     #if os(iOS)
+    /// A meeting's thread asked for from outside (the minutes push, #3862 phase 6), pushed over this page.
+    @State private var opener = MeetingPageOpener.shared
+    @State private var openedMeeting: UUID?
     /// The next recording's choices, shared by the options in the list and Record in the bottom bar.
     @State private var form = RecordingStartForm()
     #endif
@@ -708,6 +711,12 @@ struct RecordingsPage: View {
             .navigationBarTitleDisplayMode(.inline)
             #if os(iOS)
             .recordingLiveSheet()
+            // Pushed over this list, not over the recording's page: its Open Minutes / Open Recording is the way there.
+            .navigationDestination(item: $openedMeeting) { MeetingPage(id: $0, mode: .after, opensRecording: true) }
+            // On appear too: a cold launch from the push asks before this page exists.
+            .onChange(of: opener.serial, initial: true) {
+                if let id = opener.take() { openedMeeting = id }
+            }
             #endif
             #if DEBUG
             .navigationDestination(item: $debugPage) { page in
@@ -754,6 +763,8 @@ struct RecordingDetailView: View {
     @State private var pendingPrivate: Bool?
     /// The hub said the recording isn't a meeting (`409 not_meeting`): it takes no private mark.
     @State private var notMeeting = false
+    /// Its transcript has words (`MeetingTalk.hasText`), worked out when it changes rather than on every pass (P4).
+    @State private var hasText = false
     #endif
     @Environment(\.dismiss) private var dismiss
     @State private var library = RecordingLibrary.shared
@@ -798,6 +809,10 @@ struct RecordingDetailView: View {
         }
         #if os(iOS)
         .onTabVisibility(appear: { watchMeeting() }, disappear: { unwatchMeeting() })
+        .onChange(of: library.entry(id)?.revision, initial: true) {
+            let next = library.entry(id).map(MeetingTalk.hasText) ?? false
+            if hasText != next { hasText = next }
+        }
         #endif
         .confirmationDialog("Delete This Recording?", isPresented: $deleting, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
@@ -979,14 +994,16 @@ struct RecordingDetailView: View {
     // MARK: The meeting conversation (#3862)
 
     /// Private Meeting for any meeting (whatever recorded it: a meeting with no mark counts as private until it is turned
-    /// off), and Meeting Conversation for a room meeting, or one the hub says has a room or a follow-up. Only with a hub
-    /// that lists the meeting conversation.
+    /// off), and Talk about this meeting (#3862 phase 6) for any recording that ended with text or minutes, or one the hub
+    /// holds a conversation for (`MeetingTalk.offered`; past retention its transcript here doesn't count): it pushes the
+    /// meeting's one thread. Only with a hub that lists the meeting conversation.
     @ViewBuilder private func meetingSection(_ entry: RecordingEntry) -> some View {
         let meeting = conversation.meeting(id)
+        let offered = MeetingAttendees.conversation(model)
         let showsPrivate = entry.isMeeting && !notMeeting
-        let showsThread = entry.roomMeeting || meeting.followup != nil
-            || meeting.room.map { $0.known != MeetingRoom.State.none } == true
-        if MeetingAttendees.conversation(model), showsPrivate || showsThread {
+        let showsThread = MeetingTalk.offered(entry, conversation: offered, minutes: minutes.ready != nil, meeting: meeting,
+                                              text: hasText, expired: sync.isExpired(entry))
+        if offered, showsPrivate || showsThread {
             Section {
                 if showsPrivate {
                     Toggle(isOn: Binding(get: { pendingPrivate ?? MeetingPage.isPrivate(entry, meeting) }, set: { setPrivate($0) })) {
@@ -1007,9 +1024,11 @@ struct RecordingDetailView: View {
                 if showsThread {
                     NavigationLink { MeetingPage(id: id, mode: .after) } label: {
                         // Drawn as the Private Meeting row beside it: in the style's icon language.
-                        Label { Text("Meeting Conversation").lineLimit(1) } icon: { ThemedIcon(Theme.Icon.meeting) }
+                        Label { Text("Talk about this meeting").lineLimit(1) } icon: {
+                            ThemedIcon(Theme.Icon.conversation)
+                        }
                     }
-                    .accessibilityIdentifier("recording-meeting-conversation")
+                    .accessibilityIdentifier("recording-talk")
                 }
             }
         }

@@ -1,6 +1,6 @@
 import { SNAPSHOT_RE, SNAPSHOT_END_RE } from '../../runtime-sdk/lib/compat.js'
 // Mapping between Antigravity CLI (agy) transcripts / ACP updates and Persona runtime items.
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { appToolName, clipInput, light, snippet } from '../../runtime-sdk/index.js'
 
@@ -235,12 +235,31 @@ export function stepsToItems(steps, opts = {}) {
   return { items, toSeq: maxSeq, lastText }
 }
 
+const transcriptCache = new Map()
+const MAX_CACHED_TRANSCRIPTS = 16
+const MAX_TRANSCRIPT_CACHE_BYTES = 64 * 1024 * 1024
+let transcriptCacheBytes = 0
+
 export function readTranscriptSteps(brainDir, full = false) {
   const file = join(brainDir, '.system_generated', 'logs', full ? 'transcript_full.jsonl' : 'transcript.jsonl')
   const fallback = full ? join(brainDir, '.system_generated', 'logs', 'transcript.jsonl') : null
   const target = existsSync(file) ? file : fallback && existsSync(fallback) ? fallback : null
   if (!target) return []
   try {
+    const info = statSync(target, { bigint: true })
+    const version = [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':')
+    // Fast same-size native rewrites can share a filesystem timestamp tick.
+    const settled = Math.max(Number(info.mtimeMs), Number(info.ctimeMs)) <= Date.now() - 1000
+    const cached = transcriptCache.get(target)
+    if (cached) {
+      transcriptCache.delete(target)
+      transcriptCacheBytes -= cached.size
+      if (settled && cached.version === version) {
+        transcriptCache.set(target, cached)
+        transcriptCacheBytes += cached.size
+        return cached.steps
+      }
+    }
     const raw = readFileSync(target, 'utf8')
     const out = []
     for (const line of raw.split('\n')) {
@@ -250,9 +269,19 @@ export function readTranscriptSteps(brainDir, full = false) {
         out.push(JSON.parse(trimmed))
       } catch {}
     }
+    const size = Number(info.size)
+    if (settled && size <= MAX_TRANSCRIPT_CACHE_BYTES) {
+      while (transcriptCache.size >= MAX_CACHED_TRANSCRIPTS || transcriptCacheBytes + size > MAX_TRANSCRIPT_CACHE_BYTES) {
+        const oldest = transcriptCache.keys().next().value
+        transcriptCacheBytes -= transcriptCache.get(oldest).size
+        transcriptCache.delete(oldest)
+      }
+      transcriptCache.set(target, { version, size, steps: out })
+      transcriptCacheBytes += size
+    }
     return out
   } catch {
-    return []
+    return full ? readTranscriptSteps(brainDir, false) : []
   }
 }
 

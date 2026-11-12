@@ -513,4 +513,33 @@ struct AgentRepoTreeTests {
         #expect(badge(child, parent: nil) == nil, "A grouped root already has its repository heading")
     }
 
+    // MARK: One folder in two repositories
+
+    /// A Codex App chat names its project's folder (`repo_root` ~/work) while git places its working tree in the
+    /// repository inside it, the main checkout of that repository's own agents. Each repository lists its own agents: the
+    /// two trees' ids differ, so the list's rows and quiet state for one are not the other's (2026-11-12: "14 agents"
+    /// over the other repository's one agent).
+    @Test func aFolderTwoRepositoriesClaimKeepsEachOnesAgents() throws {
+        let inner = "/home/me/work/code/app"
+        let own = (1...3).map { placed("own\($0)", inner, ["repo_root": inner, "worktree": inner, "branch": "feat/x"]) }
+        let codex = placed("codex", inner, ["repo_root": "/home/me/work", "worktree": inner, "branch": "feat/x",
+                                            "state": "unread", "status": "done"])
+        let all = own + [codex]
+        let repos = try #require(RepoTree.build(all, machines: machines).first?.repos)
+        let app = try #require(repos.first { $0.path == inner })
+        let work = try #require(repos.first { $0.path == "/home/me/work" })
+        #expect(app.worktrees.map(\.id) == ["tree/machine-a/" + inner], "the main checkout keeps the path's id")
+        #expect(work.worktrees.count == 1 && work.worktrees[0].id != app.worktrees[0].id)
+        #expect(app.worktrees[0].sessions.map(\.sessionID).sorted() == ["own1", "own2", "own3"])
+        #expect(work.worktrees[0].sessions.map(\.sessionID) == ["codex"])
+
+        var settings = AgentListProjection.Settings()
+        settings.grouping = "repo"
+        let projection = AgentListProjection.build(.init(sessions: all, machines: [], settings: settings))
+        let rows = try #require(projection.rows[app.worktrees[0].id])
+        #expect(rows.all.flatMap(\.sessions).map(\.sessionID).sorted() == ["own1", "own2", "own3"])
+        #expect(projection.quietWorktrees[app.worktrees[0].id] == true, "its agents are all idle")
+        #expect(projection.rows[work.worktrees[0].id]?.all.flatMap(\.sessions).map(\.sessionID) == ["codex"])
+    }
+
 }

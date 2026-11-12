@@ -67,4 +67,27 @@ struct ChatJumpTests {
     @Test func anUnmeasuredScreenGlides() {
         #expect(ChatJump.plan(gap: 5_000, screen: 0) == .glide(seconds: ChatJump.longest))
     }
+
+    /// Any jump of the chat (#5076), either way: close by it animates from where the list is, far away it starts a
+    /// screen short of the target on the side it came from, and at the target nothing moves.
+    @Test func aJumpEitherWayLeapsAsTheNewestDoes() {
+        let near = screen * ChatJump.leapTo
+        #expect(ChatJump.path(from: 1_000, to: 1_000.2, screen: screen) == (1_000.2, 0))
+        let up = ChatJump.path(from: 1_000, to: 1_300, screen: screen)
+        #expect(up.start == 1_000 && up.seconds == ChatJump.seconds(300, screen: screen))
+        let down = ChatJump.path(from: 1_300, to: 1_000, screen: screen)
+        #expect(down.start == 1_300 && down.seconds == up.seconds)
+        let older = ChatJump.path(from: 0, to: 9_000, screen: screen) // into the history: put below the target
+        #expect(older.start == 9_000 - near && older.seconds == ChatJump.longest)
+        let newer = ChatJump.path(from: 9_000, to: 0, screen: screen) // back toward the newest: put above it
+        #expect(newer.start == near && newer.seconds == ChatJump.longest)
+    }
+
+    /// Offsets go to the screen's pixels: a list moved by whole pixels draws nothing again.
+    @Test func offsetsLandOnPixels() {
+        #expect(ChatJump.pixel(10.2, scale: 3) * 3 == 31) // 30.6 px
+        #expect(ChatJump.pixel(10.2, scale: 3) == ChatJump.pixel(ChatJump.pixel(10.2, scale: 3), scale: 3))
+        #expect(ChatJump.pixel(-7.49, scale: 2) * 2 == -15)
+        #expect(ChatJump.pixel(12.345, scale: 0) == 12.345)
+    }
 }

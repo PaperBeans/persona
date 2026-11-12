@@ -8,6 +8,8 @@
     <string name="designsystem_status_unknown">未知</string>
     <string name="designsystem_status_waiting">待唤醒</string>
     <string name="designsystem_status_muted">已屏蔽</string>
+    <string name="designsystem_density_standard">标准</string>
+    <string name="designsystem_density_compact">紧凑</string>
     <string name="designsystem_style_glass">玻璃</string>
     <string name="designsystem_style_glass_summary">磨砂玻璃浮在状态光上，有事等你时泛起琥珀色</string>
     <string name="designsystem_style_brief">晨报</string>
@@ -52,12 +54,13 @@
     <string name="designsystem_decision_other">需要你</string>
     <string name="designsystem_decision_open_chat">打开对话</string>
     <string name="designsystem_decision_open_full">打开完整页</string>
-    <string name="designsystem_decision_previous">上一项</string>
-    <string name="designsystem_decision_next">下一项</string>
     <string name="designsystem_decision_advice">Persona：%1$s</string>
     <string name="designsystem_decision_recommended">建议</string>
-    <string name="designsystem_decision_position">第 %1$d 件，共 %2$d 件</string>
     <string name="designsystem_decision_option_position">第 %1$d 个，共 %2$d 个</string>
+    <!-- The pending requests above a chat's composer while they scroll (iOS PendingCards). -->
+    <plurals name="designsystem_decision_pending">
+        <item quantity="other">%1$d 个待处理</item>
+    </plurals>
     <string name="designsystem_pending_sending">发送中</string>
     <string name="designsystem_pending_waiting">连上后自动发送</string>
     <string name="designsystem_pending_unconfirmed">结果待确认</string>
@@ -134,7 +137,7 @@
     <string name="designsystem_row_style_two_lines">紧凑两行</string>
     <string name="designsystem_row_style_cards">色条卡片</string>
     <string name="designsystem_row_style_list">细列表</string>
-    <string name="designsystem_row_style_avatar_summary">头像、标题和时间，一行最新的话，再一行写它在哪儿跑。</string>
+    <string name="designsystem_row_style_avatar_summary">头像、标题和时间，两行最新的话，再一行写它在哪儿跑。</string>
     <string name="designsystem_row_style_two_lines_summary">每个 Agent 两行：标题和时间，再一行最新的话。</string>
     <string name="designsystem_row_style_cards_summary">每个 Agent 一张卡片，左边一条状态色；等你处理的那张整张淡蓝底。</string>
     <string name="designsystem_row_style_list_summary">每个 Agent 一行：状态、标题和时间。</string>
@@ -281,6 +284,7 @@
     <string name="designsystem_qr_code">二维码</string>
     <string name="designsystem_queue_actions">排队消息的操作</string>
     <string name="designsystem_queue_item">第 %1$d 条：%2$s</string>
+    <string name="designsystem_queue_item_note">第 %1$d 条：%2$s。%3$s</string>
     <string name="designsystem_draft_ready">Persona 拟好了回复</string>
     <!-- Connection details (the title's sheet while the hub is out of reach) -->
     <string name="designsystem_connection_online">已连上 hub</string>

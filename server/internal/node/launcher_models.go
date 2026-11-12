@@ -185,6 +185,25 @@ func (n *Node) launcherModelsAgent(ctx context.Context, name, agentType string) 
 	return "claude" // a probe that failed: as claude, like every other start
 }
 
+// agentModelsCommand is the command listAgentModels runs in shell to ask launcher name's agent for its models, in dir.
+func (n *Node) agentModelsCommand(ctx context.Context, shell, name, agent, dir string) (*exec.Cmd, error) {
+	var cmd *exec.Cmd
+	if agent == "codex" {
+		cmd = exec.CommandContext(ctx, shell, "-ic", codexShell(n.launcherForScript(name)), "persona")
+	} else {
+		// No hooks: this claude is no session of the user's (Persona's own, or a hook of theirs, would see one start).
+		ours := filepath.Join(dir, "settings.json")
+		if err := os.WriteFile(ours, []byte(`{"disableAllHooks":true}`), 0o600); err != nil {
+			return nil, err
+		}
+		cmd = exec.CommandContext(ctx, shell, "-ic", n.launcherForScript(name)+` "$@"`, "persona",
+			"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+			"--settings", n.claudeSettings(ctx, name, ours, dir))
+	}
+	cmd.Dir = dir
+	return cmd, nil
+}
+
 // listAgentModels runs the launcher's agent just long enough to ask for its list, in an empty directory.
 func (n *Node) listAgentModels(ctx context.Context, name, agent string) ([]proto.AgentModel, error) {
 	dir, err := os.MkdirTemp("", "persona-models-")
@@ -196,20 +215,10 @@ func (n *Node) listAgentModels(ctx context.Context, name, agent string) ([]proto
 	if err != nil {
 		return nil, err
 	}
-	var cmd *exec.Cmd
-	if agent == "codex" {
-		cmd = exec.CommandContext(ctx, shell, "-ic", codexShell(n.launcherCommand(name)), "persona")
-	} else {
-		// No hooks: this claude is no session of the user's (Persona's own, or a hook of theirs, would see one start).
-		ours := filepath.Join(dir, "settings.json")
-		if err := os.WriteFile(ours, []byte(`{"disableAllHooks":true}`), 0o600); err != nil {
-			return nil, err
-		}
-		cmd = exec.CommandContext(ctx, shell, "-ic", n.launcherCommand(name)+` "$@"`, "persona",
-			"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-			"--settings", n.claudeSettings(ctx, name, ours, dir))
+	cmd, err := n.agentModelsCommand(ctx, shell, name, agent, dir)
+	if err != nil {
+		return nil, err
 	}
-	cmd.Dir = dir
 	killGroupOnCancel(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

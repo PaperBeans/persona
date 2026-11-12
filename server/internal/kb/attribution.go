@@ -274,6 +274,9 @@ func (e *Engine) ApplyExtension(kind, id string, u Update, w ExtensionWrite) (Ex
 	by := ExtensionWriter(w.Extension)
 	e.Store.applyMu.Lock()
 	defer e.Store.applyMu.Unlock()
+	if kind == KindProject {
+		u = e.projectUpdate(u)
+	}
 	target := fieldRef{kind: kind, id: e.resolve(kind, id)}
 	var refs []fieldRef
 	if u.MergeInto != "" {

@@ -42,6 +42,26 @@ public nonisolated enum ChatJump: Equatable, Sendable {
         return 1 - rest * rest * rest
     }
 
+    /// The same plan between any two offsets of a list, either way (#5076): every animated jump of the chat runs this
+    /// way, not only ↓. Where the list is put before its animated part starts (`from` when the whole way animates, a
+    /// screen short of `to` when it is far, `to` itself when it is there already) and how long that part lasts.
+    public static func path(from: CGFloat, to: CGFloat, screen: CGFloat) -> (start: CGFloat, seconds: Double) {
+        let gap = from - to
+        switch plan(gap: abs(gap), screen: screen) {
+        case .none: return (to, 0)
+        case .glide(let s): return (from, s)
+        case .leap(let near, let s): return (gap < 0 ? to - near : to + near, s)
+        }
+    }
+
+    /// `y` on the screen's pixel grid. A list moved to whole pixels draws nothing again: its rows' drawings are
+    /// composited where they are. SwiftUI's own animated scroll stops at fractions of a pixel, and every frame it
+    /// drew every text on screen again for its new offset (#5076).
+    public static func pixel(_ y: CGFloat, scale: CGFloat) -> CGFloat {
+        guard scale > 0 else { return y }
+        return (y * scale).rounded() / scale
+    }
+
     /// How long an animated scroll over `distance` lasts: from `shortest` for a few lines to `longest` for a screen or more.
     public static func seconds(_ distance: CGFloat, screen: CGFloat) -> Double {
         guard screen > 0 else { return longest }

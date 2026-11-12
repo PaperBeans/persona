@@ -15,6 +15,7 @@ import { devDialog } from "../router";
 import { ExtensionMarkets } from "./ExtensionMarket";
 import { Permissions, PreviewBody } from "./ExtensionPreview";
 import { ExtensionRunning, RunColumns } from "./ExtensionRunning";
+import { linkedExtension, NetworkBlock } from "./ExtensionNetwork";
 import type { AdminExtension, ExtensionOverview, ExtensionPreview } from "../types";
 import { Card, Dot, EmptyState, ErrorBox, Field, Loader, Notice, PageHeader, Segmented, Tag, useLoad, useVisiblePoll } from "../parts";
 
@@ -135,8 +136,10 @@ function ExtensionRow({
   onRollBack: () => void;
   onRemove: () => void;
 }) {
-  // Dev only (screenshots): ?dialog=details opens the rows that can roll back.
-  const [open, setOpen] = useState(() => devDialog() === "details" && canRollBack(p));
+  // Dev only (screenshots): ?dialog=details opens the rows that can roll back. ?extension=<id> (the settings page's link
+  // to its network block, #5696) opens that one.
+  const linked = linkedExtension() === p.id;
+  const [open, setOpen] = useState(() => linked || (devDialog() === "details" && canRollBack(p)));
   const [busy, setBusy] = useState(false);
   const st = extensionStatus(p);
   const toggle = async (on: boolean) => {
@@ -223,6 +226,7 @@ function ExtensionRow({
       <Collapse open={open} lazy>
         <div className="mt-3 ml-12 grid min-w-0 gap-3 pr-px pb-px">
           {p.permissions.length > 0 && <Permissions lines={p.permissions} title={t("admin-pages-extensions.can")} />}
+          <NetworkBlock p={p} onChanged={onChanged} linked={linked} />
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[12px]">
             {extensionRunNote(p) && <Meta label={t("admin-pages-extensions.now")}>{extensionRunNote(p)}</Meta>}
             {contributes.length > 0 && <Meta label={t("admin-pages-extensions.provides")}>{contributes.map(([point, ids]) => t("admin-pages-extensions.provides_item", { point: pointLabel(point), ids: ids.join(t("admin-pages-extensions.list_sep")) })).join(t("admin-pages-extensions.group_sep"))}</Meta>}

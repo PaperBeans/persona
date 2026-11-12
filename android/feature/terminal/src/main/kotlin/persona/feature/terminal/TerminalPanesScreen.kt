@@ -101,7 +101,7 @@ private fun SpaceHeader(space: TermSpace, opening: Boolean, thisOne: Boolean, on
                 overflow = TextOverflow.Ellipsis)
         }
         if (space.canOpen) {
-            if (thisOne) JSpinner(Modifier.size(Tokens.Space.l))
+            if (thisOne) JSpinner(Modifier.size(Tokens.Space.Standard.l))
             else JTextButton(stringResource(R.string.terminal_panes_new_tab), onNewTab, enabled = !opening, icon = PhIcons.Plus)
         }
     }

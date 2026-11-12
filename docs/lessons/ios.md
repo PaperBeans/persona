@@ -2,6 +2,24 @@
 
 Pitfalls, odd behavior and the decisions made at the time (formerly "Lessons" in `CLAUDE.md`; index in `docs/lessons/README.md`). Add new lessons to the relevant section, or create one if none fits.
 
+## Tab selection and targeted opens are different navigation intents (#5641)
+
+- An Agent pushed on Assistant's stack still uses the dev chat view, which writes the shared last-opened Agent marker.
+  Returning to Assistant does not clear that marker. A lazily built Agents page can therefore restore the card's Agent
+  on its first appearance; a previously built Agents page can retain its own detail path instead. Check both paths.
+- A regular-width split sidebar's `NavigationLink(value:)` can own a selection independently of the bound detail path.
+  Clearing that path closes a code-opened Agent but not necessarily an Agent opened by a sidebar row. On iOS, route
+  those Agent links through the bound path as well; decide from the parent page's layout (`ownsTop`), because the
+  sidebar itself can read compact. Test native-tab reselection and switching back after a row tap, not just after a
+  launch link. Do not rebuild the whole list to erase this selection and discard its local state.
+- Reset the Agents path and restore marker only at an explicit tab-selection boundary, not in the general tab router:
+  notifications and links use that router too and must still open their exact Agent. Reselection needs a generation,
+  because the selected tab's value does not change. Deferred restoration/reset callbacks must check that generation and
+  leave newer targeted requests to the existing stable-stack opener.
+- A test proving that the strip says Agents is not a list-root test. Also assert its navigation root and that no Agent
+  title is in front. Keep the mock task and its Agent under the same assistant: the generic multi-manager mock puts
+  some computers under a different assistant, so the dispatch fixture explicitly defaults to one manager.
+
 ## Settings requests must capture their scope (#5236)
 
 - Renaming a section does not scope a merged list. Filter connector/extension rows by the captured assistant, and name
@@ -14,6 +32,12 @@ Pitfalls, odd behavior and the decisions made at the time (formerly "Lessons" in
   scope group. Nesting Sections produces a different grouping instead of retaining one group.
 - Check existing icon identifiers, not just symbol literals, before adding a vocabulary token. Pairing was already a
   registered meaning; QR scanning is a different one. Run the icon vocabulary and token ratchets after moving code.
+
+## Draft growth and caret following are different jobs (#5650)
+
+- A keyboard-visible viewport percentage is not a reliable six-line draft cap. The former 22% policy commonly selected three lines on phones; iOS now uses its own six-line token, separate from Mac's unchanged eight-line cap.
+- Geometry updates are not typing. Calling `scrollRangeToVisible` from every height change overrides a person's manual reading position. Layout settling only clamps an out-of-range offset; caret following belongs to text/selection changes, and deferred work must stay tied to the same text view and yield to a later manual scroll.
+- A full-page editor needs a dedicated controls row before its text. Navigation toolbar placement alone does not guarantee the text view starts below the controls. Check both appearances with the keyboard up and down.
 
 ## Colors inside the user's bubble come from the bubble as drawn (#5204)
 
@@ -442,7 +466,8 @@ Use an invalidation revision as the task key and handle the flag after completio
   `max(bottom of one, top of the next)` and a list or quote takes the largest margins inside it. Check spacing by pixels against the whole answer in a
   window (`AnswerPartsLookTests`), not `ImageRenderer`: one pass of it draws the blocks before their margins arrive.
   - Parts trade the opening freeze for drawing as they come into view: the lazy stack drops a part's layers once it scrolls far away, and drawing
-    many distinct CJK glyphs the first time is most of the main thread's work in fast programmatic jumps (#5076). Finger scrolling stays in budget.
+    many distinct CJK glyphs is most of the main thread's work in programmatic jumps; jumps to the newest end now run
+    on the list itself (「Animated jumps redraw every text they pass」, #5076). Finger scrolling stays in budget.
   - Whatever acted on the row acts on the message, not the part (#5221): with each part's long press lifting its own words, the lifted card showed a
     fragment of the answer and Select Text selected only it, while Copy (the bar's text) still took all of it. The part's press lifts a copy of every
     part (`AnswerPartsLift`), lazily: a copy laying out every part at once would bring back the cost the parts took out of the chat. Its words
@@ -1283,6 +1308,55 @@ When a computer disconnects, hub marks sessions unknown, not offline; `AgentStat
   (`ScrollToBottomTests` 11 and 12), but the old code passed it too. The device check is the report's own steps on a
   TestFlight build: flick hard, tap ↓ at once, in an Agent chat and in Persona's.
 
+## Animated jumps redraw every text they pass (2026-11-12, #5076)
+
+- **What happened**: after #4970 a finger glide through a long finished Agent answer stayed within budget, but
+  `-showAutoScroll`'s sweep (eight animated 3000 pt jumps) over a ~33,000-character, mostly Chinese report still spent
+  about 430 ms of every second hitching, longest frames near 400 ms. A synthetic report of the same shape with few
+  distinct characters cost a seventh of that, so the cost followed glyph variety.
+- **CoreGraphics' glyph cache is 1 MB**: every glyph CoreGraphics renders goes into one process-wide cache of
+  1,000,000 bytes, least recently used first out. A 17 pt Chinese glyph at @3x is about 2.6 KB, so it holds roughly 380.
+  The report used 784 distinct characters at several sizes and weights (body, semibold, headings, inline code, tables):
+  one dense screen already overflows it, and from then on every draw renders each glyph again from its outline
+  (`CGGlyphBitmapCreateWithPathAndDilation` under `CABackingStoreUpdate_`, about 35–80 µs a glyph in the simulator). The
+  limit is not adjustable by an app: `CGFontCacheMaxSize` is a debugging default CoreGraphics reads only where debugging
+  defaults are allowed, and the setter is private. Warming glyphs off the main thread before a part appears cannot help:
+  what was warmed is evicted before it is drawn.
+- **SwiftUI's animated scroll draws everything again, every frame**: `withAnimation { position.scrollTo(…) }` moves the
+  content to a new fractional pixel offset each frame, and SwiftUI draws each of its drawing layers on screen again for
+  it. Counted with a lab library in a simulator build (`drawInContext:` of SwiftUI's drawing layers): 1,000–2,300 draws
+  a second on 40–100 layers during the sweep, every draw on a new sub-pixel position, against a handful a second when a
+  finger or ↓ moves the `UIScrollView` itself (those layers are composited where they are). Together with the cache, an
+  animated jump over Chinese text rendered every glyph on screen anew on every frame.
+- **Fix**: the chat's animated jumps to its newest end (sending, following, a held row let go) run like ↓ (#3027) on
+  the list itself, `ChatJumpRun` on a display link, on whole pixels: far away the list is put a screen short first and
+  the last screen glides, so the rows between are never drawn. `-showSwiftUIJumps YES` keeps the old way to measure
+  against in one build; `-showJumpPerf YES` measures ↓, send, quote, call and near jumps; `MOCK_LONG_REPORT=cjk` is a
+  public fixture with a real report's glyph variety.
+- **Jumps to a line keep SwiftUI's animated scroll**: tried on the list too (SwiftUI places the line on the frame of
+  the tap, below), a far one put SwiftUI's layout of the far line, three evaluations of the page and the leap's drawing
+  on one frame: 206–252 ms against SwiftUI's own worst frame of 112–169 ms there (a quote of the report's start, the
+  oldest tool call). Landing far away has to lay that place out either way; spread over SwiftUI's animation it costs
+  more in total but less on any one frame. A line partly on screen (the oldest one, as the navigator picks it) is not
+  a fair race: SwiftUI's animated `scrollTo(id:anchor: .center)` left the list where it was, while placing it first
+  moved the list about 1,000 pt to center it (longest frame 117 ms median against SwiftUI's 17 in the real report).
+  All jumps to a line keep SwiftUI's, so they behave exactly as before.
+- **Where a line is, before the frame is drawn** (tried, not used): a lazy list knows a far row's offset only once it lays it out. A
+  non-animated `position.scrollTo(id:anchor:)` followed by `window.layoutIfNeeded()` makes SwiftUI place it at once, and
+  the list's `contentOffset` is then the target. Putting the offset back does not hold: SwiftUI keeps the list on the
+  requested row and moves it there again on the next frame, even after the position is forgotten. Replacing the request
+  with `scrollTo(point:)` where the jump starts (another layout pass) does hold; then the position can be forgotten as ↓
+  does. A simulator lab app (a flipped `LazyVStack` of 1,500 rows) landed the glide exactly where SwiftUI's own
+  non-animated jump puts the row, five targets near and far, twice; the chat still asks SwiftUI for the row once there.
+- **What did not help**: `drawsAsynchronously` on SwiftUI's layers (worse: 545–588 ms/s against 416–470); smaller answer
+  parts (`-showAnswerPartLines` 12 or 8: a finger's first glide 80–110 ms/s against 84–96 at 24 lines).
+- **How it was found without a build**: a lab-only dynamic library injected into an existing simulator build
+  (`SIMCTL_CHILD_DYLD_INSERT_LIBRARIES` on `simctl launch`) read and raised the cache limit and counted the layers'
+  draws, and command-line programs run with `simctl spawn` timed CoreGraphics alone. None of it is in the app.
+- **Remaining**: a finger's first pass over parts never drawn still renders their glyphs once (about 85–95 ms/s at
+  2000 pt/s in a Debug build); a far jump draws the screen it lands on; jumps to a line still animate SwiftUI's
+  scroll position.
+
 ## Context compaction as a divider (2026-11-04, #1064)
 
 Claude Code writes three things: `system/compact_boundary` (`compactMetadata.trigger` `manual` / `auto`; idle compaction also `auto`), a following `isCompactSummary` user line,
@@ -1940,7 +2014,13 @@ A worktree's display name and its Agents' conversation names are different comma
   were in a picker's own menu (a `Picker` in a `Form`), not an inline picker inside a `Menu`.
 - The modes became `Toggle`s, the current one on, in a `Section { … } header: { Text }`: a menu draws that header, as the
   composer's ultracode section does, and a check mark beside the switch that is on, as a picker does. The Agents menu's
-  Display note (#3182) is the second shape above; look at it in a shot before counting on it.
+  Display note (#3182) was the second shape above (#3753 has since removed it).
+- The composer's model menus had both shapes (2026-11-12, #4322): `Section("Model") { Button("Other Model…"); Picker … }`
+  drew "Model" over Other Model… only, below the whole model list, and `Section("Thinking Effort") { Picker … }` drew no
+  title. A check that only looks for the words passes on the first: a UI test checks that each title stands above its own
+  rows (`MenuSectionTitleTests`). These menus open upward, list their items the other way round and scroll, and only the
+  rows on screen are in the element tree, so the test drags the menu down until each title has shown. Titled choices in
+  a menu are `MenuChoice` switches (`apple/Persona/Views/Chat/SessionModes.swift`).
 
 ## A menu inside a menu keeps the items it was first built with (2026-11-09, #1644)
 

@@ -64,6 +64,7 @@ var Features = []string{
 	"machine_trust",            // machines' trust and error_code, POST /api/v1/machines/{id}/confirm|reject (docs/assistant/onboarding.md 5.3)
 	"machines_add",             // POST /api/v1/auth/pair-codes with add / machine from a signed-in device: it adds a computer and pairs it (docs/assistant/onboarding.md 5.3)
 	"todo_threads",             // a to-do's chat thread: PUT/DELETE /api/v1/todos/{id}/thread, and `thread` on the to-dos GET returns (docs/assistant/todos.md "Chat thread")
+	"todo_seen",                // Got it on a Just finished to-do: PUT/DELETE /api/v1/todos/{id}/seen, and `seen_at` on the to-dos GET returns (docs/assistant/todo-status-sop.md "Seen")
 	"tls",                      // optional TLS listener and SPKI pin (hub-changes.md 1.1)
 	"endpoints",                // authenticated address discovery and capability-gated updates
 	"plugins",                  // GET /api/v1/plugins and the relay under /api/v1/plugins/{id}/ (docs/extensions/extensions.md)
@@ -115,6 +116,10 @@ var Features = []string{
 // CodeWorktreeUnsupported: worktree.prepare / worktree.create on an engine that has no checkouts (a runtime such as
 // Paseo or Cindy, or a host without checkout support); the message starts with "unsupported".
 const CodeWorktreeUnsupported = "worktree_unsupported"
+
+// CodeWorktreeNoCommits: worktree.prepare / worktree.create on a repository nobody has committed to (HEAD names an
+// unborn branch): there is nothing to check out, so the folder itself is the only workspace (#5548).
+const CodeWorktreeNoCommits = "worktree_no_commits"
 
 // Codes of a failed credential.gh_token (hub → node, node/credential.go).
 const (

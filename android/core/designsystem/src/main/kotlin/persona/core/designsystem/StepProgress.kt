@@ -34,8 +34,8 @@ fun StepProgress(steps: List<ProgressStep>, modifier: Modifier = Modifier) {
         ?: steps.firstOrNull { it.state == StepState.Pending }
         ?: steps.last()
     val shape = if (PersonaTheme.style == AppStyle.Board) RoundedCornerShape(1.dp) else CircleShape
-    Column(modifier.clearAndSetSemantics { contentDescription = summary }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(modifier.clearAndSetSemantics { contentDescription = summary }, verticalArrangement = Arrangement.spacedBy(8.dp.dense)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp.dense)) {
             steps.forEach { step ->
                 val color = when (step.state) {
                     StepState.Pending -> palette.line

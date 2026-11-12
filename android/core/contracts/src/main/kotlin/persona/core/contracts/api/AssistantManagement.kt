@@ -31,6 +31,21 @@ interface AssistantManagement {
     suspend fun assistantLaunchers(machineId: String): List<AgentLauncher> = launchers(machineId)
     /** The models of [launcher], null on a hub without the list. */
     suspend fun launcherModels(machineId: String, launcher: String): LauncherModels? = null
+    /**
+     * [assistantLaunchers] with the rest of the hub's answer: the main chat's default and what can't run Persona chats
+     * there, with why (`GET /api/v1/machines/{id}/launchers?purpose=assistant`): the model panel's providers (#5033, #5055).
+     */
+    suspend fun assistantLauncherList(machineId: String): AssistantLaunchers = AssistantLaunchers(assistantLaunchers(machineId))
+    /**
+     * Keeps [pick] as what the conversation's next messages run on (`PUT /api/v1/assistant/conversations/{id}/model`,
+     * feature `assistant_model_pick`); answers the pick the hub kept. A refusal throws the hub's failure with its words
+     * (409 `launcher_out_of_scope`, `launcher_own_service`, `launcher_missing`, `launcher_other_kind`; 400 for a launcher
+     * that can't run assistant chats).
+     */
+    suspend fun setModelPick(session: SessionKey, pick: persona.core.contracts.ModelPick): persona.core.contracts.ModelPick =
+        throw UnsupportedOperationException("Model pick unavailable")
+    /** The conversation follows the default again (`DELETE …/conversations/{id}/model`): Follow default, Undo pick. */
+    suspend fun clearModelPick(session: SessionKey): Unit = throw UnsupportedOperationException("Model pick unavailable")
     suspend fun endConversation(session: SessionKey)
     /**
      * Compacts an assistant conversation's context now (POST /api/v1/assistant/conversations/{id}/compact, hub feature

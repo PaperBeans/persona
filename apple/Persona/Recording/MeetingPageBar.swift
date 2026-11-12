@@ -34,9 +34,11 @@ struct MeetingPageBar: View {
     @Binding var notice: String?
     /// At accessibility sizes, that some picked photos couldn't be read, for the page to show (nil at other sizes).
     @Binding var photoNotice: String?
+    /// After the meeting, a voice call bound to the follow-up (#3862 phase 6): set where one can start now; nil, no button.
+    var voice: (() -> Void)?
 
     init(entry: RecordingEntry, mode: MeetingPage.Mode, paused: Bool = false, justMe: Binding<Bool>, focus: FocusState<Bool>.Binding,
-         notice: Binding<String?>, photoNotice: Binding<String?> = .constant(nil)) {
+         notice: Binding<String?>, photoNotice: Binding<String?> = .constant(nil), voice: (() -> Void)? = nil) {
         self.entry = entry
         self.mode = mode
         self.paused = paused
@@ -44,6 +46,7 @@ struct MeetingPageBar: View {
         self.focus = focus
         _notice = notice
         _photoNotice = photoNotice
+        self.voice = voice
     }
 
     @Environment(\.dynamicTypeSize) private var size
@@ -104,8 +107,10 @@ struct MeetingPageBar: View {
             MeetingQuestionField(text: $draft, focus: focus, placeholder: placeholder, sendLabel: String(localized: "Send"),
                                  canSend: canSend, disabled: fieldDisabled, largeTypeHint: blocked ?? "", send: send) {
                 plus
+                voiceButton
             } under: {
                 if mode == .live, !writing { largeControls }
+                voiceButton
             }
             if let caption {
                 Text(caption).font(Theme.Font.caption).foregroundStyle(.secondary)
@@ -216,6 +221,18 @@ struct MeetingPageBar: View {
             .accessibilityLabel(Text("Add [Meeting Composer]"))
             .accessibilityIdentifier("meeting-plus")
             .shellScaled()
+        }
+    }
+
+    /// Voice Chat after the meeting (#3862 phase 6): the composer's voice button, before the field where the live page has
+    /// [+] (the bar has no [+] after the meeting). The call is bound to the follow-up; the page shows its bar in place of
+    /// this one while it runs.
+    @ViewBuilder private var voiceButton: some View {
+        if mode == .after, let voice {
+            ComposerVoiceButton(round: false, id: "meeting-voice") {
+                focus.wrappedValue = false
+                voice()
+            }
         }
     }
 

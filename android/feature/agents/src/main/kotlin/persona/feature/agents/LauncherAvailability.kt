@@ -14,6 +14,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import persona.core.contracts.api.AgentLauncher
 import persona.core.designsystem.*
+import persona.core.designsystem.dense
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 
@@ -85,8 +86,8 @@ internal fun LauncherBlockedSheet(
     JSheet(onDismiss = onDismiss, title = stringResource(block.title), scrollable = true, modifier = Modifier.testTag("launcher-help")) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.l)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.Top) {
-                JIcon(PhIcons.WarningCircle, null, size = 20.dp, tint = palette.cautionText, modifier = Modifier.padding(top = 2.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                JIcon(PhIcons.WarningCircle, null, size = 20.dp, tint = palette.cautionText, modifier = Modifier.padding(top = 2.dp.dense))
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp.dense)) {
                     Text(launcher.name, style = PersonaTheme.type.headline, color = palette.ink, maxLines = 1)
                     Text(stringResource(block.reason), style = PersonaTheme.type.callout, color = palette.cautionText)
                 }
@@ -99,7 +100,7 @@ internal fun LauncherBlockedSheet(
                     else listOf(R.string.agents_launcher_help_fix_other)
                 steps.forEach { step ->
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.Top) {
-                        JIcon(PersonaIcons.success, null, size = 16.dp, tint = palette.accent, modifier = Modifier.padding(top = 3.dp))
+                        JIcon(PersonaIcons.success, null, size = 16.dp, tint = palette.accent, modifier = Modifier.padding(top = 3.dp.dense))
                         Text(stringResource(step), style = PersonaTheme.type.body, color = palette.ink)
                     }
                 }

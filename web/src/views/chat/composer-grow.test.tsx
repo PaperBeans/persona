@@ -1,21 +1,16 @@
 // @vitest-environment jsdom
-// The phone composer grows to a line limit, then offers Expand (#5688): the pure limit, and the box's four states
-// (growing, the button, the full editor, collapsed with the same text and caret), with desktop left as it was.
+// The composer grows to six lines; native scrolling and the existing phone-only expanded editor stay intact.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer";
-import { growLines, lineCount, offersExpand } from "./composer-grow";
+import { COMPOSER_LINES, lineCount, offersExpand } from "./composer-grow";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-describe("growLines", () => {
-  it("takes 22% of the visible height, between 3 and 8 lines", () => {
-    expect(growLines(360, 24)).toBe(3); // a small phone with its keyboard up
-    expect(growLines(760, 24)).toBe(6); // a tall phone without it
-    expect(growLines(3000, 24)).toBe(8);
-    expect(growLines(0, 24)).toBe(3);
-    expect(growLines(800, 0)).toBe(3);
+describe("composer line cap", () => {
+  it("uses one six-line token, independent of the visible viewport", () => {
+    expect(COMPOSER_LINES).toBe(6);
   });
   it("counts wrapped lines and offers Expand only past the limit", () => {
     expect(lineCount(72, 24)).toBe(3);
@@ -71,12 +66,18 @@ const editor = () => document.querySelector<HTMLElement>('[data-testid="composer
 describe("the phone composer", () => {
   it("grows without a button, offers Expand past the limit, and keeps the draft and caret across the full editor", () => {
     act(() => root.render(<Composer draftKey="k1" placeholder="" onSend={async () => true} />));
-    // jsdom's window is 768px tall: a limit of 7 lines
+    // jsdom's window is 768px tall: the shared six-line cap.
     type(lines(4));
+    expect(box().style.height).toBe(`${4 * 24}px`);
     expect(expandButton()).toBeNull();
     expect(box().className).not.toContain("pr-8");
-    expect(box().style.maxHeight).toBe(`${7 * 24}px`);
+    expect(box().style.maxHeight).toBe(`min(${6 * 24}px, min(240px, calc(var(--kb-h) * 0.35)))`);
+    type(lines(6));
+    expect(box().style.height).toBe(`${6 * 24}px`);
+    expect(expandButton()).toBeNull();
 
+    type(lines(7));
+    expect(expandButton()).not.toBeNull();
     type(lines(9));
     expect(expandButton()).not.toBeNull();
     expect(box().className).toContain("pr-8");
@@ -110,11 +111,11 @@ describe("the phone composer", () => {
     expect(editor()).toBeNull();
   });
 
-  it("leaves the desktop box as it was: no button, its own height cap", () => {
+  it("uses the same six-line cap on desktop without offering the phone editor", () => {
     phone = false;
     act(() => root.render(<Composer draftKey="k3" placeholder="" onSend={async () => true} />));
     type(lines(12));
     expect(expandButton()).toBeNull();
-    expect(box().style.maxHeight).toBe("min(240px, calc(var(--kb-h) * 0.35))");
+    expect(box().style.maxHeight).toBe(`min(${6 * 24}px, min(240px, calc(var(--kb-h) * 0.35)))`);
   });
 });

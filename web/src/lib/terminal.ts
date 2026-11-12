@@ -187,13 +187,13 @@ export function usableGrid(g: { cols: number; rows: number } | null | undefined)
 }
 
 /**
- * A font stack with `family` before its generic family (the fallback the browser reaches for characters the
- * monospaced fonts lack): `"JetBrains Mono", Menlo, monospace` → `"JetBrains Mono", Menlo, "<family>", monospace`.
+ * A font stack with a range-limited `family` first. Named desktop fallbacks can resolve to a CJK face, so the
+ * size-adjusted face must precede them as well as the generic family. Its unicode-range limits which glyphs it draws.
  */
 export function withFamily(stack: string, family: string): string {
   const parts = stack.split(",").map((s) => s.trim()).filter(Boolean);
   const generic = parts.length && /^monospace$/i.test(parts[parts.length - 1]) ? parts.pop()! : "monospace";
-  return [...parts.filter((p) => p !== `"${family}"`), `"${family}"`, generic].join(", ");
+  return [`"${family}"`, ...parts.filter((p) => p !== `"${family}"`), generic].join(", ");
 }
 
 // ── colors ──────────────────────────────────────────────

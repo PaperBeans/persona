@@ -1,5 +1,35 @@
 # Lessons: web UI and interactions
 
+## The live screen's later words go in a lazy component, not in a startup namespace (#5685)
+
+`main.tsx` imports `screen/ScreenView` without waiting for the rest of the catalog, so the build counts every namespace
+ScreenView names as first-screen code, and a namespace in `src/i18n/startup-namespaces.json` ships in every page's first
+screen: the live screen and the App share that catalog. Four Displays-menu strings in `screen-screenview` took the ja first
+screen 49 B over its budget. Words the live screen needs only once it is connected go in a component ScreenView imports
+dynamically (`screen/DisplayMenu.tsx`, namespace `screen-displays`): the build makes that import wait for the rest of the
+catalog, so the first screen does not grow and nothing has to wait for it at run time. Gating ScreenView's own rendering
+on `i18nRest()` does not pass the build: the check reads which namespaces a chunk names, not when it reads them.
+
+## A mouse event sent again comes out on whole pixels (#5729)
+
+Keeping a drag inside a clipping box meant stopping a move outside it and dispatching a new `MouseEvent` at the nearest
+point inside. A centered box rarely has whole-pixel edges, and Chrome hands a constructed event's `clientX` / `clientY`
+back as whole pixels: kept at 81.5, the event read 81, outside again, and was sent again without end. The release never
+reached noVNC, so the Mac's button stayed down. Keep such a point on a whole pixel inside the edges (`ceil` the near edge,
+`floor` the far one), and guard the handler against the event it sends itself. Unit tests with whole-pixel boxes passed;
+`web/e2e/screen-displays.mjs` sizes its window so the edge is fractional.
+
+## Check the keyboard-sized viewport before declaring that a composer grows (#5645)
+
+A 390 × 844 phone showed seven draft lines, but the same phone with 500px visible above the keyboard stopped at
+four: its growth cap used 22% of the visible height, not a six-line limit. Desktop instead stopped at 240px, cutting
+through a twelfth line. Measure the real textarea's line height and padding at both widths and with the keyboard's
+remaining height; cap at six whole lines while retaining the dock's short-viewport safety share. A manual scroll
+was stable at both widths before the fix (idle, hub update and viewport resize), so leave the native scrolling alone
+and pin that behavior with browser tests rather than adding a caret-follow timer for a bug that was not reproduced.
+The follow-up #5682 keeps the six-line limit in `COMPOSER_LINES` and leaves exceptionally short-viewport safety to
+CSS, removing the redundant viewport React state/subscription and keeping the original startup budget unchanged.
+
 ## A lazy page importing a first-screen module can split it into a chunk of its own (#3962)
 
 Step 4c's settings pages imported `referenceState` from `lib/extensions.ts`, which the first screen already loaded inside
@@ -167,17 +197,37 @@ that UI. Pass existing task helpers into the editor instead of importing the who
 chunk. Static-render tests exercise the extracted editor directly; mounted tray tests wait for the lazy card and still
 exercise its actions. Leave Send/Dismiss admission, owner capture and revision fences in the synchronous feed layer.
 
-## Gate identity chrome by installed assistants, not by roster availability (#3967)
+## Gate identity chrome by displayable identity, not installed-assistant count (#3967, #3978)
 
-A roster with one assistant does not need assistant identity or switching UI. Reuse the installed-assistant cardinality
-rule used by conversation titles and list grouping; offline installed assistants count and pending installs do not.
-Restore the earlier product header and its existing controls rather than hiding the whole header, which would also
-remove appearance, Settings and Disconnect. Keep product branding and the user's chosen Persona look separate from
-roster name/monogram attribution. Regress one → two → one on a mounted view, along with one installed plus a pending
-install, and assert the rendered labels, avatars and menu rows rather than only the count helper. A phone's menu and
-drawer own separate history entries: wait for each closing entry to pop before the next full-page navigation, or a
-late Back can replace the requested Inbox page with the previous main conversation. Prefer the built web preview for
-broad E2E runs on a busy machine; thousands of Vite development modules can exhaust Chromium's renderer resources.
+The #3978 simplification hid assistant identity again with one installed assistant; that is not the rule. With a
+displayable current assistant, even one installed assistant shows its name, first-character avatar with a status dot,
+and status line at the desktop sidebar's and phone drawer's head, and opens the roster. A single-assistant roster has
+one row with no Default tag and still includes New assistant and Manage assistants…, so creation is not confined to
+Settings. On an older hub whose roster route is unsupported, restore the earlier product header and its existing
+controls rather than hiding the whole header, which would also remove appearance, Settings and Disconnect: keep
+AppMark, Persona, connection/computer status and the original menu. Keep product branding and the user's chosen Persona
+look separate from roster name/monogram attribution.
+
+Remember the last header id and name per hub for display only, including the default assistant's, whose pick is not
+otherwise stored. A reload or transient roster-read failure must not flash the product header; the cached identity does
+not choose an assistant or enable manager behavior. Only an unsupported-roster 404 clears it. An empty roster or no
+displayable current identity must make the product header, 220 px menu and Appearance heading agree, rather than
+pairing an assistant header with the product menu or vice versa.
+
+The behavior gate remains `multiManager`: with one installed assistant or no roster, filtering, badges, extra requests,
+`X-Persona-Manager`, `?manager=` and `needs_you` reads stay off. Conversation titles and message identity also remain
+under `multiManager`, so one assistant keeps the Persona title and existing message identity. Do not reuse roster
+availability for those behaviors, or the installed-assistant count for identity chrome.
+
+Regress no roster → one → two → one on a mounted view, along with one installed plus a pending install, cached default
+and non-default identities across reloads and transient failures, unsupported 404 clearing, and an empty roster or no
+current identity. Assert the rendered labels, avatars, status, Default tag, New assistant / Manage assistants… rows and
+264 / 220 px menu widths, not only the count helper. The header button's `aria-describedby` must reference its visible
+status line so a screen reader hears the same connection or assistant state. Also assert that single-assistant
+filtering and manager-routing requests stay off, and that its offline header does not disable the composer. A phone's
+menu and drawer own separate history entries: wait for each closing entry to pop before the next full-page navigation,
+or a late Back can replace the requested Inbox page with the previous main conversation. Prefer the built web preview
+for broad E2E runs on a busy machine; thousands of Vite development modules can exhaust Chromium's renderer resources.
 
 ## Retention mode changes must not save an intermediate window (#3780, #3862)
 
@@ -640,6 +690,11 @@ Six parallel lanes (chat rendering, message actions, Agents list / Machines, Ter
 - Machine details has three monitoring cells per row; at 390 width a subtitle gets about 94 px, while "56.5 GB / 64.0 GB" takes 92 px (2026-11-06, #3637). Headless Chrome at 390 just fits and hides truncation in screenshots; 15 px narrower (desktop scrollbar), or a slightly wider font, cuts the total. Measure natural text width (`Range.getBoundingClientRect`) against cell `clientWidth`, not just 390-wide screenshots. Show a shared unit once (`usedOfTotal`, "56.5 / 64.0 GB", 74 px).
 
 ### Terminal (xterm.js)
+
+- A Linux Fontconfig preference can substitute a missing desktop family such as Menlo with a proportional face
+  (#5768). Check W and i widths through the entire computed stack. Add explicit Linux monospace faces before
+  platform fallbacks. Put the unicode-range-limited CJK face first so substituted named fonts cannot shadow its
+  size adjustment. Verify the actual xterm row spacing after asynchronous CJK loading in both terminal surfaces.
 
 - DOM-renderer Chinese gaps come from `DomRendererRowFactory`: `spacing = width * cellWidth - measured glyph width`, written as `letter-spacing`. Make Chinese glyphs measure exactly two cells to eliminate gaps. `FontFace` `size-adjust`
   scales only this fallback font; restrict `unicode-range` to CJK, leaving English cell width unchanged.

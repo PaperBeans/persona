@@ -11,7 +11,15 @@ sealed interface ChatAction {
     /** [ultracode]: Claude Code's ultracode switch, sent on its own (docs/protocol/protocol.md "Claude Code ultracode"). */
     data class Modes(val permissionMode: String? = null, val effort: String? = null, val ultracode: Boolean? = null,
         /** Take the after-resume ultracode notice away (`ultracode_dismiss_lost`, #582). */
-        val dismissUltracodeLost: Boolean? = null) : ChatAction
+        val dismissUltracodeLost: Boolean? = null,
+        /** The model Claude Code in a terminal switches to (`/model <id>`, typed by the node), switched before the rest. */
+        val model: String? = null,
+        /**
+         * Another launcher of the session's engine: a switch the user's next message carries out (feature
+         * `launcher_switch`); the session's own launcher drops one that waits. [from] is the launcher the app saw it on.
+         */
+        val launcher: String? = null,
+        val from: String? = null) : ChatAction
     data object Close : ChatAction
     /** Join a Codex app-server thread live (POST …/attach); only for a session whose capabilities offer it. */
     data object Attach : ChatAction
@@ -64,6 +72,14 @@ interface ChatActions {
 
     /** What the node reads from the session's transcript (GET …/info). */
     suspend fun info(session: Session): SessionInfo = throw UnsupportedOperationException("Session info unavailable")
+
+    /**
+     * The session's complete row (`GET /api/v1/sessions?summary=0&machine_id=…&session_id=…`, docs/protocol/protocol.md
+     * "Bounded Agents lists"): what a list's summary row leaves out, such as `pending_switch`. Callers ask only on a hub
+     * that lists `sessions_lookup` (an older one ignores the keys and answers a page of other sessions); null when the
+     * hub has no such row.
+     */
+    suspend fun completeRow(session: Session): Session? = null
 
     /**
      * The session's cards and how each ended (GET /api/v1/interactions/history, iOS `DelegatedHistoryModel`), for Session

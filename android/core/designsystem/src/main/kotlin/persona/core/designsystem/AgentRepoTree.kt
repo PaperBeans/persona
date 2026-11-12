@@ -44,11 +44,11 @@ import persona.core.designsystem.icons.PhIcons
 // Idle Repositories. Brief and Board keep `AgentSpaceHeader` and `AgentIdleRow` (decision 8).
 
 /** A level in (iOS `Theme.Tree.indent`), the column a line's mark sits in (`Theme.Tree.column`), above and below its words. */
-private val TreeIndent = Tokens.Space.xl - Tokens.Space.xxs
-private val TreeColumn = Tokens.Space.l + Tokens.Space.xxs
-private val TreeRowPadding = Tokens.Space.sm
-private val TreeChevron = Tokens.Space.m
-private val TreeWorktreeMark = Tokens.Space.m + Tokens.Space.xxs
+private val TreeIndent = Tokens.Space.Standard.xl - Tokens.Space.Standard.xxs
+private val TreeColumn = Tokens.Space.Standard.l + Tokens.Space.Standard.xxs
+private val TreeRowPadding get() = Tokens.Space.sm
+private val TreeChevron = Tokens.Space.Standard.m
+private val TreeWorktreeMark = Tokens.Space.Standard.m + Tokens.Space.Standard.xxs
 
 /**
  * The fill of By Repository's cards (iOS's grouped card), from the page that holds them ([JAgentHomeSurface]); null where

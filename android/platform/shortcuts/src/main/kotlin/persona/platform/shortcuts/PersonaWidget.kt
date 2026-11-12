@@ -206,9 +206,9 @@ internal class WidgetLook private constructor(private val light: PersonaPalette,
     val itemTitle = text(type.callout.copy(fontWeight = ComposeWeight.Medium), ink)
     val caption = text(type.caption, ink2)
     val micro = text(type.micro, ink2)
-    val markSize = Tokens.Space.l
-    val dotSize = Tokens.Space.s + Tokens.Space.xxs
-    val smallDotSize = Tokens.Space.s
+    val markSize = Tokens.Space.Standard.l
+    val dotSize = Tokens.Space.Standard.s + Tokens.Space.Standard.xxs
+    val smallDotSize = Tokens.Space.Standard.s
 
     fun phase(phase: String): GlanceColor = when (phase) {
         FleetSummary.NEEDS_YOU -> needsYou

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Questions the assistant answered for the user, over an Agent chat's composer and in Session info (#4339 C9): iOS DelegatedCard and ReanswerSheet words. -->
+<resources>
+    <string name="chat_delegated_title">アシスタントが代理で回答</string>
+    <string name="chat_delegated_close">閉じる</string>
+    <string name="chat_delegated_was">アシスタントの元の回答：%1$s</string>
+    <string name="chat_delegated_changed">あなたが変更しました</string>
+    <string name="chat_delegated_change">回答を変更</string>
+    <string name="chat_reanswer_other">その他の回答…</string>
+    <string name="chat_reanswer_note">エージェントはアシスタントの回答で作業を進めています。新しい回答はメッセージとして送られます。</string>
+    <string name="chat_reanswer_cancel">キャンセル</string>
+    <string name="chat_reanswer_send">送信</string>
+    <string name="chat_reanswer_sent">新しい回答をエージェントに送りました</string>
+    <string name="chat_reanswer_answer_only">このデバイスはカードの選択肢でしか回答できないため、回答を変更できません</string>
+    <string name="chat_reanswer_not_delegated">この質問はアシスタントが回答したものではないため、ここでは変更できません</string>
+    <string name="chat_reanswer_empty">先に回答を選んでください</string>
+    <string name="chat_reanswer_not_sent">新しい回答をエージェントに送れませんでした：%1$s</string>
+    <string name="chat_reanswer_offline">アシスタントがオフラインです。しばらくしてからもう一度お試しください</string>
+    <string name="chat_reanswer_old_hub">このハブはまだ回答の変更に対応していません。先にハブを更新してください</string>
+    <string name="chat_reanswer_unreachable">ハブに接続できないため、操作は反映されていません</string>
+    <string name="chat_reanswer_failed">回答を変更できませんでした：%1$s</string>
+</resources>

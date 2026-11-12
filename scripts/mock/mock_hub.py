@@ -48,6 +48,7 @@ def features():
                 ["sessions_list", "sessions_lookup", "sessions_hierarchy"] if os.environ.get("MOCK_SESSIONS_LIST") == "1" else []) + (
                 ["preview"] if os.environ.get("MOCK_PREVIEW") else []) + (
                 ["task_cron"] if os.environ.get("MOCK_CRON") == "1" else []) + (
+                [] if os.environ.get("MOCK_TODO_SEEN") == "off" else ["todo_seen"]) + (
                 [] if os.environ.get("MOCK_LOOK_UPLOADS") == "off" else ["look_uploads"])
 
 
@@ -945,6 +946,31 @@ if os.environ.get("MOCK_WORKTREES") == "1":
         sess("macbook", "a1f3c2d4-0000-4000-8000-0000000000c3", "整理读书笔记", "/Users/me/code/notes",
              "idle", "idle", "notes", 4, "1", 1, 60 * 48, "按主题整理好了，每本书一页。", seen_at=ago(days=2)),
     ]
+
+# MOCK_SHARED_FOLDER=1 (#5715): one folder two repositories claim, on Mac Studio. Three Claude desktop chats (one finished
+# and unseen, two idle) have /Users/me/code/atlas as their main checkout; a finished Codex App chat in the same folder
+# names its Codex project, /Users/me/code, as its repository. By Repository lists the three under atlas's working tree
+# (the two idle ones behind their fold) and the Codex chat under code's, each tree's count matching its rows.
+if os.environ.get("MOCK_SHARED_FOLDER") == "1":
+    _atlas, _herdr = "/Users/me/code/atlas", ("space_kind", "space_id", "space_name", "space_index", "slot_id", "slot_name",
+                                              "slot_index", "pane_id", "tab_id", "workspace_id")
+
+    def _desktop(sid, title, status, state, minutes, last, agent="claude", **kw):
+        s = {k: v for k, v in sess("studio", sid, title, _atlas, status, state, "", 0, "", 0, minutes, last, agent=agent).items()
+             if k not in _herdr}
+        s.update(worktree=_atlas, branch="feat/tiles", agent_surface="desktop", **kw)
+        return s
+
+    SESSIONS += [
+        _desktop("a1f3c2d4-0000-4000-8000-00000000571%d" % i, title, *(("done", "unread") if i == 1 else ("idle", "idle")),
+                 40 + 20 * i, last, repo_root=_atlas, source_kind="claude_desktop",
+                 **({} if i == 1 else {"seen_at": ago(minutes=30 + 20 * i)}))
+        for i, (title, last) in enumerate([("地图瓦片缓存", "瓦片缓存改成按缩放级别分目录了。"),
+                                           ("离线包大小评估", "离线包压到 180 MB，列了三种取舍。"),
+                                           ("标注图层的点击区域", "点击区域放大到 44 pt，补了测试。")], 1)
+    ] + [_desktop("a1f3c2d4-0000-4000-8000-000000005719", "总结这周的地图反馈", "done", "unread", 8,
+                  "反馈分成三类：加载慢、离线包太大、标注难点，各附了例子。", agent="codex", repo_root="/Users/me/code",
+                  source_kind="codex_history", space_kind="codex_app", space_id="codex-project:/Users/me/code", space_name="code")]
 
 
 # MOCK_MACHINES=1: the machine pages' edge cases (MachinePagesTests): a fourth machine that is offline with an ssh
@@ -2892,6 +2918,7 @@ def is_read_only(h):
 
 
 # ---------- the knowledge base (Persona › Knowledge base, docs/assistant/knowledge.md) ----------
+KB_KINDS = ("projects", "chats", "people", "docs", "meetings", "events", "recordings", "topics")  # kb_search's kinds
 KB = {
     "projects": [
         {"kind": "projects", "id": "weather-app", "name": "天气 App", "one_line": "小组件时间线已按小时刷新，等中号布局的降雨条",
@@ -2924,6 +2951,7 @@ KB_UPDATES = []  # what "Tagging" saved (read back at /mock/kb_updates)
 # Recordings synced from the phone (docs/protocol/protocol.md "Recording sync", #3235): uuid → the last body PUT; deleted ids are
 # tombstones (a later PUT gets 410). GET /mock/recordings reads both back. MOCK_RECORDINGS_DOWN=1: 503 (the hub away).
 RECORDINGS = {}
+RECORDING_UPLOADED = {}  # uuid → when its last upload was stored (the hub's Recording.Updated): a meeting without ended_at ends 12 h after
 RECORDINGS_DELETED = set()
 RECORDING_PUTS = [0]  # every PUT, stored or refused
 # Trimmed recordings (#3780, docs/assistant/meeting-minutes.md "Privacy"): POST /mock/recording_trim {"id"} makes a stored one
@@ -3175,6 +3203,7 @@ def day_put(h, rid, raw):
     if have and have.get("recap_final_at"): body["recap_final_at"] = have["recap_final_at"]
     for i, seg in enumerate(body["segments"]): seg["n"] = i + 1
     RECORDINGS[rid] = body
+    RECORDING_UPLOADED[rid] = time.time()
     day_publish(rid, repair=bool(have))
     return h.send_json(day_result(rid, "stored", put=True, fallback=raw)) or True
 
@@ -3953,7 +3982,7 @@ def meeting_conversation_on():
 def conv_of(rid, make=False):
     m = MEETING_CONV.get(rid)
     if m is None and make:
-        m = MEETING_CONV[rid] = {"room": None, "private": None, "followup": None, "revs": {}, "updated": 0.0}
+        m = MEETING_CONV[rid] = {"room": None, "private": None, "followup": None, "revs": {}}
     return m
 
 
@@ -4063,7 +4092,6 @@ def meeting_put(rid, body):
     good, one without turns its role off) and its first private mark (a meeting's, only while it has none). What was
     wrong with the room's role."""
     m = conv_of(rid, True)
-    m["updated"] = time.time()
     room_before, private_before = json.dumps(m["room"], sort_keys=True), m["private"]
     problem = None
     if isinstance(body.get("room"), dict):
@@ -4345,10 +4373,11 @@ def meeting_message(body):
 
 def meeting_running(rid):
     """The meeting is not over for a follow-up (followup.meetingRunning): no ended_at and an upload in the last 12 hours
-    (a trimmed one has ended), or a room still starting, ready or unavailable."""
+    (a trimmed one has ended), or a room still starting, ready or unavailable. Any recording, a note or one that never
+    had a room too (#3862 phase 6): one with neither waits for nothing."""
     if rid in RECORDINGS_TRIMMED: return False
+    if not RECORDINGS[rid].get("ended_at") and time.time() - RECORDING_UPLOADED.get(rid, 0) < MEETING_STALE: return True
     m = MEETING_CONV.get(rid) or {}
-    if not RECORDINGS[rid].get("ended_at") and time.time() - m.get("updated", time.time()) < MEETING_STALE: return True
     return ((m.get("room") or {}).get("state") or "none") in ("starting", "ready", "unavailable")
 
 
@@ -4962,7 +4991,7 @@ def recordings_route_locked(h, method, p):
         # A fresh start for the next test on the same mock: what an earlier one stored (its minutes) is gone too.
         RECORDING_MINUTES[0] = json.loads(h.last_body or b"{}").get("mode", "pending")
         meeting_conversation_reset()
-        RECORDINGS.clear(); RECORDING_MINUTES_ASKED.clear(); MEETING_LIVE.clear(); RECORDINGS_TRIMMED.clear(); RECORDING_DAY_TODOS.clear()
+        RECORDINGS.clear(); RECORDING_UPLOADED.clear(); RECORDING_MINUTES_ASKED.clear(); MEETING_LIVE.clear(); RECORDINGS_TRIMMED.clear(); RECORDING_DAY_TODOS.clear()
         with PHOTO_LOCK: PHOTO_STORE.clear()
         KB["recordings"] = []
         for key in [k for k in KB_DETAIL if k[0] == "recordings"]: KB_DETAIL.pop(key)
@@ -5053,7 +5082,7 @@ def recordings_route_locked(h, method, p):
         return h.send_json({"error": "404 page not found"}, 404) or True
     if method == "DELETE":
         existed = rid in RECORDINGS
-        RECORDINGS.pop(rid, None); RECORDINGS_DELETED.add(rid); RECORDINGS_TRIMMED.pop(rid, None); RECORDING_DAY_TODOS.pop(rid, None)
+        RECORDINGS.pop(rid, None); RECORDING_UPLOADED.pop(rid, None); RECORDINGS_DELETED.add(rid); RECORDINGS_TRIMMED.pop(rid, None); RECORDING_DAY_TODOS.pop(rid, None)
         kb[:] = [e for e in kb if e["id"] != rid]; KB_DETAIL.pop(("recordings", rid), None)
         with MEETING_LOCK: MEETING_LIVE.pop(rid, None)  # live lines and asks go with the recording
         with PHOTO_LOCK:  # as at the trim
@@ -5089,6 +5118,7 @@ def recordings_route_locked(h, method, p):
             if (v := upload_room_view(rid, body)) is not None: out["room"] = v
         return h.send_json(out) or True
     RECORDINGS[rid] = body
+    RECORDING_UPLOADED[rid] = time.time()
     text = "\n".join("[%d:%02d] %s" % (int(x["start"]) // 60, int(x["start"]) % 60, x["text"]) for x in body.get("segments", []))
     entry = {"kind": "recordings", "id": rid, "name": body.get("title") or "录音", "relevance": 0, "tags": [],
              "one_line": (body.get("segments") or [{"text": ""}])[0]["text"], "updated": body["started_at"]}
@@ -6260,6 +6290,55 @@ if MOCK_TASKS:
             it("user", "text", 5.8, text=_digest, injected={"kind": "system", "state": "supervise", "line": "督办：2 个派出去的任务要处理"}),
             it("assistant", "text", 5.7, text="网络层测试我核对过了：PR 已合并，覆盖率 83%，验收通过。小组件那个我让它接着修。"),
         ]
+        ITEMS[ASK1].sort(key=lambda x: x["ts"])
+        _base = min(x["seq"] for x in ITEMS[ASK1])
+        for _i, _x in enumerate(ITEMS[ASK1]):
+            _x["seq"] = _base + _i
+    # MOCK_PLACE_MAP=1 (with MOCK_TASKS=1): "where am I" and "coffee near me" answered with the phone's location tools,
+    # drawn as map cards under their work lines (#5543), then the walk to the second café as a route (#5544) and handed
+    # to Maps (#5545); the places and the route are made up.
+    if os.environ.get("MOCK_PLACE_MAP") == "1":
+        _cafes = [("街角咖啡", 31.2318, 121.4752, 180), ("安静书房咖啡", 31.2291, 121.4769, 340),
+                  ("老弄堂咖啡馆", 31.2335, 121.4711, 420), ("河边烘焙咖啡", 31.2276, 121.4702, 610)]
+        ITEMS[ASK1] += (
+            [it("user", "text", 1.6, text="我现在在哪")]
+            + tool("mcp__persona__phone_location_current", {},
+                   json.dumps({"latitude": 31.2304, "longitude": 121.4737, "accuracy_meters": 12, "altitude_meters": 4,
+                               "timestamp": ago(minutes=1.6), "timezone": "Asia/Shanghai",
+                               "address": {"city": "上海市", "district": "黄浦区", "formatted": "上海市黄浦区人民大道"}},
+                              ensure_ascii=False), 1.55)
+            + [it("assistant", "text", 1.5, text="你在上海市黄浦区人民大道附近。")]
+            + [it("user", "text", 1.2, text="附近有安静点的咖啡馆吗")]
+            + tool("mcp__persona__phone_maps_search_nearby", {"query": "安静 咖啡馆"},
+                   json.dumps({"query": "安静 咖啡馆", "center": {"latitude": 31.2304, "longitude": 121.4737, "from": "current_location"},
+                               "radius_meters": 1500, "count": len(_cafes),
+                               "places": [{"name": n, "address": "上海市黄浦区", "latitude": la, "longitude": lo,
+                                           "distance_meters": d, "category": "MKPOICategoryCafe"} for n, la, lo, d in _cafes],
+                               "source": "Apple Maps (MapKit local search)",
+                               "note": "Opening hours are not available from Apple Maps to apps."}, ensure_ascii=False), 1.15)
+            + [it("assistant", "text", 1.1, text="找到 4 家：最近的是 1 号街角咖啡，180 米；想安静些可以去 2 号安静书房咖啡，340 米。营业时间苹果地图不提供，去之前最好确认一下。")]
+            # How long a walk to the second café takes, worked out without opening anything (#5544): a route card.
+            + [it("user", "text", 0.95, text="走到 2 号要多久")]
+            + tool("mcp__persona__phone_maps_route",
+                   {"latitude": 31.2291, "longitude": 121.4769, "name": "安静书房咖啡", "mode": "walking"},
+                   json.dumps({"destination": "安静书房咖啡", "latitude": 31.2291, "longitude": 121.4769, "mode": "walking",
+                               "distance_meters": 420, "expected_seconds": 330,
+                               "line": [[31.2304, 121.4737], [31.2299, 121.4741], [31.2297, 121.4755],
+                                        [31.2293, 121.4762], [31.2291, 121.4769]],
+                               "from": "current_location", "source": "Apple Maps (MapKit directions)",
+                               "note": "Nothing was opened: Persona draws the route in the chat. Hand it to Maps with "
+                                       "phone_maps_navigate when the user wants to go."}, ensure_ascii=False), 0.9)
+            + [it("assistant", "text", 0.85, text="走过去 420 米，大约 6 分钟，路线在上面。要出发的话我帮你在地图里打开。")]
+            # Directions to the second café handed to Maps (#5545): the hand-off's card is the conversation's last.
+            + [it("user", "text", 0.8, text="好，走过去")]
+            + tool("mcp__persona__phone_maps_navigate",
+                   {"latitude": 31.2291, "longitude": 121.4769, "name": "安静书房咖啡", "mode": "walking"},
+                   json.dumps({"opened": "maps", "destination": "安静书房咖啡", "latitude": 31.2291, "longitude": 121.4769,
+                               "mode": "walking",
+                               "note": "Directions are open in the Maps app; navigation runs there, not in Persona."},
+                              ensure_ascii=False), 0.75)
+            + [it("assistant", "text", 0.7, text="去安静书房咖啡的步行路线已经在地图 App 里打开了，导航在地图里进行。")]
+        )
         ITEMS[ASK1].sort(key=lambda x: x["ts"])
         _base = min(x["seq"] for x in ITEMS[ASK1])
         for _i, _x in enumerate(ITEMS[ASK1]):
@@ -13529,9 +13608,10 @@ if os.environ.get("MOCK_LONG_HISTORY") == "1":
 # MOCK_LONG_REPORT=1: an agent chat that ends in one very long final report, the shape of a real planning session that
 # scrolled badly (#4970): about 33,000 characters in one reply (headings, lists, nine tables of 115 rows, a dozen code
 # blocks, a quote), after 120 tool calls folded into work lines, eight subagent cards and the same report handed in as a
-# plan. `-openSession macbook/a1f3c2d4-0000-4000-8000-000000000090`. MOCK_LONG_REPORT=<items.json> serves that file's
-# items instead (a transcript's items as the hub parses them, kept outside the repository), cutting long tool outputs as
-# the hub's pages do.
+# plan. `-openSession macbook/a1f3c2d4-0000-4000-8000-000000000090`. MOCK_LONG_REPORT=cjk: the same chat with a report as
+# varied in its Chinese characters as a real one (#5076: what the glyph cache has to hold). MOCK_LONG_REPORT=<items.json>
+# serves that file's items instead (a transcript's items as the hub parses them, kept outside the repository), cutting
+# long tool outputs as the hub's pages do.
 LONG_REPORT = "a1f3c2d4-0000-4000-8000-000000000090"
 
 
@@ -13565,14 +13645,59 @@ def long_report_text():
     return "\n".join(out)
 
 
+def long_report_text_varied():
+    """The report's shape with a real report's glyph variety (#5076): about 10,900 Chinese characters, some 800 of them
+    distinct, the most common fifty 38% of the text (`MOCK_LONG_REPORT=1` repeats one sentence: about 100 distinct).
+    The characters are drawn from the CJK block by a fixed seed, so every run serves the same text."""
+    import random
+    rnd = random.Random(5076)
+    pool = [chr(0x4E00 + (k * 37) % 20902) for k in range(800)]
+    weights = [1 / (k + 15) for k in range(len(pool))]  # Zipf-like: a few characters often, most of them rarely
+
+    def words(n):
+        cs = rnd.choices(pool, weights, k=n)
+        for k in range(rnd.randint(8, 14), n, rnd.randint(9, 16)):  # punctuation as prose has it
+            cs[k] = rnd.choice("，，，。；、")
+        if rnd.random() < 0.4:  # an English word or two, as the real one mixes them
+            cs.insert(rnd.randrange(n), " %s " % rnd.choice(("adapter", "rollout", "client", "cache", "schema", "v2")))
+        return "".join(cs) + "。"
+
+    tables = [(7, 3), (20, 3), (10, 2), (9, 3), (8, 3), (35, 3), (8, 5), (7, 3), (11, 3)]
+    codes = [31, 6, 3, 7, 8, 18, 3, 1, 1, 20, 6, 56]
+    out = ["# " + words(10), "", "> " + words(30), ""]
+    for n in range(12):
+        out += ["## %d. %s" % (n + 1, words(6)), ""]
+        for k in range(3):
+            out += [words(110), ""]
+            out += ["### %d.%d %s" % (n + 1, k + 1, words(7)), ""]
+            out += ["- **%s**：%s" % (words(4), words(30 + j * 6)) for j in range(3)] + [""]
+            if k == 1:
+                out += ["#### " + words(4), "", "1. " + words(12), "2. " + words(14), "3. " + words(10), ""]
+        if n < len(tables):
+            rows, cols = tables[n]
+            out.append("| " + " | ".join(words(3) for _ in range(cols)) + " |")
+            out.append("|" + "---|" * cols)
+            out += ["| " + " | ".join(("`field_%d_%d`" % (r, c)) if c == 0 else words(8 + 8 * (c % 2)) for c in range(cols)) + " |"
+                    for r in range(rows - 2)]
+            out.append("")
+        if n < len(codes):
+            out.append("```text")
+            out += ["%-3d %s" % (j + 1, "step_%02d -> check_%02d -> commit  # keep the old reader until every client moved" % (j, j))[:64 + j % 10]
+                    for j in range(codes[n])]
+            out += ["```", ""]
+    return "\n".join(out)
+
+
 if os.environ.get("MOCK_LONG_REPORT"):
     _src = os.environ["MOCK_LONG_REPORT"]
     SESSIONS.append(sess("macbook", LONG_REPORT, "数据层迁移方案", "/Users/me/code/weather", "done", "idle", "weather", 1, "plan", 6, 3,
                          "方案写好了，共十二部分。"))
-    if _src == "1":
-        _report = long_report_text()
+    if _src in ("1", "cjk"):
+        _report = long_report_text_varied() if _src == "cjk" else long_report_text()
         _r = [it("user", "text", 180, text="把天气 App 的数据层迁移方案整理出来，先读完现有代码再写。")]
         _r += [it("assistant", "text", 179, text="好，我先分头读代码。")]
+        if _src == "cjk":  # a plain call before the subagents: the oldest step a call's notice can lead back to (-showJumpPerf)
+            _r += tool("Bash", {"command": "ls Sources/Data"}, "".join("Model%02d.swift\n" % k for k in range(15)), 179)
         for _a in range(8):
             _r += tool("Agent", {"description": "读第 %d 组模块" % (_a + 1), "prompt": "读 Sources/Data 下第 %d 组文件，列出公开接口。" % (_a + 1)},
                        "第 %d 组共 12 个文件，公开接口如下：\n" % (_a + 1) + "".join("- func load%d()\n" % k for k in range(40)), 178 - _a)
@@ -21036,9 +21161,14 @@ class H(BaseHTTPRequestHandler):
             return self.send_json(out)
         if p == "/api/v1/kb-search":
             word = (q.get("q") or [""])[0].lower()
+            # kind: one kind only, as kb_search (#3862 phase 6: recordings for meetings); another is the hub's 400.
+            only = (q.get("kind") or [""])[0]
+            if only and only not in KB_KINDS:
+                return self.send_json({"error": "Unknown kind: search one of " + ", ".join(KB_KINDS) + "."}, 400)
             if (q.get("results") or [""])[0] == "1":
                 res = []
                 for k, l in KB.items():
+                    if only and k != only: continue
                     for e in l:
                         found = [{"path": "%s/%s/messages/%s.md" % (k, e["id"], d), "n": n, "line": t}
                                  for d, n, t in reversed(kb_messages(e["id"])) if kb_match(t, word)] if k == "chats" else \
@@ -21048,9 +21178,10 @@ class H(BaseHTTPRequestHandler):
                             res.append({"entry": e, "count": len(found), "hits": found[:3], "in_name": kb_match(e["name"], word)})
                 return self.send_json({"results": res})
             hits = [{"path": "%s/%s/summary.md" % (k, e["id"]), "line": "- " + e["name"] + "：" + (e.get("one_line") or "")}
-                    for k, l in KB.items() for e in l if word and (word in e["name"].lower() or word in (e.get("one_line") or "").lower())]
+                    for k, l in KB.items() if not only or k == only
+                    for e in l if word and (word in e["name"].lower() or word in (e.get("one_line") or "").lower())]
             hits += [{"path": x["path"], "line": x["line"]} for e in KB.get("recordings", [])
-                     for x in photo_matches(e["id"], word) + day_recap_matches(e["id"], word)] if word else []
+                     for x in photo_matches(e["id"], word) + day_recap_matches(e["id"], word)] if word and only in ("", "recordings") else []
             return self.send_json({"hits": hits})
         if p.startswith("/api/v1/machines/") and p.endswith("/file/thumb"): return self.file_thumb(p, q)
         files = mock_files(p, q)
@@ -21448,6 +21579,19 @@ class H(BaseHTTPRequestHandler):
                         push_machine(mid)
                         push_todos()
                         return self.send_json({"ok": True})
+        # PUT / DELETE /api/v1/todos/{id}/seen (#5707, server/internal/assistant/todo_seen.go): Got it and its Undo. Not
+        # activity: updated_at stays. MOCK_TODO_SEEN=off is a hub without it (no feature, 404 here).
+        if p.startswith("/api/v1/todos/") and p.endswith("/seen") and p.count("/") == 5 and self.command in ("PUT", "DELETE") \
+                and os.environ.get("MOCK_TODO_SEEN") != "off":
+            if is_read_only(self): return self.send_json({"error": "只读角色不能修改待办"}, 403)
+            t = next((x for x in TODOS if x["id"] == p.split("/")[4]), None)
+            if not t: return self.send_json({"error": "待办不存在"}, 404)
+            if self.command == "PUT":
+                t["seen_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            else:
+                t.pop("seen_at", None)
+            push_todos()
+            return self.send_json({"todo": format_todo(t)})
         if p.startswith("/api/v1/todos/") and "/agents/" in p:
             if is_read_only(self): return self.send_json({"error": "只读角色不能修改待办"}, 403)
             parts = p.split("/")  # ['', 'api', 'v1', 'todos', id, 'agents', mid, sid]
@@ -23281,7 +23425,7 @@ MOCK_HELP.append("MOCK_EXTENSION_PICKERS=1  （配合 MOCK_EXTENSIONS=1）多一
 MOCK_HELP.append("MOCK_EXTENSION_OPS=1|fail  （配合 MOCK_EXTENSIONS）扩展的安装 / 升级 / 卸载分步骤推进度（extension_operation 事件）：后台预览、停在等你同意、同意后同一个操作接着装；fail：每个扩展第一次安装停在「启动」、第一次卸载停在「删除」，都能重试；MOCK_EXTENSION_OPS_STEP=秒 每步的时长；MOCK_EXTENSION_INSTALL_DELAY=秒 没有分步骤的旧 hub 安装 / 卸载要这么久才回（#3307）")
 MOCK_HELP.append("MOCK_MANAGER_NAS=1  （默认的三个管理者）NAS 归离线的「家里」：像 hub 一样显示成离线，error 是 hub 的「助手暂时连不上，稍后再试」；它的一个 agent（备份脚本）状态 unknown")
 MOCK_HELP.append("MOCK_ASSISTANT_BASH=1  主对话自己的第一条 Bash 在等批准（#4883），是它唯一的卡片：对话里输入区上方显示「在等你批准」，不只在收起的「需要你」里")
-MOCK_HELP.append("MOCK_LONG_REPORT=1|<items.json>  An Agent chat (macbook/a1f3c2d4-0000-4000-8000-000000000090) ending in one ~33,000-character report with nine tables and a dozen code blocks after 120 folded tool calls (#4970); a path serves that file's transcript items instead")
+MOCK_HELP.append("MOCK_LONG_REPORT=1|cjk|<items.json>  An Agent chat (macbook/a1f3c2d4-0000-4000-8000-000000000090) ending in one ~33,000-character report with nine tables and a dozen code blocks after 120 folded tool calls (#4970); cjk: the report as varied in Chinese characters as a real one, ~800 distinct (#5076); a path serves that file's transcript items instead")
 MOCK_HELP.append("MOCK_ASK_LONG=1|actions|swipe|review|perm|agent  卡片比输入区上方的盒子还高（#3112）：1 主对话的 ask_user 提问卡（八个带说明的选项）；actions 单道八个带说明选项的多选题，swipe 短单选拖动不误发，review 六道单选题的长复核页，Submit 首屏可达（#4839）；perm 主对话的飞书授权卡（超长命令）；agent MacBook 上补测试的 Agent 对话里两张这样的授权卡、没有别的卡（手机和侧边面板把第二张折在「还有 1 件」后面）")
 MOCK_HELP.append("MOCK_MANAGER_NEEDS_YOU=0  名册不带 inbox_needs_you（旧 hub，或还不上报这个数的旧管理者）；默认每个在线的管理者带它收件箱里「需要你处理」的未完成条目数，数变了推 managers")
 MOCK_HELP.append("MOCK_MANAGER_OUTDATED=1  设置 › 管理者：「工作」带 needs_update（它还不读自己的 manager.json，hub 在它在线时这样标）")

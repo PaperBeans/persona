@@ -10,6 +10,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import persona.core.contracts.*
 import persona.core.designsystem.*
+import persona.core.designsystem.dense
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.sort.*
@@ -74,7 +75,7 @@ internal fun SpaceScreen(
                             ?: stringResource(R.string.agents_space_tab, row.session.slotIndex ?: 0), requestCount = requests, onClose = onClose(row), card = card)
                 }
                 if (canStart) item("new-tab") {
-                    JButton(stringResource(R.string.agents_space_new_tab), { onNewTab(space) }, Modifier.fillMaxWidth().padding(top = 16.dp), enabled = !busy, icon = PhIcons.Plus)
+                    JButton(stringResource(R.string.agents_space_new_tab), { onNewTab(space) }, Modifier.fillMaxWidth().padding(top = 16.dp.dense), enabled = !busy, icon = PhIcons.Plus)
                 }
             }
         }
@@ -123,11 +124,8 @@ private fun SpaceCard(
 ) {
     var menu by remember { mutableStateOf(false) }
     val session = row.session
-    val state = when {
-        row.waitsInBackground -> CoreText.of(CoreText.Key.StateBackgroundWaiting).text()
-        row.asksYou && !muted -> CoreText.of(CoreText.Key.StateAwaitingReply).text()
-        else -> row.state.label
-    }
+    // iOS `stateLabel(muted:)`: Awaiting reply, Waiting in the background and Working (Background) included.
+    val state = row.stateWord(muted).text()
     AgentSlotCard(session.displayTitle, row.state.designStatus, state, onOpen, Modifier.fillMaxHeight(),
         stateTone = row.rowStatus(muted), tab = session.slotLabel, pane = tab?.paneName(row), agent = session.agentLabel,
         starter = tab?.launcher?.id == row.id, pending = requests, preview = session.rowLine(card, now, muted)?.text(),

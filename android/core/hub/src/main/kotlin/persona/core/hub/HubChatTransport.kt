@@ -159,6 +159,13 @@ class HubChatTransport internal constructor(
         }
     }
 
+    override suspend fun reanswer(id: String, answers: Map<String, String>, manager: String?) {
+        val url = path("interactions", id, "reanswer").apply { manager?.takeIf(String::isNotEmpty)?.let { addQueryParameter("manager", it) } }.build()
+        val body = JsonObject(mapOf("answers" to JsonObject(answers.mapValues { JsonPrimitive(it.value) }))).toString()
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+        request(url.encodedPath + (url.encodedQuery?.let { "?$it" } ?: ""), "POST", body).use { if (!it.isSuccessful) throw HubFailure.from(it) }
+    }
+
     override suspend fun image(session: SessionKey, itemId: String): ByteArray =
         request(api("sessions", session.machineId, session.sessionId, "items", itemId, "image"), "GET", null)
             .use { it.body!!.bytes() }

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import type { AgentState } from "../lib/types";
 import type { IconName } from "./icons";
 
-/** Sidebar header menus: the earlier product menu and the multi-assistant roster, in pixels. */
+/** Sidebar header menus: the earlier product menu and the assistant roster, in pixels. */
 export const ASSISTANT_MENU_WIDTH = { product: 220, roster: 264 } as const;
 
 export interface MenuRename {

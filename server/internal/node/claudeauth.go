@@ -67,10 +67,9 @@ func (n *Node) claudeAuthStatus(ctx context.Context, name string) (proto.ClaudeA
 	}
 	// --settings goes before the subcommand: a launcher appends its own arguments after "$@" no more than before it,
 	// and `claude auth status` itself takes no --settings.
-	args := ` --settings ` + shellQuote(n.claudeSettings(ctx, name, ours, dir)) + ` auth status --json`
 	cctx, cancel := context.WithTimeout(ctx, claudeAuthTimeout)
 	defer cancel()
-	cmd := loginShell(cctx, "cd "+shellQuote(dir)+" && "+n.launcherCommand(name)+args+" </dev/null")
+	cmd := loginShell(cctx, n.launcherInDirScript(name, dir, scriptSettingsFlag(n.claudeSettings(ctx, name, ours, dir))+` auth status --json`))
 	killGroupOnCancel(cmd)
 	out, _ := cmd.CombinedOutput() // not signed in exits 1, with the same JSON
 	if cctx.Err() != nil {

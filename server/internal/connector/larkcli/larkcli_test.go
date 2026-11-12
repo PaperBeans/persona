@@ -449,7 +449,7 @@ func TestInboxDirectChatsSweepFindsWhatSearchMissed(t *testing.T) {
 	}
 	log := string(b)
 	if !strings.Contains(log, "+chat-list --types p2p --sort active_time") ||
-		!strings.Contains(log, "+chat-messages-list --chat-id oc_lag_dm --start 2029-12-31T23:00:00Z") {
+		!strings.Contains(log, "+chat-messages-list --chat-id oc_lag_dm --start 2029-12-31T22:00:00Z") {
 		t.Fatalf("direct chats were not read from history since the lookback: %q", log)
 	}
 	if strings.Contains(log, "--chat-id oc_lag_group --start") {

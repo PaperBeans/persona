@@ -41,6 +41,7 @@ class GroupRoutingTest {
         // Two hubs can use the same interaction id: other groups' ids carry the suffix, and answering strips it.
         assertEquals("i1~g0a1b2c3d", interaction.id)
         assertEquals("i1~g0a1b2c3d", (other.event(InteractionResolvedEvent("i1")) as InteractionResolvedEvent).id)
+        assertEquals("i1~g0a1b2c3d", (other.event(InteractionReansweredEvent("i1")) as InteractionReansweredEvent).id)
         assertEquals("i1~g0a1b2c3d", (other.event(NotifyEvent("interaction", "m", "s", interactionId = "i1")) as NotifyEvent).interactionId)
         // So are alert ids (#5614): the same id from two hubs replaces nothing on the other's.
         assertEquals("p1~g0a1b2c3d", (other.event(NotifyEvent("alert", "", "", id = "p1")) as NotifyEvent).id)

@@ -118,3 +118,14 @@ func TestExtensionOperationAndPreviewProjection(t *testing.T) {
 		}
 	}
 }
+
+// Why a source extension can't be checked or started on this hub is the hub's own text, shown in the client's
+// language instead of the generic failure (#5639).
+func TestSourceRuntimeReasonsAreShown(t *testing.T) {
+	for _, key := range []string{"extension-source.runtime_required", "extension-source.validator_unavailable"} {
+		text, raw := ExtensionFailureText(En, T(ZhHans, key), "extension-status.failed")
+		if text != T(En, key) || raw != "" {
+			t.Errorf("%s: %q / %q", key, text, raw)
+		}
+	}
+}

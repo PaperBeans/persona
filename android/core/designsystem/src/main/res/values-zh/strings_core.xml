@@ -93,9 +93,12 @@
     <string name="designsystem_core_state_awaiting_reply">待你回复</string>
     <string name="designsystem_core_state_working">工作中</string>
     <string name="designsystem_core_state_background_waiting">后台等待中</string>
+    <string name="designsystem_core_state_working_background">工作中（后台）</string>
     <string name="designsystem_core_state_waiting">待唤醒</string>
     <string name="designsystem_core_state_muted">已屏蔽</string>
     <string name="designsystem_core_state_idle">已看</string>
+    <string name="designsystem_core_state_not_running">未运行</string>
+    <string name="designsystem_core_state_unknown">未知</string>
     <string name="designsystem_core_agents_no_todo">没有待办</string>
     <string name="designsystem_core_agents_manual">手动开的</string>
     <string name="designsystem_core_agents_quiet_spaces">空闲的空间</string>

@@ -35,7 +35,7 @@ internal fun MailTranslationBar(target: String, translating: Boolean, translated
     val language = TranslationPrefs.languageName(target)
     when {
         translating -> Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-            JSpinner(Modifier.size(Tokens.Space.m))
+            JSpinner(Modifier.size(Tokens.Space.Standard.m))
             Spacer(Modifier.width(Tokens.Space.s))
             Text(stringResource(R.string.inbox_translating, language), style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1)
         }

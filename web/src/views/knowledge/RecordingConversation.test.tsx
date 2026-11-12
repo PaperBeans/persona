@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 // The meeting conversation on a recording's detail (#3862): only on a hub that lists meeting_conversation, the private
 // switch, a room meeting's one thread (read-only while it runs), the meeting_live event's newer parts, and the follow-up's
-// first message.
+// first message, which any recording with text or minutes offers once it has ended (phase 6).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initI18n } from "../../i18n";
 import { setToken } from "../../lib/api";
-import type { KBDetailResponse, RecordingAsk, RecordingLive } from "../../lib/kb";
+import type { KBDetailResponse, KBSegment, RecordingAsk, RecordingLive, RecordingMinutes } from "../../lib/kb";
 import { setRosterDefault } from "../../lib/manager-choice";
 import { getState } from "../../lib/store";
 import type { Item } from "../../lib/types";
@@ -41,11 +41,12 @@ const recent = () => new Date(Date.now() - 60_000).toISOString();
 const ready = { state: "ready", machine_id: "server", session_id: room };
 const ended = { state: "ended", machine_id: "server", session_id: room };
 
-const fixture = (meta: Record<string, unknown> = {}): KBDetailResponse => ({ detail: {
+const fixture = ({ segments = [{ start: 0, end: 4, text: "Let's keep the cap for this release." }], minutes, ...meta }: Record<string, unknown> = {}): KBDetailResponse => ({ detail: {
   kind: "recordings", id, path: `recordings/${id}`,
   meta: { title: "Design review", started_at: new Date(2026, 10, 10, 14).toISOString(), complete: false, kind: "meeting", revision: 2,
     minutes_state: "pending", attendance: "participant", updated: recent(), room: ready, ...meta },
-  segments: [{ start: 0, end: 4, text: "Let's keep the cap for this release." }],
+  segments: segments as KBSegment[] | undefined,
+  ...(minutes ? { minutes: minutes as RecordingMinutes } : {}),
 } });
 const ask = (over: Partial<RecordingAsk> = {}): RecordingAsk => ({
   id: askID, question: "What did we decide about the export cap last time?", question_source: "typed", at: 75, state: "answered",
@@ -253,10 +254,17 @@ describe("a recorded meeting's conversation", () => {
     await reply(pending(path)[1], { error: "read only", code: "kb_read_only" }, 403);
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     expect(box.querySelector("[role=alert]")!.textContent).toContain("Couldn’t change it");
-    // Not a meeting: no mark to set, nothing read.
+    // Not a meeting: no mark to set; its follow-up is read, and nothing to talk about while it still records.
     fresh();
     await load(fixture({ room: undefined, attendance: undefined, kind: "note" }));
     expect(privacy()).toBeNull();
+    expect(pending(livePath).map((r) => r.url)).toEqual([livePath]);
+    await reply(pending(livePath)[0], { attendance: "off", next: 0, fed: 0, asks: [], revs: { asks: 0 } });
+    expect(section()).toBeNull();
+    // Nothing of it to talk about: nothing read.
+    fresh();
+    await load(fixture({ room: undefined, attendance: undefined, kind: "note", complete: true, ended_at: recent(), segments: [] }));
+    expect(section()).toBeNull();
     expect(pending(livePath)).toHaveLength(0);
   });
 
@@ -303,6 +311,90 @@ describe("a recorded meeting's conversation", () => {
     expect(s.querySelector("li[data-thread]:last-child strong")?.textContent).toBe("draft");
     expect([...s.querySelectorAll("a")].find((a) => a.textContent === "Continue in the conversation")!.getAttribute("href")).toBe(`/persona/${follow}`);
     expect(s.querySelector("textarea")).toBeNull();
+  });
+
+  it("offers Talk about this meeting on any recording once it has ended, and a follow-up made elsewhere joins the thread", async () => {
+    const note = { room: undefined, attendance: undefined, kind: "note", complete: true, ended_at: recent() };
+    await load(fixture(note));
+    await reply(pending(livePath)[0], { attendance: "off", next: 0, fed: 0, asks: [], revs: { asks: 0 } });
+    expect(privacy()).toBeNull();
+    const s = section()!;
+    expect(s.querySelector("h2")!.textContent).toBe("Conversation");
+    expect(s.querySelector("[role=status]")).toBeNull();
+    expect(s.querySelector("[role=separator]")).toBeNull();
+    expect(s.querySelector("label")!.textContent).toBe("Talk about this meeting");
+    expect(requests.some((r) => r.url.includes("/sessions/"))).toBe(false);
+    // The follow-up made on the phone meanwhile: the event names it, and the thread shows it instead of the composer.
+    const followup = { machine_id: "server", session_id: follow };
+    fire({ type: "meeting_live", recording_id: id, changed: ["followup"], revs: { followup: 1 } });
+    await reply(pending(`${livePath}?parts=followup`)[0], { followup, revs: { followup: 1 } });
+    await reply(pending(itemsPath(follow))[0], { items: followItems() });
+    expect(kinds()).toEqual(["material", "question", "answer"]);
+    expect(section()!.textContent).toContain("After the meeting");
+    expect(section()!.querySelector("textarea")).toBeNull();
+    expect([...section()!.querySelectorAll("a")].find((a) => a.textContent === "Continue in the conversation")!.getAttribute("href")).toBe(`/persona/${follow}`);
+
+    // Its first words start the follow-up through POST …/followup and open it.
+    fresh();
+    await load(fixture({ ...note, segments: [], chars: 0, minutes: { version: 1, revision: 1, generated_at: recent(), title: "Design review", when: "", markdown: "# Design review" } }));
+    await reply(pending(livePath)[0], { attendance: "off", next: 0, fed: 0, asks: [], revs: { asks: 0 } });
+    typeInto(section()!.querySelector("textarea")!, "What did we decide?");
+    await submit();
+    const path = `/api/v1/recordings/${id}/followup`;
+    const body = JSON.parse(String(pending(path)[0].init.body));
+    expect(body).toEqual({ id: expect.stringMatching(/^[0-9a-f-]{36}$/), text: "What did we decide?" });
+    await reply(pending(path)[0], { followup, created: true, client_msg_id: `followup-${body.id}` });
+    expect(location.pathname).toBe(`/persona/${follow}`);
+  });
+
+  it("offers the talk only once …/live has answered for the recording, and none where it is gone", async () => {
+    const note = { room: undefined, attendance: undefined, kind: "note", complete: true, ended_at: recent() };
+    await load(fixture(note));
+    // Not before that read: hello's meeting_conversation is the default manager's, and a recording of another, older
+    // manager's knowledge base has no …/followup.
+    expect(pending(livePath)).toHaveLength(1);
+    expect(section()).toBeNull();
+    await reply(pending(livePath)[0], { error: "404 page not found" }, 404);
+    expect(section()).toBeNull();
+    expect(requests.some((r) => r.url.endsWith("/followup"))).toBe(false);
+    fresh();
+    await load(fixture(note));
+    expect(section()).toBeNull();
+    await reply(pending(livePath)[0], { attendance: "off", next: 0, fed: 0, asks: [], revs: { asks: 0 } });
+    expect(section()!.querySelector("textarea")).not.toBeNull();
+  });
+
+  it("offers no talk about an all-day recording, whose page is its day recap, and shows a follow-up made for one", async () => {
+    const day = { room: undefined, attendance: undefined, minutes_state: undefined, kind: "day", day: "2026-11-10", part: 1, complete: true,
+      ended_at: recent() };
+    await load(fixture(day));
+    expect(pending(livePath)).toHaveLength(0);
+    expect(section()).toBeNull();
+    // One made before, or by another app: its thread, as any recording's.
+    fresh();
+    const followup = { machine_id: "server", session_id: follow };
+    await load(fixture({ ...day, followup }));
+    await reply(pending(livePath)[0], { attendance: "off", next: 0, fed: 0, asks: [], followup, revs: { asks: 0, followup: 1 } });
+    await reply(pending(itemsPath(follow))[0], { items: followItems() });
+    expect(kinds()).toEqual(["material", "question", "answer"]);
+    expect(section()!.querySelector("textarea")).toBeNull();
+  });
+
+  it("talks about a #2981 meeting too, its questions staying under Questions in the meeting", async () => {
+    const followup = { machine_id: "server", session_id: follow };
+    await load(fixture({ room: undefined, attending_session: { machine_id: "server", session_id: "conv-2" }, complete: true, ended_at: recent() }));
+    for (const r of pending(livePath)) await reply(r, live({ room: undefined }));
+    expect(section()!.querySelector("textarea")).not.toBeNull();
+    expect(section()!.querySelectorAll("li[data-ask]")).toHaveLength(0);
+    expect(host.querySelectorAll("[data-recording-asks] li[data-ask]")).toHaveLength(1);
+    // With its follow-up: the thread, and the questions still once, where they were.
+    fresh();
+    await load(fixture({ room: undefined, attending_session: { machine_id: "server", session_id: "conv-2" }, complete: true, ended_at: recent(), followup }));
+    for (const r of pending(livePath)) await reply(r, live({ room: undefined, followup, revs: { asks: 1, followup: 1 } }));
+    await reply(pending(itemsPath(follow))[0], { items: followItems() });
+    expect(kinds()).toEqual(["material", "question", "answer"]);
+    expect(section()!.querySelectorAll("li[data-ask]")).toHaveLength(0);
+    expect(host.querySelectorAll("[data-recording-asks] li[data-ask]")).toHaveLength(1);
   });
 
   it("shows the asks of a room that never came up, and starts at the follow-up once the room is deleted", async () => {

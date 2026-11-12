@@ -64,7 +64,9 @@ fun queueListCap(rowsHeight: Int, count: Int): Int? =
  * ([initiallyExpanded] opens it from the start: catalog, screenshots); opened, each message sits in a well and about
  * [QUEUE_VISIBLE_ROWS] show before it scrolls. Its line carries [sendNow], a text button folded or open, for
  * [onSendNow] (iOS Send Now). Brief (a paper card) and the board (a bordered ticket) stay always open, without Send now
- * (the alignment plan's ground rules: no new alignment work outside Glass).
+ * (the alignment plan's ground rules: no new alignment work outside Glass). In every style a row with a note in [notes]
+ * (by index) says it in the caption size under its words (iOS's "Arrives when this chat is free" under a message
+ * relayed from another conversation); without notes Brief and Board draw as before.
  */
 @Composable
 fun QueueStrip(
@@ -76,18 +78,19 @@ fun QueueStrip(
     enabled: Boolean = true,
     sendNow: String? = null,
     onSendNow: () -> Unit = {},
+    notes: List<String?> = emptyList(),
     initiallyExpanded: Boolean = false,
 ) {
     if (items.isEmpty()) return
-    if (PersonaTheme.style == AppStyle.Glass) GlassQueueStrip(title, items, onItem, modifier, busy, enabled, sendNow, onSendNow, initiallyExpanded)
-    else PlainQueueStrip(title, items, onItem, modifier, busy, enabled)
+    if (PersonaTheme.style == AppStyle.Glass) GlassQueueStrip(title, items, onItem, modifier, busy, enabled, sendNow, onSendNow, notes, initiallyExpanded)
+    else PlainQueueStrip(title, items, onItem, modifier, busy, enabled, notes)
 }
 
 /** iOS's strip: the title line in the label size, then the rows as wells, about three of them before it scrolls. */
 @Composable
 private fun GlassQueueStrip(
     title: String, items: List<String>, onItem: (Int) -> Unit, modifier: Modifier, busy: Boolean, enabled: Boolean,
-    sendNow: String?, onSendNow: () -> Unit, initiallyExpanded: Boolean,
+    sendNow: String?, onSendNow: () -> Unit, notes: List<String?>, initiallyExpanded: Boolean,
 ) {
     var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
     val spoken = stringResource(R.string.designsystem_with_state, title,
@@ -97,7 +100,7 @@ private fun GlassQueueStrip(
     val active = enabled && !busy
     val line = type.micro.copy(fontWeight = FontWeight.SemiBold)
     Column(
-        modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = Tokens.Space.xs)
+        modifier.fillMaxWidth().padding(horizontal = 10.dp.dense, vertical = Tokens.Space.xs)
             .floatingSurface(RoundedCornerShape(Tokens.Radius.panel)).animateContentSize(PersonaTheme.motion.size()),
     ) {
         Row(
@@ -108,7 +111,7 @@ private fun GlassQueueStrip(
         ) {
             JIcon(PhIcons.Tray, null, size = Tokens.Space.l, tint = palette.ink2)
             Text(title, style = line, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            if (busy) JSpinner(Modifier.size(Tokens.Space.m), stroke = Tokens.Space.xxs)
+            if (busy) JSpinner(Modifier.size(Tokens.Space.Standard.m), stroke = Tokens.Space.Standard.xxs)
             else sendNow?.let { SendNowButton(it, line, onSendNow) }
             JIcon(if (expanded) PersonaIcons.expand else PhIcons.CaretRight, null, size = Tokens.Space.m, tint = palette.ink3)
         }
@@ -125,7 +128,9 @@ private fun GlassQueueStrip(
                 ) {
                     val itemActions = stringResource(R.string.designsystem_queue_actions)
                     items.forEachIndexed { index, text ->
-                        val spoken = stringResource(R.string.designsystem_queue_item, index + 1, text)
+                        val note = notes.getOrNull(index)
+                        val spoken = if (note == null) stringResource(R.string.designsystem_queue_item, index + 1, text)
+                            else stringResource(R.string.designsystem_queue_item_note, index + 1, text, note)
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.card)).background(palette.sunken)
                                 .clickable(enabled = active, role = Role.Button, onClickLabel = itemActions) { onItem(index) }
@@ -134,8 +139,10 @@ private fun GlassQueueStrip(
                             verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
                         ) {
                             QueueNumber(index + 1)
-                            Text(text, style = type.callout, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f))
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
+                                Text(text, style = type.callout, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                note?.let { Text(it, style = type.caption, color = palette.ink2) }
+                            }
                             if (enabled) JIcon(PersonaIcons.more, null, size = Tokens.Space.l, tint = palette.ink3,
                                 modifier = Modifier.padding(top = Tokens.Space.xxs))
                         }
@@ -146,43 +153,52 @@ private fun GlassQueueStrip(
     }
 }
 
-/** Brief and Board: their card and ticket as before, always open. */
+/** Brief and Board: their card and ticket as before, always open; a row's note under its words. */
 @Composable
-private fun PlainQueueStrip(title: String, items: List<String>, onItem: (Int) -> Unit, modifier: Modifier, busy: Boolean, enabled: Boolean) {
+private fun PlainQueueStrip(
+    title: String, items: List<String>, onItem: (Int) -> Unit, modifier: Modifier, busy: Boolean, enabled: Boolean, notes: List<String?>,
+) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
-    val shape = RoundedCornerShape(if (style == AppStyle.Brief) 20.dp else 8.dp)
+    val shape = RoundedCornerShape(if (style == AppStyle.Brief) 20.dp.corner else 8.dp.corner)
     val outer = when (style) {
-        AppStyle.Brief -> Modifier.padding(horizontal = 12.dp, vertical = 4.dp).clip(shape).background(palette.surface)
-        else -> Modifier.padding(horizontal = 10.dp, vertical = 4.dp).clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
+        AppStyle.Brief -> Modifier.padding(horizontal = 12.dp.dense, vertical = 4.dp.dense).clip(shape).background(palette.surface)
+        else -> Modifier.padding(horizontal = 10.dp.dense, vertical = 4.dp.dense).clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
     }
     val active = enabled && !busy
-    Column(modifier.fillMaxWidth().then(outer).padding(top = 10.dp, bottom = 4.dp)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier.fillMaxWidth().then(outer).padding(top = 10.dp.dense, bottom = 4.dp.dense)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp.dense), verticalAlignment = Alignment.CenterVertically) {
             JIcon(PhIcons.Tray, null, size = 16.dp, tint = palette.ink2)
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(8.dp.dense))
             Text(title, style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (busy) JSpinner(Modifier.size(14.dp), stroke = 1.8.dp)
         }
-        Column(Modifier.fillMaxWidth().heightIn(max = 184.dp).verticalScroll(rememberScrollState()).padding(top = 4.dp)) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 184.dp).verticalScroll(rememberScrollState()).padding(top = 4.dp.dense)) {
             val itemActions = stringResource(R.string.designsystem_queue_actions)
             items.forEachIndexed { index, text ->
-                val spoken = stringResource(R.string.designsystem_queue_item, index + 1, text)
-                if (index > 0) JDivider(Modifier.padding(start = 50.dp, end = 14.dp))
+                val note = notes.getOrNull(index)
+                val spoken = if (note == null) stringResource(R.string.designsystem_queue_item, index + 1, text)
+                    else stringResource(R.string.designsystem_queue_item_note, index + 1, text, note)
+                if (index > 0) JDivider(Modifier.padding(start = 50.dp.dense, end = 14.dp.dense))
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp)
+                    Modifier.fillMaxWidth().heightIn(min = 44.dp.row)
                         .clickable(enabled = active, role = Role.Button, onClickLabel = itemActions) { onItem(index) }
                         .semantics(mergeDescendants = true) { contentDescription = spoken }
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                        .padding(horizontal = 14.dp.dense, vertical = 8.dp.dense),
                     verticalAlignment = Alignment.Top,
                 ) {
                     QueueNumber(index + 1)
-                    Spacer(Modifier.width(12.dp))
-                    Text(text, style = PersonaTheme.type.callout, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f).padding(top = 1.dp))
+                    Spacer(Modifier.width(12.dp.dense))
+                    val words = Modifier.weight(1f).padding(top = 1.dp.dense)
+                    if (note == null) Text(text, style = PersonaTheme.type.callout, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        modifier = words)
+                    else Column(words, verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
+                        Text(text, style = PersonaTheme.type.callout, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(note, style = PersonaTheme.type.caption, color = palette.ink2)
+                    }
                     if (enabled) {
-                        Spacer(Modifier.width(8.dp))
-                        JIcon(PhIcons.DotsThree, null, size = 18.dp, tint = palette.ink3, modifier = Modifier.padding(top = 2.dp))
+                        Spacer(Modifier.width(8.dp.dense))
+                        JIcon(PhIcons.DotsThree, null, size = 18.dp, tint = palette.ink3, modifier = Modifier.padding(top = 2.dp.dense))
                     }
                 }
             }
@@ -200,7 +216,10 @@ private fun SendNowButton(label: String, style: TextStyle, onClick: () -> Unit) 
     ) { Text(label, style = style, color = PersonaTheme.palette.accent, maxLines = 1, softWrap = false) }
 }
 
-/** The place of a queued message: an accent disc in glass (iOS's), ink on a grey disc in brief, a small square on the board. */
+/**
+ * The place of a queued message: an accent disc in glass (iOS's, `Theme.Size.badge`, growing with the text size as its
+ * `scaledFrame` does, up to 1.6 times), ink on a grey disc in brief, a small square on the board.
+ */
 @Composable
 private fun QueueNumber(number: Int) {
     val palette = PersonaTheme.palette
@@ -210,7 +229,7 @@ private fun QueueNumber(number: Int) {
         AppStyle.Glass, AppStyle.Board -> palette.accentSoft to palette.accent
     }
     Box(
-        Modifier.size(if (style == AppStyle.Glass) Tokens.Size.icon else 24.dp)
+        Modifier.size(if (style == AppStyle.Glass) Tokens.Size.badge * LocalDensity.current.fontScale.coerceIn(1f, HomeTokens.shellScaleMaximum) else 24.dp)
             .clip(if (style == AppStyle.Board) RoundedCornerShape(4.dp) else CircleShape).background(fill),
         contentAlignment = Alignment.Center,
     ) { Text("$number", style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.Bold), color = ink, maxLines = 1) }

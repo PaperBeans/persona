@@ -1,8 +1,14 @@
 package persona.core.designsystem
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -14,6 +20,8 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.TextLayoutResult
@@ -29,8 +37,8 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * A "needs you" card read by TalkBack (#4326): a multi-select option is a checkbox with its tick, a single
- * choice a radio button; each option says which of how many it is; the dock's headline is a heading and its
- * "1 / 2" reads as "request 1 of 2".
+ * choice a radio button; each option says which of how many it is; the dock's headline is a heading, its header
+ * folds it, and the stack says how many wait once they scroll.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35], qualifiers = "zh")
@@ -73,15 +81,44 @@ class DecisionSemanticsTest {
             .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ToggleableState))
     }
 
-    @Test fun dockHeadlineIsAHeadingAndItsPositionIsSpoken() {
+    /** A card's headline is a heading; a tap on its header folds it to that line with what it asks (iOS), and opens it again. */
+    @Test fun dockHeadlineIsAHeadingAndItsHeaderFoldsIt() {
+        var folded by mutableStateOf(false)
         rule.setContent {
             PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
-                DecisionDock(DecisionKind.Command, "要运行 npm test", position = 1 to 2, onList = {}) { Text("正文") }
+                DecisionDock(DecisionKind.Command, "要运行 npm test", collapsed = folded, onCollapsedChange = { folded = it },
+                    preview = "npm test --watch") { Text("正文") }
             }
         }
         rule.onNodeWithText("要运行 npm test").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
-        rule.onNodeWithText("1 / 2", useUnmergedTree = true).assertExists()
-        rule.onNode(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("第 1 件，共 2 件"))).assertExists()
+        rule.onNodeWithText("正文").assertExists()
+        rule.onNodeWithText("npm test --watch", substring = true).assertDoesNotExist()
+        rule.onNodeWithText("要运行 npm test").performClick()
+        assertTrue(folded)
+        rule.onNodeWithText("正文").assertDoesNotExist()
+        // one line: the title, then what it asks
+        rule.onNodeWithText("要运行 npm test  npm test --watch").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+        rule.onNodeWithContentDescription("展开").performClick()
+        assertFalse(folded)
+        rule.onNodeWithText("正文").assertExists()
+    }
+
+    /** Past its height the stack says how many wait, as one heading, and scrolls; while they fit it says nothing. */
+    @Test fun theStackSaysHowManyOnlyOnceTheyScroll() {
+        var tall by mutableStateOf(false)
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
+                DecisionStack(3, 200.dp) { scrolling ->
+                    Text(if (scrolling) "滚动" else "放得下", Modifier.testTag("mode"))
+                    repeat(3) { Box(Modifier.fillMaxWidth().height(if (tall) 120.dp else 40.dp)) }
+                }
+            }
+        }
+        rule.onNodeWithText("3 个待处理").assertDoesNotExist()
+        rule.onNodeWithText("放得下").assertExists()
+        tall = true
+        rule.onNodeWithText("3 个待处理").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+        rule.onNodeWithText("滚动").assertExists()
     }
 
     // A long option is cut to 2 lines (label) and 3 (detail) in the card above the composer, and readable in full on the

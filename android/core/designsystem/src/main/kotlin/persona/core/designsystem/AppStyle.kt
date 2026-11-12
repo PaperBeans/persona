@@ -81,10 +81,20 @@ class AppStyleStore(context: Context) {
     private val currentColor = MutableStateFlow(ThemeColor.fromKey(preferences.getString(KEY_COLOR, null)))
     /** Settings › Appearance › Theme color: the style's own (the default), the persona's, or a fixed accent. */
     val color: StateFlow<ThemeColor> = currentColor.asStateFlow()
+    private val currentDensity = MutableStateFlow(LayoutDensity.fromKey(preferences.getString(KEY_DENSITY, null)))
+    /** Settings › Appearance › Layout density: Standard (the default) or Compact, on this phone. */
+    val density: StateFlow<LayoutDensity> = currentDensity.asStateFlow()
 
     init {
         ActiveStyle.value = currentStyle.value
         AppAppearance.scheme = currentScheme.value
+        LayoutDensity.apply(currentDensity.value)
+    }
+
+    fun setDensity(choice: LayoutDensity) {
+        preferences.edit().putString(KEY_DENSITY, choice.key).apply()
+        currentDensity.value = choice
+        LayoutDensity.apply(choice)
     }
 
     fun setScheme(choice: ColorSchemeChoice) {
@@ -138,6 +148,7 @@ class AppStyleStore(context: Context) {
         const val KEY_THEME = "extension-theme"
         const val KEY_SCHEME = "scheme"
         const val KEY_COLOR = "color"
+        const val KEY_DENSITY = "layout-density"
         const val KEY_NATIVE_INBOX_CHATS = "native-inbox-chats"
     }
 }

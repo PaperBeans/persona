@@ -286,7 +286,7 @@ internal class AgentsViewModel(
             }?.counts
             fun SessionListCounts.states() = AgentState.entries.associateWith { state -> this.state[state.wire] ?: 0 }
             val countedGroups = projected.list.groups.map { group ->
-                count("group:${group.id}")?.let { group.copy(totalCount = it.total, stateCounts = it.states()) } ?: group
+                count("group:${group.id}")?.let { group.copy(totalCount = it.total, stateCounts = it.states(), waitingInBackground = it.backgroundWaiting) } ?: group
             }
             val countedMachines = projected.list.machines.map { machine ->
                 count("machine:${machine.machine.id}")?.let { machine.copy(sessionCount = it.total, stateCounts = it.states(),

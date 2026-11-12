@@ -15,7 +15,8 @@ import (
 // The user's language (docs/protocol/i18n.md "Protocol"): the language the user chose in their apps, kept in Postgres
 // settings. Whatever the hub writes for people without a request in front of it reads in it: pushes to a device that
 // gave no locale of its own, the assistant's answers, injected messages, task notifications, the bots' replies. Until
-// a client says one it is zh-Hans, what the hub wrote before.
+// a client says one it is the language the hub was installed in (hub.json initial_locale, #5519), else zh-Hans, what
+// the hub wrote before.
 //
 // It moves only when a device's own interface language changes: each full-role device's last client_hello.locale is
 // kept (deviceLocalesSetting), and a device saying a different language than it did before is the user choosing
@@ -88,10 +89,14 @@ func (h *Hub) loadDeviceLocalesLocked(ctx context.Context) {
 	g.loaded = true
 }
 
-// userLang is the user's language, zh-Hans when none was said.
+// userLang is the user's language; until a device says one, the language the hub was installed in (hub.json
+// initial_locale), else zh-Hans.
 func (h *Hub) userLang() i18n.Lang {
 	if l, ok := h.userLocale.Load().(i18n.Lang); ok && i18n.Valid(l) {
 		return l
+	}
+	if h.cfg != nil && i18n.Valid(h.cfg.InitialLocale) {
+		return h.cfg.InitialLocale
 	}
 	return i18n.Default
 }

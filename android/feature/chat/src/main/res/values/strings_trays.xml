@@ -54,4 +54,9 @@
     <string name="chat_tasks_dismiss_draft">Don\'t handle</string>
     <string name="chat_tasks_draft_dismissed">Draft dismissed; nothing was sent</string>
     <string name="chat_tasks_undo_draft">Undo</string>
+    <!-- Over a task's card above Persona's composer: how many more its tasks ask (iOS TaskQuestions). -->
+    <plurals name="chat_stack_more">
+        <item quantity="one">%1$d more</item>
+        <item quantity="other">%1$d more</item>
+    </plurals>
 </resources>

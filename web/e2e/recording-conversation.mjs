@@ -2,7 +2,8 @@
 // meeting_conversation, the private switch, a running room meeting's one thread (read-only, the room's state, batches
 // folded), questions asked in the room that got no answer (why, or still being answered; one that never went in after the
 // thread), an ended one's follow-up composer that opens the follow-up, the thread after the divider, and a room that is
-// unavailable showing its asks. With meeting_photos (phase 3): the photos the room was sent in its thread (one deleted
+// unavailable showing its asks. Phase 6: **Talk about this meeting** on a recording that is not a room meeting (a note
+// that has ended), its first words through POST …/followup, and its follow-up as the thread. With meeting_photos (phase 3): the photos the room was sent in its thread (one deleted
 // since: "Photo removed", never the room's copy), **Photos**, a photos revision read again from GET …/photos only, the
 // minutes items that cite a photo and the image viewer. Run against an already running Vite server.
 // BASE_URL=http://127.0.0.1:5791 PERSONA_E2E_CHROMIUM=<chrome> SHOTS_DIR=/tmp/mm/shots node web/e2e/recording-conversation.mjs
@@ -363,6 +364,46 @@ async function down(theme, lang = "en", width = 1440) {
   runs++;
 }
 
+/** Phase 6: any recording with text or minutes that has ended (here a note: no room, no attendance, no private mark)
+ *  offers **Talk about this meeting**; its first words make the follow-up, which is then its thread. */
+async function talk(theme, lang = "en", width = 1440) {
+  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  const scene = { meta: { kind: "note", title: "Vendor call", complete: true, ended_at: "2026-11-10T14:31:00+08:00", minutes_state: undefined, attendance: undefined, room: undefined }, live: { attendance: "off", asks: [], room: undefined, revs: { asks: 0 } } };
+  const { ctx, state } = await context(theme, lang, width, scene);
+  const errors = [];
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(15_000);
+  page.on("pageerror", (err) => errors.push(err.message));
+  await page.goto(new URL(detailPath, base).href);
+  const section = page.locator("[data-meeting-conversation]");
+  const field = section.locator("textarea");
+  await field.waitFor();
+  await settle(page);
+  assert.ok(await section.getByText(s.followup_label, { exact: true }).isVisible());
+  assert.equal(await section.getByRole("status").count(), 0, "No room, no room state");
+  assert.equal(await page.locator("[data-meeting-private]").count(), 0, "Not a meeting: no private mark");
+  assert.deepEqual(state.items, [], "No thread to read yet");
+  await field.fill("What did the vendor promise about the export cap?");
+  await shoot(page, width === 1440 ? `conversation-talk-${theme}.png` : `conversation-talk-${lang}-${width}.png`);
+  await section.getByRole("button", { name: s.followup_send, exact: true }).click();
+  await page.waitForURL((u) => u.pathname === `/persona/${follow}`);
+  assert.equal(state.followup.length, 1);
+  assert.equal(state.followup[0].text, "What did the vendor promise about the export cap?");
+  assert.deepEqual(errors, []);
+  await page.goto(new URL(detailPath, base).href);
+  errors.length = 0;
+  await section.getByText("draft", { exact: true }).waitFor();
+  await settle(page);
+  assert.deepEqual(await kinds(page), ["material", "question", "answer"]);
+  assert.equal(await section.getByRole("separator").count(), 0, "Nothing before the follow-up");
+  assert.equal(await section.getByRole("link", { name: s.conversation_continue, exact: true }).getAttribute("href"), `/persona/${follow}`);
+  assert.equal(await field.count(), 0);
+  await shoot(page, width === 1440 ? `conversation-talk-followup-${theme}.png` : `conversation-talk-followup-${lang}-${width}.png`);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  runs++;
+}
+
 /** Questions in the room that got no answer: one in the thread says why, one still being answered says so, and one that
  *  never went into the room (spoken, failed) shows after the thread. */
 async function stuck(theme, lang = "en", width = 1440) {
@@ -528,7 +569,9 @@ try {
   for (const theme of ["light", "dark"]) await after(theme);
   for (const lang of ["zh-Hans", "ja"]) await after("light", lang, 390);
   for (const theme of ["light", "dark"]) await down(theme);
-  console.log(`PASS recording conversation: ${runs} browser runs, ${screenshots} screenshots; private switch, room thread, questions without an answer, meeting_live parts, follow-up composer, follow-up thread, unavailable room, photos (thread, list, revision, minutes citations, viewer) and overflow checked`);
+  for (const theme of ["light", "dark"]) await talk(theme);
+  for (const lang of ["zh-Hans", "ja"]) await talk("dark", lang, 390);
+  console.log(`PASS recording conversation: ${runs} browser runs, ${screenshots} screenshots; private switch, room thread, questions without an answer, meeting_live parts, follow-up composer, follow-up thread, unavailable room, talk about any recording, photos (thread, list, revision, minutes citations, viewer) and overflow checked`);
 } catch (err) {
   console.error(`FAIL recording conversation: ${err?.stack || err}`);
   process.exitCode = 1;

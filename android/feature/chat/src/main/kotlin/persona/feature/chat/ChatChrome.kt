@@ -1,5 +1,6 @@
 package persona.feature.chat
 
+import persona.core.designsystem.dense
 import persona.core.designsystem.text
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -116,7 +117,9 @@ internal fun ChatHeader(
                 headerTerminal)
         actions()
         // The permission mode, always in view and changed here (#3957, iOS #3719).
-        if (session != null && SessionModes.showsInHeader(session)) HeaderModeButton(session, state, online && !readOnly) { modeOverlay = it }
+        // Glass has the mode in the composer, by the model pill (Q11, #5055); Brief and Board keep it here.
+        if (session != null && SessionModes.showsInHeader(session) && PersonaTheme.style != AppStyle.Glass)
+            HeaderModeButton(session, state, online && !readOnly) { modeOverlay = it }
         JIconButton(PhIcons.DotsThree, stringResource(R.string.chat_chrome_more), { menu = true })
     }
     val resumeCopied = stringResource(R.string.chat_chrome_resume_copied)
@@ -212,7 +215,7 @@ internal fun ChatHeader(
         "info" -> session?.let { target -> ChatSessionInfoSheet(target, machine, state, onOpenTodo = onOpenTodo, onDismiss = { dialog = null }) }
         "peers" -> JSheet(onDismiss = { dialog = null }, title = stringResource(R.string.chat_chrome_peers_title)) {
             if (peers.isEmpty()) JEmptyState(stringResource(R.string.chat_chrome_peers_empty_title), stringResource(R.string.chat_chrome_peers_empty_text))
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 400.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 400.dp), contentPadding = PaddingValues(bottom = 16.dp.dense)) {
                 items(peers, key = { it.key.path }) { peer ->
                     val place = places[peer.key]
                     val where = peer.slotName ?: peer.agentLabel
@@ -241,10 +244,10 @@ internal fun ChatActionsSheet(actions: List<JAction>, onDismiss: () -> Unit, tit
     // leading slot), so every label starts in one column.
     val iconColumn = actions.any { it.icon != null }
     JSheet(onDismiss = onDismiss, title = title) {
-        LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp)) {
+        LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp.dense)) {
             items(actions) { action ->
                 JRow(action.label, leadingIcon = action.icon, enabled = action.enabled, destructive = action.destructive,
-                    leading = if (action.icon == null && iconColumn) ({ Spacer(Modifier.width(24.dp)) }) else null,
+                    leading = if (action.icon == null && iconColumn) ({ Spacer(Modifier.width(24.dp.dense)) }) else null,
                     chevron = false, onClick = { onDismiss(); action.onClick() })
             }
         }

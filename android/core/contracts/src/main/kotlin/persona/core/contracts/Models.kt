@@ -395,6 +395,11 @@ data class Session(
     @SerialName("state") val state: String? = AgentState.of(null, status).wire,
     @WireTime @SerialName("seen_at") val seenAt: String? = null,
     @SerialName("queued") val queued: List<String>? = null,
+    /**
+     * A Persona conversation's last this many of [queued] came from other conversations or the system and arrive when
+     * the conversation is free (docs/protocol/protocol.md, `queued_relayed`): they are shown, never changed. Absent: none.
+     */
+    @SerialName("queued_relayed") val queuedRelayed: Int? = null,
     @SerialName("background") val background: List<BackgroundTask>? = null,
     /**
      * Its Workflow runs of the last day, newest first (docs/protocol/agent-states.md "Background workflows and Monitor"): a running one is
@@ -513,6 +518,18 @@ data class Session(
     /** An assistant conversation set to run on the Agent SDK: `agentsdk` while it does; [runtimeFallback] why the node ran the CLI instead. */
     @SerialName("runtime") val runtime: String? = null,
     @SerialName("runtime_fallback") val runtimeFallback: String? = null,
+    /**
+     * What an assistant chat's next messages run on when it was switched to a model in an app (`PUT …/conversations/{id}/model`,
+     * feature `assistant_model_pick`, docs/assistant/model-config.md "A conversation's own model"); null: it follows the
+     * default. Summary rows carry it too.
+     */
+    @SerialName("model_pick") val modelPick: ModelPick? = null,
+    /**
+     * A running Claude Code Agent's switch to another launcher that the user's next message from the chat carries out
+     * (feature `launcher_switch`, docs/protocol/protocol.md "Switching a running Agent to another provider"); null: none
+     * waits. [launcher] stays the one it runs on until then. Summary rows leave it out.
+     */
+    @SerialName("pending_switch") val pendingSwitch: PendingSwitch? = null,
 ) {
     val key: SessionKey get() = SessionKey(machineId, sessionId)
     /** A chat of the health space ([space]), which the assistant's own lists leave out. */
@@ -636,6 +653,11 @@ data class Item(
     val source: MessageSource? = null,
     /** On a notice: a Claude Code model_refusal_* record (#2289, #2528), its public fields only. */
     @SerialName("model_refusal") val modelRefusal: ModelRefusal? = null,
+    /**
+     * The model that wrote this assistant item as the transcript records it (Claude Code's `message.model`, a Codex turn's
+     * model); null where it does not say (user items, older hubs). The chat marks where the replies' model changes by it.
+     */
+    val model: String? = null,
 )
 
 /**
@@ -656,6 +678,34 @@ data class ModelRefusal(
 )
 
 object ModelRefusalSerializer : WireSerializer<ModelRefusal>(ModelRefusal.generatedSerializer())
+
+/** What an assistant chat was switched to in an app (server proto.ModelPick): a launcher and, when picked, its model and effort. */
+@KeepGeneratedSerializer
+@Serializable(with = ModelPickSerializer::class)
+data class ModelPick(
+    val launcher: String = "",
+    val model: String? = null,
+    val effort: String? = null,
+)
+
+object ModelPickSerializer : WireSerializer<ModelPick>(ModelPick.generatedSerializer())
+
+/**
+ * A launcher switch waiting for the user's next message (server proto.PendingSwitch): the launcher, the model and effort
+ * picked (null: the launcher's default model, the effort it runs with now), the engine when the switch moves the
+ * conversation to the other one ([agent], `claude` / `codex`), and when it was picked.
+ */
+@KeepGeneratedSerializer
+@Serializable(with = PendingSwitchSerializer::class)
+data class PendingSwitch(
+    val launcher: String = "",
+    val model: String? = null,
+    val effort: String? = null,
+    val agent: String? = null,
+    @WireTime val at: String? = null,
+)
+
+object PendingSwitchSerializer : WireSerializer<PendingSwitch>(PendingSwitch.generatedSerializer())
 
 /** A pending "back to the configured model" (server proto.ModelRestore): `next_start`, the next start asks for [to]. */
 @KeepGeneratedSerializer
@@ -922,6 +972,19 @@ data class InteractionRecord(
 )
 
 object InteractionRecordSerializer : WireSerializer<InteractionRecord>(InteractionRecord.generatedSerializer())
+
+/**
+ * A question the assistant answered for the user (iOS `DelegatedAnswer`, docs/assistant/assistant.md "Assistant answers
+ * questions first"): the card, what it answered by question text and why, and when (null: unsaid).
+ */
+data class DelegatedAnswer(val interaction: Interaction, val answers: Map<String, String>, val reason: String, val at: Instant?) {
+    val id: String get() = interaction.id
+
+    companion object {
+        /** `answered_by` on a question the assistant answered. */
+        const val ASSISTANT = "assistant"
+    }
+}
 
 @Serializable
 data class Launcher(@SerialName("name") val name: String, @SerialName("base_url") val baseUrl: String? = null, @SerialName("model") val model: String? = null)

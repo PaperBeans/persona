@@ -255,8 +255,7 @@ struct RootView: View {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("RootTabs")
         #endif
-        @Bindable var model = model
-        TabView(selection: $model.selectedTab) {
+        TabView(selection: Binding(get: { model.selectedTab }, set: { model.selectHomeTab($0) })) {
             AssistantRootTab()
             AgentsRootTab()
             #if os(iOS) || os(visionOS)

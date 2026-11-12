@@ -182,15 +182,9 @@ fun TodosScreen(
     val hidden = remember(searched, filtered, sessionMap, restored, nowMs, listFilter, superseded) {
         if (listFilter == TodoListFilter.All) 0 else hiddenWaiting(searched, filtered, sessionLookup, nowMs, restored, superseded = superseded)
     }
-    // Which sections the user folded or unfolded: Other open, Shelved and Done start folded.
+    // Which sections the user folded or unfolded: Shelved and Done start folded, the rest open (#5707).
     var toggled by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    // Other open starts unfolded when the open sections above it are empty, so the list never opens on nothing.
-    val quietAbove = listOf(TriageSection.Waiting, TriageSection.Working, TriageSection.JustDone, TriageSection.Pr).all { triaged.rows(it).isEmpty() }
-    fun isFolded(section: TriageSection): Boolean {
-        // a filter narrows, so what it leaves in Other open shows (as iOS); Shelved and Done stay folded
-        val byDefault = section.folded && !(section == TriageSection.Other && (quietAbove || listFilter != TodoListFilter.All))
-        return byDefault != (section.name in toggled)
-    }
+    fun isFolded(section: TriageSection): Boolean = section.folded != (section.name in toggled)
     var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val setDone: (Todo, Boolean) -> Unit = { todo, done ->
         scope.launch {
@@ -506,7 +500,7 @@ private fun TodoTriageRow(
                     val tickName = stringResource(R.string.agents_todo_done_action)
                     val tickLabel = stringResource(if (finished) R.string.agents_todo_reopen else R.string.agents_todo_done_action)
                     Box(
-                        Modifier.size(Tokens.Space.xl).clip(CircleShape)
+                        Modifier.size(Tokens.Space.Standard.xl).clip(CircleShape)
                             .clickable(onClickLabel = tickLabel, role = Role.Checkbox) { onDone(todo, !finished) }
                             .semantics {
                                 contentDescription = tickName

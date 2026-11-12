@@ -76,7 +76,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
 
     private var maximumLines: Int {
         #if os(iOS)
-        ComposerGrowth.maximumLines(viewportHeight: viewportHeight, lineHeight: lineHeight)
+        ComposerGrowth.maximumLines
         #else
         Theme.Shell.composerMaximumLines // Other platforms retain their existing composer height.
         #endif
@@ -156,7 +156,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                     // Grown taller, the field must not stay scrolled down a line (#909, TextViewScroll).
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in
                         #if os(iOS)
-                        if focused.wrappedValue, !enlarged { TextViewScroll.settleFocused(revealCaret: true) }
+                        if focused.wrappedValue, !enlarged { TextViewScroll.settleFocused() }
                         #else
                         if focused.wrappedValue { TextViewScroll.settleFocused() }
                         #endif
@@ -259,12 +259,18 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
         .animation(Theme.Motion.composerAccessory, value: quotes?.wrappedValue.isEmpty == false)
         // A line more or less in the draft: the box follows at once, briefly eased (Telegram's 0.1 s).
         .animation(reduceMotion ? nil : Theme.Motion.composerGrow, value: text)
-        .background {
-            ComposerViewportReader { viewportHeight = $0 }
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+        .onChange(of: text) {
+            // Only a changed draft requests post-layout caret following; UIKit handles a moved cursor itself.
+            if focused.wrappedValue, !enlarged { TextViewScroll.settleFocused(revealCaret: true) }
         }
         #if DEBUG
+        .background {
+            if ScreenProbe.enabled {
+                ComposerViewportReader { viewportHeight = $0 }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
         .background { if ScreenProbe.enabled { ComposerLinesProbe(maximumLines: maximumLines, viewport: viewportHeight, line: lineHeight) } }
         #endif
         .animation(Theme.Motion.state, value: offersEnlarge)
@@ -548,10 +554,48 @@ private struct ComposerPageEditor: View {
     @State private var cursor: TextSelection?
     /// The caller's cursor as the page took it: moved since, someone else put it somewhere.
     @State private var taken: TextSelection?
+    @Environment(\.buiTheme) private var theme
+
+    private var ink: Color { ComposerInk.icon(theme) }
+
+    private var controls: some View {
+        HStack(spacing: Theme.Space.xs) {
+            Spacer(minLength: Theme.Space.s)
+            if focused {
+                Button(action: dismissPageKeyboard) {
+                    ThemedIcon(Theme.Icon.dismissKeyboard)
+                        .font(Theme.Font.secondary)
+                        .foregroundStyle(ink)
+                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hide Keyboard")
+                .accessibilityIdentifier("composer-page-dismiss-keyboard")
+            }
+            Button {
+                commitTyped()
+                collapse()
+            } label: {
+                ThemedIcon(Theme.Icon.collapseMessage)
+                    .font(Theme.Font.secondary)
+                    .foregroundStyle(ink)
+                    .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Collapse the message box")
+            .accessibilityIdentifier("composer-page-collapse")
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.top, Theme.Space.s)
+    }
 
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
+                controls
                 if let quotes, !quotes.wrappedValue.isEmpty {
                     QuoteBar(refs: quotes)
                         .padding(.horizontal, Theme.Space.l)
@@ -594,26 +638,7 @@ private struct ComposerPageEditor: View {
             .frame(maxWidth: ChatView.readableWidth) // an iPad's page: the conversation's measure, not the window's
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .themedPage()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    if focused {
-                        Button(action: dismissPageKeyboard) {
-                            ThemedIcon(Theme.Icon.dismissKeyboard)
-                        }
-                        .accessibilityLabel("Hide Keyboard")
-                        .accessibilityIdentifier("composer-page-dismiss-keyboard")
-                    }
-                    Button {
-                        commitTyped()
-                        collapse()
-                    } label: {
-                        ThemedIcon(Theme.Icon.collapseMessage)
-                    }
-                    .accessibilityLabel("Collapse the message box")
-                    .accessibilityIdentifier("composer-page-collapse")
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .onAppear {
             cursor = selection ?? TextSelection(insertionPoint: text.endIndex)

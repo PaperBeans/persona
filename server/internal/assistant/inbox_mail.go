@@ -156,11 +156,13 @@ func (b *inboxBook) applyMail(a assistantwire.InboxMailAccount, msgs []assistant
 			unseen = slices.DeleteFunc(unseen, func(m assistantwire.InboxMailSummary) bool { return held[m.UID] })
 		}
 		if len(unseen) == 0 {
-			// Read in another client: done unless it needs the user.
+			// Read in another client: done unless it needs the user. An FYI conclusion is still waiting for Got it:
+			// mark the source read, but never file the card before that explicit confirmation (#5471).
 			if open != nil && !open.Read {
 				b.roundWrite(open)
 				open.Read = true
-				if open.Tier != TierAction && open.Tier != "" {
+				g := currentSuggestion(open)
+				if open.Tier != TierAction && open.Tier != "" && (g == nil || g.Kind != SuggestConclusion) {
 					b.file(open, now, "read")
 				}
 				changed = append(changed, open)

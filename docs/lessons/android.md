@@ -1,5 +1,14 @@
 # Lessons: Android
 
+## Explicit home selection is not detail-stack restoration (#5638)
+
+Keeping visited tabs composed prevents loading flashes, but keeping their entire back stacks can make the Agents
+home control reopen a session instead of its list. Treat explicit Agents selection separately from a targeted session
+entry: remove only destinations above the existing Agents root, and preserve Assistant's current conversation.
+Do not route task entries or notification/session links through that reset. Exercise the production home control after
+those entry paths and after a restored stack; a navigator test that expects the old detail to survive a tab selection
+can accidentally pin the bug rather than prevent it.
+
 ## Keep a worktree fixed while Gradle verifies it (#5233)
 
 Do not merge main or edit source while a multi-task Gradle invocation is running in that worktree. Earlier tasks can
@@ -163,6 +172,15 @@ Pitfalls in the new multi-module Android App (`android/`, `docs/android/android.
 - Plugin alerts `notify.kind=alert` have no interaction ID, and one session may have multiple distinct alerts. Notification tags must distinguish individual alerts, not reuse completion alerts' `kind:machine/session` replacement rule (#1654). Empty machine or session identifiers mean a generic alert; do not use them to refresh session lists or create empty-session deep links. Check the `input` preference at both delivery and notification construction, so disabling it during async refresh does not still show an alert.
 
 ## UI and Compose
+
+- Composer growth needs a real field-bounds test, not only a formula test (#5648). The old viewport-share rule
+  showed seven lines on a 400 × 640 dp Native JVM Compose render and could shrink to three with the keyboard up.
+  Assistant and Agents now share the fixed six-line `ComposerGrowLines` token. Test short and tall viewports,
+  wrapped text, and large text; a manual swipe's bitmap must stay unchanged across idle cursor-blink frames,
+  while typing and selection movement must restore the visible caret. Native renders do not verify a real IME.
+  Full-screen dialogs own another Android view: override system font scale with `RuntimeEnvironment.setFontScale`
+  as well as Compose's density, complete the Activity recreation before mounting the fixture, and assert the dialog's
+  actual text-layout density before labelling a capture large. Inspect its rendered line height and pixels too.
 
 - **A big page must not read a state that changes on every scroll frame** (#4039). `ChatListState.position` holds the
   reading anchor's pixel offset, written each frame; `ChatPage` read `position.expanded`, so a scroll re-ran the whole

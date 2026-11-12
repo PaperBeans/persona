@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The unified model panel's own words (#5055), the web's ui-modelpanel namespace. -->
+<resources>
+    <string name="designsystem_modelpanel_search">Search models…</string>
+    <string name="designsystem_modelpanel_recent">Recent</string>
+    <string name="designsystem_modelpanel_favorites">Favorites</string>
+    <string name="designsystem_modelpanel_all">All</string>
+    <string name="designsystem_modelpanel_recommended">Recommended</string>
+    <string name="designsystem_modelpanel_recent_empty">No recent models yet. Pick a model and it shows up here.</string>
+    <string name="designsystem_modelpanel_favorites_empty">No favorites yet. Tap a model\'s star to keep it here.</string>
+    <string name="designsystem_modelpanel_no_match">No matching models</string>
+    <string name="designsystem_modelpanel_loading">Loading models…</string>
+    <string name="designsystem_modelpanel_retry">Retry</string>
+    <string name="designsystem_modelpanel_save_favorite">Save to favorites</string>
+    <string name="designsystem_modelpanel_remove_favorite">Remove from favorites</string>
+    <string name="designsystem_modelpanel_customize">Customize</string>
+    <string name="designsystem_modelpanel_setup_of">%1$s setup</string>
+    <string name="designsystem_modelpanel_setup_recommended">Recommended setup</string>
+    <string name="designsystem_modelpanel_setup_customized">Customized</string>
+    <string name="designsystem_modelpanel_setup_saved">Saved setup</string>
+    <string name="designsystem_modelpanel_reset">Reset to recommended</string>
+    <string name="designsystem_modelpanel_effort">Thinking effort</string>
+    <string name="designsystem_modelpanel_faster">Faster</string>
+    <string name="designsystem_modelpanel_smarter">Smarter</string>
+    <string name="designsystem_modelpanel_use_typed">Use “%1$s”</string>
+    <string name="designsystem_modelpanel_use_typed_note">Not in the list; uses this ID as typed</string>
+    <string name="designsystem_modelpanel_configure">Configure models</string>
+</resources>

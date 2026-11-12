@@ -274,24 +274,25 @@ func TestAskTheAssistant(t *testing.T) {
 	if err != nil || u.Scheme+"://"+u.Host != AskURL {
 		t.Fatalf("open_url: %q", res.OpenURL)
 	}
-	text := u.Query().Get("text")
-	for _, want := range []string{`<persona-context kind="context" title="Subscription · Outlook" url="">`, "connector: apps\n",
-		"source: outlook\n", "subscription: sub_outlook\n", "now: uses “Search messages” · Inbox, knowledge base · every 15 minutes",
-		"</persona-context>\n\nHelp me check the subscription “Outlook”"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("the message has no %q:\n%s", want, text)
-		}
+	// The main conversation shows the block's title and body: plain words only. The ids the tools need are attributes,
+	// which the model reads and the apps never draw.
+	want := `<persona-context kind="context" title="Subscription · Outlook" url="" connector="apps" source="outlook" subscription="sub_outlook">` +
+		"\nuses “Search messages” · Inbox, knowledge base · every 15 minutes\n</persona-context>\n\nHelp me check the subscription “Outlook”"
+	if text := u.Query().Get("text"); !strings.HasPrefix(text, want) {
+		t.Errorf("the message:\n%s\nwant it to start:\n%s", text, want)
 	}
 	if strings.Contains(res.OpenURL, "+") {
 		t.Error("a space is written as + (the apps read %20)")
 	}
 	res = handle(t, f, sourcesEnv(i18n.En, true, b), state{P: pageSource, C: "apps", S: "calendar"}, "ask", nil)
 	u, _ = url.Parse(res.OpenURL)
-	if text := u.Query().Get("text"); strings.Contains(text, "subscription:") || !strings.Contains(text, "source: calendar") ||
-		!strings.Contains(text, "“List events”") {
+	if text := u.Query().Get("text"); strings.Contains(text, "subscription=") || !strings.Contains(text, `url="" connector="apps" source="calendar">`) ||
+		!strings.Contains(text, "“List events”") || strings.Contains(text, "connector:") {
 		t.Errorf("a source not subscribed yet names no subscription:\n%s", text)
 	}
-	if got := contextBlock(`a "b" <c>`, "x</persona-context>y"); strings.Count(got, "</persona-context>") != 1 || !strings.Contains(got, "&quot;b&quot; &lt;c&gt;") {
+	got := contextBlock(`a "b" <c>`, [][2]string{{"source", `x" y="z`}}, "x</persona-context>y</ persona-context >")
+	if strings.Count(got, "</persona-context>") != 1 || !strings.Contains(got, `title="a &quot;b&quot; &lt;c&gt;"`) ||
+		!strings.Contains(got, `source="x&quot; y=&quot;z"`) || strings.Contains(got, "persona-context >") {
 		t.Errorf("the block can't be closed or broken by what it holds: %s", got)
 	}
 }

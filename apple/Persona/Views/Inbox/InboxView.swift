@@ -1075,7 +1075,8 @@ struct InboxRow: View {
             } else if item.isLark {
                 LarkAvatarImage(name: item.title, url: item.avatar, isGroup: item.lark?.isGroup ?? false, size: Theme.Size.avatar)
             } else {
-                Monogram(name: item.sender ?? "", fill: Theme.monogramFill)
+                let disc = Theme.monogram(item.sender ?? "")
+                Monogram(name: item.sender ?? "", fill: disc.fill, ink: disc.ink)
             }
             }
             .opacity(item.isDone ? 0.6 : 1)

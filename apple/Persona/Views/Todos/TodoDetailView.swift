@@ -30,6 +30,18 @@ struct TodoDetailView: View {
         store.todo(id: todoID)
     }
 
+    /// Marks the to-do seen when it is in Just finished and the hub keeps seen marks; a failure leaves it there.
+    private func seeIfJustFinished() async {
+        guard let todo = currentTodo, model.hubFeatures.contains(TodoSeen.feature) else { return }
+        // no restores read (UserDefaults, P2): a restore only takes a to-do out of Shelved, never into Just finished
+        let lookup = TodosLogic.makeSessionLookup(AppModel.shared.allSessions(inFront: inFront))
+        let t = TodoTriageLogic.triage(todo, lookup: lookup, now: .now,
+                                       superseded: TodoTriageLogic.supersededFailedStarts(store.todos).contains(todo.id),
+                                       calendar: TodoCalendar.userCalendar)
+        guard t.section == .justDone else { return }
+        try? await store.setSeen(id: todo.id, true, after: t.last)
+    }
+
     var body: some View {
         Group {
             if let todo = currentTodo {
@@ -103,6 +115,11 @@ struct TodoDetailView: View {
             if !focused { commitTitle() }
         }
         .onDisappear { commitTitle() }
+        #if !os(macOS)
+        // Opening a Just finished to-do is seeing it (#5707): it is filed under Done, where the list has it on the way
+        // back. Nothing is said: the user did not ask for it. Not on the Mac, whose list stays beside the page.
+        .task(id: currentTodo != nil) { await seeIfJustFinished() }
+        #endif
         // A tab switch hides the page without onDisappear: the mic must not go on listening behind it.
         .onTabVisibility(appear: {}, disappear: stopDictation)
         .onAppear {

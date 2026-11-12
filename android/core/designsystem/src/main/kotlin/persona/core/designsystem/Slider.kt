@@ -116,7 +116,7 @@ private fun SliderTrack(state: SliderState) {
         drawRoundRect(rest, cornerRadius = corner)
         if (fraction > 0f) drawRoundRect(lit, size = Size(size.width * fraction, size.height), cornerRadius = corner)
         if (style == AppStyle.Board) {
-            val inset = 0.5.dp.toPx()
+            val inset = 0.5.dp.dense.toPx()
             drawRoundRect(outline, topLeft = Offset(inset, inset), size = Size(size.width - inset * 2, size.height - inset * 2),
                 cornerRadius = corner, style = Stroke(1.dp.toPx()))
         }

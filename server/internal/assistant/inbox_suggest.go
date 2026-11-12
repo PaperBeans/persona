@@ -145,6 +145,9 @@ func (s *Service) suggestFrom(ctx context.Context, sessionID string, in suggestI
 		it.SuggestSeq++
 		g := &InboxSuggestion{Version: it.SuggestSeq, Kind: in.Kind, Text: in.Text, Note: clip(strings.TrimSpace(in.Note), 600),
 			Handback: in.Handback, Changes: in.Changes, At: now, Cwd: strings.TrimSpace(in.Cwd), Conversation: from}
+		if in.Kind == SuggestReply && !in.Handback {
+			g.MailTarget = mailTarget(*it)
+		}
 		if in.Kind == SuggestAgent {
 			if m, ok := s.machineByName(ctx, strings.TrimSpace(in.Machine)); ok {
 				g.MachineID = m.ID

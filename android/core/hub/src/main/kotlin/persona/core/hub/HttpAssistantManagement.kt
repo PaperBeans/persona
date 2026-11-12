@@ -114,6 +114,25 @@ class HttpAssistantManagement private constructor(
             }, compactHttp)
         }
     }
+    override suspend fun assistantLauncherList(machineId: String): AssistantLaunchers {
+        require(machineId.isNotBlank())
+        return JsonCodec.decodeFromJsonElement(request("GET", listOf("api", "v1", "machines", machineId, "launchers"),
+            query = mapOf("purpose" to "assistant")))
+    }
+    override suspend fun setModelPick(session: SessionKey, pick: persona.core.contracts.ModelPick): persona.core.contracts.ModelPick {
+        require(session.sessionId.isNotBlank() && pick.launcher.isNotBlank())
+        val answer = assistant("PUT", "conversations", session.sessionId, "model", body = buildJsonObject {
+            put("launcher", pick.launcher)
+            pick.model?.takeIf(String::isNotBlank)?.let { put("model", it) }
+            pick.effort?.takeIf(String::isNotBlank)?.let { put("effort", it) }
+            if (session.machineId.isNotBlank()) put("machine_id", session.machineId)
+        })
+        return (answer["model_pick"] as? JsonObject)?.let { JsonCodec.decodeFromJsonElement<persona.core.contracts.ModelPick>(it) } ?: pick
+    }
+    override suspend fun clearModelPick(session: SessionKey) {
+        require(session.sessionId.isNotBlank())
+        assistant("DELETE", "conversations", session.sessionId, "model")
+    }
     override suspend fun archiveConversation(session: SessionKey) {
         require(session.sessionId.isNotBlank())
         assistant("POST", "conversations", session.sessionId, "archive", body = buildJsonObject { })

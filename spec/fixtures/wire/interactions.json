@@ -478,5 +478,68 @@
         "/type": "interaction_resolved"
       }
     }
+  },
+  {
+    "name": "interaction_resolved_assistant",
+    "description": "助手代答的问题撤回时带上答案和理由，改答从这些答案开始。",
+    "source": [
+      "server/internal/hub/fleet_link.go: EventFleetResolved",
+      "apple/Shared/LiveConnection.swift: ServerEvent.decode",
+      "docs/protocol/protocol.md: interaction_resolved"
+    ],
+    "derived": true,
+    "decoder": "event",
+    "input": {
+      "event_seq": 1,
+      "answered_by": "assistant",
+      "answers": {
+        "选择检查项": "格式, 内容",
+        "选择示例颜色": "蓝色"
+      },
+      "id": "ix_question",
+      "reason": "示例代码只用蓝色",
+      "type": "interaction_resolved"
+    },
+    "expected": {
+      "accepted": true,
+      "fields": {
+        "/answered_by": "assistant",
+        "/answers/选择检查项": "格式, 内容",
+        "/answers/选择示例颜色": "蓝色",
+        "/id": "ix_question",
+        "/reason": "示例代码只用蓝色",
+        "/type": "interaction_resolved"
+      }
+    }
+  },
+  {
+    "name": "interaction_reanswered",
+    "description": "用户改答后只带改了的问题及其新答案。",
+    "source": [
+      "server/internal/assistant/fleet_delegate.go: Service.reanswer",
+      "server/internal/hub/bus_broadcast.go: Hub.relayBroadcastFrom",
+      "apple/Shared/LiveConnection.swift: ServerEvent.decode",
+      "docs/protocol/protocol.md: interaction_reanswered"
+    ],
+    "derived": true,
+    "decoder": "event",
+    "input": {
+      "event_seq": 2,
+      "id": "ix_question",
+      "resolution": {
+        "answers": {
+          "选择示例颜色": "绿色"
+        }
+      },
+      "type": "interaction_reanswered"
+    },
+    "expected": {
+      "accepted": true,
+      "fields": {
+        "/id": "ix_question",
+        "/resolution/answers/选择示例颜色": "绿色",
+        "/type": "interaction_reanswered"
+      }
+    }
   }
 ]

@@ -116,6 +116,7 @@ type Project struct {
 	Aliases    []string `json:"aliases,omitempty"`
 	Goal       string   `json:"goal,omitempty"`
 	MyRole     string   `json:"my_role,omitempty"`
+	Note       string   `json:"note,omitempty"`
 	People     []string `json:"people,omitempty"`
 	Chats      []string `json:"chats,omitempty"`
 	Items      []string `json:"items,omitempty"` // "<kind>/<id>" of docs, meetings, events

@@ -289,6 +289,20 @@ func (n *Node) setBlockedClaudeDirs(patterns []string) {
 	}
 }
 
+// claudeScanGOOS is the platform refreshClaudeDirs reads running claudes' directories on (tests set it).
+var claudeScanGOOS = runtime.GOOS
+
+// scannedConfigDir is a running claude's CLAUDE_CONFIG_DIR as the node names its directories. On Windows the
+// assistant's claude gets it with forward slashes (scriptPath, #5487) and every other start with backslashes: cleaned
+// to backslashes, one profile is listed once. filepath.Clean does that on Windows; the replacement makes it so where
+// tests run.
+func scannedConfigDir(goos, dir string) string {
+	if goos != "windows" {
+		return dir
+	}
+	return filepath.Clean(strings.ReplaceAll(dir, "/", `\`))
+}
+
 // setKnownClaudeDirs takes the hub's list (node.configure).
 func (n *Node) setKnownClaudeDirs(dirs []string) {
 	if n.cdirs == nil {
@@ -320,7 +334,7 @@ func (n *Node) refreshClaudeDirs() {
 	byPID := map[int]string{}
 	for pid, e := range envs {
 		if e.ConfigDir != "" {
-			byPID[pid] = e.ConfigDir
+			byPID[pid] = scannedConfigDir(claudeScanGOOS, e.ConfigDir)
 		}
 	}
 	d.mu.Lock()

@@ -632,7 +632,7 @@ internal fun LarkBubble(
                 Column(if (!message.isRead) Modifier.padding(end = Tokens.Space.m) else Modifier) { body() }
                 if (!message.isRead && !message.system && message.delivery == LarkDelivery.Sent) {
                     val unread = stringResource(R.string.inbox_conversations_unread_message)
-                    Box(Modifier.align(Alignment.TopEnd).size(Tokens.Space.s).clip(CircleShape)
+                    Box(Modifier.align(Alignment.TopEnd).size(Tokens.Space.Standard.s).clip(CircleShape)
                         .background(PersonaTheme.palette.danger.dot).semantics { contentDescription = unread })
                 }
             }

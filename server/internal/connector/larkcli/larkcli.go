@@ -37,15 +37,16 @@ type Connector struct {
 	inboxAllChats map[string]struct{}
 	// triageRules are the user's triage rules for lark-cli's Inbox items, in their words (options.triage_rules): the
 	// Inbox's triage reads them instead of the global inbox.rules.
-	triageRules      string
-	inboxState       persistedInboxState
-	inboxStateLoaded bool
-	inboxCollecting  bool
-	inboxStore       StateStore
-	inboxPrefer      string
-	gatewayAvailable func(context.Context) bool
-	inboxPoll        time.Duration
-	inboxPageLimit   int
+	triageRules       string
+	inboxState        persistedInboxState
+	inboxStateLoaded  bool
+	inboxCollecting   bool
+	inboxStore        StateStore
+	inboxPrefer       string
+	gatewayAvailable  func(context.Context) bool
+	inboxPoll         time.Duration
+	inboxPageLimit    int
+	inboxDirectOffset int
 
 	mu      sync.Mutex
 	pending *adapter.LoginProcess

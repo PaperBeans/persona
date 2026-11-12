@@ -85,23 +85,16 @@ export interface ExtensionSandbox {
   active: boolean;
   why?: string;
   trusted?: boolean;
-  egress?: { allowed: number; denied: number; last_denied?: string; denied_at?: string };
+  /** recent_denied: the last different hosts the proxy refused, the latest first (#5697). */
+  egress?: { allowed: number; denied: number; last_denied?: string; denied_at?: string; recent_denied?: { target: string; count: number; at: string }[] };
+  /** The hosts the owner allowed it in /admin (#5697): no port is any port. */
+  owner_allowed?: { host: string; port?: string; at?: string }[];
 }
 
 /** The sandbox's state in words: in effect, asked for but not in effect, or off (Android ExtensionModelText.sandbox). */
 export function sandboxState(s: ExtensionSandbox): string {
   if (s.active) return t("lib-extensions.sandbox_active");
   return t(s.enabled ? "lib-extensions.sandbox_inactive" : "lib-extensions.sandbox_off");
-}
-
-/** What it reached through the egress proxy: "through the egress proxy: N allowed · M refused", null without counts. */
-export function sandboxEgress(s: ExtensionSandbox): string | null {
-  const e = s.egress;
-  if (!e) return null;
-  return t("lib-extensions.sandbox_egress", {
-    allowed: t("lib-extensions.sandbox_allowed", { count: e.allowed ?? 0 }),
-    denied: t("lib-extensions.sandbox_denied", { count: e.denied ?? 0 }),
-  });
 }
 
 /** The channel an extension contributes (its first `channel` id), whose page is where it is bound. */

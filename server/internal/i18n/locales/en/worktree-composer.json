@@ -41,5 +41,6 @@
   "catalog_incomplete": "Orca returned an incomplete workspace catalog; refresh before continuing",
   "mode_invalid": "Creation mode flags must be booleans",
   "source_branch_conflict": "An existing branch cannot also be a pull request checkout; choose one source",
-  "field_invalid": "Worktree option fields must use the expected JSON types"
+  "field_invalid": "Worktree option fields must use the expected JSON types",
+  "no_commits": "{path} has no commits yet, so a new worktree cannot be made from it; commit once, or work in the folder itself"
 }

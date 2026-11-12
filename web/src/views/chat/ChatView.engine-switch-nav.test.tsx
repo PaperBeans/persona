@@ -28,6 +28,7 @@ vi.mock("./ChatSearch", async (importOriginal) => ({ ...await importOriginal<typ
 
 const { ChatView } = await import("./ChatView");
 const { getState, reset, upsertSession } = await import("../../lib/store");
+const { t } = await import("../../i18n");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const T0 = Date.parse("2026-11-12T09:00:00Z");
@@ -40,6 +41,14 @@ let host: HTMLDivElement;
 let root: Root;
 const until = async (ok: () => boolean) => {
   for (let i = 0; i < 200 && !ok(); i++) await act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+};
+// ChatSearch is deferred until its first open (#5526): use the real menu entry before inspecting its props.
+const openSearch = async () => {
+  const more = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat-chatview.more_actions")}"]`)!;
+  act(() => more.click());
+  await until(() => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].some((item) => item.textContent === t("chat-chatview.search_menu")));
+  const search = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === t("chat-chatview.search_menu"))!;
+  await act(async () => { search.click(); await import("./ChatSearch"); });
 };
 
 beforeEach(() => {
@@ -77,7 +86,8 @@ describe("the rail and the search in A → B → A", () => {
       items: [user(1, 1, "Build a login page."), said(2, 2, "The login page is in."), user(3, 21, `${resumed}Review the tests.`), said(4, 22, "They look right.")],
     });
     act(() => root.render(<ChatView mid="m" sid="a" onToggleSidebar={() => {}} />));
-    await until(() => (seen.rail?.ticks.length ?? 0) > 0 && seen.rail?.total !== undefined);
+    await openSearch();
+    await until(() => (seen.rail?.ticks.length ?? 0) > 0 && seen.rail?.total !== undefined && seen.search !== null);
     expect(seen.rail!.ticks.map((tick) => tick.id)).toEqual(["seg:au3#0"]);
     expect(seen.rail!.total).toBe(1);
     expect(seen.search!.items.map((i) => i.id)).toEqual(["au3#0", "aa4#0"]);
@@ -89,7 +99,8 @@ describe("the rail and the search in A → B → A", () => {
     act(() => root.render(<ChatView mid="m" sid="a" onToggleSidebar={() => {}} />));
     Object.assign(transcript, { loading: false, items: [user(3, 21, `${resumed}Review the tests.`), said(4, 22, "They look right.")] });
     act(() => root.render(<ChatView mid="m" sid="a" onToggleSidebar={() => {}} />));
-    await until(() => seen.rail?.total !== undefined);
+    await openSearch();
+    await until(() => seen.rail?.total !== undefined && seen.search !== null);
     expect(seen.rail!.ticks.map((tick) => tick.id)).toEqual(["seg:au3#0"]);
     expect(seen.search!.items.map((i) => i.id)).toEqual(["au3#0", "aa4#0"]);
     expect(seen.search!.hasMore).toBe(true);

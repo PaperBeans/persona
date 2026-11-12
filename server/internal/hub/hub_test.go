@@ -488,7 +488,7 @@ func TestPhoneToolsThatWaitForTheUser(t *testing.T) {
 		}
 	}
 	for _, name := range []string{
-		"phone_maps_search_nearby", "phone_maps_navigate", "phone_media_play", "phone_media_control", "phone_media_open",
+		"phone_maps_search_nearby", "phone_maps_navigate", "phone_maps_route", "phone_media_play", "phone_media_control", "phone_media_open",
 		"phone_shortcuts_run", "phone_shortcuts_list", "phone_alarms_list", "phone_home_list",
 	} {
 		if phoneConfirmedTools[name] {

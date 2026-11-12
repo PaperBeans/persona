@@ -7,6 +7,7 @@ import (
 
 	"github.com/nwverse/persona/sdk/go/wire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/subscriptions"
 )
 
@@ -47,20 +48,21 @@ func (p *pages) ask() (wire.ActionResult, error) {
 	return wire.ActionResult{OpenURL: AskURL + "?text=" + q}, nil
 }
 
-// askText is a sentence of what the user wants and a <persona-context> block naming the source: connector, source,
-// subscription (left out before there is one) and its setup now in one line, the fields the subscription tools'
-// descriptions read (#5240).
+// askText is a sentence of what the user wants after a <persona-context> block about the source. The block is what the
+// main conversation shows the user, so it says only plain words: a title and the setup now in one line. What the
+// subscription tools read (#5240), connector, source and subscription (left out before there is one), are its
+// attributes, which the model reads and the apps never draw.
 func (p *pages) askText() (string, error) {
-	var lines []string
-	var title, sentence string
+	var ids [][2]string
+	var title, now, sentence string
 	if p.st.ID != "" {
 		s, _, err := p.svc.Get(p.ctx, p.st.ID)
 		if err != nil {
 			return "", err
 		}
 		_, src := p.cached(s.Connector, s.Source)
-		lines = []string{"connector: " + s.Connector, "source: " + s.Source, "subscription: " + s.ID,
-			"now: " + p.askNow(s, src)}
+		ids = [][2]string{{"connector", s.Connector}, {"source", s.Source}, {"subscription", s.ID}}
+		now = p.askNow(s, src)
 		title = p.t("ask.context_subscription", i18n.Args{"label": s.Label})
 		sentence = p.t("ask.subscription", i18n.Args{"label": s.Label})
 	} else {
@@ -77,15 +79,15 @@ func (p *pages) askText() (string, error) {
 		if src == nil {
 			return "", &subscriptions.Error{Status: 404, Code: subscriptions.CodeNotFound}
 		}
-		now := p.t("ask.now_new")
+		now = p.t("ask.now_new")
 		if len(src.Recipes) > 0 {
 			now = p.t("ask.now_new_recipe", i18n.Args{"tool": toolTitle(src, src.Recipes[0].Tool)})
 		}
-		lines = []string{"connector: " + p.st.C, "source: " + p.st.S, "now: " + now}
+		ids = [][2]string{{"connector", p.st.C}, {"source", p.st.S}}
 		title = p.t("ask.context_source", i18n.Args{"source": src.Name})
 		sentence = p.t("ask.source", i18n.Args{"source": src.Name})
 	}
-	return contextBlock(title, strings.Join(lines, "\n")) + "\n\n" + sentence, nil
+	return contextBlock(title, ids, now) + "\n\n" + sentence, nil
 }
 
 // askNow is a subscription's setup in one line: its tool, where it goes, how often, its triage rules, how it is doing.
@@ -100,12 +102,18 @@ func (p *pages) askNow(s subscriptions.Subscription, src *subscriptions.CatalogS
 	return join(parts)
 }
 
-// contextBlock is a <persona-context> block as the apps write one (LinkSheet's ContextRef): attributes escaped, and
-// a text that can't close it.
-func contextBlock(title, body string) string {
+// contextBlock is a <persona-context> block as the apps write one (LinkSheet's ContextRef, web contextXML): kind,
+// title and url, then attrs in their order, all escaped; a body that can't close it (prompts.ContextBody). The apps
+// keep attributes they have no field for and draw only the title and the body.
+func contextBlock(title string, attrs [][2]string, body string) string {
 	esc := strings.NewReplacer("&", "&amp;", `"`, "&quot;", "<", "&lt;", ">", "&gt;")
-	body = strings.ReplaceAll(body, "</persona-context", "&lt;/persona-context")
-	return `<persona-context kind="context" title="` + esc.Replace(title) + `" url="">` + "\n" + body + "\n</persona-context>"
+	var b strings.Builder
+	b.WriteString(`<persona-context kind="context" title="` + esc.Replace(title) + `" url=""`)
+	for _, a := range attrs {
+		b.WriteString(" " + a[0] + `="` + esc.Replace(a[1]) + `"`)
+	}
+	b.WriteString(">\n" + prompts.ContextBody(body) + "\n</persona-context>")
+	return b.String()
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

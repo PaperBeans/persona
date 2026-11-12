@@ -1,11 +1,10 @@
 package extension
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/url"
 	"runtime"
 	"slices"
@@ -80,21 +79,24 @@ type MarketPackage struct {
 // plugin does not hide a market); an index that is not one is an error.
 func ParseIndex(data []byte) (*MarketIndex, []string, error) {
 	if len(data) > IndexMost {
-		return nil, nil, fmt.Errorf("索引大于 %d 字节", IndexMost)
+		return nil, nil, i18n.Err("extension-market_read.too_large", i18n.Args{"bytes": IndexMost})
 	}
 	var ix MarketIndex
 	if err := json.Unmarshal(data, &ix); err != nil {
-		return nil, nil, fmt.Errorf("不是扩展市场的索引：%v", err)
+		return nil, nil, notCatalog(data)
 	}
-	if ix.MarketVersion != 1 {
-		return nil, nil, fmt.Errorf("索引的 market_version 是 %d，这个 hub 只认 1", ix.MarketVersion)
+	switch {
+	case ix.MarketVersion > 1:
+		return nil, nil, i18n.Err("extension-market_read.newer_format", i18n.Args{"version": ix.MarketVersion})
+	case ix.MarketVersion != 1:
+		return nil, nil, notCatalog(data)
 	}
 	ix.Name = strings.TrimSpace(ix.Name)
 	if ix.Name == "" || len([]rune(ix.Name)) > 60 {
-		return nil, nil, errors.New("索引要有 name（最多 60 个字）")
+		return nil, nil, i18n.Err("extension-market_read.no_name")
 	}
 	if len([]rune(ix.Description)) > StringMost {
-		return nil, nil, errors.New("索引的 description 太长")
+		return nil, nil, i18n.Err("extension-market_read.description_too_long")
 	}
 	if ix.Homepage != "" && !isHTTPS(ix.Homepage) {
 		ix.Homepage = ""
@@ -105,7 +107,7 @@ func ParseIndex(data []byte) (*MarketIndex, []string, error) {
 		}
 	}
 	if len(ix.Extensions) > IndexExtensionsMost {
-		return nil, nil, fmt.Errorf("索引里多于 %d 个扩展", IndexExtensionsMost)
+		return nil, nil, i18n.Err("extension-market_read.too_many", i18n.Args{"most": IndexExtensionsMost})
 	}
 	// Identity declarations are never silently dropped or resolved first-entry-wins.
 	declaredTargets := map[string]bool{}
@@ -119,6 +121,7 @@ func ParseIndex(data []byte) (*MarketIndex, []string, error) {
 		}
 		declaredTargets[m.ID] = true
 	}
+	// Warnings are kept with the market in the default language and shown in the reader's (i18n.MarketText).
 	var warnings []string
 	seen := map[string]bool{}
 	kept := ix.Extensions[:0]
@@ -126,9 +129,9 @@ func ParseIndex(data []byte) (*MarketIndex, []string, error) {
 		m, err := e.check()
 		switch {
 		case err != nil:
-			warnings = append(warnings, fmt.Sprintf("第 %d 个扩展：%v", i+1, err))
+			warnings = append(warnings, i18n.T(i18n.Default, "extension-market_read.entry_skipped", i18n.Args{"n": i + 1, "err": err.Error()}))
 		case seen[m.ID]:
-			warnings = append(warnings, fmt.Sprintf("扩展 %s 出现了两次，只用第一个", m.ID))
+			warnings = append(warnings, i18n.T(i18n.Default, "extension-market_read.entry_duplicate", i18n.Args{"id": m.ID}))
 		default:
 			seen[m.ID] = true
 			e.Parsed = m
@@ -155,6 +158,41 @@ func ParseIndex(data []byte) (*MarketIndex, []string, error) {
 	return &ix, warnings, nil
 }
 
+// notCatalog says what a document that is not a market's catalog is, for whoever entered the address: a web page,
+// or JSON that is something else (a GitHub API answer, another file, or the answer of a proxy or sign-in page on the
+// way, quoted when it carries a message). Without market_version it is never taken for a catalog of format 0.
+func notCatalog(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) > 0 && data[0] == '<' {
+		return i18n.Err("extension-market_read.web_page")
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(data, &fields) == nil {
+		// GitHub answers a file's page with the page's own data when asked for JSON: {"meta": …, "payload": {…}}.
+		if p := bytes.TrimSpace(fields["payload"]); len(p) > 0 && p[0] == '{' && fields["meta"] != nil {
+			return i18n.Err("extension-market_read.web_page")
+		}
+		for _, key := range []string{"message", "error", "msg"} {
+			var said string
+			if json.Unmarshal(fields[key], &said) == nil {
+				if said = clipSaid(said); said != "" {
+					return i18n.Err("extension-market_read.not_catalog_said", i18n.Args{"message": said})
+				}
+			}
+		}
+	}
+	return i18n.Err("extension-market_read.not_catalog")
+}
+
+// clipSaid is what a non-catalog answer said, on one line and at most 160 characters.
+func clipSaid(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > 160 {
+		s = string(r[:160]) + "…"
+	}
+	return s
+}
+
 // Translations are the entry's l10n, read (ParseIndex has left out one that does not check out).
 func (e *MarketEntry) Translations() Translations {
 	ts, _ := ParseEntryTranslations(e.L10n)
@@ -163,7 +201,7 @@ func (e *MarketEntry) Translations() Translations {
 
 func (e *MarketEntry) check() (*Manifest, error) {
 	if len(e.Manifest) == 0 {
-		return nil, errors.New("没有 manifest")
+		return nil, i18n.Err("extension-market_read.entry_no_manifest")
 	}
 	m, err := Parse(e.Manifest)
 	if err != nil {
@@ -177,19 +215,19 @@ func (e *MarketEntry) check() (*Manifest, error) {
 		e.Tags = m.Tags
 	}
 	if len(e.Tags) > marketTagMost {
-		return nil, errors.New("tags 太多")
+		return nil, i18n.Err("extension-market_read.entry_too_many_tags")
 	}
 	for _, t := range e.Tags {
 		if t == "" || len([]rune(t)) > 24 {
-			return nil, errors.New("tag 为空或太长")
+			return nil, i18n.Err("extension-market_read.entry_bad_tag")
 		}
 	}
 	if len(e.Packages) == 0 || len(e.Packages) > marketPackageMost {
-		return nil, fmt.Errorf("%s：要有 1–%d 个包", m.ID, marketPackageMost)
+		return nil, i18n.Err("extension-market_read.entry_package_count", i18n.Args{"id": m.ID, "most": marketPackageMost})
 	}
 	for _, p := range e.Packages {
 		if b, err := hex.DecodeString(p.SHA256); err != nil || len(b) != sha256.Size {
-			return nil, fmt.Errorf("%s：包要有 sha256（64 位十六进制）", m.ID)
+			return nil, i18n.Err("extension-market_read.entry_package_sha256", i18n.Args{"id": m.ID})
 		}
 		if strings.HasPrefix(p.URL, "oci:") {
 			if _, err := parseOCI(p.URL); err != nil || p.Size <= 0 || p.Size > PackageMost {
@@ -201,7 +239,7 @@ func (e *MarketEntry) check() (*Manifest, error) {
 			return nil, i18n.Err("extension-market_security.package")
 		}
 		if p.URL == "" || strings.HasPrefix(p.URL, "http://") || strings.Contains(p.URL, "://") && !strings.HasPrefix(p.URL, "https://") {
-			return nil, fmt.Errorf("%s：包的地址要是相对路径或 https", m.ID)
+			return nil, i18n.Err("extension-market_read.entry_package_url", i18n.Args{"id": m.ID})
 		}
 	}
 	return m, nil

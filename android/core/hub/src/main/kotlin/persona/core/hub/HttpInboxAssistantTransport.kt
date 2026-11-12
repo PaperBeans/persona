@@ -196,6 +196,12 @@ class HttpInboxAssistantTransport private constructor(
         json(url("api", "v1", "assistant", "conversations").pinned(manager), buildJsonObject {
             put("prompt", ""); put("main", main); launcher?.let { put("launcher", it) }
         })
+    override suspend fun createConversationOf(manager: String?, main: Boolean, pick: persona.core.contracts.ModelPick) =
+        json(url("api", "v1", "assistant", "conversations").pinned(manager), buildJsonObject {
+            put("prompt", ""); put("main", main); put("launcher", pick.launcher)
+            pick.model?.takeIf(String::isNotBlank)?.let { put("model", it) }
+            pick.effort?.takeIf(String::isNotBlank)?.let { put("effort", it) }
+        })
     private fun HttpUrl.pinned(manager: String?) = newBuilder().addQueryParameter(ManagerQuery, manager.orEmpty()).build()
     override suspend fun pins() = json(url("api", "v1", "pins"))
     override suspend fun mutes() = json(url("api", "v1", "mutes"))

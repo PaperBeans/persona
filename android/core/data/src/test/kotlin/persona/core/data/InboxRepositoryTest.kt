@@ -679,7 +679,8 @@ class InboxRepositoryTest {
             }
             val transport = FakeTransport().apply { items = JsonArray(listOf(item("a"), item("b"), item("c"))) }
             val repository = repository(transport, directory, owner, FakeHub())
-            withTimeout(5_000) { repository.snapshot.first { it.contentSource != null } }
+            // Account for the Online-triggered initial refresh before taking the bulk request baseline.
+            withTimeout(5_000) { repository.snapshot.first { it.contentSource != null && it.refreshes > 0 } }
             repository.refresh()
             // Before the answer: b was filed on another device, c is gone from the hub. The refresh after the
             // answer fails (offline), so what the list shows is what bulk() itself made of the answer.
@@ -1043,7 +1044,8 @@ class InboxRepositoryTest {
             }
             val transport = FakeTransport().apply { items = JsonArray(listOf(item("a"), item("b", "2026-11-06T07:00:00Z"))) }
             val repository = repository(transport, directory, owner, FakeHub())
-            withTimeout(5_000) { repository.snapshot.first { it.contentSource != null } }
+            // Account for the Online-triggered initial refresh before taking the bulk request baseline.
+            withTimeout(5_000) { repository.snapshot.first { it.contentSource != null && it.refreshes > 0 } }
             repository.refresh()
             // The hub's store write failed for both: they were never filed (or reopened), and the refresh after it fails
             // (offline), so what the list shows is what bulk() itself made of the answer.

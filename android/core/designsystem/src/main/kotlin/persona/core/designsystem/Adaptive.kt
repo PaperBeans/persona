@@ -95,13 +95,13 @@ fun DetailPlaceholder(title: String, text: String, icon: PhIcon, modifier: Modif
     val palette = PersonaTheme.palette
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         PageBackdrop()
-        Column(Modifier.widthIn(max = 320.dp).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.size(64.dp).background(palette.surfaceStrong, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) {
+        Column(Modifier.widthIn(max = 320.dp).padding(24.dp.dense), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(64.dp).background(palette.surfaceStrong, RoundedCornerShape(20.dp.corner)), contentAlignment = Alignment.Center) {
                 JIcon(icon, null, size = 30.dp, tint = palette.ink2)
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp.dense))
             Text(title, style = PersonaTheme.type.title, color = palette.ink, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(6.dp.dense))
             Text(text, style = PersonaTheme.type.callout, color = palette.ink2, textAlign = TextAlign.Center)
         }
     }

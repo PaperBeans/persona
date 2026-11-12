@@ -125,6 +125,38 @@ struct StyleSpecTests {
         #expect(PersonaPalette.contrast(hex.dark, Theme.ChatBox.personaHex.dark) >= 4.5)
     }
 
+    /// The Mac window's chrome a style brings (`StyleSpec.MacChrome`, Lark's), in the style's own colors: a selected
+    /// row's icon in the accent ≥ 3:1 on the sections column's raised block and on the selection's wash over the side
+    /// column and over the page, the row's words ≥ 4.5:1 on that wash, and the white letter ≥ 3:1 on every monogram
+    /// hue (a heading-sized letter, so the large-text floor).
+    @Test func theMacChromeReads() {
+        var found: [String] = []
+        for style in AppStyle.allCases {
+            let chrome = style.component.mac
+            let spec = StyleSpec(style.component, style.component.colors)
+            for (look, ui) in Self.appearances {
+                func check(_ what: String, _ a: (Double, Double, Double), _ b: (Double, Double, Double), _ floor: Double) {
+                    let c = Self.contrast(a, b)
+                    if c < floor { found.append("\(style.rawValue) \(look) \(what): \(String(format: "%.2f", c))") }
+                }
+                let accent = Self.rgb(spec.accent, ui)
+                if let raised = chrome.sidebarSelected { check("icon on the raised block", accent, Self.rgb(raised, ui), 3) }
+                if let tint = chrome.selectionTint {
+                    let unders: [(String, Color)] = [("side column", chrome.sideColumn ?? spec.page), ("page", spec.page)]
+                    for (name, under) in unders {
+                        let wash = Self.over(spec.accent.opacity(tint), Self.rgb(under, ui), ui)
+                        check("icon on the selection over the \(name)", accent, wash, 3)
+                        check("words on the selection over the \(name)", Self.rgb(Theme.primaryText, ui), wash, 4.5)
+                    }
+                }
+                for (i, hue) in chrome.monogramHues.enumerated() {
+                    check("white on monogram hue \(i)", Self.rgb(Theme.onSolid, ui), Self.rgb(hue, ui), 3)
+                }
+            }
+        }
+        #expect(found.isEmpty, "the Mac chrome under its floors: \(found)")
+    }
+
     /// The colored canvases stay darker than the system's grouped cells in dark (#1C1C1E): Clay's at #1D1A23 was one
     /// color with them (1.01:1); Island's own #0A1110 is 1.13:1.
     @Test func darkWashesSitUnderTheCells() {

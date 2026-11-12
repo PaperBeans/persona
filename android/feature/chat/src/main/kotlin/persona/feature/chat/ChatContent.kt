@@ -53,7 +53,9 @@ import persona.core.contracts.SessionKey
 import persona.core.contracts.api.ChatRepository
 import persona.core.designsystem.*
 import persona.core.designsystem.WorkStep as TimelineStep
+import persona.core.designsystem.dense
 import persona.core.designsystem.icons.PhIcons
+import persona.core.designsystem.row
 import persona.core.domain.lines.*
 import androidx.compose.runtime.key
 import kotlinx.coroutines.Dispatchers
@@ -157,10 +159,10 @@ private fun ChatMarkdownBody(text: String, id: String, bodyStyle: TextStyle, col
                 textLink = TextLinkStyles(SpanStyle(color = palette.accent, textDecoration = TextDecoration.Underline))),
             components = markdownComponents(
                 orderedList = { model -> MarkdownOrderedList(model.content, model.node, depth = model.listDepth,
-                    markerModifier = { Modifier.alignBy(FirstBaseline).padding(end = 8.dp) },
+                    markerModifier = { Modifier.alignBy(FirstBaseline).padding(end = 8.dp.dense) },
                     listModifier = { Modifier.weight(1f).alignBy(FirstBaseline) }) },
                 unorderedList = { model -> MarkdownBulletList(model.content, model.node, depth = model.listDepth,
-                    markerModifier = { Modifier.alignBy(FirstBaseline).padding(end = 8.dp) },
+                    markerModifier = { Modifier.alignBy(FirstBaseline).padding(end = 8.dp.dense) },
                     listModifier = { Modifier.weight(1f).alignBy(FirstBaseline) }) },
                 codeFence = { model ->
                     MarkdownFence(model.content.substring(model.node.startOffset, model.node.endOffset), color, bodyStyle) {
@@ -189,7 +191,7 @@ internal fun CodeText(text: String, language: String = "", syntax: Boolean = fal
     val copy = rememberCopy()
     val palette = PersonaTheme.palette
     val colour = syntax && language.isNotBlank()
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp.dense)) {
         if (bar) CodeBody(preview, language, colour) { CodeBar(language) { copy(text, null) } }
         else {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -332,6 +334,12 @@ internal fun ChatLineContent(
         }
         is ChatLine.Recaps -> RecapLine(line.items.map { it.item })
         is ChatLine.Viewed -> ViewedImagesRow(line.images, session, loader)
+        // Glass: where the replies' model changed (#5055, ModelChanges.mark), as the transcript names both.
+        is ChatLine.ModelChange -> {
+            val from = persona.core.domain.lines.ModelChanges.replyModelName(line.from)
+            val to = persona.core.domain.lines.ModelChanges.replyModelName(line.to)
+            persona.core.designsystem.JModelChangeDivider("$from → $to", res.getString(R.string.chat_model_changed, from, to))
+        }
         is ChatLine.Extra -> {
             val round = line.payload as? persona.core.domain.tasks.BackgroundRound
             if (round != null) BackgroundRoundLine(round, onToggle) else AssistantExtraLine(line.payload, LocalAssistantTaskHost.current)
@@ -360,7 +368,7 @@ internal fun ChatLineContent(
             WorkStep(line.step, session, loader, onFold, folding, foldErrors, onFullText, style, textUpdates, workRunning, lastWorkStep, plan)
         }
         is ChatLine.End -> TimelineMark(pluralStringResource(R.plurals.chat_content_collapse_steps, line.count, line.count),
-            Modifier.heightIn(min = 44.dp).clickable(role = Role.Button) { onToggle(line.groupId) })
+            Modifier.heightIn(min = 44.dp.row).clickable(role = Role.Button) { onToggle(line.groupId) })
         is ChatLine.Wakes -> ChatSystemLine(pluralStringResource(R.plurals.chat_content_wakes, line.turn.wakes.size, line.turn.wakes.size))
     }
 }
@@ -534,7 +542,7 @@ internal fun UserBubble(text: String, id: String = "pending", pending: persona.c
 
 @Composable
 internal fun ChatSystemLine(text: String, failed: Boolean = false) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp.dense), horizontalArrangement = Arrangement.spacedBy(6.dp.dense),
         verticalAlignment = Alignment.Top) {
         JIcon(if (failed) PhIcons.WarningCircle else PhIcons.Info, null, size = 16.dp,
             tint = if (failed) PersonaTheme.palette.danger.text else PersonaTheme.palette.ink2)

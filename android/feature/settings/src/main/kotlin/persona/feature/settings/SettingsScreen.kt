@@ -304,10 +304,10 @@ private fun SettingsContent(
         "codex" -> ClaudeSettingsPage(services.sessions, services.machines.takeUnless { services.demo }, back, AgentSettingsKind.Codex,
             owns = { assistant.ownsOn(it.id, it.manager) })
         "models" -> purpose?.let { id -> ModelPurposePage(services.models.takeUnless { services.demo }, id, onBack = { purpose = null },
-                providers = services.providers.takeUnless { services.demo }, manager = purposeManager) }
+                providers = services.providers.takeUnless { services.demo }, manager = purposeManager, machines = machines) }
             ?: ModelConfigurationPage(services.models.takeUnless { services.demo }, back,
                 onPurpose = { id, owner -> onNavigate?.invoke(persona.core.navigation.ModelPurposeRoute(id, owner)) ?: run { purposeManager = owner; purpose = id } },
-                providers = services.providers.takeUnless { services.demo }, onProviders = { open(SettingsPage.Providers) })
+                providers = services.providers.takeUnless { services.demo }, onProviders = { open(SettingsPage.Providers) }, machines = machines)
         "plugins" -> extension?.let { id -> ExtensionPage(services.extensions.takeUnless { services.demo }, id, onBack = { extension = null },
                 manager = extensionManager,
                 machines = services.sessions.machines,

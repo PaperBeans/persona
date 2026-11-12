@@ -33,8 +33,11 @@
 | hello 与 health 从当前 `proto.Features` 导出能力列表。 | `server/internal/hub/hello.go`：`hello`、`health`；`apple/Shared/LiveConnection.swift`：`ServerEvent.decode` | `hello_features`、`health_features` |
 | revs 是会话标识到整数版本号的映射。 | `apple/PersonaTests/SyncEventTests.swift`：`decodesRevs` | `revs_changed_sessions` |
 | 会话列表保留模式、队列、后台任务、子任务和循环信息，事件用信封中的机器标识设置会话归属。 | `server/internal/proto/session.go`：`Session`；`apple/Shared/Models.swift`：`Session.init(from:)`；`ServerEvent.decode` | `sessions_list`、`sessions_event` |
+| 完整会话行携带等待下一条消息的服务商切换（`pending_switch`）和 Persona 对话自己选的模型（`model_pick`）；摘要行保留 `model_pick`，省略启动器和 `pending_switch`，客户端用此前完整行里的值。 | `server/internal/proto/session.go`：`PendingSwitch`、`ModelPick`；`server/internal/hub/sessions_list.go`：`runtimeSummary`；`android/core/domain/src/main/kotlin/persona/core/domain/models/SummaryRows.kt` | `sessions_model_switch`、`sessions_summary_model_pick` |
+| Persona 对话的 `queued` 先列用户自己的消息，最后 `queued_relayed` 条来自其他对话或系统，客户端只展示和拷贝这几条。 | `server/internal/proto/session.go`：`Session`；`server/internal/assistant/fleet_sessions.go`：`Service.decorateInventory`；`apple/Shared/Models.swift`：`Session.ownQueuedCount` | `sessions_assistant_queue` |
 | 在线与离线机器使用同一类型，系统信息和版本字段可选。 | `server/internal/hub/machine.go`：`Machine.snapshot`；`apple/Shared/Models.swift`：`Machine` | `machines_list`、`machines_event` |
 | items 用 kind 区分内容块，工具输入中的自定义键名原样保留。 | `server/internal/proto/item.go`：`Item`；`apple/Shared/Models.swift`：`Item`；`apple/Shared/JSONValue.swift`：`JSONValue` | `items_all_kinds` |
+| 助手条目携带写出它的模型（`model`），用户条目没有；客户端据此标出回复模型变化的位置。 | `server/internal/proto/item.go`：`Item.Model`；`android/core/domain/src/main/kotlin/persona/core/domain/lines/ModelChanges.kt` | `items_reply_models` |
 | 工具调用与结果共用 `tool_use_id`，失败结果携带 `is_error`。 | `proto.Item`；`apple/Shared/Models.swift`：`Item` | `items_all_kinds` |
 | 懒加载图片的 `data` 仍是空字符串，并携带尺寸和 lazy 标记，普通图片保留 base64。 | `proto.Image.Placeholder`、`WithoutImageData`；`apple/Shared/Models.swift`：`ImagePayload` | `items_all_kinds`、`items_inline_image`、`items_live_lazy`、`items_http_after` |
 | 后台任务通知仍是 notice，task 区分 shell、monitor 和 agent，退出码零值也可显式出现。 | `proto.TaskNote`；`apple/Shared/Models.swift`：`TaskNote` | `items_all_kinds`、`items_task_notifications` |
@@ -48,6 +51,7 @@
 | 屏幕对话框携带选项和 rev，密码提示使用 secret 且不记录密码输入。 | `server/internal/screen/dialog.go`：`ParseDialog`；`secret.go`：`SecretPrompt`；`apple/Shared/Models.swift`：`ScreenDialog`、`Interaction` | `interaction_screen`、`interaction_secret` |
 | elicitation 交互携带 MCP 服务名和 form（requested_schema）或 url 载荷，只发给声明 elicitation 能力的连接，旧 iOS 收不到。 | `server/internal/hub/http.go`：`Hub.broadcast`、`broadcastTo`；`proto.Elicitation`；`android/core/contracts/src/main/kotlin/persona/core/contracts/Elicitation.kt` | `interaction_elicitation_form`、`interaction_elicitation_url` |
 | interaction_resolved 按 id 撤回交互。 | `server/internal/hub/hub.go`：`resolve`；`ServerEvent.decode` | `interaction_resolved` |
+| 助手代答的问题撤回时另带 answered_by、reason 和按问题文字的 answers；改答事件 interaction_reanswered 只带改了的问题，放在 resolution.answers。 | `server/internal/hub/fleet_link.go`：`EventFleetResolved`；`server/internal/assistant/fleet_delegate.go`：`reanswer`；`Hub.relayBroadcastFrom`；`ServerEvent.decode`；`docs/protocol/protocol.md`「WebSocket `/api/v1/ws`」 | `interaction_resolved_assistant`、`interaction_reanswered` |
 | Fleet 保留驼峰键名，时间使用 Unix 秒数字。 | `server/internal/hub/liveactivity.go`：`FleetState`、`buildFleet`；`apple/Shared/FleetState.swift` | `fleet_snapshot`、`fleet_event` |
 | 收件箱列表统一承载飞书和邮件，移除 context 等内部字段并保留草拟回复。 | `server/internal/assistant/inbox.go`：`InboxItem.listed`；`apple/Shared/InboxModels.swift`：`InboxItem` | `inbox_list` |
 | 回答记录保留一行摘要，`items` 成对保存完整问答并保留换行；旧记录没有 `items`。 | `server/internal/assistant/answered.go`：`answeredBody`、`answeredItems`；`apple/Shared/Tasks.swift`：`FeedItem` | `feed_answered_items` |
@@ -108,7 +112,7 @@ go test -count=1 -p 1 ./internal/hub -run '^TestWireSamples$' -update
 
 ## iOS 只读对照
 
-本次全部 47 个用例已由临时 Swift 程序读取 input，调用上表中的真实解码实现并逐项核对 expected；没有只凭单测断言而未执行对照的用例。未修改 `ios/`，也没有启动 App 或联网。
+本次全部 47 个用例已由临时 Swift 程序读取 input，调用上表中的真实解码实现并逐项核对 expected；没有只凭单测断言而未执行对照的用例。未修改 `ios/`，也没有启动 App 或联网。之后加入的 `interaction_resolved_assistant`、`interaction_reanswered` 两例没有经过临时程序，期望按 `apple/PersonaTests/DelegateTests.swift` 的 `theResolvedEventCarriesTheAssistantsAnswer` 填写（同样的键和形状）。
 
 完整编译 `ChatStore.swift`、`LiveConnection.swift` 时，当前沙箱不允许 Observation 宏插件启动。临时程序因此直接引用四个纯模型文件，并把其他文件中需要的完整声明按边界原样摘取到 `/tmp/wire-swift/Referenced.swift`；没有修改声明内的解码逻辑。摘取范围是：
 

@@ -297,6 +297,35 @@ final class TodoStore {
         }
     }
 
+    /// Marks a to-do seen (Got It, or opening it: #5707, docs/assistant/todo-status-sop.md "Seen") or, with `seen` false,
+    /// takes the mark off (Undo). The list moves it at once (principle 7); the hub's mark takes the place of the local
+    /// one, and a failure puts back the mark it had and throws. `after`: the moment that put it in Just finished, so the
+    /// mark shown before the hub answers is not earlier than it on a clock behind the hub's. Only the mark is taken from
+    /// the answer: the list's own fields (its ask) are not in it.
+    func setSeen(id: String, _ seen: Bool, after: Date = .distantPast, api injected: APIClient? = nil) async throws {
+        guard let api = client(for: id, injected) else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
+        let targetGeneration = generation
+        let before = byID[id]?.seenAt
+        markSeen(id, seen ? max(Date(), after) : nil)
+        do {
+            let res = try await api.setTodoSeen(id: id, seen: seen)
+            guard generation == targetGeneration else { return }
+            markSeen(id, res.seenAt)
+        } catch {
+            if generation == targetGeneration { markSeen(id, before) }
+            throw error
+        }
+    }
+
+    /// Sets to-do `id`'s seen mark in the list; a read already in flight cannot put the old one back.
+    private func markSeen(_ id: String, _ at: Date?) {
+        guard let idx = todos.firstIndex(where: { $0.id == id }) else { return }
+        mutationRevision += 1
+        var updated = todos
+        updated[idx].seenAt = at
+        apply(updated)
+    }
+
     func delete(id: String, api injected: APIClient? = nil) async throws {
         guard let api = client(for: id, injected) else { throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]")) }
         let targetGeneration = generation

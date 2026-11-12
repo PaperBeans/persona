@@ -35,6 +35,12 @@ val Session.canTypeClaudeCommands: Boolean get() = canChangeModes && !assistant 
  * send-now the node presses. Other agents refuse it (`send_now_unsupported`).
  */
 val Session.steersQueue: Boolean get() = isClaude && !assistant && !hasSource && !paneId.isNullOrBlank() && canSend
+/**
+ * How many of [Session.queued] are the user's own (iOS `Session.ownQueuedCount`): they come first, and only they are
+ * taken back, moved, deleted or sent now. The rest, a Persona conversation's last `queued_relayed`, came from other
+ * conversations or the system and are only shown and copied (docs/protocol/protocol.md, `queued_relayed`).
+ */
+val Session.ownQueued: Int get() = (queued?.size ?: 0).let { count -> count - (queuedRelayed ?: 0).coerceIn(0, count) }
 
 /** A session's source as the app names it: its label, the agent's name there, and why it is read-only. */
 data class SessionSourceInfo(

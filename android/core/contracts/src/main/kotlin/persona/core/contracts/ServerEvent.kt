@@ -141,11 +141,40 @@ data class InteractionEvent(
     val interaction: Interaction,
 ) : ServerEvent
 
+/**
+ * A card ended (docs/protocol/protocol.md `interaction_resolved`). A question the assistant answered for the user says so
+ * ([answeredBy] `assistant`), with why ([reason]) and what it answered, which Change Answer starts from (iOS `ServerEvent`).
+ */
 @KeepGeneratedSerializer
 @Serializable(with = InteractionResolvedEventSerializer::class)
 data class InteractionResolvedEvent(
     val id: String,
-) : ServerEvent
+    @SerialName("answered_by") val answeredBy: String? = null,
+    val reason: String? = null,
+    /** By question text; raw, so a value that is not text drops alone and not the whole answer (iOS `Delegated.answers(in:)`). */
+    @SerialName("answers") val answersJson: JsonElement? = null,
+) : ServerEvent {
+    val byAssistant: Boolean get() = answeredBy == DelegatedAnswer.ASSISTANT
+    val answers: Map<String, String> get() = textValues(answersJson)
+}
+
+/**
+ * The user changed an answer the assistant gave and the hub sent it to the Agent (docs/protocol/protocol.md
+ * `interaction_reanswered`): [answers] names only the questions that changed.
+ */
+@KeepGeneratedSerializer
+@Serializable(with = InteractionReansweredEventSerializer::class)
+data class InteractionReansweredEvent(
+    val id: String,
+    /** `{answers}`, raw as [InteractionResolvedEvent.answersJson]. */
+    @SerialName("resolution") val resolutionJson: JsonElement? = null,
+) : ServerEvent {
+    val answers: Map<String, String> get() = textValues((resolutionJson as? JsonObject)?.get("answers"))
+}
+
+/** A JSON object's text values; anything else, and anything that is no object, is left out. */
+internal fun textValues(json: JsonElement?): Map<String, String> =
+    (json as? JsonObject).orEmpty().mapNotNull { (key, value) -> (value as? JsonPrimitive)?.takeIf { it.isString }?.let { key to it.content } }.toMap()
 
 @KeepGeneratedSerializer
 @Serializable(with = EndpointsEventSerializer::class)
@@ -280,6 +309,7 @@ object ServerEventSerializer : KSerializer<ServerEvent> {
             "fleet" -> input.json.decodeFromJsonElement<FleetEvent>(obj)
             "interaction" -> input.json.decodeFromJsonElement<InteractionEvent>(obj)
             "interaction_resolved" -> input.json.decodeFromJsonElement<InteractionResolvedEvent>(obj)
+            "interaction_reanswered" -> input.json.decodeFromJsonElement<InteractionReansweredEvent>(obj)
             "endpoints" -> input.json.decodeFromJsonElement<EndpointsEvent>(obj)
             "client_hello_ack" -> input.json.decodeFromJsonElement<ClientHelloAck>(obj)
             "pong" -> input.json.decodeFromJsonElement<Pong>(obj)
@@ -344,6 +374,7 @@ object ServerEventSerializer : KSerializer<ServerEvent> {
             is FleetEvent -> "fleet" to output.json.encodeToJsonElement(value)
             is InteractionEvent -> "interaction" to output.json.encodeToJsonElement(value)
             is InteractionResolvedEvent -> "interaction_resolved" to output.json.encodeToJsonElement(value)
+            is InteractionReansweredEvent -> "interaction_reanswered" to output.json.encodeToJsonElement(value)
             is EndpointsEvent -> "endpoints" to output.json.encodeToJsonElement(value)
             is ClientHelloAck -> "client_hello_ack" to output.json.encodeToJsonElement(value)
             is Pong -> "pong" to output.json.encodeToJsonElement(value)
@@ -392,6 +423,7 @@ object RevsEventSerializer : WireSerializer<RevsEvent>(RevsEvent.generatedSerial
 object FleetEventSerializer : WireSerializer<FleetEvent>(FleetEvent.generatedSerializer())
 object InteractionEventSerializer : WireSerializer<InteractionEvent>(InteractionEvent.generatedSerializer())
 object InteractionResolvedEventSerializer : WireSerializer<InteractionResolvedEvent>(InteractionResolvedEvent.generatedSerializer())
+object InteractionReansweredEventSerializer : WireSerializer<InteractionReansweredEvent>(InteractionReansweredEvent.generatedSerializer())
 object EndpointsEventSerializer : WireSerializer<EndpointsEvent>(EndpointsEvent.generatedSerializer())
 object ClientHelloAckSerializer : WireSerializer<ClientHelloAck>(ClientHelloAck.generatedSerializer())
 object PongSerializer : WireSerializer<Pong>(Pong.generatedSerializer())

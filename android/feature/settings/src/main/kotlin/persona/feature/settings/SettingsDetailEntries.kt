@@ -34,8 +34,9 @@ fun EntryProviderScope<NavKey>.settingsDetailEntries(navigator: Navigator, servi
             onDone = navigator::back, onBack = navigator::back)
     }
     entry<ModelPurposeRoute> { route ->
+        val machines by services.sessions.machines.collectAsState()
         ModelPurposePage(services.models.takeUnless { demo }, route.purposeId, onBack = navigator::back,
-            providers = services.providers.takeUnless { demo }, manager = route.manager)
+            providers = services.providers.takeUnless { demo }, manager = route.manager, machines = machines)
     }
     entry<ExtensionRoute> { route ->
         val manager = remember(route) { ExtensionOwners.of(route.manager) }

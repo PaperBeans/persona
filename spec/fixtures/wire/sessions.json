@@ -200,5 +200,199 @@
         "/type": "sessions"
       }
     }
+  },
+  {
+    "name": "sessions_assistant_queue",
+    "description": "Persona 对话的队列先列用户自己的消息，最后 queued_relayed 条来自其他对话或系统。",
+    "source": [
+      "server/internal/proto/session.go: Session.QueuedRelayed",
+      "server/internal/assistant/fleet_sessions.go: Service.decorateInventory",
+      "apple/Shared/Models.swift: Session.ownQueuedCount"
+    ],
+    "derived": true,
+    "decoder": "sessions",
+    "input": {
+      "sessions": [
+        {
+          "machine_id": "m1",
+          "session_id": "a1",
+          "started_by_persona": false,
+          "assistant": true,
+          "title": "Persona",
+          "cwd": "/home/user/persona",
+          "status": "working",
+          "state": "working",
+          "queued_relayed": 1,
+          "seen_at": "0001-01-01T00:00:00Z",
+          "state_since": "2026-01-02T03:04:05Z",
+          "queued": [
+            "请补充示例。",
+            "再检查一遍。",
+            "来自「示例对话」：示例结果已整理好。"
+          ],
+          "updated_at": "2026-01-02T03:04:05Z",
+          "pending_interactions": 0,
+          "started_by_jarvis": false
+        }
+      ]
+    },
+    "expected": {
+      "accepted": true,
+      "fields": {
+        "/sessions/0/assistant": true,
+        "/sessions/0/queued/0": "请补充示例。",
+        "/sessions/0/queued/2": "来自「示例对话」：示例结果已整理好。",
+        "/sessions/0/queued_relayed": 1
+      }
+    }
+  },
+  {
+    "name": "sessions_model_switch",
+    "description": "完整会话行携带等待下一条消息的服务商切换和 Persona 对话自己选的模型。",
+    "source": [
+      "server/internal/proto/session.go: PendingSwitch, ModelPick",
+      "docs/protocol/protocol.md: Switching a running Agent to another provider"
+    ],
+    "derived": true,
+    "decoder": "sessions",
+    "input": {
+      "sessions": [
+        {
+          "machine_id": "m1",
+          "session_id": "s3",
+          "started_by_persona": false,
+          "assistant": false,
+          "title": "示例切换",
+          "cwd": "/home/user/project",
+          "status": "idle",
+          "pane_id": "w1:p2",
+          "agent": "claude",
+          "launcher": "example",
+          "model": "example-model",
+          "effort": "high",
+          "pending_switch": {
+            "launcher": "work",
+            "model": "work-model",
+            "effort": "max",
+            "at": "2026-01-02T03:04:05Z"
+          },
+          "state": "idle",
+          "seen_at": "0001-01-01T00:00:00Z",
+          "state_since": "0001-01-01T00:00:00Z",
+          "updated_at": "2026-01-02T03:04:05Z",
+          "pending_interactions": 0,
+          "started_by_jarvis": false
+        },
+        {
+          "machine_id": "m1",
+          "session_id": "a1",
+          "started_by_persona": false,
+          "assistant": true,
+          "title": "示例对话",
+          "cwd": "",
+          "status": "idle",
+          "agent": "claude",
+          "launcher": "claude",
+          "model": "example-model",
+          "model_pick": {
+            "launcher": "work",
+            "model": "work-model",
+            "effort": "high"
+          },
+          "state": "idle",
+          "seen_at": "0001-01-01T00:00:00Z",
+          "state_since": "0001-01-01T00:00:00Z",
+          "updated_at": "2026-01-02T03:04:05Z",
+          "pending_interactions": 0,
+          "started_by_jarvis": false
+        }
+      ]
+    },
+    "expected": {
+      "accepted": true,
+      "fields": {
+        "/sessions/0/launcher": "example",
+        "/sessions/0/pending_switch/effort": "max",
+        "/sessions/0/pending_switch/launcher": "work",
+        "/sessions/0/pending_switch/model": "work-model",
+        "/sessions/1/model_pick/effort": "high",
+        "/sessions/1/model_pick/launcher": "work",
+        "/sessions/1/model_pick/model": "work-model",
+        "/sessions/1/pending_switch": null
+      }
+    }
+  },
+  {
+    "name": "sessions_summary_model_pick",
+    "description": "摘要行保留 model_pick，省略启动器和等待中的切换。",
+    "source": [
+      "server/internal/hub/sessions_list.go: runtimeSummary",
+      "docs/protocol/protocol.md: Summary rows"
+    ],
+    "derived": true,
+    "decoder": "sessions",
+    "input": {
+      "sessions": [
+        {
+          "machine_id": "m1",
+          "session_id": "s3",
+          "started_by_persona": false,
+          "assistant": false,
+          "title": "示例切换",
+          "cwd": "/home/user/project",
+          "status": "idle",
+          "pane_id": "w1:p2",
+          "agent": "claude",
+          "model": "example-model",
+          "effort": "high",
+          "state": "idle",
+          "seen_at": "0001-01-01T00:00:00Z",
+          "state_since": "0001-01-01T00:00:00Z",
+          "updated_at": "2026-01-02T03:04:05Z",
+          "pending_interactions": 0,
+          "started_by_jarvis": false,
+          "pane_source": "terminal",
+          "waiting": false,
+          "background_tasks_count": 0
+        },
+        {
+          "machine_id": "m1",
+          "session_id": "a1",
+          "started_by_persona": false,
+          "assistant": true,
+          "title": "示例对话",
+          "cwd": "",
+          "status": "idle",
+          "agent": "claude",
+          "model": "example-model",
+          "model_pick": {
+            "launcher": "work",
+            "model": "work-model",
+            "effort": "high"
+          },
+          "state": "idle",
+          "seen_at": "0001-01-01T00:00:00Z",
+          "state_since": "0001-01-01T00:00:00Z",
+          "updated_at": "2026-01-02T03:04:05Z",
+          "pending_interactions": 0,
+          "started_by_jarvis": false,
+          "pane_source": "unknown",
+          "waiting": false,
+          "background_tasks_count": 0
+        }
+      ]
+    },
+    "expected": {
+      "accepted": true,
+      "fields": {
+        "/sessions/0/launcher": null,
+        "/sessions/0/model": "example-model",
+        "/sessions/0/pending_switch": null,
+        "/sessions/0/waiting": false,
+        "/sessions/1/launcher": null,
+        "/sessions/1/model_pick/effort": "high",
+        "/sessions/1/model_pick/launcher": "work"
+      }
+    }
   }
 ]

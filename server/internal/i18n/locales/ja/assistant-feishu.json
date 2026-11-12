@@ -85,6 +85,7 @@
   "step_call": "電話をかける",
   "step_maps_nearby": "周辺を検索",
   "step_maps_navigate": "マップで経路を開く",
+  "step_maps_route": "経路を調べる",
   "step_shortcut_run": "ショートカットを実行",
   "step_media_play": "音楽を再生",
   "step_home_control": "アクセサリを操作",

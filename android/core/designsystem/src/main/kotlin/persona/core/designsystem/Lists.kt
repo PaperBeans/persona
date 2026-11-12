@@ -43,7 +43,7 @@ internal fun Modifier.holder(color: androidx.compose.ui.graphics.Color, width: D
 
 /** Horizontal page padding of the active style; list items assume they sit inside it. */
 /** Side padding of page content, plus the room that keeps it to [ReadingWidth] in wide panes. */
-val pagePadding: Dp @Composable get() = when (PersonaTheme.style) { AppStyle.Glass -> 16.dp; AppStyle.Brief -> 20.dp; AppStyle.Board -> 12.dp } + LocalReadingInset.current
+val pagePadding: Dp @Composable get() = when (PersonaTheme.style) { AppStyle.Glass -> 16.dp; AppStyle.Brief -> 20.dp; AppStyle.Board -> 12.dp } * LayoutDensity.pageScale + LocalReadingInset.current
 
 /** Where an item sits in a group, so lazy lists can draw one continuous container out of separate items. */
 @Immutable
@@ -85,8 +85,8 @@ fun JSectionHeader(
     val fold = if (onClick != null && open != null) foldLabels(open) else null
     Row(
         modifier.fillMaxWidth().then(if (onClick != null) Modifier.combinedClickable(role = Role.Button, onClickLabel = fold?.action, onClick = onClick) else Modifier)
-            .padding(top = if (sub) Tokens.Space.s else if (style == AppStyle.Board) 18.dp else 26.dp, bottom = if (sub) Tokens.Space.xs else 10.dp,
-                start = if (style == AppStyle.Brief) 0.dp else 4.dp, end = if (style == AppStyle.Brief) 0.dp else 4.dp)
+            .padding(top = if (sub) Tokens.Space.s else if (style == AppStyle.Board) 18.dp.dense else 26.dp.dense, bottom = if (sub) Tokens.Space.xs else 10.dp.dense,
+                start = if (style == AppStyle.Brief) 0.dp else 4.dp.dense, end = if (style == AppStyle.Brief) 0.dp else 4.dp.dense)
             .heightIn(min = if (leading != null) 48.dp else 0.dp)
             .semantics { heading(); fold?.let { stateDescription = it.state } },
         verticalAlignment = Alignment.CenterVertically,
@@ -98,7 +98,7 @@ fun JSectionHeader(
         }
         if (status != null && style == AppStyle.Board) {
             Box(Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(palette.status(status).dot))
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(8.dp.dense))
         }
         // The title and its count take the free width, so the trailing text and the action sit at the end of the row
         // (two weights in one row split the space, which left them near the middle and cut long titles at half width).
@@ -112,7 +112,7 @@ fun JSectionHeader(
                 modifier = Modifier.weight(1f, fill = false),
             )
             count?.let {
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(6.dp.dense))
                 if (countTone == null) Text("$it", style = PersonaTheme.type.micro, color = palette.ink3)
                 else {
                     val tone = palette.status(countTone)
@@ -122,7 +122,7 @@ fun JSectionHeader(
                 }
             }
         }
-        if (trailing != null || action != null) Spacer(Modifier.width(8.dp))
+        if (trailing != null || action != null) Spacer(Modifier.width(8.dp.dense))
         trailing?.let {
             Text(it, style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1,
                 modifier = if (trailingIsFoldAction && fold != null) Modifier.clearAndSetSemantics {} else Modifier)
@@ -202,7 +202,7 @@ fun JGroupItem(
             )
             AppStyle.Board -> if (separate) Column(
                 Modifier.fillMaxWidth().clip(shape).background(palette.surface)
-                    .then(if (holder != null) Modifier.holder(palette.status(holder).dot, Tokens.Space.xxs).padding(start = 6.dp) else Modifier)
+                    .then(if (holder != null) Modifier.holder(palette.status(holder).dot, Tokens.Space.xxs).padding(start = 6.dp.dense) else Modifier)
                     .border(1.dp, palette.line, shape),
                 content = content,
             ) else Column(
@@ -276,7 +276,7 @@ fun JRow(
         if (leading != null) { leading(); Spacer(Modifier.width(RowLeadingGap)) }
         else if (leadingIcon != null) {
             JIcon(leadingIcon, null, size = 22.dp, tint = if (destructive) palette.danger.dot else leadingIconTint ?: palette.ink2, decorative = true)
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(16.dp.dense))
         }
         Column(Modifier.weight(1f)) {
             val titleText: @Composable (Modifier) -> Unit = { m ->
@@ -341,18 +341,18 @@ private fun RowFrame(
             .then(if (drawer) Modifier.clip(RoundedCornerShape(Tokens.Radius.control)).background(if (selected) palette.sunken else Color.Transparent) else Modifier.selectedRow(selected))
             .onSecondaryClick(onLongClick)
             .then(if (onClick != null || onLongClick != null) Modifier.combinedClickable(enabled = enabled, role = role, onClickLabel = onClickLabel, onClick = onClick ?: {}, onLongClick = onLongClick) else Modifier)
-            .stableAlpha(if (enabled) 1f else 0.45f).padding(horizontal = if (drawer) Tokens.Space.m else rowPadding, vertical = if (drawer) Tokens.Space.xs else 10.dp),
+            .stableAlpha(if (enabled) 1f else 0.45f).padding(horizontal = if (drawer) Tokens.Space.m else rowPadding, vertical = if (drawer) Tokens.Space.xs else 10.dp.dense),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         content()
         value?.let {
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(10.dp.dense))
             val valueStyle = if (style == AppStyle.Board) PersonaTheme.type.micro.copy(fontSize = androidx.compose.ui.unit.TextUnit(14f, androidx.compose.ui.unit.TextUnitType.Sp)) else PersonaTheme.type.callout
             if (changingValue) JChangingText(it, style = valueStyle, color = palette.ink3, modifier = Modifier.widthIn(max = 180.dp))
             else Text(it, style = valueStyle, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
         }
-        trailing?.let { Spacer(Modifier.width(10.dp)); it() }
-        if (chevron) { Spacer(Modifier.width(6.dp)); JIcon(PhIcons.CaretRight, null, size = 16.dp, tint = palette.ink3) }
+        trailing?.let { Spacer(Modifier.width(10.dp.dense)); it() }
+        if (chevron) { Spacer(Modifier.width(6.dp.dense)); JIcon(PhIcons.CaretRight, null, size = 16.dp, tint = palette.ink3) }
     }
 }
 
@@ -400,7 +400,7 @@ fun JCard(
             modifier.fillMaxWidth().clip(shape).background(palette.surface)
                 .then(if (status != null) Modifier.holder(palette.status(status).dot, Tokens.Space.xxs) else Modifier)
                 .border(1.dp, palette.line, shape).then(click)
-                .padding(start = if (status != null) 6.dp + padding else padding, end = padding, top = padding, bottom = padding),
+                .padding(start = if (status != null) 6.dp.dense + padding else padding, end = padding, top = padding, bottom = padding),
             content = content,
         )
     }
@@ -428,13 +428,13 @@ fun JNotice(
     JCard(modifier, status = status, padding = if (inlineAction) NoticeTokens.inlinePadding else 16.dp) {
         Row(verticalAlignment = if (inlineAction) Alignment.CenterVertically else Alignment.Top) {
             JIcon(icon, null, size = 20.dp, tint = if (PersonaTheme.style == AppStyle.Brief) palette.ink else tone.dot,
-                modifier = if (inlineAction) Modifier else Modifier.padding(top = 2.dp))
-            Spacer(Modifier.width(12.dp))
+                modifier = if (inlineAction) Modifier else Modifier.padding(top = 2.dp.dense))
+            Spacer(Modifier.width(12.dp.dense))
             Column(Modifier.weight(1f)) {
                 title?.let { Text(it, style = PersonaTheme.type.headline, color = palette.ink) }
                 Text(text, style = PersonaTheme.type.callout, color = palette.ink2)
                 if (action != null && !inlineAction) {
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(10.dp.dense))
                     JButton(action.first, action.second, kind = JButtonKind.Secondary, size = JButtonSize.Medium)
                 }
             }
@@ -461,28 +461,28 @@ fun JEmptyState(
     leading: (@Composable () -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
-    Column(modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        if (leading != null) { leading(); Spacer(Modifier.height(16.dp)) }
+    Column(modifier.fillMaxWidth().padding(horizontal = 32.dp.dense, vertical = 40.dp.dense), horizontalAlignment = Alignment.CenterHorizontally) {
+        if (leading != null) { leading(); Spacer(Modifier.height(16.dp.dense)) }
         else icon?.let {
             val hue = iconHue?.let { h -> palette.hue(h) }
             Box(
-                Modifier.size(64.dp).clip(if (PersonaTheme.style == AppStyle.Board) RoundedCornerShape(12.dp) else CircleShape).background(hue?.tint ?: palette.surfaceStrong),
+                Modifier.size(64.dp).clip(if (PersonaTheme.style == AppStyle.Board) RoundedCornerShape(12.dp.corner) else CircleShape).background(hue?.tint ?: palette.surfaceStrong),
                 contentAlignment = Alignment.Center,
             ) { JIcon(it, null, size = 28.dp, tint = hue?.dot ?: palette.ink2, decorative = true) }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp.dense))
         }
         Text(title, style = PersonaTheme.type.title, color = palette.ink, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(6.dp.dense))
         Text(description, style = PersonaTheme.type.callout, color = palette.ink2, textAlign = TextAlign.Center)
-        action?.let { Spacer(Modifier.height(18.dp)); it() }
+        action?.let { Spacer(Modifier.height(18.dp.dense)); it() }
     }
 }
 
 @Composable
 fun JLoading(modifier: Modifier = Modifier, text: String? = null) {
-    Column(modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(modifier.fillMaxWidth().padding(32.dp.dense), horizontalAlignment = Alignment.CenterHorizontally) {
         JSpinner(Modifier.size(28.dp))
-        text?.let { Spacer(Modifier.height(12.dp)); Text(it, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2) }
+        text?.let { Spacer(Modifier.height(12.dp.dense)); Text(it, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2) }
     }
 }
 
@@ -522,7 +522,7 @@ fun JAvatar(
             val color = badgeColor ?: if (style == AppStyle.Brief) palette.ink else palette.accent
             Box(
                 Modifier.align(Alignment.BottomEnd).offset(3.dp, 3.dp).size(size * 0.45f).clip(if (style == AppStyle.Board) RoundedCornerShape(4.dp) else CircleShape)
-                    .background(palette.background).padding(2.dp).clip(if (style == AppStyle.Board) RoundedCornerShape(3.dp) else CircleShape).background(color),
+                    .background(palette.background).padding(2.dp.dense).clip(if (style == AppStyle.Board) RoundedCornerShape(3.dp) else CircleShape).background(color),
                 contentAlignment = Alignment.Center,
             ) { JIcon(it, null, size = size * 0.26f, tint = if (style == AppStyle.Brief) palette.background else Color.White, selected = true) }
         }
@@ -563,10 +563,10 @@ fun JCodeBlock(
     header: (@Composable () -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
-    val shape = RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 6.dp else 14.dp)
+    val shape = RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 6.dp.corner else 14.dp.corner)
     val box = Modifier.fillMaxWidth().clip(shape).background(if (PersonaTheme.style == AppStyle.Brief) palette.background else palette.sunken)
         .then(if (PersonaTheme.style == AppStyle.Brief) Modifier.border(1.dp, palette.line, shape) else Modifier)
-    val inset = 14.dp
+    val inset = 14.dp.dense
     val text: @Composable (Modifier) -> Unit = { m ->
         SelectionContainer {
             Text(

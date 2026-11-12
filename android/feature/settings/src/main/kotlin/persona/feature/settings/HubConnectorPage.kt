@@ -112,7 +112,7 @@ private fun HubConnectorDetails(connectors: ConnectorsManagement?, connectorId: 
                         trailing = {
                             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
                                 JStatusDot(statusDot)
-                                if (loading) JSpinner(stroke = Tokens.Space.xxs)
+                                if (loading) JSpinner(stroke = Tokens.Space.Standard.xxs)
                             }
                         },
                     )

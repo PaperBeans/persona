@@ -3,17 +3,23 @@ import XCTest
 /// The style a UI test runs in. The app keeps the style the last run left (`ui.style` in UserDefaults), and since the
 /// BeautifulUI style draws its own components, a test that does not say which style it wants finds whichever looks
 /// the previous test left. `launchPinned()` passes it: Liquid Glass by default, another one with
-/// `TEST_RUNNER_PERSONA_UI_STYLE=<style>` (`beautiful` runs a suite in the BeautifulUI style). `UITestStyleTests` checks
-/// every launch pins one.
+/// `TEST_RUNNER_PERSONA_UI_STYLE=<style>` (`beautiful` runs a suite in the BeautifulUI style), unless the test passes
+/// `-ui.style` itself. `UITestStyleTests` checks every launch pins one.
 enum UITestStyle {
     static var name: String { ProcessInfo.processInfo.environment["PERSONA_UI_STYLE"] ?? "glass" }
     static var isBeautiful: Bool { name == "beautiful" }
+
+    /// The launch arguments with the run's style, unless they name one already: the later `-ui.style` wins, so adding
+    /// it anyway ran a test that asked for Clay or BeautifulUI in Liquid Glass (#5683, `UITestStylePinTests`).
+    static func pinned(_ arguments: [String]) -> [String] {
+        arguments.contains("-ui.style") ? arguments : arguments + ["-ui.style", name]
+    }
 }
 
 extension XCUIApplication {
-    /// Launches in the run's style without overriding the app's navigation defaults.
+    /// Launches in the run's style (or the one the test passes) without overriding the app's navigation defaults.
     func launchPinned() {
-        launchArguments += ["-ui.style", UITestStyle.name]
+        launchArguments = UITestStyle.pinned(launchArguments)
         launchPersona()
     }
 

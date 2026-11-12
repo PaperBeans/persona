@@ -93,13 +93,13 @@ private val Holder = 26.dp
 private val None = 0.dp
 
 /** Glass's leading well (iOS `Theme.Size.wellL`), the agent's mark in it (`markL`) and the rim around its corner (`rule`). */
-private val AvatarWell = Tokens.Space.xxl + Tokens.Space.xs
-private val AvatarMark = Tokens.Space.l + Tokens.Space.xxs / 2
-private val AvatarRim = Tokens.Space.xxs
+private val AvatarWell = Tokens.Space.Standard.xxl + Tokens.Space.Standard.xs
+private val AvatarMark = Tokens.Space.Standard.l + Tokens.Space.Standard.xxs / 2
+private val AvatarRim = Tokens.Space.Standard.xxs
 /** Between the well and the row's words (iOS's Avatar row: `Theme.Space.m`). */
-private val AvatarGap = Tokens.Space.m
+private val AvatarGap get() = Tokens.Space.m
 /** Between Two Lines' dot and its words (iOS style B: `Theme.Space.s`). */
-private val TwoLineGap = Tokens.Space.s
+private val TwoLineGap get() = Tokens.Space.s
 /** The background-waiting clock against the dot it stands in for (as on the space page's cards). */
 private const val WaitClockScale = 1.7f
 /** A State Card that needs you, tinted in its blue (iOS `StatusPalette.needsYouWash`: the system blue at this opacity). */
@@ -285,7 +285,8 @@ fun AgentTreeHeader(
 /**
  * The second level: a herdr workspace under its computer, indented [depth] steps (0 when the list shows one
  * computer and drops its heading) and smaller than the computer. A [quiet] space (all finished and seen) is lighter
- * and says how many [sessions] it holds instead of [counts]. [menu] is the space's ⋯ (a [HeadingAction] and its sheet).
+ * and says how many [sessions] it holds instead of [counts]. [counts] take a clock for the agents that only [waiting] in the
+ * background, as iOS's `StateCounts` does. [menu] is the space's ⋯ (a [HeadingAction] and its sheet).
  * Under "By repository" the same heading is a repository or one of its working trees, told apart by [icon] (folder, ⌂ for the
  * main checkout, a branch for another tree) and one more [depth] step for a tree. [kind] names the level for TalkBack
  * (space, repository, main worktree, worktree): the caret says "Expand" / "Collapse" it, the icon says what it is, the heading whether it is open.
@@ -301,6 +302,8 @@ fun AgentSpaceHeader(
     quiet: Boolean = false,
     sessions: Int = 0,
     counts: List<Pair<Status, Int>> = emptyList(),
+    /** The agents that only wait in the background, drawn apart from [counts] with a clock ([StateCounts]). */
+    waiting: Int = 0,
     flags: List<RowFlag> = emptyList(),
     menu: (@Composable () -> Unit)? = null,
     icon: PhIcon? = null,
@@ -326,14 +329,22 @@ fun AgentSpaceHeader(
             flags.forEach { Spacer(Modifier.width(Tokens.Space.xs)); JIcon(it.icon, it.label, size = Caret, tint = palette.ink3) }
         }
         if (quiet) Text(pluralStringResource(R.plurals.designsystem_sessions, sessions, sessions), style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink3, maxLines = 1)
-        else StateCounts(counts)
+        else StateCounts(counts, waiting)
         menu?.invoke()
     }
 }
 
-/** "N more idle": opens the finished sessions an active space keeps tucked away. [depth] is the space's. */
+/**
+ * "N more idle": opens the finished sessions an active space keeps tucked away. [depth] is the space's. Once they are
+ * [open] (Glass's By project, iOS `collapseRow`, #4338 A8) the row follows them as "Hide N Idle" in the accent and folds them
+ * again.
+ */
 @Composable
-fun AgentIdleRow(hidden: Int, onClick: () -> Unit, modifier: Modifier = Modifier, depth: Int = 1) {
+fun AgentIdleRow(hidden: Int, onClick: () -> Unit, modifier: Modifier = Modifier, depth: Int = 1, open: Boolean = false) {
+    if (open) {
+        AgentFoldRow(persona.core.designsystem.icons.PersonaIcons.collapse, pluralStringResource(R.plurals.designsystem_idle_hide, hidden, hidden), onClick, modifier, depth)
+        return
+    }
     val start = Step * depth + (Caret - markSize) / 2
     Row(
         modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
@@ -352,6 +363,16 @@ fun AgentIdleRow(hidden: Int, onClick: () -> Unit, modifier: Modifier = Modifier
  */
 @Composable
 fun AgentShowAllRow(count: Int, expanded: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, depth: Int = 1) {
+    AgentFoldRow(
+        if (expanded) persona.core.designsystem.icons.PersonaIcons.collapse else persona.core.designsystem.icons.PersonaIcons.expand,
+        if (expanded) stringResource(R.string.designsystem_show_fewer) else stringResource(R.string.designsystem_show_all, count),
+        onClick, modifier, depth,
+    )
+}
+
+/** A line that opens or folds a run of rows, in the accent as a button: its [icon] in the rows' mark column, then [words]; [depth] as the rows'. */
+@Composable
+private fun AgentFoldRow(icon: PhIcon, words: String, onClick: () -> Unit, modifier: Modifier, depth: Int) {
     val start = Step * depth + (Caret - markSize) / 2
     val accent = PersonaTheme.palette.accent
     Row(
@@ -361,11 +382,9 @@ fun AgentShowAllRow(count: Int, expanded: Boolean, onClick: () -> Unit, modifier
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
     ) {
         Box(Modifier.width(markSize), contentAlignment = Alignment.Center) {
-            JIcon(if (expanded) persona.core.designsystem.icons.PersonaIcons.collapse else persona.core.designsystem.icons.PersonaIcons.expand,
-                null, size = Caret, tint = accent, decorative = true)
+            JIcon(icon, null, size = Caret, tint = accent, decorative = true)
         }
-        Text(if (expanded) stringResource(R.string.designsystem_show_fewer) else stringResource(R.string.designsystem_show_all, count),
-            style = PersonaTheme.type.caption, color = accent, maxLines = 1)
+        Text(words, style = PersonaTheme.type.caption, color = accent, maxLines = 1)
     }
 }
 
@@ -431,6 +450,8 @@ fun AgentRow(
     val avatar = glass && parts.leading == AgentRowLeading.Well && agentMark != null
     val placeLine = glass && parts.placeLine && place != null
     val mark = if (avatar) AvatarWell else markSize
+    // Avatar's words take two lines, as iOS's; every other row keeps one.
+    val wordLines = if (avatar) parts.wordLines else 1
     val start = if (board) Step * depth else (Step * depth + (Caret - mark) / 2).coerceAtLeast(None)
     val gap = if (avatar) AvatarGap else Tokens.Space.s - Tokens.Space.xxs
     val hasMetadata = note != null || facts.isNotEmpty()
@@ -483,7 +504,7 @@ fun AgentRow(
                 preview?.takeIf { it.isNotBlank() }?.let { append(it.replace('\n', ' ')) }
             }
             val lineText: @Composable () -> Unit = {
-                Text(line, style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(line, style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink2, maxLines = wordLines, overflow = TextOverflow.Ellipsis)
             }
             if (!boardMetadata) {
                 if (source != null && !placeLine) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -855,7 +876,7 @@ private fun HolderGlyph(status: Status) {
     val ink = PersonaTheme.palette.status(status).text
     when (status) {
         Status.Working, Status.Waiting -> if (PersonaTheme.reduceMotion) JIcon(PhIcons.Play, null, size = Caret, tint = ink, selected = true)
-            else JSpinner(Modifier.size(Caret), color = ink, stroke = Tokens.Space.xxs)
+            else JSpinner(Modifier.size(Caret), color = ink, stroke = Tokens.Space.Standard.xxs)
         Status.NeedsYou -> JIcon(PhIcons.Hand, null, size = Caret, tint = ink, selected = true)
         Status.Unread -> JIcon(PhIcons.Check, null, size = Caret, tint = ink)
         Status.Offline -> JIcon(PhIcons.Power, null, size = Caret, tint = ink)
@@ -1029,13 +1050,13 @@ fun QuickFilterBar(bays: List<Bay>, selected: Int, onSelect: (Int) -> Unit, modi
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
     when (PersonaTheme.style) {
-        AppStyle.Glass -> Row(modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        AppStyle.Glass -> Row(modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp.dense)) {
             bays.forEachIndexed { index, bay -> JChip(bay.label, selected = index == selected, onClick = { onSelect(index) }, status = bay.status, count = bay.count) }
         }
         // Tabs that do not fit scroll sideways rather than being cut off at the edge.
         AppStyle.Brief -> JSegmented(bays.map { JSegment(it.label, it.count) }, selected, onSelect, modifier.horizontalScroll(rememberScrollState()))
         AppStyle.Board -> BoxWithConstraints(modifier.fillMaxWidth()) {
-            val shape = RoundedCornerShape(10.dp)
+            val shape = RoundedCornerShape(10.dp.corner)
             // Each bay is a share of the width while its label fits; more bays than that (the Agents list's six) keep
             // their width and the board scrolls sideways instead of cutting every label short.
             val fits = maxWidth / bays.size.coerceAtLeast(1) >= BoardBayMinWidth
@@ -1051,11 +1072,11 @@ fun QuickFilterBar(bays: List<Bay>, selected: Int, onSelect: (Int) -> Unit, modi
                     val color = bay.status?.let { palette.status(it).dot } ?: palette.ink
                     val cell = if (fits) Modifier.weight(1f) else Modifier.widthIn(min = bayWidth)
                     Box(cell.clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on }) {
-                        Column(Modifier.padding(start = 12.dp, top = 10.dp, bottom = 12.dp, end = 6.dp)) {
+                        Column(Modifier.padding(start = 12.dp.dense, top = 10.dp.dense, bottom = 12.dp.dense, end = 6.dp.dense)) {
                             Text("${bay.count ?: "—"}", style = type.number, color = if ((bay.count ?: 0) == 0) palette.ink3 else palette.ink, maxLines = 1)
-                            Spacer(Modifier.height(2.dp))
+                            Spacer(Modifier.height(2.dp.dense))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (bay.status != null) { Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp)).background(color)); Spacer(Modifier.width(5.dp)) }
+                                if (bay.status != null) { Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp)).background(color)); Spacer(Modifier.width(5.dp.dense)) }
                                 Text(bay.label, style = type.caption.copy(fontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp)), color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }

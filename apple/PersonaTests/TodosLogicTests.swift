@@ -177,6 +177,35 @@ struct TodosLogicTests {
         #expect(store.todos == before)
     }
 
+    /// Got It (#5707): the mark shows at once, the hub's takes its place (PUT …/seen), Undo takes it off (DELETE), and the
+    /// list's own fields (the ask the PUT's answer leaves out) stay.
+    @Test func setSeenMarksAtOnceAndUndoTakesItOff() async throws {
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/todos", json: #"{"todos":[{"id":"t1","title":"Seen","done_at":"2026-11-10T09:00:00Z","ask":{"verdict":"v","asked_at":"2026-11-10T09:00:00Z"}}]}"#)
+        hub.on("PUT", "/api/v1/todos/t1/seen", json: #"{"todo":{"id":"t1","title":"Seen","done_at":"2026-11-10T09:00:00Z","seen_at":"2026-11-10T10:00:00Z"}}"#)
+        hub.on("DELETE", "/api/v1/todos/t1/seen", json: #"{"todo":{"id":"t1","title":"Seen","done_at":"2026-11-10T09:00:00Z"}}"#)
+        let store = TodoStore.shared
+        await store.refresh(api: hub.client)
+        let task = Task { try await store.setSeen(id: "t1", true, api: hub.client) }
+        try await task.value
+        #expect(store.todo(id: "t1")?.seenAt == ISO8601DateFormatter().date(from: "2026-11-10T10:00:00Z"))
+        #expect(store.todo(id: "t1")?.ask != nil)
+        #expect(hub.sent("PUT", "/api/v1/todos/t1/seen").count == 1)
+        try await store.setSeen(id: "t1", false, api: hub.client)
+        #expect(store.todo(id: "t1")?.seenAt == nil)
+        #expect(hub.sent("DELETE", "/api/v1/todos/t1/seen").count == 1)
+    }
+
+    /// A Got It the hub refuses (no route: 404) puts the mark back as it was and says why to its caller.
+    @Test func setSeenRollsBackWhenTheWriteFails() async throws {
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/todos", json: #"{"todos":[{"id":"t1","title":"Seen","done_at":"2026-11-10T09:00:00Z"}]}"#)
+        let store = TodoStore.shared
+        await store.refresh(api: hub.client)
+        await #expect(throws: APIError.self) { try await store.setSeen(id: "t1", true, api: hub.client) }
+        #expect(store.todo(id: "t1")?.seenAt == nil)
+    }
+
     /// Only a 404 from GET /api/v1/todos means an old hub (the sidebar entrance hides); other failures keep it shown.
     @Test func only404MarksAnOldHub() {
         #expect(TodosLogic.isOldHub(APIError(status: 404, message: "no route")))

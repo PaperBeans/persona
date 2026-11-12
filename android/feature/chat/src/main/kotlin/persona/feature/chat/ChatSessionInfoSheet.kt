@@ -12,8 +12,8 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import persona.core.contracts.Interaction
-import persona.core.contracts.InteractionRecord
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import persona.core.contracts.DelegatedAnswer
 import persona.core.contracts.Machine
 import persona.core.contracts.Session
 import persona.core.contracts.SessionInfo
@@ -21,7 +21,9 @@ import persona.core.contracts.parseTime
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
+import persona.core.domain.answer.Delegated
 import persona.core.domain.lines.tokenCount
+import persona.core.domain.sort.canSend
 import persona.core.domain.sort.resumeCommand
 import java.time.Instant
 import java.time.ZoneId
@@ -92,18 +94,6 @@ internal fun runtimeStatus(res: Resources, session: Session): String? {
 }
 
 private const val AGENT_SDK = "agentsdk"
-
-/** A question the assistant answered for the user (iOS `DelegatedAnswer`): what it answered and why, and when (null: unsaid). */
-internal data class DelegatedAnswer(val interaction: Interaction, val answers: Map<String, String>, val reason: String, val at: Instant?)
-
-/**
- * The questions the history says the assistant answered, newest first (iOS `Delegated.history`): resolved questions whose
- * resolution the assistant gave.
- */
-internal fun delegatedHistory(records: List<InteractionRecord>): List<DelegatedAnswer> =
-    records.filter { it.status == "resolved" && it.interaction.kind == "question" && it.resolution?.answeredBy == "assistant" }
-        .map { DelegatedAnswer(it.interaction, it.resolution?.answers.orEmpty(), it.resolution?.reason.orEmpty(), parseTime(it.resolvedAt)) }
-        .sortedByDescending { it.at ?: Instant.EPOCH }
 
 /**
  * "Session info" (iOS SessionInfoSheet), from GET …/info: what it runs (How it runs while an assistant conversation is on the
@@ -267,8 +257,8 @@ private fun ContextUsageRow(label: String, value: String, usage: ContextUsage) {
 
 /**
  * Session info's questions the assistant answered (iOS `DelegatedHistorySection`, GET /api/v1/interactions/history): each
- * with when, every question and its answer, and why. Nothing while it loads or when there are none; a failure says so with
- * Retry. Changing an answer is not offered here.
+ * with when, every question and its answer as it is now, why, and Change answer while the session takes messages (the
+ * new answer reaches the Agent as a message). Nothing while it loads or when there are none; a failure says so with Retry.
  */
 @Composable
 private fun DelegatedHistorySection(session: Session, state: ChatChromeState) {
@@ -291,30 +281,24 @@ private fun DelegatedHistorySection(session: Session, state: ChatChromeState) {
         return
     }
     if (shown.isEmpty()) return
+    val center = state.interactions
+    val changes = center?.reanswered?.collectAsStateWithLifecycle()?.value.orEmpty()
+    var changing by remember(session.key) { mutableStateOf<DelegatedAnswer?>(null) }
     JSectionHeader(title)
     val now = Instant.now()
     shown.forEachIndexed { index, answer ->
-        JGroupItem(GroupPosition.of(index, shown.size)) { DelegatedAnswerBody(answer, now) }
-    }
-}
-
-/** One answered question (iOS `DelegatedBody` without Change Answer): when, each question and the answer, and why. */
-@Composable
-private fun DelegatedAnswerBody(answer: DelegatedAnswer, now: Instant) {
-    val palette = PersonaTheme.palette
-    val type = PersonaTheme.type
-    val res = LocalResources.current
-    Column(Modifier.fillMaxWidth().padding(horizontal = rowPadding, vertical = Tokens.Space.m),
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-        answer.at?.let { Text(relativeTime(it, now, res), style = type.caption, color = palette.ink2) }
-        answer.interaction.questions.orEmpty().forEach { question ->
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
-                Text(question.question, style = type.caption, color = palette.ink2)
-                Text(answer.answers[question.question]?.trim()?.takeIf(String::isNotEmpty) ?: stringResource(R.string.chat_info_delegated_no_answer),
-                    style = type.callout.copy(fontWeight = FontWeight.SemiBold), color = palette.ink)
+        JGroupItem(GroupPosition.of(index, shown.size)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = rowPadding, vertical = Tokens.Space.m),
+                verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                answer.at?.let { Text(relativeTime(it, now, res), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2) }
+                DelegatedBody(answer, changes[answer.id], onChange = if (center != null && session.canSend) ({ changing = answer }) else null)
             }
         }
-        if (answer.reason.isNotBlank()) Text(stringResource(R.string.chat_info_delegated_why, answer.reason.trim()),
-            style = type.caption, color = palette.ink2)
+    }
+    changing?.let { answer ->
+        if (center != null) ReanswerSheet(answer, Delegated.latest(answer, changes[answer.id]), onDismiss = { changing = null }) { answers ->
+            // A history row may not name its manager: the session's then, as iOS's history fills it in.
+            center.reanswer(answer.id, answers, answer.interaction.manager ?: session.manager)
+        }
     }
 }

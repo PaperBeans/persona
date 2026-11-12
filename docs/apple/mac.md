@@ -91,7 +91,7 @@ and multiple windows. Do not copy the iPhone tab bar, bottom sheets or horizonta
   attaches clipboard images (screenshots), and pastes text normally; only the current window's composer receives them (chat may have its own window). Screenshot: `-openDropDemo a.png,b.md`.
 - Drag and drop: Agents in the list can be dragged to sidebar **Pinned**; files in the file panel can be dragged out to Finder (download).
 - Window and column widths, sidebar visibility, selection and each chat's reading position survive relaunch.
-- Appearance: follows system light/dark and accent color; interface styles (Liquid Glass, etc.) still apply, using system materials for Mac glass; no hard-coded dimensions, follows **Settings › Text Size**.
+- Appearance: follows system light/dark and accent color; interface styles (Liquid Glass, etc.) still apply, using system materials for Mac glass, and a style may bring the window's chrome (Lark: Feishu's navigation column, selection and colored monograms, `docs/design/DESIGN_SYSTEM.md` ("2.9 Styles and theme colors")); no hard-coded dimensions, follows **Settings › Text Size**.
   Mac has its own type scale (#779): body 13 (messages, answers, records), secondary 12, captions / labels / code 11, subheading 13 semibold, title 18, display 24; see `docs/apple/ios.md` ("Design language"). User messages and answers use the same size.
 - Performance: lists and chats must scroll without dropped frames on 120 Hz displays (`List` / `LazyVStack` lazy loading, cheap row bodies, cached text layout),
   chat first screen < 200 ms with cache, smooth window resizing. Measure with Instruments (SwiftUI / Animation Hitches), documenting the method here.

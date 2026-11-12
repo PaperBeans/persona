@@ -8,6 +8,7 @@ import persona.core.contracts.ServerEvent
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.*
+import persona.core.domain.models.keepingDetails
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -179,8 +180,10 @@ class RealAssistantRepository(
                     val owned = updates.filter { choice.owns(it.manager) && !it.isHealth }
                     val byKey = owned.associateBy { it.key }
                     val before = current.value
+                    // A summary row (paged lists) leaves the launcher, the permission mode, the compaction and the
+                    // other chat details out: they stay as the conversation had them (#5055); its model_pick is its own.
                     current.update { snapshot ->
-                        snapshot.copy(conversations = (snapshot.conversations.map { byKey[it.key] ?: it } +
+                        snapshot.copy(conversations = (snapshot.conversations.map { byKey[it.key]?.keepingDetails(it) ?: it } +
                             owned.filter { it.assistant == true }).distinctBy { it.key })
                     }
                     cached[request.key] = current.value
@@ -260,7 +263,9 @@ class RealAssistantRepository(
 
     override suspend fun startConversation(): SessionKey = start(null)
 
-    override suspend fun startConversation(launcher: String): SessionKey = start(launcher)
+    override suspend fun startConversation(launcher: String): SessionKey = start(persona.core.contracts.ModelPick(launcher))
+
+    override suspend fun startConversation(pick: persona.core.contracts.ModelPick): SessionKey = start(pick)
 
     override suspend fun mainConversationOf(manager: String): SessionKey {
         val captured = request()
@@ -295,18 +300,20 @@ class RealAssistantRepository(
         return session.key
     }
 
-    private suspend fun start(launcher: String?): SessionKey {
+    private suspend fun start(pick: persona.core.contracts.ModelPick?): SessionKey {
         // Capture identity before waiting behind another creation.
         val request = request()
         return creationLock.withLock {
             val config = request.transport.assistantOf(request.owner)
             check(connection.current.value === request.transport) { CoreText.of(Key.ConnectionSwitched).shown }
-            create(request, config.string("main").isEmpty(), launcher, config)
+            create(request, config.string("main").isEmpty(), pick, config)
         }
     }
 
-    private suspend fun create(request: Request, isMain: Boolean, launcher: String?, config: JsonObject): SessionKey {
-        val result = request.transport.createConversationOf(request.owner, isMain, launcher)
+    private suspend fun create(request: Request, isMain: Boolean, pick: persona.core.contracts.ModelPick?, config: JsonObject): SessionKey {
+        // A model or an effort goes with the launcher only (the new-chat page's panel); a launcher alone as before.
+        val result = if (pick != null && (pick.model != null || pick.effort != null)) request.transport.createConversationOf(request.owner, isMain, pick)
+            else request.transport.createConversationOf(request.owner, isMain, pick?.launcher)
         val session = JsonCodec.decodeFromJsonElement<Session>(result.getValue("session"))
         check(connection.current.value === request.transport) { CoreText.of(Key.ConnectionSwitched).shown }
         noteConversation(session.sessionId, request)

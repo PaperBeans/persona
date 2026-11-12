@@ -16,7 +16,7 @@ import { composing } from "../../lib/send-history";
 import {
   asksFirst, changed, checkError, choiceLabel, clearedSecrets, clearExtensionSecret, compact, configError, fieldLabel, fieldTitle, isDirty, listItems, listExtensionsInfo, listSummary, numberProblems,
   placeholder, extensionDetail, extensionState, extensionTone, pointText, readNumber, rebaseDraft, runNote, same, secretState, setAt, setContribution, setExtensionConfig, setExtensionEnabled,
-  channelOf, machineStatus, nodeProgramStatus, pickerChoices, sandboxEgress, sandboxState, saveFooter, setExtensionAutoUpgrade, setExtensionSecret, sourceText, stateLine, valueAt,
+  channelOf, machineStatus, nodeProgramStatus, pickerChoices, sandboxState, saveFooter, setExtensionAutoUpgrade, setExtensionSecret, sourceText, stateLine, valueAt,
   removeHandoffRule, setExtensionSecretReference, type HandoffRule, type SecretUser,
   type HubExtension, type HubExtensionDetail, type Json, type JsonObject, type ExtensionField, type ExtensionNodeState, type ExtensionSandbox, type ExtensionSecret,
   type PickerLauncher,
@@ -38,6 +38,8 @@ import { AuthGroup } from "./ExtensionAuth";
 import { dependencyText, dependentError, type Contribution, type Dependent } from "../../lib/extension-model";
 import { Group, Pill, Row, Switch, SettingsHint } from "./SettingsParts";
 import { formatList, t } from "../../i18n";
+import { tRich } from "../../i18n/rich";
+import { ago } from "../../lib/format";
 import { scoped, useScope } from "../../lib/current-assistant";
 import { SubscriptionsEntry } from "../subscriptions/SubscriptionsEntry";
 
@@ -804,7 +806,7 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
             </Group>
           )}
 
-          {p.sandbox && <SandboxGroup s={p.sandbox} />}
+          {p.sandbox && <SandboxGroup s={p.sandbox} id={p.id} name={p.name} />}
 
           {!!p.permissions?.length && (
             <Group title={t("settings-extensions.permissions_title")} footer={t("settings-extensions.permissions_footer")}>
@@ -848,28 +850,53 @@ function ExtensionDetail({ id, manager, onBack: back, onPage, onUpgrade, onChann
 }
 
 /** "Isolation" (Android ExtensionModelParts sandbox()): whether the sandbox is in effect and why, what went through the
- *  egress proxy and the last thing it refused. Only looked at here; it is changed on the hub's side. */
-export function SandboxGroup({ s }: { s: ExtensionSandbox }) {
-  const egress = sandboxEgress(s);
+ *  egress proxy, and the last address it blocked said in words, with the way to the admin page where the owner allows it
+ *  or switches the sandbox (#5696). Only looked at here: widening what an extension may reach is the owner's, in /admin. */
+export function SandboxGroup({ s, id, name }: { s: ExtensionSandbox; id: string; name: string }) {
+  const e = s.egress;
+  const blocked = e?.denied ?? 0;
   return (
-    <Group title={t("settings-extensions.sandbox_title")} footer={t("settings-extensions.sandbox_footer")}>
+    <Group title={t("settings-extensions.sandbox_title")} footer={e ? t("settings-extensions.sandbox_footer") : undefined}>
       <div className="flex items-start gap-3 px-4 py-2.5">
-        <Icon name="lock" size={14} className={cx("mt-0.5 shrink-0", s.active ? "text-green" : s.enabled ? "text-orange" : "text-ink-3")} />
+        <Icon name={s.enabled ? "lock" : "unlock"} size={14} className={cx("mt-0.5 shrink-0", s.active ? "text-green" : s.enabled ? "text-orange" : "text-ink-3")} />
         <div className="min-w-0 flex-1">
           <div className="text-[13px] text-ink">{sandboxState(s)}</div>
           {s.why && <div className="mt-0.5 text-[11.5px] leading-snug break-words text-ink-3">{s.why}</div>}
         </div>
       </div>
-      {egress && (
-        <div className="px-4 py-2.5">
-          <div className="text-[12.5px] text-ink-2">{egress}</div>
-          {s.egress?.last_denied && (
-            <div className="mt-0.5 font-mono text-[11.5px] break-all text-ink-3 select-text">{t("settings-extensions.sandbox_last_denied", { target: s.egress.last_denied })}</div>
-          )}
+      {e && (
+        <div className="flex items-center gap-3 px-4 py-2.5" data-sandbox-egress>
+          <span className="min-w-0 flex-1 text-[13px] text-ink">{t("settings-extensions.sandbox_network")}</span>
+          <span className="shrink-0 text-[12.5px] whitespace-nowrap tabular-nums">
+            <span className="text-green">{t("settings-extensions.sandbox_allowed_count", { count: e.allowed ?? 0 })}</span>
+            <span className="text-ink-3"> · </span>
+            <span className={blocked ? "text-red" : "text-ink-3"}>{t("settings-extensions.sandbox_blocked_count", { count: blocked })}</span>
+          </span>
+        </div>
+      )}
+      {e?.last_denied && (
+        <div className="px-4 py-2.5" data-sandbox-blocked>
+          <div className="flex items-start gap-2.5 rounded-control bg-orange-tint px-3 py-2.5">
+            <Icon name="warning" size={14} className="mt-0.5 shrink-0 text-orange" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] leading-snug break-words text-ink">
+                {tRich("settings-extensions.sandbox_blocked_sentence", { name, host: <span className="font-mono text-[12px] select-text">{e.last_denied}</span> })}
+              </p>
+              {e.denied_at && <p className="mt-0.5 text-[11.5px] text-ink-3">{ago(e.denied_at)}</p>}
+              <Button tone="secondary" icon="external" className="mt-2" onClick={() => window.open(adminNetworkURL(id), "_blank", "noopener")}>
+                {t("settings-extensions.sandbox_go_admin")}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </Group>
   );
+}
+
+/** Where the admin page shows an extension's network and isolation (its row opened at that block, #5696). */
+export function adminNetworkURL(id: string): string {
+  return `/admin/extensions?extension=${encodeURIComponent(id)}#network`;
 }
 
 // ── the form ────────────────────────────────────────────

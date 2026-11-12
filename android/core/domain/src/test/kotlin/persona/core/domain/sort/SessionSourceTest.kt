@@ -111,6 +111,16 @@ class SessionSourceTest {
         assertFalse(claude.copy(sourceKind = "claude_cli", capabilities = SessionCapabilities(read = true, send = true)).steersQueue)
     }
 
+    // iOS QueueSteerTests' own count: the relayed messages are the queue's last ones.
+    @Test fun theUsersOwnQueuedMessagesComeBeforeTheRelayedOnes() {
+        val queue = """{"session_id":"main","assistant":true,"status":"working","queued":["一","二","来自另一个对话"]"""
+        assertEquals("an older hub has only the user's own messages", 3, session("$queue}").ownQueued)
+        assertEquals(2, session("""$queue,"queued_relayed":1}""").ownQueued)
+        assertEquals("a stale count cannot make the own count negative", 0, session("""$queue,"queued_relayed":99}""").ownQueued)
+        assertEquals("a malformed negative count is none", 3, session("""$queue,"queued_relayed":-2}""").ownQueued)
+        assertEquals(0, session("""{"session_id":"idle","queued_relayed":1}""").ownQueued)
+    }
+
     @Test fun modeCapabilityHidesUnsupportedClaude() {
         val desktop = session(
             """{"session_id":"desktop","status":"working","agent":"claude","source_kind":"claude_desktop",""" +

@@ -2,6 +2,7 @@ package persona.core.data
 
 import persona.core.contracts.*
 import persona.core.contracts.api.*
+import persona.core.domain.answer.Delegated
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.channels.BufferOverflow
@@ -27,6 +28,10 @@ class HubInteractionCenter(
     private val mutableAnswered = MutableStateFlow<Map<SessionKey, AnsweredMark>>(emptyMap())
     /** The agents a card was answered for here in the last [ANSWERED_MILLIS] (#4525, [answeredSessions]). */
     val answered = mutableAnswered.asStateFlow()
+    private val mutableDelegated = MutableStateFlow<List<DelegatedAnswer>>(emptyList())
+    override val delegated = mutableDelegated.asStateFlow()
+    private val mutableReanswered = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
+    override val reanswered = mutableReanswered.asStateFlow()
     private val lock = Mutex()
     private val refreshing = Mutex()
     private var revision = 0L
@@ -66,7 +71,13 @@ class HubInteractionCenter(
                         ended.remove(event.interaction.id); change(event.interaction.id, event.interaction)
                         if (arrived) mutableArrivals.tryEmit(event.interaction)
                     }
-                    is InteractionResolvedEvent -> { withdrew(event.id); end(event.id) }
+                    is InteractionResolvedEvent -> {
+                        // The assistant's answer to a question whose card this device had: it stays in its chat.
+                        if (event.byAssistant) mutablePending.value.firstOrNull { it.id == event.id }
+                            ?.let { keepDelegated(it, event.answers, event.reason.orEmpty()) }
+                        withdrew(event.id); end(event.id)
+                    }
+                    is InteractionReansweredEvent -> noteReanswer(event.id, event.answers)
                     else -> Unit
                 }
             } }
@@ -107,20 +118,50 @@ class HubInteractionCenter(
     override suspend fun resolveOutcome(id: String, resolution: Resolution): ResolveOutcome {
         restored.await()
         // Whose card it is and the hub's state for them now, before an interaction_resolved can take the card away.
-        val asked = pending.value.firstOrNull { it.id == id }?.sessionKey
+        val card = pending.value.firstOrNull { it.id == id }
+        val asked = card?.sessionKey
         val since = asked?.let { key -> sessions?.value?.firstOrNull { it.key == key }?.stateSince }
         val outcome = try { transport.resolveOutcome(id, resolution) }
         catch (gone: InteractionGoneException) {
             lock.withLock { end(id, here = true) }
             throw gone
         }
-        val seen = lock.withLock { end(id, here = true); id in withdrawn }
+        val seen = lock.withLock {
+            end(id, here = true)
+            // The assistant answered first: its answer shows in the chat, where the user may change it (iOS `resolve`).
+            val effective = outcome.resolution
+            if (outcome.already && card != null && effective?.answeredBy == DelegatedAnswer.ASSISTANT) {
+                keepDelegated(card, effective.answers.orEmpty(), effective.reason.orEmpty())
+            }
+            id in withdrawn
+        }
         // Answered (now, or already): its agent goes on. An expired or withdrawn card (gone) says nothing of that, and a
         // card handed back to the computer, now or already (a second tap), leaves the agent waiting there (#709, as the
         // web's card-answer.ts).
         val handedBack = if (outcome.already) outcome.status == "dismissed" else resolution.dismiss == true
         if (!handedBack) asked?.let { answered(it, AnsweredMark(since, id, pending = !outcome.already && !seen, at = clock())) }
         return outcome
+    }
+
+    override fun dropDelegated(id: String) = mutableDelegated.update { list -> list.filterNot { it.id == id } }
+
+    override suspend fun reanswer(id: String, answers: Map<String, String>, manager: String?) {
+        transport.reanswer(id, answers, manager)
+        noteReanswer(id, answers)
+    }
+
+    /** A question the assistant answered, once, the oldest put away past [Delegated.KEPT] (iOS `keepDelegated`). */
+    private fun keepDelegated(card: Interaction, answers: Map<String, String>, reason: String) {
+        if (card.kind != "question") return
+        mutableDelegated.update { list ->
+            if (list.any { it.id == card.id }) list else (list + DelegatedAnswer(card, answers, reason, clock())).takeLast(Delegated.KEPT)
+        }
+    }
+
+    /** The hub names only the questions that changed: an earlier change to another question of the card stays. */
+    private fun noteReanswer(id: String, answers: Map<String, String>) {
+        if (answers.isEmpty()) return
+        mutableReanswered.update { it + (id to it[id].orEmpty() + answers) }
     }
 
     private fun answered(key: SessionKey, mark: AnsweredMark) {

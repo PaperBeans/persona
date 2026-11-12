@@ -16,7 +16,7 @@ import { uuid } from "../../lib/format";
 import { lazyPage } from "../../lib/lazy-page";
 import { enterSends, hasFinePointer, useMedia } from "../../lib/viewport";
 import { useModalFocus } from "../../ui/overlay";
-import { COMPACT_COMPOSER, growLines, lineCount, offersExpand } from "./composer-grow";
+import { COMPACT_COMPOSER, COMPOSER_LINES, lineCount, offersExpand } from "./composer-grow";
 import { INPUT_MAX } from "./dock";
 import { imagePayload, MAX_IMAGE, quotePath, releaseAttachments, sendFile } from "../../lib/attachments";
 import { activateComposer, addContext, getContexts, newContext, registerComposer, removeContext, useContexts, withContexts, type ComposerHandle } from "../../lib/links";
@@ -223,11 +223,10 @@ export const Composer = memo(function Composer({
   editNow.current = editingLast;
   useEffect(() => { lastEscape.current = null; }, [draftKey, working, disabled, onEditLastMessage]);
   const box = useRef<HTMLDivElement>(null);
-  // Phones (#5688): the box grows to a line limit from the visible height, then scrolls and offers Expand, the draft
-  // full screen. `grow` is what the last measure found: the limit, a line's height, the padding, and whether it is past it.
+  // The box grows to six lines, then scrolls; the dock's CSS cap protects exceptionally short viewports.
+  // Cache only the measured height cap and overflow, shared by both widths; phones also offer Expand.
   const compact = useMedia(COMPACT_COMPOSER);
-  const visible = useVisibleHeight(compact);
-  const [grow, setGrow] = useState({ limit: 0, line: 0, pad: 0, over: false });
+  const [grow, setGrow] = useState({ cap: 0, over: false });
   const [expanded, setExpanded] = useState(false);
   // the caret to put back in the box when the full editor closes
   const collapsedSel = useRef<[number, number] | null>(null);
@@ -406,19 +405,17 @@ export const Composer = memo(function Composer({
     if (holder) holder.style.minHeight = `${holder.getBoundingClientRect().height}px`;
     el.style.height = "0px";
     const h = el.scrollHeight;
-    // the CSS max-height (INPUT_MAX) caps it: 240px, less when the visible height is small (a keyboard, a phone on
-    // its side), so the send button stays on screen; past it the box scrolls (overflow-y-auto: when the keyboard
-    // lowers the cap, no new draft comes to say so)
+    // Both widths use the measured six-line cap before paint; CSS leaves room for Send in very short viewports.
+    // Longer drafts scroll inside the same native textarea.
     el.style.height = `${Math.max(h, 24)}px`;
     if (holder) holder.style.minHeight = held;
-    if (!compact) return;
     const css = getComputedStyle(el);
     const line = parseFloat(css.lineHeight) || 24;
     const pad = (parseFloat(css.paddingTop) || 0) + (parseFloat(css.paddingBottom) || 0);
-    const limit = growLines(visible, line);
-    const over = offersExpand(lineCount(h - pad, line), limit);
-    setGrow((g) => (g.limit === limit && g.line === line && g.pad === pad && g.over === over ? g : { limit, line, pad, over }));
-  }, [draft, compact, visible, grow.over]);
+    const cap = COMPOSER_LINES * line + pad;
+    const over = offersExpand(lineCount(h - pad, line), COMPOSER_LINES);
+    setGrow((g) => (g.cap === cap && g.over === over ? g : { cap, over }));
+  }, [draft, compact, grow.over]);
   const showExpand = compact && grow.over && !disabled;
   useEffect(() => {
     if (!compact || disabled) setExpanded(false);
@@ -967,7 +964,7 @@ export const Composer = memo(function Composer({
           placeholder={pill && hasFinePointer() ? t("chat-composer.suggestion", { suggestion: pill }) : placeholder}
           aria-label={t("chat-composer.message")}
           title={hasFinePointer() ? (onEditLastMessage ? t("composer.history_hint_edit") : t("composer.history_hint")) : undefined}
-          style={{ maxHeight: compact && grow.line ? `${grow.limit * grow.line + grow.pad}px` : INPUT_MAX }}
+          style={{ maxHeight: grow.cap ? `min(${grow.cap}px, ${INPUT_MAX})` : INPUT_MAX }}
           className={cx("min-h-6 w-full resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-[14px] leading-[21px] text-ink outline-none [@media(pointer:coarse)]:text-[16px] [@media(pointer:coarse)]:leading-[24px] [overflow-wrap:anywhere] placeholder:text-ink-3 disabled:opacity-50", showExpand && "pr-8")}
         />
         {showExpand && (
@@ -1138,25 +1135,6 @@ function StopButton({ stopping, onStop }: { stopping?: boolean; onStop: () => vo
       {stopping ? <Spinner size={12} /> : <span aria-hidden className="size-2.5 rounded-[1.5px] bg-current" />}
     </button>
   );
-}
-
-/** The visible height (above the keyboard), followed while `on`: the grow limit comes from it. */
-function useVisibleHeight(on: boolean): number {
-  const read = () => (typeof window === "undefined" ? 0 : Math.round(window.visualViewport?.height ?? window.innerHeight));
-  const [h, setH] = useState(read);
-  useEffect(() => {
-    if (!on) return;
-    const vv = window.visualViewport;
-    const update = () => setH(read());
-    update();
-    vv?.addEventListener("resize", update);
-    addEventListener("resize", update);
-    return () => {
-      vv?.removeEventListener("resize", update);
-      removeEventListener("resize", update);
-    };
-  }, [on]);
-  return h;
 }
 
 /** The draft full screen on a phone (#5688): collapse at the top right, the text filling the visible height, send at the

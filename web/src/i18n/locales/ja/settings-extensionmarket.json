@@ -23,7 +23,6 @@
   "preview_failed": "プレビューできません：{error}",
   "reload": "再読み込み",
   "reading": "読み込み中…",
-  "cant_install": "インストールできません：{problem}",
   "uninstall": "アンインストール",
   "upgrade_to": "{version} にアップデート",
   "install": "インストール",

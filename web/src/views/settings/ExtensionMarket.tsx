@@ -220,7 +220,8 @@ export function MarketCatalog({ onBack, onOpen, onMarkets }: { onBack: () => voi
               </div>
               <span className="flex shrink-0 flex-col items-end gap-1">
                 <Pill tone={STATE_TONE[st.tone]}>{st.label}</Pill>
-                {it.problem && <span className="max-w-[180px] truncate text-[11px] text-orange">{it.problem}</span>}
+                {/* on a phone the chip alone: the reason would squeeze the name; the item page says it in full */}
+                {it.problem && <span className="hidden max-w-[180px] truncate text-[11px] text-orange sm:block">{it.problem}</span>}
               </span>
               <Icon name="chevronRight" size={12} stroke={2} className="shrink-0 text-ink-3" />
             </button>
@@ -351,7 +352,7 @@ export function MarketItem({ market, id, manager, onBack, onInstalled }: { marke
                 ))}
               </div>
             )}
-            {it?.problem && <p className="text-[12px] text-orange">{t("settings-extensionmarket.cant_install", { problem: it.problem })}</p>}
+            {it?.problem && <p className="text-[12px] text-orange">{it.problem}</p>}
             {managerName && <p className="text-[12px] text-ink-2" data-for-manager>{t("settings-extensionmarket.for_manager", { name: managerName })}</p>}
             {error && <p className="text-[12px] break-words text-red">{error}</p>}
           </div>

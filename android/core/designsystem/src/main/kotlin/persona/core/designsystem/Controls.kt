@@ -155,15 +155,15 @@ fun JButton(
         modifier.heightIn(min = size.height).minimumInteractiveComponentSize().scale(scale).then(frame)
             .clickable(interaction, indication = androidx.compose.material3.ripple(), enabled = enabled && !busy, role = Role.Button, onClick = onClick)
             .stableAlpha(if (enabled || busy) 1f else 0.4f)
-            .padding(horizontal = if (kind == JButtonKind.Quiet) 8.dp else size.padding),
+            .padding(horizontal = if (kind == JButtonKind.Quiet) 8.dp.dense else size.padding),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
         if (busy) {
             JSpinner(Modifier.size(16.dp), color = content)
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(8.dp.dense))
         } else if (icon != null) {
             JIcon(icon, null, size = if (size == JButtonSize.Small) 15.dp else 18.dp, tint = content, selected = kind == JButtonKind.Primary)
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(6.dp.dense))
         }
         Text(
             if (busy) loadingText ?: text else text,
@@ -197,7 +197,7 @@ fun JIconButton(
         !raised -> Modifier
         style == AppStyle.Glass -> Modifier.size(44.dp).floatingSurface(CircleShape)
         style == AppStyle.Brief -> Modifier.size(42.dp).clip(CircleShape).background(palette.surface)
-        else -> Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(palette.surface).border(1.dp, palette.line, RoundedCornerShape(8.dp))
+        else -> Modifier.size(40.dp).clip(RoundedCornerShape(8.dp.corner)).background(palette.surface).border(1.dp, palette.line, RoundedCornerShape(8.dp.corner))
     }
     Box(
         modifier.size(48.dp).clip(CircleShape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
@@ -209,7 +209,7 @@ fun JIconButton(
             JIcon(icon, null, size = if (raised) 20.dp else 24.dp, tint = color, selected = selected)
         }
         if (badge) Box(
-            Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 10.dp).size(9.dp).clip(CircleShape)
+            Modifier.align(Alignment.TopEnd).padding(top = 10.dp.dense, end = 10.dp.dense).size(9.dp).clip(CircleShape)
                 .background(palette.needsYou.dot).border(1.5.dp, palette.background, CircleShape),
         )
     }
@@ -241,6 +241,8 @@ fun JTextField(
     visualTransformation: VisualTransformation = VisualTransformation.None,
     /** False keeps the field out of Autofill: nothing is filled into it, nothing typed is offered to be saved. */
     autofill: Boolean = true,
+    /** Configuration and code use the design system's code type scale, never a page-local font. */
+    monospace: Boolean = false,
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
@@ -255,33 +257,33 @@ fun JTextField(
     Column(modifier) {
         label?.let {
             Text(it, style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(6.dp.dense))
         }
         BasicTextField(
             value = value, onValueChange = onValueChange, enabled = enabled, singleLine = singleLine,
             minLines = minLines, maxLines = maxLines, interactionSource = interaction,
-            textStyle = PersonaTheme.type.body.copy(color = palette.ink), cursorBrush = SolidColor(palette.accent.takeIf { style != AppStyle.Brief } ?: palette.ink),
+            textStyle = (if (monospace) PersonaTheme.type.code else PersonaTheme.type.body).copy(color = palette.ink), cursorBrush = SolidColor(palette.accent.takeIf { style != AppStyle.Brief } ?: palette.ink),
             keyboardOptions = keyboardOptions, keyboardActions = keyboardActions, visualTransformation = visualTransformation,
             // On the text field's own semantics node: Autofill reads the node it would fill, not its parents.
             modifier = if (autofill) Modifier.fillMaxWidth() else Modifier.fillMaxWidth().semantics { contentDataType = ContentDataType.None },
             decorationBox = { field ->
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(fill)
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp.row).clip(shape).background(fill)
                         .border(if (focused || style != AppStyle.Brief) 1.dp else 0.dp, if (isError) palette.danger.dot else border, shape)
-                        .stableAlpha(if (enabled) 1f else 0.5f).padding(horizontal = 14.dp, vertical = 12.dp),
+                        .stableAlpha(if (enabled) 1f else 0.5f).padding(horizontal = 14.dp.dense, vertical = 12.dp.dense),
                     verticalAlignment = if (singleLine) Alignment.CenterVertically else Alignment.Top,
                 ) {
-                    leading?.let { JIcon(it, null, size = 20.dp, tint = palette.ink3); Spacer(Modifier.width(10.dp)) }
+                    leading?.let { JIcon(it, null, size = 20.dp, tint = palette.ink3); Spacer(Modifier.width(10.dp.dense)) }
                     Box(Modifier.weight(1f)) {
-                        if (value.isEmpty() && placeholder != null) Text(placeholder, style = PersonaTheme.type.body, color = palette.ink3, maxLines = if (singleLine) 1 else maxLines, overflow = TextOverflow.Ellipsis)
+                        if (value.isEmpty() && placeholder != null) Text(placeholder, style = if (monospace) PersonaTheme.type.code else PersonaTheme.type.body, color = palette.ink3, maxLines = if (singleLine) 1 else maxLines, overflow = TextOverflow.Ellipsis)
                         field()
                     }
-                    trailing?.let { Spacer(Modifier.width(6.dp)); it() }
+                    trailing?.let { Spacer(Modifier.width(6.dp.dense)); it() }
                 }
             },
         )
         supportingText?.let {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(6.dp.dense))
             Text(it, style = PersonaTheme.type.caption, color = if (isError) palette.danger.text else palette.ink3)
         }
     }
@@ -339,7 +341,7 @@ fun JSwitch(checked: Boolean, onCheckedChange: ((Boolean) -> Unit)?, modifier: M
             .then(if (!checked) Modifier.border(1.dp, palette.line, RoundedCornerShape(corner)) else Modifier)
             .then(if (onCheckedChange != null) Modifier.clickable(enabled = enabled, role = Role.Switch) { onCheckedChange(!checked) } else Modifier)
             .semantics { toggleableState = ToggleableState(checked) }
-            .stableAlpha(if (enabled) 1f else 0.4f).padding(3.dp),
+            .stableAlpha(if (enabled) 1f else 0.4f).padding(3.dp.dense),
         contentAlignment = Alignment.CenterStart,
     ) {
         val thumbColor = if (checked && style == AppStyle.Brief) palette.onAction else Color.White
@@ -378,7 +380,7 @@ fun JTriCheckbox(state: ToggleableState, onClick: (() -> Unit)?, modifier: Modif
 fun JCheckMark(state: ToggleableState, modifier: Modifier = Modifier) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
-    val shape = when (style) { AppStyle.Glass -> CircleShape; AppStyle.Brief -> RoundedCornerShape(7.dp); AppStyle.Board -> RoundedCornerShape(4.dp) }
+    val shape = when (style) { AppStyle.Glass -> CircleShape; AppStyle.Brief -> RoundedCornerShape(7.dp.corner); AppStyle.Board -> RoundedCornerShape(4.dp) }
     val on = if (style == AppStyle.Brief) palette.action else palette.accent
     val filled = state != ToggleableState.Off
     Box(
@@ -420,33 +422,33 @@ fun JSegmented(options: List<JSegment>, selected: Int, onSelect: (Int) -> Unit, 
     when (PersonaTheme.style) {
         AppStyle.Glass -> Row(
             modifier.clipDrawing(CircleShape).background(palette.surface)
-                .border(1.dp, Brush.verticalGradient(listOf(palette.strokeTop, palette.strokeBottom)), CircleShape).padding(4.dp),
+                .border(1.dp, Brush.verticalGradient(listOf(palette.strokeTop, palette.strokeBottom)), CircleShape).padding(4.dp.dense),
         ) {
             options.forEachIndexed { index, segment ->
                 val on = index == selected
                 Box(
                     Modifier.clip(CircleShape).background(if (on) palette.action else Color.Transparent)
                         .clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on }
-                        .padding(horizontal = 16.dp, vertical = 9.dp),
+                        .padding(horizontal = 16.dp.dense, vertical = 9.dp.dense),
                     contentAlignment = Alignment.Center,
                 ) { Text(text(segment), style = type.labelSmall, color = if (on) palette.onAction else palette.ink2, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
             }
         }
-        AppStyle.Brief -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+        AppStyle.Brief -> Row(modifier, horizontalArrangement = Arrangement.spacedBy(22.dp.dense)) {
             options.forEachIndexed { index, segment ->
                 val on = index == selected
                 Column(
-                    Modifier.clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on }.padding(vertical = 6.dp),
+                    Modifier.clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = on }.padding(vertical = 6.dp.dense),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(text(segment), style = type.label, color = if (on) palette.ink else palette.ink3, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(6.dp.dense))
                     Box(Modifier.size(20.dp, 2.5.dp).clip(CircleShape).background(if (on) palette.ink else Color.Transparent))
                 }
             }
         }
         AppStyle.Board -> Row(
-            modifier.height(IntrinsicSize.Min).clipDrawing(RoundedCornerShape(8.dp)).background(palette.surface).border(1.dp, palette.line, RoundedCornerShape(8.dp)),
+            modifier.height(IntrinsicSize.Min).clipDrawing(RoundedCornerShape(8.dp.corner)).background(palette.surface).border(1.dp, palette.line, RoundedCornerShape(8.dp.corner)),
         ) {
             options.forEachIndexed { index, segment ->
                 val on = index == selected
@@ -465,7 +467,7 @@ fun JSegmented(options: List<JSegment>, selected: Int, onSelect: (Int) -> Unit, 
                     Text(
                         text(segment), style = type.labelSmall.copy(fontWeight = if (on) FontWeight.Bold else FontWeight.Medium),
                         color = if (on) palette.ink else palette.ink2, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp.dense, vertical = 10.dp.dense),
                     )
                 }
             }
@@ -588,7 +590,7 @@ fun JBadge(count: Int, modifier: Modifier = Modifier, text: String? = null) {
     val shape = if (PersonaTheme.style == AppStyle.Board) RoundedCornerShape(4.dp) else CircleShape
     Box(
         modifier.heightIn(min = 18.dp).widthIn(min = 18.dp).clip(shape).background(palette.needsYou.dot)
-            .border(1.5.dp, palette.background, shape).padding(horizontal = 5.dp),
+            .border(1.5.dp, palette.background, shape).padding(horizontal = 5.dp.dense),
         contentAlignment = Alignment.Center,
     ) { Text(label, style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.Bold, fontSize = androidx.compose.ui.unit.TextUnit(11f, androidx.compose.ui.unit.TextUnitType.Sp), lineHeight = androidx.compose.ui.unit.TextUnit(14f, androidx.compose.ui.unit.TextUnitType.Sp)), color = palette.needsYou.onDot, maxLines = 1) }
 }
@@ -614,7 +616,7 @@ fun JTag(text: String, hue: JHue, modifier: Modifier = Modifier, animated: Boole
 @Composable
 internal fun JTagColored(text: String, modifier: Modifier, tone: StatusColors?, animated: Boolean = false) {
     val palette = PersonaTheme.palette
-    val shape = RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 4.dp else 6.dp)
+    val shape = RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 4.dp else 6.dp.corner)
     val style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.SemiBold)
     var ink = tone?.text ?: palette.ink2
     var fill = palette.statusSurface
@@ -626,7 +628,7 @@ internal fun JTagColored(text: String, modifier: Modifier, tone: StatusColors?, 
     } else Text(text, style = style, color = ink, maxLines = 1, modifier = modifier.clip(shape).background(fill).padding(TagPadding))
 }
 
-private val TagPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+private val TagPadding = PaddingValues(horizontal = 6.dp.dense, vertical = 2.dp.dense)
 
 
 // ------------------------------------------------------------------ progress

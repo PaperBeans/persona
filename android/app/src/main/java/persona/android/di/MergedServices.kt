@@ -112,6 +112,17 @@ internal fun mergedInteractions(stacks: GroupStacks): InteractionCenter = object
         stacks.use(GroupKeys.namespaceOf(id)) { it.repositories.interactions.resolveOutcome(GroupKeys.raw(id), resolution) }
     override suspend fun discardLocal(id: String) =
         stacks.use(GroupKeys.namespaceOf(id)) { it.repositories.interactions.discardLocal(GroupKeys.raw(id)) }
+    override val delegated = stacks.merged(emptyList<DelegatedAnswer>(), { s ->
+        s.mapped(s.repositories.interactions.delegated) { list -> list.map { it.copy(interaction = interaction(it.interaction)) } }
+    }) { lists -> lists.flatten().sortedBy { it.at } }
+    override val reanswered = stacks.merged(emptyMap<String, Map<String, String>>(), { s ->
+        s.mapped(s.repositories.interactions.reanswered) { changes -> changes.mapKeys { interactionId(it.key) } }
+    }) { maps -> maps.fold(emptyMap()) { all, one -> all + one } }
+    override fun dropDelegated(id: String) {
+        stacks.stacks.value.firstOrNull { it.namespace == GroupKeys.namespaceOf(id) }?.repositories?.interactions?.dropDelegated(GroupKeys.raw(id))
+    }
+    override suspend fun reanswer(id: String, answers: Map<String, String>, manager: String?) =
+        stacks.use(GroupKeys.namespaceOf(id)) { it.repositories.interactions.reanswer(GroupKeys.raw(id), answers, manager) }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -292,6 +303,7 @@ internal class MergedShellServices(private val stacks: GroupStacks) {
         override suspend fun editQueue(session: Session, keep: List<Int>) = of(session).editQueue(session, keep)
         override suspend fun sendQueuedNow(session: Session) = of(session).sendQueuedNow(session)
         override suspend fun info(session: Session) = of(session).info(session)
+        override suspend fun completeRow(session: Session) = of(session).completeRow(session)
         override suspend fun interactionHistory(session: Session) = of(session).interactionHistory(session)
         override suspend fun restoreModel(session: Session) = of(session).restoreModel(session)
         override suspend fun fork(session: Session, atItemId: String) = of(session).fork(session, atItemId)

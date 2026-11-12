@@ -1,11 +1,12 @@
-// With several installed assistants the sidebar's head names the current one and opens the roster, followed by
-// appearance, the other hubs, Settings and Disconnect. A single assistant keeps the earlier product row (AppMark,
-// Persona and the hub's connection status) and its original menu; assistants can be added in Settings › Assistants.
+// Once the hub answers with a roster, even with one assistant, the sidebar's head names the current one and opens
+// the roster, followed by appearance, the other hubs, Settings and Disconnect. The remembered identity keeps that
+// assistant head while the roster loads or a temporary read fails. A hub without a roster keeps the earlier product
+// row (AppMark, Persona and the hub's connection status) and its original menu.
 // The current pick is kept per hub (lib/manager-choice.ts), including while its roster loads after a reload.
-import { memo, useState } from "react";
+import { memo, useId, useState } from "react";
 import { t } from "../i18n";
 import { BREATHING, connStatus, phaseTone, type ConnPhase } from "../lib/connection";
-import { chooseManager, pickedName, useChosenManager, useShownManager } from "../lib/manager-choice";
+import { chooseManager, pickedName, useChosenManager, useShownIdentity, useShownManager } from "../lib/manager-choice";
 import { useManagerBadges } from "../lib/manager-attention";
 import { loadRoster, managerError, managerOf, managerOrder, multiManager, renewCode, statusLine, switcherLine, useRoster, type InstallCode, type Manager } from "../lib/managers";
 import { refreshReadiness } from "../lib/readiness";
@@ -45,8 +46,8 @@ export function switchAssistant(m: Manager, route: Route) {
 type SwitcherProps = { phase: ConnPhase; online: number; total: number; route: Route };
 const NO_BADGES: Record<string, number> = {};
 
-// The counts follow every sessions and cards push, and only several assistants have any: with one, the row reads none
-// of that and stays as still as the row it replaced (SidebarShellMemo.test).
+// Waiting counts keep their separate gate: only several installed assistants subscribe to sessions and cards. One
+// assistant still shows identity and the roster without subscribing to those counts.
 export const AssistantSwitcher = memo(function AssistantSwitcher(props: SwitcherProps) {
   return multiManager(useRoster()) ? <CountedSwitcher {...props} /> : <SwitcherRow {...props} badges={NO_BADGES} />;
 });
@@ -85,7 +86,7 @@ function useAssistantList(route: Route, badges: Record<string, number>, open: bo
 
   const installed = roster ? managerOrder(roster) : [];
   const installing = roster ? roster.managers.filter((m) => m.installing) : [];
-  const several = installed.length + installing.length > 1;
+  const several = installed.length > 1;
   const row = (m: Manager): MenuItem => ({
     key: `assistant:${m.id}`,
     label: m.name,
@@ -143,11 +144,16 @@ const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, bad
   const disconnect = useDisconnect();
   const list = useAssistantList(route, badges, Boolean(menu.anchor));
   const { now, asking } = list;
-  const several = multiManager(roster);
-  const known = several ? managerOf(roster, current) : undefined;
-  // before the roster is read (a reload), a kept pick shows the name the roster last gave it, not the hub's own row
+  const statusId = useId();
+  const currentRecord = managerOf(roster, current);
+  const known = currentRecord?.installing ? null : currentRecord;
+  const remembered = useShownIdentity();
+  // Before the roster is read, the display-only identity includes the default. The older kept pick remains a fallback
+  // for a browser that has its name but has not written the new identity cache yet.
   const picked = useChosenManager();
-  const me: Pick<Manager, "id" | "name"> | null = known ?? (!roster && picked ? { id: picked, name: pickedName() ?? picked } : null);
+  const kept = picked ? { id: picked, name: remembered && remembered.id === picked ? remembered.name : pickedName() ?? picked } : remembered;
+  const me: Pick<Manager, "id" | "name"> | null = known ?? (!roster ? kept : null);
+  const hasAssistant = me !== null;
   const linked = phase === "online";
   const othersWaiting = Object.entries(badges).some(([id, n]) => id !== current && n > 0);
 
@@ -158,10 +164,10 @@ const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, bad
   ];
 
   const items: MenuItem[] = [
-    ...(several ? list.items : []),
+    ...(hasAssistant ? list.items : []),
     // the three looks as rows of their own under a small title, as the row's menu had them: a submenu would open over
     // the rows under it on a narrow screen (a phone, a zoomed page) and hide Settings and Disconnect
-    ...(several ? [{ key: "appearance", label: t("sidebar.appearance"), heading: true, divider: true, onSelect: () => {} }] : []),
+    ...(hasAssistant ? [{ key: "appearance", label: t("sidebar.appearance"), heading: true, divider: true, onSelect: () => {} }] : []),
     ...themes.map((x) => ({ key: x.k, label: x.label, icon: x.icon, checked: theme === x.k, onSelect: () => setTheme(x.k) })),
     // the other hubs in this browser's list (#1014); none, and the menu is as before
     ...otherHubs,
@@ -179,13 +185,14 @@ const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, bad
         aria-haspopup="menu"
         aria-expanded={Boolean(menu.anchor)}
         aria-label={me ? t(othersWaiting ? "sidebar.switcher_label_waiting" : "sidebar.switcher_label", { name }) : undefined}
+        aria-describedby={me ? statusId : undefined}
         data-assistant-switcher={me?.id ?? ""}
         className={cx("flex w-full items-center gap-2.5 rounded-control p-1.5 text-left transition-[background-color,transform] duration-100 hover:bg-hover active:scale-[0.98]", menu.anchor && "bg-hover")}
       >
         {me ? <AssistantAvatar id={me.id} name={me.name} isDefault={me.id === roster?.default} size={32} status={linked ? tone : undefined} waiting={othersWaiting} /> : <AppMark size={32} radius={8} className="shadow-hairline" />}
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] leading-tight font-medium text-ink">{name}</span>
-          <span className="flex items-center gap-1.5 truncate text-[11px] leading-tight text-ink-3">
+          <span id={statusId} className="flex items-center gap-1.5 truncate text-[11px] leading-tight text-ink-3">
             {/* the hub out of reach matters more than the assistant's own state: its line and dot take the place */}
             {known && linked ? (
               <span className="truncate">{switcherLine(known, now)}</span>
@@ -200,7 +207,7 @@ const SwitcherRow = memo(function SwitcherRow({ phase, online, total, route, bad
         {/* the menu is gone while the hub revokes this browser's token or makes an install code: the row says it is busy */}
         {disconnect.busy || asking ? <Spinner size={12} /> : <Icon name="chevron" size={12} stroke={2} className={cx("shrink-0 text-ink-3 transition-transform duration-200", menu.anchor && "rotate-180")} />}
       </button>
-      {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} width={several ? ASSISTANT_MENU_WIDTH.roster : ASSISTANT_MENU_WIDTH.product} header={several ? t("sidebar.assistants") : t("sidebar.appearance")} items={items} />}
+      {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} width={hasAssistant ? ASSISTANT_MENU_WIDTH.roster : ASSISTANT_MENU_WIDTH.product} header={hasAssistant ? t("sidebar.assistants") : t("sidebar.appearance")} items={items} />}
       {disconnect.dialog}
       {list.dialogs}
     </>

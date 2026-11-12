@@ -2,13 +2,22 @@ package persona.core.designsystem
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.res.pluralStringResource
 import androidx.annotation.StringRes
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -30,7 +39,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,64 +98,64 @@ fun DecisionCard(
         AppStyle.Glass -> JCard(modifier, onClick = onOpen, status = Status.NeedsYou) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 JStatusDot(Status.NeedsYou, size = 8.dp)
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(8.dp.dense))
                 Text(label, style = type.caption, color = palette.needsYou.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 expires?.let { Expiry(it) }
             }
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(6.dp.dense))
             Text(title, style = type.title, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
             source?.let { Text(it, style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(12.dp.dense))
             body()
-            advice?.let { Spacer(Modifier.height(12.dp)); DecisionAdvice(it) }
-            actions?.let { Spacer(Modifier.height(16.dp)); it() }
+            advice?.let { Spacer(Modifier.height(12.dp.dense)); DecisionAdvice(it) }
+            actions?.let { Spacer(Modifier.height(16.dp.dense)); it() }
         }
         AppStyle.Brief -> JCard(modifier, onClick = onOpen) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 JIcon(kind.icon, null, size = 18.dp, tint = palette.ink2)
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(8.dp.dense))
                 Text(label, style = type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 expires?.let { Text(it, style = type.micro, color = palette.ink3, maxLines = 1) }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(10.dp.dense))
             Text(title, style = type.title, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            source?.let { Spacer(Modifier.height(2.dp)); Provenance(it) }
-            Spacer(Modifier.height(12.dp))
+            source?.let { Spacer(Modifier.height(2.dp.dense)); Provenance(it) }
+            Spacer(Modifier.height(12.dp.dense))
             body()
-            advice?.let { Spacer(Modifier.height(12.dp)); DecisionAdvice(it) }
-            actions?.let { Spacer(Modifier.height(16.dp)); it() }
+            advice?.let { Spacer(Modifier.height(12.dp.dense)); DecisionAdvice(it) }
+            actions?.let { Spacer(Modifier.height(16.dp.dense)); it() }
         }
         AppStyle.Board -> {
             var open by rememberSaveable(title, label) { mutableStateOf(expandedByDefault) }
-            val shape = RoundedCornerShape(10.dp)
+            val shape = RoundedCornerShape(10.dp.corner)
             Row(
                 modifier.fillMaxWidth().clip(shape).background(palette.surface).holder(palette.needsYou.dot, Tokens.Space.xxs).border(1.dp, palette.line, shape)
                     .clickable(role = Role.Button) { open = !open }.animateContentSize(PersonaTheme.motion.size()),
             ) {
-                Box(Modifier.width(36.dp).padding(top = 14.dp), contentAlignment = Alignment.TopCenter) {
+                Box(Modifier.width(36.dp).padding(top = 14.dp.dense), contentAlignment = Alignment.TopCenter) {
                     JIcon(PhIcons.Hand, null, size = 18.dp, tint = palette.needsYou.text, selected = true)
                 }
-                Column(Modifier.weight(1f).padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)) {
+                Column(Modifier.weight(1f).padding(start = 14.dp.dense, end = 14.dp.dense, top = 12.dp.dense, bottom = 12.dp.dense)) {
                     Row(verticalAlignment = Alignment.Top) {
                         Column(Modifier.weight(1f)) {
                             Text(title, style = type.headline, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(label, style = type.callout, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        expires?.let { Spacer(Modifier.width(10.dp)); Text(it, style = type.micro, color = palette.ink, maxLines = 1) }
+                        expires?.let { Spacer(Modifier.width(10.dp.dense)); Text(it, style = type.micro, color = palette.ink, maxLines = 1) }
                     }
-                    source?.let { Spacer(Modifier.height(8.dp)); Fields(it.split(" / ")) }
+                    source?.let { Spacer(Modifier.height(8.dp.dense)); Fields(it.split(" / ")) }
                     if (open) {
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(12.dp.dense))
                         JDivider()
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(12.dp.dense))
                         body()
-                        advice?.let { Spacer(Modifier.height(10.dp)); DecisionAdvice(it) }
-                        actions?.let { Spacer(Modifier.height(12.dp)); it() }
-                        onOpen?.let { Spacer(Modifier.height(4.dp)); JTextButton(stringResource(R.string.designsystem_decision_open_chat), it, icon = PhIcons.ArrowSquareOut) }
+                        advice?.let { Spacer(Modifier.height(10.dp.dense)); DecisionAdvice(it) }
+                        actions?.let { Spacer(Modifier.height(12.dp.dense)); it() }
+                        onOpen?.let { Spacer(Modifier.height(4.dp.dense)); JTextButton(stringResource(R.string.designsystem_decision_open_chat), it, icon = PhIcons.ArrowSquareOut) }
                     } else {
-                        summary?.let { Spacer(Modifier.height(8.dp)); Text(it, style = type.code, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        summary?.let { Spacer(Modifier.height(8.dp.dense)); Text(it, style = type.code, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                         note?.let { Spacer(Modifier.height(Tokens.Space.s)); Text(it, style = type.caption, color = palette.cautionText) }
-                        quickActions?.let { Spacer(Modifier.height(10.dp)); Row(horizontalArrangement = Arrangement.spacedBy(6.dp), content = it) }
+                        quickActions?.let { Spacer(Modifier.height(10.dp.dense)); Row(horizontalArrangement = Arrangement.spacedBy(6.dp.dense), content = it) }
                     }
                 }
             }
@@ -155,7 +167,7 @@ fun DecisionCard(
 private fun Expiry(text: String) {
     val palette = PersonaTheme.palette
     JIcon(PhIcons.Timer, null, size = 14.dp, tint = palette.ink3)
-    Spacer(Modifier.width(4.dp))
+    Spacer(Modifier.width(4.dp.dense))
     Text(text, style = PersonaTheme.type.micro, color = palette.ink3, maxLines = 1)
 }
 
@@ -166,9 +178,9 @@ private fun Provenance(source: String) {
     val parts = source.split(" / ")
     Row(verticalAlignment = Alignment.CenterVertically) {
         parts.forEachIndexed { index, part ->
-            if (index > 0) Spacer(Modifier.width(14.dp))
+            if (index > 0) Spacer(Modifier.width(14.dp.dense))
             JIcon(if (index == 0) PhIcons.Laptop else PhIcons.FolderSimple, null, size = 15.dp, tint = palette.ink3)
-            Spacer(Modifier.width(5.dp))
+            Spacer(Modifier.width(5.dp.dense))
             Text(part, style = PersonaTheme.type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -181,9 +193,9 @@ fun Fields(values: List<String>, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         values.filter { it.isNotBlank() }.forEachIndexed { index, value ->
             if (index > 0) {
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(10.dp.dense))
                 Box(Modifier.size(1.dp, 12.dp).background(palette.line))
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(10.dp.dense))
             }
             Text(value, style = PersonaTheme.type.micro.copy(fontSize = androidx.compose.ui.unit.TextUnit(14f, androidx.compose.ui.unit.TextUnitType.Sp)), color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         }
@@ -191,9 +203,10 @@ fun Fields(values: List<String>, modifier: Modifier = Modifier) {
 }
 
 /**
- * The pending request in a conversation, in place of the composer: a floating glass sheet, a panel docked to
- * the bottom (brief), or a clearance strip under an amber rule (board). [position] is "current / total" when
- * several requests wait.
+ * One pending request above a conversation's composer, a card of [DecisionStack] (iOS `InteractionPanel`): a floating glass
+ * card inset like the composer, a rounded paper card with a light shadow (brief), or a bordered card under an amber rule
+ * (board). With [onCollapsedChange] a tap anywhere on its header folds it to that line, [preview] after the headline, and
+ * opens it again; the caret is the control TalkBack reads.
  */
 @Composable
 fun DecisionDock(
@@ -201,77 +214,126 @@ fun DecisionDock(
     headline: String,
     modifier: Modifier = Modifier,
     expires: String? = null,
-    position: Pair<Int, Int>? = null,
-    onPrevious: (() -> Unit)? = null,
-    onNext: (() -> Unit)? = null,
-    onList: (() -> Unit)? = null,
     collapsed: Boolean = false,
     onCollapsedChange: ((Boolean) -> Unit)? = null,
+    /** What the card asks in one line, after the headline while it is folded (iOS `previewText`). */
+    preview: String? = null,
     onExpand: (() -> Unit)? = null,
     headerActions: (@Composable () -> Unit)? = null,
     /** One line over the headline saying what the request waits for ("Waiting for your approval", #4883), as the web's
-     *  and iOS's cards do; null draws the dock as before. */
+     *  and iOS's cards do; null draws the dock as before. Folded, the card is its header's line alone. */
     kicker: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
     val style = PersonaTheme.style
+    val fold by rememberUpdatedState(onCollapsedChange?.let { change -> { change(!collapsed) } })
+    val folds = if (onCollapsedChange == null) Modifier else Modifier.pointerInput(Unit) { detectTapGestures { fold?.invoke() } }
     val header: @Composable () -> Unit = {
-        kicker?.let { Text(it, style = type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            when (style) {
-                AppStyle.Glass -> JStatusDot(Status.NeedsYou, size = 8.dp)
-                AppStyle.Brief -> JIcon(kind.icon, null, size = 18.dp, tint = palette.ink2)
-                AppStyle.Board -> JIcon(PhIcons.Hand, null, size = 18.dp, tint = palette.needsYou.dot, selected = true)
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(
-                headline, style = if (style == AppStyle.Brief) type.caption else type.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).semantics { heading() },
-                color = if (style == AppStyle.Brief) palette.ink2 else palette.ink,
-            )
-            expires?.let { Text(it, style = type.micro, color = palette.ink3, maxLines = 1); Spacer(Modifier.width(4.dp)) }
-            onExpand?.let { JIconButton(PhIcons.ArrowSquareOut, stringResource(R.string.designsystem_decision_open_full), it, tint = palette.ink2) }
-            onCollapsedChange?.let { change -> JIconButton(if (collapsed) PhIcons.CaretUp else PhIcons.CaretDown, stringResource(if (collapsed) R.string.designsystem_expand else R.string.designsystem_collapse), { change(!collapsed) }, tint = palette.ink2) }
-            headerActions?.invoke()
-        }
-        position?.takeIf { it.second > 1 }?.let { (current, total) ->
+        Column(folds) {
+            if (!collapsed) kicker?.let { Text(it, style = type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                JTextButton(stringResource(R.string.designsystem_decision_previous), onPrevious ?: {}, enabled = onPrevious != null && current > 1)
-                Spacer(Modifier.weight(1f))
-                val spokenPosition = stringResource(R.string.designsystem_decision_position, current, total)
-                JTextButton("$current / $total", onList ?: {}, Modifier.semantics { contentDescription = spokenPosition }, enabled = onList != null)
-                Spacer(Modifier.weight(1f))
-                JTextButton(stringResource(R.string.designsystem_decision_next), onNext ?: {}, enabled = onNext != null && current < total)
+                when (style) {
+                    AppStyle.Glass -> JStatusDot(Status.NeedsYou, size = 8.dp)
+                    AppStyle.Brief -> JIcon(kind.icon, null, size = 18.dp, tint = palette.ink2)
+                    AppStyle.Board -> JIcon(PhIcons.Hand, null, size = 18.dp, tint = palette.needsYou.dot, selected = true)
+                }
+                Spacer(Modifier.width(8.dp.dense))
+                // Folded, what it asks follows the title on the same line and gives way first (iOS `previewText`).
+                val previewShown = collapsed && !preview.isNullOrBlank()
+                val ink = if (style == AppStyle.Brief) palette.ink2 else palette.ink
+                Text(
+                    if (!previewShown) AnnotatedString(headline) else buildAnnotatedString {
+                        append(headline)
+                        append("  ")
+                        withStyle(type.callout.toSpanStyle().copy(color = palette.ink)) { append(preview.orEmpty()) }
+                    },
+                    style = if (style == AppStyle.Brief) type.caption else type.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).semantics { heading() }, color = ink,
+                )
+                expires?.let { Text(it, style = type.micro, color = palette.ink3, maxLines = 1); Spacer(Modifier.width(4.dp.dense)) }
+                if (!collapsed) onExpand?.let { JIconButton(PhIcons.ArrowSquareOut, stringResource(R.string.designsystem_decision_open_full), it, tint = palette.ink2) }
+                onCollapsedChange?.let { change -> JIconButton(if (collapsed) PhIcons.CaretUp else PhIcons.CaretDown, stringResource(if (collapsed) R.string.designsystem_expand else R.string.designsystem_collapse), { change(!collapsed) }, tint = palette.ink2) }
+                headerActions?.invoke()
             }
         }
     }
     val body: @Composable ColumnScope.() -> Unit = {
         header()
-        if (!collapsed) { Spacer(Modifier.height(10.dp)); content() }
+        if (!collapsed) { Spacer(Modifier.height(10.dp.dense)); content() }
     }
+    val shape = PersonaTheme.shapes.panelShape
+    // Each style inset from the page's sides as its composer is.
     when (style) {
         AppStyle.Glass -> Column(
-            modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
-                .floatingSurface(RoundedCornerShape(32.dp), accentEdge = palette.needsYou.dot.copy(alpha = 0.85f))
-                .padding(start = 18.dp, end = 10.dp, top = 10.dp, bottom = 14.dp).animateContentSize(PersonaTheme.motion.size()),
-        ) {
-            Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 6.dp).size(36.dp, 4.dp).clip(CircleShape).background(palette.ink3.copy(alpha = 0.55f)))
-            Column(Modifier.padding(end = 8.dp)) { body() }
-        }
+            modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m)
+                .floatingSurface(shape, accentEdge = palette.needsYou.dot.copy(alpha = 0.85f))
+                .padding(start = 18.dp.dense, end = 10.dp.dense, top = 10.dp.dense, bottom = 14.dp.dense).animateContentSize(PersonaTheme.motion.size()),
+        ) { Column(Modifier.padding(end = 8.dp.dense)) { body() } }
         AppStyle.Brief -> Column(
-            modifier.fillMaxWidth()
-                .shadow(20.dp, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), ambientColor = Color.Black.copy(alpha = 0.16f), spotColor = Color.Black.copy(alpha = 0.16f))
-                .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(palette.surface)
-                .padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 12.dp).animateContentSize(PersonaTheme.motion.size()),
-        ) { Column(Modifier.padding(end = 8.dp)) { body() } }
-        AppStyle.Board -> Column(modifier.fillMaxWidth().background(palette.surface).animateContentSize(PersonaTheme.motion.size())) {
-            Box(Modifier.fillMaxWidth().height(3.dp).background(palette.needsYou.dot))
-            Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp)) { Column(Modifier.padding(end = 8.dp)) { body() } }
+            modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m)
+                .shadow(HomeTokens.composerShadow, shape, ambientColor = Color.Black.copy(alpha = HomeTokens.composerShadowAlpha), spotColor = Color.Black.copy(alpha = HomeTokens.composerShadowAlpha))
+                .clip(shape).background(palette.surface)
+                .padding(start = 20.dp.dense, end = 12.dp.dense, top = 16.dp.dense, bottom = 12.dp.dense).animateContentSize(PersonaTheme.motion.size()),
+        ) { Column(Modifier.padding(end = 8.dp.dense)) { body() } }
+        AppStyle.Board -> Column(modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m).clip(shape).background(palette.surface)
+            .border(Tokens.Size.line, palette.line, shape).animateContentSize(PersonaTheme.motion.size())) {
+            Box(Modifier.fillMaxWidth().height(Tokens.Size.bar).background(palette.needsYou.dot))
+            Column(Modifier.padding(start = 16.dp.dense, end = 8.dp.dense, top = 10.dp.dense, bottom = 10.dp.dense)) { Column(Modifier.padding(end = 8.dp.dense)) { body() } }
         }
     }
 }
+
+/**
+ * A conversation's pending requests above its composer, the composer still usable (iOS `PendingCards`, `DESIGN_SYSTEM.md`
+ * section 4.8): stacked [Tokens.Space.m] apart as they come while they fit in [maxHeight] (about half the page); past it,
+ * or while the [keyboard] is up, they scroll on their own under "N pending" ([count]; not over a lone card with the
+ * keyboard up), their edges fading, and [content] is told so (`true`) to put the most urgent first. A new card among
+ * [keys] while they scroll brings the stack back to its top, where the most urgent is.
+ */
+@Composable
+fun DecisionStack(
+    count: Int,
+    maxHeight: Dp,
+    modifier: Modifier = Modifier,
+    keyboard: Boolean = false,
+    keys: List<Any> = emptyList(),
+    content: @Composable ColumnScope.(scrolling: Boolean) -> Unit,
+) {
+    val palette = PersonaTheme.palette
+    var contentHeight by remember { mutableIntStateOf(0) }
+    val cap = with(LocalDensity.current) { maxHeight.roundToPx() }
+    val scrolling = keyboard || contentHeight > cap + 1
+    val scroll = rememberScrollState()
+    var seen by remember { mutableStateOf(keys.toSet()) }
+    LaunchedEffect(keys) {
+        val arrived = keys.any { it !in seen }
+        seen = keys.toSet()
+        if (arrived && scrolling) scroll.animateScrollTo(0)
+    }
+    // The count is inside [maxHeight] too: the stack never takes more than it was given.
+    Column(modifier.fillMaxWidth().heightIn(max = maxHeight), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        if (scrolling && !(keyboard && count == 1)) Text(pluralStringResource(R.plurals.designsystem_decision_pending, count, count),
+            Modifier.padding(horizontal = Tokens.Space.m + Tokens.Space.xs).semantics { heading() },
+            style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // Fitting, the cards are measured whole and nothing scrolls or clips; past the cap, what scrolls out fades at the edges.
+        val area = if (scrolling) Modifier.edgeFade(palette.ink).verticalScroll(scroll)
+            else Modifier.wrapContentHeight(Alignment.Top, unbounded = true)
+        Box(Modifier.fillMaxWidth().weight(1f, fill = false).then(area)) {
+            Column(Modifier.fillMaxWidth().padding(vertical = if (scrolling) Tokens.Space.s else Tokens.Space.flush)
+                .onSizeChanged { contentHeight = it.height }, verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) { content(scrolling) }
+        }
+    }
+}
+
+/** Fades what scrolls out at the top and bottom: [ink] gives only the mask's opacity, never a color. */
+private fun Modifier.edgeFade(ink: Color): Modifier = graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val edge = (Tokens.Space.s.toPx() / size.height.coerceAtLeast(1f)).coerceAtMost(0.5f)
+        drawRect(Brush.verticalGradient(0f to ink.copy(alpha = 0f), edge to ink, 1f - edge to ink, 1f to ink.copy(alpha = 0f)), blendMode = BlendMode.DstIn)
+    }
 
 /** Persona's suggestion: ink on paper in Brief, a neutral well in Glass and Board. */
 @Composable
@@ -280,17 +342,17 @@ fun DecisionAdvice(text: String, modifier: Modifier = Modifier) {
     val type = PersonaTheme.type
     when (PersonaTheme.style) {
         AppStyle.Brief -> Row(modifier, verticalAlignment = Alignment.Top) {
-            JIcon(PhIcons.Sparkle, null, size = 16.dp, tint = palette.ink, selected = true, modifier = Modifier.padding(top = 3.dp))
-            Spacer(Modifier.width(4.dp))
+            JIcon(PhIcons.Sparkle, null, size = 16.dp, tint = palette.ink, selected = true, modifier = Modifier.padding(top = 3.dp.dense))
+            Spacer(Modifier.width(4.dp.dense))
             Text(stringResource(R.string.designsystem_decision_advice, text), style = type.callout.copy(fontWeight = FontWeight.SemiBold), color = palette.ink)
         }
         else -> Row(
-            modifier.fillMaxWidth().clip(RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 6.dp else 16.dp)).background(palette.statusSurface)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier.fillMaxWidth().clip(RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 6.dp.corner else 16.dp.corner)).background(palette.statusSurface)
+                .padding(horizontal = 12.dp.dense, vertical = 10.dp.dense),
             verticalAlignment = Alignment.Top,
         ) {
-            JIcon(PhIcons.Sparkle, null, size = 16.dp, tint = palette.accent, selected = true, modifier = Modifier.padding(top = 2.dp))
-            Spacer(Modifier.width(8.dp))
+            JIcon(PhIcons.Sparkle, null, size = 16.dp, tint = palette.accent, selected = true, modifier = Modifier.padding(top = 2.dp.dense))
+            Spacer(Modifier.width(8.dp.dense))
             Text(text, style = type.callout.copy(fontWeight = FontWeight.Medium), color = palette.ink)
         }
     }
@@ -315,7 +377,7 @@ fun MarkerText(text: String, style: TextStyle, modifier: Modifier = Modifier) {
                     cornerRadius = CornerRadius(3.dp.toPx()),
                 )
             }
-        }.padding(horizontal = 4.dp),
+        }.padding(horizontal = 4.dp.dense),
     )
 }
 
@@ -342,7 +404,7 @@ fun DecisionOption(
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
     val style = PersonaTheme.style
-    val shape = RoundedCornerShape(when (style) { AppStyle.Glass -> 18.dp; AppStyle.Brief -> 16.dp; AppStyle.Board -> 8.dp })
+    val shape = RoundedCornerShape(when (style) { AppStyle.Glass -> 18.dp.corner; AppStyle.Brief -> 16.dp.corner; AppStyle.Board -> 8.dp.corner })
     val recommendedLabel = stringResource(R.string.designsystem_decision_recommended)
     val separator = stringResource(R.string.designsystem_separator)
     val haptics = rememberHaptics()
@@ -356,24 +418,24 @@ fun DecisionOption(
         AppStyle.Board -> Triple(palette.surface, palette.ink, if (recommended || selected) palette.accent else palette.line)
     }
     Row(
-        modifier.fillMaxWidth().heightIn(min = 52.dp).clip(shape).background(fill).border(if (selected) 2.dp else 1.dp, border, shape)
+        modifier.fillMaxWidth().heightIn(min = 52.dp.row).clip(shape).background(fill).border(if (selected) 2.dp else 1.dp, border, shape)
             .clickable(enabled = enabled, role = if (multiSelect) Role.Checkbox else Role.RadioButton, onClick = haptics.tapped(onClick))
             .semantics {
                 if (multiSelect) toggleableState = ToggleableState(selected) else this.selected = selected
                 spoken?.let { contentDescription = it }
             }
-            .stableAlpha(if (enabled) 1f else 0.45f).padding(horizontal = 16.dp, vertical = 10.dp),
+            .stableAlpha(if (enabled) 1f else 0.45f).padding(horizontal = 16.dp.dense, vertical = 10.dp.dense),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text(label, style = type.label, color = ink, maxLines = if (fullText) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
             detail?.let { Text(it, style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink2, maxLines = if (fullText) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis) }
         }
-        if (selected) { Spacer(Modifier.width(8.dp)); JIcon(PhIcons.CheckCircle, null, size = 20.dp, tint = palette.accent, selected = true) }
+        if (selected) { Spacer(Modifier.width(8.dp.dense)); JIcon(PhIcons.CheckCircle, null, size = 20.dp, tint = palette.accent, selected = true) }
         else if (recommended) {
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(8.dp.dense))
             JIcon(PhIcons.Sparkle, null, size = 14.dp, tint = if (style == AppStyle.Board) palette.accent else ink, selected = true)
-            Spacer(Modifier.width(3.dp))
+            Spacer(Modifier.width(3.dp.dense))
             Text(stringResource(R.string.designsystem_decision_recommended), style = type.micro.copy(fontWeight = FontWeight.Bold), color = if (style == AppStyle.Board) palette.accent else ink, maxLines = 1)
         }
     }
@@ -485,12 +547,12 @@ fun DecisionButtons(primary: JAction, modifier: Modifier = Modifier, secondary: 
     @Suppress("NAME_SHADOWING") val more = more.map { haptics.tapped(it) }
     val wide = if (PersonaTheme.style == AppStyle.Board) 1.5f else 1f
     Column(modifier.fillMaxWidth()) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp.dense)) {
             secondary?.let { JButton(it.label, it.onClick, Modifier.weight(1f), kind = if (it.destructive) JButtonKind.Destructive else JButtonKind.Secondary, enabled = it.enabled && !busy) }
             JButton(primary.label, primary.onClick, Modifier.weight(wide), kind = if (primary.destructive) JButtonKind.Destructive else JButtonKind.Primary, enabled = primary.enabled, loading = busy)
         }
         // Several secondary choices (a plan's "Approve and run automatically" and "Confirm each step") wrap to a second line instead of squeezing.
-        if (more.isNotEmpty()) FlowRow(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.Center) {
+        if (more.isNotEmpty()) FlowRow(Modifier.fillMaxWidth().padding(top = 4.dp.dense), horizontalArrangement = Arrangement.Center) {
             more.forEach { JTextButton(it.label, it.onClick, enabled = it.enabled && !busy) }
         }
     }

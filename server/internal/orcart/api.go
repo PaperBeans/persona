@@ -140,6 +140,9 @@ type Worktree struct {
 	Unread        *bool  `json:"unread"`
 	SidebarStatus string `json:"sidebarStatus"`
 	WorkspaceKind string `json:"workspaceKind"`
+	// Active: the worktree Orca's window is showing. Orca's UI adopts a new terminal only there; one made in another
+	// worktree becomes an orphaned background terminal under a new pane key (#5547).
+	Active bool `json:"isActive"`
 	// ParentWorktreeID is the worktree this one is a child of in Orca's sidebar (its "N children"); empty for a top-level one.
 	ParentWorktreeID string `json:"parentWorktreeId"`
 	// Agents are the agents Orca's own hooks reported in the worktree's panes.

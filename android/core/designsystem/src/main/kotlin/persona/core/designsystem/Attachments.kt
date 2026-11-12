@@ -54,7 +54,7 @@ fun AttachmentThumb(
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
-    val shape = RoundedCornerShape(when (style) { AppStyle.Glass -> 16.dp; AppStyle.Brief -> 12.dp; AppStyle.Board -> 6.dp })
+    val shape = RoundedCornerShape(when (style) { AppStyle.Glass -> 16.dp.corner; AppStyle.Brief -> 12.dp.corner; AppStyle.Board -> 6.dp.corner })
     val failed = state == AttachmentState.Failed || state == AttachmentState.Invalid
     val rim = when {
         failed -> Modifier.border(1.5.dp, palette.danger.dot, shape)
@@ -93,7 +93,7 @@ fun AttachmentThumb(
                 when (state) {
                     AttachmentState.Uploading -> JSpinner(Modifier.size(22.dp), color = OnPhoto, stroke = 2.dp)
                     AttachmentState.Waiting -> JIcon(PhIcons.Clock, null, size = 22.dp, tint = OnPhoto)
-                    AttachmentState.Failed -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    AttachmentState.Failed -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp.dense)) {
                         JIcon(PhIcons.ArrowClockwise, null, size = 20.dp, tint = OnPhoto)
                         Text(retryLabel, style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.Bold), color = OnPhoto, maxLines = 1)
                     }
@@ -104,7 +104,7 @@ fun AttachmentThumb(
         // The rim goes over the photo, so a photo's own edge never hides it.
         Box(Modifier.matchParentSize().then(rim))
         if (edit != null) Box(
-            Modifier.align(Alignment.BottomStart).padding(4.dp).size(20.dp).clip(CircleShape).background(OnPhotoBadge),
+            Modifier.align(Alignment.BottomStart).padding(4.dp.dense).size(20.dp).clip(CircleShape).background(OnPhotoBadge),
             contentAlignment = Alignment.Center,
         ) { JIcon(PhIcons.PencilSimple, null, size = 12.dp, tint = OnPhoto) }
         if (onRemove != null) Box(
@@ -113,7 +113,7 @@ fun AttachmentThumb(
             contentAlignment = Alignment.TopEnd,
         ) {
             Box(
-                Modifier.padding(4.dp).size(20.dp).clip(if (style == AppStyle.Board) RoundedCornerShape(4.dp) else CircleShape).background(OnPhotoBadge),
+                Modifier.padding(4.dp.dense).size(20.dp).clip(if (style == AppStyle.Board) RoundedCornerShape(4.dp) else CircleShape).background(OnPhotoBadge),
                 contentAlignment = Alignment.Center,
             ) { JIcon(PhIcons.X, null, size = 12.dp, tint = OnPhoto) }
         }

@@ -85,11 +85,12 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 	if err := checkExtensionArgs(args); err != nil {
 		return err
 	}
-	cfg, err := localHubConfig()
+	l := i18n.Terminal()
+	cfg, err := localHubConfig(l)
 	if err != nil {
 		return err
 	}
-	c := &extensionClient{cfg: cfg}
+	c := &extensionClient{cfg: cfg, lang: l}
 	flag := func(name string) bool {
 		for _, a := range args[1:] {
 			if a == name {
@@ -117,17 +118,17 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		}
 		out.Extensions = append(out.Extensions, out.Legacy...)
 		if len(out.Extensions) == 0 {
-			fmt.Fprintln(stdout, "没有扩展")
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.list_empty"))
 		}
 		for _, p := range out.Extensions {
 			line := fmt.Sprintf("%-20s %-10s %-9s %-12s %s", p.ID, p.Version, p.Source, p.Status, p.Name)
 			if p.Error != "" {
-				line += "（" + p.Error + "）"
+				line += i18n.T(l, "extmgr-cli.paren", i18n.Args{"text": p.Error})
 			}
 			if len(p.NeedsSetup) > 0 {
-				line += "；还缺：" + strings.Join(p.NeedsSetup, "、")
+				line += i18n.T(l, "extmgr-cli.list_needs_setup", i18n.Args{"list": cliList(l, p.NeedsSetup)})
 			}
-			line += attachedLine(p.Attached, p.Error == "")
+			line += attachedLine(l, p.Attached, p.Error == "")
 			fmt.Fprintln(stdout, strings.TrimRight(line, " "))
 		}
 		return nil
@@ -150,7 +151,7 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		if rest, ok := strings.CutPrefix(source, "market:"); ok {
 			market, id, ok := strings.Cut(rest, "/")
 			if !ok {
-				return errors.New("写成 market:<市场 id>/<扩展 id>（市场 id 见 personad extension market list）")
+				return errors.New(i18n.T(l, "extmgr-cli.market_source"))
 			}
 			if err := c.do(ctx, "POST", "/api/v1/extensions/-/catalog/preview", map[string]string{"market": market, "extension": id, "plugin": id}, &pv); err != nil {
 				return err
@@ -164,10 +165,10 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		} else if err := c.do(ctx, "POST", "/api/v1/extensions/-/preview", map[string]string{"source": source, "upgrade": upgrade}, &pv); err != nil {
 			return err
 		}
-		printPreview(stdout, &pv)
-		printBundle(stdout, &pv)
-		if !flag("--yes") && !confirm(stdin, stdout) {
-			return errors.New("没有装")
+		printPreview(l, stdout, &pv)
+		printBundle(l, stdout, &pv)
+		if !flag("--yes") && !confirm(l, stdin, stdout) {
+			return errors.New(i18n.T(l, "extmgr-cli.install_declined"))
 		}
 		var d ExtensionDetail
 		body := map[string]any{"preview_id": pv.ID, "permissions_digest": pv.Digest, "bundle": bundleRefs(&pv)}
@@ -178,9 +179,9 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		if err := c.do(ctx, "POST", path, body, &d); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%s %s：%s\n", d.ID, d.Version, d.Status)
+		fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.installed", i18n.Args{"id": d.ID, "version": d.Version, "status": d.Status}))
 		if len(d.NeedsSetup) > 0 {
-			fmt.Fprintf(stdout, "还缺：%s（App 的 设置 › 扩展，或 personad extension config / secret）\n", strings.Join(d.NeedsSetup, "、"))
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.needs_setup", i18n.Args{"list": cliList(l, d.NeedsSetup)}))
 		}
 		return nil
 	case "market":
@@ -193,15 +194,16 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 				return err
 			}
 			if len(out.Markets) == 0 {
-				fmt.Fprintln(stdout, "没有登记扩展市场")
+				fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.markets_empty"))
 			}
 			for _, m := range out.Markets {
-				line := fmt.Sprintf("%-10s %-24s %3d 个扩展  %-12s %s", m.ID, m.Name, m.Extensions, signatureLabel(m.Signature), m.Spec)
+				line := fmt.Sprintf("%-10s %-24s %s  %-12s %s", m.ID, m.Name,
+					i18n.T(l, "extmgr-cli.extension_count", i18n.Args{"count": m.Extensions}), signatureLabel(l, m.Signature), m.Spec)
 				if m.Official {
-					line += "  官方"
+					line += "  " + i18n.T(l, "extmgr-cli.market_official")
 				}
 				if m.Error != "" {
-					line += "（" + m.Error + "）"
+					line += i18n.T(l, "extmgr-cli.paren", i18n.Args{"text": m.Error})
 				}
 				fmt.Fprintln(stdout, line)
 			}
@@ -209,7 +211,7 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		case "add":
 			body := map[string]string{"spec": positional[1]}
 			if flag("--token") {
-				tok, err := readSecret(stdin, stdout)
+				tok, err := readSecret(l, stdin, stdout)
 				if err != nil {
 					return err
 				}
@@ -224,9 +226,9 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 			if err := c.do(ctx, "POST", "/api/v1/extensions/-/markets", body, &m); err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "%s：%s，%d 个扩展\n", m.ID, m.Name, m.Extensions)
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.market", i18n.Args{"id": m.ID, "name": m.Name, "count": m.Extensions}))
 			for _, w := range m.Warnings {
-				fmt.Fprintln(stdout, "  警告："+w)
+				fmt.Fprintln(stdout, "  "+i18n.T(l, "extmgr-cli.warning", i18n.Args{"text": w}))
 			}
 			return nil
 		case "set-spec":
@@ -234,30 +236,30 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 			if err := c.do(ctx, "PUT", "/api/v1/extensions/-/markets/"+url.PathEscape(positional[1]), map[string]string{"spec": positional[2]}, &m); err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "%s：%s，%d 个扩展（%s）\n", m.ID, m.Name, m.Extensions, m.Spec)
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.market_spec", i18n.Args{"id": m.ID, "name": m.Name, "count": m.Extensions, "spec": m.Spec}))
 			return nil
 		case "token":
 			tok := ""
 			if !flag("--clear") {
 				var err error
-				if tok, err = readSecret(stdin, stdout); err != nil {
+				if tok, err = readSecret(l, stdin, stdout); err != nil {
 					return err
 				}
 				if strings.TrimSpace(tok) == "" {
-					return errors.New("token 是空的：要去掉 token 用 --clear")
+					return errors.New(i18n.T(l, "extmgr-cli.token_empty"))
 				}
 			}
 			var m MarketView
 			if err := c.do(ctx, "PUT", "/api/v1/extensions/-/markets/"+url.PathEscape(positional[1])+"/token", map[string]string{"token": tok}, &m); err != nil {
 				return err
 			}
-			state := "已去掉 token"
+			args := i18n.Args{"id": m.ID, "name": m.Name, "count": m.Extensions}
+			line := i18n.T(l, "extmgr-cli.market_token_cleared", args)
 			if m.HasToken {
-				state = "已设 token"
+				line = i18n.T(l, "extmgr-cli.market_token_set", args)
 			}
-			line := fmt.Sprintf("%s：%s，%s，%d 个扩展", m.ID, m.Name, state, m.Extensions)
 			if m.Error != "" {
-				line += "（" + m.Error + "）"
+				line += i18n.T(l, "extmgr-cli.paren", i18n.Args{"text": m.Error})
 			}
 			fmt.Fprintln(stdout, line)
 			return nil
@@ -269,7 +271,7 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 			if err := c.do(ctx, "POST", "/api/v1/extensions/-/markets/"+url.PathEscape(positional[1])+"/refresh", nil, &m); err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "%s：%s，%d 个扩展\n", m.ID, m.Name, m.Extensions)
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.market", i18n.Args{"id": m.ID, "name": m.Name, "count": m.Extensions}))
 			return nil
 		}
 		return errors.New(clitext.Named(extensionUsage))
@@ -283,17 +285,17 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		}
 		out.Extensions = append(out.Extensions, out.Legacy...)
 		if len(out.Extensions) == 0 {
-			fmt.Fprintln(stdout, "没有找到")
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.search_empty"))
 		}
 		for _, p := range out.Extensions {
 			state := ""
 			switch {
 			case p.Upgradable:
-				state = "（已装 " + p.Installed + "，可升级）"
+				state = i18n.T(l, "extmgr-cli.search_upgradable", i18n.Args{"version": p.Installed})
 			case p.Installed != "":
-				state = "（已装 " + p.Installed + "）"
+				state = i18n.T(l, "extmgr-cli.search_installed", i18n.Args{"version": p.Installed})
 			case p.Problem != "":
-				state = "（" + p.Problem + "）"
+				state = i18n.T(l, "extmgr-cli.paren", i18n.Args{"text": p.Problem})
 			}
 			fmt.Fprintf(stdout, "market:%s/%s  %s %s%s\n    %s\n", p.Market, p.ID, p.Name, p.Version, state, p.Description)
 		}
@@ -308,16 +310,20 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 			if err := c.do(ctx, "PUT", "/api/v1/extensions/"+url.PathEscape(positional[1])+"/-/auto-upgrade", map[string]bool{"auto": on}, &d); err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "%s：自动升级%s\n", d.ID, map[bool]string{true: "开", false: "关"}[on])
+			key := "extmgr-cli.auto_upgrade_one_off"
+			if on {
+				key = "extmgr-cli.auto_upgrade_one_on"
+			}
+			fmt.Fprintln(stdout, i18n.T(l, key, i18n.Args{"id": d.ID}))
 			return nil
 		}
 		var v upgradesView
 		if err := c.do(ctx, "PUT", "/api/v1/extensions/-/upgrades", map[string]bool{"auto": on}, &v); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "扩展自动升级：%s\n", map[bool]string{true: "开", false: "关"}[v.Auto])
+		fmt.Fprintln(stdout, autoUpgradeLine(l, v.Auto))
 		if v.Auto && len(v.Off) > 0 {
-			fmt.Fprintf(stdout, "单独关掉的：%s\n", strings.Join(v.Off, "、"))
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.auto_upgrade_off_ones", i18n.Args{"list": cliList(l, v.Off)}))
 		}
 		return nil
 	case "audit": // docs/extensions/extensions.md, after the install steps
@@ -327,14 +333,14 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		if err := c.do(ctx, "GET", "/api/v1/extensions/-/upgrades", nil, &v); err != nil {
 			return err
 		}
-		printUpgrades(stdout, v)
+		printUpgrades(l, stdout, v)
 		return nil
 	case "rollback":
 		var d ExtensionDetail
 		if err := c.do(ctx, "POST", "/api/v1/extensions/"+url.PathEscape(positional[0])+"/-/rollback", map[string]string{}, &d); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%s 回到了 %s\n", d.ID, d.Version)
+		fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.rolled_back", i18n.Args{"id": d.ID, "version": d.Version}))
 		return nil
 	case "attach", "detach":
 		body := map[string]string{}
@@ -345,7 +351,7 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		if err := c.do(ctx, "POST", "/api/v1/extensions/"+url.PathEscape(positional[0])+"/-/"+args[0], body, &d); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%s：%s\n", d.ID, d.Status)
+		fmt.Fprintln(stdout, idStatus(l, d))
 		return nil
 	case "enable", "disable":
 		var d ExtensionDetail
@@ -353,7 +359,7 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		if err := c.do(ctx, "PUT", "/api/v1/extensions/"+url.PathEscape(positional[0])+"/-/enabled", body, &d); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%s：%s\n", d.ID, d.Status)
+		fmt.Fprintln(stdout, idStatus(l, d))
 		return nil
 	case "auth": // docs/extensions/extensions.md "Sign-in (auth)"
 		return extensionAuthCommand(ctx, c, positional, stdin, stdout)
@@ -373,13 +379,13 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		}
 		switch sb := d.Sandbox; {
 		case sb == nil:
-			fmt.Fprintf(stdout, "%s：没有沙箱\n", d.ID)
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.sandbox_none", i18n.Args{"id": d.ID}))
 		case sb.Enabled && sb.Active:
-			fmt.Fprintf(stdout, "%s：在沙箱里运行，只能经 hub 的代理连 permissions.network 里的主机\n", d.ID)
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.sandbox_active", i18n.Args{"id": d.ID}))
 		case sb.Enabled:
-			fmt.Fprintf(stdout, "%s：%s；只把它指向 hub 的代理\n", d.ID, sb.Why)
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.sandbox_proxy_only", i18n.Args{"id": d.ID, "why": sb.Why}))
 		default:
-			fmt.Fprintf(stdout, "%s：不在沙箱里运行\n", d.ID)
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.sandbox_off", i18n.Args{"id": d.ID}))
 		}
 		return nil
 	case "config":
@@ -408,7 +414,7 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		if err := c.do(ctx, "PUT", "/api/v1/extensions/"+url.PathEscape(id)+"/-/config", map[string]any{"config": cfg}, &d); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%s：%s\n", d.ID, d.Status)
+		fmt.Fprintln(stdout, idStatus(l, d))
 		return nil
 	case "secret":
 		path := "/api/v1/extensions/" + url.PathEscape(positional[0]) + "/-/secrets/" + url.PathEscape(positional[1])
@@ -417,20 +423,20 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 			if err := c.do(ctx, "DELETE", path, nil, &d); err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "%s：删掉了 %s\n", d.ID, positional[1])
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.secret_deleted", i18n.Args{"id": d.ID, "name": positional[1]}))
 			return nil
 		}
-		value, err := readSecret(stdin, stdout)
+		value, err := readSecret(l, stdin, stdout)
 		if err != nil {
 			return err
 		}
 		if strings.TrimSpace(value) == "" { // the hub would refuse it with a size error
-			return errors.New("the secret is empty: to remove it, use --delete")
+			return errors.New(i18n.T(l, "extmgr-cli.secret_empty"))
 		}
 		if err := c.do(ctx, "PUT", path, map[string]string{"value": value}, &d); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%s：%s\n", d.ID, d.Status)
+		fmt.Fprintln(stdout, idStatus(l, d))
 		return nil
 	case "uninstall":
 		q := url.Values{}
@@ -449,9 +455,9 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		if err := c.do(ctx, "DELETE", path, nil, &out); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "卸载了 %s\n", positional[0])
+		fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.uninstalled", i18n.Args{"id": positional[0]}))
 		for _, warning := range out.Warnings {
-			fmt.Fprintln(stderr, "警告："+warning)
+			fmt.Fprintln(stderr, i18n.T(l, "extmgr-cli.warning", i18n.Args{"text": warning}))
 		}
 		return nil
 	}
@@ -559,73 +565,93 @@ func checkExtensionArgs(args []string) error {
 	return nil
 }
 
-func printPreview(w io.Writer, pv *extension.Preview) {
+// printPreview is what an install or upgrade will do, in l (the hub wrote the permission lines and warnings in the
+// language the command asked for, extensionClient.call).
+func printPreview(l i18n.Lang, w io.Writer, pv *extension.Preview) {
 	m := pv.Manifest
 	if pv.RenameFrom != "" {
-		fmt.Fprintln(w, i18n.T(i18n.Default, "extension-identity.confirmation", i18n.Args{"from": pv.RenameFrom, "to": m.ID}))
+		fmt.Fprintln(w, i18n.T(l, "extension-identity.confirmation", i18n.Args{"from": pv.RenameFrom, "to": m.ID}))
 	}
 	if pv.Upgrade {
-		fmt.Fprintf(w, "升级 %s：%s → %s\n", m.ID, pv.From, m.Version)
+		fmt.Fprintln(w, i18n.T(l, "extmgr-cli.preview_upgrade", i18n.Args{"id": m.ID, "from": pv.From, "to": m.Version}))
 	} else {
-		fmt.Fprintf(w, "安装 %s %s（%s）\n", m.ID, m.Version, m.Name)
+		fmt.Fprintln(w, i18n.T(l, "extmgr-cli.preview_install", i18n.Args{"id": m.ID, "version": m.Version, "name": m.Name}))
 	}
 	if m.Publisher != "" {
-		fmt.Fprintf(w, "发布者：%s\n", m.Publisher)
+		fmt.Fprintln(w, i18n.T(l, "extmgr-cli.preview_publisher", i18n.Args{"publisher": m.Publisher}))
 	}
 	if m.Description != "" {
 		fmt.Fprintln(w, m.Description)
 	}
 	for point, ids := range m.Contributions() {
-		fmt.Fprintf(w, "提供 %s：%s\n", point, strings.Join(ids, "、"))
+		fmt.Fprintln(w, i18n.T(l, "extmgr-cli.preview_provides", i18n.Args{"point": point, "list": cliList(l, ids)}))
 	}
-	fmt.Fprintln(w, "它可以：")
+	fmt.Fprintln(w, i18n.T(l, "extmgr-cli.preview_can"))
 	if len(pv.Permissions) == 0 {
-		fmt.Fprintln(w, "  （不运行程序，只有声明）")
+		fmt.Fprintln(w, "  "+i18n.T(l, "extmgr-cli.preview_no_program"))
 	}
-	for _, l := range pv.Permissions {
-		fmt.Fprintf(w, "  · %s：%s\n", l.Title, l.Detail)
+	for _, p := range pv.Permissions {
+		fmt.Fprintln(w, "  · "+i18n.T(l, "extmgr-cli.preview_permission", i18n.Args{"title": p.Title, "detail": p.Detail}))
 	}
 	if pv.MorePermissions {
-		fmt.Fprintln(w, "新版本要的权限比现在多。")
+		fmt.Fprintln(w, i18n.T(l, "extmgr-cli.preview_more_permissions"))
 	}
 	for _, warn := range pv.Warnings {
-		fmt.Fprintf(w, "注意：%s\n", warn)
+		fmt.Fprintln(w, i18n.T(l, "extmgr-cli.preview_note", i18n.Args{"text": warn}))
 	}
 }
 
-func confirm(stdin io.Reader, stdout io.Writer) bool {
-	fmt.Fprint(stdout, "继续吗？[y/N] ")
+func confirm(l i18n.Lang, stdin io.Reader, stdout io.Writer) bool {
+	fmt.Fprint(stdout, i18n.T(l, "extmgr-cli.confirm")+" [y/N] ")
 	line, _ := bufio.NewReader(stdin).ReadString('\n')
 	line = strings.ToLower(strings.TrimSpace(line))
 	return line == "y" || line == "yes"
 }
 
+// cliList joins a command line's list in l.
+func cliList(l i18n.Lang, items []string) string {
+	return strings.Join(items, i18n.T(l, "extmgr-cli.list_separator"))
+}
+
+// idStatus is an extension's state after a command changed it: its ID and status word.
+func idStatus(l i18n.Lang, d ExtensionDetail) string {
+	return i18n.T(l, "extmgr-cli.id_status", i18n.Args{"id": d.ID, "status": d.Status})
+}
+
+// autoUpgradeLine is whether market extensions upgrade themselves.
+func autoUpgradeLine(l i18n.Lang, on bool) string {
+	if on {
+		return i18n.T(l, "extmgr-cli.auto_upgrade_on")
+	}
+	return i18n.T(l, "extmgr-cli.auto_upgrade_off")
+}
+
 // attachedLine is what `extension list` adds for an attached extension: online or offline and since when, why it is
 // offline when the line does not say it yet, and the version the program says it is when that was not approved.
-func attachedLine(a *ExtensionAttached, withError bool) string {
+func attachedLine(l i18n.Lang, a *ExtensionAttached, withError bool) string {
 	if a == nil {
 		return ""
 	}
-	line := "；独立运行，离线"
+	line := i18n.T(l, "extmgr-cli.attached_offline")
 	if a.Online {
-		line = "；独立运行，在线"
+		line = i18n.T(l, "extmgr-cli.attached_online")
 	}
 	if !a.Since.IsZero() {
-		line += "（自 " + a.Since.Format("01-02 15:04:05") + "）"
+		line += i18n.T(l, "extmgr-cli.attached_since", i18n.Args{"time": a.Since.Format("01-02 15:04:05")})
 	}
 	if withError && a.Error != "" {
-		line += "：" + a.Error
+		line += i18n.T(l, "extmgr-cli.attached_error", i18n.Args{"error": a.Error})
 	}
 	if a.Version != "" {
-		line += "；程序自报版本 " + a.Version
+		line += i18n.T(l, "extmgr-cli.attached_version", i18n.Args{"version": a.Version})
 	}
 	return line
 }
 
 // readSecret reads a secret from the terminal without echo, or the first line of a pipe.
-func readSecret(stdin io.Reader, stdout io.Writer) (string, error) {
+func readSecret(l i18n.Lang, stdin io.Reader, stdout io.Writer) (string, error) {
 	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		fmt.Fprint(stdout, "值（不显示）：")
+		fmt.Fprint(stdout, i18n.T(l, "extmgr-cli.secret_prompt")+" ")
 		b, err := term.ReadPassword(int(f.Fd()))
 		fmt.Fprintln(stdout)
 		return strings.TrimSpace(string(b)), err
@@ -638,12 +664,12 @@ func readSecret(stdin io.Reader, stdout io.Writer) (string, error) {
 }
 
 // localHubConfig is hub.json on this machine (the token, the port).
-func localHubConfig() (*Config, error) {
+func localHubConfig(l i18n.Lang) (*Config, error) {
 	dir := identity.HomeDir()
 	cfg := &Config{Listen: ":18660", dir: dir}
 	b, err := os.ReadFile(dir + "/hub.json")
 	if err != nil {
-		return nil, fmt.Errorf("这台机器上没有 hub 的配置（%s/hub.json）：扩展只能在 hub 机器上管理", dir)
+		return nil, errors.New(i18n.T(l, "extmgr-cli.no_hub_config", i18n.Args{"dir": dir}))
 	}
 	if err := json.Unmarshal(b, cfg); err != nil {
 		return nil, err
@@ -654,7 +680,16 @@ func localHubConfig() (*Config, error) {
 	return cfg, nil
 }
 
-type extensionClient struct{ cfg *Config }
+// extensionClient calls the hub for a command; lang is the terminal's (i18n.Terminal), what the command prints in
+// and asks the hub to write its text in.
+type extensionClient struct {
+	cfg  *Config
+	lang i18n.Lang
+}
+
+// l is the client's language: an unset one is English, as i18n.Terminal's is without a locale, so what the client
+// words itself and what it asks the hub for always agree.
+func (c *extensionClient) l() i18n.Lang { return c.lang.Or(i18n.En) }
 
 // do calls the hub on this machine over loopback with the master token.
 func (c *extensionClient) do(ctx context.Context, method, path string, body, out any) error {
@@ -664,7 +699,7 @@ func (c *extensionClient) do(ctx context.Context, method, path string, body, out
 		err = c.call(ctx, method, "/api/v1/plugins"+legacy, body, out)
 	}
 	if errors.Is(err, errNoRoute) {
-		return errors.New("hub 没有这个接口：hub 比这个命令旧，先重启 hub")
+		return errors.New(i18n.T(c.l(), "extmgr-cli.hub_too_old"))
 	}
 	return err
 }
@@ -691,8 +726,9 @@ func (c *extensionClient) call(ctx context.Context, method, path string, body, o
 	}
 	req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
 	req.Header.Set("Content-Type", "application/json")
-	// CLI output stays in the default language even when an app changes the user's language.
-	req.Header.Set("Accept-Language", string(i18n.Default))
+	// The hub's text (errors, permission lines, statuses it words) comes in the terminal's language, not the user
+	// language an app last set (#5520).
+	req.Header.Set("Accept-Language", string(c.l()))
 	transport := &http.Transport{Proxy: nil}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Timeout: 10 * time.Minute, Transport: transport} // a download may take a while
@@ -700,7 +736,7 @@ func (c *extensionClient) call(ctx context.Context, method, path string, body, o
 	if err != nil {
 		var ne *net.OpError
 		if errors.As(err, &ne) {
-			return errors.New("hub 没在运行：先启动 hub")
+			return errors.New(i18n.T(c.l(), "extmgr-cli.hub_not_running"))
 		}
 		return err
 	}
@@ -717,7 +753,7 @@ func (c *extensionClient) call(ctx context.Context, method, path string, body, o
 		if why == "" {
 			why = strings.TrimSpace(string(data))
 		}
-		return fmt.Errorf("%s（HTTP %d）", why, res.StatusCode)
+		return errors.New(i18n.T(c.l(), "extmgr-cli.http_error", i18n.Args{"error": why, "status": res.StatusCode}))
 	}
 	if out != nil {
 		return json.Unmarshal(data, out)
@@ -726,18 +762,19 @@ func (c *extensionClient) call(ctx context.Context, method, path string, body, o
 }
 
 // printUpgrades lists the newer versions by what happens to them.
-func printUpgrades(w io.Writer, v upgradesView) {
-	fmt.Fprintf(w, "扩展自动升级：%s\n", map[bool]string{true: "开", false: "关"}[v.Auto])
+func printUpgrades(l i18n.Lang, w io.Writer, v upgradesView) {
+	fmt.Fprintln(w, autoUpgradeLine(l, v.Auto))
 	groups := []struct {
 		title  string
 		states []string
 	}{
-		{"可升级", []string{upgradeAvailable, upgradeWaitingIdle, upgradeOff, upgradeFailed, upgradeIncompatible}},
-		{"等你确认", []string{upgradeNeedsConsent}},
-		{"已跳过", []string{upgradeSkipped}},
+		{"extmgr-cli.upgrades_available", []string{upgradeAvailable, upgradeWaitingIdle, upgradeOff, upgradeFailed, upgradeIncompatible}},
+		{"extmgr-cli.upgrades_needs_consent", []string{upgradeNeedsConsent}},
+		{"extmgr-cli.upgrades_skipped", []string{upgradeSkipped}},
 	}
-	what := map[string]string{upgradeAvailable: "下次检查时装", upgradeWaitingIdle: "等空闲", upgradeOff: "自动升级关着",
-		upgradeFailed: "没装上", upgradeIncompatible: "装不了", upgradeSkipped: "回滚过，不再自动装"}
+	what := map[string]string{upgradeAvailable: "extmgr-cli.upgrade_state_available", upgradeWaitingIdle: "extmgr-cli.upgrade_state_waiting_idle",
+		upgradeOff: "extmgr-cli.upgrade_state_off", upgradeFailed: "extmgr-cli.upgrade_state_failed",
+		upgradeIncompatible: "extmgr-cli.upgrade_state_incompatible", upgradeSkipped: "extmgr-cli.upgrade_state_skipped"}
 	any := false
 	for _, g := range groups {
 		var lines []string
@@ -749,36 +786,37 @@ func printUpgrades(w io.Writer, v upgradesView) {
 			switch {
 			case up.State == upgradeNeedsConsent:
 				// A renamed extension is in its market under its new ID (#2511).
-				line += "  " + upgradeConsentText(i18n.Default, up) + "（App 的 设置 › 扩展，或 personad extension install market:" + up.Market + "/" + cmp.Or(up.RenameTo, up.ID) + "）"
+				line += "  " + i18n.T(l, "extmgr-cli.upgrade_consent", i18n.Args{"detail": upgradeConsentText(l, up),
+					"command": clitext.Named("personad extension install market:" + up.Market + "/" + cmp.Or(up.RenameTo, up.ID))})
 			case up.Detail != "":
-				line += "  " + what[up.State] + "：" + up.Detail
+				line += "  " + i18n.T(l, "extmgr-cli.upgrade_state_detail", i18n.Args{"state": i18n.T(l, what[up.State]), "detail": up.Detail})
 			default:
-				line += "  " + what[up.State]
+				line += "  " + i18n.T(l, what[up.State])
 			}
 			lines = append(lines, line)
 		}
 		if len(lines) > 0 {
 			any = true
-			fmt.Fprintln(w, g.title+"：")
-			for _, l := range lines {
-				fmt.Fprintln(w, l)
+			fmt.Fprintln(w, i18n.T(l, g.title))
+			for _, line := range lines {
+				fmt.Fprintln(w, line)
 			}
 		}
 	}
 	if !any {
-		fmt.Fprintln(w, "从扩展市场装的扩展都是最新的")
+		fmt.Fprintln(w, i18n.T(l, "extmgr-cli.upgrades_none"))
 	}
 }
 
 // signatureLabel is a market's signature in a line of the command line.
-func signatureLabel(s MarketSignatureView) string {
+func signatureLabel(l i18n.Lang, s MarketSignatureView) string {
 	switch s.State {
 	case extension.SigSigned:
-		return "已签名 " + s.KeyID
+		return i18n.T(l, "extmgr-cli.signature_signed", i18n.Args{"key": s.KeyID})
 	case extension.SigInvalid:
-		return "签名不对"
+		return i18n.T(l, "extmgr-cli.signature_invalid")
 	case extension.SigKeyChanged:
-		return "换了 key " + s.KeyID
+		return i18n.T(l, "extmgr-cli.signature_key_changed", i18n.Args{"key": s.KeyID})
 	}
-	return "未签名"
+	return i18n.T(l, "extmgr-cli.signature_unsigned")
 }

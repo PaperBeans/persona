@@ -239,6 +239,8 @@
   "pr_idle": "最終更新 {age}",
   "restore": "戻す",
   "restored": "リストに戻しました",
+  "seen": "了解",
+  "seen_moved": "「完了」に移動しました",
   "filter_label": "絞り込みと並べ替え",
   "filter_show": "表示",
   "sort_by": "並べ替え",

@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
@@ -84,6 +85,11 @@ fun ChatComposer(
      */
     blockedLabel: String? = null,
     onBlocked: () -> Unit = {},
+    /**
+     * The model pill (#5055, Glass): at the right of the toolbar row, before the mic and Send, while the toolbar shows; it
+     * gets how much room the composer has ([ModelPillWidth], the web's container rules). Null: none.
+     */
+    modelPill: (@Composable (ModelPillWidth) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -338,9 +344,9 @@ fun ChatComposer(
         }
     }
 
-    // The field grows with the draft up to growLines (from the height above the keyboard), then scrolls inside and
-    // shows Expand at its top right; the text keeps clear of the button only while it shows.
-    val growLines = rememberComposerGrowLines()
+    // The field grows with the draft through six lines, then scrolls inside and offers Expand.
+    // The text keeps clear of the button only while it shows.
+    val growLines = ComposerGrowLines
     var lineCount by remember { mutableIntStateOf(1) }
     val offersExpand = enabled && composerOffersExpand(lineCount, growLines)
     LaunchedEffect(enabled) { if (!enabled) expandedEditor = false }
@@ -352,7 +358,11 @@ fun ChatComposer(
     val expanded = state.focused || hasContent
     val composerPlaceholder = if (homeAssistant) stringResource(R.string.chat_composer_ask_persona, LocalPersonaName.current) else placeholder
 
+    // The composer's own width, for how much of the model pill fits (the web measures its composer card the same way).
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    var composerDp by remember { mutableFloatStateOf(0f) }
     ComposerFrame(
+        modifier = if (modelPill != null) Modifier.onSizeChanged { composerDp = with(density) { it.width.toDp().value } } else Modifier,
         // Blank space around the field (its padding, beside the buttons) types too: one tap, not a hunt for the line.
         onBlankTap = { if (enabled) { focusRequester.requestFocus(); keyboard?.show() } },
         expanded = expanded,
@@ -366,6 +376,7 @@ fun ChatComposer(
             }
         },
         trailing = {
+            if (expanded && enabled) modelPill?.invoke(ModelPillWidth.of(composerDp))
             // The mic stays (iOS ShellComposerBar): more can be dictated after what is typed. Send beside it once there is
             // something to send, else a stop while the agent works; nothing else while the box is empty.
             dictate?.let { JIconButton(PhIcons.Microphone, stringResource(R.string.chat_composer_dictate), it, enabled = !sending) }

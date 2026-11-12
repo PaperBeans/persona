@@ -103,6 +103,17 @@ JSON
       nonzero) printf '%s\n' 'message-body-example' >&2; exit 17 ;;
     esac
     case "$scenario:${2:-}" in
+      inbox_followup:+messages-search) cat "$LARKCLI_FAKE_SEARCH" ;;
+      inbox_followup:+chat-list)
+        if [ -n "${LARKCLI_FAKE_CHATS:-}" ]; then
+          cat "$LARKCLI_FAKE_CHATS"
+        else
+          printf '%s\n' '{"ok":true,"data":{"chats":[]}}'
+        fi
+        ;;
+      inbox_followup:+chat-messages-list|inbox_followup:+threads-messages-list)
+        cat "$LARKCLI_FAKE_CONTEXT"
+        ;;
       inbox:+messages-search)
         case " $* " in
           *" --sender "*) cat "$base/inbox_seed.json" ;;

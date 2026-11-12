@@ -252,7 +252,7 @@ fun ChatLinkHost(
                     .windowInsetsPadding(safeDrawing.only(WindowInsetsSides.Horizontal))
                     .consumeWindowInsets(safeDrawing.only(WindowInsetsSides.Top))) {
                     Column(Modifier.fillMaxWidth().anchoredDraggable(drag, Orientation.Vertical)) {
-                        Box(Modifier.align(Alignment.CenterHorizontally).padding(top = Tokens.Space.s).size(Tokens.Space.xxl, Tokens.Space.xs)
+                        Box(Modifier.align(Alignment.CenterHorizontally).padding(top = Tokens.Space.s).size(Tokens.Space.Standard.xxl, Tokens.Space.Standard.xs)
                             .clip(PersonaTheme.shapes.controlShape).background(palette.ink3))
                         Row(Modifier.fillMaxWidth().padding(end = Tokens.Space.xs), verticalAlignment = Alignment.CenterVertically) {
                             JIconButton(PhIcons.CaretLeft, stringResource(R.string.chat_link_back), { back() })

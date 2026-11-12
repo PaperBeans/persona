@@ -10,11 +10,13 @@ import persona.core.contracts.api.hubCodedFailure
 import persona.core.designsystem.JAction
 import persona.core.designsystem.JActionSheet
 import persona.core.designsystem.JDialog
+import persona.core.designsystem.LocalPersonaName
 import persona.core.designsystem.rememberCopy
 import persona.core.designsystem.QueueStrip
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.operationFeedback
 import persona.core.domain.sort.canSend
+import persona.core.domain.sort.ownQueued
 import persona.core.domain.sort.steersQueue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -23,8 +25,11 @@ import kotlinx.coroutines.launch
 internal fun queueTitle(count: Int, agent: String, resources: Resources): String =
     resources.getQuantityString(R.plurals.chat_queue_title, count, count, agent)
 
-/** What to put back when one queued message is pulled out: every other index, in order (an empty list is meaningful). */
-internal fun queueKeep(size: Int, index: Int): List<Int> = (0 until size).filter { it != index }
+/**
+ * What to put back when one of the user's [own] queued messages is pulled out: every other one of them, in order (an
+ * empty list is meaningful). `keep` indexes only the user's own (docs/protocol/protocol.md, POST …/queue).
+ */
+internal fun queueKeep(own: Int, index: Int): List<Int> = (0 until own).filter { it != index }
 
 /**
  * The `keep` of POST …/queue that moves the message at [index] [step] places (-1 up, 1 down) and re-queues them all in
@@ -40,19 +45,27 @@ internal fun queueMoved(size: Int, index: Int, step: Int): List<Int>? {
 internal enum class QueueAction { Edit, MoveUp, MoveDown, Copy, Delete }
 
 /**
- * The actions of the message at [index] of [size], each with whether it can be taken there (iOS QueueStrip's menu):
- * Move Up and Move Down only where the queue can be reordered ([steers], `Session.steersQueue`) and holds more than one,
- * greyed at the ends.
+ * The actions of the message at [index] among the user's [own] ones, each with whether it can be taken there (iOS
+ * QueueStrip's menu): Move Up and Move Down only where the queue can be reordered ([steers]) and the user has more than
+ * one there, greyed at the ends. A message past [own], relayed from elsewhere, is only copied.
  */
-internal fun queueActions(index: Int, size: Int, steers: Boolean): List<Pair<QueueAction, Boolean>> = buildList {
+internal fun queueActions(index: Int, own: Int, steers: Boolean): List<Pair<QueueAction, Boolean>> = buildList {
+    if (index >= own) { add(QueueAction.Copy to true); return@buildList }
     add(QueueAction.Edit to true)
-    if (steers && size > 1) {
+    if (steers && own > 1) {
         add(QueueAction.MoveUp to (index > 0))
-        add(QueueAction.MoveDown to (index < size - 1))
+        add(QueueAction.MoveDown to (index < own - 1))
     }
     add(QueueAction.Copy to true)
     add(QueueAction.Delete to true)
 }
+
+/**
+ * Its own queued messages can be sent now and reordered (iOS QueueStrip's `steers`): Claude Code in a terminal pane
+ * ([steersQueue]), or a Persona conversation, whose Claude Code takes them as an interrupt over stream-json
+ * (docs/protocol/protocol.md, POST …/queue/send-now). Only where the phone may send.
+ */
+internal val Session.reordersQueue: Boolean get() = canSend && (steersQueue || assistant)
 
 /**
  * What a refused Send Now says: the hub's own sentence for a 409 it words in the reader's language (nothing_queued,
@@ -64,14 +77,18 @@ internal fun sendNowFailure(error: Throwable, resources: Resources): String {
     return words ?: operationFeedback(error).text.resolve(resources)
 }
 
-private val SEND_NOW_REFUSALS = setOf("nothing_queued", "send_now_unsupported", "send_now_unrecognized", "send_now_in_doubt", "node_outdated")
+private val SEND_NOW_REFUSALS = setOf("nothing_queued", "send_now_unsupported", "send_now_unrecognized", "send_now_in_doubt", "node_outdated",
+    // A Persona conversation whose Claude Code refused the interrupt.
+    "assistant_control_failed")
 
 /**
  * Queue strip (iOS QueueStrip): what was typed while the agent works and not taken yet, right above the composer (on
  * Glass folded to its one line until tapped). Tapping a message offers "Take back to edit" (back into the box, after the
- * draft on a new line), "Copy" and "Delete"; for Claude in a terminal pane (`Session.steersQueue`) also "Move up" /
- * "Move down", and on Glass the line's "Send now", after a confirmation that says what happens to what the agent is
- * doing. Editing and moving go
+ * draft on a new line), "Copy" and "Delete"; for Claude in a terminal pane and Persona's conversations
+ * ([reordersQueue]) also "Move up" / "Move down", and on Glass the line's "Send now", after a confirmation that says
+ * what happens to what the agent (or Persona, by its name) is doing. In Persona's conversation the line names Persona,
+ * and the messages relayed from other conversations or the system come last ([ownQueued]), each saying it arrives when
+ * the chat is free and offering only "Copy". Editing and moving go
  * through the node's session.queue.edit (POST …/queue {keep}): it pulls the whole queue out of the agent and puts the
  * kept ones back in the order given, and answers with what was queued, so a pulled-back message is read from that
  * answer. Send now is POST …/queue/send-now. Only for a session the phone may send to. [initiallyExpanded]: opened from
@@ -97,7 +114,10 @@ internal fun ChatQueueStrip(
     var picked by remember { mutableStateOf<Pair<Int, String>?>(null) }
     LaunchedEffect(queued) { picked?.let { (index, text) -> if (queued.getOrNull(index) != text) picked = null } }
     val enabled = session.canSend && actions != null
-    val steers = enabled && session.steersQueue
+    val steers = enabled && session.reordersQueue
+    // The user's own come first; only they are changed (an index past them is a relayed message).
+    val own = session.ownQueued
+    val persona = LocalPersonaName.current.takeIf { session.assistant }
     // One operation at a time, busy until the queue on screen is the new one, so a stale row cannot be picked.
     fun operate(failed: (Exception) -> String, operation: suspend (ChatActions) -> Unit) {
         val service = actions ?: return
@@ -114,14 +134,17 @@ internal fun ChatQueueStrip(
         }
     }
     val changeFailed = { e: Exception -> resources.getString(R.string.chat_queue_failed, operationFeedback(e).text.resolve(resources)) }
-    fun edit(index: Int, delete: Boolean) = operate(changeFailed) { service ->
-        val pulled = service.editQueue(session, queueKeep(queued.size, index))
-        if (delete) onNotice(resources.getString(R.string.chat_queue_deleted))
-        else pulled.getOrNull(index)?.let { composer.restoreQueued(it); onNotice(resources.getString(R.string.chat_queue_restored)) }
-            ?: onNotice(resources.getString(R.string.chat_queue_not_found))
+    fun edit(index: Int, delete: Boolean) {
+        if (index >= own) return
+        operate(changeFailed) { service ->
+            val pulled = service.editQueue(session, queueKeep(own, index))
+            if (delete) onNotice(resources.getString(R.string.chat_queue_deleted))
+            else pulled.getOrNull(index)?.let { composer.restoreQueued(it); onNotice(resources.getString(R.string.chat_queue_restored)) }
+                ?: onNotice(resources.getString(R.string.chat_queue_not_found))
+        }
     }
     fun move(index: Int, step: Int) {
-        val keep = queueMoved(queued.size, index, step) ?: return
+        val keep = queueMoved(own, index, step) ?: return
         operate(changeFailed) { it.editQueue(session, keep) }
     }
     fun sendNow() = operate({ sendNowFailure(it, resources) }) {
@@ -129,14 +152,17 @@ internal fun ChatQueueStrip(
         onNotice(resources.getString(R.string.chat_queue_sent_now))
     }
     val sendNowLabel = stringResource(R.string.chat_queue_send_now)
+    val relayedNote = stringResource(R.string.chat_queue_relayed_note)
     // A new session's queue starts folded (Glass), as each chat's does on iOS.
     key(session.key) {
-        QueueStrip(queueTitle(queued.size, session.agentLabel, resources), queued.map { composerMessagePreview(it) },
+        QueueStrip(queueTitle(queued.size, persona ?: session.agentLabel, resources), queued.map { composerMessagePreview(it) },
             onItem = { index -> queued.getOrNull(index)?.let { picked = index to it } }, busy = busy, enabled = enabled,
-            sendNow = sendNowLabel.takeIf { steers }, onSendNow = { confirmSend = true }, initiallyExpanded = initiallyExpanded)
+            sendNow = sendNowLabel.takeIf { steers && own > 0 }, onSendNow = { confirmSend = true },
+            notes = queued.indices.map { index -> relayedNote.takeIf { index >= own } }, initiallyExpanded = initiallyExpanded)
     }
     if (confirmSend) JDialog(onDismiss = { confirmSend = false }, title = stringResource(R.string.chat_queue_send_now_title),
-        text = stringResource(R.string.chat_queue_send_now_message),
+        text = persona?.let { stringResource(R.string.chat_queue_send_now_message_persona, it) }
+            ?: stringResource(R.string.chat_queue_send_now_message),
         confirm = sendNowLabel to { confirmSend = false; sendNow() })
     val (index, text) = picked ?: return
     val labels = mapOf(
@@ -144,7 +170,7 @@ internal fun ChatQueueStrip(
         QueueAction.MoveDown to stringResource(R.string.chat_queue_move_down), QueueAction.Copy to stringResource(R.string.chat_queue_copy),
         QueueAction.Delete to stringResource(R.string.chat_queue_delete),
     )
-    JActionSheet(queueActions(index, queued.size, steers).map { (action, allowed) ->
+    JActionSheet(queueActions(index, own, steers).map { (action, allowed) ->
         val writes = action != QueueAction.Copy
         JAction(labels.getValue(action), when (action) {
             QueueAction.Edit -> PersonaIcons.edit

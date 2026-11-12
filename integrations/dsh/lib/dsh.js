@@ -37,8 +37,8 @@ function assistantDir(cwd) {
  * @property {object} controller - DSH sessionController: list / page / projections / prompt / cancel / create / rename / attachment.
  * @property {(event: string, listener: Function, options?: object) => () => void} on - ctx.on.
  * @property {{ answer(agent: object, callId: string, answer: object): boolean } | undefined} [userQuestions]
- * @property {{ archivedSessionIds: readonly string[], archiveSession(id: string, o?: {stopActivity?: boolean}): Promise<void> } | undefined} [workspace]
- *   DSH's workspaceRegistry: archived sessions are not listed; closing one from the phone archives it.
+ * @property {{ archivedSessionIds: readonly string[], archiveSession(id: string, o?: {stopActivity?: boolean}): Promise<void>, resolveByPath?(path: string): Promise<{id: string, path: string} | undefined> } | undefined} [workspace]
+ *   DSH's workspaceRegistry: resolve existing workspaces for creation; omit archived sessions and archive on close.
  * @property {(definition: object, options?: object) => (() => void) | undefined} [registerTool] - ctx.tools.register:
  *   the hub's tools (phone_*, mail_*; the assistant's own for its conversations) for DSH's agents. Absent: none.
  * @property {{ get(id: string): { session: object } | undefined } | undefined} [agents] - ctx.agents: a live session,
@@ -545,7 +545,13 @@ export function createDshRuntime(deps, options = {}) {
 
   async function start(params) {
     if (!params.cwd) throw new RpcError('要选一个目录', 'bad_request')
-    const res = await deps.controller.create({ cwd: params.cwd })
+    let workspace
+    try {
+      workspace = await deps.workspace?.resolveByPath?.(params.cwd)
+    } catch (err) {
+      if (err?.code !== 'ENOENT') throw err // DSH's cwd-only creation also creates missing directories.
+    }
+    const res = await deps.controller.create(workspace ? { workspaceId: workspace.id } : { cwd: params.cwd })
     const id = String(res.sessionId)
     if (options.assistant && params.assistant === true) assistants.set(id, {})
     if (typeof params.prompt === 'string' && params.prompt.trim() !== '') await send({ session_id: id, text: params.prompt })

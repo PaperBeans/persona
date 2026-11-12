@@ -35,6 +35,12 @@ interface MessageSender : MessageSendReceiptSource {
         require(launcher == null && model == null) { "Launcher/model overrides are not supported" }
         send(session, text, clientMessageId, clearDraft)
     }
+    /**
+     * [send] for the user's own message from a chat whose session shows a launcher switch waiting
+     * (`pending_switch`, docs/protocol/protocol.md "Switching a running Agent to another provider"): it goes with
+     * `apply_switch`, so the hub carries the switch out first. Every other message leaves the switch waiting.
+     */
+    suspend fun sendApplyingSwitch(session: SessionKey, text: String, clientMessageId: String) = send(session, text, clientMessageId)
     suspend fun cancel(clientMessageId: String): Boolean = false
     /**
      * Undo of a [cancel] (#4645): [message], as the outbox listed it before, back in its state with its refusal, so it

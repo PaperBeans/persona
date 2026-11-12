@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { scoped, scopeKey, scopeOf, useScope, type Scope } from "./current-assistant";
 import { managerBadges, waitingAgents } from "./manager-attention";
-import { CHOICE_KEY, chooseManager, chosenManager, currentHeaders, managerHeaderFor, PICKED_NAME_KEY, pickedName, resetManagerChoice, shownManager } from "./manager-choice";
+import { CHOICE_KEY, chooseManager, chosenManager, currentHeaders, DISPLAY_IDENTITY_KEY, managerHeaderFor, PICKED_NAME_KEY, pickedName, resetManagerChoice, shownIdentity, shownManager } from "./manager-choice";
 import { avatarColor, avatarInitial, resetRoster, setRoster, switcherLine, type ManagerList } from "./managers";
 import { reopensOnSwitch, routeAfterSwitch } from "./persona-nav";
 import type { Interaction, Session } from "./types";
@@ -43,6 +43,28 @@ describe("the pick", () => {
     chooseManager("assistant");
     expect(localStorage.getItem(CHOICE_KEY)).toBeNull();
     expect(managerHeaderFor("/assistant")).toBeUndefined();
+  });
+
+  it("remembers the default assistant for display without creating a pick or a routing header", () => {
+    expect(DISPLAY_IDENTITY_KEY.slice("persona.shownAssistant".length)).toBe(CHOICE_KEY.slice("persona.currentManager".length));
+    setRoster(ONE);
+    expect(shownIdentity()).toEqual({ id: "assistant", name: "助手" });
+    expect(JSON.parse(localStorage.getItem(DISPLAY_IDENTITY_KEY)!)).toEqual({ id: "assistant", name: "助手" });
+    expect(chosenManager()).toBeNull();
+    expect(localStorage.getItem(CHOICE_KEY)).toBeNull();
+    expect(currentHeaders()).toBeUndefined();
+    expect(managerHeaderFor("/assistant/tasks")).toBeUndefined();
+
+    resetRoster(); // loading again keeps the display identity, and still sends the default's requests unchanged
+    expect(shownIdentity()).toEqual({ id: "assistant", name: "助手" });
+    expect(chosenManager()).toBeNull();
+    expect(currentHeaders()).toBeUndefined();
+    expect(managerHeaderFor("/assistant/tasks")).toBeUndefined();
+
+    setRoster(ONE);
+    resetManagerChoice(); // test cleanup clears the display even though a fresh roster is still in place
+    expect(shownIdentity()).toBeNull();
+    expect(localStorage.getItem(DISPLAY_IDENTITY_KEY)).toBeNull();
   });
 
   it("is there again after a reload, before the roster is read", async () => {

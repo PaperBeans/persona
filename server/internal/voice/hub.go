@@ -164,12 +164,17 @@ type kbHit struct {
 	Line string `json:"line"`
 }
 
-// searchKnowledge: lines of the knowledge base matching every word of the query.
-func (h *hubClient) searchKnowledge(ctx context.Context, query string) ([]kbHit, error) {
+// searchKnowledge: lines of the knowledge base matching every word of the query, of one kind when kind is not ""
+// (GET /api/v1/kb-search's kind, #3862 phase 6: a hub from before searches every kind, an unknown kind is its 400).
+func (h *hubClient) searchKnowledge(ctx context.Context, query, kind string) ([]kbHit, error) {
 	var out struct {
 		Hits []kbHit `json:"hits"`
 	}
-	err := h.call(ctx, "GET", "/api/v1/kb-search?q="+url.QueryEscape(query), nil, &out)
+	q := url.Values{"q": {query}}
+	if kind != "" {
+		q.Set("kind", kind)
+	}
+	err := h.call(ctx, "GET", "/api/v1/kb-search?"+q.Encode(), nil, &out)
 	return out.Hits, err
 }
 

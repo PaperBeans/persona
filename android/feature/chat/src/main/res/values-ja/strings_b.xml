@@ -140,7 +140,6 @@
     <string name="chat_full_text_failed">読み込めませんでした。タップして再試行</string>
     <string name="chat_full_text_open">全文を表示（%1$s）</string>
     <string name="chat_request_collapse_full">折りたたむ</string>
-    <string name="chat_request_list_title">対応待ちのリクエスト</string>
     <string name="chat_request_allow">許可</string>
     <string name="chat_request_deny">拒否</string>
     <string name="chat_request_always_allows">常に許可すると次を通します：%1$s</string>
@@ -338,6 +337,8 @@
     <string name="chat_queue_send_now">今すぐ送信</string>
     <string name="chat_queue_send_now_title">送信待ちのメッセージを今すぐ送りますか？</string>
     <string name="chat_queue_send_now_message">送信待ちのメッセージを今すぐエージェントに送ります。実行中のコマンドはバックグラウンドで続き、書いている途中の返信はあなたのメッセージを含めてやり直します。</string>
+    <string name="chat_queue_send_now_message_persona">%1$s は次のステップを待たずにすぐ受け取ります。今の作業は止まるか、できるものはバックグラウンドで続き、あなたのメッセージを含めてやり直します。</string>
+    <string name="chat_queue_relayed_note">この会話が空いたら届きます</string>
     <string name="chat_queue_sent_now">今すぐエージェントに送りました</string>
     <string name="chat_composer_photos_only">画像を見てください</string>
     <string name="chat_composer_photo_placeholder">[画像]</string>

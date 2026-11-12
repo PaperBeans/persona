@@ -41,5 +41,6 @@
   "catalog_incomplete": "Orca 返回的工作区目录不完整，请刷新后重试",
   "mode_invalid": "创建模式标记必须为布尔值",
   "source_branch_conflict": "已有分支不能同时用作拉取请求检出，请选择一个来源",
-  "field_invalid": "工作树选项字段必须使用正确的 JSON 类型"
+  "field_invalid": "工作树选项字段必须使用正确的 JSON 类型",
+  "no_commits": "{path} 还没有任何提交，无法从它新建工作树；先提交一次，或直接在这个文件夹里工作"
 }

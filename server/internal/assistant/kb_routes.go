@@ -3,7 +3,9 @@ package assistant
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -217,16 +219,34 @@ func (s *Service) kbRoutes() {
 		if e == nil {
 			return
 		}
+		// kind: one kind only, as kb_search takes it (#3862 phase 6: recordings for meetings); an older hub ignores it.
+		q, kind := r.URL.Query().Get("q"), r.URL.Query().Get("kind")
+		if kind != "" && !kinds[kind] {
+			apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-kb_routes.unknown_kind"))
+			return
+		}
 		// results=1: entries ranked, a few lines each (the app since 2026-10-31); otherwise the lines as found.
 		if r.URL.Query().Get("results") == "1" {
-			res := e.Find(r.URL.Query().Get("q"), 80)
+			var res []kb.Result
+			if kind == "" {
+				res = e.Find(q, 80)
+			} else { // ranked over every kind (Find's order does not depend on its limit), then only this one's
+				res = slices.DeleteFunc(e.Find(q, math.MaxInt), func(x kb.Result) bool { return x.Entry.Kind != kind })
+				res = res[:min(len(res), 80)]
+			}
 			if res == nil {
 				res = []kb.Result{}
 			}
 			apierr.WriteJSON(w, map[string]any{"results": res})
 			return
 		}
-		hits := e.Search(r.URL.Query().Get("q"), r.URL.Query().Get("messages") != "0", 60)
+		messages := r.URL.Query().Get("messages") != "0"
+		var hits []kb.Hit
+		if kind == "" {
+			hits = e.Search(q, messages, 60)
+		} else {
+			hits = e.SearchKind(q, kind, messages, 60)
+		}
 		if hits == nil {
 			hits = []kb.Hit{}
 		}

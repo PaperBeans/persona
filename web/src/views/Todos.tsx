@@ -65,7 +65,7 @@ import { formatDate, t } from "../i18n";
 import { groupTodosByProject, treeStateLabel, type TodoProjectGroup, type TreeState } from "../lib/todo-tree";
 import { directionTitle, groupsByDirection, useDirectionTree, type Direction } from "../lib/direction-tree";
 import { DirectionCountsText } from "./DirectionMarks";
-import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, lastActivity, supersededFailedStarts, triageTodos, type TriageGroup, type TriageSection } from "../lib/todo-triage";
+import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, lastActivity, supersededFailedStarts, triage, triageTodos, type TriageGroup, type TriageSection } from "../lib/todo-triage";
 import {
   TODO_LIST_FILTERS,
   TODO_LIST_SORTS,
@@ -100,6 +100,7 @@ import { useTodoField } from "./use-todo-field";
 import { todoUltracode } from "../lib/ultracode";
 import { UltraMark } from "./chat/Ultracode";
 import { boundThread, threadLine, threadName, todoThreadsOn, unbindTodoThread } from "../lib/todo-thread";
+import { setTodoSeen, todoSeenOn } from "../lib/todo-seen";
 import { dueOn, duePatch, todoRowMenu } from "./todo-row-menu";
 
 /** What this browser was last on (#2029): the list or the calendar, the calendar's mode, and whether it shows done ones. */
@@ -343,6 +344,41 @@ export function TodosView({
     },
     [restoreTodo],
   );
+  // Got it on a Just finished row (#5707, docs/assistant/todo-status-sop.md "Seen"): filed under Done at once, the hub
+  // keeps the mark for every device, and the toast's Undo takes it off. Only while the hub keeps seen marks.
+  const seenOn = useStore((s) => todoSeenOn(s.features));
+  // Opening a Just finished to-do is seeing it too: it is filed under Done once the page leaves it (another to-do, the
+  // list, another page), so its row does not move while it is read. Nothing is said: the user did not ask for it.
+  const seenOnLeave = useRef<string | undefined>(undefined);
+  // to-dos the user pressed Got it on here: their own choice (and its Undo) stands, leaving one marks nothing
+  const decided = useRef(new Set<string>());
+  // what the rows' callback reads when it runs, so it stays the same function and a push re-renders no row
+  const seenInputs = useRef({ todos, lookup, restored, superseded });
+  seenInputs.current = { todos, lookup, restored, superseded };
+  const onSeen = useCallback((id: string) => {
+    const failed = (e: unknown) => toast(t("todos.action_failed", { error: errorText(e) }), "error");
+    // the mark shown before the hub answers is not earlier than the moment that put it in Just finished
+    const { todos: list, lookup: look, restored: back, superseded: sup } = seenInputs.current;
+    const td = list.find((x) => x.id === id);
+    const after = td ? triage(td, look, Date.now(), back.get(id) ?? 0, sup.has(id)).last : 0;
+    decided.current.add(id);
+    if (seenOnLeave.current === id) seenOnLeave.current = undefined;
+    setTodoSeen(id, true, after).catch(failed);
+    toast(t("todos.seen_moved"), "ok", { label: t("lib-agents.undo"), run: () => void setTodoSeen(id, false).catch(failed) });
+  }, []);
+  const opened = seenOn && selectedId !== undefined ? todos.find((td) => td.id === selectedId) : undefined;
+  const openedJustDone = opened !== undefined && triage(opened, lookup, Date.now(), restored.get(opened.id) ?? 0, superseded.has(opened.id)).section === "just_done";
+  useEffect(() => {
+    if (openedJustDone && !decided.current.has(selectedId!)) seenOnLeave.current = selectedId;
+  }, [openedJustDone, selectedId]);
+  useEffect(() => {
+    const id = selectedId;
+    return () => {
+      if (id === undefined || seenOnLeave.current !== id) return;
+      seenOnLeave.current = undefined;
+      void setTodoSeen(id, true).catch(() => {}); // it stays in Just finished, as if never opened
+    };
+  }, [selectedId]);
 
   // Active selected todo
   const activeTodo = useMemo(() => {
@@ -351,10 +387,9 @@ export function TodosView({
       if (found) return found;
     }
     if (byStatus) {
-      // the first row of an open section; none rather than one that would unfold a folded section
+      // the first row of an open section; none rather than one that would unfold a folded section (Shelved, Done)
       for (const sec of TRIAGE_SECTIONS) if (!FOLDED_SECTIONS.has(sec) && triaged.sections[sec].length) return triaged.sections[sec][0].lead;
-      // nothing in the open sections: Other open starts unfolded (TodoTriageSection), its first row; never a shelved or done one
-      return triaged.sections.other[0]?.lead;
+      return undefined;
     }
     // by 常驻: the first row shown (a to-do outside every section is not on the list), else the first completed one
     if (grouping === "direction") return directionSections[0]?.todos[0] ?? filteredCompleted[0];
@@ -684,8 +719,8 @@ export function TodosView({
                     <TodoTriageSection
                       key={sec}
                       section={sec}
-                      // Other open unfolds when nothing above it shows, or under a filter (it narrows; as a search does on iOS)
-                      folded={FOLDED_SECTIONS.has(sec) && !(sec === "other" && (listFilter !== "all" || !TRIAGE_SECTIONS.some((o) => !FOLDED_SECTIONS.has(o) && triaged.sections[o].length > 0)))}
+                      // unfinished to-dos start open, above Just finished; Shelved and Done start folded (#5707)
+                      folded={FOLDED_SECTIONS.has(sec)}
                       groups={sortTriageGroups(triaged.sections[sec], listSort)}
                       count={triaged.sections[sec].reduce((n, g) => n + g.members.length, 0)}
                       views={views}
@@ -693,6 +728,7 @@ export function TodosView({
                       onSelect={openFromList}
                       onToggleDone={toggleDone}
                       onRestore={onRestore}
+                      onSeen={seenOn ? onSeen : undefined}
                       onMenu={openRowMenu}
                     />
                   ),
@@ -1102,7 +1138,7 @@ function sectionTitle(section: TriageSection): string {
 }
 
 /** One status section (docs/assistant/todo-status-sop.md): a folding title with its count, a row per group of related
- *  to-dos. Waiting on you, Working, Just finished and PR to merge start open; Other, Shelved and Done start folded. */
+ *  to-dos. Every section starts open but Shelved and Done (#5707). */
 const TodoTriageSection = memo(function TodoTriageSection({
   section,
   folded: foldedFirst,
@@ -1113,10 +1149,11 @@ const TodoTriageSection = memo(function TodoTriageSection({
   onSelect,
   onToggleDone,
   onRestore,
+  onSeen,
   onMenu,
 }: {
   section: TriageSection;
-  /** Whether it starts folded: Other open only while some open section has rows. */
+  /** Whether it starts folded: Shelved and Done. */
   folded: boolean;
   groups: TriageGroup[];
   /** To-dos its rows list (a merged row holds several): the number its title shows (#3712, the same on iOS). */
@@ -1126,6 +1163,8 @@ const TodoTriageSection = memo(function TodoTriageSection({
   onSelect: (id: string) => void;
   onToggleDone: (todo: Todo, open?: boolean) => void;
   onRestore: (id: string) => void;
+  /** Got it on a Just finished row; unset while the hub keeps no seen marks. */
+  onSeen?: (id: string) => void;
   onMenu: TodoRowMenuOpener;
 }) {
   const holds = groups.some((g) => g.members.some((m) => m.id === selectedId));
@@ -1141,7 +1180,7 @@ const TodoTriageSection = memo(function TodoTriageSection({
       {!folded && (
         <div className="flex flex-col gap-1 pt-0.5">
           {groups.map((g) => (
-            <TodoTriageRow key={g.key} group={g} views={views} selectedId={selectedId} onSelect={onSelect} onToggleDone={onToggleDone} onRestore={onRestore} onMenu={onMenu} />
+            <TodoTriageRow key={g.key} group={g} views={views} selectedId={selectedId} onSelect={onSelect} onToggleDone={onToggleDone} onRestore={onRestore} onSeen={onSeen} onMenu={onMenu} />
           ))}
         </div>
       )}
@@ -1157,6 +1196,7 @@ function TodoTriageRow({
   onSelect,
   onToggleDone,
   onRestore,
+  onSeen,
   onMenu,
 }: {
   group: TriageGroup;
@@ -1165,6 +1205,7 @@ function TodoTriageRow({
   onSelect: (id: string) => void;
   onToggleDone: (todo: Todo, open?: boolean) => void;
   onRestore: (id: string) => void;
+  onSeen?: (id: string) => void;
   onMenu: TodoRowMenuOpener;
 }) {
   const others = group.members.slice(1);
@@ -1181,6 +1222,7 @@ function TodoTriageRow({
       onToggleDone={onToggleDone}
       section={group.triage.get(td.id)?.section}
       onRestore={onRestore}
+      onSeen={onSeen}
       onMenu={onMenu}
     />
   );
@@ -1312,6 +1354,7 @@ const TodoListItem = memo(function TodoListItem({
   onToggleDone,
   section,
   onRestore,
+  onSeen,
   onMenu,
 }: {
   todo: Todo;
@@ -1319,9 +1362,11 @@ const TodoListItem = memo(function TodoListItem({
   selected: boolean;
   onSelect: (id: string) => void;
   onToggleDone: (todo: Todo, open?: boolean) => void;
-  /** Its status section (#3156): a PR to merge shows its link, a shelved one its Restore. */
+  /** Its status section (#3156): a PR to merge shows its link, a shelved one its Restore, a Just finished one Got it. */
   section?: TriageSection;
   onRestore?: (id: string) => void;
+  /** Got it (#5707). */
+  onSeen?: (id: string) => void;
   onMenu?: TodoRowMenuOpener;
 }) {
   const { status, dotState, activeCount } = view;
@@ -1469,6 +1514,21 @@ const TodoListItem = memo(function TodoListItem({
           <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
             <Button tone="secondary" icon="undo" onClick={() => onRestore(todo.id)} className="h-7 text-[12px] whitespace-nowrap">
               {t("todos.restore")}
+            </Button>
+          </div>
+        )}
+
+        {/* Just finished: Got it files it under Done at once (#5707); nothing else about it changes */}
+        {section === "just_done" && onSeen && (
+          <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+            <Button
+              tone="secondary"
+              icon="check"
+              testId="todo-seen"
+              onClick={() => onSeen(todo.id)}
+              className="h-7 text-[12px] whitespace-nowrap"
+            >
+              {t("todos.seen")}
             </Button>
           </div>
         )}

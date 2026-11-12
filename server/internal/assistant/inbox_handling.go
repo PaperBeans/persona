@@ -47,6 +47,9 @@ type InboxSuggestion struct {
 	At        time.Time   `json:"at"`
 	// Cwd is where an agent suggestion's Agent starts (the tool's cwd; "" home): kept, not listed.
 	Cwd string `json:"cwd,omitempty"`
+	// MailTarget is the message a reply suggestion answered when it was created: kept, not listed. Reading that mail
+	// can leave an older unread one as the item's newest; confirmation must not silently answer that different one (#5471).
+	MailTarget *inboxMailTarget `json:"mail_target,omitempty"`
 	// Conversation is the conversation the event was handed to that handed this suggestion in (Hand to AI, inbox_handoff.go);
 	// nil for the event's processing conversation. What the user does with it is told there, not to the processing one.
 	Conversation *SessionRef `json:"conversation,omitempty"`

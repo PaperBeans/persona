@@ -62,7 +62,9 @@ func (s *Service) followupRoute(w http.ResponseWriter, r *http.Request) {
 	case meetingRunning(rec, m, time.Now()):
 		apierr.WriteCode(w, http.StatusConflict, codeMeetingRunning, i18n.Err("assistant-meeting.meeting_running"))
 		return
-	case rec.Chars == 0 && !e.Store.HasMinutes(rec.ID):
+	// A trimmed recording keeps chars in meta.json with its transcript gone, so its only material is its minutes (an
+	// all-day one past recording_days keeps its recap and no minutes: nothing to seed a follow-up with).
+	case (rec.Chars == 0 || rec.Trimmed()) && !e.Store.HasMinutes(rec.ID):
 		apierr.WriteCode(w, http.StatusConflict, codeNoMaterial, i18n.Err("assistant-meeting.no_material"))
 		return
 	}

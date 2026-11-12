@@ -239,6 +239,8 @@
   "pr_idle": "{age}动过",
   "restore": "恢复",
   "restored": "已恢复到列表",
+  "seen": "知道了",
+  "seen_moved": "已移到「已完成」",
   "filter_label": "筛选与排序",
   "filter_show": "显示",
   "sort_by": "排序方式",

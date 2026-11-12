@@ -89,6 +89,7 @@ struct PhoneToolsTests {
             "phone_contacts_update",
             "phone_maps_search_nearby",
             "phone_maps_navigate",
+            "phone_maps_route",
             "phone_alarms_list",
             "phone_alarm_create",
             "phone_timer_start",

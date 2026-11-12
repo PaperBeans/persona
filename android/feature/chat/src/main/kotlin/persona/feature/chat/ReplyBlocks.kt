@@ -123,7 +123,7 @@ internal fun ReplyQuote(lineStyle: TextStyle, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.badge)).background(palette.accentSoft)
         .drawWithContent {
             drawContent()
-            drawRect(palette.accent, size = Size(Tokens.Space.xs.toPx() * 3 / 4, size.height))
+            drawRect(palette.accent, size = Size(Tokens.Space.Standard.xs.toPx() * 3 / 4, size.height))
         }) {
         Box(Modifier.fillMaxWidth()
             .padding(end = Tokens.Space.xxl, top = Tokens.Space.s, bottom = Tokens.Space.s)

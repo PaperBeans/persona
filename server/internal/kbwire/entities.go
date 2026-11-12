@@ -79,7 +79,7 @@ type Update struct {
 	Status         string   `json:"status,omitempty"`
 	Goal           string   `json:"goal,omitempty"`
 	MyRole         string   `json:"my_role,omitempty"`
-	Note           string   `json:"note,omitempty"` // people / items
+	Note           string   `json:"note,omitempty"` // projects / people / items / topics
 	Importance     string   `json:"importance,omitempty"`
 	Relevance      *int     `json:"relevance,omitempty"`
 	Tags           []string `json:"tags,omitempty"`    // nil preserves; non-nil replaces, including an empty slice

@@ -66,6 +66,9 @@ export interface Todo {
   done_reason?: string;
   /** When the user last reopened it after it was done. */
   reopened_at?: string | null;
+  /** When the owner last looked at it in Just finished: Got it, or opening it (#5707, lib/todo-seen.ts); a to-do seen
+   *  since it got there is filed under Done (lib/todo-triage.ts). Unset when never seen, and from hubs before it. */
+  seen_at?: string | null;
   /** Opened from the main conversation while "notify tasks the main chat dispatched only in the main chat" was on (#1731). */
   quiet?: boolean;
   /** The task's agent did not start, and why: the hub ended it there (done_at is set too, #1077). */

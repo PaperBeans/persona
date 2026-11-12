@@ -147,7 +147,6 @@
   "server/internal/herdr/fullclient_live_test.go": 1,
   "server/internal/herdr/fullclient_test.go": 1,
   "server/internal/herdr/live_test.go": 2,
-  "server/internal/hub/admin_assistant_test.go": 1,
   "server/internal/hub/agents_link_test.go": 1,
   "server/internal/hub/assistant_conversations_test.go": 2,
   "server/internal/hub/assistant_stop_test.go": 1,

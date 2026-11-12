@@ -1576,21 +1576,22 @@ struct StarterModesMenu: View {
                 }
             }
         } else if !launchers.isEmpty {
-            Section("Model [Assistant View c98e11]") {
-                Picker("Launcher", selection: Binding(get: { modes.launcher ?? model.assistantConfig?.launcher ?? "" }, set: { modes.launcher = $0 })) {
-                    ForEach(launchers) { l in
-                        Text(SessionModes.modelName(l.model).map { "\(l.name) · \($0)" } ?? l.name).tag(l.name)
+            Section("Model [Assistant View c98e11]") { // switches, so the title is drawn (#4322, `MenuChoice`)
+                let current = modes.launcher ?? model.assistantConfig?.launcher ?? ""
+                ForEach(launchers) { l in
+                    MenuChoice(id: l.name, selected: current, pick: { modes.launcher = $0 }) {
+                        Text(SessionModes.modelName(l.model).map { "\(l.name) · \($0)" } ?? l.name)
                     }
                 }
-                .pickerStyle(.inline)
             }
         }
-        Section("Thinking Effort") {
-            Picker("Thinking Effort", selection: modes.$effort) {
-                Text("Use Launcher's").tag("")
-                ForEach(SessionModes.startEffortLevels) { o in Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }.tag(o.id) }
+        Section("Thinking Effort") { // switches, so the title is drawn (#4322, `MenuChoice`)
+            MenuChoice(id: "", selected: modes.effort, pick: { modes.effort = $0 }) { Text("Use Launcher's") }
+            ForEach(SessionModes.startEffortLevels) { o in
+                MenuChoice(id: o.id, selected: modes.effort, pick: { modes.effort = $0 }) {
+                    Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }
+                }
             }
-            .pickerStyle(.inline)
         }
         Picker(selection: modes.$mode) {
             Text("Use Launcher's").tag("")

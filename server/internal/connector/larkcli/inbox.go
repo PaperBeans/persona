@@ -31,9 +31,10 @@ const (
 	// what was already collected.
 	inboxCursorOverlap = 10 * time.Minute
 	// Direct chats are also read from their own history (sweepDirectChats), which has no indexing delay:
-	// the most recently active inboxDirectChats of them, each back to inboxDirectLookback.
-	inboxDirectChats    = 10
-	inboxDirectLookback = time.Hour
+	// up to inboxDirectChats per round, rotating through the most recent candidates.
+	inboxDirectChats      = 10
+	inboxDirectCandidates = 50
+	inboxDirectLookback   = 2 * time.Hour
 )
 
 // StateStore is the small part of the manager's Postgres-backed settings store
@@ -228,11 +229,7 @@ func (c *Connector) pollChat(ctx context.Context) (bool, error) {
 	}
 
 	sort.SliceStable(found, func(i, j int) bool {
-		ti, tj := messageTime(found[i]), messageTime(found[j])
-		if ti.Equal(tj) {
-			return found[i].MessageID < found[j].MessageID
-		}
-		return ti.Before(tj)
+		return messageLess(found[i], found[j])
 	})
 
 	newMessages := c.dedupMessages(found)
@@ -273,28 +270,37 @@ func (c *Connector) pollChat(ctx context.Context) (bool, error) {
 	return changed, directErr
 }
 
-// sweepDirectChats reads the most recently active direct chats from their own history, back to inboxDirectLookback.
+// sweepDirectChats rotates through recent direct chats' history, back to inboxDirectLookback.
 // Message search is the round's main source, but it indexes some messages minutes late: one indexed after the cursor
 // had passed its time was never collected. Every direct message belongs in the Inbox, and chat history has no
 // indexing delay, so these chats are read here as well; the seen ledger drops what search already delivered. Search
 // results carry the chat's type and partner; history does not, so they are filled in from the chat list.
 func (c *Connector) sweepDirectChats(ctx context.Context) ([]adapter.Message, error) {
-	list, err := c.runner.ListDirectChats(ctx, inboxDirectChats)
+	list, err := c.runner.ListDirectChats(ctx, inboxDirectCandidates)
 	if err != nil {
 		return nil, err
 	}
 	floor := c.currentTime().Add(-inboxDirectLookback).UTC()
 	start := floor.Format(time.RFC3339)
 	var out []adapter.Message
-	read := 0
+	var chats []adapter.Chat
 	for _, chat := range list.Chats {
 		if chat.ChatID == "" || (chat.ChatMode != "p2p" && chat.ChatType != "p2p") {
 			continue
 		}
-		if read == inboxDirectChats {
-			break
-		}
-		read++
+		chats = append(chats, chat)
+	}
+	if len(chats) == 0 {
+		return nil, nil
+	}
+	// Keep ten reads per round without permanently skipping the eleventh active chat.
+	c.inboxMu.Lock()
+	offset := c.inboxDirectOffset % len(chats)
+	read := minInt(inboxDirectChats, len(chats))
+	c.inboxDirectOffset = (offset + read) % len(chats)
+	c.inboxMu.Unlock()
+	for i := 0; i < read; i++ {
+		chat := chats[(offset+i)%len(chats)]
 		page, err := c.runner.ListMessagesSince(ctx, chat.ChatID, start, 50)
 		if err != nil {
 			return out, err
@@ -627,7 +633,7 @@ func (c *Connector) groupMessages(messages []adapter.Message, me string, knownTo
 		}
 		if message.Sender.ID == me {
 			if prior := byKey[key]; prior != nil {
-				prior.replied = true
+				prior.replied = after(message, prior.latest)
 			}
 			if topic := topicID(message); topic != "" {
 				topics[topic] = struct{}{}
@@ -664,6 +670,7 @@ func (c *Connector) groupMessages(messages []adapter.Message, me string, knownTo
 		}
 		current.messages = append(current.messages, message)
 		current.latest = message
+		current.replied = false
 		current.mentioned = current.mentioned || mentioned
 	}
 	return out
@@ -677,10 +684,30 @@ func (c *Connector) thingForGroup(ctx context.Context, group *inboxGroup, me str
 	contextMessages := append([]adapter.Message(nil), group.messages...)
 	if page, err := c.runner.ListMessages(ctx, group.chatID, group.threadID, "", 40); err == nil && len(page.Messages) > 0 {
 		contextMessages = mergeMessages(page.Messages, group.messages)
-		for _, message := range page.Messages {
-			if messageKey(message) == group.key && message.Sender.ID == me && after(message, latest) {
-				group.replied = true
-			}
+	}
+	// History can already contain a follow-up which search has not indexed. Only
+	// eligible incoming activity in this chat/topic can supersede the search hit.
+	c.inboxMu.Lock()
+	_, allChat := c.inboxAllChats[group.chatID]
+	c.inboxMu.Unlock()
+	for _, message := range contextMessages {
+		if message.Deleted || messageKey(message) != group.key || message.Sender.ID == me || !after(message, latest) {
+			continue
+		}
+		if latest.ChatType != "p2p" && group.threadID == "" && !allChat && !messageMentions(message, me) {
+			continue
+		}
+		message.ChatType = firstNonEmpty(message.ChatType, latest.ChatType)
+		if len(message.ChatPartner) == 0 {
+			message.ChatPartner = latest.ChatPartner
+		}
+		latest = message
+		group.replied = false
+		group.mentioned = group.mentioned || messageMentions(message, me)
+	}
+	for _, message := range contextMessages {
+		if !message.Deleted && messageKey(message) == group.key && message.Sender.ID == me && after(message, latest) {
+			group.replied = true
 		}
 	}
 	text := messageText(latest)
@@ -958,11 +985,39 @@ func messageTime(message adapter.Message) time.Time {
 }
 
 func after(message, previous adapter.Message) bool {
+	if message.ChatID != "" && message.ChatID == previous.ChatID {
+		position, err := strconv.ParseUint(message.MessagePosition, 10, 64)
+		prior, priorErr := strconv.ParseUint(previous.MessagePosition, 10, 64)
+		if err == nil && priorErr == nil && position > 0 && prior > 0 {
+			return position > prior
+		}
+	}
 	tm, tp := messageTime(message), messageTime(previous)
 	if tm.IsZero() || tp.IsZero() {
-		return message.MessageID > previous.MessageID
+		return false // An opaque ID cannot establish whether the owner replied later.
 	}
 	return tm.After(tp)
+}
+
+// messageLess keeps messages with the same wall-clock minute in source order.
+// Position is scoped to a chat; group chats first so the comparator remains transitive.
+func messageLess(a, b adapter.Message) bool {
+	ta, tb := messageTime(a), messageTime(b)
+	if !ta.Equal(tb) {
+		return ta.Before(tb)
+	}
+	if a.ChatID != b.ChatID {
+		return a.ChatID < b.ChatID
+	}
+	pa, _ := strconv.ParseUint(a.MessagePosition, 10, 64)
+	pb, _ := strconv.ParseUint(b.MessagePosition, 10, 64)
+	if (pa > 0) != (pb > 0) {
+		return pa > 0
+	}
+	if pa != pb {
+		return pa < pb
+	}
+	return a.MessageID < b.MessageID
 }
 
 func messageText(message adapter.Message) string {
@@ -1067,11 +1122,7 @@ func mergeMessages(primary, extra []adapter.Message) []adapter.Message {
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		ti, tj := messageTime(out[i]), messageTime(out[j])
-		if ti.Equal(tj) {
-			return out[i].MessageID < out[j].MessageID
-		}
-		return ti.Before(tj)
+		return messageLess(out[i], out[j])
 	})
 	return out
 }

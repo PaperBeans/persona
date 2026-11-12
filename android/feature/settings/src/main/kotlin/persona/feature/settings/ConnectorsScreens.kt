@@ -100,7 +100,7 @@ internal fun MailAccountsPage(
                             onClick = { actionAccount = a },
                             trailing = {
                                 if (testingId == a.id) {
-                                    JSpinner(stroke = Tokens.Space.xxs)
+                                    JSpinner(stroke = Tokens.Space.Standard.xxs)
                                 } else {
                                     JIconButton(PhIcons.DotsThreeVertical, stringResource(R.string.settings_src_more), onClick = { actionAccount = a })
                                 }
@@ -512,7 +512,7 @@ internal fun FeishuConnectorPage(
                     trailing = {
                         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
                             JStatusDot(statusDot)
-                            if (loading) JSpinner(stroke = Tokens.Space.xxs)
+                            if (loading) JSpinner(stroke = Tokens.Space.Standard.xxs)
                         }
                     },
                 )

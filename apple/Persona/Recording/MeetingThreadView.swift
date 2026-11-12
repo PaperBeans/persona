@@ -82,7 +82,7 @@ struct MeetingThreadView: View {
                 justMeRows(mine)
             } else {
                 roomPart(roomKey: roomKey, meeting: meeting, local: local)
-                if mode == .after { followupRows(followupKey, sends: sends) }
+                if mode == .after { followupRows(followupKey, sends: sends, read: meeting.loaded || meeting.missing) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -320,8 +320,21 @@ struct MeetingThreadView: View {
 
     // MARK: After the meeting
 
-    @ViewBuilder private func followupRows(_ key: SessionKey?, sends: [MeetingConversation.FollowupSend]) -> some View {
-        afterDivider
+    /// `read`: the hub has answered for the meeting (`loaded` or `missing`). Until then the follow-up's and the room's keys
+    /// are unknown even where it has them (made on another device, or a room that came up), so the hint waits for it, as
+    /// `MeetingConversation.running` waits for `loaded`: it would flash, or stay when the read fails.
+    @ViewBuilder private func followupRows(_ key: SessionKey?, sends: [MeetingConversation.FollowupSend], read: Bool) -> some View {
+        // Between the room's part and the follow-up: a recording that never had a room, and a room meeting whose room never
+        // came up with no asks, have nothing before it (#3862 phase 6), and their thread is the follow-up alone. The
+        // divider comes with what is before it, which comes with that read.
+        let roomPart = conversation.roomKey(entry.id) != nil || !roomRows.isEmpty || !apart.isEmpty
+        if roomPart { afterDivider }
+        if read, key == nil, sends.isEmpty, !roomPart {
+            Text("Ask Persona about this meeting: what was decided, who does what, or a follow-up email.")
+                .font(Theme.Font.secondary).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("meeting-followup-empty")
+        }
         if let key {
             let store = model.chat(key)
             if store.hasMore { earlier(key, identifier: "meeting-followup-earlier") }

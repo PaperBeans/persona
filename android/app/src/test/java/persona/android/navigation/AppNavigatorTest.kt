@@ -112,14 +112,14 @@ class AppNavigatorTest {
         assertEquals(hubs, stacks.getValue(selected).last())
     }
 
-    @Test fun switchingTabsKeepsEachStackAndBackNeverRemovesTheRoot() {
+    @Test fun switchingTabsReturnsToTheAgentsListAndBackNeverRemovesTheRoot() {
         val chat = ChatRoute("machine", "session")
         navigator.navigate(chat)
         navigator.selectTab(AppTab.Persona)
         navigator.back()
         assertEquals(listOf(AssistantRoute), stacks.getValue(AppTab.Persona))
         navigator.selectTab(AppTab.Agents)
-        assertEquals(listOf(AgentsRoute, chat), stacks.getValue(AppTab.Agents))
+        assertEquals(listOf(AgentsRoute), stacks.getValue(AppTab.Agents))
         navigator.back()
         navigator.back()
         assertEquals(listOf(AgentsRoute), stacks.getValue(AppTab.Agents))
@@ -152,7 +152,7 @@ class AppNavigatorTest {
         router.back()
 
         stacks.getValue(AppTab.Agents).add(assistantChat)
-        router.selectTab(AppTab.Agents)
+        selected = AppTab.Agents // Restored position, not an explicit request to open the Agents list.
         assistantKnown = true
         router.restoreChatTabs()
         assertEquals(AppTab.Persona, selected)

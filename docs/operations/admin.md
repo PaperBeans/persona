@@ -205,6 +205,7 @@ using the same registry and checks as `personad extension`, plus:
   at most 10 in 10 minutes (successes and failures both count; exceeding it returns 429 `rate_limited` and `Retry-After`), so even someone who steals a session cannot fill the disk.
 - **Upload**: the browser POSTs the file unchanged; the hub writes it into this preview's staging directory as it arrives (stopping above 200 MB), then removes the original after unpacking; obviously oversized requests are rejected first by `Content-Length`.
 - **Audit**: every step goes into `plugin_audit`, actor `admin UI`; a hub log line says `admin: installed plugin …`.
+- **Network and isolation** (#5696, `web/src/admin/pages/ExtensionNetwork.tsx`): in an installed extension's details, the sandbox switch (turning it off is confirmed), what went through the egress proxy, the last addresses it blocked with **Allow**, and the addresses the owner allowed with **Revoke** and a field to allow one by hand (#5697); `?extension=<id>` opens that row at this block (the web's settings page links here when an address was blocked); see [extensions.md](../extensions/extensions.md) ("Sandbox").
 - **Health** (#1857): each list row shows the last 24 hours' error rate and p95; the detail has call / error / latency charts, a table by method, reasons for error exits, and the extension's logs (search, live follow, copy),
   see [extensions.md](../extensions/extensions.md) ("Runtime status", "Admin console: extensions"). Only signed-in sessions can view logs: an extension's own output may reveal more than the app should see.
 - **Extension market** (#1330, page `web/src/admin/pages/ExtensionMarket.tsx`, sharing logic and copy with the web app in `web/src/lib/extension-market.ts`): two cards above the extension list (#5017), shown only when extensions can be installed (`can_install`) and the hub has the market API (the entire section is hidden on 404 / 503).
@@ -239,8 +240,9 @@ The prompt explains all four options and their risks (see the admin access secti
 The public installer chooses English, Simplified Chinese or Japanese from `LC_ALL` (when set), then `LANG`; Chinese
 locales use `zh-Hans`, Japanese locales use `ja`, and every other, missing or unknown locale uses `en`. Pass
 `--lang en`, `--lang zh-Hans` or `--lang ja` after `sh -s --` to override it, for example
-`curl … | sh -s -- --lang ja --hub`. The override changes only the installer's own prompts, errors, explanations and summary;
-programs it runs choose their language separately. `scripts/deploy/deploy.sh` uses the same admin-access catalog and
+`curl … | sh -s -- --lang ja --hub`. The installer's language also becomes a new hub's starting language: it runs
+`personad hub setup` with `PERSONA_INSTALL_LANG` set, which writes hub.json `initial_locale` (used until a device reports
+its own language, [i18n.md](../protocol/i18n.md) "User language"). Otherwise programs it runs choose their language separately. `scripts/deploy/deploy.sh` uses the same admin-access catalog and
 follows its environment locale.
 
 ## Security trade-offs

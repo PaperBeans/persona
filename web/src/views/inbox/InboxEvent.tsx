@@ -85,11 +85,11 @@ export function EventMark({ it }: { it: InboxItem }) {
 
 /**
  * The detail's body for an event: summary, recap, how the handling goes, the suggestion, handling chain, "Related" and "Trail".
- * `embedded`: above the item's own page (a Feishu chat, #3262), as tall as it needs up to a share of the pane, then scrolling.
+ * `embedded`: above the item's own page (a Feishu chat or mail, #3262 / #5471), as tall as it needs up to a share of the pane, then scrolling.
  */
 export function EventBody({ item, onSource, embedded = false }: { item: InboxItem; onSource: (at: SourceAt) => void; embedded?: boolean }) {
   const done = isDone(item);
-  // capped above the chat: its bottom fades while there is more below, so a cut-off row reads as more to scroll to
+  // capped above the source: its bottom fades while there is more below, so a cut-off row reads as more to scroll to
   const box = useRef<HTMLDivElement>(null);
   const fold = useFoldScroll(box, embedded, [item]);
   const body = (

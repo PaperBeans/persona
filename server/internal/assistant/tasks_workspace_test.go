@@ -540,3 +540,74 @@ func TestTaskWorkspaceInferredBusyStillCreatesWhenEngineCanPrepare(t *testing.T)
 		}
 	})
 }
+
+// noCommits is the node's answer to worktree.prepare in a repository nobody has committed to (#5548).
+func noCommits() error {
+	return &rpc.Error{Code: "worktree_no_commits", Message: "/code/app has no commits yet, so a new worktree cannot be made from it"}
+}
+
+// An occupied folder without commits cannot get a checkout: the task is refused with the owner named, never with
+// git's "invalid reference", and nothing starts or shares the folder.
+func TestTaskWorkspaceInferredBusyWithoutCommitsNamesTheOwner(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, f := busyCwdService(t, noCommits())
+		args := `{"tasks":[{"title":"Fix login","prompt":"Fix login and add tests","machine":"box","cwd":"/code/app","permission":"bypassPermissions"}]}`
+		_, err := s.toolTaskPlan(context.Background(), "workspace-chat", json.RawMessage(args))
+		reason := ""
+		if err != nil {
+			reason = err.Error()
+		} else {
+			p := readonlyFeedPlan(t, s, "workspace-chat")
+			if _, err := s.startPlan(context.Background(), p.ID, nil, false); err != nil {
+				reason = err.Error()
+			}
+			synctest.Wait()
+			saved, _ := s.loadPlan(context.Background(), p.ID)
+			reason += saved.Tasks[0].Error
+		}
+		if len(f.starts) != 0 || !strings.Contains(reason, "is in use by task") || !strings.Contains(reason, "Other writer") ||
+			!strings.Contains(reason, "/code/app") || strings.Contains(reason, "invalid reference") {
+			t.Fatalf("busy folder without commits: reason=%q starts=%v", reason, f.starts)
+		}
+	})
+}
+
+// A free folder without commits is used as it is, even when new checkouts are preferred.
+func TestTaskWorkspaceInferredPreferNewWithoutCommitsUsesFreeCwd(t *testing.T) {
+	s, f := workspaceTaskService(t)
+	f.nodes[DeviceWorktreePrepare] = func(string, json.RawMessage) (any, error) { return nil, noCommits() }
+	setSettings(t, s, func(v *Settings) { v.TaskWorkspacePreference = preferNew })
+	task := PlanTask{Machine: "box", Cwd: "/code/app"}
+	if err := s.resolveTaskWorkspace(context.Background(), &task); err != nil {
+		t.Fatal(err)
+	}
+	if task.Workspace.Mode != workspaceExisting || task.WorkspaceResolved.Path != "/code/app" ||
+		task.WorkspaceResolved.Branch != "" || task.WorkspaceResolved.Shared {
+		t.Fatalf("free folder without commits not reused: workspace=%+v resolved=%+v", task.Workspace, task.WorkspaceResolved)
+	}
+}
+
+func TestTaskWorkspaceExplicitNewWithoutCommitsSaysWhy(t *testing.T) {
+	s, f := workspaceTaskService(t)
+	f.nodes[DeviceWorktreePrepare] = func(string, json.RawMessage) (any, error) { return nil, noCommits() }
+	task := PlanTask{Machine: "box", Cwd: "/code/app", Workspace: &TaskWorkspace{Mode: workspaceNew}}
+	err := s.resolveTaskWorkspace(context.Background(), &task)
+	// The manager's own sentence, not the node's text passed through.
+	if err == nil || !strings.Contains(err.Error(), "a new task workspace cannot be made from it") {
+		t.Fatalf("explicit new in a folder without commits: %v", err)
+	}
+}
+
+// Only the node's "no commits" code falls back to the folder: a failure to look at the repository (git missing or
+// timing out, a corrupt HEAD) stops an inferred task instead of quietly reusing the folder.
+func TestTaskWorkspaceInferredGitFailureIsNotNoCommits(t *testing.T) {
+	s, f := workspaceTaskService(t)
+	f.nodes[DeviceWorktreePrepare] = func(string, json.RawMessage) (any, error) {
+		return nil, &rpc.Error{Message: "git rev-list: signal: killed"}
+	}
+	setSettings(t, s, func(v *Settings) { v.TaskWorkspacePreference = preferNew })
+	task := PlanTask{Machine: "box", Cwd: "/code/app"}
+	if err := s.resolveTaskWorkspace(context.Background(), &task); err == nil || !strings.Contains(err.Error(), "signal: killed") {
+		t.Fatalf("a git failure fell back instead of failing: err=%v workspace=%+v", err, task.Workspace)
+	}
+}

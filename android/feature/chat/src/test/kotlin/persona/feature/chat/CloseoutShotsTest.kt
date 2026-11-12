@@ -205,6 +205,11 @@ class CloseoutShotsTest {
         // a new turn has no closeout yet: the card goes and the transcript is whole again
         rows.value = listOf(agent(summary(confirmed), state = "working", status = "working").copy(waiting = false, rev = 4)); settle()
         rule.onAllNodesWithTag("closeout-card").assertCountEquals(0)
+        // The restored fence parses off the UI thread; pump this fixture's paused clock until it is drawn.
+        rule.waitUntil(10_000) {
+            rule.mainClock.advanceTimeByFrame()
+            rule.onAllNodesWithText("did: Retry the import", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
         shot("card-none-working")
         rule.onNodeWithText("did: Retry the import", substring = true).assertExists()
     }

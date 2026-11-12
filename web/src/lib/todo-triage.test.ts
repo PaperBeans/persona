@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Session } from "./types";
 import { makeSessionLookup, todoStatus, todoStatusLabel, type Todo } from "./todos";
 import { checkCount, checklist, reviewBadge, type Supervision } from "./supervision";
-import { lastActivity, relatedKeys, SHELVE_AFTER_MS, supersededFailedStarts, todoBucket, triage, triageTodos } from "./todo-triage";
+import { FOLDED_SECTIONS, lastActivity, relatedKeys, SHELVE_AFTER_MS, supersededFailedStarts, todoBucket, TRIAGE_SECTIONS, triage, triageTodos } from "./todo-triage";
 import { resetRestoredCache, restoreTodo } from "./todo-restore";
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");
@@ -90,6 +90,29 @@ describe("triage (docs/assistant/todo-status-sop.md, decision table)", () => {
     expect(at(todo("t", { agents: [agent("unseen")] }))).toMatchObject({ section: "just_done", rule: "finished_unseen" });
   });
 
+  it("a seen to-do goes to Done at once; one seen before it got there stays", () => {
+    // closed, accepted, deployed: seen at or after that moment, it is Done long before the 24 hours
+    expect(at(todo("t", { done_at: hoursAgo(3), seen_at: hoursAgo(2) }))).toMatchObject({ section: "done", rule: "closed" });
+    expect(at(todo("t", { done_at: hoursAgo(3), seen_at: hoursAgo(3) })).section).toBe("done");
+    expect(at(todo("t", { done_at: hoursAgo(3), seen_at: hoursAgo(4) }))).toMatchObject({ section: "just_done", rule: "closed" });
+    expect(at(todo("t", { agents: [agent("idle")], supervision: acceptedReopened(), seen_at: hoursAgo(4) }))).toMatchObject({ section: "done", rule: "accepted" });
+    expect(at(todo("t", { delivery: { state: "live", at: hoursAgo(2) }, seen_at: hoursAgo(1) }))).toMatchObject({ section: "done", rule: "deployed" });
+    // a failed start superseded by its row's finished work, too
+    expect(triage(todo("f", { start_error: "x", done_at: hoursAgo(2), seen_at: hoursAgo(1) }), lookup, NOW, 0, true)).toMatchObject({ section: "done", rule: "superseded" });
+    // a mark that does not parse is no mark
+    expect(at(todo("t", { done_at: hoursAgo(3), seen_at: "not a time" })).section).toBe("just_done");
+  });
+
+  it("a finished turn seen since it last moved is Done, unless its PR is open", () => {
+    // the unseen session last moved an hour ago
+    expect(at(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(0.5) }))).toMatchObject({ section: "done", rule: "seen" });
+    expect(at(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(2) }))).toMatchObject({ section: "just_done", rule: "finished_unseen" });
+    expect(at(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(0.5), pr_url: "https://example.com/pull/1", stage: "review" }))).toMatchObject({ section: "pr", rule: "pr_open" });
+    // seen, it is no longer open work: every count reads it the same way
+    expect(todoBucket(todo("t", { agents: [agent("unseen")], seen_at: hoursAgo(0.5) }), lookup, NOW)).toBe("closed");
+    expect(todoBucket(todo("t", { agents: [agent("unseen")] }), lookup, NOW)).toBe("open");
+  });
+
   it("an open PR is PR to merge however old, a merged one is not", () => {
     const old = { updated_at: hoursAgo(300), agents: [agent("old")] };
     expect(at(todo("t", { ...old, delivery: { state: "pr" } })).section).toBe("pr");
@@ -159,6 +182,27 @@ describe("triageTodos", () => {
     expect(r.sections.working.map((g) => [g.lead.id, g.members.map((m) => m.id)])).toEqual([["fix", ["fix", "test"]]]);
     expect(r.sections.pr.map((g) => g.members.map((m) => m.id))).toEqual([["pr-a", "pr-b"]]);
     expect(r.sections.other.map((g) => g.lead.id)).toEqual(["lone"]);
+  });
+
+  it("lists the unfinished sections open above Just finished, Shelved and Done folded with Done last (#5707)", () => {
+    expect(TRIAGE_SECTIONS).toEqual(["waiting", "working", "pr", "other", "just_done", "shelved", "done"]);
+    expect([...FOLDED_SECTIONS]).toEqual(["shelved", "done"]);
+  });
+
+  it("unfinished to-dos lead a row and come before Just finished; seen ones are Done", () => {
+    const look = makeSessionLookup([session("unseen", "unread"), session("unseen2", "unread"), session("idle", "idle", 2)]);
+    const list = [
+      todo("fix", { title: "Fix #512 crash on launch", agents: [agent("unseen")] }),
+      todo("test", { title: "#512 crash: add a regression test", updated_at: hoursAgo(2), agents: [agent("idle")] }),
+      todo("notes", { title: "Write the release notes", updated_at: hoursAgo(3), done_at: hoursAgo(3), seen_at: hoursAgo(2.5) }),
+      todo("speed", { title: "Speed up the web page", agents: [agent("unseen2")], seen_at: hoursAgo(0.5) }),
+      todo("logs", { title: "Rotate the logs", updated_at: hoursAgo(3), done_at: hoursAgo(3) }),
+    ];
+    const r = triageTodos(list, look, NOW);
+    expect(r.sections.other.map((g) => g.members.map((m) => m.id))).toEqual([["test", "fix"]]);
+    expect(r.sections.just_done.map((g) => g.lead.id)).toEqual(["logs"]);
+    expect(r.sections.done.map((g) => g.lead.id)).toEqual(["speed", "notes"]);
+    expect([r.open, r.shelved, r.finished]).toEqual([2, 0, 3]);
   });
 
   it("never merges a closed to-do into an open one's row", () => {

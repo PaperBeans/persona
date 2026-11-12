@@ -367,6 +367,31 @@ func tagUpdate(u Update, t *Tagging) {
 	}
 }
 
+// projectUpdate keeps fields that the project branch can apply, for locking and attribution too.
+func (e *Engine) projectUpdate(u Update) Update {
+	if u.Kind != "short" && u.Kind != "long" {
+		u.Kind = ""
+	}
+	if u.Status != "active" && u.Status != "paused" && u.Status != "done" && u.Status != "ignored" {
+		u.Status = ""
+	}
+	if !importanceRe.MatchString(u.Importance) {
+		u.Importance = ""
+	}
+	if u.Relevance != nil && (*u.Relevance < 0 || *u.Relevance > 100) {
+		u.Relevance = nil
+	}
+	u.Projects, u.RemoveProjects = nil, nil
+	var chats []string
+	for _, id := range u.Chats {
+		if _, ok := e.Store.Chat(id); ok {
+			chats = append(chats, id)
+		}
+	}
+	u.Chats = chats
+	return u
+}
+
 // Apply changes one entity as the user (the app, the assistant); for projects it creates the project when it does
 // not exist (id = name or slug). Locked fields it touches become the user's: an extension's provenance on them goes.
 func (e *Engine) Apply(kind, id string, u Update) (string, error) {
@@ -375,6 +400,9 @@ func (e *Engine) Apply(kind, id string, u Update) (string, error) {
 	}
 	e.Store.applyMu.Lock()
 	defer e.Store.applyMu.Unlock()
+	if kind == KindProject {
+		u = e.projectUpdate(u)
+	}
 	out, err := e.apply(kind, id, u)
 	if err == nil && u.MergeInto == "" {
 		err = e.claim(kind, out, u, "", nil, nil)
@@ -431,6 +459,9 @@ func (e *Engine) apply(kind, id string, u Update) (string, error) {
 		}
 		if u.MyRole != "" {
 			p.MyRole = oneLine(u.MyRole)
+		}
+		if u.Note != "" {
+			p.Note = oneLine(u.Note)
 		}
 		tagUpdate(u, &p.Tagging)
 		protectUpdate(u, &p.Tagging)

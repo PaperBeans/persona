@@ -1,7 +1,9 @@
 // A recorded meeting's conversation on its Knowledge detail (#3862, docs/assistant/meeting-minutes.md "Meeting conversation
 // (#3862)", "What the phone and the web do"): the private switch for every meeting, and for a room meeting the one thread
 // (the room's questions and answers, then **After the meeting** and the follow-up conversation), the room's state and the
-// follow-up's first message. Only on a hub that lists `meeting_conversation`; older hubs see the page as before.
+// follow-up's first message. **Talk about this meeting** (phase 6, "Phase 6: talk about this meeting") is that first
+// message for any recording with text or minutes but an all-day one (its page is the day recap), once it has ended and
+// `…/live` has answered for it. Only on a hub that lists `meeting_conversation`; older hubs see the page as before.
 // It reads `GET /api/v1/recordings/{id}/live` once, then only the parts a content-free `meeting_live` event says are
 // newer (`?parts=`), and every 5 seconds while the meeting runs as a fallback. On a hub that also lists `meeting_photos`
 // (phase 3) it reads a meeting's photos (`GET …/photos`) after that first read, again when their revision moves, and
@@ -27,7 +29,7 @@ import {
   type RecordingView,
 } from "../../lib/kb";
 import { messageManager } from "../../lib/manager-choice";
-import { followupThread, MEETING_CONVERSATION_FEATURE, MEETING_PHOTOS_FEATURE, meetingRunning, newerParts, roomState, roomThread, type MeetingLine, type ThreadEntry } from "../../lib/meeting-thread";
+import { followupThread, MEETING_CONVERSATION_FEATURE, MEETING_PHOTOS_FEATURE, meetingRunning, newerParts, offersTalk, roomState, roomThread, type MeetingLine, type ThreadEntry } from "../../lib/meeting-thread";
 import { href, navigate, onLinkClick, type Route } from "../../lib/router";
 import { listenSession, onHubEvent, useStore } from "../../lib/store";
 import type { ItemsPage, Item } from "../../lib/types";
@@ -55,6 +57,9 @@ export interface MeetingState {
   meeting: boolean;
   /** A room meeting (its upload carried `room`). */
   roomMeeting: boolean;
+  /** Any recording with text or minutes but an all-day one, once `…/live` answered for it: **Talk about this meeting**
+   *  is offered once it has ended (phase 6). */
+  talk: boolean;
   room?: MeetingRoom;
   followup?: MeetingConversation;
   private?: boolean;
@@ -82,7 +87,9 @@ export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: Re
   const meta = detail?.kind === "recordings" ? detail.meta : undefined;
   const fromMeta = useMemo(() => meetingMeta(meta), [meta]);
   const meeting = on && !!detail && detail.kind === "recordings" && countsAsMeeting(meta);
-  const wanted = on && !!detail && detail.kind === "recordings" && (meeting || !!fromMeta.room || !!fromMeta.followup);
+  const offers = on && offersTalk(detail);
+  // Any recording that may have a follow-up reads it, so one made on another device joins the thread.
+  const wanted = on && !!detail && detail.kind === "recordings" && (meeting || offers || !!fromMeta.room || !!fromMeta.followup);
   const id = detail?.id ?? "";
   // What …/live said of this recording, part by part: a part it answered (even as absent) replaces detail.meta's. Kept
   // with the recording it is of, so another recording on the same page starts from its own detail.meta.
@@ -256,6 +263,10 @@ export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: Re
   // its private mark and follow-up come with the event.
   const running = !!rec && !!merged.room && (rec.partial || ["starting", "ready", "unavailable"].includes(roomState(merged.room) ?? ""));
   const live = wanted && !read.gone;
+  // **Talk about this meeting** only once `…/live` has answered for this recording: hello's `meeting_conversation` is the
+  // default manager's, and a recording of another manager's knowledge base (X-Persona-Manager) may have no `…/followup`
+  // to write to; that read is then a 404 (gone), and no composer shows.
+  const talk = offers && !!read.got.followup && !read.gone;
   useEffect(() => {
     if (!live) return;
     readLive("all");
@@ -295,7 +306,7 @@ export function useRecordingMeeting(detail: KBDetail | null | undefined, rec: Re
   }, [id, setRead]);
 
   return {
-    on, meeting, roomMeeting: on && !!merged.room, ...merged,
+    on, meeting, roomMeeting: on && !!merged.room, talk, ...merged,
     photos: { on: photosOn, list: photosOn ? photoList : undefined, images },
     roomTick: ticks.room, followupTick: ticks.followup, setPrivate, madeFollowup,
   };
@@ -398,7 +409,8 @@ type Props = {
   manager: string;
 };
 
-/** **Conversation**: the one thread of a room meeting (or of any recording with a follow-up). */
+/** **Conversation**: the one thread of a room meeting or of any recording with a follow-up, and **Talk about this
+ *  meeting** for one that has none yet. */
 export function RecordingConversation({ detail, rec, meeting, auth, current, manager }: Props) {
   const heading = useId();
   const { room, followup } = meeting;
@@ -406,8 +418,11 @@ export function RecordingConversation({ detail, rec, meeting, auth, current, man
     ? { machine_id: room.machine_id, session_id: room.session_id } : undefined;
   const roomPart = useThread(roomIds, meeting.roomTick, auth, current);
   const followPart = useThread(followup, meeting.followupTick, auth, current);
-  if (!meeting.on || (!meeting.roomMeeting && !followup)) return null;
-  const asks = meeting.asks ?? [];
+  const running = meetingRunning(detail.meta, room);
+  // Any other recording shows the section once it has a follow-up, or can make one: it has ended and has material.
+  if (!meeting.on || (!meeting.roomMeeting && !followup && (!meeting.talk || running))) return null;
+  // A #2981 meeting's asks stay under **Questions in the meeting**; only a room meeting's are part of its thread.
+  const asks = meeting.roomMeeting ? meeting.asks ?? [] : [];
   const roomEntries = roomIds && roomPart.items ? roomThread(roomPart.items, detail.id, asks) : [];
   const followEntries = followup && followPart.items ? followupThread(followPart.items) : [];
   // A room that never came up shows the questions asked of the meeting's material instead, as #3746 does; one that went
@@ -419,7 +434,6 @@ export function RecordingConversation({ detail, rec, meeting, auth, current, man
   const askById = new Map(asks.map((a) => [a.id.toLowerCase(), a]));
   const showAsks = shownAsks.length > 0;
   const before = roomEntries.length > 0 || showAsks;
-  const running = meetingRunning(detail.meta, room);
   const status = meeting.roomMeeting ? roomLine(room, rec.attendance, !!rec.trimmedAt) : null;
   const roomRoute = roomIds ? conversationPage(roomIds.session_id, roomIds.machine_id, manager) : null;
   const followRoute = followup ? conversationPage(followup.session_id, followup.machine_id, manager) : null;
@@ -475,7 +489,7 @@ export function RecordingConversation({ detail, rec, meeting, auth, current, man
           </div>
         ) : meeting.roomMeeting && running ? (
           <p className="px-4 py-2.5 text-[11.5px] leading-relaxed text-ink-3">{t("knowledge-kbdetail.conversation_read_only")}</p>
-        ) : meeting.roomMeeting && (
+        ) : (meeting.roomMeeting || meeting.talk) && (
           <FollowupComposer id={detail.id} auth={auth} current={current} manager={manager} onMade={meeting.madeFollowup} />
         )}
       </Card>

@@ -118,7 +118,7 @@ The hub writes minutes for a meeting recording once its text is complete (#2710;
 
 ## Persona in meetings
 
-Persona can attend a meeting being recorded on the iPhone (#2981; the iPhone side is #3375). The contract, with every field and error, is [meeting-minutes.md](../assistant/meeting-minutes.md) "Attending a meeting"; this is what the app does with it. Only a hub that lists the `meeting_attendance` feature gets any of it: with another hub the Recordings page, the upload and the Live Activity are exactly as before. The redesign (#3862) replaces the attending session with the meeting's own room conversation and a meeting page, on a hub that lists `meeting_conversation`: [meeting-minutes.md](../assistant/meeting-minutes.md) "Meeting conversation (#3862)". The iPhone does phase 1 of it and phase 3, photos ("The meeting conversation (#3862)" below); a meeting started on a hub without it, or before the hub listed it, keeps everything this section describes.
+Persona can attend a meeting being recorded on the iPhone (#2981; the iPhone side is #3375). The contract, with every field and error, is [meeting-minutes.md](../assistant/meeting-minutes.md) "Attending a meeting"; this is what the app does with it. Only a hub that lists the `meeting_attendance` feature gets any of it: with another hub the Recordings page, the upload and the Live Activity are exactly as before. The redesign (#3862) replaces the attending session with the meeting's own room conversation and a meeting page, on a hub that lists `meeting_conversation`: [meeting-minutes.md](../assistant/meeting-minutes.md) "Meeting conversation (#3862)". The iPhone does phase 1 of it, phase 3, photos, and phase 6, talking about any recording ("The meeting conversation (#3862)" below); a meeting started on a hub without it, or before the hub listed it, keeps everything this section describes.
 
 - **Role, chosen as the recording starts**: **Off** (the hub writes the minutes after the meeting, as before), **Listen** (Persona follows the meeting; answers show on screen only), or **Take Part** (they are also said aloud). The Recordings page shows the choice under **Record** for a meeting (`RecordingCaptureControls.personaRow`), pre-selected from the hub's `meeting_attendance_default`, which **Settings › Meetings** changes (`MeetingSettingsView`, `PUT /api/v1/assistant`). A pick on the page is for that one recording. The drawer, the home screen's menu, the Control, Siri and the Action button start with the default and the session picked last unless that was the main chat, else with Persona off, so they stay one tap (never the main chat by default, #3862); the last word from the hub (whether it offers attending, its default) is kept for a start without the app in front (`MeetingAttendanceDefaults`).
 - **Who attends**: one session per recording (`MeetingAttendees`): the main chat (sent by leaving `attending_session` out), Persona's other open chats, or an Agent that takes messages; never one the hub would refuse ("Sessions that never attend": a work computer's, another manager's, the health space's, a chat whose replies leave the apps or that an extension opened, one in `bypassPermissions`). The one picked last is pre-selected while it can still attend, unless it was the main chat: the main chat attends only when picked for that meeting (`RecordingAttendance.mainPicked`; owner decision in #3862, since every line fed to a chat fills its context). With nobody chosen the role shows Off; Listen or Take Part shows Who Attends: Choose with "Choose who attends. Until then Persona stays out of the meeting.", a start without a choice starts with Persona off, the picker never pre-selects the main chat, and turning Persona on mid-meeting (the strip's Turn on Persona or its role menu; `MeetingRecorder.setRole` returns false) opens the picker first and turns on once someone is picked. The upload holds it whatever built the attendance: an attending role with no session named and the main chat not picked goes as `off` (`RecordingAttendance.sentRole`, which the stored mark, live lines and asks follow too), so `attending_session` is never left out by default. Kept on the recording as `RecordingEntry.attendance` (`RecordingAttendance`), on this phone only.
@@ -204,7 +204,7 @@ hub that lists `meeting_conversation` beside `meeting_attendance`. The page's de
   (hidden after `409 not_meeting`). A refused change says "Couldn't change Private Meeting. Try again." unless the hub
   names a reason (`MeetingConversation.privateMessage`).
 - **After the meeting**: the after page shows the status card (when, the minutes' state, **Open Minutes** / **Open
-  Recording** in the sheet, kept above the thread), the room's thread with the asks answered from material where they
+  Recording** in the sheet and where the minutes push opened it, kept above the thread), the room's thread with the asks answered from material where they
   were asked (or the hub's `asks` when the room never came up), **After the Meeting**, then the follow-up. Its composer
   waits while the hub would answer `409 meeting_running` (`MeetingConversation.running`): the recording runs, an upload
   on its way may carry the `ended_at` the hub doesn't have yet (within 12 hours of the last upload it stored, after which
@@ -218,8 +218,9 @@ hub that lists `meeting_conversation` beside `meeting_attendance`. The page's de
   receipt, a 5xx or a `404` keep it. A sent message leaves the pending list once the follow-up's items hold its
   `client_msg_id` (`followup-<id>` or the id). Just me and `…/followup` take at most 8000 characters: over that Send
   stays off with a caption saying so, and nothing is cut (the follow-up's own messages have no such limit).
-- **The recording's page**: for a meeting on such a hub a **Private Meeting** row, and for a room meeting (or one the hub
-  has a follow-up for) **Meeting Conversation**, which pushes the after page.
+- **The recording's page**: for a meeting on such a hub a **Private Meeting** row, and for any finished recording with
+  something to talk about **Talk about this meeting**, which pushes the after page ("Talk about this meeting (phase 6)"
+  below).
 - **Screenshots and tests**: `-showMeetingSample room-listening|room-taking-part` (the made-up meeting as a room meeting,
   listening in or taking part). The mock hub serves the phase (`POST /mock/meeting_conversation {"on", "room",
   "end_seconds"}`, `GET` reads back each meeting's room, mark and follow-up; the fresh start `POST /mock/recording_minutes`
@@ -230,6 +231,47 @@ hub that lists `meeting_conversation` beside `meeting_attendance`. The page's de
   private mark and when the hub's word replaces the start's, Just me and the follow-up with their retries and the 8000
   limit, when the follow-up waits, asks while the room is missing, `room_unavailable`, the words) and `MeetingThreadTests`
   (the web's cases, the mock's items, where a Just me answer ends, asks answered from material in place).
+
+#### Talk about this meeting (phase 6)
+
+The contract's "Phase 6: talk about this meeting" ([meeting-minutes.md](../assistant/meeting-minutes.md)): the follow-up
+from any recording, by text and voice, through phase 1's `POST …/followup`; no flag of its own, so it shows on a hub that
+lists `meeting_conversation`, and an older hub keeps today's page.
+
+- **Which recordings** (`MeetingTalk.offered`): any recording on this phone that ended (not a rolling or an all-day one),
+  whatever recorded it (a note, a meeting no room attended, a #3746 meeting, the watch's), with words in its transcript,
+  minutes ready, or a conversation the hub holds for it (a follow-up, or a room that came up). Whether the transcript has
+  words is worked out when the recording changes (`MeetingTalk.hasText`, stopping at the first line; performance.md P4),
+  not on every redraw. Past retention (`RecordingSync` status `expired`) the words still on this phone don't count: the
+  hub has cut the transcript (and the room with it) or deleted the recording, so only minutes, a follow-up or a room
+  whose conversation the hub still has do. Its page has one row,
+  **Talk about this meeting** (`recording-talk`), in the section under its header beside Private Meeting; while it
+  records a room meeting's page is the live sheet instead.
+- **The thread without a room**: the row pushes `MeetingPage` in its after mode, which reads `GET …/live` (any recording
+  answers it) and never waits on a room: a recording with no room, or whose room is `none`, `ended` or `deleted`, writes
+  its follow-up as soon as the hub has its end (`MeetingConversation.running`). The thread is the hub's `asks`, if any, then
+  the follow-up; with nothing before it there is no **After the Meeting** divider, and until the follow-up starts a line
+  says what to ask ("Ask Persona about this meeting: what was decided, who does what, or a follow-up email."), once the
+  hub has answered for the meeting (`loaded` or `missing`): before that read the follow-up and the room aren't known even
+  where they exist, and the line would flash. The first
+  message makes the follow-up (`…/followup`), the next go to its messages, as after a room meeting.
+- **Voice**: once the follow-up exists, the composer has **Voice Chat** before the field (`meeting-voice`), where the hub
+  has a voice extension that speaks protocol 2 (`VoiceSupport`, asked at most once a minute) and nothing records. The call
+  is an ordinary one bound to the follow-up (`target` the follow-up, no meeting mode, `VoiceEntry.start`); its bar takes
+  the composer's place while it runs (`VoiceBar`, as in a chat), with the line a call that ended by itself leaves, and
+  leaving the page ends it. With no follow-up yet there is no voice: the first request is typed, so no turn runs on the
+  meeting's material alone. Dictating that first request is not done yet.
+- **The minutes push** carries the recording's id, `recording_id`, at the top of its payload beside `machine_id` and
+  `session_id` (a field older hubs leave out); a tap opens Recordings with that recording's thread
+  pushed over it (`MeetingRecorder.openMeeting`, `MeetingPageOpener`; a request no Recordings page took within 30 seconds is
+  dropped). Its Back returns to Recordings, so the page keeps **Open Minutes** / **Open Recording** to the recording's page
+  (`opensRecording`, with no Done), as in the sheet. With another recording running, the live sheet doesn't present
+  itself as Recordings appears for the push (`RecordingLivePresenter.holdOnAppear`, once, within those 30 seconds), so it
+  doesn't cover the meeting; the now-recording card is the way back to it. A push without the field, a recording that isn't on this phone (made on another device) and a dismissal open
+  what they opened before: the main chat (`MeetingTalk.threadToOpen`).
+- **Tests**: `MeetingTalkTests` (which recordings offer it, past retention too, `hasText`, a note writing its follow-up at
+  once, the push's field and where a tap goes, the opener, the live sheet held for the page the push opened); `TalkAboutMeetingUITests` (a finished meeting no room attended: the row, the thread without a
+  divider, a question, the mock's follow-up answer; screenshots `talk-<appearance>-detail` and `-thread`).
 
 #### Photos (phase 3)
 

@@ -15,6 +15,11 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("server_test_env", ROOT / "scripts/test/server_test_env.py")
 ISOLATION = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ISOLATION)
+# test-server.sh runs go test through this runner on the hub; the launcher test derives its split from it (#5666).
+RUNNER_SPEC = importlib.util.spec_from_file_location("go_test_partitioned", ROOT / "scripts/test/go_test_partitioned.py")
+RUNNER = importlib.util.module_from_spec(RUNNER_SPEC)
+RUNNER_SPEC.loader.exec_module(RUNNER)
+PARTITIONS = RUNNER.go_partitions
 
 
 class ServerTestEnvironmentTests(unittest.TestCase):
@@ -194,6 +199,11 @@ class ServerTestEnvironmentTests(unittest.TestCase):
             remote_schema = remote / ".cache/persona-test-checkout/schema/extension"
             shutil.copy2(ROOT / "scripts/test/test-server.sh", checkout / "scripts/test/test-server.sh")
             shutil.copy2(ROOT / "scripts/test/server_test_env.py", checkout / "scripts/test/server_test_env.py")
+            # test-server.sh stages the internal/node partition runner beside server_test_env.py (#5594).
+            runner_files = ("go_partitions.py", "go_test_partitioned.py")
+            for name in runner_files:
+                shutil.copy2(ROOT / "scripts/test" / name, checkout / "scripts/test" / name)
+            remote_checkout = remote / ".cache/persona-test-checkout"
             (checkout / "scripts/persona_config.py").write_text("print('export PERSONA_HUB_SSH=fake-hub')\n")
             identity_calls = root / "identity-calls.jsonl"
             (checkout / "scripts/persona_identity.py").write_text(
@@ -203,7 +213,6 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                 "print('export PERSONA_HOME='+shlex.quote(root))\n"
                 "if '--prepare' in sys.argv: print('test -f \"$PERSONA_HOME/hub.json\"')\n")
             (profile / "hub.json").write_text(json.dumps({"database_url": "postgres://user:synthetic@localhost/persona"}))
-            capture = root / "go-environment.json"
             cache_capture = root / "go-cache-environment.json"
             caches = {key: str(root / key.lower()) for key in ("GOCACHE", "GOMODCACHE", "GOPATH")}
 
@@ -219,8 +228,17 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                  f"command=command.replace('/usr/local/go/bin', {str(tools)!r})\n"
                  "sys.exit(subprocess.run(['bash','-c',command],env=env).returncode)\n")
             tool("rsync", "import json,os,pathlib,shutil,sys\n"
-                 "source=pathlib.Path(sys.argv[-2]); target=sys.argv[-1].split(':',1)[1]\n"
+                 "args=sys.argv[1:]\n"
+                 # operands are what is neither an option nor an --include / --exclude pattern
+                 "operands=[a for i,a in enumerate(args) if not a.startswith('-') and (not i or args[i-1] not in ('--include','--exclude'))]\n"
+                 "*sources,target=operands; target=target.split(':',1)[1]\n"
                  "destination=pathlib.Path(os.environ['HOME'])/target\n"
+                 # several files into a directory: rsync a b host:dir/ keeps each name
+                 "if len(sources)>1:\n"
+                 " assert target.endswith('/') and destination.is_dir(), target\n"
+                 " for item in map(pathlib.Path,sources): assert item.is_file(), item; shutil.copy2(item,destination/item.name)\n"
+                 " sys.exit(0)\n"
+                 "source=pathlib.Path(sources[0])\n"
                  "if source.is_file():\n assert destination.parent.is_dir(); shutil.copy2(source,destination)\n"
                  "else:\n"
                  " assert source.is_dir() and destination.parent.is_dir()\n"
@@ -232,10 +250,24 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                  f" pathlib.Path({str(sdk_capture)!r}).write_text(json.dumps(sys.argv[1:]))\n"
                  "if str(source)=='schema/extension':\n"
                  f" pathlib.Path({str(schema_capture)!r}).write_text(json.dumps(sys.argv[1:]))\n")
+            packages = ["github.com/example/fixture/server/internal/example",
+                        "github.com/example/fixture/server" + PARTITIONS.IMPORT_SUFFIX]
+            node_tests = ["TestNodeA", "TestNodeB", "TestNodeC", "ExampleNode"]
+            node_listing = [*node_tests[:2], "BenchmarkNode", *node_tests[2:], "ok  fixture 0.1s"]
             tool("go", "import json,os,pathlib,sys\n"
                  "if sys.argv[1:2]==['env']:\n"
                  f" pathlib.Path({str(cache_capture)!r}).write_text(json.dumps(dict(os.environ)))\n"
                  f" print(json.dumps({caches!r})); sys.exit(0)\n"
+                 "import tempfile\n"
+                 "def record(**extra):\n"
+                 " handle,path=tempfile.mkstemp(suffix='.json',dir=os.environ['FAKE_GO_RUNS'])\n"
+                 " with os.fdopen(handle,'w') as out: json.dump({'args':sys.argv[1:],'env':dict(os.environ),**extra},out)\n"
+                 "assert pathlib.Path.cwd().name=='server'\n"
+                 # what go_test_partitioned.py lists to split the module and internal/node, whatever -list pattern it uses
+                 f"if sys.argv[1:]==['list',{RUNNER.WHOLE_MODULE!r}]:\n"
+                 f" record(); print('\\n'.join({packages!r})); sys.exit(0)\n"
+                 f"if sys.argv[1:3]==['test','-list'] and sys.argv[-1]=={PARTITIONS.PACKAGE!r}:\n"
+                 f" record(); print('\\n'.join({node_listing!r})); sys.exit(0)\n"
                  "base=pathlib.Path.cwd().parent\n"
                  "sdk=base/'sdk/go'\n"
                  "assert (sdk/'go.mod').read_text()=='module example.invalid/fixture-sdk\\n'\n"
@@ -252,7 +284,7 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                  # Read from the package directory exactly as the hub's inboxBody test helper does.
                  "inbox_source=(base/'server/internal/hub/../../../scripts/mock/inbox_events.json').read_text()\n"
                  "assert (base/'scripts/deploy/db.sh').read_text()=='# synthetic db script\\n'\n"
-                 f"pathlib.Path({str(capture)!r}).write_text(json.dumps({{'args':sys.argv[1:],'env':dict(os.environ),'sdk_source':(sdk/'ext/fixture.go').read_text(),'inbox_source':inbox_source}}))\n"
+                 "record(sdk_source=(sdk/'ext/fixture.go').read_text(),inbox_source=inbox_source)\n"
                  "sys.exit(int(os.environ.get('FAKE_GO_EXIT','0')))\n")
             environment = {
                 "PATH": str(tools) + os.pathsep + os.environ["PATH"], "HOME": str(remote),
@@ -265,11 +297,24 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                 "PGSERVICE": "live", "PGSERVICEFILE": str(profile / "service"),
                 "PGPASSFILE": str(profile / "passwords"), "PGOPTIONS": "synthetic", "PG_FUTURE_SETTING": "synthetic",
             }
-            for index, (args, expected, extra) in enumerate((
-                ([], ["test", "-count=1", "-p", "1", "./..."], {}),
-                (["-run", "TestFixture", "./internal/example"], ["test", "-count=1", "-p", "1", "-run", "TestFixture", "./internal/example"], {}),
-                ([], ["test", "-count=1", "-p", "1", "./..."], {"FAKE_GO_EXIT": "19"}),
+            # The whole module runs through the staged go_test_partitioned.py: the other packages in one go test and
+            # internal/node in go_partitions.py's two -run partitions. A -run passes through unchanged.
+            flags = ["test", "-count=1", "-p", "1"]
+            # A listing call's -list pattern is the runner's choice; compare it by its shape.
+            is_listing = lambda call: call[:1] == ["list"] or call[:2] == ["test", "-list"]
+            shape = lambda call: ["test", "-list", PARTITIONS.PACKAGE] if call[:2] == ["test", "-list"] else call
+            listing = [["list", RUNNER.WHOLE_MODULE], ["test", "-list", PARTITIONS.PACKAGE]]
+            whole = [[*flags, packages[0]]] + [[*flags, "-run", pattern, PARTITIONS.PACKAGE]
+                                               for pattern in PARTITIONS.patterns(node_tests)]
+            for index, (args, expected, expected_listing, extra) in enumerate((
+                ([], whole, listing, {}),
+                (["-run", "TestFixture", "./internal/example"],
+                 [[*flags, "-run", "TestFixture", "./internal/example"]], [], {}),
+                ([], whole, listing, {"FAKE_GO_EXIT": "19"}),
             )):
+                runs = root / f"go-runs-{index}"
+                runs.mkdir()
+                extra = {**extra, "FAKE_GO_RUNS": str(runs)}
                 source = f"package fixture // snapshot {index}\n"
                 (sdk / "ext/fixture.go").write_text(source)
                 inbox_source = json.dumps({"items": [{"id": f"fixture-{index}"}]}) + "\n"
@@ -281,11 +326,19 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                 with self.subTest(args=args, extra=extra):
                     result = subprocess.run(["bash", str(checkout / "scripts/test/test-server.sh"), *args],
                                             env={**environment, **extra}, capture_output=True, text=True, timeout=30)
-                    self.assertEqual(result.returncode, int(extra.get("FAKE_GO_EXIT", "0")), result.stderr)
-                    recorded = json.loads(capture.read_text())
-                    child = recorded["env"]
-                    self.assertEqual(recorded["sdk_source"], source)
-                    self.assertEqual(recorded["inbox_source"], inbox_source)
+                    self.assertEqual(result.returncode, int(extra.get("FAKE_GO_EXIT", "0")),
+                                     result.stdout + result.stderr)
+                    for name in runner_files:
+                        self.assertEqual((remote_checkout / name).read_bytes(),
+                                         (ROOT / "scripts/test" / name).read_bytes())
+                    records = [json.loads(path.read_text()) for path in runs.iterdir()]
+                    tests = [record for record in records if not is_listing(record["args"])]
+                    self.assertCountEqual([record["args"] for record in tests], expected)
+                    self.assertCountEqual([shape(record["args"]) for record in records if is_listing(record["args"])],
+                                          expected_listing)
+                    for record in tests:
+                        self.assertEqual(record["sdk_source"], source)
+                        self.assertEqual(record["inbox_source"], inbox_source)
                     self.assertEqual(json.loads(sdk_capture.read_text()),
                                      ["-a", "--delete", "sdk/go/", "fake-hub:.cache/persona-test-checkout/sdk/go/"])
                     self.assertFalse((remote_sdk / "stale.go").exists())
@@ -293,18 +346,20 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                                      ["-a", "--delete", "schema/extension/",
                                       "fake-hub:.cache/persona-test-checkout/schema/extension/"])
                     self.assertFalse((remote_schema / "stale.json").exists())
-                    # the pinned Bun lives in the hub user's ~/.local/bin, which a non-interactive shell may lack (#1947)
-                    self.assertIn(str(remote / ".local/bin"), child["PATH"].split(os.pathsep))
-                    self.assertEqual(recorded["args"], expected)
-                    self.assertEqual({key for key in child if key.startswith(("PERSONA_"))},
-                                     {"PERSONA_TEST_DATABASE_URL"})
-                    self.assertEqual(urlsplit(child["PERSONA_TEST_DATABASE_URL"]).path, "/persona_test")
-                    self.assertEqual(urlsplit(child["PERSONA_TEST_DATABASE_URL"]).netloc, "user:synthetic@localhost")
-                    self.assertFalse(any(key.startswith("PG") for key in child))
-                    self.assertEqual(child['JARVIS_TEST_DATABASE_URL'], child['PERSONA_TEST_DATABASE_URL'])
-                    self.assertNotEqual(child["HOME"], str(remote))
-                    self.assertFalse(Path(child["HOME"]).exists())
-                    self.assertFalse(any(str(profile) in value for value in child.values()))
+                    for record in records:
+                        child = record["env"]
+                        # the pinned Bun lives in the hub user's ~/.local/bin, which a non-interactive shell may lack (#1947)
+                        self.assertIn(str(remote / ".local/bin"), child["PATH"].split(os.pathsep))
+                        self.assertEqual({key for key in child if key.startswith(("PERSONA_"))},
+                                         {"PERSONA_TEST_DATABASE_URL"})
+                        self.assertEqual(urlsplit(child["PERSONA_TEST_DATABASE_URL"]).path, "/persona_test")
+                        self.assertEqual(urlsplit(child["PERSONA_TEST_DATABASE_URL"]).netloc,
+                                         "user:synthetic@localhost")
+                        self.assertFalse(any(key.startswith("PG") for key in child))
+                        self.assertEqual(child['JARVIS_TEST_DATABASE_URL'], child['PERSONA_TEST_DATABASE_URL'])
+                        self.assertNotEqual(child["HOME"], str(remote))
+                        self.assertFalse(Path(child["HOME"]).exists())
+                        self.assertFalse(any(str(profile) in value for value in child.values()))
                     cache_env = json.loads(cache_capture.read_text())
                     self.assertFalse(any(key.startswith(("PERSONA_", "PG")) for key in cache_env))
                     self.assertNotIn("synthetic-live-token", result.stdout + result.stderr)
@@ -315,14 +370,17 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                     calls = [json.loads(line) for line in identity_calls.read_text().splitlines()]
                     self.assertTrue(calls)
                     self.assertFalse([call for call in calls if "--prepare" in call], calls)
-            capture.unlink(missing_ok=True)
             cache_capture.unlink(missing_ok=True)
+            # The runs below must stop before Go: any go call would leave a record here.
+            blocked = root / "go-runs-blocked"
+            blocked.mkdir()
+            environment["FAKE_GO_RUNS"] = str(blocked)
             # A missing local fixture must stop staging, even if the remote has an older copy.
             (checkout / "scripts/mock/inbox_events.json").unlink()
             result = subprocess.run(["bash", str(checkout / "scripts/test/test-server.sh")], env=environment,
                                     capture_output=True, text=True, timeout=30)
             self.assertNotEqual(result.returncode, 0)
-            self.assertFalse(capture.exists())
+            self.assertFalse(any(blocked.iterdir()))
             self.assertFalse(cache_capture.exists())
             (checkout / "scripts/mock/inbox_events.json").write_text(inbox_source)
             for source in (
@@ -340,7 +398,7 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                     result = subprocess.run(["bash", str(checkout / "scripts/test/test-server.sh")], env=environment,
                                             capture_output=True, text=True, timeout=30)
                     self.assertNotEqual(result.returncode, 0)
-                    self.assertFalse(capture.exists())
+                    self.assertFalse(any(blocked.iterdir()))
                     self.assertFalse(cache_capture.exists())
                     self.assertNotIn("postgres://", result.stdout + result.stderr)
                     self.assertNotIn("synthetic-live-password", result.stdout + result.stderr)
@@ -348,7 +406,7 @@ class ServerTestEnvironmentTests(unittest.TestCase):
             result = subprocess.run(["bash", str(checkout / "scripts/test/test-server.sh")], env=environment,
                                     capture_output=True, text=True, timeout=30)
             self.assertNotEqual(result.returncode, 0)
-            self.assertFalse(capture.exists())
+            self.assertFalse(any(blocked.iterdir()))
 
 
 if __name__ == "__main__":

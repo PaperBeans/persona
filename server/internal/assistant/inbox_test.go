@@ -109,6 +109,22 @@ func TestInboxMailThreads(t *testing.T) {
 	}
 }
 
+func TestInboxMailReadKeepsConclusionUntilGotIt(t *testing.T) {
+	now := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+	a := assistantwire.InboxMailAccount{ID: "a1", Email: "me@example.com"}
+	msgs := []assistantwire.InboxMailSummary{{UID: 88, Subject: "周报", Date: now.Add(-time.Hour).Format(time.RFC3339)}}
+	b := newInbox()
+	it := b.applyMail(a, msgs, now)[0]
+	it.Tier = TierFYI
+	it.Suggestion = &InboxSuggestion{Version: 1, Kind: SuggestConclusion, Text: "只读结论", At: now}
+
+	msgs[0].Seen = true // opening the embedded body marks it seen; the next collection must not file the conclusion
+	changed := b.applyMail(a, msgs, now)
+	if len(changed) != 1 || !it.open() || !it.Read || it.DoneBy != "" || currentSuggestion(it) == nil {
+		t.Fatalf("the conclusion was filed before Got it: %+v", it)
+	}
+}
+
 // A round's mail: new mail becomes items, and the new ones' full text is read (once) into their preview and context.
 func TestInboxMailRoundReadsTheText(t *testing.T) {
 	h := newInboxHub(t)

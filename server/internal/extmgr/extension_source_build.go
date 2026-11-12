@@ -50,7 +50,7 @@ func newSourceExtension(id, name, dir string, stdout io.Writer) error {
 	if err := writeNew(filepath.Join(dir, "src", "main.ts"), []byte(program)); err != nil {
 		return err
 	}
-	fmt.Fprintln(stdout, i18n.T(i18n.Default, "extension-source.created"))
+	fmt.Fprintln(stdout, i18n.T(i18n.Terminal(), "extension-source.created"))
 	return nil
 }
 

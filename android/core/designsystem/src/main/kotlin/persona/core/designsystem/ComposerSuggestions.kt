@@ -51,14 +51,14 @@ fun ComposerSuggestions(items: List<ComposerSuggestion>, onPick: (ComposerSugges
     if (items.isEmpty()) return
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
-    val shape = RoundedCornerShape(when (style) { AppStyle.Glass -> 20.dp; AppStyle.Brief -> 16.dp; AppStyle.Board -> 8.dp })
+    val shape = RoundedCornerShape(when (style) { AppStyle.Glass -> 20.dp.corner; AppStyle.Brief -> 16.dp.corner; AppStyle.Board -> 8.dp.corner })
     val frame = when (style) {
         AppStyle.Glass -> Modifier.clip(shape).background(palette.surface)
             .border(1.dp, Brush.verticalGradient(listOf(palette.strokeTop, palette.strokeBottom)), shape)
         AppStyle.Brief -> Modifier.clip(shape).background(palette.surface)
         AppStyle.Board -> Modifier.clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
     }
-    Column(modifier.fillMaxWidth().then(frame).heightIn(max = 272.dp).verticalScroll(rememberScrollState()).padding(vertical = 4.dp)) {
+    Column(modifier.fillMaxWidth().then(frame).heightIn(max = 272.dp).verticalScroll(rememberScrollState()).padding(vertical = 4.dp.dense)) {
         items.forEachIndexed { index, item ->
             val spoken = stringResource(R.string.designsystem_with_state, item.word, item.detail)
             if (index > 0) JDivider(Modifier.padding(horizontal = RowInset))
@@ -67,10 +67,10 @@ fun ComposerSuggestions(items: List<ComposerSuggestion>, onPick: (ComposerSugges
                 .padding(start = RowInset, end = RowInset, top = Tokens.Space.s, bottom = Tokens.Space.xxs),
                 style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable(role = Role.Button) { onPick(item) }
+                Modifier.fillMaxWidth().heightIn(min = 40.dp.row).clickable(role = Role.Button) { onPick(item) }
                     .semantics(mergeDescendants = true) { contentDescription = spoken }
-                    .padding(horizontal = RowInset, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+                    .padding(horizontal = RowInset, vertical = 6.dp.dense),
+                horizontalArrangement = Arrangement.spacedBy(12.dp.dense), verticalAlignment = Alignment.CenterVertically,
             ) {
                 item.status?.let { JStatusDot(it) }
                 Text(item.word, style = PersonaTheme.type.bodyStrong, color = if (item.destructive) palette.danger.text else palette.ink,

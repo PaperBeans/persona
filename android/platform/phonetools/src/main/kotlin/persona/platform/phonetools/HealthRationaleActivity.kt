@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import persona.core.designsystem.*
+import persona.core.designsystem.dense
 
 /**
  * Health Connect's "why does this app want health data" page. Its permission dialog does not open at all for an app
@@ -46,12 +47,12 @@ class HealthRationaleActivity : ComponentActivity() {
 
 @Composable
 private fun Paragraphs(header: String, lines: List<String>) {
-    JGroupItem(GroupPosition.Single, Modifier.padding(bottom = 12.dp)) {
+    JGroupItem(GroupPosition.Single, Modifier.padding(bottom = 12.dp.dense)) {
         Text(header, style = PersonaTheme.type.headline, color = PersonaTheme.palette.ink,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+            modifier = Modifier.padding(horizontal = 16.dp.dense, vertical = 12.dp.dense))
         lines.forEach { t ->
             Text(t, style = PersonaTheme.type.body, color = PersonaTheme.palette.ink2,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                modifier = Modifier.padding(horizontal = 16.dp.dense, vertical = 8.dp.dense))
         }
     }
 }

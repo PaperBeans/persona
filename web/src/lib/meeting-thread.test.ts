@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RecordingAsk } from "./kb";
 import { meetingMeta } from "./kb";
-import { followupThread, fromMeeting, meetingClock, meetingLines, meetingRunning, newerParts, photoOf, roomState, roomThread } from "./meeting-thread";
+import { followupThread, fromMeeting, hasMaterial, meetingClock, meetingLines, meetingRunning, newerParts, offersTalk, photoOf, roomState, roomThread } from "./meeting-thread";
 import type { Item } from "./types";
 
 const rid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -181,6 +181,30 @@ describe("meeting fields", () => {
     for (const state of ["starting", "ready", "unavailable", "something_new"]) expect(meetingRunning(ended, { state }, now), state).toBe(true);
     for (const state of ["none", "ended", "deleted"]) expect(meetingRunning(ended, { state }, now), state).toBe(false);
     expect(meetingRunning({ trimmed_at: "2026-11-10T07:00:00Z" }, { state: "ready" }, now)).toBe(false);
+  });
+
+  it("offers a talk about any recording with text or minutes, as the hub's no_material counts them", () => {
+    const rec = (over: Record<string, unknown> = {}) => ({ kind: "recordings", meta: {}, ...over });
+    const minutes = { version: 1, revision: 1, generated_at: "2026-11-10T08:00:00Z", title: "Design review", when: "", markdown: "# Design review" };
+    expect(hasMaterial(rec({ meta: { kind: "note", chars: 120 } }))).toBe(true);
+    expect(hasMaterial(rec({ segments: [{ start: 0, end: 4, text: "Call the vendor." }] }))).toBe(true);
+    expect(hasMaterial(rec({ meta: { chars: 0 }, segments: [{ start: 0, end: 4, text: "  " }] }))).toBe(false);
+    expect(hasMaterial(rec({ minutes }))).toBe(true);
+    // A trimmed recording keeps only its minutes.
+    expect(hasMaterial(rec({ meta: { chars: 120, trimmed_at: "2026-11-10T07:00:00Z" } }))).toBe(false);
+    expect(hasMaterial(rec({ meta: { chars: 120, trimmed_at: "2026-11-10T07:00:00Z" }, minutes }))).toBe(true);
+    expect(hasMaterial({ kind: "events", meta: { chars: 120 } })).toBe(false);
+    expect(hasMaterial(null)).toBe(false);
+  });
+
+  it("offers a talk about meetings and notes, not about an all-day recording, whose page is its day recap", () => {
+    const rec = (meta: Record<string, unknown>) => ({ kind: "recordings", meta: { chars: 120, ...meta } });
+    expect(offersTalk(rec({ kind: "meeting" }))).toBe(true);
+    expect(offersTalk(rec({ kind: "note" }))).toBe(true);
+    expect(offersTalk(rec({}))).toBe(true);
+    expect(offersTalk(rec({ kind: "day", day: "2026-11-10", part: 1 }))).toBe(false);
+    expect(offersTalk(rec({ kind: "note", chars: 0 }))).toBe(false);
+    expect(offersTalk(null)).toBe(false);
   });
 
   it("reads only the parts of an event that are newer", () => {

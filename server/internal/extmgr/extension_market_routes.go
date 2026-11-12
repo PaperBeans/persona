@@ -44,6 +44,7 @@ func (h *Manager) marketRoutesAt(api *http.ServeMux, base string, allow func(w h
 		writeErrCode(w, http.StatusBadRequest, code, err)
 	}
 	api.HandleFunc("GET "+base+"/markets", gate(func(w http.ResponseWriter, r *http.Request) {
+		h.awaitFirstReads(r.Context())
 		writeJSON(w, map[string]any{"markets": marketsOut(r, h.marketViews())})
 	}))
 	api.HandleFunc("POST "+base+"/markets", gate(func(w http.ResponseWriter, r *http.Request) {
@@ -184,6 +185,7 @@ func (h *Manager) marketRoutesAt(api *http.ServeMux, base string, allow func(w h
 			wg.Wait()
 		} else {
 			h.refreshStale()
+			h.awaitFirstReads(r.Context())
 		}
 		writeJSON(w, map[string]any{"markets": marketsOut(r, h.marketViews()), extKey(r, "extensions", "plugins"): h.catalogIn(h.requestLang(r), r.URL.Query().Get("q"), r.URL.Query().Get("market")),
 			"platform": extension.Platform()})
@@ -205,6 +207,10 @@ func (h *Manager) marketRoutesAt(api *http.ServeMux, base string, allow func(w h
 		rec, e, err := h.marketEntry(in.Market, in.Extension)
 		if err != nil {
 			fail(w, err, "not_in_market")
+			return
+		}
+		if err := h.cantRunHere(e.Parsed); err != nil { // before downloading it (#5639)
+			fail(w, err, "cant_run_here")
 			return
 		}
 		mk, err := h.market(rec)

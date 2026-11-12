@@ -5,24 +5,27 @@ import Foundation
 // moved — never from what an agent says about itself. The rules are the SOP's decision table, in its order; the first that
 // holds wins. Mirrors web/src/lib/todo-triage.ts (and Android's TodoTriage.kt): a change to the rules changes all three.
 
+/// The cases are in the page's order (#5707): what the owner has to act on, the unfinished work, what just finished, then
+/// the folded ones, Done last. A merged row is led by its member in the first of these.
 nonisolated enum TodoSection: String, CaseIterable, Sendable {
     /// Something only the owner can move: an answer, an approval, a decision, a retry.
     case waiting
     /// An agent is running on it now.
     case working
-    /// Closed, accepted or deployed in the last 24 hours, or a turn nobody has seen / a review not done yet.
-    case justDone = "just_done"
     /// Its work stopped at a pull request that is still open and nothing runs.
     case pr
     /// Open, recently active, none of the above.
     case other
+    /// Closed, accepted or deployed in the last 24 hours, or a turn nobody has seen / a review not done yet; not seen
+    /// by the owner since.
+    case justDone = "just_done"
     /// A task with no activity for 48 hours and nothing running.
     case shelved
-    /// Closed, accepted or deployed more than 24 hours ago.
+    /// Closed, accepted or deployed more than 24 hours ago or seen since; a finished turn seen since it last moved.
     case done
 
-    /// Other open, Shelved and Done start folded.
-    var startsFolded: Bool { self == .other || self == .shelved || self == .done }
+    /// Shelved and Done start folded; the rest start open, unfinished to-dos included.
+    var startsFolded: Bool { self == .shelved || self == .done }
 
     /// The section's header (the web's `todos.section_*`).
     var title: String {
@@ -46,7 +49,7 @@ nonisolated enum TodoBucket: String, Sendable {
 /// Which SOP rule placed a to-do; the section follows from it.
 nonisolated enum TodoTriageRule: String, Sendable {
     case failedStart = "failed_start", superseded, agentAsks = "agent_asks", ownerDecides = "owner_decides", agentRunning = "agent_running"
-    case closed, accepted, deployed, finishedUnseen = "finished_unseen", prOpen = "pr_open", stale, rest
+    case closed, accepted, deployed, finishedUnseen = "finished_unseen", prOpen = "pr_open", seen, stale, rest
 }
 
 nonisolated struct TodoTriage: Equatable, Sendable {
@@ -89,7 +92,8 @@ nonisolated struct TodoTriageResult: Sendable {
 nonisolated enum TodoTriageLogic {
     /// No activity for this long, nothing of it running: shelved.
     static let shelveAfter: TimeInterval = 48 * 3600
-    /// Finished this recently: Just finished; earlier, Done.
+    /// Finished this recently, and not seen since: Just finished; earlier, Done. Seeing it (Got It, or opening it,
+    /// #5707) files it at once; the time is the fallback.
     static let justDone: TimeInterval = 24 * 3600
 
     /// How a to-do's linked agents stand, the way the web's `todoStatus` reads them: an open ask does not count here
@@ -168,20 +172,26 @@ nonisolated enum TodoTriageLogic {
     ///  7. deployed       its delivery is live                              → Just finished (24 h), then Done
     ///  8. finishedUnseen an agent finished unseen, awaits review, or a done ask → Just finished
     ///  9. prOpen         its PR is open, nothing running                   → PR to merge (however old)
+    ///  9a. seen          rule 8, seen since it last moved, no PR open      → Done
     /// 10. stale          a task with no activity for 48 h                  → Shelved
     /// 11. rest           anything else                                     → Other open
+    ///
+    /// Seen (#5707): the owner looked at it (`seenAt`: Got It, or opening it) at or after the moment that put it in Just
+    /// finished — its close, its accepting review, its deploy, its last move for rule 8 — so it goes to Done at once.
     static func triage(_ todo: TodoItem, lookup: TodosLogic.SessionLookup?, now: Date, restoredAt: Date? = nil,
                        superseded: Bool = false, calendar: Calendar = .current) -> TodoTriage {
         let last = lastActivity(todo, lookup: lookup, restoredAt: restoredAt)
         let status = agentsStatus(todo, lookup: lookup)
-        let recent = { (at: Date) in now.timeIntervalSince(at) < justDone }
+        // seen: the owner looked at it at or after `at`; fresh: it got to Just finished at `at`, under a day ago, unseen since
+        let seen = { (at: Date) in todo.seenAt.map { $0 >= at } ?? false }
+        let fresh = { (at: Date) in now.timeIntervalSince(at) < justDone && !seen(at) }
         let ask = openAsk(todo)
         let review = todo.reviewState
         func at(_ s: TodoSection, _ r: TodoTriageRule) -> TodoTriage { TodoTriage(section: s, rule: r, last: last) }
 
         if status == .failed {
             // the same piece of work finished in a related to-do (`supersededFailedStarts`): history, nothing to retry
-            if superseded { return at(recent(todo.doneAt ?? last) ? .justDone : .done, .superseded) }
+            if superseded { return at(fresh(todo.doneAt ?? last) ? .justDone : .done, .superseded) }
             return at(now.timeIntervalSince(last) < shelveAfter ? .waiting : .done, .failedStart)
         }
         if status == .needsYou || status == .interrupted { return at(.waiting, .agentAsks) }
@@ -189,21 +199,24 @@ nonisolated enum TodoTriageLogic {
             return at(.waiting, .ownerDecides)
         }
         if status == .working { return at(.working, .agentRunning) }
-        if let done = todo.doneAt { return at(recent(done) ? .justDone : .done, .closed) }
+        if let done = todo.doneAt { return at(fresh(done) ? .justDone : .done, .closed) }
         if todo.acceptanceStands {
-            return at(recent(todo.supervision?.latestReview?.at ?? .distantPast) ? .justDone : .done, .accepted)
+            return at(fresh(todo.supervision?.latestReview?.at ?? .distantPast) ? .justDone : .done, .accepted)
         }
-        if todo.delivery?.state == "live" { return at(recent(todo.delivery?.at ?? last) ? .justDone : .done, .deployed) }
-        if status == .unread || review == .pendingReview || (ask != nil && (ask?.outcome ?? "").isEmpty) || ask?.outcome == "done" {
-            return at(.justDone, .finishedUnseen)
-        }
+        if todo.delivery?.state == "live" { return at(fresh(todo.delivery?.at ?? last) ? .justDone : .done, .deployed) }
+        let finished = status == .unread || review == .pendingReview || (ask != nil && (ask?.outcome ?? "").isEmpty)
+            || ask?.outcome == "done"
+        if finished, !seen(last) { return at(.justDone, .finishedUnseen) }
         if openPR(todo) { return at(.pr, .prOpen) }
+        // seen since it last moved, and no PR waits on the owner
+        if finished { return at(.done, .seen) }
         if shelvable(todo, now: now, calendar: calendar), now.timeIntervalSince(last) >= shelveAfter { return at(.shelved, .stale) }
         return at(.other, .rest)
     }
 
     /// Whether a to-do counts toward the header's open count: not closed, not accepted or deployed, not shelved. A
     /// finished turn nobody looked at yet (Just finished, still open) counts: only a review or the user closes a to-do.
+    /// One the owner has seen since (rule 9a, in Done) does not.
     static func countsAsOpen(_ todo: TodoItem, _ t: TodoTriage) -> Bool {
         // a failed start has done_at too (the hub ends it), yet while it waits on the owner it is theirs to retry: open
         if t.rule == .failedStart { return t.section == .waiting }
@@ -364,6 +377,12 @@ nonisolated enum TodoTriageLogic {
         return TodoTriageResult(sections: sections, todoCounts: counts, open: open, shelved: shelved,
                                 finished: list.count - open - shelved)
     }
+}
+
+/// Seen marks (#5707, docs/assistant/todo-status-sop.md "Seen"): the hub keeps when the owner last looked at a Just
+/// finished to-do (`TodoItem.seenAt`); the pages offer Got It, and count opening one as seeing it, only when it lists this.
+nonisolated enum TodoSeen {
+    static let feature = "todo_seen"
 }
 
 /// Restores from Shelved (#3206): a restore counts as activity now, kept on this device only (as the web keeps it per

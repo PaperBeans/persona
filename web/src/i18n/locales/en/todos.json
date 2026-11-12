@@ -240,6 +240,8 @@
   "pr_idle": "last moved {age}",
   "restore": "Restore",
   "restored": "Back in the list",
+  "seen": "Got it",
+  "seen_moved": "Moved to Done",
   "filter_label": "Filter and sort",
   "filter_show": "Show",
   "sort_by": "Sort by",

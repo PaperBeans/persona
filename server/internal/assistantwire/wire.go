@@ -241,6 +241,9 @@ type Notification struct {
 	// may stand in for the phone's push ("Phone Muted", docs/operations/link.md "Presence"). Older managers leave it
 	// out: the phone is pushed.
 	LinkCovered bool `json:"link_covered,omitempty"`
+	// RecordingID is the recording a NotifyPush push is about (a meeting's minutes, #3862 phase 6): the push carries it
+	// as `recording_id`, and apps that know it open the meeting's thread instead of the session. Older hubs drop it.
+	RecordingID string `json:"recording_id,omitempty"`
 }
 
 // NotifyTodo is the to-do a NotifyDecide push asks about: its id, when the decision now waiting was asked (what

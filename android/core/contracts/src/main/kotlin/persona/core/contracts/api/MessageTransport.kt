@@ -21,6 +21,8 @@ data class MessageRequest(
     /** Persona conversation overrides carried by this message; absent fields keep the hub's default. */
     val launcher: String? = null,
     val model: String? = null,
+    /** The user's message that carries out the session's waiting launcher switch first (`apply_switch`, #5035). */
+    val applySwitch: Boolean = false,
 ) {
     val headers: Map<String, String> get() = ProtocolCompatibility.operationHeaders(opId)
 }

@@ -4,7 +4,7 @@
 // question shows as "What was just said (m:ss)", a photo forwarded into the room (phase 3: its image and its text, both
 // `photo-<id>`) is one entry, and the follow-up's first message holds the meeting's material in a context block before
 // the owner's words. Pure: no DOM, no requests.
-import type { MeetingRoom, RecordingAsk } from "./kb";
+import type { KBDetail, MeetingRoom, RecordingAsk } from "./kb";
 import { parseUserText } from "./turns";
 import type { Item } from "./types";
 
@@ -203,6 +203,25 @@ export function meetingRunning(meta: Record<string, unknown> | null | undefined,
   }
   const state = roomState(room);
   return state === "starting" || state === "ready" || state === "unavailable";
+}
+
+/** Whether a recording has something to talk about (phase 6, "Phase 6: talk about this meeting"): text or minutes, as
+ *  the hub's `409 no_material` counts them (its `chars`, else a line of its transcript, or its minutes). A trimmed
+ *  recording has only its minutes. */
+export function hasMaterial(detail: Pick<KBDetail, "kind" | "meta" | "segments" | "minutes"> | null | undefined): boolean {
+  if (detail?.kind !== "recordings") return false;
+  if (detail.minutes) return true;
+  const meta = detail.meta;
+  if (typeof meta?.trimmed_at === "string" && meta.trimmed_at) return false;
+  if (typeof meta?.chars === "number" && meta.chars > 0) return true;
+  return (detail.segments ?? []).some((s) => typeof s?.text === "string" && s.text.trim() !== "");
+}
+
+/** Whether a recording's detail offers **Talk about this meeting** (phase 6): a recording with something to talk about
+ *  (`hasMaterial`) that is not an all-day one (kind `day`), whose page is its day recap, as the iPhone leaves it out. The
+ *  hub refuses no kind, so a follow-up made for one still shows its thread. */
+export function offersTalk(detail: Pick<KBDetail, "kind" | "meta" | "segments" | "minutes"> | null | undefined): boolean {
+  return hasMaterial(detail) && detail?.meta?.kind !== "day";
 }
 
 /** The parts of a `meeting_live` event newer than the revisions read so far (a part without a number is read). */

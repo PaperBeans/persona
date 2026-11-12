@@ -13,7 +13,7 @@ import androidx.compose.ui.unit.dp
 fun ConnectionTitle(title: String, busy: Boolean, modifier: Modifier = Modifier,
     leading: (@Composable () -> Unit)? = null,
 ) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp.dense)) {
         if (busy) JSpinner(Modifier.size(16.dp), stroke = 2.dp)
         else leading?.invoke()
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)

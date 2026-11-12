@@ -6,17 +6,20 @@ import { acceptanceStands, latestReview, reviewState } from "./supervision";
 import { openAsk, todoDueBy, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { todoStageIndex } from "./todo-stage";
 
-/** Where a to-do shows, in the page's order. The first four are open sections; the last three start folded. */
+/** Where a to-do shows. */
 export type TriageSection = "waiting" | "working" | "just_done" | "pr" | "other" | "shelved" | "done";
 
-export const TRIAGE_SECTIONS: readonly TriageSection[] = ["waiting", "working", "just_done", "pr", "other", "shelved", "done"];
+/** The page's order (#5707): what the owner has to act on, the unfinished work, what just finished, then the folded
+ *  ones, Done last. A merged row is led by its member in the first of these. */
+export const TRIAGE_SECTIONS: readonly TriageSection[] = ["waiting", "working", "pr", "other", "just_done", "shelved", "done"];
 
-/** Sections that start folded. */
-export const FOLDED_SECTIONS: ReadonlySet<TriageSection> = new Set(["other", "shelved", "done"]);
+/** Sections that start folded: the rest start open, unfinished to-dos included. */
+export const FOLDED_SECTIONS: ReadonlySet<TriageSection> = new Set(["shelved", "done"]);
 
 /** No activity for this long, nothing of it running: shelved (SOP rule 11). */
 export const SHELVE_AFTER_MS = 48 * 3600_000;
-/** Finished this recently: "Just finished"; earlier, "Done". */
+/** Finished this recently, and not seen since: "Just finished"; earlier, "Done". Seeing it (Got it, or opening it,
+ *  #5707) files it at once; the time is the fallback. */
 export const JUST_DONE_MS = 24 * 3600_000;
 
 /** Which SOP rule placed a to-do (for tests and the SOP's wording); the section follows from it. */
@@ -30,6 +33,7 @@ export type TriageRule =
   | "accepted"
   | "deployed"
   | "finished_unseen"
+  | "seen"
   | "pr_open"
   | "stale"
   | "rest";
@@ -100,35 +104,46 @@ function shelvable(todo: Todo, now: number): boolean {
  *  7. deployed        its delivery is live                              → Just finished (24 h), then Done
  *  8. finished_unseen an agent finished unseen, awaits review, or a done ask → Just finished
  *  9. pr_open         its PR is open, nothing running                   → PR to merge (however old)
+ *  9a. seen           rule 8, seen since it last moved, no PR open      → Done
+ *
+ * Seen (#5707): the owner looked at it (`seen_at`: Got it, or opening it) at or after the moment that put it in Just
+ * finished — its close, its accepting review, its deploy, its last move for rule 8 — so it goes to Done at once.
  * 10. stale           a task with no activity for 48 h                  → Shelved
  * 11. rest            anything else                                     → Other open
  */
 export function triage(todo: Todo, lookup: SessionLookup | undefined, now: number, restoredAt = 0, superseded = false): Triage {
   const last = lastActivity(todo, lookup, restoredAt);
   const status: TodoStatus = todoStatus(todo, lookup);
-  const recent = (at: number) => now - at < JUST_DONE_MS;
+  // seen: the owner looked at it at or after `at`; fresh: it got to Just finished at `at`, under a day ago, unseen since
+  const seenAt = ms(todo.seen_at);
+  const seen = (at: number) => seenAt > 0 && seenAt >= at;
+  const fresh = (at: number) => now - at < JUST_DONE_MS && !seen(at);
   const ask = openAsk(todo);
   const at = (section: TriageSection, rule: TriageRule): Triage => ({ section, rule, last });
 
   if (status === "failed") {
     // the same piece of work finished in a related to-do (`supersededFailedStarts`): history, nothing left to retry
-    if (superseded) return at(recent(ms(todo.done_at) || last) ? "just_done" : "done", "superseded");
+    if (superseded) return at(fresh(ms(todo.done_at) || last) ? "just_done" : "done", "superseded");
     return at(now - last < SHELVE_AFTER_MS ? "waiting" : "done", "failed_start");
   }
   if (status === "needs_you" || status === "interrupted") return at("waiting", "agent_asks");
   if (!todo.done_at && (reviewState(todo) === "needs_user" || ask?.outcome === "decide" || ask?.outcome === "cannot")) return at("waiting", "owner_decides");
   if (status === "working" || status === "waiting") return at("working", "agent_running");
-  if (todo.done_at) return at(recent(ms(todo.done_at)) ? "just_done" : "done", "closed");
-  if (acceptanceStands(todo)) return at(recent(ms(latestReview(todo.supervision)?.at)) ? "just_done" : "done", "accepted");
-  if (todo.delivery?.state === "live") return at(recent(ms(todo.delivery.at) || last) ? "just_done" : "done", "deployed");
-  if (status === "unread" || reviewState(todo) === "pending_review" || (ask && !ask.outcome) || ask?.outcome === "done") return at("just_done", "finished_unseen");
+  if (todo.done_at) return at(fresh(ms(todo.done_at)) ? "just_done" : "done", "closed");
+  if (acceptanceStands(todo)) return at(fresh(ms(latestReview(todo.supervision)?.at)) ? "just_done" : "done", "accepted");
+  if (todo.delivery?.state === "live") return at(fresh(ms(todo.delivery.at) || last) ? "just_done" : "done", "deployed");
+  const finished = status === "unread" || reviewState(todo) === "pending_review" || (ask && !ask.outcome) || ask?.outcome === "done";
+  if (finished && !seen(last)) return at("just_done", "finished_unseen");
   if (openPR(todo)) return at("pr", "pr_open");
+  // seen since it last moved, and no PR waits on the owner
+  if (finished) return at("done", "seen");
   if (shelvable(todo, now) && now - last >= SHELVE_AFTER_MS) return at("shelved", "stale");
   return at("other", "rest");
 }
 
 /** Whether a to-do counts toward the header's open count: not closed, not accepted or deployed, not shelved. A finished
- *  turn nobody looked at yet (Just finished, still open) counts: only a review or the user closes a to-do. */
+ *  turn nobody looked at yet (Just finished, still open) counts: only a review or the user closes a to-do. One the owner
+ *  has seen since (rule 9a, in Done) does not. */
 export function countsAsOpen(todo: Todo, t: Triage): boolean {
   // a failed start has done_at too (the hub ends it), yet while it waits on the owner it is theirs to retry: open
   if (t.rule === "failed_start") return t.section === "waiting";

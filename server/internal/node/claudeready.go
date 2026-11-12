@@ -62,6 +62,7 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 	sawClaude := false      // herdr has named claude in the pane
 	var goneSince time.Time // since when herdr has named no agent there after sawClaude, with only a shell in front
 	shellSaid := ""         // a not-found line the tab's shell printed after the command, of something else than it
+	gone := 0               // looks in a row at which the pane's host listed no such pane (errNoOrcaTerminal)
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
@@ -69,6 +70,9 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 		case <-time.After(500 * time.Millisecond):
 		}
 		screen, err := n.readPane(ctx, pane, "visible", 60)
+		if gone = goneLooks(gone, err); gone >= paneGoneLooks && !running {
+			return nil, errPaneGone()
+		}
 		if err != nil {
 			continue
 		}
@@ -92,6 +96,9 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 			return nil, errors.New(reason)
 		}
 		a, err := n.paneAgent(ctx, pane)
+		if gone = goneLooks(gone, err); gone >= paneGoneLooks && !running {
+			return nil, errPaneGone()
+		}
 		if err != nil || a.Agent != "claude" {
 			// The tab's shell could not run the command (a launcher its rc files do not define, a claude not on its
 			// PATH): it said so right after it and is back at its prompt, and claude will not come (#1642).
@@ -152,6 +159,9 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 	}
 	if !running && shellSaid != "" {
 		return nil, fmt.Errorf("claude did not start within %s: after the command the tab's shell printed %q", startWait, shellSaid)
+	}
+	if !running && gone > 0 {
+		return nil, errPaneGone()
 	}
 	if !running {
 		return nil, fmt.Errorf("claude did not start within %s: the tab's shell had not run it yet (is the machine busy?)", startWait)
@@ -371,4 +381,23 @@ func lastLines(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// paneGoneLooks: this many looks in a row (500 ms apart) at which the pane's host lists no such pane end a start
+// whose claude has not come: a pane that is gone does not come back.
+const paneGoneLooks = 6
+
+// goneLooks counts the looks in a row whose error says the pane's host lists no such pane (Orca's errNoOrcaTerminal),
+// rather than failing to answer: n+1 then, else 0.
+func goneLooks(n int, err error) int {
+	if errors.Is(err, errNoOrcaTerminal) {
+		return n + 1
+	}
+	return 0
+}
+
+// errPaneGone: not a slow shell, the node lost the pane (closed, or its engine moved it where the node does not find
+// it, #5547).
+func errPaneGone() error {
+	return errors.New("claude did not start: the new tab's pane could not be found any more")
 }

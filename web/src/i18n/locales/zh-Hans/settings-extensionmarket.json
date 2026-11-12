@@ -23,7 +23,6 @@
   "preview_failed": "看不了：{error}",
   "reload": "重新读取",
   "reading": "正在读取…",
-  "cant_install": "装不了：{problem}",
   "uninstall": "卸载",
   "upgrade_to": "升级到 {version}",
   "install": "安装",

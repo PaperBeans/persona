@@ -18,8 +18,9 @@ import { openMedia } from "./LarkThread";
 // ── mail ─────────────────────────────────────────────────
 
 /** A mail: who, the body (its HTML in a sandboxed frame), attachments. Opening it marks it read in the mailbox; with
- * Settings › Translation on for mail, a foreign one is shown translated ("Original" one click away). Replies are written by hand. */
-export function MailBody({ item }: { item: InboxItem }) {
+ * Settings › Translation on for mail, a foreign one is shown translated ("Original" one click away). Replies are written by hand.
+ * `onLatest`: an older message from the handling chain is open; the action returns to the thread's latest. */
+export function MailBody({ item, onLatest }: { item: InboxItem; onLatest?: () => void }) {
   const m = item.mail!;
   const uid = m.uids[m.uids.length - 1];
   const mailbox = m.mailbox || "INBOX";
@@ -86,6 +87,11 @@ export function MailBody({ item }: { item: InboxItem }) {
   const allDraft = replyAllDraft(m.account_id, msg, accounts.find((a) => a.id === m.account_id)?.email);
   return (
     <div className="mx-auto max-w-[760px] px-4 py-4 sm:px-6">
+      {onLatest && (
+        <div className="mb-3 flex justify-center">
+          <Button tone="quiet" icon="chevronDown" onClick={onLatest}>{t("inbox-inboxbodies.latest")}</Button>
+        </div>
+      )}
       <div className="flex flex-col items-start gap-3 sm:flex-row">
         <dl className="grid min-w-0 flex-1 grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12.5px]">
           <dt className="text-ink-3">{t("inbox-inboxbodies.from")}</dt>

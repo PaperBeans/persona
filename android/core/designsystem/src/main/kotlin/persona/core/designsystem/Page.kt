@@ -226,7 +226,7 @@ private fun PageFrame(
                     Column(Modifier.fillMaxSize()) {
                         Column(Modifier.fillMaxWidth().height(hingeTop)) {
                             topBar()
-                            Box(Modifier.weight(1f)) { withInset(PaddingValues(bottom = 12.dp)) }
+                            Box(Modifier.weight(1f)) { withInset(PaddingValues(bottom = 12.dp.dense)) }
                         }
                         Spacer(Modifier.height(hingeBottom - hingeTop))
                         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { Box(Modifier.widthIn(max = ReadingWidth + 40.dp)) { bottomBar?.invoke() } }
@@ -322,13 +322,13 @@ fun JBottomBar(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val palette = PersonaTheme.palette
     when (PersonaTheme.style) {
         AppStyle.Glass -> Box(
-            modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
-                .floatingSurface(RoundedCornerShape(28.dp)).padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier.fillMaxWidth().padding(horizontal = 10.dp.dense, vertical = 8.dp.dense)
+                .floatingSurface(RoundedCornerShape(28.dp.corner)).padding(horizontal = 12.dp.dense, vertical = 6.dp.dense),
         ) { content() }
         // The page's own background under a hairline: no second surface along the bottom.
         else -> Column(modifier.fillMaxWidth().background(palette.background)) {
             JDivider()
-            Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) { content() }
+            Box(Modifier.padding(horizontal = 12.dp.dense, vertical = 6.dp.dense)) { content() }
         }
     }
 }
@@ -365,10 +365,10 @@ fun JTopBar(
     }
     val titleBlock: @Composable RowScope.() -> Unit = {
         Row(
-            Modifier.weight(1f).padding(horizontal = 4.dp).then(if (onTitleClick != null) Modifier.clickable(role = Role.Button, onClick = onTitleClick) else Modifier),
+            Modifier.weight(1f).padding(horizontal = 4.dp.dense).then(if (onTitleClick != null) Modifier.clickable(role = Role.Button, onClick = onTitleClick) else Modifier),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (titleBusy) { JSpinner(Modifier.size(16.dp), stroke = 2.dp); Spacer(Modifier.width(8.dp)) }
+            if (titleBusy) { JSpinner(Modifier.size(16.dp), stroke = 2.dp); Spacer(Modifier.width(8.dp.dense)) }
             AnimatedVisibility(showTitle, enter = fadeIn(), exit = fadeOut()) {
                 Column {
                     Text(
@@ -382,11 +382,11 @@ fun JTopBar(
     }
     when (style) {
         AppStyle.Glass -> {
-            val shape = RoundedCornerShape(30.dp)
-            Box(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp)) {
+            val shape = RoundedCornerShape(30.dp.corner)
+            Box(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 10.dp.dense, vertical = 6.dp.dense)) {
                 Crossfade(showTitle, label = "bar") { full ->
                     if (full) Row(
-                        Modifier.fillMaxWidth().height(60.dp).floatingSurface(shape).padding(horizontal = 6.dp),
+                        Modifier.fillMaxWidth().height(60.dp).floatingSurface(shape).padding(horizontal = 6.dp.dense),
                         verticalAlignment = Alignment.CenterVertically,
                     ) { leading(); titleBlock(); actions() }
                     else CompositionLocalProvider(LocalIconsRaised provides true) {
@@ -401,7 +401,7 @@ fun JTopBar(
             }
         }
         else -> Row(
-            Modifier.fillMaxWidth().background(palette.background).statusBarsPadding().height(56.dp).padding(horizontal = 4.dp),
+            Modifier.fillMaxWidth().background(palette.background).statusBarsPadding().height(56.dp).padding(horizontal = 4.dp.dense),
             verticalAlignment = Alignment.CenterVertically,
         ) { leading(); titleBlock(); actions() }
     }
@@ -464,7 +464,7 @@ fun JListPage(
         val list: @Composable () -> Unit = {
             LazyColumn(
                 viewport, state,
-                contentPadding = PaddingValues(start = pad, end = pad, top = padding.calculateTopPadding() + 4.dp,
+                contentPadding = PaddingValues(start = pad, end = pad, top = padding.calculateTopPadding() + 4.dp.dense,
                     bottom = if (scrollUnderBottom) bottom + Tokens.Space.section else Tokens.Space.section),
             ) {
                 if (large) item("page-title", contentType = "page-title") { PageTitle(title, subtitle, summary, greet, titleBusy, onTitleClick) }
@@ -492,13 +492,13 @@ private fun PageTitle(title: String, subtitle: String?, summary: String?, greet:
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
     val click = if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 12.dp)) {
+    Column(Modifier.fillMaxWidth().padding(top = Tokens.Space.s, bottom = Tokens.Space.m)) {
         when (PersonaTheme.style) {
             AppStyle.Brief -> if (summary != null) {
                 if (greet) Text(todayLabel(), style = type.caption, color = palette.ink3)
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(6.dp.dense))
                 Text(if (greet) stringResource(R.string.designsystem_greeting_summary, greeting(), summary) else summary, style = type.voice, color = palette.ink, modifier = click.semantics { heading() })
-                subtitle?.let { Spacer(Modifier.height(4.dp)); Text(it, style = type.voice.copy(fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp), lineHeight = androidx.compose.ui.unit.TextUnit(27f, androidx.compose.ui.unit.TextUnitType.Sp), fontWeight = androidx.compose.ui.text.font.FontWeight.Normal), color = palette.ink2) }
+                subtitle?.let { Spacer(Modifier.height(4.dp.dense)); Text(it, style = type.voice.copy(fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp), lineHeight = androidx.compose.ui.unit.TextUnit(27f, androidx.compose.ui.unit.TextUnitType.Sp), fontWeight = androidx.compose.ui.text.font.FontWeight.Normal), color = palette.ink2) }
             } else {
                 TitleRow(title, busy, type.largeTitle, click)
                 subtitle?.let { Text(it, style = type.callout, color = palette.ink2) }
@@ -516,7 +516,7 @@ private fun PageTitle(title: String, subtitle: String?, summary: String?, greet:
 private fun TitleRow(title: String, busy: Boolean, style: androidx.compose.ui.text.TextStyle, modifier: Modifier) {
     Row(modifier.semantics { heading() }, verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = style, color = PersonaTheme.palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        if (busy) { Spacer(Modifier.width(10.dp)); JSpinner(Modifier.size(18.dp)) }
+        if (busy) { Spacer(Modifier.width(10.dp.dense)); JSpinner(Modifier.size(18.dp)) }
     }
 }
 

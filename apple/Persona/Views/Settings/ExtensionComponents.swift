@@ -5,28 +5,27 @@ import SwiftUI
 
 /// A row's look: what leads it (an icon, an avatar or a thumbnail), its title and subtitle, its value and badge, and a
 /// chevron when it can be used (a spinner while it runs); `trailing` at its very end (a control, UI version 6).
+/// At the accessibility text sizes the title wraps and the value and badge go under it, so neither is cut to a word
+/// beside the other (#5634); the default sizes keep them on one line.
 struct ExtensionComponentRowLabel<Trailing: View>: View {
     var row: ExtensionRowComponent
     var model: (any ExtensionViewControlling)?
     var chevron: Bool
     @ViewBuilder var trailing: Trailing
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        let stacked = typeSize.isAccessibilitySize
         HStack(spacing: Theme.Space.m) {
             leading
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                Text(row.title).font(Theme.Font.body).lineLimit(1).minimumScaleFactor(0.8)
-                if let s = row.subtitle, !s.isEmpty { Text(s).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(2) }
+                Text(row.title).font(Theme.Font.body).lineLimit(stacked ? 3 : 1).minimumScaleFactor(stacked ? 1 : 0.8)
+                if let s = row.subtitle, !s.isEmpty { Text(s).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(stacked ? 4 : 2) }
+                if stacked { details(lines: 2) }
             }
             Spacer(minLength: Theme.Space.s)
-            if let v = row.value, !v.isEmpty { ExtensionChangingText(v).font(Theme.Font.body.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1) }
-            if let b = row.badge {
-                // Drawn again with another tone, its colors change; with other words, they fade in (#37).
-                Chip(text: b.text, look: b.tone == nil || b.tone == "neutral" ? .neutral : .tint(ExtensionUIStyle.tone(b.tone)))
-                    .contentTransition(.opacity)
-                    .animation(reduceMotion ? nil : Theme.Motion.state, value: b)
-            }
+            if !stacked { details(lines: 1) }
             if let action = row.action, model?.selected(action.id) == true {
                 ThemedIcon(Theme.Icon.success).font(Theme.Font.labelStrong).foregroundStyle(Theme.positive)
                     .accessibilityLabel("Selected [Extension Components 7ecf1c]")
@@ -40,6 +39,17 @@ struct ExtensionComponentRowLabel<Trailing: View>: View {
             trailing
         }
         .contentShape(.rect)
+    }
+
+    /// The value and the badge: after the title's column, or under the title at the accessibility sizes.
+    @ViewBuilder private func details(lines: Int) -> some View {
+        if let v = row.value, !v.isEmpty { ExtensionChangingText(v).font(Theme.Font.body.monospacedDigit()).foregroundStyle(.secondary).lineLimit(lines) }
+        if let b = row.badge {
+            // Drawn again with another tone, its colors change; with other words, they fade in (#37).
+            Chip(text: b.text, look: b.tone == nil || b.tone == "neutral" ? .neutral : .tint(ExtensionUIStyle.tone(b.tone)))
+                .contentTransition(.opacity)
+                .animation(reduceMotion ? nil : Theme.Motion.state, value: b)
+        }
     }
 
     @ViewBuilder private var leading: some View {

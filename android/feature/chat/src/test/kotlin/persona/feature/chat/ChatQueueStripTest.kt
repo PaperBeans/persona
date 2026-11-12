@@ -1,12 +1,16 @@
 package persona.feature.chat
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -16,6 +20,7 @@ import org.junit.Rule
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -144,6 +149,106 @@ class ChatQueueStripTest {
         assertEquals(listOf(0, 2), queueKeep(3, 1))
         // The only queued message: nothing is put back, and the empty list is what the hub gets.
         assertEquals(emptyList<Int>(), queueKeep(1, 0))
+    }
+
+    // Persona's conversation (#4339 C6, iOS QueueStrip with `own`): the user's two messages, then one relayed from another conversation.
+    private val persona = Session(machineId = "box", sessionId = "main", title = "Persona", assistant = true, status = "working",
+        queued = listOf("顺便把下周三的会也挪到下午", "再查一下航班", "来自「早报」：会议纪要整理好了，要不要发给参会的人？"), queuedRelayed = 1)
+
+    @Test fun aRelayedMessageIsOnlyCopiedAndTheMovesStopAtTheUsersOwn() {
+        assertEquals(listOf(QueueAction.Copy to true), queueActions(2, 2, steers = true))
+        assertEquals(listOf(QueueAction.Copy to true), queueActions(0, 0, steers = false))
+        val all = listOf(QueueAction.Edit, QueueAction.MoveUp, QueueAction.MoveDown, QueueAction.Copy, QueueAction.Delete)
+        assertEquals(all.zip(listOf(true, false, true, true, true)), queueActions(0, 2, steers = true))
+        assertEquals(all.zip(listOf(true, true, false, true, true)), queueActions(1, 2, steers = true))
+        // Persona's conversation reorders and sends now where the phone may send; an Agent only in a terminal pane.
+        assertTrue(persona.reordersQueue)
+        assertFalse(persona.copy(sourceKind = "codex_history").reordersQueue)
+        assertFalse(claude.copy(paneId = null).reordersQueue)
+    }
+
+    @Test fun personasQueueListsTheUsersOwnFirstThenTheRelayedOnesSayingWhenTheyArrive() {
+        val queue = Queue()
+        val notices = mutableListOf<String>()
+        rule.setContent {
+            PersonaTheme(style = AppStyle.Glass, reduceMotion = true) {
+                ChatQueueStrip(persona, queue, ChatComposerState(), { notices += it }, {}, initiallyExpanded = true)
+            }
+        }
+        // The line names Persona and counts all three, in the hub's order; only the relayed one says when it arrives.
+        rule.onNodeWithContentDescription("排队中 3 条 · Persona 忙完会依次处理，已展开").assertExists()
+        rule.onNodeWithContentDescription("第 1 条：顺便把下周三的会也挪到下午").assertExists()
+        rule.onNodeWithContentDescription("第 2 条：再查一下航班").assertExists()
+        rule.onNodeWithContentDescription("第 3 条：来自「早报」：会议纪要整理好了，要不要发给参会的人？。对话空闲后送达").assertExists()
+        assertEquals(1, rule.onAllNodesWithText("对话空闲后送达").fetchSemanticsNodes().size)
+        // The relayed one is only copied.
+        rule.onNodeWithContentDescription("第 3 条", substring = true).performClick()
+        rule.onNodeWithText("拷贝").assertIsEnabled()
+        rule.onNodeWithText("撤回编辑").assertDoesNotExist()
+        rule.onNodeWithText("删除").assertDoesNotExist()
+        rule.onNodeWithText("上移").assertDoesNotExist()
+        rule.onNodeWithText("拷贝").performClick()
+        rule.waitForIdle()
+        // The user's second is the last that moves: down stops there, up re-queues only the user's own.
+        rule.onNodeWithContentDescription("第 2 条：再查一下航班").performClick()
+        rule.onNodeWithText("下移").assertIsNotEnabled()
+        rule.onNodeWithText("上移").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("第 1 条：顺便把下周三的会也挪到下午").performClick()
+        rule.onNodeWithText("删除").performClick()
+        rule.waitForIdle()
+        assertEquals(listOf(listOf(1, 0), listOf(1)), queue.kept)
+        assertEquals("已从队列删除", notices.last())
+        // Send Now asks in Persona's words, then hands over the queue.
+        rule.onNodeWithText("立即发送").performClick()
+        rule.onNodeWithText("Persona 会马上收到，不用等到下一步。它手头的这一步会停下，能转到后台的会在后台继续，然后带上你的消息重新开始。").assertExists()
+        rule.onNodeWithText("现在就把排队的消息发给 Agent。", substring = true).assertDoesNotExist()
+        rule.onNode(hasText("立即发送") and hasAnyAncestor(isDialog())).performClick()
+        rule.waitForIdle()
+        assertEquals(1, queue.sentNow)
+    }
+
+    // Seeing one's own queue is behaviour: Brief and Board show Persona's too, as their always-open strip without Send now.
+    @Test fun briefAndBoardShowPersonasQueueOpenWithTheRelayedOneLast() {
+        var style by mutableStateOf(AppStyle.Brief)
+        val queue = Queue()
+        rule.setContent {
+            PersonaTheme(style = style, reduceMotion = true) {
+                ChatQueueStrip(persona, queue, ChatComposerState(), {}, {})
+            }
+        }
+        for (s in listOf(AppStyle.Brief, AppStyle.Board)) {
+            style = s
+            rule.waitForIdle()
+            rule.onNodeWithText("排队中 3 条 · Persona 忙完会依次处理").assertExists()
+            rule.onNodeWithContentDescription("第 1 条：顺便把下周三的会也挪到下午").assertExists()
+            rule.onNodeWithContentDescription("第 3 条：来自「早报」：会议纪要整理好了，要不要发给参会的人？。对话空闲后送达").assertExists()
+            assertEquals(1, rule.onAllNodesWithText("对话空闲后送达").fetchSemanticsNodes().size)
+            rule.onNodeWithText("立即发送").assertDoesNotExist()
+            rule.onNodeWithContentDescription("第 3 条", substring = true).performClick()
+            rule.onNodeWithText("撤回编辑").assertDoesNotExist()
+            rule.onNodeWithText("拷贝").performClick()
+            rule.waitForIdle()
+            rule.onNodeWithContentDescription("第 2 条：再查一下航班").performClick()
+            rule.onNodeWithText("下移").assertIsNotEnabled()
+            rule.onNodeWithText("上移").performClick()
+            rule.waitForIdle()
+        }
+        assertEquals(listOf(listOf(1, 0), listOf(1, 0)), queue.kept)
+    }
+
+    @Test fun onlyRelayedMessagesOfferNoSendNow() {
+        rule.setContent {
+            PersonaTheme(style = AppStyle.Glass, reduceMotion = true) {
+                ChatQueueStrip(persona.copy(status = "idle", queued = persona.queued!!.takeLast(1)), Queue(), ChatComposerState(), {}, {})
+            }
+        }
+        rule.onNodeWithContentDescription("排队中 1 条 · Persona 忙完会依次处理，已收起").assertExists()
+        rule.onNodeWithText("立即发送").assertDoesNotExist()
+    }
+
+    @Test fun anAssistantRefusalOfSendNowSaysTheHubsWords() {
+        assertEquals("Claude Code 没有接受这次中断", sendNowFailure(Refusal(409, "assistant_control_failed", "Claude Code 没有接受这次中断"), res))
     }
 
     @Test fun aPulledBackMessageGoesAfterTheDraftOnANewLine() {

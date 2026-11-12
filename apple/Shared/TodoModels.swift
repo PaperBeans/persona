@@ -586,6 +586,15 @@ extension APIClient {
         return try JSON.decoder.decode(TodoResponse.self, from: data).todo
     }
 
+    /// Got It on a Just finished to-do, or opening it (#5707, docs/assistant/todo-status-sop.md "Seen"): the hub marks it
+    /// seen (`PUT …/seen`) or, with `seen` false, takes the mark off (`DELETE`, Undo), and answers the to-do. Only for a
+    /// hub that lists `todo_seen` (`TodoSeen.feature`).
+    public func setTodoSeen(id: String, seen: Bool) async throws -> TodoItem {
+        let encId = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let data = try await request(seen ? "PUT" : "DELETE", "/api/v1/todos/\(encId)/seen")
+        return try JSON.decoder.decode(TodoResponse.self, from: data).todo
+    }
+
     public func deleteTodo(id: String) async throws {
         let encId = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
         _ = try await request("DELETE", "/api/v1/todos/\(encId)")

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="designsystem_modelpanel_search">搜索模型…</string>
+    <string name="designsystem_modelpanel_recent">最近</string>
+    <string name="designsystem_modelpanel_favorites">收藏</string>
+    <string name="designsystem_modelpanel_all">全部</string>
+    <string name="designsystem_modelpanel_recommended">推荐</string>
+    <string name="designsystem_modelpanel_recent_empty">还没有最近使用。选一个模型后，它会出现在这里。</string>
+    <string name="designsystem_modelpanel_favorites_empty">还没有收藏。点模型的星标，把它存到这里。</string>
+    <string name="designsystem_modelpanel_no_match">没有匹配的模型</string>
+    <string name="designsystem_modelpanel_loading">正在读取模型…</string>
+    <string name="designsystem_modelpanel_retry">重试</string>
+    <string name="designsystem_modelpanel_save_favorite">存为收藏</string>
+    <string name="designsystem_modelpanel_remove_favorite">取消收藏</string>
+    <string name="designsystem_modelpanel_customize">自定义</string>
+    <string name="designsystem_modelpanel_setup_of">%1$s 的配置</string>
+    <string name="designsystem_modelpanel_setup_recommended">推荐配置</string>
+    <string name="designsystem_modelpanel_setup_customized">已自定义</string>
+    <string name="designsystem_modelpanel_setup_saved">收藏配置</string>
+    <string name="designsystem_modelpanel_reset">恢复推荐</string>
+    <string name="designsystem_modelpanel_effort">思考强度</string>
+    <string name="designsystem_modelpanel_faster">更高效</string>
+    <string name="designsystem_modelpanel_smarter">更智能</string>
+    <string name="designsystem_modelpanel_use_typed">使用「%1$s」</string>
+    <string name="designsystem_modelpanel_use_typed_note">列表里没有，按输入的 ID 使用</string>
+    <string name="designsystem_modelpanel_configure">配置模型</string>
+</resources>

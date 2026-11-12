@@ -241,7 +241,8 @@ struct MessagesChatRow: View {
                 .scaledFrame(width: Theme.Size.avatar, height: Theme.Size.avatar)
                 .overlay(ThemedIcon(Theme.Icon.groupChat).font(Theme.Font.body).foregroundStyle(.secondary))
         } else {
-            Monogram(name: chat.name, size: Theme.Size.avatar, fill: Theme.monogramFill)
+            let disc = Theme.monogram(chat.name)
+            Monogram(name: chat.name, size: Theme.Size.avatar, fill: disc.fill, ink: disc.ink)
         }
     }
 }

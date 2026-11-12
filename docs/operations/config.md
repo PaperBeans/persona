@@ -226,6 +226,10 @@ The sections that are a manager's (whose assistant it is, `ai`, `agents`, `inbox
 - `name` (optional): the hub's display name (e.g. "Home"), shown by persona-link on computers (Mac menu bar) and by future linked-hub and multi-hub clients.
   Defaults to the short host name of the hub machine; if the host name is a Docker container id or `PERSONA_LOCAL_NODE=0`, it uses `hub-<first 6 chars of hub_id>`. Manual file edits require a hub restart;
   edits in the admin UI's "Overview" take effect immediately ([admin.md](admin.md)).
+- `initial_locale` (optional, `en` / `zh-Hans` / `ja`): the user language until a device reports one ([i18n.md](../protocol/i18n.md), "User language").
+  A new install's `personad hub setup` writes the language the installer ran in (`--lang`, else `PERSONA_INSTALL_LANG`, which `install.sh` sets);
+  setup never changes it in an existing file. Once a device has reported a language (Postgres `user_locale`), this field no longer matters;
+  omitted or unknown means `zh-Hans`. Edits take effect at the next hub start.
 - `admin` (optional): hub admin UI (`<hub address>/admin`, [admin.md](admin.md)). `access` controls who can open it: `loopback` / `lan` (default) / `cidrs` / `any`
   (requires TLS); `cidrs` lists networks allowed with `access: cidrs`; `session_hours` is the login expiry (default 12); `first_setup: "code"` (written by a fresh `personad hub setup` install) requires a setup code even from LAN sources to set the first password; without it only loopback requires one. Access can only be broadened on the hub machine with
   `personad hub admin access <scope>` (or the deploy script); the web UI can only narrow it. Env vars `PERSONA_ADMIN_ACCESS` / `PERSONA_ADMIN_CIDRS` take precedence.

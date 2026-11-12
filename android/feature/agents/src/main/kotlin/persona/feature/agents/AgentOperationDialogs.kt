@@ -1,5 +1,6 @@
 package persona.feature.agents
 
+import persona.core.designsystem.dense
 import persona.core.designsystem.text
 import persona.core.designsystem.*
 import androidx.annotation.StringRes
@@ -83,7 +84,7 @@ internal fun AgentOperationDialog(
                     if (space) model.renameSpace(session, requireNotNull(newName)) else model.rename(session, newName, newTab)
                     dismiss()
                 }, content = {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp.dense)) {
                         if (hasTab) JTextField(tab, { tab = it }, singleLine = true, label = stringResource(tabNameLabel(session)))
                         JTextField(name, { name = it }, singleLine = true, label = stringResource(if (space) R.string.agents_dialog_space_name else R.string.agents_dialog_session_name))
                     }

@@ -34,6 +34,7 @@ import persona.core.contracts.api.ReadinessSuggestion
 import persona.core.contracts.api.ReadinessStep
 import persona.core.contracts.api.ChannelSources
 import persona.core.designsystem.*
+import persona.core.designsystem.dense
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
@@ -43,6 +44,7 @@ import persona.core.contracts.api.MessageSender
 import persona.core.contracts.api.DraftRepository
 import persona.core.contracts.api.DraftKey
 import persona.core.contracts.api.ChatComposerService
+import persona.core.designsystem.row
 import persona.feature.chat.ChatComposer
 import persona.feature.chat.ChatComposerState
 import persona.feature.chat.ChatDraftEditor
@@ -78,6 +80,9 @@ private class AssistantSendState {
     val clientId = mutableStateOf<String?>(null)
     val text = mutableStateOf<String?>(null)
     val launcher = mutableStateOf<String?>(null)
+    /** The model and effort picked with it in the model panel (Glass, #5055); null: the launcher's defaults. */
+    val model = mutableStateOf<String?>(null)
+    val effort = mutableStateOf<String?>(null)
     val started = mutableStateOf<StarterStart?>(null)
     /** A new conversation's first message while it starts, or kept after its start failed (#4339 C18). */
     val first = mutableStateOf<FirstMessage?>(null)
@@ -150,6 +155,9 @@ fun AssistantScreen(
     /** A new conversation on a launcher picked for it alone (the blank page composer's "Launcher" chip); null: no chip. */
     startConversationWith: (suspend (String) -> SessionKey)? =
         (repository as? persona.core.contracts.api.AssistantConversations)?.let { conversations -> { launcher -> conversations.startConversation(launcher) } },
+    /** A new conversation on the launcher, model and effort picked in the model panel (Glass, #5055, `{launcher, model, effort}`). */
+    startConversationPicked: (suspend (persona.core.contracts.ModelPick) -> SessionKey)? =
+        (repository as? persona.core.contracts.api.AssistantConversations)?.let { conversations -> { pick -> conversations.startConversation(pick) } },
     /** The hub's link: while it is not up, the title menu offers Connection details (iOS); null: never. */
     connection: persona.core.contracts.api.ConnectionState? = null,
     /** The sessions New chat's @ lists (every computer's, iOS `StarterComposer`); null: no @ on New chat's page. */
@@ -243,6 +251,8 @@ fun AssistantScreen(
     // The launcher the next new conversation starts with, for it alone (iOS StarterComposer); null: the default.
     // Both belong to this hub: another one has other launchers and conversations.
     var starterLauncher by sendState.launcher
+    var starterModel by sendState.model
+    var starterEffort by sendState.effort
     // The sessions picked in New chat's @ list, to go in front of its first message (iOS `StarterDraft.quotes`).
     val starterMentions = rememberStarterMentions(managerChoice.hubId, managerChoice.shown)
     // The conversation that launcher started for a message that then failed to send: its retry goes there.
@@ -553,8 +563,15 @@ fun AssistantScreen(
                 // Started once: a retry after the message failed sends to the same new conversation, while the
                 // launcher is still the one that started it.
                 val target = when {
-                    launcher != null && startWith != null ->
-                        starterTarget(launcher, starterStarted, startWith).also { starterStarted = it }.session
+                    launcher != null && startWith != null -> {
+                        // a model or an effort picked in the panel goes with the start (#5055); a launcher alone as before
+                        val picked = persona.core.contracts.ModelPick(launcher, starterModel, starterEffort)
+                        val start: suspend (String) -> SessionKey = { l ->
+                            if ((picked.model != null || picked.effort != null) && startConversationPicked != null) startConversationPicked(picked.copy(launcher = l))
+                            else startWith(l)
+                        }
+                        starterTarget(launcher, starterStarted, start).also { starterStarted = it }.session
+                    }
                     fresh != null -> fresh.started ?: try {
                         val space = fresh.space
                         if (space != null) requireNotNull(conversationsOf).startConversationIn(space).also {
@@ -586,6 +603,8 @@ fun AssistantScreen(
                 if (persona.core.contracts.api.AssistantManagerChoice.current.value != submittedChoice) return@launch
                 if (launcher != null && target != null) {
                     starterLauncher = null
+                    starterModel = null
+                    starterEffort = null
                     starterStarted = null
                     assistantAttempt { repository.refresh() }
                     openConversation(target)
@@ -879,10 +898,23 @@ fun AssistantScreen(
                             onBlocked = { blocking?.primaryAction()?.let { runReadinessAction(it) } },
                             extraContent = starterQuotes.isNotEmpty(), mentions = mentions, onMention = starterMentions::add,
                             onMentionOpen = { mentionOpen = it },
-                            // A new conversation's launcher, for it alone (iOS StarterComposer, web StarterLauncherChip).
+                            // Glass: the model pill and its panel (#5055, the web's new-chat page): the pick is this chat's start.
+                            modelPill = if (PersonaTheme.style == AppStyle.Glass && active == null && !healthPage && pageManagement != null &&
+                                startConversationWith != null && !demo) ({ width ->
+                                persona.feature.chat.PersonaModelPill(null, assistantMachine, pageManagement, width,
+                                    pagePick = starterLauncher?.let { persona.core.contracts.ModelPick(it, starterModel, starterEffort) },
+                                    onPagePick = { pick ->
+                                        // Another setup does not reuse what the last one started.
+                                        if (pick?.launcher != starterLauncher || pick?.model != starterModel) starterStarted = null
+                                        starterLauncher = pick?.launcher; starterModel = pick?.model; starterEffort = pick?.effort
+                                    },
+                                    onNotice = { message -> if (feedback?.notice(message) != true) toast.show(persona.core.designsystem.FeedbackNotice(message)) },
+                                    enabled = !sending)
+                            }) else null,
+                            // A new conversation's launcher, for it alone (iOS StarterComposer, web StarterLauncherChip); Glass's is the pill.
                             accessory = if (active == null && !healthPage && pageManagement != null && startConversationWith != null && !demo) ({
                                 if (mentionsHere) StarterQuoteCards(starterMentions)
-                                StarterLauncherChip(starterLauncher, defaultLauncher, launchers, launchersFailed, enabled = !sending,
+                                if (PersonaTheme.style != AppStyle.Glass) StarterLauncherChip(starterLauncher, defaultLauncher, launchers, launchersFailed, enabled = !sending,
                                     onOpen = { scope.launch { loadStarterLaunchers() } }) { picked ->
                                     // Another launcher (or the default) does not reuse what the last one started.
                                     if (picked != starterLauncher) starterStarted = null
@@ -1163,12 +1195,12 @@ private fun NewChatPage(
         columns = GridCells.Fixed(2), state = grid,
         modifier = Modifier.fillMaxSize().then(if (room == null) Modifier else Modifier.onGloballyPositioned { gridTop = it.positionInRoot().y.roundToInt() }),
         contentPadding = PaddingValues(start = pagePadding, end = pagePadding,
-            top = contentPadding.calculateTopPadding() + 16.dp, bottom = contentPadding.calculateBottomPadding() + 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+            top = contentPadding.calculateTopPadding() + 16.dp.dense, bottom = contentPadding.calculateBottomPadding() + 24.dp.dense),
+        horizontalArrangement = Arrangement.spacedBy(12.dp.dense), verticalArrangement = Arrangement.spacedBy(12.dp.dense),
     ) {
         if (demo) item(span = { GridItemSpan(2) }) { AssistantDemoNotice() }
         item(span = { GridItemSpan(2) }) {
-            Column(Modifier.padding(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.padding(vertical = 20.dp.dense), verticalArrangement = Arrangement.spacedBy(12.dp.dense)) {
                 Text(stringResource(greeting(LocalTime.now().hour)), style = PersonaTheme.type.largeTitle, color = PersonaTheme.palette.ink)
                 Text(stringResource(if (setup) R.string.assistant_home_setup_lead else R.string.assistant_home_lead),
                     style = PersonaTheme.type.voice, color = PersonaTheme.palette.ink2)
@@ -1192,7 +1224,7 @@ private fun NewChatPage(
         item(span = { GridItemSpan(2) }) {
             Column {
                 JSectionHeader(stringResource(R.string.assistant_online_devices))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp.dense), verticalArrangement = Arrangement.spacedBy(8.dp.dense)) {
                     machines.filter { it.online }.distinctBy { it.id }.forEach { machine ->
                         JChip(machine.displayName, icon = PhIcons.Desktop)
                     }
@@ -1249,12 +1281,12 @@ private fun HubSuggestionCard(suggestion: ReadinessSuggestion, enabled: Boolean,
 /** A suggestion card on the blank page: an icon, a one-line title and a line under it. */
 @Composable
 private fun SuggestionCard(icon: PhIcon, title: String, detail: String?, onClick: (() -> Unit)?) {
-    JCard(Modifier.fillMaxWidth().heightIn(min = 144.dp), padding = 16.dp, onClick = onClick) {
+    JCard(Modifier.fillMaxWidth().heightIn(min = 144.dp.row), padding = 16.dp.dense, onClick = onClick) {
         JIcon(icon, null, tint = PersonaTheme.palette.accent)
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(12.dp.dense))
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = PersonaTheme.type.headline, color = PersonaTheme.palette.ink)
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(4.dp.dense))
         Text(detail.orEmpty(), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
@@ -1290,7 +1322,7 @@ internal fun AssistantDrawer(
     var searchVisible by rememberSaveable { mutableStateOf(false) }
     val drawer = LocalHomeDrawer.current
     val resources = androidx.compose.ui.platform.LocalResources.current
-    Column(Modifier.fillMaxHeight().padding(horizontal = if (drawer) Tokens.Space.s else 12.dp)) {
+    Column(Modifier.fillMaxHeight().padding(horizontal = if (drawer) Tokens.Space.s else 12.dp.dense)) {
         val headPadding = Modifier.padding(horizontal = if (drawer) Tokens.Space.l else Tokens.Space.xs).padding(top = Tokens.Space.s)
         val search: @Composable () -> Unit = {
             JIconButton(PhIcons.MagnifyingGlass, stringResource(R.string.assistant_search_chats), { searchVisible = !searchVisible }, raised = true)
@@ -1303,7 +1335,7 @@ internal fun AssistantDrawer(
             }
         }
         if (switcher != null) switcher(headPadding, search.takeIf { drawer }, plainHead) else plainHead()
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 12.dp)) {
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 12.dp.dense)) {
             // The first row is the main conversation, as "Persona" with the app's mark, then a line (#2004, the same on
             // every platform): it is listed nowhere else, has no pin of its own, and is on show whatever the search.
             // Its session keeps its id and title; only the row reads differently.
@@ -1461,7 +1493,7 @@ private fun ConversationRow(
                 selected = selected, tint = if (selected) PersonaTheme.palette.accent else PersonaTheme.palette.ink2) },
             trailing = { JIconButton(PhIcons.DotsThree, stringResource(R.string.assistant_conversation_actions), { menu = true }) }, chevron = false)
         // Under the title, not the icon: a fixed 16dp put it under the icon in glass and board and past it in brief.
-        Row(Modifier.padding(start = rowTitleStart, end = rowPadding, bottom = 10.dp),
+        Row(Modifier.padding(start = rowTitleStart, end = rowPadding, bottom = 10.dp.dense),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
             StatusLabel(session.conversationStatus())
             counts?.let { Text(it, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3, maxLines = 1) }
@@ -1577,7 +1609,7 @@ internal fun AssistantDemo(navigator: Navigator) {
     val messages by repository.outbox.collectAsStateWithLifecycle()
     AssistantScreen(navigator, repository, repository, repository::start, demo = true,
         chatContent = { session ->
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp.dense), verticalArrangement = Arrangement.spacedBy(12.dp.dense)) {
                 items(messages.filter { it.session == session }, key = { it.clientMessageId }) { message ->
                     UserBubble(message.text)
                 }

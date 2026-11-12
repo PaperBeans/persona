@@ -82,6 +82,11 @@ func (n *Node) spawnCodex(id, cwd, launcher string, resume, spare bool, options 
 	return n.spawnCodexWithMode(id, cwd, launcher, resume, spare, "", options...)
 }
 
+// codexAssistantCommand is the command that runs the Codex assistant's app-server with launcher in shell.
+func (n *Node) codexAssistantCommand(shell, launcher string, args []string) *exec.Cmd {
+	return exec.Command(shell, append([]string{"-ic", codexShell(n.launcherForScript(launcher)), "persona"}, args...)...)
+}
+
 func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, mode string, options ...modelExecution) (*assistantProc, error) {
 	execution := executionOption(options)
 	if err := execution.check(); err != nil {
@@ -98,7 +103,7 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 	}
 	compaction := n.assistantCompactionPolicy(launcher, cwd, "", execution)
 	args, personaMCPOnly := n.codexAssistantArgs(key, n.dir, compaction.codexLimit())
-	cmd := exec.Command(shell, append([]string{"-ic", codexShell(n.launcherCommand(launcher)), "persona"}, args...)...)
+	cmd := n.codexAssistantCommand(shell, launcher, args)
 	cmd.Dir = root
 	cmd.Env = identity.Environment(os.Environ(), "PERSONA_ASSISTANT=1")
 	gateEnv, releaseGates, nameGates := n.assistantLarkEnvNamed(cwd, id) // its addresses at the gate proxy go with the process

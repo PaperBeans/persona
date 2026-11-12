@@ -74,11 +74,11 @@ fun JSwipeActions(
                         // The words keep their size and show as the gap opens.
                         Row(
                             Modifier.wrapContentWidth(if (fromEnd) Alignment.End else Alignment.Start, unbounded = true)
-                                .padding(horizontal = 24.dp),
+                                .padding(horizontal = 24.dp.dense),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             JIcon(action.icon, null, size = 22.dp, tint = tone.text, selected = true)
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(8.dp.dense))
                             Text(action.label, style = PersonaTheme.type.label, color = tone.text, maxLines = 1)
                         }
                     }

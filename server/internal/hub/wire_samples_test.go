@@ -210,6 +210,35 @@ func wireSamples(t *testing.T) map[string][]wireSample {
 	add("sessions", "sessions_event", "会话事件以信封中的机器标识为准。", "event", ws(map[string]any{"type": "sessions", "machine_id": "m1", "sessions": sessions}),
 		map[string]any{"/type": "sessions", "/machine_id": "m1", "/sessions/0/machine_id": "m1", "/sessions/1/status": "offline"},
 		"server/internal/hub/http.go: Hub.serveWS", "apple/Shared/LiveConnection.swift: ServerEvent.decode")
+	// A Persona chat's queue: the user's own first, then what the manager holds from other conversations (fleet_sessions.go).
+	personaQueue := []proto.Session{{MachineID: "m1", SessionID: "a1", Title: "Persona", Cwd: "/home/user/persona", Status: proto.StatusWorking,
+		State: proto.StateWorking, StateSince: now, Assistant: true, UpdatedAt: now,
+		Queued: []string{"请补充示例。", "再检查一遍。", "来自「示例对话」：示例结果已整理好。"}, QueuedRelayed: 1}}
+	add("sessions", "sessions_assistant_queue", "Persona 对话的队列先列用户自己的消息，最后 queued_relayed 条来自其他对话或系统。", "sessions",
+		httpJSON(map[string]any{"sessions": personaQueue}),
+		map[string]any{"/sessions/0/assistant": true, "/sessions/0/queued/0": "请补充示例。", "/sessions/0/queued/2": "来自「示例对话」：示例结果已整理好。", "/sessions/0/queued_relayed": 1},
+		"server/internal/proto/session.go: Session.QueuedRelayed", "server/internal/assistant/fleet_sessions.go: Service.decorateInventory", "apple/Shared/Models.swift: Session.ownQueuedCount")
+
+	// A launcher switch waiting for the next message (#5035) and a Persona chat's own pick (#5033): the complete rows
+	// carry both; a summary row keeps the pick and leaves the switch and the launcher out (the apps keep theirs).
+	switching := proto.Session{MachineID: "m1", SessionID: "s3", Title: "示例切换", Cwd: "/home/user/project", Status: proto.StatusIdle,
+		PaneID: "w1:p2", Agent: "claude", Launcher: "example", Model: "example-model", Effort: "high", UpdatedAt: now,
+		PendingSwitch: &proto.PendingSwitch{Launcher: "work", Model: "work-model", Effort: "max", At: now}}
+	picked := proto.Session{MachineID: "m1", SessionID: "a1", Title: "示例对话", Status: proto.StatusIdle, Agent: "claude",
+		Launcher: "claude", Model: "example-model", Assistant: true, UpdatedAt: now,
+		ModelPick: &proto.ModelPick{Launcher: "work", Model: "work-model", Effort: "high"}}
+	switching.State, picked.State = proto.StateIdle, proto.StateIdle
+	add("sessions", "sessions_model_switch", "完整会话行携带等待下一条消息的服务商切换和 Persona 对话自己选的模型。", "sessions",
+		httpJSON(map[string]any{"sessions": []proto.Session{switching, picked}}),
+		map[string]any{"/sessions/0/launcher": "example", "/sessions/0/pending_switch/launcher": "work", "/sessions/0/pending_switch/model": "work-model",
+			"/sessions/0/pending_switch/effort": "max", "/sessions/1/model_pick/launcher": "work", "/sessions/1/model_pick/model": "work-model",
+			"/sessions/1/model_pick/effort": "high", "/sessions/1/pending_switch": nil},
+		"server/internal/proto/session.go: PendingSwitch, ModelPick", "docs/protocol/protocol.md: Switching a running Agent to another provider")
+	add("sessions", "sessions_summary_model_pick", "摘要行保留 model_pick，省略启动器和等待中的切换。", "sessions",
+		httpJSON(map[string]any{"sessions": []runtimeRowSummary{runtimeSummary(switching), runtimeSummary(picked)}}),
+		map[string]any{"/sessions/0/waiting": false, "/sessions/0/launcher": nil, "/sessions/0/pending_switch": nil, "/sessions/0/model": "example-model",
+			"/sessions/1/model_pick/launcher": "work", "/sessions/1/model_pick/effort": "high", "/sessions/1/launcher": nil},
+		"server/internal/hub/sessions_list.go: runtimeSummary", "docs/protocol/protocol.md: Summary rows")
 
 	m := newMachine(h, MachineConfig{ID: "m1", Name: "示例电脑", Kind: "ssh", SSHHost: "example.com"})
 	m.online = true
@@ -284,6 +313,17 @@ func wireSamples(t *testing.T) map[string][]wireSample {
 	add("items", "items_task_notifications", "监控事件和子任务结果都作为带 task 的 notice 传输。", "items", httpJSON(map[string]any{"items": []proto.Item{monitor, agent}, "has_more": false}),
 		map[string]any{"/items/0/kind": "notice", "/items/0/task/kind": "monitor", "/items/0/task/detail": "示例值 > 0 & < 10", "/items/1/task/kind": "agent"},
 		"server/internal/proto/item.go: TaskNote", "apple/Shared/Models.swift: TaskNote")
+
+	// The model each reply was written by (#5034): the apps mark where it changes.
+	first := item("entry_reply_a#0", 1, "assistant", proto.KindText, "示例回答。")
+	first.Model = "example-model"
+	ask := item("entry_ask#0", 2, "user", proto.KindText, "换个模型再看。")
+	call := item("entry_reply_b#0", 3, "assistant", proto.KindToolUse, "")
+	call.ToolUseID, call.ToolName, call.ToolInput = "call_model", "Read", json.RawMessage(`{"file_path":"/home/user/project/example.txt"}`)
+	call.Model = "work-model"
+	add("items", "items_reply_models", "助手条目携带写出它的模型，用户条目没有。", "items", httpJSON(map[string]any{"items": []proto.Item{first, ask, call}, "has_more": false}),
+		map[string]any{"/items/0/model": "example-model", "/items/1/model": nil, "/items/2/model": "work-model"},
+		"server/internal/proto/item.go: Item.Model", "docs/web/web.md: Model pill and model panel")
 
 	wireItemEvents(t, add, now, []proto.Item{text, img})
 	durations := transcript.ParseLine(9, []byte(`{"type":"system","subtype":"turn_duration","uuid":"duration_example","parentUuid":"entry_text","durationMs":12345,"timestamp":"2026-01-02T03:04:05Z"}`), &transcript.Meta{})
@@ -361,6 +401,29 @@ func wireSamples(t *testing.T) map[string][]wireSample {
 	add("interactions", "interactions_list", "待处理列表使用与事件相同的交互类型。", "interactions", httpJSON(map[string]any{"interactions": ixs}),
 		map[string]any{"/interactions/0/kind": "question", "/interactions/0/questions/1/multi_select": true, "/interactions/4/secret": true}, "server/internal/hub/http.go: Hub.routes", "apple/Shared/Models.swift: Interaction")
 	add("interactions", "interaction_resolved", "已处理事件仅用交互标识撤回卡片。", "event", ws(map[string]any{"type": "interaction_resolved", "id": "ix_question"}), map[string]any{"/type": "interaction_resolved", "/id": "ix_question"}, "server/internal/hub/hub.go: Hub.resolve", "apple/Shared/LiveConnection.swift: ServerEvent.decode")
+	// A question the assistant answered (the manager's fleet.interaction_resolved as the hub passes it on), and the user's
+	// change of answer (the assistant's interaction_reanswered as the hub relays it).
+	{
+		h := newTestHub(t)
+		c := &client{out: make(chan []byte, 1)}
+		addTestClient(h, c)
+		b, _ := json.Marshal(assistantwire.FleetResolved{ID: "ix_question", AnsweredBy: "assistant", Reason: "示例代码只用蓝色",
+			Answers: map[string]string{"选择示例颜色": "蓝色", "选择检查项": "格式, 内容"}})
+		busEvents[assistantwire.EventFleetResolved](h, nil, b)
+		add("interactions", "interaction_resolved_assistant", "助手代答的问题撤回时带上答案和理由，改答从这些答案开始。", "event", wireReceive(t, c),
+			map[string]any{"/type": "interaction_resolved", "/id": "ix_question", "/answered_by": "assistant", "/reason": "示例代码只用蓝色",
+				"/answers/选择示例颜色": "蓝色", "/answers/选择检查项": "格式, 内容"},
+			"server/internal/hub/fleet_link.go: EventFleetResolved", "apple/Shared/LiveConnection.swift: ServerEvent.decode", "docs/protocol/protocol.md: interaction_resolved")
+		raw, _ := json.Marshal(map[string]any{"type": "interaction_reanswered", "id": "ix_question",
+			"resolution": proto.Resolution{Answers: map[string]string{"选择示例颜色": "绿色"}}})
+		if err := h.relayBroadcastFrom(assistantwire.AssistantID, raw); err != nil {
+			t.Fatal(err)
+		}
+		add("interactions", "interaction_reanswered", "用户改答后只带改了的问题及其新答案。", "event", wireReceive(t, c),
+			map[string]any{"/type": "interaction_reanswered", "/id": "ix_question", "/resolution/answers/选择示例颜色": "绿色"},
+			"server/internal/assistant/fleet_delegate.go: Service.reanswer", "server/internal/hub/bus_broadcast.go: Hub.relayBroadcastFrom",
+			"apple/Shared/LiveConnection.swift: ServerEvent.decode", "docs/protocol/protocol.md: interaction_reanswered")
+	}
 
 	working := sessions[0]
 	working.SessionID = "s_working"

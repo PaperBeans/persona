@@ -69,9 +69,9 @@ fun ChatTopBar(
     val style = PersonaTheme.style
     val tone = status?.let { palette.status(it) }
     val titleBlock: @Composable RowScope.() -> Unit = {
-        Column(Modifier.weight(1f).padding(horizontal = 4.dp).then(if (onTitleClick != null) Modifier.clickable(role = Role.Button, onClickLabel = titleClickLabel, onClick = onTitleClick) else Modifier)) {
+        Column(Modifier.weight(1f).padding(horizontal = 4.dp.dense).then(if (onTitleClick != null) Modifier.clickable(role = Role.Button, onClickLabel = titleClickLabel, onClick = onTitleClick) else Modifier)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (busy) { JSpinner(Modifier.size(14.dp), stroke = 1.8.dp); Spacer(Modifier.width(6.dp)) }
+                if (busy) { JSpinner(Modifier.size(14.dp), stroke = 1.8.dp); Spacer(Modifier.width(6.dp.dense)) }
                 Text(title, style = if (style == AppStyle.Board) type.headline else type.label.copy(fontSize = androidx.compose.ui.unit.TextUnit(16f, androidx.compose.ui.unit.TextUnitType.Sp)), color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (statusText != null || source != null) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -104,16 +104,16 @@ fun ChatTopBar(
     }
     val back: @Composable () -> Unit = { onBack?.let { JIconButton(if (style == AppStyle.Glass) PhIcons.CaretLeft else PhIcons.ArrowLeft, stringResource(R.string.designsystem_back), it) } }
     when (style) {
-        AppStyle.Glass -> Box(modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp)) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).floatingSurface(RoundedCornerShape(30.dp)).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        AppStyle.Glass -> Box(modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 10.dp.dense, vertical = 6.dp.dense)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 60.dp.row).floatingSurface(RoundedCornerShape(30.dp.corner)).padding(horizontal = 6.dp.dense), verticalAlignment = Alignment.CenterVertically) {
                 back(); titleBlock(); actions()
             }
         }
-        AppStyle.Brief -> Row(modifier.fillMaxWidth().background(palette.background).statusBarsPadding().heightIn(min = 60.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        AppStyle.Brief -> Row(modifier.fillMaxWidth().background(palette.background).statusBarsPadding().heightIn(min = 60.dp.row).padding(horizontal = 4.dp.dense), verticalAlignment = Alignment.CenterVertically) {
             back(); titleBlock(); actions()
         }
         AppStyle.Board -> Column(modifier.fillMaxWidth().background(palette.background).statusBarsPadding()) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp.row).padding(horizontal = 4.dp.dense), verticalAlignment = Alignment.CenterVertically) {
                 // The state is said once, in the title's line (#3957, as iOS #3719): no second mark before the title.
                 back(); titleBlock(); actions()
             }
@@ -133,8 +133,8 @@ fun UserBubbleFrame(modifier: Modifier = Modifier, footer: (@Composable () -> Un
     val style = PersonaTheme.style
     val shape = when (style) {
         AppStyle.Glass -> RoundedCornerShape(Tokens.Radius.bubble)
-        AppStyle.Brief -> RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp)
-        AppStyle.Board -> RoundedCornerShape(10.dp)
+        AppStyle.Brief -> RoundedCornerShape(22.dp.corner, 22.dp.corner, 6.dp.corner, 22.dp.corner)
+        AppStyle.Board -> RoundedCornerShape(10.dp.corner)
     }
     val chrome = LocalHomeChrome.current
     val bubble = { frame: Modifier ->
@@ -145,15 +145,15 @@ fun UserBubbleFrame(modifier: Modifier = Modifier, footer: (@Composable () -> Un
                 AppStyle.Brief -> Modifier.background(if (own) palette.statusSurface else palette.surface)
                 AppStyle.Board -> Modifier.background(if (own) palette.statusSurface else palette.surface).border(1.dp, palette.line, shape)
             })
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.m)
     }
-    Column(modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.End) {
+    Column(modifier.fillMaxWidth().padding(vertical = Tokens.Space.sm), horizontalAlignment = Alignment.End) {
         if (leading == null && !faded) Column(bubble(Modifier.fillMaxWidth(0.86f).wrapContentWidth(Alignment.End))) { content() }
         else Row(Modifier.fillMaxWidth(0.86f).wrapContentWidth(Alignment.End), verticalAlignment = Alignment.Bottom) {
             leading?.invoke()
             Column(bubble(Modifier.weight(1f, fill = false).stableAlpha(if (faded) UnsentBubbleAlpha else 1f))) { content() }
         }
-        footer?.let { Spacer(Modifier.height(4.dp)); it() }
+        footer?.let { Spacer(Modifier.height(4.dp.dense)); it() }
     }
 }
 
@@ -194,16 +194,16 @@ fun WorkGroup(
         stringResource(if (expanded || peek != null) R.string.designsystem_expanded else R.string.designsystem_collapsed))
     val header: @Composable () -> Unit = {
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(role = Role.Button, onClick = onToggle)
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp.corner)).clickable(role = Role.Button, onClick = onToggle)
                 .semantics { contentDescription = spoken }
-                .padding(horizontal = if (PersonaTheme.style == AppStyle.Brief) 0.dp else 14.dp, vertical = 10.dp),
+                .padding(horizontal = if (PersonaTheme.style == AppStyle.Brief) 0.dp else 14.dp.dense, vertical = 10.dp.dense),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (running) { JSpinner(Modifier.size(15.dp), stroke = 1.8.dp); Spacer(Modifier.width(8.dp)) }
-            else if (PersonaTheme.style != AppStyle.Brief) { JIcon(PhIcons.Wrench, null, size = 17.dp, tint = palette.ink2, decorative = true); Spacer(Modifier.width(8.dp)) }
+            if (running) { JSpinner(Modifier.size(15.dp), stroke = 1.8.dp); Spacer(Modifier.width(8.dp.dense)) }
+            else if (PersonaTheme.style != AppStyle.Brief) { JIcon(PhIcons.Wrench, null, size = 17.dp, tint = palette.ink2, decorative = true); Spacer(Modifier.width(8.dp.dense)) }
             Text(summary, style = type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = PersonaTheme.style != AppStyle.Brief))
-            trailing?.let { Spacer(Modifier.width(6.dp)); CompositionLocalProvider(LocalContentColor provides palette.ink2, LocalTextStyle provides type.micro) { it() } }
-            Spacer(Modifier.width(4.dp))
+            trailing?.let { Spacer(Modifier.width(6.dp.dense)); CompositionLocalProvider(LocalContentColor provides palette.ink2, LocalTextStyle provides type.micro) { it() } }
+            Spacer(Modifier.width(4.dp.dense))
             JIcon(if (expanded) PhIcons.CaretUp else PhIcons.CaretDown, null, size = 14.dp, tint = palette.ink3)
         }
     }
@@ -214,7 +214,7 @@ fun WorkGroup(
                 .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
         ) {
-            if (running) JSpinner(Modifier.size(Tokens.Space.m), stroke = Tokens.Space.xxs)
+            if (running) JSpinner(Modifier.size(Tokens.Space.Standard.m), stroke = Tokens.Space.Standard.xxs)
             Text(summary, style = type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
             trailing?.let { CompositionLocalProvider(LocalContentColor provides palette.ink2, LocalTextStyle provides type.micro) { it() } }
             JIcon(if (expanded) persona.core.designsystem.icons.PersonaIcons.expand else PhIcons.CaretRight, null, size = Tokens.Space.m, tint = palette.ink3)
@@ -233,12 +233,12 @@ fun WorkGroup(
     }
     when (PersonaTheme.style) {
         AppStyle.Glass -> Column(modifier.fillMaxWidth().animateContentSize(PersonaTheme.motion.size())) { glassHeader(); body() }
-        AppStyle.Brief -> Column(modifier.fillMaxWidth().padding(vertical = 6.dp).animateContentSize(PersonaTheme.motion.size())) {
-            header(); if (expanded || peek != null) { Spacer(Modifier.height(4.dp)); body() }
+        AppStyle.Brief -> Column(modifier.fillMaxWidth().padding(vertical = Tokens.Space.sm).animateContentSize(PersonaTheme.motion.size())) {
+            header(); if (expanded || peek != null) { Spacer(Modifier.height(4.dp.dense)); body() }
         }
         AppStyle.Board -> Column(
-            modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(10.dp)).background(palette.surface)
-                .border(1.dp, palette.line, RoundedCornerShape(10.dp)).animateContentSize(PersonaTheme.motion.size()),
+            modifier.fillMaxWidth().padding(vertical = Tokens.Space.sm).clip(RoundedCornerShape(10.dp.corner)).background(palette.surface)
+                .border(1.dp, palette.line, RoundedCornerShape(10.dp.corner)).animateContentSize(PersonaTheme.motion.size()),
         ) { header(); body() }
     }
 }
@@ -271,43 +271,43 @@ fun PlanCard(
     val spoken = stringResource(R.string.designsystem_with_state, stringResource(R.string.designsystem_plan_spoken, step, total, current),
         stringResource(if (open) R.string.designsystem_expanded else R.string.designsystem_collapsed))
     Column(
-        modifier.fillMaxWidth().padding(horizontal = inset, vertical = 6.dp).clip(shape).background(palette.surface)
+        modifier.fillMaxWidth().padding(horizontal = inset, vertical = Tokens.Space.sm).clip(shape).background(palette.surface)
             .border(1.dp, palette.line, shape).animateContentSize(PersonaTheme.motion.size()),
     ) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(role = Role.Button) { open = !open }
+            Modifier.fillMaxWidth().heightIn(min = 44.dp.row).clickable(role = Role.Button) { open = !open }
                 .semantics { contentDescription = spoken }
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp.dense, vertical = 10.dp.dense),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             JIcon(PhIcons.ListChecks, null, size = 17.dp, tint = palette.ink)
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(8.dp.dense))
             Text("$done/$total", style = type.micro, color = palette.ink)
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(8.dp.dense))
             Text(current, style = type.callout, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(8.dp.dense))
             Row(
-                Modifier.clip(RoundedCornerShape(50)).border(1.dp, palette.line, RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 3.dp),
+                Modifier.clip(RoundedCornerShape(50)).border(1.dp, palette.line, RoundedCornerShape(50)).padding(horizontal = 8.dp.dense, vertical = 3.dp.dense),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (total in 1..done) JIcon(PhIcons.Check, stringResource(R.string.designsystem_plan_all_done), size = 12.dp, tint = palette.done.dot)
                 else Text(stringResource(R.string.designsystem_plan_step, step, total), style = type.micro, color = palette.ink2)
             }
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(6.dp.dense))
             JIcon(if (open) PhIcons.CaretUp else PhIcons.CaretDown, null, size = 14.dp, tint = palette.ink3)
         }
         if (!open) Box(Modifier.fillMaxWidth().height(2.dp).background(palette.line)
             .semantics { progressBarRangeInfo = ProgressBarRangeInfo(done.toFloat(), 0f..total.toFloat().coerceAtLeast(1f)) }) {
             Box(Modifier.fillMaxWidth(if (total > 0) done.toFloat() / total else 0f).fillMaxHeight().background(palette.ink))
         }
-        if (open) Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (open) Column(Modifier.fillMaxWidth().padding(start = 14.dp.dense, end = 14.dp.dense, bottom = 10.dp.dense), verticalArrangement = Arrangement.spacedBy(2.dp.dense)) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(palette.line))
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(6.dp.dense))
             val doneLabel = stringResource(R.string.designsystem_plan_item_done)
             val activeLabel = stringResource(R.string.designsystem_plan_item_active)
             val pendingLabel = stringResource(R.string.designsystem_plan_item_pending)
             items.forEach { (text, state) ->
-                Row(Modifier.heightIn(min = 30.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.heightIn(min = 30.dp.row), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
                         when (state) {
                             PlanItemState.Done -> JIcon(PhIcons.CheckCircle, doneLabel, size = 18.dp, tint = palette.ink3)
@@ -316,14 +316,14 @@ fun PlanCard(
                             PlanItemState.Pending -> Box(Modifier.size(16.dp).border(1.5.dp, palette.ink2, CircleShape).semantics { contentDescription = pendingLabel })
                         }
                     }
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(10.dp.dense))
                     Text(text, style = if (state == PlanItemState.Active) type.callout.copy(fontWeight = FontWeight.SemiBold) else type.callout,
                         color = if (state == PlanItemState.Done) palette.ink3 else palette.ink)
                 }
             }
         }
         // A failed update says so folded or open.
-        note?.let { Text(it, Modifier.padding(start = 14.dp, end = 14.dp, top = if (open) 0.dp else 6.dp, bottom = 10.dp), style = type.caption, color = palette.danger.text) }
+        note?.let { Text(it, Modifier.padding(start = 14.dp.dense, end = 14.dp.dense, top = if (open) 0.dp else Tokens.Space.sm, bottom = 10.dp.dense), style = type.caption, color = palette.danger.text) }
     }
 }
 
@@ -405,7 +405,7 @@ fun WorkStep(
                     Text(title, style = titleStyle, color = palette.ink, maxLines = titleLines, overflow = TextOverflow.Ellipsis)
                     detail?.let { Text(it, style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink3, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                 }
-                diff(); Spacer(Modifier.width(6.dp)); mark()
+                diff(); Spacer(Modifier.width(6.dp.dense)); mark()
                 if (state == WorkState.Done && added == 0 && removed == 0 && verb != null && verb.startsWith("运行")) JIcon(PhIcons.Check, null, size = 15.dp, tint = palette.done.dot) // i18n-ignore: matches the caller's verb for a command run
             }
         }
@@ -416,16 +416,16 @@ fun WorkStep(
                 }
                 if (!last) Box(Modifier.width(1.5.dp).weight(1f).background(palette.ink3.copy(alpha = 0.35f)))
             }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f).padding(top = 4.dp, bottom = if (last) 4.dp else 12.dp)) {
+            Spacer(Modifier.width(12.dp.dense))
+            Column(Modifier.weight(1f).padding(top = Tokens.Space.xs, bottom = if (last) Tokens.Space.xs else Tokens.Space.m)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(title, style = titleStyle, color = palette.ink, maxLines = titleLines, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                     Spacer(Modifier.weight(1f)); diff()
-                    if (state == WorkState.Failed || state == WorkState.Waiting || state == WorkState.Unknown) { Spacer(Modifier.width(6.dp)); mark() }
+                    if (state == WorkState.Failed || state == WorkState.Waiting || state == WorkState.Unknown) { Spacer(Modifier.width(6.dp.dense)); mark() }
                 }
                 detail?.let {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (state == WorkState.Done && verb?.startsWith("运行") == true) { JIcon(PhIcons.Check, null, size = 13.dp, tint = palette.done.dot); Spacer(Modifier.width(4.dp)) } // i18n-ignore: matches the caller's verb for a command run
+                        if (state == WorkState.Done && verb?.startsWith("运行") == true) { JIcon(PhIcons.Check, null, size = 13.dp, tint = palette.done.dot); Spacer(Modifier.width(4.dp.dense)) } // i18n-ignore: matches the caller's verb for a command run
                         Text(it, style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink2, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
@@ -433,14 +433,14 @@ fun WorkStep(
         }
         AppStyle.Board -> Column(modifier.fillMaxWidth().then(click)) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(palette.line))
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(horizontal = 12.dp.dense, vertical = 9.dp.dense), verticalAlignment = Alignment.CenterVertically) {
                 when (state) {
                     WorkState.Done -> JIcon(PhIcons.Check, null, size = 14.dp, tint = palette.done.dot)
                     else -> mark()
                 }
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(8.dp.dense))
                 // At least the width of "Read" / "Run", so those line up; a named tool's longer words ("Browse") are not cut.
-                verb?.let { Text(it, style = type.caption, color = palette.ink3, maxLines = 1, modifier = Modifier.widthIn(min = 36.dp).padding(end = 6.dp)) }
+                verb?.let { Text(it, style = type.caption, color = palette.ink3, maxLines = 1, modifier = Modifier.widthIn(min = 36.dp).padding(end = 6.dp.dense)) }
                 Column(Modifier.weight(1f)) {
                     Text(title, style = titleStyle, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     detail?.let { Text(it, style = type.caption.copy(fontWeight = FontWeight.Normal, fontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp)), color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis) }
@@ -558,7 +558,7 @@ fun ComposerTextField(
     placeholder: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    maxLines: Int = 6,
+    maxLines: Int = ComposerGrowLines,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
 ) {
     val palette = PersonaTheme.palette
@@ -583,7 +583,7 @@ enum class SendKind { Send, Stop }
  */
 @Composable
 fun BlockedSendButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Box(modifier.heightIn(min = 48.dp).padding(start = Tokens.Space.xs, end = Tokens.Space.xxs), contentAlignment = Alignment.Center) {
+    Box(modifier.heightIn(min = 48.dp.row).padding(start = Tokens.Space.xs, end = Tokens.Space.xxs), contentAlignment = Alignment.Center) {
         JButton(label, onClick, size = JButtonSize.Medium)
     }
 }
@@ -592,7 +592,7 @@ fun BlockedSendButton(label: String, onClick: () -> Unit, modifier: Modifier = M
 fun SendButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, kind: SendKind = SendKind.Send, loading: Boolean = false) {
     val palette = PersonaTheme.palette
     val board = PersonaTheme.style == AppStyle.Board
-    val shape = if (board) RoundedCornerShape(8.dp) else CircleShape
+    val shape = if (board) RoundedCornerShape(8.dp.corner) else CircleShape
     val fill = when { kind == SendKind.Stop -> palette.danger.dot; enabled -> palette.action; else -> palette.surfaceStrong }
     val ink = when { kind == SendKind.Stop -> palette.danger.onDot; enabled -> palette.onAction; else -> palette.ink3 }
     val spoken = stringResource(if (kind == SendKind.Stop) R.string.designsystem_send_stop else R.string.designsystem_send)
@@ -619,22 +619,22 @@ fun SendButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Bool
 fun JumpToLatest(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
-    val shape = if (style == AppStyle.Board) RoundedCornerShape(8.dp) else RoundedCornerShape(50)
+    val shape = if (style == AppStyle.Board) RoundedCornerShape(8.dp.corner) else RoundedCornerShape(50)
     val spoken = if (count > 0) pluralStringResource(R.plurals.designsystem_jump_latest_new, count, count) else stringResource(R.string.designsystem_jump_latest)
     Row(
-        modifier.heightIn(min = 44.dp)
+        modifier.heightIn(min = 44.dp.row)
             .then(when (style) {
                 AppStyle.Glass -> Modifier.floatingSurface(RoundedCornerShape(50))
                 AppStyle.Brief -> Modifier.clip(shape).background(palette.action)
                 AppStyle.Board -> Modifier.clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
             })
             .clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = spoken }
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 14.dp.dense),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val ink = if (style == AppStyle.Brief) palette.onAction else palette.ink
         JIcon(PhIcons.ArrowDown, null, size = 18.dp, tint = ink)
-        if (count > 0) { Spacer(Modifier.width(6.dp)); Text("$count", style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.Bold), color = ink) }
+        if (count > 0) { Spacer(Modifier.width(6.dp.dense)); Text("$count", style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.Bold), color = ink) }
     }
 }
 
@@ -648,12 +648,12 @@ fun PlanPill(step: Int, total: Int, done: Int, onClick: () -> Unit, modifier: Mo
              spoken: String? = null, onClickLabel: String? = null) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
-    val shape = if (style == AppStyle.Board) RoundedCornerShape(8.dp) else RoundedCornerShape(50)
+    val shape = if (style == AppStyle.Board) RoundedCornerShape(8.dp.corner) else RoundedCornerShape(50)
     val ink = if (style == AppStyle.Brief) palette.onAction else palette.ink
     val allDone = total in 1..done
     val description = spoken ?: stringResource(R.string.designsystem_plan_pill_spoken, step, total)
     Row(
-        modifier.heightIn(min = 44.dp)
+        modifier.heightIn(min = 44.dp.row)
             .then(when (style) {
                 AppStyle.Glass -> Modifier.floatingSurface(RoundedCornerShape(50))
                 AppStyle.Brief -> Modifier.clip(shape).background(palette.action)
@@ -661,9 +661,9 @@ fun PlanPill(step: Int, total: Int, done: Int, onClick: () -> Unit, modifier: Mo
             })
             .clickable(onClickLabel = onClickLabel, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description; progressBarRangeInfo = ProgressBarRangeInfo(done.toFloat(), 0f..total.toFloat().coerceAtLeast(1f)) }
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 14.dp.dense),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp.dense),
     ) {
         if (allDone) JIcon(PhIcons.Check, null, size = 14.dp, tint = ink)
         else {
@@ -685,11 +685,11 @@ fun PlanPill(step: Int, total: Int, done: Int, onClick: () -> Unit, modifier: Mo
 @Composable
 fun TimelineMark(text: String, modifier: Modifier = Modifier, emphasized: Boolean = false) {
     val palette = PersonaTheme.palette
-    Row(modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().padding(vertical = 10.dp.dense), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f).height(1.dp).background(palette.line))
         Text(
             text, style = PersonaTheme.type.micro.copy(fontWeight = if (emphasized) FontWeight.Bold else FontWeight.Medium),
-            color = if (emphasized) palette.ink else palette.ink3, modifier = Modifier.padding(horizontal = 12.dp).alpha(1f), maxLines = 1,
+            color = if (emphasized) palette.ink else palette.ink3, modifier = Modifier.padding(horizontal = 12.dp.dense).alpha(1f), maxLines = 1,
         )
         Box(Modifier.weight(1f).height(1.dp).background(palette.line))
     }
@@ -711,16 +711,16 @@ fun IncomingBubbleFrame(
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
     val shape = when (style) {
-        AppStyle.Glass -> RoundedCornerShape(24.dp, 24.dp, 24.dp, 8.dp)
-        AppStyle.Brief -> RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp)
-        AppStyle.Board -> RoundedCornerShape(10.dp)
+        AppStyle.Glass -> RoundedCornerShape(24.dp.corner, 24.dp.corner, 24.dp.corner, 8.dp.corner)
+        AppStyle.Brief -> RoundedCornerShape(22.dp.corner, 22.dp.corner, 22.dp.corner, 6.dp.corner)
+        AppStyle.Board -> RoundedCornerShape(10.dp.corner)
     }
-    Row(modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
-        avatar?.let { it(); Spacer(Modifier.width(10.dp)) }
+    Row(modifier.fillMaxWidth().padding(vertical = Tokens.Space.sm), verticalAlignment = Alignment.Top) {
+        avatar?.let { it(); Spacer(Modifier.width(10.dp.dense)) }
         Column(Modifier.weight(1f)) {
-            if (author != null || time != null) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp, start = 2.dp)) {
+            if (author != null || time != null) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = Tokens.Space.xs, start = Tokens.Space.xxs)) {
                 author?.let { Text(it, style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)) }
-                time?.let { Spacer(Modifier.width(6.dp)); Text(it, style = PersonaTheme.type.micro, color = palette.ink3, maxLines = 1) }
+                time?.let { Spacer(Modifier.width(6.dp.dense)); Text(it, style = PersonaTheme.type.micro, color = palette.ink3, maxLines = 1) }
             }
             Column(
                 Modifier.fillMaxWidth(0.9f).wrapContentWidth(Alignment.Start).clip(shape)
@@ -729,10 +729,10 @@ fun IncomingBubbleFrame(
                         AppStyle.Brief -> Modifier.background(palette.surface)
                         AppStyle.Board -> Modifier.background(palette.surface).border(1.dp, palette.line, shape)
                     })
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = 14.dp.dense, vertical = 10.dp.dense),
                 content = content,
             )
-            footer?.let { Spacer(Modifier.height(4.dp)); it() }
+            footer?.let { Spacer(Modifier.height(4.dp.dense)); it() }
         }
     }
 }

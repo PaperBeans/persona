@@ -745,7 +745,7 @@ struct AssistantSidebar: View {
     /// The open conversation's row. On the Mac, the shade the shell's other lists select with (`macSelected`): the
     /// phone's `well` on the Mac's lighter fills (#1169) was hard to find there.
     #if os(macOS)
-    private static let selectedFill = Theme.Fill.macSelected
+    private static var selectedFill: Color { Theme.Fill.macSelected } // the style's: read when drawn
     #else
     private static let selectedFill = Theme.Fill.well
     #endif

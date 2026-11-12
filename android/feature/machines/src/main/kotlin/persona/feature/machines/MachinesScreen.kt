@@ -20,6 +20,7 @@ import persona.core.contracts.*
 import persona.core.contracts.api.HubManager
 import persona.core.contracts.api.ManagerRoster
 import persona.core.designsystem.*
+import persona.core.designsystem.dense
 import persona.core.designsystem.icons.PhIcons
 import persona.core.navigation.*
 
@@ -188,7 +189,7 @@ internal fun MachinesScreen(
                 JSegmented(MetricRange.entries.map { JSegment(stringResource(R.string.machines_range_hours, when (it) {
                     MetricRange.Hour -> 1; MetricRange.SixHours -> 6; MetricRange.Day -> 24
                 })) }, MetricRange.entries.indexOf(state.range), { selection = null; model.selectRange(MetricRange.entries[it]) })
-                Text(stringResource(R.string.machines_long_press_hint), Modifier.padding(vertical = 8.dp), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
+                Text(stringResource(R.string.machines_long_press_hint), Modifier.padding(vertical = 8.dp.dense), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
             }
             if (selection != null) item("selection") { JTextButton(stringResource(R.string.machines_back_to_now), { selection = null }) }
             // Disk history is in bytes; the chart reads it against the disk's size, so only when that is known.
@@ -219,7 +220,7 @@ internal fun MachinesScreen(
                     AgentState.Unread -> Status.Unread; AgentState.Idle -> Status.Idle
                     AgentState.Offline -> Status.Offline; AgentState.Unknown -> Status.Unknown
                 }
-                JCard(Modifier.padding(bottom = 12.dp), onClick = { navigator.navigate(ChatRoute(machineId, session.sessionId)) }, status = status) {
+                JCard(Modifier.padding(bottom = 12.dp.dense), onClick = { navigator.navigate(ChatRoute(machineId, session.sessionId)) }, status = status) {
                     JRow(session.displayTitle, leading = { JStatusDot(status) }, trailing = { JTag(status.localizedLabel, status = status) })
                     Text(session.agentLabel, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
                     Text(session.cwd, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -247,7 +248,7 @@ internal fun MachinesScreen(
                 JGroupItem(GroupPosition.of(index, systemValues.size)) { JRow(label, value = text?.takeIf { it.isNotBlank() } ?: "—") }
             }
             item("method") { Text(stringResource(R.string.machines_method),
-                Modifier.padding(vertical = 12.dp), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3) }
+                Modifier.padding(vertical = 12.dp.dense), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3) }
             extensionSections?.invoke(this)
         }
     }
@@ -271,8 +272,8 @@ private fun MachineCard(
         pending -> Status.NeedsYou
         !metrics.online -> Status.Offline; alerts.isNotEmpty() || machine?.nodeMismatch == true -> Status.NeedsYou; else -> Status.Unread
     }
-    JCard(Modifier.padding(bottom = 12.dp), onClick = onClick, status = status) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    JCard(Modifier.padding(bottom = 12.dp.dense), onClick = onClick, status = status) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp.dense)) {
             OsBadge(system)
             Column(Modifier.weight(1f)) {
                 Text(machine?.displayName ?: metrics.machineId, style = PersonaTheme.type.title, color = PersonaTheme.palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -314,7 +315,7 @@ private fun MachineCard(
                 sessions.count { it.agentState == AgentState.NeedsYou }),
                 style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp.dense)) {
             listOfNotNull(machine?.herdrVersion?.let { "herdr $it" }, machine?.claudeVersion?.let { "Claude $it" }).forEach {
                 Text(it, style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3)
             }
@@ -329,7 +330,7 @@ private fun MachineCard(
                 MetricKind.Memory -> MetricFormat.percent(percent(current?.memUsed, current?.memTotal), locale)
                 else -> "↓ ${MetricFormat.rate(current?.netRx, locale)}  ↑ ${MetricFormat.rate(current?.netTx, locale)}"
             }
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp.dense), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(stringResource(if (kinds.size > 1) R.string.machines_metric_network else kinds.first().label), style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink2)
                 Text(value, style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink)
             }
@@ -340,7 +341,7 @@ private fun MachineCard(
 
 @Composable
 private fun Warning(text: String) {
-    Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(Modifier.padding(top = 8.dp.dense), horizontalArrangement = Arrangement.spacedBy(6.dp.dense)) {
         JIcon(PhIcons.Warning, null, size = 18.dp, tint = PersonaTheme.palette.danger.dot)
         Text(text, color = PersonaTheme.palette.danger.text, style = PersonaTheme.type.caption)
     }
@@ -356,9 +357,9 @@ private fun OsBadge(system: MachineSystem?) {
 @Composable
 private fun CoreBars(cores: List<Double>) {
     val locale = currentLocale
-    JCard(Modifier.padding(bottom = 12.dp)) {
+    JCard(Modifier.padding(bottom = 12.dp.dense)) {
         Text(stringResource(R.string.machines_per_core), style = PersonaTheme.type.title, color = PersonaTheme.palette.ink)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp.dense), verticalArrangement = Arrangement.spacedBy(10.dp.dense)) {
             cores.forEachIndexed { index, usage ->
                 Column(Modifier.width(76.dp)) {
                     Text(stringResource(R.string.machines_core_n, index + 1), style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink2)

@@ -57,7 +57,7 @@ fun HomeAgentFilters(bays: List<Bay>, selected: Int, onSelect: (Int) -> Unit, mo
             val tint = tone?.text ?: palette.accent
             Row(Modifier.clip(CircleShape)
                 .background(if (chosen) tint.copy(alpha = tint.alpha * HomeTokens.filterSelectedAlpha) else palette.sunken)
-                .border(Tokens.Space.xxs / 2, if (chosen) tint.copy(alpha = tint.alpha * HomeTokens.filterStrokeAlpha) else Color.Transparent, CircleShape)
+                .border(Tokens.Space.Standard.xxs / 2, if (chosen) tint.copy(alpha = tint.alpha * HomeTokens.filterStrokeAlpha) else Color.Transparent, CircleShape)
                 .clickable(role = Role.Tab) { onSelect(index) }.semantics { this.selected = chosen }
                 .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {

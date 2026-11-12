@@ -200,7 +200,16 @@ func (s *Service) confirmReply(ctx context.Context, it *InboxItem, g *InboxSugge
 	if !validClientID(clientID) { // the same suggestion confirmed again is the same send
 		clientID = namedClientID(fmt.Sprintf("suggestion\n%s\n%d", it.ID, g.Version))
 	}
-	_, err := s.replyInboxDo(ctx, it.ID, text, clientID, false, false, g.Changes...)
+	var err error
+	if target := g.MailTarget; target != nil {
+		_, err = s.replyInboxCheckedDo(ctx, it.ID, text, clientID, false, false, &target.UID, &target.Version, g.Changes...)
+	} else if it.Mail != nil {
+		// A pre-upgrade mail suggestion cannot prove which message its text answered. Never guess after a read sync.
+		err = errMailReplyTargetChanged
+	} else {
+		// Non-mail suggestions keep their legacy path; new mail suggestions always name a target.
+		_, err = s.replyInboxDo(ctx, it.ID, text, clientID, false, false, g.Changes...)
+	}
 	b := &s.inbox
 	now := time.Now()
 	b.mu.Lock()
