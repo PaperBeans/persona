@@ -6,6 +6,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
@@ -15,15 +16,17 @@ import (
 // listCountingDevs counts the copies of a machine's whole list (Sessions): a reader of one row makes none.
 type listCountingDevs struct {
 	*fleetDevs
-	lists int
+	n atomic.Int64
 }
 
 func (d *listCountingDevs) Sessions(id string) ([]proto.Session, bool) {
-	d.lists++
+	d.n.Add(1)
 	return d.fleetDevs.Sessions(id)
 }
 
-// countLists has s count the whole lists its readers copy.
+func (d *listCountingDevs) lists() int { return int(d.n.Load()) }
+
+// countLists has s count the whole lists its readers copy. Called before anything starts a goroutine on s.
 func countLists(s *Service) *listCountingDevs {
 	d := &listCountingDevs{fleetDevs: s.devs.(*fleetDevs)}
 	s.devs = d
@@ -103,8 +106,8 @@ func TestDecoratedSessionIsTheListsFoldedRow(t *testing.T) {
 			t.Errorf("%s found on mac", sid)
 		}
 	}
-	if d.lists != 0 {
-		t.Errorf("one row at a time copied the whole list %d times", d.lists)
+	if d.lists() != 0 {
+		t.Errorf("one row at a time copied the whole list %d times", d.lists())
 	}
 }
 
@@ -160,8 +163,8 @@ func TestWorkViewReadsOneSession(t *testing.T) {
 	if _, ok := v.session("mac", "never-listed"); ok || v.failed["mac"] {
 		t.Errorf("a session no list has: found, or its machine failed")
 	}
-	if d.lists != 0 {
-		t.Fatalf("one session at a time copied the whole list %d times", d.lists)
+	if d.lists() != 0 {
+		t.Fatalf("one session at a time copied the whole list %d times", d.lists())
 	}
 	if _, ok := v.session("nowhere", "x"); ok || !v.failed["nowhere"] {
 		t.Errorf("an unknown machine: not failed, as sessions.list's error made it")
@@ -169,8 +172,8 @@ func TestWorkViewReadsOneSession(t *testing.T) {
 	if list := v.sessions("mac"); len(list) != len(whole) {
 		t.Fatalf("the whole list: %d rows, want %d", len(list), len(whole))
 	}
-	lists := d.lists
-	if c, ok := v.session("mac", "gone-restored"); !ok || c.SessionID != "gone-restored" || d.lists != lists {
+	lists := d.lists()
+	if c, ok := v.session("mac", "gone-restored"); !ok || c.SessionID != "gone-restored" || d.lists() != lists {
 		t.Errorf("once the list is read, a row is read from it")
 	}
 	if !v.isMuted("mac", "lead") || v.isMuted("mac", "plain") {
@@ -183,12 +186,13 @@ func TestWorkViewReadsOneSession(t *testing.T) {
 func TestIdlePassesReadWhatRuns(t *testing.T) {
 	s := readsFleet(t, 50, 300)
 	ctx := context.Background()
-	doneTaskOnGoneAgent(t, s)
 	d := countLists(s)
+	doneTaskOnGoneAgent(t, s)
+	before := d.lists()
 	refused := taskCloseRefused{}
 	s.closeDoneTaskAgents(ctx, refused)
-	if d.lists != 0 {
-		t.Errorf("closeDoneTaskAgents listed the machine %d times for an agent no longer there", d.lists)
+	if n := d.lists() - before; n != 0 {
+		t.Errorf("closeDoneTaskAgents listed the machine %d times for an agent no longer there", n)
 	}
 	list, err := s.listedSessions(ctx, "mac")
 	if err != nil || len(list) != 50 {
