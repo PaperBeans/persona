@@ -2025,6 +2025,27 @@ computer every 2 s): the manager allocated 555 MB and used about 2.1 s of CPU a 
   out at 0.943 with every one of the 20 minutes below 1, the unchanged hub's at 0.983 (`pairedCPU`). Measure a noisy
   quantity against a reference that sees the same noise at the same moment.
 
+## The manager read its own session lists through their JSON (2026-11-13, #3197)
+
+- With the fleet in the manager, `sessions.list` is answered in the same process (`localFleetDeviceCall`), but the
+  manager's own readers (`Service.sessions`, `workView.sessions`) still called it like a remote method: decorate the
+  machine's whole list, `json.Marshal` it, `json.Unmarshal` it again, often to read one row. Encoding and decoding was
+  75-87% of a read. Readers in the same process take the decorated rows themselves (`localSessions`); the rows share
+  their slices and pointers with the devices' list, which is safe only because nothing writes into a row's slices or
+  pointees (`localizeSession` copies before it writes; `Session.Hierarchy` is replaced, never written). Check that
+  before handing out rows in place, and prove the rows equal the answer's encoded (`TestInProcessSessionsAreTheListsRows`).
+- The list carries a row for every archive record of the machine the node no longer lists, and the records are never
+  removed, so a whole-list read grows for months even on a quiet machine. A reader of one row (a turn end, a wake, a
+  done task's agent) reads it alone (`decoratedSession`, `listedSession`; an archived row from its record by key,
+  `archivedRow`), and a pass over what runs reads only the node's rows (`listedSessions`): the archive's rows are
+  offline, and those passes skip offline rows. Prove each against the whole list's row with `reflect.DeepEqual`, folds
+  and archive rows included, and keep the apps' list pinned to the bytes the old code wrote
+  (`TestAppsSessionListUnchanged`, golden written on the base commit with `-update-session-reads`).
+- A subset never stores a fold (`foldInventory`): the fold depends on the archive's rows, so a list without them would
+  fold differently and the rows decorated alone (`foldSubset`) would pick it up. Only a complete list refreshes it.
+- A per-minute pass that walks finished tasks pays for every task ever finished, since their agent links are kept: look
+  each agent's row up (a missing row is a map lookup) rather than listing its machine.
+
 ## `http.DefaultTransport` drops a push connection after 90 s idle (2026-11-11, #4800)
 
 - The hub's relay client and `apns.Client` were `&http.Client{Timeout: …}` with no transport, so they ran on
