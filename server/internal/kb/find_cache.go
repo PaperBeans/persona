@@ -96,7 +96,8 @@ func newDirEnt(dir, rel, name string, isDir bool) dirEnt {
 	if isDir {
 		return d
 	}
-	d.day, d.moment = under(d.rel, "/messages/"), under(d.rel, "/moments/posts/")
+	// A file under messages/ is a day unless it is bookkeeping (searchable): a chat's messages/.zone names its zone.
+	d.day, d.moment = under(d.rel, "/messages/") && searchable(d.rel), under(d.rel, "/moments/posts/")
 	md := strings.HasSuffix(name, ".md")
 	d.file = !d.day && (d.moment && md || name != "segments.json" && searchable(d.rel) && (md || strings.HasSuffix(name, ".json")))
 	if kind, id, ok := entryOf(d.rel); ok && shown(kind, d.rel) {

@@ -1,5 +1,16 @@
 # Lessons: hub / node and networking
 
+## A new file in the knowledge base is searched unless `searchable` says otherwise (2026-11-13, #5991)
+
+Search reads every `.md` and `.json` file of the data dir it is not told to skip, profile files before any message
+day, and every file under a `messages/` directory as a day. Live ingestion's receipts (`chats/<id>/.receipts.json`,
+the source and every message id and time on one line) were documented as "not searched" but never added to
+`searchable` (`server/internal/kb/find.go`), nor were the ingestion intent (`.ingest.json`) and a chat's zone marker
+(`messages/.zone`). A query of digits, a date or the source's name matched the receipts of every chat and filled the
+limit before any message was read; Chinese queries looked fine, so nobody noticed. Whoever writes a new bookkeeping
+file into the data dir adds it to `searchable` in the same change and checks it with a search over real ingested
+chats that asks for digits and ASCII words, not only with a fixture line that names the file.
+
 ## An app connection's read loop must not wait for a node (2026-11-13, #5915)
 
 `subscribe` and `unsubscribe` called the node (`session.watch` / `session.unwatch`, up to 10 s each) from the app
