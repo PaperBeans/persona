@@ -457,7 +457,8 @@ struct WatchRootView: View {
                     WatchAllDayCard()
                     WatchMeetingEntries(open: { meetingOpen = true })
                     NavigationLink { WatchRecordingView() } label: {
-                        Label("Record [Recordings Section ef2821]", systemImage: Theme.Icon.recording).font(Theme.Font.secondaryMedium).lineLimit(1)
+                        Label("Record [Recordings Section ef2821]", systemImage: Theme.Icon.recording).labelStyle(.watchRow)
+                            .font(Theme.Font.secondaryMedium).lineLimit(1)
                     }.watchCard()
                     // A group the phone could not get the watch a credential for: none of its agents is below (#1185).
                     if !model.missing.isEmpty {

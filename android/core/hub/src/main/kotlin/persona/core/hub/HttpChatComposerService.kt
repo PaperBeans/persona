@@ -88,6 +88,9 @@ class HttpChatComposerService internal constructor(
                         record(message, ComposerDelivery(DeliveryState.Unknown))
                         return@use MessageTransportResult.NoReceipt
                     }
+                    try { transport.onAccepted(message.session, fields) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* Confirmed delivery survives a metadata presentation failure. */ }
                     refused.remove(message.clientMessageId)
                     record(message, ComposerDelivery(DeliveryState.Sent))
                     MessageTransportResult.Accepted

@@ -482,6 +482,10 @@ const (
 	// CodeSwitchFailedStopped: the agent did not come up on the new launcher and could not be brought back on its own
 	// one: it has stopped (Resume on its terminal page).
 	CodeSwitchFailedStopped = "switch_failed_stopped"
+	// CodeSwitchBusy: the assistant's switch (session.send with switch_now, #5973) could not be carried out now: the
+	// agent works, waits for the user, is starting or has background work a quit would end. Nothing was typed and the
+	// switch was dropped.
+	CodeSwitchBusy = "switch_busy"
 )
 
 // TodoRef is a session's link to an active todo (docs/assistant/todos.md).

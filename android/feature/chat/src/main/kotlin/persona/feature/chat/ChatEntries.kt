@@ -206,6 +206,7 @@ fun ChatDestination(
         ChatScreen(session, services.chats(), services.messages(),
             services.interactions(), services.sessions(), onBack = onHistoryBack ?: navigator::back,
             onTerminal = onTerminal ?: { navigator.navigate(TerminalRoute(it.machineId, it.sessionId)) },
+            onResumeInTerminal = { navigator.navigate(TerminalRoute(it.machineId, it.sessionId, resume = true)) },
             chrome = ChatChromeBindings(actions = wiring?.actions.takeUnless { historyReadOnly }, connection = wiring?.connection,
                 worktrees = wiring?.worktrees.takeUnless { historyReadOnly },
                 onOpenSession = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) },

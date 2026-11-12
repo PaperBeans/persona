@@ -607,7 +607,7 @@ class OutboxMessageSender(
         private val reconcilable = uncertain + setOf(OutboxState.Sent, OutboxState.NeedsConfirmation)
         private val dispatchable = setOf(OutboxState.Queued, OutboxState.WaitingForNetwork)
         private val hidden = setOf(OutboxState.Cancelled, OutboxState.Shown)
-        private val refusals = setOf("input_draft", "dialog_open", "op_id_reused", "invalid", "stale_session")
+        private val refusals = setOf("input_draft", "dialog_open", "codex_not_ready", "codex_first_text", "codex_waiting", "op_id_reused", "invalid", "stale_session")
         /** A message that keeps coming back waiting while the link is up goes again this often (iOS retryOutboxSoon). */
         private const val StallRetryMillis = 10_000L
         /** …and is refused after this long, about six tries (iOS OutboxWait.connectedLimit). */
@@ -621,6 +621,8 @@ class OutboxMessageSender(
             MessageTransportResult.NotSent -> OutboxState.WaitingForNetwork
             MessageTransportResult.NoReceipt -> OutboxState.Unknown
             is MessageTransportResult.HubError -> when {
+                // Its first paste may already be in Codex. Only the user can decide whether to send it again.
+                result.code == "codex_first_unconfirmed" && result.delivered == "unknown" -> OutboxState.NeedsConfirmation
                 result.delivered == "unknown" -> OutboxState.Verifying
                 result.delivered == "yes" -> OutboxState.Sent
                 result.code in refusals || result.code in SetupFailureCodes -> OutboxState.Refused

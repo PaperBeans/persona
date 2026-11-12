@@ -111,7 +111,7 @@ and tells it to read their AGENTS.md / CLAUDE.md before reading or writing. Pers
     summary.md              # Compressed context (AI-maintained, rolling updates)
     .receipts.json          # Live-ingestion source/chat message IDs and original times (bookkeeping, not searched)
     retention.json          # Retention ledger: the selection rule of each line another rule than the chat's usual one decided (not searched)
-    .ingest.json            # Pending live-ingestion recovery intent, removed after completion
+    .ingest.json            # Pending live-ingestion recovery intent, removed after completion (not searched)
   people/<person id>/       # One directory per person: Lark lark-<userId>, mail mail-<address>
     meta.json               # Name, chats, linked projects, tags
     summary.md              # Who they are, relationship to me, recent conversations with me
@@ -618,7 +618,7 @@ Archive dates and times (daily files, each line's "- 15:04", timeline "- 2006-01
 
 Files record clock times, not timezones, so each file declares its timezone and all data moves once on a timezone change (`kb/zone.go`):
 
-- **Chats:** `messages/.zone` records the timezone name. Without this file, the data predates timezone tracking and was written in the hub's timezone.
+- **Chats:** `messages/.zone` records the timezone name. It is bookkeeping: search never reads it as a day. Without this file, the data predates timezone tracking and was written in the hub's timezone.
   - `Store.Rezone` converts each line to an instant using the old timezone, then regroups by day and rewrites clock times in the new one.
   - Write first to `messages.rezone/`, then swap with `messages/`, so each chat is entirely new or entirely old.
   - Interrupted work resumes next time: before the swap, original files remain untouched; after it, only `messages.old/` needs deletion. The same data is never converted twice.

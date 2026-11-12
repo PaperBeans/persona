@@ -274,6 +274,7 @@ var rpcFailureKeys = map[string]string{
 	proto.CodeSwitchNotStopped:      "rpc-errors.switch_not_stopped",
 	proto.CodeSwitchFailed:          "rpc-errors.switch_failed",
 	proto.CodeSwitchFailedStopped:   "rpc-errors.switch_failed_stopped",
+	proto.CodeSwitchBusy:            "rpc-errors.switch_busy",
 }
 
 func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {

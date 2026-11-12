@@ -7,6 +7,10 @@ nonisolated enum DispatchedTasks {
         var id: String
         var todoID: String?
         var title: String
+        /// How the Agent came to the task (`task` items' `wake`): created, active or resumed; nil reads as created.
+        var wake: String? = nil
+        /// Why a plan's task did not start, before there is a to-do to say so.
+        var error: String? = nil
     }
 
     /// The task detail's actual session selection. A requested target must still belong to this task; neither a
@@ -26,14 +30,14 @@ nonisolated enum DispatchedTasks {
                   plan.conversation == item.conversation, plan.state == .started else { return nil }
             return plan.tasks.enumerated().map { index, task in
                 Entry(id: "plan:\(plan.id):\(index)", todoID: task.todoID,
-                      title: task.todoID.flatMap(titleOf) ?? task.title)
+                      title: task.todoID.flatMap(titleOf) ?? task.title, error: task.error)
             }
         case .task:
             guard let id = item.ref else { return [] }
             guard !plans.values.contains(where: { plan in
                 plan.conversation == item.conversation && plan.tasks.contains(where: { $0.todoID == id })
             }) else { return [] }
-            return [Entry(id: "todo:" + id, todoID: id, title: titleOf(id) ?? fallback)]
+            return [Entry(id: "todo:" + id, todoID: id, title: titleOf(id) ?? fallback, wake: item.wake)]
         default: return nil
         }
     }

@@ -82,6 +82,10 @@ internal fun OutboxMessage.refusalReason(): String = refusalText(error).text()
 internal fun refusalText(code: String?): UiText = when (code) {
     "input_draft" -> UiText.Res(R.string.chat_delivery_input_draft)
     "dialog_open" -> UiText.Res(R.string.chat_delivery_dialog_open)
+    "codex_not_ready" -> UiText.Res(R.string.chat_delivery_codex_not_ready)
+    "codex_first_text" -> UiText.Res(R.string.chat_delivery_codex_first_text)
+    "codex_waiting" -> UiText.Res(R.string.chat_delivery_codex_waiting)
+    "codex_first_unconfirmed" -> UiText.Res(R.string.chat_delivery_codex_first_unconfirmed)
     "op_id_reused" -> UiText.Res(R.string.chat_delivery_op_id_reused)
     "invalid" -> UiText.Res(R.string.chat_delivery_invalid)
     // The provider does not run on this computer (docs/integrations/launchers.md "Device scope and on-demand delivery").

@@ -48,6 +48,8 @@
     <string name="chat_chrome_actions_title">Session actions</string>
     <string name="chat_chrome_todo">To-do · %1$s</string>
     <string name="chat_chrome_terminal">Terminal</string>
+    <string name="chat_chrome_resume_in_terminal">Resume in Terminal</string>
+    <string name="chat_chrome_resume_no_engine">No terminal engine on %1$s</string>
     <string name="chat_chrome_search">Search</string>
     <string name="chat_chrome_files">Files</string>
     <string name="chat_chrome_details">Session details</string>

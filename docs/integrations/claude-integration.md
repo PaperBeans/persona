@@ -122,6 +122,14 @@ running Agent to another provider".
   chat of a session that shows the switch. The assistant's messages, a task's supervision, channels and the phone apps
   send without it: their message goes on the launcher the agent runs on, and the switch keeps waiting. A switch picked
   more than a day ago is no longer shown on the row and is dropped when a message comes.
+- **The assistant's switch, when the user asks for it** (`agent_switch`, #5973): the main conversation picks the switch
+  and sends at once with `switch_now`, which implies `apply_switch` and is carried out now or not at all. Wherever the
+  user's message would go on the old launcher and leave the switch waiting (a busy agent, a draft or a dialog in the
+  box, an agent that is not running, a runtime's session) the message is refused with nothing typed (`switch_busy` for a
+  busy agent, else the usual code) and the switch is dropped, so none waits for the user's next message. A node without
+  the `launcher_switch_now` capability is refused by the hub (`node_outdated`) before anything is typed. An agent a
+  usage limit stopped is sent `agents/limit_continue` when the assistant gives no text; its pending usage-limit
+  continuation is not sent afterwards (its turn moved on: `workGuard` drops the wake).
 - **A busy agent is not switched**: one that works, waits for the user, is starting, or has background work a quit
   would end gets the message on its launcher as always, and the switch waits for a later message. Background work is the
   row's (running subagents and workflows, a `/loop`) and every background command or monitor of its claude process,

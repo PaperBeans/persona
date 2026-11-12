@@ -104,7 +104,7 @@ func (s *Service) startDue(ctx context.Context) *sync.WaitGroup {
 			continue // filled by its device, never pulled
 		}
 		asked := s.asked[sub.ID]
-		if !asked && (!on(sub) || sub.NextRunAt == nil || sub.NextRunAt.After(now)) {
+		if !asked && (!pullScheduled(sub) || sub.NextRunAt == nil || sub.NextRunAt.After(now)) {
 			continue
 		}
 		if sub.LeaseUntil != nil && sub.LeaseUntil.After(now) {
@@ -183,7 +183,7 @@ func (s *Service) runOne(ctx context.Context, id string) {
 		resume = g.calls[0].Add(time.Hour)
 	}
 	s.mu.Unlock()
-	if !asked && (!on(*sub) || sub.NextRunAt == nil || sub.NextRunAt.After(now)) {
+	if !asked && (!pullScheduled(*sub) || sub.NextRunAt == nil || sub.NextRunAt.After(now)) {
 		return
 	}
 	if paused || full {
@@ -262,16 +262,19 @@ func (s *Service) execute(ctx context.Context, sub Subscription, asked bool, sta
 		s.o.Logf("subscription %s: its tool's description changed; the recipe still fits", sub.ID)
 		next.ToolFingerprint = fp
 	}
-	since := start.Add(-firstBack)
+	since, until := start.Add(-firstBack), start
 	if sub.SinceAt != nil {
 		since = sub.SinceAt.Add(-overlap)
+	}
+	if current := sub.Continuation; current != nil {
+		since, until = current.WindowSince, current.WindowEnd
 	}
 	s.mu.Lock()
 	g := s.gateOf(sub.Connector)
 	g.last = start
 	g.calls = append(g.calls, start)
 	s.mu.Unlock()
-	pl := pull(ctx, c.Conn, sub.Source, sub.Recipe, since, s.o.Location(), sub.Label)
+	pl := pull(ctx, c.Conn, sub.Source, sub.Recipe, since, until, s.o.Location(), sub.Label, sub.Continuation, tool.InputSchema)
 	ms := s.now().Sub(start).Milliseconds()
 	if pl.problem != nil {
 		switch {
@@ -291,7 +294,7 @@ func (s *Service) execute(ctx context.Context, sub Subscription, asked bool, sta
 			s.commit(ctx, sub, next, nil, nil, start, false)
 		case pl.problem.Code == CodeNoList:
 			s.shapeMiss(ctx, sub, next, pl.problem, trigger, start, ms)
-		case pl.problem.Code == CodeNotReadOnly:
+		case pl.problem.Code == CodeNotReadOnly || pl.problem.Code == CodePagination:
 			s.needsRecipe(ctx, sub, next, pl.problem, trigger, start)
 		default:
 			s.connFailed(sub.Connector)
@@ -309,10 +312,9 @@ func (s *Service) execute(ctx context.Context, sub Subscription, asked bool, sta
 	run := Run{At: start, MS: ms, Trigger: trigger}
 	var seen []Seen
 	var items []Item
-	// The first run that succeeds after a recipe changed with existing baseline records what it finds as seen and
-	// keeps none of it: only what arrives later comes in.
+	// A recipe changed with existing baseline records every page as seen and keeps none of it. Its mark clears only
+	// with the terminal page, so a restart cannot deliver an earlier page as new.
 	baseline := sub.Baseline
-	next.Baseline = nil
 	if pl.snapshot != nil {
 		run.Count = 1
 		if pl.snapHash != sub.SnapshotHash {
@@ -330,40 +332,67 @@ func (s *Service) execute(ctx context.Context, sub Subscription, asked bool, sta
 			return
 		}
 		newest := sub.SinceAt
+		sawItems, sawTimed := false, false
+		if current := sub.Continuation; current != nil {
+			newest, sawItems, sawTimed = current.NewestAt, current.SawItems, current.SawTimed
+		}
 		for _, m := range newOnes(pl.items, known) {
 			it := m.item
 			it.SubscriptionID = sub.ID
 			items, seen = append(items, it), append(seen, Seen{UID: it.UID, ContentHash: m.hash})
 		}
 		for _, m := range pl.items {
-			if t := m.item.Time; t != nil && (newest == nil || t.After(*newest)) && !t.After(start) {
-				tt := *t
-				newest = &tt
+			sawItems = true
+			if t := m.item.Time; t != nil {
+				sawTimed = true
+				if (newest == nil || t.After(*newest)) && !t.After(until) {
+					tt := *t
+					newest = &tt
+				}
 			}
 		}
-		if newest == nil || len(pl.items) > 0 && allUntimed(pl.items) {
-			newest = &start // items without times: the next run looks back from now
+		if pl.continuation != nil {
+			pl.continuation.Manual = asked && !on(sub) || sub.Continuation != nil && sub.Continuation.Manual
+			pl.continuation.NewestAt, pl.continuation.SawItems, pl.continuation.SawTimed = newest, sawItems, sawTimed
+			next.Continuation = pl.continuation
+		} else {
+			if newest == nil || sawItems && !sawTimed {
+				newest = &until // items without times: the next run looks back from the original window's end
+			}
+			next.SinceAt, next.Continuation = newest, nil
 		}
-		next.SinceAt = newest
-		next.WeakDedup = pl.weak
+		next.WeakDedup = pl.weak || sub.Continuation != nil && sub.WeakDedup
 	}
+	var baselineCommit *time.Time
 	if baseline != nil {
 		run.Baseline, items = len(items), nil
+		if pl.continuation == nil {
+			next.Baseline, baselineCommit = nil, baseline
+		}
 	}
 	run.New = len(items)
 	next.Shape, next.ShapeMisses = pl.shape, 0
 	next.RunState, next.Error, next.FailCount, next.FailingSince = StateOK, nil, 0, nil
 	next.LastOKAt, next.LastNewCount = &start, len(items)
-	// The first run since the Inbox was turned on ends its catch-up: what is stored up to it (this run's items too).
+	// Only the terminal page ends the Inbox's catch-up: it must include every page of the original window.
 	caughtUp := false
-	if from := inboxFrom(next); from != nil && (next.InboxCatchup == nil || next.InboxCatchup.Before(*from)) {
-		next.InboxCatchup, caughtUp = &start, true
+	if pl.continuation == nil {
+		if from := inboxFrom(next); from != nil && (next.InboxCatchup == nil || next.InboxCatchup.Before(*from)) {
+			next.InboxCatchup, caughtUp = &start, true
+		}
 	}
 	next = markRows(next, caughtUp, start)
-	n := s.nextRun(next, start, false)
-	next.NextRunAt = &n
-	if !s.commit(ctx, sub, next, &commitData{seen: seen, items: items, baseline: baseline}, &run, start, true) {
+	if pl.continuation != nil {
+		next.NextRunAt = &start // continuation is due now; connector gaps, budgets and backoff still apply
+	} else {
+		n := s.nextRun(next, start, false)
+		next.NextRunAt = &n
+	}
+	if !s.commit(ctx, sub, next, &commitData{seen: seen, items: items, baseline: baselineCommit}, &run, start, true) {
 		return
+	}
+	if pl.continuation != nil {
+		s.poke()
 	}
 	if len(items) > 0 {
 		s.o.Logf("subscription %s: %d new of %d", sub.ID, len(items), run.Count)
@@ -393,15 +422,6 @@ func (s *Service) prune(ctx context.Context, sub Subscription, now time.Time) {
 	if err := s.o.Store.PruneItems(ctx, sub.ID, now.Add(-keep)); err != nil {
 		s.o.Logf("subscription %s: prune its items: %v", sub.ID, err)
 	}
-}
-
-func allUntimed(items []mapped) bool {
-	for _, m := range items {
-		if m.item.Time != nil {
-			return false
-		}
-	}
-	return true
 }
 
 // connFailed counts a failed call against the connector: after connFailsToPause in a row, all its subscriptions wait,
@@ -475,8 +495,8 @@ func (s *Service) commit(ctx context.Context, sub, next Subscription, d *commitD
 			next.Runs = next.Runs[len(next.Runs)-RunsKept:]
 		}
 	}
-	if !on(next) && next.RunState != StateNeedsRecipe {
-		next.NextRunAt = nil // off: run only when asked
+	if !on(next) && next.RunState != StateNeedsRecipe && (next.Continuation == nil || !next.Continuation.Manual) {
+		next.NextRunAt = nil // off: run only when asked, apart from a manual continuation already underway
 	}
 	c := RunCommit{Sub: next, Revision: sub.Revision, Now: now}
 	if d != nil {

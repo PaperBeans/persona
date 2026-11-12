@@ -2983,7 +2983,57 @@ def sorted_todos():
                 t["ask"]["suggestion"] = sg
         if t.get("done_at") is None and t["id"] in TODO_ORPHANED:
             t["orphaned"] = {"reason": TODO_ORPHANED[t["id"]], "since": TODO_ORPHANED_SINCE}
+        review = current_decision_review(t)
+        if review:
+            t["decision_review"] = review
     return out
+
+
+# ---------- a decision row's Later / Don't handle (server/internal/assistant/task_review_dismissals.go) ----------
+DECISION_DISMISSALS = {}  # todo id -> {"review_at", "dismissal_id", "undone"}; reset with the mock hub
+
+
+def current_decision_review(t):
+    """decision_review of GET /todos: only an open task whose latest review and supervision state are needs_user, with the
+    dismissal receipt when that very round was dismissed and not undone."""
+    sup = t.get("supervision") or {}
+    reviews = sup.get("reviews") or []
+    if t.get("done_at") is not None or sup.get("state") != "needs_user" or not reviews or reviews[-1].get("verdict") != "needs_user":
+        return None
+    out = {"review_at": reviews[-1]["at"]}
+    d = DECISION_DISMISSALS.get(t["id"])
+    if d and d["review_at"] == out["review_at"] and not d["undone"]:
+        out["dismissal_id"] = d["dismissal_id"]
+    return out
+
+
+def decision_dismissal_route(h, tid, undo):
+    """POST /api/v1/todos/{id}/decision-dismiss and …/decision-undo-dismiss: {review_at[, dismissal_id]}; 400 for a missing
+    field, 409 when the round is no longer the task's current one (or the receipt is not the live dismissal)."""
+    try:
+        body = json.loads(h.last_body or b"{}")
+    except ValueError:
+        body = {}
+    at, receipt = str(body.get("review_at") or ""), str(body.get("dismissal_id") or "")
+    if not at or (undo and not receipt):
+        h.send_json({"error": "review_at is required (and dismissal_id to undo)", "code": "bad_request"}, 400)
+        return
+    todo = next((t for t in sorted_todos() if t["id"] == tid), None)
+    current = (todo or {}).get("decision_review")
+    if not current or current["review_at"] != at:
+        h.send_json({"error": "the decision changed; reload and look again", "code": "conflict"}, 409)
+        return
+    book = DECISION_DISMISSALS.get(tid)
+    if undo:
+        if not book or book["undone"] or book["dismissal_id"] != receipt or book["review_at"] != at:
+            h.send_json({"error": "the decision changed; reload and look again", "code": "conflict"}, 409)
+            return
+        book["undone"] = True
+        h.send_json({"review_at": at})
+    else:
+        DECISION_DISMISSALS[tid] = {"review_at": at, "dismissal_id": "dsm_" + uuid.uuid4().hex[:8], "undone": False}
+        h.send_json({"review_at": at, "dismissal_id": DECISION_DISMISSALS[tid]["dismissal_id"]})
+    push_todos()
 
 
 def push_todos():
@@ -6630,6 +6680,24 @@ if MOCK_TASKS:
         TODOS_INIT.append(_adopted)
         TODOS.append(copy.deepcopy(_adopted))
         TASK_FEED[ASK1].append(_feed("feed_adopted", 4, "task", "todo_task_adopted", {"wake": "active"}))
+    # MOCK_TASK_DECISION=1: the decision row's review round (the hub's decision_review), so Later / Don't handle have a round
+    # to dismiss; a dismissal belongs to that round and is undone by its receipt.
+    if os.environ.get("MOCK_TASK_DECISION") == "1":
+        for _t in TODOS_INIT + TODOS:
+            if _t["id"] == "todo_task_tests":
+                _sup = _t.setdefault("supervision", {"supervisor": ASK1, "done_when": ["覆盖率到 80%"], "round": 0, "reviews": []})
+                _sup["state"] = "needs_user"
+                _sup["reviews"] = [{"at": ago(minutes=20), "verdict": "needs_user", "round": 0, "checks": [],
+                                    "note": "要你拍板：是否继续更换缓存方案"}]  # i18n-ignore
+    # MOCK_TASKS_STARTING=1: a task whose Agent is not up yet (no agent, no start error: the apps say Starting) and a task
+    # the main chat picked up again after its Agent stopped (hand-off wake "resumed", the web's Resumed card).
+    if os.environ.get("MOCK_TASKS_STARTING") == "1":
+        _starting = _task_todo("todo_task_starting", "检查启动状态", "看看启动流程里哪一步最慢。", "macbook", "", "/Users/me/code/weather", 1, "")
+        _starting["agents"] = []
+        TODOS_INIT.append(_starting)
+        TODOS.append(copy.deepcopy(_starting))
+        TASK_FEED[ASK1].append(_feed("feed_starting", 1, "task", "todo_task_starting", {"wake": "created"}))
+        TASK_FEED[ASK1].append(_feed("feed_resumed", 2, "task", "todo_task_blog", {"wake": "resumed"}))
     # MOCK_TASKS_MESSAGE=filed / sent: the message card's inbox item was handled elsewhere (filed_at, #4797), or its reply
     # went out from the card (sent_at): the apps draw it handled / sent, with no Send.
     _msg = os.environ.get("MOCK_TASKS_MESSAGE", "")
@@ -7108,6 +7176,9 @@ def tasks_area(h, method, p, raw):
         return True
     if method == "POST" and p.startswith("/api/v1/todos/") and p.endswith("/retry"):
         retry_task(h, p.split("/")[4])
+        return True
+    if method == "POST" and p.startswith("/api/v1/todos/") and p.endswith(("/decision-dismiss", "/decision-undo-dismiss")):
+        decision_dismissal_route(h, p.split("/")[4], p.endswith("/decision-undo-dismiss"))
         return True
     if p == "/mock/cut" and os.environ.get("MOCK_TASKS_CUT") == "1":
         SESSIONS[:] = [copy.deepcopy(CUT_SESSION) if x["session_id"] == RELEASE else x for x in SESSIONS]
@@ -21201,7 +21272,7 @@ class H(BaseHTTPRequestHandler):
             INTERACTIONS[:] = [x for x in INTERACTIONS if not x["id"].startswith(("ix_bump_", "ix_churn"))]
             BUMPED["asks"].clear()
             BUMPED.pop("blocked", None)
-            TODOS[:] = copy.deepcopy(TODOS_INIT)
+            TODOS[:] = copy.deepcopy(TODOS_INIT); DECISION_DISMISSALS.clear()
             TODO_DECISIONS[:] = copy.deepcopy(TODO_DECISIONS_INIT)
             again = CODEX_INTERACTIONS + SCREEN_MULTI_INTERACTIONS + ASK_LONG_INTERACTIONS  # the cards back, unanswered
             ids = {x["id"] for x in again}
@@ -24066,6 +24137,7 @@ MOCK_HELP.append("MOCK_INBOX_EXTRA=<n>  收件箱多 n 封知悉即可的示例�
 MOCK_HELP.append("MOCK_CHANNELS=1  设置 › 插件 › 渠道：App、飞书机器人和微信已连接、飞书 /agent 只读、一个待绑定（令牌 example-token）、一个出错、一个在市场里；主对话第一条来自微信")
 MOCK_HELP.append("MOCK_EXCHANGES=1  主对话新布局的素材（#1666）：Persona 发给任务的长消息、任务带链接和证据的长汇报、督办消息")
 MOCK_HELP.append("MOCK_MARKDOWN=1  任务往来和回执里带 **粗体**、`代码`、标题的原话（#2363）：应渲染成 Markdown，不露标记")
+MOCK_HELP.append("MOCK_TASKS_STARTING=1  再加一个 Agent 还没起来的任务「检查启动状态」（Starting）和一张 wake=resumed 的交接卡（#5569）；MOCK_TASK_DECISION=1 的拍板任务带 decision_review，可点 Later / Don't handle（POST /todos/{id}/decision-dismiss、decision-undo-dismiss）")
 MOCK_HELP.append("MOCK_TASK_RENAMED=1  整理发布说明这个任务在回执写好后改了名：回执应显示新名字「写本周发布说明」（#3036）")
 MOCK_HELP.append("MOCK_AUTO_CONVERSATIONS=1  助手对话带来源 origin（feature conversation_origin）：另有 10 段自动对话（收件箱 6、定时任务 2、飞书 /agent、对话派生），侧边栏「最近」和用户自己的一起列、带来源标记，「全部对话」按来源筛（#3264、#5195）")
 MOCK_HELP.append("MOCK_EXTERNAL=1  和 MOCK_AUTO_CONVERSATIONS=1 一起用：飞书 /agent 那段带上请求和上下文，另加一段别的扩展开的（origin extension），两段都是外部的（#3758）")

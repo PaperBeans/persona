@@ -173,7 +173,7 @@ type WorktreeCreateResult struct {
 	Branch            string `json:"branch"`
 }
 
-// WorktreeDeletePreview binds confirmation to a host-owned instance and an opaque, short-lived node token.
+// WorktreeDeletePreview binds confirmation to a host-owned workspace and an opaque, short-lived node token.
 type WorktreeDeletePreview struct {
 	WorkspaceID  string `json:"workspace_id"`
 	Kind         string `json:"kind"`
@@ -184,6 +184,7 @@ type WorktreeDeletePreview struct {
 	Dirty        int    `json:"dirty"`
 	Folder       bool   `json:"folder"`
 	PreviewToken string `json:"preview_token"`
+	CloseOnly    bool   `json:"close_only,omitempty"`
 }
 
 // WorktreeDeleteResult reports completion separately from runtime acceptance or an ambiguous transport outcome.

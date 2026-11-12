@@ -72,7 +72,7 @@ export const HandoffCard = memo(function HandoffCard({ item: feed }: { item: Fee
   if (live && deferred) {
     // Later: one line until it is opened again; the item waits in the Inbox meanwhile
     return (
-      <button type="button" onClick={() => later(feed.id, false)} data-testid="handoff-card" data-state="later" className="flex min-w-0 items-center gap-1.5 self-start rounded-full bg-field px-3 py-1.5 text-[12px] text-ink-2 hover:bg-hover">
+      <button type="button" onClick={() => later(feed.id, false)} data-testid="handoff-card" data-state="later" className="flex min-w-0 items-center gap-1.5 self-start rounded-full bg-field px-3 py-1.5 text-xs text-ink-2 hover:bg-hover">
         <Icon name="inbox" size={12} className="shrink-0" />
         <span className="min-w-0 truncate">{t("assistant-handoffcard.later_line", { title: card.title })}</span>
       </button>
@@ -83,7 +83,7 @@ export const HandoffCard = memo(function HandoffCard({ item: feed }: { item: Fee
   const icon = st.state === "sent" || st.state === "self" ? "check" : resolved ? "archive" : reply ? "pencil" : "flag";
   return (
     <div className="flex flex-col gap-2.5 rounded-card bg-surface p-4 shadow-card" data-testid="handoff-card" data-state={st.state}>
-      <div className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-ink-2">
+      <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-ink-2">
         <Icon name={card.source === "mail" ? "mail" : "inbox"} size={13} className="shrink-0 text-accent" />
         <span className="min-w-0 truncate">{[card.title, sourceName(card)].filter(Boolean).join(" · ")}</span>
         <span className="flex-1" />
@@ -95,12 +95,12 @@ export const HandoffCard = memo(function HandoffCard({ item: feed }: { item: Fee
       </div>
       {card.recap && (
         <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex flex-col gap-0.5 text-left">
-          <span className="text-[12px] font-semibold text-ink-2">{t("assistant-handoffcard.summary")}</span>
-          <span className={cx("whitespace-pre-line text-[14px] [overflow-wrap:anywhere]", !open && "line-clamp-3")}>{card.recap}</span>
+          <span className="text-xs font-semibold text-ink-2">{t("assistant-handoffcard.summary")}</span>
+          <span className={cx("whitespace-pre-line text-sm [overflow-wrap:anywhere]", !open && "line-clamp-3")}>{card.recap}</span>
         </button>
       )}
       <div className={cx("flex flex-col gap-1 rounded-control p-3", tone)}>
-        <span id={headingId} className={cx("flex min-w-0 items-center gap-1 text-[12px] font-semibold", ink)}>
+        <span id={headingId} className={cx("flex min-w-0 items-center gap-1 text-xs font-semibold", ink)}>
           <Icon name={icon} size={12} className="shrink-0" />
           <span className="min-w-0 truncate">{heading}</span>
         </span>
@@ -110,13 +110,13 @@ export const HandoffCard = memo(function HandoffCard({ item: feed }: { item: Fee
             onChange={(e) => setText(e.target.value)}
             aria-labelledby={headingId}
             rows={Math.min(6, Math.max(2, draft.split("\n").length))}
-            className="-mx-1.5 resize-none rounded-control bg-transparent px-1.5 text-[14.5px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="-mx-1.5 resize-none rounded-control bg-transparent px-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent"
           />
         ) : (
-          <div className="whitespace-pre-line text-[14.5px] [overflow-wrap:anywhere]">{st.state === "sent" ? st.text : card.text}</div>
+          <div className="whitespace-pre-line text-sm [overflow-wrap:anywhere]">{st.state === "sent" ? st.text : card.text}</div>
         )}
       </div>
-      {card.note && !resolved && <div className="text-[12px] text-ink-2 [overflow-wrap:anywhere]">{card.note}</div>}
+      {card.note && !resolved && <div className="text-xs text-ink-2 [overflow-wrap:anywhere]">{card.note}</div>}
       {live && (
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button tone="accent" busy={sending} disabled={reply && !draft.trim()} onClick={() => void confirm()} className="min-h-11 flex-1" testId="handoff-card-confirm">
@@ -156,7 +156,7 @@ export const WrapUpChips = memo(function WrapUpChips({ conversation }: { convers
           disabled={busy !== null}
           onClick={() => void wrapUp(it)}
           data-testid="wrap-up-chip"
-          className="inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-full bg-accent-tint px-3 text-[12.5px] font-semibold text-accent hover:brightness-95 disabled:opacity-60"
+          className="inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-full bg-accent-tint px-3 text-xs font-semibold text-accent hover:brightness-95 disabled:opacity-60"
         >
           <Icon name={busy === it.id ? "clock" : "inbox"} size={12} className="shrink-0" />
           <span className="min-w-0 truncate whitespace-nowrap">{t("assistant-handoffcard.wrap_up", { title: it.title })}</span>

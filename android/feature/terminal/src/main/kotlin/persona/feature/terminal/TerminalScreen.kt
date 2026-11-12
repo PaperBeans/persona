@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,7 +65,14 @@ fun TerminalScreen(model: TerminalViewModel, onBack: () -> Unit, sessionTitle: S
  * a chat ([TerminalCover]): no title, and a bar that drags it down, with Close.
  */
 @Composable
-internal fun TerminalPage(model: TerminalViewModel, onBack: () -> Unit, sessionTitle: String, grab: TerminalGrab?) {
+internal fun TerminalPage(
+    model: TerminalViewModel,
+    onBack: () -> Unit,
+    sessionTitle: String,
+    grab: TerminalGrab?,
+    /** Resume in Terminal (#5565): resume once when the not-running state offers it. */
+    resumeOnOpen: Boolean = false,
+) {
     val state by model.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val context = LocalContext.current
@@ -74,6 +82,9 @@ internal fun TerminalPage(model: TerminalViewModel, onBack: () -> Unit, sessionT
     var paste by remember { mutableStateOf<String?>(null) }
     var selecting by remember { mutableStateOf<String?>(null) }
     var display by remember { mutableStateOf(false) }
+    // Keyed by the session and whether this open asked to resume: a rotation after a failed resume keeps the flag and
+    // does not fire again; closing (resumeOnOpen false) or a later Resume in Terminal starts a fresh attempt.
+    var resumedOnOpen by rememberSaveable(model.key.machineId, model.key.sessionId, resumeOnOpen) { mutableStateOf(false) }
     val active = state.driving
     // Keys work whenever the hub is reachable: straight into the stream while driving, through /keys while watching.
     val typing = state.online
@@ -84,6 +95,13 @@ internal fun TerminalPage(model: TerminalViewModel, onBack: () -> Unit, sessionT
     LaunchedEffect(model, feedback, resources) { model.notices.collect { feedback?.notice(resources.getString(it.text)) } }
     LaunchedEffect(model, feedback, resources) {
         model.resumeFailures.collect { feedback?.notice(it ?: resources.getString(R.string.terminal_resume_failed)) }
+    }
+    // Resume in Terminal (#5565): once, the way its Resume Session does, so the progress and the Agent show here.
+    LaunchedEffect(resumeOnOpen, state.resumable, state.resuming) {
+        if (resumeOnOpen && !resumedOnOpen && state.resumable && !state.resuming) {
+            resumedOnOpen = true
+            model.resume()
+        }
     }
     LaunchedEffect(typing) { if (!typing) { keyboard = false; paste = null } }
     DisposableEffect(model) { onDispose { canvas?.keyboard(false) } }
@@ -174,13 +192,21 @@ private fun TerminalNotRunning(resumable: Boolean, resuming: Boolean, onResume: 
  * lives in the page's own store, so the terminal comes back up on its last screen.
  */
 @Composable
-fun TerminalCover(key: SessionKey, open: Boolean, onClose: () -> Unit, transport: TerminalTransport, resumer: TerminalResumer? = null) {
+fun TerminalCover(
+    key: SessionKey,
+    open: Boolean,
+    onClose: () -> Unit,
+    transport: TerminalTransport,
+    resumer: TerminalResumer? = null,
+    /** Resume in Terminal (#5565): resume the stopped Agent as the cover comes up. */
+    resumeOnOpen: Boolean = false,
+) {
     val context = LocalContext.current.applicationContext
     TerminalCoverFrame(open, onClose) { grab ->
         val model = viewModel(key = "terminal-cover:${key.machineId}:${key.sessionId}") {
             TerminalViewModel(key, transport, preferences = SharedTerminalPreferences(context), resumer = resumer)
         }
-        TerminalPage(model, onClose, key.sessionId, grab)
+        TerminalPage(model, onClose, key.sessionId, grab, resumeOnOpen = resumeOnOpen)
     }
 }
 

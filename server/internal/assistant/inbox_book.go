@@ -67,6 +67,9 @@ type inboxBook struct {
 	readErrs     map[string]string
 	mailReadErrs map[string]assistantwire.InboxMailFailed
 	grouping     inboxGrouping // the batches being related to events (inbox_group.go)
+	// mailAsked: when the mail of an open mail item off its account's page was last looked up (inbox_mail_off_page.go),
+	// by item id, under mu: the lookups take the longest unasked first. Memory only.
+	mailAsked map[string]time.Time
 
 	cfgMu sync.Mutex
 	cfg   assistantwire.InboxConfig // the hub's (InboxConfigMethod), as last read

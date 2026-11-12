@@ -152,16 +152,7 @@ func (s *Service) closeDoneTaskAgents(ctx context.Context, refused taskCloseRefu
 		if !reachable[a.machine] {
 			continue
 		}
-		list, ok := lists[a.machine]
-		if !ok {
-			list = map[string]proto.Session{}
-			got, _ := s.sessions(ctx, a.machine) // as the apps get them: the state and the cards waiting count
-			for _, c := range got {
-				list[c.SessionID] = c
-			}
-			lists[a.machine] = list
-		}
-		c, ok := list[a.session]
+		c, ok := s.doneTaskAgentRow(ctx, lists, a)
 		key := [2]string{a.machine, a.session}
 		if !ok || !retirable(c, a.doneAt, now) {
 			continue
@@ -171,6 +162,31 @@ func (s *Service) closeDoneTaskAgents(ctx context.Context, refused taskCloseRefu
 		}
 		s.retireAgent(ctx, refused, "task "+a.todo, a.machine, c, now)
 	}
+}
+
+// doneTaskAgentRow is a's session as the apps get it (the state and the cards waiting count). With the fleet in this
+// process it is the row a's node lists, decorated alone (listedSession): one only the archive keeps is offline, never
+// retirable, so a task done long ago whose agent's session is gone costs a lookup each pass, not its machine's whole
+// list (#3197). Otherwise each machine is listed once a pass, into lists.
+func (s *Service) doneTaskAgentRow(ctx context.Context, lists map[string]map[string]proto.Session, a doneTaskAgent) (proto.Session, bool) {
+	if s.fleetOn() && a.machine != DeviceAll {
+		m, ok := s.fleetMachine(a.machine)
+		if !ok {
+			return proto.Session{}, false // sessions.list: no such machine, no sessions
+		}
+		return s.listedSession(m.ID, a.session)
+	}
+	list, ok := lists[a.machine]
+	if !ok {
+		list = map[string]proto.Session{}
+		got, _ := s.sessions(ctx, a.machine)
+		for _, c := range got {
+			list[c.SessionID] = c
+		}
+		lists[a.machine] = list
+	}
+	c, ok := list[a.session]
+	return c, ok
 }
 
 // retireAgent asks c's node to stop its agent and keep its terminal (session.stop with retire) and remembers a

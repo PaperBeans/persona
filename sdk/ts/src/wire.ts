@@ -3255,13 +3255,19 @@ export interface ConnectorSubscriptionFields {
 
 /**
  * A pull recipe, not a schedule. args is an object (default {}); strings may contain {{since}} or {{since_date}}.
- * items_path defaults to $; fields are relative to one item. Text results require snapshot mode. Runtime
- * argument/schema and mapped-value validation belongs to the subscription runner.
+ * cursor_arg and next_cursor_path opt into cursor pagination; page_arg and optional next_page_path opt into page
+ * pagination (without next_page_path, a full requested page continues). items_path defaults to $; fields are relative
+ * to one item. Text results require snapshot mode. Runtime argument/schema and mapped-value validation belongs to the
+ * subscription runner.
  */
 export interface ConnectorSubscriptionRecipe {
   mode: ConnectorSubscriptionMode;
   tool: string;
   args?: unknown;
+  cursor_arg?: string;
+  next_cursor_path?: string;
+  page_arg?: string;
+  next_page_path?: string;
   items_path?: string;
   fields?: ConnectorSubscriptionFields;
   kind: ConnectorSubscriptionKind;

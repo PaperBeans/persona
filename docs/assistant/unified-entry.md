@@ -166,7 +166,7 @@ rows for `AssistantTrayActivityUITests` on iPhone and Mac. No new endpoint, task
 
 The approved simplified Assistant presentation places a task's **only card in the Progress tray**, not in the conversation.
 Planning, running, blocked progress, PR references and acceptance update that same task row in place. Tapping the row opens
-the existing task details. On iOS and Android the dispatch answer has only a small line naming what it dispatched ("Dispatched: <title> · Open", or each
+the existing task details. On iOS the dispatch answer is one hand-off card per task (`DispatchHandoffCard`, #5569: title, New / Already Active / Resumed, when its Agent last moved and its state, ↗); on Android a small line naming what it dispatched ("Dispatched: <title> · Open", or each
 title when there are several); each opens that task's details, as its tray row does, not the tray (#3700). The web draws a hand-off card
 for each Agent instead, which opens that Agent in the side panel or as its page, as Settings says ("Hand-off cards (web)" below). Historical plan/task/receipt/review/report cards use the same lightweight entry or are omitted from the chat; Android's Glass style draws receipts, reviews, reports, Persona's hand-offs, message cards and the hub's notice lines in the chat as iOS does (`docs/plans/android-ios-alignment/chats.md` C13).
 
@@ -310,7 +310,7 @@ lines, and in the user's own color and alignment they read as something the user
 - What the user sends to a task (its card's Message, or the composer's routing label) has no `from` and keeps the bubble.
 - Older entries: migration `0441_feed_routed_from.sql` marks those Persona wrote before the field existed (see "Chat activity").
   Older apps ignore `from` and keep drawing the bubble.
-- Apple: `AgentSentLine`, `TaskSentList` (`apple/Persona/Views/Assistant/Tasks/SentViews.swift`), the pure rules in
+- Apple: `AgentSentLine` (`apple/Persona/Views/Assistant/Tasks/SentViews.swift`; `TaskSentList` was removed in #5569; iOS no longer applies `takenIn`, so a task's hand-off is drawn in the chat like any other message of Persona's), the pure rules in
   `SentToAgents` (`apple/Shared/Tasks.swift`); web: `web/src/views/assistant/Sent.tsx`, `takenIn` / `sentTo` in `web/src/lib/feed.ts`;
   Android (#1623): `SentLine`, `TaskSentList` in `android/feature/chat/.../AssistantTasks.kt`, the pure rules in `SentToAgents`
   (`android/core/domain/.../tasks/SentToAgents.kt`), the chat page filtering the feed with `SentToAgents.shown`; checked by
@@ -335,19 +335,24 @@ lines, and in the user's own color and alignment they read as something the user
   (dismiss the sheet, switch to Agents, and open this Agent with the normal tab bar).
 - If a task has multiple Agents, add ⌄ beside the title. Tapping the title lists the task's Agents for switching (plus "Session Info"; web does the same, #3333).
 - Without an Agent (starting or failed to start), there is no chat page; the sheet uses its own header: state, task name, ⋯, Close.
-- **What a dispatch opens (#3700, #3711, contract in #3718)**: one dispatched task reads "Dispatched: <title> · Open";
-  several tasks show their count and one link per title in plan order. These links name only that dispatch's tasks,
+- **What a dispatch opens (#3700, #3711, contract in #3718, card since #5569)**: each dispatched task is one hand-off card
+  (iOS `DispatchHandoffCard`, in a `DispatchHandoffCards` list; no "Dispatched N" heading). These cards name only that dispatch's tasks,
   never the whole In Progress tray. The ids are already on the client: a standalone `task` feed item's `ref` is the
-  to-do; a started plan's `tasks[].todo_id` identify its tasks. Live to-do titles override plan titles. Plan tasks
-  without a to-do keep their title without a link, and their per-task feed items do not add duplicate links.
-  Apple renders this with `DispatchedTaskLinks` and `DispatchedTasks`: on iPhone a live lead Agent is pushed using
+  to-do and its `wake` (`created`, `active`, `resumed`) is the badge; a started plan's `tasks[].todo_id` identify its tasks
+  (a plan's tasks are New). Live to-do titles override plan titles. A plan task without a to-do keeps its title as a card
+  with no link, red "Didn't start: <reason>" from the plan task's `error`, and its per-task feed items do not add
+  duplicate cards. The second line is the lead Agent's `activity_at` (else `updated_at`) as a relative time and the
+  task's state (`TaskState`); before there is an Agent it says "Starting the agent", a task closed without one "Closed
+  before an Agent started", a task the list no longer has "This task no longer exists". The web draws one card per Agent
+  (merged within 120 s); iOS one per task, which is its lead Agent.
+  Apple renders this with `DispatchHandoffCards` and `DispatchedTasks`: on iPhone a live lead Agent is pushed using
   `TasksStore.expand`, and Back returns to the same Assistant conversation without switching to Agents. On Mac the
   task's own detail hosts the Agent chat, carrying the resolved `SessionKey` into its initial selection (validated
   against that task's active sessions); while no Agent is available, the detail shows its starting/failure state.
-  A very large text size drops the dispatch prefix before truncating the task name; Open always stays one line.
-  Open plans keep Start / Edit / Don't Start. No new hub field or setting is needed. Dispatch links have no full task
+  The card is one accessibility element and button (`dispatch.task.<todo id>`); the badge never wraps.
+  Open plans keep Start / Edit / Don't Start. No new hub field or setting is needed. A dispatch has no full task
   card instruction list, so Persona's routed hand-offs remain separate folded feed lines instead of being hidden.
-  Tests: `DispatchedTasksTests`, `TaskSheetExpandTests`, `DispatchedTaskCardTests`; synthetic hub:
+  Tests: `DispatchedTasksTests`, `TaskCardsFusionTests`, `TaskSheetExpandTests`, `DispatchedTaskCardTests`; synthetic hub:
   `apple/PersonaUITests/Fixtures/dispatch_hub.py` (`PERSONA_MOCK_HUB`, screenshots with `PERSONA_SHOTS`).
 - On the web, where task details open is the browser's setting (#5424, "Where everything opens" below): the side panel
   (`TaskPanel`, the task's Agent's chat under the task's title, its report and the question it waits on; the default), or

@@ -65,7 +65,7 @@ if strings "$APP/Persona" | grep -qxE '(pairURL|openMachineFiles|showFolderUploa
   echo "DEBUG switches found in the Release binary" >&2; exit 1
 fi
 # Nor the runtime CLI (apple/Persona/Debug/, docs/operations/runtime-cli.md): its switches, its type, the accessibility hook it turns on.
-if strings "$APP/Persona" | grep -qE 'runtimeCLI|RuntimeCLI|showActionTray|_AXSSet(Automation|ReduceMotion)Enabled'; then
+if strings "$APP/Persona" | grep -qE 'runtimeCLI|RuntimeCLI|showActionTray|openNeedsRow|_AXSSet(Automation|ReduceMotion)Enabled'; then
   echo "DEBUG runtime or snapshot switches found in the Release binary" >&2; exit 1
 fi
 

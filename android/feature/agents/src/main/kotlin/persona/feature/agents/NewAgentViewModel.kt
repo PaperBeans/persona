@@ -103,6 +103,9 @@ internal data class NewAgentState(
         else launchers.firstOrNull { it.name == selection.launcher }?.agentType ?: "claude"
     /** The launcher that will run, whose models the "Model" row lists: the one picked, or the configuration's. */
     val modelLauncher: String get() = if (following) configuredLauncher?.name.orEmpty() else selection.launcher
+    /** Older computers still require Codex's first message, including when following model configuration. */
+    val promptRequired: Boolean get() = agentType == "codex" &&
+        launchers.firstOrNull { it.name == modelLauncher }?.promptOptional != true
     /** [modelLauncher]'s models, once there are some to show. */
     val modelList: LauncherModels? get() = models.list?.takeIf {
         it.models.isNotEmpty() && models.machineId == machineId && models.launcher == modelLauncher
@@ -403,7 +406,8 @@ internal class NewAgentViewModel(
         val agentType = current.agentType
         if (previous == null && (current.selection.cwd.isBlank() || (current.selection.launcher.isBlank() && !current.following) ||
                 machines.value.none { it.id == current.machineId && it.online } ||
-                (current.space != null && current.space.machineId != current.machineId))) return
+                (current.space != null && current.space.machineId != current.machineId) ||
+                (current.promptRequired && current.prompt.isBlank()))) return
         mutable.update { it.copy(starting = true, error = null) }
         viewModelScope.launch {
             try {

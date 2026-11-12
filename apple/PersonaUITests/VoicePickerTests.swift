@@ -68,19 +68,14 @@ final class VoicePickerTests: XCTestCase {
         more.tap()
     }
 
-    /// ⋯ opened and its Voice item ready to tap: a call's bar redraws its line as the call goes on, which closes the
-    /// menu, so it opens it again until the item stays.
+    /// ⋯ opened and its Voice item ready to tap. The menu stays open while the call's line changes (#2619), so it is
+    /// opened once.
     @MainActor private func steadyVoiceItem(_ app: XCUIApplication, _ words: String) -> XCUIElement? {
-        for _ in 0..<4 {
-            openMore(app)
-            let item = voiceItem(app, words)
-            if item.waitForExistence(timeout: 3) {
-                Thread.sleep(forTimeInterval: 0.5)
-                if item.exists, item.isHittable { return item }
-            }
-            if voiceItem(app, "音色").exists { closeMenu(app) }
-        }
-        return nil
+        openMore(app)
+        let item = voiceItem(app, words)
+        guard item.waitForExistence(timeout: 5) else { return nil }
+        Thread.sleep(forTimeInterval: 0.5)
+        return item.exists && item.isHittable ? item : nil
     }
 
     /// The voice starts the mock has had so far (each with the voice it asked for).
@@ -159,7 +154,6 @@ final class VoicePickerTests: XCTestCase {
         allowMicrophone()
         let status = element(app, "voice-status")
         XCTAssertTrue(status.waitForExistence(timeout: 30), "no voice bar:\n\(app.debugDescription)")
-        // The script's question holds the bar's line still for a while (the menu closes when the line's layout changes).
         XCTAssertTrue(element(app, "voice-asking").waitForExistence(timeout: 20), "the script never asked")
         let first = starts(hub).count
         let current = try XCTUnwrap(steadyVoiceItem(app, "音色："), "no Voice item:\n\(app.debugDescription)")
@@ -176,6 +170,34 @@ final class VoicePickerTests: XCTestCase {
         XCTAssertFalse(element(app, "voice-ended").exists, "the call ended")
         XCTAssertNotNil(steadyVoiceItem(app, "音色：" + name), "the menu does not name the new voice:\n\(app.debugDescription)")
         closeMenu(app)
+        element(app, "voice-end").tap()
+        app.terminate()
+    }
+
+    /// The call's line changes while ⋯ is open: the menu stays open (#2619). The script's line goes from the question (no
+    /// buttons) to the refused instruction (Clear and Send, Never Mind), and ⋯ moves between the line's layouts as its
+    /// buttons come and go.
+    @MainActor func testTheMenuStaysOpenWhenTheLineChanges() throws {
+        let hub = try hub
+        try mock(hub, voices: "ok")
+        let app = try launch(Self.agent + ["-openVoice", "silent"])
+        allowMicrophone()
+        XCTAssertTrue(element(app, "voice-asking").waitForExistence(timeout: 45), "the script never asked:\n\(app.debugDescription)")
+        openMore(app)
+        XCTAssertTrue(voiceItem(app, "音色").waitForExistence(timeout: 5), "the menu did not open:\n\(app.debugDescription)")
+        shot(app, "menu-line-before")
+        // The line changes under the open menu until the refused instruction offers Clear and Send (24 s into the script).
+        let clear = app.buttons["voice-line-clear"]
+        let deadline = Date.now.addingTimeInterval(40)
+        while Date.now < deadline, !clear.exists { Thread.sleep(forTimeInterval: 0.25) }
+        XCTAssertTrue(clear.exists, "the line never changed")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertTrue(voiceItem(app, "音色").exists, "the menu closed when the line changed:\n\(app.debugDescription)")
+        shot(app, "menu-line-after")
+        closeMenu(app)
+        // The menu is drawn over the line: it must not cover the line's own buttons, and VoiceOver and taps still reach it.
+        XCTAssertTrue(clear.isHittable, "Clear and Send is covered")
+        XCTAssertTrue(app.buttons["voice-more"].isHittable, "⋯ cannot be tapped after the line changed")
         element(app, "voice-end").tap()
         app.terminate()
     }

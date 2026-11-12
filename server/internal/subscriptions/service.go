@@ -181,6 +181,11 @@ func shown(sub Subscription) Subscription {
 
 func on(sub Subscription) bool { return sub.ToInbox || sub.ToKB }
 
+// pullScheduled distinguishes ordinary polling from a finite continuation explicitly started by Run Now while off.
+func pullScheduled(sub Subscription) bool {
+	return on(sub) || sub.Continuation != nil && sub.Continuation.Manual
+}
+
 func floorOf(mode string, sourceMin int) int {
 	f := max(minInterval, sourceMin)
 	if mode == wire.ConnectorSubscriptionModeSnapshot {
@@ -515,7 +520,7 @@ func (s *Service) check(ctx context.Context, c ConnectorInfo, sourceID string, r
 	if sub != nil && sub.SinceAt != nil {
 		since = sub.SinceAt.Add(-overlap)
 	}
-	args, err := fillArgs(t.recipe.Args, vars(since, loc))
+	args, err := fillPullArgs(t.recipe, since, loc, nil)
 	if err == nil {
 		err = checkArgs(tool.InputSchema, args)
 	}
@@ -537,14 +542,14 @@ func (s *Service) check(ctx context.Context, c ConnectorInfo, sourceID string, r
 	if sub != nil {
 		label = sub.Label
 	}
-	pl := pull(ctx, c.Conn, sourceID, t.recipe, since, loc, label)
+	pl := pull(ctx, c.Conn, sourceID, t.recipe, since, s.now(), loc, label, nil, t.tool.InputSchema)
 	dr.Shape, dr.ItemsPath = pl.shape, pl.itemsPath
 	if t.recipe.ItemsPath == "" && t.recipe.Mode != wire.ConnectorSubscriptionModeSnapshot {
 		t.recipe.ItemsPath = pl.itemsPath // saved as found: later runs read the same place
 	}
 	if pl.problem != nil {
 		switch pl.problem.Code {
-		case CodeNoList, CodeTextNeedsSnap:
+		case CodeNoList, CodeTextNeedsSnap, CodePagination:
 			dr.Checks[2].Error = pl.problem
 		case CodeBadArgs:
 			dr.Checks[1].OK, dr.Checks[1].Error = false, pl.problem
@@ -597,7 +602,8 @@ func (s *Service) check(ctx context.Context, c ConnectorInfo, sourceID string, r
 		}
 		dr.Warnings = append(dr.Warnings, emptyFieldWarnings(t.recipe.Fields, pl.items)...)
 		limit := pageLimit(pl.args)
-		dr.MaybeMore = limit > 0 && len(pl.items) >= limit && len(fresh) == len(pl.items)
+		dr.MaybeMore = pl.continuation != nil || !cursorPagination(t.recipe) && !pagePagination(t.recipe) &&
+			limit > 0 && len(pl.items) >= limit && len(fresh) == len(pl.items)
 	}
 	dr.OK = true
 	for _, ch := range dr.Checks {
@@ -708,6 +714,9 @@ func withRecipe(sub Subscription, t target, dr DryRun, origin string, now time.T
 	next.ToolFingerprint, next.WeakDedup, next.Shape = fingerprint(t.tool), dr.WeakDedup, dr.Shape
 	next.SourceMin, next.MaxCallsPerHour = intOr(t.source.MinIntervalSeconds), intOr(t.source.MaxCallsPerHour)
 	next.RunState, next.Error, next.FailCount, next.FailingSince, next.ShapeMisses = StateOK, nil, 0, nil, 0
+	if !SameRecipe(t.recipe, sub.Recipe) {
+		next.Continuation = nil
+	}
 	if t.recipe.Mode != sub.Recipe.Mode {
 		next.SnapshotHash = ""
 		next.IntervalSeconds = defaultIntervalOf(t.recipe.Mode, next.SourceMin)

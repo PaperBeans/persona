@@ -714,3 +714,38 @@ test('an approval card offers 本会话总是同意; always still answers DSH wi
   n.resolve = () => ({ allow: false, always: true })
   assert.equal(await ev.waterfall('approval/request', { agent, toolName: 'bash', callId: 'call_b' }, browser), 'rejected')
 })
+
+test('a session with no open turn and running background commands reports background and done status (#5981)', async (t) => {
+  const { n, ctl, rt } = await setup(t)
+  ctl.add('session-bg', {
+    cwd: '/w/app',
+    running: true, // DSH controller reports running: true because of the background task
+    projections: {
+      kind: 'cached',
+      asOfSeq: 10,
+      values: {
+        title: 'Background job session',
+        turnBoundary: { openTurnStartSeq: null, lastStepBoundary: { kind: 'end' }, lastTurn: 2 },
+        approvalState: { turnOpen: false },
+        contextTimeline: {
+          commands: [
+            { id: 'cmd-bg-1', background: true, status: 'running', command: 'sleep 300', startedAt: 1_700_000_000_000 },
+          ],
+        },
+      },
+    },
+  })
+  rt.start()
+  await n.ready
+  await until('session-bg is listed', () => rowOf(n, 'session-bg'))
+  const row = rowOf(n, 'session-bg')
+  assert.equal(row.status, 'done', 'foreground status should be done when no turn is open')
+  assert.deepEqual(row.background, [{
+    id: 'cmd-bg-1',
+    kind: 'shell',
+    description: 'sleep 300',
+    command: 'sleep 300',
+    started_at: new Date(1_700_000_000_000).toISOString(),
+  }])
+})
+
