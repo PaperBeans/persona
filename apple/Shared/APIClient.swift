@@ -1158,7 +1158,18 @@ nonisolated struct APIClient: Sendable {
     struct QueueResponse: Decodable {
         var queue: [String]
         /// Photos for each returned queue item; a Persona chat includes them so take-back can restore the composer.
+        /// An item without photos is `[]` (the node writes `null` for it, #5858).
         var images: [[ImagePayload]]?
+
+        private enum CodingKeys: String, CodingKey { case queue, images }
+
+        /// A Persona chat's queue with photos on some messages only: the node answers `null` for a message without any,
+        /// and a strict `[[ImagePayload]]` turned the whole take-back into an error although the hub had done it.
+        init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            queue = try c.decode([String].self, forKey: .queue)
+            images = try c.decodeIfPresent([[ImagePayload]?].self, forKey: .images)?.map { $0 ?? [] }
+        }
     }
     /// Pulls the queued input back out of claude and re-queues the indexes in `keep`; returns what was queued.
     func editQueue(_ k: SessionKey, keep: [Int]) async throws -> QueueResponse {

@@ -136,7 +136,7 @@ import SwiftUI
     private func manager(of card: Card, group: String) -> String? {
         switch card {
         case .plan(_, let conversation): feedManager(conversation, group)
-        case .todo(let id): named(id)
+        case .todo(let id, _): named(id)
         case .interaction(_, let manager): manager
         }
     }

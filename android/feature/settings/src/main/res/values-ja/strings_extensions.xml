@@ -11,14 +11,16 @@
     <string name="settings_ext_sandbox_off">サンドボックス未使用</string>
     <string name="settings_ext_sandbox_title">実行の分離</string>
     <string name="settings_ext_sandbox_note">サンドボックスが分離するのは、ハブが実行するインストール済みの拡張機能だけです。有効かどうかは上の実際の状態に従います。変更はハブのマシンか管理画面でのみ行えます。</string>
-    <string name="settings_ext_sandbox_egress">外部通信プロキシ経由：%1$s・%2$s</string>
+    <string name="settings_ext_sandbox_footer">アドレスの許可とサンドボックスの切り替えは管理画面で行います（管理者パスワードが必要です）。</string>
+    <string name="settings_ext_sandbox_network">ネットワーク</string>
     <plurals name="settings_ext_sandbox_allowed">
-        <item quantity="other">許可%d回</item>
+        <item quantity="other">許可 %d</item>
     </plurals>
-    <plurals name="settings_ext_sandbox_denied">
-        <item quantity="other">拒否%d回</item>
+    <plurals name="settings_ext_sandbox_blocked">
+        <item quantity="other">ブロック %d</item>
     </plurals>
-    <string name="settings_ext_sandbox_last_denied">最後の拒否：%1$s</string>
+    <string name="settings_ext_sandbox_blocked_sentence">%1$sが%2$sに接続しようとしましたが、申請したアドレスに含まれていないためブロックされました。</string>
+    <string name="settings_ext_sandbox_go_admin">管理画面で許可</string>
     <string name="settings_ext_depends">依存関係</string>
     <string name="settings_ext_pack_members">パックのメンバー</string>
     <string name="settings_ext_pack_note">インストール済みでバージョンが足りているメンバーは再インストールしません。以下は今回一緒にインストールまたはアップグレードする拡張機能です。</string>

@@ -120,8 +120,9 @@ export function AcceptRow({ row, stacked = false, admission, onBusyChange, block
     );
   };
   return (
-    <div className={stacked ? "flex flex-wrap items-center gap-x-3 gap-y-2 py-1.5" : "flex items-center gap-3 py-1.5"} data-brief-row="accept">
-      <div className={stacked ? "w-full min-w-0" : "min-w-0 flex-1"}>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-1.5" data-brief-row="accept">
+      {/* the text keeps at least 12rem: on a phone the buttons drop under it instead of squeezing it to a few characters */}
+      <div className={stacked ? "w-full min-w-0" : "min-w-[12rem] flex-1"}>
         <div className="text-[13.5px] font-medium [overflow-wrap:anywhere]">{row.title}</div>
         {row.verdict && (
           <div className="text-[12.5px] [overflow-wrap:anywhere]" data-brief-verdict={row.outcome ?? "deployed"}>

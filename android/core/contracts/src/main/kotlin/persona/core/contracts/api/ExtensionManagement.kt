@@ -47,6 +47,9 @@ interface ExtensionManagement : ExtensionUi, ExtensionMarkets {
     /** `GET /api/v1/extensions/{id}/-/`. */
     suspend fun extension(id: String): ExtensionDetail
 
+    /** The paired hub's network settings for this extension; null until its browser address is known. */
+    fun adminNetworkUrl(id: String): String? = null
+
     /**
      * `PUT /api/v1/extensions/{id}/-/enabled`. Switching off one others depend on is a [ExtensionHasDependents] unless
      * [cascade], which switches them off too.

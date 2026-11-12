@@ -771,9 +771,19 @@ path with a slash, that folder alone, read from the assistant's computer: folder
 the word first, hidden ones only after a typed dot. A picked folder stays typed with its slash and the list browses it;
 a picked file types `@path `; a picked session waits over the composer as a chat's quote card and goes in front of the
 first message as a `<persona-context>` tag. While the list is open, what needs the user over the composer steps aside
-(iOS `MentionMenuOpen`): above the keyboard the lines, the list and the composer don't fit together. Same rows and words
+(iOS `MentionMenuOpen`): above the keyboard the lines, the list and the composer don't fit together. They fade and fold
+away as the list comes in and back as it goes, in the state motion (`Tokens.Motion.State`; iOS `withAnimation(Theme.Motion.standard)`;
+Android `NeedsStepAside`, the list growing in with the same spring on Glass), and the dock keeps the page's own backdrop
+meanwhile, so the things to ask fade out above it instead of being cut at the composer. Same rows and words
 as a chat's @ list ("Reading folder…", "Nothing matches in this folder" while browsing); every style draws it in its own
 list, since it is behaviour.
+
+A chat's @ list (iOS `ComposerMentionMenu` with `MentionSource(machine:cwd:files:)`, Android `mentionRows`; #4339 C16) reads
+its session's computer: after the files its tools used it lists the session folder's own entries (folders first, then files,
+hidden ones only after a typed dot, at most twelve, none a used file already is; "Folder" for a folder and "Session folder"
+for a file beside the name), then the other sessions; a word with a slash lists that folder alone, relative to the session's,
+and a picked folder keeps the list browsing it. The + menu has the same list's first step, "Mention a file or session", in
+every composer that has an @ list: it types the `@` at the caret, as the @ button beside + does.
 
 Agent header permission mode (#3719, `HeaderModeButton` in `apple/Persona/Views/Chat/SessionModes.swift`): an icon-only
 capsule at the trailing end of the open Agents header's second row, under `⋯`, as tall as the tabs, with a 44 pt target that

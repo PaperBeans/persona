@@ -20,6 +20,8 @@
     </plurals>
     <string name="chat_mention">引用文件或会话</string>
     <string name="chat_mention_used_file">本会话用过的文件</string>
+    <string name="chat_mention_folder">文件夹</string>
+    <string name="chat_mention_session_folder">会话目录</string>
     <string name="chat_mention_session_detail">%1$s · 作为上下文</string>
     <string name="chat_mention_no_match">没有对得上的文件或会话</string>
     <string name="chat_mention_reading_folder">正在读取文件夹…</string>
