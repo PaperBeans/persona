@@ -11,9 +11,13 @@ hub shows the computer online only after `node.info`. Per-`Node` caches (`sync.O
 connection: anything slow a handshake needs must be cached per process, or not be on the handshake at all.
 
 On Apple silicon the IORegistry's `product` entry has the same name in about 20 ms (`ioreg -p IODeviceTree -rd1 -n
-product`); system_profiler remains for Intel Macs, run once per process in the background, and a read waits only a
-second for it. Its output, like ioreg's, holds serial numbers: read only the one line. Tests fake both commands
-(`newModelLookup` takes the runner) and use `synctest`; a node-level test puts hanging fakes first on `PATH`.
+product`); system_profiler remains for Intel Macs, run in the background, and a read waits only a second for it.
+A per-process cache must not also keep a failure: the first version cached an empty result with `sync.Once`, so one
+system_profiler that failed or was cut off (a machine busy right after login) left the identifier until the node
+restarted, where the per-connection read had at least tried again. Keep only a found name; let a later read retry an
+empty one after a backoff (five minutes), so a Mac where it always fails does not run it on every connection. Its
+output, like ioreg's, holds serial numbers: read only the one line. Tests fake both commands (`newModelLookup` takes
+the runner) and use `synctest`; a node-level test puts hanging fakes first on `PATH`.
 
 ## An update waits only for what its restart interrupts (2026-11-13, #6364)
 

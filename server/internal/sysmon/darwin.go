@@ -62,52 +62,80 @@ func runCommand(ctx context.Context, name string, args ...string) ([]byte, error
 }
 
 const (
-	// modelWait is how long after the lookup starts ReadSystem waits for the model name; after it, the identifier
+	// modelWait is how long after a lookup starts ReadSystem waits for the model name; after it, the identifier
 	// stands in.
 	modelWait = time.Second
+	// modelRetry is how long after a lookup ended without a name the next read may start another: a system_profiler
+	// that failed or was cut off once (a machine still busy after login) is asked again on a later connection, but
+	// a Mac where it always fails runs it at most once per modelRetry, not on every connection.
+	modelRetry = 5 * time.Minute
 	// ioregTimeout and profilerTimeout bound the two commands. system_profiler can sit for over 10 s on its
 	// Activation Lock check (#6028), past the 10 s that once cut it off just before it answered.
 	ioregTimeout    = 5 * time.Second
 	profilerTimeout = time.Minute
 )
 
-// modelLookup finds the Mac's model name ("MacBook Pro", "Mac Studio") once, in the background, so no caller waits on
-// system_profiler past modelWait from the first read.
+// modelLookup finds the Mac's model name ("MacBook Pro", "Mac Studio") in the background, so no caller waits on
+// system_profiler past modelWait from the start of a lookup. A name, once found, is kept for the process; a lookup
+// that ends without one is tried again by a read modelRetry after it ended. Concurrent reads share the lookup in
+// flight.
 type modelLookup struct {
-	run   func(ctx context.Context, name string, args ...string) ([]byte, error)
-	once  sync.Once
-	until time.Time // the first read's start + modelWait
-	done  chan struct{}
-	name  string // set before done closes
+	run func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+	mu   sync.Mutex
+	name string        // the name found; set once, never cleared
+	cur  *modelAttempt // the lookup in flight, or the last one, which ended without a name
+}
+
+// modelAttempt is one run of find.
+type modelAttempt struct {
+	until time.Time     // its start + modelWait
+	done  chan struct{} // closed when find returned
+	ended time.Time     // set under modelLookup.mu before done closes; zero while it runs
 }
 
 func newModelLookup(run func(ctx context.Context, name string, args ...string) ([]byte, error)) *modelLookup {
-	return &modelLookup{run: run, done: make(chan struct{})}
+	return &modelLookup{run: run}
 }
 
-// get starts the lookup on the first call and returns the name once it is known. While it is not, it waits until
-// modelWait has passed since the first call (or ctx ends), then returns "", as it does when there is no name.
+// get returns the name once it is known. Otherwise it starts a lookup when none ran yet, or when the last one ended
+// without a name modelRetry ago or more, and waits for the current lookup until modelWait has passed since that
+// lookup started (or ctx ends); it then returns "", as it does when there is no name.
 func (l *modelLookup) get(ctx context.Context) string {
-	l.once.Do(func() {
-		l.until = time.Now().Add(modelWait)
-		go func() {
-			defer close(l.done)
-			l.name = l.find()
-		}()
-	})
-	t := time.NewTimer(time.Until(l.until))
+	l.mu.Lock()
+	if l.name != "" {
+		defer l.mu.Unlock()
+		return l.name
+	}
+	a := l.cur
+	if a == nil || (!a.ended.IsZero() && time.Since(a.ended) >= modelRetry) {
+		a = &modelAttempt{until: time.Now().Add(modelWait), done: make(chan struct{})}
+		l.cur = a
+		go l.lookup(a)
+	}
+	l.mu.Unlock()
+
+	t := time.NewTimer(time.Until(a.until))
 	defer t.Stop()
 	select {
-	case <-l.done:
+	case <-a.done:
 	case <-t.C:
 	case <-ctx.Done():
 	}
-	select {
-	case <-l.done:
-		return l.name
-	default:
-		return ""
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.name
+}
+
+func (l *modelLookup) lookup(a *modelAttempt) {
+	name := l.find()
+	l.mu.Lock()
+	if name != "" {
+		l.name = name
 	}
+	a.ended = time.Now()
+	l.mu.Unlock()
+	close(a.done)
 }
 
 // find asks the IORegistry first: on Apple silicon its product entry has the name (about 20 ms). Intel Macs have no
