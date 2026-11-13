@@ -1,10 +1,11 @@
 #if os(iOS)
 import SwiftUI
 
-/// Forward To (#3807, docs/apple/ios.md "Forwarding a message"): Share as Image at the top, then the message, Persona and
-/// New Agent, the recent targets, and each computer's Agents, with search. A tap reads the whole message when the chat
-/// holds it cut, then leaves the rest to the chat (`ForwardOutcome`): the target's chat opens with the forward over its
-/// box. The lists come from the sessions the app already has, read once as the sheet opens.
+/// Forward To (#3807, docs/apple/ios.md "Forwarding a message"): Share as Image and Select Messages… (#3838) at the top,
+/// then the message (or the messages), Persona and New Agent, the recent targets, and each computer's Agents, with
+/// search. A tap reads the whole of a message the chat holds cut, then leaves the rest to the chat (`ForwardOutcome`):
+/// the target's chat opens with the forward over its box. The lists come from the sessions the app already has, read
+/// once as the sheet opens.
 struct ForwardSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -39,16 +40,26 @@ struct ForwardSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Button {
-                        picked(.share(draft.share))
-                        dismiss()
-                    } label: {
-                        Label("Share as Image…", systemImage: Theme.Icon.share).lineLimit(1)
+                    if let share = draft.share {
+                        Button {
+                            picked(.share(share))
+                            dismiss()
+                        } label: {
+                            Label("Share as Image…", systemImage: Theme.Icon.share).lineLimit(1)
+                        }
+                        .accessibilityIdentifier("forward.shareImage")
                     }
-                    .accessibilityIdentifier("forward.shareImage")
-                    let p = draft.preview
-                    QuoteCard(heading: p.quoteHeading, icon: Theme.Icon.forwardMessage, meta: ForwardMessage.meta(p),
-                              summary: p.forwardSummary, lines: 2, tint: Theme.accent, ink: .secondary) {}
+                    // More of the chat's messages (#3838): the chat starts selecting with this one picked.
+                    if draft.selects {
+                        Button {
+                            picked(.select(draft.source.item))
+                            dismiss()
+                        } label: {
+                            Label("Select Messages…", systemImage: Theme.Icon.pickMessages).lineLimit(1)
+                        }
+                        .accessibilityIdentifier("forward.selectMessages")
+                    }
+                    preview
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("forward.preview")
                 }
@@ -144,6 +155,18 @@ struct ForwardSheet: View {
         .accessibilityIdentifier("forward.session." + s.sessionID)
     }
 
+    /// What goes: one message's card, or several's heading and a line each.
+    @ViewBuilder private var preview: some View {
+        let refs = draft.previews
+        if refs.count == 1, let p = refs.first {
+            QuoteCard(heading: p.quoteHeading, icon: Theme.Icon.forwardMessage, meta: ForwardMessage.meta(p),
+                      summary: p.forwardSummary, lines: 2, tint: Theme.accent, ink: .secondary) {}
+        } else {
+            QuoteCard(heading: ForwardMessage.groupHeading(refs), icon: Theme.Icon.forwardMessage, meta: refs.first?.extra?["machine"],
+                      summary: refs.map(ForwardMessage.line).joined(separator: "\n"), lines: 3, tint: Theme.accent, ink: .secondary) {}
+        }
+    }
+
     /// Reads the whole message (and its pictures), then hands it to the chat and goes.
     private func pick(_ target: ForwardTarget) {
         guard busy == nil else { return }
@@ -154,7 +177,7 @@ struct ForwardSheet: View {
                 let done = try await draft.complete()
                 guard !Task.isCancelled else { return }
                 Haptics.tap()
-                picked(target == .newAgent ? .newAgent(done.ref, done.images) : .target(done.ref, done.images, target))
+                picked(target == .newAgent ? .newAgent(done.refs, done.images) : .target(done.refs, done.images, target))
                 dismiss()
             } catch {
                 guard !Task.isCancelled else { return }

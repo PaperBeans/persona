@@ -86,6 +86,7 @@ func DrawGraph(ctx context.Context, svc Service, env Env) (Graph, error) {
 	if err != nil {
 		return Graph{}, err
 	}
+	subs = ownRows(subs) // a built-in's default subscription is its built-in (#6345)
 	g := Graph{Extensions: []GraphExtension{}, Reads: []GraphRead{}, Sources: []GraphSource{}}
 	exts := map[string]*GraphExtension{}
 	reads := map[string]bool{}
@@ -145,9 +146,13 @@ func DrawGraph(ctx context.Context, svc Service, env Env) (Graph, error) {
 		}
 		r := p.builtinRow(b, subs)
 		e := ext(b.Extension, b.ID)
+		how := GraphRead{ID: "d." + e, Extension: e, Title: p.t("graph.direct"), Direct: true}
+		if b.Via != nil && b.Via.On { // read through its default subscription now (#6345)
+			how = GraphRead{ID: "v." + e, Extension: e, Title: p.t("graph.via")}
+		}
 		src := GraphSource{ID: r.Key, Kind: "builtin", Name: b.Name, Icon: r.Icon, Color: r.IconColor, Line: r.Subtitle, Badge: r.Badge,
 			Reading: p.builtinTrouble(b) == "", To: to, State: state{P: pageBuiltin, C: b.ID}.String(),
-			Read: read(GraphRead{ID: "d." + e, Extension: e, Title: p.t("graph.direct"), Direct: true})}
+			Read: read(how)}
 		for _, d := range p.duplicates(b.ID, subs) {
 			src.Duplicates = append(src.Duplicates, "s."+d.ID)
 		}

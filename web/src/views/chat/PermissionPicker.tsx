@@ -4,8 +4,9 @@
 // Full access shown disabled with its reason where the agent can't take it) without Plan mode, which is the + panel's
 // check row (`usePlanMode`); each mode's description is its row's tooltip. A Persona conversation keeps all its modes
 // (#2416) in the same words.
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
-import { leavePlanTo, modeConfirmation, modeMenuItems, pickerIcon } from "../../lib/header-mode";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { bypassNote, leavePlanTo, modeConfirmation, modeMenuItems, pickerIcon } from "../../lib/header-mode";
+import { onPermissionPicker } from "../../lib/permissions-command";
 import { BYPASS_MODE, BYPASS_WARNING, modeTitle, PERMISSION_MODES } from "../../lib/session-actions";
 import type { Session } from "../../lib/types";
 import { cx, Menu, useMenu } from "../../ui/atoms";
@@ -25,14 +26,17 @@ function modeTip(mode: string | undefined): string {
 
 /** The picker's rows: the header's, Plan mode left to the + panel, each with its symbol and its description on hover. A
  *  disabled row keeps its reason under its name (a disabled row shows no tooltip), and so does a row asking again. */
-export function pickerItems(s: Session, pick: (mode: string) => void, assistant?: boolean): MenuItem[] {
+/** `all` (the menu `/permissions` opens, #6476): Plan mode stays in it. Full access keeps its words under its name where
+ *  it does not take effect at once (`bypassNote`: a restart, the next message). */
+export function pickerItems(s: Session, pick: (mode: string) => void, assistant?: boolean, all?: boolean): MenuItem[] {
+  const later = bypassNote(s, assistant);
   return modeMenuItems(s, pick, { assistant })
-    .filter((r) => r.key !== PLAN)
+    .filter((r) => all || r.key !== PLAN)
     .map((r) => ({
       ...r,
       icon: pickerIcon(r.key),
-      ...(r.disabled ? {} : { detail: undefined, tip: r.detail }),
-      danger: r.danger || (r.key === BYPASS_MODE && r.checked),
+      ...(r.disabled || (r.key === BYPASS_MODE && later) ? {} : { detail: undefined, tip: r.detail }),
+      danger: r.danger || (r.key === BYPASS_MODE && (r.checked || s.bypass_pending)),
     }));
 }
 
@@ -41,9 +45,21 @@ export const PermissionPicker = memo(function PermissionPicker({ session, assist
   const { set } = useModeSet(session);
   const mode = session.permission_mode;
   const danger = mode === BYPASS_MODE;
+  // `/permissions` opens the menu with every mode, Plan mode included (#6476); the chip's own click without it
+  const [all, setAll] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const openAt = useRef(menu.openAt);
+  openAt.current = menu.openAt;
+  const key = `${session.machine_id}/${session.session_id}`;
+  useEffect(() => onPermissionPicker(key, () => {
+    setAll(true);
+    openAt.current(button.current);
+  }), [key]);
   // A mode not known yet (Claude Code's before its first prompt, which can still be changed) is named by no value: just
   // "Permission mode", as on iOS (#5756, #5596), never a mode the agent may not have.
   const label = mode ? modeTitle(mode) : t("chat-sessiondialogs.permission_mode");
+  // a restart into Full access waits for the turn to end: the chip says so on hover, the mode shown is the one it runs in
+  const tip = session.bypass_pending ? bypassNote(session, assistant) : modeTip(mode);
   return (
     <>
       <button
@@ -53,10 +69,15 @@ export const PermissionPicker = memo(function PermissionPicker({ session, assist
         aria-haspopup="menu"
         aria-expanded={Boolean(menu.anchor)}
         aria-label={mode ? t("chat-sessiondialogs.header_mode", { mode: label }) : label}
-        title={modeTip(mode) || undefined}
+        title={tip || undefined}
         // the caret stays in the message box (Tab still reaches the chip)
         onMouseDown={(e) => e.preventDefault()}
-        onClick={menu.open}
+        ref={button}
+        data-pending={session.bypass_pending ? BYPASS_MODE : undefined}
+        onClick={(e) => {
+          setAll(false);
+          menu.open(e);
+        }}
         className={cx(
           // as the model pill: no frame at rest, the capsule on hover and while the menu is open
           "touch-hit flex h-[30px] min-w-0 max-w-full shrink items-center gap-1 rounded-full border border-transparent px-2.5 text-[13px] leading-none whitespace-nowrap transition-colors duration-150",
@@ -70,7 +91,7 @@ export const PermissionPicker = memo(function PermissionPicker({ session, assist
         <span className="min-w-0 truncate @max-[300px]/composer:hidden">{label}</span>
         <Icon name="chevron" size={14} stroke={2} className="shrink-0 @max-[300px]/composer:hidden" />
       </button>
-      {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} side="top" width={300} items={pickerItems(session, (m) => void set({ permission_mode: m }), assistant)} />}
+      {menu.anchor && <Menu anchor={menu.anchor} onClose={menu.close} side="top" width={300} items={pickerItems(session, (m) => void set({ permission_mode: m }), assistant, all)} />}
     </>
   );
 });

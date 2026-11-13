@@ -93,6 +93,13 @@ final class RecordingCapture {
     /// A meeting Persona attends with the live view (#3862 phase 2): 15-second segments, in front and behind
     /// (`setShortSegments`). Off for every other recording.
     @ObservationIgnored private(set) var shortSegments = false
+    /// A room meeting (#3862 phase 4): the recorder's engine carries the player of a meeting call (`callPlayer`).
+    @ObservationIgnored private(set) var meetingCall = false
+    /// The input runs with the system's echo cancellation: asked for as a room meeting that starts taking part starts,
+    /// never switched while it records (`start.echo_cancellation` of its call says so).
+    @ObservationIgnored private(set) var cancelsEcho = false
+    /// Who hears the converted audio besides the files (`listen`).
+    @ObservationIgnored private var listener: (@Sendable (AVAudioPCMBuffer, Double) -> Void)?
     @ObservationIgnored private var writer: RecordingSegmentWriter?
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -254,11 +261,15 @@ final class RecordingCapture {
     /// `title` / `meeting`: what the recording is called and, for a meeting recording, its meeting (docs/apple/recording.md).
     /// `playsAloud`: Persona takes part in this meeting and may answer out loud. `shortSegments`: Persona attends this
     /// meeting with the live view (#3862 phase 2), so its segments are 15 seconds from the first (`setShortSegments`).
+    /// `meetingCall`: a room meeting (#3862 phase 4), whose engine carries a meeting call's player; `echoCancellation`:
+    /// it starts taking part, so its input asks for voice processing from the start (iPhone only; never the simulator,
+    /// where it does not run).
     /// `day`: all-day recording — goes on in the open day recording whose day is still on, or starts today's (saved
     /// before the microphone opens); the consent is the phone's and the notification permission the caller's to have
     /// asked for.
     func start(locale: String = "zh-CN", input: RecordingInput = .phone, title: String = "", meeting: RecordingMeeting? = nil, rolling: Bool = false,
-               playsAloud: Bool = false, shortSegments: Bool = false, day: Bool = false) async {
+               playsAloud: Bool = false, shortSegments: Bool = false, meetingCall: Bool = false, echoCancellation: Bool = false,
+               day: Bool = false) async {
         guard state == .idle else { return }
         generation = UUID(); let token = generation
         // One mode at a time: an all-day recording is never also a rolling one.
@@ -267,6 +278,8 @@ final class RecordingCapture {
         self.input = input
         self.playsAloud = playsAloud
         self.shortSegments = shortSegments && !day
+        self.meetingCall = meetingCall && !day && !rolling
+        cancelsEcho = false
         let allowed = await Self.permission()
         guard generation == token, state == .starting else { return }
         guard allowed else { failStarting(String(localized: "Allow Persona to use the microphone in Settings")); return }
@@ -291,12 +304,20 @@ final class RecordingCapture {
             }
             recordingID = entry.id
             let writer = makeWriter(for: entry)
+            #if os(iOS)
+            if self.meetingCall {
+                writer.callPlayerFormat = Self.callFormat
+                writer.voiceProcessing = echoCancellation
+            }
+            #endif
+            writer.listener = listener
             connect(writer)
             // Before the first buffer, so a start a moment before midnight still cuts on the exact sample.
             if day { planBoundary(for: entry.id, writer: writer) }
             let opening = Date.now
             try writer.start()
             self.writer = writer
+            cancelsEcho = writer.cancelsEcho
             elapsed = 0; state = .recording
             if day { beganDay(entry.id, at: opening) }
             startTicker()
@@ -327,6 +348,69 @@ final class RecordingCapture {
         writer.segmentLength = entry.isDay ? Self.dayChunkLength(reachable: linkReachable) : Self.segmentLength(short: shortSegments)
         return writer
     }
+
+    /// The format of a meeting call's player (`callPlayer`): mono float at the rate the voice extensions speak at; a call
+    /// at another rate is resampled on its way in.
+    nonisolated static let callFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)!
+
+    /// The meeting call's player on the recorder's engine (#3862 phase 4): nil without one (not a room meeting, the watch,
+    /// a made-up recording).
+    var callPlayer: AVAudioPlayerNode? { writer?.callPlayer }
+
+    /// The player of Persona's other spoken answers on the recorder's engine, beside the call's (`MeetingVoicePlayer`), so
+    /// voice processing takes them out of the microphone too and doesn't duck them; nil where there is no call player.
+    var answerPlayer: AVAudioPlayerNode? { writer?.answerPlayer }
+
+    /// Whether the engine runs now: a paused recording's player stops with it.
+    var engineRunning: Bool { writer?.isRunning == true }
+
+    /// Whether a notification's object (`.AVAudioEngineConfigurationChange`) is the recorder's own engine.
+    func ownsEngine(_ object: ObjectIdentifier?) -> Bool { writer?.owns(object) == true }
+
+    /// `sink` hears every buffer of the recording's audio as it is converted (16 kHz mono float), on the audio thread,
+    /// besides the files, with where its first sample lies (seconds, on `listenPosition`'s clock): a meeting call's Talk
+    /// spans and the talk window's silence (#3862 phase 4). One listener; nil stops it. It stays for the next recording
+    /// until it is taken away.
+    func listen(_ sink: (@Sendable (AVAudioPCMBuffer, Double) -> Void)?) {
+        listener = sink
+        writer?.listener = sink
+    }
+
+    /// Where what the microphone takes at this moment will lie, on the clock of the listener's positions (`listen`): the
+    /// recording's timeline plus what the tap's next buffer has gathered so far (`RecordingSegmentWriter.elapsedNow`).
+    /// Talk's press and release, each placed to its safe side, so a buffer's samples from before the press or after the
+    /// release stay out of the span (#3862 phase 4).
+    func listenPosition(_ edge: RecordingSegmentWriter.SpanEdge) -> Double {
+        #if DEBUG
+        if writer == nil, recordingID != nil {
+            return RecordingSegmentWriter.placed(edge, base: sampleFed, since: Date.now.timeIntervalSince(sampleFedAt),
+                                                 longestBuffer: Self.sampleBuffer)
+        }
+        #endif
+        return writer?.elapsedNow(edge) ?? timeline
+    }
+
+    #if DEBUG
+    /// The made-up audio handed to the listener so far (`feedSample`), seconds, and when the newest of it came: its
+    /// positions, which a made-up recording's clock (it stands still) can't give.
+    @ObservationIgnored private var sampleFed: Double = 0
+    @ObservationIgnored private var sampleFedAt = Date.distantPast
+    /// The made-up audio comes 100 ms at a time (`RecordingSamples.startTalkAudio`).
+    private static let sampleBuffer: Double = 0.1
+
+    /// A made-up recording's audio (`-showMeetingSample room-…`): canned PCM handed to the listener as the tap would,
+    /// so Talk works with no microphone.
+    func feedSample(_ buffer: AVAudioPCMBuffer) {
+        guard isSample, state == .recording else { return }
+        let at = sampleFed
+        sampleFed += Double(buffer.frameLength) / buffer.format.sampleRate
+        sampleFedAt = .now
+        listener?(buffer, at)
+    }
+
+    /// A made-up recording is being recorded (`showSample`): no microphone, no files.
+    var isSample: Bool { writer == nil && recordingID != nil }
+    #endif
 
     /// A start that never reached the microphone.
     private func failStarting(_ message: String) {
@@ -394,11 +478,16 @@ final class RecordingCapture {
     }
 
     /// Closes the segment being written and goes on in a new one, so what was just said is transcribed now rather than
-    /// at the segment's end (#2981: asking Persona about it).
+    /// at the segment's end (#2981: asking Persona about it). Paused too (`cutsOnFlush`): a Talk span the pause closed is
+    /// asked with what was said in it (#3862 phase 4), and the pause's own segment would wait for the Continue.
     func flushSegment() {
-        guard state == .recording, let writer, writer.cut() != nil else { return }
+        guard Self.cutsOnFlush(state), let writer, writer.cut() != nil else { return }
         applyWriterEvents()
     }
+
+    /// Whether `flushSegment` cuts in `state`: while recording, and while paused (the writer has stopped taking audio, and
+    /// what it wrote before the pause is all in the open segment, as an interruption's cut has it).
+    static func cutsOnFlush(_ state: State) -> Bool { state == .recording || state == .paused }
 
     /// A bookmark. In all-day recording it is a `mark` event on the wall clock; otherwise on the timeline.
     func addMark() {
@@ -486,7 +575,7 @@ final class RecordingCapture {
             }
         }
         self.writer = nil; recordingID = nil; state = .idle; interrupted = false; notice = nil; rolling = false; playsAloud = false
-        shortSegments = false
+        shortSegments = false; meetingCall = false; cancelsEcho = false
         allDay = false; dayPlan = nil
         forgetDayPlans()
         releaseAudioSession()

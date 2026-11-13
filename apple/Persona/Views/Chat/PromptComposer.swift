@@ -152,15 +152,14 @@ struct PromptComposer: View {
     private func toggleDictation() {
         if dictation.isListening { stopDictation(); return }
         let base = text.isEmpty || text.last?.isWhitespace == true ? text : text + " "
-        Task {
-            if let problem = await dictation.start(hints: [text], update: { heard in text = base + heard }) {
-                AppModel.shared.toast = Toast(problem, style: .error)
-            }
+        dictation.start(hints: [text], update: { heard in text = base + heard }) { problem in
+            AppModel.shared.toast = Toast(problem, style: .error)
         }
     }
     #endif
 
-    private func stopDictation() { if dictation.isListening { dictation.stop() } }
+    /// Ends dictation, and a start still asking for permission with it (#3407).
+    private func stopDictation() { dictation.stop() }
 
     /// The keyboard's composition confirmed into the draft before it goes (`TypedText`, #2203).
     private func commitTyped() {
@@ -329,6 +328,17 @@ final class Dictation {
     @ObservationIgnored private var update: ((String) -> Void)?
     @ObservationIgnored private let microphoneOwner = UUID()
     @ObservationIgnored private var listeningRun = UUID()
+    /// The newest start's turn, taken when it was asked for: a start whose turn has passed (a newer start, or `stop()`,
+    /// while it waited for permission) ends without listening (#3407).
+    @ObservationIgnored private var startTurn = UUID()
+    /// Stands in for asking the person for the microphone and speech recognition (tests hold a start inside that wait);
+    /// nil asks the system.
+    @ObservationIgnored var permission: (() async -> Bool)?
+    #if DEBUG
+    /// `-showDictationSample "<words>"`: hears these words, one every beat, instead of the microphone (simulators
+    /// may have none), for screenshots and recordings of the composer's mic. Without `permission` nothing is asked.
+    @ObservationIgnored var sample = UserDefaults.standard.string(forKey: "showDictationSample")
+    #endif
 
     /// A recognizer for the language the owner speaks (`DictationLanguage`): their choice, else the language of `hints`
     /// (the draft and their recent messages in this chat), else the last sure choice, else the interface language.
@@ -349,19 +359,37 @@ final class Dictation {
     private static let log = Logger(subsystem: "persona", category: "dictation")
 
     /// Starts listening; `update` gets the whole transcript so far. `hints` are what tells the language spoken: the
-    /// draft, then the owner's recent messages in this chat, newest first. Returns what went wrong, if it could not start.
-    func start(hints: [String] = [], update: @escaping (String) -> Void) async -> String? {
-        #if DEBUG
-        // `-showDictationSample "<words>"`: hears these words, one every beat, instead of the microphone (simulators
-        // may have none), for screenshots and recordings of the composer's mic.
-        if let sample = UserDefaults.standard.string(forKey: "showDictationSample"), !sample.isEmpty {
-            return startSample(sample, update: update)
+    /// draft, then the owner's recent messages in this chat, newest first. `failed` gets what went wrong, if it could not
+    /// start. The start takes its turn now, in the caller's step, and then waits for permission: the person's newest
+    /// action decides. A start asked for after it, or `stop()`, ends it in that wait: it never listens and says nothing
+    /// (a tap, then a hold, or a send, while the system still asks; #3407). A newer start takes over from an older one
+    /// already listening, which would otherwise hold the microphone and fail it as in use.
+    func start(hints: [String] = [], update: @escaping (String) -> Void, failed: @escaping (String) -> Void = { _ in }) {
+        let turn = UUID()
+        startTurn = turn
+        Task {
+            if let problem = await listen(turn, hints: hints, update: update) { failed(problem) }
         }
+    }
+
+    /// `start`'s work in its task: what went wrong, or nil when it listens or its turn passed while it waited.
+    private func listen(_ turn: UUID, hints: [String], update: @escaping (String) -> Void) async -> String? {
+        #if DEBUG
+        let sample = self.sample.flatMap { $0.isEmpty ? nil : $0 }
+        #else
+        let sample: String? = nil
         #endif
         #if os(iOS) || os(visionOS)
-        guard RecordingCapture.shared.state == .idle else { return String(localized: "A recording is in progress. Stop it before dictating.") }
+        if sample == nil, RecordingCapture.shared.state != .idle { return String(localized: "A recording is in progress. Stop it before dictating.") }
         #endif
-        guard await Self.allowed() else { return String(localized: "No access to the microphone or speech recognition. Turn it on in Settings › Persona.") }
+        var granted = true
+        if let permission { granted = await permission() } else if sample == nil { granted = await Self.allowed() }
+        guard startTurn == turn else { return nil }
+        guard granted else { return String(localized: "No access to the microphone or speech recognition. Turn it on in Settings › Persona.") }
+        if isListening { stopListening() }
+        #if DEBUG
+        if let sample { return startSample(sample, update: update) }
+        #endif
         #if os(iOS) || os(visionOS)
         guard RecordingCapture.shared.state == .idle else { return String(localized: "A recording is in progress. Stop it before dictating.") }
         #endif
@@ -425,7 +453,13 @@ final class Dictation {
     }
     #endif
 
+    /// Ends dictation, and a start still waiting for permission (its turn passes).
     func stop() {
+        startTurn = UUID()
+        stopListening()
+    }
+
+    private func stopListening() {
         guard RecordingMicrophone.shared.release(microphoneOwner) else { return }
         listeningRun = UUID()
         engine?.stop()

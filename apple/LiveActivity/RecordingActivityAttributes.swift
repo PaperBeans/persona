@@ -34,6 +34,10 @@ nonisolated struct RecordingActivityAttributes: ActivityAttributes {
         /// The latest line of the meeting's live log (phase 2, at most 120 characters): what was said while Persona
         /// attended, shown when no answer is new. nil without the live view.
         var line: String? = nil
+        /// Talk (#3862 phase 4, docs/assistant/meeting-minutes.md「The meeting card」): nil where the meeting has none
+        /// (the first button is Ask Persona, as before); false where it does (the first button is Talk, whose tap opens a
+        /// talk window); true while a talk window is open ("Listening to you…", the talk mark in the island).
+        var talking: Bool? = nil
 
         var runningSinceDate: Date? { runningSince.map { Date(timeIntervalSince1970: $0) } }
     }

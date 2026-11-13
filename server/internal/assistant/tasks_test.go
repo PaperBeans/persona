@@ -909,8 +909,13 @@ func TestTodayCardListsOnlyFinishedTasks(t *testing.T) {
 // no agent for ever (#4510).
 func TestTaskStartTimingOutStillEndsTheTask(t *testing.T) {
 	old := taskStartTimeout
+	oldAdoptWait, oldAdoptPoll := taskStartAdoptWait, taskStartAdoptPoll
 	taskStartTimeout = 300 * time.Millisecond
-	t.Cleanup(func() { taskStartTimeout = old })
+	taskStartAdoptWait, taskStartAdoptPoll = 300*time.Millisecond, 10*time.Millisecond // #6540: reconcile, then fail at once
+	t.Cleanup(func() {
+		taskStartTimeout = old
+		taskStartAdoptWait, taskStartAdoptPoll = oldAdoptWait, oldAdoptPoll
+	})
 	todoStores(t, func(t *testing.T, _ *todoEnv, database *db.DB) {
 		ctx := context.Background()
 		f := newFakeHub()

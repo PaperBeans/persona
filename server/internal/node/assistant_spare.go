@@ -52,7 +52,7 @@ func (n *Node) assistantWarm(cwd, launcher string, options ...modelExecution) er
 		return nil
 	}
 	execution := executionOption(options)
-	if err := execution.check(); err != nil {
+	if err := execution.check(launcher); err != nil {
 		return err
 	}
 	if launcher == "" || !shellcmd.NameRe.MatchString(launcher) {

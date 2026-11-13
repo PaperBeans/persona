@@ -19,6 +19,10 @@ import (
 // conversation as the user and opens it, as Ask Persona does. Only the pages drawn under PagesID may answer it.
 const AskURL = "persona://ask"
 
+// GraphURL is the open_url of the list's Source Relationships row (#5741): the app pushes its own relationship view.
+// Only the pages drawn under PagesID may answer it, and only for an app that says it has the view (Env.Graph).
+const GraphURL = "persona://sources-graph"
+
 // assistant is the assistant's name as the app shows it, at most 40 characters on one line; "" without one.
 func (p *pages) assistant() string {
 	return clipRunes(oneLine(p.env.Assistant), 40)

@@ -127,8 +127,10 @@ nonisolated struct PaneAgentResult: Decodable, Sendable {
 }
 
 extension APIClient {
-    func terminalPanes(machine: String) async throws -> TerminalPanes {
-        try await get("/api/v1/machines/\(machine)/panes", as: TerminalPanes.self)
+    /// `requestID`: sent as `X-Client-Request-Id` (the hub logs it), for a page that shows it.
+    func terminalPanes(machine: String, requestID: String? = nil) async throws -> TerminalPanes {
+        let headers = requestID.map { ["X-Client-Request-Id": $0] } ?? [:]
+        return try JSON.decoder.decode(TerminalPanes.self, from: try await request("GET", "/api/v1/machines/\(machine)/panes", extraHeaders: headers))
     }
 
     /// One of the node menu's routes, `POST /machines/{mid}/<path>`; only allowlisted fields and boolean flags reach the node.
@@ -254,14 +256,19 @@ nonisolated enum NodeMenu {
         return tab.isEmpty ? detail : "\(tab) · \(detail)"
     }
 
-    /// Only Claude Code. Codex starts in a tab of its own: a Codex start that fails closes its pane, which here is the
-    /// user's own shell (#5275).
-    static func launchableHere(_ l: Launcher) -> Bool { (l.agent ?? "").isEmpty || l.agent == "claude" }
+    /// Claude Code, and a launcher the computer says it starts in a pane the user picked, keeping that pane when the
+    /// start fails (`runHere`: its Codex launchers, #5504), as the web's `launchableHere`. An older computer's failed
+    /// Codex start closes its pane, here the user's own shell (#5275): there Codex starts from New Session in a tab of its own.
+    /// Not the one that starts the session in Claude's desktop app (#5480): it never runs in this terminal.
+    static func launchableHere(_ l: Launcher) -> Bool {
+        !l.startsInDesktopApp && (l.runHere == true || (l.agent ?? "").isEmpty || l.agent == "claude")
+    }
 
-    /// Run Agent Here's footer: the agent starts in the picked shell; where the computer has a Codex launcher, also that
-    /// Codex starts from New Session (#5275). Codex is not mentioned to a computer without it.
+    /// Run Agent Here's footer: the agent starts in the picked shell; where the computer has a Codex launcher it doesn't
+    /// offer here, also that Codex starts from New Session (#5275). Codex is not mentioned where it is offered or absent,
+    /// nor for the Codex App's launcher: its chat starts in the App, not in a tab.
     static func runHereFooter(_ launchers: [Launcher]) -> String {
-        launchers.contains(where: \.isCodex)
+        launchers.contains(where: { $0.isCodex && !$0.startsInDesktopApp && !launchableHere($0) })
             ? String(localized: "Starts in the selected shell without opening a new tab. Codex starts in a tab of its own: use New Session.")
             : String(localized: "Starts in the selected shell without opening a new tab.")
     }

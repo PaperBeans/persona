@@ -20,6 +20,24 @@ struct ModelSwitchTests {
         #expect(!SessionModes.switchesModel(nil))
     }
 
+    /// A runtime's session switches where its node takes a model (#6294); its menus wait for its launcher's list, as Claude
+    /// Code's fixed aliases are not its words. Claude Code in a pane keeps the aliases until its list is read.
+    @Test func aRuntimeSwitchesWhereItsNodeSaysSoFromItsLaunchersList() throws {
+        let runtime = { (caps: String) in
+            try JSON.decoder.decode(Session.self, from: Data(
+                #"{"machine_id":"box","session_id":"s1","status":"idle","state":"idle","source_kind":"runtime","agent":"codex","capabilities":{"read":true,"send":true\#(caps)}}"#.utf8))
+        }
+        let list = [AgentModel(id: "gpt-6", name: "GPT-6")]
+        #expect(SessionModes.switchesModel(try runtime(#","model":true"#)))
+        #expect(!SessionModes.switchesModel(try runtime(#","model":false"#)))
+        #expect(!SessionModes.switchesModel(try runtime("")))
+        #expect(!SessionModes.offersModels(try runtime(#","model":true"#), list: nil))
+        #expect(SessionModes.offersModels(try runtime(#","model":true"#), list: list))
+        #expect(!SessionModes.offersModels(try runtime(#","model":false"#), list: list))
+        #expect(SessionModes.offersModels(try session(), list: nil))
+        #expect(SessionModes.offersModels(try session(), list: list))
+    }
+
     @Test func waitsWhileItWorksOrAsks() throws {
         #expect(SessionModes.modelBusy(try session()) == nil)
         #expect(SessionModes.modelBusy(try session(state: "unread")) == nil)

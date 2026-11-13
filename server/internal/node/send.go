@@ -108,6 +108,9 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 			// On its app-server (codex_daemon.go): a turn or a steer, nothing typed — a draft in its box stays as it is.
 			return n.sendCodex(ctx, id, text, images)
 		}
+		if kind == "claude" && ps != nil && ps.Agent == "" {
+			n.leaveLimitQuestion(ctx, id, pane) // the switch moves it off its usage limit: Claude Code's question about it goes
+		}
 		if err := n.checkPaneFor(ctx, pane, kind, opts); err != nil { // sendsafe.go
 			if opts.SwitchNow {
 				n.dropSwitchNow(id, err) // a draft or a dialog: nothing typed, and no switch left waiting for the user

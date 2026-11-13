@@ -142,6 +142,9 @@ type fakeHub struct {
 	failAssistant  error               // assistant.send fails with it (a launcher that cannot start)
 	// refuseConfigDir: assistant.send with a config_dir fails as the hub refuses it for a node too old for one
 	refuseConfigDir bool
+	// elsewhere: the conversations in another profile than meetingProfile, by id: a resume that asks for a config_dir
+	// fails, as the node refuses to move a conversation to another profile
+	elsewhere map[string]bool
 
 	// The launchers' health (launcher_health.go): launchers.check's answers by "machine/launcher" (none: it works),
 	// the checks and repairs asked for, launchers.repair's answer (nil: the node has no such method) and what a repair
@@ -157,6 +160,7 @@ type fakeHub struct {
 	onRepair  func(f *fakeHub)
 	onSend    func(f *fakeHub, p map[string]any) // runs (under the fake's lock) after each session.send
 	onStart   func(f *fakeHub, p map[string]any) // runs (under the fake's lock) when session.start arrives, before slowStart blocks
+	onList    func(f *fakeHub, machine string)   // runs (under the fake's lock) before a sessions.list is answered, which then sends the list as it left it
 	// onAssistantSend runs (under the fake's lock) when assistant.send arrives, before it is answered
 	onAssistantSend func(f *fakeHub, p map[string]any)
 	// doctor is each machine's node.doctor claude-version detail (none: the report has no such check).
@@ -284,6 +288,10 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		if f.sessionsFail[p.Device] > 0 { // a node that answers offline for a few tries, then recovers
 			f.sessionsFail[p.Device]--
 			return nil, fmt.Errorf("%s: %w", p.Device, apierr.ErrOffline)
+		}
+		if f.onList != nil {
+			f.onList(f, p.Device)
+			list = f.sessions[p.Device]
 		}
 		return json.Marshal(map[string]any{"sessions": slices.Clone(list), "muted": f.muted[p.Device]})
 	case DeviceSessionGet:
@@ -515,6 +523,12 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		}
 		if _, set := a["config_dir"]; set && f.refuseConfigDir {
 			return nil, &rpc.Error{Code: proto.CodeNodeOutdated, Message: "update Persona on this computer"}
+		}
+		if l, _ := a["launcher"].(string); a["config_dir"] != nil && launcherAgent(l) != "claude" { // node/assistant.go's preflight
+			return nil, errors.New("config_dir is only supported for Claude assistant conversations")
+		}
+		if sid, _ := a["session_id"].(string); a["config_dir"] != nil && f.elsewhere[sid] {
+			return nil, errors.New("config_dir cannot move an existing conversation; start a new conversation instead")
 		}
 		f.sends = append(f.sends, a)
 		id, _ := a["session_id"].(string)

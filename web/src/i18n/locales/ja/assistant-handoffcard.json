@@ -11,5 +11,7 @@
   "later_line": "受信箱で待っています：{title}",
   "wrap_up": "まとめる：{title}",
   "wrap_up_ask": "ここでまとめましょう。最終的なまとめと返信を、この受信箱の項目に書き戻してください。",
-  "wrap_up_failed": "まとめの依頼を送れませんでした：{error}"
+  "wrap_up_failed": "まとめの依頼を送れませんでした：{error}",
+  "wrap_up_to_send": "送信待ち",
+  "wrap_up_to_confirm": "確認待ち"
 }

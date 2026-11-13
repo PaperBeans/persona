@@ -315,6 +315,7 @@ export interface StoragePermission {
 export interface Contributes {
   connectors?: ConnectorItem[];
   voice?: NamedItem[];
+  transcription?: NamedItem[];
   computer?: NamedItem[];
   browser?: NamedItem[];
   iphone?: NamedItem[];
@@ -623,7 +624,7 @@ export interface ConnectorItem {
 }
 
 /**
- * A contribution with only an id and a name: voice, computer, browser.
+ * A contribution with only an id and a name: voice, transcription, computer, browser.
  */
 export interface NamedItem {
   id: string;
@@ -3230,8 +3231,12 @@ export interface ConnectorCatalogCallParams {
   args?: unknown;
 }
 
-export type ConnectorSubscriptionMode = "items" | "snapshot" | (string & {});
-export const CONNECTOR_SUBSCRIPTION_MODES = ["items", "snapshot"] as const;
+/**
+ * items: new items, each kept once; snapshot: the answer as one state, kept when it changes; things: the answer lists
+ * Inbox rows ready-made (ConnectorInboxThing), kept and handed to the Inbox as they are.
+ */
+export type ConnectorSubscriptionMode = "items" | "snapshot" | "things" | (string & {});
+export const CONNECTOR_SUBSCRIPTION_MODES = ["items", "snapshot", "things"] as const;
 
 export type ConnectorSubscriptionGroup = "source" | "thread" | (string & {});
 export const CONNECTOR_SUBSCRIPTION_GROUPS = ["source", "thread"] as const;
@@ -3241,6 +3246,8 @@ export const CONNECTOR_SUBSCRIPTION_KINDS = ["sub_mail", "sub_message", "sub_not
 
 /**
  * Paths relative to one item. Only $, .field and [index] are supported; no expressions or recursive descent.
+ * sender_id, chat and chat_name name who and where for mutes and policies (the Inbox row's sender and chat tags),
+ * seen its read state, and reply_to where a reply goes; none of them is part of an item's content.
  */
 export interface ConnectorSubscriptionFields {
   id?: string;
@@ -3251,14 +3258,31 @@ export interface ConnectorSubscriptionFields {
   body?: string;
   link?: string;
   due_date?: string;
+  /** The sender's stable id; without it the sender tag is the lowercased display name. */
+  sender_id?: string;
+  /** The conversation's stable id: the row gets a chat tag. */
+  chat?: string;
+  /** The conversation's name, the chat tag's name. */
+  chat_name?: string;
+  /**
+   * Whether the item was already seen in the source: true, a non-zero number, or true, 1, yes, read or seen in any
+   * case. The Inbox row is read when its newest item is; seen only ever turns on.
+   */
+  seen?: string;
+  /**
+   * Where a reply goes and who sees it, in a line for people. With it, an item with an id can be replied to through
+   * the connector's inbox reply, with its thread (else its id) and its id as last.
+   */
+  reply_to?: string;
 }
 
 /**
- * A pull recipe, not a schedule. args is an object (default {}); strings may contain {{since}} or {{since_date}}.
- * cursor_arg and next_cursor_path opt into cursor pagination; page_arg and optional next_page_path opt into page
- * pagination (without next_page_path, a full requested page continues). items_path defaults to $; fields are relative
- * to one item. Text results require snapshot mode. Runtime argument/schema and mapped-value validation belongs to the
- * subscription runner.
+ * A pull recipe, not a schedule. In things mode the rows bring their own threads and kinds: group_by is thread, kind
+ * is a row's when it has none, and fields and pagination are not used. args is an object (default {}); strings may
+ * contain {{since}} or {{since_date}}. cursor_arg and next_cursor_path opt into cursor pagination; page_arg and
+ * optional next_page_path opt into page pagination (without next_page_path, a full requested page continues).
+ * items_path defaults to $; fields are relative to one item. Text results require snapshot mode. Runtime
+ * argument/schema and mapped-value validation belongs to the subscription runner.
  */
 export interface ConnectorSubscriptionRecipe {
   mode: ConnectorSubscriptionMode;
@@ -4864,6 +4888,17 @@ export interface KBRecordingSegment {
    * absent on other recordings.
    */
   n?: number;
+  /**
+   * Whose text the segment is in a meeting transcribed on the hub (docs/assistant/meeting-minutes.md "The transcript
+   * of record"): hub or device; absent means device.
+   */
+  source?: string;
+  /**
+   * The line is Persona's own answer as the meeting's microphone heard it (docs/assistant/meeting-minutes.md
+   * "Persona's echo"): kept in the transcript but not what the meeting said, so leave it out of anything read as the
+   * meeting's words; absent (false) on every other line.
+   */
+  echo?: boolean;
 }
 
 /**

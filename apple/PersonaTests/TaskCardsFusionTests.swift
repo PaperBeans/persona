@@ -80,6 +80,30 @@ struct TaskCardsFusionTests {
         #expect(other.contains("/") || other.count > today.count)
     }
 
+    /// The mock hub's MOCK_USAGE_LIMIT payload as it goes over the wire (whole-second `Z` times beside microsecond ones).
+    @Test func theMocksUsageLimitSessionDecodesAndReadsAsALimit() throws {
+        let json = #"""
+        {"machine_id":"macbook","session_id":"a9e0c000-0000-4000-8000-000000000001","title":"x","cwd":"/p","status":"done","state":"idle",
+         "updated_at":"2026-11-12T19:42:54.322265Z","last_text":"You've hit your usage limit.","turn_error":"You've hit your usage limit.",
+         "turn_error_kind":"usage_limit","turn_error_resets_at":"2026-11-12T22:44:54Z","turn_error_resumes":true,
+         "work":{"phase":"blocked","on":"external","resets_at":"2026-11-12T22:44:54Z","line":"x"},
+         "agent":"claude","launcher":"claude","model":"opus","started_by_persona":true,"assistant":false,"space_kind":"herdr","space_id":"w1",
+         "space_name":"weather","space_index":1,"slot_id":"w1:t8","slot_name":"limit","slot_index":8,"pane_id":"w1:p8","tab_id":"w1:t8",
+         "workspace_id":"w1","pending_interactions":0,"rev":1000,"permission_mode":"default","effort":"high","can_fork":true,
+         "todo":{"id":"todo_usage_limit","title":"x"},"manager":"m-3fa21c"}
+        """#
+        let s = try JSON.decoder.decode(Session.self, from: Data(json.utf8))
+        let resets = try #require(s.turnErrorResetsAt)
+        #expect(s.turnErrorKind == "usage_limit")
+        #expect(s.turnErrorResumes == true)
+        #expect(s.isUsageLimited(now: resets.addingTimeInterval(-3 * 3600)))
+        #expect(s.usageLimitContinues)
+        #expect(s.usageLimitWhen(now: resets.addingTimeInterval(-3 * 3600)) != nil)
+        let todo: TodoItem = decode(["id": "t", "title": "x", "origin": "main", "created_at": iso(5), "updated_at": iso(5),
+                                     "agents": [["machine_id": "macbook", "session_id": s.sessionID, "linked_at": iso(5)]]])
+        #expect(AssistantEntries.todoStatus(todo, lookup: { _, _ in s }) == .usageLimit)
+    }
+
     // MARK: Decision rounds
 
     private func todo(round: String? = "2026-11-12T01:02:03.456789Z", dismissal: String? = nil, manager: String? = nil) -> TodoItem {

@@ -93,6 +93,8 @@ final class InboxHandOffModel {
     private(set) var queued: String?
     /// The last ask sent or tried, for Retry.
     private(set) var lastAsk: String?
+    /// New Agent… is reading the item for New Agent's page (`newAgent`).
+    private(set) var preparing = false
 
     @ObservationIgnored private var timer: Task<Void, Never>?
 
@@ -208,6 +210,45 @@ final class InboxHandOffModel {
         sessions.filter { takes($0, online: online) }
             .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
             .prefix(limit).map { $0 }
+    }
+
+    /// What New Agent… (#5933) opens New Agent's page with: the item as the card over the first message and as the
+    /// context block ahead of it (the text an Agent target gets), the ask as the first message, the item's title as the
+    /// name, and only the computers of the item's hub. Nothing is sent: Start on that page is the confirmation.
+    struct NewAgentPrefill: Identifiable {
+        let id = UUID()
+        var card: ContextRef
+        var prompt: String
+        var nameHint: String
+        var group: String
+        /// Also Mark as Done for the Agent it starts.
+        var markDone: Bool
+        var contextBlock: String { card.xml }
+    }
+
+    /// Reads the item for New Agent's page with `ask` as the first message; nil when it couldn't be read (`error` says
+    /// why, with no Retry: nothing went). Also Mark as Done is the user's choice, else on, as for every Agent target.
+    func newAgent(ask: String, group: String) async -> NewAgentPrefill? {
+        guard !sending, !preparing else { return nil }
+        preparing = true
+        error = nil
+        lastAsk = nil
+        defer { preparing = false }
+        do {
+            let it = try await deps.load(itemID)
+            return NewAgentPrefill(card: InboxHandOffSheet.contextRef(it), prompt: ask, nameHint: it.title, group: group,
+                                   markDone: doneChosen ? markDone : true)
+        } catch {
+            self.error = error.isOffline ? String(localized: "Can't reach the hub")
+                : error.isTimeout ? String(localized: "The request timed out. Try again later.") : error.shown
+            return nil
+        }
+    }
+
+    /// New Agent's page started an Agent with the item (#5933): `open()` goes there, and the item is filed when asked.
+    func started(_ key: SessionKey, markDone: Bool) {
+        sent = (.agent(key), key)
+        if markDone { deps.markDone() }
     }
 
     func setMarkDone(_ on: Bool) {

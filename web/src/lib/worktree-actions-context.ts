@@ -1,8 +1,10 @@
 import { t } from "../i18n";
 import { credentialOwner } from "./api";
-import { currentHosts } from "./engines";
+import { currentHosts, ENGINE_HOSTS } from "./engines";
+import type { SpaceLike } from "./agent-filter";
 import { defaultManager, shownManager } from "./manager-choice";
 import { sessionWorkspace } from "./agent-repos";
+import { normalizePath } from "./files";
 import type { Machine, Session } from "./types";
 import { workspaceTarget, type HostWorkspace, type WorkspaceCatalogSnapshot } from "./workspace-catalog";
 import type { WorkspaceTarget } from "./workspace-target";
@@ -51,6 +53,21 @@ export function resolveWorktreeAction(target: WorkspaceTarget, context: Worktree
   };
 }
 export type ResolvedWorktreeAction = ReturnType<typeof resolveWorktreeAction>;
+
+/** Creation sources for a logical space. Runtime folders suggest sources for the reviewed creation dialog only;
+ *  they never establish workspace ownership for closing, renaming or deletion. */
+export function spaceWorktreeSources(space: SpaceLike, catalog: WorkspaceCatalogSnapshot, machines: readonly Machine[]) {
+  const sessions = space.sessions.filter((s) => s.machine_id === space.machineId && (!s.manager || s.manager === catalog.manager));
+  const bound = new Set(sessions.map((s) => sessionWorkspace(s, catalog.workspaces, catalog.manager)));
+  const path = (cwd: string) => normalizePath(cwd.replaceAll("\\", "/"));
+  const folders = new Set(sessions.filter((s) => s.source_kind === "runtime" && !s.workspace_id
+    && !ENGINE_HOSTS.includes(s.space_kind || s.host || ""))
+    .map((s) => path(s.worktree || s.workspace_cwd || s.cwd || "")).filter(Boolean));
+  return catalog.workspaces.filter((w) => w.machine_id === space.machineId && (bound.has(w) || folders.has(path(w.cwd))))
+    .map((w) => workspaceTarget(w, catalog.owner, catalog.manager))
+    .filter((target) => ["herdr", "orca"].includes(target.host)
+      && resolveWorktreeAction(target, { catalog, machines, writable: false }).available);
+}
 
 /** Preserve caller order, including pins, while using M2's exact attribution instead of matching cwd. */
 export function firstDirectWorktreeAgent(target: WorkspaceTarget, catalog: WorkspaceCatalogSnapshot, sessions: readonly Session[]): Session | undefined {

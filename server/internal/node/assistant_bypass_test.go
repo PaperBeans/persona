@@ -612,7 +612,7 @@ func TestAssistantBypassShellNames(t *testing.T) {
 	}
 }
 
-func assertAssistantBypassClassification(t *testing.T, command string, cards int) {
+func assertAssistantBypassClassification(t *testing.T, command string, cards int, gates ...proto.CommandGate) {
 	t.Helper()
 
 	for _, adapter := range []string{"claude", "codex"} {
@@ -624,6 +624,9 @@ func assertAssistantBypassClassification(t *testing.T, command string, cards int
 			p.id, c.threadID = testThread, testThread
 			n.procs[testThread] = p
 			n.larkCfg, n.larkCfgAt = olCfg(), time.Now().Add(time.Hour)
+			if len(gates) > 0 {
+				n.larkCfg.Gates = gates
+			}
 			n.larkCfg.CLI = &proto.LarkCLI{Bin: "/nonexistent/lark-cli"}
 			// Seed metadata without starting the CLI or executing the classified commands.
 			n.larkRisks = map[string]string{"\x00docs +fetch": "read", "\x00docs +create": "write"}

@@ -222,8 +222,8 @@ struct WatchAllDayCard: View {
     }
 }
 
-/// The Record page while all-day recording runs: its state, a meeting mark (the page's Meeting Recording can't start a
-/// second recording), and the way to its page.
+/// The recording page while all-day recording runs: its state, a meeting mark (the page's Record can't start a second
+/// recording), and the way to its page.
 struct WatchAllDaySummary: View {
     @State private var allDay = WatchAllDay.shared
 

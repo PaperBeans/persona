@@ -184,7 +184,7 @@ enum LinkLook {
 
 enum LinkText {
     static var kinds: [String: String] {
-        ["lan": "内网", "ipv6": "公网 IPv6", "name": "域名", "ipv4": "公网 IPv4", "ssh": linkText("SSH")]
+        ["lan": linkText("LAN"), "ipv6": linkText("Public IPv6"), "name": linkText("Domain"), "ipv4": linkText("Public IPv4"), "ssh": linkText("SSH")]
     }
 
     static func sshLoginCommand(_ server: String) -> String {
@@ -250,53 +250,53 @@ enum LinkText {
     }
 
     /// How a hub behind an HTTPS reverse proxy is checked.
-    static let systemTrust = "经反向代理 · 系统证书"
+    static var systemTrust: String { linkText("Via reverse proxy · system certificate") }
 
     static func duration(since: Date, now: Date) -> String {
         let s = max(0, Int(now.timeIntervalSince(since)))
         switch s {
-        case ..<60: return "不到 1 分钟"
-        case ..<3600: return "\(s / 60) 分钟"
-        case ..<86400: return "\(s / 3600) 小时 \(s % 3600 / 60) 分钟"
-        default: return "\(s / 86400) 天 \(s % 86400 / 3600) 小时"
+        case ..<60: return linkText("Under 1 minute")
+        case ..<3600: return linkText("\(s / 60) min")
+        case ..<86400: return linkText("\(s / 3600) h \(s % 3600 / 60) min")
+        default: return linkText("\(s / 86400) d \(s % 86400 / 3600) h")
         }
     }
 
     /// The hub line: its name, and how many hubs its mesh has when that is known.
     static func hub(name: String, mesh: Int?) -> String {
         switch mesh {
-        case let n? where n > 1: "hub「\(name)」· 互联组共 \(n) 台 hub"
-        case 1: "hub「\(name)」· 没和别的 hub 互联"
-        default: "hub「\(name)」"
+        case let n? where n > 1: linkText("Hub “\(name)” · \(n) hubs in its mesh")
+        case 1: linkText("Hub “\(name)” · not meshed with other hubs")
+        default: linkText("Hub “\(name)”")
         }
     }
 
     static func until(_ date: Date, now: Date) -> String {
         let s = Int(date.timeIntervalSince(now).rounded(.up))
-        if s <= 0 { return "马上重试" }
-        if s < 60 { return "\(s) 秒后重试" }
-        return "\(s / 60) 分钟后重试"
+        if s <= 0 { return linkText("Retry now") }
+        if s < 60 { return linkText("Retry in \(s) s") }
+        return linkText("Retry in \(s / 60) min")
     }
 
     /// How long ago, in a few words.
     static func ago(_ date: Date, now: Date) -> String {
         let s = max(0, Int(now.timeIntervalSince(date)))
         switch s {
-        case ..<60: return "刚刚"
-        case ..<3600: return "\(s / 60) 分钟前"
-        case ..<86400: return "\(s / 3600) 小时前"
-        default: return "\(s / 86400) 天前"
+        case ..<60: return linkText("Just now")
+        case ..<3600: return linkText("\(s / 60) min ago")
+        case ..<86400: return linkText("\(s / 3600) h ago")
+        default: return linkText("\(s / 86400) d ago")
         }
     }
 
     /// How long a pairing link is still good, in a few words.
     static func left(_ date: Date, now: Date) -> String {
         let s = Int(date.timeIntervalSince(now).rounded(.up))
-        if s < 60 { return "不到 1 分钟" }
-        return "\(s / 60) 分钟"
+        if s < 60 { return linkText("Under 1 minute") }
+        return linkText("\(s / 60) min")
     }
 
-    static func mode(_ passive: Bool) -> String { passive ? "让 hub 来连（被动）" : "我去连 hub（主动）" }
+    static func mode(_ passive: Bool) -> String { passive ? linkText("The hub connects to me (passive)") : linkText("I connect to the hub (active)") }
 }
 
 /// Runs the persona-link helper inside the app bundle, keeps it running, and turns its status lines into state.
@@ -461,7 +461,7 @@ enum LinkText {
             helperDown = nil
             presence.helperStarted()
         } catch {
-            helperDown = "后台程序启动不了：\(error.localizedDescription)"
+            helperDown = linkText("Can't start the helper: \(error.localizedDescription)")
             scheduleRestart()
         }
     }
@@ -500,7 +500,7 @@ enum LinkText {
         s?.attention = nil // the summary belonged to the helper's connection
         setStatus(s)
         guard !quitting else { return }
-        helperDown = "后台程序退出了（\(code)），正在重启"
+        helperDown = linkText("The helper exited (\(Int(code))); restarting")
         if Date().timeIntervalSince(startedAt) > 60 { restartDelay = 1 }
         scheduleRestart()
     }
@@ -597,11 +597,11 @@ enum LinkText {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
             loginNote = nil
         } catch {
-            loginNote = "改不了：\(error.localizedDescription)"
+            loginNote = linkText("Can't change it: \(error.localizedDescription)")
         }
         launchAtLogin = SMAppService.mainApp.status == .enabled
         if on && SMAppService.mainApp.status == .requiresApproval {
-            loginNote = "要在 系统设置 › 通用 › 登录项 里允许"
+            loginNote = linkText("Allow it in System Settings › General › Login Items")
         }
     }
 
@@ -864,7 +864,7 @@ enum LinkText {
             do {
                 try p.run()
             } catch {
-                finish(false, "后台程序启动不了：\(error.localizedDescription)", "", "")
+                finish(false, linkText("Can't start the helper: \(error.localizedDescription)"), "", "")
                 return
             }
             if let stdin {
@@ -873,7 +873,7 @@ enum LinkText {
                 } catch {
                     // The helper quit before reading stdin (broken pipe). Its termination handler may still win
                     // the race; if it does not, say the send failed rather than blaming the launch.
-                    finish(false, "给后台程序发送数据失败：\(error.localizedDescription)", "", "")
+                    finish(false, linkText("Couldn't send data to the helper: \(error.localizedDescription)"), "", "")
                 }
             }
             try? input.fileHandleForWriting.close()

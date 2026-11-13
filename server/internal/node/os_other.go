@@ -12,6 +12,9 @@ import (
 // progName is a command line's program as the scans compare it (isClaudeCmd, agentOfCmd): its base name.
 func progName(argv0 string) string { return filepath.Base(argv0) }
 
+// msysCmdLine: only Windows passes a command line to a program as one string (shell_windows.go).
+func msysCmdLine(*exec.Cmd) {}
+
 // scanOrcaProcsOS and scanClaudeProcessesOS are Windows' scans; macOS and Linux use ps and /proc.
 func scanOrcaProcsOS() (map[string][]orcaProc, error) { return nil, errors.New("no process scan here") }
 

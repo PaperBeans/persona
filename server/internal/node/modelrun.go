@@ -47,7 +47,7 @@ func (n *Node) modelRun(ctx context.Context, params json.RawMessage) (any, error
 	if err := n.runnableLauncher(ctx, p.Launcher, p.Configured); err != nil {
 		return nil, err // a word that is no launcher here would run as a command
 	}
-	if err := (modelExecution{Model: p.Model, Effort: p.Effort}).check(); err != nil {
+	if err := (modelExecution{Model: p.Model, Effort: p.Effort}).check(p.Launcher); err != nil {
 		return nil, err
 	}
 	timeout := modelRunTimeout

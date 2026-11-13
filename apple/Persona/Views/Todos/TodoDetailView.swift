@@ -155,8 +155,9 @@ struct TodoDetailView: View {
         }
     }
 
+    /// Ends dictation, and a start still asking for permission with it (#3407).
     private func stopDictation() {
-        if dictation.isListening { dictation.stop() }
+        dictation.stop()
     }
 
     /// Deletes the todo and leaves its page; a failed delete keeps the page and shows the error.
@@ -204,6 +205,9 @@ struct TodoDetailView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    // Nobody is working on it (#3618): under its state.
+                    OrphanedLine(todo: todo, state: status)
 
                     if todo.autoDone {
                         // The hub closed it (docs/assistant/todos.md「Automatic completion」): say why, and how to undo it.

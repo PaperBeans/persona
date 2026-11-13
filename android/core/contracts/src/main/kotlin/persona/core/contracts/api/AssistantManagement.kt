@@ -90,6 +90,14 @@ interface AssistantManagement {
      */
     suspend fun newMainConversation(carrySummary: Boolean, expect: String?): NewMainResult =
         throw UnsupportedOperationException("New main chat unavailable")
+    /**
+     * Clears the main conversation's context in place (POST /api/v1/assistant/main/clear, hub feature `assistant_main_clear`,
+     * #5095): the hub stops a turn it is on and puts it away as [newMainConversation] does, carrying nothing over, so the
+     * next message to the main conversation starts a new one. [expect] as there (`main_changed` as [AssistantRefused]).
+     * Answers the conversation put away (empty when there was none).
+     */
+    suspend fun clearMainConversation(expect: String?): String =
+        throw UnsupportedOperationException("Clear context unavailable")
     /** Scheduled tasks (GET /api/v1/assistant/tasks): one table of once / daily / interval tasks, docs/assistant/assistant.md "Scheduled tasks". */
     suspend fun tasks(): List<ScheduledTask>
     /** Creates [task] (no id yet, POST) or saves what the user edits on it (PUT); returns it as the hub has it. */

@@ -272,6 +272,14 @@
     <string name="settings_network_unreadable">Couldn\'t read the network status</string>
     <string name="settings_update_none">No update available yet.</string>
     <string name="settings_update_check_failed">Couldn\'t check for updates. Try again later.</string>
+    <string name="settings_update_up_to_date">Up to date</string>
+    <string name="settings_update_no_apk">Hub has no APK</string>
+    <string name="settings_update_package_mismatch">Different app</string>
+    <string name="settings_update_package_mismatch_detail">The release APK is for a different Android app and cannot update this installation.</string>
+    <string name="settings_update_signature_mismatch">Signature mismatch</string>
+    <string name="settings_update_signature_mismatch_detail">The release APK is signed with another key. Uninstall this app, then install the release APK from GitHub. Uninstalling removes local app data.</string>
+    <string name="settings_update_last_checked">Last checked %1$s</string>
+    <string name="settings_update_source">Hub: %1$s</string>
     <string name="settings_off">Off</string>
     <string name="settings_retry_cleanup">Retry cleanup</string>
     <string name="settings_try_demo">No hub? Try the demo</string>

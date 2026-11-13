@@ -135,6 +135,13 @@ func (h *Manager) inboxAppCall(ctx context.Context, p assistantwire.AppCall) (js
 		}
 		if err = json.Unmarshal(p.Params, &a); err == nil {
 			in, ok := connector.As[connector.Inbox](h.connectorOf(a.Source))
+			if !ok && h.subs != nil {
+				// A subscription's row (#6198): its connector answers, by the thread it knows the row's item by.
+				var thread string
+				if in, thread, ok = h.subs.ReplyTarget(ctx, a.Source, a.Reply.Thread, a.Reply.Last); ok {
+					a.Reply.Thread = thread
+				}
+			}
 			if !ok {
 				return nil, true, errCannotReply // its connector is not here (the plugin switched off)
 			}

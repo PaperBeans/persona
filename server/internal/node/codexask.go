@@ -333,7 +333,11 @@ func askCard(session string, a codexAgent, title string, ask transcript.CodexAsk
 	}
 	for _, q := range ask.Questions {
 		key += fmt.Sprintf("\x00%d", q.Index)
-		ix.Questions = append(ix.Questions, proto.Question{Question: q.Question, Header: q.Header, Options: q.Options})
+		options := q.Options
+		if options == nil {
+			options = []proto.QuestionOption{}
+		}
+		ix.Questions = append(ix.Questions, proto.Question{Question: q.Question, Header: q.Header, Options: options})
 	}
 	if ix.CreatedAt.IsZero() {
 		ix.CreatedAt = time.Now().UTC()

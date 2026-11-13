@@ -35,6 +35,8 @@ type groupLark struct {
 	failNext  map[string]int // event (or "" for a new one) → appends to fail first
 	hold      chan struct{}  // when set, appends wait for it
 	count     int            // when set, the count its answers say (the hub does not read it for an event)
+	ruleTier  string         // when set, the rule tier its answers carry (else the chat's fyi)
+	tier      string         // when set, the tier its answers carry (a rule tier the item takes, as a migrated thing does)
 }
 
 func (*groupLark) ID() string   { return "lark" }
@@ -92,8 +94,8 @@ func (g *groupLark) GroupAppend(_ context.Context, a connector.GroupAppend) (con
 		g.batch = nil
 	}
 	return connector.InboxThing{ID: id, Thread: a.Thread, Kind: KindGroup, Title: "示例兜底标题 " + id, Sender: "丙", Preview: "示例预览",
-		Context: "示例群：" + strings.Join(meta.Messages, "、"), At: time.Now().Add(-time.Minute), Last: last, Meta: raw,
-		Extra: &connector.ThingExtra{Source: "lark", Account: "feishu", AccountName: "飞书", Count: cmp.Or(g.count, len(meta.Messages)), RuleTier: TierFYI,
+		Context: "示例群：" + strings.Join(meta.Messages, "、"), At: time.Now().Add(-time.Minute), Last: last, Meta: raw, Tier: connector.Tier(g.tier),
+		Extra: &connector.ThingExtra{Source: "lark", Account: "feishu", AccountName: "飞书", Count: cmp.Or(g.count, len(meta.Messages)), RuleTier: cmp.Or(g.ruleTier, TierFYI),
 			Lark: rawJSON(InboxLark{AccountID: 1, FeedID: "F1", IsGroup: true, StartPosition: first})}}, nil
 }
 func (g *groupLark) GroupFallback(_ context.Context, f connector.GroupFallback) (connector.GroupFallbackResult, error) {
@@ -263,8 +265,8 @@ func TestInboxGroupByTheModel(t *testing.T) {
 }
 
 // An answer that does not hold up is the model being unavailable: the connector's fallback groups the batch, with the
-// events the model would have seen, and the events keep its rule tiers ("By rule", triaged_by rules) for good: the model
-// coming back sorts nothing again.
+// events the model would have seen. A new event keeps its rule tier ("By rule", triaged_by rules) for good. An existing
+// event keeps its words and triage, with triaged_at advanced so the model coming back sorts nothing again.
 func TestInboxGroupFallsBackOnABadAnswer(t *testing.T) {
 	g := &groupLark{batch: groupBatch(), placed: map[string]bool{}, fallback: connector.GroupFallbackResult{
 		Assign: []connector.GroupAssign{{Message: "m1060", Event: "lark:F1:1051"}},
@@ -279,8 +281,8 @@ func TestInboxGroupFallsBackOnABadAnswer(t *testing.T) {
 		t.Fatalf("fallback asked %+v", g.fallbacks)
 	}
 	old, fresh := h.inbox.items["lark:F1:1051"], h.inbox.items["lark:F1:1061"]
-	if old.Tier != TierFYI || old.Reason != "按规则" || old.TriagedBy != "rules" || old.Summary != "" || old.TriagedAt != old.Last ||
-		old.Title != "示例兜底标题 lark:F1:1051" {
+	if old.Tier != TierAction || old.Reason != "示例" || old.TriagedBy != "model" || old.Summary != "等你定时间" ||
+		old.Title != "示例 A 方案评审" || old.Count != 2 || old.Last != "1060" || old.TriagedAt != old.Last {
 		t.Fatalf("existing event %+v", old)
 	}
 	if fresh == nil || fresh.Tier != TierNoise || fresh.Title != "示例结构分组" || fresh.TriagedBy != "rules" || fresh.Reason != "按规则" {
@@ -290,9 +292,136 @@ func TestInboxGroupFallsBackOnABadAnswer(t *testing.T) {
 	h.triageInbox(context.Background())
 	h.inbox.triaging.Lock()
 	h.inbox.triaging.Unlock()
-	if len(model.asked()) != before || old.TriagedBy != "rules" {
-		t.Fatal("an event sorted by rules was sorted again")
+	if len(model.asked()) != before || old.TriagedBy != "model" {
+		t.Fatal("an event triaged at this version was sorted again")
 	}
+}
+
+// Fallback appends preserve an existing event's triage whether the model or rules originally sorted it. In particular,
+// noise stays folded and an urgent event stays urgent; only the message count and version advance.
+func TestInboxGroupFallbackKeepsExistingTriage(t *testing.T) {
+	tests := []struct {
+		name, title, summary, tier, reason, triagedBy string
+		urgent                                        bool
+	}{
+		{name: "noise", title: "示例折叠标题", summary: "示例折叠总结", tier: TierNoise, reason: "示例折叠理由", triagedBy: "model"},
+		{name: "rules", title: "示例规则标题", summary: "示例规则总结", tier: TierFYI, reason: "按规则", triagedBy: "rules"},
+		{name: "urgent", title: "示例紧急标题", summary: "示例紧急总结", tier: TierAction, reason: "示例紧急理由", triagedBy: "model", urgent: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &groupLark{batch: groupBatch(), placed: map[string]bool{}, fallback: connector.GroupFallbackResult{
+				Assign: []connector.GroupAssign{{Message: "m1060", Event: "lark:F1:1051"}, {Message: "m1061", Event: "lark:F1:1051"}}}}
+			h, _ := groupHub(t, g, nil)
+			it := h.inbox.items["lark:F1:1051"]
+			it.Title, it.Summary, it.Tier, it.Reason, it.TriagedBy = tc.title, tc.summary, tc.tier, tc.reason, tc.triagedBy
+			it.Urgent = tc.urgent
+			h.collectInbox(context.Background(), roundPoll)
+			h.waitGrouping()
+
+			if it.Title != tc.title || it.Summary != tc.summary || it.Tier != tc.tier || it.Reason != tc.reason ||
+				it.TriagedBy != tc.triagedBy || it.Urgent != tc.urgent || it.Count != 3 || it.Last != "1061" || it.TriagedAt != it.Last {
+				t.Fatalf("existing event %+v", it)
+			}
+		})
+	}
+}
+
+// A connector that keeps no meta (the hub composes its events): fallback messages joining an existing event keep its
+// words and triage as well, and the rule tier the connector's thing carries is not recorded as a retriage.
+func TestInboxGroupFallbackKeepsExistingTriageWithoutMeta(t *testing.T) {
+	batch := chatBatch()
+	batch.Tier, batch.Why = connector.TierNoise, "示例来源规则：这是噪音"
+	g := &groupChat{batch: batch, fallback: connector.GroupFallbackResult{
+		Assign: []connector.GroupAssign{{Message: "m2", Event: "examplechat:chat:C1#m1"}, {Message: "m3", Event: "examplechat:chat:C1#m1"}}}}
+	model, client := newGroupModel(t, chatAnswer)
+	model.down = true
+	h := chatHub(t, g, client)
+	it := h.inbox.items["examplechat:chat:C1#m1"]
+	it.Summary, it.Reason = "示例总结：等你定时间", "示例理由：等你定时间"
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if g.fallbacks != 1 {
+		t.Fatalf("%d fallback call(s)", g.fallbacks)
+	}
+	if it.Title != "示例 A 方案评审" || it.Summary != "示例总结：等你定时间" || it.Tier != TierAction || it.Reason != "示例理由：等你定时间" ||
+		it.TriagedBy != "model" || it.Count != 3 || it.Last != "3" || it.TriagedAt != it.Last {
+		t.Fatalf("existing event %+v", it)
+	}
+	if k := chainKinds(it); slices.Contains(k, ChainTriaged) {
+		t.Fatalf("the event's rule tier was recorded as a retriage: %v", k)
+	}
+}
+
+// A policy the user set still gives an existing event its tier when fallback messages join it: the words and the
+// triager stay, the tier and reason are the policy's.
+func TestInboxGroupFallbackKeepsPolicyTier(t *testing.T) {
+	g := &groupLark{batch: groupBatch(), placed: map[string]bool{}, fallback: connector.GroupFallbackResult{
+		Assign: []connector.GroupAssign{{Message: "m1060", Event: "lark:F1:1051"}, {Message: "m1061", Event: "lark:F1:1051"}}}}
+	h, _ := groupHub(t, g, nil)
+	it := h.inbox.items["lark:F1:1051"]
+	it.Tier, it.Reason = TierFYI, "示例理由：同步"
+	h.inbox.mu.Lock()
+	h.inbox.policies = []InboxPolicy{{ID: "p1", Source: "lark", Tag: connector.TagChat, Value: "F1", Name: "示例项目群", Tier: TierAction}}
+	h.inbox.mu.Unlock()
+	h.collectInbox(context.Background(), roundPoll)
+	h.waitGrouping()
+
+	if it.Tier != TierAction || it.Reason == "示例理由：同步" || it.Title != "示例 A 方案评审" || it.Summary != "等你定时间" ||
+		it.TriagedBy != "model" || it.Count != 3 || it.TriagedAt != it.Last {
+		t.Fatalf("existing event %+v", it)
+	}
+	if k := chainKinds(it); k[len(k)-1] != ChainTriaged {
+		t.Fatalf("the policy's tier was not recorded: %v", k)
+	}
+}
+
+// An event a processing conversation is working on keeps its summary, tier, reason and urgency when new messages
+// join it, whatever tier the rule carried by this batch says: the conversation decides, and a provisional rule tier
+// is not recorded as a retriage. Both ways an event's messages are written (the connector keeps the meta, or the hub
+// composes it).
+func TestInboxGroupHandledEventKeepsItsTriage(t *testing.T) {
+	t.Run("meta", func(t *testing.T) {
+		g := &groupLark{batch: groupBatch(), placed: map[string]bool{}, ruleTier: TierNoise, tier: TierNoise, fallback: connector.GroupFallbackResult{
+			Assign: []connector.GroupAssign{{Message: "m1060", Event: "lark:F1:1051"}, {Message: "m1061", Event: "lark:F1:1051"}}}}
+		h, _ := groupHub(t, g, nil)
+		it := h.inbox.items["lark:F1:1051"]
+		it.Urgent = true
+		it.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingWaiting}
+		h.collectInbox(context.Background(), roundPoll)
+		h.waitGrouping()
+
+		if it.Title != "示例 A 方案评审" || it.Summary != "等你定时间" || it.Tier != TierAction || it.Reason != "示例" ||
+			it.TriagedBy != "model" || !it.Urgent || it.Count != 3 || it.Last != "1061" || it.TriagedAt != it.Last {
+			t.Fatalf("handled event %+v", it)
+		}
+		if k := chainKinds(it); slices.Contains(k, ChainTriaged) {
+			t.Fatalf("the batch's rule tier was recorded as a retriage: %v", k)
+		}
+	})
+	t.Run("no meta", func(t *testing.T) {
+		batch := chatBatch()
+		batch.Tier, batch.Why = connector.TierNoise, "示例来源规则：这是噪音"
+		g := &groupChat{batch: batch, fallback: connector.GroupFallbackResult{
+			Assign: []connector.GroupAssign{{Message: "m2", Event: "examplechat:chat:C1#m1"}, {Message: "m3", Event: "examplechat:chat:C1#m1"}}}}
+		model, client := newGroupModel(t, chatAnswer)
+		model.down = true
+		h := chatHub(t, g, client)
+		it := h.inbox.items["examplechat:chat:C1#m1"]
+		it.Summary, it.Reason = "示例总结：等你定时间", "示例理由：等你定时间"
+		it.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingWaiting}
+		h.collectInbox(context.Background(), roundPoll)
+		h.waitGrouping()
+
+		if it.Title != "示例 A 方案评审" || it.Summary != "示例总结：等你定时间" || it.Tier != TierAction ||
+			it.Reason != "示例理由：等你定时间" || it.TriagedBy != "model" || it.Count != 3 || it.Last != "3" || it.TriagedAt != it.Last {
+			t.Fatalf("handled event %+v", it)
+		}
+		if k := chainKinds(it); slices.Contains(k, ChainTriaged) {
+			t.Fatalf("the batch's rule tier was recorded as a retriage: %v", k)
+		}
+	})
 }
 
 // The model down (or none set up): the fallback groups it. A model that only ever wants tools stops after four.

@@ -383,6 +383,8 @@ type PairConnector struct {
 // Routes are the apps' routes on machines the manager answers itself (the hub relays them as http.request, as the
 // assistant's): its own settings of each machine and what only it can do.
 var Routes = []string{
+	"GET /api/v1/machines/{mid}/codex/{sid}/takeover",
+	"POST /api/v1/machines/{mid}/codex/{sid}/takeover",
 	"POST /api/v1/machines/{mid}/reconnect",
 	"PUT /api/v1/machines/{mid}/engine",
 	"GET /api/v1/machines/{mid}/herdr",

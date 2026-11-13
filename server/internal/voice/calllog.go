@@ -65,7 +65,10 @@ func (c *conversation) ending(reason string) {
 
 // callLines are what the call's last line counts of the conversation's own: the user's lines (captions and typed) and
 // the model's that had words, and how often its upstream paused.
-type callLines struct{ user, model, pauses int }
+type callLines struct {
+	user, model, pauses int
+	meeting             string // a meeting call's Talk spans and audio (meetingCall.meetingLog)
+}
 
 // summary is the call's last line, after "conversation closed".
 func (c *conversation) summary(n callLines) string {
@@ -89,8 +92,9 @@ func (c *conversation) summary(n callLines) string {
 		took = time.Since(l.opened).Round(time.Second)
 	}
 	return fmt.Sprintf("after %v (%s): user lines %d (typed %d), model lines %d, delegations %d, function calls %d, runs %d%s, "+
-		"observed turns %d, cards asked %d, reconnects %d, pauses %d, nudges %d", took, firstNonEmpty(l.reason, "ended"), n.user,
-		l.typed, n.model, l.delegations, l.calls, len(l.runs), byState, l.observed, l.cards, l.reconnects, n.pauses, l.nudges)
+		"observed turns %d, cards asked %d, reconnects %d, pauses %d, nudges %d%s", took, firstNonEmpty(l.reason, "ended"), n.user,
+		l.typed, n.model, l.delegations, l.calls, len(l.runs), byState, l.observed, l.cards, l.reconnects, n.pauses, l.nudges,
+		n.meeting)
 }
 
 // errorRunes is the most of the service's own words on an error of a live session that the log keeps.
@@ -211,7 +215,7 @@ func (b *boundTarget) logName() string {
 func (c *conversation) logStart(s *startFrame, p *Provider) {
 	c.mu.Lock()
 	lines, runs := len(c.history), len(c.resume)
-	resumed, echoes, modelID, voice := c.resumed, c.gate.echoes, c.modelID, c.voice
+	resumed, echoes, gateOff, modelID, voice := c.resumed, c.gate.echoes, c.gate.off, c.modelID, c.voice
 	c.mu.Unlock()
 	protocol := fmt.Sprintf("protocol %d", c.version)
 	if c.asked > c.version {
@@ -225,11 +229,26 @@ func (c *conversation) logStart(s *startFrame, p *Provider) {
 	if c.lang != "" {
 		more = append(more, "language "+string(c.lang))
 	}
-	if echoes {
+	if echoes && c.meeting == nil { // a meeting call says it below
 		more = append(more, "no echo cancellation")
+	}
+	switch {
+	case gateOff:
+		more = append(more, "speech gate off")
+	case s.SpeechGate != nil && !*s.SpeechGate && c.meeting != nil:
+		more = append(more, "speech gate off asked: not for a meeting call")
+	case s.SpeechGate != nil && !*s.SpeechGate:
+		more = append(more, "speech gate off asked: not for another extension's call")
 	}
 	if resumed {
 		more = append(more, fmt.Sprintf("picked up again with %d lines and %d runs", lines, runs))
+	}
+	if c.meeting != nil {
+		echo := "not said"
+		if s.EchoCancellation != nil {
+			echo = map[bool]string{true: "on", false: "off"}[*s.EchoCancellation]
+		}
+		more = append(more, fmt.Sprintf("meeting call for recording %s (echo cancellation %s)", c.meeting.recording, echo))
 	}
 	extra := ""
 	if len(more) > 0 {

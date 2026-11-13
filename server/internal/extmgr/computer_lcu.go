@@ -50,7 +50,7 @@ func (h *Manager) answerComputerElicit(ctx context.Context, m *Machine, params j
 		ix.MachineID, ix.SessionID = home, p.Conversation
 	}
 	if ix.Summary != "" {
-		ix.Summary = i18n.T(l, "hub-computer.lcu_machine", i18n.Args{"machine": m.cfg.Name, "summary": ix.Summary})
+		ix.Summary = i18n.T(l, "hub-computer.lcu_machine", i18n.Args{"machine": m.name(), "summary": ix.Summary})
 	}
 	if ix.Kind == proto.IxQuestion && len(ix.Questions) > 0 {
 		ix.Questions[0].Question = ix.Summary
@@ -186,18 +186,8 @@ func (h *Manager) sessionHome(id string) string {
 		return ""
 	}
 	for _, m := range h.machinesNow() {
-		m.mu.Lock()
-		found := false
-		for _, s := range m.sessions {
-			if s.SessionID == id {
-				found = true
-				break
-			}
-		}
-		mid := m.cfg.ID
-		m.mu.Unlock()
-		if found {
-			return mid
+		if h.findSession(m, func(s *proto.Session) bool { return s.SessionID == id }) {
+			return m.cfg.ID
 		}
 	}
 	return ""

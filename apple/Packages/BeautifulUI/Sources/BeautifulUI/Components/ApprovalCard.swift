@@ -201,19 +201,24 @@ public struct ApprovalCard<Context: View>: View {
     private var sentView: some View {
         HStack(spacing: 12) {
             HStack(spacing: 6) {
-                Circle()
-                    .fill(theme.colors.green)
-                    .overlay { BUIIcon(.check, size: 11, lineWidth: 3).foregroundStyle(.white) }
-                    .frame(width: 18, height: 18)
+                // The host is still sending: a spinner, not the check, until it has the answer.
+                if options.isSending {
+                    BUISpinner(size: 14).frame(width: 18, height: 18)
+                } else {
+                    Circle()
+                        .fill(theme.colors.green)
+                        .overlay { BUIIcon(.check, size: 11, lineWidth: 3).foregroundStyle(.white) }
+                        .frame(width: 18, height: 18)
+                }
                 Text(sentMessage)
                     .buiFont(BUITextStyle(size: 12.5, weight: .medium))
-                    .foregroundStyle(theme.colors.green)
+                    .foregroundStyle(options.isSending ? theme.colors.ink2 : theme.colors.green)
             }
             .padding(.leading, 4)
             .padding(.trailing, 10)
             .padding(.vertical, 4)
-            .background(theme.colors.greenTint, in: Capsule())
-            if options.allowsStartOver {
+            .background(options.isSending ? Color.clear : theme.colors.greenTint, in: Capsule())
+            if options.allowsStartOver, !options.isSending {
             Button {
                 reset()
             } label: {

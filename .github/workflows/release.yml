@@ -12,7 +12,20 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authorize release publisher
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          if [[ "$ACTOR" != chyroc || "$TRIGGERING_ACTOR" != chyroc ]]; then
+            echo "Only chyroc can publish container images and GitHub Releases." >&2
+            exit 1
+          fi
   smoke:
+    needs: authorize
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -46,7 +59,7 @@ jobs:
           CI_IMAGE_PREBUILT: '1'
         run: scripts/ci/hub-image.sh
   publish:
-    needs: smoke
+    needs: [authorize, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

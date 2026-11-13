@@ -372,7 +372,7 @@ func (h *Manager) iphoneDevices() []iphoneSeen {
 			if d.ID == "" {
 				continue
 			}
-			mac := iphoneSeenMac{ID: m.cfg.ID, Name: m.cfg.Name, Enabled: p.Enabled}
+			mac := iphoneSeenMac{ID: m.cfg.ID, Name: m.name(), Enabled: p.Enabled}
 			if i, ok := at[d.ID]; ok {
 				out[i].Machines = append(out[i].Machines, mac)
 				if better(d, out[i].IPhoneDevice) {

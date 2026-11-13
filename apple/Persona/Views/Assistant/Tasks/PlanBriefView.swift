@@ -49,7 +49,7 @@ struct PlanBriefView: View {
             if more {
                 HStack(spacing: Theme.Space.s) {
                     if !open, !summary.isEmpty {
-                        Text(summary).font(Theme.Font.caption).foregroundStyle(.tertiary).lineLimit(1)
+                        Text(summary).font(Theme.Font.caption).foregroundStyle(.tertiary).lineLimit(2)
                             .accessibilityIdentifier("plan.brief.summary")
                     }
                     Spacer(minLength: 0)

@@ -364,7 +364,7 @@ func logRequests(h *Hub, next http.Handler) http.Handler {
 		sw := &statusWriter{ResponseWriter: w, status: 200, lang: lang}
 		next.ServeHTTP(sw, r)
 		// Auth and ingress refusals are logged by securityError (masked, rate limited), WebSocket ones included.
-		if !sw.securityFailure && (sw.status >= 400 || (!longLived(r.URL.Path) && time.Since(start) > 2*time.Second)) {
+		if !sw.securityFailure && (sw.status >= 400 || (!longLived(r) && time.Since(start) > 2*time.Second)) {
 			path := loggedPath(r.URL.Path)
 			if client.Platform != "" {
 				h.logf("[%s] %s %s -> %d (%s) client=%q", id, r.Method, path, sw.status, time.Since(start).Round(time.Millisecond), client.Platform+"/"+client.Version)
@@ -394,11 +394,13 @@ func loggedPath(p string) string {
 	return p
 }
 
-// longLived requests (WebSockets, a plugin's sockets and streams, a forwarded port's connections: ports.go) are not
-// slow requests however long they last.
-func longLived(path string) bool {
+// longLived requests (WebSockets, a plugin's sockets and streams, a meeting's audio socket, a forwarded port's
+// connections: ports.go) are not slow requests however long they last.
+func longLived(r *http.Request) bool {
+	path := r.URL.Path
 	return path == "/api/v1/ws" || path == link.Path || path == link.StreamPath || path == bus.Path ||
-		strings.HasPrefix(path, "/api/v1/plugins/") || strings.HasPrefix(path, "/api/v1/extensions/") || strings.HasSuffix(path, "/connect")
+		strings.HasPrefix(path, "/api/v1/plugins/") || strings.HasPrefix(path, "/api/v1/extensions/") || strings.HasSuffix(path, "/connect") ||
+		isAssistantSocket(r)
 }
 
 // requestID keeps a client's id if it is a short token (it lands in logs), else makes one.

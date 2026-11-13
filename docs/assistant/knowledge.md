@@ -869,6 +869,22 @@ A person's summary.md (`WritePersonSummary`) is written from what is known: the 
 - **Shown** in summary.md after the pinned facts and the note. There is one section per writer (the user's first, then the extensions' by id), headed with who wrote it, when, and that it is the user's private knowledge, for reference only and never to be passed on to the person or written into anything sent to others. Each part has its own subheading, and every line carries its part (`[事实]`, `[用户原话]`, `[推断·仅供参考]` with its basis, `[承诺·…]`), so a line a search returns still says whether it is a fact or a guess. All profiles together are at most 16000 bytes; a profile that would go past that is named but not shown.
 - **Read**: `kb_get` and `kb.get` show it in `summary`, and `kb.get` also gives `profiles` by writer as written, for an extension to read its own back. `kb_search` and `kb.search` find its lines in summary.md, labelled. An ignored person (`status: ignored`) has no summary.md, so its profiles are kept but not shown.
 
+#### Who reads the private parts
+
+`views` and `inferences` are the user's private view of someone. A conversation that writes to other people on the user's behalf never reads them; the hub enforces this by the conversation's origin, without relying on the heading's instruction (`assistant/outward_reader.go`):
+
+| Conversation | Origin | Reads |
+| --- | --- | --- |
+| The inbox's AI twin (drafts and sends replies) | `inbox` | Facts and commitments only |
+| Lark `/agent` (answers in chats other people read) | `lark_agent` | Facts and commitments only |
+| Any conversation an extension opens (its answers go to the extension, which may send them on) | `extension`, or any origin with `opened_by` | Facts and commitments only |
+| The main conversation, the user's other conversations, a channel's (the owner's private chat) | `user`, `channel`, … | Everything |
+| An extension with `kb.read` (`kb.get`, `kb.search`) | — | Everything, as before |
+
+- **How**: for such a conversation the hub drops every line of a private part, and the parts' subheadings, from whatever any of its tools returns: `kb_get`'s summary.md, `kb_search`'s hits (passed over during the search, so they do not use up its limit), and quotes in `conversation_read`, `agent_read` or any other tool's text. summary.md writes every line of these parts on one line with its label (`[用户原话]`, `[推断·仅供参考]`), even for a profiles.json edited by hand, so a line is recognized wherever it turns up (`kb.PrivateProfileLine`).
+- **When unsure, less**: while the origins cannot be read, every conversation is treated as one of these; so is a conversation not noted yet while a start on its machine is under way (its first tool calls can come before its origin is noted).
+- **Not covered**: the conversation's own file and shell tools (Read, Bash) on a computer that also holds the knowledge base can open `people/<id>/summary.md` or `profiles.json` directly, and an extension's own MCP tools answer it without passing through the hub. A paraphrase, rather than a quote, of a private line in another conversation is not recognized either.
+
 ### Built-in organization and extensions side by side (#6100)
 
 An extension that curates (a daily and weekly pass: triage, sourced summaries, deterministic checks, proposals for review, merges and splits) runs **on top of** the built-in pipeline, not instead of it:

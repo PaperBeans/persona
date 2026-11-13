@@ -19,12 +19,6 @@ final class MessageMenu {
     /// The lifted message's words selected where they are (#603, `LiftSelection.swift`): a second long press on it, or
     /// Select Text. nil: lifted with its bar.
     var inPlace: InPlaceSelect?
-    /// The lifted copy of a message drawn in parts lays out all of its parts (#5221): asked for when its words are to
-    /// be selected (the text view over them follows every line). Until then it lays out only the parts near the screen.
-    var liftWhole = false
-    /// Selecting asked for while that copy lays out all of its parts: `LiftedMessage` starts it once they are there,
-    /// with what showed kept where it was.
-    @ObservationIgnored var pendingSelect: InPlaceSelect?
     /// The message being shared as a card.
     var sharing: ShareMessage?
     /// Forward (#3807): the chat makes the pressed message a forward and opens its picker (`forwarding`). nil: the bar
@@ -52,6 +46,8 @@ final class MessageMenu {
     /// session never offers it, else why it is off now ("" when on).
     @ObservationIgnored var rewind: ((String, String, Rewind.Restore) -> Void)?
     @ObservationIgnored var rewindBlock: () -> String? = { nil }
+    /// What the chat's session offers once it is tapped (#6294, `Rewind.offer`): its own lines, the files too.
+    @ObservationIgnored var rewindOffer: () -> Rewind.Offer = { .init() }
     /// The message of yours whose Rewind was tapped: the chat asks what to restore (a dialog of the page, like `more`).
     var rewinding: RewindAsk?
     /// The reply whose ⋯ was tapped: the chat shows its menu (a dialog of the page, not of the bar, which the list's
@@ -97,27 +93,21 @@ final class MessageMenu {
     }
 
     func close() {
-        pendingSelect = nil
-        if selected != nil || lift != nil || inPlace != nil || liftWhole {
+        if selected != nil || lift != nil || inPlace != nil {
             withAnimation(Theme.Motion.conceal) {
                 selected = nil
                 lift = nil
                 inPlace = nil
-                liftWhole = false
             }
         }
     }
 
     /// Selects the lifted message's words where they are: the word at `point` (in the window), or all of them. A
-    /// message drawn in parts first lays out all of them (`liftWhole`); the selecting starts once they are there.
+    /// message drawn in parts stays as it is, its parts near the screen laid out (#5291): the text view over them holds
+    /// all of its words.
     func selectInPlace(at point: CGPoint?) {
-        guard let lift else { return }
+        guard lift != nil else { return }
         Haptics.tap()
-        if lift.part != nil, !liftWhole {
-            pendingSelect = InPlaceSelect(at: point)
-            liftWhole = true
-            return
-        }
         withAnimation(Theme.Motion.state) { inPlace = InPlaceSelect(at: point) }
     }
 
@@ -275,8 +265,11 @@ extension View {
     /// when pressed; card: it is words on the page with nothing around them (an answer), lifted on a card of its own.
     /// part: this is that row of the rows a message is drawn in (a long answer, #4970), and preview draws all of the
     /// message, this part marked with `liftPressedPart` and identified by this number (`MessageLift.part`).
-    func messageLongPress<P: View>(id: String, card: Bool = false, part: Int? = nil, @ViewBuilder preview: @escaping () -> P) -> some View {
-        modifier(MessageLongPress(id: id, card: card, part: part, preview: preview))
+    /// opens: the press opens what it pressed instead (your own long message folded, #5676), when it says so; nothing
+    /// is lifted then. Asked as the press begins.
+    func messageLongPress<P: View>(id: String, card: Bool = false, part: Int? = nil, opens: (() -> Bool)? = nil,
+                                   @ViewBuilder preview: @escaping () -> P) -> some View {
+        modifier(MessageLongPress(id: id, card: card, part: part, opens: opens, preview: preview))
     }
     /// The whole row of a message: hosts the action bar above the press point and lifts the row above its neighbours.
     /// pending: your message not in the transcript yet (`PendingBubble`, #6427): Copy, Select Text and Share only, no
@@ -312,6 +305,7 @@ private struct MessageLongPress<P: View>: ViewModifier {
     let id: String
     let card: Bool
     let part: Int?
+    let opens: (() -> Bool)?
     let preview: () -> P
     /// Where the part is, kept without drawing anything again (it changes on every scrolled frame).
     @State private var place = LiftPlace()
@@ -328,6 +322,7 @@ private struct MessageLongPress<P: View>: ViewModifier {
                     LiftPlace.Frames(global: g.frame(in: .global), row: g.frame(in: .named(MessageMenu.row)))
                 } action: { place.frames = $0 }
                 .gesture(LongPressAt(changed: menu.pressChanged) { p in
+                    if let opens, opens() { return } // it opened (with its own tap of the haptics), no bar
                     Haptics.tap()
                     menu.anchor = p
                     capturing = true
@@ -512,9 +507,10 @@ struct MessageActionBar: View {
         return (isUser ? 5 : 4) + (forks(id: id, isUser: isUser, menu: menu) ? 1 : 0) + (rewinds(id: id, isUser: isUser, menu: menu) ? 1 : 0)
     }
     /// Your own message ends in Rewind when the chat's session is a Claude agent's and the message is a transcript line
-    /// of its own (`<uuid>#<n>`); while the session cannot, the dialog says why.
+    /// of its own (`<uuid>#<n>`), or the session's node declares rewind and the message is a line of its own (#6294);
+    /// while the session cannot, the dialog says why.
     static func rewinds(id: String, isUser: Bool, menu: MessageMenu) -> Bool {
-        isUser && menu.rewind != nil && menu.rewindBlock() != nil && Rewind.entry(of: id) != nil
+        isUser && menu.rewind != nil && menu.rewindBlock() != nil && Rewind.entry(of: id, anyLine: menu.rewindOffer().declared) != nil
     }
     /// Forward in Share's place (#3807): on iPhone and iPad, for a message in the transcript of a chat that forwards.
     static func forwards(menu: MessageMenu, pending: Bool) -> Bool {

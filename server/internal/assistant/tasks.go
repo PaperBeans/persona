@@ -121,6 +121,12 @@ type PlanTask struct {
 	inPane    string
 	planID    string
 	planIndex int
+	// task_spawn preserves the caller's mode instead of applying a fresh task's Claude-family permission default.
+	preservePermission bool
+	// admissionRelease, once the admission gate passed, releases this start's held machine/direction slot. It is kept
+	// across the whole start (not the session.start RPC alone) and run when the agent is linked or the start failed for
+	// good, so the slot stays counted through the metrics/ledger gap. Never serialized (admission.go).
+	admissionRelease func()
 }
 
 // Readonly starts conservatively in plan. The launcher fit changes Claude to bypassPermissions while preserving Codex's sandbox.
@@ -692,8 +698,9 @@ func (s *Service) taskRoutes() {
 			return
 		}
 		var in struct {
-			TodoID string `json:"todo_id"`
-			Text   string `json:"text"`
+			TodoID  string `json:"todo_id"`
+			Text    string `json:"text"`
+			AskedAt string `json:"asked_at"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
 			apierr.Write(w, http.StatusBadRequest, err)
@@ -703,7 +710,13 @@ func (s *Service) taskRoutes() {
 			apierr.Write(w, http.StatusBadRequest, errors.New("todo_id and text are required"))
 			return
 		}
-		it, err := s.routeToTask(r.Context(), r.PathValue("id"), in.TodoID, in.Text)
+		var it FeedItem
+		var err error
+		if in.AskedAt != "" {
+			it, err = s.routeDecisionAnswer(r.Context(), r.PathValue("id"), in.TodoID, in.AskedAt, in.Text)
+		} else {
+			it, err = s.routeToTask(r.Context(), r.PathValue("id"), in.TodoID, in.Text)
+		}
 		if err != nil {
 			apierr.Write(w, http.StatusConflict, err)
 			return

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError, attachSession } from "./api";
-import { isStoppedAgent, resumeCommand, sessionCan, shellPath, sessionDeletable, sessionMenuActions, sourceSubtitle } from "./format";
+import { isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, shellPath, sessionDeletable, sessionMenuActions, sourceSubtitle } from "./format";
 import type { Session, SessionCapabilities } from "./types";
 
 const legacy: Session = { machine_id: "m", session_id: "raw-thread", title: "", cwd: "/tmp/project", status: "working" };
@@ -59,6 +59,22 @@ describe("session capability contract", () => {
     expect(sessionMenuActions({ ...legacy, capabilities: { terminal: true, interrupt: true, close: false } })).toEqual(["stop", "resume"]);
     expect(sessionCan({ ...runtime, capabilities: { terminal: true } }, "close")).toBe(true);
     expect(sessionCan(undefined, "close")).toBe(false);
+  });
+
+  it("renames a runtime's session by its declared capability and keeps the old rule where none is declared (#6294)", () => {
+    const runtime: Session = { ...legacy, source_kind: "runtime", capabilities: { read: true, send: true, rename: true } };
+    expect(sessionCanRename(runtime)).toBe(true);
+    expect(sessionCanRename({ ...runtime, capabilities: { read: true, send: true, rename: false } })).toBe(false);
+    // the node's word wins over sending too: renaming is not a message
+    expect(sessionCanRename({ ...runtime, capabilities: { read: true, rename: true } })).toBe(true);
+    // absent (an older node): a source never renames, a native row that can send does, a Persona conversation does
+    expect(sessionCanRename({ ...runtime, capabilities: { read: true, send: true } })).toBe(false);
+    expect(sessionCanRename(legacy)).toBe(true);
+    expect(sessionCanRename({ ...legacy, capabilities: { read: true, terminal: true } })).toBe(false); // a stopped Agent
+    expect(sessionCanRename({ ...runtime, assistant: true, capabilities: { read: true, send: true } })).toBe(true);
+    // an explicit refusal holds on a native row too
+    expect(sessionCanRename({ ...legacy, capabilities: { read: true, send: true, terminal: true, rename: false } })).toBe(false);
+    expect(sessionCanRename(undefined)).toBe(false);
   });
 
   it("quotes the folder in the resume command, and gives only the command without one", () => {

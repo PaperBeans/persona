@@ -66,6 +66,11 @@
     <string name="agents_count_pair">%1$s, %2$s</string>
     <string name="agents_flag_space_pinned">Space pinned</string>
     <string name="agents_flag_space_muted">Space muted</string>
+    <string name="agents_kind_todo">To-do</string>
+    <plurals name="agents_count_todos">
+        <item quantity="one">1 to-do</item>
+        <item quantity="other">%1$d to-dos</item>
+    </plurals>
     <string name="agents_kind_space">Space</string>
     <string name="agents_view_todo">View to-do</string>
     <string name="agents_history_unknown_folder">Unknown folder</string>
@@ -81,6 +86,7 @@
     <string name="agents_grouping_state">By status</string>
     <string name="agents_grouping_todo">By to-do</string>
     <string name="agents_grouping_project">By project</string>
+    <string name="agents_grouping_direction">By pinned</string>
     <string name="agents_menu_compact">Compact list</string>
     <string name="agents_menu_detailed">Detailed list</string>
     <string name="agents_menu_display">Display</string>
@@ -535,6 +541,9 @@
     <string name="agents_todos_filter_button">Filter and sort</string>
     <string name="agents_todos_filter_show">Show</string>
     <string name="agents_todos_sort_by">Sort by</string>
+    <string name="agents_todos_group_by">Group by</string>
+    <string name="agents_todos_group_status">Status</string>
+    <string name="agents_todos_group_direction">Pinned</string>
     <string name="agents_todos_filter_all">All</string>
     <string name="agents_todos_filter_no_due">No due date</string>
     <string name="agents_todos_filter_today">Today</string>

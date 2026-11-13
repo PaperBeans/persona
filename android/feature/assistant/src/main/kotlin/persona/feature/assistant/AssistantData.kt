@@ -35,6 +35,11 @@ import java.util.UUID
 internal data class ConversationGroups(
     val main: Session?, val directions: List<Session> = emptyList(), val others: List<Session> = emptyList(),
     val names: Map<String, String> = emptyMap(), val counts: Map<String, LeaderCounts> = emptyMap(),
+    /**
+     * The hub's direction tree (#4352), the same one [counts] is read from: each 常驻 lead folds open to its to-dos. Null
+     * from an older hub: the rows stay as they are.
+     */
+    val tree: persona.core.contracts.DirectionTree? = null,
     val recent: List<Session> = emptyList(),
     val background: String? = null,
 )
@@ -75,14 +80,16 @@ internal fun AssistantConversationOrigin.accessibilityLabel(resources: android.c
 
 /**
  * The drawer's Recent (#4922, #5196; web `recentConversations`, iOS `AssistantSidebarGroups.recent`): every conversation
- * that is not the main one, not a leader, not archived and not the built-in background supervisor, newest first, equal
- * times by session id, at most [limit]. Automatic chats carry their source's mark; only the supervisor stays in All chats.
+ * that is not the main one, not a leader, not archived, not the built-in background supervisor and not a scheduled
+ * task's own chat (#6228: the Scheduled Tasks entry and All chats keep those), newest first, equal times by session id,
+ * at most [limit]. The other automatic chats carry their source's mark; only the supervisor stays in All chats.
  */
 internal fun recentConversations(snapshot: AssistantSnapshot, limit: Int = RECENT_LIMIT): List<Session> {
     val leaders = snapshot.leaders.toSet()
     return snapshot.conversations.distinctBy { it.key }
         .filter { it.key != snapshot.mainSession && it.sessionId !in leaders && !it.archived &&
-            it.sessionId != snapshot.backgroundSupervisor }
+            it.sessionId != snapshot.backgroundSupervisor &&
+            automaticConversationOrigin(it.origin) != AssistantConversationOrigin.Task }
         .map { it to it.updated }
         .sortedWith(compareByDescending<Pair<Session, java.time.Instant?>> { it.second }.thenBy { it.first.sessionId })
         .take(limit).map { it.first }
@@ -114,19 +121,18 @@ internal fun conversationGroups(
     return ConversationGroups(
         snapshot.conversations.firstOrNull { it.key == snapshot.mainSession && !it.archived },
         directions, others, names, snapshot.leaderCounts,
+        tree = snapshot.directionTree,
         recent = if (query.isBlank()) recentConversations(snapshot) else emptyList(),
         background = background,
     )
 }
 
-/** A leader's open tasks 「在做 1 · 等你 2」 (#4331): only the parts that are not zero, null when both are. */
-internal fun leaderCountsLabel(counts: LeaderCounts?, resources: android.content.res.Resources): String? {
-    counts ?: return null
-    return listOfNotNull(
-        counts.working.takeIf { it > 0 }?.let { resources.getString(R.string.assistant_leader_working, it) },
-        counts.needsYou.takeIf { it > 0 }?.let { resources.getString(R.string.assistant_leader_needs_you, it) },
-    ).takeIf { it.isNotEmpty() }?.joinToString(" · ")
-}
+/**
+ * What a leader's row says in words (#4331): its tasks waiting on you, 「等你 2」, null while none do. What runs under it
+ * is the row's spinner alone ([LeaderCounts.running]), never 「在做 N」 as well (#6626: one meaning, one expression).
+ */
+internal fun leaderCountsLabel(counts: LeaderCounts?, resources: android.content.res.Resources): String? =
+    counts?.needsYou?.takeIf { it > 0 }?.let { resources.getString(R.string.assistant_leader_needs_you, it) }
 
 @StringRes
 internal fun greeting(hour: Int): Int = when (hour) {

@@ -107,11 +107,36 @@ describe("Wrap up chips", () => {
     box.items = [open()];
     draw(<WrapUpChips conversation="m1" />);
     const chip = host.querySelector<HTMLButtonElement>('[data-testid="wrap-up-chip"]')!;
-    expect(chip.textContent).toBe("收尾：示例客户");
+    expect(chip.textContent).toBe("收尾：示例客户待发送");
     await act(async () => chip.click());
     expect(box.handed).toHaveLength(1);
     expect((box.handed[0][0] as InboxItem).id).toBe("lark:f1:100");
     expect(box.handed[0][1]).toBe("可以收尾了：把最终的总结和回复写回这条收件箱事项。");
+  });
+
+  it("say a reply waits to be sent, another suggestion waits to be confirmed, and nothing while it is worked on", () => {
+    const wait = () => host.querySelector('[data-testid="wrap-up-wait"]')?.textContent ?? null;
+    const redraw = () => {
+      act(() => root.unmount()); // the chips are memoized on the conversation: start over for each item state
+      root = createRoot(host);
+      draw(<WrapUpChips conversation="m1" />);
+    };
+    box.items = [open({ handling: { state: "done" } })];
+    redraw();
+    expect(wait()).toBe("待发送");
+    box.items = [open({ suggestion: { version: 3, kind: "conclusion", text: "已处理" } })];
+    redraw();
+    expect(wait()).toBe("待确认");
+    box.items = [open({ suggestion: undefined, handling: { state: "looking" } })];
+    redraw();
+    expect(host.querySelector('[data-testid="wrap-up-chip"]')?.textContent).toBe("收尾：示例客户");
+    expect(wait()).toBeNull();
+  });
+
+  it("are gone once the item is handled with nothing waiting for the owner", () => {
+    box.items = [open({ suggestion: undefined, handling: { state: "done" } })];
+    draw(<WrapUpChips conversation="m1" />);
+    expect(host.querySelector('[data-testid="wrap-up-chip"]')).toBeNull();
   });
 
   it("are not drawn in a conversation nothing was handed to", () => {

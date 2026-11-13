@@ -199,6 +199,8 @@ func (s *Service) machineLaunchers(ctx context.Context, machine string) ([]proto
 	// A node that starts its own Codex launchers with no first message starts a managed one so too (they share
 	// codex-start, node/codex_waiting.go); an older node's Codex starts all need it.
 	codexOptional := slices.ContainsFunc(res.Launchers, func(l proto.LauncherEnvelope) bool { return l.Agent == "codex" && l.PromptOptional })
+	// Likewise in a pane the user picked (Run Agent Here, #5504): the same start, which keeps that pane when it fails.
+	codexHere := slices.ContainsFunc(res.Launchers, func(l proto.LauncherEnvelope) bool { return l.Agent == "codex" && l.RunHere })
 	// The node leaves plain claude out when its shell has another Claude launcher. devices.list's version is the
 	// same installation signal used by the built-in provider and Agent-start fallback, and works with older nodes.
 	d, _ := s.device(ctx, machine)
@@ -211,7 +213,7 @@ func (s *Service) machineLaunchers(ctx context.Context, machine string) ([]proto
 			continue
 		}
 		out = append(out, proto.Launcher{Name: m.Name, BaseURL: m.BaseURL, Model: m.Model, Source: "persona", Agent: m.Agent, Assistant: m.Agent == "agy",
-			PromptOptional: m.Agent == "codex" && codexOptional})
+			PromptOptional: m.Agent == "codex" && codexOptional, RunHere: m.Agent == "codex" && codexHere})
 	}
 	return out, nil
 }

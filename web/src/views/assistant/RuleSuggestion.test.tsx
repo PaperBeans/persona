@@ -39,7 +39,7 @@ const merge: RuleSuggestion = {
 };
 const delegate: RuleSuggestion = {
   id: "rs_delegate", kind: "delegate", count: 3, creates: "", setting: "agents.delegate", scope: {},
-  text: "You took the recommendation 3 times. Let Persona answer agents' own-call questions for you? You can turn this on in Settings.",
+  text: "You took the recommendation 3 times. Let Persona answer agents' own-call questions for you?",
 };
 
 let host: HTMLDivElement;

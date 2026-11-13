@@ -122,10 +122,15 @@ POST /api/v1/machines/{id}/confirm
 POST /api/v1/machines/{id}/reject
 POST /api/v1/machines/{mid}/doctor/fix
 POST /api/v1/machines/{mid}/files
+POST /api/v1/machines/{mid}/files/chmod
+POST /api/v1/machines/{mid}/files/copy
+POST /api/v1/machines/{mid}/files/mkdir
 POST /api/v1/machines/{mid}/files/move
 POST /api/v1/machines/{mid}/files/rename
 POST /api/v1/machines/{mid}/files/restore
 POST /api/v1/machines/{mid}/files/trash
+POST /api/v1/machines/{mid}/files/write
+POST /api/v1/machines/{mid}/files/zip
 POST /api/v1/machines/{mid}/git/commit
 POST /api/v1/machines/{mid}/git/pr
 POST /api/v1/machines/{mid}/git/pr/merge

@@ -61,7 +61,8 @@ test("Paseo's agents are the engine's sessions: Claude Code's by its session and
   assert.equal(node.hello.runtime, 'paseo')
   assert.equal(node.hello.name, 'Paseo')
   assert.equal(node.hello.version, '0.14.0', "Paseo's version")
-  assert.deepEqual(node.hello.caps, { start: true, send: true, interrupt: true, rename: true, close: true, assistant: false, modes: true, resume: true, readonly: true })
+  assert.deepEqual(node.hello.caps, { start: true, send: true, interrupt: true, rename: true, close: true, assistant: false, modes: true, model: true,
+    models: true, check: true, rewind: true, seen: true, resume: true, readonly: true })
   assert.deepEqual(node.hello.launchers.map((l) => [l.name, l.agent]), [['my-claude', 'claude'], ['my-codex', 'codex'], ['grok', 'paseo']])
   assert.deepEqual(node.hello.launchers[0].models, [{ id: 'fable[1m]', name: 'Fable', default: true, efforts: ['low', 'high', 'max'], default_effort: 'max' }])
   const byId = Object.fromEntries(rows().map((r) => [r.session_id, r]))
@@ -281,6 +282,171 @@ test('interrupt, rename, permission mode and effort go to the agent', async (t) 
   assert.equal(fake.requestsOf('set_agent_mode_request').at(-1).modeId, 'full-access')
 })
 
+test("the model goes to the agent first, an effort is the new model's; an unknown model, or an archived agent, changes nothing", async (t) => {
+  const { fake, node, a, bridge } = await setup(t)
+  fake.entries = ENTRIES.map((e) => e.provider !== 'my-claude' ? e : { ...e, models: [...e.models,
+    { id: 'haiku', label: 'Haiku', aliases: ['haiku-latest'], thinkingOptions: [{ id: 'low' }] }] })
+  fake.emit('events', { type: 'providers_snapshot_update', payload: { entries: fake.entries } }, (s) => s.events.includes('providers_snapshot_update'))
+  await until('the new model listed', () => node.last('runtime.launchers')?.launchers?.[0]?.models?.length === 2)
+  await call(node, 'session.modes', { session_id: SID, model: 'haiku', effort: 'low' })
+  assert.deepEqual(fake.requestsOf('set_agent_model_request').map((r) => [r.agentId, r.modelId]), [[a.claude.id, 'haiku']])
+  assert.equal(fake.requestsOf('set_agent_thinking_request')[0].thinkingOptionId, 'low')
+  const order = fake.requests.filter((r) => r.type === 'set_agent_model_request' || r.type === 'set_agent_thinking_request').map((r) => r.type)
+  assert.deepEqual(order, ['set_agent_model_request', 'set_agent_thinking_request'], 'the model before its effort')
+  await call(node, 'session.modes', { session_id: SID, model: 'haiku-latest' })
+  assert.equal(fake.requestsOf('set_agent_model_request').at(-1).modelId, 'haiku-latest', 'an alias Paseo lists')
+  await assert.rejects(call(node, 'session.modes', { session_id: SID, model: 'haiku', effort: 'max' }), /没有「max」/, "an effort the new model lacks")
+  await assert.rejects(call(node, 'session.modes', { session_id: SID, model: 'nope' }), /has no model nope/)
+  fake.handlers.set_agent_model_request = () => ({ payload: { agentId: a.claude.id, accepted: false, error: 'busy' } })
+  await assert.rejects(call(node, 'session.modes', { session_id: SID, model: 'fable[1m]' }), /did not switch the model: busy/)
+  delete fake.handlers.set_agent_model_request
+  const sent = fake.requestsOf('set_agent_model_request').length
+  fake.archive(a.labeled.id) // archived, it keeps its id (Persona's label): still a session, whose model Paseo cannot change
+  await until('the archive noted', () => bridge.state.archived.has(a.labeled.id))
+  await assert.rejects(call(node, 'session.modes', { session_id: 'paseo-e1', model: 'haiku' }), /archived in Paseo/)
+  assert.equal(fake.requestsOf('set_agent_model_request').length, sent, 'nothing sent for an archived agent')
+})
+
+test("rows say how far a rewind goes: Paseo's provider decides, conversation and files apart", async (t) => {
+  const { fake, a, rows } = await setup(t)
+  fake.update(a.claude.id, { capabilities: { supportsRewindConversation: true, supportsRewindFiles: true, supportsRewindBoth: true } })
+  fake.update(a.codex.id, { capabilities: { supportsRewindConversation: true } })
+  fake.update(a.grok.id, { capabilities: { supportsRewindBoth: true } })
+  await until('the rows', () => rows().find((r) => r.session_id === SID)?.capabilities?.rewind_code === true)
+  const caps = (id) => rows().find((r) => r.session_id === id)?.capabilities
+  assert.deepEqual(caps(SID), { rewind: true, rewind_code: true })
+  await until('codex', () => caps(`paseo-${a.codex.id}`)?.rewind === true)
+  assert.deepEqual(caps(`paseo-${a.codex.id}`), { rewind: true, rewind_code: false }, 'Codex: the conversation only')
+  assert.deepEqual(caps(`paseo-${a.grok.id}`), { rewind: false, rewind_code: false }, 'files and conversation only at once is no rewind of Persona\'s')
+  assert.deepEqual(caps('paseo-e1'), { rewind: false, rewind_code: false }, 'a Paseo that does not say')
+})
+
+test('a rewind goes to the message the app saw, keeps the session id through Claude Code\'s fork, and refuses a conversation that moved', async (t) => {
+  const { fake, node, a, rows } = await setup(t)
+  fake.update(a.claude.id, { capabilities: { supportsRewindConversation: true, supportsRewindBoth: true } })
+  fake.setTimeline(a.claude.id, [
+    entry(1, { type: 'user_message', text: 'again', messageId: 'u1' }), entry(2, { type: 'assistant_message', text: 'one' }),
+    entry(3, { type: 'user_message', text: '<persona-context kind="selection">x</persona-context>\nagain', messageId: 'u2' }),
+    entry(4, { type: 'assistant_message', text: 'two' }),
+    entry(5, { type: 'user_message', text: '[Request interrupted by user]', messageId: 'u3' }),
+    entry(6, { type: 'user_message', text: 'last  one', messageId: 'u4' }), entry(7, { type: 'assistant_message', text: 'three' }),
+  ])
+  fake.handlers['agent.rewind.request'] = (msg) => {
+    // Claude Code's rewind forks its session: the agent moves to the fork's id.
+    fake.update(msg.agentId, { persistence: { provider: 'my-claude', sessionId: SID2, metadata: { provider: 'claude' } } })
+    return { payload: { agentId: msg.agentId, ok: true, error: null } }
+  }
+  await until('rewind offered', () => rows().find((r) => r.session_id === SID)?.capabilities?.rewind === true)
+  const res = await call(node, 'session.rewind', { session_id: SID, prompt: 'again', occurrence: 1, prompts_after: 1, restore: 'code_and_conversation' })
+  assert.deepEqual(res, { prompt: 'again', restore: 'code_and_conversation', code_restored: true, input_cleared: true })
+  assert.deepEqual(fake.requestsOf('agent.rewind.request').map((r) => [r.agentId, r.messageId, r.mode]), [[a.claude.id, 'u2', 'both']],
+    "the last 'again', its context block aside; an interruption is no message of the user's")
+  assert.deepEqual(fake.requestsOf('update_agent_request').map((r) => r.labels), [{ 'persona.session': SID }], 'its id kept on the label first')
+  await until('the fork listed', () => rows().find((r) => r.session_id === SID)?.transcript === SID2)
+  assert.equal(rows().filter((r) => r.session_id === SID).length, 1, 'the same session, now in the fork')
+  // The first 'again' (two after it), restoring only the conversation.
+  await call(node, 'session.rewind', { session_id: SID, prompt: 'again', occurrence: 2, prompts_after: 2, restore: 'conversation' })
+  assert.deepEqual(fake.requestsOf('agent.rewind.request').at(-1), { ...fake.requestsOf('agent.rewind.request').at(-1), messageId: 'u1', mode: 'conversation' })
+  assert.equal(fake.requestsOf('update_agent_request').length, 1, 'a label once')
+  const sent = fake.requestsOf('agent.rewind.request').length
+  await assert.rejects(call(node, 'session.rewind', { session_id: SID, prompt: 'again', occurrence: 1, prompts_after: 0, restore: 'conversation' }), /moved/)
+  await assert.rejects(call(node, 'session.rewind', { session_id: SID, prompt: 'never said', occurrence: 1, restore: 'conversation' }), /moved/)
+  // Codex: the conversation only; a provider that says nothing: none.
+  fake.update(a.codex.id, { capabilities: { supportsRewindConversation: true }, status: 'idle' })
+  await until('codex idle', () => rows().find((r) => r.session_id === `paseo-${a.codex.id}`)?.status !== 'working')
+  await assert.rejects(call(node, 'session.rewind', { session_id: `paseo-${a.codex.id}`, prompt: 'x', occurrence: 1, restore: 'code_and_conversation' }), /cannot rewind/)
+  await assert.rejects(call(node, 'session.rewind', { session_id: 'paseo-e1', prompt: 'x', occurrence: 1, restore: 'conversation' }), /cannot rewind/)
+  fake.update(a.claude.id, { status: 'running' })
+  await until('running', () => rows().find((r) => r.session_id === SID)?.status === 'working')
+  await assert.rejects(call(node, 'session.rewind', { session_id: SID, prompt: 'again', occurrence: 1, restore: 'conversation' }), /current turn/)
+  fake.update(a.claude.id, { status: 'idle' })
+  fake.handlers['agent.rewind.request'] = (msg) => ({ payload: { agentId: msg.agentId, ok: false, error: 'Cannot rewind before the provider acknowledges the submitted prompt' } })
+  await until('idle', () => rows().find((r) => r.session_id === SID)?.status !== 'working')
+  await assert.rejects(call(node, 'session.rewind', { session_id: SID, prompt: 'last one', occurrence: 1, prompts_after: 0, restore: 'conversation' }), /did not rewind: Cannot rewind/)
+  assert.equal(fake.requestsOf('agent.rewind.request').length, sent + 1, 'only the last one reached Paseo')
+})
+
+test("a launcher's models come from Paseo when asked, refreshed first when the picker says so", async (t) => {
+  const { fake, node } = await setup(t)
+  fake.handlers.refresh_providers_snapshot_request = () => ({ payload: { acknowledged: true } })
+  fake.handlers.list_provider_models_request = (msg) => ({ payload: { provider: msg.provider, fetchedAt: new Date().toISOString(), error: null,
+    models: [{ id: 'opus', label: 'Opus', isDefault: true, thinkingOptions: [{ id: 'high' }, { id: 'turbo' }] }, { id: 'old', label: 'Old', isSelectable: false }] } })
+  const got = await call(node, 'launchers.models', { launcher: 'my-claude' })
+  assert.deepEqual(got, { agent: 'claude', models: [{ id: 'opus', name: 'Opus', default: true, efforts: ['high'] }] })
+  assert.equal(fake.requestsOf('refresh_providers_snapshot_request').length, 0)
+  await call(node, 'launchers.models', { launcher: 'my-codex', refresh: true })
+  assert.deepEqual(fake.requests.filter((r) => /refresh_providers|list_provider_models/.test(r.type)).map((r) => [r.type, r.providers ?? r.provider]),
+    [['list_provider_models_request', 'my-claude'], ['refresh_providers_snapshot_request', ['my-codex']], ['list_provider_models_request', 'my-codex']])
+  fake.handlers.list_provider_models_request = (msg) => ({ payload: { provider: msg.provider, fetchedAt: new Date().toISOString(), error: 'Provider is not available' } })
+  await assert.rejects(call(node, 'launchers.models', { launcher: 'grok' }), /not available/)
+  await assert.rejects(call(node, 'launchers.models', { launcher: 'claude' }), /no provider claude/, 'a provider that cannot start agents')
+})
+
+test("Settings › Models' test: one real prompt through Paseo's provider, its probe never a session, everything it made cleaned up", async (t) => {
+  const { fake, node, rows } = await setup(t)
+  const dir = mkdtempSync('/tmp/ppaseo-check-')
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const projects = [{ projectId: 'prj_1' }]
+  fake.handlers['project.list.request'] = () => ({ payload: { projects } })
+  let made = 'prj_check'
+  fake.handlers['workspace.create.request'] = () => ({ payload: { workspace: { id: 'wks_check', projectId: made }, setupTerminalId: null, error: null } })
+  let finish = { status: 'idle', final: { model: 'fable[1m]' }, error: null, lastMessage: ' OK ' }
+  fake.handlers.wait_for_finish_request = () => ({ payload: finish })
+  fake.handlers.delete_agent_request = (msg) => ({ type: 'agent_deleted', payload: { agentId: msg.agentId } })
+  fake.handlers.archive_workspace_request = (msg) => ({ payload: { workspaceId: msg.workspaceId, archivedAt: new Date().toISOString(), error: null } })
+  fake.handlers['project.remove.request'] = (msg) => ({ payload: { projectId: msg.projectId, accepted: true, removedWorkspaceIds: [], error: null } })
+  const res = await call(node, 'launchers.check', { launcher: 'my-claude', cwd: dir, prompt: 'Say OK' })
+  assert.equal(res.ok, true)
+  assert.deepEqual([res.agent, res.model, res.answer], ['claude', 'fable[1m]', 'OK'])
+  const ws = fake.requestsOf('workspace.create.request')[0]
+  assert.deepEqual([ws.source, ws.background], [{ kind: 'directory', path: dir }, true], "a background workspace: Paseo's app does not list it")
+  const probe = fake.requestsOf('agent.create.request')[0]
+  assert.deepEqual([probe.workspaceId, probe.config.provider, probe.config.modeId, probe.initialPrompt, probe.labels], ['wks_check', 'my-claude', 'plan', 'Say OK', { 'persona.check': '1' }])
+  assert.equal(probe.config.mcpServers, undefined, 'no Persona tools')
+  assert.ok(!rows().some((r) => r.cwd === dir), 'the probe is no session')
+  assert.equal(fake.requestsOf('delete_agent_request')[0].agentId, probe.agentId)
+  assert.equal(fake.requestsOf('archive_workspace_request')[0].workspaceId, 'wks_check')
+  assert.equal(fake.requestsOf('project.remove.request')[0].projectId, 'prj_check', 'the project the check made')
+  // A directory Paseo files under a project it had: that project stays. A probe that asks instead of answering fails.
+  made = 'prj_1'
+  finish = { status: 'permission', final: null, error: null, lastMessage: null }
+  const again = await call(node, 'launchers.check', { launcher: 'my-codex', cwd: dir, prompt: 'Say OK' })
+  assert.deepEqual([again.ok, again.agent], [false, 'codex'])
+  assert.match(again.error, /asked for a permission/)
+  assert.equal(fake.requestsOf('agent.create.request')[1].config.modeId, undefined, 'plan mode only where the provider has it')
+  assert.equal(fake.requestsOf('delete_agent_request').length, 2)
+  assert.equal(fake.requestsOf('project.remove.request').length, 1, "a project Paseo had is not removed")
+  await assert.rejects(call(node, 'launchers.check', { launcher: 'nope', cwd: dir, prompt: 'Say OK' }), /no provider nope/)
+})
+
+test("seen in Persona, no longer unread in Paseo: a loaded agent's mark cleared, a stored one's through its workspace, never one that asks", async (t) => {
+  const { fake, node, a, rows } = await setup(t)
+  fake.handlers.clear_agent_attention = (msg) => ({ payload: { agentId: msg.agentId, agents: [] } })
+  fake.handlers['workspace.clear_attention.request'] = (msg) => ({ payload: { workspaceId: msg.workspaceId, clearedAgentIds: [a.grok.id], results: [], success: true, error: null } })
+  fake.update(a.claude.id, { requiresAttention: true })
+  await until('unread', () => rows().find((r) => r.session_id === SID)?.status === 'done')
+  await call(node, 'session.seen', { session_id: SID })
+  assert.deepEqual(fake.requestsOf('clear_agent_attention').map((r) => r.agentId), [a.claude.id])
+  // Stored (closed): through its workspace, while it is the only one flagged there; not the agent's own (it would start it).
+  fake.update(a.claude.id, { requiresAttention: false })
+  fake.update(a.grok.id, { requiresAttention: true, status: 'closed' })
+  await until('the grok flagged', () => fake.agents.get(a.grok.id).agent.requiresAttention === true)
+  await until('known flagged', () => rows().find((r) => r.session_id === SID)?.status === 'idle')
+  await call(node, 'session.seen', { session_id: `paseo-${a.grok.id}` })
+  assert.deepEqual(fake.requestsOf('workspace.clear_attention.request').map((r) => r.workspaceId), ['wks_1'])
+  assert.equal(fake.requestsOf('clear_agent_attention').length, 1, 'never clear_agent_attention for a stored agent')
+  fake.update(a.labeled.id, { requiresAttention: true })
+  await until('another flagged', () => rows().find((r) => r.session_id === 'paseo-e1')?.status === 'done')
+  await call(node, 'session.seen', { session_id: `paseo-${a.grok.id}` })
+  assert.equal(fake.requestsOf('workspace.clear_attention.request').length, 1, 'not while another agent of the workspace is flagged')
+  // Waiting for an answer, or not flagged: nothing.
+  fake.permission(a.labeled.id, { id: 'p-1', provider: 'claude', name: 'Bash', kind: 'tool', input: { command: 'ls' } })
+  await until('blocked', () => rows().find((r) => r.session_id === 'paseo-e1')?.status === 'blocked')
+  await call(node, 'session.seen', { session_id: 'paseo-e1' })
+  await call(node, 'session.seen', { session_id: SID })
+  assert.equal(fake.requestsOf('clear_agent_attention').length, 1)
+})
+
 const MCP_JSON = {
   mcpServers: {
     persona: { command: '/usr/bin/personad', args: ['mcp'], env: { PERSONA_HOME: '/home/u/.persona' } },
@@ -307,6 +473,30 @@ test("a new session gets Persona's agent tools, each server naming the session t
   const [first, second] = fake.requestsOf('agent.create.request').map((r) => r.config.mcpServers.persona.env.PERSONA_SESSION_ID)
   assert.notEqual(first, second, 'each agent has its own session id')
   assert.equal(JSON.parse(readFileSync(mcpConfig, 'utf8')).mcpServers.persona.env.PERSONA_SESSION_ID, undefined, 'the shared config is not changed')
+})
+
+test("a new Claude Code session gets the Agent's own Persona tools preapproved; a provider that cannot is created again without that", async (t) => {
+  const dir = mkdtempSync('/tmp/ppaseo-mcp-')
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const mcpConfig = join(dir, 'mcp.json')
+  writeFileSync(mcpConfig, JSON.stringify(MCP_JSON))
+  const own = ['mcp__persona__report_to_supervisor', 'mcp__persona__todo_decision_add', 'mcp__jarvis__report_to_supervisor']
+  const { fake, node, logs } = await setup(t, { mcpConfig, allowTools: own })
+  await call(node, 'session.start', { cwd: '/tmp', prompt: 'x', launcher: 'my-claude' })
+  assert.deepEqual(fake.requestsOf('agent.create.request').at(-1).config.toolPolicy, { preapproved: [
+    { kind: 'mcp', server: 'persona', tool: 'report_to_supervisor' }, { kind: 'mcp', server: 'persona', tool: 'todo_decision_add' },
+  ] }, "only the servers it is given (none under the former name here)")
+  await call(node, 'session.start', { cwd: '/tmp', prompt: 'x', launcher: 'my-codex' })
+  assert.equal(fake.requestsOf('agent.create.request').at(-1).config.toolPolicy, undefined, 'Codex: Paseo would limit the server to those tools')
+  fake.handlers['agent.create.request'] = (msg) => msg.config.toolPolicy
+    ? { payload: { agent: null, error: `Provider '${msg.config.provider}' cannot preapprove exact MCP tools for unattended execution` } }
+    : undefined
+  const res = await call(node, 'session.start', { cwd: '/tmp', prompt: 'x', launcher: 'my-claude' })
+  const [first, second] = fake.requestsOf('agent.create.request').slice(-2)
+  assert.ok(first.config.toolPolicy && !second.config.toolPolicy && second.config.mcpServers, 'again with the tools, without the preapproval')
+  assert.equal(second.labels['persona.session'], first.labels['persona.session'], 'the same Persona session')
+  assert.equal(res.session.session_id, first.labels['persona.session'])
+  assert.ok(logs.some((l) => /cannot preapprove/.test(l)))
 })
 
 test("the fake daemon takes config.mcpServers only in Paseo's stdio shape", () => {
@@ -418,14 +608,61 @@ test("a new Codex session: bypassPermissions starts it with Paseo's full-access 
   assert.equal((await start('default')).modeId, undefined)
 })
 
+test('a resolved preset whose launcher Paseo lacks uses the replacement provider defaults', async (t) => {
+  const { fake, node } = await setup(t, {
+    providers: { ...PROVIDERS, codex: { enabled: false } },
+    entries: [...ENTRIES, { provider: 'codex', enabled: false, status: 'unavailable', models: [] }],
+  })
+  // The manager has already expanded task_plan/agent_start's tier before the node sends session.start. A managed
+  // launcher can pass its availability check even when the engine does not have a provider of the same name.
+  for (const params of [
+    { launcher: 'codex', shell_launcher: true },
+    { launcher: 'codex' },
+    { launcher: 'cc_gateway', shell_launcher: true },
+  ]) {
+    const res = await call(node, 'session.start', {
+      cwd: '/tmp', prompt: 'Check the project', model: 'preset-only-model', effort: 'high',
+      permission_mode: 'acceptEdits', workspace_id: 'wks_1', ...params,
+    })
+    const req = fake.requestsOf('agent.create.request').at(-1)
+    assert.deepEqual(req.config, { provider: 'my-claude', cwd: '/tmp', modeId: 'acceptEdits' })
+    assert.equal(req.initialPrompt, 'Check the project')
+    assert.equal(req.workspaceId, 'wks_1')
+    assert.equal(res.session.launcher, 'my-claude')
+    assert.notEqual(res.session.model, 'preset-only-model')
+  }
+})
+
+test('an unchanged or unspecified launcher keeps the requested model and effort', async (t) => {
+  const { fake, node } = await setup(t)
+  for (const params of [{ launcher: 'my-claude' }, { launcher: 'my-claude', shell_launcher: true }, {}, { launcher: '' }]) {
+    await call(node, 'session.start', { cwd: '/tmp', prompt: 'x', model: 'fable[1m]', effort: 'high', ...params })
+    assert.deepEqual(fake.requestsOf('agent.create.request').at(-1).config, {
+      provider: 'my-claude', cwd: '/tmp', model: 'fable[1m]', thinkingOptionId: 'high',
+    })
+  }
+})
+
+test('launcher fallback to a non-Claude provider also drops the replaced model and effort', async (t) => {
+  const { fake, node } = await setup(t, {
+    entries: ENTRIES.map((e) => e.provider === 'my-claude' ? { ...e, status: 'error' } : e),
+  })
+  await call(node, 'session.start', {
+    cwd: '/tmp', prompt: 'x', launcher: 'my-claude', model: 'fable[1m]', effort: 'high', permission_mode: 'bypassPermissions',
+  })
+  assert.deepEqual(fake.requestsOf('agent.create.request').at(-1).config, {
+    provider: 'my-codex', cwd: '/tmp', modeId: 'full-access',
+  })
+})
+
 test('a read-only (plan) start: Paseo\'s plan mode on a Claude provider, never a writable fallback (#3238)', async (t) => {
   const { fake, node } = await setup(t)
   const plan = (params) => call(node, 'session.start', { cwd: '/tmp', prompt: 'x', permission_mode: 'plan', ...params })
   await plan({ launcher: 'my-claude' })
   assert.equal(fake.requestsOf('agent.create.request').at(-1).config.modeId, 'plan')
   // A launcher Paseo does not have, or none: a Claude provider in plan mode, not just the default one.
-  await plan({ launcher: 'cc_gateway', shell_launcher: true })
-  assert.deepEqual([fake.requestsOf('agent.create.request').at(-1).config.provider, fake.requestsOf('agent.create.request').at(-1).config.modeId], ['my-claude', 'plan'])
+  await plan({ launcher: 'cc_gateway', shell_launcher: true, model: 'preset-only-model', effort: 'high' })
+  assert.deepEqual(fake.requestsOf('agent.create.request').at(-1).config, { provider: 'my-claude', cwd: '/tmp', modeId: 'plan' })
   const before = fake.requestsOf('agent.create.request').length
   for (const launcher of ['my-codex', 'grok']) {
     const err = await plan({ launcher }).catch((e) => e)

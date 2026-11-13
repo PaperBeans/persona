@@ -3,6 +3,7 @@ import SwiftUI
 /// A Mac's VNC on the whole screen (#1343), where it can be operated: its picture, the touches as the mode says (Mouse /
 /// Trackpad), the clipboard both ways, the keyboard with a row of the Mac's shortcuts, Help, and Picture in Picture back to picture in
 /// picture. When the agent whose chat opened it waits on the user, 「我完成了」 hands the Mac back (closing does too).
+/// On an iPhone a button next to the clipboard turns the page on its side and back (#6196).
 struct VNCPage: View {
     @Environment(AppModel.self) private var model
     let ref: MachineRef
@@ -19,6 +20,8 @@ struct VNCPage: View {
     @State private var bottomRailFit = 0
     #if os(iOS) || os(visionOS)
     @State private var screenView: VNCScreenUIView?
+    /// The picture is zoomed in (a pinch, or ⋯ › Zoom In): ⋯ offers Zoom to Fit instead of Zoom In.
+    @State private var zoomed = false
     @State private var modifiers = VNCModifiers()
     /// The display shown alone (`VNCDisplay.id`, kept per Mac, #80); nil: all of them.
     @State private var display: String?
@@ -323,6 +326,14 @@ struct VNCPage: View {
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("vnc-displays")
             }
+            // The only zoom in Trackpad Mode, which has no pinch (#6196); one tap back to the whole screen in either.
+            if zoomed {
+                Button { screenView?.zoomToFit() } label: { Label("Zoom to Fit", systemImage: Theme.Icon.zoomOut) }
+                    .accessibilityIdentifier("vnc-zoom-fit")
+            } else {
+                Button { screenView?.zoomIn() } label: { Label("Zoom In", systemImage: Theme.Icon.zoomIn) }
+                    .accessibilityIdentifier("vnc-zoom-in")
+            }
             #endif
             Button { centerPointer() } label: { Label("Center Pointer", systemImage: Theme.Icon.pointerCenter) }
             #if os(iOS)
@@ -362,6 +373,9 @@ struct VNCPage: View {
             .themedButton()
             .accessibilityLabel("Clipboard")
             .accessibilityIdentifier("vnc-clipboard")
+            #if os(iOS)
+            if AppOrientation.phone { rotateButton }
+            #endif
             Spacer(minLength: Theme.Space.s)
             if waiting {
                 Button { handBack() } label: {
@@ -390,6 +404,20 @@ struct VNCPage: View {
         #endif
     }
 
+    #if os(iOS)
+    /// Next to the clipboard (#6196): upright, it turns the page on its side; on its side (down the trailing rail, under
+    /// the clipboard), back upright. Only on an iPhone: an iPad is not made to turn.
+    private var rotateButton: some View {
+        Button { ScreenWindow.shared.turn() } label: {
+            ThemedIcon(railed ? Theme.Icon.rotateToPortrait : Theme.Icon.rotateToLandscape).font(Theme.Font.heading)
+                .scaledFrame(width: Theme.Size.icon, height: Theme.Size.icon)
+        }
+        .themedButton()
+        .accessibilityLabel(railed ? String(localized: "Rotate to Portrait") : String(localized: "Rotate to Landscape"))
+        .accessibilityIdentifier("vnc-rotate")
+    }
+    #endif
+
     #if os(iOS) || os(visionOS)
     static let fromPhone = String(localized: "Paste from iPhone"), toPhone = String(localized: "Copy to iPhone")
     #else
@@ -410,7 +438,8 @@ struct VNCPage: View {
         switch s.phase {
         case .live:
             #if os(iOS) || os(visionOS)
-            VNCScreen(session: s, mode: mode, interactive: true, region: shownDisplay?.frame) { v in DispatchQueue.main.async { screenView = v } }
+            VNCScreen(session: s, mode: mode, interactive: true, region: shownDisplay?.frame,
+                      onView: { v in DispatchQueue.main.async { screenView = v; zoomed = false } }, onZoom: { zoomed = $0 })
             #else
             VNCScreen(session: s, mode: mode, interactive: true)
             #endif
@@ -622,7 +651,12 @@ struct VNCHelp: View {
                 Section("Moving Around") {
                     #if !os(macOS)
                     row(Theme.Icon.pointer, String(localized: "Mouse mode (default)"), String(localized: "Tap to click there. Drag with one finger to drag. Drag with two fingers to scroll. Two-finger tap or touch and hold to right-click."))
-                    row(Theme.Icon.search, String(localized: "Zoom"), String(localized: "Pinch to zoom in and out. When zoomed in, dragging with two fingers moves the view instead of scrolling."))
+                    row(Theme.Icon.search, String(localized: "Zoom"), String(localized: "In Mouse Mode, pinch to zoom in and out; when zoomed in, dragging with two fingers moves the view instead of scrolling. In either mode, “…” › Zoom In zooms in around the pointer and Zoom to Fit shows the whole screen again. In Trackpad Mode two fingers only scroll, and a zoomed view follows the pointer."))
+                    #if os(iOS)
+                    if AppOrientation.phone {
+                        row(Theme.Icon.rotateToLandscape, String(localized: "Landscape"), String(localized: "Tap the rotate button next to the clipboard to turn the screen sideways for a larger view, and tap it again to turn it back upright. Once tapped, the screen keeps that orientation until you close it."))
+                    }
+                    #endif
                     row(Theme.Icon.displays, String(localized: "Displays"), String(localized: "When the Mac has more than one display, choose one in “…” › Displays to show only that display. Zooming, taps and the pointer then stay on it."))
                     #else
                     row(Theme.Icon.pointer, String(localized: "Mouse"), String(localized: "Click for the left mouse button; right-click (or Control-click) for the right button; press and hold the mouse button and move to drag."))

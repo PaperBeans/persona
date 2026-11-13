@@ -51,14 +51,22 @@ func TestClaudeExecutableFallsBackToInstallLocations(t *testing.T) {
 	}
 }
 
+// hideMachineAgents points the fixed system directories agentExecutable and commonNodePaths look in at empty temporary
+// ones, as a test does PATH and HOME: then it finds only the claude and node it sets up, not the machine's own (#5449,
+// #6257).
+func hideMachineAgents(t *testing.T) {
+	t.Helper()
+	systemDirs, distroDir := agentSystemDirs, distroNodeDir
+	agentSystemDirs, distroNodeDir = []string{t.TempDir()}, t.TempDir()
+	t.Cleanup(func() { agentSystemDirs, distroNodeDir = systemDirs, distroDir })
+}
+
 func TestClaudeExecutableFallsBackToNVMAndActionableError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", t.TempDir())
-	// Not the machine's own Homebrew or /usr/local claude, or "missing" would find it (#5449).
-	systemDirs := agentSystemDirs
-	agentSystemDirs = []string{t.TempDir()}
-	t.Cleanup(func() { agentSystemDirs = systemDirs })
+	// Not the machine's own claude, or "missing" would find it (#5449, #6257).
+	hideMachineAgents(t)
 
 	// 1. Missing claude returns actionable message noting service environment and remediation
 	_, err := claudeExecutable()

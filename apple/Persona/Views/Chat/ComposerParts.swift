@@ -192,7 +192,7 @@ final class StarterDraft {
                                    : String(localized: "Please look at the image [Assistant View 5ad878]"))
             : typed
         let body = AttachedFile.message(said, files: files)
-        return quotes.isEmpty ? body : quotes.map(\.xml).joined(separator: "\n") + "\n\n" + body
+        return ContextRef.message(quotes, body: body)
     }
 }
 

@@ -692,6 +692,11 @@ func (c *codexRemote) activeTurn(ctx context.Context, thread string) string {
 func (n *Node) interruptCodex(ctx context.Context, id string) error {
 	defer n.typing.lock(id)()
 	c, t, err := n.codexOwner(id)
+	if errors.Is(err, errCodexNoOwner) {
+		if src, ok := n.codexSource(id); ok && codexDesktopChat(src) {
+			return n.interruptCodexDesktop(ctx, src)
+		}
+	}
 	if err != nil {
 		return refusal("codex_read_only", err.Error(), nil)
 	}

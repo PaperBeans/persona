@@ -37,6 +37,11 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == sandbox.RunCommand { // a sandbox's first process (extension_sandbox_test.go)
 		os.Exit(sandbox.Run(os.Args[2:], os.Stderr))
 	}
+	// A transcription contribution's program, also run as the built-in voice extension (transcription_test.go).
+	if os.Getenv("PERSONA_TEST_PLUGIN") == "transcription" {
+		serveTranscriptionExtensionForTest()
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "voice" { // the built-in voice extension run by the hub (voice_extension_test.go)
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()

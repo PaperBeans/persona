@@ -67,6 +67,16 @@ func checkRecipe(r Recipe) *Problem {
 	if p := checkPagination(r); p != nil {
 		return p
 	}
+	if r.Mode == wire.ConnectorSubscriptionModeThings { // the rows come ready-made (#6296)
+		switch {
+		case r.GroupBy != wire.ConnectorSubscriptionGroupThread:
+			return &Problem{CodeBadRecipe, "A things recipe's rows are the connector's threads: group_by is thread."}
+		case r.Fields != nil && *r.Fields != (connector.SubscriptionFields{}):
+			return &Problem{CodeBadRecipe, "A things recipe maps no fields: its rows come ready-made."}
+		case cursorPagination(r) || pagePagination(r):
+			return &Problem{CodeBadRecipe, "A things recipe reads one answer: it has no pagination."}
+		}
+	}
 	for _, p := range recipePaths(r) {
 		if _, err := parsePath(p); err != nil {
 			return &Problem{CodeBadRecipe, err.Error()}
@@ -188,6 +198,20 @@ func pull(ctx context.Context, c connector.Connector, source string, r Recipe, s
 		p.problem = &Problem{CodeNoList, fmt.Sprintf("%s is not a list in the result.", p.itemsPath)}
 		return p
 	}
+	if r.Mode == wire.ConnectorSubscriptionModeThings {
+		for i, v := range arr {
+			if i == 0 {
+				p.first = v
+			}
+			m, ok := thingItem(v, r.Kind)
+			if !ok {
+				p.problem = &Problem{CodeBadThing, fmt.Sprintf("Item %d of the answer is not an Inbox row: it needs a thread and a last.", i+1)}
+				return p
+			}
+			p.items = append(p.items, m)
+		}
+		return p // the connector's current rows: one answer, no pages
+	}
 	titled := false
 	for i, v := range arr {
 		if i == 0 {
@@ -206,6 +230,30 @@ func pull(ctx context.Context, c connector.Connector, source string, r Recipe, s
 	p.noTitle = len(arr) > 0 && !titled
 	p.continuation, p.problem = nextContinuation(r, res, args, current, since, until, len(arr))
 	return p
+}
+
+// thingItem is one row of a things recipe's answer (#6296) as a held item: the row as this build reads the connectors'
+// rows (ConnectorInboxThing), its kind the recipe's when it has none; keyed by a hash of all of it, so a row whose
+// state changed (read, replied, a new move) is kept again. False when it has no thread or last.
+func thingItem(v any, kind string) (mapped, bool) {
+	raw, _ := json.Marshal(v)
+	var t connector.InboxThing
+	if json.Unmarshal(raw, &t) != nil || strings.TrimSpace(t.Thread) == "" || strings.TrimSpace(t.Last) == "" {
+		return mapped{}, false
+	}
+	t.Kind = cmpOr(t.Kind, kind)
+	row, err := json.Marshal(t)
+	if err != nil {
+		return mapped{}, false
+	}
+	h := hashOf(string(row))
+	it := Item{UID: "t:" + h[:24], Kind: t.Kind, Thread: clip(t.Thread, titleMax), Title: clip(oneLine(t.Title), titleMax),
+		Sender: clip(oneLine(t.Sender), titleMax), Body: clip(t.Preview, bodyMax), Link: t.URL, Thing: row}
+	if !t.At.IsZero() {
+		at := t.At
+		it.Time = &at
+	}
+	return mapped{item: it, idFound: true, hash: h, hasTitle: it.Title != ""}, true
 }
 
 // callProblem reads a failed call: rate_limited with its wait, a connector that cannot be reached now, a refusal, or

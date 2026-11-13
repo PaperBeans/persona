@@ -19,6 +19,8 @@ struct AssistantView: View {
     @State private var path = NavigationPath()
     /// The last shell request shown (`ShellState.request`'s serial).
     @State private var handledRequest = 0
+    /// The sidebar's place in front and the paths of the places left (docs/design/sidebar-navigation.md).
+    @State private var places = ShellPlaces()
     /// A first message whose start failed (#1368): it stays on the page until it is sent again or deleted.
     @State private var failedStart = FailedStart.shared
     @State private var starterLauncher: String?
@@ -119,12 +121,13 @@ struct AssistantView: View {
                                     pending = nil
                                     drawer.close()
                                     // The conversation, not the page pushed over it (the same one open: no change to see).
-                                    if places { backToRoot() }
+                                    if places { leavePlace() }
                                 },
-                                newConversation: { newConversation(); drawer.close(); if places { backToRoot() } },
-                                openProfile: { drawer.close(); showProfile = true },
-                                openRoutines: { drawer.close(); showRoutines = true },
-                                openKnowledge: { drawer.close(); showKnowledge = true },
+                                newConversation: { newConversation(); drawer.close(); if places { leavePlace() } },
+                                // The iPad's column: places, each keeping its stack (`show`, docs/design/sidebar-navigation.md).
+                                openProfile: places ? { show(.profile) } : { drawer.close(); showProfile = true },
+                                openRoutines: places ? { show(.routines) } : { drawer.close(); showRoutines = true },
+                                openKnowledge: places ? { show(.knowledge) } : { drawer.close(); showKnowledge = true },
                                 openSettings: places ? { model.shellSettings = true }
                                     : column ? nil : { drawer.close(); model.selectedTab = .settings },
                                 drawer: column ? nil : drawer,
@@ -132,7 +135,7 @@ struct AssistantView: View {
                                 openTodos: places ? { show(.todos) } : { drawer.close(); showTodos = true },
                                 onMachines: places ? { show(.machines) } : nil,
                                 onOpenExtension: places ? { show(.extensionPage($0)) } : { r in drawer.close(); openedExtension = r },
-                                openHealth: { drawer.close(); enterHealth() },
+                                openHealth: places ? { show(.health) } : { drawer.close(); enterHealth() },
                                 openRecordingsPage: Self.recordingsPage(places ? { show(.recordings) } : { drawer.close(); showRecordings = true }),
                                 collapse: column && pageTabSwitch ? { toggleSidebar() } : nil)
     }
@@ -226,8 +229,8 @@ struct AssistantView: View {
                             // In a health conversation New opens Health's new conversation page, whose list has the
                             // space's past ones (#4329); elsewhere the assistant's.
                             newConversation: currentIsHealth ? { backToRoot(); showHealth = true } : newConversation,
-                            openKnowledge: { showKnowledge = true },
-                            openProfile: { showProfile = true })
+                            openKnowledge: { if placesByValue { show(.knowledge) } else { showKnowledge = true } },
+                            openProfile: { if placesByValue { show(.profile) } else { showProfile = true } })
             #if os(macOS)
             // At the window's edge only with the history list folded away too (#830).
             .transformEnvironment(\.macTitleRowLeading) { if columns != .detailOnly { $0 = 0 } }
@@ -281,7 +284,11 @@ struct AssistantView: View {
                 handledRequest = serial
                 show(request?.page)
             }
-            .onChange(of: atRoot, initial: true) { _, root in shell?.chatAtRoot = root }
+            .onChange(of: atRoot, initial: true) { _, root in
+                shell?.chatAtRoot = root
+                // Back out of a place by the user: it starts at its root next time.
+                if root { places.backedOut() }
+            }
             // Opening a conversation from the profile (a run, a follow-up) shows it: back to the root. So does Ask Persona
             // from the knowledge base, even when its conversation is the one already open.
             // A start error belongs to the home page it failed on: another conversation (from any menu, the Mac's
@@ -289,8 +296,8 @@ struct AssistantView: View {
             .onChange(of: model.assistantCurrent) { old, new in
                 // The app picking the main conversation by itself once the hub answers (none was open) is not the user
                 // opening one: Recordings, opened by a Control or the home screen's menu at launch, stays.
-                if showRecordings, old == nil, new == model.assistantMain { return }
-                backToRoot()
+                if showRecordings || places.current == .recordings, old == nil, new == model.assistantMain { return }
+                leavePlace()
             }
             .onChange(of: model.assistantManagerID) {
                 starterLauncher = nil // a launcher of the assistant shown before
@@ -298,10 +305,11 @@ struct AssistantView: View {
                 // starts (`start`), and this page shows the one switched to.
                 pending = nil
             }
-            .onChange(of: model.assistantReveal) { backToRoot(); activeDrawer.close() }
+            // A conversation from the sidebar: the place in front is kept, the page switches under the drawer, then it closes.
+            .onChange(of: model.assistantReveal) { leavePlace(); activeDrawer.close() }
             // Another assistant is current: a pushed page (the profile, scheduled tasks, memory…) read the one before and
             // would write to this one, so it closes.
-            .onChange(of: model.assistantSwitches) { backToRoot() }
+            .onChange(of: model.assistantSwitches) { places.forget(); backToRoot() }
             #if DEBUG
             // `-openAssistantPage profile|avatars|routines|runs|…` (with `-tab assistant`): the profile and its pages;
             // `-openAssistantSidebar YES` (or a fraction): the sidebar is out; `-showDrawerAutoDrag <rounds>`: scripted drags, measured
@@ -374,22 +382,53 @@ struct AssistantView: View {
         #endif
     }
 
-    /// A page the shell asked for (the drawer, the home page): from the conversation's root, so back comes to it.
+    /// The sidebar's places push by value (`ShellRoute`, `ShellDestinations`): the iPhone shell and the iPad's column.
+    private var placesByValue: Bool { shell != nil || padPlaces }
+
+    /// A page the shell asked for (the drawer, the home page): from the conversation's root, so back comes to it. A place
+    /// comes back as it was left, the place in front is kept for coming back to it, and the place already in front goes
+    /// to its root (`ShellPlaces`, docs/design/sidebar-navigation.md). Under the open drawer the page switches without
+    /// animation, then the drawer closes: one motion, not a push and a slide while the drawer closes (#6599).
     private func show(_ page: ShellPage?) {
         guard let page else { return }
-        backToRoot()
-        switch page {
-        case .newConversation: newConversation()
-        case .profile: showProfile = true
-        case .routines: showRoutines = true
-        case .knowledge: showKnowledge = true
-        case .inbox: path.append(ShellRoute.inbox)
-        case .todos: path.append(ShellRoute.todos)
-        case .machines: path.append(ShellRoute.machines)
-        case .extensionPage(let r): path.append(ShellRoute.extensionPage(r))
-        case .health: enterHealth()
-        case .recordings: showRecordings = true
+        let kept = placesByValue ? places.enter(page, from: path) : nil
+        #if DEBUG
+        ShellTrace.shared.note("place \(page) \(kept == nil ? "root" : "kept") drawer=\(activeDrawer.isOut)")
+        #endif
+        underDrawer {
+            backToRoot()
+            if let kept {
+                path = kept
+                return
+            }
+            switch page {
+            case .newConversation: newConversation()
+            case .profile: if placesByValue { path.append(ShellRoute.profile) } else { showProfile = true }
+            case .routines: if placesByValue { path.append(ShellRoute.routines) } else { showRoutines = true }
+            case .knowledge: if placesByValue { path.append(ShellRoute.knowledge) } else { showKnowledge = true }
+            case .inbox: path.append(ShellRoute.inbox)
+            case .todos: path.append(ShellRoute.todos)
+            case .machines: path.append(ShellRoute.machines)
+            case .extensionPage(let r): path.append(ShellRoute.extensionPage(r))
+            case .health: enterHealth()
+            case .recordings: if placesByValue { path.append(ShellRoute.recordings) } else { showRecordings = true }
+            }
         }
+        if let shell, shell.drawer.isOut { shell.drawer.close() }
+    }
+
+    /// Leaves the place in front for the conversation, keeping its path (`ShellPlaces`).
+    private func leavePlace() {
+        places.leave(with: path)
+        underDrawer { backToRoot() }
+    }
+
+    /// While the drawer is out the page is under it: it changes at once, and the drawer's closing is the only motion.
+    private func underDrawer(_ change: () -> Void) {
+        guard activeDrawer.isOut else { return change() }
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t, change)
     }
 
     /// The open conversation is the health space's.
@@ -618,7 +657,7 @@ struct AssistantHome: View {
     var body: some View {
         ScrollView {
             if let pending {
-                FirstMessagePending(pending: pending, name: model.persona.name, shell: false, resend: resend, delete: delete)
+                FirstMessagePending(pending: pending, name: model.assistantShownName, shell: false, resend: resend, delete: delete)
                     // The page's height inside its margins, the message at its bottom (a long one runs up out of it, as the
                     // chat shows its newest end).
                     .containerRelativeFrame(.vertical, alignment: .bottom)
@@ -790,29 +829,44 @@ struct AssistantWelcome: View {
                     .modifier(WelcomeFold.Mark(first: s.title == suggestions.first?.title))
                 }
             }
-        } else {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                ForEach(cardRows.map { Array(suggestions.prefix($0 * 2)) } ?? suggestions, id: \.title) { s in
-                    Button {
-                        ask(s)
-                    } label: {
-                        VStack(alignment: .leading, spacing: Theme.Space.m) {
-                            ThemedIcon(s.symbol)
-                                .font(Theme.Font.title)
-                                .foregroundStyle(Theme.accent)
-                            Text(s.title).font(Theme.Font.heading).foregroundStyle(Color.primary)
-                        }
-                        .scaledFrame(maxWidth: .infinity, minHeight: Theme.Size.box72, alignment: .topLeading)
-                        .card(padding: 14)
+        } else if let cardRows {
+            // The shell's few cards are all made, wherever they are (#4073): a lazy grid never makes the ones below the
+            // page, and at the largest text sizes the greeting already fills it, so the fold was never measured and
+            // Needs You took every row it had over the composer.
+            Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+                let shown = Array(suggestions.prefix(cardRows * 2))
+                let rows = stride(from: 0, to: shown.count, by: 2).map { Array(shown[$0..<min($0 + 2, shown.count)]) }
+                ForEach(rows, id: \.[0].title) { row in
+                    GridRow {
+                        ForEach(row, id: \.title) { card($0) }
                     }
-                    .buttonStyle(.plain)
-                    // Two cards a row, and the first two rows kept clear of Needs You: the fold is where the tallest
-                    // of the first four ends (#5648: English and Japanese titles run to two lines, and the second row
-                    // was half under the fade when the fold was the first row's end).
-                    .modifier(WelcomeFold.Mark(first: suggestions.prefix(WelcomeFold.cards).contains { $0.title == s.title }))
                 }
             }
+        } else {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                ForEach(suggestions, id: \.title) { card($0) }
+            }
         }
+    }
+
+    private func card(_ s: Suggestion) -> some View {
+        Button {
+            ask(s)
+        } label: {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                ThemedIcon(s.symbol)
+                    .font(Theme.Font.title)
+                    .foregroundStyle(Theme.accent)
+                Text(s.title).font(Theme.Font.heading).foregroundStyle(Color.primary)
+            }
+            .scaledFrame(maxWidth: .infinity, minHeight: Theme.Size.box72, alignment: .topLeading)
+            .card(padding: 14)
+        }
+        .buttonStyle(.plain)
+        // Two cards a row, and the first two rows kept clear of Needs You: the fold is where the tallest of the first
+        // four ends (#5648: English and Japanese titles run to two lines, and the second row was half under the fade
+        // when the fold was the first row's end).
+        .modifier(WelcomeFold.Mark(first: suggestions.prefix(WelcomeFold.cards).contains { $0.title == s.title }))
     }
 
     private var header: some View {
@@ -1124,7 +1178,7 @@ struct StarterComposer: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if let shell {
-                ShellComposerBar(placeholder: placeholder ?? String(localized: "Ask \(model.persona.name)"), text: textBinding, selection: $selection, focused: $focused,
+                ShellComposerBar(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)"), text: textBinding, selection: $selection, focused: $focused,
                                  canSend: canSend, hasAttachments: !images.isEmpty || !videos.items.isEmpty || !quotes.isEmpty,
                                  modesTitle: StarterModesMenu.title(modes: shell, launchers: launchers, model: model),
                                  quotes: quotesBinding, history: "assistant.new", gate: gate, openAttach: attachOpener, send: submit) {
@@ -1145,7 +1199,7 @@ struct StarterComposer: View {
                 }
                 .task(id: machine) { launchers = (try? await model.launchers(machine))?.filter(\.runsAssistant) ?? [] }
             } else {
-                ComposerRow(placeholder: placeholder ?? String(localized: "Ask \(model.persona.name)…"), text: textBinding, selection: $selection, focused: $focused, canSend: canSend,
+                ComposerRow(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)…"), text: textBinding, selection: $selection, focused: $focused, canSend: canSend,
                             send: submit, history: "assistant.new", gate: gate) {
                     attachments
                 }
@@ -1285,7 +1339,7 @@ struct BeautifulStarterComposer: View {
             #else
             if !images.isEmpty { ComposerImages.editable(draft.held) } // a tap marks it up, as in a conversation
             #endif
-            PromptComposer(placeholder: placeholder ?? String(localized: "Ask \(model.persona.name)…"), text: textBinding, selection: $selection, focused: $focused,
+            PromptComposer(placeholder: placeholder ?? String(localized: "Ask \(model.assistantShownName)…"), text: textBinding, selection: $selection, focused: $focused,
                            hasAttachments: !images.isEmpty || !videos.items.isEmpty || !quotes.isEmpty, disabled: disabled,
                            attach: PromptItems.attachments(camera: false),
                            mentions: { PromptItems.sessions(model.sessionsNow, except: nil) },

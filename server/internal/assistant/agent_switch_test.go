@@ -24,18 +24,28 @@ type switchDevs struct {
 }
 
 func (d *switchDevs) NodeAnnounced(id, capability string) bool {
-	return !d.old && capability == nodeproto.LauncherSwitchNow && d.Has(id)
+	return !d.old && (capability == nodeproto.LauncherSwitchNow || capability == nodeproto.LauncherSwitchIdle) && d.Has(id)
 }
 
 // switchRig is a manager with the computer "mac" whose agents s1… a test lists; the node's session.modes and
 // session.send go to the fake hub (f.calls), answered by f.nodes.
 func switchRig(t *testing.T) (*fleetTest, *switchDevs) {
 	t.Helper()
+	return switchRigOn(t, nil)
+}
+
+// switchRigOn is switchRig with st as its database (nil: none).
+func switchRigOn(t *testing.T, st Store) (*fleetTest, *switchDevs) {
+	t.Helper()
 	f := newFakeHub()
 	f.sessions["mac"] = nil
 	d := &switchDevs{fleetDevs: newFleetDevs()}
 	d.add("mac", "Mac")
-	s := New(Options{Hub: f, Logf: testLogf(t), Devices: d})
+	opts := Options{Hub: f, Logf: testLogf(t), Devices: d}
+	if st != nil {
+		opts.Store = func() Store { return st }
+	}
+	s := New(opts)
 	return &fleetTest{t: t, s: s, d: d.fleetDevs, f: f}, d
 }
 
@@ -45,7 +55,7 @@ func nodeCalls(f *fakeHub) []DeviceCall {
 	defer f.mu.Unlock()
 	var out []DeviceCall
 	for _, c := range f.calls {
-		if c.Method == DeviceSessionModes || c.Method == DeviceSessionSend {
+		if c.Method == DeviceSessionModes || c.Method == DeviceSessionSend || c.Method == DeviceSessionSwitch {
 			out = append(out, c)
 		}
 	}

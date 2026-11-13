@@ -473,16 +473,30 @@ nonisolated struct Launcher: Codable, Identifiable, Hashable, Sendable {
     /// A Codex launcher the computer also starts with no first message (docs/integrations/codex.md「Starting without a
     /// first message」); nil from an older computer, whose Codex starts need one.
     var promptOptional: Bool? = nil
+    /// Where the computer has it: zshrc, path, persona, a runtime's id, `claude_desktop` (`claudeDesktopSource`) or
+    /// `codex_app` (`codexAppSource`).
+    var source: String? = nil
+    /// A Codex launcher the computer starts in a shell pane the user picked (Run Agent Here) and keeps that pane when the
+    /// start fails (#5504); nil from an older computer, where Run Agent Here offers Claude Code only.
+    var runHere: Bool? = nil
     var id: String { name }
+    /// The launcher that starts the session in Claude's desktop app (docs/integrations/claude-integration.md「New sessions
+    /// in the desktop app」): with no folder it runs in the app's scratch folder, and a new folder is made for it.
+    var startsInDesktopApp: Bool { source == Self.claudeDesktopSource || source == Self.codexAppSource }
+    static let claudeDesktopSource = "claude_desktop"
+    /// The launcher that starts the chat in the Codex App (#5726, docs/integrations/codex.md):
+    /// a Codex launcher (`agent` codex) whose chat with no folder goes among the App's chats in no project.
+    static let codexAppSource = "codex_app"
     /// A Codex start sends its first message with it and waits for the thread Codex makes.
     var isCodex: Bool { agent == "codex" }
     /// Starting it needs a first message: a Codex on a computer that cannot open it without one.
     var needsFirstMessage: Bool { isCodex && promptOptional != true }
 
     enum CodingKeys: String, CodingKey {
-        case name, model, agent, assistant, health
+        case name, model, agent, assistant, health, source
         case baseURL = "base_url"
         case promptOptional = "prompt_optional"
+        case runHere = "run_here"
     }
 }
 
@@ -497,6 +511,8 @@ nonisolated extension Launcher {
         assistant = try c.decodeIfPresent(Bool.self, forKey: .assistant)
         health = (try? c.decodeIfPresent(LauncherHealth.self, forKey: .health)) ?? nil
         promptOptional = try c.decodeIfPresent(Bool.self, forKey: .promptOptional)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        runHere = try c.decodeIfPresent(Bool.self, forKey: .runHere)
     }
 }
 
@@ -644,8 +660,22 @@ nonisolated struct SessionCapabilities: Codable, Hashable, Sendable {
     var terminal = false
     var attach = false
     var modes: Bool?
+    var takeover: CodexTakeoverCapability? = nil
+    /// The node's word on closing, renaming, switching the model and rewinding (#6294; docs/protocol/protocol.md "Codex
+    /// sources and capabilities"): a runtime's session has no terminal, yet does these where its runtime can. Nil from an
+    /// older node, or a value this app cannot read: the app keeps its terminal rules (`Session.canClose`, `canRename`,
+    /// `switchesModel`, `Rewind.block`).
+    var close: Bool?
+    var rename: Bool?
+    var model: Bool?
+    var rewind: Bool?
+    /// Rewind Code and Chat as well (`rewind_code`).
+    var rewindCode: Bool?
 
-    enum CodingKeys: String, CodingKey { case read, send, interrupt, approve, terminal, attach, modes }
+    enum CodingKeys: String, CodingKey {
+        case read, send, interrupt, approve, terminal, attach, modes, takeover, close, rename, model, rewind
+        case rewindCode = "rewind_code"
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -656,7 +686,20 @@ nonisolated struct SessionCapabilities: Codable, Hashable, Sendable {
         terminal = try c.decodeIfPresent(Bool.self, forKey: .terminal) ?? false
         attach = try c.decodeIfPresent(Bool.self, forKey: .attach) ?? false
         modes = try c.decodeIfPresent(Bool.self, forKey: .modes)
+        takeover = try c.decodeIfPresent(CodexTakeoverCapability.self, forKey: .takeover)
+        close = try? c.decodeIfPresent(Bool.self, forKey: .close)
+        rename = try? c.decodeIfPresent(Bool.self, forKey: .rename)
+        model = try? c.decodeIfPresent(Bool.self, forKey: .model)
+        rewind = try? c.decodeIfPresent(Bool.self, forKey: .rewind)
+        rewindCode = try? c.decodeIfPresent(Bool.self, forKey: .rewindCode)
     }
+}
+
+nonisolated struct CodexTakeoverCapability: Codable, Hashable, Sendable {
+    var running: Bool
+    var canResume: Bool
+    var reason: String?
+    enum CodingKeys: String, CodingKey { case running, reason; case canResume = "can_resume" }
 }
 
 /// Resume in Terminal (#5521, docs/integrations/engines.md "Agents run in a terminal"): what the chat's ⋯ offers for an Agent
@@ -942,6 +985,32 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     var canInterrupt: Bool { capabilities.map(\.interrupt) ?? !hasSource }
     var canApprove: Bool { capabilities.map(\.approve) ?? !hasSource }
     var canTerminal: Bool { capabilities.map(\.terminal) ?? !hasSource }
+    /// Close it (#6294, the web's `sessionCan(s, "close")`): the node's `capabilities.close` where it says (a runtime's
+    /// session closes without a terminal), else a terminal's, as before (an older node).
+    var canClose: Bool { capabilities?.close ?? canTerminal }
+    /// Rename it: the node's `capabilities.rename` where it says, else a terminal's (its tab and Claude's /rename).
+    var canRename: Bool { capabilities?.rename ?? canTerminal }
+    /// Its model can be switched while it runs (#3119; the web's `canSwitchModel`): where the node says so
+    /// (`capabilities.model`: a runtime's session takes a pick through POST …/modes, #6294), else Claude Code in a
+    /// terminal pane, which takes `/model`. Never an assistant conversation (its own chip) or one that cannot send.
+    var switchesModel: Bool {
+        guard !assistant, canSend else { return false }
+        if let said = capabilities?.model { return said }
+        return canTerminal && paneID != nil && isClaude && !isTraex
+    }
+    /// A model pick goes through POST …/modes rather than a typed `/model` (#6294): the node said it takes one. Such a
+    /// session's menus offer its launcher's list only, never Claude Code's fixed aliases.
+    var picksModelByModes: Bool { capabilities?.model == true }
+    /// Rewind Code and Chat is offered as well (the web's `rewind_code ?? !rewind`): the node's `rewind_code` where it
+    /// declares rewind (#6294); a Claude terminal, which declares nothing, keeps both choices.
+    var rewindsCode: Bool { capabilities?.rewindCode ?? (capabilities?.rewind != true) }
+    /// An Agent of a terminal engine the node has no reader for (#6170): a CLI such as Kiro or gemini, or a pi / omp /
+    /// opencode without Persona's extension. The node says so with `read_only_reason` on the row (node sessions.go
+    /// `otherAgent`, pi.go, opencode.go); a pi or opencode with its extension has none and keeps its chat. Its terminal is the
+    /// useful view, so the chat offers it at once.
+    var isTerminalOnly: Bool {
+        !assistant && !hasSource && canTerminal && !isClaude && !isCodex && !isTraex && !isStopped && !(readOnlyReason ?? "").isEmpty
+    }
     /// A stopped Agent (#4754): its conversation and terminal stay, it takes no messages; Resume on its terminal page runs
     /// it again (node stopped.go). A Codex thread nothing has open is marked the same way (node codex_registry.go, #5521),
     /// though its row keeps its Codex history source.
@@ -1198,11 +1267,37 @@ nonisolated struct WorkState: Codable, Hashable, Sendable {
     var max: Int? = nil
     /// The agent it waits for.
     var agent: WorkAgent? = nil
+    /// What the work produced: pull requests, commits, documents, builds (`WorkArtifact`). Nil from a hub without them.
+    var artifacts: [WorkArtifact]? = nil
+    /// What the agent said of its own work as the turn ended (`Closeout`, #3612). A turn the hub could not call finished
+    /// carries it with an empty `phase` and a line. Nil when it wrote none, and from a hub before closeouts.
+    var closeout: Closeout? = nil
 
     enum CodingKeys: String, CodingKey {
-        case phase, on, line, wait, then, attempts, max, agent
+        case phase, on, line, wait, then, attempts, max, agent, artifacts, closeout
         case wakeAt = "wake_at", resetsAt = "resets_at"
     }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        phase = try c.decode(String.self, forKey: .phase)
+        on = try c.decodeIfPresent(String.self, forKey: .on)
+        line = try c.decodeIfPresent(String.self, forKey: .line)
+        wait = try c.decodeIfPresent(String.self, forKey: .wait)
+        then = try c.decodeIfPresent(String.self, forKey: .then)
+        wakeAt = try c.decodeIfPresent(Date.self, forKey: .wakeAt)
+        resetsAt = try c.decodeIfPresent(Date.self, forKey: .resetsAt)
+        attempts = try c.decodeIfPresent(Int.self, forKey: .attempts)
+        max = try c.decodeIfPresent(Int.self, forKey: .max)
+        agent = try c.decodeIfPresent(WorkAgent.self, forKey: .agent)
+        // New (#3612): one that does not decode is as if there were none, never the whole work state failing.
+        artifacts = try? c.decodeIfPresent([WorkArtifact].self, forKey: .artifacts)
+        closeout = try? c.decodeIfPresent(Closeout.self, forKey: .closeout)
+    }
+
+    /// A turn nobody can call finished (docs/assistant/agent-work.md "Closeout"): the hub publishes it with an empty
+    /// phase, the closeout and a line saying why. It stays Unread and never counts as waiting.
+    var notFinished: Bool { phase.isEmpty && closeout != nil && !(line ?? "").isEmpty }
 
     /// The hub waits it out: it wakes it (`wake_at`), or it wakes itself (its background tasks, a /loop). Waiting in the
     /// lists (the web's `hubWaits`, lib/work.ts).
@@ -1232,21 +1327,30 @@ nonisolated struct TriageSwitches: Codable, Hashable, Sendable {
     static let defaultReplyReminderMinutes = 30
     /// After how many minutes since the user looked the hub reminds (what Settings › Session Triage says).
     var replyReminderAfter: Int { replyReminderMinutes.flatMap { $0 > 0 ? $0 : nil } ?? Self.defaultReplyReminderMinutes }
+    /// Ask for a Closeout (#3612): hold a stop once when a turn that did work ends without one. Nil from a hub that
+    /// does not know it: Settings shows no switch then, and a PUT leaves it out, so the hub keeps its value.
+    var closeout: Bool? = nil
+    /// The switch as Settings flips it (off while the hub names none).
+    var asksCloseout: Bool {
+        get { closeout ?? false }
+        set { closeout = newValue }
+    }
 
     enum CodingKeys: String, CodingKey {
-        case enabled, decide, wake
+        case enabled, decide, wake, closeout
         case autoContinue = "auto_continue"
         case replyReminder = "reply_reminder", replyReminderMinutes = "reply_reminder_minutes"
     }
 
     init(enabled: Bool = false, decide: Bool = false, autoContinue: Bool = false, wake: Bool = false,
-         replyReminder: Bool = true, replyReminderMinutes: Int? = nil) {
+         replyReminder: Bool = true, replyReminderMinutes: Int? = nil, closeout: Bool? = nil) {
         self.enabled = enabled
         self.decide = decide
         self.autoContinue = autoContinue
         self.wake = wake
         self.replyReminder = replyReminder
         self.replyReminderMinutes = replyReminderMinutes
+        self.closeout = closeout
     }
 
     init(from decoder: Decoder) throws {
@@ -1257,6 +1361,7 @@ nonisolated struct TriageSwitches: Codable, Hashable, Sendable {
         wake = try c.decodeIfPresent(Bool.self, forKey: .wake) ?? false
         replyReminder = (try? c.decodeIfPresent(Bool.self, forKey: .replyReminder)).flatMap { $0 } ?? true
         replyReminderMinutes = (try? c.decodeIfPresent(Int.self, forKey: .replyReminderMinutes)).flatMap { $0 }
+        closeout = (try? c.decodeIfPresent(Bool.self, forKey: .closeout)).flatMap { $0 }
     }
 }
 
@@ -1536,8 +1641,29 @@ extension Session {
         if state == .needsYou, let r = attentionReason, !r.isEmpty { return r } // a stale reason (offline, seen) stays out
         if state != .working, let r = failureReason, !r.isEmpty { return Session.failureText(r) }
         if let r = replyLine(muted: muted) { return r }
+        // The native Mac app is frozen (docs/apple/mac.md): its rows keep the line they had.
+        #if !os(macOS)
+        if let c = closeoutPreview() { return c }
+        #endif
         if let w = workLine() { return w }
         return lastText.flatMap { $0.isEmpty ? nil : Fmt.plain($0) }
+    }
+    /// The closeout to show (the web's `shownCloseout`): one with a status this build knows, while the session is not
+    /// working (a new turn has no closeout yet, and the previous turn's no longer says where the work stands).
+    var shownCloseout: Closeout? {
+        guard let w = work, let c = w.closeout, c.known != nil, state != .working, w.phase != "working" else { return nil }
+        return c
+    }
+    /// A stopped session's line when its agent ended the turn with a closeout (the web's `closeoutPreview`): the hub's
+    /// line as before (the closeout's own words when the hub gave none: the last words would be the raw block), then
+    /// "merged · not deployed" where the agent said or the hub found it, a claim the hub found untrue marked. One
+    /// string: the row truncates it like any other line.
+    func closeoutPreview(now: Date = Date()) -> String? {
+        guard let c = shownCloseout else { return nil }
+        let line = workLine(now: now) ?? c.line ?? ""
+        let suffix = c.suffix
+        if line.isEmpty { return suffix.isEmpty ? nil : suffix }
+        return suffix.isEmpty ? line : String(localized: "\(line) · \(suffix)")
     }
     /// The question an Awaiting Reply row shows: what the triage says it waits on the user for (blocked · user), else what
     /// its last reply asks; nil when it is not Awaiting Reply or names nothing.
@@ -1642,6 +1768,9 @@ nonisolated struct SessionKey: Hashable, Sendable, Codable {
         set { hubGroup = newValue.isEmpty ? nil : newValue }
     }
     var machineRef: MachineRef { MachineRef(group: group, id: machineID) }
+    /// A terminal addressed by its pane (`pane:<id>`, docs/integrations/terminal.md section 19): a plain terminal of the
+    /// Terminals page or Open Terminal Here, with no session row of its own.
+    var isPane: Bool { sessionID.hasPrefix("pane:") }
 
     /// "machine/session", or "group|machine/session" for another group: what launch arguments, remembered chats and
     /// deep links write.
@@ -2150,7 +2279,7 @@ nonisolated struct InteractionField: Codable, Hashable, Sendable, Identifiable {
     var id: String { key }
 }
 
-nonisolated struct Resolution: Codable, Sendable {
+nonisolated struct Resolution: Codable, Sendable, Equatable {
     var answers: [String: String]?
     var approve: Bool?
     var mode: String?
@@ -2270,6 +2399,11 @@ nonisolated struct MuteWhileDesktopPut: Encodable, Sendable {
 /// The Live Activity's persona alone, for the prefs PUT (it merges): FleetState.look.
 nonisolated struct FleetLookPut: Encodable, Sendable {
     var look: FleetLook
+}
+
+/// Whether this device has Persona's Home Screen widgets, alone (the PUT merges): the hub wakes it for them (#5721).
+nonisolated struct WidgetsPut: Encodable, Sendable {
+    var widgets: Bool
 }
 
 /// The managers whose pushes this device doesn't want, alone (APIClient.setMutedManagers): a write of the whole prefs

@@ -106,6 +106,7 @@ Now `personad hub run` (Linux, macOS) is an **edge**:
 - The edge forwards every connection byte for byte, first writing a PROXY v2 header stating the origin. So the slot's `RemoteAddr` / `LocalAddr` are still the client's address and the address it connected to,
   and trust decisions by origin (loopback, LAN, VPN interface, the user's own PROXY protocol upstream) work as before.
 - TLS certificates, public-key pinning and the database belong to the slot; the edge only forwards TCP.
+- On a machine with more than 4 cores the edge, the slot and the built-in manager keep at most 4 Ps (GOMAXPROCS), as the node does: they are I/O-bound, and every P costs threads and memory (#3533, `server/internal/procs/procs.go`). The edge caps itself and starts the slot with `GOMAXPROCS=4` and a marker, `PERSONA_GOMAXPROCS_CAP=4`; the slot starts the manager the same way; each takes both out of its environment at its start, so the node, Agents and tools they start never inherit them. A machine or container with 4 CPUs or fewer keeps the runtime's own value. To run the hub with another value, set `GOMAXPROCS` in its environment (its systemd unit, launchd plist or compose file): it wins and passes on unchanged.
 
 One switch (self-update, `personad hub switch`, deploy.sh), in order:
 

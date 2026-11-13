@@ -38,10 +38,10 @@ nonisolated extension ExtensionComponent {
 
     /// The device's viewed marks and display options; a test's page passes its own (none kept), so what the app or
     /// another run saved on the device does not change what it draws.
+    /// Assignments only: SwiftUI makes it again each time the page's parent redraws (docs/apple/performance.md P3).
     init(marks: CodeViewedMarks = .shared, defaults: UserDefaults? = .standard) {
         self.marks = marks
         self.defaults = defaults
-        whitespace = defaults?.bool(forKey: Self.whitespaceKey) ?? false
     }
 
     /// Open directories by tree key.
@@ -118,7 +118,11 @@ nonisolated extension ExtensionComponent {
     /// Viewed marks changed here and sent with the extension's `mark_viewed`, by path, until its page says so too.
     private(set) var viewedOver: [String: Bool] = [:]
     /// Changes that are only whitespace drawn as unchanged; the app's choice, kept for every page.
-    private(set) var whitespace: Bool
+    var whitespace: Bool { chosenWhitespace ?? savedWhitespace }
+    /// The choice made on this page.
+    private var chosenWhitespace: Bool?
+    /// The device's choice, read the first time the page asks (once a page, not when its state is made: P2, P3).
+    @ObservationIgnored private lazy var savedWhitespace = defaults?.bool(forKey: Self.whitespaceKey) ?? false
     static let whitespaceKey = "extension.code.ignoreWhitespace"
     /// A thread to scroll to (its block's id), and the open thread the last jump went to.
     var jump: String?
@@ -197,7 +201,7 @@ nonisolated extension ExtensionComponent {
     }
 
     func setWhitespace(_ on: Bool) {
-        whitespace = on
+        chosenWhitespace = on
         defaults?.set(on, forKey: Self.whitespaceKey)
         version += 1
     }

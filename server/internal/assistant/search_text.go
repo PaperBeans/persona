@@ -1,0 +1,223 @@
+package assistant
+
+import (
+	"slices"
+	"strings"
+	"unicode"
+	"unicode/utf16"
+
+	"github.com/nwverse/persona/sdk/go/wire"
+	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/prompts"
+	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/transcript"
+	"golang.org/x/text/unicode/norm"
+)
+
+// What the chat search index keeps of a message, and how a search matches it (#6282, the shared rule of
+// spec/fixtures/chat-search, its "index": docs/design/proposals/assistant-search.md "One rule for what is searchable").
+// The user's own words and the assistant's replies, as the chat shows them; never a hidden tag, a quoted context, a
+// thought, a tool or a message Persona wrote for the model. The web reads the same rule in lib/chat-search-match.ts.
+
+var (
+	// A quoted context with its attributes (web lib/compatibility.ts CONTEXT_RE); transcript.ContextRe is the snapshot's bare tag.
+	searchContextRe  = lazyre.New(`(?s)<` + compat.ContextPattern() + `\b[^>]*>.*?</` + compat.ContextPattern() + `>\s*`)
+	searchFileRe     = lazyre.New(`<` + compat.FilePattern() + `\b[^>]*?/?>(?:\s*</` + compat.FilePattern() + `>)?`)
+	searchPastedRe   = lazyre.New(`(?s)<pasted_content\b[^>]*>(.*?)</pasted_content>`)
+	searchImagesRe   = lazyre.New(`(?s)<attached_images>.*?</attached_images>`)
+	searchImageNumRe = lazyre.New(`\[Image #\d+\]\s?`)
+	// The hub's tag a card's answer ends with (view_actions.go): hidden in the chat, so never indexed.
+	searchActionRe = lazyre.New(`\n<persona-action view="[^"<>]*" action="[^"<>]*">\{[^<>]*\}</persona-action>$`)
+)
+
+// searchIndexText is the text the index keeps of it, and false for an item it keeps nothing of.
+func searchIndexText(it proto.Item) (string, bool) {
+	if it.Kind != proto.KindText {
+		return "", false
+	}
+	var text string
+	switch it.Role {
+	case "assistant":
+		text = wire.AssistantCardText(it.Text) // a card as its fallback words, never its JSON
+	case "user":
+		if it.From != "" || searchInjected(it) {
+			return "", false // another session's message, or Persona's to the model: not the user's words
+		}
+		text = searchUserText(it.Text)
+	default:
+		return "", false
+	}
+	if strings.TrimSpace(text) == "" {
+		return "", false
+	}
+	return text, true
+}
+
+// searchInjected: a message Persona wrote for the model (the hub's withInjected reads it the same way).
+func searchInjected(it proto.Item) bool {
+	if it.Injected != nil {
+		return true
+	}
+	if it.ClientMsgID != "" || prompts.UserAuthoredContext(it.Text) {
+		return false
+	}
+	return prompts.ParseInjected(it.Text) != nil
+}
+
+// searchUserText is the user's words as the bubble shows them: without the view errors, quoted contexts, files,
+// photos and the card answer's tag they travel with; pasted text as itself.
+func searchUserText(s string) string {
+	s = transcript.ViewErrorsRe.Regexp().ReplaceAllString(s, "")
+	s = searchContextRe.Regexp().ReplaceAllString(s, "")
+	s = searchFileRe.Regexp().ReplaceAllString(s, "")
+	s = searchPastedRe.Regexp().ReplaceAllString(s, "$1")
+	s = searchImagesRe.Regexp().ReplaceAllString(s, "")
+	s = searchImageNumRe.Regexp().ReplaceAllString(s, "")
+	s = strings.TrimSpace(s)
+	return strings.TrimSpace(searchActionRe.Regexp().ReplaceAllString(s, ""))
+}
+
+// searchFold is what a search matches: NFKC (full and half width alike) and lower case.
+func searchFold(s string) string { return strings.ToLower(norm.NFKC.String(s)) }
+
+// searchMaxRunes is the longest query read; searchMaxWords the most words of it that must all match.
+const (
+	searchMaxRunes = 200
+	searchMaxWords = 8
+)
+
+// searchWords is a query's words, folded, each once, in order: every one must be in a message (or the title).
+func searchWords(q string) []string {
+	r := []rune(strings.TrimSpace(q))
+	if len(r) > searchMaxRunes {
+		r = r[:searchMaxRunes]
+	}
+	var out []string
+	for _, w := range strings.Fields(searchFold(string(r))) {
+		if len(out) == searchMaxWords {
+			break
+		}
+		if !slices.Contains(out, w) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// searchHolds: folded holds every word.
+func searchHolds(folded string, words []string) bool {
+	for _, w := range words {
+		if !strings.Contains(folded, w) {
+			return false
+		}
+	}
+	return len(words) > 0
+}
+
+// How much of the text a snippet shows before and after the first match, in characters.
+const (
+	snippetBefore = 40
+	snippetAfter  = 80
+)
+
+// searchSnippet is the text around the first match of words in body, on one line, with "…" where it was cut, and the
+// [start, end) of every match in it as UTF-16 offsets (as the apps count them); the start of body when no word is
+// found in it rune by rune (a match only the whole text's normalization makes).
+func searchSnippet(body string, words []string) (string, [][2]int) {
+	runes := []rune(body)
+	folded, from := searchFoldRunes(runes)
+	start, end := 0, min(len(runes), snippetBefore+snippetAfter)
+	for _, w := range words {
+		if at := searchIndexRunes(folded, []rune(w), 0); at >= 0 {
+			first, last := from[at], from[at+len([]rune(w))-1]
+			start, end = max(0, first-snippetBefore), min(len(runes), last+1+snippetAfter)
+			break
+		}
+	}
+	var b strings.Builder
+	if start > 0 {
+		b.WriteString("…")
+	}
+	b.WriteString(searchOneLine(string(runes[start:end])))
+	if end < len(runes) {
+		b.WriteString("…")
+	}
+	snippet := b.String()
+	return snippet, searchMatchRanges(snippet, words)
+}
+
+// searchOneLine joins a text's lines with a space, as the apps' snippets do.
+func searchOneLine(s string) string {
+	lines := strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' })
+	for i := range lines {
+		lines[i] = strings.TrimFunc(lines[i], unicode.IsSpace)
+	}
+	return strings.Join(slices.DeleteFunc(lines, func(l string) bool { return l == "" }), " ")
+}
+
+// searchFoldRunes folds a text rune by rune, and for each folded rune the index of the rune it came from.
+func searchFoldRunes(runes []rune) ([]rune, []int) {
+	folded := make([]rune, 0, len(runes))
+	from := make([]int, 0, len(runes))
+	for i, r := range runes {
+		for _, f := range searchFold(string(r)) {
+			folded = append(folded, f)
+			from = append(from, i)
+		}
+	}
+	return folded, from
+}
+
+func searchIndexRunes(s, sub []rune, at int) int {
+	if len(sub) == 0 {
+		return -1
+	}
+	for i := at; i+len(sub) <= len(s); i++ {
+		match := true
+		for j := range sub {
+			if s[i+j] != sub[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
+}
+
+// searchMatchRanges is every match of words in text as UTF-16 [start, end), in order, overlaps joined.
+func searchMatchRanges(text string, words []string) [][2]int {
+	runes := []rune(text)
+	folded, from := searchFoldRunes(runes)
+	// the UTF-16 offset each rune starts at, and the end
+	at := make([]int, len(runes)+1)
+	for i, r := range runes {
+		at[i+1] = at[i] + len(utf16.Encode([]rune{r}))
+	}
+	marked := make([]bool, len(runes))
+	for _, w := range words {
+		sub := []rune(w)
+		for i := searchIndexRunes(folded, sub, 0); i >= 0; i = searchIndexRunes(folded, sub, i+len(sub)) {
+			for j := i; j < i+len(sub); j++ {
+				marked[from[j]] = true
+			}
+		}
+	}
+	var out [][2]int
+	for i := 0; i < len(runes); {
+		if !marked[i] {
+			i++
+			continue
+		}
+		j := i
+		for j < len(runes) && marked[j] {
+			j++
+		}
+		out = append(out, [2]int{at[i], at[j]})
+		i = j
+	}
+	return out
+}

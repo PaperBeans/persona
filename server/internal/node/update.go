@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/nwverse/persona/server/internal/nodeupdate"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -42,10 +43,8 @@ func (n *Node) handleUpdate(ctx context.Context, method string, params json.RawM
 			return nil, err
 		}
 		return n.updater.Commit(ctx, p.ID, func() error {
-			for _, s := range n.sessionList(ctx, true) {
-				if s.Starting || s.Status == proto.StatusWorking || s.Status == proto.StatusBlocked || len(s.Background) > 0 || updateHasRunningSubagents(s) {
-					return &rpc.Error{Code: proto.CodeNodeUpdateBusy, Message: "node_update_busy: Agent 仍在工作或等待操作，请稍后重试"}
-				}
+			if updateWouldCut(AssistantsBusy(), n.sessionList(ctx, true)) {
+				return &rpc.Error{Code: proto.CodeNodeUpdateBusy, Message: "node_update_busy: Agent 仍在工作或等待操作，请稍后重试"}
 			}
 			return nil
 		})
@@ -66,13 +65,11 @@ func (n *Node) handleUpdate(ctx context.Context, method string, params json.RawM
 	}
 }
 
-func updateHasRunningSubagents(s proto.Session) bool {
-	for _, sub := range s.Subagents {
-		if sub.Running {
-			return true
-		}
-	}
-	return false
+// updateWouldCut: the restart after a commit would interrupt work (nodeproto.NodeUpdateIdle). It execs in place once
+// ResidentReload.Prepare has stopped the idle headless conversations, so only a busy one (assistantsBusy) or a launch
+// still starting counts. Terminal Agents, their background tasks and subagents are other processes and go on.
+func updateWouldCut(assistantsBusy bool, sessions []proto.Session) bool {
+	return assistantsBusy || slices.ContainsFunc(sessions, func(s proto.Session) bool { return s.Starting })
 }
 
 // RPC writes each response in one Write. Observe the successful transport write,

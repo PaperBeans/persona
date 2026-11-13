@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -25,6 +26,21 @@ func (d *listCountingDevs) Sessions(id string) ([]proto.Session, bool) {
 }
 
 func (d *listCountingDevs) lists() int { return int(d.n.Load()) }
+
+// settle waits until no background pass has copied a machine's whole list for a quiet window (longer than liveLoop's
+// 100 ms coalescing): a pass the fixture started counts too, so the count after it belongs to the call under test
+// alone, not to whenever the background work happened to land.
+func (d *listCountingDevs) settle() {
+	poll := time.NewTicker(200 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		n := d.lists()
+		<-poll.C
+		if d.lists() == n {
+			return
+		}
+	}
+}
 
 // countLists has s count the whole lists its readers copy. Called before anything starts a goroutine on s.
 func countLists(s *Service) *listCountingDevs {
@@ -188,6 +204,7 @@ func TestIdlePassesReadWhatRuns(t *testing.T) {
 	ctx := context.Background()
 	d := countLists(s)
 	doneTaskOnGoneAgent(t, s)
+	d.settle() // the fixture's own passes list in the background too; wait them out before counting (#6121)
 	before := d.lists()
 	refused := taskCloseRefused{}
 	s.closeDoneTaskAgents(ctx, refused)

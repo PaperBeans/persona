@@ -114,7 +114,9 @@ func things(t *testing.T, c *Connector) map[string]connector.InboxThing {
 	return out
 }
 
-func TestNotificationsBecomeThings(t *testing.T) {
+// notificationsFixture is a GitHub with a review request, an assignment, and a subscription the rules leave out
+// (CI: ci_test.go).
+func notificationsFixture() *fakeNotifications {
 	f := &fakeNotifications{prs: map[string]string{
 		api12: openPR(`{"login":"me"}`),
 		"/repos/example-org/example-repo/issues/12": `{"comments":1}`,
@@ -126,7 +128,12 @@ func TestNotificationsBecomeThings(t *testing.T) {
 		note("1", "review_requested", "PullRequest", "https://api.github.com"+api12, t1),
 		note("2", "assign", "Issue", "https://api.github.com"+api7, t1),
 		note("4", "subscribed", "Issue", "https://api.github.com/repos/example-org/example-repo/issues/8", t1),
-	}, ",") + "]" // CI: ci_test.go
+	}, ",") + "]"
+	return f
+}
+
+func TestNotificationsBecomeThings(t *testing.T) {
+	f := notificationsFixture()
 	c := f.server(t)
 
 	wait, moved, err := c.poll(context.Background())

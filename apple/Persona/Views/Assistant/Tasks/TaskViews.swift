@@ -786,9 +786,18 @@ struct ReceiptCard: View {
         }
     }
 
+    /// DEBUG `-openReceiptAll YES`: receipts open on their whole summary (the name is in release.sh's list).
+    private static var opensOnAll: Bool {
+        #if DEBUG
+        UserDefaults.standard.bool(forKey: "openReceiptAll")
+        #else
+        false
+        #endif
+    }
+
     @Environment(MessageMenu.self) private var menu: MessageMenu?
     /// "Show All": the whole summary, not its first four lines.
-    @State private var all = false
+    @State private var all = ReceiptCard.opensOnAll
     /// The summary is longer than its four lines, measured (so Show All and Hide appear only when there is more).
     @State private var cuts: Set<Int> = []
 

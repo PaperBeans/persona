@@ -130,11 +130,16 @@ nonisolated enum SessionModes {
         return ids.map { id in codexEffortLevels.first { $0.id == id } ?? Option(id: id, title: id, detail: "", symbol: Theme.Icon.effort) }
     }
 
-    /// The model can be switched on the running session (#3119): Claude Code in a herdr pane, which takes `/model`.
-    /// Codex and TRAEX pick theirs in a full-screen menu the phone cannot drive; the assistant's has its own chip.
-    static func switchesModel(_ s: Session?) -> Bool {
-        guard let s else { return false }
-        return s.canSend && s.canTerminal && s.paneID != nil && s.isClaude && !s.isTraex && !s.assistant
+    /// The model can be switched on the running session (#3119): Claude Code in a herdr pane, which takes `/model`, or a
+    /// session whose node takes a model (`Session.switchesModel`, #6294). Codex and TRAEX in a terminal pick theirs in a
+    /// full-screen menu the phone cannot drive; the assistant's has its own chip.
+    static func switchesModel(_ s: Session?) -> Bool { s?.switchesModel == true }
+
+    /// Whether the menus offer model rows now: Claude Code in a pane always (its `/model` aliases until its launcher's list
+    /// is read); a session whose node takes the model once that list is read, since the fixed aliases are Claude Code's
+    /// words, not its runtime's (`Session.picksModelByModes`). `list`: `RunningModelLists.models(_:_:)`.
+    static func offersModels(_ s: Session?, list: [AgentModel]?) -> Bool {
+        switchesModel(s) && (s?.picksModelByModes != true || list != nil)
     }
 
     /// Why the model cannot be switched right now (nil when it can): the node refuses the same cases.
@@ -283,9 +288,10 @@ struct SessionModeBar: View {
                 .pickerStyle(.inline)
                 if !UltracodeMenuSection.leadsEffort { UltracodeMenuSection(key: key, session: session) }
                 // The model in the same chip (#3119, the web's #2434): Claude Code takes `/model`, typed by the node.
-                if SessionModes.switchesModel(session) {
+                // A session whose node takes the model (#6294) offers its launcher's list once read (`offersModels`).
+                let list = RunningModelLists.shared.models(key, session)
+                if SessionModes.offersModels(session, list: list) {
                     let busy = SessionModes.modelBusy(session)
-                    let list = RunningModelLists.shared.models(key, session)
                     Section("Model [Assistant View c98e11]") {
                         // A typed model (#1644) is a row of its own, by its ID: no alias is ticked for it.
                         Picker("Model [Assistant View c98e11]", selection: Binding(get: { PromptItems.runningModelID(session?.model, list: list) }, set: { id in change(model: id) })) {
@@ -320,7 +326,7 @@ struct SessionModeBar: View {
     /// The effort chip read out, with ", ultracode on" while it carries the mark (#1307).
     private var effortSpoken: String {
         let effort = session?.effort
-        let words = SessionModes.switchesModel(session)
+        let words = SessionModes.offersModels(session, list: RunningModelLists.shared.models(key, session))
             ? String(localized: "Thinking effort and model: \(SessionModes.effortLabel(effort) ?? String(localized: "Unknown [Session Modes 4d8c1c]")), \(SessionModes.modelName(session?.model) ?? String(localized: "Unknown model"))")
             : String(localized: "Thinking effort: \(SessionModes.effortLabel(effort) ?? String(localized: "Unknown [Session Modes 4d8c1c]"))")
         guard let extra = Ultracode.chipMark(session)?.spoken else { return words }
@@ -351,7 +357,8 @@ struct SessionModesMenu: View {
     @Environment(AppModel.self) private var model
     let key: SessionKey
     var session: Session?
-    /// Claude Code in a herdr pane: picking a model sends `/model <alias>`.
+    /// Claude Code in a herdr pane: picking a model sends `/model <alias>`; a session whose node takes the model (#6294,
+    /// `Session.picksModelByModes`) gets the pick through POST …/modes.
     var picksModel = false
     /// Effort and permission mode can change (Claude Code, the assistant; not Codex or TRAEX).
     var setsModes = true
@@ -398,6 +405,8 @@ struct SessionModesMenu: View {
                 ForEach(PromptItems.runningModels(session?.model, list: list), id: \.id) { m in
                     MenuChoice(id: m.id, selected: running, pick: { id in
                         guard case .send(let text) = PromptItems.modelPick(id, running: session?.model, list: list) else { return }
+                        // A session whose node takes the model (#6294) gets it through POST …/modes, never as a message.
+                        if session?.picksModelByModes == true { Task { await model.setModes(key, model: id) }; return }
                         model.sendNow(key, text: text, images: []) // photos and quotes stay for the message
                     }) {
                         Text(m.name)

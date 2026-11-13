@@ -4,9 +4,11 @@
 // and round buttons: Send now (where the agent takes queued messages now; it hands over the whole queue, so it is
 // confirmed and says so), Edit (pulled back into the box below) and Delete. Dragging the handle, or ↑ ↓ Home End on
 // it, re-queues them all in the new order. Four rows or fewer show in full; five or more show three and "N more".
-// Messages from other conversations come last and are only shown. Every change goes through the hub (POST …/queue
-// {keep}, …/queue/send-now) and the rows follow its next push; a reorder keeps its new order on screen until then.
-// Its own chunk: drawn only while something is queued (QueueStrip.tsx loads it).
+// Messages from other conversations come last and are only shown; since #6394 they collapse into one line
+// ("N messages from other conversations are waiting"), opened on demand, so a backlog no longer spreads over the
+// composer. Every change goes through the hub (POST …/queue {keep}, …/queue/send-now) and the rows follow its next
+// push; a reorder keeps its new order on screen until then. Its own chunk: drawn only while something is queued
+// (QueueStrip.tsx loads it).
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, errorText, sessionPath } from "../../lib/api";
 import { agentLabel } from "../../lib/mentions";
@@ -75,6 +77,8 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
   const inFlight = useRef(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  // relayed messages from other conversations are one collapsed line until the owner asks to inspect them (#6394)
+  const [relayedOpen, setRelayedOpen] = useState(false);
   // compact: the rows under its one line, opened
   const [open, setOpen] = useState(false);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -100,10 +104,13 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
 
   const identity = Array.from({ length: own }, (_, i) => i);
   const order = drag ? (movedTo(own, drag.from, drag.to) ?? identity) : (holdOrder ?? identity);
-  const shown = [...order.map((i) => rows[i]), ...rows.slice(own)];
+  // Only the owner's own rows reorder and fold; the relayed ones live behind their own collapsed line (#6394).
+  const ownRows = rows.filter((r) => r.own);
+  const relayedRows = rows.filter((r) => !r.own);
+  const shown = order.map((i) => ownRows[i]).filter(Boolean);
   const folds = shown.length > FOLD_OVER;
   const visible = folds && !expanded ? shown.slice(0, FOLDED_ROWS) : shown;
-  const shownOwn = Math.min(own, visible.length);
+  const shownOwn = visible.length;
 
   useLayoutEffect(() => {
     const back = refocus.current;
@@ -217,31 +224,59 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
 
   if (!queued.length) return null;
   const hidden = shown.length - visible.length;
+  const rowFor = (row: Row, pos: number) => (
+    <QueueRow
+      key={row.id}
+      row={row}
+      n={pos + 1}
+      photos={row.own ? (photosOf?.(row.raw) ?? 0) : 0}
+      editable={canEdit && row.own}
+      movable={canEdit && row.own && own > 1}
+      takesNow={takesNow}
+      agent={agent}
+      busy={busy === row.id}
+      locked={locked}
+      dragging={drag?.id === row.id}
+      rowRef={(el) => {
+        if (el) rowEls.current.set(row.id, el);
+        else rowEls.current.delete(row.id);
+      }}
+      handleRef={(el) => {
+        if (el) handles.current.set(row.id, el);
+        else handles.current.delete(row.id);
+      }}
+      onKey={(e) => keyMove(e, row)}
+      onPointerDown={(e) => startDrag(e, row)}
+      onSendNow={() => setConfirming(row.id)}
+      onEdit={() => act(row, false)}
+      onDelete={() => act(row, true)}
+    />
+  );
+  // The messages other conversations sent in: one line while collapsed, their read-only rows when opened (#6394).
+  const relayedLine = relayedRows.length > 0 && (
+    <div className="border-t border-line">
+      <button
+        type="button"
+        aria-expanded={relayedOpen}
+        data-queue-relayed-summary
+        onClick={() => setRelayedOpen((o) => !o)}
+        className="touch-hit flex h-8 w-full items-center gap-1.5 px-2 text-label leading-none whitespace-nowrap text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+      >
+        <Icon name="send" size={13} stroke={2} className="shrink-0" />
+        <span className="min-w-0 flex-1 truncate text-left">{t("chat-queuepanel.relayed_summary", { count: relayedRows.length })}</span>
+        <Icon name="chevron" size={13} className={cx("shrink-0 transition-transform duration-200", relayedOpen && "rotate-180")} />
+      </button>
+      {relayedOpen && (
+        <div role="list" data-queue-relayed-list>
+          {relayedRows.map((row, pos) => rowFor(row, own + pos))}
+        </div>
+      )}
+    </div>
+  );
   const rowsAndFold = (
     <>
       <div ref={list} id={listId} role="list" className="flex max-h-[196px] flex-col overflow-y-auto overscroll-contain px-1 pt-1.5 pb-0.5">
-        {visible.map((row, pos) => (
-          <QueueRow
-            key={row.id}
-            row={row}
-            n={pos + 1}
-            photos={row.own ? (photosOf?.(row.raw) ?? 0) : 0}
-            editable={canEdit && row.own}
-            movable={canEdit && row.own && own > 1}
-            takesNow={takesNow}
-            agent={agent}
-            busy={busy === row.id}
-            locked={locked}
-            dragging={drag?.id === row.id}
-            rowRef={(el) => void (el ? rowEls.current.set(row.id, el) : rowEls.current.delete(row.id))}
-            handleRef={(el) => void (el ? handles.current.set(row.id, el) : handles.current.delete(row.id))}
-            onKey={(e) => keyMove(e, row)}
-            onPointerDown={(e) => startDrag(e, row)}
-            onSendNow={() => setConfirming(row.id)}
-            onEdit={() => act(row, false)}
-            onDelete={() => act(row, true)}
-          />
-        ))}
+        {visible.map((row, pos) => rowFor(row, pos))}
       </div>
       {folds && (
         <div className="flex items-center justify-center border-t border-line px-2 py-1.5 text-[12px] leading-none">
@@ -258,6 +293,7 @@ export function QueuePanel({ session, draftKey, canEdit, persona, onWithdrawn, p
           </button>
         </div>
       )}
+      {relayedLine}
     </>
   );
   return (

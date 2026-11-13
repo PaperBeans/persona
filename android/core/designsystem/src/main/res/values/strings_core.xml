@@ -74,6 +74,7 @@
     <string name="designsystem_core_close_agent_title">Close this agent?</string>
     <string name="designsystem_core_close_agent_message_tab">“%1$s”\n%2$s\n\nThis quits %4$s on %3$s and closes its terminal tab “%5$s” (in a split tab, only its pane). Work in progress stops; the chat is kept, and you can continue it later from History in Agents.</string>
     <string name="designsystem_core_close_agent_message_pane">“%1$s”\n%2$s\n\nThis quits %4$s on %3$s and closes its terminal pane. Work in progress stops; the chat is kept, and you can continue it later from History in Agents.</string>
+    <string name="designsystem_core_close_agent_message_runtime">“%1$s”\n%2$s\n\nThis ends the session on %3$s. Work in progress stops.</string>
     <string name="designsystem_core_delete_session_title">Delete this chat?</string>
     <string name="designsystem_core_delete_session_on_machine_command">“%1$s” will be removed from the list on every device. The chat record on %2$s is not deleted; continue it there with %3$s and it comes back.</string>
     <string name="designsystem_core_delete_session_on_machine">“%1$s” will be removed from the list on every device. The chat record on %2$s is not deleted; it comes back when you use it again.</string>
@@ -132,6 +133,14 @@
     </plurals>
     <string name="designsystem_core_list_separator">, </string>
     <string name="designsystem_core_repo_other">Other</string>
+    <string name="designsystem_core_direction_doing">Working</string>
+    <string name="designsystem_core_direction_needs_you">Needs you</string>
+    <string name="designsystem_core_direction_stuck">Stuck</string>
+    <string name="designsystem_core_direction_review">To verify</string>
+    <string name="designsystem_core_direction_planned">Not started</string>
+    <string name="designsystem_core_direction_secretary">Secretary</string>
+    <string name="designsystem_core_direction_untitled">Chat</string>
+    <string name="designsystem_core_direction_count_needs_you">%1$d need you</string>
     <string name="designsystem_core_inbox_action">Needs you</string>
     <string name="designsystem_core_inbox_fyi">FYI</string>
     <string name="designsystem_core_inbox_noise">Folded</string>

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addQuote, getQuotes, sendDraft, setQuotes } from "../../lib/drafts";
 import { toast } from "../../ui/atoms";
 import { Composer, type Outgoing } from "./Composer";
+import { onPermissionPicker } from "../../lib/permissions-command";
 import { t } from "../../i18n";
 
 // imagePayload decodes on a canvas, which jsdom has not: each read waits on a promise the test settles
@@ -734,7 +735,7 @@ describe("the / palette", () => {
     typeInto("/co");
     await until(() => expect(rows()).toEqual(["compact", "context"]));
     typeInto("/");
-    expect(rows()).toHaveLength(9); // with /workflows (#5421)
+    expect(rows()).toHaveLength(10); // with /workflows (#5421) and /permissions (#6476)
     expect(palette()!.textContent).not.toContain("Esc");
   });
 
@@ -778,6 +779,35 @@ describe("the / palette", () => {
     expect(palette()).toBeNull();
     typeInto("/c");
     expect(palette()).not.toBeNull();
+  });
+
+  // #6476: /permissions opens the conversation's permission menu, picked in the palette or typed and sent; with no
+  // picker to open (an agent without modes), the words go as they are
+  it("opens the permission menu for /permissions instead of sending it", async () => {
+    const onSend = vi.fn(async () => true);
+    const opened = vi.fn();
+    const off = onPermissionPicker("perm", opened);
+    render("perm", onSend);
+    typeInto("/perm");
+    await until(() => expect(rows()).toEqual(["permissions"]));
+    key("Enter");
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(box().value).toBe("");
+    expect(palette()).toBeNull();
+    typeInto("/permissions");
+    key("Escape");
+    await act(async () => {
+      box().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    expect(opened).toHaveBeenCalledTimes(2);
+    expect(onSend).not.toHaveBeenCalled();
+    off();
+    typeInto("/permissions");
+    key("Escape");
+    await act(async () => {
+      box().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ text: "/permissions" }));
   });
 
   it("is not offered where there are no commands", async () => {

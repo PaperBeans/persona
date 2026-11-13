@@ -148,6 +148,7 @@ func HeaderConflict(h http.Header, name string) bool {
 	return a != "" && b != "" && a != b
 }
 func ContextPattern() string { return `(?:jarvis|persona)-context` }
+func FilePattern() string    { return `(?:jarvis|persona)-file` }
 func ContextNames() []string { return []string{"jarvis-context", "persona-context"} }
 
 // compat is also built on its own, copied without the rest of the server (scripts/test/test_persona_migration_edges.py),

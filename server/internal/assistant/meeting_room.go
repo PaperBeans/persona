@@ -348,9 +348,15 @@ func (s *Service) roomFeed(ctx context.Context, e *kb.Engine, id string, l kb.Li
 	fresh := l.FedTo == nil || !s.sameMachine(l.FedTo.MachineID, ref.MachineID) || l.FedTo.SessionID != ref.SessionID
 	b := feedBatchOf(l, fresh, end)
 	b.room = true
-	// The topics so far, to a room that has the tool to update them (one started before it keeps its tools).
-	if allowed, guest, err := s.guestOf(ctx, ref.MachineID, ref.SessionID); err == nil && guest && slices.Contains(allowed, toolTopicsSet) {
-		b.topics, b.topicsSoFar = true, l.Topics
+	// The topics and the highlights so far, each to a room that has the tool to update them (one started before it
+	// keeps its tools).
+	if allowed, guest, err := s.guestOf(ctx, ref.MachineID, ref.SessionID); err == nil && guest {
+		if slices.Contains(allowed, toolTopicsSet) {
+			b.topics, b.topicsSoFar = true, l.Topics
+		}
+		if slices.Contains(allowed, toolHighlightsSet) {
+			b.highlights, b.highlightsSoFar = true, l.Highlights
+		}
 	}
 	// The room answered its own asks: they are in its thread already, only the ones meeting.answer took are told.
 	b.answers = slices.DeleteFunc(b.answers, func(a kb.LiveAsk) bool { return a.Via == kb.AskViaRoom })

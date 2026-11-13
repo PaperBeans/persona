@@ -145,5 +145,5 @@ function subscribe(l: () => void) {
 }
 
 export function usePickedLauncher(key: string): string | undefined {
-  return useSyncExternalStore(subscribe, () => picks.get(key));
+  return useSyncExternalStore(subscribe, () => picks.get(key), () => picks.get(key));
 }

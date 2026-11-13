@@ -11,18 +11,20 @@ struct BrowserLoginsSection: View {
     @Environment(AppModel.self) private var model
     let ref: MachineRef
     var online: Bool
-    @State private var logins: BrowserLoginsModel
+    /// The computer page's: it also opens the whole list (`MachineDetailView`, #6050).
+    var logins: BrowserLoginsModel
+    @Binding var listOpen: Bool
     @State private var picking = false
     @State private var file: PickedFile?
     /// The sites the confirmation asks about.
     @State private var clearing: [String]?
-    @State private var listOpen = false
     @Environment(\.dynamicTypeSize) private var size
 
-    init(ref: MachineRef, online: Bool) {
+    init(ref: MachineRef, online: Bool, logins: BrowserLoginsModel, listOpen: Binding<Bool>) {
         self.ref = ref
         self.online = online
-        _logins = State(initialValue: BrowserLoginsModel(machine: ref.id, deps: .live(group: ref.group)))
+        self.logins = logins
+        _listOpen = listOpen
     }
 
     struct PickedFile: Identifiable {
@@ -65,7 +67,7 @@ struct BrowserLoginsSection: View {
             .padding(.horizontal, Theme.Space.xs)
         }
         .task(id: online) {
-            await logins.load(online: online)
+            await logins.appear(online: online)
             #if DEBUG
             // `-openCookieFile <path>`: as if that file were picked (UI tests and screenshots; the system's picker is
             // not theirs to drive). `-openBrowserLogins list|select|confirm|search`: straight into the whole list.
@@ -84,9 +86,6 @@ struct BrowserLoginsSection: View {
             CookiePickSheet(file: $file, busy: logins.busy) {
                 if let cookies = file?.cookies, await logins.importCookies(cookies) { file = nil } // the file's contents are gone once sent
             }
-        }
-        .navigationDestination(isPresented: $listOpen) { // a leaf: nothing is pushed from the list
-            BrowserLoginsListView(logins: logins, online: online)
         }
         .browserLoginsClearDialog($clearing, busy: logins.busy) { sites in await logins.clear(sites) }
     }
@@ -130,7 +129,7 @@ struct BrowserLoginsSection: View {
                 ThemedIcon(Theme.Icon.siteLogin).foregroundStyle(.secondary).scaledFrame(width: Theme.Size.icon)
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                     Text(String(localized: "\(logins.summary.count) sites")).font(Theme.Font.body).foregroundStyle(.primary).lineLimit(1)
-                    if let detail = Self.summaryDetail(logins.summary) { detail.font(Theme.Font.label.monospacedDigit()).lineLimit(size.isAccessibilitySize ? 3 : 1) }
+                    if let detail = Self.summaryDetail(logins.summary) { detail.font(Theme.Font.label.monospacedDigit()).lineLimit(size.isAccessibilitySize ? nil : 1) }
                 }
                 Spacer(minLength: Theme.Space.s)
                 ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)
@@ -204,8 +203,8 @@ struct BrowserSiteRow: View, Equatable {
     static func == (a: Self, b: Self) -> Bool { a.site == b.site && a.expired == b.expired }
 
     var body: some View {
-        // At the accessibility sizes a domain wraps instead of losing its end, the part that tells sites apart.
-        let lines = size.isAccessibilitySize ? 3 : 1
+        // At the accessibility sizes a domain wraps in full instead of losing its end, the part that tells sites apart.
+        let lines: Int? = size.isAccessibilitySize ? nil : 1
         HStack(spacing: Theme.Space.m) {
             ThemedIcon(Theme.Icon.siteLogin).foregroundStyle(.secondary).scaledFrame(width: Theme.Size.icon)
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {

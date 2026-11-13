@@ -10,6 +10,7 @@ struct SidebarMetricsTests {
     /// The files that draw sidebar rows. A new one goes here (docs/apple/sidebar.md, "Adding a row").
     static let files = [
         "Persona/Views/Assistant/AssistantSidebar.swift",
+        "Persona/Views/Assistant/AssistantSidebarDirections.swift",
         "Mac/Design/MacSidebarRow.swift",
     ]
 

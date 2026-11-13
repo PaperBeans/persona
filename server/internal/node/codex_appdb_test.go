@@ -19,11 +19,12 @@ const (
 	appDeleted  = "019a0000-0000-7000-8000-000000000003" // still in the sidebar's list, deleted from the database
 	appArchived = "019a0000-0000-7000-8000-000000000004"
 	appExec     = "019a0000-0000-7000-8000-000000000005" // in the database, not in the sidebar
+	appMigrated = "019a0000-0000-7000-8000-000000000006" // in the database only: the migrated App writes no legacy keys
 )
 
 const codexAppSchema = `CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL, source TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT NOT NULL,
-	archived INTEGER NOT NULL DEFAULT 0, updated_at_ms INTEGER, name TEXT);`
+	archived INTEGER NOT NULL DEFAULT 0, updated_at_ms INTEGER, name TEXT, originator TEXT);`
 
 // writeCodexApp writes the App's sidebar (appChat in project Alpha at project; appOld, appDeleted and appArchived without
 // one) and runs sql against its state database in home.
@@ -47,10 +48,14 @@ func writeCodexApp(t *testing.T, home, project, sql string) {
 	codexAppDBs.Unlock()
 }
 
-func codexAppRow(id, rollout, cwd, name string, updated time.Time, archived int) string {
+func codexAppRow(id, rollout, cwd, name string, updated time.Time, archived int, originator ...string) string {
 	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
-	return fmt.Sprintf("INSERT INTO threads VALUES (%s, %s, 0, %d, 'vscode', %s, 'auto title', %d, %d, %s);",
-		q(id), q(rollout), updated.Unix(), q(cwd), archived, updated.UnixMilli(), q(name))
+	o := "Codex Desktop"
+	if len(originator) > 0 {
+		o = originator[0]
+	}
+	return fmt.Sprintf("INSERT INTO threads VALUES (%s, %s, 0, %d, 'vscode', %s, 'auto title', %d, %d, %s, %s);",
+		q(id), q(rollout), updated.Unix(), q(cwd), archived, updated.UnixMilli(), q(name), q(o))
 }
 
 // writeAppRollout writes a Codex App rollout (originator Codex Desktop) under home, last written at written.
@@ -92,7 +97,7 @@ func TestCodexAppChatsAreListedLikeTheSidebar(t *testing.T) {
 		codexAppRow(appChat, filepath.Join(home, "sessions", "gone.jsonl"), filepath.Join(project, "sub"), "Alpha chat", updated, 0)+
 		codexAppRow(appOld, old, elsewhere, "Old chat", updated, 0)+
 		codexAppRow(appArchived, "", project, "Archived", updated, 1)+
-		codexAppRow(appExec, "", project, "A run", updated, 0))
+		codexAppRow(appExec, "", project, "A run", updated, 0, "codex_exec"))
 
 	rows := rowsByThread(n.codexSessions(map[string]bool{}))
 	if len(rows) != 2 {

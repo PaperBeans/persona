@@ -31,7 +31,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     var history: String? = nil
     /// The main conversation cannot answer yet: send says what to do first and goes there, the draft stays.
     var gate: SendGate? = nil
-    /// The iPhone's 「+」 opens the composer's panel (`AttachSheet`, Telegram's attachment menu) from where the button is,
+    /// The iPhone's 「+」 opens the composer's panel (`AttachSheet`, a half-height system sheet), given where the button is
     /// in the window, and touched and held, the menu of `attach` (#3225); nil: a tap opens the menu of `attach`.
     var openAttach: ((CGRect) -> Void)? = nil
     /// Glow While Replying (`ComposerGlow`): the band around the bar while the assistant's reply is being written. Drawn
@@ -291,7 +291,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                 .presentationSizing(.page) // the iPad's too: a page's height, not the small form
         }
         #endif
-        .onDisappear { if dictation.isListening { dictation.stop() } }
+        .onDisappear { dictation.stop() } // a start still asking for permission too (#3407)
     }
 
     #if os(iOS)
@@ -336,7 +336,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
             // An unfocused field's selection is stale (a restored draft's, PathInsert.edit): the page starts at the end.
             selection = TextSelection(insertionPoint: text.endIndex)
         }
-        if dictation.isListening { dictation.stop() }
+        dictation.stop()
         enlarged = true
     }
 
@@ -503,8 +503,9 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
         send()
     }
 
+    /// Ends dictation, and a start still asking for permission with it, so nothing writes into the emptied box (#3407).
     private func endDictation(then action: () -> Void) {
-        if dictation.isListening { dictation.stop() }
+        dictation.stop()
         action()
     }
 }

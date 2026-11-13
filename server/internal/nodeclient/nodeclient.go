@@ -54,8 +54,10 @@ type Request struct {
 	Name      string          `json:"name,omitempty"`
 	Args      json.RawMessage `json:"args,omitempty"`
 	SessionID string          `json:"session_id,omitempty"`
-	Assistant bool            `json:"assistant,omitempty"` // the caller is the assistant's MCP server
-	Guest     bool            `json:"guest,omitempty"`     // a guest conversation's MCP server (assistant_guest.go)
+	// CodexThreadID is the tool process's CODEX_THREAD_ID; the node resolves it in its own Codex registry.
+	CodexThreadID string `json:"codex_thread_id,omitempty"`
+	Assistant     bool   `json:"assistant,omitempty"` // the caller is the assistant's MCP server
+	Guest         bool   `json:"guest,omitempty"`     // a guest conversation's MCP server (assistant_guest.go)
 	// Attempt is the hook process's own id, the same on each reconnect; Resume marks those reconnects.
 	Attempt string `json:"attempt,omitempty"`
 	Resume  bool   `json:"resume,omitempty"`

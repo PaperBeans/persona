@@ -158,6 +158,7 @@ const (
 	DeviceAssistantSend      = assistantwire.DeviceAssistantSend
 	DeviceSessionSend        = assistantwire.DeviceSessionSend
 	DeviceSessionModes       = assistantwire.DeviceSessionModes
+	DeviceSessionSwitch      = assistantwire.DeviceSessionSwitch
 	DeviceSessionStart       = assistantwire.DeviceSessionStart
 	DeviceWorktreePrepare    = assistantwire.DeviceWorktreePrepare
 	DeviceWorktreeCreate     = assistantwire.DeviceWorktreeCreate

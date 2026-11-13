@@ -515,6 +515,7 @@ struct AssistantActionBar: View {
                     .padding(.bottom, Theme.Space.m)
                     .accessibilityIdentifier("action-tray.empty")
             } else {
+                let cap = min(listHeight, listCap(pinned: tray == .needsYou && pinnedPlan(rows) != nil))
                 // As tall as its rows; past the cap they scroll inside the tray, the bar stays where it is.
                 ScrollViewReader { proxy in
                 ScrollView {
@@ -544,10 +545,17 @@ struct AssistantActionBar: View {
                     guard let id = new.subtracting(old).first else { return }
                     withAnimation(Theme.Motion.state) { proxy.scrollTo(id, anchor: .top) }
                 }
-                .frame(height: min(listHeight, expanded.isEmpty ? Theme.Size.box280 : Theme.Size.box380))
+                .frame(height: cap)
+                // a row the cap cuts fades out above the bar instead of being sliced
+                .mask {
+                    let fade = listHeight > cap && cap > 0 ? min(1, Theme.Space.xxl / cap) : 0
+                    LinearGradient(stops: [.init(color: .black, location: 1 - fade), .init(color: .black.opacity(fade == 0 ? 1 : 0), location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
                 }
                 .padding(.bottom, Theme.Space.xs)
                 if tray == .needsYou, let (plan, choices) = pinnedPlan(rows) {
+                    Divider().padding(.horizontal, Theme.Space.m)
                     PlanActions(plan: plan, choices: choices)
                         .padding(.horizontal, Theme.Space.l)
                         .padding(.vertical, Theme.Space.s)
@@ -576,6 +584,11 @@ struct AssistantActionBar: View {
         case .entry(let entry):
             self.entry(entry)
         }
+    }
+
+    /// Folded rows get a short list; an opened card a taller one, and with the plan bar under it room for the next row whole.
+    private func listCap(pinned: Bool) -> CGFloat {
+        expanded.isEmpty ? Theme.Size.box280 : Theme.Size.box380 + (pinned ? Theme.Size.box56 : 0)
     }
 
     /// The open plan whose row is opened (only one is at a time): its buttons stay under the list.
@@ -615,7 +628,7 @@ struct AssistantActionBar: View {
                     }
                 }
             } label: {
-                line(title: title, detail: detail, tint: AgentState.needsYou.tone.text, subtitle: subtitle, trail: isOpen ? .expanded : .folded, mark: mark)
+                line(title: title, detail: detail, tint: AgentState.needsYou.tone.text, subtitle: isOpen ? nil : subtitle, trail: isOpen ? .expanded : .folded, mark: mark)
             }
             .buttonStyle(.plain)
             .accessibilityValue(isOpen ? String(localized: "Expanded") : String(localized: "Collapsed"))
@@ -639,11 +652,12 @@ struct AssistantActionBar: View {
                 let state = status.taskState
                 let activity = AssistantTrayActivity(sessions: store.sessions(todo))
                 if let ask = todo.openAsk, todo.doneAt == nil {
-                    // an owner decision or a to-do to verify: folded to a line, opened it is its Accept row
+                    // an owner decision or a to-do to verify: folded to a line, opened it is its Accept row, or the answerable
+                    // decision row when the hub sent its options (`TodoAskRow`)
                     let brief = ask.row(for: todo)
                     opening(row.id, title: todo.title, detail: brief.isDecision ? String(localized: "Decision") : String(localized: "To Verify"),
                             subtitle: ask.verdict, mark: { TaskMark(state: .needsYou) }) {
-                        BriefAcceptRow(row: brief, group: AppModel.shared.hub?.group ?? "", decision: todo, showsTitle: false)
+                        TodoAskRow(todo: todo, ask: ask, group: AppModel.shared.hub?.group ?? "", deferrable: true, showsTitle: false)
                             .padding(.horizontal, Theme.Space.m)
                     }
                 } else {

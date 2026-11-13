@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantskills"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -140,9 +141,12 @@ func codexSandboxPolicy(mode, memDir string) map[string]any {
 
 // deliver hands a user message to the thread: a new turn when idle, steered into the running turn otherwise. live is
 // the <persona-context> block it starts with ("" for none; assistant_context.go).
-func (c *codexConn) deliver(ctx context.Context, live, text string, images []proto.Image) error {
+func (c *codexConn) deliver(ctx context.Context, live, text string, images []proto.Image, skills ...assistantskills.Entry) error {
 	n := c.p.ownerOr(c.n)
 	input := []map[string]any{}
+	for _, skill := range skills {
+		input = append(input, map[string]any{"type": "skill", "name": skill.Name, "path": skill.Path})
+	}
 	if live != "" {
 		input = append(input, map[string]any{"type": "text", "text": live, "text_elements": []any{}})
 	}

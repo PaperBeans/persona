@@ -194,7 +194,7 @@ func TestTaskPlanReadOnlyStartsAtOnce(t *testing.T) {
 	}
 	starts, _ := tn.calls()
 	wantPrompt := "iPad 横屏时登录页崩溃，修好并补测试\n\n本任务只读：不改项目文件、不提交、不对外写入"
-	if len(starts) != 1 || starts[0]["prompt"] != wantPrompt || starts[0]["cwd"] != "/code/app" ||
+	if len(starts) != 1 || !strings.HasPrefix(starts[0]["prompt"].(string), wantPrompt+"\n\nPersona task handoffs:") || starts[0]["cwd"] != "/code/app" ||
 		starts[0]["permission_mode"] != "bypassPermissions" {
 		t.Fatalf("session.start = %+v", starts)
 	}

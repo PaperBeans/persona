@@ -25,7 +25,8 @@ import (
 // event it touches. The connector writes each event (group.append: one event a call, its meta in and out; the hub never
 // reads meta) and the hub stores what comes back with the model's words, triaged_by "model". When the model can't (not
 // set up, held, failing, too slow, or an answer that does not hold up) the connector groups the batch by structure
-// itself (group.fallback) and the events keep its rule tiers, "By rule", triaged_by "rules": that version is final.
+// itself (group.fallback). Its title, rule tier, "By rule" and triaged_by "rules" describe only events it opens; an
+// existing event takes the new messages but keeps its title, summary, tier, reason, urgency and triager. That version is final.
 
 const (
 	groupCalls       = 4                  // tool calls one batch may make
@@ -586,9 +587,11 @@ func (s *Service) appendEvent(ctx context.Context, source string, a connector.Gr
 }
 
 // putEvent keeps an event the connector wrote (or the hub composed), under the item's id: the model's title, summary
-// and tier, or under the fallback its rule tier with "By rule"; triaged at this version either way. Its count is the
-// hub's (the messages it put in it; extra.count is not read for an event) and its start is set when it is made. An answer at the version the item has
-// already is a repeat: nothing is stored or announced again (nil).
+// and tier, or under the fallback a new event's title and rule tier with "By rule". Fallback messages joining an
+// existing event leave its title, summary, tier, reason, urgency and triager unchanged; only its messages advance.
+// It is triaged at this version either way. Its count is the hub's (the messages it put in it; extra.count is not read
+// for an event) and its start is set when it is made. An answer at the version the item has already is a repeat:
+// nothing is stored or announced again (nil).
 func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e plannedEvent, thing connector.InboxThing, byModel bool) *InboxItem {
 	b := &s.inbox
 	b.mu.Lock()
@@ -614,6 +617,7 @@ func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e planned
 		}
 	}
 	count, started, title := it.Count, it.StartedAt, it.Title
+	summary, tier, reason, triagedBy, urgent := it.Summary, it.Tier, it.Reason, it.TriagedBy, it.Urgent
 	if thing.Extra != nil {
 		fillMigrated(it, thing)
 	} else {
@@ -630,11 +634,19 @@ func (s *Service) putEvent(c assistantwire.InboxSource, thread string, e planned
 	case prev.last != "" && it.handled():
 		// Messages that join an event being handled follow it: its tier, words and urgency stay; its processing
 		// conversation is told (inbox_handle.go).
-		it.Title, it.TriagedBy = title, cmp.Or(it.TriagedBy, "model")
+		it.Title, it.Summary, it.Tier, it.Reason = title, summary, tier, reason
+		it.TriagedBy = cmp.Or(it.TriagedBy, "model")
+		it.Urgent = urgent
+		tierBefore = tier // The fill's provisional rule tier is not a triage change.
 	case byModel:
 		it.Title, it.Summary, it.Tier, it.Reason, it.TriagedBy = clip(oneLine(e.title), 40), clip(oneLine(e.summary), 80), e.tier,
 			clip(oneLine(e.reason), 30), "model"
 		it.Urgent = e.urgent && e.tier == TierAction
+	case prev.last != "":
+		// The fallback adds messages to an existing event; its structural title and rule tier are only for new events.
+		it.Title, it.Summary, it.Tier, it.Reason, it.TriagedBy = title, summary, tier, reason, triagedBy
+		it.Urgent = urgent
+		tierBefore = tier // The fill's provisional rule tier is not a triage change.
 	default:
 		tier := e.tier
 		if tier == "" {

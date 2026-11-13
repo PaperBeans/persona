@@ -31,6 +31,8 @@ Prints the file and the kind of hit, never the value.
 For public Go builds, narrowly scoped dependency constants are classified separately from private data. This requires
 a build with exactly the tags of server/build-tags.txt (the public marker and ts_omit_ feature tags), and unreplaced
 dependencies whose build-info checksums match server/go.sum; registered personal values always win.
+Two exact Go rodata contexts are classified too (#6314): larkcli's two adjacent constants that read as a banned name,
+and wireguard-go's handshake identifier (its author string), the latter only with that unreplaced dependency.
 The seven known swift-nio-ssh algorithm/certificate names are also classified as a complete original printable field
 or a complete comma-separated list; that fallback excludes URLs, surrounding context and normalized fragments.
 """
@@ -88,6 +90,16 @@ SSH_ALGORITHM_NAMES = frozenset(name + "@" + domain for name, domain in (
     ("ecdsa-sha2-nistp521-cert-v01", "openssh.com"), ("ssh-ed25519-cert-v01", "openssh.com"),
 ))
 TAILSCALE_CONTACT = re.compile(r'<a href="mailto:support\+webclient@tailscale[.]com" class="link">contact us</a>')
+# Go lays string constants out back to back in rodata. larkcli's chat-link path ends where its display name begins
+# (the path, then the display name), which reads as a banned name that neither constant holds. Exact join only.
+# The name is split here because this file must not spell it either.
+GO_ADJACENT_CONSTANTS = re.compile(r"(?<=applink[.]feishu[.]cn)/client/chat/" + "open" + "Lark via lark-cli")
+# wireguard-go's handshake identifier (device/noise-protocol.go): an upstream author string, not an account.
+WIREGUARD_IDENTIFIER = re.compile(r"(?<![A-Za-z0-9._%+-])WireGuard v1 zx2c4 Jason@zx2c4[.]com(?![.][A-Za-z])")
+WIREGUARD_MODULES = frozenset({"github.com/tailscale/wireguard-go", "golang.zx2c4.com/wireguard"})
+# Go rodata also joins the unrelated title_mail field identifier with the
+# domain constant @gmail.com. Only that exact join is not an email address.
+GO_ADJACENT_MAIL_FIELD = re.compile(r'(?<![A-Za-z0-9._%+-])title_mail@gmail[.]com(?![A-Za-z0-9._%+-])')
 RFC1918_NETWORKS = tuple(ipaddress.ip_network((address, prefix)) for address, prefix in (
     (0x0A000000, 8), (0xAC100000, 12), (0xC0A80000, 16),
 ))
@@ -155,7 +167,12 @@ def generic_text(text, dependencies, original_text=None):
     if original_text is None or text == original_text:
         if text in SSH_ALGORITHM_NAMES or ("," in text and all(name in SSH_ALGORITHM_NAMES for name in text.split(","))):
             return ""
+    if dependencies and "tailscale.com" in dependencies:  # a public Go build: its own adjacent constants are known
+        text = GO_ADJACENT_CONSTANTS.sub("", text)
+    if WIREGUARD_MODULES & set(dependencies):
+        text = WIREGUARD_IDENTIFIER.sub("", text)
     text = pc.EMAIL.sub(lambda m: "" if binary_noise_email(m.group(1)) else m.group(0), text)
+    text = GO_ADJACENT_MAIL_FIELD.sub("", text)
     if "golang.org/x/crypto" in dependencies:
         text = GO_SSH_IDENTIFIERS.sub("", text)
     if "github.com/tailscale/web-client-prebuilt" in dependencies:
@@ -209,7 +226,7 @@ def text_kinds(text, words, whole_short=False, dependencies=frozenset(), origina
             kinds.add("private value (%d chars)" % len(word))
     if generic:
         for word in pc.problems(generic_text(text, dependencies, original_text), []):
-            kinds.add("private IP" if pc.IPV4.fullmatch(word) else "email")
+            kinds.add(pc.private_kind(word))
     return kinds
 
 

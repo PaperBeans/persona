@@ -1,10 +1,32 @@
 # Lessons: assistant (headless Claude / Codex)
 
+- A presence window is not an owner-turn guarantee (#6394). The two-minute `ownerPresentFor` hold and the
+  five-minute `relayDecisionMax` cap let queued relayed/decision messages start new rounds behind the owner's back
+  once the window expires, even while the owner is still waiting on their own round. Keep the ranked queue and the
+  presence window, but add an in-memory per-conversation gate armed when the owner speaks (`relayBook.ownerTurns`)
+  that holds every rank until a session list shows the round stopped. Give it two safety releases — a short
+  `ownerTurnStartWait` when the round is never seen working (refused send, dropped conversation) and a hard
+  `ownerTurnMax` once seen working but never stopped — and make an expired gate return immediately rather than fall
+  back onto the presence window, or the cap is not authoritative. The gate is memory-only on purpose: a restart
+  degrades to the persisted presence window. Update the time-window tests by shortening the new limits in lockstep
+  with the presence timers instead of waiting real minutes.
+
+- Inbox handling chats are implementation details, not user-created conversations (#5723). `Untitled` suppresses
+  automatic naming but does not hide a chat, and `titleFixed` still gives it the item's subject. Apply default
+  archiving in the common session snapshot, not only after starting or finishing: restored chats and follow-up
+  instructions must stay hidden too. Preserve item-chain links and the main conversation.
+
 - Count repeated conditional instructions at the runtime-send boundary, not just in a prompt golden (#5665).
   Two adjacent decision blocks repeated the same handling rules, but the newer one also required recording the choice.
   Remove the older copy, retain the newer obligations, and check both decision gating and the actual synthetic
   `DeviceAssistantSend` text. This proves literal deduplication, not a stable-policy refactor or provider-context savings.
 
+
+- Rechecking an Inbox task link must not replay event handling (#5680). Existing processing conversations and saved
+  drafts skip the initial task judge; resetting their processing fields to force another pass can duplicate work.
+  Use the task-link maintenance action instead: validate the message and candidate after judgment, persist through
+  Inbox rollback-aware writes, then publish the draft's task card and supervisor signal. A model failure is distinct
+  from a successful no-match result.
 
 - Proven `prompt` source can describe either a terminal tool label or a first-message fallback (#5269).
   Ordinary Claude inventory falls back to the first message for a bare tool label but not its spinner-prefixed
@@ -12,6 +34,8 @@
   changes only with explicit Claude runtime and prompt provenance; reject other tool/runtime names, meaningful
   titles, manual/custom titles and unknown sources. Apply this comparison at display and late-result boundaries,
   and test both directions plus service reconstruction without a new model call or counter reset.
+
+- A to-do's PR reference may exist only in `PRURL`, without appearing in its title or notes (#5458). Duplicate hints must read that link too; an open to-do still represents ongoing work when its linked Agent is idle.
 
 - Terminal spinner frames are presentation, not native-title changes (#5254). Comparing a saved `raw_title`
   byte for byte with a later inventory hid a successful automatic name while leaving its one-shot count spent.
@@ -154,6 +178,7 @@ Pitfalls, unusual behavior, and decisions at the time (formerly `CLAUDE.md`; ind
 - Session `last_text` is node preview, whitespace collapsed /200 characters (`node/sessions.go` snippet), not renderable Markdown (2026-11-04,#1508). Completion-card summaries became one-line lists / headings with truncated ** / backticks and web plaintext symbols. Full completion cards read `lastTurn` via `session.items`, `clipMarkdown` by lines without splitting markup. One/two-line progress / pushes strip Markdown (`textfmt.PlainMarkdown` / `textfmt.PushText` in `server/internal/textfmt`, web `lib/plain-markdown.ts`).
 - Hub feed append-only does not mean later Sent status can stay client-memory (2026-11-04,#1519). GitHub comment sent, refresh reverted card to Draft / Send, nearly duplicate. Persist body.sent_at, rebroadcast same ID, replace body by ID; incremental fetch includes later updates. Same investigation found prompt `查不到的用【】标出来` (“mark unknowns in brackets”), sending literal `【预计今晚 / 几点前】` (“[expected tonight / by what time]”). One-tap drafts must not leave blanks for user completion.
 - MCP `tools/list` failure must not return empty list (2026-11-04,#504). Personad mcp declares `listChanged: false`; Claude lists once per chat. Temporary node failure / startup order returned empty, permanently removing Persona tools without connectivity indication. Retry 15 seconds then JSON-RPC error, visible `/mcp` / logs. Node `{"tools":[],"error":…}` is failure too; only valid empty means no tools.
+- Nor may one part of the list failing drop that part (2026-11-13, #6422). The manager's `mcpTools` asked the hub for the phone's tools, logged a failure and listed the rest, so a conversation that started while the hub restarted had no `phone_*` for its whole life and the model told the user the phone couldn't set a reminder. Ask again briefly, then list what the hub last gave (`phoneTools`, `server/internal/assistant/fleet_tools.go`); each call is still the phone's to refuse.
 - Separate assistant process (2026-11-04,#1446, `docs/assistant/assistant.md` “Process”) can be unavailable to every hub inquiry. Startup connector registration asked each assistant tool name before connection,10 seconds each,60-second test. Startup / registration read last `assistantToolsNow`; wait only when node requests tools for assistant chat. Assistant schedule loop waits first handshake machine / timezone reply before running due tasks, or starts with empty config and fails all.
 - Bus events synchronously invoke read-loop callbacks (`internal/rpc`); slow handler stalls connection. Assistant queues in order, handles `session.turn_ended` separately (model query / waiting task Agent stop). To wait in tests, call assistant after event on same connection, then await empty queue (`BusHub.Settle`).
 - Hub default `os.Executable() assistant` launches test binary in tests, rerunning entire suite. Tests replace `assistantCommand` in init; subprocess tests detect env in `TestMain` and act as assistant.
@@ -401,6 +426,7 @@ tree shows pieces no Agent has worked on as `planned`. Two traps found on the wa
 To-dos SOP shelves it after 48 h untouched like any agent-made to-do (it leaves the tree; the leader touching it keeps it),
 and the stuck rule must not count a piece that never started, or every planned piece older than a day reported stuck.
 
+- Match Inbox PR/issue comments by full task URLs before the AI twin gate (#5578). A to-do may record its link only in `pr_url`, its title or its notes. Keep host, repository and PR/issue kind in the identity, leave ambiguous matches to the judge, and use a separate per-message signal cursor: the twin's `Of` cursor tracks handling, which does not run while it is off. Persist associations before forwarding them, and retain the existing supervision opt-in and exclusions.
 ## A source read by pages must settle what left the page (#5993)
 
 The Inbox's mail rounds read each account's newest 40 INBOX messages, and every rule that files a mail item (read
@@ -410,3 +436,34 @@ by newer mail, left its item open for good: nothing else files an open item, so 
 returns needs a second path for what it no longer returns: here past-window items are filed without asking, and the rest are
 looked up by UID once a round (`inbox.mail_flags`), bounded, with a failed lookup changing nothing. Tests of such a round
 must wait for the background triage pass (`waitTriage`) before setting a tier by hand, or the fallback tier overwrites it.
+
+- Literal `for` lists need per-value classification (#6266). Straight-line assignment tracking cannot resolve a loop's route segments or executable, and accepting GET alone misses action routes such as `/documents/delete`. Bind only literal lists in a completely inspected shell tree, retain quoting and reject unquoted values that could split or glob. A later assignment, state-changing builtin, executable-environment change or nonliteral nested list invalidates the entire attempt; never keep a partially expanded prefix. Resolve command positions before unwrapping so a variable cannot become a gate, CLI, shell or wrapper. Bound nested expansion and classify every resulting call through the existing read and hard-boundary rules. Both Claude and Codex adapter tests must count actual fake-hub approval cards; classification fixtures must never execute the supplied commands.
+
+## Clear a "tell it later" record only after the tell went (#6306)
+
+After a node restart, `recoverAssistantTasks` cleared the record of a conversation's lost background tasks (written to
+the hub) before sending the message about them. When that one send failed (the launcher not up yet, the 1-minute
+deadline), the record was gone and no later connection told the conversation: an assistant that promised to report on CI
+waited forever. A record that exists only so something is said later is cleared after the saying succeeded, and only if it
+still holds what was said (the woken conversation may already have re-armed new tasks). Being told twice after a send
+that timed out but was delivered is the cheaper failure.
+
+## A "which of these is it" model picks one even when none is (#6424)
+
+The Inbox judge was asked which open task an item belonged to and answered with an id the code only checked was among
+the candidates. Given seven unrelated tasks, it linked a GitHub bug report to a broad task whose notes shared a few
+words with it, and the link stuck. A selection model needs two guards: narrow the candidates by something exact first
+(the repository, the thread), skipping the call when none is left, and accept an answer only with evidence the code can
+check, such as a verbatim quote from the chosen candidate.
+
+- A legacy `bot` Inbox kind is not enough to reject a human Lark conversation (#5680). Check its explicit sender
+  identity, keep forwarded notification text as content, and apply one eligibility predicate before both URL routing
+  and the model judge. Correct old excluded links through the bounded maintenance write, with rollback on save failure.
+
+- A streamed reply is only as smooth as its slowest stage, and the model's output is bursty (#6651): Claude's
+  `text_delta`s come a few dozen characters at a time about every 350 ms, up to 2 s apart. A leading-edge throttle
+  ("send if 80 ms passed since the last send") holds back the rest of every burst until the next one, and a client that
+  draws whatever arrived shows one jump per burst however fast it renders. Throttles that drop in-between values need a
+  trailing send; a typewriter effect has to pace by the stream's average rate, not the last burst, or it finishes each
+  burst early and waits. Measure on recorded streams (`scripts/mock/stream_traces/`, `/mock/say?trace=…`) and report the
+  gaps between visible text changes and the added lag, not only frames: an evenly timed mock stream hides all of this.

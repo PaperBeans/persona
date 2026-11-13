@@ -176,6 +176,7 @@ var claudeLiveTexts = map[string]string{
 	proto.ReadOnlyClaudeNoInbox:   "read_only_claude_no_inbox",
 	proto.ReadOnlyClaudeInbox:     "read_only_claude_inbox",
 	proto.AttentionClaudeComputer: "attention_claude_computer",
+	proto.AttentionClaudeAnswer:   "attention_claude_answer",
 }
 
 // claudeLiveText is one of them in l; anything else stays as it is.

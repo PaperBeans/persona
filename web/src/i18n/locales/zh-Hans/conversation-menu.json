@@ -18,5 +18,9 @@
   "end_leader": "取消常驻",
   "leader_made": "已设为常驻「{title}」",
   "leader_ended": "已取消常驻「{title}」，它派出的任务不变",
-  "leader_failed": "没能改常驻：{error}"
+  "leader_failed": "没能改常驻：{error}",
+  "make_leader_confirm": "确认设为常驻",
+  "make_leader_confirm_detail": "这个对话会移到常驻区，不再出现在「最近」。",
+  "end_leader_confirm": "确认取消常驻",
+  "end_leader_confirm_detail": "对话会回到「最近」；还在办的任务交还主对话督办，不会关闭或删除。"
 }

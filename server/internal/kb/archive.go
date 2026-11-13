@@ -76,8 +76,8 @@ type Engine struct {
 	// earlier meetings: only those marked not private (meeting.go, "The private mark"). The manager turns it on.
 	EarlierMeetingsInAnswers bool
 	// MeetingChanged is told of recording id's meeting parts that changed (PartRoom, PartAsks, PartPrivate,
-	// PartFollowup, PartPhotos, PartLines, PartTopics): the manager's meeting_live event. Called outside the store's
-	// locks; optional.
+	// PartFollowup, PartPhotos, PartLines, PartTopics, PartHighlights): the manager's meeting_live event. Called
+	// outside the store's locks; optional.
 	MeetingChanged func(id string, parts []string)
 	// MinutesWritten is told when a recording's minutes for its current revision are written (minutes.go): the
 	// assistant pushes them. Not for minutes made again only because a photo was added or deleted. Called from the
@@ -109,6 +109,10 @@ type Engine struct {
 	HandleKey []byte
 	// TopicsOn says whether the knowledge points curation runs (topics.go; assistant.kb_topics). nil: it does.
 	TopicsOn func() bool
+	// TranscriptionReady says whether the manager can transcribe on the hub now (meeting_transcription_ready): asked
+	// only when the first upload naming a mode names hub, so it must answer at once (a cached value). nil: never
+	// ready, and such an upload is device mode with TranscriptionUnavailable.
+	TranscriptionReady func() bool
 
 	// Limits (zero: defaults).
 	ChatsPerRun  int // how many recently active chats an archive run looks at (100)

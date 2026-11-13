@@ -5,11 +5,10 @@ import Photos
 import SwiftUI
 import UIKit
 
-// The composer's 「+」 on the iPhone (docs/apple/ios.md, New shell, "Attach panel"): Telegram's attachment menu. A sheet
-// grows out of the button over the dimmed chat and rests a quarter of the screen down: a grid of recent photos (the
-// camera first, two rows tall) under a header, and a tab bar floating over its bottom (Photos, Files, More). Pulled up it
-// fills the screen and the grid scrolls; pulled down, tapped outside or closed, it shrinks back into the button. Photos
-// picked turn the tab bar into a caption (the draft) and Send. Only Telegram's behavior and numbers are taken (GPL).
+// The composer's 「+」 on the iPhone (docs/apple/ios.md, New shell, "Attach panel"): a system sheet that opens at half
+// height and drags to full (detents medium and large, the system's grabber), like the system's photo picker. Recent photos
+// in three equal square columns (the camera one cell like the others) under a header, and a bar at the sheet's foot
+// (Photos, Files, More) that the keyboard pushes up. Photos picked turn the bar into a caption (the draft) and Send.
 
 /// What was picked in the panel: the photos and videos (by `PHAsset.localIdentifier`) in the order picked, and those of
 /// them edited there, which go as edited.
@@ -51,17 +50,29 @@ enum AttachTab: String, CaseIterable, Identifiable {
     }
 }
 
-/// Lets the composer's rows in the panel close it before they act (a row is the composer's, the panel draws it).
+/// The panel's state the composer shares: on screen, what is picked, and what to hand back once it has gone.
 @Observable
 final class AttachPanel {
-    /// The panel is on screen (or going).
+    /// The sheet is on screen.
     var shown = false
-    /// Where the 「+」 button is, in the window: the panel grows out of it and goes back into it.
-    var source: CGRect = .zero
-    /// Set by a row: the panel animates away, then hands this back.
-    fileprivate(set) var leaving: AttachOutcome?
+    /// The photos and videos picked, in order, and the photos edited here (picked or not, by id: they go as edited once
+    /// picked, and open again as they were left). Kept here, not in the sheet, so a swipe down hands them back too.
+    var picked: [String] = []
+    var edited: [String: EditedImage] = [:]
+    /// What the composer gets once the sheet is down; nil: closed by the system (a swipe down, a tap outside).
+    @ObservationIgnored fileprivate var outcome: AttachOutcome?
 
-    func close(then action: @escaping () -> Void) { leaving = .then(AttachPicks(), action) }
+    /// What was picked, with the edits of those of them edited here.
+    var picks: AttachPicks { AttachPicks(ids: picked, edited: edited.filter { picked.contains($0.key) }) }
+
+    /// A row of the composer's (the More tab) closes the sheet, then acts.
+    func close(then action: @escaping () -> Void) { leave(.then(picks, action)) }
+
+    fileprivate func leave(_ outcome: AttachOutcome) {
+        guard shown else { return }
+        self.outcome = outcome
+        shown = false
+    }
 
     /// The panel's photo library and its image manager, kept from one opening to the next. Made on first use: the
     /// chat's `@State` makes an `AttachPanel` on every init of the view, and only the first is kept.
@@ -207,7 +218,7 @@ final class AttachLibrary {
     }
 }
 
-/// The panel. The composer presents it full screen with no animation of the system's (`AttachSheetHost`); it draws its own.
+/// The panel: the content of the composer's sheet (`AttachSheetHost`), which sets its detents.
 struct AttachSheet<More: View>: View {
     let panel: AttachPanel
     @Binding var caption: String
@@ -220,73 +231,51 @@ struct AttachSheet<More: View>: View {
     var allPhotos: () -> Void
     var showsMore: Bool
     @ViewBuilder var more: () -> More
-    /// Called once the panel has gone.
-    var finish: (AttachOutcome) -> Void
 
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.buiTheme) private var theme
     private var library: AttachLibrary { panel.library }
     @State private var tab: AttachTab = .photos
-    @State private var picked: [String] = []
-    /// Photos edited here (picked or not, by id): they go as edited once picked, and open again as they were left.
-    @State private var edited: [String: EditedImage] = [:]
+    @State private var detent: PresentationDetent = .medium
     /// The photo open in the editor (a tap on its picture), and what runs once the editor has gone (Send leaves the panel).
     @State private var previewing: AttachPreview?
     @State private var afterPreview: (() -> Void)?
-    /// 0: still the 「+」 button; 1: the sheet. The corners round off on their own, quicker.
-    @State private var grown: CGFloat = 0
-    @State private var cornered: CGFloat = 0
-    @State private var contentShown = false
-    @State private var dimmed = false
-    /// How far the sheet's top is down from open (`rest` at rest), and how far it is pulled down past rest.
-    @State private var offset: CGFloat?
-    @State private var drop: CGFloat = 0
-    @State private var dip: CGFloat = 0
-    @State private var dragStart: CGFloat?
-    @State private var pageAtTop = true
-    @State private var going = false
     @FocusState private var captionFocused: Bool
-    @State private var keyboardUp = false
-    /// How far the keyboard reaches up from the bottom of the screen (0: down): the caption rides on it, as in Telegram.
-    @State private var keyboard: CGFloat = 0
 
     private var tabs: [AttachTab] { showsMore ? AttachTab.allCases : [.photos, .files] }
-    /// What was picked, with the edits of those of them edited here.
-    private var picks: AttachPicks { AttachPicks(ids: picked, edited: edited.filter { picked.contains($0.key) }) }
+    private var picked: [String] { panel.picked }
+    private var picks: AttachPicks { panel.picks }
     private var surface: Color { AppStyle.current.usesBeautifulUI ? theme.colors.surface : Theme.Shell.composer }
+    #if DEBUG
+    /// Simulator automation: `-showAttachCamera YES` shows the camera cell on a simulator, which has no camera, so
+    /// screenshots and UI tests see the grid as a phone draws it (a tap does nothing).
+    private var cameraCell: (() -> Void)? { camera ?? (AttachDebug.showsCameraCell ? {} : nil) }
+    #else
+    private var cameraCell: (() -> Void)? { camera }
+    #endif
 
     var body: some View {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("AttachSheet")
         #endif
         GeometryReader { outer in
-            let safeTop = outer.safeAreaInsets.top
             let width = outer.size.width
-            let height = outer.size.height + outer.safeAreaInsets.top + outer.safeAreaInsets.bottom
-            let rest = AttachSheetPhysics.rest(width: width, height: height)
-            let top = safeTop + Theme.Attach.topGap
-            let resting = offset ?? rest
-            ZStack(alignment: .topLeading) {
-                Color.black.opacity(dimmed ? Theme.Attach.dim : 0)
-                    .contentShape(.rect)
-                    .onTapGesture { leave(.closed(picks)) }
-                    .accessibilityLabel("Close")
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityIdentifier("attach-dim")
-                sheet(width: width, height: height, top: top, rest: rest, offset: resting)
+            VStack(spacing: Theme.Space.flush) {
+                header
+                page(width: width)
             }
-            .ignoresSafeArea(.container)
-            .onAppear { appear(rest: rest) }
-            .onChange(of: panel.leaving != nil) { _, leaving in if leaving, let outcome = panel.leaving { leave(outcome) } }
-            .onChange(of: captionFocused) { _, focused in if focused { settle(to: 0, velocity: 0, motion: Theme.Motion.keyboard) } }
+            // The bar sits on the sheet's safe area: over the home indicator, or over the keyboard while the caption is
+            // typed, so the field and what is typed stay in sight (#3704, #3004); the grid scrolls under it to its end.
+            .safeAreaInset(edge: .bottom, spacing: Theme.Space.flush) { bar(width: width) }
         }
-        // The sheet lays itself out over the whole screen, so the system's keyboard avoidance would move nothing in it
-        // and the caption would stay under the keyboard (#3004): the keyboard's own frame says how far up things go.
-        .ignoresSafeArea(.keyboard)
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { keyboardMoved($0) }
+        // Typing the caption opens the sheet to full, as the panel always did: the keyboard takes the half it rested
+        // in, and the sheet stays open when the keyboard goes (#3004).
+        .onChange(of: captionFocused) { _, focused in if focused { detent = .large } }
+        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.visible)
+        .presentationBackground(surface)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("attach-sheet")
         .task { await library.load() }
         .onDisappear { library.forget() }
         .fullScreenCover(item: $previewing, onDismiss: {
@@ -294,7 +283,7 @@ struct AttachSheet<More: View>: View {
             afterPreview = nil
             then?()
         }) { preview in
-            AttachPhotoEditor(asset: preview.asset, resume: edited[preview.id], picked: picked.contains(preview.id), caption: $caption,
+            AttachPhotoEditor(asset: preview.asset, resume: panel.edited[preview.id], picked: picked.contains(preview.id), caption: $caption,
                               done: { keep(preview.asset, $0, sending: false) },
                               send: { keep(preview.asset, $0, sending: true) })
         }
@@ -307,140 +296,84 @@ struct AttachSheet<More: View>: View {
     /// panel with everything picked once the editor has gone.
     private func keep(_ asset: PHAsset, _ edit: EditedImage, sending: Bool) {
         let id = asset.localIdentifier
-        edited[id] = edit.edits.isEmpty ? nil : edit
-        if !picked.contains(id) {
-            guard AttachGrid.hasRoom(for: asset, picked: picked, photoRoom: photoRoom, videoRoom: videoRoom) else {
+        panel.edited[id] = edit.edits.isEmpty ? nil : edit
+        if !panel.picked.contains(id) {
+            guard AttachGrid.hasRoom(for: asset, picked: panel.picked, photoRoom: photoRoom, videoRoom: videoRoom) else {
                 AppModel.shared.toast = Toast(String(localized: "Up to 4 at a time"), style: .error)
                 return
             }
-            picked.append(id)
+            panel.picked.append(id)
             Haptics.tap()
         }
         if sending { afterPreview = { leave(.send(picks)) } }
     }
 
-    /// The keyboard comes up, goes down or changes height: the caption moves with it, on its curve.
-    /// The panel is the iPhone's only (the iPad keeps the menu), where the window is the whole screen.
-    private func keyboardMoved(_ note: Notification) {
-        let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-        let screen = (note.object as? UIScreen)?.bounds
-            ?? UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen.bounds }.first
-        let reach = AttachSheetPhysics.keyboardReach(end: end, screen: screen)
-        guard reach != keyboard else { return }
-        withAnimation(reduceMotion ? nil : Theme.Motion.keyboard) { keyboard = reach }
-    }
-
-    // MARK: The sheet
-
-    private func sheet(width: CGFloat, height: CGFloat, top: CGFloat, rest: CGFloat, offset: CGFloat) -> some View {
-        let progress = AttachSheetPhysics.restProgress(offset: offset, rest: rest)
-        let sheetTop = top + offset + drop + dip + Theme.Space.xxs * progress
-        let sheetHeight = height - top - offset
-        let restScale = AttachSheetPhysics.scale(offset: offset, rest: rest, width: width)
-        let source = panel.source
-        let sheetCenter = CGPoint(x: width / 2, y: sheetTop + sheetHeight / 2)
-        let startScale = source.width > 0 ? source.width / width : 0.1
-        let scale = (startScale + (1 - startScale) * grown) * restScale
-        let shift = CGSize(width: (source.midX - sheetCenter.x) * (1 - grown), height: (source.midY - sheetCenter.y) * (1 - grown))
-        let round = width / 2
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: round + (Theme.Attach.topRadius - round) * cornered,
-            bottomLeadingRadius: round + (Theme.Attach.bottomRadius - round) * cornered,
-            bottomTrailingRadius: round + (Theme.Attach.bottomRadius - round) * cornered,
-            topTrailingRadius: round + (Theme.Attach.topRadius - round) * cornered, style: .continuous)
-        // The sheet reaches the screen's bottom and is open all the way while the keyboard is up (the caption opens it),
-        // so the keyboard covers its last `keyboard` points and the caption sits on it. The grid goes on under the
-        // keyboard, as scroll views do; scrolling it puts the keyboard away.
-        return VStack(spacing: 0) {
-            header
-            page(width: width, open: offset == 0)
-        }
-        .opacity(contentShown ? 1 : 0)
-        .overlay(alignment: .bottom) { bar(width: width).padding(.bottom, keyboard).opacity(contentShown ? 1 : 0) }
-        .frame(width: width, height: sheetHeight)
-        .background(surface, in: shape)
-        .clipShape(shape)
-        .scaleEffect(scale)
-        .offset(shift)
-        .position(x: width / 2, y: sheetTop + sheetHeight / 2)
-        .gesture(AttachPan(enabled: !keyboardUp && !going, shouldBegin: { location, velocity in
-            beginsDrag(onHeader: location.y >= sheetTop && location.y < sheetTop + Theme.Attach.headerHeight, velocity: velocity, open: offset == 0)
-        }, changed: { travel in
-            follow(travel, rest: rest)
-        }, ended: { travel, velocity in
-            release(travel, velocity: velocity, rest: rest, height: height)
-        }))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("attach-sheet")
-    }
-
     private var header: some View {
-        VStack(spacing: 0) {
-            Capsule()
-                .fill(Color.primary.opacity(scheme == .dark ? Theme.Attach.grabberOpacityDark : Theme.Attach.grabberOpacityLight))
-                .frame(width: Theme.Attach.grabberWidth, height: Theme.Attach.grabberHeight)
-                .padding(.top, Theme.Attach.grabberTop)
-            ZStack {
-                Text(tab == .photos ? String(localized: "Recents") : tab.title)
-                    .font(Theme.Font.heading)
-                    .contentTransition(.opacity)
-                    .accessibilityAddTraits(.isHeader)
-                HStack {
-                    Button { leave(.closed(picks)) } label: {
-                        ThemedIcon(Theme.Icon.close).font(Theme.Font.heading)
-                            .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+        ZStack {
+            Text(tab == .photos ? String(localized: "Recents") : tab.title)
+                .font(Theme.Font.heading)
+                .lineLimit(1)
+                .contentTransition(.opacity)
+                .accessibilityAddTraits(.isHeader)
+            HStack {
+                Button { leave(.closed(picks)) } label: {
+                    ThemedIcon(Theme.Icon.close).font(Theme.Font.heading)
+                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
+                .accessibilityIdentifier("attach-close")
+                Spacer()
+                if tab == .photos {
+                    Button { leave(.then(picks, allPhotos)) } label: {
+                        Text("All Photos").font(Theme.Font.secondaryMedium).lineLimit(1)
+                            .scaledFrame(minHeight: Theme.Size.tapTarget)
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Close")
-                    .accessibilityIdentifier("attach-close")
-                    Spacer()
-                    if tab == .photos {
-                        Button { leave(.then(picks, allPhotos)) } label: {
-                            Text("All Photos").font(Theme.Font.secondaryMedium).lineLimit(1)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.accent)
-                        .accessibilityIdentifier("attach-all-photos")
-                    }
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityIdentifier("attach-all-photos")
                 }
-                .padding(.horizontal, Theme.Space.m)
             }
-            .frame(height: Theme.Attach.headerHeight - Theme.Attach.grabberTop - Theme.Attach.grabberHeight)
+            .padding(.horizontal, Theme.Space.m)
         }
+        // Under the system's grabber.
+        .padding(.top, Theme.Space.l)
+        .padding(.bottom, Theme.Space.xs)
         .frame(maxWidth: .infinity)
+        // Chrome, like the shell's top bars: at the accessibility sizes the centered title ran into All Photos.
+        .dynamicTypeSize(...Theme.Shell.topBarLargestTypeSize)
     }
 
     // MARK: Pages
 
-    @ViewBuilder private func page(width: CGFloat, open: Bool) -> some View {
+    @ViewBuilder private func page(width: CGFloat) -> some View {
         ZStack(alignment: .top) {
             switch tab {
-            case .photos: photos(width: width, open: open).transition(.asymmetric(insertion: .identity, removal: .opacity))
-            case .files: filesPage(open: open).transition(.asymmetric(insertion: .identity, removal: .opacity))
-            case .more: morePage(open: open).transition(.asymmetric(insertion: .identity, removal: .opacity))
+            case .photos: photos(width: width).transition(.asymmetric(insertion: .identity, removal: .opacity))
+            case .files: filesPage.transition(.asymmetric(insertion: .identity, removal: .opacity))
+            case .more: morePage.transition(.asymmetric(insertion: .identity, removal: .opacity))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    @ViewBuilder private func photos(width: CGFloat, open: Bool) -> some View {
+    @ViewBuilder private func photos(width: CGFloat) -> some View {
         switch library.access {
         case .unknown:
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         case .denied:
             AttachNoAccess(settings: openSettings, allPhotos: { leave(.then(picks, allPhotos)) })
         case .full, .limited:
-            AttachGrid(library: library, picked: $picked, edited: edited.mapValues(\.result), width: width,
-                       camera: camera.map { camera in { leave(.then(picks, camera)) } },
+            AttachGrid(library: library, picked: Bindable(panel).picked, edited: panel.edited.mapValues(\.result), width: width,
+                       camera: cameraCell.map { camera in { leave(.then(picks, camera)) } },
                        limited: library.access == .limited, photoRoom: photoRoom, videoRoom: videoRoom,
                        open: { previewing = AttachPreview(asset: $0) })
-                .scrollDisabled(!open)
-                .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top <= 1 } action: { _, top in pageAtTop = top }
         }
     }
 
-    private func filesPage(open: Bool) -> some View {
+    private var filesPage: some View {
         List {
             Section {
                 Button { leave(.then(picks, files)) } label: {
@@ -451,41 +384,32 @@ struct AttachSheet<More: View>: View {
                 Text("A file goes up to this conversation's computer, and its path into your message.")
             }
         }
-        .scrollDisabled(!open)
         .scrollContentBackground(.hidden)
-        .contentMargins(.bottom, Theme.Attach.gridBottom, for: .scrollContent)
-        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top <= 1 } action: { _, top in pageAtTop = top }
     }
 
-    private func morePage(open: Bool) -> some View {
+    private var morePage: some View {
         List { more() }
-            .scrollDisabled(!open)
             .scrollContentBackground(.hidden)
-            .contentMargins(.bottom, Theme.Attach.gridBottom, for: .scrollContent)
-            .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top <= 1 } action: { _, top in pageAtTop = top }
     }
 
     // MARK: The bar
 
-    /// The tabs, or once photos are picked the caption and Send. The sheet lifts it by the keyboard's reach while the
-    /// keyboard is up: its foot is under the keyboard, where the field showed nothing of what was typed (#3704, #3004).
+    /// The tabs, or once photos are picked the caption and Send.
     @ViewBuilder private func bar(width: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             if picked.isEmpty {
-                AttachTabBar(tabs: tabs, selected: tab, width: AttachSheetPhysics.barWidth(tabs: tabs.count, width: width), pick: pick)
-                    .padding(.bottom, Theme.Attach.barInset)
-                    .transition(.asymmetric(
-                        insertion: .modifier(active: AttachBarAway(), identity: AttachBarAway(away: false))
-                            .combined(with: .opacity.animation(Theme.Motion.attachBarBack)),
-                        removal: .modifier(active: AttachBarAway(), identity: AttachBarAway(away: false))
-                            .combined(with: .opacity.animation(Theme.Motion.attachBarAway))))
+                // A fixed pill: its labels stop growing where the shell's top bars do.
+                AttachTabBar(tabs: tabs, selected: tab, width: AttachLayout.barWidth(tabs: tabs.count, width: width), pick: pick)
+                    .dynamicTypeSize(...Theme.Shell.topBarLargestTypeSize)
+                    .transition(.opacity)
             } else {
                 captionBar
-                    .padding(.bottom, captionFocused ? Theme.Space.s : Theme.Attach.barInset)
-                    .transition(.opacity.animation(Theme.Motion.attachBarBack))
+                    .transition(.opacity)
             }
         }
-        .animation(Theme.Motion.attachBarSwap, value: picked.isEmpty)
+        .padding(.bottom, Theme.Space.s)
+        .frame(maxWidth: .infinity)
+        .animation(reduceMotion ? nil : Theme.Motion.attachBarSwap, value: picked.isEmpty)
     }
 
     private var captionBar: some View {
@@ -506,85 +430,23 @@ struct AttachSheet<More: View>: View {
             }
             .transition(.composerSend)
         }
-        .padding(.horizontal, captionFocused ? Theme.Space.l : Theme.Space.xxl)
+        .padding(.horizontal, Theme.Space.l)
     }
 
-    // MARK: Motion
+    // MARK: Actions
 
-    private func appear(rest: CGFloat) {
-        offset = rest
-        withAnimation(Theme.Motion.attachDimIn) { dimmed = true }
-        withAnimation(reduceMotion ? nil : Theme.Motion.attachOpen()) { grown = 1 }
-        withAnimation(reduceMotion ? nil : Theme.Motion.attachCorner) { cornered = 1 }
-        withAnimation(reduceMotion ? nil : Theme.Motion.attachContentIn) { contentShown = true }
-    }
-
-    /// Shrinks back into the 「+」 button (or drops away), then hands the outcome to the composer.
-    private func leave(_ outcome: AttachOutcome, velocity: CGFloat = 0) {
-        guard !going else { return }
-        going = true
+    /// The sheet goes down (the system's motion), then the composer gets `outcome` (`AttachSheetHost`).
+    private func leave(_ outcome: AttachOutcome) {
         captionFocused = false
-        withAnimation(Theme.Motion.attachDimOut) { dimmed = false }
-        withAnimation(Theme.Motion.attachContentOut) { contentShown = false }
-        withAnimation(reduceMotion ? nil : Theme.Motion.attachSettle()) { cornered = 0 }
-        withAnimation(reduceMotion ? nil : Theme.Motion.attachOpen(velocity: velocity)) {
-            grown = 0
-            drop = 0
-        } completion: {
-            finish(outcome)
-        }
-    }
-
-    private func settle(to target: CGFloat, velocity: CGFloat, motion: Animation) {
-        withAnimation(reduceMotion ? nil : motion) {
-            offset = target
-            drop = 0
-        }
+        panel.leave(outcome)
     }
 
     private func pick(_ next: AttachTab) {
         if next == tab {
-            settle(to: 0, velocity: 0, motion: Theme.Motion.attachSettle()) // the tab already shown: open all the way
+            detent = .large // the tab already shown: open all the way
             return
         }
         withAnimation(reduceMotion ? nil : Theme.Motion.attachTabFade) { tab = next }
-        pageAtTop = true
-        guard !reduceMotion else { return }
-        withAnimation(Theme.Motion.attachTabDip) { dip = Theme.Attach.tabDip } completion: {
-            withAnimation(Theme.Motion.attachTabBack) { dip = 0 }
-        }
-    }
-
-    // MARK: Dragging
-
-    private func beginsDrag(onHeader: Bool, velocity: CGPoint, open: Bool) -> Bool {
-        guard abs(velocity.y) > abs(velocity.x) else { return false }
-        if !open { return true }
-        return onHeader || (pageAtTop && velocity.y > 0)
-    }
-
-    private func follow(_ travel: CGFloat, rest: CGFloat) {
-        if dragStart == nil { dragStart = offset ?? rest }
-        let place = AttachSheetPhysics.follow(startOffset: dragStart ?? rest, travel: travel, rest: rest)
-        offset = place.offset
-        drop = place.drop
-    }
-
-    private func release(_ travel: CGFloat, velocity: CGFloat, rest: CGFloat, height: CGFloat) {
-        let start = dragStart ?? rest
-        dragStart = nil
-        let place = AttachSheetPhysics.follow(startOffset: start, travel: travel, rest: rest)
-        switch AttachSheetPhysics.settle(offset: place.offset, drop: place.drop, velocity: velocity, rest: rest,
-                                         startedOpen: start == 0, gridAtTop: pageAtTop) {
-        case .dismiss:
-            leave(.closed(picks), velocity: AttachSheetPhysics.springVelocity(velocity, remaining: height - place.offset))
-        case .open:
-            settle(to: 0, velocity: 0, motion: Theme.Motion.attachSettle(velocity: AttachSheetPhysics.springVelocity(velocity, remaining: place.offset)))
-        case .rest where abs(velocity) > Theme.Attach.settleSpeed && place.drop == 0:
-            settle(to: rest, velocity: 0, motion: Theme.Motion.attachSettle(velocity: AttachSheetPhysics.springVelocity(velocity, remaining: rest - place.offset)))
-        case .rest:
-            settle(to: rest, velocity: 0, motion: Theme.Motion.attachSnapBack)
-        }
     }
 
     private func openSettings() {
@@ -592,15 +454,12 @@ struct AttachSheet<More: View>: View {
     }
 }
 
-/// The tab bar gone (photos picked): smaller, blurred.
-private struct AttachBarAway: ViewModifier {
-    var away = true
-    func body(content: Content) -> some View {
-        content
-            .scaleEffect(away ? Theme.Attach.barAwayScale : 1)
-            .blur(radius: away ? Theme.Attach.barAwayBlur : 0)
-    }
+#if DEBUG
+/// The panel's simulator switches, read once.
+private enum AttachDebug {
+    static let showsCameraCell = UserDefaults.standard.bool(forKey: "showAttachCamera")
 }
+#endif
 
 /// The floating tab bar: a pill of tabs, a highlight sliding under the one shown.
 struct AttachTabBar: View {
@@ -642,7 +501,7 @@ struct AttachTabBar: View {
     }
 }
 
-/// The grid of recent photos: the camera first, a column wide and two rows tall, then three across.
+/// The grid of recent photos: three equal square columns, the camera first as one cell like the others.
 private struct AttachGrid: View {
     let library: AttachLibrary
     @Binding var picked: [String]
@@ -655,35 +514,26 @@ private struct AttachGrid: View {
     var videoRoom: Int
     /// A tap on a photo's picture (not its ring): it opens in the editor.
     var open: (PHAsset) -> Void
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("AttachGrid")
         #endif
-        let cell = AttachSheetPhysics.cell(width: width)
+        let cell = AttachLayout.cell(width: width, scale: displayScale)
         let spacing = Theme.Attach.gridSpacing
-        let assets = library.assets
-        let lead = camera == nil ? 0 : min(4, assets.count)
-        let rest = Array(assets.dropFirst(lead))
-        let rows = stride(from: 0, to: rest.count, by: Theme.Attach.columns).map { Array(rest[$0..<min($0 + Theme.Attach.columns, rest.count)]) }
+        let columns = Array(repeating: GridItem(.fixed(cell), spacing: spacing), count: Theme.Attach.columns)
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: spacing) {
+            VStack(spacing: Theme.Space.flush) {
                 if limited { AttachLimitedBanner(refetch: { await library.fetch() }) }
-                if let camera {
-                    HStack(alignment: .top, spacing: spacing) {
-                        AttachCameraCell(action: camera).frame(width: cell, height: cell * 2 + spacing)
-                        VStack(alignment: .leading, spacing: spacing) {
-                            HStack(spacing: spacing) { ForEach(assets.prefix(2), id: \.localIdentifier) { photo($0, cell: cell) } }
-                            HStack(spacing: spacing) { ForEach(assets.dropFirst(2).prefix(2), id: \.localIdentifier) { photo($0, cell: cell) } }
-                        }
+                LazyVGrid(columns: columns, spacing: spacing) {
+                    if let camera {
+                        AttachCameraCell(action: camera).frame(width: cell, height: cell)
                     }
-                }
-                ForEach(rows.indices, id: \.self) { i in
-                    HStack(spacing: spacing) { ForEach(rows[i], id: \.localIdentifier) { photo($0, cell: cell) } }
+                    ForEach(library.assets, id: \.localIdentifier) { photo($0, cell: cell) }
                 }
             }
         }
-        .contentMargins(.bottom, Theme.Attach.gridBottom, for: .scrollContent)
         .scrollIndicators(.hidden)
         // Typing the caption, a drag of the grid puts the keyboard away and the caption back down. Not
         // `scrollDismissesKeyboard`: it leaves the caption's keyboard up, the field being outside the grid.
@@ -930,69 +780,7 @@ private struct AttachNoAccess: View {
     }
 }
 
-/// The sheet's pan, a UIKit recognizer so it can take over from a grid scrolled to its top (Telegram's hand-off): it
-/// begins only when `shouldBegin` says so (the sheet not open all the way, the header, or a pull down from the top),
-/// and then stops the scroll view under it so the two never move together.
-private struct AttachPan: UIGestureRecognizerRepresentable {
-    var enabled: Bool
-    var shouldBegin: (CGPoint, CGPoint) -> Bool
-    var changed: (CGFloat) -> Void
-    var ended: (CGFloat, CGFloat) -> Void
-
-    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
-
-    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
-        let pan = UIPanGestureRecognizer()
-        pan.delegate = context.coordinator
-        pan.maximumNumberOfTouches = 1
-        return pan
-    }
-
-    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
-        recognizer.isEnabled = enabled
-        context.coordinator.shouldBegin = shouldBegin
-    }
-
-    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
-        let travel = recognizer.translation(in: recognizer.view).y
-        switch recognizer.state {
-        case .began:
-            context.coordinator.stopScrolling()
-            changed(travel)
-        case .changed:
-            changed(travel)
-        case .ended, .cancelled, .failed:
-            ended(travel, recognizer.velocity(in: recognizer.view).y)
-        default:
-            break
-        }
-    }
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var shouldBegin: (CGPoint, CGPoint) -> Bool = { _, _ in false }
-        private weak var scroll: UIScrollView?
-
-        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
-            guard let pan = g as? UIPanGestureRecognizer else { return false }
-            return shouldBegin(pan.location(in: nil), pan.velocity(in: pan.view)) // the window's: the sheet's top is in it
-        }
-
-        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-            if let view = other.view as? UIScrollView, other == view.panGestureRecognizer { scroll = view }
-            return true
-        }
-
-        /// The sheet took the finger: the scroll view under it lets go, so the grid stays at its top.
-        func stopScrolling() {
-            guard let scroll, scroll.isScrollEnabled else { return }
-            scroll.panGestureRecognizer.isEnabled = false
-            scroll.panGestureRecognizer.isEnabled = true
-        }
-    }
-}
-
-/// Puts the panel over the whole window from the composer: a full-screen cover with no background and no animation of
-/// its own (the panel draws its own), and what the panel hands back.
+/// Puts the panel in a system sheet from the composer, and hands back what it gave once the sheet is down.
 struct AttachSheetHost<More: View>: ViewModifier {
     let panel: AttachPanel
     @Binding var caption: String
@@ -1006,20 +794,17 @@ struct AttachSheetHost<More: View>: ViewModifier {
     var finish: (AttachOutcome) -> Void
 
     func body(content: Content) -> some View {
-        content.fullScreenCover(isPresented: Binding(get: { panel.shown }, set: { if !$0 { panel.shown = false } })) {
+        content.sheet(isPresented: Binding(get: { panel.shown }, set: { panel.shown = $0 }), onDismiss: {
+            // Closed by the system (a swipe down, a tap outside): what was picked goes into the composer.
+            let outcome = panel.outcome ?? .closed(panel.picks)
+            panel.outcome = nil
+            panel.picked = []
+            panel.edited = [:]
+            // What runs after it (the camera, Files) presents now that the sheet is down.
+            finish(outcome)
+        }) {
             AttachSheet(panel: panel, caption: $caption, photoRoom: photoRoom, videoRoom: videoRoom, camera: camera, files: files,
-                        allPhotos: allPhotos, showsMore: showsMore, more: more) { outcome in
-                var quiet = Transaction()
-                quiet.disablesAnimations = true
-                withTransaction(quiet) { panel.shown = false }
-                panel.leaving = nil
-                // What runs after it (the camera, Files) presents once the cover is down.
-                Task { @MainActor in
-                    try? await Task.sleep(for: Theme.Attach.afterKeyboard)
-                    finish(outcome)
-                }
-            }
-            .presentationBackground(.clear)
+                        allPhotos: allPhotos, showsMore: showsMore, more: more)
         }
     }
 }
@@ -1122,27 +907,20 @@ struct AttachMoreRows: View {
 }
 
 extension AttachPanel {
-    /// Opens the panel with no animation of the system's: it grows out of `source` on its own.
-    func open(from source: CGRect) {
-        self.source = source
-        leaving = nil
-        var quiet = Transaction()
-        quiet.disablesAnimations = true
-        withTransaction(quiet) { shown = true }
+    /// Opens the sheet, nothing picked yet (the last one's `onDismiss` emptied it). Not while the last one is still on
+    /// its way out with an outcome to hand back.
+    func open() {
+        guard outcome == nil else { return }
+        shown = true
     }
 
     /// What the iPhone's 「+」 does on a tap (`ShellComposerBar.openAttach`), in a conversation and a new one alike; nil on
-    /// the iPad, whose + is the menu. The keyboard goes down first and the panel follows a moment later, the two moving
-    /// together (Telegram's).
+    /// the iPad, whose + is the menu. The composer's keyboard goes down as the sheet comes up.
     func opener(focused: FocusState<Bool>.Binding) -> ((CGRect) -> Void)? {
         guard UIDevice.current.userInterfaceIdiom == .phone else { return nil }
-        return { frame in
-            guard focused.wrappedValue else { self.open(from: frame); return }
+        return { _ in
             focused.wrappedValue = false
-            Task {
-                try? await Task.sleep(for: Theme.Attach.afterKeyboard)
-                self.open(from: frame)
-            }
+            self.open()
         }
     }
 }

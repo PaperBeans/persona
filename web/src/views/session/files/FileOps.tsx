@@ -7,7 +7,10 @@ import { api, credentialOwner, enc, errorText, fileDownloadURL, getToken, isAbor
 import { onManagerChoice, shownManager, useShownManager } from "../../../lib/manager-choice";
 import { t } from "../../../i18n";
 import {
+  copyEntries,
+  FILE_COPY_FEATURE,
   FILE_EDIT_FEATURE,
+  FILE_ZIP_FEATURE,
   isNameTaken,
   moveEntries,
   nameProblem,
@@ -19,6 +22,7 @@ import {
   UPLOAD_DIR_FEATURE,
   uploadToDir,
   within,
+  zipEntries,
   type Conflict,
   type FileCredential,
   type UploadCredential,
@@ -28,7 +32,7 @@ import { baseName, bytes, shortPath } from "../../../lib/format";
 import { hubHas, useStore } from "../../../lib/store";
 import { contextMenuProps } from "../../../ui/context-menu";
 import type { MenuAt, MenuItem } from "../../../ui/menu-model";
-import { Button, copyText, cx, Dialog, IconButton, Loading, type ToastAction } from "../../../ui/atoms";
+import { Button, copyText, cx, Dialog, IconButton, Loading, toast, type ToastAction } from "../../../ui/atoms";
 import { Icon } from "../../../ui/icons";
 import { FileGlyph } from "./parts";
 
@@ -77,6 +81,8 @@ interface MutationOwner extends WorkspaceOwner {
 interface MutationIntent {
   owner: MutationOwner;
   targets: OpTarget[];
+  /** Copy to… instead of Move to… (#5830): the same folder picker and name question. */
+  copy?: boolean;
 }
 
 export interface FileOps {
@@ -84,6 +90,8 @@ export interface FileOps {
   scope: object;
   canUpload: boolean;
   canEdit: boolean;
+  /** The hub zips (`file_zip`): several items or a folder download as one zip. */
+  canZip: boolean;
   /** Sends files into `dir` (dropped or chosen). */
   upload: (files: File[], dir: string) => void;
   /** Opens the file chooser for `dir`. */
@@ -91,6 +99,14 @@ export interface FileOps {
   /** The row's menu: open, download, rename, move, copy path, move to the trash. */
   rowItems: (target: OpTarget, open: () => void) => MenuItem[];
   move: (targets: OpTarget[]) => void;
+  /** Copy to… (#5830). */
+  copy: (targets: OpTarget[]) => void;
+  /** Copies beside themselves as "name 2.ext" (#5830). */
+  duplicate: (targets: OpTarget[]) => void;
+  /** Zips them beside the first one (#5830). */
+  compress: (targets: OpTarget[]) => void;
+  /** The hub copies (`file_copy`). */
+  canCopy: boolean;
   trash: (targets: OpTarget[]) => void;
   download: (targets: OpTarget[]) => void;
   /** The tray, the dialogs and the hidden chooser: rendered once by the panel. */
@@ -243,9 +259,9 @@ export function useFileOps({ mid, cwd, path = cwd, workspace = cwd, onChanged }:
   const [trashBusy, setTrashBusy] = useState<MutationIntent | null>(null);
   const activeMove = useCallback((intent: MutationIntent) => movingRef.current === intent && currentOwner(intent.owner), [currentOwner]);
   const activeTrash = useCallback((intent: MutationIntent) => trashingRef.current === intent && currentOwner(intent.owner), [currentOwner]);
-  const openMove = useCallback((targets: OpTarget[]) => {
+  const openMove = useCallback((targets: OpTarget[], copy = false) => {
     if (!targets.length || !currentOwner(mutationOwner)) return;
-    const intent = { owner: mutationOwner, targets: targets.map((target) => ({ ...target })) };
+    const intent: MutationIntent = { owner: mutationOwner, targets: targets.map((target) => ({ ...target })), ...(copy ? { copy: true } : {}) };
     movingRef.current = intent;
     moveLocation.current = null;
     moveQuestion.current = null;
@@ -280,12 +296,14 @@ export function useFileOps({ mid, cwd, path = cwd, workspace = cwd, onChanged }:
       const { targets, owner: candidate } = intent;
       const from = [...new Set(targets.map((x) => parentOf(x.path)))];
       try {
-        await moveEntries(candidate.mid, targets.map((x) => x.path), candidate.cwd, dir, conflict, { ...candidate.credential, isAuthContextCurrent: () => activeMove(intent) });
+        const auth = { ...candidate.credential, isAuthContextCurrent: () => activeMove(intent) };
+        if (intent.copy) await copyEntries(candidate.mid, targets.map((x) => x.path), candidate.cwd, dir, conflict, auth);
+        else await moveEntries(candidate.mid, targets.map((x) => x.path), candidate.cwd, dir, conflict, auth);
         if (!activeMove(intent)) return;
         movingRef.current = null;
         setMoving(null);
-        changed.current([...from, dir]);
-        say(candidate.workspaceOwner, t("files-ops.moved", { count: targets.length, dir: shortPath(dir) }), "ok");
+        changed.current(intent.copy ? [dir] : [...from, dir]);
+        say(candidate.workspaceOwner, t(intent.copy ? "files-ops.copied" : "files-ops.moved", { count: targets.length, dir: shortPath(dir) }), "ok");
       } catch (e) {
         if (!activeMove(intent)) return;
         if (isNameTaken(e) && !conflict) {
@@ -356,27 +374,66 @@ export function useFileOps({ mid, cwd, path = cwd, workspace = cwd, onChanged }:
     }
   }, [activeTrash, currentOwner, currentWorkspace, say]);
 
+  const canZip = hubHas(features, FILE_ZIP_FEATURE);
   const download = useCallback(
     (targets: OpTarget[]) => {
-      // one link each: the browser saves them (a folder has no download)
-      for (const x of targets.filter((x) => !x.dir)) {
+      const save = (path: string, name: string) => {
         const a = document.createElement("a");
-        a.href = fileDownloadURL(mid, x.path, cwd);
-        a.download = x.name;
+        a.href = fileDownloadURL(mid, path, cwd);
+        a.download = name;
         a.rel = "noopener";
         document.body.append(a);
         a.click();
         a.remove();
+      };
+      if (targets.length === 1 && !targets[0].dir) return save(targets[0].path, targets[0].name);
+      if (!canZip) {
+        // an older hub: one link each, folders left out
+        for (const x of targets.filter((x) => !x.dir)) save(x.path, x.name);
+        return;
       }
+      // several items or a folder: one zip the computer makes in a temporary folder, then downloaded (#5828)
+      const name = targets.length === 1 ? `${targets[0].name}.zip` : t("files-ops.archive_name");
+      toast(t("files-ops.zipping", { count: targets.length }));
+      zipEntries(mid, targets.map((x) => x.path), cwd, name)
+        .then((z) => save(z.path, name))
+        .catch((e) => !isAbort(e) && toast(t("files-ops.zip_failed", { error: opErrorText(e) }), "error"));
     },
-    [mid, cwd],
+    [mid, cwd, canZip],
   );
+
+  const canCopy = hubHas(features, FILE_COPY_FEATURE);
+  // Duplicate and Compress (#5830): beside the first one, named by the computer ("name 2.ext", "Archive 2.zip")
+  const duplicate = useCallback((targets: OpTarget[]) => {
+    if (!targets.length || !currentOwner(mutationOwner)) return;
+    const dir = parentOf(targets[0].path);
+    const candidate = mutationOwner;
+    copyEntries(candidate.mid, targets.map((x) => x.path), candidate.cwd, dir, "keep", { ...candidate.credential, isAuthContextCurrent: () => currentOwner(candidate) })
+      .then(() => {
+        changed.current([dir]);
+        say(candidate.workspaceOwner, t("files-ops.duplicated", { count: targets.length }), "ok");
+      })
+      .catch((e) => !isAbort(e) && say(candidate.workspaceOwner, opErrorText(e), "error"));
+  }, [currentOwner, mutationOwner, say]);
+  const compress = useCallback((targets: OpTarget[]) => {
+    if (!targets.length || !currentOwner(mutationOwner)) return;
+    const dir = parentOf(targets[0].path);
+    const candidate = mutationOwner;
+    const name = targets.length === 1 ? `${targets[0].name.replace(/\.[^./]+$/, "") || targets[0].name}.zip` : t("files-ops.archive_name");
+    zipEntries(candidate.mid, targets.map((x) => x.path), candidate.cwd, name, dir, { ...candidate.credential, isAuthContextCurrent: () => currentOwner(candidate) })
+      .then((z) => {
+        changed.current([dir]);
+        say(candidate.workspaceOwner, t("files-ops.compressed", { name: z.name }), "ok");
+      })
+      .catch((e) => !isAbort(e) && say(candidate.workspaceOwner, t("files-ops.zip_failed", { error: opErrorText(e) }), "error"));
+  }, [currentOwner, mutationOwner, say]);
 
   const rowItems = useCallback(
     (x: OpTarget, open: () => void): MenuItem[] => {
       let renaming = false;
       const items: MenuItem[] = [{ key: "open", label: x.dir ? t("files-ops.open_folder") : t("files-ops.open"), icon: x.dir ? "folder" : "file", onSelect: open }];
       if (!x.dir) items.push({ key: "download", label: t("files-ops.download"), icon: "download", onSelect: () => download([x]) });
+      else if (canZip) items.push({ key: "download", label: t("files-ops.download_zip"), icon: "download", onSelect: () => download([x]) });
       if (x.dir && canUpload) items.push({ key: "upload", label: t("files-ops.upload_here"), icon: "upload", onSelect: () => choose(x.path) });
       if (canEdit) {
         items.push(
@@ -407,13 +464,20 @@ export function useFileOps({ mid, cwd, path = cwd, workspace = cwd, onChanged }:
             },
           },
           { key: "move", label: t("files-ops.move"), icon: "arrowRight", onSelect: () => openMove([x]) },
+          ...(canCopy
+            ? [
+                { key: "copy_to", label: t("files-ops.copy_to"), icon: "copy" as const, onSelect: () => openMove([x], true) },
+                { key: "duplicate", label: t("files-ops.duplicate"), icon: "copy" as const, onSelect: () => duplicate([x]) },
+              ]
+            : []),
+          ...(canZip ? [{ key: "compress", label: t("files-ops.compress"), icon: "archive" as const, onSelect: () => compress([x]) }] : []),
         );
       }
       items.push({ key: "copy", label: t("files-ops.copy_path"), icon: "copy", divider: !canEdit, onSelect: () => copyText(x.path) });
       if (canEdit) items.push({ key: "trash", label: t("files-ops.trash"), icon: "trash", danger: true, divider: true, onSelect: () => openTrash([x]) });
       return items;
     },
-    [canUpload, canEdit, download, choose, currentOwner, mutationOwner, openMove, openTrash],
+    [canUpload, canEdit, canZip, canCopy, download, choose, currentOwner, mutationOwner, openMove, openTrash, duplicate, compress],
   );
 
   const visibleMove = moving?.owner === mutationOwner && currentOwner(moving.owner) ? moving : null;
@@ -467,7 +531,7 @@ export function useFileOps({ mid, cwd, path = cwd, workspace = cwd, onChanged }:
     </>
   );
 
-  return { scope: mutationOwner, canUpload, canEdit, upload, choose, rowItems, move: openMove, trash: openTrash, download, ui };
+  return { scope: mutationOwner, canUpload, canEdit, canZip, canCopy, upload, choose, rowItems, move: openMove, copy: (targets: OpTarget[]) => openMove(targets, true), duplicate, compress, trash: openTrash, download, ui };
 }
 /** The uploads at the panel's foot: each with its progress and a cancel; a failed one says why and can go again. */
 function UploadTray({ uploads, onCancel, onRetry }: { uploads: Upload[]; onCancel: (u: Upload) => void; onRetry: (u: Upload) => void }) {
@@ -640,8 +704,11 @@ function MoveDialog({
   }, [owner, at]);
   const sources = useMemo(() => new Set(targets.map((x) => parentOf(x.path))), [targets]);
   // not where they all are already, nor into one of the folders moved
-  const blocked = targets.some((x) => x.dir && within(x.path, at)) || (sources.size === 1 && sources.has(at));
-  const title = targets.length === 1 ? t("files-ops.move_one_title", { name: targets[0].name }) : t("files-ops.move_title", { count: targets.length });
+  // a copy may go beside them (it is then a duplicate); never into a folder copied
+  const blocked = targets.some((x) => x.dir && within(x.path, at)) || (!intent.copy && sources.size === 1 && sources.has(at));
+  const title = intent.copy
+    ? targets.length === 1 ? t("files-ops.copy_one_title", { name: targets[0].name }) : t("files-ops.copy_title", { count: targets.length })
+    : targets.length === 1 ? t("files-ops.move_one_title", { name: targets[0].name }) : t("files-ops.move_title", { count: targets.length });
   return (
     <Dialog
       open
@@ -654,7 +721,7 @@ function MoveDialog({
             {t("files-ops.cancel")}
           </Button>
           <Button tone="primary" onClick={() => onMove(at)} busy={busy} disabled={blocked || !listing?.dirs}>
-            {t("files-ops.move_here")}
+            {intent.copy ? t("files-ops.copy_here") : t("files-ops.move_here")}
           </Button>
         </>
       }
@@ -740,7 +807,7 @@ function TrashDialog({ targets, busy, onClose, onTrash }: { targets: OpTarget[] 
 
 /** The bar a selection brings: how many, and what can be done to them all. */
 export function SelectionBar({ ops, selected, onClear }: { ops: FileOps; selected: OpTarget[]; onClear: () => void }) {
-  const files = selected.filter((x) => !x.dir);
+  const files = ops.canZip ? selected : selected.filter((x) => !x.dir);
   return (
     <div role="toolbar" aria-label={t("files-ops.selection")} className="flex h-10 shrink-0 items-center gap-1 border-b border-line bg-inset px-2">
       <IconButton icon="x" label={t("files-ops.clear_selection")} onClick={onClear} iconSize={14} />
@@ -748,7 +815,9 @@ export function SelectionBar({ ops, selected, onClear }: { ops: FileOps; selecte
         {t("files-ops.selected", { count: selected.length })}
       </span>
       <IconButton icon="download" label={t("files-ops.download")} onClick={() => ops.download(files)} disabled={!files.length} iconSize={14} />
+      {ops.canCopy && <IconButton icon="copy" label={t("files-ops.copy_to")} onClick={() => ops.copy(selected)} disabled={!selected.length} iconSize={14} />}
       {ops.canEdit && <IconButton icon="arrowRight" label={t("files-ops.move")} onClick={() => ops.move(selected)} disabled={!selected.length} iconSize={14} />}
+      {ops.canZip && ops.canEdit && <IconButton icon="archive" label={t("files-ops.compress")} onClick={() => ops.compress(selected)} disabled={!selected.length} iconSize={14} />}
       {ops.canEdit && <IconButton icon="trash" label={t("files-ops.trash")} onClick={() => ops.trash(selected)} disabled={!selected.length} iconSize={14} />}
     </div>
   );

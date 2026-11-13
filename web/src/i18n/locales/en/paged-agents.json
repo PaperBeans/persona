@@ -26,5 +26,9 @@
   "window_7d": "Past 7 days",
   "window_30d": "Past 30 days",
   "earlier": "Earlier",
-  "earlier_hint": "{count} sessions last active before this window ({window})"
+  "earlier_hint": "{count} sessions last active before this window ({window})",
+  "no_folder": "No folder",
+  "no_space": "No space",
+  "more_groups": "Show {count} more",
+  "places": "Where it is checked out"
 }

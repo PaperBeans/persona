@@ -204,7 +204,7 @@ internal fun StateCounts(counts: List<Pair<Status, Int>>, waiting: Int = 0, ligh
         }
         // Idle is spoken as iOS says it ("3 idle"), not by the state's own name (Seen).
         count(n, if (status == Status.Idle) pluralStringResource(R.plurals.designsystem_idle_count, n, n) else "$n ${stringResource(status.labelRes)}") {
-            JStatusDot(status, size = Dot, waiting = lighter)
+            JStatusDot(status, size = Dot, waiting = lighter, breathes = false) // still, as iOS's `StateCounts`
         }
     }
     if (waiting > 0 && !clockDrawn) count(waiting, waitingWords) {
@@ -1089,7 +1089,7 @@ data class Bay(
 
 /**
  * The quick filters of a list. Glass shows glass chips; brief underlined tabs; the board a counter board with
- * one big number per bay — tapping a cell filters to it.
+ * one big number per bay — tapping a cell filters to it. A Needs You dot is still, as on iOS's `QuickFilterBar`.
  */
 @Composable
 fun QuickFilterBar(bays: List<Bay>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
@@ -1097,7 +1097,7 @@ fun QuickFilterBar(bays: List<Bay>, selected: Int, onSelect: (Int) -> Unit, modi
     val type = PersonaTheme.type
     when (PersonaTheme.style) {
         AppStyle.Glass -> Row(modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp.dense)) {
-            bays.forEachIndexed { index, bay -> JChip(bay.label, selected = index == selected, onClick = { onSelect(index) }, status = bay.status, count = bay.count) }
+            bays.forEachIndexed { index, bay -> JChip(bay.label, selected = index == selected, onClick = { onSelect(index) }, status = bay.status, count = bay.count, breathes = false) }
         }
         // Tabs that do not fit scroll sideways rather than being cut off at the edge.
         AppStyle.Brief -> JSegmented(bays.map { JSegment(it.label, it.count) }, selected, onSelect, modifier.horizontalScroll(rememberScrollState()))

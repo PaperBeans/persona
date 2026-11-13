@@ -107,6 +107,7 @@ func (pl *Plugin) Handler() http.Handler {
 		role, lang := r.Header.Get(extwire.HeaderRole), i18n.Resolve(r.Header.Get(extwire.HeaderLang))
 		pl.converse(context.WithoutCancel(r.Context()), c, role, lang)
 	})
+	pl.transcriptionRoutes(mux) // meeting transcription (transcribe.go)
 	return mux
 }
 

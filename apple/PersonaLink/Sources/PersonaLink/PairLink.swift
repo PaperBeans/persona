@@ -100,8 +100,8 @@ struct PairLink: Equatable {
     static func notice(for parsed: Parsed) -> String? {
         switch parsed {
         case .link, .notOurs: nil
-        case .otherApp: "这是给手机 / Mac App 用的链接，不是给这台电脑配对用的。在手机或网页的「添加电脑」里拷贝这台电脑的配对链接。"
-        case .incomplete: "这条配对链接不完整（没有 token）：在手机或网页的「添加电脑」里重新拷贝一次。"
+        case .otherApp: linkText("This link is for the phone / Mac app, not for pairing this computer. In the phone or web app, copy this computer's pairing link from “Add Computer”.")
+        case .incomplete: linkText("This pairing link is incomplete (no token): copy it again from “Add Computer” in the phone or web app.")
         }
     }
 }

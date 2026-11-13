@@ -175,10 +175,17 @@ export async function startFakePaseo(t, o = {}) {
         return reply(c, 'cancel_agent_response', { requestId: id, agentId: msg.agentId, agent: f.agents.get(msg.agentId)?.agent ?? null, error: null })
       case 'update_agent_request': {
         // An archived agent's record is renamed where it is stored, and no list is told (it lists the agents Paseo has).
+        // Labels are merged into the agent's (Paseo cannot drop one over the wire); a live agent's lists are told.
         const e = f.agents.get(msg.agentId)
         if (e?.agent.archivedAt && msg.name) e.agent = { ...e.agent, title: msg.name, updatedAt: new Date().toISOString() }
+        if (e && msg.labels) {
+          const labels = { ...e.agent.labels, ...msg.labels }
+          if (e.agent.archivedAt) e.agent = { ...e.agent, labels }
+          else f.update(msg.agentId, { labels })
+        }
         return reply(c, replyType(msg.type), { requestId: id, agentId: msg.agentId, accepted: true, error: null })
       }
+      case 'set_agent_model_request':
       case 'set_agent_mode_request':
       case 'set_agent_thinking_request': {
         // Paseo loads the agent first, and refuses an archived one (ensureUnarchivedAgentLoaded).

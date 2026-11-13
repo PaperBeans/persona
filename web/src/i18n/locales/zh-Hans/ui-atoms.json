@@ -3,5 +3,6 @@
   "menu_empty": "没有可选的",
   "close": "关闭",
   "copied": "已拷贝",
-  "copy_failed": "没复制上"
+  "copy_failed": "没复制上",
+  "about": "关于「{name}」"
 }

@@ -45,9 +45,9 @@ func (s *Service) toolKB(ctx context.Context, name string, args json.RawMessage)
 		var hits []kb.Hit
 		switch {
 		case a.Kind == "":
-			hits = e.Search(a.Query, messages, limit)
+			hits = e.Search(a.Query, messages, limit, profileSkip(ctx)...)
 		case kbRPCKind(a.Kind):
-			hits = e.SearchKind(a.Query, a.Kind, messages, limit)
+			hits = e.SearchKind(a.Query, a.Kind, messages, limit, profileSkip(ctx)...)
 		default:
 			return "", fmt.Errorf("kind %q: one of projects, chats, people, docs, meetings, events, recordings, topics", a.Kind)
 		}

@@ -65,5 +65,8 @@
   "speed_fast": "Fast 加速",
   "header_mode": "权限模式：{mode}",
   "leave_bypass_confirm": "切到 {mode}",
-  "leave_bypass_detail": "这个 Agent 不是以完全访问启动的，切走后在这里切不回来。"
+  "leave_bypass_detail": "这个 Agent 不是以完全访问启动的，切走后在这里切不回来。",
+  "bypass_restart_detail": "这一轮结束后将重启会话以生效，对话接着进行",
+  "bypass_pending": "这一轮结束后会重启会话，切到完全访问",
+  "bypass_next_message": "从下一条消息起生效"
 }

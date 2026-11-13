@@ -403,7 +403,8 @@ Start from a reproduction, measure the base, change one thing, measure again.
    attach the data without enforcing the budget yet.
 6. **Automate it (the probe-script pattern).** A DEBUG launch argument runs the scenario inside the app and writes its
    numbers to a file (`-showAutoScroll YES` → `Documents/frames.json` from `FrameStats`; `-showPagePerf YES` →
-   `frames-page-*.json`); a script launches the app, drives the mock hub (`/mock/churn`, `/mock/say?stream=1`), waits with a
+   `frames-page-*.json`); a script launches the app, drives the mock hub (`/mock/churn`, `/mock/say?stream=1`, or
+   `/mock/say?trace=markdown|prose&node=lead|trail` for a recorded model stream at the node's cadence), waits with a
    timeout, reads the file and ends with a one-line verdict. Screen probes (`-probes YES`, `docs/apple/ios-state.md`,
    "Probes and assertions") expose state for UI tests. The suites in `scripts/app/perf-test.sh` (`PerfAgentsTests`,
    `PerfAssistantTests`, `PerfComposerTests`, …) do this with `XCTHitchMetric` and report through
@@ -484,7 +485,7 @@ Grep counts are across `apple/` without tests; they are leads to read, not each 
 
 - `apple/Persona/Views/Chats/ChatsView.swift:4344`: every scroll frame writes `header.scrolled`, which `AgentsFoldingField` observes, so that field's `body` runs every frame, folded or not.
 - `apple/Persona/App/AppModel.swift:1868-1872`: each `screen` event sets three observed properties with no pacing (who reads them not yet checked).
-- Good: stream deltas are paced (`apple/Persona/App/DeltaPacer.swift`, 200 ms) and prepared off the main actor; session lists coalesce for 25 ms; chat scroll values go to unobserved `ChatScratch`.
+- Good: stream deltas are paced (`apple/Persona/App/DeltaPacer.swift`, 200 ms) and prepared off the main actor; between them only `StreamingText` redraws, a few characters a frame while text waits (`StreamRevealClock`, #6651); session lists coalesce for 25 ms; chat scroll values go to unobserved `ChatScratch`.
 
 **P6: list identity**
 

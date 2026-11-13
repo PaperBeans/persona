@@ -514,7 +514,8 @@ func (h *Manager) extensionRoutes(api *http.ServeMux) {
 			hp = ps().get(id)
 		}
 		rest := strings.TrimPrefix(r.URL.Path, "/api/v1/extensions/"+id)
-		if hp == nil || hp.proxy == nil || hp.proc == nil || strings.HasPrefix(rest, "/-/") {
+		// /transcription/ is the manager's only (transcription.go): a meeting's audio never comes from an app.
+		if hp == nil || hp.proxy == nil || hp.proc == nil || strings.HasPrefix(rest, "/-/") || transcriptionPath(rest) {
 			writeExtensionResponseError(w, r, http.StatusNotFound, "not_found", errNoExtension)
 			return
 		}

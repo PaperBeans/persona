@@ -12,9 +12,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.ui.draw.alpha
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import android.content.res.Resources
 import androidx.compose.ui.unit.dp
@@ -42,14 +44,19 @@ internal fun NewAgentDialog(
     var picking by remember { mutableStateOf(false) }
     val list = rememberLazyListState()
     val prompt = rememberPromptFocus(state, list)
+    val pickers = rememberNewAgentPickers(model)
+    CloseAttachmentsOnLeave(model)
     val close = { if (!state.starting) { if (state.browsing) model.closeBrowser() else onDismiss() } }
     JSheet(onDismiss = { if (!state.starting) onDismiss() }, title = stringResource(R.string.agents_action_new_session)) {
         BackHandler(onBack = close)
-        Column(Modifier.fillMaxWidth().weight(1f).imePadding()) {
-            LazyColumn(Modifier.weight(1f), list, contentPadding = PaddingValues(bottom = 16.dp.dense), verticalArrangement = Arrangement.spacedBy(8.dp.dense)) {
-                newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt, onBlocked = { helping = it })
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            Column(Modifier.fillMaxSize().imePadding()) {
+                LazyColumn(Modifier.weight(1f), list, contentPadding = PaddingValues(bottom = 16.dp.dense), verticalArrangement = Arrangement.spacedBy(8.dp.dense)) {
+                    newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt, onBlocked = { helping = it }, pickers)
+                }
+                NewAgentFooter(state, model, machines, online, Modifier.fillMaxWidth().padding(top = 8.dp.dense))
             }
-            NewAgentFooter(state, model, machines, online, Modifier.fillMaxWidth().padding(top = 8.dp.dense))
+            NewAgentToast(model, Modifier.align(Alignment.TopCenter))
         }
         if (picking) NewAgentModelSheet(state, model::pickModel, model::reloadModels, onDismiss = { picking = false })
         LauncherHelp(helping, state, model, onAddProvider?.let { add -> { helping = null; onDismiss(); add() } }) { helping = null }
@@ -89,12 +96,17 @@ internal fun NewAgentPage(
     var picking by remember(initialModelQuery) { mutableStateOf(initialModelQuery != null) }
     val list = rememberLazyListState()
     val prompt = rememberPromptFocus(state, list)
+    val pickers = rememberNewAgentPickers(model)
+    CloseAttachmentsOnLeave(model)
     val close = { if (!state.starting) { if (state.browsing) model.closeBrowser() else onBack() } }
     BackHandler(onBack = close)
-    JListPage(title = stringResource(R.string.agents_action_new_session), onBack = close, largeTitle = false, state = list, bottomBar = {
-        NewAgentFooter(state, model, machines, online, Modifier.fillMaxWidth().padding(horizontal = pagePadding, vertical = Tokens.Space.s))
-    }) {
-        newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt, onBlocked = { helping = it })
+    Box(Modifier.fillMaxSize()) {
+        JListPage(title = stringResource(R.string.agents_action_new_session), onBack = close, largeTitle = false, state = list, bottomBar = {
+            NewAgentFooter(state, model, machines, online, Modifier.fillMaxWidth().padding(horizontal = pagePadding, vertical = Tokens.Space.s))
+        }) {
+            newAgentItems(state, model, machines, query, { query = it }, close, onModels = { picking = true }, prompt, onBlocked = { helping = it }, pickers)
+        }
+        NewAgentToast(model, Modifier.align(Alignment.TopCenter).statusBarsPadding())
     }
     if (picking) NewAgentModelSheet(state, model::pickModel, model::reloadModels, onDismiss = { picking = false },
         initialQuery = initialModelQuery.orEmpty())
@@ -122,6 +134,8 @@ private fun rememberPromptFocus(state: NewAgentState, list: LazyListState): Focu
 private fun LazyListScope.newAgentItems(
     state: NewAgentState, model: NewAgentViewModel, machines: List<Machine>, query: String, onQuery: (String) -> Unit, close: () -> Unit,
     onModels: () -> Unit, prompt: FocusRequester, onBlocked: (persona.core.contracts.api.AgentLauncher) -> Unit,
+    /** The add menu's pickers (#2321); null where the form takes no attachments. */
+    pickers: NewAgentPickers? = null,
 ) {
     val editable = !state.locked && !state.loading
     if (state.loading) item("loading") { JLinearProgress(null) }
@@ -293,6 +307,8 @@ private fun LazyListScope.newAgentItems(
             }),
             minLines = 3, maxLines = 8, modifier = Modifier.fillMaxWidth().focusRequester(prompt))
     }
+    // Photos and files for the first message (#2321, iOS NewAgentAttachmentRows), under it.
+    item("attachments") { NewAgentAttachmentRows(state, model, pickers) }
 }
 
 /** What following the configuration starts: the configured provider and model, and whether this machine has that launcher. */
@@ -313,6 +329,10 @@ private fun NewAgentFooter(state: NewAgentState, model: NewAgentViewModel, machi
         if (state.pending != null) PendingBadge(if (state.starting) PendingStatus.Verifying else PendingStatus.Unconfirmed)
         state.error?.let { Text(it.resolve(), color = PersonaTheme.palette.ink2, style = PersonaTheme.type.callout) }
         if (!online) Text(stringResource(R.string.agents_new_offline_footer), color = PersonaTheme.palette.ink2, style = PersonaTheme.type.callout)
+        // What the attachments hold Start back for (iOS `notReadyReason`): uploads still going, a failed one, a launcher that takes none.
+        if (state.pending == null && !state.browsing) state.attachmentsHold?.let {
+            Text(it.resolve(), Modifier.testTag("newAgent.attachHold"), color = PersonaTheme.palette.ink2, style = PersonaTheme.type.callout)
+        }
         if (state.browsing) {
             JButton(stringResource(R.string.agents_new_use_directory), { model.closeBrowser(use = true) }, enabled = state.browser != null && !state.loading, modifier = Modifier.fillMaxWidth())
         } else {
@@ -323,10 +343,11 @@ private fun NewAgentFooter(state: NewAgentState, model: NewAgentViewModel, machi
     }
 }
 
-/** A folder, a launcher or the configuration to follow, an online machine, and a first message when required. */
+/** A folder, a launcher or the configuration to follow, an online machine, a first message when required, and attachments ready to go. */
 internal fun startable(state: NewAgentState, machines: List<Machine>): Boolean =
     state.selection.cwd.isNotBlank() && (state.selection.launcher.isNotBlank() || state.following) &&
-        machines.any { it.id == state.machineId && it.online } && (!state.promptRequired || state.prompt.isNotBlank())
+        machines.any { it.id == state.machineId && it.online } && (!state.promptRequired || state.prompt.isNotBlank()) &&
+        state.attachmentsHold == null
 
 internal fun String.agentLabel() = when (this) { "claude" -> "Claude Code"; "codex" -> "Codex"; "traex" -> "TRAEX"; else -> this }
 internal val permissionModes = listOf("" to R.string.agents_mode_follow, "default" to R.string.agents_mode_default,

@@ -28,6 +28,7 @@ var InboxRoutes = []string{
 	"POST /api/v1/inbox/{id}/reply",
 	"POST /api/v1/inbox/{id}/suggestion",
 	"POST /api/v1/inbox/{id}/handoff",
+	"POST /api/v1/inbox/{id}/task-link/recheck",
 	"POST /api/v1/inbox/{id}/doc/status",
 	"PUT /api/v1/inbox/{id}/parent",
 	"PUT /api/v1/inbox/{id}/folder",
@@ -67,6 +68,9 @@ const (
 	MethodInboxMutes = "inbox.mutes"
 	// MethodInboxUnmute: {id} → {}: the user unmuted one on those pages; what it filed stays done.
 	MethodInboxUnmute = "inbox.unmute"
+	// MethodInboxPost: {on?} → {on}: whether the assistant may put its conversations into the Inbox (#6430, the Inbox
+	// Sources page's "Assistant" switch); with on, it is set first.
+	MethodInboxPost = "inbox.post"
 	// MethodInboxTriagePreview: InboxTriagePreview → {verdicts: [InboxTriageVerdict]}: the triage model tries a
 	// subscription's dry-run items as the Inbox would be handed them, one verdict each, at the user's request on the
 	// pages. Nothing is kept: no item, no triage state.
@@ -187,8 +191,14 @@ type InboxSource struct {
 	// #5671); another connector's is ignored there, and each move counts one.
 	Counts bool `json:"counts,omitempty"`
 	// Kinds are its kinds of things as it describes them, for the models.
-	Kinds  map[string]string          `json:"kinds,omitempty"`
-	Things []connectorwire.InboxThing `json:"things"`
+	Kinds map[string]string `json:"kinds,omitempty"`
+	// Via, ViaSource and Chats are a subscription's (#6222): the connector it reads and that source's name, for the AI
+	// twin; and the knowledge-base chat of each thread it hands while its knowledge base is on, under its archive
+	// (kb.ChatID(ID, chat)).
+	Via       string                     `json:"via,omitempty"`
+	ViaSource string                     `json:"via_source,omitempty"`
+	Chats     map[string]string          `json:"chats,omitempty"`
+	Things    []connectorwire.InboxThing `json:"things"`
 	// ReadError: its Collect failed this round (Things is empty and means nothing; what it had stays): a short code,
 	// never the error's text (ReadTimeout, ReadRateLimited, ReadFailed). The apps say which source is behind.
 	ReadError string `json:"read_error,omitempty"`

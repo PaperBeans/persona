@@ -46,6 +46,10 @@ export function query({ prompt, options }) {
   let inputEnded = false
   ;(async () => {
     for await (const m of prompt) {
+      // A message asking for it makes the CLI report a running background task, as background_tasks_changed does.
+      if (JSON.stringify(m).includes('start a background task')) {
+        send({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'sleep 600' }] })
+      }
       send({ type: 'stream_event', event: { type: 'message_start' } })
       if (process.env.FAKE_TURN_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_TURN_MS)))
       if (closed) return

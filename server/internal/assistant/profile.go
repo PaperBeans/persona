@@ -84,6 +84,15 @@ type Settings struct {
 	// MeetingAttendanceDefault: the role a meeting recording pre-selects on the phone (off, listener, participant;
 	// docs/assistant/meeting-minutes.md "Attending a meeting"); nil is off.
 	MeetingAttendanceDefault *string `json:"meeting_attendance_default,omitempty"`
+	// Meeting transcription stays on the device until the user chooses the hub. A nil glossary is empty;
+	// a nil or empty extension reference selects the built-in transcription contribution.
+	MeetingTranscriptionDefault   *string   `json:"meeting_transcription_default,omitempty"`
+	MeetingGlossary               *[]string `json:"meeting_glossary,omitempty"`
+	MeetingTranscriptionExtension *string   `json:"meeting_transcription_extension,omitempty"`
+	// MeetingTranscriptionInstall pins MeetingTranscriptionExtension to the installation the owner named
+	// (transcribers.TranscriptionInstall): set with it on every PUT, never by the apps, never shown. Nil for the
+	// built-in contribution (or a choice stored before pins were kept).
+	MeetingTranscriptionInstall *string `json:"meeting_transcription_install,omitempty"`
 	// DoneNeedsDelivery: a finished task closes only once its work is live and checked; stopped at a PR, merged or
 	// off by default it stays open with where it is held, and its agent is told so with its prompt (#3306,
 	// delivery.go). nil is off (the default).
@@ -100,6 +109,10 @@ type Settings struct {
 	// InboxSignals: new Inbox messages the judge links to a supervised task reach its supervisor as the signal inbox
 	// (#4293, supervise_inbox.go). nil is off (the default): each one is a supervisor turn.
 	InboxSignals *bool `json:"inbox_signals,omitempty"`
+	// InboxPost: the assistant may put a conversation into the Inbox (inbox_post, a task's "put it in the Inbox when
+	// done", inbox_post.go). nil is on: a row only comes from the user's own request or a task they set. The Inbox
+	// Sources page's switch for it.
+	InboxPost *bool `json:"inbox_post,omitempty"`
 	// IdleCloseHours: an agent Persona started that has been idle this many hours with nothing going on is closed
 	// (tasks_idle.go); 0 turns it off, nil is 12 (the default).
 	IdleCloseHours *int `json:"idle_close_hours,omitempty"`
@@ -434,6 +447,7 @@ func keptSessions(v Settings, tasks []TaskView, links []TodoLink) []SessionRef {
 
 // settingsChanged: the hub learns them (the snapshot's profile) and the next message reads the time in the new zone.
 func (s *Service) settingsChanged(ctx context.Context) {
+	s.transcriptionSettingsChanged(ctx) // only another contribution chosen drops the readiness answer
 	s.ProfileChanged(ctx)
 	s.publish(ctx)
 }
@@ -478,7 +492,11 @@ type assistantView struct {
 	// MainBackgroundFolded is in effect, like MainTasksQuiet.
 	MainBackgroundFolded bool `json:"main_background_folded"`
 	// MeetingAttendanceDefault is in effect (off until changed).
-	MeetingAttendanceDefault string `json:"meeting_attendance_default"`
+	MeetingAttendanceDefault      string   `json:"meeting_attendance_default"`
+	MeetingTranscriptionDefault   string   `json:"meeting_transcription_default"`
+	MeetingGlossary               []string `json:"meeting_glossary"`
+	MeetingTranscriptionExtension string   `json:"meeting_transcription_extension"`
+	MeetingTranscriptionReady     bool     `json:"meeting_transcription_ready"`
 	// IdleCloseHours is in effect (0: off).
 	IdleCloseHours int `json:"idle_close_hours"`
 	// ArchiveClosedDays is in effect (0: off).
@@ -510,6 +528,7 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		sp = space[0]
 	}
 	v := s.settings(ctx)
+	v.MeetingTranscriptionInstall = nil // the hub's own, never shown
 	if sp == "" {
 		v.MainMachineID = s.confirmedMainMachine(ctx, v)
 	}
@@ -517,6 +536,8 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 	out := assistantView{Settings: v, Manager: s.managerIdentity(), PermissionDefaults: s.permissionDefaults(), Conversations: []proto.Session{}, NotesEffective: s.notes(ctx), MainTasksQuiet: quietOn(v.MainTasksQuiet),
 		StartRequestedTasks: quietOn(v.StartRequestedTasks), RecordingDays: recordingDaysOf(v), MinutesDays: kb.MinutesDaysFor(minutesDaysSetting(v), recordingDaysOf(v)),
 		MeetingAttendanceDefault: meetingAttendanceOf(v), KBTopics: quietOn(v.KBTopics),
+		MeetingTranscriptionDefault: meetingTranscriptionDefaultOf(v), MeetingGlossary: meetingGlossaryOf(v),
+		MeetingTranscriptionExtension: meetingTranscriptionExtensionOf(v), MeetingTranscriptionReady: s.transcriptionReadyNow(),
 		TaskWorkspacePreference: s.taskWorkspacePreference(ctx),
 		MainBackgroundFolded:    quietOn(v.MainBackgroundFolded),
 		DoneNeedsDelivery:       v.DoneNeedsDelivery != nil && *v.DoneNeedsDelivery, IdleCloseHours: int(s.idleCloseAfter(ctx) / time.Hour),

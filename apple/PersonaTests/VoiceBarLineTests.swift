@@ -111,12 +111,36 @@ struct VoiceBarLineTests {
     }
 
     @Test func refusalsThatCannotGoAgainOnlyGoAway() {
-        for code in ["unprompted", "on_screen", "empty", "open_elsewhere", "engine_missing", "runtime_away"] {
+        for code in ["on_screen", "empty", "open_elsewhere", "engine_missing", "runtime_away"] {
             let l = Self.line([Self.run(.refused, code: code)], resendable: ["voice-1"])
             #expect(l.kind == .notSent && l.actions == [.dismiss(run: "voice-1")], "\(code)")
         }
         let other = Self.line([Self.run(.refused, code: "conflict")], resendable: ["voice-1"])
         #expect(other.actions == [.resend(run: "voice-1"), .dismiss(run: "voice-1")])
+    }
+
+    /// #5904: what the user-speech gate held back says no fresh request was heard, never that someone else said it, quotes
+    /// what was held back (Send Anyway confirms words the user can see), and offers Send Anyway while the connection up
+    /// now knows the run and keeps it (`canResend`: `speech_gate`).
+    @Test func anUnpromptedRefusalCanBeSentAnyway() {
+        let refused = Self.run(.refused, code: "unprompted")
+        let known = Self.line([refused], resendable: ["voice-1"])
+        #expect(known.kind == .notSent)
+        #expect(known.actions.map(\.name) == ["anyway", "dismiss"])
+        #expect(known.actions.first?.id == "anyway-voice-1")
+        #expect(known.text == "刚才没听到你要做这件事，所以没发出去：『修登录页』")
+        #expect(!known.text.contains("不是你说的"), "not worded as if someone else said it")
+        let unknown = Self.line([refused])
+        #expect(unknown.actions.map(\.name) == ["dismiss"], "not after a reconnect, nor from an extension that does not keep it")
+        #expect(unknown.text == known.text)
+    }
+
+    /// #5904 review: nothing to quote is nothing to send anyway (the extension keeps no run without a task), even
+    /// when the caller says it can go.
+    @Test func anUnpromptedRefusalWithoutATaskOnlyGoesAway() {
+        let l = Self.line([Self.run(.refused, code: "unprompted", task: "")], resendable: ["voice-1"])
+        #expect(l.kind == .notSent && l.actions == [.dismiss(run: "voice-1")])
+        #expect(l.text == "刚才没听到你要做这件事，所以没发出去")
     }
 
     @Test func unknownAndFailedAreNeverSentAgainByThemselves() {

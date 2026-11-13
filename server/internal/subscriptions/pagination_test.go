@@ -418,7 +418,7 @@ func TestContinuationRoundTripAndRecipeRace(t *testing.T) {
 
 	changed := r
 	changed.Args = json.RawMessage(`{"since":"{{since}}","limit":20}`)
-	current := Subscription{ID: sub.ID, Recipe: changed, Continuation: nil}
+	current := Subscription{ID: sub.ID, Recipe: changed, ToInbox: true, Continuation: nil}
 	applyRun(&current, RunCommit{Sub: sub}, false)
 	if current.Continuation != nil {
 		t.Fatalf("an old recipe's run replaced the new recipe's position: %+v", current.Continuation)
@@ -431,5 +431,172 @@ func TestContinuationRoundTripAndRecipeRace(t *testing.T) {
 	current.Continuation.Cursors[0] = "changed"
 	if original.Cursors[0] == "changed" {
 		t.Fatal("a run commit aliased the prior continuation's history")
+	}
+}
+
+// runWhenDue moves the clock to the subscription's next run and runs what is due.
+func (e *env) runWhenDue(id string) {
+	e.t.Helper()
+	if next := e.get(id).NextRunAt; next != nil && next.After(e.clock.Now()) {
+		e.clock.advance(next.Sub(e.clock.Now()))
+	}
+	e.svc.RunDue(e.ctx)
+}
+
+// expiringCursorSource answers a cursor pull whose page token "second" is refused once expired is set, as a source
+// does after a restart, an outage or a long backoff; a pull without a cursor still answers, with newer items (#6310).
+func expiringCursorSource(t *testing.T, e *env, expired *bool, refuse func() (string, error)) *[]connector.CatalogQuery {
+	var calls []connector.CatalogQuery
+	e.conn.setAnswer(func(q connector.CatalogQuery) (string, error) {
+		calls = append(calls, q)
+		switch cursor, _ := queryArgs(t, q)["cursor"].(string); {
+		case cursor == "" && *expired:
+			return noticesPage(nil, nil, 5, 4, 3), nil // the first page's n3 again, and what came since
+		case cursor == "":
+			return noticesPage("second", nil, 3), nil
+		case cursor == "second" && !*expired:
+			return noticesPage(nil, nil, 2, 1), nil
+		default:
+			return refuse()
+		}
+	})
+	return &calls
+}
+
+func cursorsOf(t *testing.T, calls []connector.CatalogQuery) []string {
+	out := make([]string, len(calls))
+	for i, q := range calls {
+		out[i], _ = queryArgs(t, q)["cursor"].(string)
+	}
+	return out
+}
+
+func TestAnExpiredCursorStartsAFreshPullOnItsSecondFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		refuse func() (string, error)
+	}{
+		{"call error", func() (string, error) { return "", errors.New("invalid page_token: expired") }},
+		{"no list", func() (string, error) { return `{"error":"invalid page_token"}`, nil }}, // not a shape miss
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := pagingEnv(t)
+			expired := false
+			calls := expiringCursorSource(t, e, &expired, tc.refuse)
+			sub := e.turnOn(e.create(cursorRecipe()))
+			*calls = nil // the dry run's
+			e.svc.RunDue(e.ctx)
+			window := e.get(sub.ID).Continuation
+			if window == nil || window.Cursor != "second" {
+				t.Fatalf("first page's continuation: %+v", window)
+			}
+			expired = true
+
+			e.runWhenDue(sub.ID)
+			got := e.get(sub.ID)
+			if got.State != StateFailing || got.FailCount != 1 || got.Continuation == nil || got.Continuation.Cursor != "second" {
+				t.Fatalf("a first failure kept no position to resume: state %s fails %d %+v", got.State, got.FailCount, got.Continuation)
+			}
+			e.runWhenDue(sub.ID)
+			got = e.get(sub.ID)
+			if got.State != StateFailing || got.FailCount != 2 || got.Continuation != nil || got.NextRunAt == nil {
+				t.Fatalf("a second failure kept the dead cursor: state %s fails %d %+v", got.State, got.FailCount, got.Continuation)
+			}
+			e.runWhenDue(sub.ID)
+			got = e.get(sub.ID)
+			if got.State != StateOK || got.FailCount != 0 || got.Continuation != nil || got.SinceAt == nil || got.InboxCatchup == nil {
+				t.Fatalf("the fresh pull did not recover: %+v", got)
+			}
+			if want := []string{"", "second", "second", ""}; !slices.Equal(cursorsOf(t, *calls), want) {
+				t.Fatalf("cursors sent %q, want %q", cursorsOf(t, *calls), want)
+			}
+			if since := queryArgs(t, (*calls)[3])["since"]; since != window.WindowSince.Format(time.RFC3339) {
+				t.Fatalf("the fresh pull read from %v, not the first pull's start %s", since, window.WindowSince)
+			}
+			// n3 came on the first page and again in the fresh pull: held and delivered once.
+			if got := itemUIDs(e.store.Items()); !slices.Equal(got, []string{"n3", "n4", "n5"}) {
+				t.Fatalf("items after the fresh pull: %v", got)
+			}
+			if e.store.SeenCount(sub.ID) != 3 {
+				t.Fatalf("seen keys after the fresh pull: %d", e.store.SeenCount(sub.ID))
+			}
+		})
+	}
+}
+
+func TestATransientPageFailureResumesItsCursor(t *testing.T) {
+	e := pagingEnv(t)
+	var calls []connector.CatalogQuery
+	refused := false
+	e.conn.setAnswer(func(q connector.CatalogQuery) (string, error) {
+		calls = append(calls, q)
+		switch cursor, _ := queryArgs(t, q)["cursor"].(string); {
+		case cursor == "":
+			return noticesPage("second", nil, 3), nil
+		case !refused:
+			refused = true
+			return "", errors.New("temporarily unavailable")
+		default:
+			return noticesPage(nil, nil, 2, 1), nil
+		}
+	})
+	sub := e.turnOn(e.create(cursorRecipe()))
+	calls = nil // the dry run's
+	e.svc.RunDue(e.ctx)
+	e.runWhenDue(sub.ID)
+	e.runWhenDue(sub.ID)
+	if want := []string{"", "second", "second"}; !slices.Equal(cursorsOf(t, calls), want) {
+		t.Fatalf("cursors sent %q, want %q: one failure re-read the committed pages", cursorsOf(t, calls), want)
+	}
+	got := e.get(sub.ID)
+	if got.State != StateOK || got.Continuation != nil || got.SinceAt == nil {
+		t.Fatalf("after the resumed page: %+v", got)
+	}
+	if got := itemUIDs(e.store.Items()); !slices.Equal(got, []string{"n1", "n2", "n3"}) {
+		t.Fatalf("items: %v", got)
+	}
+}
+
+func TestTurningOffDropsTheContinuation(t *testing.T) {
+	e := pagingEnv(t)
+	expired := false
+	calls := expiringCursorSource(t, e, &expired, func() (string, error) { return "", errors.New("invalid page_token: expired") })
+	sub := e.turnOn(e.create(cursorRecipe()))
+	*calls = nil // the dry run's
+	e.svc.RunDue(e.ctx)
+	expired = true
+	e.runWhenDue(sub.ID)
+	got := e.get(sub.ID)
+	off, err := e.svc.Update(e.ctx, sub.ID, Patch{Revision: got.Revision, ToInbox: ptr(false)}, Actor{ID: "device:phone"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.get(sub.ID); got.Continuation != nil || got.NextRunAt != nil {
+		t.Fatalf("off kept its position: next %v %+v", got.NextRunAt, got.Continuation)
+	}
+	e.turnOn(off)
+	e.svc.RunDue(e.ctx)
+	if want := []string{"", "second", ""}; !slices.Equal(cursorsOf(t, *calls), want) {
+		t.Fatalf("cursors sent %q, want %q", cursorsOf(t, *calls), want)
+	}
+	if got := e.get(sub.ID); got.State != StateOK || got.Continuation != nil {
+		t.Fatalf("on again: %+v", got)
+	}
+}
+
+func TestARunThatEndsAfterTurningOffKeepsNoPosition(t *testing.T) {
+	r := cursorRecipe()
+	since := time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC)
+	ran := Subscription{ID: "sub_a", Recipe: r, ToInbox: true,
+		Continuation: &Continuation{WindowSince: since, WindowEnd: since.Add(24 * time.Hour), Cursor: "next", Pages: 1, Cursors: []string{"next"}}}
+	off := Subscription{ID: ran.ID, Recipe: r}
+	applyRun(&off, RunCommit{Sub: ran}, false)
+	if off.Continuation != nil {
+		t.Fatalf("a page that ran while it was turned off kept its position: %+v", off.Continuation)
+	}
+	ran.Continuation.Manual = true // Run Now while off goes on to the end
+	applyRun(&off, RunCommit{Sub: ran}, false)
+	if off.Continuation == nil || off.Continuation.Cursor != "next" {
+		t.Fatalf("a manual pull's position was dropped: %+v", off.Continuation)
 	}
 }

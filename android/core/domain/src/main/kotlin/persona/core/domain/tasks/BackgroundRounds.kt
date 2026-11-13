@@ -19,7 +19,7 @@ import persona.core.domain.lines.ChatLine
  */
 data class BackgroundFolding(val open: Set<String> = emptySet(), val reveal: String? = null, val rounds: Boolean = true) {
     companion object {
-        /** The source a folded supervision round stands under: drawn "Supervision record" (iOS `SupervisionRecordLine`). */
+        /** The source a folded supervision round stands under: drawn "Handled in the background" (iOS `SupervisionRecordLine`). */
         val supervision = MessageSource("supervision")
 
         /** The message sources whose rounds fold (the web's `supervisionRound`, widened by #4314). */
@@ -40,17 +40,28 @@ data class BackgroundFolding(val open: Set<String> = emptySet(), val reveal: Str
 
         /** The id of the line that stands for the round [roundId] (its first input's id). */
         fun lineId(roundId: String): String = "bg-$roundId"
+
+        /**
+         * Whether conversation [sessionId] folds its background rounds (#4314, #6595): the main conversation or one of
+         * the hub's leader (direction) conversations, while the switch is on. A hub that omits the switch means on;
+         * an ordinary side conversation never folds.
+         */
+        fun foldsConversation(sessionId: String, main: String?, on: Boolean, leaders: Set<String>): Boolean {
+            if (!on || sessionId.isBlank()) return false
+            if (!main.isNullOrBlank() && sessionId == main) return true
+            return sessionId in leaders
+        }
     }
 }
 
 /**
- * One folded background round, drawn as one muted line, `@<source> · Background round` (`· Running in the background`
+ * One folded background round, drawn as one muted line, `@<source> · Reported from the background` (`· Working in the background…`
  * while [live]); while [open] its [lines] follow it unchanged.
  */
 data class BackgroundRound(
     val id: String, val source: MessageSource, val live: Boolean, val open: Boolean, val lines: List<ChatLine>,
 ) {
-    /** A quiet supervision round (Glass), drawn "Supervision record" rather than with a source mention. */
+    /** A quiet supervision round (Glass), drawn "Handled in the background" rather than with a source mention. */
     val supervision: Boolean get() = source.kind == BackgroundFolding.supervision.kind
 }
 

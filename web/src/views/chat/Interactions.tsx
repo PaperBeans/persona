@@ -26,6 +26,7 @@ import { Markdown } from "../../ui/Markdown";
 import { permissionDetail, permissionReason, summaryExtra } from "../../lib/tool-detail";
 import { DIFF_TOOLS, DiffBlocks, editDiffs } from "./ActionRow";
 import { cardFold, cardLine, nextWaiting, PLAN_MAX, showsAnswered } from "./dock";
+import { ScrollFold } from "./fold-scroll";
 import { cardState } from "../../lib/card-focus";
 import { href, onLinkClick, type Route } from "../../lib/router";
 import { t } from "../../i18n";
@@ -494,6 +495,9 @@ function PermissionCard({ ix }: { ix: Interaction }) {
   );
 }
 
+/** A terminal dialog's words under its question (#6638): at most six lines in view, the rest a scroll inside them. */
+const DETAIL_FOLD = "mb-2 max-h-[6lh] text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-2";
+
 const CODE_BOX = "max-h-48 overflow-auto rounded-[8px] bg-inset px-2.5 py-2 font-mono text-[11.5px] leading-[1.6] whitespace-pre-wrap text-ink-2 shadow-hairline";
 
 /** What the tool will do, field by field (Android PermissionRequestSummary): the agent's sentence, then the command,
@@ -821,7 +825,9 @@ function PlainScreenCard({ ix }: { ix: Interaction }) {
         <CloseBlockedAgent ix={ix} disabled={busy !== null} />
       </div>}
     >
-      {d?.detail && <p className="mb-2 text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-2">{d.detail}</p>}
+      {/* long words (a command the hub did not read as one, #6638) fold as the chat's long blocks do, so the choices
+          under them are in view: six lines that scroll inside and fade while there is more */}
+      {d?.detail && <ScrollFold className={DETAIL_FOLD} data-screen-detail>{d.detail}</ScrollFold>}
       {d?.options?.length ? (
         <div className="flex flex-col gap-0.5">
           {d.options.map((o, i) =>
@@ -927,7 +933,7 @@ function MultiScreenCard({ ix }: { ix: Interaction }) {
         </>
       }
     >
-      {d.detail && <p className="mb-2 text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-2">{d.detail}</p>}
+      {d.detail && <ScrollFold className={DETAIL_FOLD} data-screen-detail>{d.detail}</ScrollFold>}
       <div className="flex flex-col gap-0.5">
         {options.filter((o) => !o.kind).map((o, i) => (
           <button

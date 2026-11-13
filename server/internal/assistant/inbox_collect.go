@@ -63,6 +63,9 @@ func (s *Service) InboxCollected(ctx context.Context, r assistantwire.InboxRound
 		for kind, d := range src.Kinds {
 			b.kinds[src.ID+"/"+kind] = d
 		}
+		if src.Via != "" {
+			b.vias[src.ID] = inboxVia{connector: src.Via, source: src.ViaSource, chats: src.Chats}
+		}
 	}
 	b.srcMu.Unlock()
 	b.mu.Lock()

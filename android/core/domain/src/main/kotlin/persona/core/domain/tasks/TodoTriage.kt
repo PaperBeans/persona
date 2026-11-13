@@ -245,6 +245,31 @@ data class TriageResult(
     val finished: Int,
 ) {
     fun rows(section: TriageSection): List<TriageGroup> = sections[section].orEmpty()
+
+    /**
+     * This without the to-dos [ids] (another grouping shows them already, #4352): a row keeps its other members, led by
+     * the first one left and in that one's section; a row left with none goes. The header totals stay as they are.
+     */
+    fun without(ids: Set<String>): TriageResult {
+        if (ids.isEmpty()) return this
+        val groups = sections.values.flatten().mapNotNull { group ->
+            val members = group.members.filterNot { it.id in ids }
+            when {
+                members.isEmpty() -> null
+                members.size == group.members.size -> group
+                else -> group.copy(section = group.triage.getValue(members.first().id).section, lead = members.first(),
+                    members = members, triage = members.associate { it.id to group.triage.getValue(it.id) },
+                    last = members.maxOf { group.triage.getValue(it.id).last })
+            }
+        }
+        val kept = groups.flatMap { group -> group.members.map { group.triage.getValue(it.id).section } }
+        return copy(
+            sections = TriageSection.entries.associateWith { section ->
+                groups.filter { it.section == section }.sortedWith(compareByDescending<TriageGroup> { it.last }.thenBy { it.key })
+            },
+            todoCounts = TriageSection.entries.associateWith { section -> kept.count { it == section } },
+        )
+    }
 }
 
 /** The row each to-do is in: the root of its related to-dos (union of shared keys), open and closed kept apart. */

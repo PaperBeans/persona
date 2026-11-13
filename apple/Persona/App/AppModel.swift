@@ -174,6 +174,8 @@ final class AppModel {
     #endif
     /// Cards being answered, and whether the hub ended them meanwhile: a failed answer puts back only the ones it did not.
     @ObservationIgnored private var answering = AnsweringInteractions()
+    /// What question cards show while their answers are on the way, or after one failed (#6279).
+    private(set) var answerAttempts = AnswerAttempts()
     /// The machine whose engine the pairing asks for (a newly paired group's hub machine).
     var pairingEngineMachine: MachineRef?
     /// Just paired (#4195): the checklist page comes up once the hub says what the main conversation still needs
@@ -288,9 +290,15 @@ final class AppModel {
     /// The directions' names by leader conversation id (`GET /api/v1/assistant/leaders`): the sidebar's Directions group
     /// shows these instead of the conversations' titles. Read again with the assistant; empty without leaders.
     private(set) var directionNames: [String: String] = [:]
-    /// How much work each direction holds (`GET /api/v1/assistant/directions/tree`, read on its `directions` push and on
-    /// every (re)connect): the sidebar's "N working · N need you" under its name. Empty from a hub without the tree.
-    private(set) var directionCounts: [String: APIClient.DirectionCounts] = [:]
+    /// The hub's direction tree (#4352, `GET /api/v1/assistant/directions/tree`): the directions' open to-dos with their
+    /// state and Agents, for the sidebar's Pinned rows, the To-dos page and the Agents page. Read with the assistant, on
+    /// every connect and on the `directions` event; nil from a hub without it (404) or before it is read.
+    private(set) var directionTree: DirectionTree?
+    /// Numbers the tree reads in the order they were asked; `directionTreeLanded` is the newest one whose answer was
+    /// taken. An answer older than that is dropped; a read that fails moves neither, so it never makes an earlier
+    /// good answer count as stale.
+    @ObservationIgnored private var directionTreeAsk = 0
+    @ObservationIgnored private var directionTreeLanded = 0
     @ObservationIgnored private var assistantRetryInFlight: Task<Void, Never>?
     /// The assistant conversation shown in the Chat tab (persisted across launches).
     ///
@@ -441,11 +449,14 @@ final class AppModel {
             guard let self, self.isPaired, !self.isDemo else { return }
             WatchSync.shared.push(persona: self.personas.chosenID)
             self.pushWatchConfigs()
-            WatchSync.shared.push(summary: self.watchSummary())
+            summariesChanged()
         }
         personas.onChange = { [weak self] in
             self?.applyPersonaPalette()
             self?.followAppIcon()
+            #if os(iOS)
+            HomeWidgetWriter.shared.schedule()
+            #endif
         }
         applyPersonaPalette()
         connection.onCaughtUp = { [weak self] in self?.flushOutbox() }
@@ -456,9 +467,17 @@ final class AppModel {
         #endif
         for name in leaving {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { @Sendable [weak self] _ in
-                MainActor.assumeIsolated { self?.flushSnapshot() }
+                MainActor.assumeIsolated {
+                    self?.flushSnapshot()
+                    #if os(iOS)
+                    HomeWidgetWriter.shared.flush() // the widgets keep what the app last showed
+                    #endif
+                }
             }
         }
+        #if os(iOS)
+        HomeWidgetWriter.shared.source = { [weak self] in self?.homeSnapshotSource() }
+        #endif
         #if os(iOS) || os(visionOS)
         if registryUnreadable {
             NotificationCenter.default.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil,
@@ -1036,6 +1055,9 @@ final class AppModel {
             // resolve one (their default), so an empty answer means an old hub — show Couldn't Load Settings instead of an
             // endless Reading or a made-up name.
             assistantConfigLoadFailed = (assistantConfig?.launcher ?? "").isEmpty
+            // The tree is read on every hello and `directions` event; here only when none is held (a manager or hub
+            // group was just picked, which clears it), off this read's path so the page does not wait for it.
+            if directionTree == nil { Task { await refreshDirectionTree(api, followLeaders: false) } }
         } catch {
             // Settings that already name a launcher stay usable; with none held the page shows Couldn't Load Settings (#4200).
             if showsPage(of: api), (assistantConfig?.launcher ?? "").isEmpty { assistantConfigLoadFailed = true }
@@ -1047,12 +1069,19 @@ final class AppModel {
     private func refreshDirectionInfo(_ api: APIClient, leaders: [String]) async {
         guard !leaders.isEmpty else {
             if !directionNames.isEmpty { directionNames = [:] }
-            if !directionCounts.isEmpty { directionCounts = [:] }
             return
         }
         guard let list = try? await api.leaders(), showsPage(of: api) else { return }
         let names = APIClient.directionNames(list)
         if names != directionNames { directionNames = names }
+    }
+
+    /// What the To-dos and Agents pages' headers call direction `d`: its name, Secretary for the secretary group, else
+    /// its leader conversation's title as the sidebar's lead row says it (New Chat when that has none either).
+    func directionTitle(_ d: DirectionTree.Direction) -> String {
+        if let name = directionNames[d.id], !name.isEmpty { return d.title(fallback: name) }
+        let t = assistantConfig?.conversations.first { $0.sessionID == d.id }?.title ?? ""
+        return d.title(fallback: t.isEmpty || t == "Claude Code" ? String(localized: "New Chat [Quick Actions ea4b29]") : t)
     }
 
     /// The assistant's leader conversations (the sidebar's Directions), never the main one, in the hub's order.
@@ -1074,18 +1103,27 @@ final class AppModel {
         } catch { show(error) }
     }
 
-    /// The hub's direction tree (#4352): its current directions in order, their names and counts. Read on the hub's
-    /// `directions` push and on every (re)connect. The tree answers for the default manager alone, so another manager's
-    /// page keeps what `GET /api/v1/assistant/leaders` gave it; a hub older than the tree (404) changes nothing.
-    private func refreshDirectionTree(_ api: APIClient) async {
-        guard assistantShows(nil), showsPage(of: api) else { return }
-        guard let tree = try? await api.directionsTree(), assistantShows(nil), showsPage(of: api) else { return }
-        let directions = APIClient.directions(tree)
-        let names = APIClient.directionNames(tree)
-        let counts = APIClient.directionCounts(tree)
+    /// Reads the hub's direction tree again (#4352, `directionTree`, the one copy every page draws): on the hub's
+    /// `directions` push, on every (re)connect and with the assistant. It also carries the directions' order and names.
+    /// The tree answers for the default manager alone, so another manager's page keeps what
+    /// `GET /api/v1/assistant/leaders` gave it and holds no tree. A hub older than the tree (404) has none; another
+    /// failure (offline) keeps what is held. Only an answer newer than the last one taken applies, and a read that fails
+    /// moves neither number, so it never makes an earlier good answer count as stale.
+    /// `followLeaders` false (read from `refreshAssistant` itself): a direction the conversations do not list yet does
+    /// not read the assistant again.
+    func refreshDirectionTree(_ from: APIClient? = nil, followLeaders: Bool = true) async {
+        guard let api = from ?? api, assistantShows(nil), showsPage(of: api) else { return }
+        directionTreeAsk += 1
+        let ask = directionTreeAsk
+        let read: DirectionTree?
+        do { read = try await api.directionsTree() } catch { return }
+        guard ask > directionTreeLanded, assistantShows(nil), showsPage(of: api) else { return }
+        directionTreeLanded = ask
+        if read != directionTree { directionTree = read }
+        guard let tree = read else { return }
+        let names = tree.leaderNames
         if names != directionNames { directionNames = names }
-        if counts != directionCounts { directionCounts = counts }
-        let ids = directions.map(\.id)
+        let ids = tree.leaders.map(\.id)
         if ids != assistantLeaders, var cfg = assistantConfig {
             cfg.leaders = ids
             assistantConfig = cfg
@@ -1093,7 +1131,7 @@ final class AppModel {
         // A direction the page's conversations do not list yet: the whole settings are read, so its row appears
         // without a relaunch.
         let known = Set((assistantConfig?.conversations ?? []).map(\.sessionID))
-        if ids.contains(where: { !known.contains($0) }) { await refreshAssistant() }
+        if followLeaders, ids.contains(where: { !known.contains($0) }) { await refreshAssistant() }
     }
 
     /// The Couldn't Load Settings retry: the page flips back to Reading at once, and repeated taps share the one request (#4200).
@@ -1518,23 +1556,35 @@ final class AppModel {
     }
 
 
+    /// The terminal of key can be streamed and typed into: what its session's row says (a read-only Agent's has none),
+    /// or a pane addressed directly (`pane:<id>`, a plain terminal), which has no row. Refusing those left Open Terminal
+    /// Here on Taking over… for good: nothing was sent, and the terminal waited for an answer (#6327).
+    func canUseTerminal(_ key: SessionKey) -> Bool { Self.terminalUsable(session(key), key) }
+
+    nonisolated static func terminalUsable(_ session: Session?, _ key: SessionKey) -> Bool {
+        session.map(\.canTerminal) ?? key.isPane
+    }
+
     /// Starts (or continues, with the last epoch and seq the view holds) a session's terminal stream. grid: drive it at
-    /// that size (the phone's); takeover: even if another program on the computer holds it.
+    /// that size (the phone's); takeover: even if another program on the computer holds it. False: nothing went out (no
+    /// terminal there, or no socket): the view asks again later.
+    @discardableResult
     func terminalSubscribe(_ key: SessionKey, epoch: String?, after: Int, grid: TerminalGridSize? = nil, takeover: Bool = false,
-                           handler: @escaping (TerminalEvent) -> Void) {
-        guard session(key)?.canTerminal == true else { return }
+                           handler: @escaping (TerminalEvent) -> Void) -> Bool {
+        guard canUseTerminal(key), let socket = socket(key.group) else { return false }
         terminalHandlers[key] = handler
         var msg: [String: Any] = ["type": "terminal_subscribe", "machine_id": key.machineID, "session_id": key.sessionID]
         if let epoch { msg["epoch"] = epoch; msg["after_seq"] = after }
         if let grid { msg["control"] = ["cols": grid.cols, "rows": grid.rows] }
         if takeover { msg["takeover"] = true }
-        socket(key.group)?.send(msg)
+        socket.send(msg)
+        return true
     }
 
     /// Typed into a terminal the phone drives: the bytes go straight to it (in order, over the WebSocket). grid: the
     /// terminal's new size (the keyboard came up, the font changed).
     func terminalInput(_ key: SessionKey, _ text: String, grid: TerminalGridSize? = nil) {
-        guard session(key)?.canTerminal == true else { return }
+        guard canUseTerminal(key) else { return }
         var msg: [String: Any] = ["type": "terminal_input", "machine_id": key.machineID, "session_id": key.sessionID]
         if !text.isEmpty { msg["text"] = text }
         if let grid { msg["control"] = ["cols": grid.cols, "rows": grid.rows] }
@@ -1545,7 +1595,7 @@ final class AppModel {
     /// gives it to a program that takes the mouse (Claude Code, Codex scroll their conversation) and scrolls its own
     /// scrollback for one that does not — what a herdr client does with the wheel, as in Moshi.
     func terminalScroll(_ key: SessionKey, lines: Int, at: (col: Int, row: Int)?) {
-        guard session(key)?.canTerminal == true, lines != 0 else { return }
+        guard canUseTerminal(key), lines != 0 else { return }
         var msg: [String: Any] = ["type": "terminal_input", "machine_id": key.machineID, "session_id": key.sessionID, "scroll": lines]
         if let at { msg["at"] = [at.col, at.row] }
         socket(key.group)?.send(msg)
@@ -1553,14 +1603,14 @@ final class AppModel {
 
     /// A tap on a terminal the app drives: a left click at that cell of its screen (0-based).
     func terminalClick(_ key: SessionKey, column: Int, row: Int) {
-        guard session(key)?.canTerminal == true else { return }
+        guard canUseTerminal(key) else { return }
         socket(key.group)?.send(["type": "terminal_input", "machine_id": key.machineID, "session_id": key.sessionID, "click": [column, row]])
     }
 
     /// The pointer on a terminal the app drives (docs/integrations/terminal.md section 25): action down / up / drag, button left /
     /// middle / right, at a cell of its screen (0-based), mods herdr's bits (shift 1, ctrl 2, alt 4).
     func terminalMouse(_ key: SessionKey, action: String, button: String, column: Int, row: Int, mods: Int) {
-        guard session(key)?.canTerminal == true else { return }
+        guard canUseTerminal(key) else { return }
         socket(key.group)?.send(["type": "terminal_input", "machine_id": key.machineID, "session_id": key.sessionID,
                                  "mouse": ["action": action, "button": button, "at": [column, row], "mods": mods]])
     }
@@ -1734,7 +1784,7 @@ final class AppModel {
             let asked = Date.now
             guard let ixs = try? await api(group)?.interactions() else { return }
             replaceInteractions(group, ixs, askedAt: asked)
-            WatchSync.shared.push(summary: watchSummary())
+            summariesChanged()
         }
     }
 
@@ -1892,7 +1942,7 @@ final class AppModel {
             olds.append((old, list))
         }
         if lists != sessionsByMachine { sessionsByMachine = lists }
-        WatchSync.shared.push(summary: watchSummary())
+        summariesChanged()
         for (old, new) in olds {
             for session in new where session.assistant == true {
                 chats[session.key]?.updateQueuePhotoMarks(queued: session.queued, own: session.ownQueuedCount)
@@ -2183,14 +2233,15 @@ final class AppModel {
             interactions[ix.uid] = ix
             noteScreenCard(ix, live: true)
             if announces { Haptics.attention() }
-            WatchSync.shared.push(summary: watchSummary())
+            summariesChanged()
         case .interactionResolved(let id, let assistant):
             let uid = group.isEmpty ? id : group + "|" + id
             endedInteractionIDs.insert(uid)
             answering.hubEnded(uid)
+            if answerAttempts.progress(uid) != .sending { answerAttempts.finish(uid) }
             if let assistant, let ix = interactions[uid] { keepDelegated(ix, assistant) }
             interactions[uid] = nil
-            WatchSync.shared.push(summary: watchSummary())
+            summariesChanged()
         case .interactionReanswered(let id, let answers):
             noteReanswer(group.isEmpty ? id : group + "|" + id, answers)
         case .toolCall(let callID, let name, let args):
@@ -2301,6 +2352,21 @@ final class AppModel {
     /// This device's answer to the card is on its way (the card is hidden meanwhile).
     func isAnswering(_ uid: String) -> Bool { answering.contains(uid) }
 
+    /// The card's answer is on its way or failed (a question card stays in place meanwhile, #6279).
+    func answerProgress(_ uid: String) -> AnswerAttempts.Progress? { answerAttempts.progress(uid) }
+
+    /// Why the card's answer failed, while it shows the error and Retry.
+    func answerFailure(_ uid: String) -> String? {
+        if case .failed(let message)? = answerAttempts.progress(uid) { return message }
+        return nil
+    }
+
+    /// Sends a failed question's answer again, with the op id it had.
+    func retryAnswer(_ ix: Interaction) async {
+        guard let r = answerAttempts.retryable(ix.uid) else { return }
+        await resolve(ix, r)
+    }
+
     /// `handoffCard`: the hand-off card's own buttons answer; an approval of one from anywhere else is refused here, as
     /// the hub would refuse it (`SecretHandoff`).
     func resolve(_ ix: Interaction, _ r: Resolution, handoffCard: Bool = false) async {
@@ -2313,14 +2379,25 @@ final class AppModel {
         }
         // No network: the card stays as it is (taking it away and bringing it back a moment later read as "done").
         guard connection.networkUp else { notDone(); return }
-        interactions[ix.uid] = nil
-        endedInteractionIDs.insert(ix.uid)
+        // A question's card stays where it is, greyed and marked "Sending…", until the hub has the answer: its picks and
+        // text stay for a retry (#6279). Every other card goes at once and comes back if its answer fails.
+        let keepsCard = ix.kind == .question
+        guard let op = answerAttempts.begin(ix.uid, r) else { return } // its answer is on the way: a second tap sends nothing
+        if !keepsCard {
+            interactions[ix.uid] = nil
+            endedInteractionIDs.insert(ix.uid)
+        }
         answering.begin(ix.uid)
         defer { answering.finish(ix.uid) }
         // One op id for this answer: a retry through a hub restart (the request died with the old process, a proxy
-        // answered 502) goes with it again, and the hub presses the keys once. The card stays away meanwhile, for up
-        // to a minute (OpRetry.limit), then comes back with the error.
-        let op = UUID()
+        // answered 502) goes with it again, and the hub presses the keys once. The card waits meanwhile, for up to a
+        // minute (OpRetry.limit), then shows the error (a question's) or comes back with it.
+        func over() {
+            answerAttempts.finish(ix.uid)
+            guard keepsCard else { return }
+            interactions[ix.uid] = nil
+            endedInteractionIDs.insert(ix.uid)
+        }
         do {
             let res = try await OpRetry.untilDelivered { try await api.resolve(ix.id, r, opID: op, handoffCard: handoff) }
             if res.already == true, let existing = res.resolution, existing.answeredBy == AssistantAnswer.assistant, ix.kind == .question {
@@ -2332,19 +2409,29 @@ final class AppModel {
                 let text = (lines.first?.answer.isEmpty == false) ? String(localized: "Already answered: \(lines.first!.answer)") : String(localized: "Already answered")
                 toast = Toast(text, style: .success)
             }
+            over()
             Haptics.success()
         } catch let e as APIError where e.code == "prompt_changed" {
             // Nothing pressed: the terminal's dialog changed. The hub has ended a screen card and sends one for what is
             // there now; a Codex card it keeps open goes back.
+            answerAttempts.finish(ix.uid)
             putBack(ix)
             Haptics.attention()
             toast = Toast(String(localized: "The dialog in the terminal changed, so no keys were pressed. Check the new one and answer again."), style: .error)
         } catch let e as APIError where e.status == 410 {
             let reason = Answered.endedText(e.fields["status"])
+            over()
             toast = Toast(reason, style: .error)
         } catch {
-            putBack(ix)
-            show(error)
+            if keepsCard, answering.putsBack(ix.uid), interactions[ix.uid] != nil, !error.isOffline, !error.isQuiet {
+                // The card shows the error and Retry itself.
+                answerAttempts.fail(ix.uid, error.localizedDescription)
+                Haptics.error()
+            } else {
+                answerAttempts.finish(ix.uid)
+                putBack(ix)
+                show(error)
+            }
         }
     }
 
@@ -2588,6 +2675,8 @@ final class AppModel {
         }
         var msg = PendingMessage(text: text, images: images)
         msg.via = via
+        // The composer says "queued" while the agent works: such a message is drawn in the queue strip (#1461).
+        if session(key)?.status.isActive == true { msg.queuedMode = true }
         chat(key).pending.append(msg)
         saveOutbox()
         Haptics.tap()
@@ -2959,10 +3048,12 @@ final class AppModel {
         guard let api = api(key.group), rewinding.insert(key).inserted else { return false }
         defer { rewinding.remove(key) }
         toast = Toast(String(localized: "Rewinding…"))
+        // A session whose node declares rewind (#6294): its own lines, and no Claude input box to have kept the message.
+        let offer = Rewind.offer(session(key))
         do {
             var full: String?
-            if let cut = Rewind.cutItem(items, id: itemID) { full = try await api.fullItem(key, id: cut).text }
-            guard let target = Rewind.target(items, id: itemID, full: full) else {
+            if let cut = Rewind.cutItem(items, id: itemID, anyLine: offer.declared) { full = try await api.fullItem(key, id: cut).text }
+            guard let target = Rewind.target(items, id: itemID, full: full, anyLine: offer.declared) else {
                 toast = Toast(String(localized: "This message has no text, so you can't rewind to it"), style: .error)
                 return false
             }
@@ -2971,6 +3062,8 @@ final class AppModel {
             let result = (try? JSON.decoder.decode(Rewind.Result.self, from: data)) ?? Rewind.Result()
             if result.inputCleared == true {
                 drafts[key] = text
+                toast = Toast(Rewind.done(result, asked: restore), style: .success)
+            } else if offer.declared {
                 toast = Toast(Rewind.done(result, asked: restore), style: .success)
             } else {
                 let done = Rewind.done(result, asked: restore)
@@ -2988,7 +3081,7 @@ final class AppModel {
 
     @discardableResult
     func close(_ key: SessionKey) async -> Bool {
-        guard let session = latest(key), session.canTerminal else {
+        guard let session = latest(key), session.canClose else {
             toast = Toast(String(localized: "This agent can't be stopped and closed from the phone"), style: .error)
             return false
         }
@@ -3009,7 +3102,9 @@ final class AppModel {
             }
             if let list = sessionsByMachine[key.machineRef] { sessionsByMachine[key.machineRef] = ended(list) }
             if let list = pendingSessions[key.machineRef] { pendingSessions[key.machineRef] = ended(list) }
-            toast = Toast(String(localized: "Agent stopped and closed. The chat history was kept."), style: .success)
+            // A session without a terminal (a runtime's, #6294): whether its history stays is its runtime's, so not promised.
+            toast = Toast(session.canTerminal ? String(localized: "Agent stopped and closed. The chat history was kept.")
+                                              : String(localized: "Agent stopped and closed"), style: .success)
             Haptics.success()
             return true
         } catch {
@@ -3330,6 +3425,8 @@ final class AppModel {
         if let g = hub?.group {
             assistantConfig = heldAssistant(g)
         }
+        directionTree = nil // the other hub's to-dos and sessions; `refreshAssistant` below reads this one's
+        directionTreeLanded = directionTreeAsk // and a read already under way answers for the other one
         // The picked group's settings are read again: until that read finishes, the page shows its loading state.
         assistantConfigLoadFailed = false
         if let a = assistantCurrent, a.group != hub?.group { assistantCurrent = assistantMain }
@@ -3358,6 +3455,11 @@ final class AppModel {
     /// (`assistantSwitches`). Another assistant's conversation opened from a notification stays through a re-read.
     func assistantManagerChanged(switched: Bool = true) {
         assistantConfig = heldAssistant(hub?.group ?? "")
+        // The tree is the default manager's: kept through a re-read of it, dropped for any other.
+        if switched || !assistantShows(nil) {
+            directionTree = nil // the other manager's; `refreshAssistant` below reads this one's
+            directionTreeLanded = directionTreeAsk // and a read already under way answers for the other one
+        }
         assistantConfigLoadFailed = false
         readiness.forget()
         relistAssistant()
@@ -3632,9 +3734,10 @@ final class AppModel {
         await refresh()
     }
 
-    /// Renames an agent's herdr tab and / or its Claude session name (nil leaves that one alone).
+    /// Renames an agent's herdr tab and / or its Claude session name (nil leaves that one alone); a session without a
+    /// terminal, its name where its runtime keeps it (`Session.canRename`, #6294).
     func renameSession(_ k: SessionKey, tab: String?, title: String?) async {
-        guard session(k)?.canTerminal == true, let api = api(k.group) else { return }
+        guard session(k)?.canRename == true, let api = api(k.group) else { return }
         let tab = tab?.trimmingCharacters(in: .whitespacesAndNewlines), title = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             try await api.renameSession(k, tabName: tab?.isEmpty == false ? tab : nil, title: title?.isEmpty == false ? title : nil)
@@ -3762,6 +3865,15 @@ final class AppModel {
         Haptics.attention()
     }
 
+    /// What the watch's summary and the Home Screen widgets show may have changed: the watch gets the summary, and
+    /// the widgets' snapshot is written soon, coalesced (`HomeWidgetWriter`, docs/apple/home-widgets.md).
+    func summariesChanged() {
+        WatchSync.shared.push(summary: watchSummary())
+        #if os(iOS)
+        HomeWidgetWriter.shared.schedule()
+        #endif
+    }
+
     func watchSummary() -> WatchSummary {
         // A quiet task's agent and its questions are the main conversation's (#1731).
         let (live, asking) = QuietTasks.leavingOut(sessions: allSessions.filter { $0.status.isLive }, interactions: pendingInteractions,
@@ -3824,6 +3936,7 @@ struct Toast: Identifiable, Equatable {
 /// No taptic engine on Apple Vision Pro: the system's own sounds and the hover effect are the feedback.
 enum Haptics {
     static func tap() {}
+    static func selection() {}
     static func success() {}
     static func error() {}
     static func attention() {}
@@ -3831,6 +3944,8 @@ enum Haptics {
 #else
 enum Haptics {
     static func tap() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+    /// A tick as something dragged reaches a new place (a to-do on the calendar at the next quarter hour or day).
+    static func selection() { UISelectionFeedbackGenerator().selectionChanged() }
     static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
     static func error() { UINotificationFeedbackGenerator().notificationOccurred(.error) }
     static func attention() { UINotificationFeedbackGenerator().notificationOccurred(.warning) }

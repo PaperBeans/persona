@@ -83,14 +83,27 @@ describe("QueuePanel row actions", () => {
     expect(within(1, "[data-queue-delete]").hasAttribute("disabled")).toBe(false);
   });
 
-  it("gives relayed rows no handle and no actions (#4342)", () => {
+  it("collapses the relayed rows into one line, which opens to their read-only rows (#4342, #6394)", () => {
     const persona = { ...session, agent: undefined, assistant: true, queued: ["我的", "来自「日报」：汇总"], queued_relayed: 1 } as unknown as Session;
     render(<QueuePanel session={persona} draftKey="qp-relayed" canEdit persona="Nova" />);
-    expect(rows()[1].querySelector("button")).toBeNull();
-    expect(rows()[1].querySelector("[data-queue-note]")!.textContent).toBe("其他对话");
+    // collapsed: the owner's row stays, the relayed one is only the summary line
+    expect(rows()).toHaveLength(1);
+    const summary = host.querySelector<HTMLElement>("[data-queue-relayed-summary]")!;
+    expect(summary.textContent).toContain("还有 1 条别的对话在排队");
+    expect(summary.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector("[data-queue-relayed-list]")).toBeNull();
     // the user's own row has nothing to move past
     expect(rows()[0].querySelector("[data-queue-handle]")).toBeNull();
     expect(rows()[0].querySelector("[data-send-now]")).not.toBeNull();
+    // open: the relayed row appears, still with no handle and no actions, and the note says where it came from
+    click(summary);
+    expect(summary.getAttribute("aria-expanded")).toBe("true");
+    expect(rows()).toHaveLength(2);
+    expect(rows()[1].querySelector("button")).toBeNull();
+    expect(rows()[1].querySelector("[data-queue-note]")!.textContent).toBe("其他对话");
+    click(summary);
+    expect(host.querySelector("[data-queue-relayed-list]")).toBeNull();
+    expect(rows()).toHaveLength(1);
   });
 });
 

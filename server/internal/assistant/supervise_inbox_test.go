@@ -214,7 +214,7 @@ func TestInboxSignalFromTheTwinsPass(t *testing.T) {
 			}
 			todo := supervisedTodo(t, s, "修登录崩溃")
 			h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
-			model, _ := captureModel(t, `{"task_id":"`+todo.ID+`"}`)
+			model, _ := captureModel(t, `{"task_id":"`+todo.ID+`","evidence":"修登录崩溃"}`)
 			in.setModel(model)
 			it := actionItem("lark:f1:12", time.Now())
 			it.Source, it.Title, it.Sender, it.Preview = "lark", "客户端发版群", "陈晓", "登录那个崩溃今天能修好吗？"

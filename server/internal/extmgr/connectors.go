@@ -47,7 +47,8 @@ func (h *Manager) builtinTools() []string {
 	return names
 }
 
-// connectorChanged is a connector's realtime event: collect the inbox or archive soon.
+// connectorChanged is a connector's realtime event: collect the inbox or archive soon, and run the subscriptions that
+// read it (#6247), in the background: the event's caller never waits on their store.
 func (h *Manager) connectorChanged(id string, scope connector.Scope) {
 	switch scope {
 	case connector.ScopeInbox:
@@ -55,7 +56,17 @@ func (h *Manager) connectorChanged(id string, scope connector.Scope) {
 	case connector.ScopeChats, connector.ScopeItems:
 		h.kbKick(id, scope)
 	}
+	if subs := h.subsLive.Load(); subs != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), subscriptionKickWait)
+			defer cancel()
+			subs.ConnectorChanged(ctx, id)
+		}()
+	}
 }
+
+// subscriptionKickWait bounds how long a changed event's look at the subscriptions may take.
+const subscriptionKickWait = 10 * time.Second
 
 // callConnector runs a connector's tool for an agent or assistant conversation (by: none when the user acts in a
 // connector's thread); a write the gate leaves to the user is asked on the phone like mail_send, in that conversation.
@@ -603,7 +614,7 @@ func (h *Manager) registerConnectors() {
 	if gh.Configured() {
 		name := gh.Auth.FromMachine
 		if m := h.localMachine(name); m != nil {
-			name = m.cfg.Name
+			name = m.name()
 		}
 		ghc = github.New(gh, name, h.ghToken(gh.Auth.FromMachine))
 	} else {
@@ -650,7 +661,7 @@ func (h *Manager) ghToken(machine string) github.TokenSource {
 		case errors.As(err, &re) && re.Code == proto.CodeNotSignedIn:
 			return "", github.ErrNotSignedIn
 		case err != nil:
-			return "", fmt.Errorf("%s: %s", m.cfg.Name, github.Scrub(err.Error()))
+			return "", fmt.Errorf("%s: %s", m.name(), github.Scrub(err.Error()))
 		case out.Token == "":
 			return "", github.ErrNotSignedIn
 		}

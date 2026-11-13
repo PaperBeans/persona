@@ -417,6 +417,9 @@ targets:
       - path: Shared/Design/ExtensionSurfaceTokens.swift
       # The persona's face (the app's PersonaAvatar draws it too), on the activity's leading side.
       - path: Shared/Design/PersonaFace.swift
+      # Persona's Home Screen widgets (docs/apple/home-widgets.md): the snapshot the app writes, the views, their tokens.
+      - path: Shared/HomeWidgets
+      - path: Shared/Design/HomeWidgetTokens.swift
       # The app's String Catalog and interface language (docs/apple/ios.md「Interface language」).
       - path: Shared/Localization
     entitlements:
@@ -485,8 +488,10 @@ targets:
       - path: PersonaShare
         excludes: ["*.plist", "*.entitlements"]
       # The app's hub client, models and design system, as the watch has them (HubStore, APIClient, Theme), with the
-      # String Catalog and interface language (docs/apple/ios.md「Interface language」).
+      # String Catalog and interface language (docs/apple/ios.md「Interface language」). Not the Home Screen widgets: they
+      # draw from the App Group with the Live Activity's files, which this extension does not build.
       - path: Shared
+        excludes: ["HomeWidgets/**", "Design/HomeWidgetTokens.swift"]
     entitlements:
       path: PersonaShare/PersonaShare.entitlements
       properties:
@@ -599,6 +604,8 @@ targets:
       # The All-Day Recording complication's view, for its debug preview (-openWatchItem allday-complication). Its
       # snapshot (Shared/Recording/AllDaySnapshot.swift) comes with Shared.
       - path: PersonaWatchWidgets/AllDayComplicationView.swift
+      # The Record complication's view, for its debug preview (-openWatchItem record-complication).
+      - path: PersonaWatchWidgets/MeetingRecordingComplicationView.swift
     dependencies:
       - target: PersonaWatchWidgets
     entitlements:

@@ -222,10 +222,14 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 		return nil, fmt.Errorf("unknown kind %q", kind)
 	}
 	var recording map[string][]byte
+	var meeting *Meeting
+	var hub HubTranscript
 	var raw []byte
 	var err error
 	if kind == KindRecording {
-		recording, err = e.Store.recordingSnapshot(id)
+		// Its files with its meeting.json and the hub's transcript, read together: detail.segments is the transcript of
+		// record, detail.meta has the transcription.
+		recording, meeting, hub, err = e.Store.recordSnapshot(id)
 		raw = recording["meta.json"]
 		if err == nil && raw == nil {
 			err = ErrNotFound
@@ -238,10 +242,7 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 	}
 	d.Meta = raw
 	if kind == KindRecording {
-		e.Store.recFilesMu.RLock()
-		m, _ := e.Store.readMeeting(id)
-		e.Store.recFilesMu.RUnlock()
-		d.Meta = metaWithMeeting(raw, m)
+		d.Meta = metaWithMeeting(raw, meeting)
 	}
 	if kind == KindProject {
 		d.Log = e.Store.Log(id, 30)
@@ -255,9 +256,7 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 		}
 	}
 	if kind == KindRecording {
-		var segs []RecordingSegment
-		_ = json.Unmarshal(recording["segments.json"], &segs)
-		d.Segments = nonNilSegments(segs)
+		d.Segments = nonNilSegments(recordOf(recording, meeting, hub))
 		if raw, err := os.ReadFile(e.Store.path(kind, id, "minutes.json")); err == nil && json.Valid(raw) {
 			var r Recording
 			if json.Unmarshal(recording["meta.json"], &r) == nil {

@@ -14,6 +14,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -89,8 +90,29 @@ internal data class NewAgentState(
     /** Start it in a worktree of its own, on [worktreeBranch] (empty: the node's pick). */
     val inWorktree: Boolean = false,
     val worktreeBranch: String = "",
+    /**
+     * Photos and files for the first message (#2321, iOS NewAgentAttachments), each uploaded to [attachedOn] when picked
+     * and sent the way the chat composer sends them ([NewAgentAttachments.firstMessage]).
+     */
+    val attachments: List<persona.feature.chat.ComposerAttachment> = emptyList(),
+    /** The computer [attachments] are uploaded to; "" before the first. */
+    val attachedOn: String = "",
+    /** Why files went (they are on the computer picked before), or why picks were not taken; cleared by the next pick. */
+    val attachNote: AgentText? = null,
 ) {
     val locked get() = !initialized || starting || pending != null || created != null
+    /**
+     * A Claude start takes attachments: its first message goes as an ordinary message. Codex and other CLIs take theirs
+     * with the start as text, and take none (iOS `FirstMessage.hold`, web `launcher_no_attachments`).
+     */
+    val takesAttachments: Boolean get() = agentType == "claude"
+    /** What the attachments hold Start back for, said under it (iOS `FirstMessage.hold`); null: nothing. */
+    val attachmentsHold: AgentText? get() = when {
+        attachments.isEmpty() -> null
+        !takesAttachments -> AgentText(R.string.agents_attach_launcher_hold, agentType.agentLabel())
+        attachments.any { it.path == null } -> AgentText(R.string.agents_attach_uploading_hold)
+        else -> null
+    }
     /** The folder is in a Git repository and this is not a tab in an existing space: the worktree switch shows (#4532). */
     val worktreeOffered: Boolean get() = space == null && repo?.path?.isNotEmpty() == true
     val follow: ModelPurposeDetail? get() = (modelConfig as? NewAgentModelConfig.Follow)?.detail
@@ -158,12 +180,15 @@ internal class NewAgentViewModel(
     internal val usage: (suspend (machineId: String) -> List<persona.core.contracts.api.UsageAccount>)? = null,
     /** The hub took an Agent this form started afresh (not a resume): the GitHub star card counts it (#5761). */
     private val launched: () -> Unit = {},
+    /** How attachments reach the computer picked (#2321); null: the form offers none (no hub services, tests). */
+    private val uploads: NewAgentUploads? = null,
 ) : ViewModel() {
     private val mutable = MutableStateFlow(NewAgentState())
     val state = mutable.asStateFlow()
     private var machineJob: Job? = null
     private var browseJob: Job? = null
     private var modelsJob: Job? = null
+    private val uploadJobs = mutableMapOf<String, Job>()
     init {
         // Whether the folder is in a Git repository, a moment after it stops changing (iOS `loadRepo`): New Agent's
         // worktree switch shows only then, and never for a tab in an existing space.
@@ -226,6 +251,7 @@ internal class NewAgentViewModel(
     private fun load(id: String, setup: RecentSetup? = null) {
         if (state.value.locked || machines.value.none { it.id == id && it.online }) return
         state.value.space?.let { if (it.machineId != id) return }
+        moveAttachments(id)
         machineJob?.cancel()
         browseJob?.cancel()
         modelsJob?.cancel()
@@ -407,7 +433,7 @@ internal class NewAgentViewModel(
         if (previous == null && (current.selection.cwd.isBlank() || (current.selection.launcher.isBlank() && !current.following) ||
                 machines.value.none { it.id == current.machineId && it.online } ||
                 (current.space != null && current.space.machineId != current.machineId) ||
-                (current.promptRequired && current.prompt.isBlank()))) return
+                (current.promptRequired && current.prompt.isBlank()) || current.attachmentsHold != null)) return
         mutable.update { it.copy(starting = true, error = null) }
         viewModelScope.launch {
             try {
@@ -436,16 +462,21 @@ internal class NewAgentViewModel(
      * with the start, and so does any start without a sender.
      */
     private fun newOperation(current: NewAgentState, agentType: String, worktree: String? = null): AgentStartOperation {
-        val first = current.prompt.trim().takeIf { it.isNotEmpty() }
+        val typed = current.prompt.trim().takeIf { it.isNotEmpty() }
+        // The photos and the uploaded files go with the first message as the composer writes them (#2321); the tab is
+        // named from what was typed, as on iOS.
+        val first = if (sender != null && agentType == "claude" && current.attachments.isNotEmpty())
+            NewAgentAttachments.firstMessage(typed.orEmpty(), current.attachments, uploads?.photosOnly?.invoke().orEmpty()).takeIf { it.isNotEmpty() }
+        else typed
         val async = sender != null && agentType == "claude"
         val efforts = current.modelEfforts
         val request = AgentStartRequest(
             current.machineId, worktree ?: current.selection.cwd, current.selection.launcher,
-            first.takeUnless { async }, current.selection.mode.takeIf { it.isNotEmpty() && agentType == "claude" },
+            typed.takeUnless { async }, current.selection.mode.takeIf { it.isNotEmpty() && agentType == "claude" },
             // Codex starts take no effort; Claude's only one the model that will run takes.
             current.selection.effort.takeIf { it.isNotEmpty() && agentType == "claude" && (efforts == null || it in efforts) },
             current.space?.workspaceId, agentType.takeIf { it != "claude" }, async = true.takeIf { async },
-            nameHint = first.takeIf { async }, model = current.sentModel,
+            nameHint = typed.takeIf { async }, model = current.sentModel,
             ultracode = true.takeIf { current.ultracode && agentType == "claude" },
         )
         return AgentStartOperation(UUID.randomUUID().toString(), request,
@@ -503,6 +534,110 @@ internal class NewAgentViewModel(
             AgentStartResult.Unknown -> mutable.update { it.copy(error = AgentText(R.string.agents_new_error_unknown)) }
         }
     }
+    /** Whether this form can take attachments at all: it has a way to the computer and sends Claude's first message itself. */
+    val attachable: Boolean get() = uploads != null && sender != null
+    /** Whether [machineId]'s hub can take uploads now (none offline or in the demo): the add menu shows only then. */
+    fun canUpload(machineId: String): Boolean = machineId.isNotEmpty() && uploads?.service?.invoke(machineId) != null
+    /** How many more photos fit (iOS `MessagePhotos.limit`, 4). */
+    fun photoRoom(): Int = (NewAgentAttachments.MAX_PHOTOS - state.value.attachments.count { it.media }).coerceAtLeast(0)
+    private val noticeChannel = Channel<AgentText>(Channel.BUFFERED)
+    /** What the form's toast says (iOS `model.toast`): a pick not taken, an upload that failed. */
+    val notices: Flow<AgentText> = noticeChannel.receiveAsFlow()
+    fun notice(text: AgentText) { noticeChannel.trySend(text) }
+    /** Picked photos and files join the form and go to the computer picked, each on its own (iOS `NewAgentAttachments.upload`). */
+    fun attach(picked: List<persona.feature.chat.ComposerAttachment>) {
+        val uploads = uploads
+        val current = state.value
+        if (uploads == null || picked.isEmpty() || current.locked || !current.takesAttachments || current.machineId.isEmpty()) {
+            picked.forEach { uploads?.discard?.invoke(it) }
+            return
+        }
+        mutable.update { it.copy(attachments = it.attachments + picked, attachedOn = it.machineId, attachNote = null) }
+        picked.forEach { upload(it.id) }
+    }
+    /** ✕ on a photo or a file: an upload still going stops. */
+    fun removeAttachment(id: String) {
+        if (state.value.locked) return
+        drop(id)
+    }
+    /**
+     * The form closed without starting (iOS: the sheet's attachments go with it, `cancelUploads`): uploads still going stop
+     * and the photos taken for it leave the cache. Nothing once a start is on its way: its first message is written.
+     */
+    fun closeAttachments() {
+        if (state.value.starting || state.value.pending != null) return
+        clearAttachments()
+    }
+    private fun clearAttachments() {
+        uploadJobs.values.forEach { it.cancel() }
+        uploadJobs.clear()
+        val gone = state.value.attachments
+        mutable.update { it.copy(attachments = emptyList(), attachedOn = "", attachNote = null) }
+        gone.forEach { uploads?.discard?.invoke(it) }
+    }
+    override fun onCleared() {
+        clearAttachments()
+        super.onCleared()
+    }
+    private fun drop(id: String) {
+        uploadJobs.remove(id)?.cancel()
+        val gone = state.value.attachments.firstOrNull { it.id == id } ?: return
+        mutable.update { it.copy(attachments = it.attachments.filterNot { a -> a.id == id }) }
+        uploads?.discard?.invoke(gone)
+    }
+    private fun upload(id: String) {
+        val uploads = uploads ?: return
+        val current = state.value
+        val attachment = current.attachments.firstOrNull { it.id == id } ?: return
+        if (attachment.path != null) return
+        val machine = current.attachedOn
+        uploadJobs.remove(id)?.cancel()
+        // The services of the hub group this computer belongs to (bindingsFor): the group's own machine id goes up.
+        val service = uploads.service(machine)
+        if (service == null) {
+            // No hub to send it with: it goes, as iOS's upload without an API does.
+            drop(id)
+            return
+        }
+        mutable.update { s -> s.copy(attachments = s.attachments.map { if (it.id == id) it.copy(error = null, uploadState = DraftUploadState.Uploading) else it }) }
+        uploadJobs[id] = viewModelScope.launch {
+            try {
+                val path = uploads.upload(service, persona.core.contracts.SessionKey(machine, ""), attachment)
+                // Another computer picked meanwhile: this one's path is no use there.
+                mutable.update { s ->
+                    if (s.attachedOn != machine) s
+                    else s.copy(attachments = s.attachments.map { if (it.id == id) it.copy(path = path, uploadState = DraftUploadState.Uploaded) else it })
+                }
+                uploadJobs.remove(id)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                uploadJobs.remove(id)
+                if (state.value.attachedOn != machine) return@launch
+                // As iOS (`FileUploads.run`): a toast says why, and the attachment goes.
+                notice(uploadFailure(attachment.name, e))
+                drop(id)
+            }
+        }
+    }
+    /**
+     * Another computer was picked (iOS `computerChanged`): files are on the one picked before, so they come out with a
+     * note saying so, and uploads still going stop. Photos stay, as on iOS; here they are paths on a computer too, so
+     * they go up again to the new one.
+     */
+    private fun moveAttachments(to: String) {
+        val current = state.value
+        val from = current.attachedOn
+        if (from.isEmpty() || from == to) return
+        uploadJobs.values.forEach { it.cancel() }
+        uploadJobs.clear()
+        val files = current.attachments.filterNot { it.image }
+        val photos = current.attachments.filter { it.image }.map { it.copy(path = null, error = null, uploadState = DraftUploadState.Pending) }
+        val name = machines.value.firstOrNull { it.id == from }?.displayName ?: from
+        mutable.update { it.copy(attachments = photos, attachedOn = if (photos.isEmpty()) "" else to,
+            attachNote = if (files.isNotEmpty()) AgentText(R.string.agents_attach_moved, name) else it.attachNote) }
+        files.forEach { uploads?.discard?.invoke(it) }
+        photos.forEach { upload(it.id) }
+    }
     fun opened() {
         viewModelScope.launch { acknowledge() }
     }
@@ -511,6 +646,7 @@ internal class NewAgentViewModel(
         try {
             store.pending(service.scope, null)
             mutable.update { it.copy(pending = null, created = null, prompt = "") }
+            clearAttachments()
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { mutable.update { it.copy(error = AgentText(R.string.agents_new_error_cleanup)) } }
     }

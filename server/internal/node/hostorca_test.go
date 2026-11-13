@@ -48,6 +48,10 @@ func TestMain(m *testing.M) {
 		preflightChild(os.Args[1:], os.Stdout)
 		os.Exit(0)
 	}
+	// A plain run of the whole package: its tests in concurrent processes of this binary (partition_test.go, #5734).
+	if code, ran := runPartitioned(); ran {
+		os.Exit(code)
+	}
 	// Nor `node doctor` as the preflight's child: the test binary again, in that mode, given long enough to come up
 	// under the whole server suite's load (#1110); only a child that never starts waits that long.
 	preflightChildCmd = func(string) ([]string, []string) {

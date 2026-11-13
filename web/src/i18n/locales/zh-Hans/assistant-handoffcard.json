@@ -11,5 +11,7 @@
   "later_line": "在收件箱里等你：{title}",
   "wrap_up": "收尾：{title}",
   "wrap_up_ask": "可以收尾了：把最终的总结和回复写回这条收件箱事项。",
-  "wrap_up_failed": "收尾请求没发出去：{error}"
+  "wrap_up_failed": "收尾请求没发出去：{error}",
+  "wrap_up_to_send": "待发送",
+  "wrap_up_to_confirm": "待确认"
 }

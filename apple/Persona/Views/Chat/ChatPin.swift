@@ -634,16 +634,18 @@ private struct ChatPinReport: ViewModifier {
 /// fold away first, its space held, and then leave: for a fifth of a second the rows under it sat below a fading copy
 /// of the output and a blank (#3005). Where the chat would follow what comes in next, the tapped row is kept where it
 /// is instead; at the newest end it rises to the top bar first, and closed there the chat goes on following
-/// (`ChatPin.toggled`, #3757). `closing`: it closes. Elsewhere: the animation as before.
+/// (`ChatPin.toggled`, #3757). `closing`: it closes. `rises`: false keeps the row's top where it is at the newest end too
+/// (your own long message, #5676: its top never moves; what opened runs on below the screen, with ↓). Elsewhere: the
+/// animation as before.
 @MainActor func toggleInPlace(_ pin: ChatPin?, _ key: String, animation: Animation, unfold: Binding<Unfolding>? = nil,
-                              closing: Bool = false, _ change: @escaping () -> Void) {
+                              closing: Bool = false, rises: Bool = true, _ change: @escaping () -> Void) {
     #if DEBUG
     UnfoldTrace.shared.begin("\(key.split(separator: "-").first ?? "row") \(closing ? "fold" : "toggle")",
                              height: { [weak pin] in pin?.contentHeight }) { [weak pin] in pin?.screenY(key) }
     #endif
     guard let pin else { withAnimation(animation, change); return }
     let how = pin.toggled(closing)
-    pin.hold(key, rise: how.rise ? pin.room(above: key) : 0, keep: how.keep)
+    pin.hold(key, rise: how.rise && rises ? pin.room(above: key) : 0, keep: how.keep)
     let reveals = !closing && unfold != nil && !Theme.Motion.reduced
     if reveals { unfold?.wrappedValue.revealing = true }
     var t = Transaction()

@@ -271,6 +271,14 @@
     <string name="settings_network_unreadable">ネットワークの状態を読み込めません</string>
     <string name="settings_update_none">利用できるアップデートはまだありません。</string>
     <string name="settings_update_check_failed">アップデートを確認できませんでした。あとでもう一度お試しください。</string>
+    <string name="settings_update_up_to_date">最新です</string>
+    <string name="settings_update_no_apk">hub に APK がありません</string>
+    <string name="settings_update_package_mismatch">別のアプリ</string>
+    <string name="settings_update_package_mismatch_detail">Release APK は別の Android アプリ用です。このインストールを更新できません。</string>
+    <string name="settings_update_signature_mismatch">署名が一致しません</string>
+    <string name="settings_update_signature_mismatch_detail">Release APK は別の鍵で署名されています。このアプリをアンインストールしてから、GitHub の Release APK をインストールしてください。アンインストールするとローカルのアプリデータが削除されます。</string>
+    <string name="settings_update_last_checked">最終確認: %1$s</string>
+    <string name="settings_update_source">hub: %1$s</string>
     <string name="settings_off">オフ</string>
     <string name="settings_retry_cleanup">クリーンアップを再試行</string>
     <string name="settings_try_demo">ハブがない場合はデモを試す</string>

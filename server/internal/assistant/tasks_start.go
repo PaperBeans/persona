@@ -59,6 +59,12 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 		if err := s.resolveTaskWorkspace(ctx, &p.Tasks[i]); err != nil {
 			return nil, planInvalid{err}
 		}
+		// A card left waiting while another plan carried on the same to-do would open a second one for the same work.
+		if t := p.Tasks[i]; t.Continues != "" && t.ReuseTodo == "" {
+			if succ, ok := s.openSuccessor(t.Continues); ok {
+				return nil, planInvalid{fmt.Errorf("task %d: %w", i+1, errContinued(t.Continues, succ))}
+			}
+		}
 	}
 	p.State = planStarted
 	for i := range p.Tasks {
@@ -155,37 +161,64 @@ func notReusable(id, why string) error {
 }
 
 // reusableTodo says whether a task of a plan from conversation may run on todo id (task_plan's todo_id): the todo is
-// one that conversation opened, is not done, has no agent on it (one linked and not let go or dismissed) and is not
-// taken by a plan that started and has not linked its agent yet. taking: that last one is what the caller is about
-// to claim itself, so it is not looked at (takeTodoForTask holds it).
-func (s *Service) reusableTodo(conversation, id string, taking bool) error {
+// one that conversation opened or supervises (a handover after its agent stopped carries on in the same to-do, #6427),
+// is not done, has no live agent on it and is not taken by a plan that started and has not linked its agent yet. An
+// agent linked and never let go whose session stopped (its terminal kept, tasks_close.go), was archived or whose
+// computer the hub no longer knows is no agent working on it: those links are answered as stopped, for the taker to
+// let go (releaseStoppedAgents). A computer that cannot be reached is not an answer: its agent counts as working.
+// taking: the plan hold is what the caller is about to claim itself, so it is not looked at (takeTodoForTask holds it).
+func (s *Service) reusableTodo(ctx context.Context, conversation, id string, taking bool) (stopped []TodoAgent, err error) {
 	t, ok := s.todoNow(id)
 	switch {
 	case !ok:
-		return notReusable(id, "there is no such todo")
-	case conversation == "" || t.Origin != conversation:
-		return notReusable(id, "it was not opened from this conversation")
+		return nil, notReusable(id, "there is no such todo")
+	case conversation == "" || t.Origin != conversation && (t.Supervision == nil || t.Supervision.Supervisor != conversation):
+		return nil, notReusable(id, "it was not opened from this conversation, nor is it supervised by it")
 	case t.DoneAt != nil:
-		return notReusable(id, "it is already done")
+		return nil, notReusable(id, "it is already done")
 	}
 	for _, a := range t.Agents {
-		if a.ReleasedAt == nil && a.DismissedAt == nil {
-			return notReusable(id, "an agent is already working on it")
+		if a.ReleasedAt != nil || a.DismissedAt != nil {
+			continue
 		}
+		if !s.todoAgentStopped(ctx, a) {
+			return nil, notReusable(id, "an agent is already working on it")
+		}
+		stopped = append(stopped, a)
 	}
 	if !taking {
 		s.tasks.mu.Lock()
 		busy := s.tasks.reusing[id]
 		s.tasks.mu.Unlock()
 		if busy {
-			return notReusable(id, "another plan is starting an agent on it")
+			return nil, notReusable(id, "another plan is starting an agent on it")
 		}
 	}
-	return nil
+	return stopped, nil
+}
+
+// todoAgentStopped: nothing runs agent a now, so a new agent may take over its to-do: its session is listed stopped
+// (switchStopped) or archived, or its computer is gone from the hub. Not listed at all, or the computer not reached,
+// is not known to be stopped.
+func (s *Service) todoAgentStopped(ctx context.Context, a TodoAgent) bool {
+	list, err := s.sessions(ctx, a.MachineID)
+	if errors.Is(err, ErrNoDevice) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	for _, c := range list {
+		if c.SessionID == a.SessionID {
+			return c.Archived || switchStopped(c)
+		}
+	}
+	return false
 }
 
 // takeTodoForTask is the todo a started plan's task runs on (PlanTask.ReuseTodo), checked again now (it may have been
-// closed or taken since the plan was made) and held until the task's agent is linked (releaseTakenTodo).
+// closed or taken since the plan was made) and held until the task's agent is linked (releaseTakenTodo). The stopped
+// agents still linked to it are let go first: the new agent is the one working on it.
 func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation, id string) (Todo, error) {
 	s.tasks.mu.Lock()
 	if s.tasks.reusing[id] {
@@ -194,33 +227,91 @@ func (s *Service) takeTodoForTask(ctx context.Context, planID, conversation, id 
 	}
 	s.tasks.reusing[id] = true
 	s.tasks.mu.Unlock()
-	if err := s.reusableTodo(conversation, id, true); err != nil {
+	stopped, err := s.reusableTodo(ctx, conversation, id, true)
+	if err != nil {
 		s.releaseTakenTodo(id)
 		return Todo{}, err
 	}
 	// TodoID is the execution binding; ReuseTodo preserves each historical plan's intended target.
 	// Retire old bindings while this takeover holds the to-do, before the new agent can ask for approval.
-	// Creation order is not start order, and a later retry can change an old plan's UpdatedAt.
-	plans, err := s.conversationPlans(ctx, conversation)
-	if err != nil {
-		s.releaseTakenTodo(id)
-		return Todo{}, err
+	// Creation order is not start order, and a later retry can change an old plan's UpdatedAt. A supervisor taking
+	// over a to-do another conversation opened retires that conversation's bindings too.
+	convs := []string{conversation}
+	if t, ok := s.todoNow(id); ok && t.Origin != "" && t.Origin != conversation {
+		convs = append(convs, t.Origin)
 	}
-	for _, p := range plans {
-		if p.ID == planID {
-			continue
+	for _, conv := range convs {
+		plans, err := s.conversationPlans(ctx, conv)
+		if err != nil {
+			s.releaseTakenTodo(id)
+			return Todo{}, err
 		}
-		for i, task := range p.Tasks {
-			if task.TodoID == id {
-				if err := s.patchPlanTask(ctx, p.ID, i, func(t *PlanTask) { t.TodoID = "" }); err != nil {
-					s.releaseTakenTodo(id)
-					return Todo{}, err
+		for _, p := range plans {
+			if p.ID == planID {
+				continue
+			}
+			for i, task := range p.Tasks {
+				if task.TodoID == id {
+					if err := s.patchPlanTask(ctx, p.ID, i, func(t *PlanTask) { t.TodoID = "" }); err != nil {
+						s.releaseTakenTodo(id)
+						return Todo{}, err
+					}
 				}
 			}
 		}
 	}
+	if err := s.releaseStoppedAgents(ctx, id, stopped); err != nil {
+		s.releaseTakenTodo(id)
+		return Todo{}, err
+	}
 	t, _ := s.todoNow(id)
 	return formatTodo(t), nil
+}
+
+// todoAgentReleaser is the store's letting go of one agent link (released_at only); a store without it keeps that in
+// memory only.
+type todoAgentReleaser interface {
+	ReleaseTodoAgent(ctx context.Context, todoID, machineID, sessionID string, at time.Time) error
+}
+
+var _ todoAgentReleaser = (*db.DB)(nil)
+
+// releaseStoppedAgents lets go of the stopped agents still linked to todo id (reusableTodo), so the agent taking it
+// over is the one the to-do and its follow-up see. They stay in its history.
+func (s *Service) releaseStoppedAgents(ctx context.Context, id string, stopped []TodoAgent) error {
+	if len(stopped) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	s.todos.writing.Lock()
+	if st, ok := s.todoDB().(todoAgentReleaser); ok {
+		for _, a := range stopped {
+			if err := st.ReleaseTodoAgent(ctx, id, a.MachineID, a.SessionID, now); err != nil {
+				s.todos.writing.Unlock()
+				return err
+			}
+		}
+	}
+	s.todos.mu.Lock()
+	if t, ok := s.todos.todos[id]; ok {
+		for _, a := range stopped {
+			for i := range t.Agents {
+				if t.Agents[i].MachineID == a.MachineID && t.Agents[i].SessionID == a.SessionID && t.Agents[i].ReleasedAt == nil {
+					t.Agents[i].ReleasedAt = &now
+				}
+			}
+			if key := [2]string{a.MachineID, a.SessionID}; s.todos.activeBySession[key] == id {
+				delete(s.todos.activeBySession, key)
+			}
+		}
+		t.UpdatedAt = now
+	}
+	s.todos.mu.Unlock()
+	s.todos.writing.Unlock()
+	s.logf("task %s: let go of %d stopped agent(s) for the agent taking it over", id, len(stopped))
+	s.linksChanged(ctx)
+	s.todosChanged(ctx)
+	return nil
 }
 
 // releaseTakenTodo lets go of a todo takeTodoForTask held; id "" is nothing.
@@ -269,6 +360,14 @@ func (s *Service) startPlanTaskAsync(planID, conversation string, i int, t PlanT
 func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTask, retry bool) {
 	t.planID, t.planIndex = planID, i
 	defer s.releaseTaskWorkspace(t.TodoID)
+	// The admission claim (if the gate took one) is released when this start body ends either way: on success the
+	// agent is linked into the todo by then so the ledger's direction count carries it, and on failure nothing runs.
+	defer func() {
+		if t.admissionRelease != nil {
+			t.admissionRelease()
+			t.admissionRelease = nil
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), taskStartTimeout)
 	defer cancel()
 	placed, placedWhy, placedPermission := t.Machine, t.Why, t.Permission
@@ -281,8 +380,12 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 	if err != nil && ctx.Err() == nil && !startStalled(err) {
 		// The machine's link dropped (a node restarting, a tunnel blinking): try once more after a moment. Any other
 		// launcher failure may move a flexible task, after verifying its directory on the destination.
-		shouldRetry := transientStartErr(err)
-		if !shouldRetry && t.MachinePolicy == machineFlexible {
+		// An unknown result (the wait ran out or the link dropped while the answer was out) already went through
+		// adoption inside startTaskAgent: neither a blind retry nor a reroute may run, since the node can still be
+		// creating that first session and either one would open a second agent (#6540).
+		unknown := startResultUnknown(err)
+		shouldRetry := transientStartErr(err) && !unknown
+		if !shouldRetry && t.MachinePolicy == machineFlexible && !unknown {
 			shouldRetry = s.healthyPlace(ctx, &t)
 		}
 		if shouldRetry {
@@ -298,11 +401,18 @@ func (s *Service) runPlanTaskStart(planID, conversation string, i int, t PlanTas
 		s.updatePlanTask(ctx, planID, i, t)
 	}
 	if err == nil {
-		err = s.linkPlanAgent(ctx, t, mid, sid, false)
+		// The start's own context can be spent already: an unanswered start whose session was just reconciled
+		// (#6540) reaches here after taskStartTimeout, and a database write on that context fails at once, which
+		// would fail the task although its agent is running. The link gets its own time, like the bookkeeping below.
+		linkCtx, linkCancel := context.WithTimeout(context.WithoutCancel(ctx), taskFailTimeout)
+		err = s.linkPlanAgent(linkCtx, t, mid, sid, false)
+		linkCancel()
 		if errors.Is(err, db.ErrTodoCompleted) {
 			// The user tapped "Done" while the agent was starting (a busy machine takes minutes, #1396). The task stays
 			// done and its agent stays in it: nothing reads failed, and the close loop still finds the agent to retire.
-			err = s.linkPlanAgent(ctx, t, mid, sid, true)
+			retryCtx, retryCancel := context.WithTimeout(context.WithoutCancel(ctx), taskFailTimeout)
+			err = s.linkPlanAgent(retryCtx, t, mid, sid, true)
+			retryCancel()
 			if err != nil {
 				s.logf("task %s: link to the finished task: %v", t.TodoID, err)
 			}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -118,6 +119,9 @@ func (n *Node) waitCodexBox(ctx context.Context, pane string) error {
 	}
 	if agent, err := n.paneAgent(ctx, pane); err == nil && agent != nil && agent.Agent == "codex" {
 		return errCodexBoxLate
+	}
+	if adoptedPane(ctx) != nil { // Run Agent Here (#5504): the user's own pane, not a new tab, and it stays as it is
+		return &rpc.Error{Code: "codex_no_box_here", Message: i18n.T(i18n.Default, "node-codex-start.no_box_here", map[string]any{"seconds": int(codexStartWait.Seconds())})}
 	}
 	return &rpc.Error{Code: "codex_no_box", Message: fmt.Sprintf("Codex 已经在电脑上的新标签里打开了，但 %d 秒内没看到它的输入框", int(codexStartWait.Seconds()))}
 }

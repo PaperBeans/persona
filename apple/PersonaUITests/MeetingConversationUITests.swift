@@ -20,6 +20,9 @@ final class MeetingConversationUITests: XCTestCase {
         try post(hub, "/mock/meeting_conversation", ["on": true, "room": "ok", "end_seconds": 180])
         try post(hub, "/mock/meeting_attendance", ["on": true, "default": "participant", "answer": "ok", "kb_read_only": false])
         try post(hub, "/mock/meeting_photos", Self.photosOn)
+        // A voice extension from before phase 4 (on a MOCK_VOICE=1 mock): these questions go through `…/ask`, not a
+        // meeting call's `text` frames (MeetingTalkUITests covers those). A mock without MOCK_VOICE has no such route.
+        _ = try? Data(contentsOf: URL(string: hub + "/mock/voice_meeting?meeting=off")!)
     }
 
     /// The shared mock goes back to how it starts (the features on, attending's default off, a room's end after 180 s, a

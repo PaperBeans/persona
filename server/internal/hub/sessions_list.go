@@ -25,21 +25,23 @@ const (
 	// key and answers with every manager's sessions, so an app sends it only to a hub that says this.
 	featureSessionsManager = "sessions_manager"
 	// featureSessionsPageCounts: a paged GET /api/v1/sessions takes with_counts=1 and answers with the page plus the
-	// counts ?counts=1 would give for the same filters (pageWithCounts), one read where a refresh took two (#4858).
+	// counts ?counts=1 would give for the same filters (sessionlist.PageWithCounts), one read where a refresh took two (#4858).
 	featureSessionsPageCounts = "sessions_page_counts"
+	// featureAgentsPageCounts: the same for a paged GET /api/v1/agents/sessions, the personal Agents the extension
+	// manager serves (extmgr/agents.go, #6496).
+	featureAgentsPageCounts = "agents_page_counts"
 	// featureSessionsHierarchy: a paged GET /api/v1/sessions takes roots=1 (the child sessions folded under a listed
 	// parent left out of the rows and counts, the parents counted by their folded state) and parent_session_id=<sid>
 	// with machine_id (the children folded under that session), docs/protocol/protocol.md "Session hierarchy" (#5120).
 	// An older hub reads neither key, so an app sends them only to a hub that says this.
 	featureSessionsHierarchy = "sessions_hierarchy"
+	// featureSessionsCatalog: a paged GET /api/v1/sessions takes catalog=1 (the projects and spaces of the filtered
+	// list, a repository's directories on every computer as one project: sessions_catalog.go), and
+	// place=["<machine>","<project>"] and space=["<machine>","<group>"], both repeatable (the sessions at those
+	// directories, in those spaces), docs/protocol/protocol.md "Projects and spaces". An older hub reads none of the
+	// keys, so an app sends them only to a hub that says this.
+	featureSessionsCatalog = "sessions_catalog"
 )
-
-// pageWithCounts is a page with its view's current counts (with_counts=1): what a separate ?counts=1 read with the
-// same filters returns, ignoring since, cursor and limit.
-type pageWithCounts struct {
-	sessionlist.Page
-	Counts sessionlist.Counts `json:"counts"`
-}
 
 // runtimeList is a transport cache of the manager's already-decorated rows. It
 // does not derive agent state or store business data. sessionsMu orders updates
@@ -361,6 +363,9 @@ func runtimeSummary(s proto.Session) runtimeRowSummary {
 	if s.Todo != nil {
 		out.Todo = &proto.TodoRef{ID: s.Todo.ID, Title: rowText(s.Todo.Title, 256)}
 	}
+	if done := s.CompletedTodo(); done != nil {
+		out.SetCompletedTodo(&proto.TodoRef{ID: done.ID, Title: rowText(done.Title, 256)})
+	}
 	if s.Plan != nil {
 		cp := *s.Plan
 		cp.Current = rowText(cp.Current, 180)
@@ -498,6 +503,15 @@ func (h *Hub) pagedSessions(w http.ResponseWriter, r *http.Request, manager stri
 		sessionListErr(w, errors.New("pane_source requires machine_id for a manager-scoped aggregate"))
 		return
 	}
+	if catalogAsked(r) {
+		catalog, err := h.sessionCatalogOf(r.Context(), index, opts, own, limited, !extensionToken(r))
+		if err != nil {
+			sessionListErr(w, err)
+			return
+		}
+		writeJSON(w, catalog)
+		return
+	}
 	if counts := r.URL.Query().Get("counts"); counts == "1" || counts == "true" {
 		var counts sessionlist.Counts
 		var err error
@@ -537,7 +551,7 @@ func (h *Hub) pagedSessions(w http.ResponseWriter, r *http.Request, manager stri
 			sessionListErr(w, err)
 			return
 		}
-		writeJSON(w, pageWithCounts{Page: page, Counts: counts})
+		writeJSON(w, sessionlist.PageWithCounts{Page: page, Counts: counts})
 		return
 	}
 	writeJSON(w, page)
@@ -596,7 +610,7 @@ func ownPage(index *sessionlist.Index, opts sessionlist.Options, own []string, p
 		return json.Unmarshal([]byte(id), &k) != nil || !keep(k[0])
 	})
 	counts, err := ownCounts(index, sessionlist.Options{Since: opts.Since, State: opts.State, Project: opts.Project, Group: opts.Group,
-		Source: opts.Source, Provider: opts.Provider, Q: opts.Q, Manager: opts.Manager, Roots: opts.Roots}, own)
+		Source: opts.Source, Provider: opts.Provider, Q: opts.Q, Manager: opts.Manager, Roots: opts.Roots, Places: opts.Places, Spaces: opts.Spaces}, own)
 	if err != nil {
 		return sessionlist.Page{}, err
 	}

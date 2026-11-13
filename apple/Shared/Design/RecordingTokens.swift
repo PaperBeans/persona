@@ -68,6 +68,10 @@ nonisolated extension Theme {
         static let liveLineLength = 2
         /// The step, in seconds, of the Live box's "About N s behind" (so it changes a few times a minute).
         static let liveBehindStep = 5
+        /// How many lines of text a highlight on the meeting page's top card takes at the regular text sizes (#3862 phase
+        /// 2b), cut at the end (VoiceOver reads it whole): four highlights stay a glance, and the thread under the card,
+        /// which alone scrolls there, keeps its height.
+        static let highlightLines = 2
         /// How many exchanges Show Earlier brings of the room conversation: each batch of lines is a turn of its own,
         /// so the chat's two would bring little.
         static let earlierTurns = 6
@@ -97,5 +101,9 @@ nonisolated extension Theme {
         /// stamped as its sentence begins. Few enough that the card stays a summary.
         static let contextBefore = 1
         static let contextAfter = 2
+        /// How much the meeting page's Talk grows while it is held (#3862 phase 4): the finger covers it, so the change
+        /// that says "Persona hears you" is its color and the words over the field; the size only confirms the touch.
+        /// None under Reduce Motion.
+        static let talkHeldScale: CGFloat = 1.06
     }
 }

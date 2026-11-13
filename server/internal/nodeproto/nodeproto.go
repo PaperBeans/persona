@@ -98,6 +98,21 @@ const (
 	// nothing typed and the switch dropped. A node without it would take the message as apply_switch alone: typed on the
 	// launcher the agent runs on while it is busy, with the switch left waiting for the user's next message.
 	LauncherSwitchNow = "launcher_switch_now"
+	// LauncherSwitchIdle: session.switch, the assistant's batch switch (#6008) of an idle agent: the switch picked a
+	// moment before is carried out with no message, or refused (switch_busy and the other switch codes) with nothing
+	// done and the switch dropped.
+	LauncherSwitchIdle = "launcher_switch_idle"
+	// PaneCwd: panes.new takes cwd, a folder to start the new terminal in (the file page's Open Terminal Here, #5832);
+	// without it the hub answers node_outdated rather than open the terminal somewhere else.
+	PaneCwd = "pane_cwd"
+	// PaneNewSpace: panes.new with cwd on a computer whose engine opens tabs but has no workspace opens a new workspace
+	// there (#6362). The hub answers node_outdated to a request that asks for this (new_space) when the node lacks it.
+	PaneNewSpace = "pane_new_space"
+	// NodeUpdateIdle: node.update.commit waits only for what the restart would interrupt, the conversations the node
+	// runs headless and launches still starting; terminal Agents and their background work do not hold it back
+	// (docs/operations/node-update.md "Usage"). sessions.list answers update_busy, that check, and the hub waits on it;
+	// for a node without it (or a list without the field) it waits on the old rule, every Agent idle.
+	NodeUpdateIdle = "node_update_idle"
 )
 
 // Error codes in the manager's answers to a resident node's replayed notifications (a notify with spool_id,
@@ -122,7 +137,7 @@ const (
 )
 
 // Announced is what a node built from this code announces.
-var Announced = []string{ShareProjection, CreationReceipt, PersonaContracts, ManagerUpdateInventory, Sessions, ModelConfiguration, AssistantConfigDir, NodeUpdate, Engines, MachineUID, HerdrServer, PluginNodeCall, Ultracode, HealthSpaces, Preview, SecretRun, Clipboard, SecretEnv, LauncherSwitch, ModelHTTP, EngineSwitch, ModelRun, LauncherSwitchNow}
+var Announced = []string{ShareProjection, CreationReceipt, PersonaContracts, ManagerUpdateInventory, Sessions, ModelConfiguration, AssistantConfigDir, NodeUpdate, Engines, MachineUID, HerdrServer, PluginNodeCall, Ultracode, HealthSpaces, Preview, SecretRun, Clipboard, SecretEnv, LauncherSwitch, ModelHTTP, EngineSwitch, ModelRun, LauncherSwitchNow, LauncherSwitchIdle, PaneCwd, NodeUpdateIdle, PaneNewSpace}
 
 // ShareProjection is the bounded complete-source sharing projection, not light Items.
 const ShareProjection = "share_projection.v1"
