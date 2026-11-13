@@ -28,7 +28,8 @@ import (
 // the state below, and a window starts with it as it would be — the background-task notifications already
 // shown (a repeat is dropped) and the calls they name, the reports subagents handed back before their
 // notification, and the last "! cmd" input (its output line becomes the call) are read from the earlier lines that
-// mention them, as is ultracode's pending command (its delayed attachment repeats command output).
+// mention them, as is ultracode's pending command (its delayed attachment repeats command output), and the request
+// whose usage the lines just before put on items (a reply's blocks are lines of their own; item_usage.go).
 // Those lines are found by a byte search while counting lines, so a Claude window may start at any line; a
 // Codex rollout records an item twice only within its turn, so its windows start at a turn (task_started).
 
@@ -320,7 +321,7 @@ func (f *File) startsTurn(_ int, line []byte, _ bool) bool {
 // seeded is the parser state for a window starting at line b whose bytes are window: what the earlier lines leave
 // behind that changes what later lines turn into. Notifications already shown (a repeat is dropped), the calls
 // they name and the reports handed back: only the earlier lines for a task the window mentions are read. The pending "! cmd": the last earlier line that is a "! cmd"
-// input or output decides it.
+// input or output decides it. The request whose usage items already carry: the lines just before (seedUsage).
 func (f *File) seeded(fh *os.File, w *window, b int, end int64, window []byte) Meta {
 	readLine := func(n int) []byte {
 		line := make([]byte, w.lineStart(n+1, end)-w.starts[n-1])
@@ -373,10 +374,30 @@ func (f *File) seeded(fh *os.File, w *window, b int, end int64, window []byte) M
 			ParseLine(n, line, &ultra)
 		}
 	}
+	size := func(n int) int64 { return w.lineStart(n+1, end) - w.starts[n-1] }
+	usage, codexTotal := f.seedUsage(seedLines{line: readLine, size: size,
+		head: func(n int, most int64) []byte {
+			head := make([]byte, min(size(n), most))
+			if _, err := fh.ReadAt(head, w.starts[n-1]); err != nil && err != io.EOF {
+				return nil
+			}
+			return head
+		},
+		tokenCount: func(before int) int {
+			at := w.lineStart(before, end)
+			return lastMentionWithin(fh, w.starts, at, max(at-seedCodexSearch, 0), [][]byte{codexTokenCount})
+		},
+	}, b, w.codex)
+	// A subagent's own work starts at its first user line (a fork's copied context is its first two lines at most): a
+	// later window is past it.
 	return Meta{Sidechain: f.meta.Sidechain, Codex: w.codex, notified: scratch.notified, taskCalls: scratch.taskCalls,
 		handbacks: scratch.handbacks, agentCalls: scratch.agentCalls, bashInput: bash,
-		Ultracode: ultra.Ultracode, UltracodeAt: ultra.UltracodeAt, UltracodeSince: ultra.UltracodeSince, ultracodeCommand: ultra.ultracodeCommand}
+		Ultracode: ultra.Ultracode, UltracodeAt: ultra.UltracodeAt, UltracodeSince: ultra.UltracodeSince, ultracodeCommand: ultra.ultracodeCommand,
+		usage: usage, codexTotal: codexTotal, sawUser: b > 2}
 }
+
+// codexTokenCount marks a rollout's token_count line (seedCodexTotal).
+var codexTokenCount = []byte(`"type":"token_count"`)
 
 var taskIDRe = lazyre.New(`<task-id>([^<]{1,200})</task-id>`)
 var seedRequestTypeRe = lazyre.New(`"type"\s*:\s*"(?:api-request-blob|api-request-shape|tools-used)"`)
@@ -605,14 +626,19 @@ func quoteID(s string) []byte {
 // lastMention is the line (1-based, starts as in window) holding the last of the needles found in the file's bytes
 // before end, read back a block at a time; 0 when none is (or the file cannot be read).
 func lastMention(fh *os.File, starts []int64, end int64, needles [][]byte) int {
+	return lastMentionWithin(fh, starts, end, 0, needles)
+}
+
+// lastMentionWithin is lastMention looking back only to floor.
+func lastMentionWithin(fh *os.File, starts []int64, end, floor int64, needles [][]byte) int {
 	const block = 4 << 20
 	keep := 0 // a needle split across two blocks
 	for _, n := range needles {
 		keep = max(keep, len(n)-1)
 	}
-	buf := make([]byte, min(end, block+int64(keep)))
-	for hi := end; hi > 0; {
-		lo := max(hi-block, 0)
+	buf := make([]byte, min(end-floor, block+int64(keep)))
+	for hi := end; hi > floor; {
+		lo := max(hi-block, floor)
 		data := buf[:min(hi+int64(keep), end)-lo]
 		if _, err := fh.ReadAt(data, lo); err != nil && err != io.EOF {
 			return 0

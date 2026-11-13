@@ -16,7 +16,7 @@
   "last_tool": "Last tool: {tool}",
   "output_file": "Output: {path}",
   "running_for": "Running for {duration}",
-  "open_in_background": "Open {name} in Background tasks",
+  "open_in_background": "Open {name} in the background tasks panel",
   "workflow_progress_line": "{phase} · {done}/{total} agents",
   "workflow_progress_count": "{done}/{total} agents"
 }

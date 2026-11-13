@@ -56,6 +56,10 @@ nonisolated struct ContextRef: Identifiable, Hashable, Sendable, Codable {
     /// The attributes that have fields of their own; the rest go to `extra`.
     private static let ownAttributes: Set<String> = ["kind", "title", "url", "msg", "part"]
 
+    /// The hub's mid-turn interject note title (server/internal/prompts/assistant/interject.md, pinned by
+    /// assistant_interject_test.go): model instructions in a context block, never a quote the owner picked (#6595).
+    static let interjectTitle = "插话" // i18n-ignore: canonical hub prompt title
+
     /// The contexts in a message and the message without them.
     private static let memo = TextMemo<(refs: [ContextRef], rest: String)>()
 
@@ -77,6 +81,8 @@ nonisolated struct ContextRef: Identifiable, Hashable, Sendable, Codable {
             }
             // Provenance and protected-user sentinels are transport metadata, never selectable context cards.
             guard a["kind"] != "message-source" else { continue }
+            // The hub's interject note is instructions for the model, not an owner-bubble quote (#6595).
+            guard (a["kind"] ?? "context") != "context" || a["title"] != interjectTitle else { continue }
             let extra = a.filter { !Self.ownAttributes.contains($0.key) }
             refs.append(ContextRef(kind: a["kind"] ?? "context", title: a["title"] ?? "", url: a["url"] ?? "",
                                    text: ns.substring(with: m.range(at: 2)), msg: a["msg"] ?? "", part: a["part"],
@@ -219,6 +225,11 @@ struct LinkSheet: View {
                         }
                         .font(Theme.Font.label)
                         .foregroundStyle(Theme.accent)
+                        // A caption line hit like a row, the header keeping its height (#6577), and over the title above
+                        // it too: the header has only `Space.s` under it, and the page below takes its own taps.
+                        .padding(.top, Theme.Space.l)
+                        .tapTargetOutset()
+                        .padding(.top, -Theme.Space.l)
                     }
                     .buttonStyle(.plain)
                     .accessibilityHint(String(localized: "Lists this session's dev servers"))
@@ -250,6 +261,10 @@ struct LinkSheet: View {
         .padding(.horizontal, Theme.Space.l)
         .padding(.top, Theme.Space.l)
         .padding(.bottom, Theme.Space.s)
+        // A bar: it grows with the text up to the largest standard size, as the viewers' bars do. Beyond, its buttons
+        // left the title and the server chooser a letter each, and the room it took came off the page and the
+        // preview's comment panel above the keyboard (#5114); the page under it does not grow with the text anyway.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 
     @ViewBuilder private var browserItems: some View {

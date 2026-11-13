@@ -194,7 +194,8 @@ type liveActivities struct {
 	shownState FleetState
 	shownStats FleetStats
 	shownAt    time.Time
-	repair     bool // a device's activity shows something unknown: flush without waiting for a change
+	repair     bool        // a device's activity shows something unknown: flush without waiting for a change
+	widgets    widgetWaker // which phones' Home Screen widgets to wake, and when (widget_wake.go)
 	// wake: when the run loop's timer goes off next (zero: not set), for a merge or a device's turn after fleetMinGap.
 	wake         time.Time
 	now          func() time.Time
@@ -304,6 +305,7 @@ func (la *liveActivities) run(ctx context.Context) {
 				la.shown = b
 				la.broadcast(st)
 			}
+			la.wakeWidgets(st)
 			now, schedule := la.coal.offer(st)
 			switch {
 			case now:
@@ -353,6 +355,7 @@ func (la *liveActivities) tick() {
 	if la.h.isMember() { // the center's Live Activity is the group's (mesh_group.go)
 		return
 	}
+	la.wakeWidgets(la.snapshot()) // a change held back for widgetGap, the heartbeat
 	now := la.now()
 	la.mu.Lock()
 	over := !la.emptyAt.IsZero() && now.Sub(la.emptyAt) >= fleetEndAfter
@@ -471,6 +474,11 @@ func (la *liveActivities) phoneLeft(device string, clean bool) {
 	}
 	d, ok := la.h.push.device(device)
 	now := la.now()
+	// The app wrote its widgets as it went: they show what it showed (widget_wake.go).
+	la.mu.Lock()
+	shown := la.shownState
+	la.mu.Unlock()
+	la.widgets.wrote(device, widgetCountsOf(shown), now)
 	la.mu.Lock()
 	r := la.rows[device]
 	needsStart := r.PushToStartToken != "" && (r.PushToken == "" || now.Sub(r.StartedAt) >= fleetMaxAge)

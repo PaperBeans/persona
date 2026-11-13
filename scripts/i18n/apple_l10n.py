@@ -53,12 +53,12 @@ CATALOGS = [
 ]
 # Persona Link (apple/PersonaLink, docs/operations/link.md "Menu bar App") is its own SwiftPM package: its text is looked
 # up in its own catalog through `linkText`, so its keys are checked apart and never satisfy the apps' source keys. Its
-# older UI text is hard-coded Chinese; LINK_CJK is each file's count of such literals, which may only go down: new text
-# goes through the catalog. Keys are paths under LINK_SOURCES.
+# UI text is all in the catalog; LINK_CJK is each file's allowed count of hard-coded Chinese/Japanese literals (none now;
+# data that must stay Chinese, such as persona-link's own output, carries `// i18n-ignore`): new text goes through the
+# catalog. Keys are paths under LINK_SOURCES.
 LINK_SOURCES = "PersonaLink/Sources/PersonaLink"
 LINK_CATALOG = LINK_SOURCES + "/Resources/Localizable.xcstrings"
-LINK_CJK = {"LinkModel.swift": 28, "MenuView.swift": 48, "PairLink.swift": 2, "PairView.swift": 36, "PersonaLinkApp.swift": 2,
-            "RenameView.swift": 5, "Snapshots.swift": 28}
+LINK_CJK = {}
 # The targets whose extracted strings go into the catalogs (sync / strict).
 TARGETS = ["Persona", "PersonaMac", "PersonaVision", "PersonaWatch", "PersonaWidgets", "PersonaNotify", "PersonaShare"]
 

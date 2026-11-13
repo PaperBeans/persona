@@ -40,6 +40,8 @@ internal class ChatRowActions(
     val imageDescription: String = "",
     /** A file's thumbnail from the session's machine (`file/thumb`): its cache key and loader; null: icons only. */
     val thumbnails: ((path: String) -> Pair<String, suspend (Int) -> ByteArray?>)? = null,
+    /** A picture of the session for the image viewer, called [description] (the turn's viewed images, `ViewedImagesRow`). */
+    val viewerImage: (item: Item, description: String) -> ViewerImage = { item, description -> chatViewerImage(session, item, null, description) },
 ) {
     /** Opens the viewer on the conversation's pictures at [item]; a picture not among them opens alone. */
     fun openPicture(item: Item) {
@@ -53,11 +55,16 @@ internal class ChatRowActions(
 internal val LocalChatRowActions = compositionLocalOf<ChatRowActions?> { null }
 
 /**
- * The session's sub-agents by the Task / Agent call that started them ([keys], running or done) and how to open one:
- * what "View sub-agent" under those steps needs. Null where they cannot be opened (a read-only conversation, no navigation).
+ * The session's subagents by the Task / Agent call that started them, running or done: their conversations ([keys]) and
+ * how to open one ([open], "View sub-agent" in Brief and Board; null where they cannot be opened: a read-only
+ * conversation, no navigation), and the session's listing of each by `Subagents.callOf` ([agents]: what a task card says).
  */
 @androidx.compose.runtime.Immutable
-internal data class ChatSubagents(val keys: Map<String, SessionKey>, val open: (SessionKey) -> Unit)
+internal data class ChatSubagents(
+    val keys: Map<String, SessionKey>,
+    val open: ((SessionKey) -> Unit)?,
+    val agents: Map<String, persona.core.contracts.Subagent> = emptyMap(),
+)
 
 internal val LocalChatSubagents = compositionLocalOf<ChatSubagents?> { null }
 

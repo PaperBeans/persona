@@ -21,6 +21,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // dev runs `personad extension dev`: build, hang the extension on this machine's hub, print its log, and on each
@@ -33,7 +35,7 @@ func (c *extensionClient) dev(ctx context.Context, dir string, stdout, stderr io
 		return err
 	}
 	here := runtime.GOOS + "-" + runtime.GOARCH
-	fmt.Fprintf(stdout, "构建 %s（%s）…\n", p.manifest.ID, here)
+	fmt.Fprintln(stdout, i18n.T(c.l(), "extmgr-cli.dev_building", i18n.Args{"id": p.manifest.ID, "platform": here}))
 	if err := p.build(ctx, here, stderr); err != nil {
 		return err
 	}
@@ -45,9 +47,9 @@ func (c *extensionClient) dev(ctx context.Context, dir string, stdout, stderr io
 		rctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = c.do(rctx, "DELETE", "/api/v1/extensions/"+url.PathEscape(id)+"/-/dev", nil, nil)
-		fmt.Fprintf(stdout, "\n%s 已从 hub 上拿掉\n", id)
+		fmt.Fprintln(stdout, "\n"+i18n.T(c.l(), "extmgr-cli.dev_removed", i18n.Args{"id": id}))
 	}()
-	fmt.Fprintf(stdout, "%s 挂到 hub 上了（来源 dev，hub 重启就没了）。改了文件会自动重建、重启；Ctrl-C 结束。\n", id)
+	fmt.Fprintln(stdout, i18n.T(c.l(), "extmgr-cli.dev_attached", i18n.Args{"id": id}))
 	go c.devLogs(ctx, id, stdout)
 
 	last := fingerprint(p.dir)
@@ -65,7 +67,7 @@ func (c *extensionClient) dev(ctx context.Context, dir string, stdout, stderr io
 			continue
 		}
 		last = now
-		fmt.Fprintln(stdout, "— 有改动，重新构建")
+		fmt.Fprintln(stdout, "— "+i18n.T(c.l(), "extmgr-cli.dev_changed"))
 		if np, err := openProject(p.dir); err != nil {
 			fmt.Fprintln(stdout, "✗ "+err.Error())
 			continue
@@ -73,7 +75,7 @@ func (c *extensionClient) dev(ctx context.Context, dir string, stdout, stderr io
 			p = np
 		}
 		if err := p.build(ctx, here, stdout); err != nil {
-			fmt.Fprintln(stdout, "✗ "+err.Error()+"（还跑着上一次的）")
+			fmt.Fprintln(stdout, "✗ "+i18n.T(c.l(), "extmgr-cli.dev_build_failed", i18n.Args{"error": err.Error()}))
 			continue
 		}
 		if m := fingerprint(p.dir, extensionManifestNames...); m != manifest || p.manifest.ID != id {
@@ -84,7 +86,7 @@ func (c *extensionClient) dev(ctx context.Context, dir string, stdout, stderr io
 			continue
 		}
 		if err := c.do(ctx, "POST", "/api/v1/extensions/"+url.PathEscape(id)+"/-/dev/restart", nil, nil); err != nil {
-			fmt.Fprintln(stdout, "✗ 重启："+err.Error())
+			fmt.Fprintln(stdout, "✗ "+i18n.T(c.l(), "extmgr-cli.dev_restart_failed", i18n.Args{"error": err.Error()}))
 		}
 	}
 }
@@ -95,14 +97,14 @@ var extensionManifestNames = []string{"persona-extension.json", "persona-plugin.
 func (c *extensionClient) devHang(ctx context.Context, p *devProject, stdout io.Writer) error {
 	dc, err := readDevConfig(p.dir)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("extension.dev.json：%w", err)
+		return fmt.Errorf("extension.dev.json: %w", err)
 	}
 	var d ExtensionDetail
 	if err := c.do(ctx, "POST", "/api/v1/extensions/-/dev", map[string]any{"dir": p.dir, "config": dc.Config, "secrets": dc.Secrets}, &d); err != nil {
 		return err
 	}
 	if len(d.NeedsSetup) > 0 {
-		fmt.Fprintf(stdout, "还缺：%s（写进 extension.dev.json）\n", strings.Join(d.NeedsSetup, "、"))
+		fmt.Fprintln(stdout, i18n.T(c.l(), "extmgr-cli.dev_needs_setup", i18n.Args{"list": cliList(c.l(), d.NeedsSetup)}))
 	}
 	return nil
 }
@@ -111,7 +113,7 @@ func (c *extensionClient) devHang(ctx context.Context, p *devProject, stdout io.
 func (c *extensionClient) devLogs(ctx context.Context, id string, stdout io.Writer) {
 	for ctx.Err() == nil {
 		if err := c.stream(ctx, "/api/v1/extensions/"+url.PathEscape(id)+"/-/dev/logs", stdout); err != nil && ctx.Err() == nil {
-			fmt.Fprintln(stdout, "（日志断了："+err.Error()+"，2 秒后再连）")
+			fmt.Fprintln(stdout, i18n.T(c.l(), "extmgr-cli.dev_logs_lost", i18n.Args{"error": err.Error()}))
 		}
 		select {
 		case <-ctx.Done():

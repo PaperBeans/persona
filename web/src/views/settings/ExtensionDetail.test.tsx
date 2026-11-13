@@ -22,7 +22,7 @@ vi.mock("../../lib/store", async (original) => {
   return { ...real, useStore: <T,>(select: (s: ReturnType<typeof real.getState>) => T): T => select({ ...real.getState(), features: ["channels"] }) };
 });
 vi.mock("../../ui/atoms", async (original) => ({ ...(await original<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
-import { Extensions, SandboxGroup } from "./Extensions";
+import { adminNetworkURL, Extensions, SandboxGroup } from "./Extensions";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -43,21 +43,40 @@ afterEach(() => {
 });
 
 describe("运行隔离", () => {
-  it("says the sandbox is in effect, with what went through the egress proxy and the last refusal", () => {
-    const html = renderToStaticMarkup(<SandboxGroup s={{ enabled: true, active: true, egress: { allowed: 3, denied: 1, last_denied: "example.com:443" } }} />);
+  const blocked = { enabled: true, active: true, egress: { allowed: 3, denied: 1, last_denied: "rss.example.org:443", denied_at: new Date(Date.now() - 180_000).toISOString() } };
+  it("says what was blocked in words, when, and links to the admin page's network block (#5696)", () => {
+    const html = renderToStaticMarkup(<SandboxGroup s={blocked} id="rsshub" name="RSSHub" />);
     expect(html).toContain("运行隔离");
     expect(html).toContain("沙箱正在生效");
-    expect(html).toContain("经出网代理：放行 3 次 · 拒绝 1 次");
-    expect(html).toContain("最近拒绝：example.com:443");
+    expect(html).toContain("放行 3");
+    expect(html).toContain("拦下 1");
+    expect(html).toContain("RSSHub 想连");
+    expect(html).toContain("rss.example.org:443");
+    expect(html).toContain("不在它申请的范围里");
+    expect(html).toContain("去管理界面放行");
+    expect(html).not.toContain("最近拒绝");
+    expect(adminNetworkURL("rsshub")).toBe("/admin/extensions?extension=rsshub#network");
+  });
+  it("opens the admin page in a new tab", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    act(() => root.render(<SandboxGroup s={blocked} id="rss hub" name="RSSHub" />));
+    act(() => host.querySelector<HTMLButtonElement>("[data-sandbox-blocked] button")!.click());
+    expect(open).toHaveBeenCalledWith("/admin/extensions?extension=rss%20hub#network", "_blank", "noopener");
+    open.mockRestore();
+  });
+  it("has no notice when nothing was blocked", () => {
+    const html = renderToStaticMarkup(<SandboxGroup s={{ enabled: true, active: true, egress: { allowed: 12, denied: 0 } }} id="rsshub" name="RSSHub" />);
+    expect(html).toContain("拦下 0");
+    expect(html).not.toContain("data-sandbox-blocked");
   });
   it("says why a sandbox asked for is not in effect", () => {
-    const html = renderToStaticMarkup(<SandboxGroup s={{ enabled: true, active: false, why: "这台机器没有 bubblewrap" }} />);
+    const html = renderToStaticMarkup(<SandboxGroup s={{ enabled: true, active: false, why: "这台机器没有 bubblewrap" }} id="x" name="X" />);
     expect(html).toContain("要求了沙箱，但现在没开起来");
     expect(html).toContain("这台机器没有 bubblewrap");
-    expect(html).not.toContain("经出网代理");
+    expect(html).not.toContain("data-sandbox-egress");
   });
   it("says it is off", () => {
-    expect(renderToStaticMarkup(<SandboxGroup s={{ enabled: false, active: false }} />)).toContain("未启用沙箱");
+    expect(renderToStaticMarkup(<SandboxGroup s={{ enabled: false, active: false }} id="x" name="X" />)).toContain("未启用沙箱");
   });
 });
 

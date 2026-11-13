@@ -3,6 +3,10 @@
   "detail": "Bash command\nDelete the example build output\nrm -rf $BUILD_DIR/*",
   "warning": "Dangerous rm operation on possibly-empty variable path: $BUILD_DIR/* in `rm -rf $BUILD_DIR/*` (rewrite it as \"${BUILD_DIR:?}\"/* or use a literal path)",
   "deadline": "Claude Code will automatically deny this request in 0:42, to avoid holding up an unattended session",
+  "command": "rm -rf $BUILD_DIR/*",
+  "description": "Delete the example build output",
+  "risk": "delete",
+  "deadline_action": "deny",
   "options": [
     {
       "key": "1",

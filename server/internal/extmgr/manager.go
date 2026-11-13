@@ -34,7 +34,6 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/secretkey"
 	"github.com/nwverse/persona/server/internal/subscriptions"
-	"github.com/nwverse/persona/server/internal/subscriptionsui"
 	"github.com/nwverse/persona/server/internal/update"
 )
 
@@ -79,6 +78,12 @@ type Options struct {
 	Assistant func(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error)
 	// AssistantEvent tells the assistant an event the hub used to send it (feishu.owner).
 	AssistantEvent func(event string, params json.RawMessage)
+	// AssistantSocket serves the assistant's WebSocket routes (assistantwire.SocketRoutes: a meeting's audio socket),
+	// which the hub relays here over a relay stream like the extensions' routes; nil: they are 404 (tests).
+	AssistantSocket http.HandlerFunc
+	// TranscriptionChanged invalidates the assistant's availability cache after an extension registry change.
+	// It must not block or call back into the registry; nil means no observer.
+	TranscriptionChanged func()
 	// DialRelay opens the hub's relay channel with query.
 	DialRelay func(ctx context.Context, query string) (*websocket.Conn, error)
 	// Connected says whether the bus is up now (nil: always), and Connection which connection it is: a comparable
@@ -103,6 +108,8 @@ type Options struct {
 type Manager struct {
 	// handoffRulesMu: one change of the hand-off rules at a time (secret_handoff_rules.go).
 	handoffRulesMu sync.Mutex
+	// inboxReads are each source's latest read by the Inbox, for the Inbox Sources pages (inbox_sources.go).
+	inboxReads sourceReads
 	// errReports: the error reports' pipeline (error_reports.go).
 	errReports errorReports
 	// iphoneTurns: one iphone_do at a time per iPhone, across conversations (iphone.go, iphoneTurn).
@@ -127,9 +134,8 @@ type Manager struct {
 	imessageArchive    imessageArchiveFence
 	imessageAIPending  atomic.Bool
 	subs               *subscriptions.Service // source subscriptions (subscriptions.go); nil until Run
-	// subDrafts are the model drafts the subscription pages started (#2040, subscriptions_ui.go), made on first use.
-	subDrafts     *subscriptionsui.Drafts
-	subDraftsOnce sync.Once
+	// subsLive is subs once it runs, for the connectors' events, which start before it (connectorChanged).
+	subsLive      atomic.Pointer[subscriptions.Service]
 	connectorsOff map[string]bool
 	migrated      sync.Map
 	media         mediaCache

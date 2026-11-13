@@ -421,6 +421,9 @@ type codexListPass struct {
 	// runtimes is the runtime session each Codex thread is listed as (thread → session, runtimecodex.go): the list
 	// has that session's row, so the thread's own is left out and its subagents hang off the session.
 	runtimes map[string]codexClaim
+	// paginated is codexPaginatedThreads by Codex home: each call globs the home for the App's databases and stats
+	// them, which every row's codexAppHistoryPath did (#5970).
+	paginated map[string]map[string]codexAppThread
 }
 
 // runtimeOf is the runtime session that names Codex thread as its conversation; the zero claim when none does.
@@ -437,7 +440,8 @@ type codexStat struct {
 }
 
 func newCodexListPass() *codexListPass {
-	return &codexListPass{real: map[string]string{}, stats: map[string]codexStat{}, desktop: map[string]bool{}}
+	return &codexListPass{real: map[string]string{}, stats: map[string]codexStat{}, desktop: map[string]bool{},
+		paginated: map[string]map[string]codexAppThread{}}
 }
 
 func (p *codexListPass) realPath(dir string) string {
@@ -474,6 +478,20 @@ func (p *codexListPass) desktopAvailable(home string) bool {
 		p.desktop[home] = up
 	}
 	return up
+}
+
+// paginatedThreadOf is codexPaginatedThreadOf with each home's paginated threads looked up once per pass.
+func (p *codexListPass) paginatedThreadOf(src codexSource) (codexAppThread, bool) {
+	if p == nil {
+		return codexPaginatedThreadOf(src)
+	}
+	threads, ok := p.paginated[src.home]
+	if !ok {
+		threads = codexPaginatedThreads(src.home)
+		p.paginated[src.home] = threads
+	}
+	t, ok := threads[src.thread]
+	return t, ok
 }
 
 func (p *codexListPass) assistantProject(n *Node) string {
@@ -536,15 +554,22 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		if n.programRun(id, src, pass) {
 			continue
 		}
+		if src.path != "" && readCodexOrigin(src.path).guardian { // an approval review of a tool call, not an Agent (#5486)
+			continue
+		}
 		if n.agentFiltered("codex", src.path) && !n.keptSessions()[id] { // another platform's runs (agentfilters.go)
 			continue
 		}
 		s := proto.Session{SessionID: id, Agent: "codex", SourceKind: "codex_history", SourceThreadID: src.thread, Status: proto.StatusOffline,
 			Capabilities: &proto.SessionCapabilities{Read: true}, ReadOnlyReason: "仅查看：未发现可共享的 app-server 入口，请在电脑上打开会话"}
 		var m quickMeta
-		if src.path != "" {
-			if st, err := pass.stat(src.path); err == nil {
-				m = n.meta(src.path, st)
+		readPath := src.path
+		if p := n.codexAppHistoryPath(src, pass); p != "" {
+			readPath = p
+		}
+		if readPath != "" {
+			if st, err := pass.stat(readPath); err == nil {
+				m = n.meta(readPath, st)
 				if !n.sessionScopeAllows(m.cwd) {
 					continue
 				}
@@ -593,6 +618,9 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			if t.cwd != "" {
 				s.Cwd = t.cwd
 			}
+			if t.model != "" {
+				s.Model = t.model
+			}
 			s.Capabilities.Send, s.Capabilities.Attach = t.parent == "", t.parent == ""
 			s.Capabilities.Approve, s.Capabilities.Interrupt = t.joined, t.turn != "" && t.parent == ""
 			s.ReadOnlyReason = ""
@@ -604,6 +632,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			}
 			n.codexEffortRow(id, &s.Efforts, &s.Effort, m) // codex_effort.go
 			n.codexSpeedRow(&s)
+			n.codexRewindRow(id, &s)
 		} else if err != errCodexNoOwner {
 			s.ReadOnlyReason = err.Error()
 		} else if src.path == "" && codexDesktopChatIn(src, pass) {
@@ -613,6 +642,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			s.Capabilities.Send = true
 			s.ReadOnlyReason = ""
 			n.placeCodexDesktop(&s, src, src.thread, false)
+			n.codexDesktopEffortRow(&s, src, m) // codex_desktop_effort.go
 		} else if o := readCodexOrigin(src.path); o.desktop {
 			switch {
 			case o.parent != "":
@@ -626,6 +656,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 				s.Capabilities.Send = true
 				s.ReadOnlyReason = ""
 				n.placeCodexDesktop(&s, src, src.thread, false)
+				n.codexDesktopEffortRow(&s, src, m)
 			}
 		} else if o.cli {
 			s.AgentName, s.AgentSurface = "Codex CLI", transcript.SurfaceCLI
@@ -647,6 +678,9 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			// brings it back in a new tab (session.start, codex_resume.go).
 			s.Capabilities.Terminal = true
 			s.ReadOnlyReason = stoppedReason
+		}
+		if s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && !n.codexBlocked(id) {
+			s.Capabilities.Takeover = n.codexTakeoverRow(id, src, m, liveRollouts[id] != "")
 		}
 		if n.codexBlocked(id) {
 			markCodexConflict(&s)

@@ -84,3 +84,56 @@ func TestRecordingFailedUploadHTTPRetainsAcceptedRevision(t *testing.T) {
 		t.Fatalf("retry detail = %s", detail)
 	}
 }
+
+// GET /api/v1/kb-search takes kind as kb_search does (#3862 phase 6: the voice search_knowledge finds meetings with
+// kind=recordings): the lines, and the ranked results, of that kind only; an unknown kind is a 400.
+func TestKBSearchKind(t *testing.T) {
+	s := kbServiceOn(t, newFakeHub(), newKBStore(), t.TempDir(), nil)
+	e := kbEng(t, s)
+	c := &kb.Chat{ID: kb.ChatID("lark", "f1"), Source: "lark", SourceID: "f1", Kind: "group", Name: "Orchard group", Created: time.Now()}
+	if err := e.Store.PutChat(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Store.AppendMessages(c, []kb.Line{{At: time.Now(), Sender: "Ada", Text: "the orchard vendor"}}); err != nil {
+		t.Fatal(err)
+	}
+	const id = "33333333-3333-4333-8333-333333333333"
+	if _, err := e.PutRecording(id, kb.RecordingUpload{Revision: 1, StartedAt: time.Now().UTC(), Device: "phone", Kind: "meeting", Title: "Vendor review",
+		Segments: []kb.RecordingSegment{{Text: "we keep the orchard vendor", End: 1}}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	get := func(path string, want int) string {
+		t.Helper()
+		r := httptest.NewRecorder()
+		s.ServeHTTP(r, httptest.NewRequest("GET", path, nil))
+		if r.Code != want {
+			t.Fatalf("%s: %d %s, want %d", path, r.Code, r.Body, want)
+		}
+		return r.Body.String()
+	}
+	var all, only struct{ Hits []kb.Hit }
+	_ = json.Unmarshal([]byte(get("/api/v1/kb-search?q=orchard", 200)), &all)
+	_ = json.Unmarshal([]byte(get("/api/v1/kb-search?q=orchard&kind=recordings", 200)), &only)
+	kinds := func(hits []kb.Hit) map[string]bool {
+		out := map[string]bool{}
+		for _, h := range hits {
+			k, _, _ := strings.Cut(h.Path, "/")
+			out[k] = true
+		}
+		return out
+	}
+	if k := kinds(all.Hits); !k["chats"] || !k[kb.KindRecording] {
+		t.Fatalf("every kind: %+v", all.Hits)
+	}
+	if k := kinds(only.Hits); len(k) != 1 || !k[kb.KindRecording] {
+		t.Fatalf("kind=recordings: %+v", only.Hits)
+	}
+	var ranked struct{ Results []kb.Result }
+	_ = json.Unmarshal([]byte(get("/api/v1/kb-search?q=orchard&kind=recordings&results=1", 200)), &ranked)
+	if len(ranked.Results) != 1 || ranked.Results[0].Entry.Kind != kb.KindRecording || ranked.Results[0].Entry.ID != id {
+		t.Fatalf("results of kind=recordings: %+v", ranked.Results)
+	}
+	if body := get("/api/v1/kb-search?q=orchard&kind=nope", 400); !strings.Contains(body, "recordings") {
+		t.Fatalf("an unknown kind: %s", body)
+	}
+}

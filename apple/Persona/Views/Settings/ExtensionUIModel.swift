@@ -127,11 +127,16 @@ extension APIClient {
 
     /// Draws (no action) or uses a control (an action, with the fields' values it sends).
     func pluginUI(_ ext: String, _ ui: String, context: ExtensionUIContext, state: String?, action: String? = nil,
-                  values: [String: String]? = nil, manager: String? = nil) async throws -> ExtensionActionResult {
+                  values: [String: String]? = nil, manager: String? = nil, assistant: String? = nil) async throws -> ExtensionActionResult {
         let body = ExtensionUIRequest(context: context, state: state, action: action, values: values)
         let query = manager.map { ["manager": $0] } ?? [:]
-        // The source subscription pages (#2041) are the manager's own, drawn and pressed as an extension page.
-        let path = ext == SubscriptionsUI.id ? SubscriptionsUI.path : extensionPath("/\(ext)/-/ui/\(ui)")
+        // The source subscription pages (#2041) are the manager's own, drawn and pressed as an extension page; only they are
+        // told the assistant's name (#5278).
+        if ext == SubscriptionsUI.id {
+            let sent = SubscriptionsUI.Request(request: body, assistant: assistant)
+            return try JSON.decoder.decode(ExtensionActionResult.self, from: try await request("POST", SubscriptionsUI.path, query: query, body: sent))
+        }
+        let path = extensionPath("/\(ext)/-/ui/\(ui)")
         return try JSON.decoder.decode(ExtensionActionResult.self, from: try await request("POST", path, query: query, body: body))
     }
 }
@@ -165,6 +170,9 @@ extension APIClient {
     struct Deps {
         var api: () -> APIClient?
         var connection: () -> LiveConnection? = { nil }
+        /// The assistant's name as the composer shows it ("Ask {name}…"), for the subscription pages (#5278): every page
+        /// of them gets it, a pushed one (built with its hub's group) too; only those pages are sent it (`pluginUI`).
+        var assistant: () -> String? = { AppModel.shared.persona.name }
         static var live: Deps {
             let group = AppModel.shared.hub?.group ?? ""
             return .init(api: { AppModel.shared.api(group) }, connection: { AppModel.shared.socket(group) })
@@ -178,6 +186,8 @@ extension APIClient {
         var error: String?
         var lines: ExtensionUIStreamFileLines?
         var cancelled = false
+        /// Whose extension settings the link opens when it is an extension's settings link: an extension page's own.
+        var settingsOwner: ExtensionSettingsOwner = .current
     }
 
     private(set) var fileLines: [String: ExtensionUIStreamFileLines] = [:]
@@ -226,7 +236,7 @@ extension APIClient {
             }
             if result.pop == true { popped = true }
             let url = result.openUrl.flatMap(URL.init(string:)).flatMap { Self.opens($0, item: context.item, owner: plugin) ? $0 : nil }
-            return Outcome(toast: result.toast, url: url, lines: result.lines)
+            return Outcome(toast: result.toast, url: url, lines: result.lines, settingsOwner: linkOwner(url))
         } catch {
             return stream.visible ? Outcome(error: String(localized: "Couldn't Load This Page")) : Outcome(cancelled: true)
         }
@@ -281,6 +291,10 @@ extension APIClient {
     @ObservationIgnored private let initialState: String?
     @ObservationIgnored private let initialManager: String?
     var selectedManager: String? { stream?.manager ?? initialManager }
+
+    /// Whose extension settings a link in an answer opens (`Outcome.settingsOwner`): this page's assistant's; with no
+    /// link, the default, so an answer without one compares as before.
+    private func linkOwner(_ url: URL?) -> ExtensionSettingsOwner { url == nil ? .current : .page(selectedManager) }
 
     /// When the view on screen was last drawn (its `refresh_after` counts from here).
     private(set) var drawnAt: Date?
@@ -447,14 +461,17 @@ extension APIClient {
     /// it is still busy keeps its new controls disabled after the state clears (#1937); an answer with nothing in it is
     /// drawn again first, still busy, so nothing else starts meanwhile.
     private func take(_ r: ExtensionActionResult, searched: Bool = false, done: () -> Void = {}) async -> Outcome {
-        let again = r.view == nil && r.toast == nil && r.openUrl == nil && r.push == nil && r.pop != true
+        // UI version 5: `items` replace the components with their keys, and nothing else is drawn again.
+        let items = r.view == nil ? (r.items ?? []) : []
+        let again = r.view == nil && items.isEmpty && r.toast == nil && r.openUrl == nil && r.push == nil && r.pop != true
             ? try? await call(nil, values: nil) : nil
         done()
         if let v = r.view { show(v, keeping: [:], searched: searched) } else if let v = again?.view { show(v, keeping: values) }
+        if !items.isEmpty { replace(items) }
         if let p = r.push, depth < Self.maxDepth { pushed = p }
         if r.pop == true { popped = true }
         let url = r.openUrl.flatMap(URL.init(string:)).flatMap { Self.opens($0, item: context.item, owner: plugin) ? $0 : nil }
-        return Outcome(toast: r.toast?.isEmpty == false ? r.toast : nil, url: url)
+        return Outcome(toast: r.toast?.isEmpty == false ? r.toast : nil, url: url, settingsOwner: linkOwner(url))
     }
 
     /// A `segmented` picked: shown picked at once, and its action sent with `{name: value}` (and the page's fields when it
@@ -619,7 +636,7 @@ extension APIClient {
             if let p = r.push, depth < Self.maxDepth { pushed = p }
             if r.pop == true { popped = true }
             let url = r.openUrl.flatMap(URL.init(string:)).flatMap { Self.opens($0, item: context.item, owner: plugin) ? $0 : nil }
-            return Outcome(toast: r.toast?.isEmpty == false ? r.toast : nil, url: url)
+            return Outcome(toast: r.toast?.isEmpty == false ? r.toast : nil, url: url, settingsOwner: linkOwner(url))
         } catch let e as APIError where Self.isUnsupported(e) {
             unsupported = true
             return Outcome()
@@ -636,6 +653,74 @@ extension APIClient {
             v.sections[i].items = v.sections[i].items.map { c in c.key.flatMap { byKey[$0] } ?? c }
         }
         ExtensionMotion.redraw(from: view, to: v) { view = v }
+    }
+
+    // MARK: Pictures (UI version 6)
+
+    /// A picture the hub serves for this page (`src.path`, signed for this extension): only the hub's own image route
+    /// for it gets the device's credentials, never another address (docs/extensions/extensions.md "Pictures through
+    /// the hub").
+    func picture(_ path: String, pixels: Int) async throws -> Data {
+        guard Self.isHubPicture(path, owner: plugin) else { throw APIError(status: 0, message: String(localized: "Couldn't Load This Picture")) }
+        guard let api = deps.api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
+        return try await api.request("GET", path, query: ["w": String(max(1, pixels))])
+    }
+
+    /// The hub's image route for extension `owner`: `/api/v1/extensions/<owner>/-/image/<token>`.
+    nonisolated static func isHubPicture(_ path: String, owner: String) -> Bool {
+        let prefix = "/api/v1/extensions/" + owner + "/-/image/"
+        guard !owner.isEmpty, !owner.contains("/"), path.hasPrefix(prefix) else { return false }
+        let token = path.dropFirst(prefix.count)
+        return !token.isEmpty && token.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "_.-".contains($0)) }
+    }
+
+    /// A hub picture did not load: its token may have run out, so the page is drawn again (signed anew), at most once a
+    /// minute.
+    func pictureFailed() {
+        guard lastPictureRedraw.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true else { return }
+        lastPictureRedraw = .now
+        Task { await refresh() }
+    }
+
+    @ObservationIgnored private var lastPictureRedraw: Date?
+
+    /// The page drawn again, keeping the diffs loaded since (by `load`) that it gives without their lines again: the
+    /// extension does not have to remember what was opened (UI version 5).
+    private func keepingLoaded(_ next: ExtensionView) -> ExtensionView {
+        var loaded: [String: ExtensionComponent] = [:]
+        for c in components {
+            if case .diff(let d) = c, let k = c.key, !(d.hunks ?? []).isEmpty { loaded[k] = c }
+        }
+        guard !loaded.isEmpty else { return next }
+        var v = next
+        for i in v.sections.indices {
+            v.sections[i].items = v.sections[i].items.map { c in
+                guard case .diff(let d) = c, (d.hunks ?? []).isEmpty, d.load != nil, let k = c.key, let kept = loaded[k] else { return c }
+                return kept
+            }
+        }
+        return v
+    }
+
+    /// Sends an action that does not hold the page (UI version 5's `mark_viewed`, a diff's `context`): nothing waits for
+    /// it, its answer's `items` or view are drawn, an answer with neither draws nothing, its `lines` come back for the
+    /// page, and only a failure is told (the page puts back what it showed at once).
+    func quiet(_ action: ExtensionAction, with chosen: [String: String]) async -> Outcome {
+        let sent = chosen.merging(action.values ?? [:]) { _, own in own }
+        if let stream, stream.supported != false {
+            do {
+                let frozen = try stream.freeze(action, values: sent)
+                return await performFrozen(frozen)
+            } catch { return Outcome(error: String(localized: "Couldn't Load This Page")) }
+        }
+        do {
+            let r = try await call(action.id, values: sent)
+            if let v = r.view { show(v, keeping: values) } else if let items = r.items, !items.isEmpty { replace(items) }
+            // A diff's hidden lines (`context`): for the page to keep, nothing drawn again.
+            return Outcome(lines: r.lines.map { ExtensionUIStreamFileLines(path: $0.path, side: $0.side, start: $0.start, lines: $0.lines, total: $0.total) })
+        } catch {
+            return Outcome(error: error.localizedDescription)
+        }
     }
 
     /// The fields' values as the extension gets them: every field of the view, by name.
@@ -680,7 +765,7 @@ extension APIClient {
     }
 
     private func show(_ v: ExtensionView?, keeping typed: [String: String] = [:], searched: Bool = false) {
-        guard let v else { return }
+        guard let v = v.map(keepingLoaded) else { return }
         ExtensionMotion.redraw(from: view, to: v) { view = v }
         fileLines = fileLines.filter { key, lines in v.sections.flatMap(\.items).contains { item in
             guard item.key == key else { return false }
@@ -717,7 +802,8 @@ extension APIClient {
         if let stream, stream.hasMountedNative || (action != nil && stream.supported != false) { throw ExtensionStreamJSON.Failure.version }
         guard let api = deps.api() else { throw APIError(status: 0, message: String(localized: "Not connected to the hub yet")) }
         let generation = stream?.tree?.version
-        let result = try await api.pluginUI(plugin, ui, context: context, state: view?.state ?? initialState, action: action, values: values, manager: selectedManager)
+        let result = try await api.pluginUI(plugin, ui, context: context, state: view?.state ?? initialState, action: action, values: values,
+                                            manager: selectedManager, assistant: plugin == SubscriptionsUI.id ? deps.assistant() : nil)
         guard stream?.supported != true, generation == stream?.tree?.version else { throw ExtensionStreamJSON.Failure.version }
         return result
     }
@@ -729,6 +815,8 @@ extension APIClient {
     /// (`InboxSourceLink`), never another item's.
     static func opens(_ url: URL, item: String?, owner: String? = nil) -> Bool {
         if url.scheme?.lowercased() == "https" { return url.host()?.isEmpty == false && url.user == nil && url.password == nil }
+        // the subscription pages' Set Up with … (#5278): their text to the assistant, never an extension's
+        if SubscriptionsUI.askText(url) != nil || SubscriptionsUI.isGraph(url) { return owner == SubscriptionsUI.id }
         if let settings = ExtensionSettingsLink.extensionID(url) { return owner != nil && settings == owner }
         guard let item, let source = InboxSourceLink.item(url) else { return false }
         return source == item

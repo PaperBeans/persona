@@ -103,6 +103,14 @@ class HeaderModeShotsTest {
         return page.copy(Bitmap.Config.ARGB_8888, true).also { Canvas(it).drawBitmap(menu, m.x - p.x, m.y - p.y, null) }
     }
 
+    /** The header and, on Glass, the mode as the composer has it (Q11, #5055: Glass's header has no mode button). */
+    @androidx.compose.runtime.Composable
+    private fun Moded(s: Session, chrome: ChatChromeState) {
+        ChatHeader(s, machine, listOf(s), chrome, null, false, onBack = {}, onOpenSession = {}, onConnectionDetails = {},
+            onOverlay = {}, statusState = working)
+        if (PersonaTheme.style == AppStyle.Glass && SessionModes.showsInComposer(s)) Row { HeaderModeButton(s, chrome, online = true) {} }
+    }
+
     private fun has(text: String) = rule.onAllNodesWithText(text, substring = true, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
     private fun described(text: String) = rule.onAllNodesWithContentDescription(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
@@ -118,7 +126,8 @@ class HeaderModeShotsTest {
                             onOverlay = {}, statusState = working)
                         Spacer(Modifier.weight(1f))
                         ChatSessionStatusLine(working, s, null, 0, onDetails = {}, terminal = null)
-                        Row { ChatModeBar(s, chrome, online = true) }
+                        // the composer's control: Glass's is the mode button beside the model pill (Q11, #5055)
+                        Row { if (style == AppStyle.Glass) HeaderModeButton(s, chrome, online = true) {} else ChatModeBar(s, chrome, online = true) }
                     }
                 }
                 assertTrue("$scene: mode button", described(if (scene == "after-bypass") "权限模式：全部放行" else "权限模式：自动改文件"))
@@ -134,8 +143,7 @@ class HeaderModeShotsTest {
                     agent(null), agent(null, agent = "codex"))
                 show(style, dark, 640) { chrome ->
                     Column(Modifier.fillMaxWidth()) {
-                        for (s in list) ChatHeader(s, machine, listOf(s), chrome, null, false, onBack = {}, onOpenSession = {},
-                            onConnectionDetails = {}, onOverlay = {}, statusState = working)
+                        for (s in list) Moded(s, chrome)
                     }
                 }
                 for (w in listOf("手动确认", "只做计划", "自动改文件", "自动", "全部放行", "未知")) assertTrue("modes: $w", described("权限模式：$w"))
@@ -144,10 +152,7 @@ class HeaderModeShotsTest {
             }
             "menu", "menu-bypass" -> {
                 val s = agent("default", bypass = scene == "menu-bypass")
-                show(style, dark, 640) { chrome ->
-                    ChatHeader(s, machine, listOf(s), chrome, null, false, onBack = {}, onOpenSession = {}, onConnectionDetails = {},
-                        onOverlay = {}, statusState = working)
-                }
+                show(style, dark, 640) { chrome -> Column { Moded(s, chrome) } }
                 rule.onNodeWithTag("chat-mode").performClick()
                 rule.waitForIdle()
                 assertTrue(has("权限模式：手动确认") && has("只做计划") && has("全部放行"))
@@ -158,10 +163,7 @@ class HeaderModeShotsTest {
             "confirm-bypass", "confirm-leave" -> {
                 val into = scene == "confirm-bypass"
                 val s = if (into) agent("default", bypass = true) else agent("bypassPermissions")
-                show(style, dark, 640) { chrome ->
-                    ChatHeader(s, machine, listOf(s), chrome, null, false, onBack = {}, onOpenSession = {}, onConnectionDetails = {},
-                        onOverlay = {}, statusState = working)
-                }
+                show(style, dark, 640) { chrome -> Column { Moded(s, chrome) } }
                 rule.onNodeWithTag("chat-mode").performClick()
                 rule.waitForIdle()
                 rule.onNode(hasText(if (into) "全部放行" else "只做计划") and hasAnyAncestor(isPopup())).performClick()

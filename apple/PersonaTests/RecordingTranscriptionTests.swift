@@ -84,6 +84,42 @@ import Testing
         #expect(runner.errors[entry.id] == nil)
     }
 
+    /// All-day recording's lane waits for the clips (`whenIdle`), also inside the catch-up task: when that task's time
+    /// runs out, its wait must end at once, however long a clip's transcription (or model download) still takes.
+    @Test func aCancelledWaitForTheClipsEndsWhileOneIsStillTranscribing() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let lib = RecordingLibrary(root: root)
+        var entry = try lib.create(source: .phone)
+        entry.active = false; entry.expectedSegments = 1
+        entry.segments = [RecordingSegment(index: 0, start: 0, duration: 30)]
+        try lib.save(entry)
+        try Data([0]).write(to: lib.audio(entry.id, 0))
+        // A transcription that takes as long as the test says, whatever cancellation asks of it.
+        let held = OSAllocatedUnfairLock(initialState: true)
+        let runner = RecordingTranscription(library: lib) { _, _ in
+            while held.withLock({ $0 }) { try? await Task.sleep(for: .milliseconds(2)) }
+            return [RecordingSentence(start: 0, end: 1, text: "done")]
+        }
+        runner.enqueue(entry.id)
+        for _ in 0..<500 where runner.current != entry.id { try await Task.sleep(for: .milliseconds(2)) }
+        #expect(runner.current == entry.id)
+        // So a broken fix fails rather than hangs.
+        let safety = Task { try? await Task.sleep(for: .seconds(10)); held.withLock { $0 = false } }
+        defer { safety.cancel() }
+
+        let waiter = Task { await runner.whenIdle() }
+        for _ in 0..<20 { await Task.yield() }
+        waiter.cancel()
+        await waiter.value
+        #expect(runner.current == entry.id, "returned while the clip was still being transcribed")
+
+        // Uncancelled, it still waits for the end.
+        held.withLock { $0 = false }
+        await runner.whenIdle()
+        #expect(runner.current == nil && lib.entry(entry.id)?.transcribedAll == true)
+    }
+
     @Test func pullTranscribesOnlyItsRangeAndAFailureCanBeRetried() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

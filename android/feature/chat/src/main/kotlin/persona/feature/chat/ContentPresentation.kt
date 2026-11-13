@@ -3,10 +3,14 @@ package persona.feature.chat
 import persona.core.designsystem.resolve
 import android.content.res.Resources
 import androidx.annotation.StringRes
+import androidx.compose.runtime.compositionLocalOf
 import persona.core.contracts.Item
+import persona.core.contracts.Machine
 import persona.core.domain.lines.ChatLine
+import persona.core.domain.ComputerSteps
 import persona.core.domain.MessageContext
 import persona.core.domain.decodeXmlEntities
+import persona.core.domain.isInterjectContext
 import persona.core.domain.lines.WorkItem
 import persona.core.domain.messageText
 import persona.core.domain.parseContexts
@@ -62,7 +66,10 @@ internal data class MessageModel(
 }
 
 internal fun messageModel(raw: String, from: String? = null, user: Boolean = false): MessageModel {
-    val (contexts, written) = parseContexts(raw)
+    // The hub's interject note is model instructions, never a quote chip in the owner's bubble (#6595); parseContexts
+    // already strips the block from the written text, so only drop it from the rendered contexts.
+    val (parsedContexts, written) = parseContexts(raw)
+    val contexts = parsedContexts.filterNot(MessageContext::isInterjectContext)
     // Only the exact tag the hub ends a card's answer with, only on the user's own message.
     val card = if (user) persona.core.domain.views.PersonaActionTag.split(written) else null
     val (attached, text) = parseAttachedFiles(card?.first ?: written)
@@ -345,20 +352,38 @@ internal data class ToolPresentation(
     val title: String, val verb: String, val detail: String? = null, val mono: Boolean = false, val kind: ToolVerb = ToolVerb.Use,
     /** A tool with words of its own ("Operate computer", `namedToolVerb`): the running line says them, not "Running x". */
     val named: Boolean = false,
+    /** What a tool no table knows is about, under its name in words ([detail]); the running line says it after them. */
+    val about: String? = null,
 ) {
-    /** The running line's words for this call: "Reading x", or a named tool's "Operate computer x". */
+    /** The running line's words for this call: "Reading x", a named tool's "Operate computer x", "GitHub · Create issue x". */
     fun running(res: Resources): String = when {
         !named -> res.getString(kind.running, title)
-        title == verb -> verb
+        title == verb -> about?.let { res.getString(R.string.chat_tool_running_named, verb, it) } ?: verb
         else -> res.getString(R.string.chat_tool_running_named, verb, title)
     }
 }
 
-internal fun toolPresentation(res: Resources, item: Item): ToolPresentation {
+/**
+ * What a tool call's words need besides the call: the Macs the chat knows, so a computer tool's `machine` reads as the
+ * Mac's name ([ComputerSteps.machineName], as iOS's rows), and whether the rows are Glass's ([glass]). iOS draws every
+ * tool as its verb and then what the call is about; Glass's rows keep a tool's words as the title with the subject under
+ * them for the to-do list's tools ("Complete to-do", #3) and for Persona's own tools that no case reads a subject of
+ * (agent_read, kb_search: the subject iOS picks), where Brief and Board keep the subject alone and the words alone.
+ */
+internal class ToolNames(
+    val machines: List<Machine> = emptyList(), val chatMachine: String = "", val glass: Boolean = false,
+) {
+    fun machine(named: String): String = ComputerSteps.machineName(named, machines, chatMachine)
+}
+
+/** The chat's [ToolNames], provided by its page. */
+internal val LocalToolNames = compositionLocalOf { ToolNames() }
+
+internal fun toolPresentation(res: Resources, item: Item, names: ToolNames = ToolNames()): ToolPresentation {
     val input = item.toolInput as? JsonObject
     val name = item.toolName.orEmpty()
     val kind = when (name) {
-        "Read", "LS" -> ToolVerb.Read
+        "Read", "LS", "NotebookRead" -> ToolVerb.Read
         "Edit", "MultiEdit", "NotebookEdit" -> ToolVerb.Edit
         "Write" -> ToolVerb.Create
         "Bash" -> ToolVerb.Run
@@ -370,11 +395,26 @@ internal fun toolPresentation(res: Resources, item: Item): ToolPresentation {
         "AskUserQuestion" -> ToolVerb.Ask
         else -> ToolVerb.Use
     }
+    // A few tools say what this call did from its input ("Complete to-do", "Find references"; iOS ToolPresentation.verb(call)).
+    val call = if (name.isNotEmpty()) persona.core.domain.callToolVerb(name, item.toolInput)?.resolve(res) else null
     // Persona's own tools, the computer's and the phone's have words of their own (iOS ToolPresentation.verb); any
-    // other reads its name in words, another server's MCP tool as "GitHub · Create issue" (#2986), never "Use".
-    val named = if (kind == ToolVerb.Use && name.isNotEmpty())
-        persona.core.domain.namedToolVerb(name)?.resolve(res) ?: persona.core.domain.toolWords(name) else null
-    val verb = named ?: res.getString(kind.label)
+    // other reads its name in words, another server's MCP tool as "GitHub · Create issue" (#2986), never "Use". Claude Code's
+    // task list, TodoWrite's successor, is the Update kind and has iOS's words for each call ("Add to-do").
+    val taskList = persona.core.domain.toolBaseName(name) in setOf("TaskCreate", "TaskUpdate", "TaskList")
+    val table = if ((kind == ToolVerb.Use || taskList) && name.isNotEmpty()) call ?: persona.core.domain.namedToolVerb(name)?.resolve(res) else null
+    val words = if (kind == ToolVerb.Use && name.isNotEmpty() && table == null) persona.core.domain.toolWords(name) else null
+    val named = table ?: words
+    val verb = call ?: named ?: res.getString(kind.label)
+    // A tool with no icon of its own to say what it is keeps its words as the title, and what the call is about
+    // (`ToolNaming.subject`, #4339 C1) goes under it, as iOS's row reads the verb, then the subject. So do the newer tools
+    // a table names now (`rowKeepsWords`) and, on Glass, the to-do list's and Persona's own with no case of their own for it.
+    val keeps = table != null && (persona.core.domain.rowKeepsWords(name) || (names.glass && (taskList || persona.core.domain.toolBaseName(name) == "TaskGet" ||
+        (persona.core.domain.isPersonaTool(name) && !persona.core.domain.toolHasSubjectCase(item)))))
+    if (words != null || keeps) {
+        val title = words ?: table.orEmpty()
+        val about = persona.core.domain.toolSubjectText(item, machine = names::machine, pickNamed = true).resolve(res).trim().ifBlank { null }
+        return ToolPresentation(title, title, about, kind = kind, named = true, about = about)
+    }
     val path = input?.string("file_path") ?: input?.string("notebook_path")
     if (!path.isNullOrBlank()) {
         val normalized = path.replace('\\', '/')
@@ -384,8 +424,10 @@ internal fun toolPresentation(res: Resources, item: Item): ToolPresentation {
         val command = input?.string("command")?.lineSequence()?.firstOrNull().orEmpty()
         return ToolPresentation(command.ifBlank { res.getString(R.string.chat_tool_command) }, verb, input?.string("description"), mono = true, kind = kind)
     }
-    // A computer_run with steps or a script says what it does (iOS ComputerSteps): "MacBook · Click AC → 6 → ×".
-    val subject = ComputerSteps.subject(res, name, input) ?: persona.core.domain.toolSubjectText(item).resolve(res).trim()
+    // A computer_run with steps or a script says what it does (iOS ComputerSteps): "MacBook · Click AC → 6 → ×", the Mac as
+    // the user knows it.
+    val subject = ComputerSteps.runSubject(name, input, names::machine)?.resolve(res)
+        ?: persona.core.domain.toolSubjectText(item, machine = names::machine).resolve(res).trim()
     return ToolPresentation(subject.ifBlank { when (name) {
         "TodoWrite" -> res.getString(R.string.chat_tool_todo_list)
         "Task", "Agent" -> res.getString(R.string.chat_tool_subagent)
@@ -405,14 +447,14 @@ internal fun WorkItem.Folded.stepCount(): Int = item.fold?.let { it.tools + it.t
  * what the header says, "Waiting for you", with no time: nothing is at work.
  */
 internal fun workSummary(res: Resources, line: ChatLine.Work, recordedDuration: Long?, now: Instant? = null,
-    waiting: Boolean = false): String {
+    waiting: Boolean = false, names: ToolNames = ToolNames()): String {
     if (line.live && waiting) return res.getString(R.string.chat_chrome_status_needs_you)
     // As iOS's work line (#4339 C5): while it runs, the step it is on ("Reading a.kt +2 · 39 s"), else "Working 39 s ·
     // Tools 2 · Thinking 1"; done, "Tools 3 · Thinking 1 · 1m 20s".
     val counts = workCounts(res, line.steps)
     if (line.live) {
         val elapsed = now?.let { n -> line.start?.let { workDuration(res, java.time.Duration.between(it, n).seconds) } }
-        workNow(res, line.steps)?.let { (words, more) ->
+        workNow(res, line.steps, names)?.let { (words, more) ->
             val lead = if (more > 0) " +$more" else ""
             return if (elapsed == null) words + lead else "$words$lead · $elapsed"
         }
@@ -439,14 +481,7 @@ internal fun workCounts(res: Resources, steps: List<WorkItem>): List<String> {
 }
 
 /** A work line's time as iOS writes it (`WorkLine.duration`): "39 s", "2 min", "1m 20s", "1 hr 5 min". */
-internal fun workDuration(res: Resources, seconds: Long): String {
-    val s = seconds.coerceAtLeast(0)
-    return when {
-        s < 60 -> res.getString(R.string.chat_work_seconds, s)
-        s < 3600 -> if (s % 60 == 0L) res.getString(R.string.chat_work_minutes, s / 60) else res.getString(R.string.chat_work_minutes_seconds, s / 60, s % 60)
-        else -> res.getString(R.string.chat_work_hours_minutes, s / 3600, s % 3600 / 60)
-    }
-}
+internal fun workDuration(res: Resources, seconds: Long): String = persona.core.domain.workTime(seconds).resolve(res)
 
 /** The tools that keep the books rather than do the work: never what the running line names (iOS `WorkNow.quiet`). */
 private val QuietWorkTools = setOf("TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch")
@@ -456,15 +491,15 @@ private val QuietWorkTools = setOf("TodoWrite", "TaskCreate", "TaskUpdate", "Tas
  * many run beside it; with none running, the latest step (a call, or a thought's first line). Null when the newest
  * work is folded away or there is no step yet: the line says its counts.
  */
-internal fun workNow(res: Resources, steps: List<WorkItem>): Pair<String, Int>? {
+internal fun workNow(res: Resources, steps: List<WorkItem>, names: ToolNames = ToolNames()): Pair<String, Int>? {
     fun base(tool: WorkItem.Tool) = persona.core.domain.toolBaseName(tool.call.use.item.toolName.orEmpty())
     val running = steps.takeLastWhile { it is WorkItem.Tool && it.call.running }.filterIsInstance<WorkItem.Tool>().filter { base(it) !in QuietWorkTools }
     if (running.isNotEmpty()) {
         if (running.size > 1 && running.all { base(it) == "Read" }) return res.getString(R.string.chat_work_reading_files, running.size) to 0
-        return toolPresentation(res, running.last().call.use.item).running(res) to running.size - 1
+        return toolPresentation(res, running.last().call.use.item, names).running(res) to running.size - 1
     }
     for (step in steps.asReversed()) when (step) {
-        is WorkItem.Tool -> if (base(step) !in QuietWorkTools) return toolPresentation(res, step.call.use.item).running(res) to 0
+        is WorkItem.Tool -> if (base(step) !in QuietWorkTools) return toolPresentation(res, step.call.use.item, names).running(res) to 0
         is WorkItem.Thought -> if (step.item.item.kind != "notice") {
             val first = step.item.item.text.orEmpty().lineSequence().map(String::trim).firstOrNull(String::isNotEmpty)
                 ?.removeSurrounding("**")

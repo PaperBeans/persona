@@ -81,9 +81,9 @@ struct MacViewMenu: Commands {
             Divider()
             Toggle("Compact List [Mac View Commands a92bf4]", isOn: $compact)
             // the grouping in use: a stored By To-do is By Project on a hub without todos
-            Picker("Group By [Personal Agent List View 72148c]", selection: Binding(get: { DevGrouping.resolved(grouping, supportsTodos: TodoStore.shared.isSupported) },
+            Picker("Group By [Personal Agent List View 72148c]", selection: Binding(get: { DevGrouping.resolvedNow(grouping) },
                                                 set: { grouping = $0 })) {
-                ForEach(DevGrouping.offered(supportsTodos: TodoStore.shared.isSupported)) { Text($0.title).tag($0) }
+                ForEach(DevGrouping.offeredNow) { Text($0.title).tag($0) }
             }
             Picker("Sort By", selection: $sort) {
                 ForEach(AgentSort.allCases) { Text($0.title).tag($0) }

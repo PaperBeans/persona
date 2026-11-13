@@ -82,6 +82,7 @@ struct SourceMessage: View, Equatable {
                 Markdown(d.markdown)
                     .markdownSoftBreakMode(.lineBreak)
                     .markdownTheme(.persona)
+                    .readingContent()
                     .frame(maxWidth: .infinity, alignment: .leading)
                     #if os(macOS)
                     .textSelection(.enabled)
@@ -97,7 +98,7 @@ struct SourceMessage: View, Equatable {
             }
             if folds {
                 Button {
-                    toggleInPlace(pin, pinKey, animation: Theme.Motion.state) { open.toggle() }
+                    toggleInPlace(pin, pinKey, animation: Theme.Motion.state, closing: open) { open.toggle() }
                 } label: {
                     Text(open ? String(localized: "Collapse") : String(localized: "Expand"))
                         .font(Theme.Font.captionStrong)

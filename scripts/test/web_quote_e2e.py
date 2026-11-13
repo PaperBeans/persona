@@ -17,11 +17,13 @@ widths; --shots saves each.
 """
 import argparse
 import os
+import re
 import sys
 
 from playwright.sync_api import expect, sync_playwright
 
 SIZES = {"wide": {"width": 1280, "height": 900}, "narrow": {"width": 390, "height": 844}}
+SEND = re.compile(r"^(发送|排队发送)$")  # the round button queues while the agent works (#5324)
 
 
 def ok(msg):
@@ -84,7 +86,7 @@ def case(browser, base, token, size, theme, shots, before):
         shot(page, shots, name + "-typed")
     posts = []
     page.on("request", lambda r: posts.append(r.post_data or "") if r.method == "POST" else None)
-    page.get_by_role("button", name="发送").click()
+    page.get_by_role("button", name=SEND).click()
     page.wait_for_timeout(1200)
     bubble = page.locator("[data-user-bubble]").last
     bubble.scroll_into_view_if_needed()
@@ -159,7 +161,7 @@ def task_case(browser, base, token, size, theme, shots):
     shot(page, shots, name + "-composer")
     posts = []
     page.on("request", lambda r: posts.append(r.post_data or "") if r.method == "POST" else None)
-    page.get_by_role("button", name="发送", exact=True).and_(page.locator("[aria-label='发送']")).click()
+    page.get_by_role("button", name=SEND).click()
     page.wait_for_timeout(1200)
     body = next((p for p in posts if "新功能那组再细分一下" in p), "")
     if "> 任务「整理发布说明」（todo id: todo_task_release）" not in body or "> 整理好了" not in body:

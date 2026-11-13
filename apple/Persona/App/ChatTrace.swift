@@ -103,6 +103,7 @@ final class ChatTrace {
         case .apiError(let item, _, let count): "err\(item.seq)x\(count)"
         case .feed(let f): "feed:\(f.kind.rawValue)"
         case .quick: "quick"
+        case .placeMap: "map"
         case .day: "day"
         case .viewed(_, let images): "viewed\(images.count)"
         }

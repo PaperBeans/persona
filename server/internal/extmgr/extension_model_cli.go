@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // The extension model's commands (docs/extensions/extensions.md "Turning contributions on and off"), next to extensionUsage's.
@@ -27,7 +28,7 @@ func extensionModelCommand(ctx context.Context, c *extensionClient, cmd string, 
 		if err := c.do(ctx, "GET", "/api/v1/extensions/"+url.PathEscape(positional[0])+"/-/", nil, &d); err != nil {
 			return true, err
 		}
-		printContributions(stdout, d.Contributions)
+		printContributions(c.l(), stdout, d.Contributions)
 		return true, nil
 	case "contribution":
 		if len(positional) < 3 || (positional[2] != "on" && positional[2] != "off") {
@@ -42,7 +43,7 @@ func extensionModelCommand(ctx context.Context, c *extensionClient, cmd string, 
 		if err := c.do(ctx, "PUT", path, map[string]bool{"enabled": positional[2] == "on"}, &d); err != nil {
 			return true, err
 		}
-		printContributions(stdout, d.Contributions)
+		printContributions(c.l(), stdout, d.Contributions)
 		return true, nil
 	}
 	return false, nil
@@ -50,27 +51,36 @@ func extensionModelCommand(ctx context.Context, c *extensionClient, cmd string, 
 
 // printBundle says what installs with a preview: its dependencies and their state, the previews that come along
 // (each with what it may do), and what no market has.
-func printBundle(w io.Writer, pv *extension.Preview) {
+func printBundle(l i18n.Lang, w io.Writer, pv *extension.Preview) {
 	for _, d := range pv.Depends {
-		state := map[string]string{extension.DepOK: "已装", extension.DepMissing: "没装", extension.DepDisabled: "停用着",
-			extension.DepOld: "版本不够（" + d.Installed + "）"}[d.State]
-		fmt.Fprintf(w, "要用：%s %s（%s）\n", d.ID, d.Version, state)
+		state := ""
+		switch d.State {
+		case extension.DepOK:
+			state = i18n.T(l, "extmgr-cli.dep_ok")
+		case extension.DepMissing:
+			state = i18n.T(l, "extmgr-cli.dep_missing")
+		case extension.DepDisabled:
+			state = i18n.T(l, "extmgr-cli.dep_disabled")
+		case extension.DepOld:
+			state = i18n.T(l, "extmgr-cli.dep_old", i18n.Args{"version": d.Installed})
+		}
+		fmt.Fprintln(w, i18n.T(l, "extmgr-cli.dep", i18n.Args{"id": d.ID, "version": d.Version, "state": state}))
 	}
 	if len(pv.Bundle) > 0 {
-		fmt.Fprintln(w, "一起装：")
+		fmt.Fprintln(w, i18n.T(l, "extmgr-cli.bundle"))
 	}
 	for _, b := range pv.Bundle {
-		verb := "安装"
+		key := "extmgr-cli.bundle_install"
 		if b.Upgrade {
-			verb = "升级到"
+			key = "extmgr-cli.bundle_upgrade"
 		}
-		fmt.Fprintf(w, "  %s %s %s（%s）\n", verb, b.Manifest.ID, b.Manifest.Version, b.Manifest.Name)
-		for _, l := range b.Permissions {
-			fmt.Fprintf(w, "    · %s：%s\n", l.Title, l.Detail)
+		fmt.Fprintln(w, "  "+i18n.T(l, key, i18n.Args{"id": b.Manifest.ID, "version": b.Manifest.Version, "name": b.Manifest.Name}))
+		for _, p := range b.Permissions {
+			fmt.Fprintln(w, "    · "+i18n.T(l, "extmgr-cli.preview_permission", i18n.Args{"title": p.Title, "detail": p.Detail}))
 		}
 	}
 	for _, u := range pv.Unresolved {
-		fmt.Fprintf(w, "找不到：%s\n", u)
+		fmt.Fprintln(w, i18n.T(l, "extmgr-cli.unresolved", i18n.Args{"id": u}))
 	}
 }
 
@@ -83,18 +93,21 @@ func bundleRefs(pv *extension.Preview) []bundleRef {
 	return out
 }
 
-func printContributions(w io.Writer, cs []ContributionView) {
+func printContributions(l i18n.Lang, w io.Writer, cs []ContributionView) {
 	if len(cs) == 0 {
-		fmt.Fprintln(w, "没有贡献")
+		fmt.Fprintln(w, i18n.T(l, "extmgr-cli.contributions_empty"))
 	}
 	for _, c := range cs {
-		state := map[bool]string{true: "开", false: "关"}[c.Enabled]
+		state := i18n.T(l, "extmgr-cli.switch_off")
+		if c.Enabled {
+			state = i18n.T(l, "extmgr-cli.switch_on")
+		}
 		note := ""
 		switch {
 		case c.Via == "connector":
-			note = "（跟着连接器的开关）"
+			note = i18n.T(l, "extmgr-cli.contribution_via_connector")
 		case !c.CanDisable:
-			note = "（这里改不了）"
+			note = i18n.T(l, "extmgr-cli.contribution_fixed")
 		}
 		fmt.Fprintf(w, "%-28s %s  %s%s\n", c.Point+"/"+c.ID, state, c.Title, note)
 	}

@@ -10,7 +10,7 @@ vi.hoisted(() => {
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
 
-const calls = vi.hoisted(() => ({ list: [] as { path: string; json?: unknown }[], items: [] as unknown[], history: [] as unknown[], historyStatus: 200, days: false }));
+const calls = vi.hoisted(() => ({ list: [] as { path: string; json?: unknown }[], items: [] as unknown[], history: [] as unknown[], historyStatus: 200, days: false, byId: {} as Record<string, unknown> }));
 vi.mock("../../lib/api", async (orig) => {
   const m = await orig<typeof import("../../lib/api")>();
   return {
@@ -39,6 +39,8 @@ vi.mock("../../lib/api", async (orig) => {
         const last = page.at(-1);
         return Promise.resolve({ items: page, next: page.length === Number(q.get("limit") ?? 50) && last ? { before: last.done_at, before_id: last.id } : undefined });
       }
+      // one item by id (GET /api/v1/inbox/{id}), as the hub reads any it keeps
+      if (path.startsWith("/inbox/") && path.slice(7) in calls.byId) return Promise.resolve(calls.byId[path.slice(7)]);
       if (path === "/mail/accounts") return Promise.resolve({ accounts: [{ id: "acc1", email: "me@example.com" }] });
       if (path === "/inbox/bulk") {
         const ids = new Set((init?.json?.items ?? []).map((x) => x.id));
@@ -90,6 +92,7 @@ beforeEach(async () => {
   calls.list = [];
   calls.historyStatus = 200;
   calls.days = false;
+  calls.byId = {};
   // Needs you: two Lark today, one mail yesterday, one mail 3 days ago; FYI: one Lark; Done: one today (the list's)
   calls.items = [lark("l1"), lark("l2"), mail("m1", { updated_at: ago(1) }), mail("m2", { updated_at: ago(3) }), lark("f1", { tier: "fyi" }),
     lark("d1", { done_at: ago(0, 0.2), done_by: "user" })];
@@ -245,6 +248,42 @@ describe("Done's day counts from the hub (#2969)", () => {
     expect(button("加载更早的")).toBeUndefined();
   });
 
+  it("the list's last days are not complete on their own: Today loads what the list leaves out (#5549)", async () => {
+    // the list carries only the newest done items (one of today's): three more were done today, only the history has them
+    calls.items.push(lark("lt", { done_at: ago(0, 2), done_by: "user" }));
+    calls.history.push(...[1, 2, 3].map((i) => lark(`t${i}`, { done_at: ago(0, 4 + i), done_by: "user" })));
+    calls.days = true;
+    await remount();
+    expect(head("done", "today").textContent).toContain("今天4");
+    await click(toggle("done", "just").closest("section")?.querySelector('button[aria-haspopup="menu"]'));
+    await click([...document.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent?.includes("今天")));
+    // Today's first page starts past the oldest done item the list holds, not with rows the list has
+    const ask = historyAsks().at(-1)!;
+    expect([ask.get("before"), ask.get("before_id")]).toEqual([ago(0, 2), "lt"]);
+    expect(["t1", "t2", "t3"].map((id) => Boolean(head("done", "today").querySelector(`[data-item="${id}"]`)))).toEqual([true, true, true]);
+    // a row only the history has opens like a listed one
+    act(() => root.render(<Inbox id="t2" onToggleSidebar={() => {}} />));
+    await flush();
+    expect(host.textContent).not.toContain("这件事已经不在收件箱里了");
+    expect(host.textContent).toContain("chat t2");
+  });
+
+  it("a link to a done item neither the list nor the loaded history has opens the hub's copy (#5549)", async () => {
+    calls.byId = { x9: lark("x9", { title: "chat x9", done_at: ago(0, 2), done_by: "user" }) };
+    act(() => root.render(<Inbox id="x9" onToggleSidebar={() => {}} />));
+    await flush();
+    expect(calls.list.filter((c) => c.path === "/inbox/x9")).toHaveLength(1);
+    expect(host.textContent).not.toContain("这件事已经不在收件箱里了");
+    expect(host.textContent).toContain("chat x9");
+    // one the hub doesn't have either is gone, asked once
+    act(() => root.render(<Inbox id="nope" onToggleSidebar={() => {}} />));
+    await flush();
+    act(() => root.render(<Inbox id="nope" onToggleSidebar={() => {}} />));
+    await flush();
+    expect(calls.list.filter((c) => c.path === "/inbox/nope")).toHaveLength(1);
+    expect(host.textContent).toContain("这件事已经不在收件箱里了");
+  });
+
   it("filtered, the counts are of what is loaded, and n+ until a group is complete", async () => {
     localStorage.setItem("inbox.source", "feishu"); // the Lark chip
     calls.history.push(lark("h12", { done_at: ago(12), done_by: "user" }));
@@ -253,6 +292,9 @@ describe("Done's day counts from the hub (#2969)", () => {
     // nothing of 7+ days is loaded yet: only Lark's done item of the list shows
     expect(groups("done")).toEqual([]);
     expect(host.querySelector('[data-section="done"]')?.textContent).toContain("1+");
+    // Today first: the list carries only the newest done items (#5549), so its days page in too, past what it holds
+    await click(button("加载更早的"));
+    expect(historyAsks().at(-1)!.get("before_id")).toBe("d1");
     await click(button("加载更早的"));
     expect(historyAsks().at(-1)!.get("before")).toBe(midnight(6).toISOString());
     expect(head("done", "week").textContent).toContain("7 天前2"); // h10 and h12, Lark's; the week is complete

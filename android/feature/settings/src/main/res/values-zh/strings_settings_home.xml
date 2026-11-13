@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_home_models">模型</string>
+    <string name="settings_home_models_detail">为对话和各项功能选择模型</string>
+    <string name="settings_home_agents">Agent</string>
+    <string name="settings_home_agents_detail">编码 Agent 与会话分诊</string>
+    <string name="settings_home_channels_detail">选择与助手对话的渠道</string>
+    <string name="settings_notification_background_title">通知与后台</string>
+    <string name="settings_notification_background_checks_header">手机检查</string>
+    <string name="settings_home_notifications_detail">提醒、悬浮胶囊与后台连接</string>
+    <string name="settings_home_about">关于与更新</string>
+    <string name="settings_home_about_detail">App 信息与版本更新</string>
+    <string name="settings_home_connection">连接</string>
+    <string name="settings_home_connection_detail">连接状态与问题排查</string>
+    <string name="settings_search_placeholder">搜索设置</string>
+    <string name="settings_search_empty">没有找到相关设置</string>
+    <string name="settings_search_empty_detail">换个名称搜索，或清空搜索内容。</string>
+    <string name="settings_search_models_aliases">供应商 模型配置 用途 密钥 API Key 运行方式</string>
+    <string name="settings_search_agents_aliases">Claude Code Codex 会话分诊 编码 运行时</string>
+    <string name="settings_search_notifications_aliases">通知设置 通知 通知渠道 电池 保活 自启动 胶囊 悬浮 静音 电脑 锁屏 后台</string>
+    <string name="settings_search_connectors_aliases">邮箱 邮件 手机 飞书 Lark 以你的名义发出</string>
+    <string name="settings_search_extensions_aliases">扩展 插件 市场</string>
+    <string name="settings_search_about_aliases">App 版本 检查更新 APK 安装</string>
+    <string name="settings_search_connection_aliases">Hub hub 服务器 状态 诊断 网络 配对 地址</string>
+    <string name="settings_search_appearance_aliases">风格 主题 颜色 深色 浅色 外观 密度 紧凑 边距</string>
+    <string name="settings_model_add_provider">添加供应商</string>
+    <string name="settings_model_how_runs">模型运行方式</string>
+    <string name="settings_model_how_runs_detail">在模型供应商中管理凭据和连接方式。更换模型不会改变界面或已开启的功能。</string>
+    <string name="settings_home_extensions_detail">管理扩展能力</string>
+    <string name="settings_home_connectors_detail">邮件、消息与手机数据</string>
+</resources>

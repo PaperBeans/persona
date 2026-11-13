@@ -247,6 +247,33 @@ func readAskDeadline(a askDeadlineArgs, now time.Time) (askDeadline, error) {
 	return d, nil
 }
 
+// askRecommend is question i's recommended option as ask_user's arguments name it, when it is one of its options'
+// labels (a deadline requires that; without one a recommend naming no option is left out); "" for none.
+func askRecommend(a askDeadlineArgs, i int, options []proto.QuestionOption) string {
+	if i >= len(a.Questions) {
+		return ""
+	}
+	rec := strings.TrimSpace(a.Questions[i].Recommend)
+	if rec == "" || !slices.ContainsFunc(options, func(o proto.QuestionOption) bool { return strings.TrimSpace(o.Label) == rec }) {
+		return ""
+	}
+	return rec
+}
+
+// keepAskDecision keeps on ask_user card ix what its arguments said of the decision, for the history
+// (docs/protocol/protocol.md "Decision fields"): its deadline when it has one, and reversible as the asker said it (left
+// out when it said nothing; never guessed).
+func keepAskDecision(ix *proto.Interaction, a askDeadlineArgs, d askDeadline) {
+	if !d.At.IsZero() {
+		at := d.At.UTC()
+		ix.Deadline = &at
+	}
+	if a.Reversible != nil {
+		r := *a.Reversible
+		ix.Reversible = &r
+	}
+}
+
 // askDeadlineOf reads back the deadline toolAskUser wrote into ask_user ix's arguments (always an RFC 3339 time there,
 // checked when it was asked); false when it has none.
 func askDeadlineOf(ix proto.Interaction) (askDeadline, bool) {
@@ -364,6 +391,7 @@ func (s *Service) askTodoDue(ctx context.Context, id string, inline bool, now ti
 				}
 			}
 		}
+		s.recordLateAnswer(a, choices, proto.AnsweredByDefault, reason)
 		s.settleAskClaim(ctx, id, true)
 		s.closeAskTodo(ctx, id)
 		s.logf("ask_user to-do %s: deadline passed unanswered: recommended options taken by default", id)

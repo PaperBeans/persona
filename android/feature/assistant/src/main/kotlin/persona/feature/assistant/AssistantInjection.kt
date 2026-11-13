@@ -85,7 +85,7 @@ fun ConnectedAssistant(
         machines = machines, phoneToolsAvailable = phoneToolsAvailable ?: LocalAssistantHost.current?.phoneToolsAvailable,
         management = management ?: LocalAssistantHost.current?.management,
         requestedSession = requestedSession, assistantChatContent = assistantChatContent ?: LocalAssistantHost.current?.chatContent,
-        mainConversationSender = dependencies.mainConversationSender())
+        mainConversationSender = dependencies.mainConversationSender(), mentionSessions = sessions.sessions)
 }
 
 /** All assistant entry points reuse the pairing-owned outbox, including the platform share queue. */
@@ -99,6 +99,7 @@ object AssistantSendingModule {
     ): MainConversationSender =
         object : MainConversationSender {
             override val outbox = messages.outbox
+            override val sendReceipts = messages.sendReceipts
 
             override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?) {
                 val pairing = checkNotNull(data.restore()) { context.getString(R.string.assistant_pair_first) }
@@ -113,4 +114,12 @@ object AssistantSendingModule {
                 data.restore()?.messages?.mainChanged()
             }
         }
+}
+
+/** The current group's read-only access to its computers (New chat's @ lists a typed folder on the assistant's one). */
+@Composable
+internal fun assistantSessionFiles(): persona.core.contracts.api.SessionFiles? {
+    val host = LocalAssistantHost.current ?: return null
+    val wiring by chatWiringSource().current.collectAsStateWithLifecycle()
+    return wiring?.takeIf { it.scope.path == host.identity }?.files
 }

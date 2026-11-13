@@ -75,7 +75,8 @@ export function replyModel(seg: Segment): string | undefined {
 /** `lines` with each visible exchange whose reply's model differs from the previous visible reply's marked
  *  (Segment.modelChange). The same model written another way is no change (modelIdentity), nor are two ids the chat
  *  names alike. A folded round (supervision, background) is no visible reply; an exchange whose model is unknown
- *  neither gets a mark nor ends the run. */
+ *  neither gets a mark nor ends the run. The first exchange on another engine (Segment.engineSwitch, #5054) gets none:
+ *  its switch divider names the model already; the next exchange is compared with it. */
 export function markModelChanges(lines: ChatLine[]): ChatLine[] {
   let previous: { id: string; identity: ModelIdentity } | undefined;
   return lines.map((line) => {
@@ -85,7 +86,7 @@ export function markModelChanges(lines: ChatLine[]): ChatLine[] {
     const from = previous;
     const identity = modelIdentity(model);
     previous = { id: model, identity };
-    if (!from || from.identity.canonical === identity.canonical || from.identity.name === identity.name) return line;
+    if (!from || line.seg.engineSwitch || from.identity.canonical === identity.canonical || from.identity.name === identity.name) return line;
     return { ...line, seg: { ...line.seg, modelChange: { from: from.id, to: model } } };
   });
 }

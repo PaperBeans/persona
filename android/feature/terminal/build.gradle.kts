@@ -17,6 +17,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.androidx.lifecycle.compose)
+    implementation(libs.androidx.activity)
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:${libs.versions.lifecycle.get()}")
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.coroutines.android)

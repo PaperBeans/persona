@@ -9,7 +9,7 @@ vi.hoisted(() => {
 });
 vi.mock("../../lib/api", async (original) => ({ ...await original<typeof import("../../lib/api")>(), fullItem: vi.fn() }));
 import { fullItem } from "../../lib/api";
-import { agentStatus, agentsWorking, buildTaskIndex, terminalCalls } from "../../lib/tasks";
+import { agentStatus, buildTaskIndex, terminalCalls } from "../../lib/tasks";
 import { chatLines } from "../../lib/turns";
 import type { Item, Subagent } from "../../lib/types";
 import { ChatContext } from "./chat-context";
@@ -64,7 +64,8 @@ describe("associated subagent reports", () => {
     // the interim report is what it has said so far
     expect(host.textContent).toContain("The fictional checks are still running.");
     const running = [...initial, progress];
-    expect(agentsWorking([meta], terminalCalls(running))).toEqual({ count: 1, doing: ["Checking fictional tests"] });
+    // an interim report answers nothing: the agent still waits on the call (the running bar's step)
+    expect(terminalCalls(running).has("launch")).toBe(false);
     const terminal = [...running, done, item(7, "tool_result", { tool_use_id: "launch", task: note("completed") })];
     await draw(terminal);
     expect(host.querySelector("[data-subagent-card]")?.getAttribute("data-subagent-card")).toBe("completed");
@@ -74,7 +75,7 @@ describe("associated subagent reports", () => {
     expect(host.querySelector('[data-items="example-6#0"]')).not.toBeNull();
     expect(host.textContent).toContain("Every fictional check passed.");
     expect(host.textContent).not.toContain("The fictional checks are still running.");
-    expect(agentsWorking([meta], terminalCalls(terminal))).toBeNull();
+    expect(terminalCalls(terminal).has("launch")).toBe(true);
     expect(host.querySelectorAll("[data-subagent-card]")).toHaveLength(1);
     expect(host.textContent).not.toContain("Async agent launched");
   });

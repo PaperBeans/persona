@@ -48,15 +48,15 @@ func pluginToolsRule(dir string) string {
 	return ownToolsRule + ",Bash(sh " + filepath.Join(dir, "agent-plugin", "skills", "persona-office", "scripts", "office.sh") + " *)"
 }
 
-// resumeHeld are the two reports that give herdr the pane's resume command (herdrresume.go): the pane held as
-// Persona's, then the session with eval of cmd as its resume_argv.
+// resumeHeld are the two reports that give herdr the pane's resume command (herdrresume.go): any stale Persona
+// authority cleared so herdr's screen detection decides state (#4657), then the session with eval of cmd as resume_argv.
 func resumeHeld(pane, id, cmd string) [2]string {
 	return resumeHeldAgent("claude", pane, id, cmd)
 }
 
 func resumeHeldAgent(agent, pane, id, cmd string) [2]string {
 	return [2]string{
-		call("pane.report_agent", map[string]any{"pane_id": pane, "source": resumeSource, "agent": agent, "state": "idle", "seq": 7}),
+		call("pane.clear_agent_authority", map[string]any{"pane_id": pane, "source": resumeSource, "seq": 7}),
 		call("pane.report_agent_session", map[string]any{"pane_id": pane, "source": resumeSource, "agent": agent, "seq": 8,
 			"agent_session_id": id, "resume_argv": []string{"eval", cmd}}),
 	}
@@ -91,6 +91,13 @@ func waitCalls(t *testing.T, f *fakeHerdr, method string, n int) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// waitReports waits until the resume report for pane has completed its per-pane turn. It follows the actual
+// asynchronous work rather than sleeping for a guessed amount of time before asserting that nothing was sent.
+func waitReports(n *Node, pane string) {
+	unlock := n.resumes.lock(pane)
+	unlock()
 }
 
 func personaDir(home string) string { return filepath.Join(home, ".persona") }
@@ -341,6 +348,7 @@ func TestHerdrStartFailsWhenTheTabCannotBeMade(t *testing.T) {
 // before its first start, not on package variables: a start another test left running still reads its own node's.
 func withStartWaits(n *Node, start, ready time.Duration) {
 	n.claudeStart, n.claudeReady = start, ready
+	n.readyPoll = 0 // timing-sensitive tests keep the production cadence
 }
 
 // A busy machine's shell takes longer than claude's whole ready wait to run claude (#1396: ~/.zshrc took 54 s with a

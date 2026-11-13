@@ -175,6 +175,7 @@ func readExtensionJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 func (h *Manager) extensionRoutes(api *http.ServeMux) {
 	h.extensionUIRoutes(api)
 	h.extensionImageRoutes(api)
+	h.extensionLogoRoutes(api)
 	h.extensionSystemRoutes(api)
 	h.marketRoutes(api)
 	h.operationRoutes(api)
@@ -215,6 +216,7 @@ func (h *Manager) extensionRoutes(api *http.ServeMux) {
 		}
 	}
 	h.authRoutes(api, full)
+	h.assistantDataRoutes(api, full)
 	// Installing, upgrading and removing run or delete code on this machine: the master token over loopback only.
 	owner := func(f http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -512,7 +514,8 @@ func (h *Manager) extensionRoutes(api *http.ServeMux) {
 			hp = ps().get(id)
 		}
 		rest := strings.TrimPrefix(r.URL.Path, "/api/v1/extensions/"+id)
-		if hp == nil || hp.proxy == nil || hp.proc == nil || strings.HasPrefix(rest, "/-/") {
+		// /transcription/ is the manager's only (transcription.go): a meeting's audio never comes from an app.
+		if hp == nil || hp.proxy == nil || hp.proc == nil || strings.HasPrefix(rest, "/-/") || transcriptionPath(rest) {
 			writeExtensionResponseError(w, r, http.StatusNotFound, "not_found", errNoExtension)
 			return
 		}

@@ -247,7 +247,7 @@ fun VoiceControl(
             Modifier.size(if (style == AppStyle.Board) 60.dp else 64.dp).then(surface).clip(shape).indication(interaction, ripple()),
             contentAlignment = Alignment.Center,
         ) { JIcon(icon, null, size = 26.dp, tint = ink, selected = kind != VoiceControlKind.Plain) }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(8.dp.dense))
         Text(
             label, style = PersonaTheme.type.caption, color = when (kind) {
                 VoiceControlKind.Plain -> palette.ink2
@@ -272,7 +272,7 @@ fun VoiceControlBar(modifier: Modifier = Modifier, content: @Composable RowScope
         AppStyle.Board -> Modifier.background(palette.background).drawBehind { drawLine(palette.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
     }
     Row(
-        modifier.fillMaxWidth().then(frame).padding(horizontal = 24.dp).padding(top = 14.dp, bottom = 18.dp),
+        modifier.fillMaxWidth().then(frame).padding(horizontal = 24.dp.dense).padding(top = 14.dp.dense, bottom = 18.dp.dense),
         horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Top, content = content,
     )
 }
@@ -293,7 +293,7 @@ fun VoiceCaption(text: String, fromUser: Boolean, final: Boolean, modifier: Modi
             AppStyle.Brief -> PersonaTheme.type.voice.copy(fontSize = 19.sp, lineHeight = 29.sp, fontWeight = FontWeight.Medium)
             AppStyle.Board -> PersonaTheme.type.body.copy(fontWeight = FontWeight.Medium)
         }
-        Text(text, modifier.fillMaxWidth().padding(end = 32.dp, top = 6.dp, bottom = 6.dp), style = words, color = ink)
+        Text(text, modifier.fillMaxWidth().padding(end = 32.dp.dense, top = 6.dp.dense, bottom = 6.dp.dense), style = words, color = ink)
     }
 }
 
@@ -302,7 +302,7 @@ fun VoiceCaption(text: String, fromUser: Boolean, final: Boolean, modifier: Modi
 fun VoiceStatus(text: String, modifier: Modifier = Modifier, error: String? = null) {
     val palette = PersonaTheme.palette
     Column(
-        modifier.fillMaxWidth().padding(horizontal = 24.dp).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+        modifier.fillMaxWidth().padding(horizontal = 24.dp.dense).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
@@ -310,7 +310,7 @@ fun VoiceStatus(text: String, modifier: Modifier = Modifier, error: String? = nu
             color = if (PersonaTheme.style == AppStyle.Brief) palette.ink else palette.ink2, overflow = TextOverflow.Ellipsis,
         )
         error?.let {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(6.dp.dense))
             Text(it, style = PersonaTheme.type.caption, color = palette.danger.text, textAlign = TextAlign.Center)
         }
     }

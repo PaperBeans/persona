@@ -5,6 +5,7 @@ import { reviewState } from "./supervision";
 import { supersededFailedStarts } from "./todo-triage";
 import { dockAgents, makeSessionLookup, openAsk, todoRank, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import { byTime } from "./times";
+import { homeKey } from "./folded-rows";
 import type { Interaction, Session } from "./types";
 
 /**
@@ -15,8 +16,10 @@ import type { Interaction, Session } from "./types";
  * Agent that belongs to no task (opened by hand) is a row of its own.
  */
 export type NeedsYouItem =
-  /** A task whose agent asks something (`asks`, oldest first), or that waits for the user's decision or review. */
-  | { kind: "task"; key: string; todo: Todo; status: TodoStatus; asks: Interaction[] }
+  /** A task whose agent asks something (`asks`, oldest first), or that waits for the user's decision or review.
+   *  `countsOpen` says whether the To-dos page's "Not done" counts the to-do (#3331): the row stays visible whatever
+   *  it says, the chip badge counts it only when it does. */
+  | { kind: "task"; key: string; todo: Todo; status: TodoStatus; asks: Interaction[]; countsOpen: boolean }
   /** An Agent that belongs to no task, asking something. */
   | { kind: "agent"; key: string; session: Session; asks: Interaction[] }
   /** A plan waiting for Start. */
@@ -25,8 +28,8 @@ export type NeedsYouItem =
   | { kind: "message"; key: string; item: FeedItem };
 
 export type RunningItem =
-  /** A dispatched task not finished and not waiting on the user. */
-  | { kind: "task"; key: string; card: TaskCardMetadata; todo: Todo; status: TodoStatus; activity?: BackgroundWork }
+  /** A dispatched task not finished and not waiting on the user. `countsOpen`: see NeedsYouItem. */
+  | { kind: "task"; key: string; card: TaskCardMetadata; todo: Todo; status: TodoStatus; activity?: BackgroundWork; countsOpen: boolean }
   /** A working Agent that belongs to no task. */
   | { kind: "agent"; key: string; session: Session; activity?: BackgroundWork };
 
@@ -104,7 +107,8 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
   const superseded = supersededFailedStarts(todos);
   const asksOf = new Map<string, Interaction[]>();
   for (const ix of [...interactions].sort((a, b) => byTime(a.created_at, b.created_at) || a.id.localeCompare(b.id))) {
-    const k = sessionKey(ix.machine_id, ix.session_id);
+    // a child session's card is asked under its parent (#5120): the parent's task or Agent row holds it
+    const k = homeKey(ix);
     asksOf.set(k, [...(asksOf.get(k) ?? []), ix]);
   }
 
@@ -122,20 +126,20 @@ export function assistantEntries(input: AssistantEntriesInput): AssistantEntries
     const asks = active.flatMap((a) => asksOf.get(sessionKey(a.machine_id, a.session_id)) ?? []);
     const key = `task:${todo.id}`;
     const bucket = cardBucket(card, todo, plans, lookup, now, input.restored?.get(todo.id) ?? 0, superseded.has(todo.id));
+    const countsOpen = bucket === "open";
     // a failed start carries done_at (the hub ends it), yet it is the user's to retry while its bucket says open
     const waits = status === "failed" ? bucket === "open" : !todo.done_at && WAITS_ON_YOU.has(status);
-    if (asks.length) asking.push({ kind: "task", key, todo, status, asks });
-    else if (waits || taskAwaitsDecision(todo)) {
+    const decision = taskAwaitsDecision(todo);
+    if (asks.length) asking.push({ kind: "task", key, todo, status, asks, countsOpen });
+    else if (waits || decision) {
       // Only the review decision is hidden; a live Agent question above still has its home.
-      if (!waits && taskAwaitsDecision(todo) && (todo.decision_review?.dismissal_id && todo.decision_review.review_at === decisionRound(todo) || input.deferred?.[decisionLaterKey(todo)])) {
-        for (const agent of active) folded.add(sessionKey(agent.machine_id, agent.session_id));
-        continue;
+      if (!(status !== "needs_you" && decision && (todo.decision_review?.dismissal_id && todo.decision_review.review_at === decisionRound(todo) || input.deferred?.[decisionLaterKey(todo)]))) {
+        deciding.push({ item: { kind: "task", key, todo, status, asks, countsOpen }, rank: todoRank(todo, status), at: card.at });
       }
-      deciding.push({ item: { kind: "task", key, todo, status, asks }, rank: todoRank(todo, status), at: card.at });
     }
     // a parked task waits on purpose (#3804): with the tasks in progress however long it has been still, never folded away
-    else if (bucket === "open" || reviewState(todo) === "parked") open.push({ item: { kind: "task", key, card, todo, status, activity: taskBackgroundWork(todo, lookup) }, rank: todoRank(todo, status), at: card.at });
-    else if (bucket === "shelved") shelved.push({ item: { kind: "task", key, card, todo, status }, at: card.at });
+    else if (bucket === "open" || reviewState(todo) === "parked") open.push({ item: { kind: "task", key, card, todo, status, activity: taskBackgroundWork(todo, lookup), countsOpen }, rank: todoRank(todo, status), at: card.at });
+    else if (bucket === "shelved") shelved.push({ item: { kind: "task", key, card, todo, status, countsOpen: false }, at: card.at });
     else continue;
     for (const agent of active) folded.add(sessionKey(agent.machine_id, agent.session_id));
   }

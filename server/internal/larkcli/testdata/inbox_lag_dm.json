@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "data": {
+    "messages": [
+      {
+        "message_id": "om_lag_recent",
+        "msg_type": "text",
+        "create_time": "2029-12-31T23:50:00Z",
+        "sender": {"id": "ou_lag_peer", "id_type": "open_id", "sender_type": "user", "name": "Lag Peer"},
+        "content": "Question search had not indexed yet",
+        "chat_id": "oc_lag_dm"
+      },
+      {
+        "message_id": "om_lag_old",
+        "msg_type": "text",
+        "create_time": "2029-12-31T21:58:00Z",
+        "sender": {"id": "ou_lag_peer", "id_type": "open_id", "sender_type": "user", "name": "Lag Peer"},
+        "content": "Older than the direct-chat lookback",
+        "chat_id": "oc_lag_dm"
+      }
+    ],
+    "has_more": false
+  }
+}

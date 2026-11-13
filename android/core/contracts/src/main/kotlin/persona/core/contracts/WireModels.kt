@@ -27,6 +27,16 @@ data class Subagent(
     @WireTime @SerialName("started_at") val startedAt: String? = null,
     @WireTime @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("last_text") val lastText: String? = null,
+    /**
+     * How many tool calls it made and its latest one, the model it ran on (its own transcript's, never the one its call
+     * asked for) and its latest reply's tokens; the subagent that launched it ([parentId], absent when the session did).
+     * Each absent from older hubs (docs/protocol/protocol.md, a session's `subagents`).
+     */
+    val steps: Int? = null,
+    @SerialName("last_tool") val lastTool: WorkflowTool? = null,
+    val model: String? = null,
+    val tokens: Long? = null,
+    @SerialName("parent_id") val parentId: String? = null,
 )
 
 @KeepGeneratedSerializer
@@ -52,6 +62,27 @@ data class Fold(
     val tasks: List<FoldTaskSnapshot> = emptyList(),
     /** The folded run belongs to a supervision round the user must see (`fold_supervision.go`); older hubs omit it. */
     @SerialName("supervision_user") val supervisionUser: Boolean? = null,
+    /** The images this run of work looked at (docs/protocol/protocol.md, "Images viewed this turn"); older hubs omit it. */
+    val images: List<FoldImage> = emptyList(),
+)
+
+/**
+ * An image a folded run looked at (`fold.images`, docs/protocol/protocol.md "Images viewed this turn"): its image item
+ * ([itemId], absent for a picture file Read opened whose result kept no image), the call and tool, where it came from
+ * (`read`, `screenshot`, `browser`, `mcp`, `tool`), the file Read read, the machine a screenshot named, and its shape.
+ */
+@Serializable
+data class FoldImage(
+    @SerialName("item_id") val itemId: String? = null,
+    @SerialName("tool_use_id") val toolUseId: String = "",
+    val tool: String = "",
+    val source: String = "tool",
+    val path: String? = null,
+    val machine: String? = null,
+    val mime: String? = null,
+    val size: Int? = null,
+    val width: Int? = null,
+    val height: Int? = null,
 )
 
 @Serializable
@@ -500,7 +531,7 @@ data class WorkflowAgent(
     val calls: Int? = null,
 )
 
-/** A [WorkflowAgent]'s latest tool call: its [name] and what it does ([summary], in the reader's language). */
+/** A [WorkflowAgent]'s or a [Subagent]'s latest tool call: its [name] and what it does ([summary], in the reader's language). */
 @KeepGeneratedSerializer
 @Serializable(with = WorkflowToolSerializer::class)
 data class WorkflowTool(

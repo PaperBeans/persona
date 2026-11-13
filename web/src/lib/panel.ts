@@ -1,7 +1,8 @@
-// The page's right-hand panel: a session's files / Git, or a link opened in the page (docs/web/web.md "Side panel"). A
-// session's terminal is the page's own view now (lib/session-view.ts), not a panel.
+// The page's right-hand panel (docs/web/web.md "Side panel"): a session's files / Git, a link opened in the page, or an
+// Agent or task opened from a conversation (lib/agent-open.ts). A session's terminal is the page's own view now
+// (lib/session-view.ts), not a panel.
 // One panel at a time; opening another replaces it. Session panels close when the page moves to another conversation;
-// a link stays until closed (it is not tied to the conversation it came from).
+// a link, a task and an Agent stay until closed (they are not tied to the conversation they came from).
 import { useSyncExternalStore } from "react";
 import type { DiffScope } from "./comments";
 import { followSubagentLink } from "./subagent-link";
@@ -18,22 +19,41 @@ export interface GitSpot {
   old?: boolean;
 }
 
+/** Where a review opens (Panel "review" `at`). */
+export interface ReviewSpot {
+  path: string;
+  line?: number;
+  /** The line number is the old file's. */
+  old?: boolean;
+  /** A changed-files card's file: when the review does not list it (or cannot be read), the file itself opens in the
+   *  side panel instead of a review with nothing to show for it. */
+  file?: boolean;
+}
+
 export type Panel =
-  /** `path`: the folder to open at; `file`: a file open in it (a panel brought back, lib/panel-memory.ts). */
-  | { kind: "files"; mid: string; sid: string; cwd: string; path?: string; file?: string }
+  /** `path`: the folder to open at; `file`: a file open in it (a panel brought back, lib/panel-memory.ts); `highlight`: a name
+   *  in the folder to mark (the viewer's Show in Files, #5827). */
+  | { kind: "files"; mid: string; sid: string; cwd: string; path?: string; file?: string; highlight?: string }
   | { kind: "git"; mid: string; sid: string; cwd: string; at?: GitSpot }
-  /** Reviewing the session's changes (#151): `scope` to open at, `at` a comment's file and line to go to. */
-  | { kind: "review"; mid: string; sid: string; cwd: string; scope?: "uncommitted" | "branch" | "commit"; at?: { path: string; line: number; old?: boolean } }
+  /** Reviewing the session's changes (#151): `scope` to open at, `at` a comment's file and line to go to, or a changed
+   *  file to scroll to (`path` from the repository's root, or a full path inside it; no `line`). */
+  | { kind: "review"; mid: string; sid: string; cwd: string; scope?: "uncommitted" | "branch" | "commit"; at?: ReviewSpot }
   /** `sid`: the session whose message box takes the comments made in it (else the one last used). */
   | { kind: "file"; mid: string; path: string; cwd?: string; line?: number; to?: number; sid?: string }
   /** `manager`: the chat's it was opened from, which reads it (none: the default's). */
   | { kind: "link"; url: string; title?: string; manager?: string }
-  /** A task of the assistant's conversation: its agent's chat (docs/assistant/unified-entry.md). */
+  /** A task of a conversation, opened from it while Agents open in the side panel (lib/agent-open.ts, #5424): its
+   *  Agent's chat (docs/assistant/unified-entry.md "Task details"). */
   | { kind: "task"; todo: string }
-  /** An agent the main conversation's dock shows that no task stands for (#1113): its chat. */
+  /** An Agent opened from a conversation while Agents open in the side panel (#5424), one no task stands for (#1113)
+   *  included: its chat. */
   | { kind: "agent"; mid: string; sid: string }
-  /** A chat's plan: its latest TodoWrite as a whole list, following the chat (#5602). */
-  | { kind: "plan"; mid: string; sid: string }
+  /** A lead's Team (#5180, lib/team.ts): its workers' strip and the conversation of `worker` (else the one lib/team.ts
+   *  shownWorker picks). `sid` is the lead's: the panel stays while the page shows the lead. */
+  | { kind: "team"; mid: string; sid: string; worker?: string }
+  /** An Agent's background work (#5421, cindy's Background tasks tab; lib/background-panel.ts): its /loop, background tasks
+   *  and workflow runs. `run`: a workflow run's task_id to open at (its detail in the panel). */
+  | { kind: "background"; mid: string; sid: string; run?: string }
   /** The session's dev server in a headless browser on its computer (docs/web/preview.md); `port` / `path`: the one to
    *  show (a localhost link of a reply), else the one shown last or the first running one. */
   | { kind: "preview"; mid: string; sid: string; cwd: string; port?: number; path?: string };

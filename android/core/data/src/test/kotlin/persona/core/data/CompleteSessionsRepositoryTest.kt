@@ -7,12 +7,50 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.*
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.*
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class CompleteSessionsRepositoryTest {
+    @get:Rule val temporary = TemporaryFolder()
     private val rows = (0 until 8000).map { Session("demo", "session/$it") }
     private fun counts() = SessionListCounts(total = 8000)
+
+    @Test fun firstCompleteMembershipRequestKeepsRestoredRowsUntilTheResponse() = runTest {
+        val cached = listOf(Session("demo", "cached"))
+        val fresh = listOf(Session("demo", "fresh"))
+        val store = ListSnapshotStore(temporary.newFolder())
+        store.save("sessions", cached)
+        val requested = CompletableDeferred<Unit>()
+        val response = CompletableDeferred<List<Session>>()
+        val transport = Transport().apply {
+            legacyFetch = {
+                requested.complete(Unit)
+                response.await()
+            }
+        }
+        val connection = Connection()
+        val repository = HubSessionsRepository(transport, connection, backgroundScope, store)
+        repository.sessions.first { it == cached }
+
+        val refresh = backgroundScope.launch { repository.setListFilter(SessionListFilter(requiresCompleteMembership = true)) }
+        requested.await()
+        assertEquals(cached, repository.sessions.value)
+        assertTrue(repository.listStatus.value.loading)
+        assertFalse(repository.listStatus.value.loaded)
+
+        connection.resumed = true
+        connection.state.value = ConnectionState.Online
+        runCurrent()
+        assertTrue(repository.verifiedSessions().isEmpty())
+
+        response.complete(fresh)
+        refresh.join()
+        assertEquals(fresh, repository.sessions.value)
+        assertTrue(repository.listStatus.value.loaded)
+        assertEquals(mapOf("demo" to fresh), repository.verifiedSessions())
+    }
 
     @Test fun completeMembershipRetainsDeepRowsRefreshesNoticesAndCanReturnToPaging() = runTest {
         val connection = Connection()

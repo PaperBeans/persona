@@ -301,6 +301,9 @@ export interface UIContext {
   machine?: string;
   item?: string;
   size?: "compact" | "full";
+  /** The assistant's name as the composer shows it ("Ask {name}…"), sent only to the manager's own subscription pages,
+   *  which name their Set Up with … after it (docs/extensions/subscriptions.md "Pages"). */
+  assistant?: string;
 }
 
 /** What the web says with every render and action (docs/extensions/extensions.md "Context"): time zone, language, platform, UI version. */
@@ -327,6 +330,7 @@ export function uiContext(context?: UIContext): UIContextSent {
   if (context?.machine) out.machine = context.machine;
   if (context?.item) out.item = context.item;
   if (context?.size) out.size = context.size;
+  if (context?.assistant) out.assistant = context.assistant;
   return out;
 }
 
@@ -442,15 +446,19 @@ export function blocks(items: UIItem[]): UIBlock[] {
 /**
  * What to do after a press: the view to show (new, or "reload" to draw again), a word to say, a link to open; `source`:
  * open the inbox item's own source page (an inbox_item's open_url persona://inbox/<item>/source, for the item it is
- * drawn for); `settings`: the in-app path of an extension's own settings (open_url persona://settings/extensions/<id>).
+ * drawn for); `settings`: the in-app path of an extension's own settings (open_url persona://settings/extensions/<id>);
+ * `ask`: the text for the assistant's main conversation (open_url persona://ask?text=…), taken only from the manager's
+ * own subscription pages (`extension` SUBSCRIPTIONS_UI, docs/extensions/subscriptions.md "Pages").
  */
 export function outcome(
   r: UIActionResult,
   item?: string,
-): { view?: UIView; items?: UIItem[]; reload: boolean; toast?: string; url?: string; source?: true; settings?: string; push?: UIPush; pop?: true } {
+  extension?: string,
+): { view?: UIView; items?: UIItem[]; reload: boolean; toast?: string; url?: string; source?: true; settings?: string; ask?: string; push?: UIPush; pop?: true } {
   const url = r.open_url && isHttps(r.open_url) ? r.open_url : undefined;
   const source = !!item && !!r.open_url && inboxSourceItem(r.open_url) === item;
   const settings = r.open_url ? extensionSettingsHref(r.open_url) : undefined;
+  const ask = extension === SUBSCRIPTIONS_UI && r.open_url ? askText(r.open_url) : undefined;
   const push = readPush(r.push);
   const pop = r.pop === true && !push;
   return {
@@ -462,9 +470,19 @@ export function outcome(
     url,
     ...(source ? { source: true as const } : {}),
     ...(settings ? { settings } : {}),
+    ...(ask ? { ask } : {}),
     ...(push ? { push } : {}),
     ...(pop ? { pop: true as const } : {}),
   };
+}
+
+/** The text of a persona://ask?text=… link (an older name's scheme too, as other in-app links); undefined for any other
+ *  link or an empty text. At most 8000 characters: the pages name a source, they don't carry its content. */
+export function askText(link: string): string | undefined {
+  const c = canonicalAppURL(link);
+  if (!c.startsWith("persona://ask?")) return undefined;
+  const text = new URLSearchParams(c.slice("persona://ask?".length)).get("text") ?? "";
+  return text.trim() && text.length <= 8000 ? text : undefined;
 }
 
 /** How deep the pages pushed on one another go (docs/extensions/extensions.md "Page navigation"): a push past it replaces the top one. */
@@ -906,4 +924,28 @@ export function seriesColors(series: ChartSeries[]): string[] {
 export function sliceColors(n: number): string[] {
   const more = ["teal", "amber", "indigo", "orange"];
   return Array.from({ length: n }, (_, i) => (i < 4 ? `var(--series-${i + 1})` : `var(--hue-${more[(i - 4) % more.length]})`));
+}
+
+/** One segment of a single category's horizontal share bar: its series index, value and share of the total (0…1). */
+export interface SharePart {
+  series: number;
+  value: number;
+  ratio: number;
+}
+
+/**
+ * Whether a stacked bar chart is one category's shares — every series holds exactly one point, all values finite and
+ * non-negative and the total positive. A persona-card stacked_bar is always this shape (a single day's parts), so it
+ * reads as a horizontal segmented bar rather than a lone column; a chart with two or more categories stays columns for
+ * the comparison. The same rule on every app (docs/extensions/extensions.md "New items" chart; issue #5386).
+ */
+export function stackedShare(item: Pick<UIItem, "kind" | "stacked" | "series">): SharePart[] | null {
+  const series = item.series ?? [];
+  if (item.kind !== "bar" || !item.stacked || series.length === 0) return null;
+  if (series.some((s) => s.points.length !== 1)) return null;
+  const values = series.map((s) => s.points[0].value);
+  if (values.some((v) => !Number.isFinite(v) || v < 0)) return null;
+  const total = values.reduce((a, b) => a + b, 0);
+  if (total <= 0) return null;
+  return values.map((value, i) => ({ series: i, value, ratio: value / total }));
 }

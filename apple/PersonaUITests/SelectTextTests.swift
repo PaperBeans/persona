@@ -68,6 +68,9 @@ final class SelectTextTests: XCTestCase {
         XCTAssertTrue(text.waitForExistence(timeout: 20), "\(message) is not in the chat")
         acceptIconAlert(timeout: 3) // the scheme's icon
         sleep(3) // the list settles at the newest message; the header folds
+        let title = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier IN %@", ["chat.title", "chat.compactTitle"])).firstMatch
+        topBar = title.exists ? title.frame : .null
         // Rows of the flipped chat list may report flipped frames: press by the centre in the window.
         let window = app.windows.firstMatch.frame
         var f = text.frame
@@ -127,9 +130,16 @@ final class SelectTextTests: XCTestCase {
         return got
     }
 
-    /// Beside the lifted message, on the scrim: below the status bar, whose taps never reach the app.
+    /// The chat's title in its top bar, where it was before the message was lifted: the lift dims it and is drawn over it.
+    private var topBar = CGRect.null
+
+    /// Beside the lifted message, on the scrim: on the top bar it dims (below the status bar, whose taps never reach the
+    /// app). Not at a set height: a long reply's card can start there, and a tap on the card's edge ends nothing (#6099).
     @MainActor private func tapBeside() {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+        let card = app.descendants(matching: .any)["message-lift"].firstMatch.frame
+        let at = CGPoint(x: topBar.midX, y: topBar.midY)
+        XCTAssertFalse(topBar.isNull || card.contains(at), "nothing beside the lifted message to tap: top bar \(topBar), card \(card)")
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: at.x, dy: at.y)).tap()
     }
 
     /// A reply with a fence inside a longer fence, a formula, indented code, a rule and a tab-indented item: the

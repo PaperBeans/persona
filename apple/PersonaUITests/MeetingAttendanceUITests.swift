@@ -25,7 +25,7 @@ final class MeetingAttendanceUITests: XCTestCase {
         try shot(app, "older-hub")
     }
 
-    /// The hub's default is off: the role shows, Off chosen, nobody attends, Meeting Recording still one tap.
+    /// The hub's default is off: the role shows, Off chosen, nobody attends, Record still one tap.
     @MainActor func testOffByDefault() throws {
         let hub = try mockHub()
         try attendance(hub, on: true, default: "off")

@@ -63,3 +63,10 @@ Rule 4 defines the audiences of Assistant and Agents and the simplicity required
    understandable; developer terminology, engineering details and accumulating options must not make them harder to use.
    Put specialist workflows in Agents or advanced settings, and disclose details only when needed. For example, asking
    Assistant to organize a trip must not require choosing an Agent runtime or a repository.
+
+5. **Fast, local-first and stateful: never leave the user waiting without feedback.**
+
+   Show local feedback immediately. When the hub receives a message, show Processing without waiting for scheduling,
+   process startup or model output. Keep receipt, delivery and execution distinct; expose waiting and failure, preserve
+   recoverable drafts, and reconcile local state with authoritative outcomes. Make the work itself faster too, and
+   verify feedback latency separately from execution latency.

@@ -16,8 +16,11 @@ export function workflowStatus(w: Workflow): WorkflowStatus {
   return (["failed", "killed", "stalled"] as const).find((s) => s === w.status) ?? "completed";
 }
 
-/** Its runs still running. */
+/** Its runs still running. On a summary row (`summary=1`) its `workflow_progress`, the newest running run without its
+ *  agents and phases, stands for them (#5888), even when the store kept an older complete row's `workflows`: fresh
+ *  summary counts win, as in `backgroundWork`. */
 export function runningWorkflows(s: Session | undefined): Workflow[] {
+  if (typeof s?.waiting === "boolean") return s.workflow_progress?.running ? [s.workflow_progress] : [];
   return (s?.workflows ?? []).filter((w) => w.running);
 }
 
@@ -42,7 +45,7 @@ export function workflowName(w: Workflow): string {
 /** "Verify 2/2", "Verify", "" */
 export function workflowPhase(w: Workflow): string {
   if (!w.phase) return "";
-  const n = w.phases?.length ?? 0;
+  const n = w.phases?.length || w.phase_count || 0; // a summary row's run has no phases, only how many (#5888)
   return w.phase_index && n ? `${w.phase} ${w.phase_index}/${n}` : w.phase;
 }
 
@@ -73,8 +76,9 @@ export function workflowShortLine(s: Session | undefined): string {
 export function workflowLine(s: Session | undefined, now: number): string {
   const runs = runningWorkflows(s);
   if (!runs.length) {
-    // an older hub: it only says a workflow runs
-    return (s?.running_workflows ?? 0) > 0 || (s?.background ?? []).some((b) => b.kind === "workflow") ? t("lib-workflows.running_in_background") : "";
+    // an older hub: it only says a workflow runs (a summary's background is an older row's, kept by the store)
+    const said = typeof s?.waiting === "boolean" ? (s.running_workflows ?? 0) > 0 : (s?.background ?? []).some((b) => b.kind === "workflow");
+    return said ? t("lib-workflows.running_in_background") : "";
   }
   const w = runs[0];
   const parts = [t("lib-workflows.line_name", { name: workflowName(w) }), workflowPhase(w), workflowCounts(w), workflowElapsed(w, now)].filter(Boolean);
@@ -107,7 +111,7 @@ function endedAt(w: Workflow): number | null {
 }
 
 /** Its runs still running, and those that ended within the last day (the node lists them that long; an older one may
- *  list them longer): what the chat's "Background" chip and its dialog show. */
+ *  list them longer): what the chat's Background tasks button and panel show. */
 export function recentWorkflows(s: Session | undefined, now: number): Workflow[] {
   return (s?.workflows ?? []).filter((w) => {
     if (w.running) return true;

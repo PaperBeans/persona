@@ -43,6 +43,16 @@ type Rule struct {
 	// Targets are the addresses its settings name now (permissions.network "config:<field>", #5906): each lets
 	// through that host and port only, as written (no subdomain), an https tunnel unless HTTP.
 	Targets []Target
+	// Owner are the hosts the owner allowed it in the admin UI (#5697): each that host only (no subdomain), on its
+	// port or on any port when it has none, https or http. Reached like Targets: every address the name resolves to is
+	// checked on each connection (private LAN addresses pass; loopback, link-local and metadata ones refuse the name),
+	// and only checked addresses are dialled.
+	Owner []Target
+}
+
+// owned says whether host:port is one of the hosts the owner allowed (Rule.Owner).
+func (r Rule) owned(host, port string) bool {
+	return slices.ContainsFunc(r.Owner, func(t Target) bool { return t.Host == host && (t.Port == "" || t.Port == port) })
 }
 
 // Target is one address an extension's settings name (extension.ConfiguredTarget).
@@ -92,7 +102,19 @@ type Counts struct {
 	Denied     int64     `json:"denied"`
 	LastDenied string    `json:"last_denied,omitempty"`
 	DeniedAt   time.Time `json:"denied_at,omitzero"`
+	// Recent are the last RecentDenied different hosts it was refused, the latest first (#5697): in memory only.
+	Recent []Denied `json:"recent_denied,omitempty"`
 }
+
+// Denied is one host an extension was refused: how often and when last.
+type Denied struct {
+	Host  string    `json:"target"`
+	Count int64     `json:"count"`
+	At    time.Time `json:"at"`
+}
+
+// RecentDenied is how many refused hosts Counts.Recent keeps.
+const RecentDenied = 5
 
 // Proxy is the hub's egress proxy: one loopback TCP listener (an extension says who it is with its credential) and a
 // unix socket per sandboxed extension (the socket says who it is).
@@ -197,6 +219,25 @@ func (p *Proxy) SetTargets(ext string, targets []Target) {
 	}
 }
 
+// SetOwner replaces the hosts the owner allowed ext (Rule.Owner) while its program runs. A host taken away is refused
+// from now on: its open connections are closed, as SetTargets does; one only added leaves them be.
+func (p *Proxy) SetOwner(ext string, owner []Target) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	r, ok := p.rules[ext]
+	if !ok {
+		return
+	}
+	for _, t := range r.Owner {
+		if !slices.Contains(owner, t) {
+			p.cancelIOLocked(ext)
+			break
+		}
+	}
+	r.Owner = slices.Clone(owner)
+	p.rules[ext] = r
+}
+
 // Register sets ext's rule and gives it a new credential (each start of its program): the URL of the loopback
 // listener with it, for HTTP(S)_PROXY.
 func (p *Proxy) Register(ext string, r Rule) string {
@@ -212,7 +253,7 @@ func (p *Proxy) Register(ext string, r Rule) string {
 	if old, ok := p.credOf[ext]; ok {
 		delete(p.creds, old)
 	}
-	p.rules[ext] = Rule{Hosts: slices.Clone(r.Hosts), Hub: r.Hub, Targets: slices.Clone(r.Targets)}
+	p.rules[ext] = Rule{Hosts: slices.Clone(r.Hosts), Hub: r.Hub, Targets: slices.Clone(r.Targets), Owner: slices.Clone(r.Owner)}
 	p.creds[cred], p.credOf[ext] = ext, cred
 	addr := ""
 	if p.ln != nil {
@@ -246,7 +287,9 @@ func (p *Proxy) Stats(ext string) Counts {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if c := p.counts[ext]; c != nil {
-		return *c
+		out := *c
+		out.Recent = slices.Clone(c.Recent)
+		return out
 	}
 	return Counts{}
 }
@@ -323,8 +366,19 @@ func (p *Proxy) count(ext, host string, allowed bool) {
 	if allowed {
 		c.Allowed++
 	} else {
+		now := time.Now()
 		c.Denied++
-		c.LastDenied, c.DeniedAt = host, time.Now()
+		c.LastDenied, c.DeniedAt = host, now
+		d := Denied{Host: host, At: now}
+		if i := slices.IndexFunc(c.Recent, func(d Denied) bool { return d.Host == host }); i >= 0 {
+			d.Count = c.Recent[i].Count
+			c.Recent = slices.Delete(c.Recent, i, i+1)
+		}
+		d.Count++
+		c.Recent = slices.Insert(c.Recent, 0, d)
+		if len(c.Recent) > RecentDenied {
+			c.Recent = c.Recent[:RecentDenied]
+		}
 	}
 	p.mu.Unlock()
 	if p.OnDecision != nil {

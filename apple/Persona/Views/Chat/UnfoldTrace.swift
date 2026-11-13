@@ -37,6 +37,10 @@ final class UnfoldTrace: NSObject {
         var heights: [Int?] = []
         /// View bodies evaluated meanwhile, the most first (`-perfCounts YES`).
         var bodies: [String] = []
+        /// The list's distance from its newest end when the measurement ended, and how high on screen a row opened
+        /// there may rise (window y, `ChatPin.riseTop`): what a row opened or closed at the newest end is checked by (#3757).
+        var gap: Int?
+        var top: Int?
         /// Where the row was at the tap (window y).
         var from: Int?
         /// Its top as drawn on screen, frame by frame (`DrawnProbe`: work line headers), beside what SwiftUI reports
@@ -63,6 +67,10 @@ final class UnfoldTrace: NSObject {
     @ObservationIgnored private var link: CADisplayLink?
     @ObservationIgnored private var bodiesAtStart: [String: Int] = [:]
     @ObservationIgnored private var idled = false
+    /// Set by the chat: its list's distance from the newest end, and the top bar's edge (`Result.gap`, `Result.top`).
+    @ObservationIgnored var newestGap: () -> CGFloat? = { nil }
+    @ObservationIgnored var riseTop: () -> CGFloat? = { nil }
+    @ObservationIgnored private var top: CGFloat?
     @ObservationIgnored private var drawnTop: () -> CGFloat? = { nil }
     @ObservationIgnored private var drawn: [CGFloat?] = []
 
@@ -88,6 +96,7 @@ final class UnfoldTrace: NSObject {
         self.drawn = []
         self.height = height
         y0 = drawn() ?? y()
+        top = riseTop()
         deltas = []
         ys = []
         heights = [height()]
@@ -129,6 +138,7 @@ final class UnfoldTrace: NSObject {
                        heights: heights.map { $0.map { Int($0.rounded()) } },
                        bodies: PerfCount.bodies.map { ($0.key, $0.value - (bodiesAtStart[$0.key] ?? 0)) }.filter { $0.1 > 0 }
                            .sorted { $0.1 > $1.1 }.prefix(8).map { "\($0.0) \($0.1)" },
+                       gap: newestGap().map { Int($0.rounded()) }, top: top.map { Int($0.rounded()) },
                        from: y0.map { Int($0.rounded()) }, drawn: drawn.map { $0.map { Int($0.rounded()) } })
         print("UNFOLD \(r.what): frames \(r.frames) hitches \(r.hitches) worst \(r.worstMS) ms moved \(r.moved) end \(r.end) ys "
               + r.ys.map { $0.map(String.init) ?? "-" }.joined(separator: " "))

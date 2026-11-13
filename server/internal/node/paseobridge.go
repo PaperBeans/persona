@@ -168,8 +168,12 @@ func isNodeBinary(path string) bool {
 // commonNodePaths are where Node.js installers put node, newest nvm version first.
 func commonNodePaths() []string {
 	home := userHome()
-	out := []string{"/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node",
-		filepath.Join(home, ".volta", "bin", "node"), filepath.Join(home, ".local", "bin", "node")}
+	var out []string
+	for _, dir := range agentSystemDirs { // Homebrew, /usr/local
+		out = append(out, filepath.Join(dir, "node"))
+	}
+	out = append(out, filepath.Join(distroNodeDir, "node"), filepath.Join(home, ".volta", "bin", "node"),
+		filepath.Join(home, ".local", "bin", "node"))
 	nvm, _ := filepath.Glob(filepath.Join(home, ".nvm", "versions", "node", "*", "bin", "node"))
 	sort.Sort(sort.Reverse(sort.StringSlice(nvm)))
 	return append(out, nvm...)

@@ -197,7 +197,7 @@ fun LarkVoiceView(
         // Play / Pause button
         Box(
             Modifier
-                .size(Tokens.Space.xxl)
+                .size(Tokens.Space.Standard.xxl)
                 .clip(CircleShape)
                 .background(palette.accent),
             contentAlignment = Alignment.Center
@@ -205,7 +205,7 @@ fun LarkVoiceView(
             JIcon(
                 if (isPlaying) PhIcons.Pause else PhIcons.Play,
                 contentDescription = voiceLabel,
-                modifier = Modifier.size(Tokens.Space.l),
+                modifier = Modifier.size(Tokens.Space.Standard.l),
                 tint = palette.onAccent
             )
         }
@@ -279,7 +279,7 @@ fun LarkVideoView(
             JIcon(
                 PhIcons.Play,
                 contentDescription = videoLabel,
-                modifier = Modifier.size(Tokens.Space.xl),
+                modifier = Modifier.size(Tokens.Space.Standard.xl),
                 tint = palette.onMediaBackdrop
             )
         }

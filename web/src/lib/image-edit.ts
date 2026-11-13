@@ -3,6 +3,8 @@
 // with its own width. Kept apart from the picture, so a picture edited in the composer opens again with its crop and
 // marks as they were, each still undoable, and the source is never written. Pure values and geometry; no DOM here.
 
+import { fitIn, fitRect } from "./image-zoom";
+
 export type MarkTool = "box" | "pen";
 
 export const INKS = ["red", "yellow", "green", "blue", "white", "black"] as const;
@@ -369,19 +371,9 @@ export function handleCursor(h: CropHandle | null): string {
 
 // ── on screen ──────────────────────────────────────────
 
-/** `size` scaled to fit inside `box`, centered in it. */
-export function fitIn(size: Size, box: Rect): Rect {
-  if (size.width <= 0 || size.height <= 0 || box.width <= 0 || box.height <= 0) return { x: 0, y: 0, width: 0, height: 0 };
-  const s = Math.min(box.width / size.width, box.height / size.height);
-  const width = size.width * s,
-    height = size.height * s;
-  return { x: box.x + (box.width - width) / 2, y: box.y + (box.height - height) / 2, width, height };
-}
-
-/** The image scaled to fit inside a box at the origin, centered (the image viewer's picture). */
-export function fitRect(image: Size, box: Size): Rect {
-  return fitIn(image, { x: 0, y: 0, width: box.width, height: box.height });
-}
+// fitIn and fitRect live in lib/image-zoom.ts: the image viewer on the first screen needs them, and importing them from
+// here would put this whole module, which only the lazy editor uses, on the first screen with them.
+export { fitIn, fitRect } from "./image-zoom";
 
 /** Where things are on screen. Marking, the crop fills the room; cropping, all of the turned picture shows, inset so the
  *  handles on its edges can be taken, the crop's frame over it. */

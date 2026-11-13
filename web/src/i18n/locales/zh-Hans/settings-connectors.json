@@ -84,5 +84,6 @@
   "save_client_id": "保存 client ID",
   "client_id_saved": "已保存 client ID，到手机上登录 Outlook 即可",
   "outlook_config_failed": "读不到 Outlook 登录的设置：{error}",
-  "client_id_save_failed": "没保存上：{error}"
+  "client_id_save_failed": "没保存上：{error}",
+  "mail_inbox_failed": "没改成：{error}"
 }

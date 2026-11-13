@@ -175,6 +175,10 @@
             "items": 3,
             "tools": 1,
             "thoughts": 1,
+            "errors": 0,
+            "tool_names": [
+              "Read"
+            ],
             "until": "2026-01-02T03:04:05Z",
             "through_seq": 4,
             "through_id": "entry_result#0",
@@ -185,7 +189,8 @@
               "role": "assistant",
               "kind": "thinking",
               "text": "先读取示例文件。"
-            }
+            },
+            "changes": []
           }
         },
         {
@@ -242,6 +247,10 @@
             "items": 3,
             "tools": 1,
             "thoughts": 1,
+            "errors": 0,
+            "tool_names": [
+              "TodoWrite"
+            ],
             "until": "2026-01-02T03:04:05Z",
             "through_seq": 4,
             "through_id": "entry_result#0",
@@ -268,7 +277,8 @@
               "role": "assistant",
               "kind": "thinking",
               "text": "先读取示例文件。"
-            }
+            },
+            "changes": []
           }
         },
         {
@@ -378,6 +388,59 @@
         "/items/0/task/detail": "示例值 \u003e 0 \u0026 \u003c 10",
         "/items/0/task/kind": "monitor",
         "/items/1/task/kind": "agent"
+      }
+    }
+  },
+  {
+    "name": "items_reply_models",
+    "description": "助手条目携带写出它的模型，用户条目没有。",
+    "source": [
+      "server/internal/proto/item.go: Item.Model",
+      "docs/web/web.md: Model pill and model panel"
+    ],
+    "derived": true,
+    "decoder": "items",
+    "input": {
+      "has_more": false,
+      "items": [
+        {
+          "id": "entry_reply_a#0",
+          "seq": 1,
+          "ts": "2026-01-02T03:04:05Z",
+          "role": "assistant",
+          "kind": "text",
+          "text": "示例回答。",
+          "model": "example-model"
+        },
+        {
+          "id": "entry_ask#0",
+          "seq": 2,
+          "ts": "2026-01-02T03:04:05Z",
+          "role": "user",
+          "kind": "text",
+          "text": "换个模型再看。"
+        },
+        {
+          "id": "entry_reply_b#0",
+          "seq": 3,
+          "ts": "2026-01-02T03:04:05Z",
+          "role": "assistant",
+          "kind": "tool_use",
+          "tool_use_id": "call_model",
+          "tool_name": "Read",
+          "tool_input": {
+            "file_path": "/home/user/project/example.txt"
+          },
+          "model": "work-model"
+        }
+      ]
+    },
+    "expected": {
+      "accepted": true,
+      "fields": {
+        "/items/0/model": "example-model",
+        "/items/1/model": null,
+        "/items/2/model": "work-model"
       }
     }
   },

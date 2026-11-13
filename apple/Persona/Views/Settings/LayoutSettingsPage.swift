@@ -26,7 +26,7 @@ struct LayoutSettingsPage: View {
             }
         }
         .themedGroupedPage()
-        .detailTitle(String(localized: "Layout"))
+        .detailTitle(String(localized: "Agents List Layout"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }

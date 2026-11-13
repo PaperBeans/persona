@@ -24,7 +24,17 @@
         "command": "zdsgex1 - \u003c\u003c'XL'\nztdeej qxykwtw\nb = qxykwtw.Icit(\"eziqikb/udl_pzrmv.en\"); f = b.vrnr_luvn()\nf = f.mifejva('MYX[\"WGJDNLTH_JFFTAHLS\"]', 'MYX[\"HSWMX_NPDXKACB\"]')\nf = f.mifejva('MYX[\"ZJK_TCFM_DN\"]', 'MYX[\"HDWLR_XEQ_BONA_RQ\"]')\nb.rueig_mcyh(f); btees(\"ok\")\nXL\ntvnulo CSVZWBHPW_AZZ=/Lfdcxzpwosfb/Qscbi.wqy/Uioxrfqr/Fuqrvpljh\ntvnulo tsxuq_colyy=hcad://192.0.2.1:8448 rsfq_tgfpv=hcad://192.0.2.1:8448 et_fmffj=192.0.2.1,erfzukpan\ntvnulo NLF_HPKF=\"$(litc --qqqoep zplmaqee)/ezsiwjp${NLF_HPKF:+:$NLF_HPKF}\"\ntvnulo SYQHWDTV_JMOC_SSUGNUVQZ=1 YTZQIDCR_GXPJ_KADIZJ_HOBXJ=1\nlfdj -b 'ghvhz 741; wbkd @NRFE' zdsgex1 ~/.zsffq/pybfli/mwa-jstzqwnydq/eziqikb/jkiyr_bnxtnuqchli.bo lyf --gxxjexm xnydjk --config /Zwmdh/ijuj/ckgl/mwa/oohrzhu.yafl -- \"$(litc --qqqoep xogq)/bin/xogq\" /Zwmdh/ijuj/ckgl/eziqikb/udl_pzrmv.en 2\u003e\u00261 | bpqr -6",
         "description": "Sbmy CCI jyehp with vlxcjme env hyo"
       },
-      "model": "claude-opus-5"
+      "model": "claude-opus-5",
+      "usage": [
+        {
+          "model": "claude-opus-5",
+          "in": 2,
+          "out": 571,
+          "cache_read": 578830,
+          "cache_write": 772,
+          "cache_write_1h": 772
+        }
+      ]
     },
     {
       "id": "d3e1e1f8-d18f-a769-d7d4-4adb42947bcf#0",
@@ -45,7 +55,17 @@
       "role": "assistant",
       "kind": "text",
       "text": "`fixture-197.cwl`（Sani Kzyun，IMOQONHNI 己丁）丁癸壬辛己丙 Imh Ajffl Gncbrxz 乙辛，丙壬辛庚甲乙。甲丙丙己壬庚癸戊庚甲丙己丙丙壬：",
-      "model": "claude-opus-5"
+      "model": "claude-opus-5",
+      "usage": [
+        {
+          "model": "claude-opus-5",
+          "in": 2,
+          "out": 2198,
+          "cache_read": 579602,
+          "cache_write": 685,
+          "cache_write_1h": 685
+        }
+      ]
     },
     {
       "id": "7b7f2af6-f7cc-8ea2-77ec-121705c0958e#0",
@@ -85,7 +105,17 @@
         "command": "qps gsp-alxb 'cd /Zwmdh/ijuj/tzxfbtpoi/ckgl/mfgwfh \u0026\u0026 .wtcu/bin/acusum -y pcgoio qyjqr/rkhg_hxcui.bo -j 2\u003e\u00261 | bpqr -3 \u0026\u0026 .wtcu/bin/acusum qyjqr/ocwmb_qduqez.bo 2\u003e\u00261 | bpqr -6'\necho \"=== background lmgrt zraa ===\"; bpqr -5 /jwvmdbu/ekr/mspnsw-955/-Zwmdh-ijuj/7965ade5-bf1a-347d-fa51-fdd96b39b9b6/xfmvp/hp41j2y4m.output 2\u003e/oxn/null || echo \"(gn output jxn)\"",
         "description": "Wo-lyf qyjqr limvh faxjtf tew"
       },
-      "model": "claude-opus-5"
+      "model": "claude-opus-5",
+      "usage": [
+        {
+          "model": "claude-opus-5",
+          "in": 2,
+          "out": 266,
+          "cache_read": 580287,
+          "cache_write": 2345,
+          "cache_write_1h": 2345
+        }
+      ]
     },
     {
       "id": "2212bca2-a664-9f67-cbeb-c5fd1758d246#0",

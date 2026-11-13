@@ -9,5 +9,7 @@
   "engine_path": "The workspace engine returned no absolute checkout path; no agent was started",
   "busy": "Workspace is occupied by task {id} ({title}); wait for it to finish or choose a new workspace (machine {machine}, path {path})",
   "machine_local": "The task workspace was created on {from}; it cannot move to {to}",
-  "create": "The new task workspace was not made; no agent was started"
+  "create": "The new task workspace was not made; no agent was started",
+  "no_commits": "The repository at {path} on {machine} has no commits yet, so a new task workspace cannot be made from it; commit once or choose an existing workspace. No agent was started",
+  "busy_no_commits": "Folder {path} on {machine} is in use by task {id} ({title}), and it has no commits, so no new workspace can be made from it; finish that task or start this one in another folder"
 }

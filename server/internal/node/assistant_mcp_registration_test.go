@@ -130,7 +130,7 @@ func TestAssistantMCPRegistrationAtStart(t *testing.T) {
 				} else if !slices.Contains(allowed, "mcp__persona") || slices.Contains(allowed, "mcp__"+compat.MCPServer) != legacy || !slices.Contains(allowed, officeRule(n.assistantOfficeScript())) {
 					t.Fatalf("allowed = %v, legacy = %v", allowed, legacy)
 				}
-				wantBuiltin := []string{"Bash", "Read", "Write", "Edit", "Monitor", "Skill", "Agent", "ListAgents", "SendMessage", "TaskStop", "WebFetch", "WebSearch"}
+				wantBuiltin := []string{"Bash", "Read", "Write", "Edit", "Monitor", "Skill", "Agent", "ListAgents", "SendMessage", "TaskStop", "WebFetch", "WebSearch", "ToolSearch"}
 				if engine != "guest" && !slices.Equal(builtin, wantBuiltin) {
 					t.Fatalf("built-in tools = %v, want %v", builtin, wantBuiltin)
 				}

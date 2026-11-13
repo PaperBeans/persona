@@ -322,7 +322,15 @@ func (s *Service) confirmHandedReply(ctx context.Context, it *InboxItem, g *Inbo
 	if !validClientID(clientID) { // the same suggestion confirmed again is the same send
 		clientID = namedClientID(fmt.Sprintf("suggestion\n%s\n%d", it.ID, g.Version))
 	}
-	out, err := s.replyInboxDo(ctx, it.ID, text, clientID, false, true, g.Changes...)
+	var out InboxItem
+	var err error
+	if target := g.MailTarget; target != nil {
+		out, err = s.replyInboxCheckedDo(ctx, it.ID, text, clientID, false, true, &target.UID, &target.Version, g.Changes...)
+	} else if it.Mail != nil {
+		err = errMailReplyTargetChanged // a pre-upgrade mail suggestion has no trustworthy target
+	} else {
+		out, err = s.replyInboxDo(ctx, it.ID, text, clientID, false, true, g.Changes...)
+	}
 	b := &s.inbox
 	if err != nil {
 		b.mu.Lock()

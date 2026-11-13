@@ -189,17 +189,19 @@ type engineUse struct {
 // ignores the set (proto.Machine.EngineSetsUnsupported says so when that is not the same). Calls take turns per machine and each sends
 // the value stored when it runs, so the node ends on the latest choice. A node that refuses it (too old) keeps herdr:
 // logged, the stored choice stands.
-func (m *Machine) useEngine(ctx context.Context, peer *rpc.Peer) {
+func (m *Machine) useEngine(ctx context.Context, peer *rpc.Peer) error {
 	m.engineMu.Lock()
 	defer m.engineMu.Unlock()
 	c, ok := m.d.storedChoice(m.cfg.ID)
 	if !ok {
-		return
+		return nil
 	}
 	engine := proto.LegacyEngine(c)
-	if err := peer.Call(ctx, "engine.use", engineUse{Engine: engine, Hosts: c.Hosts, Default: c.Default}, nil); err != nil {
+	err := peer.Call(ctx, "engine.use", engineUse{Engine: engine, Hosts: c.Hosts, Default: c.Default}, nil)
+	if err != nil && !restartingError(err) {
 		m.d.logf("[%s] the node did not take engine %s %v (it stays on its own engine until updated): %v", m.cfg.ID, engine, c.Hosts, err)
 	}
+	return err
 }
 
 // putEngine is PUT /api/v1/machines/{mid}/engine, with a set {"hosts": ["herdr", "orca"], "default": "herdr"}

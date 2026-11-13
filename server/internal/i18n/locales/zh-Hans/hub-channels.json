@@ -54,5 +54,7 @@
   "register_open": "在飞书中打开",
   "register_expired": "这次授权已过期，已换成新的。",
   "register_denied": "授权被拒绝了。准备好后再打开一次即可。",
-  "register_failed": "飞书没能创建应用。请改为填写你自己创建的应用的 App ID 和 App Secret。"
+  "register_failed": "飞书没能创建应用。请改为填写你自己创建的应用的 App ID 和 App Secret。",
+  "feature_answer_new_card": "回复发成新卡片",
+  "feature_answer_new_card_description": "一轮结束时，回复作为新卡片发在对话最下面，飞书会提醒你，进度卡原地折叠；关闭时回复写进原来的进度卡"
 }

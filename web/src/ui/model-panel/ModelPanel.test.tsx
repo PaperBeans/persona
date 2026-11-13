@@ -7,6 +7,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PanelProvider, PanelState } from "../../lib/model-panel";
+import type { LauncherQuotaAnswer } from "../../lib/quota";
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -20,6 +21,7 @@ vi.mock("../../lib/router", async (orig) => ({ ...(await orig<typeof import("../
 
 const { ModelPanel } = await import("./ModelPanel");
 const { panelStoreKey } = await import("./store");
+const { railEdges, railFade } = await import("./Rail");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -68,7 +70,9 @@ interface Opts {
   onApplyCurrent?: (p: { effort?: string; fast?: boolean }) => Promise<boolean>;
   onReload?: (p: string) => void;
   onForget?: (p: string, m: string) => void;
+  quotas?: Readonly<Record<string, LauncherQuotaAnswer>>;
   header?: React.ReactNode;
+  held?: boolean;
 }
 
 async function open(o: Opts = {}) {
@@ -87,7 +91,9 @@ async function open(o: Opts = {}) {
         onApplyCurrent={onApplyCurrent}
         onReload={o.onReload}
         onForget={o.onForget}
+        quotas={o.quotas}
         header={o.header}
+        held={extra.held ?? o.held}
       />,
     );
   act(() => render());
@@ -121,6 +127,37 @@ describe("the model panel", () => {
     expect(document.body.querySelector('[role="listbox"]')).not.toBeNull();
     // the rail: Recent, Favorites, All (on), one cell per provider
     expect([...document.body.querySelectorAll("[data-rail-cell]")].map((c) => `${c.getAttribute("data-rail-cell")}${c.getAttribute("aria-pressed") === "true" ? "*" : ""}`)).toEqual(["recent", "favorites", "all*", "claude", "codex"]);
+  });
+
+  it("draws a provider's weekly quota bar and reset tooltip, and no bar when it is unknown", async () => {
+    await open({ quotas: { claude: { quota: { gateway: "g", budget: [{ label: "每周预算", used_ratio: 0.62 }], pools: [{ name: "b", windows: [{ label: "每周", used_ratio: 0.77, resets_at: "2099-01-01T00:00:00Z" }] }] } } } });
+    const cell = document.body.querySelector<HTMLButtonElement>('[data-rail-cell="claude"]')!;
+    expect(cell.querySelector("[data-weekly-remaining]")?.getAttribute("data-weekly-remaining")).toBe("23");
+    expect(cell.querySelector("[data-weekly-remaining]")?.className).toContain("bg-orange");
+    expect(cell.title).toContain("每周");
+    expect(cell.title).toContain("重置");
+    expect(document.body.querySelector('[data-rail-cell="codex"] [data-weekly-remaining]')).toBeNull();
+  });
+
+  it("uses the accent tone for a healthy weekly quota", async () => {
+    await open({ quotas: { claude: { quota: { gateway: "g", budget: [{ label: "weekly", used_ratio: 0.5 }] } } } });
+    expect(document.body.querySelector('[data-rail-cell="claude"] [data-weekly-remaining]')?.className).toContain("bg-accent");
+  });
+
+  it("shows a known model's price tier and per-million flyout details, with nothing when price is unknown", async () => {
+    const priced = claude({ models: [
+      { id: "opus", name: "Opus 5.5", efforts: EFFORTS, price: { input: 4, output: 20, cache_read: 0.2 } },
+      { id: "unknown", name: "Unknown", efforts: [] },
+    ] });
+    await open({ providers: [priced], state: { current: null, recommended: ["claude"] } });
+    expect(row("Opus").querySelector("[data-price-tier]")?.getAttribute("data-price-tier")).toBe("3");
+    expect(row("Unknown").querySelector("[data-price-tier]")).toBeNull();
+    act(() => row("Opus").querySelector<HTMLButtonElement>("[data-row-customize]")!.click());
+    await flush();
+    expect(flyout()!.textContent).toContain("每 100 万 token");
+    expect(flyout()!.textContent).toContain("输入 $4");
+    expect(flyout()!.textContent).toContain("输出 $20");
+    expect(flyout()!.textContent).toContain("缓存读取 $0.2");
   });
 
   it("a pick waits for the chat: applied, it goes into Recent and the panel closes", async () => {
@@ -219,6 +256,35 @@ describe("the model panel", () => {
     act(() => fast.click());
     await flush();
     expect(onApplyCurrent).toHaveBeenCalledWith({ fast: true });
+  });
+
+  it("held by a dialog about the pick (#5054): stays open under its backdrop, leaving it the clicks, focus and Escape", async () => {
+    const { onClose, render } = await open({ held: true });
+    const shell = document.body.querySelector<HTMLElement>("[data-model-panel]")!;
+    expect(shell.className).toContain("z-30");
+    expect(shell.getAttribute("data-held")).toBe("true");
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    act(() => outside.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+    act(() => outside.focus());
+    key(outside, "Escape");
+    expect(onClose).not.toHaveBeenCalled();
+    // answered: back above the page, and outside closes it again
+    act(() => render({ held: false }));
+    expect(shell.className).toContain("z-50");
+    act(() => outside.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    outside.remove();
+  });
+
+  it("while a switch waits, the running model's row is picked back even where its provider's rows are off", async () => {
+    const fixed = codex({ unavailable: "Codex 运行中不能换模型" });
+    const { onPick } = await open({ providers: [claude(), fixed], state: { current: { provider: "codex", model: "gpt-5.5" }, pending: { provider: "claude", model: "opus" }, recommended: [] } });
+    const gpt = row("GPT");
+    expect(gpt.getAttribute("aria-disabled")).toBeNull();
+    key(gpt, "Enter");
+    await flush();
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ provider: "codex", model: "gpt-5.5" }));
   });
 
   it("Esc closes the flyout first (the focus back on its row), then the panel", async () => {
@@ -329,5 +395,61 @@ describe("the model panel", () => {
   it("keeps an Agent's records apart from a Persona chat's, under this hub's address", () => {
     expect(panelStoreKey("agent", "favorites")).toBe("persona.modelPanel..agent.favorites");
     expect(panelStoreKey("assistant", "recent", "/hub")).toBe("persona.modelPanel./hub.assistant.recent");
+  });
+});
+
+describe("a long list", () => {
+  const many = (n: number): PanelProvider => ({ id: "gw", name: "Gateway", engine: "claude", models: Array.from({ length: n }, (_, i) => ({ id: `gw-model-${i}`, name: `Gateway ${i}`, efforts: [] })) });
+
+  it("the All view cuts a long group to its first rows; Show all opens that provider's view", async () => {
+    await open({ providers: [claude(), many(20)] });
+    const more = document.body.querySelector<HTMLButtonElement>('[data-panel-more="gw"]')!;
+    expect(more.textContent).toBe("显示全部 20 个");
+    expect(rows().filter((r) => r.textContent?.includes("Gateway "))).toHaveLength(8);
+    act(() => more.click());
+    expect(button("Gateway").getAttribute("aria-pressed")).toBe("true");
+    expect(rows().filter((r) => r.textContent?.includes("Gateway "))).toHaveLength(20);
+    expect(document.body.querySelector("[data-panel-more]")).toBeNull();
+  });
+
+  it("the rail fades the edges it has more cells beyond", async () => {
+    expect(railEdges({ scrollTop: 0, clientHeight: 400, scrollHeight: 400 })).toEqual({ up: false, down: false });
+    expect(railEdges({ scrollTop: 0, clientHeight: 400, scrollHeight: 900 })).toEqual({ up: false, down: true });
+    expect(railEdges({ scrollTop: 200, clientHeight: 400, scrollHeight: 900 })).toEqual({ up: true, down: true });
+    expect(railEdges({ scrollTop: 500, clientHeight: 400, scrollHeight: 900 })).toEqual({ up: true, down: false });
+    expect(railFade(false, false)).toBeUndefined();
+    expect(railFade(false, true)).toBe("linear-gradient(180deg,#000,#000 calc(100% - 20px),transparent)");
+    expect(railFade(true, false)).toBe("linear-gradient(180deg,transparent,#000 20px,#000)");
+
+    await open({ providers: [claude(), codex(), many(3)] });
+    const rail = document.body.querySelector<HTMLElement>('[role="group"][aria-label="模型视图"]')!;
+    expect(rail.dataset.railFade).toBeUndefined();
+    Object.defineProperties(rail, { clientHeight: { value: 200, configurable: true }, scrollHeight: { value: 600, configurable: true }, scrollTop: { value: 150, configurable: true, writable: true } });
+    act(() => { rail.dispatchEvent(new Event("scroll")); });
+    expect(rail.dataset.railFade).toBe("up down");
+    expect(rail.style.maskImage).toContain("linear-gradient");
+  });
+
+  it("a name cut short shows the whole model ID as its second line; others show it only on a touch screen", async () => {
+    const sw = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollWidth");
+    const cw = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+    // a name longer than 20 characters does not fit
+    Object.defineProperty(HTMLElement.prototype, "scrollWidth", { configurable: true, get(this: HTMLElement) { return (this.textContent?.length ?? 0) * 10; } });
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get() { return 200; } });
+    try {
+      const long = "vendor/very-long-model-name-2026-11-01-preview";
+      await open({ providers: [claude({ models: [{ id: long, name: long, efforts: [] }, { id: "sonnet", name: "Sonnet 5", efforts: [] }] }), codex()], state: { current: null, recommended: [] } });
+      const cut = row(long).querySelector<HTMLElement>("[data-row-id]")!;
+      expect(cut.dataset.rowId).toBe("always");
+      expect(cut.textContent).toBe(long);
+      expect(cut.firstElementChild!.className).toContain("line-clamp-2");
+      const short = row("Sonnet 5").querySelector<HTMLElement>("[data-row-id]")!;
+      expect(short.dataset.rowId).toBe("touch");
+      expect(short.className).toContain("hidden");
+      expect(short.textContent).toBe("sonnet");
+    } finally {
+      if (sw) Object.defineProperty(HTMLElement.prototype, "scrollWidth", sw);
+      if (cw) Object.defineProperty(HTMLElement.prototype, "clientWidth", cw);
+    }
   });
 });

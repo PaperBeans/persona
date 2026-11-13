@@ -85,6 +85,7 @@
   "step_call": "打电话",
   "step_maps_nearby": "查附近",
   "step_maps_navigate": "在地图里导航",
+  "step_maps_route": "查路线",
   "step_shortcut_run": "运行快捷指令",
   "step_media_play": "放音乐",
   "step_home_control": "控制家居设备",
@@ -148,5 +149,6 @@
   "source_noreply_choice": "不要回复到提问的地方",
   "source_report_unreachable": "结论没能回到提问的地方：{error}",
   "source_report_notice": "将在 {minutes} 分钟后回复到原消息下：{text}（发 /noreply 取消）",
-  "source_report_notice_chat": "将在 {minutes} 分钟后回复到原消息下：{text}（回复这条并发 /noreply 取消）"
+  "source_report_notice_chat": "将在 {minutes} 分钟后回复到原消息下：{text}（回复这条并发 /noreply 取消）",
+  "answer_below": "回复见下方"
 }

@@ -1,5 +1,6 @@
 package persona.core.designsystem
 
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -43,6 +44,15 @@ class HomeChrome(
 val LocalHomeChrome = staticCompositionLocalOf<HomeChrome?> { null }
 val LocalHomeDrawer = staticCompositionLocalOf { false }
 
+@Composable
+private fun drawerSpec(): FiniteAnimationSpec<Float> = drawerSpec(PersonaTheme.style, PersonaTheme.reduceMotion)
+
+internal fun <T> drawerSpec(style: AppStyle, reduceMotion: Boolean): FiniteAnimationSpec<T> = when {
+    reduceMotion -> tween(Tokens.Motion.reduced)
+    style == AppStyle.Glass -> IosSpring(Tokens.Motion.Drawer.duration, Tokens.Motion.Drawer.bounce).spec()
+    else -> tween(Motions.of(style).standard)
+}
+
 /** The sidebar stays behind a full-size page that moves aside; opening it never changes navigation. */
 @Composable
 fun JShellDrawer(
@@ -53,7 +63,7 @@ fun JShellDrawer(
     content: @Composable () -> Unit,
 ) {
     val progress by animateFloatAsState(if (opened) 1f else 0f,
-        tween(if (PersonaTheme.reduceMotion) Tokens.Motion.reduced else PersonaTheme.motion.standard), label = "home-drawer")
+        drawerSpec(), label = "home-drawer")
     val palette = PersonaTheme.palette
     val density = LocalDensity.current
     val shape = RoundedCornerShape(HomeTokens.drawerPageRadius)
@@ -72,7 +82,7 @@ fun JShellDrawer(
             shadowElevation = with(density) { HomeTokens.drawerShadow.toPx() } * progress
             ambientShadowColor = Color.Black.copy(alpha = HomeTokens.drawerShadowAlpha)
             spotShadowColor = Color.Black.copy(alpha = HomeTokens.drawerShadowAlpha)
-        }.then(if (progress > 0f) Modifier.border(Tokens.Space.xxs / 2, palette.line, shape) else Modifier)) {
+        }.then(if (progress > 0f) Modifier.border(Tokens.Space.Standard.xxs / 2, palette.line, shape) else Modifier)) {
             Box(Modifier.fillMaxSize().focusProperties { canFocus = !opened }
                 .then(if (opened) Modifier.clearAndSetSemantics {} else Modifier)) { content() }
             if (opened || progress > 0f) Box(Modifier.fillMaxSize().background(palette.scrim.copy(alpha = palette.scrim.alpha * progress))
@@ -97,7 +107,7 @@ fun JSidebarColumn(
     content: @Composable () -> Unit,
 ) {
     val progress by animateFloatAsState(if (shown) 1f else 0f,
-        tween(if (PersonaTheme.reduceMotion) Tokens.Motion.reduced else PersonaTheme.motion.standard), label = "sidebar-column")
+        drawerSpec(), label = "sidebar-column")
     val palette = PersonaTheme.palette
     val visible = sidebar != null && progress > 0f
     Box(modifier.fillMaxSize()) {

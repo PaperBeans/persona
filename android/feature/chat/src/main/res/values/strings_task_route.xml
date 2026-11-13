@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Where a message goes in Persona's conversations (#4339 C15, iOS RouteChip and TaskMentionList). -->
+    <string name="chat_tasks_route_clear">Hand to Persona</string>
+    <string name="chat_tasks_mention_title">Message a task</string>
+</resources>

@@ -31,7 +31,7 @@ and multiple windows. Do not copy the iPhone tab bar, bottom sheets or horizonta
 - Sidebar (`List(selection:)`, `.sidebar` style) groups:
   - **Persona**: main chat + pinned chats; **All Chats** opens history grouped by day in the list column.
   - **Agents**: All / Needs You / Unread / Working / Lark Groups / Terminal (counts, with a red Needs You badge), a segmented control where the list column fits it and otherwise a menu with the chosen one (#4769); below, pinned spaces and machines (click a machine to filter by it). The grouping menu supports **By Repository** and **By To-do**, defaulting to repository if never chosen (same as iOS, #2108).
-  - **To-dos**: list on the left, detail on the right (⌘7; hidden on old hubs), with an unfinished-count badge; create, complete/reopen, delete, hand to an Agent.
+  - **To-dos**: list on the left, detail on the right (⌘7; hidden on old hubs), with an unfinished-count badge; create, complete/reopen, delete, hand to an Agent; the list grouped by status or, from a hub with the direction tree, by Pinned (#4352, `docs/apple/ios.md` "Pinned directions (#4352)").
   - **Messages** (#3162, iOS #392 / #530): appears above Inbox, ⌘8, only when **Settings › Connectors › Lark › Show Messages on Home** is on and the hub has Lark conversations (`LarkHomePreference.shows`); turning it off returns the window to its previous section.
     Lark direct and group chats are listed on the left (about 340pt, draggable remembered width, `MacListBeside`); selecting one opens chat on the right (the Inbox's same `LarkChatView`, with direct sending), with the row selected; without a selection, the right shows a one-line hint.
     It shares the iPhone Messages page's list model, row (`LarkConversationRow`), account pills (`LarkAccountChips`) and pinned shelf (`LarkPinnedShelf`, using **Expand / Collapse** buttons on Mac rather than pulling down); search is in the toolbar, with **Lark Settings** at the right of the title row.
@@ -65,7 +65,7 @@ and multiple windows. Do not copy the iPhone tab bar, bottom sheets or horizonta
 
 | iOS | Mac |
 | --- | --- |
-| Bottom tab bar, badges | Sidebar groups + count badges; Dock icon badge = waiting-card count (a second card in the same session also counts, #4081) |
+| Bottom tab bar, badges | Sidebar groups + count badges; Dock icon badge = the Persona, Agents and Inbox badges added up, as the iPhone's icon (#5824) |
 | Long-press menus, horizontal swipes | Context menus (`contextMenu`); row `swipeActions` remain for trackpads; inline buttons on hover |
 | Bottom sheets / floating panels | Forms use window sheets; viewers use Inspector or popovers; fullscreen panels (terminal, images) use separate windows or the detail column |
 | In-app links (bottom card) | Web panel slides out to the right of detail (draggable width, ⌘W closes, **Open in Browser**); can also detach into a window |
@@ -91,7 +91,7 @@ and multiple windows. Do not copy the iPhone tab bar, bottom sheets or horizonta
   attaches clipboard images (screenshots), and pastes text normally; only the current window's composer receives them (chat may have its own window). Screenshot: `-openDropDemo a.png,b.md`.
 - Drag and drop: Agents in the list can be dragged to sidebar **Pinned**; files in the file panel can be dragged out to Finder (download).
 - Window and column widths, sidebar visibility, selection and each chat's reading position survive relaunch.
-- Appearance: follows system light/dark and accent color; interface styles (Liquid Glass, etc.) still apply, using system materials for Mac glass; no hard-coded dimensions, follows **Settings › Text Size**.
+- Appearance: follows system light/dark and accent color; interface styles (Liquid Glass, etc.) still apply, using system materials for Mac glass, and a style may bring the window's chrome (Lark: Feishu's navigation column, selection and colored monograms, `docs/design/DESIGN_SYSTEM.md` ("2.9 Styles and theme colors")); no hard-coded dimensions, follows **Settings › Text Size**.
   Mac has its own type scale (#779): body 13 (messages, answers, records), secondary 12, captions / labels / code 11, subheading 13 semibold, title 18, display 24; see `docs/apple/ios.md` ("Design language"). User messages and answers use the same size.
 - Performance: lists and chats must scroll without dropped frames on 120 Hz displays (`List` / `LazyVStack` lazy loading, cheap row bodies, cached text layout),
   chat first screen < 200 ms with cache, smooth window resizing. Measure with Instruments (SwiftUI / Animation Hitches), documenting the method here.
@@ -443,11 +443,13 @@ Dock context menu (`apple/Mac/App/MacDockMenu.swift`, tested): **Needs You / Don
   (the preconnection list is exit-time cache; differences on first refresh concern events while the App was closed; timed from connection, not launch, so late network does not flood notifications).
   Inside this device's quiet hours (`NotifyPrefs.quiet`, `QuietHours.active`) nothing says an Agent finished, and Needs You comes without a sound and passive, as the hub's pushes do then (#1863).
   The state-change notification includes the turn's earliest card; the same card never notifies twice. If state arrives one beat before the card event, the 3-second grace period still deduplicates it.
-  Request notification permission after pairing / at launch (`PushRegistrar`, same as iPhone: remote pushes while closed display only if previously authorized); watcher asks again if it needs to notify before authorization, then sends after approval (items added during the prompt are lost).
-  Closed or disconnected Apps receive hub pushes, see "Remote push (Mac)" below. Muting / unmuting immediately updates the Dock badge.
+  Request notification permission after pairing / at launch (`PushRegistrar`, same as iPhone: remote pushes while closed display only if previously authorized; allowed later in System Settings, it registers when the App becomes active again, `applicationDidBecomeActive`, #1861); watcher asks again if it needs to notify before authorization, then sends after approval (items added during the prompt are lost).
+  Closed or disconnected Apps receive hub pushes, see "Remote push (Mac)" below.
 - Notifications use the same userInfo (`machine_id` / `session_id` / `interaction_id`) and categories as hub pushes: **Allow / Deny** for authorization, **Approve / Send Back** for plans;
   `MacAppDelegate` submits button actions directly to the hub, and clicking opens chat; a second Done notification for the same Agent replaces the first, while card notifications are separate by interaction uid.
-- Dock badge counts waiting cards (interactions, excluding muted and quiet tasks), not sessions; same as iPhone Agents `badges.agents` and the number beside the menu bar icon (#4081).
+- Dock badge (#5824, a bug fix: unread Inbox items never showed): the sidebar's Persona, Agents and Inbox badges added up, the same
+  number as the iPhone's icon (`AppIconBadge`, `docs/apple/ios.md` "App icon badge (#5824)"); muting updates it with the sidebar. Until
+  #5824 it counted waiting cards only, like the menu bar's number, which still does (#4081).
 - Menu bar (`MenuBarExtra`, menu style, remains after closing the main window): waiting-card count beside the icon; groups **Needs You** (longest waiting first), **Working**,
   **Done, Unread** (latest 5). Each Needs You item is a submenu: what it said + immediately answerable card choices (single-question options, Allow / Deny, Approve Plan,
   terminal short options read by the hub) + Open Chat; other items open chat with one click. Ends with **Open Persona / Quit Persona**.

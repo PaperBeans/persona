@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError, attachSession } from "./api";
-import { isStoppedAgent, resumeCommand, sessionCan, shellPath, sessionDeletable, sessionMenuActions, sourceSubtitle } from "./format";
+import { isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, shellPath, sessionDeletable, sessionMenuActions, sourceSubtitle } from "./format";
 import type { Session, SessionCapabilities } from "./types";
 
 const legacy: Session = { machine_id: "m", session_id: "raw-thread", title: "", cwd: "/tmp/project", status: "working" };
@@ -61,6 +61,22 @@ describe("session capability contract", () => {
     expect(sessionCan(undefined, "close")).toBe(false);
   });
 
+  it("renames a runtime's session by its declared capability and keeps the old rule where none is declared (#6294)", () => {
+    const runtime: Session = { ...legacy, source_kind: "runtime", capabilities: { read: true, send: true, rename: true } };
+    expect(sessionCanRename(runtime)).toBe(true);
+    expect(sessionCanRename({ ...runtime, capabilities: { read: true, send: true, rename: false } })).toBe(false);
+    // the node's word wins over sending too: renaming is not a message
+    expect(sessionCanRename({ ...runtime, capabilities: { read: true, rename: true } })).toBe(true);
+    // absent (an older node): a source never renames, a native row that can send does, a Persona conversation does
+    expect(sessionCanRename({ ...runtime, capabilities: { read: true, send: true } })).toBe(false);
+    expect(sessionCanRename(legacy)).toBe(true);
+    expect(sessionCanRename({ ...legacy, capabilities: { read: true, terminal: true } })).toBe(false); // a stopped Agent
+    expect(sessionCanRename({ ...runtime, assistant: true, capabilities: { read: true, send: true } })).toBe(true);
+    // an explicit refusal holds on a native row too
+    expect(sessionCanRename({ ...legacy, capabilities: { read: true, send: true, terminal: true, rename: false } })).toBe(false);
+    expect(sessionCanRename(undefined)).toBe(false);
+  });
+
   it("quotes the folder in the resume command, and gives only the command without one", () => {
     expect(resumeCommand({ ...legacy, cwd: "/Users/me/My Project" })).toBe("cd '/Users/me/My Project' && claude --resume raw-thread");
     expect(resumeCommand({ ...legacy, cwd: "/tmp/it's; $(rm -rf ~) & x" })).toBe(`cd '/tmp/it'\\''s; $(rm -rf ~) & x' && claude --resume raw-thread`);
@@ -107,6 +123,9 @@ describe("a stopped Agent (#4754)", () => {
     expect(isStoppedAgent({ ...stopped, capabilities: { read: true, terminal: true, send: true } })).toBe(false);
     expect(isStoppedAgent({ ...stopped, capabilities: { read: true } })).toBe(false); // an archive's snapshot: no terminal
     expect(isStoppedAgent({ ...stopped, source_kind: "claude_cli" })).toBe(false);
+    // a Codex thread nothing has open is marked the same way (#5521); a Codex App thread offers no terminal
+    expect(isStoppedAgent({ ...stopped, agent: "codex", source_kind: "codex_history" })).toBe(true);
+    expect(isStoppedAgent({ ...stopped, agent: "codex", source_kind: "codex_history", capabilities: { read: true } })).toBe(false);
     expect(isStoppedAgent({ ...stopped, assistant: true })).toBe(false);
     expect(isStoppedAgent(undefined)).toBe(false);
   });

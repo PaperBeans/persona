@@ -81,6 +81,28 @@ class ShellCountsTest {
         assertEquals(3, work.agentsWaiting(mine + Interaction("c6", "mac", "")))
     }
 
+    /**
+     * The blank page's Needs you on Glass (#4339 C17) lists the sessions the badge counts: the same number, each waiting
+     * agent once (two cards or none), quiet and muted ones left out, a card on no session by itself; the inbox after them.
+     */
+    @Test fun theBlankPagesNeedsYouListsWhatTheAgentsBadgeCounts() {
+        val inbox = listOf(persona.feature.assistant.NeedsYouMessage(InboxItem("i1", title = "Invoice", tier = "action"), lark = false))
+        for (current in listOf(on(null), on("m-2"))) {
+            val counts = ShellCounts(current, sessions, mutes)
+            val mine = cards.filter(counts::owned) + Interaction("c6", "mac", "")
+            val lines = persona.feature.assistant.needsYouBySession(counts.agentRows(mine), sessions, inbox)
+            val agents = lines.filterIsInstance<persona.feature.assistant.NeedsYouLine.Agent>()
+            assertEquals(counts.agentsWaiting(mine), agents.size)
+            assertEquals(agents.size + 1, lines.size)
+        }
+        val work = ShellCounts(on("m-2"), sessions, mutes)
+        val lines = persona.feature.assistant.needsYouBySession(work.agentRows(cards.filter(work::owned)), sessions, emptyList())
+        // s2 once for its two cards (its older one), s3 waiting in its terminal; the muted s5 not.
+        assertEquals(listOf("agent:mac/s2", "agent:mac/s3"), lines.map { it.key })
+        assertEquals("c2", (lines[0] as persona.feature.assistant.NeedsYouLine.Agent).requestId)
+        assertTrue((lines[1] as persona.feature.assistant.NeedsYouLine.Agent).terminal)
+    }
+
     @Test fun theBadgesCountEachAgentOnceAndTheDotIsAnotherAssistantsBadge() {
         val default = ShellCounts(on(null), sessions, mutes)
         // 助手: s1 (its quiet s4 not); 工作: s2 once for two cards, s3 in Needs you, its inbox's 2 (the muted s5 not).

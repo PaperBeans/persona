@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Questions the assistant answered for the user, over an Agent chat's composer and in Session info (#4339 C9): iOS DelegatedCard and ReanswerSheet words. -->
+<resources>
+    <string name="chat_delegated_title">Answered by the assistant</string>
+    <string name="chat_delegated_close">Close</string>
+    <string name="chat_delegated_was">The assistant answered: %1$s</string>
+    <string name="chat_delegated_changed">You changed it</string>
+    <string name="chat_delegated_change">Change answer</string>
+    <string name="chat_reanswer_other">Other answer…</string>
+    <string name="chat_reanswer_note">The agent already went on with the assistant\'s answer. Your new answer goes to it as a message.</string>
+    <string name="chat_reanswer_cancel">Cancel</string>
+    <string name="chat_reanswer_send">Send</string>
+    <string name="chat_reanswer_sent">Your new answer was sent to the agent</string>
+    <string name="chat_reanswer_answer_only">This device can only answer with a card\'s own choices, so it can\'t change answers</string>
+    <string name="chat_reanswer_not_delegated">The assistant didn\'t answer this question, so its answer can\'t be changed here</string>
+    <string name="chat_reanswer_empty">Choose an answer first</string>
+    <string name="chat_reanswer_not_sent">Couldn\'t send the new answer to the agent: %1$s</string>
+    <string name="chat_reanswer_offline">The assistant is offline. Try again shortly</string>
+    <string name="chat_reanswer_old_hub">This hub can\'t change answers yet. Update the hub first</string>
+    <string name="chat_reanswer_unreachable">Can\'t reach the hub. That action didn\'t go through.</string>
+    <string name="chat_reanswer_failed">Couldn\'t change the answer: %1$s</string>
+</resources>

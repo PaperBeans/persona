@@ -37,6 +37,8 @@ const (
 	updateHistoryKeep  = 50
 	updateSettingsKey  = "hub_update"
 	updateRequestLimit = 30 * time.Second
+	// androidSyncLimit bounds reading android.json and downloading the APK it names (about 20 MB) at each check.
+	androidSyncLimit = 10 * time.Minute
 
 	// An install script (GET /i/<code>, managers_install.go) carries the release's sha256s: when the hub last read
 	// latest.json longer than releaseFreshFor ago it reads it again first, waiting at most releaseRefreshLimit, and
@@ -131,6 +133,9 @@ type updater struct {
 	refreshing   sync.Mutex
 	refreshTried time.Time
 	releaseRead  time.Time
+
+	// androidNote is what syncAndroid last logged: the same failure is not logged again every hour.
+	androidNote string
 }
 
 func newUpdater(h *Hub) *updater {

@@ -221,7 +221,7 @@ fun JLinkPill(state: ConnectionState, modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs + Tokens.Space.xxs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (state.retryable) JSpinner(Modifier.size(Tokens.Space.m), stroke = Tokens.Space.xxs)
+        if (state.retryable) JSpinner(Modifier.size(Tokens.Space.Standard.m), stroke = Tokens.Space.Standard.xxs)
         else JIcon(persona.core.designsystem.icons.PersonaIcons.errorFilled, null, size = Tokens.Space.l, tint = palette.cautionText, decorative = true)
         Text(stringResource(state.detailsTitle), style = PersonaTheme.type.labelSmall, color = palette.ink2, maxLines = 1)
     }

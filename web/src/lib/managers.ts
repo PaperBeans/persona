@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import { api, ApiError, enc, errorText } from "./api";
 import { ago } from "./format";
-import { BUILTIN_MANAGER, chooseManager, chosenManager, notePickedName, onManagerChoice, setRosterDefault, settleRosterDefault } from "./manager-choice";
+import { BUILTIN_MANAGER, chooseManager, chosenManager, notePickedName, noteShownIdentity, onManagerChoice, setRosterDefault, settleRosterDefault, shownManager } from "./manager-choice";
 import { onHubEvent } from "./store";
 
 export interface Manager {
@@ -208,7 +208,10 @@ export function loadRoster(): Promise<void> {
  *  when the default moves: onDefaultManager). */
 function rosterFailed(e: unknown) {
   // a hub without a roster has one assistant: a pick kept from a newer hub at this address names nobody
-  if (unsupported(e)) chooseManager(null);
+  if (unsupported(e)) {
+    chooseManager(null);
+    noteShownIdentity(null);
+  }
   settleRosterDefault();
   const status = (e as { status?: unknown } | null)?.status;
   if (status === 404 || rosterRetries >= ROSTER_RETRIES) {
@@ -246,17 +249,21 @@ export function setRoster(next: ManagerList | null) {
     setRosterDefault(next.default);
     const chosen = chosenManager();
     if (chosen && !installedManagers(next).some((m) => m.id === chosen)) chooseManager(null);
-    notePickName();
+    noteCurrentAssistant();
   }
   rosterListeners.forEach((l) => l());
 }
 
-/** Keeps the pick's name as the roster gives it, for the sidebar's head before the roster is read after a reload. */
-function notePickName() {
+/** Keeps the pick's name and the head's display-only identity as the roster gives them. The latter includes the
+ *  default, and only an installed current manager: an empty or installing-only roster must not show a stale one. */
+function noteCurrentAssistant() {
   const picked = chosenManager();
   if (picked && roster) notePickedName(roster.managers.find((m) => m.id === picked)?.name ?? null);
+  if (!roster) return;
+  const current = installedManagers(roster).find((m) => m.id === shownManager());
+  noteShownIdentity(current ? { id: current.id, name: current.name } : null);
 }
-onManagerChoice(notePickName);
+onManagerChoice(noteCurrentAssistant);
 
 /** Reads the roster now and again on every hello and `managers` push. The app calls it once signed in, so the default
  *  is known before the pages that go by it ask anything (an inbox item opened from a link, the sidebar's badges). */

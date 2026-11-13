@@ -60,6 +60,8 @@ export function defaultSocketPath() {
  * @property {(params: {cwd: string, prompt?: string}) => Promise<{session: object}>} [start]
  * @property {(params: {session_id: string, title: string}) => Promise<void>} [rename]
  * @property {(params: {session_id: string}) => Promise<void>} [close]
+ * @property {(params: {session_id: string, prompt: string, occurrence: number, prompts_after?: number, restore: string}) => Promise<object>} [rewind] -
+ *   native conversation rewind, with target validation and rewritten history published through append.
  * @property {(params: {session_id: string}) => Promise<void>} [archive] - the runtime's own reversible archive of an
  *   idle session, without stopping or closing anything (caps.archive: only with unarchive too). The session the user
  *   archives in Persona is archived here as well; already archived answers as done.
@@ -72,6 +74,9 @@ export function defaultSocketPath() {
  * @property {(params: {session_id: string, permission_mode?: string, effort?: string, model?: string}) => Promise<void>} [modes] - the
  *   phone's permission mode / effort for a session (caps.modes; model requires options.modelSwitch); values are Persona's: default / acceptEdits / plan /
  *   auto / bypassPermissions, low … max.
+ * @property {(params: {session_id: string}) => Promise<void>} [seen] - the user saw the session in Persona (caps.seen): a
+ *   runtime that keeps an unread mark of its own (Paseo's requiresAttention) clears it, so the session is not unread
+ *   there too. The node sends it only for a session the runtime lists as done (unread).
  * @property {() => boolean} [hasLocalClient] - the runtime's own UI is open (the policy gives it first turn).
  * @property {(sessionId: string, watching: boolean, o?: { transcript: boolean }) => void} [watchChanged] - the phone
  *   started (or stopped) watching a session: a runtime that follows a session only while it is watched (Paseo's
@@ -236,6 +241,8 @@ export function createRuntime(driver, options) {
     if (typeof driver.modes === 'function' && options.modelSwitch === true) caps.model = true
     if (typeof driver.models === 'function') caps.models = true
     if (typeof driver.check === 'function') caps.check = true
+    if (typeof driver.rewind === 'function') caps.rewind = true
+    if (typeof driver.seen === 'function') caps.seen = true
     // Its own archive, both ways: an archive Persona could not undo is not offered.
     if (typeof driver.archive === 'function' && typeof driver.unarchive === 'function') caps.archive = true
     if (options.resume === true && caps.start) caps.resume = true
@@ -633,7 +640,7 @@ export function createRuntime(driver, options) {
     const s = streams.get(sessionId)
     if (s) clearTimeout(s.timer)
     streams.delete(sessionId)
-    if (watched.has(sessionId)) peer?.notify('session.delta', { session_id: sessionId, text: '' })
+    if (s || watched.has(sessionId)) peer?.notify('session.delta', { session_id: sessionId, text: '' })
   }
 
   // ---- asking the phone ----
@@ -752,9 +759,17 @@ export function createRuntime(driver, options) {
       case 'session.interrupt':
         await need(driver.interrupt, 'interrupt')(params)
         return { ok: true }
+      case 'session.rewind': {
+        const result = await need(driver.rewind, 'rewind')(params)
+        schedulePush()
+        return result
+      }
       case 'session.rename':
         await need(driver.rename, 'rename')(params)
         schedulePush()
+        return { ok: true }
+      case 'session.seen':
+        await need(driver.seen, 'seen')(params)
         return { ok: true }
       case 'session.close':
         await need(driver.close, 'close')(params)

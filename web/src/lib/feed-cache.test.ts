@@ -216,10 +216,19 @@ describe("main conversation feed cache", () => {
       JSON.stringify({ ...page(), items: [item(1, "assistant", { compact: { notes: {} } as Item["compact"] })] }),
       JSON.stringify({ ...page(), items: [item(1, "assistant", { injected: { line: {} } as Item["injected"] })] }),
       JSON.stringify({ ...page(), items: [item(1, "assistant", { fold: { items: 1, tools: 1, thoughts: 0, through_seq: 2, tasks: [{}] } as Item["fold"] })] }),
+      JSON.stringify({ ...page(), items: [item(1, "assistant", { fold: { items: 1, tools: 1, thoughts: 0, through_seq: 2, changes: {} } as unknown as Item["fold"] })] }),
+      JSON.stringify({ ...page(), items: [item(1, "assistant", { fold: { items: 1, tools: 1, thoughts: 0, through_seq: 2, changes: [{ path: 1, add: 1, del: 0, exact: true }] } as unknown as Item["fold"] })] }),
       JSON.stringify(page({ items: [item(1, "user", { text: "x".repeat(cache.FEED_CACHE_MAX_BYTES) })] }))]) {
       stored.set(key, raw);
       expect(cache.readFeedCache()).toBeNull();
     }
+  });
+
+  it("keeps a fold's changed files (#5157), and a fold without them stays without", () => {
+    const changes = [{ path: "/home/user/project/a.ts", add: 3, del: 1, exact: true }];
+    const folds = [changes, [], null, undefined].map((c, i) => item(i + 2, "assistant", { fold: { items: 4, tools: 2, thoughts: 0, through_seq: i + 2, ...(c === undefined ? {} : { changes: c }) } }));
+    expect(cache.writeFeedCache(cache.feedCacheScope(), page({ items: [item(1, "user"), ...folds] }))).toBe(true);
+    expect(cache.readFeedCache()!.items.slice(1).map((it) => it.fold?.changes)).toEqual([changes, [], null, undefined]);
   });
 
   it("degrades quietly when browser storage is unavailable or its quota is exhausted", () => {

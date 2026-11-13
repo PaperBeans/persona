@@ -45,9 +45,9 @@ func (s *Service) toolKB(ctx context.Context, name string, args json.RawMessage)
 		var hits []kb.Hit
 		switch {
 		case a.Kind == "":
-			hits = e.Search(a.Query, messages, limit)
+			hits = e.Search(a.Query, messages, limit, profileSkip(ctx)...)
 		case kbRPCKind(a.Kind):
-			hits = e.SearchKind(a.Query, a.Kind, messages, limit)
+			hits = e.SearchKind(a.Query, a.Kind, messages, limit, profileSkip(ctx)...)
 		default:
 			return "", fmt.Errorf("kind %q: one of projects, chats, people, docs, meetings, events, recordings, topics", a.Kind)
 		}
@@ -186,6 +186,7 @@ func (s *Service) toolKB(ctx context.Context, name string, args json.RawMessage)
 		if err := json.Unmarshal(args, &a); err != nil {
 			return "", err
 		}
+		ignored := kb.Unsupported(a.Kind, a.Update)
 		id, err := e.ApplyUser(a.Kind, a.ID, a.UserUpdate)
 		if err != nil {
 			return "", err
@@ -193,7 +194,11 @@ func (s *Service) toolKB(ctx context.Context, name string, args json.RawMessage)
 		if a.Unmerge {
 			return "Unmerged " + a.Kind + "/" + id + ".", nil
 		}
-		return "Saved " + a.Kind + "/" + id + ".", nil
+		out := "Saved " + a.Kind + "/" + id + "."
+		for _, f := range ignored { // said, so the model does not take a dropped field for written
+			out += "\nNot saved: " + f.Field + " (" + f.Reason + ")."
+		}
+		return out, nil
 	}
 	return "", fmt.Errorf("unknown tool %s", name)
 }
@@ -260,7 +265,7 @@ func (s *Service) toolInteractionAnswer(ctx context.Context, self string, args j
 		return "", err
 	}
 	// A card handed to this conversation before the user (ask_route.go): its answer is the task's decision.
-	todo, routed := s.routedTo(ix.ID, self)
+	todo, routed := s.routedTo(ix.ID, self, s.isMain(ctx, self))
 	var res struct {
 		OK     bool   `json:"ok"`
 		Status string `json:"status"`

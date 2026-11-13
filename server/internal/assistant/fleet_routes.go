@@ -6,12 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -41,6 +39,7 @@ func (s *Service) fleetHandler(next http.Handler) http.Handler {
 		}
 		res.AnsweredBy, res.Reason = "", "" // only the assistant's interaction_answer says it answered
 		res.Remembered = false              // only the manager's own "Always allow" answers say so
+		res.Late = false                    // only the history's record of an answer after expiry says so
 		id := r.PathValue("id")
 		var approver *assistantwire.HandoffApprover // the device the hub vouched may approve a hand-off card
 		if a, ok := assistantwire.HandoffApproverOf(r.Context()); ok {
@@ -61,35 +60,8 @@ func (s *Service) fleetHandler(next http.Handler) http.Handler {
 		}
 		apierr.WriteJSON(w, map[string]any{"ok": true})
 	})
-	mux.HandleFunc("POST /api/v1/interactions/{id}/reanswer", s.serveReanswer) // "Change answer" (fleet_delegate.go)
-	mux.HandleFunc("GET /api/v1/interactions/history", func(w http.ResponseWriter, r *http.Request) {
-		st := s.fleetStore()
-		if st == nil {
-			apierr.WriteJSON(w, map[string]any{"interactions": []any{}})
-			return
-		}
-		q := r.URL.Query()
-		mid := q.Get("machine_id")
-		if m, ok := s.fleetMachine(mid); ok {
-			mid = m.ID
-		}
-		limit, _ := strconv.Atoi(q.Get("limit"))
-		recs, err := st.Interactions(r.Context(), mid, q.Get("session_id"), limit)
-		if err != nil {
-			apierr.Write(w, http.StatusInternalServerError, err)
-			return
-		}
-		if r.Header.Get(assistantwire.ElicitationHeader) != "1" {
-			filtered := make([]db.InteractionRecord, 0, len(recs))
-			for _, rec := range recs {
-				if rec.Interaction.Kind != proto.IxElicitation {
-					filtered = append(filtered, rec)
-				}
-			}
-			recs = filtered
-		}
-		apierr.WriteJSON(w, map[string]any{"interactions": recs})
-	})
+	mux.HandleFunc("POST /api/v1/interactions/{id}/reanswer", s.serveReanswer)    // "Change answer" (fleet_delegate.go)
+	mux.HandleFunc("GET /api/v1/interactions/history", s.serveInteractionHistory) // interaction_history.go
 	mux.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/seen", func(w http.ResponseWriter, r *http.Request) {
 		m, ok := s.fleetMachine(r.PathValue("mid"))
 		if !ok {
@@ -134,6 +106,28 @@ func (s *Service) writeEnded(ctx context.Context, w http.ResponseWriter, id stri
 }
 
 // ---- the queue as the assistant's own code asks for it (it was the hub's: device.call, app.call) ----
+
+// localSessions is sessions.list as localFleetDeviceCall answers it, for this manager's own readers: the decorated rows
+// and the muted ones themselves, not encoded to JSON and decoded again, which was most of what a read cost (#3197).
+// The rows share their slices and pointers with the devices' list, as every decorated row does: read, never written
+// in place (proto.Session). false when the fleet is not this process's (the hub answers then).
+func (s *Service) localSessions(machine string) (list []proto.Session, muted map[string]bool, ok bool, err error) {
+	if !s.fleetOn() || machine == DeviceAll {
+		return nil, nil, false, nil
+	}
+	m, found := s.fleetMachine(machine)
+	if !found {
+		return nil, map[string]bool{}, true, ErrNoDevice
+	}
+	list = s.decorated(m.ID)
+	muted = map[string]bool{}
+	for i := range list {
+		if s.mutedAs(m.ID, list[i].SessionID, list[i].SpaceName) { // mutedSessions, as a set
+			muted[list[i].SessionID] = true
+		}
+	}
+	return list, muted, true, nil
+}
 
 // localFleetDeviceCall answers the device methods the hub answered from what was its (the pending interactions, the
 // session lists as the apps get them, one session); false for the others.

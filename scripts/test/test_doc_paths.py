@@ -62,6 +62,12 @@ GENERATED_SCREENSHOTS = {
         "android/feature/settings/src/test/kotlin/persona/feature/settings/TranslationSettingsShotsTest.kt",
     "android/feature/inbox/build/translation-shots":
         "android/feature/inbox/src/test/kotlin/persona/feature/inbox/InboxTranslationShotsTest.kt",
+    "android/feature/settings/build/settings-groups-shots":
+        "android/feature/settings/src/test/kotlin/persona/feature/settings/SettingsGroupsShotsTest.kt",
+    "android/feature/settings/build/model-configuration-shots":
+        "android/feature/settings/src/test/kotlin/persona/feature/settings/ModelConfigurationScreenTest.kt",
+    "android/feature/settings/build/settings-reorganized-shots":
+        "android/feature/settings/src/test/kotlin/persona/feature/settings/ReorganizedSettingsPagesTest.kt",
 }
 
 # Quoted on purpose though not at the repository root: paths in another project or in the mock hub's fake file tree.

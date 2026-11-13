@@ -54,25 +54,28 @@ func (m *Market) get(ctx context.Context, u, accept string, w io.Writer, limit i
 	defer res.Body.Close()
 	switch {
 	case res.StatusCode == http.StatusNotFound && m.Token == "":
-		return notFound{errors.New("找不到（404）：地址不对，或者是私有的，要填 token")}
+		return notFound{i18n.Err("extension-market_read.not_found")}
 	case res.StatusCode == http.StatusNotFound:
-		return notFound{errors.New("没有权限（HTTP 404）：token 不对或没有读这个仓库的权限")}
+		return notFound{i18n.Err("extension-market_read.not_found_token")}
 	case rateLimited(res):
-		msg := fmt.Sprintf("被限流了（HTTP %d）：%s再试", res.StatusCode, retryIn(res.Header, time.Now()))
-		if !sent && m.Spec.Kind == "github" {
-			msg += "；填一个 GitHub token 额度更高（公开仓库也适用）"
+		key := "extension-market_read.rate_limited"
+		switch {
+		case m.Spec.Kind == "github" && !sent:
+			key = "extension-market_read.rate_limited_github_add_token" // a token raises the limit, public repositories too
+		case m.Spec.Kind == "github":
+			key = "extension-market_read.rate_limited_github"
 		}
-		return errOfKind(ErrRateLimited, "%s", msg)
+		return messageOfKind(ErrRateLimited, key, i18n.Args{"status": res.StatusCode, "retry": retryIn(res.Header, time.Now())})
 	case (res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden) && !sent:
-		return fmt.Errorf("要登录才能读（HTTP %d）：填一个能读它的 token", res.StatusCode)
+		return i18n.Err("extension-market_read.sign_in", i18n.Args{"status": res.StatusCode})
 	case res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden:
-		return fmt.Errorf("没有权限（HTTP %d）：token 不对或没有读这个仓库的权限", res.StatusCode)
+		return i18n.Err("extension-market_read.no_permission", i18n.Args{"status": res.StatusCode})
 	case res.StatusCode != http.StatusOK:
-		return fmt.Errorf("HTTP %d", res.StatusCode)
+		return i18n.Err("extension-market_read.http_status", i18n.Args{"status": res.StatusCode})
 	}
 	n, err := io.Copy(w, io.LimitReader(res.Body, limit+1))
 	if err == nil && n > limit {
-		err = fmt.Errorf("大于 %d 字节", limit)
+		err = i18n.Err("extension-market_read.too_large", i18n.Args{"bytes": limit})
 	}
 	return err
 }
@@ -94,20 +97,20 @@ func rateLimited(res *http.Response) bool {
 }
 
 // retryIn says when a rate-limited request may be tried again, from Retry-After (seconds) or X-RateLimit-Reset
-// (Unix seconds); "in a while" (in Chinese) when neither says.
-func retryIn(h http.Header, now time.Time) string {
+// (Unix seconds); "later" when neither says. It is a sentence of its own, read in the reader's language.
+func retryIn(h http.Header, now time.Time) error {
 	var wait time.Duration
 	if s, err := strconv.ParseInt(strings.TrimSpace(h.Get("Retry-After")), 10, 64); err == nil && s >= 0 {
 		wait = time.Duration(s) * time.Second
 	} else if s, err := strconv.ParseInt(strings.TrimSpace(h.Get("X-RateLimit-Reset")), 10, 64); err == nil && s > 0 {
 		wait = time.Unix(s, 0).Sub(now)
 	} else {
-		return "过一会儿"
+		return i18n.Err("extension-market_read.retry_later")
 	}
 	if wait <= time.Minute {
-		return "1 分钟后"
+		return i18n.Err("extension-market_read.retry_minute")
 	}
-	return fmt.Sprintf("约 %d 分钟后", int((wait+time.Minute-1)/time.Minute))
+	return i18n.Err("extension-market_read.retry_minutes", i18n.Args{"count": int((wait + time.Minute - 1) / time.Minute)})
 }
 
 // notFound is a catalog or package that the origin could not find.

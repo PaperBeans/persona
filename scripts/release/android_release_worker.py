@@ -95,18 +95,21 @@ def check_history(checkout, previous, sha):
         run(["git", "merge-base", "--is-ancestor", previous, sha], checkout)
 
 
-def build(config, checkout, sha, directory):
+def build(config, checkout, sha, directory, name=None):
+    """Build the unsigned release APK of sha. name is its version name: a version tag's release version
+    (android_tag_release.py), else the main branch's 0.1.<code>-<commit>."""
     run(["git", "checkout", "--detach", "--force", sha], checkout)
     # The dedicated clone never contains user work. Do not remove its build caches.
     env = dict(os.environ, **config.get("build_environment", {}))
     code = version_code(checkout, sha, config.get("version_base", VERSION_BASE))
-    name = f"0.1.{code}-{sha[:12]}"
+    name = name or f"0.1.{code}-{sha[:12]}"
     unsigned = directory / "unsigned.apk"
     receipt = directory / "build.json"
     if receipt.exists() and unsigned.exists():
         built = json.loads(receipt.read_text())
         if (built.get("repository") == config["repository"] and built.get("source_sha") == sha
-                and built.get("version_code") == code and built.get("package") == config["application_id"]
+                and built.get("version_code") == code and built.get("version_name") == name
+                and built.get("package") == config["application_id"]
                 and built.get("unsigned_sha256") == digest(unsigned)):
             return built
     tests = ["python3", "-m", "unittest", "discover", "-s", "scripts/release", "-p", "test_*android*.py"]

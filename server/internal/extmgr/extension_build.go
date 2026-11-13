@@ -17,27 +17,30 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	sdk "github.com/nwverse/persona/sdk/go"
+	"github.com/nwverse/persona/server/internal/clitext"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extension/conformance"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // Writing an extension (docs/extensions/extensions.md "Writing extensions: SDK, templates and command line"): `personad extension new |
-// test | pack` need no hub; `dev` hangs the extension on this machine's (extension_dev.go).
+// test | pack` need no hub; `dev` hangs the extension on this machine's (extension_dev.go). What they print reads in
+// the terminal's language (i18n.Terminal, #5520).
 
 const extensionBuildUsage = `
 writing one:
-  new <id> [--template go|ts] [--name <名字>] [--dir <目录>]
+  new <id> [--template go|ts] [--name <name>] [--dir <directory>]
                                     a new extension from a template, with a copy of the SDK
-  dev [<目录>]                      run it on this machine's hub from its directory: rebuilt and restarted when
+  dev [<directory>]                 run it on this machine's hub from its directory: rebuilt and restarted when
                                     its files change, its log and the hub's calls to it printed here; Ctrl-C ends
                                     (settings and secrets from extension.dev.json: {"config": {…}, "secrets": {…}})
-  test [<目录>]                     build it for this machine and hold it to the hub's checks
-  pack [<目录>] [--platforms linux-amd64,…] [--out dist] [--split]
+  test [<directory>]                build it for this machine and hold it to the hub's checks
+  pack [<directory>] [--platforms linux-amd64,…] [--out dist] [--split]
                                     build every platform and pack it; prints the sha256 and the index entry`
 
 // extensionBuildCommand runs new, test and pack.
@@ -46,7 +49,7 @@ func extensionBuildCommand(ctx context.Context, args []string, stdout, stderr io
 	switch args[0] {
 	case "new":
 		if len(positional) < 1 {
-			return errors.New("usage: personad extension new <id> [--template go|ts] [--name <名字>] [--dir <目录>]")
+			return errors.New(clitext.Named("usage: personad extension new <id> [--template go|ts] [--name <name>] [--dir <directory>]"))
 		}
 		return newExtension(positional[0], opts["template"], opts["name"], opts["dir"], stdout)
 	case "test":
@@ -89,8 +92,9 @@ func dirArg(positional []string) string {
 
 // newExtension writes a new extension from a template, with the SDK copied in (sdk/go or sdk/ts).
 func newExtension(id, template, name, dir string, stdout io.Writer) error {
+	l := i18n.Terminal()
 	if !extension.ValidID(id) || len(id) > 26 {
-		return fmt.Errorf("id %q：小写字母、数字、- 和 _，字母或数字开头，最长 26（模板的贡献 id 是 <id>-today）", id)
+		return errors.New(i18n.T(l, "extmgr-cli.new_bad_id", i18n.Args{"id": strconv.Quote(id)}))
 	}
 	if template == "" {
 		template = "go"
@@ -99,19 +103,19 @@ func newExtension(id, template, name, dir string, stdout io.Writer) error {
 		return newSourceExtension(id, name, dir, stdout)
 	}
 	if template != "go" && template != "ts" {
-		return fmt.Errorf("模板只有 go 和 ts，没有 %q", template)
+		return errors.New(i18n.T(l, "extmgr-cli.new_bad_template", i18n.Args{"template": strconv.Quote(template)}))
 	}
 	if name == "" {
 		name = id
 	}
 	if n := len([]rune(name)); n > 40 || strings.ContainsAny(name, "\"\\\n") {
-		return errors.New("名字最长 40 个字，不能有引号、反斜杠和换行")
+		return errors.New(i18n.T(l, "extmgr-cli.new_bad_name"))
 	}
 	if dir == "" {
 		dir = id
 	}
 	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
-		return fmt.Errorf("%s 已经有东西了：换一个目录（--dir）", dir)
+		return errors.New(i18n.T(l, "extmgr-cli.new_dir_not_empty", i18n.Args{"dir": dir}))
 	}
 	files, err := bundleFiles()
 	if err != nil {
@@ -134,20 +138,21 @@ func newExtension(id, template, name, dir string, stdout io.Writer) error {
 		n++
 	}
 	if n == 0 {
-		return fmt.Errorf("这个 personad 里没有 %s 模板", template)
+		return errors.New(i18n.T(l, "extmgr-cli.new_no_template", i18n.Args{"template": template}))
 	}
 	if err := copySDK(dir, template, files); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "在 %s 写好了扩展 %s（%s 模板）。接下来：\n", dir, id, template)
+	fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.new_done", i18n.Args{"dir": dir, "id": id, "template": template}))
 	fmt.Fprintf(stdout, "  cd %s\n", dir)
+	step := func(command, key string) { fmt.Fprintf(stdout, "  %-29s %s\n", command, i18n.T(l, key)) }
 	if template == "go" {
-		fmt.Fprintln(stdout, "  go test ./...                 单元测试和一致性检查")
+		step("go test ./...", "extmgr-cli.new_step_go_test")
 	} else {
-		fmt.Fprintln(stdout, "  bun test                      单元测试")
+		step("bun test", "extmgr-cli.new_step_bun_test")
 	}
-	fmt.Fprintln(stdout, "  personad extension dev        挂到这台 hub 上试（改了自动重启）")
-	fmt.Fprintln(stdout, "  personad extension pack       打包，打印 sha256 和市场索引的条目")
+	step(clitext.Named("personad extension dev"), "extmgr-cli.new_step_dev")
+	step(clitext.Named("personad extension pack"), "extmgr-cli.new_step_pack")
 	return nil
 }
 
@@ -213,27 +218,30 @@ func bundleFiles() (map[string][]byte, error) {
 	}
 }
 
-// devProject is an extension's source directory: its manifest and how it is built.
+// devProject is an extension's source directory: its manifest and how it is built. lang is the terminal's, what its
+// build says what went wrong in.
 type devProject struct {
 	dir      string
 	manifest *extension.Manifest
 	kind     string // go | ts
+	lang     i18n.Lang
 }
 
 func openProject(dir string) (*devProject, error) {
+	l := i18n.Terminal()
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
 	data, err := os.ReadFile(extension.ManifestPath(abs))
 	if err != nil {
-		return nil, fmt.Errorf("%s 里没有 persona-extension.json", abs)
+		return nil, errors.New(i18n.T(l, "extmgr-cli.no_manifest", i18n.Args{"dir": abs}))
 	}
 	m, err := extension.Parse(data)
 	if err != nil {
 		return nil, err
 	}
-	p := &devProject{dir: abs, manifest: m}
+	p := &devProject{dir: abs, manifest: m, lang: l}
 	switch {
 	case m.Runtime == nil:
 		p.kind = "" // declarations only: nothing to build
@@ -246,7 +254,7 @@ func openProject(dir string) (*devProject, error) {
 	case goModule(abs):
 		p.kind = "go"
 	default:
-		return nil, errors.New("不知道怎么构建：Go 的扩展有 go.mod，TypeScript 的有 src/main.ts")
+		return nil, errors.New(i18n.T(l, "extmgr-cli.unknown_build"))
 	}
 	return p, nil
 }
@@ -290,7 +298,7 @@ func (p *devProject) build(ctx context.Context, platform string, stderr io.Write
 	}
 	rel, ok := p.manifest.Runtime.Command.For(platform)
 	if !ok {
-		return fmt.Errorf("清单的 runtime.command 没有 %s", platform)
+		return errors.New(i18n.T(p.lang, "extmgr-cli.no_command", i18n.Args{"platform": platform}))
 	}
 	out := filepath.Join(p.dir, filepath.FromSlash(rel))
 	goos, goarch, _ := strings.Cut(platform, "-")
@@ -301,7 +309,7 @@ func (p *devProject) build(ctx context.Context, platform string, stderr io.Write
 	} else {
 		arch := map[string]string{"amd64": "x64", "arm64": "arm64"}[goarch]
 		if arch == "" {
-			return fmt.Errorf("bun 不能编译 %s", platform)
+			return errors.New(i18n.T(p.lang, "extmgr-cli.bun_platform", i18n.Args{"platform": platform}))
 		}
 		cmd = exec.CommandContext(ctx, "bun", "build", "--compile", "--minify", "--target=bun-"+goos+"-"+arch, "src/main.ts", "--outfile", out)
 	}
@@ -312,9 +320,9 @@ func (p *devProject) build(ctx context.Context, platform string, stderr io.Write
 		_, _ = stderr.Write(buf.Bytes())
 		var ee *exec.Error
 		if errors.As(err, &ee) {
-			return fmt.Errorf("构建要 %s：%w", cmd.Args[0], err)
+			return &buildError{i18n.T(p.lang, "extmgr-cli.build_needs", i18n.Args{"tool": cmd.Args[0], "error": err}), err}
 		}
-		return fmt.Errorf("%s 构建失败：%w", platform, err)
+		return &buildError{i18n.T(p.lang, "extmgr-cli.build_failed", i18n.Args{"platform": platform, "error": err}), err}
 	}
 	if p.kind == "ts" && platform == "darwin-arm64" && runtime.GOOS == "darwin" {
 		return signedForMac(ctx, out)
@@ -355,9 +363,18 @@ func signedForMac(ctx context.Context, out string) error {
 	if b, err := exec.CommandContext(ctx, "bun", "--version").Output(); err == nil {
 		version = strings.TrimSpace(string(b))
 	}
-	return fmt.Errorf("bun %s 编出来的 %s 没有签名、也补不上签名，macOS 会在它启动时直接结束它：升级 bun（bun upgrade）后再试（%w）",
-		version, filepath.Base(out), errBunUnsigned)
+	return &buildError{i18n.T(i18n.Terminal(), "extmgr-cli.bun_unsigned", i18n.Args{"version": version, "program": filepath.Base(out),
+		"error": errBunUnsigned}), errBunUnsigned}
 }
+
+// buildError is a build's failure in the terminal's language, wrapping its cause (errors.Is sees errBunUnsigned).
+type buildError struct {
+	text string
+	err  error
+}
+
+func (e *buildError) Error() string { return e.text }
+func (e *buildError) Unwrap() error { return e.err }
 
 // check holds the directory to what installing it would (the program for this machine is there, the settings'
 // schema, the inbox's rules), without copying it.
@@ -381,20 +398,21 @@ func testExtension(ctx context.Context, dir string, stdout, stderr io.Writer) er
 	if err := p.build(ctx, here, stderr); err != nil {
 		return err
 	}
+	l := p.lang
 	e, reg, err := p.check()
 	if err != nil {
-		return fmt.Errorf("清单和包：%w", err)
+		return &buildError{i18n.T(l, "extmgr-cli.check_failed", i18n.Args{"error": err}), err}
 	}
-	fmt.Fprintf(stdout, "✓ 清单和包（%s %s）\n", p.manifest.ID, p.manifest.Version)
+	fmt.Fprintln(stdout, "✓ "+i18n.T(l, "extmgr-cli.check_ok", i18n.Args{"id": p.manifest.ID, "version": p.manifest.Version}))
 	for _, w := range e.Warnings {
-		fmt.Fprintln(stdout, "  警告："+w)
+		fmt.Fprintln(stdout, "  "+i18n.T(l, "extmgr-cli.warning", i18n.Args{"text": w}))
 	}
 	rt := p.manifest.Runtime
 	if rt.IsDeno() {
-		return i18n.Err("extension-source.package_check_only")
+		return errors.New(i18n.T(l, "extension-source.package_check_only"))
 	}
 	if rt == nil || !rt.SpeaksRPC() {
-		fmt.Fprintln(stdout, "✓ 没有说协议的程序，不用查握手")
+		fmt.Fprintln(stdout, "✓ "+i18n.T(l, "extmgr-cli.check_no_protocol"))
 		return nil
 	}
 	rel, _ := rt.Command.For(here)
@@ -417,9 +435,9 @@ func testExtension(ctx context.Context, dir string, stdout, stderr io.Writer) er
 			extension.InitializeParams{Config: reg.Config(e), Hub: extension.HubInfo{Role: "center", Timezone: "Asia/Shanghai"}})
 	})
 	if err != nil {
-		return fmt.Errorf("✗ 协议：%w", err)
+		return &buildError{"✗ " + i18n.T(l, "extmgr-cli.protocol_failed", i18n.Args{"error": err}), err}
 	}
-	fmt.Fprintln(stdout, "✓ 协议：握手、错误码、snake_case、每个 ui 贡献画得出 App 画得了的 View、关掉 stdin 后退出")
+	fmt.Fprintln(stdout, "✓ "+i18n.T(l, "extmgr-cli.protocol_ok"))
 	return nil
 }
 
@@ -461,13 +479,13 @@ func packExtension(ctx context.Context, dir string, opts map[string]string, stdo
 		if p.kind == "deno" && i > 0 {
 			continue // One platform-independent artifact serves every package platform.
 		}
-		fmt.Fprintf(stdout, "构建 %s…\n", pl)
+		fmt.Fprintln(stdout, i18n.T(p.lang, "extmgr-cli.pack_building", i18n.Args{"platform": pl}))
 		if err := p.build(ctx, pl, stderr); err != nil {
 			return err
 		}
 	}
 	if _, _, err := p.check(); err != nil {
-		return fmt.Errorf("清单和包：%w", err)
+		return &buildError{i18n.T(p.lang, "extmgr-cli.check_failed", i18n.Args{"error": err}), err}
 	}
 	outDir := opts["out"]
 	if outDir == "" {
@@ -506,7 +524,7 @@ func packExtension(ctx context.Context, dir string, opts map[string]string, stdo
 		}
 		sum := sha256.Sum256(data)
 		pkgs = append(pkgs, pkg{Platforms: group, URL: name, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data))})
-		fmt.Fprintf(stdout, "%s  %s（%d 字节）\n", hex.EncodeToString(sum[:]), path, len(data))
+		fmt.Fprintln(stdout, i18n.T(p.lang, "extmgr-cli.pack_file", i18n.Args{"sha256": hex.EncodeToString(sum[:]), "path": path, "count": len(data)}))
 	}
 	fields := map[string]any{"packages": pkgs}
 	// the translations go into the index entry too, so a market shows them before anything is downloaded (#897)
@@ -518,7 +536,8 @@ func packExtension(ctx context.Context, dir string, opts map[string]string, stdo
 		fields["l10n"] = translations
 	}
 	entry, _ := json.MarshalIndent(fields, "", "  ")
-	fmt.Fprintf(stdout, "市场索引里这个扩展的 packages（url 换成包实际放的地方）：\n%s\n", entry)
+	fmt.Fprintln(stdout, i18n.T(p.lang, "extmgr-cli.pack_entry"))
+	fmt.Fprintln(stdout, string(entry))
 	return nil
 }
 

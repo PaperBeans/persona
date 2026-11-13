@@ -2,9 +2,13 @@
 // meeting_conversation, the private switch, a running room meeting's one thread (read-only, the room's state, batches
 // folded), questions asked in the room that got no answer (why, or still being answered; one that never went in after the
 // thread), an ended one's follow-up composer that opens the follow-up, the thread after the divider, and a room that is
-// unavailable showing its asks. With meeting_photos (phase 3): the photos the room was sent in its thread (one deleted
+// unavailable showing its asks. Phase 6: **Talk about this meeting** on a recording that is not a room meeting (a note
+// that has ended), its first words through POST …/followup, and its follow-up as the thread. With meeting_photos (phase 3): the photos the room was sent in its thread (one deleted
 // since: "Photo removed", never the room's copy), **Photos**, a photos revision read again from GET …/photos only, the
-// minutes items that cite a photo and the image viewer. Run against an already running Vite server.
+// minutes items that cite a photo and the image viewer. With meeting_live_view (phase 2): a running meeting's **Topics** (the
+// current one's start and note shown under the chips) and **Live** lines (a log the keyboard reaches), the new ones read
+// from the page's own position on meeting_live, and both gone once the room says the meeting ended. Run against an already
+// running Vite server.
 // BASE_URL=http://127.0.0.1:5791 PERSONA_E2E_CHROMIUM=<chrome> SHOTS_DIR=/tmp/mm/shots node web/e2e/recording-conversation.mjs
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
@@ -151,7 +155,7 @@ async function context(theme, lang, width, scene) {
     localStorage.setItem("persona.language", lang);
     localStorage.setItem("persona.theme", theme);
   }, { theme, lang });
-  const state = { live: [], private: [], followup: [], items: [], made: false, asksRev: 0, photos: [], images: [], roomImages: [], details: 0, photosRev: 0 };
+  const state = { live: [], private: [], followup: [], items: [], made: false, asksRev: 0, photos: [], images: [], roomImages: [], details: 0, photosRev: 0, linesMore: 0, topicsRev: 0, roomEnded: false };
   await ctx.route("**/*", (route) => new URL(route.request().url()).origin === base.origin ? route.continue() : route.abort());
   await ctx.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -184,7 +188,12 @@ async function context(theme, lang, width, scene) {
       assert.equal(request.headers()["x-persona-manager"], "assistant");
       state.live.push(url.search);
       const revs = { ...(scene.live.revs ?? live().revs), ...(state.asksRev ? { asks: state.asksRev } : {}), ...(state.made ? { followup: 1 } : {}), ...(state.photosRev ? { photos: state.photosRev } : {}) };
-      return route.fulfill({ json: live({ ...scene.live, ...(state.made ? { followup } : {}), revs }) });
+      // Phase 2: the live log's lines only from ?from=, its length as their revision.
+      const from = url.searchParams.get("from");
+      const log = scene.lines ? scene.lines(state) : undefined;
+      const lines = log && from !== null ? { lines: log.slice(Number(from)) } : {};
+      return route.fulfill({ json: live({ ...scene.live, ...(state.made ? { followup } : {}), ...(state.roomEnded ? { room: ended } : {}), ...(scene.topics ? { topics: scene.topics(state) } : {}), ...lines,
+        revs: { ...revs, ...(log ? { lines: log.length } : {}), ...(state.topicsRev ? { topics: state.topicsRev } : {}), ...(state.roomEnded ? { room: 3 } : {}) } }) });
     }
     if (path === `/recordings/${id}/private`) {
       assert.equal(request.method(), "PUT");
@@ -363,6 +372,46 @@ async function down(theme, lang = "en", width = 1440) {
   runs++;
 }
 
+/** Phase 6: any recording with text or minutes that has ended (here a note: no room, no attendance, no private mark)
+ *  offers **Talk about this meeting**; its first words make the follow-up, which is then its thread. */
+async function talk(theme, lang = "en", width = 1440) {
+  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  const scene = { meta: { kind: "note", title: "Vendor call", complete: true, ended_at: "2026-11-10T14:31:00+08:00", minutes_state: undefined, attendance: undefined, room: undefined }, live: { attendance: "off", asks: [], room: undefined, revs: { asks: 0 } } };
+  const { ctx, state } = await context(theme, lang, width, scene);
+  const errors = [];
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(15_000);
+  page.on("pageerror", (err) => errors.push(err.message));
+  await page.goto(new URL(detailPath, base).href);
+  const section = page.locator("[data-meeting-conversation]");
+  const field = section.locator("textarea");
+  await field.waitFor();
+  await settle(page);
+  assert.ok(await section.getByText(s.followup_label, { exact: true }).isVisible());
+  assert.equal(await section.getByRole("status").count(), 0, "No room, no room state");
+  assert.equal(await page.locator("[data-meeting-private]").count(), 0, "Not a meeting: no private mark");
+  assert.deepEqual(state.items, [], "No thread to read yet");
+  await field.fill("What did the vendor promise about the export cap?");
+  await shoot(page, width === 1440 ? `conversation-talk-${theme}.png` : `conversation-talk-${lang}-${width}.png`);
+  await section.getByRole("button", { name: s.followup_send, exact: true }).click();
+  await page.waitForURL((u) => u.pathname === `/persona/${follow}`);
+  assert.equal(state.followup.length, 1);
+  assert.equal(state.followup[0].text, "What did the vendor promise about the export cap?");
+  assert.deepEqual(errors, []);
+  await page.goto(new URL(detailPath, base).href);
+  errors.length = 0;
+  await section.getByText("draft", { exact: true }).waitFor();
+  await settle(page);
+  assert.deepEqual(await kinds(page), ["material", "question", "answer"]);
+  assert.equal(await section.getByRole("separator").count(), 0, "Nothing before the follow-up");
+  assert.equal(await section.getByRole("link", { name: s.conversation_continue, exact: true }).getAttribute("href"), `/persona/${follow}`);
+  assert.equal(await field.count(), 0);
+  await shoot(page, width === 1440 ? `conversation-talk-followup-${theme}.png` : `conversation-talk-followup-${lang}-${width}.png`);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  runs++;
+}
+
 /** Questions in the room that got no answer: one in the thread says why, one still being answered says so, and one that
  *  never went into the room (spoken, failed) shows after the thread. */
 async function stuck(theme, lang = "en", width = 1440) {
@@ -513,7 +562,91 @@ async function photosAfter(theme, lang = "en", width = 1440) {
   runs++;
 }
 
+/** Phase 2 while the meeting runs: **Topics** (done, now, still to come) and **Live**, the newest lines; a meeting_live event
+ *  reads only the new lines, from the page's own next position, and the topics once they moved. */
+async function liveView(theme, lang = "en", width = 1440) {
+  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  const said = [
+    [5, "Ada: Today we look at the export flow of the example project."], [12, "Bo: The cap is still 4 MB."], [31, "Ada: Let's keep it for this release."],
+    [312, "Bo: Pricing next: two options on the table."], [340, "Ada: The yearly plan keeps the discount."], [1790, "Bo: Did we decide on the cap last time, or is it still open?"],
+  ];
+  const more = [[1850, "Ada: Then hiring: we open one more role in Q1."], [1858, "Bo: I'll write the job post this week."]];
+  const scene = {
+    meta: {}, live: { revs: { room: 2, asks: 4 } },
+    lines: (st) => [...said, ...more.slice(0, st.linesMore)].map(([start, text], n) => ({ n, start, end: start + 4, text })),
+    topics: (st) => [
+      { title: "Export cap", state: "done", at: 0 },
+      { title: "Pricing", state: st.topicsRev >= 2 ? "done" : "current", at: 312, note: "Two options: monthly and yearly" },
+      { title: "Hiring", state: st.topicsRev >= 2 ? "current" : "open", ...(st.topicsRev >= 2 ? { at: 1850 } : {}) },
+      { title: "Vendor contract", state: "open" },
+    ],
+    features: [...FEATURES, "meeting_live_view"],
+  };
+  const { ctx, state, push } = await context(theme, lang, width, scene);
+  state.topicsRev = 1;
+  const errors = [];
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(15_000);
+  page.on("pageerror", (err) => errors.push(err.message));
+  await page.goto(new URL(detailPath, base).href);
+  const topics = page.locator("[data-live-topics]");
+  const lines = page.locator("[data-live-lines]");
+  await lines.locator("[data-live-line]").nth(5).waitFor();
+  await page.locator("[data-meeting-conversation]").getByText(ask().answer, { exact: true }).waitFor();
+  assert.equal(await topics.locator("h2").innerText(), s.live_topics_title);
+  assert.deepEqual(await topics.locator("li").evaluateAll((els) => els.map((el) => el.getAttribute("data-topic"))), ["done", "current", "open", "open"]);
+  assert.ok(await topics.getByText(s.live_topic_current, { exact: true }).isVisible());
+  assert.equal(await lines.locator("h2").innerText(), s.live_title);
+  const first = lines.locator("[data-live-line]").first().locator("span");
+  assert.deepEqual([await first.first().innerText(), await first.last().innerText()], ["14:00:05", said[0][1]]);
+  assert.equal(state.live[0], "", "The first read takes no from");
+  assert.ok(state.live.includes("?parts=lines&from=0"), "then the lines from the start of this short meeting");
+  // The current topic's start and the room's note as text under the chips, not only in a tooltip.
+  assert.equal(await topics.locator("[data-live-topic-now]").innerText(), `${fill(s.live_topic_since, { time: "14:05:12" })} · Two options: monthly and yearly`);
+  // Live is a log the keyboard reaches, with a plain list inside; nothing was cut from this short meeting.
+  const log = lines.locator("[role=log]");
+  assert.deepEqual(await log.evaluate((el) => [el.tagName, el.tabIndex, document.getElementById(el.getAttribute("aria-labelledby"))?.textContent, el.querySelector("ol")?.hasAttribute("role")]), ["DIV", 0, s.live_title, false]);
+  assert.equal(await lines.locator("[data-live-earlier]").count(), 0);
+  for (const box of [topics, lines]) assert.ok(await box.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), "No live view overflow");
+  if (lang === "en" && width === 1440) {
+    // New lines and the next topic: only those, from the page's own next position.
+    const reads = state.live.length;
+    state.linesMore = 2; state.topicsRev = 2;
+    push({ type: "meeting_live", recording_id: id, changed: ["lines", "topics"], revs: { lines: 8, topics: 2 } });
+    await lines.getByText(more[1][1], { exact: true }).waitFor();
+    assert.equal(state.live[reads], "?parts=lines,topics&from=6");
+    await until(async () => (await topics.locator('li[data-topic="current"]').innerText()).endsWith("Hiring"), "the next topic");
+    // Hiring began at 30:50 and has no note: only its start under the chips.
+    assert.equal(await topics.locator("[data-live-topic-now]").innerText(), fill(s.live_topic_since, { time: "14:30:50" }));
+  }
+  await settle(page);
+  const tag = width === 1440 ? theme : `${lang}-${width}-${theme}`;
+  await shootFrom(page, "[data-live-topics]", `live-view-${tag}.png`);
+  if (width === 1440) {
+    // Reached from the keyboard, the log shows the accent focus ring.
+    await page.locator("[data-live-topics]").evaluate((el) => el.scrollIntoView({ block: "start" }));
+    await page.keyboard.press("Shift");
+    await log.focus();
+    assert.ok(await log.evaluate((el) => el.matches(":focus-visible") && getComputedStyle(el).outlineStyle === "solid"), "The log's focus ring");
+    await settle(page);
+    await page.screenshot({ path: join(output, `live-view-focus-${theme}.png`) });
+    screenshots++;
+    // The room says the meeting ended: Topics and Live go, before the detail is read again.
+    state.roomEnded = true;
+    push({ type: "meeting_live", recording_id: id, changed: ["room"], revs: { room: 3 } });
+    await topics.waitFor({ state: "detached" });
+    await lines.waitFor({ state: "detached" });
+  }
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  runs++;
+}
+
 try {
+  for (const theme of ["light", "dark"]) await liveView(theme);
+  for (const theme of ["light", "dark"]) await liveView(theme, "en", 390);
+  await liveView("light", "zh-Hans", 390);
+  await liveView("dark", "ja", 390);
   for (const theme of ["light", "dark"]) await photosRunning(theme);
   for (const theme of ["light", "dark"]) await photosRunning(theme, "en", 390);
   await photosRunning("light", "zh-Hans", 390);
@@ -528,7 +661,9 @@ try {
   for (const theme of ["light", "dark"]) await after(theme);
   for (const lang of ["zh-Hans", "ja"]) await after("light", lang, 390);
   for (const theme of ["light", "dark"]) await down(theme);
-  console.log(`PASS recording conversation: ${runs} browser runs, ${screenshots} screenshots; private switch, room thread, questions without an answer, meeting_live parts, follow-up composer, follow-up thread, unavailable room, photos (thread, list, revision, minutes citations, viewer) and overflow checked`);
+  for (const theme of ["light", "dark"]) await talk(theme);
+  for (const lang of ["zh-Hans", "ja"]) await talk("dark", lang, 390);
+  console.log(`PASS recording conversation: ${runs} browser runs, ${screenshots} screenshots; private switch, room thread, questions without an answer, meeting_live parts, follow-up composer, follow-up thread, unavailable room, talk about any recording, photos (thread, list, revision, minutes citations, viewer), the live view (topics, the current topic's start and note, a log the keyboard reaches, lines, meeting_live parts, gone once the room ended) and overflow checked`);
 } catch (err) {
   console.error(`FAIL recording conversation: ${err?.stack || err}`);
   process.exitCode = 1;

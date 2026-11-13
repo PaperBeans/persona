@@ -26,6 +26,12 @@ interface ChatTransport {
     }
     suspend fun image(session: SessionKey, itemId: String): ByteArray
     suspend fun fullItem(session: SessionKey, itemId: String): Item
+    /**
+     * Change Answer (POST /api/v1/interactions/{id}/reanswer `{answers}`, with the card's [manager]): the user's answers to a
+     * question the assistant answered go to the Agent as a message. Not retried: the hub sends the same answer once.
+     */
+    suspend fun reanswer(id: String, answers: Map<String, String>, manager: String?): Unit =
+        throw UnsupportedOperationException("Change Answer unavailable")
 }
 
 data class ItemsQuery(

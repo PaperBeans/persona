@@ -1,0 +1,21 @@
+{
+  "more_actions": "更多消息操作",
+  "worth": "价值 {cost}",
+  "tokens": "{tokens} tokens",
+  "approx": "约 {cost}",
+  "details_title": "本轮明细",
+  "value_line": "本轮 token 价值：{cost}",
+  "by_model": "按模型拆分：",
+  "model_cost": "· {model} {cost}",
+  "token_line": "Tokens：共 {total} · 输入 {input} · 输出 {output}",
+  "cache_line": "缓存拆分：读取 {read} · 写入 {write} · 命中率 {rate}",
+  "cache_line_no_rate": "缓存拆分：读取 {read} · 写入 {write}",
+  "time_line": "耗时 {duration}",
+  "model_line": "模型：{model}",
+  "models_other": "{count} 个模型",
+  "suggestion_line": "建议：{suggestion}",
+  "low_cache": "缓存命中率偏低，本轮较多上下文重新计费",
+  "no_cost": "本轮费用暂不可用，仅显示用量",
+  "persona_cost": "这条回复约 {cost}，按公开价格估算",
+  "persona_title": "这条回复的估算费用"
+}

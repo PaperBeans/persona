@@ -252,6 +252,13 @@ type Mouser interface {
 	Mouse(MouseEvent) error
 }
 
+// Releaser is a Control that can end at a size: the pane resized to cols × rows, then given back (herdr: CloseAt). herdr
+// lays a released pane out at its own client's size only while one is attached, so the node gives back the size the
+// pane had before it took it (docs/integrations/terminal.md section 11).
+type Releaser interface {
+	CloseAt(cols, rows int)
+}
+
 // Redrawer is a Control that can be asked for a whole frame of the screen as it is, the programs seeing no change
 // (herdr: a resize to the size it has). The node asks when a slow link falls behind (node/terminal.go frameGate).
 type Redrawer interface {

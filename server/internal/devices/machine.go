@@ -113,6 +113,7 @@ type Machine struct {
 	timings                    tailcatTimings
 	deployRetry                time.Duration // how long a node update waits before asking a busy node again (tests: shorter)
 	reconnectGrace             time.Duration // shown as it was this long after its node disconnected (warm.go; tests: shorter)
+	reloadUntil                time.Time     // a resident announced exec; never extends display/reconnect grace
 	storeWait                  time.Duration // how long a node event waits on the store (nodeStoreWait; tests: shorter)
 	engineMu                   sync.Mutex
 	link                       *mgrLink      // kind link: the link Persona Link keeps open, nil while there is none
@@ -404,6 +405,9 @@ func (m *Machine) open(ctx context.Context, via string) (*nodePipe, error) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	cmd := m.command(ctx)
+	if via == "ssh" {
+		stopSSHTreeOnCancel(cmd)
+	}
 	// Bound pipe draining if a node descendant inherits stdout or stderr.
 	cmd.WaitDelay = shutdownStepTimeout
 	stdin, err := cmd.StdinPipe()
@@ -415,7 +419,8 @@ func (m *Machine) open(ctx context.Context, via string) (*nodePipe, error) {
 		// This machine's node is ended the way a hub that went away ends it, by EOF on its stdin: it stops the
 		// assistant's conversations, whose processes lead their own groups, and exits (node.Serve). Killed straight
 		// away, as the default Cancel does, it left them running beside the ones the next node started for the same
-		// conversations (#4259). An ssh node's own end sees EOF when ssh is killed, so ssh keeps the default.
+		// conversations (#4259). A local node's children need this graceful stop. An ssh node's own end instead sees
+		// EOF when its process group is killed; its ProxyCommand cannot outlive it either.
 		cmd.Cancel = stdin.Close
 		cmd.WaitDelay = localNodeStopGrace
 	}
@@ -470,15 +475,30 @@ func (m *Machine) open(ctx context.Context, via string) (*nodePipe, error) {
 			case <-time.After(shutdownStepTimeout):
 			}
 			_ = cmd.Wait()
+			if via == "ssh" {
+				sweepSSHProcessTree(cmd.Process.Pid)
+			}
 		},
 	}, nil
 }
 
-func (m *Machine) call(ctx context.Context, method string, params any, out any) error {
+func (m *Machine) callOnce(ctx context.Context, method string, params any, out any) error {
 	m.mu.Lock()
 	p := m.peer
 	info := m.info
 	m.mu.Unlock()
+	if p != nil {
+		select {
+		case <-p.Done():
+			p = nil
+		default:
+		}
+	}
+	if p == nil && ctx.Err() == nil && (m.waitWarm(ctx) || m.waitFirst(ctx)) {
+		m.mu.Lock()
+		p, info = m.peer, m.info
+		m.mu.Unlock()
+	}
 	if info.Version != "" && info.EngineHosts == nil && devicewire.IsSessionStart(method) && proto.StartHost(params) != "" {
 		// An older node ignores host and would start in its engine instead (#2576): refused, nothing started.
 		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_engine_hosts")}
@@ -489,6 +509,16 @@ func (m *Machine) call(ctx context.Context, method string, params any, out any) 
 			key = "hub-machine.node_protocol_new"
 		}
 		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), key)}
+	}
+	if (method == "session.skills" || method == "session.send") && !nodeHas(info, nodeproto.SessionSkills) {
+		var fields struct {
+			SkillOwner string `json:"skill_owner"`
+		}
+		raw, _ := json.Marshal(params)
+		_ = json.Unmarshal(raw, &fields)
+		if method == "session.skills" || method == "session.send" && strings.HasPrefix(fields.SkillOwner, "agents:") {
+			return refusalSessionSkillNode()
+		}
 	}
 	if !nodeHas(info, nodeproto.ModelConfiguration) && (method == "assistant.send" || method == "assistant.warm" || devicewire.IsSessionStart(method) || method == "session.send") {
 		raw, _ := json.Marshal(params)
@@ -521,14 +551,36 @@ func (m *Machine) call(ctx context.Context, method string, params any, out any) 
 			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_assistant_config_dir")}
 		}
 	}
+	if method == "session.send" && !nodeHas(info, nodeproto.LauncherSwitchNow) {
+		raw, _ := json.Marshal(params)
+		var fields struct {
+			SwitchNow bool `json:"switch_now"`
+		}
+		_ = json.Unmarshal(raw, &fields)
+		if fields.SwitchNow {
+			// An older node would take it as apply_switch alone: typed on the launcher the agent runs on while it is
+			// busy, the switch left waiting for the user (the assistant's agent_switch, #5973).
+			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_launcher_switch_now")}
+		}
+	}
+	if method == "session.switch" && !nodeHas(info, nodeproto.LauncherSwitchIdle) {
+		// An older node answers "unknown method", or would take it as another session call (the batch switch, #6008).
+		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_launcher_switch_now")}
+	}
+	if method == proto.MethodModelHTTP && !nodeHas(info, nodeproto.ModelHTTP) {
+		// An older node would answer "unknown method": an API connection that sends through it says to update it.
+		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_model_http")}
+	}
+	if method == proto.MethodModelRun && !nodeHas(info, nodeproto.ModelRun) {
+		// The same for an API purpose that runs on a launcher there.
+		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_model_run")}
+	}
 	if method == proto.MethodSecretRun && !nodeHas(info, nodeproto.SecretRun) {
 		// An older node would answer "unknown method"; this says what to do about it before the user types anything.
 		return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_secret_run")}
 	}
-	if p == nil && (m.waitWarm(ctx) || m.waitFirst(ctx)) { // the manager just started: its node is on its way (warm.go)
-		m.mu.Lock()
-		p, info = m.peer, m.info
-		m.mu.Unlock()
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	if p == nil {
 		return fmt.Errorf("%s: %w", m.name(), errOffline)
@@ -582,7 +634,11 @@ func (m *Machine) waitFirst(ctx context.Context) bool {
 func (m *Machine) reachable() bool {
 	m.mu.Lock()
 	p := m.peer
+	waiting := m.warmLocked(time.Now()) || time.Now().Before(m.reloadUntil)
 	m.mu.Unlock()
+	if waiting {
+		return true // a bounded call waits for the resident handover; scheduling agrees with the apps
+	}
 	if p == nil {
 		return false
 	}
@@ -738,14 +794,27 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 			SessionID string         `json:"session_id"`
 			State     db.NodeSession `json:"state"`
 		}
-		if s, ok := m.d.opts.Store.(nodeStateStore); ok && json.Unmarshal(params, &p) == nil && p.SessionID != "" {
+		if json.Unmarshal(params, &p) != nil || p.SessionID == "" {
+			devicewire.ShareCreationLog(m.d.logf, "", "manager_persist", "invalid_state")
+			return
+		}
+		received, committed := "received_without_receipt", "committed_without_receipt"
+		if p.State.CreationID != "" && p.State.Incarnation != "" {
+			received, committed = "received_with_receipt", "committed_with_receipt"
+		}
+		devicewire.ShareCreationLog(m.d.logf, p.SessionID, "manager_persist", received)
+		if s, ok := m.d.opts.Store.(nodeStateStore); ok {
 			// Written here, in order (the latest put of a session wins), but bounded: a store that does not answer must
 			// not hold the node's read loop, and with it every reply and event of the node (nodeStoreWait).
 			ctx, cancel := m.storeCtx()
 			if err := s.PutNodeSession(ctx, m.cfg.ID, p.SessionID, p.State); err != nil {
-				m.d.logf("[%s] save session state: %v", m.cfg.ID, err)
+				devicewire.ShareCreationLog(m.d.logf, p.SessionID, "manager_persist", "store_error")
+			} else {
+				devicewire.ShareCreationLog(m.d.logf, p.SessionID, "manager_persist", committed)
 			}
 			cancel()
+		} else {
+			devicewire.ShareCreationLog(m.d.logf, p.SessionID, "manager_persist", "store_unavailable")
 		}
 		return // the manager's alone
 	case "claude.dirs":

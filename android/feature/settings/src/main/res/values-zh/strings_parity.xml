@@ -8,6 +8,8 @@
     <string name="settings_ext_themes_extension">扩展主题</string>
     <string name="settings_scheme">深浅色</string>
     <string name="settings_scheme_note">只对这台手机生效。跟随系统时随系统的深色模式切换。</string>
+    <string name="settings_density">布局密度</string>
+    <string name="settings_density_note">只对这台手机生效。紧凑会收窄边距和间距，一屏能看到更多；文字和图标大小不变。</string>
     <string name="settings_providers_title">模型供应商</string>
     <string name="settings_row_providers_subtitle">网关、Key 和 ~/.zshrc 里的 claude 函数</string>
     <string name="settings_providers_demo">体验模式没有 hub 的模型供应商。配对 hub 后再看。</string>

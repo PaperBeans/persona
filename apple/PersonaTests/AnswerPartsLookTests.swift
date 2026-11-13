@@ -123,7 +123,10 @@ struct AnswerPartLinesTests {
         try #require(parts.count > 1)
         let split = ChatLines.splitAnswers(lines)
         #expect(split.count == lines.count - 1 + parts.count)
-        #expect(split.map(\.id) == ["1#0", "2#0"] + (1..<parts.count).map { "2#0/part-\($0)" } + ["3#0"])
+        // Spelled out step by step: Xcode 26.0 can't type-check it as one expression in time (#5364).
+        let partIDs: [String] = (1..<parts.count).map { "2#0/part-\($0)" }
+        let ids: [String] = ["1#0", "2#0"] + partIDs + ["3#0"]
+        #expect(split.map(\.id) == ids)
         #expect(split.dropFirst().dropLast().allSatisfy { $0.holds("2#0") })
         #expect(!split[0].holds("2#0"))
     }

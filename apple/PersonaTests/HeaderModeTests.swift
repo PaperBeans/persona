@@ -28,6 +28,20 @@ struct HeaderModeTests {
         #expect(SessionModes.headerLook("dontAsk") == .init(symbol: Theme.Icon.permissions, tone: .unknown))
     }
 
+    /// The mode menus' title and the mode buttons' accessibility label (#5596): the mode when the agent reported one, else
+    /// just "Permission Mode", as the capsule says it, never "Permission Mode: Unknown".
+    @Test func anUnknownModeIsNamedWithoutAValue() throws {
+        let plain = String(localized: "Permission Mode")
+        #expect(SessionModes.modeHeading(nil) == plain)
+        #expect(SessionModes.modeHeading("") == plain)
+        #expect(!SessionModes.modeHeading(nil).contains(SessionModes.unknown))
+        let ask = try #require(SessionModes.mode("default"))
+        #expect(SessionModes.modeHeading("default") == String(localized: "Permission Mode: \(ask.title)"))
+        #expect(SessionModes.modeHeading("default") != plain && SessionModes.modeHeading("default").contains(ask.title))
+        // A mode this app does not list (a newer Claude Code's, a Codex policy) is named as it came.
+        #expect(SessionModes.modeHeading("dontAsk") == String(localized: "Permission Mode: \("dontAsk")"))
+    }
+
     @Test func claudeShowsItsModeEvenBeforeItReportsOne() throws {
         #expect(SessionModes.showsInHeader(try session(#","agent":"claude","permission_mode":"plan""#)))
         #expect(SessionModes.showsInHeader(try session(#","agent":"claude""#))) // running, not reported yet: it can be set

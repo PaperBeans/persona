@@ -195,8 +195,9 @@ func (s *Service) agentGone(ix proto.Interaction) bool {
 	if ix.SessionID == "" {
 		return false
 	}
-	// Only whether it is listed: no copy of the list.
-	found, listed := s.nodeSessionsWhere(ix.MachineID, func(c *proto.Session) bool { return c.SessionID == ix.SessionID })
+	// Only whether it is listed: no copy of the list, nor of the card (the closure takes the id alone).
+	sid := ix.SessionID
+	found, listed := s.nodeSessionsWhere(ix.MachineID, func(c *proto.Session) bool { return c.SessionID == sid })
 	return listed > 0 && len(found) == 0
 }
 

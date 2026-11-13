@@ -65,8 +65,11 @@ is_here() { @HERE@; }
 machine_platform m
 '''.replace('@OS@', quote(os_name)).replace('@ARCH@', quote(arch)) \
    .replace('@HERE@', here).replace('@SOURCE@', machine_platform_source())
+            # Its own HOME and no stdin: with stdin a socket (ssh, a tool's shell) and no HOME, bash -c sources the
+            # passwd home's ~/.bashrc, whose PATH puts the real uname / ssh ahead of the stubs.
             result = subprocess.run([BASH, '-c', script], capture_output=True, text=True, timeout=10,
-                                    env={'PATH': str(stubs), 'CALLS': str(calls), 'REMOTE': remote})
+                                    stdin=subprocess.DEVNULL,
+                                    env={'PATH': str(stubs), 'HOME': str(stubs), 'CALLS': str(calls), 'REMOTE': remote})
             return result, calls.read_text()
 
     def test_an_intel_mac_gets_the_amd64_build(self):

@@ -74,7 +74,7 @@ func kbServiceOn(t *testing.T, f *fakeHub, st Store, dir string, logf func(strin
 	}
 	f.mu.Unlock()
 	s := New(Options{Hub: f, Store: func() Store { return st }, Logf: logf, KB: &KBOptions{Dir: dir}})
-	t.Cleanup(s.kbClose)
+	t.Cleanup(s.kbEnd)
 	return s
 }
 
@@ -281,6 +281,32 @@ func TestKBZoneAtStart(t *testing.T) {
 	kbEng(t, again)
 	if moved() != 1 {
 		t.Fatalf("moved again at a restart: %v", logs)
+	}
+}
+
+// Once the service ends (BusHub.Serve), its knowledge base stays closed (#5510): a debounced timer that fires late
+// finds it not open, puts nothing back into the data directory and leaves its lock to the manager taking over. Closed
+// only while not connected, it opens again when it is next needed.
+func TestKBEndIsFinal(t *testing.T) {
+	f, st, dir := newFakeHub(), newKBStore(), t.TempDir()
+	s := kbServiceOn(t, f, st, dir, nil)
+	kbEng(t, s)
+	s.kbClose()
+	kbEng(t, s)
+	s.kbEnd()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.kbGet(context.Background()); !errors.Is(err, errKBNotOpen) {
+		t.Fatalf("opened after the end: %v", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the data directory came back after the end: %v", err)
+	}
+	next := kbServiceOn(t, f, st, dir, nil)
+	kbEng(t, next)
+	if _, err := s.kbGet(context.Background()); !errors.Is(err, errKBNotOpen) {
+		t.Fatalf("the ended one opened beside the next: %v", err)
 	}
 }
 

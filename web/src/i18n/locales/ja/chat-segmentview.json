@@ -1,5 +1,6 @@
 {
   "sending": "送信中…",
+  "processing": "処理中…",
   "queued": "作業中に送信",
   "collapse": "折りたたむ",
   "expand": "展開",

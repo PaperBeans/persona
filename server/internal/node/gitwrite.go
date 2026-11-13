@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -201,7 +202,11 @@ func clipGitOutput(s string) string {
 		return -1
 	}, ansiEscape.ReplaceAllString(s, ""))
 	if len(s) > 4096 {
-		s = "…" + s[len(s)-4096:]
+		s = s[len(s)-4096:]
+		for len(s) > 0 && !utf8.RuneStart(s[0]) { // the cut fell inside a character: start after it
+			s = s[1:]
+		}
+		s = "…" + s
 	}
 	return s
 }

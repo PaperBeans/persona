@@ -41,6 +41,7 @@ class GroupRoutingTest {
         // Two hubs can use the same interaction id: other groups' ids carry the suffix, and answering strips it.
         assertEquals("i1~g0a1b2c3d", interaction.id)
         assertEquals("i1~g0a1b2c3d", (other.event(InteractionResolvedEvent("i1")) as InteractionResolvedEvent).id)
+        assertEquals("i1~g0a1b2c3d", (other.event(InteractionReansweredEvent("i1")) as InteractionReansweredEvent).id)
         assertEquals("i1~g0a1b2c3d", (other.event(NotifyEvent("interaction", "m", "s", interactionId = "i1")) as NotifyEvent).interactionId)
         // So are alert ids (#5614): the same id from two hubs replaces nothing on the other's.
         assertEquals("p1~g0a1b2c3d", (other.event(NotifyEvent("alert", "", "", id = "p1")) as NotifyEvent).id)
@@ -59,6 +60,31 @@ class GroupRoutingTest {
         assertEquals(setOf("m~g0a1b2c3d/s"), preferences.pins.allowed)
         assertEquals(mapOf("m~g0a1b2c3d/s" to "v"), preferences.seen)
         assertEquals(SessionKey("m", "s"), other.raw(SessionKey("m~g0a1b2c3d", "s")))
+    }
+
+    @Test fun receiptEventsAndMainSendersKeepTheirHubNamespaceWithoutChangingOperationIds() = runBlocking<Unit> {
+        val at = java.time.Instant.parse("2026-11-12T10:00:00.123456789Z")
+        val event = MessageSendStateEvent("m", "s", "same-operation", "processing", at.toString())
+        assertSame(event, primary.event(event))
+        val translated = other.event(event) as MessageSendStateEvent
+        assertEquals("m~g0a1b2c3d", translated.machineId)
+        assertEquals(event.clientMessageId, translated.clientMessageId)
+        assertEquals(event.at, translated.at)
+        val receipts = MutableStateFlow(listOf(MessageSendReceipt(SessionKey("m", "s"), "same-operation", "processing", at)))
+        val source = object : MainConversationSender {
+            override val outbox = MutableStateFlow(emptyList<OutboxMessage>())
+            override val sendReceipts = receipts
+            override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?) = Unit
+        }
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined)
+        try {
+            val wrapped = source.inGroup(other, scope)
+            assertEquals(SessionKey("m~g0a1b2c3d", "s"), wrapped.sendReceipts.value.single().session)
+            assertEquals("same-operation", wrapped.sendReceipts.value.single().clientMessageId)
+            assertNotEquals(source.sendReceipts.value.single().session, wrapped.sendReceipts.value.single().session)
+            receipts.value = emptyList()
+            assertTrue(wrapped.sendReceipts.value.isEmpty())
+        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
     }
 
     @Test fun anotherGroupsFilesReachItsMachineByThePlainId() = runBlocking<Unit> {
@@ -95,6 +121,54 @@ class GroupRoutingTest {
         assertTrue(wrapped.filePreview("macbook~g0a1b2c3d", "/w", "a.mp4").stream)
         assertEquals(listOf("download macbook a.mp3", "stat macbook", "thumbnail macbook a.pdf 256", "convert macbook a.docx", "preview macbook a.mp4"), calls)
     }
+
+    /** Renaming and trashing (docs/protocol/protocol.md "Changing files"): both wrappers pass them on, or the app only ever sees the interface's "not supported". */
+    private class EditingFiles(val calls: MutableList<String>) : SessionFiles {
+        override suspend fun directory(machineId: String, cwd: String, path: String) = error("unused")
+        override suspend fun file(machineId: String, cwd: String, path: String) = error("unused")
+        override suspend fun status(machineId: String, cwd: String) = error("unused")
+        override suspend fun diff(machineId: String, cwd: String, path: String, staged: Boolean) = error("unused")
+        override suspend fun log(machineId: String, cwd: String, skip: Int, limit: Int) = error("unused")
+        override suspend fun show(machineId: String, cwd: String, hash: String) = error("unused")
+        override fun editsFiles(machineId: String) = true.also { calls += "edits $machineId" }
+        override suspend fun rename(machineId: String, cwd: String, path: String, name: String) = "~/b".also { calls += "rename $machineId $path $name" }
+        override suspend fun trash(machineId: String, cwd: String, paths: List<String>) =
+            listOf(SessionTrashedFile(paths.single(), "t1")).also { calls += "trash $machineId ${paths.single()}" }
+        override suspend fun restore(machineId: String, trashIds: List<String>) = listOf("~/a").also { calls += "restore $machineId ${trashIds.single()}" }
+    }
+
+    private suspend fun SessionFiles.editAll(machineId: String) {
+        assertTrue(editsFiles(machineId))
+        assertEquals("~/b", rename(machineId, "/w", "~/a", "b"))
+        assertEquals(listOf("t1"), trash(machineId, "/w", listOf("~/a")).map { it.trashId })
+        assertEquals(listOf("~/a"), restore(machineId, listOf("t1")))
+    }
+
+    @Test fun anotherGroupsFileEditsReachItsMachineByThePlainId() = runBlocking<Unit> {
+        val calls = mutableListOf<String>()
+        EditingFiles(calls).inGroup(other).editAll("macbook~g0a1b2c3d")
+        assertEquals(listOf("edits macbook", "rename macbook ~/a b", "trash macbook ~/a", "restore macbook t1"), calls)
+    }
+
+    @Test fun theMergedFilesSendEditsToTheMachinesGroup() = runBlocking<Unit> {
+        val home = mutableListOf<String>()
+        val work = mutableListOf<String>()
+        val homeFiles = EditingFiles(home)
+        val workFiles = EditingFiles(work).inGroup(other)
+        // As GroupStacks.of: the group a merged id's suffix names, none for a group that is not open.
+        val merged = routedFiles { machineId ->
+            when (GroupKeys.namespaceOf(machineId)) { null -> homeFiles; "g0a1b2c3d" -> workFiles; else -> null }
+        }
+        merged.editAll("macbook")
+        merged.editAll("studio~g0a1b2c3d")
+        assertEquals(listOf("edits macbook", "rename macbook ~/a b", "trash macbook ~/a", "restore macbook t1"), home)
+        assertEquals(listOf("edits studio", "rename studio ~/a b", "trash studio ~/a", "restore studio t1"), work)
+        // No open group: not offered, and a change fails as offline.
+        assertFalse(merged.editsFiles("mini~gffffffff"))
+        try { merged.trash("mini~gffffffff", "/w", listOf("a")); fail("Expected offline") }
+        catch (failure: HubFailure) { assertEquals(HubError.NoNetwork, failure.kind) }
+    }
+
 
     @Test fun aGroupsDraftsAreStoredWithItsPlainKeys() = runBlocking<Unit> {
         val stored = mutableListOf<DraftKey>()

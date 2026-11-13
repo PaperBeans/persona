@@ -4,6 +4,7 @@
 // where it was sent (placeFailed). The conversation's own composer keeps its local sending bubbles (ChatView); one of
 // those that fails comes here (keepFailed), so its words stay in the chat and not in the box, as in the apps (#1122).
 import { t } from "../i18n";
+import { toast } from "../ui/atoms";
 import { api, ApiError, errorText, sessionPath } from "./api";
 import { pickedLauncher, pickedModel, conversationKey } from "./assistant-chat";
 import { showLauncherNote, startConversation } from "./assistant-start";
@@ -17,6 +18,7 @@ import { apiOp, isTransient, OP_OFFLINE_MS, OP_RETRY_MS } from "./ops";
 import { echoed, isEcho, type Seen, type Sent } from "./echo";
 import { parseUserText, type ChatLine, type UserMessage } from "./turns";
 import type { AssistantInfo, Item } from "./types";
+import { beginMessageSend, settleMessageEcho } from "./message-send";
 
 export interface OutboxImage {
   mime: string;
@@ -40,6 +42,9 @@ export interface OutboxEntry {
   clearable?: string;
   /** The hub could not tell whether it went in: a retry is a new message. */
   newId?: boolean;
+  /** Its send ended with delivered "unknown" (no answer in the hub's time, the link dropped while it went): its words
+   *  in the transcript after it was sent are its copy, so it shows as sent instead of asking to be sent again. */
+  inDoubt?: boolean;
   /** Brought back after a reload: even an unconfirmed send can settle by the transcript's words. */
   restored?: boolean;
   launcher?: string;
@@ -64,7 +69,9 @@ export function outboxMessage(e: OutboxEntry): UserMessage {
 
 type Described = Pick<OutboxEntry, "text" | "images" | "at"> & Partial<Pick<OutboxEntry, "id" | "wordsOnly">>;
 
-const seenAs = (e: Described): Sent => ({ id: e.wordsOnly ? undefined : e.id, text: parseUserText(e.text).text, images: e.images, at: e.at });
+const seenAs = (e: Described & Partial<Pick<OutboxEntry, "inDoubt">>): Sent => ({
+  id: e.wordsOnly ? undefined : e.id, text: parseUserText(e.text).text, images: e.images, at: e.at, inDoubt: e.inDoubt,
+});
 
 /** The transcript has this message: one of its latest user messages, or an item the hub tied to it, is its copy (lib/echo.ts). */
 export function arrived(e: Described, users: Seen[]): boolean {
@@ -73,10 +80,13 @@ export function arrived(e: Described, users: Seen[]): boolean {
 
 /** What stays once the transcript moved: arrived ones go (one copy each), and sent ones past the grace; sending and
  *  failed stay, but a failed one the hub tied a copy to went in after all (delivered unknown, #1121): the copy is it.
+ *  One whose send ended in doubt is found by its words too: the hub's tie can come late or not at all (a node slow to
+ *  answer wrote the message after the hub stopped waiting), and a failed bubble over a message that went in had the
+ *  owner send it again. A refusal (nothing went in) is never settled by words alone.
  *  `users`: the latest user messages and the items the hub tied to a message (taggedSeen). `claimed`: the ones that
  *  already answered one, kept across calls. */
 export function settle(list: OutboxEntry[], users: Seen[], now: number, claimed = new Set<string>()): OutboxEntry[] {
-  const shown = echoed(list.filter((e) => e.state !== "failed" || e.restored), users, seenAs, claimed);
+  const shown = echoed(list.filter((e) => e.state !== "failed" || e.restored || e.inDoubt), users, seenAs, claimed);
   const tied = new Set(users.flatMap((u) => u.client_msg_id ?? []));
   return list.filter((e) => !shown.has(e) && !(e.state === "failed" && !e.wordsOnly && tied.has(e.id)) && (e.state !== "sent" || now - (e.acceptedAt ?? e.at) < SENT_GRACE_MS));
 }
@@ -170,12 +180,17 @@ export function settleOutbox(mid: string, sid: string, users: Seen[]) {
   const claimed = claimedBy.get(key) ?? new Set<string>();
   claimedBy.set(key, claimed);
   const after = settle(before, users, Date.now(), claimed);
-  if (after.length !== before.length) write(key, after);
+  if (after.length !== before.length) {
+    for (const e of before) if (!after.includes(e) && arrived(e, users)) settleMessageEcho(mid, sid, e.id);
+    write(key, after);
+  }
 }
 
 /** A failed entry's fields for the error its send ended with. */
-function failedWith(err: unknown): Pick<OutboxEntry, "state" | "error" | "clearable" | "newId"> {
+function failedWith(err: unknown): Pick<OutboxEntry, "state" | "error" | "clearable" | "newId" | "inDoubt"> {
   return {
+    // the hub stopped waiting (delivered "unknown"): it may have gone in, and its copy in the transcript settles it (settle)
+    inDoubt: err instanceof ApiError && err.body.delivered === "unknown",
     state: "failed",
     error: failureText(err),
     clearable: err instanceof ApiError && err.code === "input_draft" && typeof err.body.clearable === "string" ? err.body.clearable : undefined,
@@ -303,21 +318,30 @@ export function resetRestoredForTests() {
   restored.clear();
 }
 
-async function deliver(mid: string, sid: string, e: OutboxEntry, clearDraft?: string): Promise<boolean> {
+async function deliver(mid: string, sid: string, e: OutboxEntry, clearDraft?: string, flight = beginMessageSend(mid, sid, e.id, e.text)): Promise<boolean> {
   const key = outboxKey(mid, sid);
   try {
     // stays sending through a gap (a hub restart); the client_msg_id is the op id
-    const r = await inSendOrder(key, () => apiOp<{ launcher_note?: string } | undefined>(`${sessionPath(mid, sid)}/messages`, {
+    const r = await inSendOrder(key, () => apiOp<{ launcher_note?: string; waits_on_computer?: boolean } | undefined>(`${sessionPath(mid, sid)}/messages`, {
+      ...flight.request,
       method: "POST",
       opId: e.id,
       json: { text: e.text, images: e.images.length ? e.images : undefined, client_msg_id: e.id, launcher: e.launcher || undefined, model: e.model || undefined, clear_draft: clearDraft },
     }));
+    if (!flight.current()) return true;
+    flight.finish("delivered");
     update(key, e.id, { state: "sent", acceptedAt: Date.now(), error: undefined, clearable: undefined });
     showLauncherNote(`${mid}/${sid}`, r?.launcher_note);
+    // An outside-terminal Claude took it behind a question only the computer can answer (#5890).
+    if (r?.waits_on_computer) toast(t("lib-outbox.waits_on_computer"), "info");
     return true;
   } catch (err) {
+    if (!flight.current() || flight.echoed()) return true;
+    flight.finish("failed");
     update(key, e.id, failedWith(err));
     return false;
+  } finally {
+    flight.finish();
   }
 }
 
@@ -330,9 +354,10 @@ export function sendToSession(mid: string, sid: string, out: { text: string; ima
 export function queueToSession(mid: string, sid: string, out: { text: string; images?: OutboxImage[] }, opts: { launcher?: string; model?: string } = {}): { id: string; sent: Promise<boolean> } {
   const key = outboxKey(mid, sid);
   const e: OutboxEntry = { id: uuid(), text: out.text, images: out.images ?? [], at: Date.now(), state: "sending", launcher: opts.launcher, model: opts.model };
+  const flight = beginMessageSend(mid, sid, e.id, e.text);
   noteWritten(e.id, e.at);
   write(key, [...list(key), e]);
-  return { id: e.id, sent: deliver(mid, sid, e) };
+  return { id: e.id, sent: deliver(mid, sid, e, undefined, flight) };
 }
 
 /** One entry of a conversation's outbox, as it stands. */
@@ -355,11 +380,13 @@ export function retryOutboxEntry(mid: string, sid: string, id: string, clearDraf
   const key = outboxKey(mid, sid);
   const e = list(key).find((x) => x.id === id);
   if (!e || e.state !== "failed") return { id, sent: Promise.resolve(false) };
-  // the hub said it may have gone in: the user looked and wants it sent again, as a new message
+  // the hub said it may have gone in: the user looked and wants it sent again, as a new message. One that was in doubt
+  // stays so: its copy is written after this, and the first try's, landing late, must not stand in for it (lib/echo.ts isEcho)
   const next: OutboxEntry = { ...e, id: e.newId ? uuid() : e.id, newId: false, state: "sending", error: undefined, acceptedAt: undefined, at: Date.now() };
+  const flight = beginMessageSend(mid, sid, next.id, next.text);
   noteWritten(next.id, next.at);
   write(key, list(key).map((x) => (x.id === id ? next : x)));
-  return { id: next.id, sent: deliver(mid, sid, next, clearDraft) };
+  return { id: next.id, sent: deliver(mid, sid, next, clearDraft, flight) };
 }
 
 /** Drops one message from the conversation's outbox, and its copy kept for reloads; nothing is sent. A failed one is

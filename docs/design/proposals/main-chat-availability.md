@@ -1,7 +1,12 @@
 # Proposal: the main chat stays available to the owner while background work grows
 
-Status: proposal (#4757). The owner took decisions 1 to 5 of section 7 as recommended; decision 6 is open. The server
-steps M1, F1, F2, B1, Q1, R1 and R2 are in review (#4924 to #4930); B2, R3 and K1 are not started. Covers the assistant
+Status: built (#4757). The owner took decisions 1 to 5 of section 7 as recommended; decision 6 is open and built as
+recommended. Every step of section 6 is merged: M1 (#4924), F1 (#4925), F2 (#4926), B1 (#4927), Q1 (#4928), R1 (#4929),
+R2 (#4930), B2 on the web, the Apple apps and Android (#5082, #5083, #5084), R3 (#5085) and K1 (#5086). Follow-ups:
+the clients' part of R1 (#5802), R2 (#5803) and R3 (#5804), the tier-down suggestion (#5805, built), purpose descriptions in
+Model Settings (#5806), and verification on real builds and a live install (#5807). The Apple apps' part of #5802 to
+#5804 and of #5806 is in `docs/apple/ios.md` ("Suggested standing rule and held decisions", "Briefing card",
+"Background supervisor"); its check on a simulator is part of #5807. Covers the assistant
 manager and its prompts; the clients change only where a step says so.
 
 ## 1. Goal
@@ -30,7 +35,7 @@ step M1.
 | Fact | Where |
 | --- | --- |
 | Supervision messages, task notices, late `ask_user` answers and `conversation_send` share one first-in-first-out queue per conversation. A conversation that is not working gets the head of its queue at once; nothing ranks the owner's message above it | `queueRelay`, `drainRelays` in `server/internal/assistant/conversations.go` |
-| Signals about tasks the main chat supervises go to the main chat. Supervision messages are gathered for 15 seconds, then spaced 10 minutes apart, or 2 minutes for a signal that waits on a decision | `digestTo` in `supervise_leader.go`; `superviseGather`, `superviseEvery`, `superviseUrgentEvery` in `supervise_signals.go` |
+| Signals about tasks the main chat supervises go to the main chat. Supervision messages are gathered for 15 seconds, then spaced 10 minutes apart, or 2 minutes for a signal that waits on a decision. A failed start waits only the 15 seconds: the spacing is shared by every supervisor, and a message just sent to the background supervisor once held a failed start back for minutes | `digestTo` in `supervise_leader.go`; `superviseGather`, `superviseEvery`, `superviseUrgentEvery` in `supervise_signals.go` |
 | The main chat reviews in its own context: it checks the PR, CI, screenshots and the live state itself before `task_review` | `prompts/assistant/claude_md.md`, `prompts/assistant/supervise.md` |
 | A message the owner sends during a running round is written into the running process and read at the next tool boundary; behind a long command that is minutes. Moving the running command to the background first (`interject_background`) is off by default | `docs/assistant/assistant.md`, "Interjecting while it answers" |
 | `ask_user` holds its turn until the owner answers, for up to 2 hours | `askUserWait` in `tools.go` |
@@ -94,6 +99,24 @@ work out as today; it no longer receives supervision messages for it.
 - **Shown where**: its tasks stay under Persona in the direction tree (#4352), as the secretary's own. The conversation
   itself is listed with the scheduled group, not among directions or quick chats. Its rounds are never pushed, as
   supervision rounds are not today.
+- **As built (step B1, #4927)**, where it differs from the above (`docs/assistant/unified-entry.md` "Background
+  supervisor" has the whole of it): the background supervisor is not recorded as `supervision.supervisor`. The ledger
+  keeps the main chat and the signals are routed when they are sent, which keeps everything that reads the ledger
+  unchanged, lets the off switch move every open task at once and leaves no task naming a conversation that is gone.
+  Asks climb through it only with leaders configured, as today. A `needs_user` writes the `escalated` entry leaders
+  write, and that entry is a supervision message to the main chat, so it is one folded main-chat round, not none.
+- **As built (step B2 on the web, #5082)**, where it differs from "Shown where" (`docs/web/web.md` "Background
+  supervisor" has the whole of it): the web sidebar has had no group of automatic conversations since #4331, so the
+  conversation is listed under All chats › Scheduled, marked built in, not in a sidebar group. The main chat draws
+  each `review` entry marked `by: "background"` (the mark #5084 added) as one line. The model
+  purpose `assistant.supervise` stayed out of the catalog `GET /api/v1/model-config` returns (until #5806) and is read
+  by its own id beside it.
+- **As built on Android (step B2, #5084)** (`docs/android/android.md` "The background supervisor (#5084)"): that app's
+  drawer has no group of its own for scheduled tasks' conversations (they are under All chats), so the conversation is
+  under All chats with them. The feed's `review` entry did not say who wrote it, so this step adds `by: "background"`
+  to the entry of a review the background supervisor wrote (`reviewFeedBody.By`), and the app draws exactly those as one
+  line; against a hub without the mark every review stays in the background record as before. The hub's model catalog
+  left `assistant.supervise` out (until #5806), so the app asks for it by its ID to list it.
 
 Alternatives considered:
 
@@ -173,6 +196,19 @@ by 11 hours before the deadline, or within 24 hours.
 The weekly briefing gains one block when the numbers support it: which switch in 2b would have removed how many of last
 week's asks or background rounds, each with its cost in one sentence and a link to its setting. The block is computed,
 not written by the model, and each suggestion is shown at most once a month. Nothing is turned on for the owner.
+
+As built (R3, #5085; `docs/assistant/assistant.md` "Recommended setup" is authoritative and defines every number):
+there is no weekly briefing, so the block goes with the first briefing with `facts` on that reaches the owner in a
+week. The triage's own switch is never suggested (nothing is recorded about a stopped turn while it is off) and its
+three actions are counted only while it is on; a transient error is continued by `transient_retry` by default, so
+`auto_continue` counts usage-limit stops continued by hand. The tier-down suggestion of section 9c is one more line
+of the block (#5805; "A lower tier for the background supervisor" there): named only for the background supervisor's
+own reviews on its current model, with at least 20 settled acceptances in 30 days of which at most 1 in 20 were
+reopened (over `settled`, never over accepted), and only when the provider's own tier models show a tier below that is
+not the smallest; the block does not say what a tier down "would have cost", since tokens are not attributed to tasks
+(9c), and it never suggests a tier up. The block is drawn on the Lark card and on the web app's briefing card (the `brief` item's
+`setup`) and given to the model as facts; the Android app draws it on its briefing card (#5802) and so do the Apple apps
+(#5804).
 
 ## 5. Measurement
 
@@ -297,4 +333,28 @@ Two notes on the table:
 - The read of section 5 gains, per supervisor model and effort: tasks accepted, tasks reopened after acceptance,
   rework rounds per task and tokens per accepted task. That is the chart the guides ask for; the weekly block (4c)
   suggests a tier change only when a cheaper point on it did not review worse.
+
+As built (K1, #5086; `docs/assistant/model-config.md` "Models for each role" and `docs/assistant/assistant.md`
+"Supervision by model" are authoritative):
+
+- The table is in `docs/assistant/model-config.md` with the tiers named first and the Claude models as examples. Every
+  built-in purpose carries a one-sentence `description` from the manager in three languages; Android draws it
+  (#5802) and so do the Apple apps (#5806); the web does not yet (it keeps its own sentence for the background
+  supervisor), so "in Model Settings" is the hub's half there.
+- The main chat's rule speaks of tiers, not models, and covers the task-leader row too. It knows tiers only from the
+  Agent presets of the model profile in use or from what the owner said; when it cannot tell them apart it leaves the
+  tier, the model and the effort empty and what the owner set in Model Settings applies. A preset it picks runs in
+  place of the Agents binding for that task, which is a changed start for well-scoped work on an install whose presets
+  say where they stand.
+- **Tokens per accepted task is not reported.** Nothing recorded attributes a supervisor's tokens to a task, so the
+  read gives, per day and supervisor conversation, its output tokens (output only, the conversation's whole output)
+  next to the tasks it accepted that day. Accepted, reopened and rework rounds are per model and effort as proposed:
+  reopened is within 24 hours of the acceptance and over the acceptances at least that old (`settled`), so models in
+  use for different lengths of time compare; rework rounds are those since the task's previous acceptance; a task
+  leader's agent is counted by its model too.
+- `assistant.supervise` stayed out of the catalog `GET /api/v1/model-config` returns until #5806. The web, the Apple
+  apps and Android as of B2 each skip their own request's row when the catalog already lists the purpose, and an app
+  from before B2 draws the row with the name the hub sends, so #5806 lists it; the catalog's list is also what a
+  provider's "in use" check reads, so a provider only the background supervisor runs on is no longer deleted
+  underneath it (`docs/assistant/model-config.md` "The background supervisor in the catalog").
 

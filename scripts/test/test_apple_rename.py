@@ -152,7 +152,7 @@ class AppleRenameTests(unittest.TestCase):
         self.assertIn('} else { RootTabs()', root)
         self.assertIn('RootTabs().visionShell()', root)
         tabs = root.split('private struct RootTabs: View {', 1)[1].split('\n#if os(iOS)', 1)[0]
-        self.assertIn('TabView(selection: $model.selectedTab)', tabs)
+        self.assertIn('TabView(selection: Binding(get: { model.selectedTab }, set: { model.selectHomeTab($0) }))', tabs)
         self.assertIn('AssistantRootTab()', tabs)
         self.assertIn('AgentsRootTab()', tabs)
         self.assertRegex(tabs, r'#if !os\(iOS\)\s+InboxRootTab\(\)\s+SettingsRootTab\(\)\s+#endif')

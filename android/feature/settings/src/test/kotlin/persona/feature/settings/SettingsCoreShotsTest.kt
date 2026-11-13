@@ -57,13 +57,13 @@ class SettingsCoreShotsTest {
     private fun out(): File = File(System.getProperty("persona.shots") ?: "build/i18n-shots").also { it.mkdirs() }
 
     @Config(sdk = [35], qualifiers = "zh-w400dp-h2600dp-xhdpi")
-    @Test fun simplifiedChinese() = shots("zh", settings = "设置", diagnostics = "连接诊断", quiet = "免打扰时段")
+    @Test fun simplifiedChinese() = shots("zh", settings = "设置", diagnostics = "连接", quiet = "免打扰时段")
 
     @Config(sdk = [35], qualifiers = "en-w400dp-h2600dp-xhdpi")
-    @Test fun english() = shots("en", settings = "Settings", diagnostics = "Connection diagnostics", quiet = "Quiet hours")
+    @Test fun english() = shots("en", settings = "Settings", diagnostics = "Connection", quiet = "Quiet hours")
 
     @Config(sdk = [35], qualifiers = "ja-w400dp-h2600dp-xhdpi")
-    @Test fun japanese() = shots("ja", settings = "設定", diagnostics = "接続の診断", quiet = "おやすみ時間")
+    @Test fun japanese() = shots("ja", settings = "設定", diagnostics = "接続", quiet = "おやすみ時間")
 
     private class Live(sample: ConnectionDiagnostics) : HubConnection, ConnectionDiagnosticsSource {
         override val state = MutableStateFlow(ConnectionState.Online)
@@ -160,7 +160,7 @@ class SettingsCoreShotsTest {
                 rule.mainClock.advanceTimeBy(2_000)
                 rule.waitForIdle()
                 if (p.first.startsWith("list")) rule.onNodeWithText(settings).assertExists()
-                if (p.first == "list") {
+                if (p.first == "diagnostics") {
                     rule.onNodeWithTag("settings-hub-address-selection").assertExists()
                     val address = rule.onNodeWithText(longHubAddress, useUnmergedTree = true).assertExists()
                     val layouts = mutableListOf<TextLayoutResult>()

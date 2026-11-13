@@ -172,6 +172,7 @@ var stepMCP = map[string]string{
 	"phone_call_start":            "step_call",
 	"phone_maps_search_nearby":    "step_maps_nearby",
 	"phone_maps_navigate":         "step_maps_navigate",
+	"phone_maps_route":            "step_maps_route",
 	"phone_shortcuts_run":         "step_shortcut_run",
 	"phone_media_play":            "step_media_play",
 	"phone_home_control":          "step_home_control",

@@ -27,12 +27,25 @@ struct ReadinessCard: View {
     var busy = false
     var dismiss: (() -> Void)?
     @State private var open = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.chatPin) private var pin
+    /// What the chat's pin knows the Details button by (this view's, kept while it is drawn).
+    @State private var detailsKey = "readiness-" + UUID().uuidString
 
     var body: some View {
         if AppStyle.current.usesBeautifulUI { beautiful } else { plain }
     }
 
     private var color: Color { tone == .danger ? Theme.danger : Theme.caution }
+
+    /// The buttons and Details side by side; at the accessibility text sizes one under another, the main one first, each
+    /// still on one line (docs/design/DESIGN_SYSTEM.md 1.2 rule 3). In a row at the largest size each was cut to a
+    /// letter (#5202). The layout changes, not the views, so Details stays open across a size change.
+    private var stacked: Bool { typeSize.isAccessibilitySize }
+    private func buttonRow(spacing: CGFloat) -> AnyLayout {
+        stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.s))
+            : AnyLayout(HStackLayout(spacing: spacing))
+    }
 
     private var plain: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -54,6 +67,10 @@ struct ReadinessCard: View {
                         ThemedIcon(Theme.Icon.close).font(Theme.Font.label).foregroundStyle(.secondary)
                     }
                     .buttonStyle(.borderless)
+                    .padding(.horizontal, Theme.Space.l)
+                    .contentShape(.rect)
+                    .padding(.horizontal, -Theme.Space.l)
+                    .tapTargetOutset()
                     .accessibilityLabel(Text("Later [Readiness Card 9d2055]"))
                 }
             }
@@ -69,8 +86,9 @@ struct ReadinessCard: View {
 
     @ViewBuilder private var buttons: some View {
         let hasAny = action != nil || alt != nil || !details.isEmpty || busy
+        let row = buttonRow(spacing: Theme.Space.m)
         if hasAny {
-            HStack(spacing: Theme.Space.m) {
+            row {
                 if busy { ProgressView().controlSize(.small) }
                 if let actionTitle, let action {
                     Button {
@@ -89,7 +107,7 @@ struct ReadinessCard: View {
                     .buttonStyle(.borderless)
                     .foregroundStyle(Theme.accent)
                 }
-                Spacer(minLength: 0)
+                if !stacked { Spacer(minLength: 0) }
                 if !details.isEmpty { detailsToggle }
             }
         }
@@ -97,7 +115,8 @@ struct ReadinessCard: View {
 
     private var detailsToggle: some View {
         Button {
-            withAnimation(Theme.Motion.state) { open.toggle() }
+            // In the chat (the turn's error card) the button stays where it is and the details open under it (#3757).
+            toggleInPlace(pin, detailsKey, animation: Theme.Motion.state, closing: open) { open.toggle() }
         } label: {
             Label("Details [Readiness Card 979a33]", systemImage: open ? Theme.Icon.collapse : Theme.Icon.expand)
                 .font(Theme.Font.label).lineLimit(1)
@@ -105,6 +124,7 @@ struct ReadinessCard: View {
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
         .accessibilityValue(open ? Text("Expanded") : Text("Collapsed [Readiness Card ee6046]"))
+        .chatPinned(detailsKey)
     }
 
     private var detailsBlock: some View {
@@ -132,8 +152,9 @@ struct ReadinessCard: View {
                             .buttonStyle(.plain)
                     }
                 }
+                let row = buttonRow(spacing: Theme.Space.s)
                 if action != nil || alt != nil || !details.isEmpty {
-                    HStack(spacing: Theme.Space.s) {
+                    row {
                         if let actionTitle, let action {
                             Button {
                                 Haptics.tap()
@@ -147,7 +168,7 @@ struct ReadinessCard: View {
                         if let altTitle, let alt {
                             Button(action: alt) { BUIPill(altTitle, tone: .outline) }.buttonStyle(.plain)
                         }
-                        Spacer(minLength: 0)
+                        if !stacked { Spacer(minLength: 0) }
                         if !details.isEmpty { detailsToggle }
                     }
                 }

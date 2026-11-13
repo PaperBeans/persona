@@ -10,7 +10,9 @@ import SwiftUI
 /// At standard sizes `beside` (the meeting page's [+]), the field and send sit on one row. At accessibility sizes the
 /// field takes the whole width and the row under it holds `under` (the live bar's Cancel, the meeting page's controls)
 /// with send at its trailing edge. The two rows join the stack of the bar that holds the view, with its spacing.
-struct MeetingQuestionField<Beside: View, Under: View>: View {
+/// `instead` (the meeting page's Talk, #3862 phase 4) takes send's place while `showsInstead` (the field is empty), as
+/// the chat's voice button does.
+struct MeetingQuestionField<Beside: View, Under: View, Instead: View>: View {
     @Binding var text: String
     var focus: FocusState<Bool>.Binding
     var placeholder: String
@@ -23,9 +25,12 @@ struct MeetingQuestionField<Beside: View, Under: View>: View {
     var largeTypeHint = ""
     /// The keyboard comes up as the field appears (the live bar opens its row for typing).
     var focusOnAppear = false
+    /// `instead` stands where send is.
+    var showsInstead = false
     var send: () -> Void
     @ViewBuilder var beside: () -> Beside
     @ViewBuilder var under: () -> Under
+    @ViewBuilder var instead: () -> Instead
 
     @Environment(\.dynamicTypeSize) private var size
 
@@ -35,15 +40,19 @@ struct MeetingQuestionField<Beside: View, Under: View>: View {
             HStack(spacing: Theme.Space.m) {
                 under()
                 Spacer(minLength: Theme.Space.s)
-                sendButton
+                trailing
             }
         } else {
             HStack(alignment: .bottom, spacing: Theme.Space.xs) {
                 beside()
                 field
-                sendButton
+                trailing
             }
         }
+    }
+
+    @ViewBuilder private var trailing: some View {
+        if showsInstead { instead() } else { sendButton }
     }
 
     private var field: some View {
@@ -79,13 +88,14 @@ struct MeetingQuestionField<Beside: View, Under: View>: View {
     }
 }
 
-extension MeetingQuestionField where Beside == EmptyView {
-    /// Nothing beside the field at standard sizes (the live bar's row).
+extension MeetingQuestionField where Beside == EmptyView, Instead == EmptyView {
+    /// Nothing beside the field at standard sizes (the live bar's row), and send always.
     init(text: Binding<String>, focus: FocusState<Bool>.Binding, placeholder: String, sendLabel: String, canSend: Bool,
          disabled: Bool = false, largeTypeHint: String = "", focusOnAppear: Bool = false, send: @escaping () -> Void,
          @ViewBuilder under: @escaping () -> Under) {
         self.init(text: text, focus: focus, placeholder: placeholder, sendLabel: sendLabel, canSend: canSend, disabled: disabled,
-                  largeTypeHint: largeTypeHint, focusOnAppear: focusOnAppear, send: send, beside: { EmptyView() }, under: under)
+                  largeTypeHint: largeTypeHint, focusOnAppear: focusOnAppear, send: send, beside: { EmptyView() }, under: under,
+                  instead: { EmptyView() })
     }
 }
 #endif

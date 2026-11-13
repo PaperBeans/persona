@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/ai"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
@@ -560,7 +561,7 @@ func TestMinutesAnswerRules(t *testing.T) {
 		if err := json.Unmarshal([]byte(reply), &a); err != nil {
 			t.Fatal(err)
 		}
-		return e.buildMinutes(r, a, read, goldenZone)
+		return e.buildMinutes(r, a, read, goldenZone, i18n.ZhHans)
 	}
 	for _, empty := range []string{`{}`, `{"title":"无法总结"}`, `{"points":[{"text":"","line":1}]}`} {
 		if _, err := build(empty); !errors.Is(err, errMinutesUnusable) {

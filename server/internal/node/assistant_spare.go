@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/shellcmd"
 )
 
 // A spare process started when the app opens the "Chat" tab, so the first message skips claude's startup.
@@ -51,10 +52,10 @@ func (n *Node) assistantWarm(cwd, launcher string, options ...modelExecution) er
 		return nil
 	}
 	execution := executionOption(options)
-	if err := execution.check(); err != nil {
+	if err := execution.check(launcher); err != nil {
 		return err
 	}
-	if launcher == "" || !nameRe.MatchString(launcher) {
+	if launcher == "" || !shellcmd.NameRe.MatchString(launcher) {
 		return fmt.Errorf("invalid launcher %q", launcher)
 	}
 	if err := n.ensureManaged(context.Background(), launcher); err != nil {

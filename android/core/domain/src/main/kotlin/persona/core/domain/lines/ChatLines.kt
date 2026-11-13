@@ -344,6 +344,8 @@ internal class LineBuilder(val liveId: String?, val options: LineOptions) {
                 add(work(id, steps, live, seg.user?.start ?: (if (k == 0) wokeAt else null) ?:
                     seg.rows.firstOrNull()?.start ?: turn.start, seg.rows.lastOrNull()?.end))
             }
+            // Between the work and the answer: what the work looked at.
+            ViewedImages.of(steps).takeIf { it.isNotEmpty() }?.let { add(ChatLine.Viewed("vi-" + id.removePrefix("w-"), it)) }
             // Only the latest text stays outside the summary, in one stable slot throughout the turn.
             seg.rows.getOrNull(last)?.let { add(ChatLine.Row(it, contentKey = "$id/latest-text")) }
             addAll(after.sorted().map { ChatLine.Row(seg.rows[it]) })

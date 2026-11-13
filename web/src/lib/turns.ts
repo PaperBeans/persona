@@ -6,11 +6,13 @@ import { CONTEXT_RE, FILE_RE, PERSONA_SERVERS, canonicalTool } from "./compatibi
 import { t } from "../i18n";
 import { errorSignature, isRetryText, parseAPIError, type APIErrorInfo } from "./api-errors";
 import { foldCompactions, isCompaction } from "./compaction";
+import { engineSwitchOf, type EngineSwitch } from "./engine-switch";
 import { injectedOf } from "./injected";
 import { markModelChanges, type ModelChange } from "./model-change";
 import { sourceKey, sourceOf, userSourceSentinel } from "./message-source";
-import { attachedAgentNotices } from "./task-association";
-import type { Injected, Item, MessageSource } from "./types";
+import { attachedAgentNotices, taskCalls } from "./task-association";
+import { addUsage, countUsage, itemUsage, markFirstUsage, type TurnUsage } from "./turn-usage";
+import type { Injected, Item, MessageSource, TokenUsage } from "./types";
 
 export type Step =
   | { kind: "tool"; id: string; use: Item; result?: Item; images: Item[] }
@@ -84,13 +86,31 @@ export interface Segment {
   supervision?: boolean;
   /** Its reply came from another model than the previous visible reply (lib/model-change.ts): a divider before it. */
   modelChange?: ModelChange;
+  /** Its message is the first the conversation's new engine got (#5054, lib/engine-switch.ts): the switch divider
+   *  before it, with the handoff its block carried (never a context chip). */
+  engineSwitch?: EngineSwitch;
+  /** The exchange ended in a model API error or an interruption after everything in it (turnLines, lineError): its last
+   *  words are not a finished reply, and say so (cindy's "This reply did not complete", #5314). */
+  cut?: boolean;
+  /** What its items used (#5426, lib/turn-usage.ts): every item counts, those it does not show too (a tool's result, a
+   *  Codex turn's duration, a stopped turn's notice); each subagent counts once in the chat, in the exchange that
+   *  launched it (chatLines' lineUsage). Absent when none of them carries tokens. */
+  usage?: TurnUsage;
 }
 
-function blockOrder(a: Item, b: Item) {
+function blockPart(id: string) {
+  return Number(id.split("#")[1] ?? 0);
+}
+
+function blockOrder(a: Pick<Item, "id" | "seq">, b: Pick<Item, "id" | "seq">) {
   if (a.seq !== b.seq) return a.seq - b.seq;
-  const ia = Number(a.id.split("#")[1] ?? 0);
-  const ib = Number(b.id.split("#")[1] ?? 0);
-  return ia - ib;
+  return blockPart(a.id) - blockPart(b.id);
+}
+
+/** Fold bounds are seq + numeric block, not seq alone: a final answer can share the fold's last line. */
+function insideFold(i: Item, f: Item) {
+  if (!f.fold || blockOrder(i, f) < 0 || i.seq > f.fold.through_seq) return false;
+  return i.seq < f.fold.through_seq || !f.fold.through_id || blockPart(i.id) <= blockPart(f.fold.through_id);
 }
 
 export function sortItems(items: Item[]): Item[] {
@@ -108,14 +128,15 @@ export function mergeItems(have: Item[], batch: Item[]): Item[] {
     byId.set(it.id, next);
   }
   const all = [...byId.values()];
-  const work = all.filter((i) => i.kind === "tool_use" || i.kind === "tool_result" || i.kind === "thinking");
+  const work = all.filter((i) => i.kind === "tool_use" || i.kind === "tool_result" || i.kind === "thinking" ||
+    (i.kind === "text" && i.role === "assistant")); // text inside a fold's range is its narration; outside it is the answer
   const promotedFolds = all.filter((i) => i.fold?.supervision_user);
-  const kept = all.filter((f) => f.kind !== "fold" || !f.fold || !work.some((i) => i.seq >= f.seq && i.seq <= f.fold!.through_seq));
+  const kept = all.filter((f) => f.kind !== "fold" || !f.fold || !work.some((i) => insideFold(i, f)));
   // An overlapping page may replace only part of a fold. Its authoritative promotion must survive that replacement,
   // even if the real visibility tool is on the part that has not arrived yet, or a later receipt says silent.
   if (!promotedFolds.length) return sortItems(kept);
   const realWork = new Set(work);
-  return sortItems(kept.map((i) => realWork.has(i) && promotedFolds.some((f) => i.seq >= f.seq && i.seq <= f.fold!.through_seq) ? { ...i, supervisionUser: true } : i));
+  return sortItems(kept.map((i) => realWork.has(i) && promotedFolds.some((f) => insideFold(i, f)) ? { ...i, supervisionUser: true } : i));
 }
 
 /** `have` without what a fold of this fresh page now stands for. Left in, a step kept from before the fold existed
@@ -123,15 +144,22 @@ export function mergeItems(have: Item[], batch: Item[]): Item[] {
 export function withoutFolded(have: Item[], page: Item[]): Item[] {
   const folds = page.filter((f) => f.fold);
   if (!folds.length) return have;
-  return have.filter((i) => !((i.kind === "thinking" || i.kind === "fold" || i.tool_use_id) && folds.some((f) => i.seq >= f.seq && i.seq <= f.fold!.through_seq)));
+  return have.filter((i) => !((i.kind === "thinking" || (i.kind === "text" && i.role === "assistant") || i.kind === "fold" || i.tool_use_id) && folds.some((f) => insideFold(i, f))));
 }
 
 // Only the canonical persona-context tag is recognized.
 
 const ATTR_RE = /(\w+)="([^"]*)"/g;
 
+const NAMED_ENTITIES: Record<string, string> = { quot: '"', apos: "'", lt: "<", gt: ">", amp: "&" };
+
+/** One pass, so an escaped entity stays itself; numeric ones too (Go's html.EscapeString writes `&#34;` and `&#39;`). */
 function unescapeAttr(s: string) {
-  return s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  return s.replace(/&(quot|apos|lt|gt|amp|#\d+|#[xX][0-9a-fA-F]+);/g, (m, e: string) => {
+    if (e[0] !== "#") return NAMED_ENTITIES[e];
+    const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : Number(e.slice(1));
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+  });
 }
 
 /** A tag's `name="value"` attributes, unescaped. */
@@ -190,12 +218,23 @@ export function viewFeedbackOnly(it: Item): boolean {
   return it.role === "user" && it.kind === "text" && !!it.text?.includes("<persona-view-errors") && !withoutViewErrors(it.text).trim();
 }
 
+/** The hub's mid-turn interject note (server/internal/prompts/assistant/interject.md): instructions for the model
+ *  inside `<persona-context kind="context" title="插话">`, never a quote the owner picked, so it never renders as one.
+ *  The title is pinned by server/internal/node/assistant_interject_test.go. */
+export const INTERJECT_TITLE = "插话"; // i18n-ignore: canonical hub prompt title
+
+/** A persona-context block that is the hub's interject note rather than user-picked context. */
+export function isInterjectContext(attrs: { kind?: string; title?: string }): boolean {
+  return (attrs.kind ?? "context") === "context" && attrs.title === INTERJECT_TITLE;
+}
+
 export function parseUserText(raw: string): { text: string; contexts: Context[]; files: AttachedFile[]; photos: string[] } {
   const contexts: Context[] = [];
   const files: AttachedFile[] = [];
   const photos: string[] = [];
   let text = withoutViewErrors(raw).replace(CONTEXT_RE, (_, attrs: string, body: string) => {
     const { kind, title, url, ...rest } = tagAttrs(attrs);
+    if (kind === "skill-instructions" || isInterjectContext({ kind, title })) return "";
     contexts.push({ kind: kind ?? "context", title, url, text: body.trim(), ...(Object.keys(rest).length ? { attrs: rest } : {}) });
     return "";
   });
@@ -241,7 +280,7 @@ export function segments(items: Item[], results?: ReadonlyMap<string, Item>): Se
   };
 
   for (const it of items) {
-    if (attached.has(it.id)) continue;
+    if (attached.has(it.id)) continue; // what its subagent used: chatLines counts it where it was launched
     const entry = it.id.split("#")[0];
     if (viewFeedbackOnly(it)) continue;
     if (isUserMessage(it)) {
@@ -271,7 +310,13 @@ export function segments(items: Item[], results?: ReadonlyMap<string, Item>): Se
       else {
         const p = parseUserText(it.text ?? "");
         cur.user!.text = cur.user!.text ? `${cur.user!.text}\n${p.text}` : p.text;
-        cur.user!.contexts.push(...p.contexts.filter((c) => c.kind !== "message-source"));
+        for (const c of p.contexts) {
+          if (c.kind === "message-source") continue;
+          // a real switch is the divider, not a chip; a block that only looks like one (pasted, naming no engines) stays a chip
+          const sw = engineSwitchOf(c);
+          if (sw) cur.engineSwitch ??= sw;
+          else cur.user!.contexts.push(c);
+        }
         if (p.files.length) cur.user!.files = [...(cur.user!.files ?? []), ...p.files];
         if (p.photos.length) cur.user!.photos = [...new Set([...(cur.user!.photos ?? []), ...p.photos])];
       }
@@ -282,6 +327,7 @@ export function segments(items: Item[], results?: ReadonlyMap<string, Item>): Se
       cur.start = it.ts;
     }
     if (it.ts) cur.end = it.ts;
+    countUsage(cur, it);
     switch (it.kind) {
       case "tool_use": {
         const st: Extract<Step, { kind: "tool" }> = { kind: "tool", id: it.id, use: it, result: it.tool_use_id ? results?.get(it.tool_use_id) : undefined, images: [] };
@@ -419,9 +465,9 @@ export function pickSubject(inp: Record<string, unknown>): string {
 
 const baseFileName = (p: string) => p.split(/[/\\]/).filter(Boolean).pop() ?? p;
 
-type Pick = (...keys: string[]) => string;
+type PickToolField = (...keys: string[]) => string;
 /** What Claude Code's newer tools are about (iOS ToolPresentation.subject). */
-const CLAUDE_TOOL_CHIP: Record<string, (inp: Record<string, unknown>, pick: Pick) => string> = {
+const CLAUDE_TOOL_CHIP: Record<string, (inp: Record<string, unknown>, pick: PickToolField) => string> = {
   TaskCreate: (_, pick) => pick("subject", "description"),
   TaskUpdate: (inp, pick) => pick("subject", "activeForm") || (inp.taskId != null ? `#${String(inp.taskId)}` : ""),
   TaskGet: (inp) => (inp.taskId != null ? `#${String(inp.taskId)}` : ""),
@@ -832,7 +878,7 @@ export function buildBlocks(items: Item[], background = false): Block[] {
         // e.g. a background command finishing after a recap: part of the (next) work, never its own line
         cur = newTurn(it.id);
         add(cur, it);
-      } else if (!it.task && (it.text ?? "").includes("中断")) { // i18n-ignore: the transcript's interrupt notice
+      } else if (isInterruptNotice(it)) {
         cur.trailing.push(it);
       } else {
         add(cur, it);
@@ -844,6 +890,11 @@ export function buildBlocks(items: Item[], background = false): Block[] {
   }
   close();
   return blocks;
+}
+
+/** The transcript's "Interrupted" notice: a line of its own after the exchange it stopped. */
+function isInterruptNotice(it: Item): boolean {
+  return it.kind === "notice" && !it.task && (it.text ?? "").includes("中断"); // i18n-ignore: the transcript's interrupt notice
 }
 
 export type ChatLine =
@@ -881,6 +932,13 @@ function turnLines(t: Turn, live: boolean, results?: ReadonlyMap<string, Item>):
     ordered = ordered.slice(1);
   }
   const segs = segments(ordered, results);
+  // what the background task that woke it used is the work it woke
+  if (ordered !== t.ordered && segs[0]) countUsage(segs[0], t.ordered[0]);
+  // stopped after everything it did (not an exchange that went on after it): its last words are not a finished reply
+  const end = segs.at(-1), at = t.ordered.at(-1)?.seq ?? 0;
+  if (end && !live && t.trailing.some((n) => isInterruptNotice(n) && n.seq > at)) end.cut = true;
+  // what a stopped turn's notice carries (a Codex turn's total) is its last exchange's
+  if (end) for (const n of t.trailing) countUsage(end, n);
   segs.forEach((seg, k) => {
     if (k === 0 && !seg.user && wokeAt) seg.start = wokeAt;
     const last = k === segs.length - 1;
@@ -940,6 +998,7 @@ export function chatLines(items: Item[], opts: ChatLinesOptions = {}): ChatLine[
   // Working with nothing of this run yet (the last thing is a recap): retain the supervision round's visibility.
   if (opts.live && !liveId) append([{ kind: "segment", id: "live", seg: { id: "live", steps: [], tools: 0, thoughts: 0, replies: 0, folds: [] }, live: true }], [], true);
   flush();
+  lineUsage(out, items);
   const lines = markModelChanges(foldRecaps(foldAPIErrors(out)));
   if (background) hideScheduledPrompts(lines);
   let previous: string | undefined;
@@ -953,6 +1012,50 @@ export function chatLines(items: Item[], opts: ChatLinesOptions = {}): ChatLine[
     previous = line.seg.steps.length || line.seg.answer ? undefined : key;
   }
   return lines;
+}
+
+const KINDS = ["in", "out", "cache_read", "cache_write", "cache_write_1h"] as const;
+
+/** What the exchanges' subagents used, across the chat (lib/turn-usage.ts): each subagent (an entry's `id`, its model and
+ *  speed) once, at the largest count of each kind any of its reports gives (a later report includes the work it did
+ *  after being resumed), in the earliest exchange that launched an item carrying it (the item's call, its task's, or
+ *  the call taskCalls finds); with none of those on the page, where its first report is. Then only the chat's first
+ *  exchange that used tokens is its first round. */
+function lineUsage(lines: ChatLine[], items: Item[]) {
+  const segs = lines.flatMap((l) => (l.kind === "segment" ? [l.seg] : l.kind === "supervision" ? l.lines.flatMap((c) => (c.kind === "segment" ? [c.seg] : [])) : []));
+  if (items.some((it) => itemUsage(it, true).length)) {
+    // each item's exchange, and each call's: the first exchange that has it
+    const at = new Map<string, number>();
+    const own = (id: string | undefined, k: number) => id && !at.has(id) && at.set(id, k);
+    segs.forEach((s, k) => {
+      for (const i of s.user?.rawInput ?? []) own(i.id, k);
+      for (const st of s.steps) {
+        own(st.kind === "tool" ? st.use.id : st.item.id, k);
+        if (st.kind === "tool") {
+          own(`call:${st.use.tool_use_id}`, k);
+          own(st.result?.id, k);
+        }
+      }
+      own(s.answer?.id, k);
+    });
+    const calls = taskCalls(items);
+    const reports = new Map<string, { u: TokenUsage; k: number; launched?: boolean }>();
+    let here = 0; // the exchange the walk is in: an item none draws (a result, a notice on a card) lands in the one before
+    for (const it of items) {
+      here = at.get(it.id) ?? here;
+      const list = itemUsage(it, true);
+      if (!list.length) continue;
+      const launch = [it.tool_use_id, it.task?.tool_use_id, calls.get(it.id)].map((c) => at.get(`call:${c}`)).find((k) => k !== undefined);
+      for (const u of list) {
+        const key = `${u.id}\n${u.model ?? ""}\n${u.fast ? 1 : 0}`;
+        const r = reports.get(key) ?? reports.set(key, { u: { id: u.id, ...(u.model ? { model: u.model } : {}), ...(u.fast ? { fast: true } : {}) }, k: here }).get(key)!;
+        for (const kind of KINDS) if ((u[kind] ?? 0) > (r.u[kind] ?? 0)) r.u[kind] = u[kind];
+        if (launch !== undefined && (!r.launched || launch < r.k)) Object.assign(r, { k: launch, launched: true });
+      }
+    }
+    for (const { u, k } of reports.values()) if (segs[k]) addUsage(segs[k], [u]);
+  }
+  markFirstUsage(segs);
 }
 
 /** A scheduled task's or follow-up's input shows its one line, never its prompt, folded or not. */
@@ -973,7 +1076,9 @@ function lineError(l: ChatLine): { item: Item; info: APIErrorInfo; rest: ChatLin
   if (l.kind !== "segment" || !l.seg.answer) return null;
   const info = parseAPIError(l.seg.answer.text);
   if (!info) return null;
-  const seg = { ...l.seg, answer: undefined };
+  const seg: Segment = { ...l.seg, answer: undefined };
+  // the error came after everything else the exchange did: the words before it are cut short (Segment.cut)
+  if (!l.live && exchangeSteps(l.seg).at(-1)?.id === l.seg.answer.id) seg.cut = true;
   const empty = !seg.user && !seg.steps.length && !l.live;
   return { item: l.seg.answer, info, rest: empty ? null : { ...l, seg } };
 }

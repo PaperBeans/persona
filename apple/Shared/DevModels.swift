@@ -94,7 +94,52 @@ nonisolated struct FileEntry: Codable, Identifiable, Hashable, Sendable {
     var symlink: Bool?
     var size: Int64
     var mtime: Date?
+    /// A symlink's text and whether it leads nowhere (hub feature `file_info`, docs/protocol/protocol.md "File details and links").
+    var linkTarget: String?
+    var linkBroken: Bool?
     var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name, dir, symlink, size, mtime
+        case linkTarget = "link_target", linkBroken = "link_broken"
+    }
+}
+
+/// One path's details for the file page's Info sheet (`GET …/stat?detail=1`, hub feature `file_info`). An older node
+/// answers only `path`, `kind` and `size`.
+nonisolated struct FileInfo: Codable, Hashable, Sendable {
+    var path: String
+    /// file, dir, link (a broken symlink), denied or missing.
+    var kind: String
+    var size: Int64?
+    /// Permission bits as chmod takes them.
+    var mode: Int?
+    var owner: String?
+    var group: String?
+    var mtime: Date?
+    var ctime: Date?
+    var birthtime: Date?
+    var items: Int?
+    var itemsMore: Bool?
+    var symlink: Bool?
+    var linkTarget: String?
+    var linkReal: String?
+    var linkBroken: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case path, kind, size, mode, owner, group, mtime, ctime, birthtime, items, symlink
+        case itemsMore = "items_more", linkTarget = "link_target", linkReal = "link_real", linkBroken = "link_broken"
+    }
+
+    /// The node answered with details (an older one sends only kind and size).
+    var detailed: Bool { mode != nil || mtime != nil }
+}
+
+/// Every file under a folder (`GET …/fs/find`): paths relative to it, with `/`.
+nonisolated struct FileFindResult: Codable, Hashable, Sendable {
+    var cwd: String?
+    var files: [String]?
+    var truncated: Bool?
 }
 
 nonisolated struct FileListing: Codable, Hashable, Sendable {
@@ -127,6 +172,15 @@ extension APIClient {
     func listDir(machine: String, path: String, cwd: String) async throws -> FileListing {
         try await get(mp(machine) + "/fs", query: ["path": path, "cwd": cwd])
     }
+    private struct InfoResponse: Decodable { var stats: [FileInfo] }
+    /// One path's details for the Info sheet (`stat?detail=1`).
+    func fileInfo(machine: String, path: String, cwd: String) async throws -> FileInfo? {
+        try await get(mp(machine) + "/stat", query: ["path": path, "cwd": cwd, "detail": "1"], as: InfoResponse.self).stats.first
+    }
+    /// Every file under dir (`fs/find`; Git's files in a repository), for finding by name.
+    func findFiles(machine: String, dir: String) async throws -> FileFindResult {
+        try await getDecodedOffMain(mp(machine) + "/fs/find", query: ["cwd": dir], as: FileFindResult.self)
+    }
 
     // Rename, move, trash and put back (docs/protocol/protocol.md "Changing files"); paths as in listDir.
     private struct RenameRequest: Encodable { var path, cwd, name: String }
@@ -153,6 +207,57 @@ extension APIClient {
     /// Moves paths to the machine's trash; restoreFiles with the ids puts them back.
     func trashFiles(machine: String, paths: [String], cwd: String) async throws -> [TrashedFile] {
         try await post(mp(machine) + "/files/trash", body: TrashRequest(paths: paths, cwd: cwd), timeout: 130, as: TrashResponse.self).trashed ?? []
+    }
+    // New folders, text files and zips (#5828, #5829; docs/protocol/protocol.md "Changing files").
+    private struct MkdirRequest: Encodable { var dir, cwd, name: String }
+    /// Makes folder name in dir; returns its path (absolute).
+    func makeDir(machine: String, dir: String, cwd: String, name: String) async throws -> String {
+        try await post(mp(machine) + "/files/mkdir", body: MkdirRequest(dir: dir, cwd: cwd, name: name), as: RenameResponse.self).path
+    }
+    private struct WriteRequest: Encodable {
+        var path, cwd, text: String
+        var create: Bool?
+        var revision: String?
+        var sha256: String?
+        var force: Bool?
+    }
+    struct WrittenFile: Decodable, Sendable {
+        var path: String
+        var size: Int64
+        var revision: String
+        var mtime: Date?
+    }
+    /// Writes a text file: create makes a new one (409 `exists` when taken); otherwise it replaces the file while it is
+    /// still at revision (or hashes to sha256), else 409 `file_changed`; force: Overwrite Anyway.
+    func writeFile(machine: String, path: String, cwd: String, text: String, create: Bool = false, revision: String? = nil,
+                   sha256: String? = nil, force: Bool = false) async throws -> WrittenFile {
+        try await post(mp(machine) + "/files/write",
+                       body: WriteRequest(path: path, cwd: cwd, text: text, create: create ? true : nil, revision: revision,
+                                          sha256: sha256, force: force ? true : nil),
+                       timeout: 60, as: WrittenFile.self)
+    }
+    private struct ZipRequest: Encodable {
+        var paths: [String]
+        var cwd: String
+        var dir: String?
+        var name: String
+    }
+    struct ZippedFile: Decodable, Sendable {
+        var path: String
+        var name: String
+        var size: Int64
+        var files: Int
+    }
+    /// Zips paths into dir as name, or with no dir into a temporary file on the computer for a download.
+    func zipFiles(machine: String, paths: [String], cwd: String, dir: String?, name: String) async throws -> ZippedFile {
+        try await post(mp(machine) + "/files/zip", body: ZipRequest(paths: paths, cwd: cwd, dir: dir, name: name), timeout: 610, as: ZippedFile.self)
+    }
+    /// Copies paths into folder dir (#5830); conflict "replace" / "keep" answers a 409 `exists` ("keep" into their own
+    /// folder: Duplicate).
+    func copyFiles(machine: String, paths: [String], cwd: String, dir: String, conflict: String? = nil) async throws -> [MovedFile] {
+        struct CopyResponse: Decodable { var copied: [MovedFile]? }
+        return try await post(mp(machine) + "/files/copy", body: MoveRequest(paths: paths, cwd: cwd, dir: dir, conflict: conflict),
+                              timeout: 610, as: CopyResponse.self).copied ?? []
     }
     private struct RestoreRequest: Encodable {
         var trashIDs: [String]

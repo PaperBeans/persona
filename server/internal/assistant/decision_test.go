@@ -468,6 +468,17 @@ func TestOldDecisionGoesBackToItsSupervisorOnce(t *testing.T) {
 	s.sweepDecisionAges(day)
 	waitFor(t, "the recheck message", func() bool { return len(f.notices()) > before })
 	n := f.notices()[before]
+	// Check the actual DeviceAssistantSend text, not only the rendered template (#5665).
+	// i18n-ignore: exact instructions in the runtime-bound supervision prompt.
+	for _, instruction := range []string{
+		"- 决定交回你核对的：", "- 用户那边没有能回答的东西的：",
+		"- 用户回「你来定」的：", "- 用户回「这不是我要的」的：", "- 用户回「先讲清背景」的：",
+		"todo_decision_add",
+	} {
+		if got := strings.Count(n, instruction); got != 1 {
+			t.Errorf("runtime-bound instruction %q occurs %d times, want 1", instruction, got)
+		}
+	}
 	for _, want := range []string{"等了超过一天", "先交回你核对", "why_owner=irreversible，不会默认执行", "删不删旧表", "选项「先导出再删」：多花半天，数据留一份备份",
 		"推荐：删掉旧表", "等待的代价：磁盘两周后写满", "决定交回你核对的：先核对它依据的事实还成立不"} {
 		if !strings.Contains(n, want) {

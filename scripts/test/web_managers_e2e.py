@@ -28,10 +28,10 @@ first group then follows the new assistant (its pages' requests name it, Connect
 only); with --single, the title and Switch with one assistant. Once after the rounds: the count beside 工作 (its agents
 waiting plus the roster's inbox_needs_you) moving without a reload when the hub pushes `managers`, and every row of the
 list reachable and clickable at 200% zoom and at the largest text size. --outdated its Needs update badge; --single
-checks the earlier Persona product row and appearance menu, without assistant identity or a roster dropdown, that
-nothing is filtered
-and that no request names a manager (no X-Persona-Manager header, no manager= in the address). Screenshots (390 and
-1200 wide, light and dark) contain only mock data.
+checks the current assistant's name, avatar and status in the sidebar head, its one-row roster with New assistant and
+Manage assistants…, and the appearance and settings menu, while the chat title stays product-branded. It also checks
+that nothing is filtered and that no request names a manager (no X-Persona-Manager header, no manager= in the address).
+Screenshots (390 and 1200 wide, light and dark) contain only mock data.
 """
 import argparse
 import os
@@ -96,7 +96,7 @@ def check(browser, base, width, theme, shots, single, outdated):
                     main.get_by_role("button", name="侧边栏").first.click()
 
         def open_list():
-            """The head's menu: product settings with one assistant, the roster with several."""
+            """The head's menu: the hub's roster, or product settings on a hub without one."""
             open_drawer()
             head.click()
             return page.get_by_role("menu")
@@ -119,21 +119,31 @@ def check(browser, base, width, theme, shots, single, outdated):
             # signed in and the assistant page drawn (its box)
             page.wait_for_function("localStorage.getItem('persona.token')")
             expect(main.get_by_role("textbox").last).to_be_visible()
-            # The installed roster has loaded: the head stays product-branded and the chat does not name an assistant.
-            expect(head).to_have_attribute("data-assistant-switcher", "")
-            expect(head).to_contain_text("Persona")
-            expect(head).not_to_contain_text("助手")
-            expect(page.locator("[data-assistant-avatar]")).to_have_count(0)
+            # The installed roster has loaded: the head names even the only assistant; the chat title stays Persona.
+            expect(head).to_have_attribute("data-assistant-switcher", MANAGERS["助手"])
+            expect(head).to_contain_text("助手")
+            expect(head).to_contain_text("在线 · server")
+            avatar = head.locator("[data-assistant-avatar]")
+            expect(avatar).to_have_attribute("data-assistant-avatar", MANAGERS["助手"])
+            expect(avatar).to_be_visible()
+            expect(avatar).to_contain_text("助")
+            expect(avatar.locator('[data-avatar-status="green"]')).to_be_visible()
             open_drawer()
             if shots:
                 page.wait_for_timeout(400)
                 page.screenshot(path=name("single"))
             menu = open_list()
-            expect(menu.get_by_role("menuitemradio")).to_have_count(0)
-            expect(menu.get_by_role("menuitem", name="新建助手")).to_have_count(0)
-            expect(menu.get_by_role("menuitem", name="管理助手…")).to_have_count(0)
-            expect(menu.get_by_role("menuitem", name="设置", exact=True)).to_be_visible()
-            expect(menu.get_by_role("menuitem", name="深色", exact=True)).to_be_visible()
+            radio = menu.get_by_role("menuitemradio")
+            expect(radio).to_have_count(1)
+            expect(radio).to_have_attribute("aria-checked", "true")
+            expect(radio).to_contain_text("助手")
+            expect(radio).to_contain_text("在线 · server")
+            expect(radio.get_by_text("默认", exact=True)).to_have_count(0)
+            expect(menu.get_by_role("menuitem", name="新建助手")).to_be_visible()
+            expect(menu.get_by_role("menuitem", name="管理助手…")).to_be_visible()
+            expect(menu.get_by_text("外观", exact=True)).to_be_visible()
+            for item in ("跟随系统", "浅色", "深色", "设置", "断开这个浏览器"):
+                expect(menu.get_by_role("menuitem", name=item, exact=True)).to_be_visible()
             if shots:
                 page.screenshot(path=name("single-menu"))
             page.goto(base + "/machines")

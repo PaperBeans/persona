@@ -5,7 +5,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Session } from "../lib/types";
 import { agentRowMenuItems } from "./AgentMenus";
 import { AgentsPage } from "./AgentsPage";
-import { paneTabsFit, PaneTabs } from "./chat/PaneTabs";
 import { Palette } from "./Palette";
 import { ShellSwitchView } from "./ShellSwitch";
 import { NavGrid, navGridColumns, type NavPage } from "./Sidebar";
@@ -96,22 +95,6 @@ describe("the drawer's page grid", () => {
   });
 });
 
-describe("pane tabs on a phone", () => {
-  const two = [session({ session_id: "a" }), session({ session_id: "b", title: "改测试" })];
-  const five = ["a", "b", "c", "d", "e"].map((id) => session({ session_id: id }));
-  it("up to three share the width; more scroll with faded ends", () => {
-    expect(paneTabsFit(2)).toBe("fill");
-    expect(paneTabsFit(3)).toBe("fill");
-    expect(paneTabsFit(4)).toBe("scroll");
-    const fill = renderToStaticMarkup(<PaneTabs sessions={two} current="a" onSelect={() => {}} />);
-    expect(fill.match(/max-lg:flex-1 max-lg:basis-0/g)).toHaveLength(2);
-    expect(fill).not.toContain("mask-image");
-    const scroll = renderToStaticMarkup(<PaneTabs sessions={five} current="c" onSelect={() => {}} />);
-    expect(scroll).not.toContain("max-lg:flex-1");
-    expect(scroll).toContain("max-lg:[mask-image:linear-gradient(");
-  });
-});
-
 describe("a sidebar row's ⋯", () => {
   const items = (s: Session) => agentRowMenuItems(s, { pinned: false, muted: false, onRename: () => {}, onDelete: () => {}, onLinkTodo: () => {} }).map((i) => i.key);
   it("has what used to be only on right click: 关联到待办, 解除关联 and 删除对话", () => {
@@ -136,6 +119,19 @@ describe("a sidebar row's ⋯", () => {
     expect(keys(session(live))).not.toContain("close"); // no terminal capability
     expect(keys(session({ ...live, attached: true } as Partial<Session>))).not.toContain("attach");
     expect(keys(session())).not.toContain("attach");
+  });
+  it("offers 重命名 and 关闭 Agent on a runtime's session where its node says so (#6294)", () => {
+    const keys = (s: Session) => agentRowMenuItems(s, { pinned: false, muted: false, onRename: () => {}, onDelete: () => {}, onCloseAgent: () => {} }).map((i) => i.key);
+    const paseo = { source_kind: "runtime", agent: "claude", capabilities: { read: true, send: true, interrupt: true, approve: true, close: true, rename: true } } as Partial<Session>;
+    expect(keys(session(paseo))).toEqual(expect.arrayContaining(["rename", "close"]));
+    const refused = keys(session({ ...paseo, capabilities: { read: true, send: true, close: false, rename: false } } as Partial<Session>));
+    expect(refused).not.toContain("rename");
+    expect(refused).not.toContain("close");
+    // an older node says neither: a source keeps neither, as before
+    const older = keys(session({ ...paseo, capabilities: { read: true, send: true } } as Partial<Session>));
+    expect(older).not.toContain("rename");
+    expect(older).not.toContain("close");
+    expect(keys(session())).toEqual(expect.arrayContaining(["rename", "close"])); // the user's own Agent keeps both
   });
   it("offers 删除对话 on a finished or seen desktop thread, which has no terminal to close it from", () => {
     const thread = { source_kind: "codex_app_server", capabilities: { read: true, send: true } } as Partial<Session>;

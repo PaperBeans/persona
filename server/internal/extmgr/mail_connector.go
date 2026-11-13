@@ -28,10 +28,10 @@ func (mailConnector) ID() string   { return "mail" }
 func (mailConnector) Name() string { return "邮件" }
 
 // Manifest: the coding agents get mail too; IMAP is slow and Gmail goes through a proxy, so it is asked for changes
-// less often.
+// less often. Its inbox is the mail rounds' (readMail), with the Add to Inbox switch (#5307).
 func (mailConnector) Manifest() connector.Manifest {
 	return connector.Manifest{Capabilities: []connector.Capability{connector.CapTools, connector.CapActions, connector.CapArchive},
-		AgentTools: []string{"mail_*"}, Poll: kbMailPoll}
+		AgentTools: []string{"mail_*"}, Poll: kbMailPoll, InboxSwitch: true}
 }
 
 // Archive paging: a page of the inbox per ListMessages, at most mailArchivePages of them per account and call, at

@@ -16,7 +16,7 @@ Click a card to see its folder and linked Agents, open that machine's Files or G
 
 The board belongs to the manager (`personad assistant`) (moved from the hub on 2026-11-05; code in `server/internal/assistant/workspace_board*.go`). Cards bind folders on computers, and computers are connected by the manager ([machines.md](../server/machines.md), "Who connects to computers"), so the board, the toggle, and workspace discovery are all done there. Table and settings keys are unchanged, so no migration is needed. The hub only forwards: `/api/v1/workspace-board`, `/api/v1/workspaces`, and `/api/v1/workspace-board/settings` go as-is over the bus `http.request` to the manager (`boardRoutes` in `assistantwire`), carrying the requesting device's role. The `workspace_board` and `workspace_board_settings` events are sent by the manager via `ws.broadcast` and the hub pushes them unchanged to every client; their shape is the same, so clients need no changes.
 
-- **When the manager is away** (the hub just started, the manager is restarting): these endpoints return `503 assistant_offline` ("Can’t reach the assistant right now. Try again later"). The board and snapshots live in Postgres and are not lost. The web app treats it as a read failure and recovers on the next read after the manager returns (the discovery refresh runs every 10 seconds while visible).
+- **When the manager is away** (the hub just started, the manager is restarting): these endpoints return `503 assistant_offline` ("Can’t reach the assistant right now. Try again later"). The board and snapshots live in Postgres and are not lost. The web app treats it as a read failure and recovers on the next read after the manager returns (the board and discovery are read again every 60 seconds while visible, and when the page comes back to the foreground).
 
 ## Toggle (#2475)
 
@@ -46,7 +46,7 @@ The board is stored in Postgres in `workspace_board`, workspace snapshots in `wo
 
 The `full` role can make changes. `answer` can read the board and the workspace list, and the response has `can_write` false. `answer`'s permissions for Files, Git, starting Agents, and so on are still decided by the existing endpoints' allowlists; reading the board grants none of them.
 
-A successful write pushes a `workspace_board` event. When the toggle is off, the web app neither reads nor polls. When the board is open, the web app reads the data, refreshes the discovery list every 10 seconds while the page is visible, and refreshes when it comes back to the foreground; polling stops while hidden. Session status refreshes only affect what is shown inside cards, never the manual order.
+A successful write pushes a `workspace_board` event. When the toggle is off, the web app neither reads nor polls. When the board is open, the web app reads the data, re-reads the board when a `workspace_board` push carries a newer revision and after a reconnect that did not resume (pushes may have been missed), refreshes the board and the discovery list every 60 seconds while the page is visible (the same pace as the sidebar's workspace catalog, #5168; every board write already pushes, so the timer only catches discovery changes and a manager that came back), and refreshes when it comes back to the foreground; polling stops while hidden. Session status refreshes only affect what is shown inside cards, never the manual order.
 
 ## Upgrades and compatibility
 

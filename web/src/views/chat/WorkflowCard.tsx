@@ -1,10 +1,11 @@
 // A Claude Code workflow run (#2935, #3434; docs/protocol/agent-states.md "Background workflows and Monitor") as a card.
 // In the chat, where the Workflow call that launched it was (WorkflowCallCard, #5030 after cindy's AgentTaskCard): the
 // shared task card (TaskCard.tsx), its title the run's name, its status word, "Workflow · tokens · tool uses · time"
-// ("Running for …" while it runs), "{phase} · done/started agents" and a strip of one square per agent. It opens the
-// chat's Background dialog at its run (lib/background-dialog.ts); where the chat has no such dialog (the assistant's
-// chat) it opens in place to the run's phases instead. Like every tool call it sits in the folded work (super rule 2).
-// In the background dialog (WorkflowCard), always open:
+// ("Running for …" while it runs), "{phase} · done/started agents" and a strip of one square per agent. In an Agent's
+// chat it opens the Background tasks side panel at its run (#5421, lib/background-panel.ts); in the assistant's chat and
+// a chat drawn inside another (the Team panel's worker) it opens in place to the run's phases instead. Like every tool
+// call it sits in the folded work (super rule 2).
+// In the Background tasks panel, as a run's detail (WorkflowCard), always open:
 // - a head: the mark, its name, its status, "169/185+" agents done of those started (the "+" while it runs: the script
 //   starts more as it goes), how long it has run;
 // - while it runs "Now Verify: verify:chat-rich", once it has ended what it was for (and a failed run's error);
@@ -15,9 +16,9 @@
 //   as a conversation of its own.
 // Things move only when a value changes, never on the first draw, and not at all with reduced motion: counts roll,
 // the lit phase moves on and the one before it gets its ✓, a new agent fades in, a finished run's chip changes color.
-import { memo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { t } from "../../i18n";
-import { canOpenBackgroundDialog, openBackgroundDialog, subscribeBackgroundDialogs } from "../../lib/background-dialog";
+import { openBackgroundPanel } from "../../lib/background-panel";
 import { useStore } from "../../lib/store";
 import { compactTokens } from "../../lib/tokens";
 import type { Workflow, WorkflowAgent } from "../../lib/types";
@@ -54,6 +55,7 @@ import { fadeInStyle, MOVE_MS, useArrivals, useFlash } from "../../ui/motion";
 import { Fading, Rolling } from "../../ui/Rolling";
 import { StatusMark } from "../../ui/StatusMark";
 import { ActionRow } from "./ActionRow";
+import { useChatContext } from "./chat-context";
 import { useExpanded } from "./expanded";
 import { RunningFor, TaskCard, taskStatusWord } from "./TaskCard";
 
@@ -82,22 +84,22 @@ const CELL: Record<StripCell["state"], string> = { ...PART, unknown: "bg-field" 
 const CELL_WORD: Record<AgentRunState, Parameters<typeof taskStatusWord>[0]> = { running: "running", done: "completed", failed: "failed", stopped: "stopped" };
 
 /** The run a Workflow call launched, in the chat in that call's place (#3434) while the hub lists the run, drawn as a
- *  task card (#5030). Its head opens the chat's Background dialog at the run; with no dialog listing it, it opens in
- *  place to the run's phases (closed at first; what the reader chose stays for the page's life). The hub listing no
- *  such run (an older hub, a run over a day old, one not read yet): the call's row as it always was. */
+ *  task card (#5030). In an Agent's own chat its head opens the Background tasks panel at the run, with the panel mark at
+ *  its end; in the assistant's chat, or a chat drawn inside a panel, it opens in place to the run's phases (closed at
+ *  first; what the reader chose stays for the page's life). The hub listing no such run (an older hub, a run over a day
+ *  old, one not read yet): the call's row as it always was. */
 export const WorkflowCallCard = memo(function WorkflowCallCard({ step, mid, sid, scope }: { step: ToolStep; mid: string; sid: string; scope: string }) {
   const call = step.use.tool_use_id ?? "";
-  const run = useStore((s) => {
-    const session = (s.sessions[mid] ?? []).find((x) => x.session_id === sid) ?? s.assistant?.conversations.find((c) => c.session_id === sid);
-    return session?.workflows?.find((w) => w.tool_use_id === call);
+  const { embedded } = useChatContext();
+  const { run, agent } = useStore((s) => {
+    const own = (s.sessions[mid] ?? []).find((x) => x.session_id === sid);
+    const session = own ?? s.assistant?.conversations.find((c) => c.session_id === sid);
+    return { run: session?.workflows?.find((w) => w.tool_use_id === call), agent: Boolean(own && !own.assistant) };
   });
-  const task = run?.task_id;
-  // the same read on the server: a page drawn to markup has no dialog yet, and opens in place
-  const reach = () => Boolean(task) && canOpenBackgroundDialog(mid, sid, task);
-  const inDialog = useSyncExternalStore(subscribeBackgroundDialogs, reach, reach);
+  const inPanel = agent && !embedded;
   const [open, setOpen] = useExpanded(`${scope}workflow:${call}`);
   // the agents' clocks go each second only while their rows show
-  const now = useNow(1000, Boolean(run?.running) && open && !inDialog);
+  const now = useNow(1000, Boolean(run?.running) && open && !inPanel);
   if (!run) return <ActionRow step={step} mid={mid} sid={sid} />;
   const name = workflowName(run);
   const ids = [step.use.id, ...(step.result ? [step.result.id] : [])].join(" ");
@@ -108,13 +110,13 @@ export const WorkflowCallCard = memo(function WorkflowCallCard({ step, mid, sid,
       status={workflowTaskStatus(run)}
       meta={meta(run)}
       extra={<Overview run={run} />}
-      onClick={inDialog ? () => void openBackgroundDialog(mid, sid, run.task_id) : () => setOpen((o) => !o)}
-      ariaLabel={inDialog ? t("chat-subagentcard.open_in_background", { name }) : t(open ? "lib-workflows.collapse_run" : "lib-workflows.expand_run", { name })}
-      expanded={inDialog ? undefined : open}
-      trailing={inDialog ? <Icon name="sidebar" size={14} className="mt-1 shrink-0 text-ink-3" /> : undefined}
-      data={{ "data-workflow-call": workflowStatus(run), "data-tool-use": call, "data-items": ids, "data-workflow-opens": inDialog ? "dialog" : "inline" }}
+      onClick={inPanel ? () => openBackgroundPanel(mid, sid, run.task_id) : () => setOpen((o) => !o)}
+      ariaLabel={inPanel ? t("chat-subagentcard.open_in_background", { name }) : t(open ? "lib-workflows.collapse_run" : "lib-workflows.expand_run", { name })}
+      expanded={inPanel ? undefined : open}
+      trailing={inPanel ? <Icon name="sidebar" size={14} className="mt-1 shrink-0 text-ink-3" /> : undefined}
+      data={{ "data-workflow-call": workflowStatus(run), "data-tool-use": call, "data-items": ids, "data-workflow-opens": inPanel ? "panel" : "inline" }}
     >
-      {!inDialog && (
+      {!inPanel && (
         <Collapse open={open} lazy className="-mx-3">
           <div className="@container flex flex-col pt-2" data-workflow-inline>
             <div className="flex flex-col px-3 pb-2 empty:hidden">
@@ -176,7 +178,8 @@ function Overview({ run }: { run: Workflow }) {
   );
 }
 
-/** A run in the chat's background dialog: always open. `onJump`: "Show in chat", to the call that launched it. */
+/** A run's detail in the Background tasks panel (BackgroundPanel.tsx): always open. `onJump`: "Show in chat", to the
+ *  call that launched it. */
 export function WorkflowCard({ run, scope, onJump }: { run: Workflow; scope: string; onJump?: (call: string) => void }) {
   const now = useNow(1000, run.running);
   const status = workflowStatus(run);

@@ -63,7 +63,8 @@ struct WorkspaceSidebarCard<AgentContent: View, Actions: View>: View {
     var selectAgent: (SessionKey) -> Void = { _ in }
     var appeared: (Session) -> Void = { _ in }
     var agentIdentifier = "agents.row"
-    /// A Codex chat's subagents (`CodexTasks`): listed under it, a level in. The list's rows are the chats'.
+    /// An agent's subtasks (`CodexTasks`: a Codex chat's subagents, the agents a runtime's agent created): listed under
+    /// it, a level in. The list's rows are the others'.
     var subtasks: (Session) -> [Session] = { _ in [] }
     var ordered: ([Session]) -> [Session]
     @ViewBuilder var agent: (Session) -> AgentContent
@@ -360,8 +361,9 @@ struct HostHeading: View {
     }
 }
 
-/// A working tree's row in its repository's card (By Repository): ⌂ for the main checkout, the branch mark for the others, how
-/// many agents (Idle when nothing goes on), and the chevron that turns as it opens.
+/// A working tree's row in its repository's card (By Repository): ⌂ for the main checkout, and no mark for the others
+/// so the name and indentation carry the meaning like the web sidebar; how many agents (Idle when nothing goes on),
+/// and the chevron that turns as it opens.
 struct WorktreeRow: View {
     var name: String
     var main: Bool
@@ -373,10 +375,17 @@ struct WorktreeRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
-            ThemedIcon(main ? Theme.Icon.home : Theme.Icon.gitBranch)
-                .font(compact ? CompactList.meta : Theme.Font.caption)
-                .foregroundStyle(.secondary)
-                .scaledFrame(width: compact ? CompactList.mark : Theme.Size.iconXS)
+            // Only the main checkout wears a mark; other worktrees stay text-only, matching the web sidebar. The
+            // same-width clear lane keeps every row's name aligned whether the home mark is present or not.
+            if main {
+                ThemedIcon(Theme.Icon.home)
+                    .font(compact ? CompactList.meta : Theme.Font.caption)
+                    .foregroundStyle(.secondary)
+                    .scaledFrame(width: compact ? CompactList.mark : Theme.Size.iconXS)
+            } else {
+                Color.clear
+                    .scaledFrame(width: compact ? CompactList.mark : Theme.Size.iconXS)
+            }
             Text(name)
                 .font(compact ? CompactList.metaStrong : Theme.Font.secondaryMedium)
                 .foregroundStyle(quiet ? Color.secondary : Color.primary)
@@ -601,9 +610,9 @@ struct RepoCardHeader: View {
     }
 }
 
-/// A worktree's line: ⌂ for the main checkout (with its Primary badge), the branch mark for the others, its name and,
-/// small, what the name does not say (its branch, Detached HEAD, another repository's name); at the end how many agents
-/// (Idle when nothing goes on) and the chevron that turns as it opens.
+/// A worktree's line: ⌂ for the main checkout (with its Primary badge) and no mark for the others, matching the web
+/// sidebar; its name and, small, what the name does not say (its branch, Detached HEAD, another repository's name);
+/// at the end how many agents (Idle when nothing goes on) and the chevron that turns as it opens.
 struct RepoWorktreeLine: View {
     var name: String
     var main: Bool
@@ -620,7 +629,9 @@ struct RepoWorktreeLine: View {
 
     var body: some View {
         RepoTreeLine(level: level) {
-            ThemedIcon(main ? Theme.Icon.home : Theme.Icon.gitBranch).font(Theme.Font.caption).foregroundStyle(.secondary)
+            // Non-main worktrees carry no glyph: the name, indentation and detail text identify them, as on web.
+            // RepoTreeLine reserves the mark column either way, so the names stay aligned.
+            if main { ThemedIcon(Theme.Icon.home).font(Theme.Font.caption).foregroundStyle(.secondary) }
         } content: {
             HStack(spacing: Theme.Space.s) {
                 Text(name).font(Theme.Font.secondaryMedium).foregroundStyle(quiet || offline ? Color.secondary : Color.primary)

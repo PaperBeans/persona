@@ -94,6 +94,36 @@ describe("splitting and running an agent", () => {
     expect(d.openSession).toHaveBeenCalledWith("m1", "s9");
   });
 
+  it("offers Codex launchers where the computer starts them in the user's pane (run_here, #5504), and only those", async () => {
+    const d = deps({
+      post: vi.fn(async () => ({ session_id: "c0de0000-0000-4000-8000-000000000009" })),
+      launchers: vi.fn(async () => [
+        { name: "claude" },
+        { name: "codex", agent: "codex", agent_type: "codex", prompt_optional: true, run_here: true, model: "gpt-6" },
+        { name: "cx_old", agent: "codex", prompt_optional: true }, // a computer that keeps no pane when a start fails
+        { name: "cx_cfg", agent_type: "codex", run_here: false },
+      ]),
+    });
+    const list = await (by(nodeActions(tab, d), "node-agent").children as () => Promise<MenuItem[]>)();
+    expect(list.map((i) => i.label)).toEqual(["claude", "codex"]);
+    await list[1].onSelect();
+    expect(d.post).toHaveBeenCalledWith("m1", "panes/agent", { pane: "w1:p2", launcher: "codex" });
+    // its waiting row opens, where the first message goes (docs/integrations/codex.md "Starting without a first message")
+    expect(d.openSession).toHaveBeenCalledWith("m1", "c0de0000-0000-4000-8000-000000000009");
+  });
+
+  it("never offers a launcher that starts the session in a desktop app (#5480): a shell would run nothing", async () => {
+    const d = deps({
+      launchers: vi.fn(async () => [
+        { name: "claude" },
+        { name: "claude-desktop", agent: "claude", source: "claude_desktop" },
+        { name: "codex-app", agent: "codex", source: "codex_app", run_here: true },
+      ]),
+    });
+    const list = await (by(nodeActions(tab, d), "node-agent").children as () => Promise<MenuItem[]>)();
+    expect(list.map((i) => i.label)).toEqual(["claude"]);
+  });
+
   it("names a provider by its display name, its ID before the model at the row's end; an rc alias by its ID (#5029)", async () => {
     const d = deps({ launchers: vi.fn(async () => [{ name: "relay-example-com", display_name: "我的中转 站", model: "glm-5" }, { name: "cc_glm" }]) });
     const list = await (by(nodeActions(tab, d), "node-agent").children as () => Promise<MenuItem[]>)();

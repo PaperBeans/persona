@@ -56,11 +56,15 @@ func (n *Node) firstPrompt(ctx context.Context, pane, id, prompt string, a *host
 	}
 	n.typing.typed(pane, prompt)
 	unlock := n.typing.lock(id)
+	parent := n.firstPromptParent
+	if parent == nil {
+		parent = context.Background()
+	}
 	n.firstWait.Add(1)
 	go func() {
 		defer n.firstWait.Done()
 		defer unlock()
-		bctx, cancel := context.WithTimeout(context.Background(),
+		bctx, cancel := context.WithTimeout(parent,
 			firstPromptTries*firstPromptWait+(firstPromptTries-1)*firstPromptRecover+15*time.Second)
 		defer cancel()
 		if why := n.confirmFirst(bctx, pane, id, prompt, since, watch, draft); why != "" {
@@ -312,6 +316,7 @@ func (n *Node) lostFirstPrompt(id, status string) string {
 	}
 	if status == proto.StatusWorking || n.promptedSince(id, p.at) {
 		n.lostFirst.clear(id)
+		n.dropHandoff(id, nil) // a switch's handoff waiting for this message (engine_switch.go) missed it
 		return ""
 	}
 	return p.why

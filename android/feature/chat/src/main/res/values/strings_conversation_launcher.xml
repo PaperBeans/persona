@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_conversation_launcher_title">Following messages use</string>
+    <string name="chat_conversation_launcher_default">Use the default</string>
+    <string name="chat_conversation_launcher_default_named">Default: %1$s</string>
+    <string name="chat_conversation_launcher_section">Launcher</string>
+    <string name="chat_conversation_launchers_loading">Loading launchers…</string>
+    <string name="chat_conversation_launchers_failed">Couldn\'t load launchers</string>
+    <string name="chat_conversation_launchers_none">No launcher on this computer can run Persona</string>
+    <string name="chat_conversation_model_section">Model</string>
+    <string name="chat_conversation_model_default">Default model</string>
+    <string name="chat_conversation_model_selected">Model selected</string>
+    <string name="chat_conversation_models_loading">Loading models…</string>
+    <string name="chat_conversation_models_failed">Couldn\'t load models</string>
+    <string name="chat_conversation_models_unavailable">This hub has no model list</string>
+    <string name="chat_conversation_launcher_note">The pick applies from your next message until you change it. Assistant settings stay unchanged.</string>
+</resources>

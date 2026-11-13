@@ -136,6 +136,12 @@ internal object SessionModes {
      */
     fun showsInHeader(session: Session): Boolean = !session.assistant && (session.permissionMode != null || session.canChangeModes)
 
+    /**
+     * Glass's composer shows the mode beside the model pill (Q11, #5055): an agent's as the header did, and a Persona
+     * chat's while it can change it (the web's permission picker, "a Persona conversation whatever its state").
+     */
+    fun showsInComposer(session: Session): Boolean = session.canChangeModes || showsInHeader(session)
+
     /** The alias a session's model reads as ("claude-opus-…" → opus); a gateway model or none is the default. */
     fun claudeModelId(model: String?): String {
         val name = model.orEmpty().lowercase()

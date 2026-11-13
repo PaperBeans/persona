@@ -156,10 +156,11 @@ func TestExtensionHubVersionMessages(t *testing.T) {
 			})
 		})
 	}
-	t.Run("cli_keeps_default_language", func(t *testing.T) {
+	// The command line speaks the terminal's language (#5520), here Chinese, not the user language an app set (English).
+	t.Run("cli_keeps_terminal_language", func(t *testing.T) {
 		srv := httptest.NewServer(mux)
 		defer srv.Close()
-		client := extensionClient{cfg: &Config{Listen: strings.TrimPrefix(srv.URL, "http://"), Token: h.cfg.Token}}
+		client := extensionClient{cfg: &Config{Listen: strings.TrimPrefix(srv.URL, "http://"), Token: h.cfg.Token}, lang: i18n.ZhHans}
 		err := client.call(t.Context(), "POST", "/api/v1/extensions/-/preview", map[string]string{"source": "dir:" + pkg}, nil)
 		want := "这个扩展需要更新版本的 hub，请先更新 hub（需要 >=202612010000，现在是 202611041200）（HTTP 400）"
 		if err == nil || err.Error() != want {

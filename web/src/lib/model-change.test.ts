@@ -141,6 +141,12 @@ describe("model change divider placement", () => {
     expect(marks(lines)).toEqual(["first", `second [${OPUS} → ${SONNET}]`]);
   });
 
+  it("puts none on the first exchange on another engine (its switch divider names the model) and compares the next with it", () => {
+    const handoff = '<persona-context kind="engine-switch" title="Handoff" from="claude" to="codex" model="gpt-5.5">summary</persona-context>\n\n';
+    const lines = chatLines([user(1, "first"), said(2, OPUS), user(3, `${handoff}second`), said(4, "gpt-5.5"), user(5, "third"), said(6, "gpt-5.5"), user(7, "fourth"), said(8, "gpt-5.4")]);
+    expect(marks(lines)).toEqual(["first", "second", "third", "fourth [gpt-5.5 → gpt-5.4]"]);
+  });
+
   it("leaves the lines as they are when no model changes", () => {
     const lines = chatLines([user(1, "first"), said(2, OPUS), user(3, "second"), said(4, OPUS)]);
     const again = markModelChanges(lines);

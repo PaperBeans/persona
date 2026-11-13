@@ -5,12 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 )
 
@@ -54,10 +54,10 @@ func ParseMarket(s string) (MarketSpec, error) {
 		repo, ref, _ := strings.Cut(rest, "@")
 		owner, name, ok := strings.Cut(repo, "/")
 		if !ok || !githubName.MatchString(owner) || !githubName.MatchString(name) || strings.Contains(name, "/") {
-			return MarketSpec{}, errors.New("GitHub 市场写成 github:owner/repo 或 github:owner/repo@分支")
+			return MarketSpec{}, i18n.Err("extension-market_read.github_form")
 		}
 		if ref != "" && (strings.ContainsAny(ref, " \t\n?#") || strings.Contains(ref, "..") || len(ref) > 200) {
-			return MarketSpec{}, errors.New("分支名不对")
+			return MarketSpec{}, i18n.Err("extension-market_read.bad_ref")
 		}
 		return MarketSpec{Kind: "github", Owner: owner, Repo: strings.TrimSuffix(name, ".git"), Ref: ref}, nil
 	}
@@ -72,13 +72,13 @@ func ParseMarket(s string) (MarketSpec, error) {
 	}
 	u, err := url.Parse(s)
 	if err != nil || u.Host == "" {
-		return MarketSpec{}, errors.New("市场的地址是 https://… 或 github:owner/repo")
+		return MarketSpec{}, i18n.Err("extension-market_read.address_form")
 	}
 	if u.Scheme != "https" {
-		return MarketSpec{}, errors.New("市场只能用 https")
+		return MarketSpec{}, i18n.Err("extension-market_read.https_only")
 	}
 	if u.User != nil {
-		return MarketSpec{}, errors.New("地址里不能带账号密码：私有市场填 token")
+		return MarketSpec{}, i18n.Err("extension-market_read.no_credentials")
 	}
 	u.Fragment = ""
 	if !strings.HasSuffix(u.Path, ".json") {

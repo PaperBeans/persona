@@ -1,6 +1,6 @@
 import XCTest
 
-/// Against the mock hub: separated providers/purposes and a real PATCH through the editor.
+/// Against the mock hub: common model choices, advanced providers, and a real PATCH through the editor.
 final class ModelConfigurationTests: XCTestCase {
     private var hub: String!
 
@@ -20,14 +20,19 @@ final class ModelConfigurationTests: XCTestCase {
         return app
     }
 
-    @MainActor func testSettingsSeparatesProvidersAndModelConfiguration() {
+    @MainActor func testSettingsOpensModelsBeforeAdvancedProviders() {
         let app = launch()
-        let providers = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "模型供应商")).firstMatch
-        let purposes = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "模型配置")).firstMatch
-        for _ in 0..<4 where !purposes.isHittable { app.swipeUp() }
-        XCTAssertTrue(providers.exists && purposes.exists)
-        purposes.tap()
+        let models = app.descendants(matching: .any)["settings-models"].firstMatch
+        XCTAssertTrue(models.waitForExistence(timeout: 10))
+        for _ in 0..<4 where !models.isHittable { app.swipeUp() }
+        XCTAssertFalse(app.descendants(matching: .any)["settings-model-providers"].exists)
+        models.tap()
         XCTAssertTrue(app.descendants(matching: .any)["model-purpose-assistant"].waitForExistence(timeout: 10))
+        let providers = app.descendants(matching: .any)["settings-model-providers"].firstMatch
+        for _ in 0..<4 where !providers.isHittable { app.swipeUp() }
+        XCTAssertTrue(providers.exists)
+        providers.tap()
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 10))
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.lifetime = .keepAlways
         add(attachment)
@@ -39,7 +44,9 @@ final class ModelConfigurationTests: XCTestCase {
         for id in ["assistant", "agent.new", "kb", "inbox.triage"] {
             XCTAssertTrue(app.descendants(matching: .any)["model-purpose-\(id)"].exists)
         }
-        XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "model-purpose-")).count, 4)
+        // The four categories and the background supervisor's use, which the hub answers for by its own id (#5083).
+        XCTAssertTrue(app.descendants(matching: .any)["model-purpose-assistant.supervise"].exists)
+        XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "model-purpose-")).count, 5)
         XCTAssertFalse(app.searchFields.firstMatch.exists)
         let drafts = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "草拟回复"))
         XCTAssertFalse(drafts.firstMatch.exists)
@@ -67,15 +74,27 @@ final class ModelConfigurationTests: XCTestCase {
 
     @MainActor func testPurposeSaveUsesTheUnifiedConfigurationEndpoint() throws {
         let app = launch(["-openModelConfiguration", "YES", "-openModelPurpose", "agent.new"])
-        let field = app.textFields["model-config-model"]
-        XCTAssertTrue(field.waitForExistence(timeout: 10))
-        addShot(app, "editor")
-        field.tap()
-        if let current = field.value as? String, !current.contains("留空"), !current.isEmpty {
-            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
-        }
         let requested = "model-ui-" + UUID().uuidString.prefix(8).lowercased()
-        field.typeText(requested)
+        let list = app.descendants(matching: .any)["model-config-model-list"].firstMatch
+        if list.waitForExistence(timeout: 10) {
+            list.tap()
+            let search = app.searchFields.firstMatch
+            XCTAssertTrue(search.waitForExistence(timeout: 10))
+            search.tap()
+            search.typeText(requested)
+            let choice = app.buttons["newChat.model." + requested]
+            XCTAssertTrue(choice.waitForExistence(timeout: 10))
+            choice.tap()
+        } else {
+            let field = app.textFields["model-config-model"]
+            XCTAssertTrue(field.waitForExistence(timeout: 10))
+            field.tap()
+            if let current = field.value as? String, !current.contains("留空"), !current.isEmpty {
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+            }
+            field.typeText(requested)
+        }
+        addShot(app, "editor")
         let save = app.buttons["model-config-save"]
         XCTAssertTrue(save.isEnabled)
         save.tap()

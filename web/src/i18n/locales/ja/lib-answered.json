@@ -1,6 +1,6 @@
 {
   "mode_accept_edits": "編集を自動承認",
-  "mode_bypass": "すべて許可",
+  "mode_bypass": "フルアクセス",
   "mode_default": "毎回確認",
   "dismissed": "コンピューターに戻しました",
   "by_assistant": "アシスタントが代わりに回答しました",

@@ -6,7 +6,7 @@ import SwiftUI
 /// Live box with the newest lines, the thread (Persona, or Just Me), and the bar with the composer, Pause, Bookmark and
 /// Stop under the thumb. After Stop the same page goes on as the thread (`.after`): where the minutes are (kept above the
 /// thread), **After the Meeting** and the follow-up's composer; a past meeting's page is that one, pushed from its
-/// recording. An ordinary recording and a #3746 meeting keep `RecordingLiveView` and `RecordingWrapUp`.
+/// recording (or over Recordings by the minutes push, with Open to the recording's page). An ordinary recording and a #3746 meeting keep `RecordingLiveView` and `RecordingWrapUp`.
 struct MeetingPage: View {
     enum Mode: Equatable { case live, after }
 
@@ -18,15 +18,25 @@ struct MeetingPage: View {
     var captureError: String? = nil
     /// Hide (live) / Done (after, in the sheet); nil when pushed (the navigation bar's back).
     var close: (() -> Void)? = nil
+    /// After mode, pushed where Back doesn't return to the recording's page (the minutes push opens it over Recordings,
+    /// #3862 phase 6): Open Minutes / Open Recording push that page, as in the sheet, with no Done.
+    var opensRecording = false
 
+    @Environment(AppModel.self) private var model
     @Environment(\.dynamicTypeSize) private var size
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var capture = RecordingCapture.shared
+    /// After the meeting: the app's voice call, when it is bound to the follow-up (#3862 phase 6), and why one couldn't start.
+    @State private var calls = VoiceCalls.shared
+    @State private var voiceNote: VoiceUnavailableNote?
     @State private var library = RecordingLibrary.shared
     @State private var conversation = MeetingConversation.shared
     @State private var sync = RecordingSync.shared
     @State private var live = MeetingLive.shared
     @State private var speaker = MeetingSpeaker.shared
+    /// The meeting call (#3862 phase 4): Stop Speaking while its voice speaks.
+    @State private var meetingCall = MeetingCall.shared
     /// This page's hold on the meeting's state (`MeetingConversation.watch`): the live page fading out and the after page
     /// fading in each hold their own, so neither ends the other's.
     @State private var owner = UUID()
@@ -49,8 +59,12 @@ struct MeetingPage: View {
     /// keeps its height.
     @FocusState private var writing: Bool
     /// At accessibility sizes, why the composer takes no words (`MeetingPageBar`): shown at the end of what scrolls, so
-    /// the bar stays two rows.
+    /// the bar stays two rows. Likewise that some picked photos couldn't be read (#3862 phase 3), beside it.
     @State private var notice: String?
+    @State private var photoNotice: String?
+    /// The transcript a highlight's time pushed (phase 2b): the page's, so it stays while the page is open, across the
+    /// switch between the regular and the accessibility layouts.
+    @State private var transcriptAt: MeetingTranscriptFocus?
 
     private var paused: Bool { capture.state == .paused }
 
@@ -69,8 +83,12 @@ struct MeetingPage: View {
         .themedGroupedPage()
         .navigationTitle(close == nil ? String(localized: "Meeting") : "")
         .navigationBarTitleDisplayMode(.inline)
-        // `meeting_live` and reconnects read the meeting again only while a page shows it (or it records here).
-        .onTabVisibility(appear: { watch(id) }, disappear: { unwatch() })
+        // `meeting_live` and reconnects read the meeting again only while a page shows it (or it records here). A Talk
+        // held on it ends as it goes (#3862 phase 4): nothing else would let it go.
+        .onTabVisibility(appear: { watch(id) }, disappear: {
+            unwatch()
+            meetingCall.endHold(id)
+        })
         .onChange(of: id) { _, new in
             guard watching != nil else { return }
             unwatch()
@@ -88,6 +106,8 @@ struct MeetingPage: View {
         guard let watching else { return }
         conversation.unwatch(watching, by: owner)
         self.watching = nil
+        // Leaving the page ends the phone's call bound to the follow-up, as leaving a chat does (docs/assistant/voice.md 6.5).
+        if mode == .after, let key = conversation.followupKey(watching) { VoiceCalls.shared.leave(key) }
     }
 
     // MARK: While the meeting records
@@ -97,13 +117,18 @@ struct MeetingPage: View {
             .safeAreaInset(edge: .bottom, spacing: Theme.Space.flush) {
                 VStack(spacing: Theme.Space.flush) {
                     if showsStopSpeaking { stopSpeaking }
-                    MeetingPageBar(entry: entry, mode: .live, paused: paused, justMe: $justMe, focus: $writing, notice: $notice)
+                    MeetingPageBar(entry: entry, mode: .live, paused: paused, justMe: $justMe, focus: $writing, notice: $notice,
+                                   photoNotice: $photoNotice)
                 }
             }
             .onChange(of: exchanges.compactMap(\.answer)) { old, new in
                 // A room answer arriving on screen: announced, with no haptic while the microphone is open. Just Me's
                 // answers never are: VoiceOver would say them out loud to the room.
                 if new.count > old.count, let latest = new.last { AccessibilityNotification.Announcement(latest).post() }
+            }
+            // On the page, not the card: one host in either layout, kept while the card turns into the Live box under it.
+            .navigationDestination(item: $transcriptAt) { focus in
+                MeetingTranscriptPage(id: id, exchanges: exchanges, focus: focus)
             }
     }
 
@@ -121,7 +146,8 @@ struct MeetingPage: View {
                             subtitle(entry)
                         }
                         problems(entry)
-                        MeetingLiveBox(entry: entry, exchanges: exchanges, folded: false)
+                        topics(entry)
+                        topCard(entry, writing: false)
                         threadHeader(entry)
                         thread(entry)
                         noticeBanner
@@ -131,9 +157,9 @@ struct MeetingPage: View {
                 }
             }
         } else {
-            // While the field has the keyboard the subtitle steps aside and the Live box keeps only its newest line: the
-            // keyboard takes about half the screen, and the thread under them would get none of it. The structure stays
-            // the same, so the thread's scroll view keeps its place.
+            // While the field has the keyboard the subtitle steps aside and the top card keeps only its newest line or
+            // highlight, or its waiting line: the keyboard takes about half the screen, and the thread under them would get
+            // none of it. The structure stays the same, so the thread's scroll view keeps its place.
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     titleRow(entry)
@@ -143,7 +169,8 @@ struct MeetingPage: View {
                 .padding(.horizontal, Theme.Space.page)
                 .padding(.top, Theme.Space.s)
                 problems(entry)
-                MeetingLiveBox(entry: entry, exchanges: exchanges, folded: writing)
+                if !writing { topics(entry) }
+                topCard(entry, writing: writing)
                     .padding(.horizontal, Theme.Space.page)
                 threadHeader(entry)
                     .padding(.horizontal, Theme.Space.page)
@@ -157,11 +184,16 @@ struct MeetingPage: View {
         }
     }
 
-    /// Why the composer takes no words, at accessibility sizes (the bar says it at the others).
+    /// Why the composer takes no words, and picked photos that couldn't be read, at accessibility sizes (the bar says
+    /// them at the others).
     @ViewBuilder private var noticeBanner: some View {
         if let notice {
             NoticeBanner(text: notice, tone: .neutral)
                 .accessibilityIdentifier("meeting-ask-notice")
+        }
+        if let photoNotice {
+            NoticeBanner(text: photoNotice, tone: .danger)
+                .accessibilityIdentifier("meeting-photo-problem")
         }
     }
 
@@ -267,6 +299,33 @@ struct MeetingPage: View {
         case .listener: String(localized: "Persona listens")
         case .off: String(localized: "Persona is off")
         }
+    }
+
+    // MARK: Topics
+
+    /// The room's topics (#3862 phase 2), for a meeting started with the live view, once the room set any: a row of chips
+    /// under the header, above the Live box. It steps aside while the field has the keyboard, as the subtitle does.
+    @ViewBuilder private func topics(_ entry: RecordingEntry) -> some View {
+        let topics = conversation.meeting(id).topics
+        if entry.attendance?.liveView == true, !topics.isEmpty {
+            MeetingTopicsRow(topics: topics, inset: size.isAccessibilitySize ? Theme.Space.flush : Theme.Space.page)
+        }
+    }
+
+    // MARK: The top card
+
+    /// The Highlights card (phase 2b) for a meeting started with the highlights, or the Live box: the room's highlights
+    /// and its state are read here with the rest of the meeting (`topics(_:)`, `problems(_:)`) and handed to the card as
+    /// they are, so the card observes nothing itself. The waiting line comes only while Persona attends and its room still
+    /// gets the meeting (`MeetingHighlights.attending`), from what `problems(_:)` reads too, so it never sits under a banner
+    /// saying Persona can't take part.
+    private func topCard(_ entry: RecordingEntry, writing: Bool) -> some View {
+        let meeting = conversation.meeting(id)
+        let highlights = entry.attendance?.highlights == true ? meeting.highlights : []
+        let attending = MeetingHighlights.attending(entry, room: meeting.room, roomMissing: sync.roomMissing.contains(id),
+                                                    refused: sync.attendanceProblem[id] != nil)
+        return MeetingTopCard(entry: entry, exchanges: exchanges, highlights: highlights, attending: attending, writing: writing,
+                              transcriptAt: $transcriptAt)
     }
 
     // MARK: Problems
@@ -389,14 +448,19 @@ struct MeetingPage: View {
             .animation(reduceMotion ? nil : (following ? Theme.Motion.conceal : Theme.Motion.reveal), value: following)
     }
 
-    /// Stop Speaking for an answer the thread draws as a room message (one drawn as an exchange card has its own).
+    /// Stop Speaking for an answer the thread draws as a room message (one drawn as an exchange card has its own), and
+    /// while the meeting call's voice speaks (#3862 phase 4).
     private var showsStopSpeaking: Bool {
+        if mode == .live, meetingCall.call(for: id)?.speaking == true { return true }
         guard let speaking = speaker.speaking else { return false }
         return !shown.exchangeRows.contains(speaking)
     }
 
     private var stopSpeaking: some View {
-        Button { MeetingAsk.shared.stopSpeaking() } label: {
+        Button {
+            MeetingAsk.shared.stopSpeaking()
+            meetingCall.interruptVoice(id)
+        } label: {
             Label("Stop Speaking", systemImage: Theme.Icon.interrupt)
                 .font(Theme.Font.bodyStrong)
                 .lineLimit(1)
@@ -413,7 +477,8 @@ struct MeetingPage: View {
 
     // MARK: The page menu
 
-    /// Persona's role (Off turns it off) and the private mark.
+    /// Persona's role (Off turns it off), the private mark, and Meeting / Note (#5243: a note leaves this page for the live
+    /// view, as the sheet shows a note).
     private func pageMenu(_ entry: RecordingEntry) -> some View {
         let role = entry.attendance?.role ?? .off
         return Menu {
@@ -429,6 +494,7 @@ struct MeetingPage: View {
             }
             .disabled(pendingPrivate != nil)
             .accessibilityIdentifier("meeting-private")
+            RecordingKindPicker(entry: entry)
         } label: {
             ThemedIcon(Theme.Icon.moreMenu).font(Theme.Font.heading).foregroundStyle(Theme.accent)
                 .tapTargetFrame()
@@ -507,11 +573,19 @@ struct MeetingPage: View {
                 .padding(.horizontal, Theme.Space.page)
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: Theme.Space.flush) {
-            MeetingPageBar(entry: entry, mode: .after, justMe: .constant(false), focus: $writing, notice: $notice)
+        .safeAreaInset(edge: .bottom, spacing: Theme.Space.flush) { afterBar(entry) }
+        .voiceUnavailableAlert($voiceNote, model: model)
+        // Whether the follow-up's hub has a voice to call (at most once a minute, `VoiceSupport`). The id says whether the
+        // follow-up exists: with one hub paired its group is "", so the group alone wouldn't change when the first message
+        // makes it, and the probe would never run on this page.
+        .tabActiveTask(id: FollowupVoiceProbe(group: conversation.followupKey(id)?.group, active: scenePhase == .active)) {
+            guard scenePhase == .active, VoicePlatform.current == .phone, let key = conversation.followupKey(id),
+                  let api = model.api(key.group) else { return }
+            await VoiceSupport.shared.refresh(group: key.group, api: api)
         }
-        // Pushed from the recording's page, the back button returns there: no way to push it again from here.
-        .modifier(OpensRecording(id: id, enabled: close != nil, opening: $opening))
+        // Pushed from the recording's page, the back button returns there: no way to push it again from here. In the
+        // sheet, and opened over Recordings by the minutes push, Open is the way to the minutes.
+        .modifier(OpensRecording(id: id, enabled: opens, opening: $opening))
         .tabActiveTask(id: "\(entry.revision)|\(minutes.round)|\(entry.transcribedAll)") { await followMinutes() }
         .onChange(of: minutes.state) { old, new in
             // Only minutes that come while the page waits for them are news: a past meeting's, there as it opens, are not.
@@ -520,13 +594,46 @@ struct MeetingPage: View {
         }
     }
 
+    /// The composer, or while a voice call bound to the follow-up runs its bar in the composer's place (#3862 phase 6, the
+    /// chat's way: docs/assistant/voice.md 6.2), with the line a call that ended by itself leaves over it.
+    @ViewBuilder private func afterBar(_ entry: RecordingEntry) -> some View {
+        let key = conversation.followupKey(id)
+        let call = key.flatMap { key in calls.current.flatMap { $0.key == key ? $0 : nil } }
+        VStack(spacing: Theme.Space.s) {
+            if let call, call.isOver, case .ended(let end) = call.phase, let note = VoiceEndNote.make(end, extensionID: call.extensionID) {
+                VoiceEndedStrip(call: call, note: note)
+                    .padding(.horizontal, Theme.Space.page)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if let call, let key, !call.isOver {
+                VoiceBar(call: call, key: key, label: model.persona.name)
+                    .padding(.horizontal, Theme.Space.page)
+                    .padding(.vertical, Theme.Space.s)
+                    .frame(maxWidth: .infinity)
+                    .background { Theme.groupedPage.ignoresSafeArea(edges: .bottom) }
+                    .transition(.opacity)
+            } else {
+                MeetingPageBar(entry: entry, mode: .after, justMe: .constant(false), focus: $writing, notice: $notice,
+                               voice: voiceStart(key, entry: entry))
+            }
+        }
+    }
+
+    /// Voice Chat bound to the follow-up: only once it exists (with none yet the first request is typed, so no turn runs on
+    /// the meeting's material alone), while nothing records (the microphone is the recording's) and the hub has a voice.
+    private func voiceStart(_ key: SessionKey?, entry: RecordingEntry) -> (() -> Void)? {
+        guard let key, capture.state == .idle, conversation.followupHold(entry) == nil,
+              VoiceSupport.shared.availability(for: model.session(key), group: key.group).isAvailable else { return nil }
+        return { voiceNote = VoiceEntry.start(key, model: model) }
+    }
+
     /// The title, when the meeting ran, where the minutes are, and (in the sheet) the way to them. The composer is the
     /// page's primary control, so Open is a standard button.
     private func statusCard(_ entry: RecordingEntry) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             afterTitle(entry)
             minutesLine
-            if close != nil {
+            if opens {
                 Button { opening = true } label: {
                     Text(openTitle)
                         .font(Theme.Font.bodyStrong).lineLimit(1).minimumScaleFactor(0.7)
@@ -558,7 +665,7 @@ struct MeetingPage: View {
             .lineLimit(1)
             .minimumScaleFactor(0.7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            if close != nil {
+            if opens {
                 Button { opening = true } label: {
                     ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.heading)
                         .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
@@ -583,6 +690,10 @@ struct MeetingPage: View {
     }
 
     private var openTitle: String { minutesReady ? String(localized: "Open Minutes") : String(localized: "Open Recording") }
+
+    /// The page has Open Minutes / Open Recording: in the sheet, or where it was pushed over something other than the
+    /// recording's page (`opensRecording`).
+    private var opens: Bool { close != nil || opensRecording }
 
     /// The minutes line has something to say (the hub answered, and there are or will be minutes).
     private var minutesShown: Bool {
@@ -645,8 +756,9 @@ struct MeetingPage: View {
 /// The Live box: the newest transcript lines, how far the text is behind the room, and the whole transcript one tap away.
 /// A view of its own, so its lines are taken from the transcript (every segment sorted and filtered, `entry.sentences`)
 /// only when the recording changes, not on every pass of the page (P4). `folded` (the keyboard is up): only the newest
-/// line, so the thread under it keeps its height.
-private struct MeetingLiveBox: View {
+/// line, so the thread under it keeps its height. The top card (`MeetingTopCard`) shows it where there can be no
+/// highlights (phase 2b).
+struct MeetingLiveBox: View {
     var entry: RecordingEntry
     var exchanges: [MeetingAsk.Exchange]
     var folded: Bool
@@ -669,18 +781,7 @@ private struct MeetingLiveBox: View {
             if !folded {
                 HStack {
                     Spacer(minLength: Theme.Space.flush)
-                    NavigationLink { MeetingTranscriptPage(id: entry.id, exchanges: exchanges) } label: {
-                        HStack(spacing: Theme.Space.xs) {
-                            Text("Full Transcript").lineLimit(1)
-                            ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.captionStrong).accessibilityHidden(true)
-                        }
-                        .font(Theme.Font.secondaryStrong)
-                        .foregroundStyle(Theme.accent)
-                        .scaledFrame(minHeight: Theme.Size.tapTarget)
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("meeting-transcript")
+                    MeetingFullTranscriptLink(id: entry.id, exchanges: exchanges)
                 }
             }
         }
@@ -734,6 +835,112 @@ private struct MeetingLiveBox: View {
     }
 }
 
+/// **Full Transcript**: pushes the whole timeline of the meeting being recorded (`MeetingTranscriptPage`), from the Live
+/// box and from the Highlights card (phase 2b).
+struct MeetingFullTranscriptLink: View {
+    var id: UUID
+    var exchanges: [MeetingAsk.Exchange]
+
+    var body: some View {
+        NavigationLink { MeetingTranscriptPage(id: id, exchanges: exchanges) } label: {
+            HStack(spacing: Theme.Space.xs) {
+                Text("Full Transcript").lineLimit(1)
+                ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.captionStrong).accessibilityHidden(true)
+            }
+            .font(Theme.Font.secondaryStrong)
+            .foregroundStyle(Theme.accent)
+            .scaledFrame(minHeight: Theme.Size.tapTarget)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("meeting-transcript")
+    }
+}
+
+/// The meeting's topics as the room set them (#3862 phase 2; docs/design/DESIGN_SYSTEM.md「Meeting page (#3862)」): "Topics"
+/// and a horizontal row of chips in the room's order, the current one scrolled into view. The state is said in words,
+/// never by color alone: "Done: …" on the neutral fill, "Now: …" in the accent, an open topic its title alone in an
+/// outline; VoiceOver reads each with its state ("Not yet: …" for an open one).
+struct MeetingTopicsRow: View {
+    /// The room's topics with a stable identity each (`MeetingTopic.listed`): the room replaces the list as a whole,
+    /// inserting and reordering, so a chip keeps its identity by its title, not its place.
+    private let listed: [MeetingTopic.Listed]
+    /// The row's side margin (the page's; none where the page's content scrolls inside its own margin).
+    var inset: CGFloat
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(topics: [MeetingTopic], inset: CGFloat) {
+        listed = MeetingTopic.listed(topics)
+        self.inset = inset
+    }
+
+    private var current: String? { listed.first { $0.topic.known == .current }?.id }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            Text("Topics [Meeting]").font(Theme.Font.captionStrong).foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, inset)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: Theme.Space.s) {
+                        ForEach(listed) { item in
+                            chip(item.topic).id(item.id)
+                        }
+                    }
+                    .padding(.horizontal, inset)
+                    .padding(.vertical, Theme.Space.xxs)
+                }
+                .scrollIndicators(.hidden)
+                .onChange(of: current, initial: true) { _, id in
+                    guard let id else { return }
+                    withAnimation(reduceMotion ? nil : Theme.Motion.state) { proxy.scrollTo(id, anchor: .center) }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("meeting-topics")
+    }
+
+    private func chip(_ topic: MeetingTopic) -> some View {
+        Chip(text: Self.words(topic), look: Self.look(topic.known), shrinks: true)
+            .scaledFrame(maxWidth: Theme.Size.meetingTopicChip)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(Self.spoken(topic)))
+            .accessibilityIdentifier("meeting-topic-\(topic.known.rawValue)")
+    }
+
+    /// What a chip says: its state in words before the title, except an open topic's, which its outline tells apart.
+    static func words(_ topic: MeetingTopic) -> String {
+        switch topic.known {
+        case .done: String(localized: "Done: \(topic.title) [Meeting Topic]")
+        case .current: String(localized: "Now: \(topic.title) [Meeting Topic]")
+        case .open: topic.title
+        }
+    }
+
+    /// What VoiceOver says for it: the state in words for every topic.
+    static func spoken(_ topic: MeetingTopic) -> String {
+        topic.known == .open ? String(localized: "Not yet: \(topic.title) [Meeting Topic]") : words(topic)
+    }
+
+    private static func look(_ state: MeetingTopic.State) -> Chip.Look {
+        switch state {
+        case .done: .neutral
+        case .current: .tint(Theme.accent)
+        case .open: .outline
+        }
+    }
+}
+
+/// The after page's voice probe (`VoiceSupport.refresh`): the follow-up's group, nil while there is no follow-up, and
+/// whether the scene is active.
+private nonisolated struct FollowupVoiceProbe: Hashable, Sendable {
+    var group: String?
+    var active: Bool
+}
+
 /// One of the Live box's lines; its id is its place in the transcript, which only grows at the end.
 private struct LiveRow: Identifiable, Equatable {
     var id: String
@@ -742,7 +949,8 @@ private struct LiveRow: Identifiable, Equatable {
     var text: String
 }
 
-/// Open Minutes / Open Recording's destination, only where the page has that button (in the sheet).
+/// Open Minutes / Open Recording's destination, only where the page has that button (in the sheet, or opened by the
+/// minutes push).
 private struct OpensRecording: ViewModifier {
     var id: UUID
     var enabled: Bool
@@ -757,27 +965,56 @@ private struct OpensRecording: ViewModifier {
     }
 }
 
+/// Where the meeting's transcript opens (#3862 phase 2b): a highlight's minute, `at` to `end` in seconds from the
+/// recording's start. Its own id each time, so the same highlight tapped again opens the page again.
+nonisolated struct MeetingTranscriptFocus: Identifiable, Hashable, Sendable {
+    var id = UUID()
+    var at: Double
+    var end: Double
+}
+
 /// The whole transcript of the meeting being recorded, with its bookmarks and questions: the live view's timeline, one
-/// tap from the Live box.
-private struct MeetingTranscriptPage: View {
+/// tap from the Live box. Opened at a highlight's time (`focus`), it scrolls to the first of the phone's lines in its
+/// minute and lights them all for two seconds (`RecordingTimeline.focus`), as the recording's page lights a line.
+struct MeetingTranscriptPage: View {
     var id: UUID
     var exchanges: [MeetingAsk.Exchange]
+    var focus: MeetingTranscriptFocus? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var library = RecordingLibrary.shared
     @State private var capture = RecordingCapture.shared
     @State private var items: [RecordingTimeline.Item] = []
+    @State private var lit: Set<RecordingTimeline.Item.ID> = []
 
     var body: some View {
-        ScrollView {
-            if let entry = library.entry(id) {
-                RecordingTimelineRows(entry: entry, exchanges: exchanges, paused: capture.state == .paused, items: $items)
-                    .padding(.horizontal, Theme.Space.page)
-                    .padding(.vertical, Theme.Space.s)
+        ScrollViewReader { proxy in
+            ScrollView {
+                if let entry = library.entry(id) {
+                    RecordingTimelineRows(entry: entry, exchanges: exchanges, paused: capture.state == .paused, items: $items,
+                                          lit: lit)
+                        .padding(.horizontal, Theme.Space.page)
+                        .padding(.vertical, Theme.Space.s)
+                }
             }
+            .task(id: focus) { await jump(proxy) }
         }
         .themedGroupedPage()
         .navigationTitle(String(localized: "Transcript"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+    }
+
+    /// To the focus's lines, lit for two seconds.
+    private func jump(_ proxy: ScrollViewProxy) async {
+        guard let focus else { return }
+        // The rows are laid out after the page appears; a scroll asked for before that lands nowhere.
+        try? await Task.sleep(for: .milliseconds(100))
+        guard !Task.isCancelled, let target = RecordingTimeline.focus(at: focus.at, end: focus.end, in: items) else { return }
+        withAnimation(reduceMotion ? nil : Theme.Motion.layout) { proxy.scrollTo(target.scroll, anchor: .center) }
+        lit = target.lit
+        try? await Task.sleep(for: .seconds(2))
+        guard !Task.isCancelled, lit == target.lit else { return }
+        withAnimation(reduceMotion ? nil : Theme.Motion.standard) { lit = [] }
     }
 }
 #endif

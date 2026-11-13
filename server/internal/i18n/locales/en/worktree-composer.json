@@ -35,11 +35,14 @@
   "preview_invalid": "Preview must be requested separately from deletion or reconciliation",
   "preview_required": "Preview this exact workspace again before deleting it",
   "preview_stale": "The workspace or its changes differ from the preview; review a new preview",
-  "identity_unavailable": "Orca cannot prove this workspace instance is safe to delete; refresh or update Orca",
+  "identity_unavailable": "The engine could not verify this workspace identity; refresh before continuing",
   "folder_branch": "Folder workspaces do not have a branch to delete",
   "delete_dispatched": "Deletion was already sent; reconcile its status before any further action",
   "catalog_incomplete": "Orca returned an incomplete workspace catalog; refresh before continuing",
   "mode_invalid": "Creation mode flags must be booleans",
   "source_branch_conflict": "An existing branch cannot also be a pull request checkout; choose one source",
-  "field_invalid": "Worktree option fields must use the expected JSON types"
+  "field_invalid": "Worktree option fields must use the expected JSON types",
+  "no_commits": "{path} has no commits yet, so a new worktree cannot be made from it; commit once, or work in the folder itself",
+  "close_unsupported": "Closing this workspace is not supported by its engine",
+  "herdr_children": "Close the linked workspaces first, then reopen this workspace’s Close action."
 }

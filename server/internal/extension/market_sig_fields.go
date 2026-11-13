@@ -140,6 +140,7 @@ var catalogItemTypes = map[string]reflect.Type{
 	"auth_relay":       reflect.TypeFor[AuthRelayItem](),
 	"secret_providers": reflect.TypeFor[SecretProviderItem](),
 	"voice":            reflect.TypeFor[VoiceItem](),
+	"transcription":    reflect.TypeFor[TranscriptionItem](),
 	"browser":          reflect.TypeFor[ComputerItem](),
 	"channel":          reflect.TypeFor[channel.Item](),
 	"shortcuts":        reflect.TypeFor[ShortcutItem](),

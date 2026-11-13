@@ -76,8 +76,9 @@ import java.time.Instant
  * The sidebar with the assistant switcher at its head (docs/assistant/managers.md "Clients"), the real sidebar and the real
  * switcher as the shell puts them together, in every style, light and dark: closed, open (the roster's menu with its
  * badges, presence dots, the tick, Default, one offline, one still installing, New assistant and Manage assistants…),
- * after switching to another assistant, on an offline one, and with one assistant; the open roster also in English and
- * Japanese, and at the largest text size (on a short screen scrolled to its actions). The roster is the mock hub's
+ * after switching to another assistant, on an offline one, and with one assistant, alone or with one still installing;
+ * the open roster also in English and Japanese, and at the largest text size (on a short screen scrolled to its
+ * actions). The roster is the mock hub's
  * (`scripts/mock/mock_hub.py`). PNGs go to `build/switcher-shots/` (or `-Dpersona.shots=<dir>`). The plain
  * Application keeps Hilt's PersonaApp out of the test.
  */
@@ -296,6 +297,15 @@ class AssistantSwitcherShotsTest {
                     val shown = capture("$case-$suffix")
                     assertTrue("$case lost the assistant identity ($suffix)", !product.sameAs(shown))
                     assertEquals("assistant", AssistantManagerChoice.current.value.shown)
+                    tap(status)
+                    rule.onNodeWithText("新建助手").assertIsDisplayed()
+                    rule.onNodeWithText("管理助手…").assertIsDisplayed()
+                    rule.onAllNodesWithText("默认").assertCountEquals(0)
+                    if (case == "single-installing") {
+                        rule.onNodeWithText("测试").assertIsDisplayed()
+                        rule.onNodeWithText("安装中", substring = true).assertIsDisplayed()
+                    }
+                    rule.onNodeWithContentDescription("Sample assistant，$status").performSemanticsAction(SemanticsActions.OnClick)
                 }
                 rule.runOnIdle { roster = ManagerRoster(emptyList(), "assistant") }
                 rule.onAllNodesWithText("Sample assistant").assertCountEquals(0)

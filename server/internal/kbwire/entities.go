@@ -35,6 +35,15 @@ type Detail struct {
 	Recap json.RawMessage `json:"recap,omitempty"`
 	// Points: a topic's knowledge points (points.json, docs/assistant/knowledge.md "Topics"), grouped by Path.
 	Points []TopicPoint `json:"points,omitempty"`
+	// Profiles: a person's profiles by writer ("user", "ext:<id>"), as written (Summary shows them too); none when no
+	// one wrote one.
+	Profiles map[string]ProfileRecord `json:"profiles,omitempty"`
+}
+
+// ProfileRecord is one writer's profile of a person and when it was written.
+type ProfileRecord struct {
+	Profile PersonProfile `json:"profile"`
+	At      time.Time     `json:"at"`
 }
 
 // TopicPoint is one knowledge point of a topic: a concept, decision, practice, pitfall, fact or open question, under
@@ -79,7 +88,7 @@ type Update struct {
 	Status         string   `json:"status,omitempty"`
 	Goal           string   `json:"goal,omitempty"`
 	MyRole         string   `json:"my_role,omitempty"`
-	Note           string   `json:"note,omitempty"` // people / items
+	Note           string   `json:"note,omitempty"` // projects / people / items / topics
 	Importance     string   `json:"importance,omitempty"`
 	Relevance      *int     `json:"relevance,omitempty"`
 	Tags           []string `json:"tags,omitempty"`    // nil preserves; non-nil replaces, including an empty slice
@@ -93,6 +102,50 @@ type Update struct {
 	Projects       []string `json:"projects,omitempty"` // chats / people / items: project slugs to link
 	// MergeInto (projects): fold this project into that one (MergeProjects); nothing else in the update applies.
 	MergeInto string `json:"merge_into,omitempty"`
+	// Profile (people): the writer's own profile of the person, replacing the one it wrote before; one with no items
+	// removes it. Each writer (an extension, the user) keeps its own; nobody else's is touched (docs/assistant/knowledge.md
+	// "Person profiles").
+	Profile *PersonProfile `json:"profile,omitempty"`
+}
+
+// PersonProfile is one writer's profile of a person, its four parts kept apart: what is known as fact, what the user
+// said of them in their own words, what is inferred (only a hint), and what each owes the other. Every item says where
+// it comes from (Sources).
+type PersonProfile struct {
+	Facts       []ProfileItem       `json:"facts,omitempty"`       // their role, what they are in charge of, how they relate to the user
+	Views       []ProfileItem       `json:"views,omitempty"`       // the user's own words about them, quoted
+	Inferences  []ProfileItem       `json:"inferences,omitempty"`  // inferred, never stated: each with its Basis
+	Commitments []ProfileCommitment `json:"commitments,omitempty"` // promises and to-dos between them, either way
+}
+
+// Empty: the profile has no items (writing it removes the writer's profile).
+func (p *PersonProfile) Empty() bool {
+	return p == nil || len(p.Facts)+len(p.Views)+len(p.Inferences)+len(p.Commitments) == 0
+}
+
+// ProfileItem is one line of a profile: its text, for an inference what it rests on, and where it comes from (a
+// knowledge-base path such as "chats/<id>/messages/2026-11-01.md", "recordings/<id>", a URL, or "user" for the user's
+// own word).
+type ProfileItem struct {
+	Text    string   `json:"text"`
+	Basis   string   `json:"basis,omitempty"`
+	Sources []string `json:"sources"`
+}
+
+// ProfileCommitment is a promise or a to-do between the user and the person: Owes says who owes it ("user": the user
+// to them; "them": they to the user), Due its day (YYYY-MM-DD) when there is one, Done once kept.
+type ProfileCommitment struct {
+	Text    string   `json:"text"`
+	Owes    string   `json:"owes"`
+	Due     string   `json:"due,omitempty"`
+	Done    bool     `json:"done,omitempty"`
+	Sources []string `json:"sources"`
+}
+
+// IgnoredField is a field an update carried that its kind does not use: not applied, and why.
+type IgnoredField struct {
+	Field  string `json:"field"`
+	Reason string `json:"reason"`
 }
 
 // RecordingSegment is one transcribed stretch: seconds from the recording's start.
@@ -103,6 +156,13 @@ type RecordingSegment struct {
 	// N is an all-day recording's line number: its upload position plus one, what the recap cites
 	// (docs/assistant/day-recap.md); 0 (absent) for every other recording.
 	N int `json:"n,omitempty"`
+	// Source is whose text a segment of the transcript of record is in hub transcription (docs/assistant/meeting-minutes.md
+	// "The transcript of record"): "hub" or "device"; absent means device. Only the hub sets it, never an upload.
+	Source string `json:"source,omitempty"`
+	// Echo: the line is Persona's own answer as the meeting's microphone heard it (#5905,
+	// docs/assistant/meeting-minutes.md "Persona's echo"), marked by the phone or by the hub's rule (kb/echo.go). Kept,
+	// never fed to the minutes, the summary or the follow-up; absent (false) for every other line.
+	Echo bool `json:"echo,omitempty"`
 }
 
 // Hit is one search result.

@@ -9,6 +9,8 @@
   "address_taken": "另一个市场已经是这个地址",
   "bad_signature": "市场的签名不对：{err}",
   "no_package": "没有这台 hub（{platform}）能用的包",
+  "source_needs_linux": "这台 hub 还不能装：这类扩展（源码扩展）只能在运行 Linux 的 hub 上运行。",
+  "source_needs_runtime": "这台 hub 还不能装：这类扩展（源码扩展）要先在 hub 上配置固定版本的源码运行时（扩展管理器 manager.json 里的 extension_runtime）。",
   "bad_signature_install": "市场的签名不对，先不从它安装或升级：{err}",
   "not_in_market": "这个市场里没有扩展 {id}",
   "token_and_token_from": "token 和 token_from 只能给一个",

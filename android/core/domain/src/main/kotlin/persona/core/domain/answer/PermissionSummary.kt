@@ -24,7 +24,9 @@ fun Interaction.permissionSummary(): PermissionSummary {
         if (description != null) return PermissionSummary(CoreText.plain(description))
     }
     val item = Item(id = id, toolName = toolName, toolInput = toolInput)
-    if (toolSubject(item).isNotBlank()) return PermissionSummary(CoreText.of(Key.ToolWithSubject, toolVerb(toolName), toolSubjectText(item)))
+    // A tool no case knows keeps the fallbacks below rather than a field picked from its input (the chat's rows pick one).
+    if (toolSubject(item, pick = false).isNotBlank())
+        return PermissionSummary(CoreText.of(Key.ToolWithSubject, toolVerb(toolName), toolSubjectText(item, pick = false)))
     if (description != null) return PermissionSummary(CoreText.plain(description))
     val raw = toolInput?.toString().orEmpty()
     return PermissionSummary(if (raw.isBlank()) toolVerb(toolName) else CoreText.plain(raw.take(240) + if (raw.length > 240) "…" else ""))

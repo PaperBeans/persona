@@ -65,6 +65,7 @@ type subagentMeta struct {
 	ParentID     string `json:"parentAgentId"`
 	Fork         bool   `json:"isFork"`
 	Phase        string `json:"workflowPhase"` // a workflow agent's (workflows.go)
+	TaskKind     string `json:"taskKind"`      // "in_process_teammate": a team's worker (agent_usage.go)
 }
 
 // subagents lists a session's subagents, newest first; finished ones older than a day are left out (each on its own:

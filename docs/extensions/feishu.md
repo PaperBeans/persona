@@ -95,3 +95,32 @@ Gateway x-multi-account `GET /agent/v1/accounts`; choose account via gateway hea
 Topic replies (`GET /agent/v1/messages/:messageId/thread`) page only backward: the gateway returns the latest page or the one before `beforePosition`, never a newer page (source review: `docs/archive/extensions/feishu-records.md`).
 
 Hub topic route therefore has no after yet. Ordinary messages support `afterPosition`, but topic replies use independent `threadPosition`; cannot borrow ordinary cursor or append latest page as continuous. Android ↓ Latest Replies reloads / replaces current window; older pagination / post-reply refresh unchanged. Add newer pagination once upstream fetch / query / cursor contract exists. No real Lark / live hub accessed; conclusions from source review.
+
+### lark-cli Inbox conversation details
+
+The lark-cli connector exposes read-only `Threads` pages for the conversation keys
+produced by its Inbox source (`larkcli:chat:<chat>` and the optional `:thread:<topic>`).
+The CLI supplies each message ID, sender, source time, direction and older-page
+cursor; legacy collected context is never split into guessed messages. When the
+shortcut omits the conversation kind, the web page keeps the header neutral.
+
+The web page renders the CLI's textual card envelope and safe Markdown using the
+existing message renderer. Known merge notifications put the linked change and
+description first; author, repository and original text remain available in
+details. Long descriptions expand and collapse without discarding their content.
+Unknown or incomplete envelopes remain literal text. A reply destination shows a
+friendly name and a preview only when its message is present; its routing ID stays
+in details and is unchanged.
+
+**Open in Feishu** (or **Open in Lark**) is available beside AI draft reply when
+the CLI supplies the original message's AppLink. Its chat or topic positioning
+parameters are preserved. Missing or unrelated links do not produce an action;
+opening the source does not send a message or replace the existing draft action.
+For previously collected items, the loaded original message can supply the link
+without a history backfill. A different message is never used as its substitute.
+
+Conversation reads distinguish unsupported capability, missing access, rate limits
+and transient failures, retaining collected content and previously loaded pages.
+This is the text/card portion of #856 L6. Collection remains L4; attachments,
+reactions and new write actions are not provided by these pages. Existing Inbox
+reply actions and their confirmation gates are unchanged.

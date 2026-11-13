@@ -30,11 +30,11 @@ const (
 )
 
 // viewErrors is the block for conversation p.SessionID's next message and its receipts; "" when there is nothing to
-// tell, rich views are off or the asker is unknown. A reply is told whole or not at all: only replies whose every
+// tell or the asker is unknown. A reply is told whole or not at all: only replies whose every
 // problem is in the block get a receipt, so an ack never marks a problem the model was not shown. One that does not
 // fit waits for the next message (the first always fits: a reply keeps at most viewErrorLines).
 func (s *Service) viewErrors(ctx context.Context, p ContextParams) (string, []assistantwire.ViewErrorReceipt) {
-	if p.SessionID == "" || p.MachineID == "" || !s.hello(ctx).PersonaView {
+	if p.SessionID == "" || p.MachineID == "" {
 		return "", nil
 	}
 	st, ok := s.store().(viewErrorStore)
@@ -79,8 +79,8 @@ func (s *Service) viewErrors(ctx context.Context, p ContextParams) (string, []as
 // ackViewErrors marks the problems a delivered message carried as told.
 func (s *Service) ackViewErrors(ctx context.Context, p ContextParams) {
 	st, ok := s.store().(viewErrorStore)
-	if p.SessionID == "" || p.MachineID == "" || !ok || !s.hello(ctx).PersonaView {
-		return // off: nothing was read for the message, so nothing it carried can be confirmed
+	if p.SessionID == "" || p.MachineID == "" || !ok {
+		return
 	}
 	var items, digests []string
 	for _, r := range p.Ack {

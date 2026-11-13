@@ -116,16 +116,23 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
         launcher: launch.launcher || undefined, agent_type: launch.agentType, work_session: launch.workSession,
         model: launch.model || undefined, host: launch.host || undefined, todo_id: launch.todoId || undefined,
       };
-      const startWithPrompt = async (required: boolean) => {
+      // A Codex (and a compatible CLI) takes its first message with the start. With none, a computer that can opens
+      // Codex waiting for one (docs/integrations/codex.md "Starting without a first message"); an older one refuses.
+      const startWithPrompt = async () => {
         if (launch.attachments.length) throw new Error(t("lib-new-agent.launcher_no_attachments"));
-        if (required && !launch.text) throw new Error(t("lib-new-agent.launcher_needs_text"));
-        const r = await launchOp<{ session: Session }>("/sessions", launch.startPromptOpId, controller.signal, { ...target, prompt: launch.text });
+        let r: { session: Session };
+        try {
+          r = await launchOp<{ session: Session }>("/sessions", launch.startPromptOpId, controller.signal, { ...target, prompt: launch.text || undefined });
+        } catch (e) {
+          if (!launch.text && e instanceof ApiError && (e.code === "codex_needs_prompt" || e.code === "work_prompt_required")) throw new Error(t("lib-new-agent.launcher_needs_text"));
+          throw e;
+        }
         update({ outgoing: { text: "", images: [] } });
         return r.session;
       };
       let session: Session;
       if (launch.inlinePrompt) {
-        session = await startWithPrompt(launch.agentType === "codex");
+        session = await startWithPrompt();
       } else {
         try {
           const r = await launchOp<{ session: Session }>("/sessions", launch.startOpId, controller.signal, {
@@ -135,7 +142,7 @@ export async function deliverLaunch(id: string, clearDraft?: string) {
           session = r.session;
         } catch (e) {
           if (!(e instanceof ApiError) || e.code !== "codex_needs_prompt") throw e;
-          session = await startWithPrompt(true);
+          session = await startWithPrompt();
         }
       }
       if (!getState().launches[id]) return;
@@ -206,12 +213,16 @@ export interface NewAgentPreset {
   prompt?: string;
   machineId?: string;
   cwd?: string;
-  /** A message forwarded to a new Agent (#3899): its card over the first message, which carries it in front; and the
-   *  pictures it had, attached. */
-  forward?: ContextRef;
+  /** Messages forwarded to a new Agent (#3899; several at once, #3838): their card over the first message, which carries
+   *  them in front; and the pictures they had, attached. */
+  forwards?: ContextRef[];
   images?: DraftImage[];
   /** An exact workspace destination takes precedence over the legacy machine/folder preset. */
   workspace?: WorkspaceTarget;
+  /** Hears the Agent started from this opening once its launch is ready, its first message sent (Inbox's "Hand to AI" ›
+   *  "New agent…", #5933: it files the item and remembers the Agent; lib/new-agent-started.ts). Never for a cancelled
+   *  sheet or a launch dropped before that. */
+  onStarted?: (session: Session) => void;
 }
 
 const openers = new Set<(preset: NewAgentPreset) => void>();

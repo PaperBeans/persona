@@ -57,7 +57,7 @@ import java.io.File
 
 /**
  * The chat page's parity batch with iOS / the web (#2967), in every style, light and dark: Persona's own tools in
- * words, ask_user opened with what was picked, "View sub-agent" under a Task step, a fenced block coloured by its
+ * words, ask_user opened with what was picked, "View sub-agent" under a Task step (Brief and Board; Glass draws the task card), a fenced block coloured by its
  * language, the "Step N/M" pill, a message dragged left to quote, the plan card's three approvals, and the message
  * menu's "Branch to new chat" / "Rewind to here". PNGs in `build/chat-parity-shots/` (or `-Dpersona.shots=<dir>`).
  */
@@ -142,7 +142,8 @@ class ChatParityShotsTest {
         rule.onNodeWithText("读 Agent 对话", substring = true, useUnmergedTree = true).assertExists()
         rule.onNodeWithText("MacBook · 点 AC → 6 → × → 7 → =", substring = true, useUnmergedTree = true).assertExists()
         rule.onNodeWithText("调用 Persona · lark doc fetch", substring = true, useUnmergedTree = true).assertExists()
-        rule.onNodeWithText("查看子 Agent", substring = true, useUnmergedTree = true).assertExists()
+        // Glass draws the Task as its task card, which is never a conversation of its own: no "View sub-agent" (#5045).
+        rule.onNodeWithText("查看子 Agent", substring = true, useUnmergedTree = true).assertDoesNotExist()
         rule.onNodeWithText("批准，每步确认", substring = true, useUnmergedTree = true).assertExists()
         // ask_user opened: the questions, what was picked.
         rule.onNodeWithText("周末的会挪到哪天？", substring = true, useUnmergedTree = true).performClick()
@@ -154,6 +155,7 @@ class ChatParityShotsTest {
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
             rule.waitForIdle()
+            if (s != AppStyle.Glass) rule.onNodeWithText("查看子 Agent", substring = true, useUnmergedTree = true).assertExists()
             save(rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap(), "parity-${s.name.lowercase()}-${if (d) "dark" else "light"}")
         }
     }
@@ -224,10 +226,11 @@ class ChatParityShotsTest {
         var forked = ""
         var rewound: Pair<String, RewindRestore>? = null
         var block by mutableStateOf<String?>(null)
+        var code by mutableStateOf(true)
         rule.setContent {
             PersonaTheme(reduceMotion = true) {
                 MessageMenuSheet(menu, writes = true, onQuote = {}, onEdit = {}, onContext = {}, onHandToPersona = null, onNotice = {},
-                    onFork = { forked = it }, rewind = RewindMenu(block) { target, restore -> rewound = target.id to restore })
+                    onFork = { forked = it }, rewind = RewindMenu(block, code) { target, restore -> rewound = target.id to restore })
             }
         }
         menu.open(MessageTarget("abc#2", "回复", user = false))
@@ -255,6 +258,17 @@ class ChatParityShotsTest {
         rule.onNodeWithText("只回退对话").performClick()
         rule.waitForIdle()
         assertEquals("u1" to RewindRestore.Conversation, rewound)
+        // Where the node puts no files back (a runtime's session, a Codex thread; #6294): the conversation only.
+        code = false
+        menu.open(MessageTarget("u2", "再跑一次", user = true))
+        rule.waitForIdle()
+        rule.onNodeWithText("回退到这里").performClick()
+        rule.waitForIdle()
+        val choices = sheet()
+        assertTrue(choices.toString(), "只回退对话" in choices && "回退代码和对话" !in choices)
+        rule.onNodeWithText("只回退对话").performClick()
+        rule.waitForIdle()
+        assertEquals("u2" to RewindRestore.Conversation, rewound)
     }
 
     private fun sheet(): List<String> {

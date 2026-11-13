@@ -50,6 +50,10 @@ The parameters live in `RecordingRolling`. These are the starting defaults; tune
 - The watch cannot read health data and deletes by time only (`RecordingRolling.expiredOnWatch`); the phone decides what is kept. Segments the phone confirmed follow the current rules (the audio is already deleted, the record goes after 6 hours); segments the phone has not confirmed are held for at most `undeliveredHours` (24 hours) and then deleted (a gap on the timeline); segments within 5 minutes of a bookmark, delivered or not, stay for `keptDays` so the phone can still keep them.
   The price is storage: 24 hours of unsent audio at 32 kbps is about 345 MB, plus the bookmarked segments. When the watch runs low on space the existing 150 MB threshold stops recording; it never deletes what is already recorded.
 
+## Sending to the phone
+
+The watch sends finished rolling segments as it does every clip (`WatchRecordingTransfer`): files batched every 3 minutes while the recording runs (at once while the phone is reachable), every 5 minutes in Low Power Mode (`RecordingAudioSpec.lowPowerTransferBatchSeconds`), each kept until the phone confirms it or the watch's age-based pruning deletes it unconfirmed (`undeliveredHours`, 24 hours; `keptDays` near a bookmark; see above). The Low Power interval was defined before but only wired up with all-day recording, which sends its own chunks another way (`WatchDayTransfer`, `docs/apple/recording.md` "All-day recording (Apple)"); the watch's age-based pruning of rolling segments never touches an all-day chunk.
+
 ## Older phones
 
 The watch only offers rolling recording when the paired phone says it can hold it: the phone sets `recordingRolling` in the WatchConnectivity application context when its session activates, and the watch stores it as `WatchSync.phoneRollingKey`. A phone from before this feature never sets it, so the button stays hidden.
@@ -75,7 +79,9 @@ The system measures heart rate only every few minutes outside workouts and HRV a
 
 ## Interruptions and the microphone
 
-- Phone calls, Siri and other apps taking the microphone are handled as before: after a pause the microphone is not reopened in the background (watchOS cannot resume in the background). During a rolling recording the watch taps the wrist and shows a prompt, and a tap on continue records on.
+- Phone calls, Siri and other apps taking the microphone are handled as before: after a pause the microphone is not reopened in the background (watchOS cannot resume in the background). During a rolling recording the watch taps the wrist and shows a prompt, and a tap on continue records on. The tap plays only while the app is in front: watchOS ignores a haptic from an app in the background, so with the wrist down nothing reaches the user (all-day recording posts a notification for this; rolling does not yet, "Where it stands").
+- On the watch, coming back to the front resumes a recording a call paused, rolling included, unless the call's audio still holds the session (`WatchAllDay.becameActive`, added with all-day recording).
+- The audio session's messages come through `RecordingSessionObserver`, the same for every recording on the phone and the watch: on iOS / watchOS 27, built with Swift 6.4 (`#if compiler(>=6.4)`), `didBecomeInactive` (which tells a call from the app's own deactivation) and `resumptionRecommendation`; otherwise `AVAudioSession.interruptionNotification`.
 - Rolling recording, normal recording and dictation share `RecordingMicrophone` and one `RecordingCapture`: a normal recording cannot be started while a rolling one runs; use a bookmark or "Save as recording" to keep something.
 
 ## Privacy and consent
@@ -90,10 +96,10 @@ Done (this version): rolling mode and cleanup, exact segment tombstones, the wat
 
 Not done:
 
-1. A watch-face complication showing "rolling recording on", and a local notification when paused (today there is only the tap on the wrist and the on-page prompt).
+1. A watch-face complication showing "rolling recording on", and a local notification when paused (today there is only the tap on the wrist, which plays only in front, and the on-page prompt). All-day recording has both (the All-Day Recording complication, its paused / stopped notifications and dead-man's switch: `docs/apple/recording.md` "All-day recording (Apple)"); its `AllDayAlertPolicy` and `AllDaySnapshot` are all-day's own, and rolling recording uses neither.
 2. A "today" timeline (heart-rate curve, recording coverage and the calendar on one axis), computed and shown on the phone only; mood gets no separate timeline or pattern statistics.
 3. Knowledge base: a hub endpoint that accepts the text (for example `POST /api/v1/recording/notes`), the `recording` connector implementing `connector.Archive` for daily archives, and a "hand the state labels to Persona" switch (off by default, sending only the time span and coarse labels, no numbers).
-4. Splitting into one entry per day across midnight; the segment index is capped at 100,000, about 34 days of continuous 30-second segments.
+4. Splitting into one entry per day across midnight; the segment index is capped at 100,000, about 34 days of continuous 30-second segments. All-day recording does split: one recording per local day in its own time zone, cut at that midnight without closing the microphone. A rolling recording is still one entry for as long as it runs.
 5. Starting rolling recording on the phone itself (in a pocket both quality and privacy are poor, so it is watch-only for now).
 
 ## To verify on real devices

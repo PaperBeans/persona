@@ -156,6 +156,23 @@ class ChatStateTest {
 
     private data class WaitCase(val session: Session, val requests: List<Interaction>, val turn: Boolean, val header: StatusKind)
 
+    @Test fun messageReceiptsOverrideOnlyTheirOwnLocalSendAndNeverManufactureRuntimeWork() {
+        val session = Session("machine", "session", status = "idle")
+        val message = OutboxMessage("client", session.key, "hello", DeliveryState.Sending)
+        val receipt = MessageSendReceipt(session.key, "client", "processing", java.time.Instant.parse("2026-11-12T10:00:00Z"))
+        val snapshot = ChatSnapshot(loading = false)
+        fun state(receipts: List<MessageSendReceipt>, local: String? = "client") =
+            chatStatusState(res, snapshot, session, null, listOf(message), emptyList(), false,
+                submittingId = local, receipts = receipts)
+        assertEquals(StatusKind.Submitting, resolveStatusLine(state(emptyList()))?.kind)
+        assertEquals(StatusKind.Processing, resolveStatusLine(state(listOf(receipt)))?.kind)
+        assertFalse(state(listOf(receipt)).working)
+        assertEquals("idle", session.status)
+        assertEquals(StatusKind.Submitting, resolveStatusLine(state(listOf(receipt.copy(clientMessageId = "another"))))?.kind)
+        assertEquals(StatusKind.Unconfirmed, resolveStatusLine(state(listOf(receipt.copy(state = "unknown"))))?.kind)
+        assertNull(resolveStatusLine(state(listOf(receipt.copy(state = "failed")))))
+    }
+
     @Test fun statusPriorityAndApprovalRulesUseDomainPolicy() {
         val session = Session(sessionId = "session", status = "working")
         val key = SessionKey("machine", "session")

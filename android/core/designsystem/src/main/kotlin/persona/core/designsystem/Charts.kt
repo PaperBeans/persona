@@ -7,10 +7,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -196,6 +198,23 @@ object ChartMath {
     /** The label under [x] px of a plot [width] px wide with [n] equal slots. */
     fun indexAt(x: Float, width: Float, n: Int): Int = if (n <= 0 || width <= 0f) 0 else floor(x / width * n).toInt().coerceIn(0, n - 1)
 
+    /**
+     * A stacked bar chart of one category — every series has exactly one point, all non-negative and adding above
+     * zero: it reads as a horizontal segmented bar (one day's parts), so return each series' share of the total
+     * (0…1, adding up to 1). Null when the chart has several categories, is not a stacked bar, or holds a negative or
+     * zero total: it keeps the usual columns. The same rule on every app (docs/extensions/extensions.md「New items」
+     * chart; issue #5386).
+     */
+    fun singleCategoryShares(data: JChartData): List<Double>? {
+        if (data.kind != JChartKind.Bar || !data.stacked || data.series.isEmpty()) return null
+        if (data.series.any { it.values.size != 1 }) return null
+        val values = data.series.map { it.values[0] }
+        if (values.any { !it.isFinite() || it < 0 }) return null
+        val total = values.sum()
+        if (total <= 0.0) return null
+        return values.map { it / total }
+    }
+
     /** A donut's or a pie's slices: each value's share of the sum (negatives count as none); all none when the sum is not more than 0. */
     fun shares(values: List<Double>): List<Double> {
         val clean = values.map { if (it.isFinite() && it > 0) it else 0.0 }
@@ -254,11 +273,11 @@ fun JChart(data: JChartData, modifier: Modifier = Modifier, compact: Boolean = f
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)) {
         if (title != null) Text(title, style = if (compact) type.caption else type.headline, color = if (compact) palette.ink2 else palette.ink,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (data.series.size > 1) FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (data.series.size > 1) FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp.dense), verticalArrangement = Arrangement.spacedBy(2.dp.dense)) {
             data.series.forEachIndexed { index, s -> Swatch(colors[index], s.name.orEmpty(), null) }
         }
         val index = picked?.takeIf { it < n }
-        if (index != null) FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (index != null) FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp.dense), verticalArrangement = Arrangement.spacedBy(2.dp.dense)) {
             Text(data.labels[index], style = type.micro, color = palette.ink2, maxLines = 1)
             val c = data.candles.getOrNull(index)
             if (data.kind == JChartKind.Candlestick && c != null) {
@@ -279,9 +298,29 @@ fun JChart(data: JChartData, modifier: Modifier = Modifier, compact: Boolean = f
                 s.name?.let { labeled.format(it, values) } ?: values
             }
         }
-        ChartPlot(data, chartValues(data), colors, compact, index, onPick = { picked = it },
-            Modifier.fillMaxWidth().height(if (compact) 72.dp else if (hasVolume(data)) 220.dp else 180.dp).semantics { contentDescription = summary })
+        // A stacked bar of one category (a single day's parts) is a horizontal segmented bar, not a lone column.
+        val shares = remember(data) { ChartMath.singleCategoryShares(data) }
+        if (shares != null) {
+            JSegmentedShareBar(shares, colors, Modifier.fillMaxWidth().semantics { contentDescription = summary })
+        } else {
+            ChartPlot(data, chartValues(data), colors, compact, index, onPick = { picked = it },
+                Modifier.fillMaxWidth().height(if (compact) 72.dp else if (hasVolume(data)) 220.dp else 180.dp).semantics { contentDescription = summary })
+        }
         if (detail != null) Text(detail, style = type.caption, color = palette.ink3)
+    }
+}
+
+/**
+ * One horizontal capsule split into a single category's shares (a single day's stacked parts): each share takes its
+ * part of the width in its series' color, a 2dp gap between touching segments. It carries no text — the legend above
+ * and the card's rows below name each part and its value.
+ */
+@Composable
+fun JSegmentedShareBar(ratios: List<Double>, colors: List<Color>, modifier: Modifier = Modifier) {
+    Row(modifier.height(Tokens.Space.m).clip(CircleShape), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
+        ratios.forEachIndexed { i, ratio ->
+            if (ratio > 0.0) Box(Modifier.weight(ratio.toFloat()).fillMaxHeight().background(colors[i]))
+        }
     }
 }
 
@@ -296,11 +335,11 @@ private fun Swatch(color: Color, name: String?, value: String?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(8.dp).background(color, PersonaTheme.shapes.controlShape))
         if (name != null) {
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(4.dp.dense))
             Text(name, style = PersonaTheme.type.micro, color = palette.ink2, maxLines = 1)
         }
         if (value != null) {
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(4.dp.dense))
             Text(value, style = PersonaTheme.type.micro, color = palette.ink, maxLines = 1)
         }
     }
@@ -339,7 +378,7 @@ private fun ChartPlot(data: JChartData, values: List<List<Double>>, colors: List
                 pick(ChartMath.indexAt(change.position.x, width(), n))
             }
         }) {
-        val gap = 8.dp.toPx()
+        val gap = 8.dp.dense.toPx()
         val labelHeight = labels.maxOfOrNull { it.size.height }?.toFloat() ?: 0f
         val plotWidth = (size.width - (if (gutter > 0) gutter + gap else 0f)).coerceAtLeast(1f)
         val fullHeight = (size.height - labelHeight - 6.dp.toPx()).coerceAtLeast(1f)
@@ -554,7 +593,7 @@ private fun JPieChart(data: JChartData, modifier: Modifier, compact: Boolean, ti
                     val words = if (pickedIndex != null) ChartMath.percent(shares[pickedIndex]) else data.center
                     words?.takeIf { it.isNotBlank() }?.let {
                         Text(it, style = if (compact) type.micro else type.bodyStrong, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 4.dp))
+                            modifier = Modifier.padding(horizontal = 4.dp.dense))
                     }
                 }
             }
@@ -563,13 +602,13 @@ private fun JPieChart(data: JChartData, modifier: Modifier, compact: Boolean, ti
                     Row(Modifier.fillMaxWidth().pointerInput(i) { detectTapGestures { picked = if (picked == i) null else i } }
                         .stableAlpha(if (picked != null && picked != i) 0.45f else 1f), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(8.dp).background(colors[i], PersonaTheme.shapes.controlShape))
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(6.dp.dense))
                         Text(label, Modifier.weight(1f), style = if (compact) type.micro else type.callout, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (!compact) {
-                            Spacer(Modifier.width(6.dp))
+                            Spacer(Modifier.width(6.dp.dense))
                             Text(series.displays.getOrNull(i).orEmpty(), style = type.micro, color = palette.ink2, maxLines = 1)
                         }
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(6.dp.dense))
                         Text(ChartMath.percent(shares[i]), style = type.micro, color = palette.ink3, maxLines = 1)
                     }
                 }
@@ -603,7 +642,7 @@ fun JSparkline(spark: JSpark, modifier: Modifier = Modifier.size(SparkSize.width
     Canvas(modifier.semantics { contentDescription = description }) {
         val low = values.min(); val high = values.max()
         val span = (high - low).takeIf { it > 0 } ?: 1.0
-        val inset = 1.5.dp.toPx()
+        val inset = 1.5.dp.dense.toPx()
         val h = size.height - inset * 2
         val points = values.mapIndexed { i, v -> Offset(size.width * i / (values.size - 1), (inset + h * (1 - (v - low) / span)).toFloat()) }
         val line = Path().apply { points.forEachIndexed { i, p -> if (i == 0) moveTo(p.x, p.y) else lineTo(p.x, p.y) } }
@@ -624,9 +663,9 @@ fun JStatGrid(stats: List<JStat>, modifier: Modifier = Modifier) {
     if (stats.isEmpty()) return
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val columns = statColumns(stats.size, maxWidth.value)
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp.dense)) {
             stats.chunked(columns).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp.dense)) {
                     row.forEach { StatCell(it, Modifier.weight(1f)) }
                     repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                 }
@@ -647,7 +686,7 @@ fun statColumns(count: Int, width: Float): Int = when {
 private fun StatCell(stat: JStat, modifier: Modifier) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp.dense)) {
         Text(stat.label, style = type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
         JChangingText(stat.value, style = type.number, color = palette.ink)
         stat.spark?.let { JSparkline(it, Modifier.fillMaxWidth().height(SparkSize.height)) }

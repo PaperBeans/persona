@@ -46,12 +46,7 @@ type entry struct {
 		Model   string          `json:"model"`
 		ID      string          `json:"id"`
 		Content json.RawMessage `json:"content"`
-		Usage   *struct {
-			InputTokens              int `json:"input_tokens"`
-			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-			OutputTokens             int `json:"output_tokens"`
-		} `json:"usage"`
+		Usage   *claudeUsage    `json:"usage"`
 	} `json:"message"`
 	AITitle        string `json:"aiTitle"`
 	CustomTitle    string `json:"customTitle"`
@@ -151,9 +146,17 @@ type Meta struct {
 	StartedAt        time.Time
 	lastMessageID    string
 	lastOutputTokens int
+	// usage: the request whose usage the latest reply lines put on items (item_usage.go). codexTotal: a rollout's
+	// latest running total of tokens; codexUsage: what the turn under way used so far.
+	usage      RequestUsage
+	codexTotal int64
+	codexUsage proto.TokenUsage
+	sawUser    bool // a user line was read: a subagent's own work began (a fork's copied context comes before it)
 	// Queue holds input typed while Claude works and not yet taken (queue-operation lines:
 	// enqueue / dequeue / remove / popAll — popAll is "up arrow pulls them back into the input").
 	Queue []string
+	// queued is the whole queue in order, Claude Code's own system notices included; Queue is what the user typed of it.
+	queued []queuedInput
 	// Background holds background shells / agents that have not reported back (see trackBackground).
 	Background []proto.BackgroundTask
 	bgPending  map[string]proto.BackgroundTask // tool_use_id → started, waiting for the tool result with its id
@@ -473,6 +476,9 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 	}
 	meta.tree = treeLine{uuid: e.UUID, parent: e.ParentUUID, sidechain: e.IsSidechain, assistant: e.Type == "assistant",
 		system: e.Type == "system", turnEnd: e.Type == "system" && e.Subtype == "turn_duration"}
+	if e.Type == "user" {
+		meta.sawUser = true
+	}
 	if e.Cwd != "" {
 		meta.Cwd = e.Cwd
 	}
@@ -508,10 +514,10 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		u := e.Message.Usage
 		// A gateway's sum of a whole turn is not a context, nor the zeros it reports on the turn's other replies
 		// (usage.go): the last real one stands.
-		if tokens := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens; tokens > 0 && PlausibleContext(tokens, 0) {
+		if tokens := int(u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens); tokens > 0 && PlausibleContext(tokens, 0) {
 			meta.ContextTokens = tokens
 		}
-		meta.observeOutput(e.Message.ID, u.OutputTokens)
+		meta.observeOutput(e.Message.ID, int(u.OutputTokens))
 	}
 	if e.Type == "queue-operation" {
 		content := rawString(e.Content)
@@ -851,6 +857,9 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		meta.claudeReply(&e, blocks, len(out) > 0)
 		for i := range out {
 			out[i].Model = model
+		}
+		if len(out) > 0 {
+			meta.replyUsage(&e, &out[0])
 		}
 		return out
 	}

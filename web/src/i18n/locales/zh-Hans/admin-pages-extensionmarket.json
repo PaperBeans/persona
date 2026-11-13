@@ -26,7 +26,6 @@
   "filter_by_market": "按市场筛选",
   "not_found": "没有找到「{query}」",
   "catalog_empty": "这里还没有扩展",
-  "cannot_install": "装不了：{problem}",
   "manage_above": "从这个市场装的，在上面的列表里管理。",
   "upgrade": "升级",
   "install": "安装",

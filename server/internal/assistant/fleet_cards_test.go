@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -734,6 +735,47 @@ func TestScreenCardRebuiltAfterPromptChanged(t *testing.T) {
 	}
 	if got, _ := waitCards(ft.s, 1, 5*time.Second); len(got) != 1 || got["scr_mac_s1_"+second] != proto.IxScreen {
 		t.Fatalf("after prompt_changed: %v", got)
+	}
+}
+
+// #5265, #5266: Claude Code's safety check with a countdown makes one card, whose dialog says what the apps lay it out
+// from: the command, the agent's words for it, what the warning is about, and when the countdown runs out by the hub's
+// clock. The countdown moving (and the pane narrowed by a phone) is the same card: no new one, no second push.
+func TestScreenCardForASafetyCheckWithACountdown(t *testing.T) {
+	read := func(name string) string {
+		b, err := os.ReadFile("../screen/testdata/claude-2.1.322-danger-shell-" + name + ".txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	ft, n := newCardFleet(t, false)
+	n.setScreen(read("120"))
+	before := time.Now()
+	blockSession(ft, proto.Session{SessionID: "s1"})
+	got, _ := waitCards(ft.s, 1, 5*time.Second)
+	if len(got) != 1 {
+		t.Fatalf("cards %v", got)
+	}
+	ix := ft.s.pendingInteractions()[0]
+	d := ix.Dialog
+	if d == nil || !strings.HasPrefix(d.Command, "cd ./dist && F=(") || d.Description != "Count the example names in first-screen chunks" ||
+		d.Risk != screen.RiskDelete || d.DeadlineAction != screen.DeadlineDeny {
+		t.Fatalf("dialog %+v", d)
+	}
+	if left := d.DeadlineAt.Sub(before); left < time.Duration(d.DeadlineIn-2)*time.Second || left > time.Duration(d.DeadlineIn+2)*time.Second {
+		t.Fatalf("deadline_at %v, %d s left at the read", d.DeadlineAt, d.DeadlineIn)
+	}
+	b, _ := json.Marshal(d)
+	if !strings.Contains(string(b), `"deadline_at":"`) || !strings.Contains(string(b), `"command":"cd ./dist`) {
+		t.Fatalf("json %s", b)
+	}
+	for _, later := range []string{"later-120", "later-57"} {
+		n.setScreen(read(later))
+		blockSession(ft, proto.Session{SessionID: "s1"})
+		if now := pendingIDs(ft.s); len(now) != 1 || now[ix.ID] == "" {
+			t.Fatalf("%s: cards %v, want only %s", later, now, ix.ID)
+		}
 	}
 }
 

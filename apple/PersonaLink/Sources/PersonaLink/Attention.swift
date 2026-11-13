@@ -275,5 +275,8 @@ extension LinkAttention.Item {
 
 /// Text from this app's String Catalog (Resources/Localizable.xcstrings, en / zh-Hans / ja).
 func linkText(_ key: String.LocalizationValue) -> String {
-    String(localized: key, bundle: .module)
+    String(localized: key, bundle: linkTextBundle)
 }
+
+/// Where `linkText` looks; tests point it at one language's `.lproj` to check a translation.
+nonisolated(unsafe) var linkTextBundle: Bundle = .module

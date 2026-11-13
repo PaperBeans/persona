@@ -131,16 +131,36 @@ public nonisolated struct ChatFollow: Equatable, Sendable {
         self.anchored = anchored
     }
 
+    /// How the chat holds a row opened or closed in place (`toggledRow`).
+    public enum RowHold: Equatable, Sendable {
+        /// For a moment, while it settles; then the list goes on as it was.
+        case moment
+        /// Where it is, until the user takes the list, taps ↓ or sends.
+        case kept
+        /// Opened at the newest end while following: it rises, what opened growing up from the newest end, which stays
+        /// on screen, and what comes in next does the same; once it reaches the top bar it is kept there, the newest end
+        /// goes off the screen and ↓ shows (#3757).
+        case rising
+    }
+
     /// A row in the chat opened or closed in place (a tool call, a thought, a card: `toggleInPlace`): the user reads it.
     /// Where what comes in next would take the list to the newest end (following, or about to go back to it), the list
     /// is held instead, anchored as a work line opened at the newest end is, until the user takes the list, taps ↓ or
-    /// sends; true if so, and the chat keeps the row where it is. Left following, the next step, the turn's answer or
-    /// the next turn took the list to the newest end, the rows the user had just opened off the top (#3005). Reading
-    /// further up, nothing comes in meanwhile (held back) and it stays reading.
-    public mutating func toggledRow() -> Bool {
-        guard followsNext else { return false }
+    /// sends. Left following, the next step, the turn's answer or the next turn took the list to the newest end, the rows
+    /// the user had just opened off the top (#3005). At the newest end (`atNewest`), following or anchored with the newest
+    /// end still on screen, a row is not kept still: what opened under it, and what comes in after, grow up from the
+    /// newest end, the row rising with them to the top bar (`rising`); kept still, it pushed the newest end off below
+    /// the composer. A row closed there while following leaves the list following, back at the newest end (#3757).
+    /// Reading further up, nothing comes in meanwhile (held back) and it stays reading.
+    public mutating func toggledRow(closing: Bool = false, atNewest: Bool = false) -> RowHold {
+        guard followsNext else { return .moment }
+        if atNewest {
+            if closing, !anchored { return .moment }
+            hold(anchored: true)
+            return .rising
+        }
         hold(anchored: true)
-        return true
+        return .kept
     }
 
     /// What comes in next would take the list to the newest end once no finger holds it: following, held for a moment on

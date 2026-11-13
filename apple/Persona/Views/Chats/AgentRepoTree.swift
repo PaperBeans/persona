@@ -308,6 +308,22 @@ nonisolated struct RepoTree {
                 worktreeIndices[key, default: [:]][place.worktree] = index
             }
         }
+        // One folder can be a working tree of two repositories: a Codex App project names its own folder (`repo_root`
+        // ~/work) while git places the tree in the repository inside it (~/work/code/app), whose other agents put it
+        // under that one. A tree's id is its path, and the list keys its rows, folds and quiet state by it, so the
+        // second repository's tree took the first's rows: "14 agents" over the other repository's one agent, the 14
+        // out of reach (2026-11-12). The repository whose main checkout it is keeps the path's id; the others' carry
+        // their repository's.
+        var claims: [String: [String]] = [:]
+        for key in repos.keys.sorted() { for w in repos[key]!.worktrees { claims[w.id, default: []].append(key) } }
+        for (id, keys) in claims where keys.count > 1 {
+            let keep = keys.first { repos[$0]!.worktrees.contains { $0.id == id && $0.main } } ?? keys[0]
+            for key in keys where key != keep {
+                for i in repos[key]!.worktrees.indices where repos[key]!.worktrees[i].id == id {
+                    repos[key]!.worktrees[i].id = id + "@" + repos[key]!.id
+                }
+            }
+        }
         var hosts: [MachineRef: [Repo]] = [:]
         for var repo in repos.values {
             // A linked tree takes the name its host gave it (#4768, as the web's and Android's By Repository), its branch

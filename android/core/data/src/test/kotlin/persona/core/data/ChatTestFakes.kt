@@ -13,6 +13,8 @@ internal class FakeConnection : HubConnection {
     override val state = MutableStateFlow(ConnectionState.Online)
     override val events = MutableSharedFlow<ServerEvent>()
     override var resumed = false
+    override var lastHello: Hello? = null
+    override val currentHello = MutableStateFlow<SocketHello?>(null)
     var open = true
     val sent = mutableListOf<JsonObject>()
     override fun reconnect() = Unit

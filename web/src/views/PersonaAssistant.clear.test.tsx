@@ -148,8 +148,9 @@ describe("清理主对话上下文 (#5095)", () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(area, "/");
       area.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    await flush();
-    expect(host.textContent).toContain("/clear");
+    // the "/" palette is a chunk of its own; its row names the command without the slash
+    for (let i = 0; i < 200 && !host.querySelector("[role=option]"); i++) await act(async () => { await new Promise((ok) => setTimeout(ok, 5)); });
+    expect([...host.querySelectorAll("[role=option]")].map((o) => o.textContent)).toEqual(["clear"]);
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(area, "/clear");
       area.dispatchEvent(new Event("input", { bubbles: true }));

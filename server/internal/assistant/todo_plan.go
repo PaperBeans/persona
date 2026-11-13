@@ -21,7 +21,8 @@ import (
 // dayLayout is how a due day is written (the API's due_date, the tools' due).
 const dayLayout = "2006-01-02"
 
-// setPlan takes the plan of row (a stored todo, or one made in memory), and the project it is in (todo_project.go).
+// setPlan takes the plan of row (a stored todo, or one made in memory), the project it is in (todo_project.go) and when
+// the owner last saw it (todo_seen.go).
 func (t *Todo) setPlan(row db.TodoRow) {
 	t.DueAt, t.DueDate = row.DueAt, ""
 	if row.DueDate != nil {
@@ -30,9 +31,11 @@ func (t *Todo) setPlan(row db.TodoRow) {
 	t.RemindAt, t.RemindedAt, t.Priority = row.RemindAt, row.RemindedAt, row.Priority
 	t.Project = row.Project
 	t.Kind = row.Kind
+	t.SeenAt = row.SeenAt
 }
 
-// keepPlan writes t's plan and project into row: a row made in memory for a change that is not to them keeps them.
+// keepPlan writes t's plan, project and seen mark into row: a row made in memory for a change that is not to them keeps
+// them.
 func (t *Todo) keepPlan(row *db.TodoRow) {
 	row.DueAt, row.DueDate = t.DueAt, nil
 	if d, err := time.Parse(dayLayout, t.DueDate); err == nil {
@@ -41,6 +44,7 @@ func (t *Todo) keepPlan(row *db.TodoRow) {
 	row.RemindAt, row.RemindedAt, row.Priority = t.RemindAt, t.RemindedAt, t.Priority
 	row.Project = t.Project
 	row.Kind = t.Kind
+	row.SeenAt = t.SeenAt
 }
 
 // todoRowOf is todo t as a row (what memory has of it; the store-less PATCH changes it).
@@ -170,6 +174,27 @@ func (s *Service) createPlainTodo(ctx context.Context, title, notes string, plan
 	plan.Title, plan.Notes, plan.Done = nil, nil, nil
 	plan.Apply(&row, now)
 	return s.insertTodo(ctx, row)
+}
+
+// createDirectionTodo makes a piece of leader's direction (#5846): a todo with plan's due date, reminder, priority and
+// project, opened by the leader and supervised by it, with no agent and no done_when, as a Lark topic opens one
+// (feishu_thread_open.go). So the direction tree lists it under that direction (as not started until an agent works on
+// it, direction_tree.go), and task_plan's todo_id can run an agent on it later instead of opening a second todo.
+func (s *Service) createDirectionTodo(ctx context.Context, leader, title, notes string, plan db.TodoEdit) (Todo, error) {
+	now := time.Now().UTC()
+	row := db.TodoRow{ID: "todo_" + randomHex(8), Title: title, Notes: notes, CreatedAt: now, UpdatedAt: now,
+		Origin: leader, Quiet: s.quietTask(ctx, leader)}
+	plan.Title, plan.Notes, plan.Done = nil, nil, nil
+	plan.Apply(&row, now)
+	t, err := s.insertTodo(ctx, row)
+	if err != nil {
+		return Todo{}, err
+	}
+	s.superviseTodo(ctx, t.ID, leader, nil, 0)
+	if cur, ok := s.todoNow(t.ID); ok {
+		t = cur
+	}
+	return t, nil
 }
 
 // editTodo makes edit e to todo id as the user's PATCH does: stored, put into memory, the apps and the hub told; a

@@ -1,10 +1,10 @@
 #if os(iOS)
 import SwiftUI
 
-/// What the live sheet shows while a meeting records (docs/design/proposals/meeting-recording.md section 4C): the title and
-/// the state, the time, a level meter, Persona's part, and one timeline of what is heard, bookmarked and asked, with the bar
-/// that keeps Ask Persona, Pause, Stop and Bookmark under the thumb. At accessibility sizes everything above the bar scrolls
-/// as one view and the bar stays pinned.
+/// What the live sheet shows while a meeting records (docs/design/proposals/meeting-recording.md section 4C): the title, the
+/// page menu (Meeting / Note, #5243) and the state, the time, a level meter, Persona's part, and one timeline of what is
+/// heard, bookmarked and asked, with the bar that keeps Ask Persona, Pause, Stop and Bookmark under the thumb. At
+/// accessibility sizes everything above the bar scrolls as one view and the bar stays pinned.
 struct RecordingLiveView: View {
     var id: UUID
     var exchanges: [MeetingAsk.Exchange]
@@ -53,10 +53,10 @@ struct RecordingLiveView: View {
 
     @ViewBuilder private func layout(_ entry: RecordingEntry) -> some View {
         if size.isAccessibilitySize {
-            // A fixed one-line header (the mark, the time and Hide) stays above whatever scrolls, so the state and the
-            // time are on screen at any text size.
+            // A fixed one-line header (the mark, the time, the menu and Hide) stays above whatever scrolls, so the state
+            // and the time are on screen at any text size.
             VStack(spacing: Theme.Space.s) {
-                compactHeader
+                compactHeader(entry)
                 scroller {
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -79,8 +79,8 @@ struct RecordingLiveView: View {
         }
     }
 
-    /// The accessibility-size header: the mark, the time and Hide, on one line.
-    private var compactHeader: some View {
+    /// The accessibility-size header: the mark, the time, the menu and Hide, on one line.
+    private func compactHeader(_ entry: RecordingEntry) -> some View {
         HStack(spacing: Theme.Space.m) {
             RecordingStateDot(paused: paused)
             RecordingClock(running: capture.state == .recording, font: Theme.Font.title)
@@ -91,6 +91,7 @@ struct RecordingLiveView: View {
                 .accessibilityValue(RecordingClock.spoken(capture.timeline))
                 .accessibilityIdentifier("recording-live-timer")
             Spacer(minLength: Theme.Space.s)
+            pageMenu(entry)
             RecordingSheetCloseButton(title: String(localized: "Hide"), identifier: "recording-live-hide") { hide() }
         }
         .padding(.horizontal, Theme.Space.page)
@@ -132,9 +133,25 @@ struct RecordingLiveView: View {
         return HStack(alignment: .center, spacing: Theme.Space.m) {
             title.frame(maxWidth: .infinity, alignment: .leading)
             if !size.isAccessibilitySize {
+                pageMenu(entry)
                 RecordingSheetCloseButton(title: String(localized: "Hide"), identifier: "recording-live-hide") { hide() }
             }
         }
+    }
+
+    /// The page menu, where the meeting page has its own (#5243): Meeting or Note. Persona's part keeps its strip's menu.
+    private func pageMenu(_ entry: RecordingEntry) -> some View {
+        Menu {
+            RecordingKindPicker(entry: entry)
+        } label: {
+            ThemedIcon(Theme.Icon.moreMenu).font(Theme.Font.heading).foregroundStyle(Theme.accent)
+                .tapTargetFrame()
+                .contentShape(.rect)
+        }
+        .labelOnlyMenu()
+        // Its own name: the Persona strip's menu and the bar's More are other menus.
+        .accessibilityLabel(Text("Recording options"))
+        .accessibilityIdentifier("recording-page-menu")
     }
 
     /// The chip and the state: never the color alone, the dot becomes a pause glyph and the word changes.

@@ -191,7 +191,17 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 		steps = append([]string{}, all...)
 	}
 	card := r.Ext["card"]
-	cards := answerCards(l, answer, quiet, steps, foot)
+	// With answer_new_card the answer is a card of its own at the bottom of the chat (Lark notifies on a new message,
+	// not on an edit) and the progress card folds into the process (#5396); a quiet ending stays in the progress card.
+	newCard := false
+	if f, ready := s.feishuFeatures(ctx); ready && f.AnswerNewCard && card != "" && !quiet {
+		newCard = true
+	}
+	answerSteps := steps
+	if newCard {
+		answerSteps = nil // they go into the folded progress card
+	}
+	cards := answerCards(l, answer, quiet, answerSteps, foot)
 	if quiet {
 		c := feishubot.NewCard("", "", foot)
 		processPanel(l, c, steps)
@@ -245,7 +255,20 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 		}
 		var mid string
 		var err error
-		if i == 0 && card != "" {
+		if i == 0 && newCard {
+			// Under a key of the progress card's: a retry after an unreachable failure lands once.
+			if mid, err = s.botPostTo(ctx, to, r.ReplyTo, c, piece, answerKey(r.ID, card)); err == nil {
+				if ferr := s.botUpdateAnswerCard(ctx, card, foldedProgressCard(l, steps)); ferr != nil {
+					s.logf("bots: fold the progress card: %v", ferr)
+				}
+			} else if unreachable(err) {
+				return err // nothing went out: the whole answer is tried again later, under the same key
+			} else {
+				s.logf("bots: answer as a new card: %v; writing it into the progress card", err)
+				mid = ""
+			}
+		}
+		if i == 0 && card != "" && mid == "" {
 			if err = s.botUpdateAnswerCard(ctx, card, c); err == nil {
 				mid = card
 			} else {
@@ -285,6 +308,22 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 		}
 	}
 	return nil
+}
+
+// answerKey is the key a run's answer goes out under as a new card (answer_new_card): one per progress card, as a
+// held run answers each turn under a card of its own. Hashed to fit Feishu's 50-character uuid, as endKey is.
+func answerKey(id, card string) string {
+	sum := sha256.Sum256([]byte("answer:" + id + "\x00" + card))
+	return "ans-" + hex.EncodeToString(sum[:12])
+}
+
+// foldedProgressCard is what a progress card becomes once its answer went out as a new card: the process, folded,
+// and a line pointing to the answer below it.
+func foldedProgressCard(l i18n.Lang, steps []string) *feishubot.Card {
+	below := i18n.T(l, "assistant-feishu.answer_below")
+	c := feishubot.NewCard("", "", below)
+	processPanel(l, c, steps)
+	return c.Note("↓ " + below)
 }
 
 // endKey is the key a run's quiet ending goes out under when it is posted as a card of its own: a retry after an

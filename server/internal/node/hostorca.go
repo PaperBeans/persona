@@ -54,6 +54,57 @@ type orcaHost struct {
 	view     *orcaView               // the last look, reused by Agents right after a Snapshot
 	viewAt   time.Time
 	launches map[string]orcaLaunch // fresh panes whose shell may receive one launch command
+	// made are the terminals this host created, by the pane key creation gave them (the node's name for the pane):
+	// Orca re-keys one its UI does not adopt (orphaned, a new tabId and leafId, the same handle and incarnation,
+	// #5547), and it is still found by its handle under that key. rekeyed: such a key -> the pane key Orca gives it now.
+	made    map[string]orcart.Terminal
+	rekeyed map[string]string
+}
+
+// track remembers a terminal this host created (h.mu held), to find it by handle if Orca re-keys it.
+func (h *orcaHost) track(t orcart.Terminal) {
+	if h.made == nil {
+		h.made = map[string]orcart.Terminal{}
+	}
+	h.made[t.PaneKey()] = t
+}
+
+// madeAs is the pane key this host created t under, when t is one of its terminals that Orca re-keyed or orphaned
+// since (the same handle and incarnation); made is a copy of h.made.
+func madeAs(made map[string]orcart.Terminal, t orcart.Terminal) (string, orcart.Terminal, bool) {
+	for key, m := range made {
+		if m.Handle == t.Handle && (m.IncarnationID == "" || m.IncarnationID == t.IncarnationID) {
+			return key, m, true
+		}
+	}
+	return "", orcart.Terminal{}, false
+}
+
+// rekeyedKey: key is a terminal this host made that Orca orphaned and re-keyed (as of the last listing).
+func (h *orcaHost) rekeyedKey(key string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.rekeyed[key] != ""
+}
+
+// paneKeys are the keys a pane's processes and agent row may carry: the node's, then the one Orca re-keyed it to.
+func (h *orcaHost) paneKeys(key string) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if now := h.rekeyed[key]; now != "" {
+		return []string{key, now}
+	}
+	return []string{key}
+}
+
+// procsIn are the agent processes in a pane, under any of its keys (paneKeys).
+func (h *orcaHost) procsIn(procs map[string][]orcaProc, key string) []orcaProc {
+	for _, k := range h.paneKeys(key) {
+		if ps := procs[k]; len(ps) > 0 {
+			return ps
+		}
+	}
+	return nil
 }
 
 var (
@@ -111,6 +162,8 @@ func (h *orcaHost) terminals(ctx context.Context) ([]orcart.Terminal, []orcart.T
 		h.mu.Unlock()
 		return nil, nil, err
 	}
+	// Taken before the list: a terminal created while it is asked for is not taken for gone.
+	made := maps.Clone(h.made)
 	h.mu.Unlock()
 	l, err := h.c.Terminals(ctx, false)
 	if err == nil {
@@ -135,15 +188,35 @@ func (h *orcaHost) terminals(ctx context.Context) ([]orcart.Terminal, []orcart.T
 	}
 	var terms []orcart.Terminal
 	byPane := map[string]orcart.Terminal{}
+	rekeyed := map[string]string{}
+	listed := map[string]bool{}
 	for _, t := range l.Terminals {
-		if t.IsLocal() && !t.Orphaned && t.TabID != "" && t.LeafID != "" {
-			terms = append(terms, t)
-			byPane[t.PaneKey()] = t
+		if !t.IsLocal() {
+			continue
 		}
+		// A terminal this host made that Orca orphaned and re-keyed keeps the pane key it was made under (#5547). One
+		// the user moved to another tab is still in Orca's UI: it is listed where it is now.
+		key, m, ok := madeAs(made, t)
+		if ok {
+			listed[key] = true
+		}
+		if now := t.PaneKey(); ok && t.Orphaned && now != key {
+			rekeyed[key] = now
+			t.TabID, t.LeafID = m.TabID, m.LeafID
+		} else if t.Orphaned || t.TabID == "" || t.LeafID == "" {
+			continue
+		}
+		terms = append(terms, t)
+		byPane[t.PaneKey()] = t
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.failErr, h.terms = nil, byPane
+	for key := range made {
+		if !listed[key] {
+			delete(h.made, key) // gone
+		}
+	}
+	h.failErr, h.terms, h.rekeyed = nil, byPane, rekeyed
 	return terms, h.tabs, nil
 }
 
@@ -193,6 +266,8 @@ type orcaView struct {
 	procsKnown bool
 	// fallback: terminal.agentStatus of agent panes without a usable row.
 	fallback map[string]string
+	// rekeyed: a pane key this host created a terminal under -> the one Orca re-keyed it to (orcaHost.rekeyed).
+	rekeyed map[string]string
 }
 
 func (h *orcaHost) look(ctx context.Context) (*orcaView, error) {
@@ -201,6 +276,9 @@ func (h *orcaHost) look(ctx context.Context) (*orcaView, error) {
 		return nil, err
 	}
 	v := &orcaView{terms: terms, tabs: tabs, rows: map[string]orcart.AgentRow{}, fallback: map[string]string{}}
+	h.mu.Lock()
+	v.rekeyed = maps.Clone(h.rekeyed)
+	h.mu.Unlock()
 	v.trees = h.worktrees(ctx)
 	for _, w := range v.trees {
 		for _, a := range w.Agents {
@@ -421,9 +499,19 @@ func (v *orcaView) agent(t orcart.Terminal) host.Agent {
 		Cwd: t.WorktreePath, Title: stripSpinner(t.Title), RawTitle: t.Title,
 	}
 	row, hasRow := v.rows[key]
+	ps := v.procs[key]
+	// A terminal Orca re-keyed (#5547): its processes may carry either key, and Orca's row is under the new one.
+	if now := v.rekeyed[key]; now != "" {
+		if !hasRow {
+			row, hasRow = v.rows[now]
+		}
+		if len(ps) == 0 {
+			ps = v.procs[now]
+		}
+	}
 	var started time.Time
 	if v.procsKnown {
-		if ps := v.procs[key]; len(ps) > 0 {
+		if len(ps) > 0 {
 			a.Agent, a.ForegroundCwd, started = ps[0].agent, ps[0].cwd, ps[0].start
 		}
 	} else if k := orcaAgents[t.AgentIdentity]; k != "" && hasRow && row.HasLivePty && orcaAgents[row.AgentType] == k {

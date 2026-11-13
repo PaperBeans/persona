@@ -614,6 +614,9 @@ func (s *Service) leaderReview(ctx context.Context, lead TodoAgent, args json.Ra
 	if verdict == reviewNeedsUser && up == "" {
 		up = s.settings(ctx).Main // reworked too often with nobody above the leader: the main conversation
 	}
+	if verdict != reviewAccepted { // by the leader's model and effort; an acceptance once it closed the worker (below)
+		s.leaderTaskReviewed(lead, t.ID, verdict, v)
+	}
 	if verdict == reviewRework || verdict == reviewNeedsUser {
 		s.setTaskStageKind(ctx, t.ID, "unverified", "", "", false)
 	}
@@ -630,9 +633,14 @@ func (s *Service) leaderReview(ctx context.Context, lead TodoAgent, args json.Ra
 		if verdict == reviewCancelled {
 			reason = "取消：" + cmp.Or(clip(oneLine(note), 80), "不做了") // i18n-ignore: done_reason, as a conversation's review writes it
 		}
-		if t.DoneAt == nil {
-			if _, err := s.reviewDoneTodo(ctx, t.ID, reason, verdict == reviewAccepted); err != nil {
+		if t.DoneAt == nil || t.StartError != "" {
+			wasOpen := t.DoneAt == nil
+			closed, err := s.reviewDoneTodo(ctx, t.ID, reason, verdict == reviewAccepted)
+			if err != nil {
 				return "", err
+			}
+			if wasOpen && closed && verdict == reviewAccepted { // a failed start was closed already: no acceptance to count
+				s.leaderTaskReviewed(lead, t.ID, verdict, v)
 			}
 		}
 		if verdict == reviewCancelled {
@@ -749,7 +757,12 @@ func (s *Service) leaderOpen(t Todo) bool { return t.ID != "" && t.DoneAt == nil
 // worker (a decision the leader sent up). The worker's supervisor stays the leader's agent: this never takes it over.
 func (s *Service) mayReviewForLeader(ctx context.Context, self string, t Todo) bool {
 	up, _ := s.supervisorAboveTask(ctx, t)
-	return up != "" && up == self
+	if up == "" {
+		return false
+	}
+	// The background supervisor stands in for the main conversation above a task leader no leader conversation
+	// supervises: the leader's decisions come to it (digestTo).
+	return up == self || s.isBackground(ctx, self) && !s.isLeader(ctx, up)
 }
 
 // leaderTaskOf is the open task leader agent lead leads.

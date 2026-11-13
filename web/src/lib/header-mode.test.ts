@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { headerIcon, headerTone, modeConfirmation, modeMenuItems, showsInHeader } from "./header-mode";
+import { bypassNote, bypassRestarts, modeConfirmation, modeMenuItems, pickerIcon } from "./header-mode";
+import { t } from "../i18n";
 import type { Session } from "./types";
 
 // The Agent header's permission mode (#3956), the rules of iOS SessionModes (#3719, HeaderModeTests) and Android #3957.
@@ -7,27 +8,10 @@ const claude = (permission_mode?: string, extra: Partial<Session> = {}): Session
   ({ machine_id: "m", session_id: "s", agent: "claude", status: "idle", permission_mode, ...extra }) as Session;
 
 describe("header mode", () => {
-  it("draws each mode in its tone and symbol, never a guessed Ask First", () => {
-    expect(["default", "plan", "acceptEdits", "auto", "bypassPermissions"].map(headerTone)).toEqual(["asks", "plans", "acts", "acts", "allows"]);
-    expect(["default", "acceptEdits", "plan", "auto", "bypassPermissions"].map(headerIcon)).toEqual(["hand", "pencil", "list", "sparkles", "shieldAlert"]);
-    for (const m of [undefined, "", "dontAsk"]) {
-      expect(headerTone(m)).toBe("unknown");
-      expect(headerIcon(m)).toBe("shield");
-    }
-  });
-
-  it("shows a mode to see or to change", () => {
-    expect(showsInHeader(claude("default"))).toBe(true);
-    // before its first prompt: nothing reported, but it can be set
-    expect(showsInHeader(claude(undefined))).toBe(true);
-    // ended with its last mode: still shown; ended without one: nothing to say
-    expect(showsInHeader(claude("plan", { status: "offline" }))).toBe(true);
-    expect(showsInHeader(claude(undefined, { status: "offline" }))).toBe(false);
-    // Codex has none; an assistant conversation has its own controls
-    expect(showsInHeader(claude(undefined, { agent: "codex" }))).toBe(false);
-    expect(showsInHeader(claude("default", { assistant: true }))).toBe(false);
-    expect(showsInHeader(claude("default"), true)).toBe(false);
-    expect(showsInHeader(undefined)).toBe(false);
+  it("draws each mode with the composer picker's symbol (#5324)", () => {
+    expect(["default", "acceptEdits", "plan", "auto", "bypassPermissions"].map(pickerIcon)).toEqual(["palm", "code", "list", "sparkles", "warning"]);
+    // a mode not reported yet, however it comes, keeps the raised hand; the label names no mode (#5756)
+    expect([undefined, "", null].map(pickerIcon)).toEqual(["palm", "palm", "palm"]);
   });
 
   it("asks first into Allow all, and out of it where the agent can't come back", () => {
@@ -63,5 +47,48 @@ describe("header mode", () => {
     expect(locked.some((r) => r.key === "bypassPermissions")).toBe(false);
     without.find((r) => r.key === "plan")!.onSelect();
     expect(picked).toEqual(["plan"]);
+  });
+});
+
+// Full access for a terminal Claude Code started without a bypass flag (#6476): the node restarts the session in it once
+// its turn is over, so the row is offered, says so under its name, and still asks first.
+describe("Full access by a restart", () => {
+  const pane = (permission_mode = "default", extra: Partial<Session> = {}) => claude(permission_mode, { pane_id: "w1:p1", ...extra });
+  const bypassRow = (s: Session, assistant?: boolean) => modeMenuItems(s, () => {}, { assistant }).find((r) => r.key === "bypassPermissions")!;
+
+  it("is offered to a terminal Claude Code that cannot reach it with shift+tab, saying it restarts the session", () => {
+    const s = pane();
+    expect(bypassRestarts(s)).toBe(true);
+    const row = bypassRow(s);
+    expect(row.disabled).toBeFalsy();
+    expect(row.detail).toBe(t("chat-sessiondialogs.bypass_restart_detail"));
+    expect(row.confirm).toBe(t("chat-sessiondialogs.bypass_confirm"));
+    expect(row.confirmDetail).toContain(t("chat-sessiondialogs.bypass_restart_detail"));
+    expect(row.danger).toBe(true);
+    // working: still offered, the restart waits for the turn to end
+    expect(bypassRow(pane("default", { status: "working", state: "working" } as Partial<Session>)).disabled).toBeFalsy();
+  });
+
+  it("says a restart waits once picked", () => {
+    const row = bypassRow(pane("acceptEdits", { bypass_pending: true }));
+    expect(row.detail).toBe(t("chat-sessiondialogs.bypass_pending"));
+    expect(bypassNote(pane("acceptEdits", { bypass_pending: true }))).toBe(t("chat-sessiondialogs.bypass_pending"));
+  });
+
+  it("needs no restart where shift+tab reaches it, nor for the agents the node cannot restart", () => {
+    expect(bypassRestarts(pane("default", { bypass_available: true }))).toBe(false);
+    expect(bypassNote(pane("default", { bypass_available: true }))).toBe("");
+    expect(bypassRestarts(pane("bypassPermissions"))).toBe(false);
+    // Antigravity switches itself; a session with no pane, Codex and a read-only source have no restart
+    for (const s of [pane("default", { agent: "agy" }), claude("default"), pane("default", { agent: "codex" }), pane("default", { source_kind: "codex_app_server", capabilities: { send: true, terminal: true } } as Partial<Session>)]) {
+      expect(bypassRestarts(s)).toBe(false);
+    }
+    expect(bypassRow(claude("default")).disabled).toBe(true);
+  });
+
+  it("tells a Persona conversation that Full access applies from its next message", () => {
+    expect(bypassNote(claude("default", { assistant: true }), true)).toBe(t("chat-sessiondialogs.bypass_next_message"));
+    expect(bypassRow(claude("default", { assistant: true }), true).detail).toBe(t("chat-sessiondialogs.bypass_next_message"));
+    expect(bypassNote(claude("bypassPermissions", { assistant: true }), true)).toBe("");
   });
 });

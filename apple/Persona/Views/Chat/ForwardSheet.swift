@@ -1,10 +1,11 @@
 #if os(iOS)
 import SwiftUI
 
-/// Forward To (#3807, docs/apple/ios.md "Forwarding a message"): Share as Image at the top, then the message, Persona and
-/// New Agent, the recent targets, and each computer's Agents, with search. A tap reads the whole message when the chat
-/// holds it cut, then leaves the rest to the chat (`ForwardOutcome`): the target's chat opens with the forward over its
-/// box. The lists come from the sessions the app already has, read once as the sheet opens.
+/// Forward To (#3807, docs/apple/ios.md "Forwarding a message"): Share as Image and Select Messages… (#3838) at the top,
+/// then the message (or the messages), Persona and New Agent, the recent targets, and each computer's Agents, with
+/// search. A tap reads the whole of a message the chat holds cut, then leaves the rest to the chat (`ForwardOutcome`):
+/// the target's chat opens with the forward over its box. The lists come from the sessions the app already has, read
+/// once as the sheet opens.
 struct ForwardSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +15,8 @@ struct ForwardSheet: View {
     @State private var query = ""
     @State private var sessions: [Session] = []
     @State private var busy: ForwardTarget?
+    /// The read `pick` started: Cancel, or the sheet going any other way, stops it before it opens anything (#5338).
+    @State private var work: Task<Void, Never>?
     @State private var error: String?
     /// The recent targets, read once when the sheet opens.
     @State private var recents: [SessionKey] = []
@@ -37,16 +40,26 @@ struct ForwardSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Button {
-                        picked(.share(draft.share))
-                        dismiss()
-                    } label: {
-                        Label("Share as Image…", systemImage: Theme.Icon.share).lineLimit(1)
+                    if let share = draft.share {
+                        Button {
+                            picked(.share(share))
+                            dismiss()
+                        } label: {
+                            Label("Share as Image…", systemImage: Theme.Icon.share).lineLimit(1)
+                        }
+                        .accessibilityIdentifier("forward.shareImage")
                     }
-                    .accessibilityIdentifier("forward.shareImage")
-                    let p = draft.preview
-                    QuoteCard(heading: p.quoteHeading, icon: Theme.Icon.forwardMessage, meta: ForwardMessage.meta(p),
-                              summary: p.forwardSummary, lines: 2, tint: Theme.accent, ink: .secondary) {}
+                    // More of the chat's messages (#3838): the chat starts selecting with this one picked.
+                    if draft.selects {
+                        Button {
+                            picked(.select(draft.source.item))
+                            dismiss()
+                        } label: {
+                            Label("Select Messages…", systemImage: Theme.Icon.pickMessages).lineLimit(1)
+                        }
+                        .accessibilityIdentifier("forward.selectMessages")
+                    }
+                    preview
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("forward.preview")
                 }
@@ -77,12 +90,19 @@ struct ForwardSheet: View {
             }
             .pageSearchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
                             prompt: String(localized: "Search chats, computers or projects"))
+            // The list only: Cancel stays usable while the message is read.
+            .disabled(busy != nil)
             .navigationTitle("Forward To")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        work?.cancel()
+                        dismiss()
+                    }
+                    .accessibilityIdentifier("forward.cancel")
+                }
             }
-            .disabled(busy != nil)
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
@@ -92,6 +112,7 @@ struct ForwardSheet: View {
             list()
         }
         .onChange(of: query) { list() }
+        .onDisappear { work?.cancel() }
         .accessibilityIdentifier("forward.sheet")
     }
 
@@ -134,18 +155,32 @@ struct ForwardSheet: View {
         .accessibilityIdentifier("forward.session." + s.sessionID)
     }
 
+    /// What goes: one message's card, or several's heading and a line each.
+    @ViewBuilder private var preview: some View {
+        let refs = draft.previews
+        if refs.count == 1, let p = refs.first {
+            QuoteCard(heading: p.quoteHeading, icon: Theme.Icon.forwardMessage, meta: ForwardMessage.meta(p),
+                      summary: p.forwardSummary, lines: 2, tint: Theme.accent, ink: .secondary) {}
+        } else {
+            QuoteCard(heading: ForwardMessage.groupHeading(refs), icon: Theme.Icon.forwardMessage, meta: refs.first?.extra?["machine"],
+                      summary: refs.map(ForwardMessage.line).joined(separator: "\n"), lines: 3, tint: Theme.accent, ink: .secondary) {}
+        }
+    }
+
     /// Reads the whole message (and its pictures), then hands it to the chat and goes.
     private func pick(_ target: ForwardTarget) {
         guard busy == nil else { return }
         busy = target
         error = nil
-        Task {
+        work = Task {
             do {
                 let done = try await draft.complete()
+                guard !Task.isCancelled else { return }
                 Haptics.tap()
-                picked(target == .newAgent ? .newAgent(done.ref, done.images) : .target(done.ref, done.images, target))
+                picked(target == .newAgent ? .newAgent(done.refs, done.images) : .target(done.refs, done.images, target))
                 dismiss()
             } catch {
+                guard !Task.isCancelled else { return }
                 busy = nil
                 self.error = error.isOffline ? String(localized: "Can't reach the hub") : error.shown
             }

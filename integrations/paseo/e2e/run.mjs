@@ -2,7 +2,7 @@
 // a Claude Code provider whose model is the scripted one in model.mjs), a real `personad node --stdio` started by the
 // runtime SDK's harness (it plays the hub), and the bridge the node itself writes out and runs once the engine is set
 // to Paseo. It starts a session from the "phone", watches it, sends to it, answers a permission, a question and a
-// plan, switches the mode, interrupts, renames, has a card answered in Paseo's own app, lives through Paseo
+// plan, switches the mode, interrupts, renames, switches the model, rewinds, has a card answered in Paseo's own app, lives through Paseo
 // restarting, closes the session (archived in Paseo, it stays listed under its id) and sends to it again, archives it
 // once more across a restart of the bridge and continues it, and checks agents started or archived in Paseo itself.
 //
@@ -122,6 +122,24 @@ const models = await until('its models', async () => {
   return m?.models?.length ? m : undefined
 }, 30_000).catch(() => ({}))
 check('its models with their efforts', (models.models ?? []).some((m) => (m.efforts ?? []).includes('high')), JSON.stringify(models).slice(0, 300))
+const refreshed = await tryCall('launchers.models', { name: 'e2e-claude', refresh: true }, 90_000)
+check('refreshed: the models Paseo lists now', (refreshed?.models ?? []).length > 0, JSON.stringify(refreshed).slice(0, 200))
+
+// Settings › Models' test: one prompt through Paseo's provider; its probe agent, workspace and project are gone after.
+const look = new PaseoClient({ home: paseoHome })
+const lookUp = new Promise((r) => look.once('connected', r))
+look.start()
+await lookUp
+const projectsBefore = (await look.request('project.list.request', {})).projects?.length ?? 0
+const tested = await tryCall('launchers.check', { name: 'e2e-claude' }, 120_000)
+check('the launcher test answers through Paseo', tested?.ok === true && tested.answer === 'OK' && tested.agent === 'claude', JSON.stringify(tested))
+const probes = ((await look.request('fetch_agents_request', { filter: { includeArchived: true }, page: { limit: 200 } })).entries ?? [])
+  .filter((e) => e.agent?.labels?.['persona.check'])
+const projectsAfter = (await look.request('project.list.request', {})).projects ?? []
+check('nothing of the test is left in Paseo, nor in the list', probes.length === 0 && projectsAfter.length === projectsBefore &&
+  !projectsAfter.some((p) => /persona-check-/.test(p.projectRootPath ?? '')) && !node.sessions().some((s) => /persona-check-/.test(s.cwd ?? '')),
+  `${probes.length} probes, ${projectsBefore} → ${projectsAfter.length} projects`)
+look.stop()
 
 // ---- a session from the phone ----
 
@@ -138,6 +156,12 @@ await until('the row names its transcript', () => listed()?.status === 'done' ||
 check('listed as Claude Code, done, with its space', listed()?.agent === 'claude' && ['done', 'idle'].includes(listed()?.status) && listed()?.space_kind === 'paseo',
   JSON.stringify(listed()))
 check('no second row for its transcript (未运行)', node.sessions().filter((s) => s.cwd === work).length === 1, node.sessions().map((s) => s.session_id).join(','))
+
+// Seen in Persona (#6299): Paseo's own unread mark is cleared too, so it is not unread in Paseo's app either.
+const wasUnread = listed()?.status === 'done'
+await tryCall('session.seen', { session_id: sid })
+await until('seen in Paseo too', () => listed()?.status === 'idle', 20_000).catch(() => {})
+check('seen in Persona: no longer unread in Paseo either', wasUnread && listed()?.status === 'idle', `${wasUnread} ${listed()?.status}`)
 
 // Live text while it writes, the message's own echo.
 await node.call('session.send', { session_id: sid, text: 'Now E2E_HELLO again', client_msg_id: 'cm-e2e-1' })
@@ -206,6 +230,24 @@ await node.call('session.rename', { session_id: sid, title: 'E2E 改名' })
 await until('renamed', () => listed()?.title === 'E2E 改名', 20_000).catch(() => {})
 check('renamed from the phone', listed()?.title === 'E2E 改名', listed()?.title)
 
+// ---- the model, and a rewind ----
+
+const other = (models.models ?? []).map((m) => m.id).find((id) => id !== listed()?.model)
+await tryCall('session.modes', { session_id: sid, model: other })
+await until('the model switched', () => listed()?.model === other, 20_000).catch(() => {})
+check('the model from the phone', Boolean(other) && listed()?.model === other, `${other} ${listed()?.model}`)
+check('the row offers a rewind, the files too (Claude Code)', listed()?.capabilities?.rewind === true && listed()?.capabilities?.rewind_code === true,
+  JSON.stringify(listed()?.capabilities))
+// As the app asks: the message, and how many of the user's came after it in the chat it shows.
+const typed = (await texts()).filter((i) => i.role === 'user' && i.kind === 'text').map((i) => i.text)
+const promptsAfter = typed.length - 1 - typed.lastIndexOf('Now E2E_HELLO again')
+const rewound = await tryCall('session.rewind', { session_id: sid, prompt: 'Now E2E_HELLO again', occurrence: 1, prompts_after: promptsAfter, restore: 'conversation' }, 120_000)
+const said = async (t) => (await texts()).some((i) => i.role === 'user' && i.text === t)
+await until('rewound', async () => !(await said('Now E2E_HELLO again')), 30_000).catch(() => {})
+check('rewound from the phone: that message and what followed are gone, what came before stays, the session the same', rewound?.restore === 'conversation' &&
+  !(await said('Now E2E_HELLO again')) && !(await said('Run E2E_BASH')) && (await said('Please E2E_HELLO')) && listed()?.session_id === sid,
+  `${JSON.stringify(rewound)} after=${promptsAfter} ${JSON.stringify(typed)}`)
+
 // ---- Paseo restarting ----
 
 await stopDaemon()
@@ -266,6 +308,20 @@ check('resumed (session.start): the same agent, under the same id', resumed?.ses
 check('one row for the conversation throughout: never one under its transcript id', claudeSid && !underTranscript() &&
   node.sessions().filter((s) => s.cwd === work).length === 1, node.sessions().filter((s) => s.cwd === work).map((s) => s.session_id).join(','))
 
+// A branch of it (#6298): a copy of its transcript, a session not running; its first message continues it in Paseo.
+await until('idle for the branch', () => ['done', 'idle'].includes(listed()?.status), 60_000).catch(() => {})
+check('the session can be branched', listed()?.can_fork === true, JSON.stringify(listed()?.can_fork))
+const branch = (await tryCall('session.fork', { session_id: sid, at_item_id: '' }, 30_000))?.session_id
+await until('the branch listed', () => node.sessions().some((s) => s.session_id === branch), 30_000).catch(() => {})
+await tryCall('session.send', { session_id: branch, text: 'Branch E2E_HELLO', client_msg_id: 'cm-e2e-fork' }, 90_000)
+await until('the branch answered', async () => (await texts(branch)).some((i) => i.client_msg_id === 'cm-e2e-fork') &&
+  (await texts(branch)).filter((i) => i.text === 'Hello from the mock model, step by step.').length >= 2, 90_000).catch(() => {})
+const branchRow = node.sessions().find((s) => s.session_id === branch)
+const branchSaid = (await texts(branch)).filter((i) => i.role === 'user' && i.kind === 'text').map((i) => [i.text, i.client_msg_id ?? null])
+check('the branch goes on in Paseo under its own id, the original as it was', Boolean(branch) && branch !== sid && branchRow?.source_kind === 'runtime' &&
+  branchSaid.some(([t, cm]) => t === 'Branch E2E_HELLO' && cm === 'cm-e2e-fork') && branchSaid.some(([t]) => t === 'Back again E2E_HELLO') &&
+  !(await texts()).some((i) => i.text === 'Branch E2E_HELLO') && Boolean(listed()), `${branch} ${branchRow?.source_kind} ${JSON.stringify(branchSaid)}`)
+
 // ---- agents started in Paseo itself, never driven from the phone ----
 
 // Paseo runs Claude Code's command line itself, so such an agent's transcript reads like a script's one-shot run, which
@@ -294,6 +350,21 @@ check('archived in Paseo\'s own app: its transcript is a session not running (�
 await until('the deleted one off the list', () => !row(gone, true), 30_000).catch(() => {})
 check('deleted in Paseo: gone from the list, and its transcript is not listed', gone && !node.sessions().some((s) => s.session_id === gone.claude),
   JSON.stringify(node.sessions().filter((s) => s.session_id === gone?.claude).map((s) => [s.source_kind, s.status])))
+
+// A rewind of an agent Paseo started, listed under its Claude session id: Claude Code forks the session, and Persona's
+// session stays the same (the bridge keeps the id on the agent's label first).
+const forked = await inPaseo()
+await paseo.request('send_agent_message_request', { agentId: forked?.id, text: 'Now E2E_HELLO again', messageId: randomUUID() }, { timeoutMs: 60_000 }).catch(() => {})
+await until('its second turn over', async () => (await texts(forked?.claude)).filter((i) => i.text === 'Hello from the mock model, step by step.').length >= 2 &&
+  row(forked, true)?.status !== 'working', 60_000).catch(() => {})
+await tryCall('session.rewind', { session_id: forked?.claude, prompt: 'Now E2E_HELLO again', occurrence: 1, prompts_after: 0, restore: 'conversation' }, 120_000)
+const forkedNow = async () => (await paseo.request('fetch_agent_request', { agentId: forked?.id })).agent
+await until('forked', async () => (await forkedNow())?.persistence?.sessionId !== forked?.claude, 30_000).catch(() => {})
+const fork = await forkedNow()
+await until('its rewound conversation', async () => !(await texts(forked?.claude)).some((i) => i.role === 'user' && i.text === 'Now E2E_HELLO again'), 30_000).catch(() => {})
+check("a Paseo agent's rewind: Claude Code's fork, under the same session in Persona", fork && fork.persistence?.sessionId !== forked?.claude &&
+  fork.labels?.['persona.session'] === forked?.claude && row(forked, true) && !node.sessions().some((s) => s.session_id === fork.persistence?.sessionId) &&
+  !(await texts(forked?.claude)).some((i) => i.role === 'user' && i.text === 'Now E2E_HELLO again'), JSON.stringify(fork?.labels))
 
 // ---- the engine changed: the bridge stops ----
 

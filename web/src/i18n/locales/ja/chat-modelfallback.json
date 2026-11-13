@@ -21,5 +21,8 @@
   "refusal_no_switch": "記録には別のモデルを使ったとは書かれていません",
   "refusal_category": "カテゴリ：{category}",
   "refusal_explanation": "説明：{text}",
-  "refusal_text": "拒否の原文"
+  "refusal_text": "拒否の原文",
+  "details": "詳細",
+  "plain_refused_switched": "上流がこのリクエストを拒否したため、{model} に切り替えました。",
+  "plain_card": "上流で拒否されたため、この会話は {model} で応答しています。"
 }

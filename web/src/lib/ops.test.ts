@@ -126,6 +126,16 @@ describe("a write through a gap", () => {
   });
 });
 
+describe("operation owner retirement", () => {
+  it("does not retry a send after its captured login or manager retired", async () => {
+    let current = true;
+    const fetcher = vi.fn(async () => { current = false; throw new TypeError("Failed to fetch"); });
+    vi.stubGlobal("fetch", fetcher);
+    await expect(apiOp("/sessions/m/s/messages", { method: "POST", opId: OP, isAuthContextCurrent: () => current }, fakeClock())).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("op ids the hub takes (#1651)", () => {
   it("are UUIDs even where crypto.randomUUID is missing (a hub opened over plain http)", async () => {
     const { uuid, isUUID } = await import("./format");

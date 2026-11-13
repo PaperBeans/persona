@@ -23,6 +23,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 var updateGolden = flag.Bool("update-hubjson-golden", false, "rewrite testdata/hubjson/*.golden.json")
@@ -127,8 +128,11 @@ func TestNewInstallDefaultsAreNotDefaults(t *testing.T) {
 	if n := newInstallConfig(installInputs{lanIP: lan, listen: ":18660", tls: ":18662", outside: true}); n.Public.TLSListen != ":18662" || len(n.Machines) != 0 || n.Machines == nil {
 		t.Fatalf("outside, no agents: %+v %#v", n.Public, n.Machines)
 	}
-	if n := newInstallConfig(installInputs{listen: ":18660", tls: ":18662"}); n.Public.TLSListen != "" || !strings.Contains(n.PublicURL, ":18660") {
-		t.Fatalf("no LAN address: TLS stays off: %+v %s", n.Public, n.PublicURL)
+	if n := newInstallConfig(installInputs{listen: ":18660", tls: ":18662"}); n.Public.TLSListen != "" || !strings.Contains(n.PublicURL, ":18660") || n.InitialLocale != "" {
+		t.Fatalf("no LAN address: TLS stays off: %+v %s %q", n.Public, n.PublicURL, n.InitialLocale)
+	}
+	if n := newInstallConfig(installInputs{listen: ":18660", tls: ":18662", locale: i18n.En}); n.InitialLocale != i18n.En || d.InitialLocale != "" {
+		t.Fatalf("the install language: %q, default %q", n.InitialLocale, d.InitialLocale)
 	}
 }
 
@@ -725,6 +729,74 @@ func TestSetupFillsAFileNoHubHasRead(t *testing.T) {
 	}
 	if cmds.called("docker") {
 		t.Fatalf("docker with a database_url: %v", cmds.calls)
+	}
+}
+
+// The language the installer ran in (PERSONA_INSTALL_LANG, or --lang) goes into a new hub.json as initial_locale
+// (#5519); one it does not know records none, and a hub.json a hub has run with keeps every byte.
+func TestSetupRecordsTheInstallLanguage(t *testing.T) {
+	for _, tc := range []struct {
+		name, env string
+		flag      i18n.Lang
+		want      string
+	}{
+		{"installer", "en", "", `"initial_locale":"en"`},
+		{"flag over the installer", "en", i18n.Ja, `"initial_locale":"ja"`},
+		{"unknown", "fr", "", ""},
+		{"none", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := setupTestHome(t)
+			var token string
+			port := fakeHub(t, &token, false)
+			cmds := &fakeCommands{replies: map[string]fakeReply{"loginctl show-user": {out: "yes\n"}}}
+			o := setupOptions{listen: ":" + strconv.Itoa(port), tls: ":18662", lang: tc.flag}
+			e, out := testSetupEnv(t, home, o, cmds, "systemctl", "loginctl")
+			e.getenv = func(k string) string {
+				if k == "PERSONA_INSTALL_LANG" {
+					return tc.env
+				}
+				return ""
+			}
+			if err := os.WriteFile(filepath.Join(e.root, "hub.json"), []byte(`{"database_url":"postgres://dbsh"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			e.pingDB = func(context.Context, string) error {
+				cfg, _ := readHubJSON(e.root)
+				raw, _ := cfg.Get("token")
+				_ = json.Unmarshal(raw, &token)
+				return nil
+			}
+			if err := e.setup(context.Background()); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			b, _ := os.ReadFile(filepath.Join(e.root, "hub.json"))
+			compact := strings.Join(strings.Fields(string(b)), "")
+			if tc.want != "" && !strings.Contains(compact, tc.want) || tc.want == "" && strings.Contains(compact, "initial_locale") {
+				t.Fatalf("want %q in hub.json: %s", tc.want, b)
+			}
+			// Again with another language: the file a hub has run with keeps its own.
+			e.getenv = func(k string) string {
+				if k == "PERSONA_INSTALL_LANG" {
+					return "zh-Hans"
+				}
+				return ""
+			}
+			e.o.lang = ""
+			out.Reset()
+			if err := e.setup(context.Background()); err != nil {
+				t.Fatalf("again: %v\n%s", err, out)
+			}
+			if after, _ := os.ReadFile(filepath.Join(e.root, "hub.json")); string(after) != string(b) {
+				t.Fatalf("a rerun changed hub.json:\n%s\n%s", b, after)
+			}
+		})
+	}
+	// An unknown --lang stops before anything is set up; in a temporary home all the same, in case it ever did not.
+	setupTestHome(t)
+	var out, errOut bytes.Buffer
+	if err := SetupCommand(context.Background(), []string{"--lang", "fr", "--no-service", "--manager-service"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "--lang") {
+		t.Fatalf("--lang fr: %v", err)
 	}
 }
 

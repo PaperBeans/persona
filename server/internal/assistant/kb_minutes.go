@@ -32,15 +32,16 @@ const codeMinutesStale = "minutes_stale"
 const codeTranscriptExpired = "transcript_expired"
 
 // minutesWritten pushes the minutes the knowledge-base loop wrote for a recording's current revision: one push per
-// recording and version (a stable id, so a restart does not repeat it), a tap opening the main conversation as
-// reminders do, and the same text with the recording's web page to the Lark bot and the channels with pushes on.
+// recording and version (a stable id, so a restart does not repeat it), carrying the recording (an app that knows it
+// opens the meeting's thread; one that does not, the main conversation, as reminders do), and the same text with the
+// recording's web page to the Lark bot and the channels with pushes on.
 func (s *Service) minutesWritten(ctx context.Context, r kb.Recording, m kb.Minutes) {
 	l := s.lang(ctx)
 	title := i18n.T(l, "assistant-minutes.ready_title")
 	body := i18n.T(l, "assistant-minutes.ready_body", i18n.Args{"name": m.Title, "decisions": len(m.Decisions), "actions": len(m.Actions)})
 	set := s.settings(ctx)
 	n := Notification{ID: "ntf_minutes_" + r.ID + "_" + strconv.Itoa(m.Version), Kind: NotifyPush, Title: title, Body: body,
-		DeviceID: set.MachineID, SessionID: set.Main}
+		DeviceID: set.MachineID, SessionID: set.Main, RecordingID: r.ID}
 	if err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
 		s.logf("assistant: minutes push: %v", err)
 	}

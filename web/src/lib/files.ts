@@ -13,6 +13,30 @@ export interface FsEntry {
   mtime?: string;
   /** Git ignores it (the tree dims it); only set inside a repository. */
   ignored?: boolean;
+  /** A symlink's text and whether it leads nowhere (hub feature `file_info`, docs/protocol/protocol.md "File details and links"). */
+  link_target?: string;
+  link_broken?: boolean;
+}
+
+/** One path's details (`/stat?detail=1`, the Info dialog); an older node sends only path, kind and size. */
+export interface FileInfo {
+  path: string;
+  /** file, dir, link (a broken symlink), denied, missing */
+  kind: string;
+  size?: number;
+  /** Permission bits as chmod takes them. */
+  mode?: number;
+  owner?: string;
+  group?: string;
+  mtime?: string;
+  ctime?: string;
+  birthtime?: string;
+  items?: number;
+  items_more?: boolean;
+  symlink?: boolean;
+  link_target?: string;
+  link_real?: string;
+  link_broken?: boolean;
 }
 
 export interface FsListing {
@@ -121,8 +145,8 @@ export function resolveRef(baseDir: string, ref: string): string {
   const src = ref.trim().split(/[?#]/)[0];
   if (!src || !isMachineRef(ref)) return "";
   const path = decodeURIComponentSafe(src);
-  if (path.startsWith("~") || path.startsWith("/")) return normalize(path);
-  return normalize(joinPath(baseDir, path));
+  if (path.startsWith("~") || path.startsWith("/")) return normalizePath(path);
+  return normalizePath(joinPath(baseDir, path));
 }
 
 /** A reference that points into the machine (relative, absolute or ~/), not a URL or an in-page anchor. */
@@ -132,7 +156,8 @@ export function isMachineRef(ref: string): boolean {
   return !/^[a-z][a-z0-9+.-]*:/i.test(r);
 }
 
-function normalize(p: string): string {
+/** A path without "." parts, doubled slashes or ".." where it can go up (a file named two ways is one path). */
+export function normalizePath(p: string): string {
   const abs = p.startsWith("/");
   const out: string[] = [];
   for (const part of p.split("/")) {

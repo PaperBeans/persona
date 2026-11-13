@@ -259,6 +259,8 @@ export interface AdminExtension {
   permissions: PermissionLine[];
   /** An extension running on its own that the hub reaches on its sockets (a `remote:` install): how it is connected. */
   attached?: import("../lib/extensions").ExtensionAttached;
+  /** Installed packages the hub runs: the sandbox and what went through the egress proxy (#5696). */
+  sandbox?: import("../lib/extensions").ExtensionSandbox;
 }
 
 export interface AdminExtensions {
@@ -355,11 +357,6 @@ export interface LogsPage {
   lines: LogLine[];
   next: number;
   kept: number;
-}
-
-/** GET/PUT /api/v1/admin/assistant: hub.json's assistant.persona_view (docs/operations/admin.md "Assistant cards"). */
-export interface AssistantCards {
-  persona_view: boolean;
 }
 
 // ── usage sources (docs/server/usage-windows.md "Account-pool gateways", docs/operations/admin.md): account-pool gateways feeding the sidebar's usage bars ──

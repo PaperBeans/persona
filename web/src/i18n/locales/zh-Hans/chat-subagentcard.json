@@ -15,7 +15,7 @@
   "last_tool": "最近工具：{tool}",
   "output_file": "输出：{path}",
   "running_for": "已运行 {duration}",
-  "open_in_background": "在后台任务中打开 {name}",
+  "open_in_background": "在后台任务面板中打开 {name}",
   "workflow_progress_line": "{phase} · {done}/{total} Agent",
   "workflow_progress_count": "{done}/{total} Agent"
 }

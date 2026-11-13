@@ -1,6 +1,6 @@
 // What the main conversation still needs, above its composer (docs/assistant/onboarding.md 4.4): the first missing step as a card
 // (a title, one line why, one button), the "chat only" note, a refused start or send as a card with the original text under
-// "Details" (4.6), and the help those buttons and the local example questions open in place. "Add computer" and "Confirm computer" open the
+// "Error details" (4.6), and the help those buttons and the local example questions open in place. "Add computer" and "Confirm computer" open the
 // machines page's own flow (views/machines/AddComputer.tsx) in place where the hub has it (machines_add, machine_trust).
 import { useEffect, useState } from "react";
 import { canAddComputer, canConfirmComputer, pendingToConfirm } from "../../lib/add-computer";
@@ -12,7 +12,8 @@ import { navigate } from "../../lib/router";
 import { getState, useStore } from "../../lib/store";
 import type { PendingComputer } from "../machines/AddComputer";
 import { lazyDialog } from "../LazyOverlay";
-import { Button, Collapse, copyText, cx, Dialog, IconButton } from "../../ui/atoms";
+import { Button, copyText, cx, Dialog, IconButton } from "../../ui/atoms";
+import { ErrorDetailsText, ErrorNotice } from "../../ui/ErrorNotice";
 import { Icon, type IconName } from "../../ui/icons";
 import { t } from "../../i18n";
 
@@ -33,15 +34,17 @@ export interface ReadinessGate {
   help: (topic: HelpTopic) => void;
   /** "Confirm computer": the confirm screen of the computer waiting to be confirmed (the machines page on an older hub). */
   confirm: () => void;
-  /** "Try it" is running (the hub's probe takes up to ~30 s). */
+  /** "Try it" is running (the hub gives it up to PROBE_HUB_MS: the one-word check, then the self-check). */
   probing: boolean;
+  /** The last "Try it" got no answer: why ("" none). It stands in for the try's result. */
+  probeError: string;
   /** The help dialog and the add / confirm computer flow, to render once beside the card. */
   dialog: React.ReactNode;
 }
 
 /** The main conversation's gate: the readiness, its card's step, the send button's stand-in and the help dialog. */
 export function useReadinessGate(on = true): ReadinessGate {
-  const { readiness, probing } = useReadiness(on);
+  const { readiness, probing, probeError } = useReadiness(on);
   const [topic, setTopic] = useState<HelpTopic | null>(null);
   // the add computer flow: a new one ({}), or the one waiting to be confirmed
   const [computer, setComputer] = useState<{ confirm?: PendingComputer } | null>(null);
@@ -85,6 +88,7 @@ export function useReadinessGate(on = true): ReadinessGate {
     help,
     confirm,
     probing: on && probing,
+    probeError: on ? probeError : "",
     dialog: (
       <>
         {topic && <HelpDialog topic={topic} machine={machine} step={step} onClose={() => setTopic(null)} onAction={act} />}
@@ -138,10 +142,17 @@ export function ReadinessCard({ gate }: { gate: ReadinessGate }) {
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-[13.5px] font-semibold text-ink">{step.title || t("assistant-readiness.one_more_step")}</span>
         {step.detail && <span className="text-[12.5px] leading-relaxed text-ink-2">{step.detail}</span>}
-        {probe && !gate.probing && (
-          <span data-testid="readiness-probe" className={cx("text-[12.5px] leading-relaxed", probe.ok ? "text-ink-2" : "text-red")}>
-            {probe.ok ? t("assistant-readiness.probe_ok", { answer: probe.answer ?? "" }) : t("assistant-readiness.probe_failed", { error: probe.error ?? "" })}
+        {gate.probeError && !gate.probing ? (
+          <span data-testid="readiness-probe" data-failed="" className="text-[12.5px] leading-relaxed text-red">
+            {t("assistant-readiness.probe_failed", { error: gate.probeError })}
           </span>
+        ) : (
+          probe &&
+          !gate.probing && (
+            <span data-testid="readiness-probe" className={cx("text-[12.5px] leading-relaxed", probe.ok ? "text-ink-2" : "text-red")}>
+              {probe.ok ? t("assistant-readiness.probe_ok", { answer: probe.answer ?? "" }) : t("assistant-readiness.probe_failed", { error: probe.error ?? "" })}
+            </span>
+          )
         )}
         {(main || alts.length > 0) && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -178,49 +189,46 @@ export function ChatOnlyNote({ gate }: { gate: ReadinessGate }) {
 
 // ── a refused start or send ─────────────────────────────
 
-/** A start or a send that did not go: the hub's words, a button for its code, the original under "Details" (4.6). */
+/** A start or a send that did not go: the hub's words, a button for its code, the original under "Error details" (4.6). */
 /** `onRetry`: a send that did not go and is back in the box (#4270): a "Send again" button that sends the box again. */
 export function FailureCard({ failure, onClose, onHelp, onConfirm, onRetry }: { failure: CodedFailure; onClose: () => void; onHelp: (topic: HelpTopic) => void; onConfirm?: () => void; onRetry?: () => void }) {
-  const [open, setOpen] = useState(false);
   const action = failure.action && knownAction(failure.action) ? failure.action : undefined;
   const raw = [failure.detail, failure.requestId && t("assistant-readiness.request_id", { id: failure.requestId })].filter(Boolean).join("\n");
+  // the same error notice as a model error over the composer (#5313): the hub's sentence, its buttons, the original
+  // folded under Error details, and ✕
   return (
-    <div role="alert" data-testid="readiness-failure" data-code={failure.code} className="flex flex-col gap-2 rounded-card bg-red-tint px-3.5 py-3" style={{ animation: "fade-up 200ms ease-out both" }}>
-      <div className="flex items-start gap-2">
-        <Icon name="warning" size={14} stroke={2.2} className="mt-[3px] shrink-0 text-red" />
-        <span className="min-w-0 flex-1 text-[13px] leading-relaxed font-medium text-ink">{failure.error}</span>
-        <IconButton icon="x" label={t("assistant-readiness.close")} onClick={onClose} size={24} iconSize={12} />
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5 pl-[22px]">
-        {onRetry && (
-          <Button tone={action ? "quiet" : "primary"} onClick={onRetry}>
-            {t("assistant-readiness.resend")}
-          </Button>
-        )}
-        {action && (
-          <Button tone="primary" onClick={() => runAction(action, { launcher: failure.launcher, onHelp, onConfirm })}>
-            {actionLabel(action)}
-          </Button>
-        )}
-        {raw && (
-          <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="flex h-8 items-center gap-1 rounded-control px-2 text-[12px] font-medium whitespace-nowrap text-ink-2 hover:bg-hover">
-            {t("assistant-readiness.details")}
-            <Icon name="chevron" size={12} stroke={2.2} className="transition-transform duration-200" style={{ transform: open ? "rotate(180deg)" : "none" }} />
-          </button>
-        )}
-      </div>
-      {raw && (
-        <Collapse open={open}>
-          <div className="flex flex-col gap-1.5 pt-0.5 pl-[22px]">
-            <pre className="max-h-48 overflow-auto rounded-[8px] bg-surface px-2.5 py-2 font-mono text-[11.5px] leading-[1.6] whitespace-pre-wrap text-ink-2 shadow-hairline [overflow-wrap:anywhere]">{raw}</pre>
-            <button type="button" onClick={() => void copyText(raw)} className="flex w-fit items-center gap-1 text-[12px] font-medium whitespace-nowrap text-accent-ink hover:underline">
+    <ErrorNotice
+      role="alert"
+      data-testid="readiness-failure"
+      data-code={failure.code}
+      message={failure.error}
+      onDismiss={onClose}
+      actions={
+        <>
+          {onRetry && (
+            <Button tone={action ? "quiet" : "primary"} size="sm" className="touch-hit" onClick={onRetry}>
+              {t("assistant-readiness.resend")}
+            </Button>
+          )}
+          {action && (
+            <Button tone="primary" size="sm" className="touch-hit" onClick={() => runAction(action, { launcher: failure.launcher, onHelp, onConfirm })}>
+              {actionLabel(action)}
+            </Button>
+          )}
+        </>
+      }
+      details={
+        raw ? (
+          <div className="flex flex-col gap-1.5">
+            <ErrorDetailsText text={raw} />
+            <button type="button" onClick={() => void copyText(raw)} className="touch-hit flex w-fit items-center gap-1 text-[12px] font-medium whitespace-nowrap text-accent-ink hover:underline">
               <Icon name="copy" size={12} />
               {t("assistant-readiness.copy_details")}
             </button>
           </div>
-        </Collapse>
-      )}
-    </div>
+        ) : undefined
+      }
+    />
   );
 }
 

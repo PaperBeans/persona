@@ -31,7 +31,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     var history: String? = nil
     /// The main conversation cannot answer yet: send says what to do first and goes there, the draft stays.
     var gate: SendGate? = nil
-    /// The iPhone's 「+」 opens the composer's panel (`AttachSheet`, Telegram's attachment menu) from where the button is,
+    /// The iPhone's 「+」 opens the composer's panel (`AttachSheet`, a half-height system sheet), given where the button is
     /// in the window, and touched and held, the menu of `attach` (#3225); nil: a tap opens the menu of `attach`.
     var openAttach: ((CGRect) -> Void)? = nil
     /// Glow While Replying (`ComposerGlow`): the band around the bar while the assistant's reply is being written. Drawn
@@ -76,7 +76,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
 
     private var maximumLines: Int {
         #if os(iOS)
-        ComposerGrowth.maximumLines(viewportHeight: viewportHeight, lineHeight: lineHeight)
+        ComposerGrowth.maximumLines
         #else
         Theme.Shell.composerMaximumLines // Other platforms retain their existing composer height.
         #endif
@@ -149,14 +149,23 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
             #endif
             HStack(alignment: .bottom, spacing: Theme.Space.xs) {
                 if !expanded { plus }
-                TextField(placeholder, text: $text, selection: fieldSelection, axis: .vertical)
+                TextField("", text: $text, selection: fieldSelection, axis: .vertical)
+                    .readingContent() // what is typed grows past the interface's cap, as in Messages
                     .font(Theme.Font.body)
+                    .overlay(alignment: .leading) {
+                        // The placeholder is interface text: capped with it, one line, shrunk before it is cut ("Ask Per…").
+                        if text.isEmpty {
+                            Text(placeholder).font(Theme.Font.body).foregroundStyle(.tertiary)
+                                .lineLimit(1).minimumScaleFactor(0.5).allowsHitTesting(false).accessibilityHidden(true)
+                        }
+                    }
+                    .accessibilityLabel(placeholder)
                     .lineLimit(expanded ? 1...maximumLines : 1...1)
                     #if os(iOS) || os(visionOS)
                     // Grown taller, the field must not stay scrolled down a line (#909, TextViewScroll).
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in
                         #if os(iOS)
-                        if focused.wrappedValue, !enlarged { TextViewScroll.settleFocused(revealCaret: true) }
+                        if focused.wrappedValue, !enlarged { TextViewScroll.settleFocused() }
                         #else
                         if focused.wrappedValue { TextViewScroll.settleFocused() }
                         #endif
@@ -259,12 +268,18 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
         .animation(Theme.Motion.composerAccessory, value: quotes?.wrappedValue.isEmpty == false)
         // A line more or less in the draft: the box follows at once, briefly eased (Telegram's 0.1 s).
         .animation(reduceMotion ? nil : Theme.Motion.composerGrow, value: text)
-        .background {
-            ComposerViewportReader { viewportHeight = $0 }
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+        .onChange(of: text) {
+            // Only a changed draft requests post-layout caret following; UIKit handles a moved cursor itself.
+            if focused.wrappedValue, !enlarged { TextViewScroll.settleFocused(revealCaret: true) }
         }
         #if DEBUG
+        .background {
+            if ScreenProbe.enabled {
+                ComposerViewportReader { viewportHeight = $0 }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
         .background { if ScreenProbe.enabled { ComposerLinesProbe(maximumLines: maximumLines, viewport: viewportHeight, line: lineHeight) } }
         #endif
         .animation(Theme.Motion.state, value: offersEnlarge)
@@ -285,7 +300,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                 .presentationSizing(.page) // the iPad's too: a page's height, not the small form
         }
         #endif
-        .onDisappear { if dictation.isListening { dictation.stop() } }
+        .onDisappear { dictation.stop() } // a start still asking for permission too (#3407)
     }
 
     #if os(iOS)
@@ -330,7 +345,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
             // An unfocused field's selection is stale (a restored draft's, PathInsert.edit): the page starts at the end.
             selection = TextSelection(insertionPoint: text.endIndex)
         }
-        if dictation.isListening { dictation.stop() }
+        dictation.stop()
         enlarged = true
     }
 
@@ -497,8 +512,9 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
         send()
     }
 
+    /// Ends dictation, and a start still asking for permission with it, so nothing writes into the emptied box (#3407).
     private func endDictation(then action: () -> Void) {
-        if dictation.isListening { dictation.stop() }
+        dictation.stop()
         action()
     }
 }
@@ -548,16 +564,55 @@ private struct ComposerPageEditor: View {
     @State private var cursor: TextSelection?
     /// The caller's cursor as the page took it: moved since, someone else put it somewhere.
     @State private var taken: TextSelection?
+    @Environment(\.buiTheme) private var theme
+
+    private var ink: Color { ComposerInk.icon(theme) }
+
+    private var controls: some View {
+        HStack(spacing: Theme.Space.xs) {
+            Spacer(minLength: Theme.Space.s)
+            if focused {
+                Button(action: dismissPageKeyboard) {
+                    ThemedIcon(Theme.Icon.dismissKeyboard)
+                        .font(Theme.Font.secondary)
+                        .foregroundStyle(ink)
+                        .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hide Keyboard")
+                .accessibilityIdentifier("composer-page-dismiss-keyboard")
+            }
+            Button {
+                commitTyped()
+                collapse()
+            } label: {
+                ThemedIcon(Theme.Icon.collapseMessage)
+                    .font(Theme.Font.secondary)
+                    .foregroundStyle(ink)
+                    .scaledFrame(width: Theme.Size.tapTarget, height: Theme.Size.tapTarget)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Collapse the message box")
+            .accessibilityIdentifier("composer-page-collapse")
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.top, Theme.Space.s)
+    }
 
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
+                controls
                 if let quotes, !quotes.wrappedValue.isEmpty {
                     QuoteBar(refs: quotes)
                         .padding(.horizontal, Theme.Space.l)
                         .accessibilityIdentifier("composer-page-quotes")
                 }
                 TextEditor(text: $text, selection: $cursor)
+                    .readingContent()
                     .font(Theme.Font.body)
                     .focused($focused)
                     .scrollContentBackground(.hidden)
@@ -594,26 +649,7 @@ private struct ComposerPageEditor: View {
             .frame(maxWidth: ChatView.readableWidth) // an iPad's page: the conversation's measure, not the window's
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .themedPage()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    if focused {
-                        Button(action: dismissPageKeyboard) {
-                            ThemedIcon(Theme.Icon.dismissKeyboard)
-                        }
-                        .accessibilityLabel("Hide Keyboard")
-                        .accessibilityIdentifier("composer-page-dismiss-keyboard")
-                    }
-                    Button {
-                        commitTyped()
-                        collapse()
-                    } label: {
-                        ThemedIcon(Theme.Icon.collapseMessage)
-                    }
-                    .accessibilityLabel("Collapse the message box")
-                    .accessibilityIdentifier("composer-page-collapse")
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .onAppear {
             cursor = selection ?? TextSelection(insertionPoint: text.endIndex)

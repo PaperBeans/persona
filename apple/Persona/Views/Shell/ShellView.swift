@@ -93,46 +93,48 @@ struct ShellView: View {
     private var sidebar: some View {
         AssistantSidebar(current: model.assistantCurrent,
                          open: { key in
+                             // Under the open drawer: no slide; the page switches, then closes the drawer (AssistantView).
+                             shell.select(0, animated: false)
                              model.assistantCurrent = key
-                             model.selectedTab = .assistant
                              model.assistantReveal += 1
-                             shell.drawer.close()
+                             closeIfLeftOpen()
                          },
                          newConversation: { go(.newConversation) },
                          openProfile: { go(.profile) },
                          openRoutines: { go(.routines) },
                          openKnowledge: { go(.knowledge) },
-                         openSettings: {
-                             shell.drawer.close()
-                             model.shellSettings = true
-                         },
+                         // A task: over the open drawer, which is where Done comes back to (docs/design/sidebar-navigation.md).
+                         openSettings: { model.shellSettings = true },
                          drawer: shell.drawer,
                          openInbox: { go(.inbox) },
                          openTodos: { go(.todos) },
                          onMachines: { go(.machines) },
                          onOpenExtension: { go(.extensionPage($0)) },
                          openHealth: { go(.health) },
-                         startMeeting: startMeeting)
+                         openRecordingsPage: openRecordingsPage)
     }
 
-    /// The drawer's Meeting Recording: records the meeting and opens Recordings (`MeetingRecorder`), or opens the
-    /// recording already running.
-    private var startMeeting: (() -> Void)? {
+    /// The drawer's Recordings: the page, which shows the recording running, else Record to start one.
+    private var openRecordingsPage: (() -> Void)? {
         #if os(iOS)
-        return {
-            shell.drawer.close()
-            if RecordingCapture.shared.state != .idle { go(.recordings) }
-            else { Task { await MeetingRecorder.shared.startMeeting(inForeground: true) } }
-        }
+        return { go(.recordings) }
         #else
         return nil
         #endif
     }
 
+    /// A place from the drawer (docs/design/sidebar-navigation.md): the strip snaps to Assistant under the open drawer, the page
+    /// switches there without animation and then closes the drawer (`AssistantView.show`). Before, the strip slid, the stack
+    /// pushed and the drawer closed in the same moment (#6599).
     private func go(_ page: ShellPage) {
-        model.selectedTab = .assistant
+        shell.select(0, animated: false)
         shell.show(page)
-        shell.drawer.close()
+        closeIfLeftOpen()
+    }
+
+    /// The Assistant page closes the drawer once it has switched; should nothing have taken the request, this still does.
+    private func closeIfLeftOpen() {
+        DispatchQueue.main.async { if shell.drawer.isOut { shell.drawer.close() } }
     }
 }
 

@@ -46,6 +46,10 @@ func TestMutesOf(t *testing.T) {
 			{Key: connector.TagChat, Value: "oc_example_chat", Name: "Example Chat"},
 			{Key: connector.TagSender, Value: "ou_example_sender", Name: "Example Sender"}}}},
 			"[{chat oc_example_chat Example Chat} {sender ou_example_sender Example Sender}]"},
+		// a subscription's row (#5306): its sender, never the subscription itself (turning it off is that)
+		"subscription": {&InboxItem{Source: "sub_x", Connector: &InboxConnector{Tags: []connector.Tag{
+			{Key: "source", Value: "sub_x", Name: "Notices"}, {Key: connector.TagSender, Value: "office", Name: "Office"}}}},
+			"[{sender office Office}]"},
 	} {
 		if got := fmt.Sprint(mutesOf(c.it)); got != c.want && !(c.want == "[]" && got == "[]") {
 			t.Errorf("%s: %s, want %s", name, got, c.want)

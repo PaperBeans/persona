@@ -3,13 +3,18 @@
 // (Apple's ARD sign-in), which go to the Mac only and are not kept. The app shows this page in its web view.
 import { BASE } from "../lib/base";
 import RFB from "@novnc/novnc";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, errorText, pastHub } from "../lib/api";
 import { cx, Spinner } from "../ui/atoms";
 import { t } from "../i18n";
 import "../views/theme"; // follows the system's light / dark while open (index.html picked the first one)
 import { ensureSubtleAES } from "./aes";
+import { displayChoice, framing, keepPointerIn, layoutDisplays, machineDisplays, setDisplayChoice, type MachineDisplay, type Rect, type Size } from "./displays";
 import { accountOf, keepLabel, keysymsOf, screenSocket, toApp, type ScreenTarget } from "./screen";
+import { pictureChoice, qualityChoice, setPictureChoice, setQualityChoice, videoAdvertised, type ScreenPicture, type ScreenQuality } from "./video";
+
+type DisplayMenuView = typeof import("./DisplayMenu").default;
+type ScreenMenuView = typeof import("./ScreenMenu").default;
 
 type Phase =
   | { kind: "checking" }
@@ -19,7 +24,7 @@ type Phase =
   | { kind: "live" }
   | { kind: "closed"; why: string };
 
-type Computer = { enabled?: boolean; screen_sharing?: boolean };
+type Computer = { enabled?: boolean; screen_sharing?: boolean; displays?: unknown; screen_video?: unknown };
 /** A sign-in sent to the Mac: typed (and to keep or not), or the one the app kept (saved). */
 type Credentials = { account: string; password: string; remember: boolean; saved: boolean };
 type MachineRow = { id: string; name: string; home?: string; online: boolean };
@@ -46,6 +51,20 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
   const [go, setGo] = useState(false);
   const screen = useRef<HTMLDivElement>(null);
   const rfb = useRef<RFB | null>(null);
+  // One display of a multi-display Mac (#5685): its arrangement as the node read it, the framebuffer's size as noVNC
+  // sized its canvas, the room the page has for it, and the display chosen for this Mac (null: all of them).
+  const [displays, setDisplays] = useState<MachineDisplay[]>([]);
+  const [fb, setFb] = useState<Size | null>(null);
+  const [stage, setStage] = useState<Size | null>(null);
+  const [choice, setChoice] = useState(() => displayChoice(target.mid));
+  const stageRef = useRef<HTMLElement>(null);
+  const clip = useRef<HTMLDivElement>(null);
+  // The hardware video channel (#3954): the Picture / Quality switcher appears only when this Mac's node advertises it,
+  // so no Mac shows a control it can't use — as the iOS app gates it (AppModel.advertisesVideo). The choice is kept per
+  // Mac in this browser (video.ts). Input always rides RFB; only the picture path changes.
+  const [hasVideo, setHasVideo] = useState(false);
+  const [picture, setPicture] = useState<ScreenPicture>(() => pictureChoice(target.mid) ?? "vnc");
+  const [quality, setQuality] = useState<ScreenQuality>(() => qualityChoice(target.mid));
 
   // What the hub says first: why there would be nothing to connect to.
   useEffect(() => {
@@ -60,23 +79,10 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
           setAccount((a) => a || accountOf(m.home));
         }
         if (m && !m.online) throw new Error(t("screen-screenview.offline", { name: m.name }));
-        // The extension cua or ego, on for this Mac, lets its screen through (#1507); each asked fresh, 404 while off.
-        const fresh = async (what: "computer" | "browser") => {
-          try {
-            // the hub asks the Mac for up to 45 s (extmgr/browser.go; computer.go 30 s)
-            return await api<Computer>(`/machines/${encodeURIComponent(target.mid)}/${what}`, { token: target.token, timeout: pastHub(45_000) });
-          } catch (e) {
-            if (e instanceof ApiError && e.status === 404) return null;
-            throw e;
-          }
-        };
-        const c = await fresh("computer");
-        const b = c?.enabled ? null : await fresh("browser");
-        const on = c?.enabled ? c : b?.enabled ? b : null;
-        if (!c && !b) throw new Error(t("screen-screenview.no_extension"));
-        if (!on) throw new Error(t("screen-screenview.extension_off"));
-        if (!on.screen_sharing) throw new Error(t("screen-screenview.sharing_off"));
+        const on = await sharing(target);
         if (!gone) {
+          setDisplays(machineDisplays(on.displays));
+          setHasVideo(videoAdvertised(on.screen_video));
           setPhase({ kind: "connecting" });
           setGo(true);
         }
@@ -101,6 +107,13 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
     r.scaleViewport = true;
     r.resizeSession = false;
     r.background = "transparent";
+    // noVNC sizes its canvas to the framebuffer (and again when the Mac's displays change); nothing else says the size.
+    const canvas = screen.current.querySelector("canvas");
+    const sized = new MutationObserver(() => {
+      const w = canvas?.width ?? 0, h = canvas?.height ?? 0;
+      if (w > 0 && h > 0) setFb((f) => (f?.w === w && f.h === h ? f : { w, h }));
+    });
+    if (canvas) sized.observe(canvas, { attributes: true, attributeFilter: ["width", "height"] });
     waiting.current = false;
     sent.current = null;
     let askedApp = false;
@@ -157,6 +170,7 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
     });
     rfb.current = r;
     return () => {
+      sized.disconnect();
       clearTimeout(appSilent);
       answer.current = null;
       rfb.current = null;
@@ -167,6 +181,93 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
   useEffect(() => {
     if (rfb.current) rfb.current.viewOnly = !control;
   }, [control, phase.kind]);
+
+  // The room for the picture: the page below its bar.
+  useLayoutEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const measure = () => {
+      const { width: w, height: h } = el.getBoundingClientRect();
+      setStage((s) => (s?.w === w && s.h === h ? s : { w, h }));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
+
+  // The arrangement the node reads now; the latest answer wins. Asked again when the framebuffer changes size (a display
+  // plugged in or out, another resolution: the one read before connecting no longer fits) and as the menu opens, so
+  // its list is the Mac's as the choice is made.
+  const asked = useRef(0);
+  const reask = useCallback(() => {
+    const n = ++asked.current;
+    sharing(target).then(
+      (on) => n === asked.current && setDisplays(machineDisplays(on.displays)),
+      () => {}, // the arrangement already here stays; the layout offers nothing when it does not fit
+    );
+  }, [target]);
+  useEffect(() => () => void asked.current++, []); // an answer after the page went changes nothing
+  const lastFb = useRef<Size | null>(null);
+  useEffect(() => {
+    if (!fb) return;
+    const before = lastFb.current;
+    lastFb.current = fb;
+    if (before && (before.w !== fb.w || before.h !== fb.h)) reask();
+  }, [fb, reask]);
+
+  const offered = useMemo(() => (fb ? layoutDisplays(displays, fb) : []), [displays, fb]);
+  const offering = !target.embedded && phase.kind === "live" && offered.length > 1;
+  // The menu is a chunk of its own (its words stay off the first screen's catalog), fetched while a Mac with several
+  // displays connects, so a kept display is cropped from the first live frame. One that would not load (offline, the hub
+  // redeployed) leaves the page showing every display, and is asked for again as the connection moves on.
+  const multiDisplay = !target.embedded && displays.length > 1;
+  const [DisplayMenu, setDisplayMenu] = useState<DisplayMenuView | null>(null);
+  // One display only while its menu is there to go back to all of them: a page an app embeds has no bar to choose in,
+  // and a menu that would not load leaves none.
+  const shown = DisplayMenu ? (offered.find((d) => d.id === choice) ?? null) : null;
+  useEffect(() => {
+    if (DisplayMenu || !multiDisplay) return;
+    let gone = false;
+    import("./DisplayMenu").then(
+      (m) => !gone && setDisplayMenu(() => m.default),
+      () => {},
+    );
+    return () => {
+      gone = true;
+    };
+  }, [DisplayMenu, multiDisplay, phase.kind]);
+  const frame = shown && fb && stage ? framing(stage, fb, shown.frame) : null;
+  const cropped = frame !== null;
+  useEffect(() => (cropped && clip.current ? keepPointerIn(clip.current) : undefined), [cropped]);
+  const choose = (id: string | null) => {
+    setChoice(id);
+    setDisplayChoice(target.mid, id);
+  };
+
+  // The picture menu is a chunk of its own, as the Displays menu is (its words stay off the first screen's catalog),
+  // fetched only for a Mac whose node advertises the video channel; one that would not load just leaves the page on RFB.
+  const [ScreenMenu, setScreenMenu] = useState<ScreenMenuView | null>(null);
+  useEffect(() => {
+    if (ScreenMenu || target.embedded || !hasVideo) return;
+    let gone = false;
+    import("./ScreenMenu").then(
+      (m) => !gone && setScreenMenu(() => m.default),
+      () => {},
+    );
+    return () => {
+      gone = true;
+    };
+  }, [ScreenMenu, hasVideo, target.embedded]);
+  const choosePicture = (p: ScreenPicture) => {
+    setPicture(p);
+    setPictureChoice(target.mid, p);
+  };
+  const chooseQuality = (q: ScreenQuality) => {
+    setQuality(q);
+    setQualityChoice(target.mid, q);
+  };
 
   // In the app (#1343) the app draws the name, the state and "View only" / "Take control" around the page: it hears the phase, and
   // says "Take control" through window.personaScreen.
@@ -242,6 +343,10 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
           {t("screen-screenview.title", { name })}
           <span className="ml-2 text-[11.5px] font-normal text-ink-3">{live ? (control ? t("screen-screenview.in_control") : t("screen-screenview.view_only")) : phaseLabel(phase)}</span>
         </p>
+        {offering && DisplayMenu && <DisplayMenu offered={offered} shown={shown?.id ?? null} onChoose={choose} onOpen={reask} />}
+        {live && !target.embedded && hasVideo && ScreenMenu && (
+          <ScreenMenu picture={picture} quality={quality} onPicture={choosePicture} onQuality={chooseQuality} />
+        )}
         {live && (
           <div role="group" aria-label={t("screen-screenview.mode_label")} className="flex shrink-0 rounded-control bg-field p-0.5">
             {[false, true].map((on) => (
@@ -262,8 +367,11 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
         )}
       </header>
       )}
-      <main className="relative min-h-0 flex-1">
-        <div ref={screen} className={cx("absolute inset-0", !live && "invisible")} data-testid="screen" />
+      <main ref={stageRef} className="relative min-h-0 flex-1">
+        {/* One display: a box as large as fits shows it, over the whole framebuffer drawn at the same scale (displays.ts). */}
+        <div ref={clip} className={cx("absolute", frame ? "overflow-hidden" : "inset-0", !live && "invisible")} style={frame ? place(frame.clip) : undefined}>
+          <div ref={screen} className={cx("absolute", !frame && "inset-0")} style={frame ? place(frame.inner) : undefined} data-testid="screen" />
+        </div>
         {!live && (
           <div className="absolute inset-0 flex items-center justify-center p-6">
             {phase.kind === "signin" ? (
@@ -328,6 +436,29 @@ export function ScreenView({ target }: { target: ScreenTarget }) {
     </div>
   );
 }
+
+/** The status of the extension that lets this Mac's screen through, as the hub has it now: cua's computer, else ego's
+ *  browser (#1507), each asked fresh and null while off (404). Throws what to tell the user when there is no screen. */
+async function sharing(target: ScreenTarget): Promise<Computer> {
+  const fresh = async (what: "computer" | "browser") => {
+    try {
+      // the hub asks the Mac for up to 45 s (extmgr/browser.go; computer.go 30 s)
+      return await api<Computer>(`/machines/${encodeURIComponent(target.mid)}/${what}`, { token: target.token, timeout: pastHub(45_000) });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  };
+  const c = await fresh("computer");
+  const b = c?.enabled ? null : await fresh("browser");
+  const on = c?.enabled ? c : b?.enabled ? b : null;
+  if (!c && !b) throw new Error(t("screen-screenview.no_extension"));
+  if (!on) throw new Error(t("screen-screenview.extension_off"));
+  if (!on.screen_sharing) throw new Error(t("screen-screenview.sharing_off"));
+  return on;
+}
+
+const place = (r: Rect) => ({ left: r.x, top: r.y, width: r.w, height: r.h });
 
 function phaseLabel(p: Phase): string {
   switch (p.kind) {

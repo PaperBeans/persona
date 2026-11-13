@@ -29,7 +29,11 @@ func (p *pages) pushSource(s subscriptions.Subscription) wire.View {
 	fb := row("h.fallback", p.t("source.fallback"))
 	fb.Value = p.t("tier." + cmp.Or(s.FallbackTier, "default"))
 	fb.Action = open(state{P: pageFallback, ID: s.ID}, p.t("source.fallback"))
-	v.Sections = append(v.Sections, wire.Section{Key: "how", Title: p.t("source.push_section"), Items: []wire.Component{how, rules, fb}})
+	sec := wire.Section{Key: "how", Title: p.t("source.push_section"), Items: []wire.Component{how, rules, fb}}
+	if p.env.Builtin != nil { // the apps its items came from that are muted (#5306)
+		sec.Items = append(sec.Items, p.mutesRow(s.ID))
+	}
+	v.Sections = append(v.Sections, sec)
 	del := button("b.delete", p.t("source.delete"), "delete")
 	del.Role = "destructive"
 	del.Action.Confirm = p.t("source.delete_confirm", i18n.Args{"source": s.Label})

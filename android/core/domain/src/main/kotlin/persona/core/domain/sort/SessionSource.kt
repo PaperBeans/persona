@@ -16,8 +16,18 @@ val Session.canRead: Boolean get() = !hasSource || capabilities?.read == true
 val Session.canSend: Boolean get() = !hasSource || capabilities?.send == true
 val Session.canInterrupt: Boolean get() = !hasSource || capabilities?.interrupt == true
 val Session.canApprove: Boolean get() = !hasSource || capabilities?.approve == true
-/** A pane in a terminal engine: the terminal and its keys, closing the pane, renaming the tab. */
+/** A pane in a terminal engine: the terminal and its keys; closing and renaming where the node says nothing else ([canClose], [canRename]). */
 val Session.canTerminal: Boolean get() = !hasSource || capabilities?.terminal == true
+/**
+ * Close the agent: the node's capabilities.close where it says (a runtime's session closes without a terminal, #6294),
+ * else a terminal's, as before.
+ */
+val Session.canClose: Boolean get() = capabilities?.close ?: canTerminal
+/**
+ * Rename it: the node's capabilities.rename where it says (a runtime's session renames without a terminal, #6294), else a
+ * terminal's: its tab and Claude's /rename.
+ */
+val Session.canRename: Boolean get() = capabilities?.rename ?: canTerminal
 /** Join a Codex app-server thread live: offered until it is attached. */
 val Session.canAttach: Boolean get() = hasSource && capabilities?.attach == true && !attached
 
@@ -30,6 +40,17 @@ val Session.canChangeModes: Boolean get() = isLive && canSend && (capabilities?.
 val Session.canChangeEffortOnly: Boolean get() = isLive && !isClaude && !assistant && canSend && efforts.isNotEmpty()
 /** /model and /clear are typed into Claude's pane: Claude in a terminal engine, not Persona's conversations. */
 val Session.canTypeClaudeCommands: Boolean get() = canChangeModes && !assistant && !paneId.isNullOrBlank() && canTerminal
+/**
+ * Its queue can be sent now and reordered (iOS `Session.steersQueue`; `docs/protocol/protocol.md`, POST …/queue/send-now): Claude Code in a terminal pane, whose own
+ * send-now the node presses. Other agents refuse it (`send_now_unsupported`).
+ */
+val Session.steersQueue: Boolean get() = isClaude && !assistant && !hasSource && !paneId.isNullOrBlank() && canSend
+/**
+ * How many of [Session.queued] are the user's own (iOS `Session.ownQueuedCount`): they come first, and only they are
+ * taken back, moved, deleted or sent now. The rest, a Persona conversation's last `queued_relayed`, came from other
+ * conversations or the system and are only shown and copied (docs/protocol/protocol.md, `queued_relayed`).
+ */
+val Session.ownQueued: Int get() = (queued?.size ?: 0).let { count -> count - (queuedRelayed ?: 0).coerceIn(0, count) }
 
 /** A session's source as the app names it: its label, the agent's name there, and why it is read-only. */
 data class SessionSourceInfo(

@@ -17,6 +17,16 @@ vi.mock("./session/FilesPanel", async () => {
 vi.mock("./session/GitPanel", () => {
   throw new TypeError("Failed to fetch dynamically imported module: /assets/GitPanel-abc.js");
 });
+const bg = vi.hoisted(() => ({ mounts: 0 }));
+vi.mock("./chat/BackgroundPanel", async () => {
+  const { useEffect } = await import("react");
+  return {
+    BackgroundPanel: ({ opened }: { opened: { run?: string } }) => {
+      useEffect(() => void bg.mounts++, []);
+      return <p data-testid="background">{opened.run ?? "list"}</p>;
+    },
+  };
+});
 import { registerComposer } from "../lib/links";
 import { closePanel, openPanel } from "../lib/panel";
 import { CHAT_MIN, panelWidth, SidePanel } from "./SidePanel";
@@ -66,6 +76,24 @@ describe("侧边面板按需加载", () => {
     expect(alert?.textContent).toContain("重新加载");
     // the panel's frame (its resize handle) is still there: the error stays inside the panel
     expect(host.querySelector('aside [role="separator"]')).not.toBeNull();
+  });
+});
+
+// #5421: an Agent's Background tasks, one panel per session: asking for another run keeps it and goes to that run
+describe("the Background tasks panel", () => {
+  it("is labelled, and asking for another run of the session does not draw it anew", async () => {
+    bg.mounts = 0;
+    act(() => openPanel({ kind: "background", mid: "m1", sid: "s1", run: "w1" }));
+    act(() => root.render(<SidePanel />));
+    await until(() => Boolean(host.querySelector('[data-testid="background"]')));
+    expect(host.querySelector("aside")?.getAttribute("aria-label")).toBe("后台任务");
+    expect(host.querySelector('[data-testid="background"]')?.textContent).toBe("w1");
+    act(() => openPanel({ kind: "background", mid: "m1", sid: "s1", run: "w2" }));
+    expect(host.querySelector('[data-testid="background"]')?.textContent).toBe("w2");
+    expect(bg.mounts).toBe(1);
+    act(() => openPanel({ kind: "background", mid: "m1", sid: "s2" }));
+    expect(host.querySelector('[data-testid="background"]')?.textContent).toBe("list");
+    expect(bg.mounts).toBe(2);
   });
 });
 

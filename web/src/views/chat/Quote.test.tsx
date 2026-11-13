@@ -32,7 +32,7 @@ describe("引用 above the composer", () => {
     expect(html).toContain("第一行 第二行");
     expect(html).toMatch(/<textarea[^>]*><\/textarea>/);
     // a quote alone can be sent
-    expect(html).toMatch(/<button[^>]*aria-label="发送"(?![^>]*disabled)/);
+    expect(html).toMatch(/<button[^>]*aria-label="发送"(?![^>]*disabled="")/);
   });
 });
 

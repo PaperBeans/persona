@@ -29,9 +29,15 @@ const (
 // named after ("fold:" + its id, at its seq and time) through ThroughID. A chat shows the run folded into counts;
 // opening it fetches the run (session.items with from_seq / through_seq), which replaces the fold.
 type Fold struct {
-	Items      int                `json:"items"`
-	Tools      int                `json:"tools"`
-	Thoughts   int                `json:"thoughts"` // thoughts with words (blank ones are not shown)
+	Items    int `json:"items"`
+	Tools    int `json:"tools"`
+	Thoughts int `json:"thoughts"` // thoughts with words (blank ones are not shown)
+	// Errors: how many of the run's tool results were errors, and ToolNames the tools it called, each once in the
+	// order first called, at most FoldToolNamesMax: what a reader needs to tell a run that went wrong without opening
+	// it (docs/protocol/protocol.md "Folded work"). ToolNames is always a list: a fold without it (an older node) says
+	// neither.
+	Errors     int                `json:"errors"`
+	ToolNames  []string           `json:"tool_names"`
 	Until      time.Time          `json:"until"`
 	ThroughSeq int                `json:"through_seq"`
 	ThroughID  string             `json:"through_id"`
@@ -43,6 +49,26 @@ type Fold struct {
 	LatestThinking *Item `json:"latest_thinking,omitempty"`
 	// SupervisionUser preserves an explicit user-visible action hidden inside this work range.
 	SupervisionUser bool `json:"supervision_user,omitempty"`
+	// Changes: the files the run's successful edits changed, in the order first edited (FoldChange), so a chat shows its
+	// turn's changed-files card without opening the run. Always a list, empty when the run edited nothing: a fold
+	// without it (an older node) leaves the edits unknown.
+	Changes []FoldChange `json:"changes"`
+	// Usage: the tokens of the model requests the folded items stood for, summed per model and speed (TokenUsage), so
+	// a chat counts its turn's usage without opening the run. Absent when they carried none and from older nodes.
+	Usage []TokenUsage `json:"usage,omitempty"`
+}
+
+// FoldToolNamesMax bounds Fold.ToolNames.
+const FoldToolNamesMax = 10
+
+// FoldChange is one file a folded run's successful edits changed (docs/protocol/protocol.md "Folded work"): the lines
+// they added and removed, counted as the apps count an edit's diff and summed over the run's edits of that path.
+// Exact is false when an edit's input was clipped for good: its counts would be a guess, which the apps do not show.
+type FoldChange struct {
+	Path  string `json:"path"`
+	Add   int    `json:"add"`
+	Del   int    `json:"del"`
+	Exact bool   `json:"exact"`
 }
 
 // FoldImage is an image a tool call of a folded run looked at (docs/protocol/protocol.md "Images viewed this turn"): one its result
@@ -150,6 +176,9 @@ type Item struct {
 	// Wake marks a background task's notice that started new work after the agent had finished its turn
 	// (not one absorbed mid-turn): the exchange before it is over and its last words are an answer.
 	Wake bool `json:"wake,omitempty"`
+	// Narration is assistant text that belongs to the work summary (Codex commentary). It is internal to the
+	// transcript and FoldWork: on the wire it is ordinary text, so clients need no new item kind or cache migration.
+	Narration bool `json:"-"`
 	// From names the Claude session that sent this message (cross-session messaging), not the user.
 	From string `json:"from,omitempty"`
 	// Injected: this user line is a message Persona put into the conversation for the model (a task's notice, a
@@ -171,6 +200,32 @@ type Item struct {
 	// (never its "<synthetic>" placeholder), a Codex turn's turn_context model. Absent when the transcript does not
 	// say, on other roles, and from older nodes. Clients draw a divider where the model of the replies changes.
 	Model string `json:"model,omitempty"`
+	// Usage: the tokens of the model requests this item stands for, one entry per model and speed (TokenUsage, #5426).
+	// Claude Code: a request's usage once, on the first item its lines made. Codex: the turn's total, on its
+	// turn_duration item (on its interrupted notice when the user stopped it). A finished subagent's result or
+	// completion notice: what its own transcript used and what each of its nested subagents used (in-process teammates
+	// never), each agent under its own ID "agent:<agent id>"; a finished workflow's report: each of its run's agents the
+	// same way. An agent reported on several items counts once in the chat. Absent on anything else and from older
+	// nodes. A chat sums a turn's items (folds' Fold.Usage included) into the turn's usage
+	// (docs/protocol/protocol.md "Token usage on items").
+	Usage []TokenUsage `json:"usage,omitempty"`
+}
+
+// TokenUsage is what model requests used, as the transcript records it (#5426): tokens by kind, the way the usage
+// meter counts them (UsageBucket: Input excludes the cache). Model is the model the transcript names (never Claude
+// Code's "<synthetic>"); empty when it does not say.
+type TokenUsage struct {
+	// ID: entries with the same ID (and model) are one report, counted once; empty: count it as it is.
+	ID         string `json:"id,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Input      int64  `json:"in,omitempty"`  // input not read from the cache
+	Output     int64  `json:"out,omitempty"` // Codex: reasoning included
+	CacheRead  int64  `json:"cache_read,omitempty"`
+	CacheWrite int64  `json:"cache_write,omitempty"` // every cache write, the 1-hour ones included
+	// CacheWrite1h: of CacheWrite, what was written for an hour (priced higher than the 5-minute writes).
+	CacheWrite1h int64 `json:"cache_write_1h,omitempty"`
+	// Fast: the requests ran at Claude Code's fast speed (usage.speed "fast"), priced higher than the standard rate.
+	Fast bool `json:"fast,omitempty"`
 }
 
 // ModelRefusal is a Claude Code model_refusal_* record as clients see it: its known fields, values kept as recorded
@@ -247,8 +302,8 @@ type Injected struct {
 	// Level classifies supervision: info updates only, triage folds the turn, user is visible.
 	Level   string `json:"level,omitempty"`
 	Kind    string `json:"kind"`              // InjectedTaskNotice | InjectedFollowup | InjectedSystem
-	State   string `json:"state,omitempty"`   // task_notice: done|needs|interrupted|failed; followup: once|daily|interval|wake; system: lost_tasks|supervise|inbox
-	Title   string `json:"title,omitempty"`   // the task's, the scheduled task's, the inbox item's, or what a woken agent waits for
+	State   string `json:"state,omitempty"`   // task_notice: done|needs|interrupted|failed; followup: once|daily|interval|wake; system: lost_tasks|supervise|inbox|ask_answered|ask_expired|ask_closed
+	Title   string `json:"title,omitempty"`   // the task's, the scheduled task's, the inbox item's, what a woken agent waits for, or a question's answers
 	Machine string `json:"machine,omitempty"` // task_notice: where its agent runs (a name)
 	TodoID  string `json:"todo_id,omitempty"` // task_notice: the task, when the hub can tell
 	Line    string `json:"line"`              // the one line to show

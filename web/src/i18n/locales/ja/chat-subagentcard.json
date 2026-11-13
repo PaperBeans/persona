@@ -15,7 +15,7 @@
   "last_tool": "直近のツール: {tool}",
   "output_file": "出力: {path}",
   "running_for": "実行時間 {duration}",
-  "open_in_background": "{name} をバックグラウンドタスクで開く",
+  "open_in_background": "{name} をバックグラウンドタスクパネルで開く",
   "workflow_progress_line": "{phase} · {done}/{total} Agent",
   "workflow_progress_count": "{done}/{total} Agent"
 }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Share as a picture, videos and pasted pictures in the composer (iOS MessageShareSheet, VideoAttachments, PasteImageChip). -->
+<resources>
+    <string name="chat_composer_videos_only">请看视频</string>
+    <string name="chat_composer_video_placeholder">[视频]</string>
+    <string name="chat_paste_image">粘贴</string>
+    <string name="chat_paste_dont">不粘贴</string>
+    <string name="chat_share_card_title">消息卡片</string>
+    <string name="chat_share_card_me">我</string>
+    <string name="chat_share_card_brand">Persona</string>
+    <string name="chat_share_card_share_text">分享文字</string>
+    <string name="chat_share_card_light">浅色</string>
+    <string name="chat_share_card_dark">深色</string>
+</resources>

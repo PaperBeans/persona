@@ -19,6 +19,7 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "general", group: t("settings.sidebar_pages"), anchor: "sidebar-pages" },
   // Persona
   { tab: "general", group: t("settings.agent_preferences"), anchor: "agent-preferences" },
+  { tab: "general", group: t("settings-agentopen.label"), hint: `${t("settings-agentopen.panel")} / ${t("settings-agentopen.page")}`, anchor: "agent-preferences" },
   { tab: "general", group: t("settings.this_browser"), anchor: "this-browser" },
   // the assistant's profile
   { tab: "persona", group: t("settings-triagesettings.title"), anchor: "triage" },

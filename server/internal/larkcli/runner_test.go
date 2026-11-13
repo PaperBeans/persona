@@ -43,7 +43,7 @@ func TestRunnerSuccessJSONAndProfile(t *testing.T) {
 		t.Fatalf("at-me chats = %+v, err = %v", atMe, err)
 	}
 	messages, err := r.ListMessages(ctx, "oc_example_group", "", "", 10)
-	if err != nil || len(messages.Messages) != 2 || messages.Messages[0].MessageID != "om_example_older" {
+	if err != nil || len(messages.Messages) != 2 || messages.Messages[0].MessageID != "om_example_older" || messages.Messages[1].MessageAppLink != "https://applink.feishu.cn/client/thread/open?open_chat_id=oc_example_group&open_thread_id=omt_example_thread&thread_position=4" {
 		t.Fatalf("messages = %+v, err = %v", messages, err)
 	}
 	search, err := r.SearchMessages(ctx, "example", SearchOptions{})

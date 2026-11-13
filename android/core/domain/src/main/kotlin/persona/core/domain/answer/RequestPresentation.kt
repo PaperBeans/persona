@@ -5,6 +5,7 @@ import persona.core.contracts.CoreText
 import persona.core.contracts.Interaction
 import persona.core.contracts.Item
 import persona.core.contracts.mcpServerLabel
+import persona.core.contracts.toolDisplayName
 import kotlinx.serialization.json.*
 
 /** Only metadata supplied by the hook is a source; tool names are not proof. */
@@ -57,7 +58,13 @@ val Interaction.alwaysScopeDetail: CoreText?
                 if (toolName == "Bash") Key.AlwaysScopeCommands else Key.AlwaysScopeTool
             else -> Key.AlwaysScopeApproved
         }
-        return CoreText.of(key)
+        return if (key == Key.AlwaysScopeTool) {
+            val tool: Any = toolNameTitle?.takeIf(String::isNotBlank) ?: toolTitle?.takeIf(String::isNotBlank)
+                ?: toolDisplayName(toolName) ?: CoreText.of(Key.ToolGeneric)
+            CoreText.of(key, tool)
+        } else {
+            CoreText.of(key)
+        }
     }
 
 data class RequestCommand(val requestId: String, val toolUseId: String, val command: String)

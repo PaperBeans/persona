@@ -214,7 +214,7 @@ func TestInboxSignalFromTheTwinsPass(t *testing.T) {
 			}
 			todo := supervisedTodo(t, s, "修登录崩溃")
 			h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
-			model, _ := captureModel(t, `{"task_id":"`+todo.ID+`"}`)
+			model, _ := captureModel(t, `{"task_id":"`+todo.ID+`","evidence":"修登录崩溃"}`)
 			in.setModel(model)
 			it := actionItem("lark:f1:12", time.Now())
 			it.Source, it.Title, it.Sender, it.Preview = "lark", "客户端发版群", "陈晓", "登录那个崩溃今天能修好吗？"
@@ -266,10 +266,10 @@ func TestInboxSignalsSetting(t *testing.T) {
 	}
 }
 
-// The messages counted: every batch of an item linked just now, those after the last count for one counted before, and
-// only the newest when nothing was counted in this run of the manager.
+// The messages counted use the item's Count as the watermark: every message of an item linked just now, those after
+// the last count for one counted before, and only the newest received entry when nothing was counted in this run.
 func TestReceivedSince(t *testing.T) {
-	it := &InboxItem{Chain: []InboxChainEntry{{ID: "c1", Kind: ChainReceived, Count: 2}, {ID: "c2", Kind: ChainTriaged},
+	it := &InboxItem{Count: 6, Chain: []InboxChainEntry{{ID: "c1", Kind: ChainReceived, Count: 2}, {ID: "c2", Kind: ChainTriaged},
 		{ID: "c3", Kind: ChainReceived, Count: 3}, {ID: "c4", Kind: ChainReceived}}}
 	for _, c := range []struct {
 		name          string
@@ -277,10 +277,10 @@ func TestReceivedSince(t *testing.T) {
 		linked        bool
 		wantN, wantAt int
 	}{
-		{"linked now", 0, true, 6, 4},
-		{"unknown", 0, false, 1, 4},
-		{"after c1", 1, false, 4, 4},
-		{"after c4", 4, false, 1, 4},
+		{"linked now", 0, true, 6, 6},
+		{"unknown", 0, false, 1, 6},
+		{"after count 2", 2, false, 4, 6},
+		{"after count 6", 6, false, 1, 6},
 	} {
 		if n, at := receivedSince(it, c.since, c.linked); n != c.wantN || at != c.wantAt {
 			t.Errorf("%s: %d, %d; want %d, %d", c.name, n, at, c.wantN, c.wantAt)

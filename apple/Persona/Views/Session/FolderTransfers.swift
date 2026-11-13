@@ -19,6 +19,7 @@ final class FolderTransfers {
         var done: Int64 = 0
         var waiting = true // behind another transfer
         var asking = false // the name is taken: waiting for Replace / Keep Both
+        var zipping = false // several items (or a folder) zipped on the computer before the download (#5828)
     }
 
     /// A name already in the folder, waiting for the user's answer.
@@ -75,6 +76,14 @@ final class FolderTransfers {
     func download(_ ref: FileRef, name: String, size: Int64, model: AppModel) {
         let item = Item(kind: .download, name: name, size: size)
         queue(item) { [weak self] in await self?.fetch(item.id, ref: ref, name: name, model: model) }
+    }
+
+    /// Several items, or a folder, as one zip the computer makes in a temporary folder (`files/zip`), then downloaded
+    /// for Save to Files like one file (#5828).
+    func downloadZip(_ paths: [String], name: String, cwd: String, machine: MachineRef, model: AppModel) {
+        var item = Item(kind: .download, name: name, size: 0)
+        item.zipping = true
+        queue(item) { [weak self] in await self?.zipThenFetch(item.id, paths: paths, name: name, cwd: cwd, machine: machine, model: model) }
     }
 
     func cancel(_ id: UUID) {
@@ -158,6 +167,24 @@ final class FolderTransfers {
         }
     }
 
+    private func zipThenFetch(_ id: UUID, paths: [String], name: String, cwd: String, machine: MachineRef, model: AppModel) async {
+        update(id) { $0.waiting = false }
+        guard let api = model.api(machine.group) else { return }
+        do {
+            let zip = try await api.zipFiles(machine: machine.id, paths: paths, cwd: cwd, dir: nil, name: name)
+            try Task.checkCancellation()
+            update(id) {
+                $0.zipping = false
+                $0.size = zip.size
+            }
+            await fetch(id, ref: FileRef(group: machine.group, machineID: machine.id, path: zip.path, cwd: cwd), name: name, model: model)
+        } catch {
+            if !error.isCancellation {
+                model.toast = Toast(String(localized: "Couldn’t download “\(name)”: \(FolderEdits.message(error))"), style: .error)
+            }
+        }
+    }
+
     private func fetch(_ id: UUID, ref: FileRef, name: String, model: AppModel) async {
         update(id) { $0.waiting = false }
         guard let api = model.api(ref.group) else { return }
@@ -232,8 +259,8 @@ struct FolderTransfersBar: View {
             ForEach(transfers.items) { item in
                 AttachmentRow(symbol: item.kind == .upload ? Theme.Icon.upload : Theme.Icon.save, name: item.name,
                               status: item.asking ? String(localized: "Already exists, waiting for you") : item.waiting ? String(localized: "Waiting [File Attach 26c8cf]")
-                                  : "\(item.done.storageText) / \(item.size.storageText)",
-                              progress: item.asking ? nil : item.size > 0 ? Double(min(item.done, item.size)) / Double(item.size) : 0,
+                                  : item.zipping ? String(localized: "Zipping on the computer…") : "\(item.done.storageText) / \(item.size.storageText)",
+                              progress: item.asking || item.zipping ? nil : item.size > 0 ? Double(min(item.done, item.size)) / Double(item.size) : 0,
                               removeLabel: item.kind == .upload ? String(localized: "Cancel upload of \(item.name)") : String(localized: "Cancel download of \(item.name)")) { transfers.cancel(item.id) }
             }
         }

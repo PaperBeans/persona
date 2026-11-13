@@ -5,10 +5,11 @@ import OSLog
 import UIKit
 import UserNotifications
 
-/// "We're meeting now, record it" in one step (docs/apple/recording.md「Meeting recordings」): the drawer's Meeting Recording,
-/// the Recordings page, the home screen's menu, the Control, Siri / Shortcuts / the Action button. Names the recording after
-/// the calendar event happening now, keeps the Live Activity in step, picks a recording a call paused up again when the app
-/// comes back, and holds the app open after a stop in the background until the last text is transcribed and sent.
+/// "We're meeting now, record it" in one step (docs/apple/recording.md「Meeting recordings」): Record, the one name for it
+/// in the drawer, on the Recordings page, in the home screen's menu, the Control and Siri / Shortcuts / the Action button
+/// (#5243). Names the recording after the calendar event happening now, turns a running recording into a note or back
+/// into a meeting, keeps the Live Activity in step, picks a recording a call paused up again when the app comes back, and
+/// holds the app open after a stop in the background until the last text is transcribed and sent.
 @MainActor final class MeetingRecorder {
     static let shared = MeetingRecorder()
 
@@ -30,11 +31,21 @@ import UserNotifications
         RecordingActivity.shared.start()
         MinutesRelay.shared.start()
         capture.onInterruptionNotResumed = { MeetingRecorder.notifyPaused() }
-        // However a meeting stops: nothing more is said in it, and its questions go (#2981).
-        capture.onStopping = { MeetingAsk.shared.ended($0) }
+        // However a meeting stops: nothing more is said in it, and its questions go (#2981); its call and Talk end
+        // (#3862 phase 4).
+        capture.onStopping = { id in
+            MeetingAsk.shared.ended(id)
+            MeetingCall.shared.ended(id)
+        }
         MeetingLive.shared.start()
+        // The segment length follows what the meeting being recorded may send (#3862 phase 2).
+        RecordingSync.shared.onSegments = { MeetingRecorder.shared.followSegments($0) }
         // The room of every upload 200 of a room meeting (#3862).
         MeetingConversation.shared.start()
+        // Meeting photos a relaunch left on their way (#3862 phase 3): they go on uploading.
+        MeetingPhotos.shared.start()
+        // The meeting call and Talk follow the room meeting being recorded (#3862 phase 4).
+        MeetingCall.shared.start()
         // A call that ended while the app was away (or never said so): coming back carries on, unless another app's audio
         // (a VoIP call without CallKit, still going) holds the route: taking the session would cut into that call.
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { @Sendable _ in
@@ -55,10 +66,10 @@ import UserNotifications
     /// Starts a meeting recording named after the calendar event happening now (a dated "Meeting" without one). In front
     /// (`inForeground`), the Recordings page opens (unless the caller opened it: `openPage`), and the calendar is asked
     /// for once if it never was, after the recording has begun, so the prompt costs no seconds of the meeting.
-    /// `attendance`: Persona's part (#2981), as picked on the Recordings page; nil (the drawer, Siri, the Control, the Action
-    /// button) starts with the hub's default role and the session picked last that isn't the main chat, else off
-    /// (`MeetingAttendees.defaultAttendance`), or, with the meeting conversation, as a room meeting in the default role,
-    /// not private (`MeetingAttendees.startAttendance`).
+    /// `attendance`: Persona's part (#2981), as picked on the Recordings page; nil (the + list, the home screen's menu,
+    /// Siri, the Control, the Action button) starts with the hub's default role and the session picked last that isn't the
+    /// main chat, else off (`MeetingAttendees.defaultAttendance`), or, with the meeting conversation, as a room meeting in
+    /// the default role, not private (`MeetingAttendees.startAttendance`).
     @discardableResult
     func startMeeting(inForeground: Bool, openPage: Bool? = nil, attendance: RecordingAttendance? = nil) async -> Outcome {
         if openPage ?? inForeground { Self.openRecordings() }
@@ -66,8 +77,11 @@ import UserNotifications
         let meeting = await MeetingCalendar.meetingOffMain() ?? RecordingMeeting()
         let picked = attendance != nil
         let attendance = attendance ?? MeetingAttendees.startAttendance(AppModel.shared)
+        // A room meeting's engine carries a meeting call's player (#3862 phase 4); one that starts taking part asks for the
+        // system's echo cancellation now, for the whole recording (never on the simulator, where it doesn't run).
         await capture.start(locale: Self.locale, input: RecordingInput.chosen, title: meeting.title ?? "", meeting: meeting,
-                            playsAloud: attendance.sentRole.speaks)
+                            playsAloud: attendance.sentRole.speaks, shortSegments: attendance.shortSegments(roomMissing: false),
+                            meetingCall: attendance.room, echoCancellation: Self.echoCancellation(attendance))
         guard capture.state == .recording, let id = capture.recordingID else {
             return .failed(capture.error ?? String(localized: "Can't open the microphone. Try again later."))
         }
@@ -97,6 +111,22 @@ import UserNotifications
             }
         }
         return .started
+    }
+
+    /// Whether a meeting asks for the system's echo-cancelled input as it starts (#3862 phase 4, decision 8): a room
+    /// meeting that starts taking part; never switched while it records, so a later change of role keeps what it began
+    /// with. Not on the simulator: voice processing doesn't run there (docs/assistant/voice.md 6.4).
+    static func echoCancellation(_ attendance: RecordingAttendance) -> Bool {
+        attendance.room && attendance.sentRole == .participant && !VoiceCapture.simulator
+    }
+
+    /// The activity's Talk and Done (#3862 phase 4): `open` is what the button showed (Talk: true, Done: false; nil from an
+    /// activity drawn before it said). Talk opens a talk window, Done ends the open span; a tap that no longer matches
+    /// what is open does nothing (`MeetingCallRule.activityTap`).
+    func talk(recordingID: String?, open: Bool?) {
+        guard let id = capture.recordingID, recordingID == nil || recordingID == id.uuidString else { return }
+        MeetingCall.shared.activityTap(id, open: open)
+        Haptics.tap()
     }
 
     /// Stops the recording (the activity's Stop: `id` is the one it shows; a stale one stops nothing).
@@ -132,6 +162,7 @@ import UserNotifications
                 e.attendance = a
             }
             capture.setPlaysAloud(role.speaks)
+            followSegments(id)
             if !role.speaks { MeetingSpeaker.shared.stop() }
             RecordingSync.shared.attendanceChanged(id)
             return true
@@ -145,6 +176,66 @@ import UserNotifications
         if !role.speaks { MeetingSpeaker.shared.stop() }
         RecordingSync.shared.attendanceChanged(id)
         return true
+    }
+
+    /// The segment length of the recording being made follows what it may send (#3862 phase 2,
+    /// `RecordingAttendance.shortSegments`): 15 seconds while Persona attends a meeting started with the live view and its
+    /// lines go to the room, else the usual length. After every save of it (its role, Meeting / Note, the phone stopping
+    /// attending) and every change of `RecordingSync.roomMissing` (`RecordingSync.onSegments`); the capture changes
+    /// nothing when the length stays.
+    func followSegments(_ id: UUID) {
+        guard capture.recordingID == id else { return }
+        let entry = RecordingLibrary.shared.entry(id)
+        let missing = RecordingSync.shared.roomMissing.contains(id)
+        capture.setShortSegments(entry?.isMeeting == true && entry?.attendance?.shortSegments(roomMissing: missing) == true)
+    }
+
+    /// The live sheet's Meeting / Note (#5243): the recording being made becomes a note (`kind: note`, no minutes; Persona
+    /// goes off and stops speaking) or a meeting again (named after the calendar event on now when it has no name yet, and
+    /// Persona's part as a fresh start would get it, from now on). What was said before stays the recording's transcript
+    /// either way; live lines go only from a stretch Persona attends, as ever. The hub hears of it at once.
+    func setMeeting(_ on: Bool, recordingID: UUID) async {
+        let library = RecordingLibrary.shared
+        guard capture.recordingID == recordingID, let entry = library.entry(recordingID), entry.source == .phone,
+              entry.isMeeting != on else { return }
+        let named = on ? await MeetingCalendar.meetingOffMain() : nil
+        // The calendar is read off the main actor: meanwhile the recording may have stopped, or been switched already.
+        guard capture.recordingID == recordingID, library.entry(recordingID)?.isMeeting == !on else { return }
+        let start = on ? MeetingAttendees.startAttendance(AppModel.shared) : RecordingAttendance(role: .off)
+        let at = capture.timeline
+        library.change(recordingID) { $0 = Self.switched($0, meeting: on, at: at, named: named, start: start) }
+        let speaks = library.entry(recordingID).map { $0.isMeeting && $0.attendance?.sentRole.speaks == true } ?? false
+        capture.setPlaysAloud(speaks)
+        followSegments(recordingID)
+        if !speaks { MeetingSpeaker.shared.stop() }
+        // Live lines and questions wait for the hub to have it as it is now (`attendanceSettled`): a mark stored while it
+        // was this meeting before counts for nothing.
+        RecordingSync.shared.reupload(recordingID)
+        RecordingActivity.shared.refresh()
+    }
+
+    /// `entry` turned into a meeting (`on`) or a note at `at` on its clock (`setMeeting`; pure, for the tests). `named`:
+    /// the calendar's event on now; `start`: the attendance a start would get now (`MeetingAttendees.startAttendance`).
+    static func switched(_ entry: RecordingEntry, meeting on: Bool, at: Double, named: RecordingMeeting?,
+                         start: RecordingAttendance) -> RecordingEntry {
+        var e = entry
+        guard e.isMeeting != on else { return e }
+        if on {
+            let meeting = named ?? RecordingMeeting()
+            if e.title.isEmpty { e.title = meeting.title ?? "" }
+            e.meeting = meeting
+            let attendance = MeetingAttendees.resumed(e.attendance, start: start, at: at)
+            // As at a start: a meeting Persona stays out of (off, no room) carries no attendance, so its uploads are as
+            // they were before attending existed.
+            if e.attendance != nil || attendance.room || attendance.sentRole.attends { e.attendance = attendance }
+        } else {
+            // `kind: note` and no attendance on the upload (`RecordingUpload.attendance`): the hub turns Persona off and
+            // writes no minutes. The attendance stays, off: the live log the hub already has, the stretches Persona spoke
+            // in (kept out of the transcript), and a room meeting's room, which it never leaves.
+            e.meeting = nil
+            e.attendance?.set(.off, at: at)
+        }
+        return e
     }
 
     /// The meeting page's Private Meeting switch (#3862): `PUT …/private`; the mark the hub stored. Throws `APIError`.
@@ -194,6 +285,20 @@ import UserNotifications
     /// shell yet: it tries again for a few seconds.
     static func openRecordings() {
         RecordingLivePresenter.shared.open() // a sheet swiped away on the page already in front comes back (`recordingLiveSheet`)
+        showRecordings()
+    }
+
+    /// The minutes push (#3862 phase 6): Recordings, with the meeting's one thread (`MeetingPage` after mode) pushed over it
+    /// once the page is on screen (`MeetingPageOpener`). Not the live sheet: the push is about a meeting that ended, and
+    /// with another recording running the sheet doesn't present itself as the page appears (`holdOnAppear`), so it
+    /// doesn't cover that meeting; the now-recording card is the way back to it.
+    static func openMeeting(_ id: UUID) {
+        RecordingLivePresenter.shared.holdOnAppear()
+        MeetingPageOpener.shared.open(id)
+        showRecordings()
+    }
+
+    private static func showRecordings() {
         let model = AppModel.shared
         model.shellSettings = false
         model.selectedTab = .assistant

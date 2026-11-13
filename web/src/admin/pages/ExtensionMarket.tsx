@@ -234,7 +234,7 @@ function MarketCatalog({ markets, onChanged }: { markets: Market[]; onChanged: (
                     ))}
                   </div>
                 )}
-                {it.problem && <p className="mt-1 text-[12px] leading-relaxed text-orange">{t("admin-pages-extensionmarket.cannot_install", { problem: it.problem })}</p>}
+                {it.problem && <p className="mt-1 text-[12px] leading-relaxed text-orange">{it.problem}</p>}
                 {canUninstall(it) && st.kind !== "upgrade" && <p className="mt-1 text-[11.5px] text-ink-3">{t("admin-pages-extensionmarket.manage_above")}</p>}
               </div>
               {(st.kind === "install" || st.kind === "upgrade") && (

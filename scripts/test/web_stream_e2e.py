@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """End-to-end check of the web chat's streaming (#1963): the assistant's reply fades in word by word while its deltas
-arrive and is plain Markdown once it is written (no fade spans left); a working Claude's status bar shows the status
-line's verb ("Thinking" while thinking), the time and the tokens counting up, then lingers and fades out when the turn ends.
+arrive and is plain Markdown once it is written (no fade spans left); a working Claude's status bar (cindy's, #5312) says
+"Thinking…" while the status line does, then the state of the turn, the time in the work summary's format and either the
+tokens counting up or, once measured, the latest speed (never both), then says Done, lingers and fades out when the turn ends.
 
 Needs a running web page against the fake hub with MOCK_STREAM=1 MOCK_LIVE_STATUS=1 (the status bar's run starts
 when the page subscribes to the widget session) and Playwright for Python (it drives the installed Chrome):
@@ -11,10 +12,11 @@ when the page subscribes to the widget session) and Playwright for Python (it dr
     python3 scripts/test/web_stream_e2e.py http://127.0.0.1:5321 --hub http://127.0.0.1:18821 [--shots <dir>]
 
 Prints one line per check and a verdict; exits 1 on the first failure. Runs wide light, wide dark and phone width
-(390) light; --shots saves the reply mid-stream and the status bar thinking / counting tokens for each.
+(390) light; --shots saves the reply mid-stream and the status bar thinking / with its speed for each.
 """
 import argparse
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -71,8 +73,7 @@ def bar(page):
       if (!b) return null;
       const t = (s) => b.querySelector(s)?.textContent ?? null;
       return { phase: b.dataset.runningStatus, verb: t("[data-running-verb]"), elapsed: t("[data-running-elapsed]"),
-               tokens: t("[data-running-tokens]"), opacity: parseFloat(getComputedStyle(b).opacity),
-               accent: getComputedStyle(b.querySelector("[data-running-verb]")).color };
+               tokens: t("[data-running-tokens]"), rate: t("[data-running-rate]"), done: !!b.querySelector("[data-running-done]") };
     }""")
 
 
@@ -114,9 +115,9 @@ def check_reply(page, base, hub, shots, tag):
 
 def check_bar(page, base, shots, tag):
     page.goto(base + WIDGET)
-    seen = {"thinking": False, "verbs": set(), "tokens": [], "phases": [], "elapsed": set()}
+    seen = {"thinking": False, "words": set(), "tokens": [], "rates": [], "both": [], "phases": [], "elapsed": set(), "done": False}
     end = time.time() + 40
-    shot_thinking = shot_tokens = False
+    shot_thinking = shot_rate = False
     while time.time() < end:
         b = bar(page)
         if b is None:
@@ -126,39 +127,45 @@ def check_bar(page, base, shots, tag):
             continue
         if not seen["phases"] or seen["phases"][-1] != b["phase"]:
             seen["phases"].append(b["phase"])
-        if b["verb"] == "思考中":
+        if b["done"]:
+            seen["done"] = seen["done"] or b["verb"] == "已完成"
+        elif b["verb"] == "正在思考…":
             seen["thinking"] = True
             if not shot_thinking:
                 page.wait_for_timeout(200)
                 shot(page, shots, "bar-thinking", tag)
                 shot_thinking = True
         elif b["verb"]:
-            seen["verbs"].add(b["verb"])
+            seen["words"].add(b["verb"])
+        if b["tokens"] and b["rate"]:
+            seen["both"].append((b["tokens"], b["rate"]))
         if b["tokens"] and (not seen["tokens"] or seen["tokens"][-1] != b["tokens"]):
             seen["tokens"].append(b["tokens"])
+        if b["rate"] and (not seen["rates"] or seen["rates"][-1] != b["rate"]):
+            seen["rates"].append(b["rate"])
+            if not shot_rate:
+                shot(page, shots, "bar-rate", tag)
+                shot_rate = True
         if b["elapsed"]:
             seen["elapsed"].add(b["elapsed"])
-        if b["verb"] == "Moonwalking…" and not shot_tokens:
-            page.wait_for_timeout(500)
-            shot(page, shots, "bar-tokens", tag)
-            shot_tokens = True
         page.wait_for_timeout(50)
     if not seen["thinking"]:
-        fail(f"{tag}: the bar never said 思考中: {seen}")
-    if not {"Frosting…", "Moonwalking…"} <= seen["verbs"]:
-        fail(f"{tag}: the verb did not follow the status line: {seen['verbs']}")
-    if "↓ 22.8k tokens" not in seen["tokens"] or len(seen["tokens"]) < 5:
-        fail(f"{tag}: the tokens did not count up to 22.8k: {seen['tokens']}")
+        fail(f"{tag}: the bar never said 正在思考…: {seen}")
+    if any("Frosting" in w or "Moonwalking" in w for w in seen["words"]):
+        fail(f"{tag}: the bar showed the spinner's verb instead of a state: {seen['words']}")
+    if seen["both"]:
+        fail(f"{tag}: the bar showed the tokens and the speed at once: {seen['both'][:3]}")
+    if not seen["tokens"] or not seen["rates"] or not all(r.endswith(" tok/s") for r in seen["rates"]):
+        fail(f"{tag}: the tokens before a measurement and the speed after it should both show: {seen['tokens']} / {seen['rates']}")
     # the tween shows numbers between the pushed ones
-    pushed = {"↓ 400 tokens", "↓ 900 tokens", "↓ 1.2k tokens", "↓ 2.3k tokens", "↓ 3.4k tokens", "↓ 4.8k tokens", "↓ 22.8k tokens"}
-    if not set(seen["tokens"]) - pushed:
+    if not set(seen["tokens"]) - {"400 tok", "900 tok", "1.2k tok", "2.3k tok", "3.4k tok", "4.8k tok", "22.8k tok"}:
         fail(f"{tag}: the token count jumped instead of easing: {seen['tokens']}")
-    if len(seen["elapsed"]) < 4 or not all("秒" in e for e in seen["elapsed"]):
-        fail(f"{tag}: the time did not tick: {sorted(seen['elapsed'])}")
-    ok(f"{tag}: bar said 思考中, then {sorted(seen['verbs'])}, tokens eased {seen['tokens'][0]} → {seen['tokens'][-1]} ({len(seen['tokens'])} steps), time ticked")
-    if seen["phases"][-2:] != ["linger", "fading"] or bar(page) is not None:
-        fail(f"{tag}: the bar did not linger, fade and go: {seen['phases']}")
-    ok(f"{tag}: after the turn the bar lingered, faded out and went ({' → '.join(seen['phases'])})")
+    if len(seen["elapsed"]) < 4 or not all(re.fullmatch(r"\d+s|\d+m \d+s", e) for e in seen["elapsed"]):
+        fail(f"{tag}: the time did not tick in the work summary's format: {sorted(seen['elapsed'])}")
+    ok(f"{tag}: bar said 正在思考…, then {sorted(seen['words'])}, tokens eased to {seen['tokens'][-1]}, then {seen['rates']}, never both; time ticked")
+    if not seen["done"] or seen["phases"][-2:] != ["linger", "fading"] or bar(page) is not None:
+        fail(f"{tag}: the bar did not say Done, linger, fade and go: {seen['phases']} done={seen['done']}")
+    ok(f"{tag}: after the turn the bar said 已完成, lingered, faded out and went ({' → '.join(seen['phases'])})")
 
 
 def run(browser, base, hub, token, size, theme, shots):

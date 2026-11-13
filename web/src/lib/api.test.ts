@@ -173,6 +173,18 @@ describe("a computer that did not answer", () => {
   });
 });
 
+// The hub answered that nothing it can call directly is set up for the request (an Inbox draft): where to set one up,
+// not a bare "HTTP 503" that reads as an outage.
+describe("no model set up", () => {
+  it("says where to set one up", () => {
+    const noModel = new ApiError(503, "No model can be called directly to draft a reply", { code: "model_unavailable" });
+    const text = errorText(noModel);
+    expect(text).toBe(t("lib-api.model_unavailable"));
+    expect(text).not.toContain("HTTP 50");
+    expect(isOfflineError(text)).toBe(false);
+  });
+});
+
 describe("error language", { timeout: 30_000 }, () => {
   afterEach(() => initI18n("zh-Hans"), 30_000);
 

@@ -2,25 +2,28 @@
 // FYI, Collapsed and Done, each a section that opens / closes from its title.
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
-  agentDraft, agentWorking, conversationRoute, fromLine, interactionAgentTitle, interactionAsk, interactionTitle, isDone, isLark,
+  agentDraft, agentWorking, conversationRoute, fromLine, repeatsSummary, interactionAgentTitle, interactionAsk, interactionTitle, isDone, isLark,
   itemKey, itemRoute, listInboxMutes, muteItem, muteLine, muteShortName, muteTitle, policyMenuTitle, sameItem, unmuteInbox,
   BULK_CONFIRM_AT, bulkScope, bulkScopeName, connectorSources, KIND_FILTERS, kindLabel, labelIsUrgent, mailAccounts, mailShort, matches, reloadInbox, sections, sendReply, setAllDone, setDone, shortTime, TIERS,
   useInbox, waitingAgents, type InboxItem, type InboxMute, type SectionKey, doneWithHistory, loadOlderDone, loadDoneDays, loadDoneGroup,
 } from "../../lib/inbox";
+import { rowMeta } from "../../lib/inbox-now";
 import { dayGroupCounts, doneGroups, groupBySource, groupByTime, openAtFirst, sortTimeKeys, timeRange, timeTitle, type Grouping, type InboxGroup } from "../../lib/inbox-groups";
 import { useMailAccounts } from "../../lib/mail";
 import { hubTranslation, useTranslatePrefs } from "../../lib/translate";
 import { machineWithHub } from "../../lib/mesh";
 import { href, navigate, onLinkClick } from "../../lib/router";
 import { openedItemState } from "../../lib/inbox-nav";
+import { useInboxListScroll, useInboxView } from "../../lib/inbox-view-memory";
 import { useInboxSources } from "../../lib/inbox-sources";
-import { subscriptionsHref, useSubscriptionsShown } from "../../lib/subscriptions";
+import { subscriptionsHref, useInboxSourcesShown, useSubscriptionsShown } from "../../lib/subscriptions";
 import { type Manager } from "../../lib/managers";
 import { scoped, useScope, useScoped } from "../../lib/current-assistant";
 import { useStore } from "../../lib/store";
 import type { Interaction } from "../../lib/types";
 import { t } from "../../i18n";
 import { requestRoute } from "../../lib/card-focus";
+import { requestHome } from "../../lib/child-sessions";
 import { Button, Collapse, cx, Dialog, IconButton, Loading, Menu, toast, useMenu, type MenuItem } from "../../ui/atoms";
 import { errorText } from "../../lib/api";
 import { contextMenuProps } from "../../ui/context-menu";
@@ -73,6 +76,7 @@ type Picked = Set<string> | null;
 
 /** `selected`: the item opened (its id and manager). `picked` / `onPicked`: selecting, from the page's "Select". */
 export function InboxList({ selected, picked = null, onPicked }: { selected?: { id: string; manager?: string }; picked?: Picked; onPicked?: Dispatch<SetStateAction<Picked>> }) {
+  const view = useInboxView();
   // with several assistants the list is the current one's (docs/assistant/managers.md "Clients"); one: every item
   const mine = useScope();
   const items = useScoped(useInbox((s) => s.items));
@@ -98,7 +102,11 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   const groupLoading = useInbox((st) => st.groupLoading);
   const groupComplete = useInbox((st) => st.groupComplete);
   const [storedFolder, setFolder] = useStored("inbox.folder");
-  const [query, setQuery] = useState("");
+  const [query, setQueryState] = useState(() => view.listQuery());
+  const setQuery = (value: string) => {
+    setQueryState(value);
+    view.setListQuery(value);
+  };
   const foldersShown = useFoldersShown(items);
   // folders hidden (turned off, nothing filed): a folder picked before does not filter what can't be seen
   const folder = foldersShown ? storedFolder : "";
@@ -108,7 +116,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   const agents = useScoped(useStore((st) => waitingAgents(st.interactions, st.sessions, st.mutes, { source, kind, query, folder })));
   // the sections opened or closed by hand, by "<manager group>:<section>" (each manager's group keeps its own; one
   // manager: the group ""), the others as they are at first
-  const [toggled, setToggled] = useState<Set<string>>(() => new Set());
+  const [toggled, setToggled] = useState<Set<string>>(() => view.listToggled());
   const isOpen = (group: string, k: string) => OPEN_AT_FIRST.has(k) !== toggled.has(`${group}:${k}`);
   const [editing, setEditing] = useState<InboxItem | null>(null);
   const accounts = useMailAccounts();
@@ -116,18 +124,20 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
   const [mutesOpen, setMutesOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const subscriptionsShown = useSubscriptionsShown();
+  const sourcesShown = useInboxSourcesShown();
   const [foldersOpen, setFoldersOpen] = useState(false);
   // Clean up all over many items asks first; the items are the ones shown when it was asked.
   const [confirm, setConfirm] = useState<{ items: InboxItem[]; scope: string } | null>(null);
 
-  // The opened item stays in sight in the list (a link straight to it, a click in the detail).
+  // The opened item stays in sight in the list (a link straight to it, a click in the detail), except while a returned
+  // history entry's own scroll position is being put back.
   const selectedKey = selected ? itemKey(selected) : "";
-  useEffect(() => {
+  const listBox = useRef<HTMLDivElement>(null);
+  useInboxListScroll(listBox, view, selectedKey, loaded, storeLoaded, () => {
     if (!selected) return;
     const rows = [...document.querySelectorAll<HTMLElement>(`[data-item="${CSS.escape(selected.id)}"]`)];
     (rows.find((el) => sameItem({ id: selected.id, manager: el.dataset.manager }, selected)) ?? rows[0])?.scrollIntoView({ block: "nearest" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey, loaded, storeLoaded]);
+  });
 
   const s = useMemo(() => sections(items, { source, kind, query, folder }), [items, source, kind, query, folder]);
   // what the folder bar counts: the items the other filters leave
@@ -175,9 +185,9 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     if (!days) return { groups: loaded.map((g, i) => ({ ...g, count: g.items.length, plus: i === loaded.length - 1 && historyMore.includes(group), more: false, range: timeRange(g.key, now) })) };
     const counts = dayGroupCounts(days, now, filtered ? 0 : loaded.find((g) => g.key === "just")?.items.length ?? 0);
     const byKey = new Map(loaded.map((g) => [g.key, g.items]));
-    // complete: a page of its own reached its start, or the list holds it (the done items of its last days, the hub's
-    // inboxKeepDone), or (unfiltered) as many are loaded as the hub counts
-    const complete = (key: string, loadedCount: number) => groupComplete.includes(`${group}|${key}`) || timeRange(key, now).start >= now - LIST_DONE_MS
+    // complete: a page of its own reached its start, or (unfiltered) as many are loaded as the hub counts. The list's
+    // done items don't make a group complete: it carries only the newest of the last days' (#5549), the rest page in.
+    const complete = (key: string, loadedCount: number) => groupComplete.includes(`${group}|${key}`)
       || (!filtered && loadedCount >= (counts.get(key) ?? 0));
     const groupOf = (key: string): DoneGroup => {
       const items = byKey.get(key) ?? [];
@@ -269,13 +279,14 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     if (openInView.length >= BULK_CONFIRM_AT) setConfirm({ items: openInView, scope: bulkScopeName(filterNames, query) });
     else void setAllDone(openInView, "dismiss");
   };
-  const toggle = (group: string, k: string) => setToggled((o) => {
-    const n = new Set(o);
+  const toggle = (group: string, k: string) => {
+    const n = new Set(toggled);
     const at = `${group}:${k}`;
     if (n.has(at)) n.delete(at);
     else n.add(at);
-    return n;
-  });
+    setToggled(n);
+    view.setListToggled(n);
+  };
   // Agents have no source: picking one leaves the Agent filter, and the Agent filter leaves the source.
   const pickSource = (v: string) => {
     setSource(source === v ? "" : v);
@@ -291,7 +302,7 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
     {/* `overflow-y-auto` alone makes this a scroll container on both axes, so a row or a long chip (a connector's name)
         wider than the 380px column let the whole list scroll sideways and cut off every card (#3262); `overflow-x-clip`
         clips that overflow instead, and is not a scroll container, so `scrollIntoView` above cannot shift it either. */}
-    <div className="min-h-0 flex-1 overflow-y-auto overflow-x-clip" data-picking={picking || undefined}>
+    <div ref={listBox} className="min-h-0 flex-1 overflow-y-auto overflow-x-clip" data-picking={picking || undefined} data-inbox-list-scroll>
       <div className="mx-auto max-w-[760px] px-3 pt-3 pb-16 sm:px-4">
         <label className="flex h-8 items-center gap-2 rounded-control bg-surface px-2.5 shadow-btn focus-within:shadow-[inset_0_0_0_1px_var(--accent)]">
           <Icon name="search" size={13} stroke={2} className="shrink-0 text-ink-3" />
@@ -344,7 +355,9 @@ export function InboxList({ selected, picked = null, onPicked }: { selected?: { 
               { key: "rules", label: t("inbox-inboxlist.rules_list"), icon: "target", onSelect: () => setRulesOpen(true) },
               { key: "folders", label: t("inbox-folders.settings_menu"), icon: "folder", onSelect: () => setFoldersOpen(true) },
               // source subscriptions (#2041): every subscription, with the Inbox's other settings
-              ...(subscriptionsShown ? [{ key: "subscriptions", label: t("inbox-inboxlist.subscriptions"), icon: "loop" as const, onSelect: () => navigate(subscriptionsHref()) }] : []),
+              // with inbox_sources (#5278): every source of the Inbox, Settings' Inbox Sources (one home for them)
+              ...(subscriptionsShown ? [{ key: "subscriptions", label: sourcesShown ? t("inbox-inboxlist.sources") : t("inbox-inboxlist.subscriptions"), icon: "loop" as const,
+                onSelect: () => navigate(sourcesShown ? "/settings?tab=sources" : subscriptionsHref()) }] : []),
             ]} />
         )}
         {mutesOpen && <MutesDialog onClose={() => setMutesOpen(false)} />}
@@ -548,9 +561,6 @@ function scrollListTo(el: Element | null) {
   box.scrollTo?.({ top: box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top, behavior: scrollBehavior() });
 }
 
-/** How long the list keeps done items (the hub's inboxKeepDone): Done's groups within it are complete without a page. */
-const LIST_DONE_MS = 3 * 86_400_000;
-
 /** A group of Done (#2969): its items loaded so far, its count (the hub's when it has day counts), whether the count
  *  reads "n+" (plus), whether more of its items can load (more) and its time range (where its pages start). */
 type DoneGroup = InboxGroup & { count: number; plus: boolean; more: boolean; range: { start: number; end: number } };
@@ -630,7 +640,8 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
   const rows = !done ? it.doc?.rows ?? [] : [];
   const first = rows[0];
   const translated = hubTranslation(it, useTranslatePrefs());
-  const from = fromLine(it, translated?.preview);
+  // Translated mail keeps the old optional-preview path exactly; mail has no `where`.
+  const from = translated ? fromLine(it, translated.preview) : rowMeta(it);
   // a right click: "Done" / "Move back", then what it can be muted by (iOS: the row's long press)
   // (the menu key / Shift+F10 open it next to the row, see ui/context-menu.ts)
   const [menu, setMenu] = useState<MenuAt | null>(null);
@@ -653,7 +664,7 @@ const ItemRow = memo(function ItemRow({ it, selected, showAccount, folder, onEdi
               {it.summary ? (
                 <>
                   <span className={cx("line-clamp-2 text-[12.5px] leading-[1.5] break-words", done ? "text-ink-2" : "text-ink")}><Spark />{it.summary}</span>
-                  <span className="mt-0.5 block truncate text-[11.5px] text-ink-2">{from}</span>
+                  {!repeatsSummary(it) && <span className="mt-0.5 block truncate text-[11.5px] text-ink-2">{from}</span>}
                 </>
               ) : (
                 <span className="line-clamp-2 text-[12.5px] leading-[1.5] break-words text-ink-2">{from}</span>
@@ -718,9 +729,9 @@ export function rowMenu(it: InboxItem, done: boolean, folders = false): MenuItem
       ? { key: "undone", label: t("inbox-inboxlist.move_back"), icon: "inbox", onSelect: () => void setDone(it, false) }
       : { key: "done", label: t("inbox-inboxlist.done"), icon: "check", onSelect: () => void markFromRow(it, true, true) }, // a menu pick: "Undo" on any screen (#4162)
   ];
-  (it.mutes ?? []).forEach((m, i) => items.push({ key: `mute:${m.tag}:${m.value}`, label: muteTitle(m), hint: muteShortName(m), icon: "bellOff", divider: i === 0, onSelect: () => void muteItem(it, m) }));
+  (it.mutes ?? []).forEach((m, i) => items.push({ key: `mute:${m.tag}:${m.value}`, label: muteTitle(m), detail: muteShortName(m), icon: "bellOff", divider: i === 0, onSelect: () => void muteItem(it, m) }));
   // then a rule for each (docs/assistant/inbox.md "Policies"): the tier its items get, what the AI twin does with them
-  (it.mutes ?? []).forEach((m, i) => items.push({ key: `policy:${m.tag}:${m.value}`, label: policyMenuTitle(m), hint: muteShortName(m), icon: "target", divider: i === 0, onSelect: () => openPolicyDialog({ item: it, option: m, source: it.source }) }));
+  (it.mutes ?? []).forEach((m, i) => items.push({ key: `policy:${m.tag}:${m.value}`, label: policyMenuTitle(m), detail: muteShortName(m), icon: "target", divider: i === 0, onSelect: () => openPolicyDialog({ item: it, option: m, source: it.source }) }));
   if (folders) items.push({ key: "folder", label: t("inbox-folders.move_menu"), hint: it.folder, icon: "folder", divider: true, onSelect: () => openFolderDialog(it) });
   return items;
 }
@@ -833,7 +844,8 @@ const IX_GLYPH: Record<Interaction["kind"], GlyphName | "list" | "terminal"> = {
  * only when one of those changed.
  */
 const AgentRow = memo(function AgentRow({ ix, off = false }: { ix: Interaction; off?: boolean }) {
-  const to = useStore((s) => ix.session_id === "" ? requestRoute(ix) : conversationRoute(ix.machine_id, ix.session_id, s.sessions, s.assistant));
+  // a child session's card opens its parent's page, where it is answered (#5120)
+  const to = useStore((s) => ix.session_id === "" ? requestRoute(ix) : conversationRoute(ix.machine_id, requestHome(ix), s.sessions, s.assistant));
   const persona = to.name === "persona";
   const where = useStore((s) => (persona ? "Persona" : machineWithHub(ix.machine_id, s.machines)));
   const ask = interactionAsk(ix);

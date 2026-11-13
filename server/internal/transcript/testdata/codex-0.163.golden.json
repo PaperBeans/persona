@@ -13,7 +13,7 @@
       "seq": 12,
       "ts": "2026-01-01T00:00:05.223Z",
       "role": "assistant",
-      "kind": "thinking",
+      "kind": "text",
       "text": "甲壬戊壬丁乙 Lds 丙 Eoooj、dXH TNI 庚庚丁壬辛，己庚丙 Beaac 辛辛己 LsrqYdutra 甲甲辛乙，己癸戊辛戊辛癸壬丙丙己丁癸庚。",
       "model": "gpt-5-codex"
     },
@@ -213,7 +213,15 @@
         "source": "codex_task_complete",
         "turn_id": "99dc8fd6-f366-d50f-3b19-2de7fe4a86e7",
         "user_item_id": "548a7d42-3c4d-ba8f-dc2e-ef5db9643fa9#0"
-      }
+      },
+      "usage": [
+        {
+          "model": "gpt-5-codex",
+          "in": 52973,
+          "out": 2222,
+          "cache_read": 190592
+        }
+      ]
     },
     {
       "id": "call_JB0YnrzzV3GE1xdCHZNY7emUPxBLm9KY#0",
@@ -635,7 +643,15 @@
       "ts": "2026-01-01T23:49:36.69Z",
       "role": "system",
       "kind": "notice",
-      "text": "已中断"
+      "text": "已中断",
+      "usage": [
+        {
+          "model": "gpt-5-codex",
+          "in": 6332,
+          "out": 623,
+          "cache_read": 590976
+        }
+      ]
     },
     {
       "id": "exec-FPPcnfhM-1p71-030f-5877-9wo6u61fg594#0",

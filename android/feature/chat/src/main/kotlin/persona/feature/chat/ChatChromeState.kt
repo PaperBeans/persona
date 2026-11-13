@@ -5,6 +5,7 @@ import android.content.res.Resources
 import androidx.compose.runtime.*
 import persona.core.designsystem.operationFeedback
 import persona.core.domain.FailureAction
+import persona.core.domain.answer.Delegated
 import persona.core.contracts.*
 import persona.core.contracts.api.*
 import kotlinx.coroutines.CancellationException
@@ -62,6 +63,8 @@ internal class ChatChromeState(
     private val actions: ChatActions?, private val scope: CoroutineScope,
     private val refresh: suspend () -> Unit, private val onClosed: () -> Unit,
     private val renamer: SessionRenamer? = null,
+    /** The answers the assistant gave and Change answer, for Session info's questions it answered; none in previews. */
+    val interactions: InteractionCenter? = null,
 ) {
     var busy by mutableStateOf(false); private set
     var muted by mutableStateOf<Boolean?>(null); private set
@@ -87,6 +90,10 @@ internal class ChatChromeState(
     /** "Session info" (GET …/info); fails when the actions are not wired, which the sheet says. */
     suspend fun info(session: Session): SessionInfo =
         actions?.info(session) ?: throw UnsupportedOperationException(res.getString(R.string.chat_action_info_unavailable))
+
+    /** Session info's questions the assistant answered for this session ([Delegated.history]); none without the actions. */
+    suspend fun delegatedAnswers(session: Session): List<DelegatedAnswer> =
+        Delegated.history(actions?.interactionHistory(session).orEmpty())
 
     suspend fun loadMute(session: Session) {
         try { muted = actions?.isMuted(session) }

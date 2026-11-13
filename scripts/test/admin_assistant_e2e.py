@@ -4,9 +4,9 @@
 Run the web dev server (cd web && npx vite --port <port>), then:
     python3 scripts/test/admin_assistant_e2e.py http://127.0.0.1:<port> [--shots <directory>]
 
-Checks the switch (on asks first, off at once), that every example draws, that a press and a form only change the
-page (no request leaves it while previewing), that the html example is its text and no frame; wide and narrow,
-light and dark. Screenshots contain only the synthetic examples.
+Checks that the page has no switch (the cards are always on, #5509) and calls no hub API, that every example draws,
+that a press and a form only change the page (no request leaves it while previewing), that the html example is its
+text and no frame; wide and narrow, light and dark. Screenshots contain only the synthetic examples.
 """
 import argparse
 import os
@@ -28,33 +28,16 @@ def check(browser, base, width, theme, shots):
         page.goto(f"{base}/admin/assistant?mock=app&theme={theme}")
         main = page.locator("main")
         expect(main.get_by_role("heading", name="助手卡片", exact=True)).to_be_visible()
-        switch = main.get_by_role("switch", name="助手画 persona-view 卡片")
-        expect(switch).to_have_attribute("aria-checked", "false")
+        expect(main.get_by_role("switch")).to_have_count(0)
+        expect(main.get_by_text("各端支持", exact=True)).to_be_visible()
+        page.wait_for_load_state("networkidle")
+        if any("/api/v1/admin/assistant" in url for _, _, url in requests):
+            raise AssertionError("the page asked the hub for the retired switch")
         if shots:
             page.wait_for_timeout(300)
             page.screenshot(path=os.path.join(shots, f"assistant-{width}-{theme}.png"), full_page=True)
 
-        # On asks first; cancel leaves it off; confirm turns it on; off needs no question.
-        switch.click()
-        dialog = page.get_by_role("dialog")
-        expect(dialog.get_by_text("打开助手卡片？")).to_be_visible()
-        if shots:
-            page.wait_for_timeout(300)
-            page.screenshot(path=os.path.join(shots, f"assistant-enable-{width}-{theme}.png"))
-        dialog.get_by_role("button", name="取消").click()
-        expect(switch).to_have_attribute("aria-checked", "false")
-        switch.click()
-        page.get_by_role("dialog").get_by_role("button", name="打开", exact=True).click()
-        expect(switch).to_have_attribute("aria-checked", "true")
-        expect(main.get_by_text("已打开", exact=True)).to_be_visible()
-        switch.click()
-        expect(switch).to_have_attribute("aria-checked", "false")
-        expect(page.get_by_role("dialog")).to_have_count(0)
-
-        # From here on nothing may leave the page: the preview is local. (A fresh load: no toasts over the shots.)
-        page.reload()
-        expect(main.get_by_role("heading", name="助手卡片", exact=True)).to_be_visible()
-        page.wait_for_load_state("networkidle")
+        # From here on nothing may leave the page: the preview is local.
         start = len(requests)
         picker = main.get_by_role("radiogroup", name="选择示例")
         preview = main.locator("[data-preview]")

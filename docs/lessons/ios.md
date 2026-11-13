@@ -2,6 +2,132 @@
 
 Pitfalls, odd behavior and the decisions made at the time (formerly "Lessons" in `CLAUDE.md`; index in `docs/lessons/README.md`). Add new lessons to the relevant section, or create one if none fits.
 
+## A Debug build on an iPhone has a 1 MB main-thread stack (#6735)
+
+A Debug build installed on an iPhone crashed every time it opened on Agents: `EXC_BAD_ACCESS` in the main thread's stack
+guard, with Swift runtime metadata frames on top (`swift_getTypeByMangledName`, `_swift_getKeyPath`) under
+`View.listSectionSpacing` in `AgentsList.styledAgentList`. Those were only the last ~26 frames; the stack had gone to the
+page's own frames. Unoptimized, a function reserves a stack slot on entry for every opaque (`some View`) intermediate of a
+modifier chain, and each intermediate holds everything before it, so the slots add up like a triangle: `observedAgentList`
+reserved 422 KB on entry for its ~45 modifiers. The device's main thread has 1008 KB (the crash report's
+`vmRegionInfo`); the simulator's has 8 MB, and Release specializes and reuses the storage, so neither the simulator, CI
+nor TestFlight showed it. Measured with `AgentsListStackTests` in the simulator: the page's first render reached 941 KB
+before the fix and 448 KB after.
+
+- Erase a long chain in a few places (`AnyView(...)` at the stage boundaries): each segment then starts small. An erased
+  type is the same on every update, so identity and state stay. The same tool as the Mac's cold-start split
+  (`docs/lessons/macos.md`). Erasing only the big view at the bottom of the chain helped little (941 → 747 KB): the
+  modifiers' own storage (bindings, closures, ids) made most of the triangle.
+- A crash in the stack guard with runtime frames on top: count the frames before reading it as recursion. Few frames
+  mean big frames; look for the app's functions underneath, and measure where the stack goes (record the stack address
+  at a few points) rather than guessing.
+- `StackPeak.measure` (in `AgentsListStackTests`) paints the unused stack, runs the render, and finds the lowest word
+  overwritten. Keep a page under half the device's stack (512 KB).
+
+## An edit menu needs the selection's rect, not just a point (#6005)
+
+- If `UIEditMenuInteraction.presentEditMenu(with:)` gets only a `sourcePoint` and its delegate has no
+  `editMenuInteraction(_:targetRectFor:)`, the system doesn't know how tall the selection is or where its handles are.
+  In the lifted message it put the menu just under the selection's top edge, covering the selected word and its end
+  handle, so the handle couldn't be dragged. Return the selection's rect, clipped to what shows and padded for each
+  handle's knob (the start handle's above the first line, the end handle's below the last). The system then places
+  the menu above that rect, or below it when there is no room.
+- To check this in a UI test, a DEBUG value reports the selected lines and the handle views
+  (`UITextSelectionHandleView`) in window coordinates. Compare them with the frame of the edit menu's items.
+
+## Selecting the words of a long lifted answer (#5291)
+
+- A `LazyVStack` opened at item N in a scroll view still lays out items 0 and 1 first, then walks the items between
+  them and N, all in the first frame. To lift item N without that cost, give the items above it fixed-height
+  placeholders on the first frame and swap in the real ones on a later frame (`AnswerPartsLift`), keeping the pressed
+  item where it is on screen while they arrive.
+- `.task` and `onAppear` run inside the frame that shows the view, not after it. To defer work to a later frame, use a
+  display link and skip one tick (`LiftFrames`).
+- A text view that doesn't scroll sets its text container's height to its own frame height whenever its frame is set,
+  so its last line is dropped when that line's spacing hangs below the frame. Keep the container unbounded in
+  `layoutSubviews` (`LiftUITextView.keepsAllLaidOut`). A UI test comparing its lines to the chat's catches the missing line.
+- Making a UIKit view inside SwiftUI the first responder costs tens of milliseconds whatever the view holds: SwiftUI's
+  focus bridge walks the hosting view's whole responder tree. The first text selection after launch also loads
+  TextInputUI (the cursor glow), and the first edit menu loads the Translate service. Measured in the simulator, the
+  two loads were about 30 ms each. Start the selection in a later frame than heavy text layout, and show the edit
+  menu one frame after that, so the costs don't add up in one frame.
+- To see what fills a long main-thread block, read the watchdog's backtraces in the frame report the UI test
+  attaches. They show which step of the frame the block was in before you add any tracing.
+- TextKit 1 can keep a stale end for a line it laid out once and then breaks elsewhere (here: wrapped on its own,
+  then where the chat's lines break, through `shouldBreakLineByWordBeforeCharacterAt`). The glyphs are drawn in the
+  right places, but `boundingRect(forGlyphRange:)` of the line's new last glyph is a zero-wide box at the line's right
+  edge. Set the breaks before anything lays the words out, and remember that setting a `UITextView`'s
+  `attributedText` can lay it out then and there: work the breaks out from the new string and set them before
+  assigning it (`LiftUITextView.render`). When the breaks still change after a layout, invalidate all of the glyphs
+  (`resnap`); it costs no more than the relayout. On macOS the stale box appears only after something measured the
+  old layout, and only invalidating every glyph clears it. A command-line repro built with `swiftc` for the iOS
+  simulator and run with `simctl spawn` did not show it there, so check the fix in the app.
+- A selection handle's knob hangs past the selected lines: over the first, under the last. When a text view is
+  exactly as large as its words inside a SwiftUI view, a touch on the knob lands outside it and the handle can't be
+  dragged. Make the text view reach past the words (`Theme.Lift.handleReach`), with a matching
+  `textContainerInset` that keeps the words where they are.
+
+## A lazy grid never makes what it does not show (#4073)
+
+- `LazyVGrid` and `LazyVStack` make an item only once it comes near the visible part of their scroll view. A preference,
+  `GeometryReader` or `onGeometryChange` on an item that never comes into view never reports, so "not measured yet"
+  lasts for good.
+- The new conversation's welcome reports where its first suggestion cards end (`WelcomeFold`), and the shell caps
+  Needs You over the composer below that (`NeedsRoom`). At the largest accessibility text sizes the greeting and the
+  paragraph filled the page and the cards stayed below it. The grid never made them, and Needs You showed every row it
+  had (three and "N more") over the welcome.
+- A few items that must be measured wherever they are go in a non-lazy layout (`Grid`, `VStack`). The shell's four
+  cards are a `Grid` now. The main chat's welcome measures nothing and keeps its `LazyVGrid`.
+- Reproduce with `-UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL` on an ordinary iPhone
+  simulator; no iPhone Duo is needed.
+- An XCUITest query builds the app's accessibility tree, and that makes a lazy grid make its items off the page too. A
+  test that first waited for Needs You saw one row without the fix: the query had made the cards, and their fold capped
+  it. `testNeedsYouAtTheLargestTextSize` lets the page settle without asking for anything, and counts the rows at its
+  first look.
+
+## Tab selection and targeted opens are different navigation intents (#5641)
+
+- An Agent pushed on Assistant's stack still uses the dev chat view, which writes the shared last-opened Agent marker.
+  Returning to Assistant does not clear that marker. A lazily built Agents page can therefore restore the card's Agent
+  on its first appearance; a previously built Agents page can retain its own detail path instead. Check both paths.
+- A regular-width split sidebar's `NavigationLink(value:)` can own a selection independently of the bound detail path.
+  Clearing that path closes a code-opened Agent but not necessarily an Agent opened by a sidebar row. On iOS, route
+  those Agent links through the bound path as well; decide from the parent page's layout (`ownsTop`), because the
+  sidebar itself can read compact. Test native-tab reselection and switching back after a row tap, not just after a
+  launch link. Do not rebuild the whole list to erase this selection and discard its local state.
+- Reset the Agents path and restore marker only at an explicit tab-selection boundary, not in the general tab router:
+  notifications and links use that router too and must still open their exact Agent. Reselection needs a generation,
+  because the selected tab's value does not change. Deferred restoration/reset callbacks must check that generation and
+  leave newer targeted requests to the existing stable-stack opener.
+- A test proving that the strip says Agents is not a list-root test. Also assert its navigation root and that no Agent
+  title is in front. Keep the mock task and its Agent under the same assistant: the generic multi-manager mock puts
+  some computers under a different assistant, so the dispatch fixture explicitly defaults to one manager.
+
+## Settings requests must capture their scope (#5236)
+
+- Renaming a section does not scope a merged list. Filter connector/extension rows by the captured assistant, and name
+  that assistant on reads, previews, consent and mutations. A default (`nil`) is a captured choice too: it must not
+  inherit a later picker value. Keep explicit manager-bound deep links bound to their owner.
+- A remembered pick must apply before the roster returns, or opening settings during launch can read another assistant's
+  data. Distinguish a confirmed legacy-roster 404 from a transient failure; compatibility may suppress the request header
+  without erasing the user's saved pick.
+- A reusable Settings row that already wraps itself in Section needs an unwrapped variant when moved into an existing
+  scope group. Nesting Sections produces a different grouping instead of retaining one group.
+- Check existing icon identifiers, not just symbol literals, before adding a vocabulary token. Pairing was already a
+  registered meaning; QR scanning is a different one. Run the icon vocabulary and token ratchets after moving code.
+
+## Draft growth and caret following are different jobs (#5650)
+
+- A keyboard-visible viewport percentage is not a reliable six-line draft cap. The former 22% policy commonly selected three lines on phones; iOS now uses its own six-line token, separate from Mac's unchanged eight-line cap.
+- Geometry updates are not typing. Calling `scrollRangeToVisible` from every height change overrides a person's manual reading position. Layout settling only clamps an out-of-range offset; caret following belongs to text/selection changes, and deferred work must stay tied to the same text view and yield to a later manual scroll.
+- A full-page editor needs a dedicated controls row before its text. Navigation toolbar placement alone does not guarantee the text view starts below the controls. Check both appearances with the keyboard up and down.
+
+## Colors inside the user's bubble come from the bubble as drawn (#5204)
+
+- Persona's main conversation draws the user's message in the new layout's pale box (`Theme.ChatBox.user`, primary words) whatever the style, while `StyleSpec.userBubbleText` and `deepensBubble` describe the style's own bubble. Quote and comment blocks picked their colors from `deepensBubble` alone, so every colored-bubble color (Coral, Lavender, Teal, Clay, Island) drew white blocks on the pale box (about 1.35:1), and Island in dark drew near-black ones on the dark box. Anything placed in the bubble reads `Theme.UserBubbleInk.of(spec, boxed: layout.on)`, the same value the bubble's fill comes from.
+- A veil of the words' color as a block's fill lowers contrast on a colored bubble: white words on white 12% over Coral were 4.3:1, and the 82% summary 3.4:1. A colored bubble's block takes a black shade (as `Theme.deepening`), and its words stay at full strength (82% fell to 4.45:1 on an avatar's honey bubble).
+- Text on a tinted fill needs a composite test (DESIGN_SYSTEM.md 6.3, item 7): lay the fill over the bubble's top and its deepened bottom before measuring (`StyleSpecTests.whatSitsInTheUsersBubble`).
+
 ## What a VNC client can count on from macOS Screen Sharing (#3075)
 
 - ClientCutText reaches the Mac's pasteboard only as the legacy `com.apple.traditional-mac-plain-text` type, without `public.utf8-plain-text`: AppleScript's `the clipboard` reads it, `pbpaste` and Terminal do not, so a ⌘V after it pasted nothing. Write the clipboard through the node, which answers once the text is there.
@@ -25,6 +151,28 @@ does not compile): read it where it is set from (`StyleSpec.current.fontDesign`)
 - A type nested in a `nonisolated` type or extension is not `nonisolated` itself; used from a test or a background queue it crashes with `dispatch_assert_queue`. Write `nonisolated` on each nested enum and struct.
 - UI tests of this feature share one mock hub for the whole run, and the hub keeps each recording's live log and asks. A test that reads `asks.first` passes alone and fails after another test asked about the same sample recording. Restart the mock hub (stop it by its port) before each run, or run the test alone.
 - `Text(timerInterval:)` has no text a UI test can read: its accessibility label is the caller's ("Recording time") and the time is the spoken value, so assert on the value. A `Label` carrying an accessibility identifier gives the identifier to its icon too; combine its children first, or the test finds the SF Symbol name as the label.
+
+## A hold attached to a Button never begins (#2045, 2026-11-12)
+
+`.gesture(_:)` attaches a gesture "with a lower precedence than gestures defined by the view", and a `Button`'s press
+is one. A `UIGestureRecognizerRepresentable` hold put on the calendar's to-do buttons waited for the press, which only
+ends when the finger lifts. So the hold never began, a finger that moved a few points failed it and the axis
+scrolled, and on the lift the press fired: a drag across the week opened the to-do. Only the UI test recordings showed
+it; the compiler and the unit tests had nothing to say.
+
+- A representable has no `simultaneousGesture` or `highPriorityGesture`. Make the recognizer the button's own
+  interaction instead: a `PrimitiveButtonStyle` whose label carries it and calls `configuration.trigger()` on a tap
+  (`CalendarCarryStyle`). The recognizer recognizes the tap itself, so no gesture under it takes the touch as well.
+- Never wrap `Button(configuration)` inside the style (`Styling.swift`).
+- Such a button no longer wins the hit test the way a plain `Button` does. On an iPad, a finger on the axis's
+  blocks went to the empty column beside them, whose tap gesture added a to-do; a pointer and a phone's finger still
+  reached the block. Put a tap meant for the empty space on the view that contains the buttons, as the month's day
+  is around its chips, as a `simultaneousGesture` that ignores taps on them. Placing the blocks by layout instead of
+  `.offset` (FB17939266) and taking a hover effect off the label changed nothing.
+- When a gesture misbehaves only in UI tests, note its steps in a DEBUG trace shown as an accessibility value
+  (`CalendarDragTrace`) and print it in the failure message. An empty trace says the recognizer never saw the touch. To
+  find where a touch went, a passive recognizer on the window (`cancelsTouchesInView` false, failing in
+  `touchesBegan`) can note `touch.view` and `touch.gestureRecognizers`; take it out once it has answered.
 
 ## A file only tests read still counts as a blocking read (#4695)
 
@@ -105,8 +253,8 @@ The table and red lines are in `docs/apple/ios.md` ("Design language", Motion); 
   there. The two exceptions are measured ones: a glyph swapped inside the same round button (Telegram's send) and the quote bar fading in
   quicker than out (Telegram's input panel), kept as measured.
 - **No easing under the finger.** An animation on a drag makes the content trail the finger, which reads as lag. Track the gesture with
-  `transaction.animation = nil` / plain state writes and hand the finger's speed to the release animation (`drawer(velocity:)`,
-  `attachOpen(velocity:)`), so the motion carries on instead of starting over.
+  `transaction.animation = nil` / plain state writes and hand the finger's speed to the release animation (`drawer(velocity:)`),
+  so the motion carries on instead of starting over.
 - **Continuous motion is registered.** Each loop costs battery and attention, and a loop nobody asked about is how a pulsing avatar or a
   spinning gear ships. `ContinuousMotionTests` scans the app targets for `repeatForever`, `TimelineView(.animation…)`, `phaseAnimator`,
   `repeatCount = .infinity` and `startAnimating()`; a new one fails until it is registered with its reason and the file that reads Reduce
@@ -177,14 +325,27 @@ from colliding with its buttons.
   CJK punctuation, and TextKit 2 matches SwiftUI glyph for glyph. TextKit 1 draws a line-ending 」 or ） about 3 pt narrower and starts the next
   line half an em in (a little in, before an opening bracket). Lines ending in ，。、”： match. `LiftUITextView.wrappedStart` measures how
   far a wrapped line starts past its indent and `LineSnap` moves it back; the narrower bracket stays (the highlight of a whole line
-  reaches the words' edge anyway).
+  reaches the words' edge anyway). A line that starts with an opening bracket (「) gets that bracket narrower too (6.1 pt of its 8.6 at
+  17 pt, iOS 27.2): it starts where the chat's does, and the rest of the line is 2.5 pt to the left, its end handle short of the last
+  word. `narrowedBracket` moves such a line right by what the bracket lost, so only the bracket starts in (#5982). A kern after the
+  bracket did the same but made the line too long for TextKit 1, which measures a line-ending 。 at full width: it wrapped the 。.
+- **Over lines a layout manager's delegate moved, find the line yourself.** `LineSnap` puts each line on the chat's
+  (`shouldSetLineFragmentRect`); the highlight (`selectionRects`) and the paragraphs' accessibility frames follow. The text view's own
+  lookups did not (#6099). In the mock's long answer, `closestPosition(to:)` found the table for a point on the line under it and the
+  heading for one on the first paragraph, and `caretRect(for:)` put the end 57 pt under the last line. A line moved up can also start
+  inside the one before it (a table picture's line is taller than the chat's table), and there the layout manager's own
+  `characterIndex(for:in:fractionOfDistanceBetweenInsertionPoints:)` took the earlier line too. A second long press picked a word above
+  the one pressed; a handle dragged onto the line under a table ended before the table. `LiftUITextView.closestPosition(to:)` takes the
+  last line starting at or above the point, then the nearest place in it; `caretRect(for:)` is still the system's.
 - A `UIScrollView` subclass cannot have a property named `dragging`: its Objective-C getter is `isDragging`'s, and the override fails.
   `Layout` methods are not on the main actor: what they write must be `nonisolated`.
 - **UIKit only scrolls a text view's own content while a selection handle is held at its edge.** With `isScrollEnabled = false` inside a
   SwiftUI `ScrollView`, the handle reaches the edge and the outer scroll view stays put. `LiftUITextView` follows the finger with a
   recognizer that never recognizes and cannot be prevented (`canBePrevented(by:)` false), treats a touch that changes the selection as a
   handle's drag, and scrolls the first enclosing `UIScrollView` from a display link, moving the dragged end of the selection with the words
-  under the finger, since a finger held still sends no touches.
+  under the finger, since a finger held still sends no touches. Since iOS 27 a dragged handle changes the selection only when the finger
+  lifts, so nothing changed while it was held at the edge and the lift never scrolled (#5982): the handle is told by where the finger went
+  down (`LiftLayout.handle`), and it scrolls once it has moved (`LiftLayout.moved`), not as soon as it is touched at an edge.
 - **XCUITest sees no child of a `.combine` element.** A lifted message combined into one element has no static texts to find; the long
   one is `.contain` (VoiceOver can then go through its parts, which scrolls it), and `isHittable` on its first line is what tells whether
   something else is drawn over it.
@@ -423,7 +584,13 @@ Use an invalidation revision as the task key and handle the flag after completio
   `max(bottom of one, top of the next)` and a list or quote takes the largest margins inside it. Check spacing by pixels against the whole answer in a
   window (`AnswerPartsLookTests`), not `ImageRenderer`: one pass of it draws the blocks before their margins arrive.
   - Parts trade the opening freeze for drawing as they come into view: the lazy stack drops a part's layers once it scrolls far away, and drawing
-    many distinct CJK glyphs the first time is most of the main thread's work in fast programmatic jumps (#5076). Finger scrolling stays in budget.
+    many distinct CJK glyphs is most of the main thread's work in programmatic jumps; jumps to the newest end now run
+    on the list itself (「Animated jumps redraw every text they pass」, #5076). Finger scrolling stays in budget.
+  - Whatever acted on the row acts on the message, not the part (#5221): with each part's long press lifting its own words, the lifted card showed a
+    fragment of the answer and Select Text selected only it, while Copy (the bar's text) still took all of it. The part's press lifts a copy of every
+    part (`AnswerPartsLift`), lazily: a copy laying out every part at once would bring back the cost the parts took out of the chat. Its words
+    are selected only after all of its parts are laid out, since the text view over them follows every line. When splitting any message into
+    rows, list what reads the row's view (long press, selection, accessibility, share as image) and check each against the whole message.
 - Check that a scroll measurement moved the list before trusting it (#4970). `-showPagePerf`'s glide and `-showListOffset` move the `UIScrollView`
   themselves; a chat not told a finger is on it keeps following its newest end and puts its stored `ScrollPosition` back as rows size themselves, so
   the list barely moves and the numbers look excellent. Chats register a per-list hook (`PagePerf.touchers`): a single static one was taken by Persona's
@@ -914,6 +1081,10 @@ Use an invalidation revision as the task key and handle the flag after completio
 - For new APIs, build with 26.0 before merge when available (`eval "$(python3 scripts/persona_config.py env)"` for `DEVELOPER_DIR`). **Without that environment, no mandatory build or merge / release blockage** (explicitly requested 2026-11-03): build / test with available tools, `state` actual version and "26.0 not verified" in PR without repeated exemptions; retain compatibility targets and compile guards.
 - Raising minimum is a product decision: ask the user and update `CLAUDE.md`'s rule and this section.
 
+- **SourceKit's diagnostics on a file opened alone are noise** (2026-11-12, #4741): an editor or an Agent's language server that
+  checks one file of `apple/` without the XcodeGen project's build settings reports types from other files, `Theme` and the targets'
+  modules as missing, and calls across them as errors. They say nothing about the build: judge a change by `xcodebuild`'s own `error:`
+  lines (after `eval "$(python3 scripts/persona_config.py env)"`), never by those squiggles, and don't "fix" code to quiet them.
 - Release machine Swift 6.3.3 differs from other machines and may report "unable to type-check this expression in reasonable time":
   multi-statement closures in long modifier chains (`.task { … }`) are inferred with the entire chain, with shifting error lines. Extract closure methods and computed ids (`ChatView.prewarmRows`).
 - Xcode 26.3 / Swift 6.2.4 also times out on long array-concatenated fixtures (`RFBClientTests.sessionFollowsDesktopSize`).
@@ -930,6 +1101,25 @@ Use an invalidation revision as the task key and handle the flag after completio
 - watchOS Picker in compact VStack can flatten to a thin line, missed by compile / accessibility-existence checks. Use single-line toggle buttons for a few recording languages and inspect watch screenshots.
 - Recording and composer dictation share microphone ownership; failed / late stop callbacks must not close another user's audio session. Recording deletion retains tombstones against late watch transfers resurrecting items.
 - The watch app keeps running in the background while it records (`UIBackgroundModes: audio`, 2026-11-02), and the phone's summaries still arrive over WatchConnectivity then, so a page keyed on `model.lastUpdate` or a session's `rev` reloads in the background too. watchOS kills a background app over its CPU budget (`CAROUSEL 0xc51bad01`, #6256): gate page reloads on `scenePhase == .active`, and keep only what the page draws (`WatchMessage`, the newest few) instead of the hub's whole `Item` page, whose synthesized `Hashable` hashes nested tool input on every assignment.
+
+### All-day recording on the watch (#4741)
+
+- **AVAudioFile's m4a files carry about 23 KB of padding**: the writer leaves a `free` box between `moov` and `mdat` (room for the
+  header to grow, never used once the file is closed), so 10 s of 32 kbps AAC came to about 65 KB instead of 42 KB, over the 48 000
+  bytes all-day recording's live envelope allows (`sendMessageData`, `docs/assistant/day-recap.md` "Chunks"). Every chunk would have
+  gone the slow `transferFile` way. `RecordingM4A.compact` drops the top-level `free` / `skip` boxes from each finished all-day chunk
+  and moves the chunk offsets (`stco`, `co64`) back; a layout it doesn't know stays as written. Measure the real file size before
+  sizing anything on bitrate × seconds.
+- **A watch haptic does nothing in the background**: `WKInterfaceDevice.play` plays only while the app is in front, and the call
+  fails silently otherwise. A recording paused by a call with the wrist down reached nobody: rolling recording still only taps
+  (`docs/apple/recording-rolling.md` "Interruptions and the microphone"). Anything that must reach a wrist that is down is a local
+  notification the watch posts itself (`AllDayAlertPolicy` decides the haptic only when `appActive`).
+- **`WCSession.sendMessage` can't launch the watch app**: from the watch it may wake the iPhone app, but the phone's message reaches
+  the watch app only while it runs and is reachable. The phone's all-day commands, acknowledgements, erases and deletes therefore fall
+  back to `transferUserInfo`, and a suspended or closed watch app gets them only when the system wakes it, which it does only for an
+  app with a `.backgroundTask(.watchConnectivity)` handler; without one they waited for the next time the user opened the app. The
+  handler returns once `hasContentPending` is false and what it led to is done (`WatchAllDay.receiveConnectivity`). It can't open
+  the microphone either: a start the phone asked for becomes a notification whose button brings the app to the front.
 
 ## System capabilities and page conventions
 
@@ -1236,6 +1426,55 @@ When a computer disconnects, hub marks sessions unknown, not offline; `AgentStat
   (`ScrollToBottomTests` 11 and 12), but the old code passed it too. The device check is the report's own steps on a
   TestFlight build: flick hard, tap ↓ at once, in an Agent chat and in Persona's.
 
+## Animated jumps redraw every text they pass (2026-11-12, #5076)
+
+- **What happened**: after #4970 a finger glide through a long finished Agent answer stayed within budget, but
+  `-showAutoScroll`'s sweep (eight animated 3000 pt jumps) over a ~33,000-character, mostly Chinese report still spent
+  about 430 ms of every second hitching, longest frames near 400 ms. A synthetic report of the same shape with few
+  distinct characters cost a seventh of that, so the cost followed glyph variety.
+- **CoreGraphics' glyph cache is 1 MB**: every glyph CoreGraphics renders goes into one process-wide cache of
+  1,000,000 bytes, least recently used first out. A 17 pt Chinese glyph at @3x is about 2.6 KB, so it holds roughly 380.
+  The report used 784 distinct characters at several sizes and weights (body, semibold, headings, inline code, tables):
+  one dense screen already overflows it, and from then on every draw renders each glyph again from its outline
+  (`CGGlyphBitmapCreateWithPathAndDilation` under `CABackingStoreUpdate_`, about 35–80 µs a glyph in the simulator). The
+  limit is not adjustable by an app: `CGFontCacheMaxSize` is a debugging default CoreGraphics reads only where debugging
+  defaults are allowed, and the setter is private. Warming glyphs off the main thread before a part appears cannot help:
+  what was warmed is evicted before it is drawn.
+- **SwiftUI's animated scroll draws everything again, every frame**: `withAnimation { position.scrollTo(…) }` moves the
+  content to a new fractional pixel offset each frame, and SwiftUI draws each of its drawing layers on screen again for
+  it. Counted with a lab library in a simulator build (`drawInContext:` of SwiftUI's drawing layers): 1,000–2,300 draws
+  a second on 40–100 layers during the sweep, every draw on a new sub-pixel position, against a handful a second when a
+  finger or ↓ moves the `UIScrollView` itself (those layers are composited where they are). Together with the cache, an
+  animated jump over Chinese text rendered every glyph on screen anew on every frame.
+- **Fix**: the chat's animated jumps to its newest end (sending, following, a held row let go) run like ↓ (#3027) on
+  the list itself, `ChatJumpRun` on a display link, on whole pixels: far away the list is put a screen short first and
+  the last screen glides, so the rows between are never drawn. `-showSwiftUIJumps YES` keeps the old way to measure
+  against in one build; `-showJumpPerf YES` measures ↓, send, quote, call and near jumps; `MOCK_LONG_REPORT=cjk` is a
+  public fixture with a real report's glyph variety.
+- **Jumps to a line keep SwiftUI's animated scroll**: tried on the list too (SwiftUI places the line on the frame of
+  the tap, below), a far one put SwiftUI's layout of the far line, three evaluations of the page and the leap's drawing
+  on one frame: 206–252 ms against SwiftUI's own worst frame of 112–169 ms there (a quote of the report's start, the
+  oldest tool call). Landing far away has to lay that place out either way; spread over SwiftUI's animation it costs
+  more in total but less on any one frame. A line partly on screen (the oldest one, as the navigator picks it) is not
+  a fair race: SwiftUI's animated `scrollTo(id:anchor: .center)` left the list where it was, while placing it first
+  moved the list about 1,000 pt to center it (longest frame 117 ms median against SwiftUI's 17 in the real report).
+  All jumps to a line keep SwiftUI's, so they behave exactly as before.
+- **Where a line is, before the frame is drawn** (tried, not used): a lazy list knows a far row's offset only once it lays it out. A
+  non-animated `position.scrollTo(id:anchor:)` followed by `window.layoutIfNeeded()` makes SwiftUI place it at once, and
+  the list's `contentOffset` is then the target. Putting the offset back does not hold: SwiftUI keeps the list on the
+  requested row and moves it there again on the next frame, even after the position is forgotten. Replacing the request
+  with `scrollTo(point:)` where the jump starts (another layout pass) does hold; then the position can be forgotten as ↓
+  does. A simulator lab app (a flipped `LazyVStack` of 1,500 rows) landed the glide exactly where SwiftUI's own
+  non-animated jump puts the row, five targets near and far, twice; the chat still asks SwiftUI for the row once there.
+- **What did not help**: `drawsAsynchronously` on SwiftUI's layers (worse: 545–588 ms/s against 416–470); smaller answer
+  parts (`-showAnswerPartLines` 12 or 8: a finger's first glide 80–110 ms/s against 84–96 at 24 lines).
+- **How it was found without a build**: a lab-only dynamic library injected into an existing simulator build
+  (`SIMCTL_CHILD_DYLD_INSERT_LIBRARIES` on `simctl launch`) read and raised the cache limit and counted the layers'
+  draws, and command-line programs run with `simctl spawn` timed CoreGraphics alone. None of it is in the app.
+- **Remaining**: a finger's first pass over parts never drawn still renders their glyphs once (about 85–95 ms/s at
+  2000 pt/s in a Debug build); a far jump draws the screen it lands on; jumps to a line still animate SwiftUI's
+  scroll position.
+
 ## Context compaction as a divider (2026-11-04, #1064)
 
 Claude Code writes three things: `system/compact_boundary` (`compactMetadata.trigger` `manual` / `auto`; idle compaction also `auto`), a following `isCompactSummary` user line,
@@ -1500,7 +1739,43 @@ no initial Working row so the message shifted by one row, and pending local remo
   - Inspect keyboard UI at SE size; iOS 27.1 simulator has no SE, use 27.0.
   - Do not `swipeUp` for options in small regions: fast flings overshoot and header-start swipes do not scroll. Hold, slow-drag, pause at end (`press(forDuration:thenDragTo:withVelocity:thenHoldForDuration:)`), starting inside the scrolling area.
 
+## Question actions live outside option scrolling (2026-11-12, #4839)
+
+- Putting the whole question form in the panel's ScrollView also puts Previous / Next / Submit below the visible options. A footer brought closer to the visible area can still be clipped by the spacing between the scrolling body and footer; subtract both the footer and that spacing from the body's cap.
+- Size a single question from the actual pending-card area after its header and margins, not only from the page's 55% or the keyboard-only cap. The choices (or a multi-question review) scroll inside; the outer pending-cards view scrolls only between several cards.
+- `ApprovalCard.maxHeight` is opt-in and includes its fixed footer, so the BeautifulUI panel gets the same behavior without changing the library's other approval and plan callers. `rejectsDraggedPicks` is separately opt-in, so terminal, plan and permission cards keep their original gesture handling. `ScreenReviewFooter` separates the multi-question review's actions from its scrolling rows in the same way. The regression drives the real main-chat `ask_user` card in both styles, color schemes and the largest accessibility text on a standard phone, plus default-text small-phone coverage, after a deliberate pick has enabled Submit, then checks the actual resolution.
+- A multi-select drag guard cannot cover the single-select auto-send path: a 12 pt flick can still activate a Button. `DeliberateTap` marks a drag from 10 pt until 250 ms after it ends, and the option action checks that state; a short-drag regression must assert both no selection and no resolution while deliberate taps keep working.
+- Negative footer padding is visual overflow even when the accessibility frame still fits. A capped `ApprovalCard` keeps the host's horizontal and top alignment but has no bottom bleed, so its measured cap contains the whole button. Its footer pills also opt into `growsWithText`: a fixed 27 pt background does not grow when the label does at accessibility XXXL. The UI regression keeps actions above the outer area's 8 pt bottom fade, and screenshot pixel checks must confirm the visible capsule, not only `isHittable` and a successful resolution.
+
+## A lone question card past half the page (2026-11-13, #6277)
+
+- A cap that may grow past half the page uses only values the card does not move: the page's height, the header as it
+  stands open (`fixedHeader`) and what the footer holds besides the cards (`footerRest`). A DEBUG log of `PendingCards`'
+  body on iPhone 17 Pro showed a burst while launching, then no evaluation for about 9 s on the still page.
+- **What the footer holds besides the cards must not depend on the cards either.** The first version still froze the
+  app at 100% CPU when the composer was tapped. The field taking the focus grew the composer by its second row before
+  the keyboard came up. `footerRest` rose and the cap fell below the card. Measured one layout late, the card was over
+  the new cap, so the area switched to scrolling and showed "1 pending". That count is in `footerRest`, so the cap fell
+  again. The card then fitted itself, the count went and the cap rose: a 5 ms cycle between two states
+  (cap 477.98 / 454.31, `footerRest` 129.02 / 152.69, the difference being the count and its spacing). On `main` the
+  ring is open: outside the keyboard the cap is the fixed half page, and with the keyboard up the area is always laid
+  out as scrolling and the count is left off a lone card. Fix: a lone question that may grow is always laid out as
+  fitting (its form fits itself to `cardArea`), so `over` never comes from its late measure. Find such a ring by logging
+  the cap's inputs in `body` and looking for two lines that alternate.
+- Measured against the open header, the conversation keeps `cardThreadRoom` only while that header is open; once an
+  Agents header settles to its slim bar (40 pt, the open one is 90 pt with one row) the conversation keeps 50 pt more.
+- With a taller card the conversation overflows and the Agents header folds to its slim bar. XCUITest reports that bar's
+  back button as the 8 x 13 pt chevron and not hittable: a known limit of these tests, so
+  `PendingCardsTests.testLoneQuestionShowsEveryOption` checks it on screen and taps it by its coordinate. It is not a
+  way around the button itself: the slim bar's back is a plain button without `.contentShape(.rect)` (`ChatView`'s
+  `compactChrome`), so its real touch area may be little more than the chevron. That is on `main` and not fixed here.
+- `-ui.scheme light|dark` makes the app icon follow the appearance, and SpringBoard's "You have changed the icon"
+  alert covers the screenshot and takes taps: dismiss it through `com.apple.springboard` after launch.
+
 ## A view that places itself over the whole screen gets no keyboard avoidance (2026-11-10, #3004)
+
+Superseded for the + panel by #4312: it is a system sheet now, its bar a `safeAreaInset` that the system's keyboard
+avoidance moves; the points on `Keyboard.dismiss()` and XCUITest's `typeText` below still hold.
 
 - The + panel (`AttachSheet`) measures the screen in a `GeometryReader` (size plus safe-area insets, which with the keyboard
   up include it) and places the sheet with `.position` under `ignoresSafeArea(.container)`. The keyboard only shrank the
@@ -1623,6 +1898,15 @@ but UIKit still had a page with only Agents Back and empty content.
   (`json.dumps(d, ensure_ascii=False, indent=2) + "\n"`), add only the keys the branch added, and drop keys that were in the merge base but `main`
   no longer has. `git diff origin/main --stat` should then show only `+` lines for your keys. Git's own text merge of two branches that added the
   same key leaves a duplicate JSON key, which `check` rejects: keep one copy.
+
+### `Localizable.xcstrings` no longer round-trips: insert entries as text (2026-11-12, #4741)
+- `main`'s catalog mixes two formats: most entries as `json.dumps(indent=2)` writes them (`"key": {`), some as Xcode writes them
+  (`"key" : {`). Loading it and writing it back with `json.dumps(d, ensure_ascii=False, indent=2) + "\n"`, with no key added, makes
+  a diff of about 3,200 lines in other people's entries. The merge and sync entries in this section still say to write the file that
+  way: don't.
+- Never rewrite the file whole. Insert each new entry as text, in the format of the entries around it, before the first key that sorts
+  after it; then `apple_l10n.py check`, and `git diff origin/main --stat` must show only `+` lines. Check the round trip first
+  (`json.dumps(json.load(f), …) == f.read()`) before trusting any script that writes the catalog.
 
 ### Two PRs that add the same catalog key both pass, then break master (#5811)
 - #5743 and #5757 each added `"Run"` to `Localizable.xcstrings`. Each passed `apple_l10n.py check` against its own base, and git merged them
@@ -1876,7 +2160,13 @@ A worktree's display name and its Agents' conversation names are different comma
   were in a picker's own menu (a `Picker` in a `Form`), not an inline picker inside a `Menu`.
 - The modes became `Toggle`s, the current one on, in a `Section { … } header: { Text }`: a menu draws that header, as the
   composer's ultracode section does, and a check mark beside the switch that is on, as a picker does. The Agents menu's
-  Display note (#3182) is the second shape above; look at it in a shot before counting on it.
+  Display note (#3182) was the second shape above (#3753 has since removed it).
+- The composer's model menus had both shapes (2026-11-12, #4322): `Section("Model") { Button("Other Model…"); Picker … }`
+  drew "Model" over Other Model… only, below the whole model list, and `Section("Thinking Effort") { Picker … }` drew no
+  title. A check that only looks for the words passes on the first: a UI test checks that each title stands above its own
+  rows (`MenuSectionTitleTests`). These menus open upward, list their items the other way round and scroll, and only the
+  rows on screen are in the element tree, so the test drags the menu down until each title has shown. Titled choices in
+  a menu are `MenuChoice` switches (`apple/Persona/Views/Chat/SessionModes.swift`).
 
 ## A menu inside a menu keeps the items it was first built with (2026-11-09, #1644)
 
@@ -1967,6 +2257,30 @@ The watch only prunes by age. Segments the phone has not confirmed stay up to `u
   reported the end (found by replaying a recording that ran out). `RFBOutbox.next()` wraps the wait in
   `withTaskCancellationHandler` and resumes the parked continuation with nil, with a flag for a cancel that comes
   before the continuation is stored (`RFBFrameTests.outboxHandsOverInOrderAndEndsOnFinishOrCancel`).
+## A menu's button must stay the same view while its menu opens (2026-11-12, #5289)
+
+- On an iPhone on its side with the keyboard up, tapping ⋯ on the VNC page stopped the app:
+  `AnimationKit/LiquidMorphAnimation.swift:310: Fatal error: Starting a pivot morph to a view that isn't in the view hierarchy`, under
+  `-[_UIContextMenuPresentation present]`. Opening a menu hides the keyboard (UIKit deactivates it for the menu:
+  `setDeactivatedKeyboard … reason: setDisableBecomeFirstResponder`). The page got taller, the rail's `ViewThatFits` picked a roomier
+  child, and since each child is its own subtree, the `Menu`'s button was replaced while the menu morphed out of it.
+- Anything that picks views by the space the keyboard leaves (`ViewThatFits` by height, `if` on a measured height, a size class) must not
+  hold a `Menu`, or must keep it the same view. The VNC rails (`fittingRail` in `apple/Persona/Screen/VNCPage.swift`) measure hidden copies
+  of their ways in a `ViewThatFits`. The copy shown says which one it is (`onAppear`), and the visible rail is one set of views that only
+  changes its spacing, which buttons it shows and whether it scrolls (a `ScrollView` always there, `scrollDisabled` when it fits).
+- The crash needs the menu's morph (iOS 26 and later) and a layout that changes when the keyboard goes. Upright, the VNC top row's
+  `ViewThatFits` picks by width, which the keyboard doesn't change, so it never met this.
+
+## A destructive swipe takes its row's dialog with it (2026-11-13, #3962)
+
+- An Always rule's confirm (`SecretProviderSections` in `apple/Persona/Views/Settings/ExtensionsViews.swift`) moved from the page
+  onto its row, so iOS 26's popover points at the row. Its swipe's Remove kept `role: .destructive`, and tapping it closed the whole
+  Settings cover back to the Assistant page, with no dialog. A destructive swipe button folds its row away at once, expecting the row
+  to go; the `confirmationDialog` anchored to it went too, and its dismissal reached the cover that presented the page.
+- A swipe that only asks first is a plain button tinted `Theme.danger` (`ModelLaunchersView`'s Delete does the same); the context
+  menu's item keeps the role, since the menu is gone before the dialog shows. A UI test that swipes, taps and waits for the dialog
+  catches it; a test that only checks the dialog's text after setting the state directly does not.
+
 ## Simulator arguments and screenshot settling (#1872)
 
 - On Xcode 27.2, a direct `simctl launch` can drop leading DEBUG arguments before they reach `UserDefaults`; put `--` before them. Verify the App actually adopted the mock pairings—an old real-hub cache on screen is a launch-environment failure, not the target RED. UI launch helpers can carry the same separator without changing the assertions.
@@ -1997,3 +2311,61 @@ the page starts loading rather than leaving a banner that no longer does anythin
 Handing the composer something while the card is up has its own trap: the composer focused its field when a picture arrived
 in `composerInbox`, and focusing a field under a sheet closes the sheet. A preview screenshot closed the card it was taken
 from. The chat now tells its composer the card covers it (`composerCovered`), and the picture lands without the keyboard.
+
+## A start that waits for permission takes its turn when it is asked for (2026-11-13, #3407)
+
+The composer's mic started dictation in a `Task` whose `Dictation.start` waited for permission, and stopping checked
+`if dictation.isListening { dictation.stop() }`. Inside that wait (a few milliseconds once granted, the system's prompts
+the first time) nothing was listening yet: a send, leaving the page or saving a to-do stopped nothing, and the start
+listened afterwards into the emptied box. A hold after a tap made a second start that found the microphone in use,
+toasted and ended the hold, while the tap's dictation went on. The TLA+ model in `apple/verify/composer-hold/` found both.
+
+- An action that starts asynchronous work takes its turn in its own synchronous step (`Dictation.start` sets the turn,
+  then makes the task), not when the task first runs: tasks may run in another order than they were made.
+- After every suspension, check that the turn is still yours before taking a shared resource; a start whose turn has
+  passed ends without a word. Make `stop()` pass the turn, and call it unconditionally rather than behind `isListening`.
+- A newer start of the same owner takes over from an older one already holding the resource instead of failing as "in
+  use". Test the orderings with the wait held open (`Dictation.permission`, `DictationTurnTests`) and rerun the model.
+
+## MapKit speaks WGS-84 in mainland China too (2026-11-13, #6386)
+
+Apple draws its mainland China map in GCJ-02, but MapKit's public API never shows it: `MKLocalSearch` and `CLGeocoder`
+return WGS-84, `MKMapSnapshotter`'s `point(for:)` and `MKDirections` take WGS-84 and give their route lines back in it,
+the same frame as Core Location. Converting to GCJ-02, as older posts advise, moves every mark about 500 m. Checked from
+a Mac (macOS 14, region China): Tiananmen Gate searched by name came back at (39.90919, 116.39746) and sat on the gate in
+a snapshot, the same point shifted to GCJ-02 (39.91059, 116.40371) landed in an alley 550 m east, and a walking route
+drawn from MapKit's own points followed the streets. Check on a phone in the mainland before adding any conversion.
+
+## A sidebar place has more than one way in (2026-11-13, #6599)
+
+The drawer's places (Inbox, Machines, Knowledge…) keep their stacks through `AssistantView.show` (`ShellPlaces`,
+`docs/design/sidebar-navigation.md`). The iPhone shell's rows all reach `show`, but the iPad's sidebar column wires its own
+closures in `AssistantView.sidebar(column:)`, and Knowledge, Scheduled Tasks, Profile and Health there still set the old
+`show…` flags: Machines was never left, so choosing it again counted as choosing the place in front and popped it. A new
+way into a place goes through `show`, and a UI test walks it on the iPad too (`testAPlaceKeepsItsStackBesideTheIPadColumn`).
+Against a mock hub XCUITest calls the shell's switch not hittable under the status window, which takes no touches: tap it
+with `ShellFinger` and check the probe, never `isHittable` (`DrawerSwipeTests` failed on `main` for this).
+
+## A modal sheet presented on RootView's window relays out the chat under it (2026-11-13, #6235)
+
+Presenting a `UISheetPresentationController` (`detents = [.medium(), .large()]`) on the shell window's `rootViewController`
+(`UIHostingController<RootView>`) dims `tintAdjustmentMode` and updates the modal card backing traits on `RootView`'s
+hosting view. Inside `-[UISheetPresentationController _sheetLayoutInfoLayout:]` → `-[UIView layoutBelowIfNeeded]`, UIKit
+synchronously flushes `RootView`'s dirtied SwiftUI graph (`ChatView`, `ChatTranscript`, `ChatFooter`, `ShellSwitch`,
+`ShellComposerBar`) and re-rasterizes its text layers on both open and close, even when the sheet itself is empty.
+
+- Present reusable modal panels in a dedicated scene `UIWindow` (`AttachSheetWindow` in
+  `apple/Persona/Views/Chat/AttachSheet.swift`, `windowLevel = .normal + 0.25`, below `ScreenWindow` and `ToastWindow`)
+  whose `rootViewController` is a bare `UIViewController`, so the sheet dims an empty `UIView` and `ChatView` evaluates
+  zero bodies.
+- Copy `overrideUserInterfaceStyle` and `tintColor` from the shell window, call `Keyboard.dismiss()` before `makeKey()` so
+  closing the sheet does not restore the composer's keyboard, and hide the sheet window plus restore `makeKey()` to the
+  previous key window (only if the sheet window is still key) before running any follow-up presentation on the shell window.
+- Keep one stable `UIHostingController` `rootView` fed by an `@Observable` state object instead of reassigning `vc.rootView`,
+  defer a cold `LazyVGrid` mount to a later frame via `LiftFrames` (`apple/Persona/Views/Chat/MessageLift.swift`, skipping one
+  display-link tick), cap warm retention to a single controller across the process, reset the `ScrollView` identity after a
+  scrolled dismissal so off-screen cell state is freed, and evict warm resources on memory warnings.
+- `UIViewRepresentable.updateUIView` runs inside an active `@Observable` tracking scope (`PlatformViewChild.updateValue()`).
+  Reading and mutating the same `@Observable` property there (such as `&+= 1` via `_modify`) subscribes the representable to
+  its own write and causes an endless `updateUIView` loop; compare against `@ObservationIgnored` shadow fields and write via
+  pure setter assignment.

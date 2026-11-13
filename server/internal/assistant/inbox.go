@@ -19,8 +19,11 @@ import (
 
 const (
 	inboxWindow   = 7 * 24 * time.Hour // older unread chats / mail are history, not inbox
-	inboxKeepDone = 3 * 24 * time.Hour // done items stay listed (for undo) this long
+	inboxKeepDone = 3 * 24 * time.Hour // done items are the list's (for undo) this long, the newest inboxListDone of them
 	inboxForget   = 8 * 24 * time.Hour // and are held in memory (so old unread messages don't come back) this long
+	// inboxListDone: of those, a list carries the newest this many (inbox_list_done.go); Done pages the rest from the
+	// history.
+	inboxListDone = 200
 	// inboxKeepHistory: done items stay in the database this long, paged by GET /api/v1/inbox/done (inbox_history.go);
 	// inboxPurgeEvery is how often the rounds delete those past it.
 	inboxKeepHistory = 90 * 24 * time.Hour
@@ -84,6 +87,14 @@ type InboxItem struct {
 	// TriagedBy says who sorted an event (inbox_group.go): "model" (its title, summary and tier are the model's) or
 	// "rules" (the connector grouped it and its rule tier stands, "By rule").
 	TriagedBy string `json:"triaged_by,omitempty"`
+	// Where is where the matter happens, for people: a group's name, the other person of a direct chat, a repository
+	// ("" for mail). TitleBy says who wrote Title (TitleBy* in inbox_follow.go): once the assistant or the user did,
+	// grouping leaves the title and the summary alone; kept, not listed. Follow is what the matter waits on, its next
+	// step and when to look at it again; Now is its state key, listed only (docs/assistant/inbox.md "Following up").
+	Where   string       `json:"where,omitempty"`
+	TitleBy string       `json:"title_by,omitempty"`
+	Follow  *InboxFollow `json:"follow,omitempty"`
+	Now     string       `json:"now,omitempty"`
 	// Parent is what the item grew out of: another item, a todo or an agent session (inbox_parent.go, #2128).
 	Parent *InboxParent `json:"parent,omitempty"`
 	// Folder is the "/"-separated folder path the item is filed under ("" none); FolderBy says who filed it, "model"
@@ -100,7 +111,10 @@ type InboxItem struct {
 	Handling   *InboxHandling    `json:"handling,omitempty"`
 	Suggestion *InboxSuggestion  `json:"suggestion,omitempty"`
 	Chain      []InboxChainEntry `json:"chain,omitempty"`
-	Related    []InboxRelated    `json:"related,omitempty"`
+	// ChainCount is set only in a list asked with chain=last (inbox_list_memo.go, #4742): a done item's chain is then
+	// its newest entry alone, and this is how many it has. GET /api/v1/inbox/{id} has them all.
+	ChainCount int            `json:"chain_count,omitempty"`
+	Related    []InboxRelated `json:"related,omitempty"`
 	// Handoffs are the latest conversations the event was handed to (inbox_handoff.go), oldest first.
 	Handoffs []InboxHandoff `json:"handoffs,omitempty"`
 
@@ -190,6 +204,11 @@ func (it *InboxItem) listed() InboxItem {
 	c.Meta, c.Group = nil, nil
 	c.ChainSeq, c.SuggestSeq = 0, 0
 	c.Status = it.status()
+	c.Now, c.TitleBy = it.nowKey(), ""
+	if it.Follow != nil {
+		f := *it.Follow
+		c.Follow = &f
+	}
 	c.Chain = listedChain(it)
 	c.Related = slices.Clone(it.Related)
 	c.Handoffs = listedHandoffs(it.Handoffs)
@@ -200,6 +219,7 @@ func (it *InboxItem) listed() InboxItem {
 	if g := currentSuggestion(it); g != nil {
 		g := *g
 		g.Changes, g.Cwd = slices.Clone(g.Changes), ""
+		g.MailTarget = nil // the reply's internal conflict check, not a client's target to choose
 		c.Suggestion = &g
 		if c.Handling == nil && g.Conversation == nil && it.Agent != nil { // an old draft: its conversation is done with this round
 			c.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingDone, MachineID: it.Agent.MachineID, SessionID: it.Agent.SessionID}

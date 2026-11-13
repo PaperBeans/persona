@@ -32,7 +32,7 @@ def run(browser, base, token):
     chat = f"{base}/s/{MID}/{SID}"
     page.goto(base + "/overview")
     page.goto(chat)
-    page.locator("main header").get_by_role("button", name="更多", exact=True).click()
+    page.locator("main header").get_by_role("button", name="更多操作", exact=True).click()
     page.get_by_role("menuitem", name="文件").or_(page.get_by_role("menuitemcheckbox", name="文件")).click()
     panel = page.locator("aside[aria-label=文件]")
     expect(panel).to_be_visible()
@@ -40,7 +40,7 @@ def run(browser, base, token):
     ok("Files opens from ⋯ at 390 wide")
 
     page.reload()
-    page.locator("main header").get_by_role("button", name="更多", exact=True).wait_for()
+    page.locator("main header").get_by_role("button", name="更多操作", exact=True).wait_for()
     expect(panel).to_have_count(0)
     ok("the reload closed the panel")
     page.go_back()

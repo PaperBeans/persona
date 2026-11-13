@@ -2464,6 +2464,521 @@
         "rule": "rest"
       },
       "derived": true
+    },
+    {
+      "name": "closed_seen",
+      "description": "关掉后看过（知道了，或打开过）：不等 24 小时，直接「已完成」。",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Seen\"",
+        "web/src/lib/todo-triage.ts triage"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [
+          {
+            "machine_id": "m",
+            "session_id": "ask",
+            "state": "needs_you",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "run",
+            "state": "working",
+            "status": "working",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "unseen",
+            "state": "unread",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "idle",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T10:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "old",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-06T08:00:00.000Z"
+          }
+        ],
+        "todo": {
+          "id": "t",
+          "title": "t",
+          "created_at": "2026-10-29T00:00:00.000Z",
+          "updated_at": "2026-11-10T11:00:00.000Z",
+          "done_at": "2026-11-10T09:00:00.000Z",
+          "agents": [],
+          "origin": "conv",
+          "seen_at": "2026-11-10T09:30:00.000Z"
+        }
+      },
+      "expected": {
+        "section": "done",
+        "rule": "closed"
+      },
+      "from_test": "web/src/lib/todo-triage.test.ts > a seen to-do goes to Done at once; one seen before it got there stays"
+    },
+    {
+      "name": "closed_seen_before_close",
+      "description": "看过之后才关掉：关掉是新动静，还在「刚做完」。",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Seen\"",
+        "web/src/lib/todo-triage.ts triage"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [
+          {
+            "machine_id": "m",
+            "session_id": "ask",
+            "state": "needs_you",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "run",
+            "state": "working",
+            "status": "working",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "unseen",
+            "state": "unread",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "idle",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T10:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "old",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-06T08:00:00.000Z"
+          }
+        ],
+        "todo": {
+          "id": "t",
+          "title": "t",
+          "created_at": "2026-10-29T00:00:00.000Z",
+          "updated_at": "2026-11-10T11:00:00.000Z",
+          "done_at": "2026-11-10T09:00:00.000Z",
+          "agents": [],
+          "origin": "conv",
+          "seen_at": "2026-11-10T08:00:00.000Z"
+        }
+      },
+      "expected": {
+        "section": "just_done",
+        "rule": "closed"
+      },
+      "from_test": "web/src/lib/todo-triage.test.ts > a seen to-do goes to Done at once; one seen before it got there stays"
+    },
+    {
+      "name": "accepted_seen",
+      "description": "验收之后看过：「已完成」。",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Seen\"",
+        "web/src/lib/todo-triage.ts triage"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [
+          {
+            "machine_id": "m",
+            "session_id": "ask",
+            "state": "needs_you",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "run",
+            "state": "working",
+            "status": "working",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "unseen",
+            "state": "unread",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "idle",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T10:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "old",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-06T08:00:00.000Z"
+          }
+        ],
+        "todo": {
+          "id": "t",
+          "title": "t",
+          "created_at": "2026-10-29T00:00:00.000Z",
+          "updated_at": "2026-11-10T11:00:00.000Z",
+          "done_at": null,
+          "agents": [
+            {
+              "machine_id": "m",
+              "session_id": "idle",
+              "linked_at": "2026-11-02T04:00:00.000Z"
+            }
+          ],
+          "origin": "conv",
+          "reopened_at": "2026-11-10T08:00:00.000Z",
+          "supervision": {
+            "supervisor": "conv",
+            "done_when": [
+              "c1",
+              "c2",
+              "c3",
+              "c4",
+              "c5",
+              "c6",
+              "c7",
+              "c8"
+            ],
+            "state": "accepted",
+            "round": 1,
+            "reviews": [
+              {
+                "at": "2026-11-10T07:00:00.000Z",
+                "verdict": "accepted",
+                "checks": [
+                  {
+                    "criterion": "c1",
+                    "met": true
+                  },
+                  {
+                    "criterion": "c2",
+                    "met": true
+                  },
+                  {
+                    "criterion": "c3",
+                    "met": true
+                  },
+                  {
+                    "criterion": "c4",
+                    "met": true
+                  },
+                  {
+                    "criterion": "c5",
+                    "met": true
+                  }
+                ]
+              }
+            ]
+          },
+          "seen_at": "2026-11-10T07:30:00.000Z"
+        }
+      },
+      "expected": {
+        "section": "done",
+        "rule": "accepted"
+      },
+      "from_test": "web/src/lib/todo-triage.test.ts > a seen to-do goes to Done at once; one seen before it got there stays"
+    },
+    {
+      "name": "deployed_seen",
+      "description": "上线之后看过：「已完成」。",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Seen\"",
+        "web/src/lib/todo-triage.ts triage"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [
+          {
+            "machine_id": "m",
+            "session_id": "ask",
+            "state": "needs_you",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "run",
+            "state": "working",
+            "status": "working",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "unseen",
+            "state": "unread",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "idle",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T10:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "old",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-06T08:00:00.000Z"
+          }
+        ],
+        "todo": {
+          "id": "t",
+          "title": "t",
+          "created_at": "2026-10-29T00:00:00.000Z",
+          "updated_at": "2026-11-10T11:00:00.000Z",
+          "done_at": null,
+          "agents": [],
+          "origin": "conv",
+          "delivery": {
+            "state": "live",
+            "at": "2026-11-10T10:00:00.000Z"
+          },
+          "seen_at": "2026-11-10T10:30:00.000Z"
+        }
+      },
+      "expected": {
+        "section": "done",
+        "rule": "deployed"
+      },
+      "from_test": "web/src/lib/todo-triage.test.ts > a seen to-do goes to Done at once; one seen before it got there stays"
+    },
+    {
+      "name": "finished_unseen_seen",
+      "description": "Agent 做完一轮，用户点了「知道了」，之后没动静：「已完成」（不算未完成）。",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Seen\"",
+        "web/src/lib/todo-triage.ts triage"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [
+          {
+            "machine_id": "m",
+            "session_id": "ask",
+            "state": "needs_you",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "run",
+            "state": "working",
+            "status": "working",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "unseen",
+            "state": "unread",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "idle",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T10:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "old",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-06T08:00:00.000Z"
+          }
+        ],
+        "todo": {
+          "id": "t",
+          "title": "t",
+          "created_at": "2026-10-29T00:00:00.000Z",
+          "updated_at": "2026-11-10T11:00:00.000Z",
+          "done_at": null,
+          "agents": [
+            {
+              "machine_id": "m",
+              "session_id": "unseen",
+              "linked_at": "2026-11-02T04:00:00.000Z"
+            }
+          ],
+          "origin": "conv",
+          "seen_at": "2026-11-10T11:30:00.000Z"
+        }
+      },
+      "expected": {
+        "section": "done",
+        "rule": "seen"
+      },
+      "from_test": "web/src/lib/todo-triage.test.ts > a finished turn seen since it last moved is Done, unless its PR is open"
+    },
+    {
+      "name": "finished_unseen_moved_after_seen",
+      "description": "看过之后又有动静：回到「刚做完」。",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Seen\"",
+        "web/src/lib/todo-triage.ts triage"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [
+          {
+            "machine_id": "m",
+            "session_id": "ask",
+            "state": "needs_you",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "run",
+            "state": "working",
+            "status": "working",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "unseen",
+            "state": "unread",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "idle",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T10:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "old",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-06T08:00:00.000Z"
+          }
+        ],
+        "todo": {
+          "id": "t",
+          "title": "t",
+          "created_at": "2026-10-29T00:00:00.000Z",
+          "updated_at": "2026-11-10T11:00:00.000Z",
+          "done_at": null,
+          "agents": [
+            {
+              "machine_id": "m",
+              "session_id": "unseen",
+              "linked_at": "2026-11-02T04:00:00.000Z"
+            }
+          ],
+          "origin": "conv",
+          "seen_at": "2026-11-10T10:30:00.000Z"
+        }
+      },
+      "expected": {
+        "section": "just_done",
+        "rule": "finished_unseen"
+      },
+      "from_test": "web/src/lib/todo-triage.test.ts > a finished turn seen since it last moved is Done, unless its PR is open"
+    },
+    {
+      "name": "finished_unseen_seen_pr_open",
+      "description": "看过了，但 PR 还开着：「PR 待合并」，等用户合并。",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Seen\"",
+        "web/src/lib/todo-triage.ts triage"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [
+          {
+            "machine_id": "m",
+            "session_id": "ask",
+            "state": "needs_you",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "run",
+            "state": "working",
+            "status": "working",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "unseen",
+            "state": "unread",
+            "status": "idle",
+            "updated_at": "2026-11-10T11:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "idle",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T10:00:00.000Z"
+          },
+          {
+            "machine_id": "m",
+            "session_id": "old",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-06T08:00:00.000Z"
+          }
+        ],
+        "todo": {
+          "id": "t",
+          "title": "t",
+          "created_at": "2026-10-29T00:00:00.000Z",
+          "updated_at": "2026-11-10T11:00:00.000Z",
+          "done_at": null,
+          "agents": [
+            {
+              "machine_id": "m",
+              "session_id": "unseen",
+              "linked_at": "2026-11-02T04:00:00.000Z"
+            }
+          ],
+          "origin": "conv",
+          "seen_at": "2026-11-10T11:30:00.000Z",
+          "pr_url": "https://github.com/example/app/pull/7",
+          "stage": "review"
+        }
+      },
+      "expected": {
+        "section": "pr",
+        "rule": "pr_open"
+      },
+      "from_test": "web/src/lib/todo-triage.test.ts > a finished turn seen since it last moved is Done, unless its PR is open"
     }
   ]
 }

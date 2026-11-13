@@ -181,6 +181,22 @@ nonisolated enum Theme {
     static let monogramFill = Color(uiColor: .secondarySystemFill)
     #endif
 
+    /// A name's disc without a picture (`Monogram`) and its letter's color: the neutral disc in the label's color, or on
+    /// the Mac in a style with hued monograms (Lark, `StyleSpec.MacChrome.monogramHues`) the hue the name picks, the same
+    /// one on every launch, with a white letter. The iPhone, iPad and watch keep the neutral disc in every style.
+    static func monogram(_ name: String) -> (fill: Color, ink: Color?) {
+        #if os(macOS)
+        let hues = spec.mac.monogramHues
+        if !hues.isEmpty {
+            // FNV-1a over the name: `hashValue` is seeded per process, so a person's color would change on every launch.
+            var h: UInt32 = 2_166_136_261
+            for s in name.unicodeScalars { h = (h ^ s.value) &* 16_777_619 }
+            return (hues[Int(h % UInt32(hues.count))], onSolid)
+        }
+        #endif
+        return (monogramFill, nil)
+    }
+
     /// Diffs and Git: their own colors, text strength (≥ 4.5:1 on the code background) for signs and counts.
     enum Diff {
         static let add = Color(light: 0x1D7A4C, dark: 0x4CC38A)
@@ -273,6 +289,10 @@ nonisolated enum Theme {
         /// message on that way, faster the closer it gets: up to `edgeScrollSpeed` points a second (#3188).
         static let edgeScroll: CGFloat = 44
         static let edgeScrollSpeed: CGFloat = 900
+        /// How far a selection handle's knob reaches past the selected lines (over the first, under the last): the text
+        /// view over a lifted message's words reaches that far past them, so a knob there is in it, to be dragged (#5291),
+        /// and the edit menu stays that far off them (#6005).
+        static let handleReach: CGFloat = 16
     }
     #endif
 
@@ -489,6 +509,10 @@ nonisolated enum Theme {
         /// The width the small window's card is drawn at (VNCPiPCard: Connecting…, why not), in points, about the small
         /// window's own on an iPhone so its text reads at its size there.
         static let pictureInPictureCard: CGFloat = 240
+        /// A task sheet closes on a rightward swipe that starts within `edgeBackZone` of the leading edge and travels at
+        /// least `edgeBackDistance` (a sheet has no system edge-back; #5603).
+        static let edgeBackZone: CGFloat = 24
+        static let edgeBackDistance: CGFloat = 72
         static let line: CGFloat = 1
         static let lineMedium: CGFloat = 1.5
         static let rule: CGFloat = 2
@@ -499,6 +523,13 @@ nonisolated enum Theme {
         static let barWide: CGFloat = 4
         /// A share bar's thickness (the assistant's stacked-bar card).
         static let meter: CGFloat = 12
+        /// An Agent chat's header folded into its slim bar (Android `Tokens.Size.slimBar`).
+        static let slimBar: CGFloat = 40
+        /// How much of the conversation a lone question card keeps in view over it when it grows past half the page
+        /// (`PendingCards`, #6277): about two lines of a message, under the chat's header as it stands open (more once an
+        /// Agents header has folded to its slim bar). The card the user has to answer gets the rest. A call keeps less for
+        /// its captions (`voiceThreadRoom`).
+        static let cardThreadRoom: CGFloat = 72
         /// How far a sideways strip fades out at an end with more to scroll to (`.edgeFade()`): a cut-off chip reads as
         /// "more", not as a broken row.
         static let fadeEdge: CGFloat = 24
@@ -556,6 +587,8 @@ nonisolated enum Theme {
         /// The height of the map in a saved place's editor: the reminder's circle with the streets around it, and room to
         /// pan the map and tap where the place is (#4248).
         static let placeMap: CGFloat = 220
+        /// The map a place answer draws in the chat (`PlaceMapCard`, #5543): small enough to scroll past.
+        static let chatMap: CGFloat = 160
         static let box110: CGFloat = 110
         static let box120: CGFloat = 120
         /// The longest a tab's name gets in the chat header's strip of the space's tabs: one long name cannot push the
@@ -601,6 +634,16 @@ nonisolated enum Theme {
         static let codeSideColumn: CGFloat = 300
         /// The width from which an extension's code page puts its side column beside the main one (#2961).
         static let codeSplitMin: CGFloat = 700
+        // An extension's tiles (UI version 6's grid and carousel, #827).
+        /// A grid's narrowest tile: two to a phone, more on wider screens.
+        static let tileMin: CGFloat = 150
+        /// A tile's least height.
+        static let tileHeight: CGFloat = 96
+        /// A carousel's narrow tile (scenes) and its usual one (rooms); a wide one (cameras) takes most of the width.
+        static let tileNarrow: CGFloat = 140
+        static let tileRegular: CGFloat = 200
+        /// A wide carousel tile's share of the width it scrolls in (the next one's edge shows).
+        static let tileWideShare: CGFloat = 0.8
     }
 
     /// The system's sidebar column on iPad (iOS 26, the glass styles), measured from its pixels: the split fills the
@@ -630,6 +673,10 @@ nonisolated enum Theme {
         static let doneFade: Double = 0.5
         /// A day of the month grid that belongs to the month before or after.
         static let outsideFade: Double = 0.45
+        /// A to-do being dragged, where it was (#2045): where it would land is drawn in full.
+        static let liftedFade: Double = 0.3
+        /// How far the axis scrolls each frame while a dragged to-do is held near its top or bottom edge.
+        static let autoscrollStep: CGFloat = 4
         /// Lines a day of the month grid shows: its entries, or one fewer and "N more".
         static let monthLines = 3
         /// Where a new to-do's time snaps to when the empty axis is tapped, in minutes.
@@ -721,31 +768,12 @@ nonisolated enum Theme {
         static let holdAppear = Animation.spring(duration: 0.5, bounce: 0.3)
         static let holdAppearScale: CGFloat = 0.2
         static let holdLeave = Animation.easeOut(duration: 0.18)
-        /// The 「+」 panel (`AttachSheet`, Telegram's attachment menu). It grows out of the 「+」 button (Telegram's spring,
-        /// mass 5, stiffness 900: damping 110 opening, 124 settling), its corners rounding off quicker; the dim fades in
-        /// linearly and out eased.
-        static func attachOpen(velocity: CGFloat = 0) -> Animation {
-            .interpolatingSpring(mass: 5, stiffness: 900, damping: 110, initialVelocity: velocity)
-        }
-        static func attachSettle(velocity: CGFloat = 0) -> Animation {
-            .interpolatingSpring(mass: 5, stiffness: 900, damping: 124, initialVelocity: velocity)
-        }
-        static let attachCorner = Animation.easeInOut(duration: 0.2)
-        static let attachContentIn = Animation.easeInOut(duration: 0.2)
-        static let attachContentOut = Animation.easeInOut(duration: 0.12)
-        static let attachDimIn = Animation.linear(duration: 0.3)
-        static let attachDimOut = Animation.easeInOut(duration: 0.25)
-        static let attachSnapBack = Animation.easeInOut(duration: 0.3)
-        /// Switching tabs: the old page fades over the new; the sheet dips, then springs back with a little bounce.
+        /// The 「+」 panel (`AttachSheet`, a system sheet): switching tabs, the old page fades out over the new.
         static let attachTabFade = Animation.easeInOut(duration: 0.23)
-        static let attachTabDip = Animation.easeInOut(duration: 0.2)
-        static let attachTabBack = Animation.interpolatingSpring(mass: 5, stiffness: 900, damping: 70)
         /// The tab bar's highlight sliding to the tab picked.
         static let attachLens = Animation.timingCurve(0.38, 0.7, 0.125, 1, duration: 0.4)
-        /// The tab bar giving way to the caption and send, and coming back.
+        /// The tab bar giving way to the caption and send (a cross-fade), and coming back.
         static let attachBarSwap = Animation.interpolatingSpring(mass: 1, stiffness: 555.027, damping: 47.118)
-        static let attachBarAway = Animation.easeInOut(duration: 0.1)
-        static let attachBarBack = Animation.easeInOut(duration: 0.25)
         /// A photo's mark: picked, it fills and bounces (0.9, 1.1, 1); let go, it empties.
         static let attachPick = Animation.easeOut(duration: 0.21)
         static let attachUnpick = Animation.easeIn(duration: 0.15)
@@ -759,59 +787,27 @@ nonisolated enum Theme {
         static let holdBlink = Animation.easeInOut(duration: 0.5)
     }
 
-    /// The 「+」 panel (`AttachSheet`), Telegram's attachment menu: its sizes, thresholds and motion. A sheet that rests
-    /// with the top quarter of the screen showing the chat, a photo grid with a tab bar floating over its bottom, pulled
-    /// up to fill the screen or down to go (docs/apple/ios.md, New shell, "Attach panel").
+    /// The 「+」 panel (`AttachSheet`): a system sheet at half height (detents medium and large), a grid of recent photos
+    /// and a bar at its foot (docs/apple/ios.md, New shell, "Attach panel").
     enum Attach {
-        /// How much of the screen's height stays above the sheet at rest (the chat, dimmed), and on a narrow phone.
-        static let restFraction: CGFloat = 0.2488
-        static let restFractionNarrow: CGFloat = 0.15
-        static let narrowWidth: CGFloat = 320
-        /// The sheet's top under the status bar, open all the way.
-        static let topGap: CGFloat = 10
-        /// At rest the sheet is this much narrower than the screen (half each side); it widens as it is pulled up.
-        static let restInset: CGFloat = 10
-        static let topRadius: CGFloat = 38
-        /// The bottom corners follow the screen's, a little inside them.
-        static let bottomRadius: CGFloat = 60
-        static let grabberWidth: CGFloat = 36
-        static let grabberHeight: CGFloat = 5
-        static let grabberTop: CGFloat = 5
-        static let grabberOpacityLight = 0.07
-        static let grabberOpacityDark = 0.2
         static let dim = 0.25
-        /// Let go: pulled down this far (or this fast, moving down) it goes; open all the way, a fling this fast from the
-        /// grid's top goes too. Up or down this fast, or past half the way, it opens all the way or goes back to rest.
-        static let dismissDistance: CGFloat = 60
-        static let dismissSpeed: CGFloat = 300
-        static let dismissFling: CGFloat = 1800
-        static let settleSpeed: CGFloat = 300
-        /// The grid: three columns a point apart, square cells; the camera's cell is a column wide and two rows tall.
+        /// The grid: three equal square columns a point apart; the camera's cell is one of them.
         static let columns = 3
         static let gridSpacing: CGFloat = 1
-        static let headerHeight: CGFloat = 56
         /// A cell's selection mark: its size and inset from the cell's top right, the white ring round it.
         static let badge: CGFloat = 29
         static let badgeInset: CGFloat = 3
         static let badgeRing: CGFloat = 1.5
         static let badgeTarget: CGFloat = 45
-        /// The tab bar: a pill floating this far over the sheet's bottom, a tab's cell, its icon.
+        /// The tab bar: a pill at the sheet's foot, a tab's cell, its icon. A pill for five or more tabs is the screen
+        /// less `barInset` each side.
         static let barInset: CGFloat = 22
         static let barHeight: CGFloat = 62
         static let barTab: CGFloat = 72
         static let barIcon: CGFloat = 30
         static let barLensInset: CGFloat = 3
-        /// The pill's width for two, three and four tabs (five or more: the screen less `barInset` each side).
+        /// The pill's width for two, three and four tabs.
         static let barWidths: [CGFloat] = [160, 240, 300]
-        /// Switching tabs, the sheet dips this far and springs back while the old page fades.
-        static let tabDip: CGFloat = 10
-        /// Photos picked, the tab bar shrinks to this, blurs this much and gives way to the caption and send.
-        static let barAwayScale: CGFloat = 0.85
-        static let barAwayBlur: CGFloat = 10
-        /// The tab bar's room under the grid: the pill and its inset, so the last row scrolls clear of it.
-        static var gridBottom: CGFloat { barHeight + barInset * 2 }
-        /// After the keyboard starts down, the panel follows this much later (Telegram's), the two moving together.
-        static let afterKeyboard: Duration = .milliseconds(150)
         static let thumbnailScale: CGFloat = 3
         /// How many photos a page of the grid asks the library for at a time.
         static let fetchLimit = 600
@@ -888,6 +884,12 @@ nonisolated enum Theme {
         static let pink = Color(light: 0xD62E5C, dark: 0xFF6B8B)
         /// A quiet mark: a list row's tile that is information, not a place to go.
         static let gray = Color(light: 0x8E8E93, dark: 0x636366)
+        // The rest of an extension's named colors (UI version 6, `ExtensionUIStyle.color`, #827): marks only (icons,
+        // badges' tints, tiles, chart series), never text.
+        static let red = Color(light: 0xD1342C, dark: 0xFF6961)
+        static let amber = Color(light: 0xB7791F, dark: 0xF5B342)
+        static let yellow = Color(light: 0x9A7B00, dark: 0xFFD60A)
+        static let teal = Color(light: 0x0F7C80, dark: 0x40C8C8)
     }
 
     /// A permission mode's tone where the Agents header shows it (#3719), by how much the agent does without asking.
@@ -933,9 +935,9 @@ nonisolated enum Theme {
         /// The colors that travel around the composer while a reply is generating (Glow While Replying, `ComposerGlow`):
         /// blue through violet to pink, each in its light and dark shade.
         static let composerGlow: [Color] = [Hue.blue, Hue.indigo, Hue.purple, Hue.pink]
-        /// Reserve most of the keyboard-visible viewport for the conversation, not the draft.
-        static let composerHeightFraction: CGFloat = 0.22
-        static let composerMinimumLines = 3
+        /// iPhone and iPad drafts grow through six lines before scrolling; keyboard height does not lower the cap.
+        static let composerPhoneMaximumLines = 6
+        /// The shared Mac/visionOS composer retains its existing eight-line cap.
         static let composerMaximumLines = 8
         /// Text and TextField round line heights differently; half a line distinguishes adjacent counts.
         static let composerLineTolerance: CGFloat = 0.5

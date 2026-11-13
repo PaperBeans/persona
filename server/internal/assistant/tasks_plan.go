@@ -136,13 +136,18 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		t.Reroute = preview.Reroute
 		// What it runs on the computer it lands on (#2640): a default that computer lacks is swapped now, so the card
 		// names the launcher that will run and its why says so; a launcher this plan names that it lacks is refused.
-		// A configuration that can't run at all is the dispatch's to say, as before.
 		if m, ok := s.machineByName(ctx, t.Machine); ok {
 			params := map[string]any{"launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "tier": t.Tier}
-			if own, err := s.resolveStart(ctx, params); err == nil {
-				if err := s.fitTaskLauncher(ctx, t, m, own, params); err != nil {
-					return "", fmt.Errorf("task %d: %w", i+1, err)
-				}
+			own, err := s.resolveStart(ctx, params)
+			if err != nil {
+				return "", fmt.Errorf("task %d: %w", i+1, err)
+			}
+			claude, err := s.fitTaskLauncher(ctx, t, m, own, params)
+			if err != nil {
+				return "", fmt.Errorf("task %d: %w", i+1, err)
+			}
+			if claude {
+				t.Permission = "bypassPermissions"
 			}
 		}
 		// Unset: settled on the computer it lands on, so the card shows what will run (tasks_permission.go).
@@ -156,6 +161,14 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return "", fmt.Errorf("todos are unavailable: %v", err)
 	}
+	for i := range a.Tasks {
+		if scope != nil { // a task leader's workers are new pieces of its task, never a takeover
+			break
+		}
+		if err := s.takeOver(ctx, sessionID, &a.Tasks[i]); err != nil {
+			return "", fmt.Errorf("task %d: %v", i+1, err)
+		}
+	}
 	for i, t := range a.Tasks {
 		if t.ReuseTodo == "" {
 			continue
@@ -164,7 +177,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			return "", fmt.Errorf("task %d: todo_id %s is already the todo of another task in this plan", i+1, t.ReuseTodo)
 		}
 		reused[t.ReuseTodo] = true
-		if err := s.reusableTodo(sessionID, t.ReuseTodo, false); err != nil {
+		if _, err := s.reusableTodo(ctx, sessionID, t.ReuseTodo, false); err != nil {
 			return "", fmt.Errorf("task %d: %v", i+1, err)
 		}
 	}
@@ -249,14 +262,29 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 		}
 	}
 	b.WriteString("This is not confirmation that any agent started. Startup can still fail; the task cards and context snapshot show the outcome.")
+	background := s.backgroundOn(s.settings(ctx)) // who follows up a task no leader supervises (supervise_background.go)
 	switch {
 	case lead != "":
 		fmt.Fprintf(&b, " Leader conversation %s supervises them: their supervision messages go there, and it reviews them with task_review.", lead)
+	case background && s.isBackground(ctx, sessionID):
+		b.WriteString(" You follow them up as the background supervisor: a supervision message comes when one needs you (review it with task_review).")
+	case background && s.isMain(ctx, sessionID):
+		b.WriteString(" The background supervisor follows them up: their supervision messages go to it and it reviews them with " +
+			"task_review, so none comes to you for them. You still hear of a start that failed and of what it hands to the user, " +
+			"and may review any of them yourself (task_review).")
 	case s.supervises(ctx, sessionID):
 		b.WriteString(" You supervise them: a supervision message comes when one needs you (review it with task_review).")
 	default:
-		if _, ok := s.defaultPlanSupervisor(ctx, sessionID, ""); ok {
+		// A live side conversation supervises what it hands out; one that cannot be told anything leaves its task to
+		// the main conversation's follow-up (defaultPlanSupervisor), which is the background supervisor's while it is on.
+		if sup, ok := s.defaultPlanSupervisor(ctx, sessionID, ""); ok && sup == sessionID {
 			b.WriteString(" You supervise them: a supervision message comes when one needs you (review it with task_review).")
+		} else if ok && background {
+			b.WriteString(" The background supervisor follows them up (their supervision messages and task_review); this conversation " +
+				"gets a one-line notice with the task's link when each one ends.")
+		} else if ok {
+			b.WriteString(" The main conversation supervises them (its supervision messages and task_review); this conversation " +
+				"gets a one-line notice with the task's link when each one ends.")
 		}
 	}
 	b.WriteString(dups)

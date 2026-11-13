@@ -145,6 +145,66 @@ func (c *Card) Buttons(bs ...Button) *Card {
 	return c
 }
 
+// AppendToLinks adds a navigation button to the last row when that row already consists only of open_url actions. A
+// callback action row (approval, form or another command) stays separate from navigation. Otherwise this is Buttons.
+func (c *Card) AppendToLinks(b Button) *Card {
+	if len(b) == 0 {
+		return c
+	}
+	if len(c.Body.Elements) > 0 {
+		row, ok := c.Body.Elements[len(c.Body.Elements)-1].(map[string]any)
+		if ok && row["tag"] == "column_set" && row["flex_mode"] == "flow" && linkColumns(row["columns"]) {
+			cols, _ := row["columns"].([]any)
+			row["columns"] = append(cols, buttonRow([]Button{b})["columns"].([]any)...)
+			return c
+		}
+	}
+	return c.Buttons(b)
+}
+
+// linkColumns reports whether every button in a row opens a URL, rather than invoking a command callback.
+func linkColumns(raw any) bool {
+	cols, ok := raw.([]any)
+	if !ok || len(cols) == 0 {
+		return false
+	}
+	for _, rawCol := range cols {
+		col, ok := rawCol.(map[string]any)
+		if !ok {
+			return false
+		}
+		elements, ok := col["elements"].([]any)
+		if !ok {
+			return false
+		}
+		for _, rawElement := range elements {
+			var button Button
+			switch b := rawElement.(type) {
+			case Button:
+				button = b
+			case map[string]any:
+				button = Button(b)
+			default:
+				return false
+			}
+			if button["tag"] != "button" {
+				return false
+			}
+			behaviors, ok := button["behaviors"].([]any)
+			if !ok || len(behaviors) == 0 {
+				return false
+			}
+			for _, rawBehavior := range behaviors {
+				behavior, ok := rawBehavior.(map[string]any)
+				if !ok || behavior["type"] != "open_url" {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 // Form adds a form: its fields (Input, Select, MarkdownBlock) and the submit buttons under them.
 func (c *Card) Form(name string, fields []any, submit ...Button) *Card {
 	els := append([]any{}, fields...)

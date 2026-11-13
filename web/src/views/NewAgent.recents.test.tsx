@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // "New agent"'s recent setups (#2134): a start is remembered; the cards fill every field (computer, folder, launcher, model,
-// permission mode, effort) and never start; picking a computer brings back its model with the launcher it restores; an
-// offline computer's card can't be picked; "Allow everything" is marked; the ⋯ removes one or clears them; a sheet opened
-// on a folder of another page's has no cards.
+// permission mode, effort; the model pill and its panel since #5104) and never start; picking a computer brings back its
+// model with the launcher it restores; an offline computer's card can't be picked; "Full access" is marked; the ⋯
+// removes one or clears them; a sheet opened on a folder of another page's has no cards.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +25,7 @@ const launched = vi.hoisted(() => [] as Record<string, unknown>[]);
 vi.mock("../lib/new-agent", async (original) => ({ ...(await original<typeof import("../lib/new-agent")>()), launchAgent: (input: Record<string, unknown>) => { launched.push(input); return "local-1"; } }));
 
 import { NewAgent } from "./NewAgent";
+import { resetModelListsForTests } from "../lib/session-models";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -47,15 +48,42 @@ const cards = () => [...document.body.querySelectorAll<HTMLButtonElement>("[data
 const card = (text: string) => cards().find((c) => c.textContent?.includes(text))!;
 // a card's two lines: "folder · computer", then launcher · model · mode · effort
 const lines = (c: HTMLElement) => [...c.children].map((line) => [...line.children].map((p) => p.textContent).join(line === c.firstElementChild ? " " : ""));
-const chip = (name: string) => [...document.body.querySelectorAll<HTMLButtonElement>("button[aria-pressed]:not([data-recent-setup])")].find((b) => b.textContent?.trim() === name);
 const radio = (name: string) => [...document.body.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent?.trim() === name);
 const machineChip = (name: string) => [...document.body.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name && b.className.includes("h-8"))!;
 const folder = () => q<HTMLInputElement>('input[placeholder]')!.value;
-const modelRow = () => [...document.body.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")].find((b) => b.className.includes("h-9"))!;
-const option = (name: string) => [...document.body.querySelectorAll<HTMLButtonElement>('button[role="option"]')].find((b) => b.firstElementChild?.textContent === name)!;
 const textarea = () => q<HTMLTextAreaElement>("textarea")!;
+// the model pill (its tooltip: "engine · model · launcher · effort") and its panel's rows, by key (`model:<launcher>\n<id>`)
+const pill = () => q<HTMLButtonElement>("[data-testid=new-agent-model] [data-model-pill]")!;
+const pillEffort = () => pill().querySelector("[data-pill-effort]")?.textContent ?? "";
+const row = (key: string) => [...document.body.querySelectorAll<HTMLElement>("[data-panel-row]")].find((r) => r.dataset.panelRow === key)!;
+async function openPanel() {
+  act(() => pill().click());
+  await flush();
+}
+async function pick(key: string) {
+  await openPanel();
+  act(() => row(key).click());
+  await flush();
+}
+/** One key on the effort slider of the open row flyout (the effort is the form's at once). */
+async function slide(key: string) {
+  const slider = q('[data-model-flyout] [role="slider"]')!;
+  act(() => { slider.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); });
+  await flush();
+}
+/** Opens the panel and the flyout of the row that runs now. */
+async function customizeCurrent() {
+  await openPanel();
+  act(() => q('[data-panel-row][data-current] [data-row-customize]')!.click());
+  await flush();
+}
+
+// The computer opens Codex with no first message too (#4961); false: an older one, whose Codex needs it.
+let codexOptional = true;
 
 beforeEach(() => {
+  codexOptional = true;
+  resetModelListsForTests();
   state.machines = [
     { id: "mac", name: "MacBook", online: true },
     { id: "studio", name: "Studio", online: true },
@@ -71,7 +99,7 @@ beforeEach(() => {
     if (url.includes("/model-config/purposes/")) return json({ error: "not found" }, 404);
     const list = /\/launchers\/([^/]+)\/models/.exec(url);
     if (list) return json(LISTS[decodeURIComponent(list[1])] ?? { models: [] });
-    if (url.includes("/launchers")) return json({ launchers: [{ name: "claude", agent: "claude" }, { name: "work", agent: "claude" }, { name: "codex", agent: "codex", agent_type: "codex" }] });
+    if (url.includes("/launchers")) return json({ launchers: [{ name: "claude", agent: "claude" }, { name: "work", agent: "claude" }, { name: "codex", agent: "codex", agent_type: "codex", prompt_optional: codexOptional }] });
     return json({ path: "/code", entries: [] });
   }));
   host = document.createElement("div");
@@ -90,14 +118,36 @@ async function open(key = "a", preset?: { machineId?: string; cwd?: string }) {
   await flush();
 }
 
+describe("New agent's first message for Codex (#4961)", () => {
+  it("is required only where the computer needs it, and a Codex start takes it with the start", async () => {
+    codexOptional = false;
+    await open();
+    await pick("model:codex\ngpt-5.5");
+    expect(document.body.textContent).toContain("第一条消息");
+    expect(document.body.textContent).not.toContain("第一条消息（可选）");
+    expect(button("启动")!.disabled).toBe(true);
+
+    codexOptional = true;
+    await open("b");
+    await pick("model:codex\ngpt-5.5");
+    expect(document.body.textContent).toContain("第一条消息（可选）");
+    expect(button("启动")!.disabled).toBe(false);
+    act(() => button("启动")!.click());
+    expect(launched).toEqual([expect.objectContaining({ launcher: "codex", agentType: "codex", inlinePrompt: true, text: "" })]);
+  });
+});
+
 describe("New agent's recent setups (#2134)", () => {
   it("shows no section before anything started, and remembers a start with the model and effort it sent", async () => {
     await open();
     expect(q('[data-testid="recent-setups"]')).toBeNull();
-    act(() => modelRow().click());
-    act(() => option("Opus 5.5").click());
-    act(() => radio("只做计划")!.click());
-    act(() => chip("高")!.click());
+    await pick("model:claude\nopus");
+    // the effort in the picked model's flyout: none set, then up three levels
+    await customizeCurrent();
+    for (const k of ["ArrowRight", "ArrowRight", "ArrowRight"]) await slide(k);
+    expect(pillEffort()).toBe("高");
+    act(() => pill().click());
+    act(() => radio("计划模式")!.click());
     act(() => button("启动")!.click());
     expect(launched).toHaveLength(1);
     expect(loadRecentSetups()).toEqual([{ ...setup({ model: "opus", mode: "plan", effort: "high" }), at: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/) }]);
@@ -105,11 +155,8 @@ describe("New agent's recent setups (#2134)", () => {
 
   it("remembers a Codex start with its launcher and model only", async () => {
     await open();
-    act(() => radio("只做计划")!.click()); // a Claude Code choice that stays for this computer's next one
-    act(() => chip("codex")!.click());
-    await flush();
-    act(() => modelRow().click());
-    act(() => option("Codex 5.5").click());
+    act(() => radio("计划模式")!.click()); // a Claude Code choice that stays for this computer's next one
+    await pick("model:codex\ngpt-5.5");
     act(() => button("启动")!.click());
     expect(loadRecentSetups()).toEqual([expect.objectContaining({ launcher: "codex", model: "gpt-5.5", agent_type: "codex", mode: "", effort: "" })]);
   });
@@ -121,24 +168,29 @@ describe("New agent's recent setups (#2134)", () => {
     ]);
     await open();
     expect(cards()).toHaveLength(2);
-    expect(lines(card("notes-app"))).toEqual(["notes-app · Studio", "work · sonnet · 全部放行 · 很高"]);
+    expect(lines(card("notes-app"))).toEqual(["notes-app · Studio", "work · sonnet · 完全访问 · 很高"]);
     expect(lines(card("app"))).toEqual(["app · MacBook", "claude"]);
     act(() => card("notes-app").click());
     await flush();
     expect(machineChip("Studio").className).toContain("bg-ink");
     expect(folder()).toBe("/code/notes-app");
-    expect(chip("work")!.getAttribute("aria-pressed")).toBe("true");
-    expect(modelRow().textContent).toContain("Sonnet 5");
-    expect(radio("全部放行")!.getAttribute("aria-checked")).toBe("true");
-    expect(chip("很高")!.getAttribute("aria-pressed")).toBe("true");
+    expect(pill().title).toBe("Claude Code · Sonnet 5 · work · 很高");
+    expect(radio("完全访问")!.getAttribute("aria-checked")).toBe("true");
     expect(card("notes-app").getAttribute("aria-pressed")).toBe("true");
     expect(document.activeElement).toBe(textarea());
     expect(launched).toHaveLength(0);
+    // the panel lights what the card put in
+    await openPanel();
+    expect(row("model:work\nsonnet").getAttribute("aria-selected")).toBe("true");
+    act(() => pill().click());
     // the form changed by hand: no longer that card
-    act(() => chip("高")!.click());
+    await customizeCurrent();
+    await slide("ArrowLeft");
+    expect(pillEffort()).toBe("高");
     expect(card("notes-app").getAttribute("aria-pressed")).toBe("false");
     // Start is the user's: it starts what the form holds
-    act(() => chip("很高")!.click());
+    await slide("ArrowRight");
+    act(() => pill().click());
     act(() => button("启动")!.click());
     expect(launched[0]).toMatchObject({ machineId: "studio", cwd: "/code/notes-app", launcher: "work", model: "sonnet", effort: "xhigh", permissionMode: "bypassPermissions" });
   });
@@ -150,8 +202,8 @@ describe("New agent's recent setups (#2134)", () => {
     act(() => card("other").click());
     await flush();
     expect(folder()).toBe("/code/other");
-    expect(chip("codex")!.getAttribute("aria-pressed")).toBe("true");
-    expect(modelRow().textContent).toContain("Codex 5.5");
+    expect(pill().title).toBe("Codex · Codex 5.5 · codex");
+    expect(pill().querySelector("[data-pill-engine]")!.getAttribute("data-pill-engine")).toBe("codex");
     expect(card("other").getAttribute("aria-pressed")).toBe("true");
     expect(launched).toHaveLength(0);
   });
@@ -164,24 +216,22 @@ describe("New agent's recent setups (#2134)", () => {
       setup({ machine: "studio", launcher: "claude", model: "sonnet" }),
     ]);
     await open();
-    expect(modelRow().textContent).toContain("默认"); // the Mac has no recent setup: the default
+    expect(pill().title).toBe("Claude Code · Default · claude"); // the Mac has no recent setup: the default
     act(() => machineChip("Studio").click());
     await flush();
-    expect(chip("claude")!.getAttribute("aria-pressed")).toBe("true");
-    expect(modelRow().textContent).toContain("Opus 5.5");
-    act(() => chip("work")!.click());
-    await flush();
-    expect(modelRow().textContent).toContain("默认");
+    expect(pill().title).toBe("Claude Code · Opus 5.5 · claude");
+    await pick("model:work\ndefault");
+    expect(pill().title).toBe("Claude Code · Default · work");
     act(() => machineChip("MacBook").click());
     await flush();
-    expect(modelRow().textContent).toContain("默认");
+    expect(pill().title).toContain("Default");
   });
 
   it("restores the model on open too", async () => {
     localStorage.setItem("new.launcher.mac", "claude");
     seed([setup({ model: "sonnet" })]);
     await open();
-    expect(modelRow().textContent).toContain("Sonnet 5");
+    expect(pill().title).toBe("Claude Code · Sonnet 5 · claude");
   });
 
   it("an offline computer's card is dimmed, says so, and can't be picked", async () => {
@@ -198,12 +248,12 @@ describe("New agent's recent setups (#2134)", () => {
     expect(offline.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("marks Allow everything with the warning", async () => {
+  it("marks Full access with the warning", async () => {
     seed([setup({ mode: "bypassPermissions" }), setup({ cwd: "/code/b", mode: "plan" })]);
     await open();
     const bypass = card("app");
     expect(bypass.dataset.bypass).toBe("true");
-    const mark = [...bypass.querySelectorAll("span")].find((s) => s.textContent === "全部放行" && s.className.includes("text-orange"))!;
+    const mark = [...bypass.querySelectorAll("span")].find((s) => s.textContent === "完全访问" && s.className.includes("text-orange"))!;
     expect(mark.querySelector("svg")).not.toBeNull();
     expect(cards()[1].dataset.bypass).toBeUndefined();
   });

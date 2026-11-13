@@ -23,7 +23,9 @@ const Usage = `  personad hub [run]        run the hub (config ~/.persona/hub.js
                            persona-hub) and switch to it once it is up, waiting at most --timeout; --status only says what
                            serves now; exit 0 switched, 1 it did not (the hub serves on), 3 no edge here (restart the service instead)
   personad hub setup [--yes] [--listen :18660] [--tls :18662] [--outside] [--no-service | --manager-service] [--json]
+                    [--lang en|zh-Hans|ja]
                                            set this machine up as the hub: hub.json, database, service, pairing (docs/assistant/onboarding.md);
+                                           --lang: a new hub's language until a device says one (default PERSONA_INSTALL_LANG, set by install.sh);
                                            --manager-service: an existing hub's built-in manager becomes a service of its own (a new one has that);
                                            PERSONA_SPLIT_PROGRAMS=0 keeps its services on personad (not persona-hub, persona-manager)
                                            and stays in their units until setup runs again without it (an installed Mac stays on personad)

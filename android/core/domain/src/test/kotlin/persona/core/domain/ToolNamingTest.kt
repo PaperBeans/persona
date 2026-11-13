@@ -1,9 +1,13 @@
 package persona.core.domain
 
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import persona.core.contracts.Item
 
 /** Tools no table names read as words, never their raw names (#2986, #4339 C1); the cases are iOS's `ToolNamingTests`. */
 class ToolNamingTest {
@@ -44,5 +48,33 @@ class ToolNamingTest {
         assertEquals("Share onboarding guide", toolVerb("ShareOnboardingGuide").zh())
         // The tables still name what they know.
         assertEquals(toolVerb("Read").zh(), namedToolVerb("Read")!!.zh())
+    }
+
+    private fun call(name: String, input: String) = Item("call", kind = "tool_use", toolName = name, toolInput = Json.parseToJsonElement(input))
+
+    // More cases, the shared ones, are in spec/fixtures/tool-names (ToolNamingFixtureTest).
+    @Test fun anUnknownToolsRowSaysWhatItIsAbout() {
+        assertEquals("Crash on launch", toolSubject(call("mcp__github__create_issue", """{"repo":"r","title":"Crash on launch"}""")))
+        assertEquals("Store.swift", toolSubject(call("SomethingNew", """{"path":"/a/b/Store.swift","count":3}""")))
+        // A tool a table names keeps its words as its row's title (iOS picks for these too; Android's rows show no verb).
+        assertEquals("", toolSubject(call("mcp__persona__kb_search", """{"query":"release notes"}""")))
+        // A permission card keeps its own fallback for them (the hub's summary, the description, the input).
+        assertEquals("", toolSubject(call("mcp__github__create_issue", """{"title":"Crash on launch"}"""), pick = false))
+    }
+
+    @Test fun aShellToolsDetailIsItsCommandLine() {
+        assertEquals("$ ls", toolDetail(call("Bash", """{"command":"ls","description":"List"}""")))
+        assertEquals("PS> dir", toolDetail(call("PowerShell", """{"command":"dir"}""")))
+        assertEquals("wss://e.example.com", toolDetail(call("Monitor", """{"ws":{"url":"wss://e.example.com"},"description":"Events"}""")))
+        // Another server's tool of the same name lists its input.
+        assertEquals("command: ls", toolDetail(call("mcp__shell__Bash", """{"command":"ls"}""")))
+    }
+
+    @Test fun aSentenceReadsInTheTextFaceATokenInTheCodeFace() {
+        val args = ToolNaming.arguments(Json.parseToJsonElement("""{"title":"导出很慢","path":"/a/b.kt","id":"a1b2"}"""))
+        assertEquals(listOf("title", "path", "id"), args.map { it.id })
+        assertFalse(args[0].code)
+        assertTrue(args[1].code && args[2].code)
+        assertEquals("ID", args[2].label)
     }
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../../../spec/fixtures/entries/cases.json";
-import { assistantEntries } from "./assistant-entries";
+import { assistantEntries, decisionLaterKey } from "./assistant-entries";
+import { triageTodos } from "./todo-triage";
+import { makeSessionLookup } from "./todos";
 import type { FeedItem, TaskPlan } from "./feed";
 import type { Todo } from "./todos";
 import type { Interaction, Session } from "./types";
@@ -57,5 +59,110 @@ describe("a parked task in the Assistant's entries", () => {
     const at = "2026-11-05T08:00:00Z";
     expect(keys(entries(todo("parked", at), at))).toEqual({ needsYou: [], running: ["task:todo_1"], shelved: [] });
     expect(keys(entries(todo("", at), at)).running).toEqual([]);
+  });
+});
+
+describe("review dismissal with an interrupted Agent", () => {
+  const at = "2026-11-10T08:00:00.123456789Z";
+  const todo: Todo = {
+    id: "task", title: "Example rollout", origin: "main", created_at: at, updated_at: at,
+    agents: [{ machine_id: "box", session_id: "worker", linked_at: at }],
+    supervision: { supervisor: "main", state: "needs_user", reviews: [{ at, verdict: "needs_user", note: "Choose the rollout route." }] },
+    decision_review: { review_at: at, dismissal_id: "dismiss-demo" },
+  };
+  const session: Session = { machine_id: "box", session_id: "worker", title: "Example Agent", cwd: "/example", state: "idle", status: "idle", updated_at: at, turn_error: "Synthetic transient error", turn_error_kind: "transient" };
+  const input = { conversation: "main", main: "main", todos: [todo], sessions: [session], interactions: [], plans: {}, feed: [],
+    cards: [{ id: "task:task", todo_id: todo.id, at, updated_at: at, state: "working" as const }] };
+
+  it("honors a same-round dismissal despite an old runtime error", () => {
+    expect(assistantEntries(input).needsYou).toEqual([]);
+  });
+
+  it("honors Later for the same review despite an old runtime error", () => {
+    const deferredTodo = { ...todo, decision_review: { review_at: at } };
+    expect(assistantEntries({ ...input, todos: [deferredTodo], deferred: { [decisionLaterKey(deferredTodo)]: true } }).needsYou).toEqual([]);
+  });
+
+  it("does not hide a new review one nanosecond later", () => {
+    const next = "2026-11-10T08:00:00.123456790Z";
+    const newer = { ...todo, supervision: { ...todo.supervision!, reviews: [{ at: next, verdict: "needs_user" as const }] } };
+    expect(assistantEntries({ ...input, todos: [newer], deferred: { [decisionLaterKey(todo)]: true } }).needsYou.map((r) => r.key)).toEqual(["task:task"]);
+  });
+
+  it("keeps a pending Agent question visible with its own home", () => {
+    const interaction = { id: "question", machine_id: "box", session_id: "worker", kind: "question", created_at: at } as Interaction;
+    const got = assistantEntries({ ...input, interactions: [interaction], deferred: { [decisionLaterKey(todo)]: true } });
+    expect(got.needsYou.map((r) => r.key)).toEqual(["task:task"]);
+    expect(got.needsYou[0]).toMatchObject({ asks: [interaction] });
+  });
+
+  it("keeps Agent input visible even while its interaction has not loaded", () => {
+    const got = assistantEntries({ ...input, sessions: [{ ...session, state: "needs_you" }], deferred: { [decisionLaterKey(todo)]: true } });
+    expect(got.needsYou.map((r) => r.key)).toEqual(["task:task"]);
+  });
+
+  it("keeps an interruption without a review decision visible", () => {
+    const interrupted = { ...todo, supervision: undefined, decision_review: undefined };
+    expect(assistantEntries({ ...input, todos: [interrupted] }).needsYou.map((r) => r.key)).toEqual(["task:task"]);
+  });
+});
+
+// #3331: the chip bar's numbers use the To-dos page's one rule (lib/todo-triage countsAsOpen). Rows stay visible
+// whatever the bucket; only the count follows whether the page's "Not done" counts the to-do.
+describe("the entries' open-to-do count follows the To-dos page's rule", () => {
+  const now = Date.parse("2026-11-10T09:00:00Z");
+  const fresh = "2026-11-10T08:00:00Z";
+  const stale = "2026-11-05T08:00:00Z";
+  const parked = { reason: "The design team has to pick the icon set first", until: "2026-11-14T09:00:00Z", waiting_on: "someone_else" as const, count: 1 };
+  const base = (id: string, at: string, patch: Partial<Todo> = {}): Todo => ({
+    id, title: id, origin: "main", created_at: at, updated_at: at,
+    agents: [{ machine_id: "box", session_id: id, linked_at: at }], ...patch,
+  }) as Todo;
+  const run = (todos: Todo[], sessions: Session[] = [], plans: Record<string, TaskPlan> = {}) =>
+    assistantEntries({ conversation: "main", main: "main", todos, sessions, interactions: [], plans, feed: [], now });
+  const openTaskItems = (got: ReturnType<typeof assistantEntries>) =>
+    [...got.needsYou, ...got.running].filter((item) => item.kind === "task") as { key: string; countsOpen: boolean }[];
+
+  it("keeps an unexpired parked task open even after days without activity, as the page does", () => {
+    const t = base("parked-stale", stale, { supervision: { supervisor: "main", state: "parked", parked, reviews: [], updated_at: stale } });
+    const got = run([t]);
+    expect(got.running.map((i) => i.key)).toEqual(["task:parked-stale"]);
+    expect(openTaskItems(got)[0]!.countsOpen).toBe(true);
+    // Explicit parking survives inactivity; fresh and stale parked tasks use the same count.
+    const freshTodo = base("parked-fresh", fresh, { supervision: { supervisor: "main", state: "parked", parked: { ...parked, until: "2026-11-14T09:00:00Z" }, reviews: [], updated_at: fresh } });
+    expect(openTaskItems(run([freshTodo]))[0]!.countsOpen).toBe(true);
+  });
+
+  it("keeps a seen pending-review decision visible in Needs you but counts it only while the page still has it open", () => {
+    const review = { at: stale, verdict: "needs_user" as const, note: "Choose the route." };
+    const seen = base("review-seen", stale, { seen_at: stale, supervision: { supervisor: "main", state: "pending_review", reviews: [review], updated_at: stale } });
+    const got = run([seen]);
+    expect(got.needsYou.map((i) => i.key)).toEqual(["task:review-seen"]);
+    expect(openTaskItems(got)[0]!.countsOpen).toBe(false);
+    // nobody looked at the finished turn yet: the page keeps it in Just finished, so it still counts
+    const unseen = base("review-unseen", stale, { supervision: { supervisor: "main", state: "pending_review", reviews: [review], updated_at: stale } });
+    expect(openTaskItems(run([unseen]))[0]!.countsOpen).toBe(true);
+  });
+
+  it("counts across both entries exactly the to-dos the To-dos page header calls open, and never plans or hand-opened Agents", () => {
+    const workingSession: Session = { machine_id: "box", session_id: "working", title: "Worker", cwd: "/w", state: "working", status: "working", updated_at: fresh } as Session;
+    const todos: Todo[] = [
+      base("working", fresh, { agents: [{ machine_id: "box", session_id: "working", linked_at: fresh }] }),
+      base("stale", stale),
+      base("done", fresh, { done_at: fresh }),
+      base("parked-stale", stale, { supervision: { supervisor: "main", state: "parked", parked, reviews: [], updated_at: stale } }),
+      base("review-seen", stale, { seen_at: stale, supervision: { supervisor: "main", state: "pending_review", reviews: [{ at: stale, verdict: "needs_user" as const }], updated_at: stale } }),
+    ];
+    // a plan waiting for Start has no to-do yet: a Needs you row that is not a to-do
+    const plans: Record<string, TaskPlan> = { plan: { id: "plan", conversation: "main", state: "open", created_at: fresh, tasks: [{ title: "Future work", prompt: "p", cwd: "/w", machine: "box" }] } };
+    // a hand-opened Agent that belongs to no to-do: a running row that is not a to-do
+    const loneAgent: Session = { machine_id: "box", session_id: "lone", title: "Lone", cwd: "/w", state: "working", status: "working", updated_at: fresh } as Session;
+    const got = run(todos, [workingSession, loneAgent], plans);
+    const pageOpen = triageTodos(todos, makeSessionLookup([workingSession, loneAgent]), now).open;
+    const chipOpen = openTaskItems(got).filter((i) => i.countsOpen).length;
+    expect(chipOpen).toBe(pageOpen);
+    expect(chipOpen).toBe(2); // Working and unexpired parked; inactivity alone does not end an explicit wait.
+    expect(got.needsYou.some((i) => i.kind === "plan")).toBe(true);
+    expect(got.running.some((i) => i.kind === "agent")).toBe(true);
   });
 });

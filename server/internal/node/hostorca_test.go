@@ -48,6 +48,10 @@ func TestMain(m *testing.M) {
 		preflightChild(os.Args[1:], os.Stdout)
 		os.Exit(0)
 	}
+	// A plain run of the whole package: its tests in concurrent processes of this binary (partition_test.go, #5734).
+	if code, ran := runPartitioned(); ran {
+		os.Exit(code)
+	}
 	// Nor `node doctor` as the preflight's child: the test binary again, in that mode, given long enough to come up
 	// under the whole server suite's load (#1110); only a child that never starts waits that long.
 	preflightChildCmd = func(string) ([]string, []string) {
@@ -854,8 +858,9 @@ func TestNotRunningOnAnEngineWithoutResume(t *testing.T) {
 	if code, _ := refusalOf(t, err); code != agentStopped {
 		t.Fatalf("a message to a stopped agent: %v", err)
 	}
+	starts := orcaTypedStarts(o)
 	_, _ = request(t, n, "session.start", map[string]any{"resume_session_id": sidA})
-	if s := strings.Join(o.Trace("terminal.send"), "\n"); !strings.Contains(s, "--resume "+sidA) || !strings.Contains(s, "claude-gpt") {
+	if s := strings.Join(starts(), "\n"); !strings.Contains(s, "--resume "+sidA) || !strings.Contains(s, "claude-gpt") {
 		t.Fatalf("gone: not resumed with its launcher; calls %v", o.Trace())
 	}
 	const unknown = "0e000000-0000-4000-8000-0000000000ff" // no Claude transcript: not Orca's to resume

@@ -55,6 +55,7 @@ func TestAskUserNoWaitTakesNoDefaultAfterTheUserWroteInTheChat(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			presenceTimes(t, 200*time.Millisecond, time.Hour)
+			ownerTurnTimes(t, 200*time.Millisecond, time.Hour)
 			e := newAskTodoEnv(t, nil)
 			stopHolds(t, e.s)
 			ix, _ := e.askLater(c.args)
@@ -309,7 +310,7 @@ func TestAskUserNoWaitAnswerIsNotHeldForTheOwnersPresence(t *testing.T) {
 		t.Fatalf("delivered %q", got)
 	}
 	e.mustEnd(closed.ID, `{"dismiss":true}`)
-	time.Sleep(50 * time.Millisecond)
+	waitFor(t, "the closed card held for the owner", func() bool { return e.s.queuedFor("c1x1x1") == 2 })
 	if q, sent := e.s.queuedFor("c1x1x1"), len(e.told("c1x1x1")); q != 2 || sent != 1 {
 		t.Fatalf("after the answer: %d queued (want the other chat's message and the closed card), %d sent", q, sent)
 	}

@@ -19,9 +19,14 @@ import SwiftUI
     /// Set by the chat: a held header began, or ended, rising to show what opened under it (`rising`). Meanwhile the
     /// newest end is off the screen for a moment, and ↓ came up for that moment only (#1123).
     var onRising: (Bool) -> Void = { _ in }
-    /// Set by the chat: a row is opening or closing under the click (`toggleInPlace`). True when the chat holds the list
-    /// there instead of following what comes in next (`ChatFollow.toggledRow`, as on iOS, #3005).
-    var anchor: () -> Bool = { false }
+    /// Set by the chat: a row is opening or closing under the click (`toggleInPlace`), and how it is held
+    /// (`ChatFollow.toggledRow`, as on iOS, #3005). The Mac keeps the row where it is: it does not rise (`room`).
+    var toggled: (_ closing: Bool) -> (keep: Bool, rise: Bool) = { _ in (false, false) }
+    var riseTop: CGFloat = 0
+    /// How far a row may rise to the top bar: on iOS only (#3757).
+    func room(above key: String) -> CGFloat { 0 }
+    /// What a click opened comes from the hub later: on iOS the hold waits for it (#3757).
+    func awaiting(_ work: () async throws -> Void) async rethrows { try await work() }
     /// Set by the chat: a kept hold glided to the newest end (iOS, #1173). The Mac pin does not glide; never called.
     var landed: () -> Void = {}
 
@@ -86,6 +91,8 @@ import SwiftUI
     var traceHeld: String { held.map { "\($0.key)\($0.until == .distantFuture ? "+kept" : "")" } ?? "-" }
     /// The iPhone's trace says where its scroll view is; the Mac's says nothing more.
     var traceFrame: String { "-" }
+    /// The list's distance from its newest end (`UnfoldTrace`): on iOS only.
+    var measuredNewestGap: CGFloat? { nil }
     #endif
 
     func moved(_ key: String, to spot: Spot) {

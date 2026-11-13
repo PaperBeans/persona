@@ -37,8 +37,8 @@ struct ScreenReview: View {
     var submit: () -> Void
     /// Go and answer that question.
     var answer: ((ScreenReviewRow) -> Void)?
-
-    private var missing: ScreenReviewRow? { rows.first { $0.answer == nil } }
+    /// Question forms place this footer outside their scrolling rows; terminal cards keep the original combined layout.
+    var showsFooter = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -64,7 +64,7 @@ struct ScreenReview: View {
             .padding(.vertical, Theme.Space.xs)
             .background(Theme.Fill.well, in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
             .accessibilityIdentifier("screen-review")
-            footer
+            if showsFooter { ScreenReviewFooter(rows: rows, sending: sending, back: back, submit: submit, answer: answer) }
         }
     }
 
@@ -80,6 +80,18 @@ struct ScreenReview: View {
             Text(a).font(Theme.Font.body).fixedSize(horizontal: false, vertical: true)
         }
     }
+
+}
+
+/// The review's actions as a separate view, so an assistant or hook question can pin them below its scrolling rows.
+struct ScreenReviewFooter: View {
+    var rows: [ScreenReviewRow]
+    var sending: String?
+    var back: (() -> Void)?
+    var submit: () -> Void
+    var answer: ((ScreenReviewRow) -> Void)?
+
+    private var missing: ScreenReviewRow? { rows.first { $0.answer == nil } }
 
     /// Previous and the main button in a row, with a question left Submit Without Them beside them; when the row has no
     /// room, Submit Without Them goes under it; at the largest text sizes all three stack, the main button first and full
@@ -109,6 +121,8 @@ struct ScreenReview: View {
         .controlSize(.regular)
         .disabled(sending != nil)
     }
+
+    var body: some View { footer }
 
     private var leftOne: Bool { missing != nil && answer != nil }
 

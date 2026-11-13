@@ -282,6 +282,7 @@ struct FittedTable: View {
             Self.drawn(config.label)
                 .environment(\.tableColumnWidths, plan?.widths ?? [])
                 .environment(\.tableColumnAlignments, measure.alignments)
+                .liftTableSize() // its room in the text view over a lifted copy's words
         }
         .scrollDisabled(plan?.scrolls != true)
         // What shows of it, not offset + container: on an iPad the chat's scroll views run on under the sidebar, inset

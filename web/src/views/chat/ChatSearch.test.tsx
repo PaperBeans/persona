@@ -10,7 +10,7 @@ import { ActionRow } from "./ActionRow";
 import { ChatContext } from "./chat-context";
 import { ChatSearch } from "./ChatSearch";
 import { revealItem, undoReveals } from "./search-reveal";
-import { ThinkingCard } from "./ThinkingCard";
+import { ThinkingRow } from "./ThinkingRow";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -58,9 +58,27 @@ describe("ChatSearch", () => {
     panel();
     const text = document.body.textContent ?? "";
     expect(text).toContain("输入关键词");
-    expect(text).toContain("可搜索正文、思考、工具名、工具输入和输出、系统事件。");
+    expect(text).toContain("可搜索正文、引用、思考、工具名、工具输入和输出、系统事件。");
     expect(text).toContain("0 条命中，已加载 1 轮");
     expect(text).toContain("已到最早的记录");
+  });
+
+  it("says while it searches the folded steps, and when some could not be searched (#6281)", () => {
+    panel({ foldsLoading: true });
+    expect(document.body.textContent).toContain("正在搜索收起的工作记录…");
+    panel({ foldsPartial: true });
+    expect(document.body.textContent).toContain("部分收起的工作记录没能搜索。");
+  });
+
+  it("lists a quoted context under its own heading, without the tag it travels in", () => {
+    vi.useFakeTimers();
+    const quoted: Item[] = [{ id: "q#0", seq: 1, role: "user", kind: "text", text: '帮我看看\n<persona-context kind="selection" title="摘录">隐藏摘录 HiddenCtx</persona-context>' }];
+    panel({ items: quoted, query: "hiddenctx" });
+    act(() => vi.advanceTimersByTime(250));
+    const rows = [...document.querySelectorAll("[data-search-result]")];
+    expect(rows.map((r) => r.getAttribute("data-search-result"))).toEqual(["quoted"]);
+    expect(document.body.textContent).toContain("引用");
+    expect(rows[0].textContent).not.toContain("persona-context");
   });
 
   it("lists the hits by category with the match marked, and picks one", () => {
@@ -80,6 +98,15 @@ describe("ChatSearch", () => {
     panel({ query: "nothing-like-this" });
     act(() => vi.advanceTimersByTime(250));
     expect(document.body.textContent).toContain("没有找到匹配记录");
+  });
+
+  it("keeps the existing earlier-load failure text and retry button when loading throws", async () => {
+    panel({ hasMore: true, onLoadEarlier: async () => { throw new Error("Synthetic earlier-load failure"); } });
+    const load = [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "加载更早的记录并继续搜")!;
+    await act(async () => load.click());
+    expect(document.body.textContent).toContain("更早的记录未能载入，请重试");
+    expect([...document.querySelectorAll<HTMLButtonElement>("button")].some(button => button.textContent === "加载更早的记录并继续搜")).toBe(true);
+    expect([...document.querySelectorAll<HTMLButtonElement>("button")].some(button => button.textContent === "停止加载")).toBe(false);
   });
 
   it("loads earlier pages, and says why it stopped", async () => {
@@ -120,12 +147,22 @@ describe("going to a hit", () => {
   });
 
   it("opens a thought", () => {
-    const thought: Item = { id: "th#0", seq: 2, role: "assistant", kind: "thinking", text: "the parser drops a token" };
-    act(() => root.render(<ThinkingCard item={thought} durationMs={2000} scope="m/s:" />));
-    expect(host.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
+    const thought: Item = { id: "th#0", seq: 2, role: "assistant", kind: "thinking", text: "the parser drops a token\nat the end" };
+    act(() => root.render(<ThinkingRow item={thought} scope="m/s:" />));
+    expect(host.querySelector('[data-thinking="words"] > div')?.getAttribute("aria-expanded")).toBe("false");
     act(() => revealItem("m/s:", "th#0"));
-    expect(host.querySelector("button")?.getAttribute("aria-expanded")).toBe("true");
+    expect(host.querySelector('[data-thinking="words"] > div')?.getAttribute("aria-expanded")).toBe("true");
     act(() => undoReveals());
-    expect(host.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector('[data-thinking="words"] > div')?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("opens a thought that fits on its row too (#5155: its row says it already, opened it shows it whole)", () => {
+    const thought: Item = { id: "th#1", seq: 2, role: "assistant", kind: "thinking", text: "the parser drops a token" };
+    act(() => root.render(<ThinkingRow item={thought} scope="m/s:" />));
+    expect(host.querySelector('[data-thinking="words"] > div')?.hasAttribute("aria-expanded")).toBe(false);
+    act(() => revealItem("m/s:", "th#1"));
+    expect(host.querySelector('[data-thinking="words"] > div')?.getAttribute("aria-expanded")).toBe("true");
+    act(() => undoReveals());
+    expect(host.querySelector('[data-thinking="words"] > div')?.hasAttribute("aria-expanded")).toBe(false);
   });
 });

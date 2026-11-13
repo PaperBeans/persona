@@ -310,19 +310,6 @@ export function subagentEnded(result: Item | undefined, meta: Subagent | undefin
 
 const sameTool = (x: Subagent["last_tool"], y: Subagent["last_tool"]) => x === y || (x?.id === y?.id && x?.name === y?.name && x?.summary === y?.summary);
 
-/** The subagents the main agent is waiting on (#5602, Claude Desktop's "2 agents working — …"): running ones it
- *  launched in the foreground whose calls have no result yet (`answered`: the call ids that do), and what they are
- *  doing, newest call first. Null when there are none. */
-export function agentsWorking(all: Subagent[] | undefined, answered: ReadonlySet<string>): { count: number; doing: string[] } | null {
-  const waiting = (all ?? []).filter((a) => a.running && !a.background && a.tool_use_id && !answered.has(a.tool_use_id));
-  if (!waiting.length) return null;
-  const doing = waiting
-    .filter((a) => a.last_tool)
-    .sort((a, b) => (Date.parse(b.updated_at ?? "") || 0) - (Date.parse(a.updated_at ?? "") || 0))
-    .map((a) => a.last_tool!.summary?.trim() || a.last_tool!.name);
-  return { count: waiting.length, doing: [...new Set(doing)] };
-}
-
 /** What of a subagent its card and list show: everything but `updated_at`, which moves with every line it writes. */
 function subagentShown(a: Subagent): Omit<Subagent, "updated_at"> {
   const { updated_at: _, ...shown } = a;
@@ -360,8 +347,8 @@ export function modelChipLabel(model: string | undefined): string {
   const word = (w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
   const claude = /^claude-([a-z]+)-(\d+)(?:-(\d+))?$/i.exec(id);
   if (claude) return `${word(claude[1])} ${claude[3] ? `${claude[2]}.${claude[3]}` : claude[2]}`;
-  const gpt = /^gpt-([\d.]+)(?:-(mini|nano))?$/i.exec(id);
-  if (gpt) return `GPT-${gpt[1]}${gpt[2] ? ` ${word(gpt[2])}` : ""}`;
+  const gpt = /^gpt-([\d.]+)((?:-[a-z0-9]+)*)$/i.exec(id);
+  if (gpt) return `GPT-${gpt[1]}${gpt[2].split("-").filter(Boolean).map((w) => ` ${word(w)}`).join("")}`;
   return id.split("-").filter(Boolean).map(word).join(" ");
 }
 

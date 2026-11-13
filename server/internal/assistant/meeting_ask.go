@@ -520,7 +520,7 @@ func (s *Service) answerMeetingAsk(ctx context.Context, e *kb.Engine, id string,
 	question := a.Question
 	var heard []kb.LiveSegment
 	if a.QuestionSource == askHeard {
-		l, err := awaitLive(ctx, e, id, a.LiveNext)
+		l, err := s.awaitHeard(ctx, e, id, a)
 		if err != nil {
 			return failed(askModelError)
 		}

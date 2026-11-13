@@ -35,11 +35,14 @@
   "preview_invalid": "请单独请求删除预览，不要同时删除或核对",
   "preview_required": "请重新预览此工作区后再删除",
   "preview_stale": "工作区或改动与预览不符，请重新预览并确认",
-  "identity_unavailable": "Orca 无法确认此工作区实例可安全删除，请刷新或更新 Orca",
+  "identity_unavailable": "引擎无法核实此工作区的身份，请刷新后再试",
   "folder_branch": "文件夹工作区没有可删除的分支",
   "delete_dispatched": "删除请求已发送，请先核对状态再继续操作",
   "catalog_incomplete": "Orca 返回的工作区目录不完整，请刷新后重试",
   "mode_invalid": "创建模式标记必须为布尔值",
   "source_branch_conflict": "已有分支不能同时用作拉取请求检出，请选择一个来源",
-  "field_invalid": "工作树选项字段必须使用正确的 JSON 类型"
+  "field_invalid": "工作树选项字段必须使用正确的 JSON 类型",
+  "no_commits": "{path} 还没有任何提交，无法从它新建工作树；先提交一次，或直接在这个文件夹里工作",
+  "close_unsupported": "此引擎暂不支持关闭工作区",
+  "herdr_children": "请先关闭关联的子工作区，再重新打开此工作区的关闭菜单。"
 }

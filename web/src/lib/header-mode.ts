@@ -1,63 +1,26 @@
-// The Agent header's permission mode (#3956, as iOS `SessionModes` from #3719 and Android #3957; its tones are
-// ModeTone in docs/design/DESIGN_SYSTEM.md): the mode's symbol in a tone that says how much it lets the agent do without asking, and the rules of the mode
-// menu the header and the composer's chip share (which modes it offers, which picks ask first).
+// The rules of an Agent's permission mode menu (#3956, as iOS `SessionModes` from #3719 and Android #3957): which modes the
+// composer's picker offers, which picks ask first, and each mode's symbol. The web's header no longer has a mode button
+// (#5421, cindy's: the mode is the composer's picker and Session info).
 import { t } from "../i18n";
 import type { IconName } from "../ui/icons";
 import type { MenuItem } from "../ui/menu-model";
-import { stateOf } from "./format";
 import { BYPASS_MODE, BYPASS_WARNING, canSwitchToBypass, hasModes, modeTitle, PERMISSION_MODES, switchableModes } from "./session-actions";
 import type { Session } from "./types";
+import { paneClaude } from "./composer-commands";
 
-/** Ask First (the quiet gray), Plan Only (teal), Auto-Edit and Auto (purple), Allow Everything (red); unknown: not reported yet. */
-export type ModeTone = "asks" | "plans" | "acts" | "allows" | "unknown";
-
-/** A mode not reported yet, or one this app does not know, is `unknown`: never a guessed Ask First, which would make an agent
- *  started in Allow Everything look safe. */
-export function headerTone(mode: string | undefined): ModeTone {
-  switch (mode) {
-    case "default":
-      return "asks";
-    case "plan":
-      return "plans";
-    case "acceptEdits":
-    case "auto":
-      return "acts";
-    case BYPASS_MODE:
-      return "allows";
-    default:
-      return "unknown";
-  }
+/** Full access for a terminal Claude Code that cannot reach it with shift+tab (started without a bypass flag): the node
+ *  restarts the session in it once its turn is over, resuming the same conversation (node/mode_restart.go, #6476). */
+export function bypassRestarts(s: Session, assistant?: boolean): boolean {
+  return !(assistant || s.assistant) && s.agent !== "agy" && hasModes(s) && paneClaude(s) && !canSwitchToBypass(s);
 }
 
-/** The mode menu's own symbol per mode (iOS hand.raised, pencil.line, list.bullet.clipboard, wand.and.sparkles,
- *  exclamationmark.shield; the plain shield when unknown). */
-export function headerIcon(mode: string | undefined): IconName {
-  switch (mode) {
-    case "default":
-      return "hand";
-    case "acceptEdits":
-      return "pencil";
-    case "plan":
-      return "list";
-    case "auto":
-      return "sparkles";
-    case BYPASS_MODE:
-      return "shieldAlert";
-    default:
-      return "shield";
-  }
-}
-
-/** The mode can be changed from here: an agent with modes that runs (the composer's chips' rule). */
-export function modesChangeable(s: Session): boolean {
-  return hasModes(s) && stateOf(s) !== "offline";
-}
-
-/** The header shows an agent's mode when there is one to see or to change (iOS `showsInHeader`): Claude Code's, before its
- *  first prompt too. Not an assistant conversation (its page has its own controls), nor an agent whose mode can be neither
- *  read nor changed (Codex). */
-export function showsInHeader(s: Session | undefined, assistant?: boolean): boolean {
-  return Boolean(s && !assistant && !s.assistant && (s.permission_mode || modesChangeable(s)));
+/** What the Full access row says under its name where picking it does not take effect at once, "" where it does: the
+ *  restart it waits for, or the one it will make; a Persona conversation's next message. */
+export function bypassNote(s: Session, assistant?: boolean): string {
+  if (s.bypass_pending) return t("chat-sessiondialogs.bypass_pending");
+  if (bypassRestarts(s, assistant)) return t("chat-sessiondialogs.bypass_restart_detail");
+  if ((assistant || s.assistant) && s.permission_mode !== BYPASS_MODE) return t("chat-sessiondialogs.bypass_next_message");
+  return "";
 }
 
 /** An assistant conversation (and Antigravity, as before) switches without asking. */
@@ -77,16 +40,19 @@ export function modeConfirmation(s: Session, to: string, assistant?: boolean): "
  *  disabled with its reason where the agent cannot take it while it runs. `locked`: nothing can be picked (not running). */
 export function modeMenuItems(s: Session, pick: (mode: string) => void, opts: { assistant?: boolean; locked?: boolean } = {}): MenuItem[] {
   const mode = s.permission_mode;
-  const rows: MenuItem[] = switchableModes(opts.assistant || s.assistant, s.agent, canSwitchToBypass(s)).map((m) => {
+  const restart = bypassRestarts(s, opts.assistant);
+  const note = bypassNote(s, opts.assistant);
+  const rows: MenuItem[] = switchableModes(opts.assistant || s.assistant, s.agent, canSwitchToBypass(s) || restart).map((m) => {
     const ask = modeConfirmation(s, m.id, opts.assistant);
+    const later = m.id === BYPASS_MODE && note ? note : "";
     return {
       key: m.id,
       label: m.title,
-      detail: m.detail,
+      detail: later || m.detail,
       radio: true,
       checked: mode === m.id,
       disabled: opts.locked,
-      ...(ask === "allow" ? { danger: true, confirm: t("chat-sessiondialogs.bypass_confirm"), confirmDetail: BYPASS_WARNING } : {}),
+      ...(ask === "allow" ? { danger: true, confirm: t("chat-sessiondialogs.bypass_confirm"), confirmDetail: later ? `${BYPASS_WARNING}\n${later}` : BYPASS_WARNING } : {}),
       ...(ask === "leave" ? { confirm: t("chat-sessiondialogs.leave_bypass_confirm", { mode: modeTitle(m.id) }), confirmDetail: t("chat-sessiondialogs.leave_bypass_detail") } : {}),
       onSelect: () => pick(m.id),
     };
@@ -97,4 +63,34 @@ export function modeMenuItems(s: Session, pick: (mode: string) => void, opts: { 
     rows.push({ key: BYPASS_MODE, label: bypass.title, detail: bypass.detail, disabled: true, onSelect: () => {} });
   }
   return rows;
+}
+
+/** The composer picker's symbol per mode (#5324, cindy's: a raised hand, code, a list, sparkles, a warning triangle); a
+ *  mode this app does not know the plain shield. Not reported yet keeps the raised hand, as iOS does, while the picker's
+ *  label names no mode (#5756). */
+export function pickerIcon(mode: string | null | undefined): IconName {
+  if (!mode) return "palm"; // not reported: absent, empty or null alike
+  switch (mode) {
+    case "default":
+      return "palm";
+    case "acceptEdits":
+      return "code";
+    case "plan":
+      return "list";
+    case "auto":
+      return "sparkles";
+    case BYPASS_MODE:
+      return "warning";
+    default:
+      return "shield";
+  }
+}
+
+/** Where unchecking Plan mode (the + panel's check row, #5324) goes: the mode the agent had before it, as this page saw it,
+ *  while it can still switch to it; else Default permissions. Never Full access, which only the picker chooses, with its
+ *  confirmation. */
+export function leavePlanTo(s: Session, before: string | undefined, assistant?: boolean): string {
+  if (!before || before === "plan" || before === BYPASS_MODE) return "default";
+  const offered = switchableModes(assistant || s.assistant, s.agent, canSwitchToBypass(s));
+  return offered.some((m) => m.id === before) ? before : "default";
 }

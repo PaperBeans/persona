@@ -4,12 +4,13 @@ a run the hub lists is the run's task card (after cindy's AgentTaskCard), inside
 reader opens it: the workflow mark, the run's name and its status word (运行中 / 已完成 / 失败, only 失败 red), then
 "Workflow · tokens · tool uses · 已运行 … / the time it took", "<phase> · done/total Agent" and a strip of a square per
 agent (at most 40, then "+n"; a 185-agent run's earlier agents the hub no longer lists drawn from its counts). Its head
-opens the chat's Background dialog at its run (brought into view and lit a moment); there the run's card has its counts,
+opens the Background tasks side panel at its run's detail (#5421, cindy's); there the run's card has its counts,
 a progress bar moved by scaleX, one block per phase (a long block's last 12 rows with "更早的 n 个没有列出" and
 "还有 n 个"), and agent rows that only read (they open no conversation). A call whose run the hub no longer lists stays a
-plain row. A change moves the card in place (the dialog's counts roll, not with reduced motion); the running bar says
+plain row. A change moves the card in place (the detail's counts roll, not with reduced motion); the running bar says
 "后台 workflow · <phase> · N/M+ · 还有 n 个" from the run's start, its count whole at 390 wide in English and Japanese
-too; the header's chip opens the same dialog, whose "在对话中查看" brings the call into view; the sidebar row's count.
+too; the top bar's Background tasks button opens the panel's list, a run's detail there has "在对话中查看" bringing the
+call into view; the sidebar row's count.
 Light / dark × 1280 / 390.
 
     MOCK_WORKFLOW_CARDS=1 PORT=18772 python3 scripts/mock/mock_hub.py &
@@ -22,6 +23,7 @@ completed) and pushes the session. Prints one line per check and a verdict; exit
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.request
 
@@ -91,28 +93,27 @@ def check_head(card, tag, status, word, meta_first, progress):
         fail(f"{tag}: the second line should start {meta_first}: {meta}")
     expect(card.locator("[data-workflow-progress-line]")).to_have_text(progress)
     if card.locator("[data-workflow-status], [data-workflow-counts], [data-workflow-phases]").count():
-        fail(f"{tag}: the dialog's head and phases are not drawn in the chat's card")
+        fail(f"{tag}: the detail's head and phases are not drawn in the chat's card")
     return meta
 
 
-def open_in_dialog(page, card, task, tag):
-    """The card's head opens the Background dialog with its run in view and lit a moment."""
+def open_in_panel(page, card, task, tag):
+    """The card's head opens the Background tasks panel at its run's detail (#5421)."""
     head = card.locator("button").first
-    if head.get_attribute("aria-expanded") is not None or card.get_attribute("data-workflow-opens") != "dialog":
-        fail(f"{tag}: the card should open the Background dialog, not in place")
+    if head.get_attribute("aria-expanded") is not None or card.get_attribute("data-workflow-opens") != "panel":
+        fail(f"{tag}: the card should open the Background tasks panel, not in place")
     head.click()
-    dialog = page.get_by_role("dialog")
-    expect(dialog).to_have_count(1)
-    target = dialog.locator(f'[data-workflow-task="{task}"]')
+    panel = page.locator('aside[aria-label="后台任务"]')
+    expect(panel).to_have_count(1)
+    expect(panel.locator(f'[data-background-detail="{task}"]')).to_have_count(1)
+    target = panel.locator(f'[data-workflow-task="{task}"]')
     expect(target).to_be_in_viewport()
-    if not target.evaluate("(e) => e.getAnimations().length > 0"):
-        fail(f"{tag}: the run's card in the dialog should be lit when it opens there")
-    return dialog, target
+    return panel, target
 
 
-def close_dialog(page):
-    page.keyboard.press("Escape")
-    expect(page.get_by_role("dialog")).to_have_count(0)
+def close_panel(page):
+    page.locator('aside[aria-label="后台任务"]').get_by_role("button", name="关闭面板").click()
+    expect(page.locator('aside[aria-label="后台任务"]')).to_have_count(0)
 
 
 def run(browser, base, hub, token, size, theme, shots, reduce):
@@ -153,7 +154,7 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
     if len(meta) != 4 or not meta[1].endswith(" tokens") or not meta[2].endswith("次工具调用") or not meta[3].startswith("已运行 "):
         fail(f"{tag}: the running card's second line: {meta}")
     strip_of(small, tag, ["done"] * 6 + ["running"] * 3)
-    expect(small.locator("button").first).to_have_attribute("aria-label", "在后台任务中打开 widget-review")
+    expect(small.locator("button").first).to_have_attribute("aria-label", "在后台任务面板中打开 widget-review")
     ok(f"{tag}: the running card: 运行中, {' · '.join(meta)}, Verify · 6/9 Agent, 6 done and 3 running squares")
     center(small)
     shot("running", small)
@@ -167,7 +168,7 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
     started = page.evaluate("""async () => { const r = await fetch('/api/v1/sessions', { headers: { Authorization: 'Bearer ' + (localStorage.getItem('persona.token') || 'mock') } });
       const all = (await r.json()).sessions; const s = all.find((x) => x.session_id === '%s');
       return (Date.now() - Date.parse(s.workflows[0].started_at)) / 60000; }""" % CHAT.split("/")[-1])
-    minutes = int(elapsed.split(" 分")[0]) if " 分" in elapsed else -1
+    minutes = int(m.group(1)) if (m := re.match(r"(\d+)m ", elapsed)) else -1
     if abs(minutes - int(started)) > 1:
         fail(f"{tag}: the running bar should count from the run's start ({started:.1f} min): {elapsed}")
     ok(f"{tag}: the running bar says the background workflow, its phase and count, from the run's start")
@@ -181,11 +182,11 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
     center(long)
     shot("long", long)
 
-    # its head opens the Background dialog at the run, lit; there its Audit block (cut into by the hub's cap) shows its
+    # its head opens the Background tasks panel at the run; there its Audit block (cut into by the hub's cap) shows its
     # last 12 rows with what is hidden and what is not listed above them; the rows only read
-    dialog, card = open_in_dialog(page, long, "wflong", tag)
+    panel, card = open_in_panel(page, long, "wflong", tag)
     page.wait_for_timeout(300)
-    shot("dialog-long")
+    shot("panel-long")
     expect(card.locator("[data-workflow-counts]")).to_have_text("169/185+")
     audit = card.locator('[data-phase="Audit"]')
     expect(audit.locator("[data-phase-count]")).to_have_text("169/180+")
@@ -205,15 +206,15 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
     expect(audit.locator("[data-phase-unlisted]")).to_be_visible()
     audit.locator("[data-phase-fewer]").click()
     expect(audit.locator("[data-agent]")).to_have_count(12)
-    if dialog.locator("[data-agent] button, [data-agent] a, [data-agent][role=button]").count():
-        fail(f"{tag}: the dialog's agent rows should open nothing")
+    if panel.locator("[data-agent] button, [data-agent] a, [data-agent][role=button]").count():
+        fail(f"{tag}: the detail's agent rows should open nothing")
     audit.locator('[data-agent="p170"]').click()
-    expect(page.get_by_role("dialog")).to_have_count(1)  # nothing opened over it
-    ok(f"{tag}: the long card opens the dialog at its run, lit; Audit's last 12 rows, 还有 43 个 opens exactly those; rows only read")
-    close_dialog(page)
+    expect(panel).to_have_count(1)  # nothing opened in its place
+    ok(f"{tag}: the long card opens the panel at its run; Audit's last 12 rows, 还有 43 个 opens exactly those; rows only read")
+    close_panel(page)
 
-    # the small run in the dialog: Verify lit at 2/5+, Scan folded at 4/4, the bar by scaleX
-    dialog, card = open_in_dialog(page, small, "wfrun", tag)
+    # the small run in the panel: Verify lit at 2/5+, Scan folded at 4/4, the bar by scaleX
+    panel, card = open_in_panel(page, small, "wfrun", tag)
     expect(card.locator("[data-workflow-counts]")).to_have_text("6/9+")
     expect(card.locator("[data-workflow-status]")).to_have_text("在跑")
     expect(card.locator("[data-workflow-now]")).to_contain_text("当前 Verify：verify:")
@@ -226,8 +227,8 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
     if [p["part"] for p in parts] != ["done", "running", "failed", "stopped"] or any(p["width"] for p in parts) \
             or not all("scaleX" in p["transform"] for p in parts) or any("width" in p["transition"] for p in parts):
         fail(f"{tag}: the bar's parts should move by transform: scaleX, never width: {parts}")
-    ok(f"{tag}: the small run in the dialog: 6/9+, Verify lit at 2/5+, Scan folded at 4/4, the bar by scaleX")
-    close_dialog(page)
+    ok(f"{tag}: the small run in the panel: 6/9+, Verify lit at 2/5+, Scan folded at 4/4, the bar by scaleX")
+    close_panel(page)
 
     # a call whose run is over a day old: the row it always was
     old_turn = main.locator("[data-segment]", has_text="上次的文案审计再跑一遍")
@@ -238,10 +239,10 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
         fail(f"{tag}: an unlisted run's call should stay a plain row")
     ok(f"{tag}: a call with no run listed is the plain row")
 
-    # ended runs: their status word, the time they took, how many came back, a square each; the dialog at their run
+    # ended runs: their status word, the time they took, how many came back, a square each; the panel at their run
     for prompt, call, task, status, word, took, progress, cells, name in (
-            ("把设置页的文案过一遍", "toolu_wf_done", "wfdone", "completed", "已完成", "22 分钟", "8/8 Agent", ["done"] * 8, "done"),
-            ("小组件的快照对比也跑一遍", "toolu_wf_failed", "wffail", "failed", "失败", "8 分钟", "6/6 Agent",
+            ("把设置页的文案过一遍", "toolu_wf_done", "wfdone", "completed", "已完成", "22m", "8/8 Agent", ["done"] * 8, "done"),
+            ("小组件的快照对比也跑一遍", "toolu_wf_failed", "wffail", "failed", "失败", "8m", "6/6 Agent",
              ["done", "done", "done", "failed", "failed", "done"], "failed")):
         seg = main.locator("[data-segment]", has_text=prompt)
         card = seg.locator(f'[data-workflow-call="{status}"][data-tool-use="{call}"]')
@@ -252,24 +253,24 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
         strip_of(card, tag, cells)
         center(card)
         shot(f"{name}", card)
-        dialog, target = open_in_dialog(page, card, task, tag)
+        panel, target = open_in_panel(page, card, task, tag)
         if status == "failed":
             expect(target.locator("[data-workflow-error]")).to_contain_text("2 agents failed")
             expect(target.locator('[data-phase="Snapshot"] [data-phase-mark]')).to_have_attribute("data-phase-mark", "done_failed")
         page.wait_for_timeout(300)
-        shot(f"dialog-{name}")
-        close_dialog(page)
-        ok(f"{tag}: the {name} run's card: {word}, {took}, {progress}; opens the dialog at its run")
+        shot(f"panel-{name}")
+        close_panel(page)
+        ok(f"{tag}: the {name} run's card: {word}, {took}, {progress}; opens the panel at its run")
 
-    # a change: the dialog's count rolls (not with reduced motion), the card's line and squares move on in place
+    # a change: the detail's count rolls (not with reduced motion), the card's line and squares move on in place
     small.evaluate("(e) => { e.dataset.e2eMark = '1'; }")
-    dialog, card = open_in_dialog(page, small, "wfrun", tag)
+    panel, card = open_in_panel(page, small, "wfrun", tag)
     center(card)
     shot("change-before", card)
     step(hub, 1)
     if reduce:
         expect(card.locator("[data-workflow-counts]")).to_have_text("8/10+")
-        if dialog.locator("[data-rolling], [data-fading]").count():
+        if panel.locator("[data-rolling], [data-fading]").count():
             fail(f"{tag}: something moved with reduced motion")
         ok(f"{tag}: reduced motion: the new count at once, nothing rolls")
     else:
@@ -278,11 +279,11 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
         shot("change-mid", card)
         expect(card.locator("[data-workflow-counts]")).to_have_text("8/10+")
         expect(card.locator("[data-workflow-counts] [data-rolling]")).to_have_count(0)
-        ok(f"{tag}: the dialog's count rolls to 8/10+ and comes to rest")
+        ok(f"{tag}: the detail's count rolls to 8/10+ and comes to rest")
     expect(card.locator('[data-phase="Verify"] [data-agent]')).to_have_count(6)
     page.wait_for_timeout(500)
     shot("change-after", card)
-    close_dialog(page)
+    close_panel(page)
     expect(small.locator("[data-workflow-progress-line]")).to_have_text("Verify · 8/10 Agent")
     strip_of(small, tag, ["done"] * 8 + ["running"] * 2)
     step(hub, 2)
@@ -303,21 +304,20 @@ def run(browser, base, hub, token, size, theme, shots, reduce):
     shot("completed-page")
     ok(f"{tag}: completed in place: 已完成, 11/11 Agent, 11 squares done, the time it took")
 
-    # the header's chip opens the same dialog; "在对话中查看" brings the call into view
-    chip = page.locator('[data-background-chip]').first
-    expect(chip).to_be_visible()
-    chip.click()
-    dialog = page.get_by_role("dialog")
-    expect(dialog.locator("[data-workflow-card]")).to_have_count(4)
-    expect(dialog.locator('[data-workflow-card="failed"]')).to_contain_text("2 agents failed")
-    if dialog.evaluate("(d) => [...d.querySelectorAll('[data-workflow-card]')].some((c) => c.getAnimations().length > 0)"):
-        fail(f"{tag}: the chip's dialog lights no run")
+    # the top bar's Background tasks button opens the panel's list: the four runs; a run's detail's "在对话中查看" brings
+    # the call into view
+    page.locator("main header").get_by_role("button", name="后台任务", exact=False).first.click()
+    panel = page.locator('aside[aria-label="后台任务"]')
+    expect(panel.locator("[data-bg-run]")).to_have_count(4)
     page.wait_for_timeout(350)
-    shot("dialog")
-    dialog.locator('[data-workflow-card="failed"] [data-workflow-jump]').click()
-    expect(dialog).to_have_count(0)
+    shot("panel")
+    panel.locator('[data-bg-run="wffail"] [data-bg-row-button]').click()
+    expect(panel.locator('[data-workflow-card="failed"]')).to_contain_text("2 agents failed")
+    panel.locator('[data-workflow-card="failed"] [data-workflow-jump]').click()
+    if size == "narrow":
+        expect(panel).to_have_count(0)  # it covered the chat
     expect(main.locator('[data-tool-use="toolu_wf_failed"]')).to_be_in_viewport()
-    ok(f"{tag}: the chip's dialog: the same cards, none lit; 在对话中查看 brings the call into view")
+    ok(f"{tag}: the button's panel lists the four runs; a detail's 在对话中查看 brings the call into view")
 
     if size == "wide":
         # the sidebar's row for this agent, where the sidebar lists agents (its default now lists pages only)

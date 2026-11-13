@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/nwverse/persona/server/internal/acceptloop"
 	"github.com/nwverse/persona/server/internal/identity"
-	"github.com/nwverse/persona/server/internal/link"
 	"io"
 	"net"
 	"os"
@@ -96,35 +95,17 @@ func SetResident(program, version string) {
 // resident node, and shared by every connection's Node, so runtimes connect before the hub does and stay connected
 // while it reconnects.
 func Attach(ctx context.Context, newNode func() (*Node, error), extra <-chan net.Conn, runtimes *RuntimeHost) error {
-	path := AttachSocketPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	// Only one resident node: a second one would steal relays from the first. The run lock next to the socket, held
-	// until Attach returns, decides it: two nodes starting together could both find nobody answering on the socket,
-	// and the second would remove the first one's fresh socket. It also keeps a second start from dialing the live
-	// node, whose next connection would replace the hub's. The process ending gives the lock back, however it ends.
-	release, err := link.LockFile(path+".run", false)
-	if errors.Is(err, link.ErrLocked) {
-		return fmt.Errorf("a resident node is already running (%s.run is locked)", path)
-	}
-	if err != nil {
-		return fmt.Errorf("resident node lock: %w", err)
-	}
-	defer release()
-	// A resident node from a build without the lock is found by answering. A socket nobody answers on, with the lock
-	// free, is stale.
-	if c, err := net.DialTimeout("unix", path, time.Second); err == nil {
-		c.Close()
-		return fmt.Errorf("a resident node is already listening on %s", path)
-	}
-	_ = os.Remove(path)
-	ln, err := net.Listen("unix", path)
+	transport, err := OpenResidentTransport()
 	if err != nil {
 		return err
 	}
-	_ = os.Chmod(path, 0o600)
-	ln.(*net.UnixListener).SetUnlinkOnClose(false) // a replacement may already own the path (hooks.go has the same trap)
+	defer transport.Close()
+	return AttachWithTransport(ctx, newNode, extra, runtimes, transport)
+}
+
+// AttachWithTransport serves on a resident-owned listener that can retain duplicates through an executable handover.
+func AttachWithTransport(ctx context.Context, newNode func() (*Node, error), extra <-chan net.Conn, runtimes *RuntimeHost, transport *ResidentTransport) error {
+	ln := transport.Listener
 	go func() { <-ctx.Done(); ln.Close() }()
 	logf := func(f string, a ...any) { fmt.Fprintf(os.Stderr, "node: "+f+"\n", a...) }
 	if runtimes != nil {
@@ -147,6 +128,9 @@ func Attach(ctx context.Context, newNode func() (*Node, error), extra <-chan net
 
 	keeper := newAssistantKeeper()
 	scans := &bgCarry{} // background-task scans go on from one connection's Node to the next (carry.go)
+	// Launcher switches too: one that outlives its connection is seen, waited for and written by the next Node
+	// (switch_share.go).
+	switches := &switchShare{}
 	// No manager connected yet (or between connections): standby answers node.sock (spool_standby.go).
 	sp := openSpool(SpoolPath())
 	sb := newStandby(sp, logf)
@@ -217,6 +201,7 @@ func Attach(ctx context.Context, newNode func() (*Node, error), extra <-chan net
 				n.runtimeHost = runtimes // Serve attaches it for this connection
 			}
 			n.adoptBgScans(scans)
+			n.share.Store(switches)
 			n.keeper = keeper                        // conversations go on from one connection to the next (assistant_keep.go)
 			n.spool = sp                             // what standby took goes to this connection first (spool.go)
 			go func() { <-cctx.Done(); c.Close() }() // a replaced connection stops reading at once

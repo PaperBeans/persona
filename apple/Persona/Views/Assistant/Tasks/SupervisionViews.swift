@@ -119,20 +119,29 @@ private struct CriterionRow: View {
     }
 }
 
-/// What the task's agent last told Persona, under the card's current step (only while the task is open).
-struct TaskProgressLine: View {
-    var line: String
+/// "Nobody is working on this · closed after an error" (#3618, docs/assistant/todos.md "Nobody is working on this"): an
+/// open task every agent of which is gone, with nothing set to bring one back. Drawn where the task's supervision
+/// state is (its to-do row, its page; the task board says it in its subtitle), in the caution color with the warning
+/// mark; not while the task waits for the user, which is not waiting on an agent. The native Mac app is frozen and does
+/// not draw it.
+struct OrphanedLine: View {
+    var todo: TodoItem
+    var state: TaskState
 
     var body: some View {
-        Label {
-            Text(line).lineLimit(1)
-        } icon: {
-            ThemedIcon(Theme.Icon.reported).font(Theme.Font.labelStrong)
+        #if !os(macOS)
+        if state != .needsYou, let line = todo.orphanedLine {
+            // Not a `Label`: in a list row its icon takes the row's icon column, far from the words.
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
+                ThemedIcon(Theme.Icon.error).font(Theme.Font.labelStrong)
+                Text(line).lineLimit(2)
+            }
+            .font(Theme.Font.caption)
+            .foregroundStyle(Theme.cautionText)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("task-orphaned-line")
         }
-        .labelStyle(.titleAndIcon)
-        .font(Theme.Font.caption)
-        .foregroundStyle(.secondary)
-        .accessibilityIdentifier("task-progress-line")
+        #endif
     }
 }
 

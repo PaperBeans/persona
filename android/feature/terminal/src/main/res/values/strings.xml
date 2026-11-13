@@ -6,6 +6,7 @@
     <string name="terminal_control_watching">Read-only</string>
     <string name="terminal_select_text">Select text</string>
     <string name="terminal_display_settings">Display settings</string>
+    <string name="terminal_close">Close terminal</string>
     <string name="terminal_retry">Retry</string>
     <string name="terminal_busy_title">Take over the terminal?</string>
     <string name="terminal_busy_text">Another program on the computer is using this terminal. Taking over disconnects it, and the terminal is sized for your phone.</string>
@@ -65,11 +66,13 @@
     <string name="terminal_panes_refresh">Refresh list</string>
     <string name="terminal_panes_offline">Offline</string>
     <string name="terminal_panes_loading">Loading…</string>
-    <string name="terminal_panes_no_panes">No panes</string>
+    <string name="terminal_panes_no_panes">No terminals open on this computer.</string>
+    <string name="terminal_panes_no_panes_agent">Terminals open here when an Agent starts on this computer.</string>
     <string name="terminal_panes_no_computers">No computers yet</string>
     <string name="terminal_panes_no_computers_detail">Connect a computer and its terminals show up here.</string>
     <string name="terminal_panes_tab">Tab %1$s</string>
     <string name="terminal_panes_untitled">Terminal</string>
     <string name="terminal_panes_new_tab">New tab</string>
+    <string name="terminal_panes_new_terminal">New Terminal</string>
     <string name="terminal_panes_new_tab_failed">Couldn\'t open a new tab: %1$s</string>
 </resources>

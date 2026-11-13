@@ -1,6 +1,7 @@
 package subscriptions
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -116,7 +117,8 @@ type Service struct {
 	gates    map[string]*gate
 	busy     map[string]bool // connectors whose subscriptions are running now
 	running  int
-	asked    map[string]bool // subscriptions asked to run now
+	asked    map[string]bool      // subscriptions asked to run now
+	kicked   map[string]time.Time // when a connector's changed event makes each of its subscriptions due (ConnectorChanged)
 	wake     chan struct{}
 
 	// Push sources (push.go): one push at a time, and each device's items in the last hour.
@@ -160,7 +162,7 @@ func New(o Options) *Service {
 		o.Delivered = func(Subscription) {}
 	}
 	return &Service{o: o, catalogs: map[string]catalogEntry{}, reading: map[string]bool{}, gates: map[string]*gate{},
-		busy: map[string]bool{}, asked: map[string]bool{}, wake: make(chan struct{}, 1), pushed: map[string][]time.Time{}}
+		busy: map[string]bool{}, asked: map[string]bool{}, kicked: map[string]time.Time{}, wake: make(chan struct{}, 1), pushed: map[string][]time.Time{}}
 }
 
 func (s *Service) now() time.Time { return s.o.Clock.Now().UTC() }
@@ -168,7 +170,7 @@ func (s *Service) now() time.Time { return s.o.Clock.Now().UTC() }
 // shown is s as the API shows it: off while both destinations are off, its floor of intervals filled in.
 func shown(sub Subscription) Subscription {
 	sub.State = cmpOr(sub.RunState, StateOK)
-	if !sub.ToInbox && !sub.ToKB {
+	if !on(sub) {
 		sub.State = StateOff
 	}
 	sub.MinIntervalSeconds = floorOf(sub.Recipe.Mode, sub.SourceMin)
@@ -178,7 +180,13 @@ func shown(sub Subscription) Subscription {
 	return sub
 }
 
-func on(sub Subscription) bool { return sub.ToInbox || sub.ToKB }
+// on says whether sub is pulled: a destination is on, or it is a built-in's Inbox feed now (Migrated, #6265).
+func on(sub Subscription) bool { return sub.ToInbox || sub.ToKB || sub.Migrated != nil }
+
+// pullScheduled distinguishes ordinary polling from a finite continuation explicitly started by Run Now while off.
+func pullScheduled(sub Subscription) bool {
+	return on(sub) || sub.Continuation != nil && sub.Continuation.Manual
+}
 
 func floorOf(mode string, sourceMin int) int {
 	f := max(minInterval, sourceMin)
@@ -315,7 +323,7 @@ func (s *Service) catalog(ctx context.Context, c ConnectorInfo, fresh time.Durat
 	}
 	cctx, cancel := context.WithTimeout(ctx, catalogWait)
 	defer cancel()
-	sources, err := connector.ReadCatalog(cctx, c.Conn)
+	sources, err := connector.ReadCatalog(cctx, withInboxThings(c.Conn)) // with the generic inbox_things (#6381)
 	s.mu.Lock()
 	kept := c
 	kept.Conn = nil
@@ -391,12 +399,17 @@ func catalogOf(c ConnectorInfo, sources []connector.CatalogSource, err error, al
 		return out
 	}
 	for _, src := range sources {
+		tools := peopleTools(src.Tools)
+		if len(tools) == 0 && len(src.Tools) > 0 {
+			continue // only the Inbox's own rows (#6381): no source of people's
+		}
+		recipes := slices.DeleteFunc(slices.Clone(src.Recipes), func(r Recipe) bool { return r.Tool == InboxThingsTool })
 		cs := CatalogSource{ID: src.ID, Name: src.Name, Icon: src.Icon, Service: src.Service, MinIntervalSeconds: src.MinIntervalSeconds,
-			MaxCallsPerHour: src.MaxCallsPerHour, Tools: []CatalogTool{}, Recipes: slices.Clone(src.Recipes), Subscriptions: []string{}}
+			MaxCallsPerHour: src.MaxCallsPerHour, Tools: []CatalogTool{}, Recipes: recipes, Subscriptions: []string{}}
 		if cs.Recipes == nil {
 			cs.Recipes = []Recipe{}
 		}
-		for _, t := range src.Tools {
+		for _, t := range tools {
 			ct := CatalogTool{Name: t.Name, Title: t.Title, Description: t.Description, InputSchema: t.InputSchema, Refused: refusal(t)}
 			ct.Subscribable = ct.Refused == nil
 			cs.Tools = append(cs.Tools, ct)
@@ -452,6 +465,7 @@ func (s *Service) DryRun(ctx context.Context, in DryRunRequest) (DryRun, error) 
 		interval, daily = sub.IntervalSeconds, sub.DailyAt
 	}
 	dr, _ := s.check(ctx, c, in.Source, in.Recipe, sub, interval, daily)
+	dr.Warnings = append(unknownWarnings(in.Unknown), dr.Warnings...)
 	return dr, nil
 }
 
@@ -460,7 +474,7 @@ func (s *Service) DryRun(ctx context.Context, in DryRunRequest) (DryRun, error) 
 // first own one is used. t is filled as far as it got.
 func (s *Service) check(ctx context.Context, c ConnectorInfo, sourceID string, recipe *Recipe, sub *Subscription, interval int, daily string) (DryRun, target) {
 	dr := DryRun{Checks: []Check{{Key: CheckReadOnly}, {Key: CheckArgs}, {Key: CheckFields}, {Key: CheckDedup}, {Key: CheckInterval}},
-		Items: []Preview{}, Paths: []PathValue{}}
+		Items: []Preview{}, Paths: []PathValue{}, Warnings: []Warning{}}
 	t := target{conn: c, sub: sub}
 	fail := func(p *Problem) (DryRun, target) {
 		dr.Error = p
@@ -513,7 +527,7 @@ func (s *Service) check(ctx context.Context, c ConnectorInfo, sourceID string, r
 	if sub != nil && sub.SinceAt != nil {
 		since = sub.SinceAt.Add(-overlap)
 	}
-	args, err := fillArgs(t.recipe.Args, vars(since, loc))
+	args, err := fillPullArgs(t.recipe, since, loc, nil)
 	if err == nil {
 		err = checkArgs(tool.InputSchema, args)
 	}
@@ -535,14 +549,14 @@ func (s *Service) check(ctx context.Context, c ConnectorInfo, sourceID string, r
 	if sub != nil {
 		label = sub.Label
 	}
-	pl := pull(ctx, c.Conn, sourceID, t.recipe, since, loc, label)
+	pl := pull(ctx, withInboxThings(c.Conn), sourceID, t.recipe, since, s.now(), loc, label, nil, t.tool.InputSchema)
 	dr.Shape, dr.ItemsPath = pl.shape, pl.itemsPath
 	if t.recipe.ItemsPath == "" && t.recipe.Mode != wire.ConnectorSubscriptionModeSnapshot {
 		t.recipe.ItemsPath = pl.itemsPath // saved as found: later runs read the same place
 	}
 	if pl.problem != nil {
 		switch pl.problem.Code {
-		case CodeNoList, CodeTextNeedsSnap:
+		case CodeNoList, CodeTextNeedsSnap, CodePagination, CodeBadThing:
 			dr.Checks[2].Error = pl.problem
 		case CodeBadArgs:
 			dr.Checks[1].OK, dr.Checks[1].Error = false, pl.problem
@@ -555,7 +569,8 @@ func (s *Service) check(ctx context.Context, c ConnectorInfo, sourceID string, r
 		dr.Count = 1
 		dr.Checks[2].OK, dr.Checks[3].OK = true, true
 		body := clip(pl.snapshot.Body, previewMax)
-		dr.Items = append(dr.Items, Preview{UID: pl.snapshot.UID, New: sub == nil || sub.SnapshotHash != pl.snapHash, Title: pl.snapshot.Title, Body: body})
+		dr.Items = append(dr.Items, Preview{UID: pl.snapshot.UID, New: sub == nil || sub.SnapshotHash != pl.snapHash, Title: pl.snapshot.Title, Body: body,
+			Summary: clip(oneLine(pl.snapshot.Body), previewMost), Problems: []FieldProblem{}})
 	} else {
 		dr.Count, dr.WeakDedup = len(pl.items), pl.weak
 		switch {
@@ -587,13 +602,15 @@ func (s *Service) check(ctx context.Context, c ConnectorInfo, sourceID string, r
 			if i >= 3 {
 				break
 			}
-			dr.Items = append(dr.Items, preview(m, !seen[m.item.UID]))
+			dr.Items = append(dr.Items, preview(m, !seen[m.item.UID], t.recipe.Fields))
 		}
 		if pl.first != nil {
 			dr.Paths = leaves(pl.first)
 		}
+		dr.Warnings = append(dr.Warnings, emptyFieldWarnings(t.recipe.Fields, pl.items)...)
 		limit := pageLimit(pl.args)
-		dr.MaybeMore = limit > 0 && len(pl.items) >= limit && len(fresh) == len(pl.items)
+		dr.MaybeMore = pl.continuation != nil || !cursorPagination(t.recipe) && !pagePagination(t.recipe) &&
+			limit > 0 && len(pl.items) >= limit && len(fresh) == len(pl.items)
 	}
 	dr.OK = true
 	for _, ch := range dr.Checks {
@@ -618,9 +635,9 @@ func fieldPath(r Recipe, name string) string {
 	return "(no path)"
 }
 
-func preview(m mapped, fresh bool) Preview {
+func preview(m mapped, fresh bool, f *connector.SubscriptionFields) Preview {
 	p := Preview{UID: m.item.UID, New: fresh, Title: m.item.Title, Sender: m.item.Sender, Thread: m.item.Thread, Link: m.item.Link,
-		Body: clip(m.item.Body, previewMax)}
+		Body: clip(m.item.Body, previewMax), Summary: clip(oneLine(m.item.Body), previewMost), Problems: itemProblems(m, f)}
 	if m.item.Time != nil {
 		v := m.item.Time.Format(time.RFC3339)
 		p.Time = &v
@@ -652,9 +669,15 @@ func (s *Service) Create(ctx context.Context, in CreateRequest, by Actor) (Subsc
 	if !ok {
 		return Subscription{}, notFound("connector")
 	}
+	if in.Recipe != nil && in.Recipe.Tool == InboxThingsTool {
+		return Subscription{}, inboxThingsOnly()
+	}
 	dr, t := s.check(ctx, c, in.Source, in.Recipe, nil, -1, "")
 	if !dr.OK {
 		return Subscription{}, refused(dr)
+	}
+	if t.recipe.Tool == InboxThingsTool {
+		return Subscription{}, inboxThingsOnly()
 	}
 	now := s.now()
 	origin := OriginExtension
@@ -704,6 +727,9 @@ func withRecipe(sub Subscription, t target, dr DryRun, origin string, now time.T
 	next.ToolFingerprint, next.WeakDedup, next.Shape = fingerprint(t.tool), dr.WeakDedup, dr.Shape
 	next.SourceMin, next.MaxCallsPerHour = intOr(t.source.MinIntervalSeconds), intOr(t.source.MaxCallsPerHour)
 	next.RunState, next.Error, next.FailCount, next.FailingSince, next.ShapeMisses = StateOK, nil, 0, nil, 0
+	if !SameRecipe(t.recipe, sub.Recipe) {
+		next.Continuation = nil
+	}
 	if t.recipe.Mode != sub.Recipe.Mode {
 		next.SnapshotHash = ""
 		next.IntervalSeconds = defaultIntervalOf(t.recipe.Mode, next.SourceMin)
@@ -713,6 +739,48 @@ func withRecipe(sub Subscription, t target, dr DryRun, origin string, now time.T
 		}
 	}
 	return next
+}
+
+// rebased is next, whose recipe replaced cur's, with what the new recipe finds at once handled as existing says
+// (ExistingDigest when ""). A recipe that is the same as before changes nothing here: what it finds is already seen.
+//   - digest: while the Inbox was on and stays on, its catch-up starts again at the change (not a day before: the old
+//     recipe's items were delivered already), so the first run's items come in as rows when 3 or fewer, else as one
+//     digest row. An Inbox turned on by the same change catches up as any turned on.
+//   - baseline: the next run that succeeds records what it finds as seen and keeps none of it (Baseline).
+//   - deliver: each comes in as a new item.
+func rebased(next, cur Subscription, existing string, now time.Time) Subscription {
+	if SameRecipe(next.Recipe, cur.Recipe) {
+		return next
+	}
+	next.Baseline = nil
+	switch existing {
+	case ExistingDeliver:
+	case ExistingBaseline:
+		next.Baseline = &now
+	default:
+		if cur.ToInbox && next.ToInbox {
+			next.InboxFrom, next.InboxCatchup, next.CatchupFrom = &now, nil, &now
+		}
+	}
+	return next
+}
+
+// SameRecipe says whether two recipes pull and read the same way (their arguments compared as JSON values).
+func SameRecipe(a, b Recipe) bool {
+	x, errA := json.Marshal(normalRecipe(a))
+	y, errB := json.Marshal(normalRecipe(b))
+	return errA == nil && errB == nil && bytes.Equal(x, y)
+}
+
+// normalRecipe is r with its arguments' keys in order, so the same recipe written another way compares equal.
+func normalRecipe(r Recipe) Recipe {
+	var v any
+	if len(bytes.TrimSpace(r.Args)) == 0 {
+		r.Args = emptyObject
+	} else if json.Unmarshal(r.Args, &v) == nil {
+		r.Args, _ = json.Marshal(v)
+	}
+	return r
 }
 
 // Update changes a subscription made at p.Revision.
@@ -729,6 +797,12 @@ func (s *Service) Update(ctx context.Context, id string, p Patch, by Actor) (Sub
 	}
 	if IsPush(*cur) && (p.Recipe != nil || p.IntervalSeconds != nil || p.DailyAt != nil) {
 		return Subscription{}, pushOnly("recipe or schedule")
+	}
+	if p.Recipe != nil && (p.Recipe.Tool == InboxThingsTool || IsMigration(cur.ID)) {
+		return Subscription{}, inboxThingsOnly() // a built-in's rows: its default subscription's recipe is the manager's
+	}
+	if p.Existing != "" && (p.Recipe == nil || !slices.Contains([]string{ExistingDigest, ExistingBaseline, ExistingDeliver}, p.Existing)) {
+		return Subscription{}, errorf(http.StatusBadRequest, CodeBadRequest, "existing is digest, baseline or deliver, with a recipe")
 	}
 	next, prev := *cur, cur.Revision
 	now := s.now()
@@ -790,9 +864,9 @@ func (s *Service) Update(ctx context.Context, id string, p Patch, by Actor) (Sub
 		// The Inbox catches up from a day before it was turned on, once the first run since has read the source.
 		switch {
 		case next.ToInbox && !cur.ToInbox:
-			next.InboxFrom, next.InboxCatchup, turnedOn = &now, nil, true
+			next.InboxFrom, next.InboxCatchup, next.CatchupFrom, turnedOn = &now, nil, nil, true
 		case !next.ToInbox:
-			next.InboxFrom, next.InboxCatchup = nil, nil
+			next.InboxFrom, next.InboxCatchup, next.CatchupFrom = nil, nil, nil
 		}
 	}
 	if p.ToKB != nil {
@@ -805,9 +879,19 @@ func (s *Service) Update(ctx context.Context, id string, p Patch, by Actor) (Sub
 			next.KBFrom = nil
 		}
 	}
+	if p.Recipe != nil {
+		next = rebased(next, *cur, p.Existing, now)
+	}
+	if next.ToKB && next.Recipe.Mode == wire.ConnectorSubscriptionModeThings {
+		// Its rows are the Inbox's; the knowledge base reads the source itself (#6296).
+		return Subscription{}, errorf(http.StatusBadRequest, CodeBadRequest, "a things subscription's rows go to the Inbox only")
+	}
 	switch {
 	case !on(next):
 		next.NextRunAt = nil
+		if wasOn {
+			next.Continuation = nil // off and on again starts a fresh pull, also out of a page that keeps failing (#6310)
+		}
 	case !wasOn || p.Recipe != nil || turnedOn: // a new recipe or destination runs soon, also after needs_recipe stopped it
 		next.NextRunAt = &now
 	case schedule:
@@ -874,6 +958,51 @@ func (s *Service) RunNow(ctx context.Context, id string, by Actor) (Subscription
 	return out, nil
 }
 
+// changedGap is the least time between a subscription's last run and one its connector's changed event starts (#6247).
+const changedGap = time.Minute
+
+// changedDebounce is how long after a connector's changed event a switched built-in's default subscription runs
+// (#6381): as the Inbox's own kick of the built-in (extmgr's inboxDebounce), so a burst of events runs it once.
+const changedDebounce = 3 * time.Second
+
+// ConnectorChanged runs soon the subscriptions of connector id that are on and pull items on a schedule: the connector
+// said it has something new, as it kicks the Inbox for its own (#6247). A subscription is run so at most once a
+// changedGap after its last run, and never sooner than its source's own minimum; the connector's call gap, hourly
+// budget and pauses hold as for any run, and a run they hold back is left to the schedule. A snapshot keeps its
+// schedule. The run is a scheduled one brought forward.
+func (s *Service) ConnectorChanged(ctx context.Context, id string) {
+	all, err := s.o.Store.ListSubscriptions(ctx)
+	if err != nil {
+		s.o.Logf("subscriptions: %s changed: %v", id, err)
+		return
+	}
+	now, kicked, later := s.now(), false, false
+	s.mu.Lock()
+	for _, sub := range all {
+		if sub.Connector != id || IsPush(sub) || !on(sub) || sub.Recipe.Mode == wire.ConnectorSubscriptionModeSnapshot {
+			continue
+		}
+		if _, switched := MigratedFrom(sub); switched {
+			// The built-in's own feed now (#6381): as fast as its kick of the Inbox, a burst once.
+			if at, pending := s.kicked[sub.ID]; !pending || !at.After(now) {
+				s.kicked[sub.ID], later = now.Add(changedDebounce), true
+			}
+			continue
+		}
+		if last := sub.LastRunAt; last != nil && now.Sub(*last) < max(changedGap, time.Duration(sub.SourceMin)*time.Second) {
+			continue
+		}
+		s.kicked[sub.ID], kicked = now, true
+	}
+	s.mu.Unlock()
+	if kicked {
+		s.poke()
+	}
+	if later {
+		time.AfterFunc(changedDebounce, s.poke)
+	}
+}
+
 // Delete removes a subscription with its dedup keys and pending items. withData also has the destinations remove what
 // they took from it (#2039): its destinations are switched off first, so they take nothing more meanwhile; when the
 // removal fails the subscription stays (off), and deleting again finishes it. It is recorded either way.
@@ -915,6 +1044,7 @@ func (s *Service) switchOff(ctx context.Context, sub Subscription) (*Subscriptio
 		}
 		next, prev := sub, sub.Revision
 		next.ToInbox, next.ToKB, next.InboxFrom, next.InboxCatchup, next.KBFrom, next.NextRunAt = false, false, nil, nil, nil, nil
+		next.CatchupFrom, next.Migrated = nil, nil // a built-in's feed switched to it goes back to the built-in (#6265)
 		next.Revision, next.UpdatedAt = prev+1, s.now()
 		ok, err := s.o.Store.UpdateSubscription(ctx, next, prev)
 		if err != nil {
@@ -951,3 +1081,58 @@ func (e *Error) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(body{e.Code, e.Message, e.RetryAfter})
 }
+
+// Recent are a subscription's newest held items, at most n, newest first (subscription_get's samples). Their content
+// goes only to the asker, as a dry run's items do.
+func (s *Service) Recent(ctx context.Context, id string, n int) ([]Held, error) {
+	if n <= 0 {
+		return []Held{}, nil
+	}
+	held, err := s.o.Store.HeldItems(ctx, id, ItemQuery{Limit: n, Newest: true})
+	if err != nil {
+		return nil, err
+	}
+	slices.Reverse(held)
+	return held, nil
+}
+
+// Patched is cur as Update would leave it after p, for showing the change before it is made (the assistant's approval
+// card): the settings people see, by Update's own rules. A recipe is taken as given (Update checks it first); one of
+// another mode takes that mode's default schedule unless p sets it. Nothing is checked or written.
+func Patched(cur Subscription, p Patch) Subscription {
+	next := cur
+	if p.Recipe != nil {
+		next.Recipe = *p.Recipe
+		if p.Recipe.Mode != cur.Recipe.Mode {
+			next.IntervalSeconds, next.DailyAt = defaultIntervalOf(p.Recipe.Mode, cur.SourceMin), ""
+			if p.Recipe.Mode == wire.ConnectorSubscriptionModeSnapshot {
+				next.DailyAt = defaultDailyAt
+			}
+		}
+	}
+	if p.Label != nil {
+		next.Label = cmpOr(clip(oneLine(*p.Label), 200), next.SourceName)
+	}
+	if p.TriageRules != nil {
+		next.TriageRules = clip(*p.TriageRules, 4000)
+	}
+	if p.FallbackTier != nil {
+		next.FallbackTier = *p.FallbackTier
+	}
+	if p.DailyAt != nil {
+		next.DailyAt = *p.DailyAt
+	}
+	if p.IntervalSeconds != nil {
+		next.IntervalSeconds = *p.IntervalSeconds
+	}
+	if p.ToInbox != nil {
+		next.ToInbox = *p.ToInbox
+	}
+	if p.ToKB != nil {
+		next.ToKB = *p.ToKB
+	}
+	return shown(next)
+}
+
+// DefaultInterval is how often a new subscription of mode pulls on a source whose own minimum is sourceMin seconds.
+func DefaultInterval(mode string, sourceMin int) int { return defaultIntervalOf(mode, sourceMin) }

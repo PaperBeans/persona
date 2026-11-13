@@ -292,12 +292,25 @@ var zshrcAliases = func(ctx context.Context, s *Service, machine string) ([]zshr
 	return out.Aliases, err
 }
 
-// importGroups is machine's aliases merged against the stored providers, and those providers.
-func (s *Service) importGroups(ctx context.Context, machine string) ([]importGroup, []storedLauncher, error) {
+// importGroups is machine's aliases (only the one named alias, when it is not "") merged against the stored
+// providers, and those providers.
+func (s *Service) importGroups(ctx context.Context, machine, alias string) ([]importGroup, []storedLauncher, error) {
 	aliases, err := zshrcAliases(ctx, s, machine)
 	if err != nil {
 		return nil, nil, err
 	}
+	if alias != "" {
+		aliases = slices.DeleteFunc(slices.Clone(aliases), func(a zshrcAlias) bool { return a.Alias != alias })
+	}
+	stored, known, err := s.storedKnown(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return mergeZshrcAliases(machine, aliases, known), stored, nil
+}
+
+// storedKnown is the stored providers (read under the models lock) and each as an import matches against it.
+func (s *Service) storedKnown(ctx context.Context) ([]storedLauncher, []knownProvider, error) {
 	s.models.mu.Lock()
 	stored, err := s.readStoredLaunchers(ctx)
 	s.models.mu.Unlock()
@@ -308,7 +321,7 @@ func (s *Service) importGroups(ctx context.Context, machine string) ([]importGro
 	if err != nil {
 		return nil, nil, err
 	}
-	return mergeZshrcAliases(machine, aliases, known), stored, nil
+	return stored, known, nil
 }
 
 // knownProviders opens only the keys needed to match aliases against every stored provider.
@@ -535,9 +548,10 @@ var errImportNotHidden = i18n.Err("assistant-models_import.err_not_hidden")
 
 // importBody is POST /api/v1/launchers/import's body: the groups to import (by name), the ones of them to import
 // as one provider per alias, and whether to hide the aliases where that is safe. A body without split or
-// hide_aliases (an older app) merges every group and hides nothing.
+// hide_aliases (an older app) merges every group and hides nothing. Alias reads only that alias of the machine.
 type importBody struct {
 	Machine     string   `json:"machine"`
+	Alias       string   `json:"alias"`
 	Providers   []string `json:"providers"`
 	Split       []string `json:"split"`
 	HideAliases bool     `json:"hide_aliases"`
@@ -662,6 +676,7 @@ func (s *Service) importLaunchers(ctx context.Context, groups []importGroup, in 
 }
 
 func (s *Service) launcherImportRoutes() {
+	s.handle("POST /api/v1/launchers/import/parse", s.parsePasteRoute)
 	s.handle("GET /api/v1/launchers/import", func(w http.ResponseWriter, r *http.Request) {
 		machine := r.URL.Query().Get("machine")
 		if machine == "" {
@@ -670,7 +685,7 @@ func (s *Service) launcherImportRoutes() {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		groups, stored, err := s.importGroups(ctx, machine)
+		groups, stored, err := s.importGroups(ctx, machine, r.URL.Query().Get("alias"))
 		if err != nil {
 			importErr(w, err)
 			return
@@ -697,7 +712,7 @@ func (s *Service) launcherImportRoutes() {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		groups, stored, err := s.importGroups(ctx, in.Machine)
+		groups, stored, err := s.importGroups(ctx, in.Machine, in.Alias)
 		if err != nil {
 			importErr(w, err)
 			return

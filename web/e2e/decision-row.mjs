@@ -29,6 +29,12 @@ const menuWords = {
   ja: ["任せます", "頼んだことと違います", "先に背景を教えて"],
 };
 
+/** The Needs you rows are folded to a line until opened (#5569): open every one that still is. */
+async function openFolded(page) {
+  const folded = page.locator('button[data-needs-row][aria-expanded="false"]');
+  while (await folded.count() > 0) await folded.first().click();
+}
+
 function todos() {
   // a deadline later today in the browser's zone, so the row says a time of day
   const deadline = new Date();
@@ -78,7 +84,8 @@ async function run(browser, size, theme, language) {
   }, { theme, language, textSize });
   const session = { machine_id: "demo", session_id: sid, title: "Example conversation", assistant: true, state: "idle", status: "idle", updated_at: AT };
   let list = todos();
-  const agents = list.map((t) => ({ machine_id: "demo", session_id: `${t.id}-worker`, title: `${t.title} Agent`, state: "idle", status: "idle", updated_at: AT, state_since: AT }));
+  const agents = list.map((t) => ({ machine_id: "demo", session_id: `${t.id}-worker`, title: `${t.title} Agent`, state: "idle", status: "idle", updated_at: AT, state_since: AT, ...(t.id === "demo-legacy" ? { turn_error: "Synthetic transient runtime error", turn_error_kind: "transient" } : {}) }));
+  let dismissalGate;
   const writes = [];
   await context.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -94,6 +101,7 @@ async function run(browser, size, theme, language) {
       const dismissal = /^\/todos\/([^/]+)\/decision-(dismiss|undo-dismiss)$/.exec(path);
       if (dismissal) {
         assert.equal(body.review_at, AT);
+        if (dismissal[2] === "dismiss" && dismissalGate) await dismissalGate;
         const todo = list.find((t) => t.id === dismissal[1]);
         assert(todo && !todo.done_at);
         if (dismissal[2] === "undo-dismiss") assert.equal(body.dismissal_id, "demo-dismissal");
@@ -104,6 +112,7 @@ async function run(browser, size, theme, language) {
       const m = /^\/todos\/([^/]+)\/accept$/.exec(path);
       assert(m && request.method() === "POST", `only decision routes are written: ${request.method()} ${path}`);
       list = list.map((t) => (t.id === m[1] ? { ...t, ask: undefined, supervision: { ...t.supervision, state: "" } } : t));
+      agents.find((a) => a.session_id === `${m[1]}-worker`).turn_error = undefined;
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
       return;
     }
@@ -136,6 +145,8 @@ async function run(browser, size, theme, language) {
   try {
     await page.goto(`${base}/`);
     await page.locator('[data-tray-entry="needs"]').click();
+    await page.locator('button[data-needs-row]').first().waitFor();
+    await openFolded(page);
     const rows = page.locator("[data-decision-row]");
     await rows.first().waitFor();
     assert.equal(await rows.count(), 2);
@@ -184,6 +195,7 @@ async function run(browser, size, theme, language) {
     await cleanup.waitFor({ state: "detached" });
     assert.deepEqual(writes[1], { path: "/todos/demo-cleanup/accept", method: "POST", body: { asked_at: AT, option: "Delete after an export" } });
     const legacy = page.locator('[data-needs-row="task:demo-legacy"]');
+    await openFolded(page);
     await legacy.locator("[data-decision-actions]").scrollIntoViewIfNeeded();
     assert.equal(await legacy.locator("[data-decision-option]").count(), 0, "no invented options for a review without an ask");
     assert.match(await legacy.locator("[data-decision-legacy]").innerText(), /Example extension checks passed/);
@@ -194,20 +206,58 @@ async function run(browser, size, theme, language) {
     await page.reload();
     await page.locator('[data-tray-entry="needs"]').click();
     await legacy.waitFor();
+    await openFolded(page);
+    await legacy.locator("[data-decision-actions]").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: name("dismiss-before") });
+    let releaseDismiss;
+    dismissalGate = new Promise((resolve) => { releaseDismiss = resolve; });
     await legacy.locator("[data-decision-actions] button").nth(1).click();
     await legacy.waitFor({ state: "detached" });
+    assert(!list.find((t) => t.id === "demo-legacy").decision_review.dismissal_id, "the row disappears before the server confirms");
+    await page.screenshot({ path: name("dismiss-pending") });
+    releaseDismiss();
+    dismissalGate = undefined;
     assert.deepEqual(writes[2], { path: "/todos/demo-legacy/decision-dismiss", method: "POST", body: { review_at: AT } });
     const undo = page.locator('[aria-live="polite"] button').filter({ hasText: /Undo|撤销|元に戻す/ });
+    await undo.waitFor();
+    await page.screenshot({ path: name("dismiss-confirmed") });
     await undo.click();
     await legacy.waitFor();
     assert.deepEqual(writes[3], { path: "/todos/demo-legacy/decision-undo-dismiss", method: "POST", body: { review_at: AT, dismissal_id: "demo-dismissal" } });
     await legacy.locator("[data-decision-actions] button").nth(1).click();
     await legacy.waitFor({ state: "detached" });
+    await undo.waitFor();
     await page.reload();
     await page.locator('[data-tray-entry="needs"]').click();
     assert.equal(await legacy.count(), 0, "dismissal survives a read and reload without completing the task");
     assert(!list.find((t) => t.id === "demo-legacy").done_at);
-    await page.screenshot({ path: name("answered") });
+    await page.screenshot({ path: name("refreshed") });
+    const other = await context.newPage();
+    await other.goto(`${base}/`);
+    await other.locator('[data-tray-entry="needs"]').click();
+    assert.equal(await other.locator('[data-needs-row="task:demo-legacy"]').count(), 0, "a fresh tab also honors the persisted dismissal");
+    await other.screenshot({ path: name("second-tab") });
+    await other.close();
+    list = list.map((t) => t.id === "demo-rollout" ? todos()[0] : t);
+    agents.find((a) => a.session_id === "demo-rollout-worker").turn_error = "Synthetic transient runtime error";
+    await page.reload();
+    await page.locator('[data-tray-entry="needs"]').click();
+    await rollout.waitFor();
+    await openFolded(page);
+    await rollout.locator("[data-decision-actions]").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: name("structured-before") });
+    dismissalGate = new Promise((resolve) => { releaseDismiss = resolve; });
+    await rollout.locator("[data-decision-actions] button").nth(1).click();
+    await rollout.waitFor({ state: "detached" });
+    assert(!list.find((t) => t.id === "demo-rollout").decision_review.dismissal_id);
+    await page.screenshot({ path: name("structured-pending") });
+    releaseDismiss();
+    dismissalGate = undefined;
+    await undo.waitFor();
+    await page.reload();
+    await page.locator('[data-tray-entry="needs"]').click();
+    assert.equal(await rollout.count(), 0, "structured decision dismissal survives reload despite a runtime error");
+    await page.screenshot({ path: name("structured-refreshed") });
     assert.deepEqual(errors, []);
     console.log(`PASS ${size} ${theme} ${language}: rows=2, option buttons on the first row=${shownOptions}, menu=${labels.length}, POST=${writes.length}`);
   } catch (error) {

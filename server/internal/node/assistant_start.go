@@ -175,6 +175,11 @@ func missingFrom(launcher string, lines []string, notFound bool) string {
 // spawnAssistant starts the conversation's process for its launcher's agent: claude -p (spawnClaude) or codex
 // app-server (spawnCodex). A new Codex conversation (id "") gets its id from Codex.
 func (n *Node) spawnAssistant(id, cwd, launcher string, resume, spare bool, options ...modelExecution) (*assistantProc, error) {
+	done, err := n.reload.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer done()
 	if n.agentOf(launcher) == "codex" {
 		return n.spawnCodex(id, cwd, launcher, resume, spare, options...)
 	}
@@ -216,7 +221,7 @@ func (n *Node) claudeAssistantMCPAndTools(id, cwd string, legacyMCP bool) (mcpJS
 // A managed launcher's shell is not wrapped: it runs `personad launch`, which fetches the launcher's settings outside
 // the sandbox and wraps only the agent it execs (launchExec).
 func (n *Node) assistantCLICommand(shell, launcher, cwd string, args, env []string) *exec.Cmd {
-	argv := append([]string{shell, "-ic", n.launcherCommandIn(launcher, envValue(env, "CLAUDE_CONFIG_DIR"), shellQuote) + ` "$@"`, "persona"}, args...)
+	argv := append([]string{shell, "-ic", n.launcherCommandIn(launcher, envValue(env, "CLAUDE_CONFIG_DIR"), scriptPath) + ` "$@"`, "persona"}, args...)
 	if _, managed := n.managedLauncher(launcher); !managed {
 		base := env
 		argv, env, _ = wrapAgent("assistant", n.home, n.dir, cwd, settingsArgs(args),
@@ -229,7 +234,7 @@ func (n *Node) assistantCLICommand(shell, launcher, cwd string, args, env []stri
 
 func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options ...modelExecution) (*assistantProc, error) {
 	execution := executionOption(options)
-	if err := execution.check(); err != nil {
+	if err := execution.check(launcher); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(cwd, 0o700); err != nil {
@@ -258,14 +263,14 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	if settingsErr != nil {
 		return nil, settingsErr
 	}
-	if n.guestKindOf(id) == guestMeeting { // a meeting's room: none of the owner's Claude Code setup (assistant_guest.go)
-		if n.guestOf(id) == nil {
-			return nil, errRoomRecord // never with the assistant's tools
-		}
-		if settings, settingsErr = n.meetingRoomSettingsFile(id, cwd, configPath, settings, hooks == ""); settingsErr != nil {
+	if n.guestKindOf(id) == guestMeeting && n.guestOf(id) == nil {
+		return nil, errRoomRecord // a meeting's room never runs with the assistant's tools
+	}
+	if n.guestOf(id) != nil { // a guest, a meeting's room too: none of the owner's Claude Code setup (assistant_guest.go)
+		if settings, settingsErr = n.guestSettingsFile(id, cwd, configPath, settings, hooks == ""); settingsErr != nil {
 			return nil, settingsErr
 		}
-		args = append(args, meetingRoomArgs()...)
+		args = append(args, guestSettingArgs()...)
 	}
 	if settings != "" {
 		args = append(args, "--settings", settings)
@@ -301,8 +306,9 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 	} else {
 		args = append(args, "--session-id", id)
 	}
-	// Persona's own tools are few and used all the time: load them up front instead of behind ToolSearch.
-	env := identity.Environment(os.Environ(), append([]string{"PERSONA_ASSISTANT=1", "ENABLE_TOOL_SEARCH=false"}, compaction.env()...)...)
+	// Persona's own tools are few and used all the time: personad mcp marks them alwaysLoad (#5838). Other MCP
+	// servers keep Claude Code's normal ToolSearch deferral instead of having every tool forced into the context.
+	env := identity.Environment(os.Environ(), append([]string{"PERSONA_ASSISTANT=1"}, compaction.env()...)...)
 	env = n.claudeProcessEnv(env, configDir)
 	guest := n.guestOf(id) != nil
 	if guest && execution.Runtime == proto.AssistantRuntimeAgentSDK && n.guestKindOf(id) == guestMeeting {
@@ -395,6 +401,7 @@ func (n *Node) spawnClaude(id, cwd, launcher string, resume, spare bool, options
 		cmd = n.assistantCLICommand(shell, launcher, cwd, args, env)
 	}
 	cmd.SysProcAttr = osproc.GroupAttr() // so stop() can kill the whole group
+	msysCmdLine(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

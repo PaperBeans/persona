@@ -41,13 +41,18 @@ const (
 )
 
 // The parts of a meeting the apps read again when they change (GET …/live?parts=, the meeting_live event). PartPhotos'
-// revision is kept in photos.json (recording_photos.go), the others' in meeting.json.
+// revision is kept in photos.json (recording_photos.go); PartAsks', PartTopics' and PartHighlights' in live.json, and
+// PartLines' is the live log's length (live.go); the others' in meeting.json.
 const (
 	PartRoom     = "room"
 	PartAsks     = "asks"
 	PartPrivate  = "private"
 	PartFollowup = "followup"
 	PartPhotos   = "photos"
+	PartLines    = "lines"
+	PartTopics   = "topics"
+	// PartHighlights is the room's highlights of the meeting so far (phase 2b, live.go HighlightsSet).
+	PartHighlights = "highlights"
 )
 
 // Meeting is meeting.json.
@@ -57,7 +62,10 @@ type Meeting struct {
 	// Private is the private mark: nil until chosen.
 	Private  *bool            `json:"private,omitempty"`
 	Followup *MeetingFollowup `json:"followup,omitempty"`
-	// Revs are the parts' revisions (PartRoom, PartPrivate, PartFollowup): each only goes up.
+	// Transcription is the meeting's transcription mode and, in hub mode, its state and timeline (#3862 phase 5,
+	// transcription.go): nil until an upload named a mode.
+	Transcription *MeetingTranscription `json:"transcription,omitempty"`
+	// Revs are the parts' revisions (PartRoom, PartPrivate, PartFollowup, PartTranscription): each only goes up.
 	Revs map[string]int64 `json:"revs,omitempty"`
 }
 
@@ -114,6 +122,7 @@ func (m Meeting) Clone() Meeting {
 		f := *m.Followup
 		out.Followup = &f
 	}
+	out.Transcription = m.Transcription.clone()
 	return out
 }
 
@@ -186,7 +195,18 @@ func meetingParts(before, after Meeting) []string {
 	if !same(before.Followup, after.Followup) {
 		out = append(out, PartFollowup)
 	}
+	if !same(transcriptionShown(before.Transcription), transcriptionShown(after.Transcription)) {
+		out = append(out, PartTranscription)
+	}
 	return out
+}
+
+// meetingSame: a and b are the same meeting.json (also where no part the apps read differs: the timeline, the final
+// pass's bookkeeping).
+func meetingSame(a, b Meeting) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return bytes.Equal(x, y)
 }
 
 // bumpRevs raises the revisions of parts in m.
@@ -269,10 +289,10 @@ func (e *Engine) meetingUpdateLocked(id string, fn func(m *Meeting, r Recording)
 	if err := fn(&m, *r); err != nil {
 		return Meeting{}, nil, err
 	}
-	parts := meetingParts(before, m)
-	if len(parts) == 0 {
+	if meetingSame(before, m) {
 		return m, nil, nil
 	}
+	parts := meetingParts(before, m)
 	bumpRevs(&m, parts)
 	if ok, err := st.putMeeting(id, &m); err != nil {
 		return Meeting{}, nil, err
@@ -346,12 +366,14 @@ func (u *RecordingUpload) roomRole() (role, problem string) {
 	return role, ""
 }
 
-// putMeetingFields stores what upload u says of recording id's meeting: its room (an upload with room makes it a room meeting for good; one without turns the role of a
-// room meeting off and changes nothing else) and its first private mark (only a meeting's, only while it has none).
-// The caller holds recMu; meeting.json is written before meta.json, so a crash between leaves a role no older
-// manager reads. The upload's top-level attendance fields are cleared for a room meeting (they are ignored beside
-// room, and never written to its meta.json). The meeting after it, and the parts that changed.
-func (e *Engine) putMeetingFields(id string, u *RecordingUpload) (*Meeting, []string, error) {
+// putMeetingFields stores what upload u says of recording id's meeting: its room (an upload with room makes it a room
+// meeting for good; one without turns the role of a room meeting off and changes nothing else), its first private
+// mark (only a meeting's, only while it has none) and its transcription (putTranscriptionFields: the first mode named,
+// then in hub mode the timeline and the end). The caller holds recMu; meeting.json is written before meta.json, so a
+// crash between leaves a role no older manager reads. The upload's top-level attendance fields are cleared for a room
+// meeting (they are ignored beside room, and never written to its meta.json). The meeting after it, and the parts
+// that changed.
+func (e *Engine) putMeetingFields(id string, u *RecordingUpload, now time.Time) (*Meeting, []string, error) {
 	st := e.Store
 	st.meetMu.Lock()
 	defer st.meetMu.Unlock()
@@ -382,13 +404,14 @@ func (e *Engine) putMeetingFields(id string, u *RecordingUpload) (*Meeting, []st
 		p := *u.Private
 		m.Private = &p
 	}
-	parts := meetingParts(before, m)
-	if len(parts) == 0 {
-		if m.Room == nil && m.Private == nil && m.Followup == nil {
+	e.putTranscriptionFields(id, &m, u, now)
+	if meetingSame(before, m) {
+		if m.Room == nil && m.Private == nil && m.Followup == nil && m.Transcription == nil {
 			return nil, nil, nil
 		}
 		return &m, nil, nil
 	}
+	parts := meetingParts(before, m)
 	bumpRevs(&m, parts)
 	raw, err := json.MarshalIndent(&m, "", "  ")
 	if err != nil {
@@ -467,8 +490,9 @@ func (m Meeting) FollowupView() *ConvView {
 	return &ConvView{MachineID: f.MachineID, SessionID: f.SessionID}
 }
 
-// metaWithMeeting is a recording's meta.json as detail.meta shows it: with its meeting.json's private mark, room and
-// follow-up; a room meeting's attendance is its room's role (absent when off), never an attending_session.
+// metaWithMeeting is a recording's meta.json as detail.meta shows it: with its meeting.json's private mark, room,
+// follow-up and transcription (its mode, and in hub mode its state and gaps); a room meeting's attendance is its
+// room's role (absent when off), never an attending_session.
 func metaWithMeeting(raw []byte, m *Meeting) []byte {
 	if m == nil {
 		return raw
@@ -497,6 +521,9 @@ func metaWithMeeting(raw []byte, m *Meeting) []byte {
 	}
 	if v := m.FollowupView(); v != nil {
 		set("followup", v)
+	}
+	if v := m.TranscriptionView(nil); v != nil {
+		set("transcription", v)
 	}
 	out, err := json.Marshal(meta)
 	if err != nil {

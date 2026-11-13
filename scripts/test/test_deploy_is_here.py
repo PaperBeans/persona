@@ -36,7 +36,10 @@ class DeployIsHereTests(unittest.TestCase):
                 path.chmod(0o755)
             script = 'field() { printf "%%s\\n" %s; }\n%sis_here m && echo here || echo remote\n' % (
                 "'" + hostnames + "'", is_here_source())
-            result = subprocess.run([BASH, '-c', script], env={'PATH': str(stubs)}, capture_output=True, text=True,
+            # Its own HOME and no stdin: with stdin a socket (ssh, a tool's shell) and no HOME, bash -c sources the
+            # passwd home's ~/.bashrc, whose PATH puts the real hostname ahead of the stub.
+            result = subprocess.run([BASH, '-c', script], env={'PATH': str(stubs), 'HOME': str(stubs)},
+                                    stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                     timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
             return result.stdout.strip() == 'here'

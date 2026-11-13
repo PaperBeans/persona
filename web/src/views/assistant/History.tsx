@@ -1,6 +1,8 @@
 // "All chats" (docs/assistant/assistant.md "Managing its own conversations", the iOS app's sidebar + ArchivedConversationsView): every conversation
 // Persona has, the main one first, the rest newest first by day; search on the title and the last message; a row's menu
-// renames it, copies its id, archives it (the main one can't be). The archived ones are folded at the end.
+// renames it, copies its id, archives it (the main one can't be). The archived ones are folded at the end. The background
+// supervisor (#5082, lib/background-supervisor.ts) is with the scheduled tasks' chats, marked built in, and its menu only
+// copies its id.
 import { conversationChannel, useChannels } from "../../lib/channels";
 import { ChannelMark, OriginMark } from "../../ui/ChannelMark";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,10 +19,16 @@ import { Icon } from "../../ui/icons";
 import { arrange, conversationTitle, filterConversations, mergeConversations, splitTitle, type Conversation } from "./conversations";
 import { Empty, inputClass, SectionTitle } from "./parts";
 import { Chip } from "../inbox/InboxParts";
-import { autoConversations, externalOrigin, matchesOrigin, originLabel, parseOriginFilter, type OriginFilter } from "../../lib/conversation-origins";
+import { autoConversations, autoOrigin, matchesOrigin, originLabel, parseOriginFilter, type OriginFilter } from "../../lib/conversation-origins";
+import { backgroundSupervisorTitle, isBackgroundSupervisor } from "../../lib/background-supervisor";
 import { t } from "../../i18n";
+import { ASSISTANT_SEARCH_FEATURE, markParts, mergeSearch, useAssistantSearch, type AssistantSearchHit } from "../../lib/assistant-search";
 
 const NONE: Session[] = [];
+// A row's line under its title: the matching words of a search, or else its last message.
+const ROW_LINE = "mt-0.5 block truncate text-[12px] text-ink-3";
+// The pill beside a row's title ("Main chat", "Built in"): one shape, each in its own colors.
+const pill = (bg: string, ink: string) => `inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full ${bg} px-2 text-[11px] font-medium ${ink}`;
 
 export function History({ origin, onToggleSidebar }: { origin?: string; onToggleSidebar: () => void }) {
   const filter = parseOriginFilter(origin);
@@ -73,9 +81,22 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
       }),
     [fetched, assistant?.conversations, live, titles, marked],
   );
-  const hits = useMemo(() => filterConversations(all.filter((s) => matchesOrigin(s, filter)), query), [all, query, filter]);
+  const background = assistant?.background_supervisor;
+  // what was said in them too (#6283): the manager's search, merged into the local matches (titles, last messages), as
+  // the filter chips narrow them; a chat found by a message shows it and opens at it
+  const searchOn = useStore((s) => s.features.includes(ASSISTANT_SEARCH_FEATURE));
+  const said = useAssistantSearch(query, searchOn);
+  const { hits, saidBy } = useMemo(() => {
+    const shown = all.filter((s) => matchesOrigin(s, filter, background));
+    const merged = mergeSearch(filterConversations(shown, query), said.answer, all, (r): Conversation => ({
+      machine_id: r.machine_id, session_id: r.session_id, title: r.title, cwd: "", status: "idle", assistant: true, archived: r.archived, updated_at: r.updated_at, origin: r.origin,
+    })).filter(({ chat }) => matchesOrigin(chat, filter, background));
+    const byId = new Map<string, AssistantSearchHit>();
+    for (const r of said.answer?.results ?? []) if (r.hits[0] && !r.title_match) byId.set(r.session_id, r.hits[0]);
+    return { hits: merged.map((m) => m.chat), saidBy: byId };
+  }, [all, query, filter, background, said.answer]);
   // the sources there are (#3264): "All" · "Mine" · one per kind of automatic conversation, when there are any
-  const sources = useMemo(() => autoConversations(all, assistant?.main).groups, [all, assistant?.main]);
+  const sources = useMemo(() => autoConversations(all, assistant?.main, background).groups, [all, assistant?.main, background]);
   const { main, days, archived } = useMemo(() => arrange(hits, assistant?.main, new Date(nowMs)), [hits, assistant?.main, nowMs]);
   const total = all.filter((s) => !s.archived).length;
   const searching = query.trim() !== "";
@@ -123,7 +144,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-              placeholder={t("assistant-history.search_placeholder")}
+              placeholder={searchOn ? t("assistant-history.search_label") : t("assistant-history.search_placeholder")}
               aria-label={t("assistant-history.search_label")}
               className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
             />
@@ -156,12 +177,13 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
               {t("assistant-history.empty_body")}
             </Empty>
           )}
+          {searching && said.answer?.partial && <p className="-mt-3 mb-4 px-1 text-[12px] text-ink-3" role="status">{t("assistant-history.search_partial")}</p>}
           {!loading && searching && hits.length === 0 && all.length > 0 && <Empty icon="search" title={t("assistant-history.no_results", { query: query.trim() })} />}
 
           {main && (
             <section className="mb-5">
               <div className="overflow-hidden rounded-card bg-surface shadow-card">
-                <ConvRow s={main} main now={nowMs} onRename={setRenaming} onArchive={archive} />
+                <ConvRow s={main} main now={nowMs} said={searching ? saidBy.get(main.session_id) : undefined} onRename={setRenaming} onArchive={archive} />
               </div>
             </section>
           )}
@@ -171,7 +193,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
               <SectionTitle>{d.title}</SectionTitle>
               <div className="divide-y divide-line overflow-hidden rounded-card bg-surface shadow-card">
                 {d.items.map((s) => (
-                  <ConvRow key={s.session_id} s={s} now={nowMs} onRename={setRenaming} onArchive={archive} />
+                  <ConvRow key={s.session_id} s={s} now={nowMs} said={searching ? saidBy.get(s.session_id) : undefined} onRename={setRenaming} onArchive={archive} />
                 ))}
               </div>
             </section>
@@ -194,7 +216,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
                 <div inert={!(showArchived || searching)}>
                 <div className="divide-y divide-line overflow-hidden rounded-card bg-surface shadow-card">
                   {archived.map((s) => (
-                    <ConvRow key={s.session_id} s={s} now={nowMs} onRename={setRenaming} onArchive={archive} />
+                    <ConvRow key={s.session_id} s={s} now={nowMs} said={searching ? saidBy.get(s.session_id) : undefined} onRename={setRenaming} onArchive={archive} />
                   ))}
                 </div>
                 <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("assistant-history.archived_footer")}</p>
@@ -241,23 +263,28 @@ function ConvChannel({ ids }: { ids?: string[] }) {
   );
 }
 
-function ConvRow({ s, main, now, onRename, onArchive }: { s: Conversation; main?: boolean; now: number; onRename: (s: Conversation) => void; onArchive: (s: Conversation, on: boolean) => void }) {
+function ConvRow({ s, main, now, said, onRename, onArchive }: { s: Conversation; main?: boolean; now: number; said?: AssistantSearchHit; onRename: (s: Conversation) => void; onArchive: (s: Conversation, on: boolean) => void }) {
   const menu = useMenu();
-  const route: Route = conversationPage(s.session_id, s.machine_id, s.manager);
-  const title = conversationTitle(s, main);
-  const split = splitTitle(title);
+  // found by what was said in it: opens at that message (#6283)
+  const route: Route = conversationPage(s.session_id, s.machine_id, s.manager, said?.item_id);
+  // the background supervisor is built in (#5082): its own name and mark, and nothing to rename, archive or make 常驻
+  const builtIn = useStore((x) => isBackgroundSupervisor(x.assistant, s.session_id));
+  const title = builtIn ? backgroundSupervisorTitle(s) : conversationTitle(s, main);
+  const split = builtIn ? null : splitTitle(title);
   const st = stateOf(s);
   const flagged = st === "needs_you" || st === "working" || st === "unread";
   const last = plainMarkdown(s.last_text);
-  // opened by an extension (#3758): where it came from, in the channel's place
-  const origin = externalOrigin(s);
+  // opened by the hub itself (#3758, #5195): what opened it, in the channel's place, as on its sidebar row; decided as the
+  // filters decide it, the background supervisor with the scheduled tasks' whatever its row says (#5082)
+  const origin = autoOrigin(s, builtIn ? s.session_id : undefined);
   // the chats outside the sidebar live here: 设为常驻 puts one in its 常驻 group (#4331)
   const leader = useStore((x) => !!x.assistant?.leaders?.includes(s.session_id));
+  const own = !main && !builtIn;
   const items: MenuItem[] = [
-    ...(!main && !s.archived ? [leaderItem(s, leader)] : []),
-    ...(!main ? [{ key: "rename", label: t("assistant-history.rename_ellipsis"), icon: "pencil" as const, onSelect: () => onRename(s) }] : []),
+    ...(own && !s.archived ? [leaderItem(s, leader)] : []),
+    ...(own ? [{ key: "rename", label: t("assistant-history.rename_ellipsis"), icon: "pencil" as const, onSelect: () => onRename(s) }] : []),
     { key: "copy", label: t("assistant-history.copy_session_id"), icon: "copy", onSelect: () => void copyText(s.session_id) },
-    ...(!main
+    ...(own
       ? [s.archived
           ? { key: "unarchive", label: t("assistant-history.unarchive"), icon: "archive" as const, onSelect: () => onArchive(s, false) }
           : { key: "archive", label: t("assistant-history.archive"), icon: "archive" as const, onSelect: () => onArchive(s, true) }]
@@ -272,7 +299,7 @@ function ConvRow({ s, main, now, onRename, onArchive }: { s: Conversation; main?
         className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-4 focus-visible:outline-none"
       >
         <span className={cx("flex size-8 shrink-0 items-center justify-center rounded-full", main ? "bg-ink text-surface" : markTone(s.session_id))}>
-          <Icon name={main ? "spark" : "chat"} size={main ? 13 : 14} />
+          <Icon name={main ? "spark" : builtIn ? "target" : "chat"} size={main ? 13 : 14} />
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
@@ -286,10 +313,17 @@ function ConvRow({ s, main, now, onRename, onArchive }: { s: Conversation; main?
                 title
               )}
             </span>
-            {main && <span className="inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full bg-accent-tint px-2 text-[11px] font-medium text-accent-ink">{t("assistant-history.main_chat")}</span>}
+            {main && <span className={pill("bg-accent-tint", "text-accent-ink")}>{t("assistant-history.main_chat")}</span>}
+            {builtIn && <span data-testid="built-in" className={pill("bg-field", "text-ink-2")}>{t("assistant-conversations.built_in")}</span>}
             {origin ? <OriginMark origin={origin} size={16} /> : <ConvChannel ids={s.channels} />}
           </span>
-          {last && <span className="mt-0.5 block truncate text-[12px] text-ink-3">{last}</span>}
+          {said ? (
+            <span className={ROW_LINE} data-said>
+              {markParts(said.snippet, said.ranges).map(([words, match], k) => (match ? <mark key={k} className="rounded-[3px] bg-accent-tint text-ink">{words}</mark> : <span key={k}>{words}</span>))}
+            </span>
+          ) : (
+            last && <span className={ROW_LINE}>{last}</span>
+          )}
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1">
           <span className="text-[11px] text-ink-3 tabular-nums">{ago(s.updated_at, now)}</span>

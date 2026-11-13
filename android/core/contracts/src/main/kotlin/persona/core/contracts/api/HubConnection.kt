@@ -3,12 +3,18 @@ package persona.core.contracts.api
 import persona.core.contracts.Hello
 import persona.core.contracts.ServerEvent
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.JsonObject
 
 enum class ConnectionState {
     Online, Connecting, Updating, WaitingForNetwork, NeedsLocalNetworkPermission, CertificateMismatch, Revoked,
 }
+
+/** Local authenticated socket identity, distinct even when two hellos have equal payloads. */
+data class SocketHello(val generation: Long, val hello: Hello)
+private val noCurrentHello = MutableStateFlow<SocketHello?>(null).asStateFlow()
 
 interface HubConnection {
     val state: StateFlow<ConnectionState>
@@ -28,6 +34,9 @@ interface HubConnection {
      * kept for pages built after it went by on [events]. Null before any, and for connections that do not keep it.
      */
     val lastHello: Hello? get() = null
+
+    /** Current identity-checked socket hello; null immediately on loss/reconnect, even during the UI's Online grace. */
+    val currentHello: StateFlow<SocketHello?> get() = noCurrentHello
 
     fun reconnect()
 

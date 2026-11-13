@@ -27,7 +27,7 @@ func ownerTestService(t *testing.T, dir, keyDir string) *Service {
 	})
 	s := New(Options{Hub: f, KB: &KBOptions{Dir: dir, KeyDir: keyDir}, Logf: testLogf(t)})
 	setSettings(t, s, func(v *Settings) { v.Timezone = "UTC" })
-	t.Cleanup(s.kbClose)
+	t.Cleanup(s.kbEnd)
 	return s
 }
 

@@ -138,7 +138,7 @@ class HubUpdateShotsTest {
         }
         rule.waitForIdle()
         rule.onNodeWithText("新版本 1.43.0").assertIsDisplayed()
-        rule.onNode(hasText("更新 hub") and hasClickAction()).performClick()
+        rule.onNode(hasText("更新 Hub") and hasClickAction()).performClick()
         rule.waitForIdle()
         rule.onNodeWithText("等 2 个在忙的结束").assertIsDisplayed()
         rule.onNode(hasText("现在就更新…") and hasClickAction()).performClick()
@@ -151,7 +151,7 @@ class HubUpdateShotsTest {
         rule.waitForIdle()
         rule.onNodeWithText("正在重启，会断开一会儿").assertIsDisplayed()
         // The push said auto-update is on: the switch turns it off.
-        rule.onNode(hasText("自动更新 hub") and hasClickAction()).performClick()
+        rule.onNode(hasText("自动更新 Hub") and hasClickAction()).performClick()
         rule.waitForIdle()
         assertEquals("settings auto=false", calls.last())
     }

@@ -30,7 +30,8 @@ const (
 	OriginExtension = "extension"
 	OriginModel     = "model"
 	OriginUser      = "user"
-	OriginPush      = "push" // a push source (#3848): no recipe, its device sends its items
+	OriginPush      = "push"    // a push source (#3848): no recipe, its device sends its items
+	OriginPersona   = "persona" // a built-in's default subscription (#6345): the manager's own recipe
 )
 
 // Error codes: in API errors, Subscription.Error, a dry run's error and its checks.
@@ -57,8 +58,10 @@ const (
 	CodeCallFailed       = "call_failed"
 	CodeShapeChanged     = "shape_changed"
 	CodeToolChanged      = "tool_changed"
-	CodeNoModel          = "no_model"     // drafting: no model is set up for it
-	CodeModelFailed      = "model_failed" // drafting: the model's call failed
+	CodePagination       = "invalid_pagination" // a cursor/page cannot make safe progress: the recipe must be edited
+	CodeBadThing         = "bad_thing"          // a things recipe's answer has an item that is not an Inbox row
+	CodeNoModel          = "no_model"           // drafting: no model is set up for it
+	CodeModelFailed      = "model_failed"       // drafting: the model's call failed
 )
 
 // Problem is a code and one English sentence. Clients localize the code; the sentence never carries source content.
@@ -108,22 +111,37 @@ type Subscription struct {
 	UpdatedAt time.Time `json:"updated_at"`
 
 	// Kept, not shown.
-	Tool            string     `json:"-"` // Recipe.Tool, a column of its own
-	ToolFingerprint string     `json:"-"`
-	SourceMin       int        `json:"-"` // the source's min_interval_seconds as last read
-	MaxCallsPerHour int        `json:"-"` // the connector's budget as last read (0: the default)
-	SinceAt         *time.Time `json:"-"` // the newest item time pulled so far
-	LeaseUntil      *time.Time `json:"-"`
-	ShapeMisses     int        `json:"-"` // runs in a row that pulled items without a title or id
-	SnapshotHash    string     `json:"-"` // the last snapshot's content hash
-	RunState        string     `json:"-"` // the state as runs left it; State is StateOff over it while both switches are off
-	Runs            []Run      `json:"-"`
+	Tool            string        `json:"-"` // Recipe.Tool, a column of its own
+	ToolFingerprint string        `json:"-"`
+	SourceMin       int           `json:"-"` // the source's min_interval_seconds as last read
+	MaxCallsPerHour int           `json:"-"` // the connector's budget as last read (0: the default)
+	SinceAt         *time.Time    `json:"-"` // the newest item time pulled so far; unchanged between pages
+	Continuation    *Continuation `json:"-"` // the next page and original window, committed with the preceding page
+	LeaseUntil      *time.Time    `json:"-"`
+	ShapeMisses     int           `json:"-"` // runs in a row that pulled items without a title or id
+	SnapshotHash    string        `json:"-"` // the last snapshot's content hash
+	RunState        string        `json:"-"` // the state as runs left it; State is StateOff over it while both switches are off
+	Runs            []Run         `json:"-"`
 	// The destinations' marks (#2039, deliver.go): when the Inbox was turned on (its catch-up reaches a day before),
-	// the first run since (the items stored up to it are the catch-up), and when the knowledge base was turned on
+	// the first terminal page since (the items stored up to it are the catch-up), and when the knowledge base was turned on
 	// (it starts a day before).
 	InboxFrom    *time.Time `json:"-"`
 	InboxCatchup *time.Time `json:"-"`
 	KBFrom       *time.Time `json:"-"`
+	// What a changed recipe finds at once (Patch.Existing): CatchupFrom starts the Inbox's catch-up at the change
+	// instead of a day before (digest); Baseline asks the next run that succeeds to record what it finds as seen
+	// without keeping it (baseline). Each is when the change asked for it.
+	CatchupFrom *time.Time `json:"-"`
+	Baseline    *time.Time `json:"-"`
+	// How the Inbox's rows are grouped (#5671, deliver.go "rowsFrom"): InboxGroup is the recipe's group_by they are made
+	// by ("" for rows from before #5671, which were a thread's or an item's whatever the recipe said), and the rows take
+	// only the items stored from InboxGroupFrom on (nil: all), as the earlier ones came in as rows grouped otherwise.
+	InboxGroup     string     `json:"-"`
+	InboxGroupFrom *time.Time `json:"-"`
+	// Migrated is when a built-in connector's Inbox feed was switched to this, its default subscription
+	// (MigrationID, #6265); nil while it is not. While set the subscription is pulled and its rows go to the Inbox under
+	// the built-in's own source id; its ToInbox stays false, so a manager that does not know Migrated leaves it off.
+	Migrated *time.Time `json:"-"`
 }
 
 // Run is one execution, as the subscription's history keeps it (the newest RunsKept).
@@ -134,6 +152,9 @@ type Run struct {
 	New     int       `json:"new"`
 	Count   int       `json:"count"`
 	Error   *Problem  `json:"error"`
+	// Baseline is how many new items the run recorded as seen without keeping them: the first run after a recipe
+	// changed with existing baseline.
+	Baseline int `json:"baseline,omitempty"`
 }
 
 // Run triggers.
@@ -214,12 +235,14 @@ type CatalogTool struct {
 }
 
 // DryRunRequest names a subscription (ID) or a source not subscribed yet (Connector, Source); Recipe replaces the
-// subscription's own.
+// subscription's own. Unknown are the keys of the request's recipe that the recipe format does not know, as decoding
+// it found them ("fields.author"): the dry run warns about each, since decoding drops them.
 type DryRunRequest struct {
-	ID        string  `json:"id,omitempty"`
-	Connector string  `json:"connector,omitempty"`
-	Source    string  `json:"source,omitempty"`
-	Recipe    *Recipe `json:"recipe,omitempty"`
+	ID        string   `json:"id,omitempty"`
+	Connector string   `json:"connector,omitempty"`
+	Source    string   `json:"source,omitempty"`
+	Recipe    *Recipe  `json:"recipe,omitempty"`
+	Unknown   []string `json:"-"`
 }
 
 // DryRun is a dry run's answer. Items and Paths hold source values: they are in this answer only, never kept or logged.
@@ -235,6 +258,23 @@ type DryRun struct {
 	Items     []Preview   `json:"items"`
 	Paths     []PathValue `json:"paths"`
 	Error     *Problem    `json:"error"`
+	// Warnings do not fail the dry run: what the recipe says that will not do what it seems to (Warning).
+	Warnings []Warning `json:"warnings"`
+}
+
+// The warnings of a dry run.
+const (
+	WarnUnknownKey = "unknown_key" // a recipe key the format does not know: decoding drops it, so it does nothing
+	WarnEmptyField = "empty_field" // a mapped field is empty in every item pulled
+)
+
+// Warning is one thing a dry run noticed that does not fail it: Key is the recipe key it is about ("fields.author",
+// "fields.sender"), Path the field's path when it has one.
+type Warning struct {
+	Code    string `json:"code"`
+	Key     string `json:"key"`
+	Path    string `json:"path,omitempty"`
+	Message string `json:"message"`
 }
 
 // The checks of a dry run, always these and in this order.
@@ -252,17 +292,32 @@ type Check struct {
 	Error *Problem `json:"error,omitempty"`
 }
 
-// Preview is one item of a dry run.
+// Preview is one item of a dry run, as the Inbox would show it: Summary is its row's preview line (the body's first
+// 200 characters on one line), Problems what its mapped fields could not read in this item.
 type Preview struct {
-	UID     string  `json:"uid"`
-	New     bool    `json:"new"`
-	Title   string  `json:"title"`
-	Sender  string  `json:"sender"`
-	Time    *string `json:"time"`
-	Thread  string  `json:"thread"`
-	Link    string  `json:"link"`
-	DueDate *string `json:"due_date"`
-	Body    string  `json:"body"`
+	UID      string         `json:"uid"`
+	New      bool           `json:"new"`
+	Title    string         `json:"title"`
+	Sender   string         `json:"sender"`
+	Time     *string        `json:"time"`
+	Thread   string         `json:"thread"`
+	Link     string         `json:"link"`
+	DueDate  *string        `json:"due_date"`
+	Body     string         `json:"body"`
+	Summary  string         `json:"summary"`
+	Problems []FieldProblem `json:"problems"`
+}
+
+// The problems of one item's field (FieldProblem.Code).
+const (
+	FieldEmpty   = "empty"    // the field's path finds nothing in this item
+	FieldBadTime = "bad_time" // a time or due date that cannot be read
+)
+
+// FieldProblem is a mapped field one item has no value for: Key is the recipe key ("fields.sender").
+type FieldProblem struct {
+	Key  string `json:"key"`
+	Code string `json:"code"`
 }
 
 // PathValue is a leaf of the first item, for the field pickers.
@@ -287,11 +342,26 @@ type CreateRequest struct {
 	Label        string  `json:"label,omitempty"`
 }
 
-// Patch changes a subscription made at Revision; nil fields stay as they are.
+// What a changed recipe does with what it finds on its first run (Patch.Existing): everything it pulls is new to the
+// dedup keys, but much of it happened before the change.
+const (
+	// ExistingDigest (the default): the Inbox catches up from the change, as when it is turned on: more than 3 come
+	// in as one digest row, fewer as rows. The knowledge base keeps each.
+	ExistingDigest = "digest"
+	// ExistingBaseline: the first run that succeeds records what it finds as seen and keeps none of it; only what
+	// arrives later comes in.
+	ExistingBaseline = "baseline"
+	// ExistingDeliver: each comes in as a new item.
+	ExistingDeliver = "deliver"
+)
+
+// Patch changes a subscription made at Revision; nil fields stay as they are. Existing goes with a recipe that
+// changes: ExistingDigest when "".
 type Patch struct {
 	Revision        int64   `json:"revision"`
 	Label           *string `json:"label,omitempty"`
 	Recipe          *Recipe `json:"recipe,omitempty"`
+	Existing        string  `json:"existing,omitempty"`
 	ToInbox         *bool   `json:"to_inbox,omitempty"`
 	ToKB            *bool   `json:"to_kb,omitempty"`
 	IntervalSeconds *int    `json:"interval_seconds,omitempty"`
@@ -342,6 +412,17 @@ type Item struct {
 	DueDate        *time.Time `json:"due_date,omitempty"`
 	Kind           string     `json:"kind"`
 	Snapshot       bool       `json:"snapshot,omitempty"`
+	// SenderID, Chat and ChatName say who and where for mutes and policies (deliverer.tags), not what the item says.
+	SenderID string `json:"sender_id,omitempty"`
+	Chat     string `json:"chat,omitempty"`
+	ChatName string `json:"chat_name,omitempty"`
+	// Seen: the item was seen in the source (#6176), when the pull that stored it or a later one read it so; never
+	// turned off again.
+	Seen bool `json:"seen,omitempty"`
+	// ReplyTo says where a reply goes, for people (#6198): with it the row can be replied to (deliverer.replies).
+	ReplyTo string `json:"reply_to,omitempty"`
+	// Thing is a things recipe's row as the connector made it (#6296), handed to the Inbox as it is.
+	Thing json.RawMessage `json:"thing,omitempty"`
 }
 
 // Seen is a dedup key kept for a subscription (subscription_seen).

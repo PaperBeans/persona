@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Persona's conversation, as iOS shows it (#4339 C18). -->
+<resources>
+    <string name="chat_tray_shelved">搁置</string>
+    <string name="chat_placeholder_ask">问 %1$s…</string>
+</resources>

@@ -9,6 +9,9 @@ Place necessary historical text under its module directory and list it below.
 
 | File | Contents |
 | --- | --- |
+| `operations/2026-11-12-skill-zip-timeout-5581.md` | Skill ZIP import five-package 600-second timeout reproduction, exact main comparison, fixture boundaries and unresolved verification (#5478 / #5581) |
+| `operations/2026-11-12-server-test-latency-5730.md` | Fixed-revision shared node fixture latency, bounded package-set comparisons, terminal accounting, verifier adoption limits and November 13 main synchronization (#5730) |
+| `operations/cpu-memory-2026-11-13.md` | CPU and memory optimization measurements, equivalence checks and independent round reviews |
 | `operations/2026-11-09-client-error-semantics.md` | Cross-client error classification audit, narrow legacy compatibility, recording retry boundaries and unverified native/UI gates (#1915) |
 | `android/2026-11-09-inbox-completion-section-read.md` | Completion projection, assistant-section read controls and synthetic UI/API checks (#1807) |
 | `android/2026-11-08-inbox-conversation-identity.md` | Grouped inbox chat-kind and sender identity loss, historical negative controls and native render checks (#1583) |
@@ -67,6 +70,8 @@ Place necessary historical text under its module directory and list it below.
 | `redesign/research/public-direct-ipv6.md` | Direct public connectivity, IPv6, TLS, and persistent-connection keepalive: research notes |
 | `redesign/ux.md` | Interaction and UI specification (shared by both platforms) |
 | `apple/2026-11-09-ios-idle-energy.md` | Six synthetic before/after energy-workload windows, single-flight boundaries, lifecycle regressions and preserved Instruments/device acceptance gaps (#1634 / #1633) |
+| `native-rewind-5878/acceptance.md` | Native conversation rewind for Codex and Antigravity in the web app: native runtime runs, browser checks in both themes at large text, and synthetic completion latency (#5878 / #5919) |
+| `worktree-mark-6644/acceptance.md` | Worktree rows in the By-repository sidebar without the bare branch glyph: web browser and Android Robolectric screenshots in both themes; iOS not captured (#6644 / #6701) |
 
 The [historical redesign index](redesign/README.md) groups the retained interaction drafts and research.
 The retained [chat-header prototype](apple/prototypes/chat-topbar.html) is a text-only historical design, not a production screen.

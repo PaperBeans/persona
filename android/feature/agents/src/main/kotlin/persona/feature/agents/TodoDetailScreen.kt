@@ -40,6 +40,9 @@ import persona.core.designsystem.icons.PersonaIcons
 import persona.core.domain.sort.slotLabel
 import persona.core.domain.tasks.TasksStore
 import persona.core.domain.tasks.TodoDecisionsSource
+import persona.core.domain.tasks.TriageSection
+import persona.core.domain.tasks.supersededFailedStarts
+import persona.core.domain.tasks.triage
 import java.time.Instant
 
 /** Where an agent on a to-do came from (iOS TodosLogic.agentSource): with a project, sent by another agent, the same chat. */
@@ -107,6 +110,17 @@ fun TodoDetailScreen(
 
     val sessionMap = remember(sessions) { sessions.associateBy { it.key } }
     val sessionLookup: (SessionKey) -> Session? = remember(sessionMap) { { key: SessionKey -> sessionMap[key] } }
+    val hubFeatures = tasks?.features?.collectAsState()
+    val seenOn = hubFeatures?.value?.contains("todo_seen") == true
+    LaunchedEffect(todoId, seenOn) {
+        val store = tasks ?: return@LaunchedEffect
+        if (!seenOn) return@LaunchedEffect
+        val placed = todo.triage(sessionLookup, now.toEpochMilli(), superseded = todo.id in supersededFailedStarts(todos))
+        if (placed.section != TriageSection.JustDone) return@LaunchedEffect
+        try { store.setTodoSeen(todo.id, true, placed.last) }
+        catch (e: CancellationException) { throw e }
+        catch (_: Exception) { } // Opening is silently seen only if the hub accepts it.
+    }
     val state = todo.state(sessionLookup)
 
     if (confirmDelete) {

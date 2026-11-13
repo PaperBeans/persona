@@ -9,7 +9,8 @@ import (
 	"strings"
 )
 
-// PaneSize is the grid of a pane's terminal, what its programs see: its rect in pane.layout.
+// PaneSize is a pane's rect in pane.layout: the grid its programs see while a herdr client is attached. With none,
+// the layout holds herdr's default (120 × 40) and the pane keeps the last client's size: TermSize says that.
 func (c *Client) PaneSize(ctx context.Context, pane string) (cols, rows int, err error) {
 	var res struct {
 		Layout struct {
@@ -45,8 +46,8 @@ type Frame struct {
 }
 
 // Observe streams a pane's terminal to fn until ctx ends or herdr stops, and returns why. An observer takes no attach
-// slot and never resizes the pane; cols × rows must be the pane's own size (PaneSize): a smaller grid is the top
-// left of the screen cut out, not the screen laid out again.
+// slot and never resizes the pane; cols × rows must be the pane's own size (TermSize; PaneSize only while a client is
+// attached): a smaller grid is the top left of the screen cut out, not the screen laid out again.
 func (c *Client) Observe(ctx context.Context, pane string, cols, rows int, fn func(Frame)) error {
 	cmd := exec.CommandContext(ctx, c.Bin, "terminal", "session", "observe", pane, "--cols", fmt.Sprint(cols), "--rows", fmt.Sprint(rows))
 	cmd.Env = c.env()

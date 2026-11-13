@@ -86,7 +86,48 @@ func withoutControls(s string) string {
 	}, s)
 }
 
+// switchSendWait is how long the hub waits for a message carrying out a launcher switch: the node's checks before the
+// quit take at most a minute and the rest at most five (node/launcher_switch.go switchProbeWait, switchBudget); a
+// switch to the other engine also builds its handoff before the quit and takes five and a half minutes after it
+// (node/engine_switch.go engineSwitchBudget, #5054).
+const switchSendWait = 8 * time.Minute
+
+// sendWait is how long the hub waits for the node to take message p to session s (as listed; zero when not): 90
+// seconds; 5 minutes for one that is starting or not running (a resume, node's claudeStartWait, #1396); switchSendWait
+// for the user's message that carries out a switch to another launcher (apply_switch): it quits the agent and starts
+// it again, and brings it back on its own launcher when that fails. Decided by the request, not the cached row, which
+// may not show a switch picked a moment ago.
+func sendWait(p map[string]any, s proto.Session) time.Duration {
+	if apply, _ := p["apply_switch"].(bool); apply {
+		return switchSendWait
+	}
+	if s.Starting || s.Status == proto.StatusOffline {
+		return 5 * time.Minute
+	}
+	return 90 * time.Second
+}
+
+type sendTimingKey struct{}
+
+type sendTiming struct {
+	hub   *Hub
+	id    string
+	start time.Time
+}
+
+func (s *sendTiming) mark(phase string, ok bool) {
+	if s != nil && s.hub.logger != nil {
+		s.hub.logf("send_timing trace=%s phase=%s elapsed_ms=%d ok=%t", s.id, phase, time.Since(s.start).Milliseconds(), ok)
+	}
+}
+
+func sendTimingOf(ctx context.Context) *sendTiming {
+	s, _ := ctx.Value(sendTimingKey{}).(*sendTiming)
+	return s
+}
+
 func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
+	started := time.Now()
 	p := map[string]any{}
 	if r.ContentLength != 0 {
 		if err := decodeJSONBody(w, r, &p, 32<<20); err != nil && !errors.Is(err, io.EOF) {
@@ -98,6 +139,97 @@ func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 		writeErr(w, http.StatusBadRequest, errors.New("request body must be a JSON object"))
 		return
 	}
+	if id, _ := p["client_msg_id"].(string); strings.HasPrefix(id, assistantwire.FirstMessageIDPrefix) {
+		// The manager's own, for a conversation's first message (assistant start.go humanStart): never an app's, so no
+		// later message carries one (and passes for that first message). Refused before anything else is done with it.
+		writeErrCode(w, http.StatusBadRequest, "client_msg_id_reserved", i18n.Err("hub-send.reserved_id"))
+		return
+	}
+	sid := r.PathValue("sid")
+	if todoID, _ := p["todo_id"].(string); todoID != "" && principalOf(r.Context()).Role != roleFull {
+		writeErr(w, http.StatusForbidden, errors.New("read-only role cannot modify todos"))
+		return
+	}
+	if answerOnly(r) {
+		// Validate this caller's target before joining another request's receipt.
+		s, ok := m.session(sid)
+		if !ok || len(h.shown(m.cfg.ID, []proto.Session{s})) == 0 {
+			writeErr(w, http.StatusNotFound, errors.New("no such session"))
+			return
+		}
+		text, _ := p["text"].(string)
+		text = withoutControls(text)
+		if strings.TrimSpace(text) == "" {
+			writeErr(w, http.StatusBadRequest, errors.New("text is required"))
+			return
+		}
+		said := map[string]any{"session_id": sid, "text": text}
+		if id, ok := p["client_msg_id"]; ok {
+			said["client_msg_id"] = id
+		}
+		p = said
+	}
+	id, _ := p["client_msg_id"].(string)
+	timing := &sendTiming{hub: h, id: proto.SendTraceID(id), start: started}
+	r = r.WithContext(context.WithValue(r.Context(), sendTimingKey{}, timing))
+	timing.mark("hub_received", true)
+	if id == "" {
+		h.sendMessageOnce(w, r, m, p)
+		return
+	}
+	// Join before manager preparation, not just terminal delivery. A duplicate must
+	// neither prepare another turn nor reset an already executing turn's state.
+	f, first := h.sends.join(id)
+	if !first {
+		select {
+		case <-f.done:
+			// HTTP replays the receipt. Re-broadcasting this older terminal event
+			// could clear a newer retry's Processing state for the same ID.
+			writeRaw(w, f.status, f.body)
+		case <-r.Context().Done():
+		}
+		return
+	}
+	h.toSubscribers(m.cfg.ID, sid, proto.MessageSendState{Type: "message_send_state", MachineID: m.cfg.ID,
+		SessionID: sid, ClientMsgID: id, State: proto.MessageSendProcessing, At: time.Now().UTC()})
+	// Receipt is not durable delivery. Keep the original flight alive even when
+	// the HTTP caller disconnects during manager preparation.
+	row, _ := m.session(sid)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), sendWait(p, row))
+	defer cancel()
+	rec := &bufferedResponse{header: http.Header{}, lang: h.requestLang(r)}
+	h.sendMessageOnce(rec, r.WithContext(ctx), m, p)
+	f.status, f.body = rec.status, rec.body.Bytes()
+	state := h.messageSendState(m.cfg.ID, sid, id, f.status, f.body)
+	close(f.done)
+	if state == proto.MessageSendFailed {
+		h.sends.forget(id, f) // preparation or delivery typed nothing: retry remains safe
+	}
+	for key, values := range rec.header {
+		w.Header()[key] = values
+	}
+	writeRaw(w, f.status, f.body)
+}
+
+// messageSendState only reports the transport outcome; session state belongs to
+// the manager and node, and may already describe another running turn.
+func (h *Hub) messageSendState(mid, sid, id string, status int, body []byte) string {
+	state := proto.MessageSendFailed
+	var out struct {
+		Delivered string `json:"delivered"`
+	}
+	_ = json.Unmarshal(body, &out)
+	if status == http.StatusOK {
+		state = proto.MessageSendDelivered
+	} else if out.Delivered == sendUnknown {
+		state = proto.MessageSendUnknown
+	}
+	h.toSubscribers(mid, sid, proto.MessageSendState{Type: "message_send_state", MachineID: mid,
+		SessionID: sid, ClientMsgID: id, State: state, At: time.Now().UTC()})
+	return state
+}
+
+func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine, p map[string]any) {
 	sid := r.PathValue("sid")
 	p["session_id"] = sid
 	todoID, _ := p["todo_id"].(string)
@@ -110,7 +242,7 @@ func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 	if isText {
 		r = h.captureHumanSubmission(r, text)
 	}
-	for _, reserved := range []string{"creation_id", "incarnation", "caller", "submission", "share_authority"} {
+	for _, reserved := range []string{"creation_id", "incarnation", "caller", "submission", "share_authority", "skill_owner"} {
 		delete(p, reserved)
 	}
 	var start freshStart
@@ -140,27 +272,6 @@ func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 		p["text"] = h.todoStartText(r.Context(), assistantwire.TodoHandoff{TodoID: start.todoID, Text: text, New: true,
 			MachineID: m.cfg.ID, Cwd: start.cwd})
 	}
-	if answerOnly(r) {
-		// An answer-only device says something to a conversation it can see, no more. A message to an id nobody has starts
-		// an agent on the computer; which program runs it, and whatever else a send can shape, are a full device's to pick;
-		// and it is text for the agent, not keys for the terminal.
-		s, ok := m.session(sid)
-		if !ok || len(h.shown(m.cfg.ID, []proto.Session{s})) == 0 {
-			writeErr(w, http.StatusNotFound, errors.New("no such session"))
-			return
-		}
-		text, _ := p["text"].(string)
-		text = withoutControls(text)
-		if strings.TrimSpace(text) == "" {
-			writeErr(w, http.StatusBadRequest, errors.New("text is required"))
-			return
-		}
-		said := map[string]any{"session_id": sid, "text": text}
-		if id, ok := p["client_msg_id"]; ok {
-			said["client_msg_id"] = id
-		}
-		p = said
-	}
 	if s, ok := m.session(sid); ok && m.isAssistant(s) {
 		// The user is talking in it again: back in the list, and it works for them, not for a chain of conversations.
 		h.asstOf(h.sessionOwner(m.cfg.ID, sid)).UserSpoke(r.Context(), assistantwire.SessionRef{MachineID: m.cfg.ID, SessionID: sid})
@@ -189,11 +300,8 @@ func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 	// its outcome is what the retry gets. Resuming an offline session can take a while (shell + claude startup).
 	// One sent while the session still starts waits for claude to be ready (node/starting.go); one to a session that is
 	// not running resumes it first. Either can wait minutes on a busy machine (node's claudeStartWait, #1396).
-	wait := 90 * time.Second
-	if s, ok := m.session(sid); ok && (s.Starting || s.Status == proto.StatusOffline) {
-		wait = 5 * time.Minute
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), wait)
+	row, _ := m.session(sid)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), sendWait(p, row))
 	defer cancel()
 	id, _ := p["client_msg_id"].(string)
 	if ch := channel.FromClientMsgID(id, []string{"voice"}); ch != "" {
@@ -225,31 +333,14 @@ func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 			h.fresh.done(m.cfg.ID, sid)
 		}
 		if status == http.StatusOK && todoID != "" {
-			var title, cwd, agent string
-			if s, ok := m.session(sid); ok {
-				title, cwd, agent = s.Title, s.Cwd, s.Agent
-			}
-			if _, err := h.asst().TodoLink(ctx, assistantwire.TodoLinkParams{TodoID: todoID, MachineID: m.cfg.ID, SessionID: sid,
-				Title: title, Cwd: cwd, Agent: agent}); err != nil {
-				h.logf("sendMessage: link todo %s for %s/%s failed: %v", todoID, m.cfg.ID, sid, err)
-			}
+			h.linkSentTodo(ctx, m, todoID, sid, body)
 		}
 		writeRaw(w, status, body)
 		return
 	}
-	f, first := h.sends.join(id)
-	if !first {
-		select {
-		case <-f.done:
-			writeRaw(w, f.status, f.body)
-		case <-r.Context().Done():
-		}
-		return
-	}
+	f := &sendFlight{}
 	if external && h.store == nil {
 		f.status, f.body = callErrBytes(l, &rpc.Error{Code: "codex_send_guard", Message: i18n.T(l, "hub-send.guard_no_record"), Data: json.RawMessage(`{"delivered":"none"}`)})
-		close(f.done)
-		h.sends.forget(id, f)
 		writeRaw(w, f.status, f.body)
 		return
 	}
@@ -259,8 +350,6 @@ func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 		if state, err = h.store.ClaimSend(ctx, id, m.cfg.ID, sid); err != nil {
 			if external {
 				f.status, f.body = callErrBytes(l, &rpc.Error{Code: "codex_send_guard", Message: i18n.T(l, "hub-send.guard_no_record"), Data: json.RawMessage(`{"delivered":"none"}`)})
-				close(f.done)
-				h.sends.forget(id, f)
 				writeRaw(w, f.status, f.body)
 				return
 			}
@@ -284,33 +373,44 @@ func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 				h.logf("send %s: %v", id, err)
 			}
 		}
-		if outcome == "" {
-			defer h.sends.forget(id, f)
-		}
 	}
-	close(f.done)
 	modelSent(f.status)
 	if f.status == http.StatusOK && fresh {
 		h.fresh.done(m.cfg.ID, sid)
 	}
 	if f.status == http.StatusOK && todoID != "" {
-		var title, cwd, agent string
-		if s, ok := m.session(sid); ok {
-			title, cwd, agent = s.Title, s.Cwd, s.Agent
-		}
-		if _, err := h.asst().TodoLink(ctx, assistantwire.TodoLinkParams{TodoID: todoID, MachineID: m.cfg.ID, SessionID: sid,
-			Title: title, Cwd: cwd, Agent: agent}); err != nil {
-			h.logf("sendMessage: link todo %s for %s/%s failed: %v", todoID, m.cfg.ID, sid, err)
-		}
+		h.linkSentTodo(ctx, m, todoID, sid, f.body)
 	}
 	writeRaw(w, f.status, f.body)
+}
+
+// linkSentTodo links a todo to the session its message went to: a Codex that waited for its first message answers
+// with the thread that message began (node/codex_waiting.go), and that thread is the todo's from now on.
+func (h *Hub) linkSentTodo(ctx context.Context, m *Machine, todoID, sid string, body []byte) {
+	var reply struct {
+		Session *proto.Session `json:"session"`
+	}
+	var title, cwd, agent string
+	if json.Unmarshal(body, &reply) == nil && reply.Session != nil && reply.Session.SessionID != "" {
+		sid = reply.Session.SessionID
+		title, cwd, agent = reply.Session.Title, reply.Session.Cwd, reply.Session.Agent
+	}
+	if s, ok := m.session(sid); ok {
+		title, cwd, agent = s.Title, s.Cwd, s.Agent
+	}
+	if _, err := h.asst().TodoLink(ctx, assistantwire.TodoLinkParams{TodoID: todoID, MachineID: m.cfg.ID, SessionID: sid,
+		Title: title, Cwd: cwd, Agent: agent}); err != nil {
+		h.logf("sendMessage: link todo %s for %s/%s failed: %v", todoID, m.cfg.ID, sid, err)
+	}
 }
 
 // deliverOnce asks the node to send and says what became of it: delivered, unknown (it may have been typed), or ""
 // (nothing typed: refused, offline, failed before typing).
 func (h *Hub) deliverOnce(ctx context.Context, m *Machine, p map[string]any) (int, []byte, string) {
 	var out json.RawMessage
+	sendTimingOf(ctx).mark("dispatch_started", true)
 	err := m.call(ctx, "session.send", p, &out)
+	sendTimingOf(ctx).mark("node_returned", err == nil)
 	switch outcome := sendOutcome(err); {
 	case err == nil:
 		if len(out) == 0 {

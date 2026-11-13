@@ -36,7 +36,7 @@ func TestSubscriptionPagesRoute(t *testing.T) {
 	h.startSubscriptions(ctx)
 	code, out := call(watch, `{"context":{"ui_version":6,"locale":"en"}}`)
 	view, _ := out["view"].(map[string]any)
-	if code != http.StatusOK || view == nil || view["title"] != "Subscriptions" {
+	if code != http.StatusOK || view == nil || view["title"] != "Inbox Sources" {
 		t.Fatalf("an answer-only device draws the list: %d %v", code, out)
 	}
 	if b, _ := json.Marshal(view); !strings.Contains(string(b), "can only view subscriptions") {

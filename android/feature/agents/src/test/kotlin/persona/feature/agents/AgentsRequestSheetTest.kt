@@ -9,6 +9,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.datastore.core.DataStore
@@ -94,6 +95,8 @@ class AgentsRequestSheetTest {
         rule.onNodeWithText("Deny").performClick()
         deliver()
         assertEquals("Denied: notes.md", notices.last())
+        // On Glass the requests and their history are in ⋯ (#4338 A1).
+        rule.onNodeWithContentDescription("List settings").performClick()
         rule.onNodeWithText("Requests and history").performClick()
         rule.onNodeWithText("History 2").performClick()
         rule.onAllNodesWithText("Waiting for your approval")[0].performClick()

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- An Agent chat's header (#4339 C4, iOS ChatView): what a tap on the title does, and the slim bar it folds into. -->
+    <string name="chat_chrome_title_info">View session info</string>
+    <string name="chat_chrome_title_connection">View connection details</string>
+    <string name="chat_chrome_slim_open">%1$s, show title and tags</string>
+</resources>

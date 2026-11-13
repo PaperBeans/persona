@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
@@ -37,7 +38,9 @@ func (h *Manager) readInbox(ctx context.Context, round inboxRound) assistantwire
 // accounts' order; an account that can't be read is left out and named in Failed with why (the manager keeps what it
 // had and the apps say it is behind). nil without mail or when the accounts can't be listed.
 func (h *Manager) readMail(ctx context.Context) *assistantwire.InboxMailRead {
-	if h.mail == nil || h.connectors.Get("mail") == nil {
+	// Add to Inbox off (#5307): no mail round, so the manager keeps the mail items it has; search, replies and the
+	// knowledge base go on.
+	if h.mail == nil || h.connectors.Get("mail") == nil || !h.connectors.Feeds("mail", connector.FeedInbox) {
 		return nil
 	}
 	accounts, err := h.mail.ListAccounts()
@@ -60,9 +63,11 @@ func (h *Manager) readMail(ctx context.Context) *assistantwire.InboxMailRead {
 	out := &assistantwire.InboxMailRead{Accounts: []assistantwire.InboxMailAccount{}}
 	var health map[string]string // the accounts' status after the round (mail settings'), read once one failed
 	checked := false
+	now := time.Now()
 	for i, acc := range read {
 		if acc != nil {
 			out.Accounts = append(out.Accounts, *acc)
+			h.inboxReads.note("mail:"+accounts[i].ID, now, "")
 			continue
 		}
 		code := mailReadErrorOf(errs[i])
@@ -81,6 +86,7 @@ func (h *Manager) readMail(ctx context.Context) *assistantwire.InboxMailRead {
 			}
 		}
 		out.Failed = append(out.Failed, assistantwire.InboxMailFailed{ID: accounts[i].ID, Email: accounts[i].Email, ReadError: code})
+		h.inboxReads.note("mail:"+accounts[i].ID, now, code)
 	}
 	return out
 }
@@ -139,11 +145,23 @@ func mailAddresses(list []mail.Address) []assistantwire.MailAddress {
 
 // readConnectors reads every connector with an inbox: its things and what it can do with them. One the user turned "Add
 // to Inbox" off for, not signed in, or a hub.json plugin's waiting for the triage model is read with nothing (nothing
-// of it waits); one whose Collect failed is left out (it keeps what it had).
+// of it waits); one whose Collect failed is left out (it keeps what it had). One whose Inbox feed was switched to its
+// default subscription is not read at all: the subscription hands its rows under its id (#6265).
 func (h *Manager) readConnectors(ctx context.Context) []assistantwire.InboxSource {
 	out := []assistantwire.InboxSource{}
 	h.reconcileIMessageAI(ctx)
+	migrated := map[string]bool{}
+	if subs := h.subsLive.Load(); subs != nil {
+		var err error
+		if migrated, err = subs.Migrated(ctx); err != nil {
+			h.logf("inbox: migrated sources: %v", err)
+			return out // which built-ins to read is not known: none this round, rather than one twice
+		}
+	}
 	for _, c := range h.connectors.All() {
+		if migrated[c.ID()] {
+			continue
+		}
 		in, ok := connector.As[connector.Inbox](c)
 		if !ok {
 			continue
@@ -161,26 +179,35 @@ func (h *Manager) readConnectors(ctx context.Context) []assistantwire.InboxSourc
 		if err != nil {
 			h.logf("inbox: %s: %v", c.ID(), err)
 			src.ReadError = readErrorOf(err) // the manager keeps what it had and the apps say it is behind
+			h.inboxReads.note(c.ID(), time.Now(), src.ReadError)
 			out = append(out, src)
 			continue
 		}
+		h.inboxReads.note(c.ID(), time.Now(), "")
 		h.vetThings(c, things)
 		src.Things = things
-		_, src.Group = connector.As[connector.Grouper](c)
-		_, src.Meta = connector.As[connector.EventWriter](c)
-		src.MetaDescription = strings.TrimSpace(c.Manifest().MetaDescription)
-		_, src.Settles = connector.As[connector.InboxSettler](c)
-		for _, kind := range c.Manifest().Kinds {
-			if d, ok := extensionKinds.Load(c.ID() + "/" + kind); ok {
-				if src.Kinds == nil {
-					src.Kinds = map[string]string{}
-				}
-				src.Kinds[kind] = d.(string)
-			}
-		}
+		withAbilities(&src, c)
 		out = append(out, src)
 	}
 	return out
+}
+
+// withAbilities gives a connector's round entry what the Inbox does with its things besides taking them: grouping
+// (group, meta), settling, and its kinds as it describes them. A built-in read through its default subscription
+// gets the same (#6381), so nothing it does is lost at the switch.
+func withAbilities(src *assistantwire.InboxSource, c connector.Connector) {
+	_, src.Group = connector.As[connector.Grouper](c)
+	_, src.Meta = connector.As[connector.EventWriter](c)
+	src.MetaDescription = strings.TrimSpace(c.Manifest().MetaDescription)
+	_, src.Settles = connector.As[connector.InboxSettler](c)
+	for _, kind := range c.Manifest().Kinds {
+		if d, ok := extensionKinds.Load(c.ID() + "/" + kind); ok {
+			if src.Kinds == nil {
+				src.Kinds = map[string]string{}
+			}
+			src.Kinds[kind] = d.(string)
+		}
+	}
 }
 
 // readErrorOf is a failed Collect as a short code: its text may hold an address or a token, the code does not.

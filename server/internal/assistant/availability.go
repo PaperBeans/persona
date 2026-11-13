@@ -20,7 +20,8 @@ import (
 // docs/design/proposals/main-chat-availability.md): how long the owner waits for an assistant conversation's reply,
 // what its rounds are spent on, how long system messages wait in its queue, and who answers the cards. Everything is
 // a work event (session_work_events, kept 30 days like the others): one per answered owner message, per round, per
-// delivered queued message and per ended card. Nothing here calls a model or reads a transcript.
+// delivered queued message and per ended card. Nothing here calls a model or reads a transcript. What supervision
+// costs per accepted task, by the supervisor's model and effort, is read with them (availability_supervision.go).
 //
 // GET /api/v1/assistant/availability reads them. It is a route of its own, not part of #4601's north-star read
 // (north_star.go): that one reads a single day from the database alone, this one a window of days plus the queues and
@@ -32,7 +33,9 @@ const (
 	// then that bound); by "turn_end" when a turn's end stood in for a text the session list never showed changing.
 	replyWaitEvent = "reply_wait"
 	// roundEvent: an assistant conversation's round ended. Detail: source (who started it, the round* constants and
-	// the message sources), seconds, main; stopped when it ended without a turn's end (interrupted, its process gone).
+	// the message sources), seconds, main; stopped when it ended without a turn's end (interrupted, its process gone);
+	// model, effort and output_tokens (the conversation's output so far in all) as its node listed them at the end,
+	// each absent when not known (roundRan, availability_supervision.go).
 	roundEvent = "round"
 	// queueWaitEvent: a queued system message was delivered. Detail: kind (as roundEvent's source), wait (seconds since
 	// it was first queued), depth (the queue's length with it when it was added), main.
@@ -159,6 +162,27 @@ func (s *Service) availInput(machine, session, source string, now time.Time) {
 	b.init()
 	k := [2]string{machine, session}
 	b.known[k] = true
+	b.inputs[k] = availInput{source: source, until: now.Add(availInputFor)}
+}
+
+// availStartedBy: the manager itself started machine's assistant conversation session for source (the background
+// supervisor, supervise_background.go). Its first round is that source's, not roundOther as a new conversation's
+// is: the id is known only once the start answered, by when the round may already have been seen starting.
+func (s *Service) availStartedBy(machine, session, source string, now time.Time) {
+	if machine == "" || session == "" || source == "" {
+		return
+	}
+	b := &s.avail
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.init()
+	k := [2]string{machine, session}
+	b.known[k] = true
+	if r, open := b.rounds[k]; open && r.source == roundOther {
+		r.source = source
+		b.rounds[k] = r
+		return
+	}
 	b.inputs[k] = availInput{source: source, until: now.Add(availInputFor)}
 }
 
@@ -373,7 +397,8 @@ func (s *Service) availTurnEnded(ctx context.Context, machine, session string, n
 	}
 	b.mu.Unlock()
 	main := s.isMain(ctx, session)
-	s.workEvent(machine, session, roundEvent, map[string]any{"source": round.source, "seconds": now.Sub(round.started).Seconds(), "main": main})
+	s.workEvent(machine, session, roundEvent, s.roundRan(machine, session,
+		map[string]any{"source": round.source, "seconds": now.Sub(round.started).Seconds(), "main": main}))
 	if answered {
 		s.replyWaited(machine, session, wait, now.Sub(wait.at), main, map[string]any{"by": "turn_end"})
 	}
@@ -391,8 +416,8 @@ func (s *Service) availStopped(machine, session string, now time.Time) {
 	if !ok {
 		return
 	}
-	s.workEvent(machine, session, roundEvent, map[string]any{"source": round.source, "seconds": now.Sub(round.started).Seconds(),
-		"main": s.isMain(context.Background(), session), "stopped": true})
+	s.workEvent(machine, session, roundEvent, s.roundRan(machine, session, map[string]any{"source": round.source,
+		"seconds": now.Sub(round.started).Seconds(), "main": s.isMain(context.Background(), session), "stopped": true}))
 }
 
 // replyWaited records wait as over after waited.
@@ -568,6 +593,10 @@ type availabilityStats struct {
 	QueueWait queueWaits `json:"queue_wait"`
 	// AskOutcome: by card kind, then by who answered: how many and after how long.
 	AskOutcome map[string]map[string]waitStats `json:"ask_outcome"`
+	// Supervision: per model and effort the reviewer ran on, the tasks it accepted, those reopened within a day and
+	// their rework rounds; per day and supervisor conversation, the tasks accepted next to the output
+	// tokens it generated (availability_supervision.go, #5086).
+	Supervision supervisionStats `json:"supervision"`
 }
 
 type replyWaits struct {
@@ -827,6 +856,7 @@ func summarizeAvailability(hours int, since time.Time, events []db.WorkEvent, lo
 		}
 		out.AskOutcome[k[0]][k[1]] = waitsOf(v)
 	}
+	out.Supervision = summarizeSupervision(since, since.Add(time.Duration(hours)*time.Hour), events, loc)
 	return out
 }
 

@@ -8,10 +8,29 @@ import SwiftUI
 /// Asks the hosts' `.recordingLiveSheet()` to present again: a Live Activity tap, a notification or the drawer, while the
 /// Recordings page is already on screen with the sheet swiped away, change the route without the page ever disappearing, so
 /// nothing else would tell it. A counter, bumped by `MeetingRecorder.openRecordings` and by the now-recording card.
+///
+/// `holdOnAppear` is the other way round: the page is opened for something else (the minutes push's meeting,
+/// `MeetingRecorder.openMeeting`, #3862 phase 6), which it pushes over itself, and the sheet presenting itself as the page
+/// appears while a recording runs would cover it. The next appear within `MeetingPageOpener.stale` doesn't present it,
+/// once; the now-recording card stays the way back. An `open` cancels the hold.
 @MainActor @Observable final class RecordingLivePresenter {
     static let shared = RecordingLivePresenter()
     private(set) var serial = 0
-    func open() { serial += 1 }
+    @ObservationIgnored private var heldAt: Date?
+
+    func open() {
+        heldAt = nil
+        serial += 1
+    }
+
+    func holdOnAppear(now: Date = .now) { heldAt = now }
+
+    /// Whether a host appearing now presents the sheet for a running recording: false once after `holdOnAppear`, soon after.
+    func presentsOnAppear(now: Date = .now) -> Bool {
+        guard let heldAt else { return true }
+        self.heldAt = nil
+        return now.timeIntervalSince(heldAt) > MeetingPageOpener.stale
+    }
 }
 
 extension View {
@@ -35,7 +54,9 @@ private struct RecordingLiveSheetPresenter: ViewModifier {
             // A hidden shell page never gets onDisappear: the tab-aware pair keeps one host presenting at a time.
             .onTabVisibility(appear: {
                 visible = true
-                if capturing { presented = true }
+                // Asked whatever runs: a hold left by an appear with nothing recording would hide a later one.
+                let presents = presenter.presentsOnAppear()
+                if capturing, presents { presented = true }
             }, disappear: { visible = false })
             // The observed change, not "tapped here": the drawer, Siri and the quick action open the page before the
             // calendar read and the microphone, so it is already on screen and idle when recording begins.

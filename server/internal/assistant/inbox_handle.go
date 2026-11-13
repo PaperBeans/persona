@@ -154,11 +154,13 @@ func (b *inboxBook) escalate(since, now time.Time) []*inboxWrite {
 		if !handled && (twin == TwinNever || it.Tier != TierAction && twin != TwinFirst || it.TriagedAt != it.Last) {
 			continue
 		}
+		// A URL-only link has an Agent record but has never asked the twin to work. It follows the same age
+		// limit as an unlinked item; an established conversation can still receive its later messages.
+		if (a == nil || a.Of == "" && a.StartedAt == nil && a.SessionID == "") && !it.UpdatedAt.After(since) {
+			continue
+		}
 		w := beginWrite(it)
 		if a == nil {
-			if !it.UpdatedAt.After(since) {
-				continue
-			}
 			a = &InboxAgent{State: AgentQueued}
 			it.Agent = a
 		}
@@ -343,34 +345,64 @@ func (s *Service) inboxAgentStarted(ctx context.Context, self, machine, session,
 // handling it; a model that fails leaves the event unlinked. w is the item's write not saved yet (nil: none): the link
 // joins that write while the item still holds it (a concurrent move keeps the write from being undone over it).
 func (s *Service) linkTaskFor(ctx context.Context, it *InboxItem, tasks []prompts.InboxTask, w *inboxWrite) bool {
-	b := &s.inbox
-	b.mu.Lock()
-	input := prompts.RenderInboxJudgeInput(prompts.InboxJudgeInput{Summary: it.Summary, Item: b.promptItem(it), Tasks: tasks})
-	b.mu.Unlock()
-	system := prompts.RenderInboxJudge(prompts.InboxJudge{Owner: s.owner(ctx), Rules: s.inboxConfig(ctx).AgentRules})
-	var out struct {
-		TaskID string `json:"task_id"`
-	}
-	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	err := s.inboxModelJSON(cctx, purposeJudge, system, input, 0, &out)
-	cancel()
+	id, err := s.judgeInboxTask(ctx, it, tasks)
 	if err != nil {
 		if paused, _ := modelPaused(err); ctx.Err() == nil && !paused {
 			s.logf("inbox: link %s to a task: %v", it.ID, err)
 		}
 		return false
 	}
+	b := &s.inbox
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for _, t := range tasks { // only a task it was shown
-		if it.Agent != nil && t.ID == strings.TrimSpace(out.TaskID) {
-			held := w != nil && b.holds(w)
-			it.Agent.TodoID = t.ID
-			if held {
-				b.settle(w)
-			}
-			return true
+	if it.Agent != nil && id != "" && inboxTaskLinkEligible(it) {
+		held := w != nil && b.holds(w)
+		it.Agent.TodoID = id
+		if held {
+			b.settle(w)
 		}
+		return true
 	}
 	return false
+}
+
+// judgeInboxTask is the task the judge links item it to, among tasks (inbox_task_scope.go): only the tasks the item's
+// repository or thread allows are offered (none: no model call), and an answer counts only when it is a task it was
+// shown and quotes that task's title or notes as its evidence. "" for none. Callers apply and save the result.
+func (s *Service) judgeInboxTask(ctx context.Context, it *InboxItem, tasks []prompts.InboxTask) (string, error) {
+	b := &s.inbox
+	b.mu.Lock()
+	if !inboxTaskLinkEligible(it) {
+		b.mu.Unlock()
+		return "", nil
+	}
+	sc := inboxScopeOf(it)
+	b.mu.Unlock()
+	if tasks = s.scopeInboxTasks(sc, tasks); len(tasks) == 0 {
+		return "", nil
+	}
+	b.mu.Lock()
+	input := prompts.RenderInboxJudgeInput(prompts.InboxJudgeInput{Summary: it.Summary, Item: b.promptItem(it), Tasks: tasks})
+	b.mu.Unlock()
+	system := prompts.RenderInboxJudge(prompts.InboxJudge{Owner: s.owner(ctx), Rules: s.inboxConfig(ctx).AgentRules})
+	var out struct {
+		TaskID   string `json:"task_id"`
+		Evidence string `json:"evidence"`
+	}
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	err := s.inboxModelJSON(cctx, purposeJudge, system, input, 0, &out)
+	cancel()
+	if err != nil {
+		return "", err
+	}
+	for _, t := range tasks { // only a task it was shown, with a line copied from it
+		if t.ID == strings.TrimSpace(out.TaskID) {
+			if !judgeEvidence(t, out.Evidence) {
+				s.logf("inbox: %s: the judge named task %s without evidence from it (%q): not linked", it.ID, t.ID, clip(oneLine(out.Evidence), 80))
+				return "", nil
+			}
+			return t.ID, nil
+		}
+	}
+	return "", nil
 }

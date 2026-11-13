@@ -8,6 +8,8 @@
     <string name="settings_ext_themes_extension">拡張テーマ</string>
     <string name="settings_scheme">外観モード</string>
     <string name="settings_scheme_note">この端末だけに適用されます。「システムに合わせる」ではシステムのダークモードに従います。</string>
+    <string name="settings_density">レイアウトの密度</string>
+    <string name="settings_density_note">この端末だけに適用されます。「コンパクト」では余白と間隔を詰めて、一画面により多く表示します。文字とアイコンの大きさは変わりません。</string>
     <string name="settings_providers_title">モデルプロバイダー</string>
     <string name="settings_row_providers_subtitle">ゲートウェイ、キー、~/.zshrc の claude 関数</string>
     <string name="settings_providers_demo">体験モードには hub のプロバイダーがありません。hub とペアリングすると表示されます。</string>

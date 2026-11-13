@@ -260,6 +260,29 @@ test('live text is throttled to the latest whole text, and ends empty', async (t
   await until('end', () => n.last('session.delta')?.text === '')
 })
 
+test('a stream ending after unwatch clears the published text and cancels its pending batch', async (t) => {
+  const n = await startFakeNode(t)
+  const rt = createRuntime(minimal(), { runtime: 'toy', socketPath: n.path, retryMs: 20 })
+  t.after(() => rt.stop())
+  rt.start()
+  await n.ready
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 0 })
+  rt.stream('s1', 'Previous reply.')
+  await until('the published reply', () => n.last('session.delta')?.text === 'Previous reply.')
+  rt.stream('s1', 'Previous reply. More text.')
+  await n.peer.call('session.unwatch', { session_id: 's1' })
+  rt.streamEnd('s1')
+  await until('the unwatched reply ends', () => n.last('session.delta')?.text === '', 2000)
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  assert.equal(n.last('session.delta').text, '', 'the pending batch cannot restore the old text')
+  await n.peer.call('session.watch', { session_id: 's1', since_seq: 0 })
+  rt.stream('s1', 'Previous reply.')
+  await until('a new reply may repeat the earlier words', () => n.last('session.delta')?.text === 'Previous reply.')
+  rt.streamEnd('never-watched')
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.ok(n.all('session.delta').every((delta) => delta.session_id === 's1'))
+})
+
 test('live text flows again after stop() then start(): a text pending at stop does not hold the session silent', async (t) => {
   const n = await startFakeNode(t)
   const rt = createRuntime(minimal(), { runtime: 'toy', socketPath: n.path, retryMs: 20, refreshMs: 0 })
@@ -668,4 +691,42 @@ test('a card for a new session waits for a slow list already under way, then for
   assert.deepEqual(res, { allow: true })
   const card = order.findIndex((e) => e[0] === 'card')
   assert.ok(order.slice(0, card).some((e) => e[0] === 'list' && e[1].includes('new')), JSON.stringify(order))
+})
+
+
+test('native rewind is advertised and returns the driver result with a refreshed inventory', async (t) => {
+  const node = await startFakeNode(t)
+  let called
+  const result = { prompt: 'Example', restore: 'conversation', input_cleared: true, code_restored: false }
+  const rt = createRuntime(minimal({ listSessions: async () => [{ session_id: 's1', status: 'idle', rev: called ? 2 : 1 }], rewind: async (params) => { called = params; return result } }), { runtime: 'toy', socketPath: node.path, pushDelayMs: 5 })
+  t.after(() => rt.stop())
+  rt.start()
+  await node.ready
+  assert.equal(node.hello.caps.rewind, true)
+  await until('initial rewind inventory', () => node.last('runtime.sessions'))
+  const params = { session_id: 's1', prompt: 'Example', occurrence: 1, prompts_after: 0, restore: 'conversation' }
+  assert.deepEqual(await node.peer.call('session.rewind', params), result)
+  assert.deepEqual(called, params)
+  await until('inventory after rewind', () => node.all('runtime.sessions').length > 1)
+})
+
+test('seen is advertised only by a driver that has it, and reaches the driver (#6299)', async (t) => {
+  const node = await startFakeNode(t)
+  const seen = []
+  const rt = createRuntime(minimal({ listSessions: async () => [{ session_id: 's1', status: 'done', rev: 1 }], seen: async (params) => { seen.push(params) } }),
+    { runtime: 'toy', socketPath: node.path, pushDelayMs: 5 })
+  t.after(() => rt.stop())
+  rt.start()
+  await node.ready
+  assert.equal(node.hello.caps.seen, true)
+  assert.deepEqual(await node.peer.call('session.seen', { session_id: 's1' }), { ok: true })
+  assert.deepEqual(seen, [{ session_id: 's1' }])
+
+  const other = await startFakeNode(t)
+  const plain = createRuntime(minimal({}), { runtime: 'toy2', socketPath: other.path, pushDelayMs: 5 })
+  t.after(() => plain.stop())
+  plain.start()
+  await other.ready
+  assert.equal(other.hello.caps.seen, undefined, 'not said without the method')
+  await assert.rejects(other.peer.call('session.seen', { session_id: 's1' }), /unsupported/)
 })

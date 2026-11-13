@@ -26,7 +26,6 @@
   "filter_by_market": "マーケットで絞り込み",
   "not_found": "「{query}」は見つかりませんでした",
   "catalog_empty": "拡張機能はまだありません",
-  "cannot_install": "インストールできません：{problem}",
   "manage_above": "このマーケットからインストール済みです。上の一覧で管理します。",
   "upgrade": "アップグレード",
   "install": "インストール",

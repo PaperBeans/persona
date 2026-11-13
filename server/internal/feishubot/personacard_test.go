@@ -82,16 +82,36 @@ func TestPersonaCardsTheAppsCannotDraw(t *testing.T) {
 	}
 }
 
-// Only persona-card blocks change: other code, a persona-view block (drawn elsewhere), a card shown as an example
-// inside another code block, and text with no card at all stay as they were.
+// Only the assistant's card blocks change: other code, a card shown as an example inside another code block, and text
+// with no card at all stay as they were.
 func TestPersonaCardsLeaveTheRest(t *testing.T) {
 	for _, in := range []string{
 		"没有卡片，`code` 和 **加粗**。\n\n```json\n{\"type\":\"stat\",\"value\":1}\n```\n",
 		"````markdown\n```persona-card\n{\"type\":\"stat\",\"value\":1}\n```\n````\n",
-		"```persona-view\n{\"type\":\"metric\",\"label\":\"a\",\"value\":\"1\",\"fallback\":\"a 1\"}\n```\n",
+		"````markdown\n```persona-view\n{\"fallback\":\"a 1\",\"sections\":[]}\n```\n````\n",
 	} {
 		if got := PersonaCards(in); got != in {
 			t.Errorf("changed:\n%q\n→\n%q", in, got)
+		}
+	}
+}
+
+// A persona-view card (the apps draw it, Feishu cannot) is its text fallback, never its JSON or HTML; one without a
+// fallback is a placeholder.
+func TestPersonaCardsWriteViewsAsFallback(t *testing.T) {
+	view := "```persona-view\n{\"fallback\":\"Plan B: half a day.\",\"sections\":[{\"items\":[{\"type\":\"html\",\"html\":\"<script>x()</script>\"}]}]}\n```"
+	for _, tc := range []struct{ in, want string }{
+		{"Pick one.\n\n" + view + "\n\nDone.", "Pick one.\n\nPlan B: half a day.\n\nDone."},
+		{"Pick one.\n" + view + "\nDone.", "Pick one.\n\nPlan B: half a day.\n\nDone."},
+		{view, "Plan B: half a day.\n"},
+		{"```persona-view\n{\"sections\":[]}\n```", "〔卡片〕\n"}, // i18n-ignore: the shared placeholder (sdk/go/wire)
+	} {
+		got := PersonaCards(tc.in)
+		if got != tc.want {
+			t.Errorf("%q\n→ %q\nwant %q", tc.in, got, tc.want)
+		}
+		if strings.Contains(got, "{") || strings.Contains(got, "script") {
+			t.Errorf("card source left: %q", got)
 		}
 	}
 }

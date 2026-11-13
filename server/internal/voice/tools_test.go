@@ -288,3 +288,23 @@ func TestToolsMode(t *testing.T) {
 		}
 	}
 }
+
+// search_knowledge's kind reaches GET /api/v1/kb-search (#3862 phase 6: kind=recordings finds meetings); without one,
+// the call is as before, every kind.
+func TestSearchKnowledgeKind(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.URL.RawQuery)
+		_ = json.NewEncoder(w).Encode(map[string]any{"hits": []map[string]string{{"path": "recordings/r1/minutes.md", "line": "- keep the cap"}}})
+	}))
+	defer srv.Close()
+	hub := newHubClient(srv.URL, "t")
+	for _, args := range []string{`{"query":"vendor cap","kind":"recordings"}`, `{"query":"vendor"}`} {
+		if out := runTool(t.Context(), hub, "en", "search_knowledge", args); !strings.Contains(out, "recordings/r1/minutes.md: - keep the cap") {
+			t.Fatalf("%s: %s", args, out)
+		}
+	}
+	if len(got) != 2 || got[0] != "kind=recordings&q=vendor+cap" || got[1] != "q=vendor" {
+		t.Fatalf("queries %q", got)
+	}
+}

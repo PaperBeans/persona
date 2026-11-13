@@ -15,7 +15,10 @@ import { Button, cx, Dialog, IconButton, Loading, Menu, StatePill, toast, type M
 import { Icon } from "../ui/icons";
 import { t } from "../i18n";
 import { navigate } from "../lib/router";
+import { openAgent } from "../lib/handoff";
 import { useWorkspaceBoardSetting } from "../lib/workspace-board-setting";
+import { CATALOG_POLL_MS } from "../lib/workspace-catalog";
+import { isResumed } from "../lib/reconnect";
 const field = "w-full rounded-control bg-field px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-accent";
 const VIEW_KEY = "persona.workspace-board.view";
 // The lanes that are an agent state take the one canonical state name; only To review and Idle are board-only words.
@@ -66,10 +69,14 @@ function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
       refreshing.current = true;
       void model.refresh().finally(() => { refreshing.current = false; });
     };
-    refresh(); void refreshTodos(); const timer = setInterval(refresh, 10_000);
+    // Every board write pushes workspace_board, so the timer is only for what no push covers (discovery, a manager
+    // that came back after a 503): once a minute, as the sidebar's catalog (#5168). A fresh connection may have
+    // missed pushes, so it reads again at once; a resumed one had them replayed.
+    refresh(); void refreshTodos(); const timer = setInterval(refresh, CATALOG_POLL_MS);
     document.addEventListener("visibilitychange", refresh);
     const off = onHubEvent("workspace_board", (e) => { if (typeof e.revision !== "number" || e.revision > (model.snapshot().board?.revision ?? -1)) refresh(); });
-    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", refresh); off(); };
+    const offHello = onHubEvent("hello", (e) => { if (!isResumed(e)) refresh(); });
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", refresh); off(); offHello(); };
   }, [model]);
   const board = state.board, disabled = state.busy || state.readonly;
   const activeColumn = board ? selectedColumn(board, columnSelection) : "";
@@ -221,7 +228,7 @@ function WorkCard({ item, machine }: { item: WorkItem; machine?: Machine }) {
     </div>
     <div className="mt-2">
       <Button tone="quiet" icon="chevronRight" className="!px-2 !py-1 text-xs" onClick={() => {
-        if (s) openPanel({ kind: "agent", mid: s.machine_id, sid: s.session_id });
+        if (s) openAgent(s.machine_id, s.session_id);
         else navigate("/todos");
       }}>{item.kind === "todo" ? t("workspaceboard.work_open_todo") : t("workspaceboard.auto_open_session")}</Button>
     </div>
@@ -239,7 +246,7 @@ function AutoCard({ card, machine, workspace, sessions, disabled, onOpen, onMenu
   return <div>
     <WorkspaceCard card={card} machine={machine} workspace={workspace} sessions={sessions} disabled={disabled} drag={false} onOpen={onOpen} onMenu={onMenu} />
     <div className="mt-1 flex flex-wrap gap-1">
-      {focus ? <Button tone="quiet" icon="agent" className="!px-2 !py-1 text-xs" onClick={() => openPanel({ kind: "agent", mid: focus.machine_id, sid: focus.session_id })}>{t("workspaceboard.auto_open_session")}</Button>
+      {focus ? <Button tone="quiet" icon="agent" className="!px-2 !py-1 text-xs" onClick={() => openAgent(focus.machine_id, focus.session_id)}>{t("workspaceboard.auto_open_session")}</Button>
         : <Button tone="quiet" icon="plus" className="!px-2 !py-1 text-xs" disabled={disabled || offline} onClick={() => openNewAgent({ machineId: card.machine_id, cwd: card.cwd })}>{t("workspaceboard.new_agent")}</Button>}
       <Button tone="quiet" icon={card.archived ? "undo" : "check"} className="!px-2 !py-1 text-xs" disabled={disabled} onClick={() => onArchive(card, !card.archived)}>{card.archived ? t("workspaceboard.restore_card") : t("workspaceboard.archive_card")}</Button>
     </div>
@@ -263,7 +270,7 @@ function WorkspaceDetail({ card, column, machine, sessions, readonly, onClose }:
   const open = (kind: "files" | "git") => { onClose(); openPanel({ kind, mid: card.machine_id, sid: sessions[0]?.session_id ?? "", cwd: card.cwd }); };
   return <Dialog open title={card.title} onClose={onClose}><div className="space-y-4"><p className="text-xs text-ink-3">{[column, card.archived && t("workspaceboard.archived"), machine?.name || card.machine_id, machine?.online === false && t("workspaceboard.offline")].filter(Boolean).join(" · ")}</p><p className="break-all rounded-control bg-inset p-3 font-mono text-xs text-ink-2">{card.cwd}</p>{card.branch && <p className="text-xs text-ink-2">{t("workspaceboard.branch", { branch: card.branch })}</p>}
     <div className="flex flex-wrap gap-2"><Button icon="folder" disabled={!machine?.online} onClick={() => open("files")}>{t("workspaceboard.files")}</Button><Button icon="git" disabled={!machine?.online} onClick={() => open("git")}>Git</Button><Button icon="plus" disabled={readonly || !machine?.online} onClick={() => { onClose(); openNewAgent({ machineId: card.machine_id, cwd: card.cwd }); }}>{t("workspaceboard.new_agent")}</Button></div>
-    <div className="border-t border-line pt-3"><h3 className="mb-2 text-xs font-medium text-ink-3">{t("workspaceboard.agents_here")}</h3>{sessions.length ? <div className="space-y-1">{sessions.map((s) => <button type="button" key={s.session_id} className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left hover:bg-hover" onClick={() => { onClose(); openPanel({ kind: "agent", mid: s.machine_id, sid: s.session_id }); }}><Icon name="agent" size={14} className="text-ink-3" /><span className="min-w-0 flex-1 truncate text-sm text-ink">{sessionTitle(s)}</span><StatePill state={stateOf(s)} /></button>)}</div> : <p className="text-sm text-ink-3">{t("workspaceboard.no_agents_detail")}</p>}</div></div></Dialog>;
+    <div className="border-t border-line pt-3"><h3 className="mb-2 text-xs font-medium text-ink-3">{t("workspaceboard.agents_here")}</h3>{sessions.length ? <div className="space-y-1">{sessions.map((s) => <button type="button" key={s.session_id} className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left hover:bg-hover" onClick={() => { onClose(); openAgent(s.machine_id, s.session_id); }}><Icon name="agent" size={14} className="text-ink-3" /><span className="min-w-0 flex-1 truncate text-sm text-ink">{sessionTitle(s)}</span><StatePill state={stateOf(s)} /></button>)}</div> : <p className="text-sm text-ink-3">{t("workspaceboard.no_agents_detail")}</p>}</div></div></Dialog>;
 }
 interface Dirs { path: string; parent?: string; entries: { name: string; path: string }[] }
 function BindWorkspace({ column, board, workspaces, machines, busy, disabled, onClose, onBind }: {

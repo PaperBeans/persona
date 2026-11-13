@@ -59,13 +59,43 @@ func agentNameKey(machine, session string) string {
 	return string(b)
 }
 
+// Terminal animation is not a native rename. Share this presentation-only
+// normalization with candidate recognition and both native-title rechecks.
+func agentTitleText(title string) string {
+	return strings.TrimLeftFunc(strings.TrimSpace(title), func(r rune) bool {
+		return unicode.IsSpace(r) || strings.ContainsRune("◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", r)
+	})
+}
+
+func sameAgentRawTitle(a, b string) bool {
+	return a == b || agentTitleText(a) == agentTitleText(b)
+}
+
+// Claude's bare tool label falls back to its first message, while a spinner
+// label does not. Proven bad prompt fallbacks may differ without a native rename.
+func sameAgentNamingTitle(before string, current proto.Session) bool {
+	if sameAgentRawTitle(before, current.Title) {
+		return true
+	}
+	if current.Agent != "claude" || current.TitleSource != proto.TitleSourcePrompt {
+		return false
+	}
+	return badClaudePromptFallback(before, current.Cwd) && badClaudePromptFallback(current.Title, current.Cwd)
+}
+
+func badClaudePromptFallback(title, cwd string) bool {
+	switch strings.ToLower(agentTitleText(title)) {
+	case "codex", "opencode", "pi", "persona":
+		return false // a different runtime/tool is not Claude's prompt fallback
+	}
+	return badAgentName(title, cwd)
+}
+
 // Bad names are recognizable placeholders or instruction scaffolding, not arbitrary
 // short names. Meaningful-but-stale names require opting into periodic refresh.
 func badAgentName(title, cwd string) bool {
 	title = strings.TrimSpace(title)
-	plain := strings.TrimLeftFunc(title, func(r rune) bool {
-		return unicode.IsSpace(r) || strings.ContainsRune("◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", r)
-	})
+	plain := agentTitleText(title)
 	low := strings.ToLower(plain)
 	// i18n-ignore: Observed native placeholder labels, matched as data rather than UI copy.
 	for _, name := range []string{"", "claude", "claude code", "codex", "opencode", "pi", "persona", "guest", "new chat", "untitled", "new session", "新对话", "新会话", "無題"} {
@@ -332,7 +362,7 @@ func (s *Service) tryAgentName(ctx context.Context, machine string, c proto.Sess
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	r = b.records[key]
-	if r.Manual || !settingsOK || !quietOn(prefs.AgentAutoNaming) || r.Changes >= agentNamingLimit(prefs) || !found || current.Assistant || current.Archived || current.TitleManual || current.TitleSource.String() == "manual" || !knownAgentTitle(current) || current.Title != c.Title {
+	if r.Manual || !settingsOK || !quietOn(prefs.AgentAutoNaming) || r.Changes >= agentNamingLimit(prefs) || !found || current.Assistant || current.Archived || current.TitleManual || current.TitleSource.String() == "manual" || !knownAgentTitle(current) || !sameAgentNamingTitle(c.Title, current) {
 		return true
 	}
 	check := r
@@ -434,7 +464,7 @@ func (s *Service) agentDisplayName(machine string, c proto.Session) string {
 		return ""
 	}
 	r := b.display[[2]string{machine, c.SessionID}]
-	if !r.Manual && (!knownAgentTitle(c) || r.RawTitle != c.Title) {
+	if !r.Manual && (!knownAgentTitle(c) || !sameAgentNamingTitle(r.RawTitle, c)) {
 		return ""
 	}
 	return r.Title

@@ -30,5 +30,16 @@
   "forget": "「{id}」を削除",
   "loading": "モデルを読み込み中…",
   "retry": "再試行",
-  "configure": "モデルを設定"
+  "weekly_left": "{label} · 残り {percent}%",
+  "price_tier": "参考価格ティア {tier}/3",
+  "price_per_million": "100万トークン単位",
+  "price_input": "入力",
+  "price_output": "出力",
+  "price_cache_read": "キャッシュ読取",
+  "configure": "モデルを設定",
+  "presets": "プリセット",
+  "how_to_fix": "直し方",
+  "engine_via": "{provider} で実行",
+  "effort_unset": "モデルのデフォルト",
+  "show_all": "{count} 件をすべて表示"
 }

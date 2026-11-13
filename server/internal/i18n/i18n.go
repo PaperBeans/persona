@@ -113,15 +113,17 @@ func (l Lang) Name() string {
 // _meta.json matches it (any Chinese, Traditional too, is zh-Hans), the rest is en. An empty tag is "" (unknown), so
 // callers can tell "not said" from "said English".
 func Resolve(tag string) Lang {
-	tag = strings.TrimSpace(tag)
-	if tag == "" {
-		return ""
-	}
-	primary, _, _ := strings.Cut(strings.ReplaceAll(tag, "_", "-"), "-")
-	if l, ok := matches[strings.ToLower(primary)]; ok {
+	if l := Match(tag); l != "" || strings.TrimSpace(tag) == "" {
 		return l
 	}
 	return Fallback
+}
+
+// Match is the supported language that tag's language subtag picks, as for Resolve, or "" when no _meta.json matches it
+// (ko-KR, fr) or tag is empty: for a caller with a better fallback than en.
+func Match(tag string) Lang {
+	primary, _, _ := strings.Cut(strings.ReplaceAll(strings.TrimSpace(tag), "_", "-"), "-")
+	return matches[strings.ToLower(primary)]
 }
 
 // Valid: one of the supported codes exactly (what a client sends).

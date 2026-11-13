@@ -208,6 +208,9 @@ type UsageSummary struct {
 	CacheWrite int64          `json:"cache_write"`
 	CacheRead  int64          `json:"cache_read"`
 	Machines   []MachineUsage `json:"machines"`
+	// Hourly: today's tokens (as Tokens, cache included) for each hour from midnight in the user's zone, 24 of them
+	// (the hours to come 0): the iPhone's Usage widget draws them as a chart (#5664, #5721).
+	Hourly []int64 `json:"hourly,omitempty"`
 }
 
 // MachineUsage is one machine's share and load; Load is the 1-minute load average over its cores, 0 when unknown.

@@ -163,8 +163,10 @@ internal class PaneSplitter(private val tab: AppTab?, private val store: PaneSpl
             try {
                 animate(from, target, initialVelocity = velocity,
                     animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) { value, _ ->
-                    at = value
-                    apply(state, value)
+                    // Release velocity can carry even a non-bouncy spring past either pane's limit.
+                    val range = dragRange(width, canCollapse)
+                    at = value.coerceIn(range.start, range.endInclusive)
+                    apply(state, at)
                 }
                 keep(target)
             } finally {

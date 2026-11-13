@@ -21,9 +21,6 @@ type inlineViewStore interface {
 }
 
 func (s *Service) registerInlineViews(parent context.Context, p SessionItems) {
-	if !s.hello(parent).PersonaView {
-		return
-	}
 	st, ok := s.store().(inlineViewStore)
 	if !ok {
 		return
@@ -91,9 +88,6 @@ func (s *Service) registerInlineViews(parent context.Context, p SessionItems) {
 
 // registerInlineTurn also registers cards when no app was watching the conversation during its reply.
 func (s *Service) registerInlineTurn(parent context.Context, r SessionRef) {
-	if !s.hello(parent).PersonaView {
-		return
-	}
 	if _, ok := s.store().(inlineViewStore); !ok {
 		return
 	}

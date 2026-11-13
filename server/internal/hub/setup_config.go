@@ -18,15 +18,17 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // installInputs are what newInstallConfig needs to know about this machine.
 type installInputs struct {
-	lanIP   string // this machine's LAN IPv4 ("" when none was found)
-	listen  string // ":18660"
-	tls     string // ":18662", or with an address: used as given
-	outside bool   // TLS on every address
-	agents  bool   // herdr or claude is here: keep this machine as a local machine
+	lanIP   string    // this machine's LAN IPv4 ("" when none was found)
+	listen  string    // ":18660"
+	tls     string    // ":18662", or with an address: used as given
+	outside bool      // TLS on every address
+	agents  bool      // herdr or claude is here: keep this machine as a local machine
+	locale  i18n.Lang // the language the installer ran in (hub.json initial_locale), "" for none
 }
 
 // newInstallConfig is the hub.json a new install gets (docs/assistant/onboarding.md 4.1). These defaults are written into new
@@ -50,6 +52,7 @@ func newInstallConfig(in installInputs) *Config {
 		cfg.Public.TLSListen = net.JoinHostPort(in.lanIP, port)
 	}
 	cfg.Admin.FirstSetup = firstSetupCode
+	cfg.InitialLocale = in.locale
 	if !in.agents {
 		cfg.Machines = []MachineConfig{}
 	}
@@ -287,6 +290,14 @@ func (e *setupEnv) installInputs(notes *[]string) installInputs {
 		}
 	}
 	in.agents = e.hasAgents()
+	in.locale = e.o.lang
+	if in.locale == "" {
+		// install.sh says the language it ran in through the environment, which an older personad ignores rather
+		// than refusing an unknown flag; one this build does not know records none.
+		if l := i18n.Lang(e.getenv("PERSONA_INSTALL_LANG")); i18n.Valid(l) {
+			in.locale = l
+		}
+	}
 	return in
 }
 

@@ -20,17 +20,21 @@ nonisolated struct RecordingMinutes: Codable, Hashable, Sendable {
         var dueDate: String?
         /// The to-do an action item became once the user confirmed it (#4062); absent or empty while it is a suggestion.
         var todoID: String?
+        /// The meeting photo it cites instead of a transcript line (#3862 phase 3): its number at the hub (`n`); `at` is
+        /// then the photo's. The page shows that photo with the item, or Photo removed once the hub no longer lists it.
+        var photo: Int?
 
         init(text: String, at: Double? = nil, who: String? = nil, by: String? = nil, id: String? = nil, dueDate: String? = nil,
-             todoID: String? = nil) {
+             todoID: String? = nil, photo: Int? = nil) {
             self.text = text; self.at = at; self.who = who; self.by = by; self.id = id; self.dueDate = dueDate; self.todoID = todoID
+            self.photo = photo
         }
 
         /// An action item already confirmed as a to-do.
         var added: Bool { todoID?.isEmpty == false }
 
         enum CodingKeys: String, CodingKey {
-            case text, what, at, who, by, id
+            case text, what, at, who, by, id, photo
             case dueDate = "due_date", todoID = "todo_id"
         }
 
@@ -43,6 +47,8 @@ nonisolated struct RecordingMinutes: Codable, Hashable, Sendable {
             id = try c.decodeIfPresent(String.self, forKey: .id)
             dueDate = try c.decodeIfPresent(String.self, forKey: .dueDate)
             todoID = try c.decodeIfPresent(String.self, forKey: .todoID)
+            // A number from 1; anything else reads as no citation rather than losing the minutes.
+            photo = (try? c.decodeIfPresent(Int.self, forKey: .photo)).flatMap { $0 }.flatMap { $0 > 0 ? $0 : nil }
         }
 
         func encode(to encoder: Encoder) throws {
@@ -54,6 +60,7 @@ nonisolated struct RecordingMinutes: Codable, Hashable, Sendable {
             try c.encodeIfPresent(id, forKey: .id)
             try c.encodeIfPresent(dueDate, forKey: .dueDate)
             try c.encodeIfPresent(todoID, forKey: .todoID)
+            try c.encodeIfPresent(photo, forKey: .photo)
         }
     }
 
@@ -137,6 +144,9 @@ nonisolated struct RecordingMinutes: Codable, Hashable, Sendable {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    /// How Copy and Share name a cited photo after its item, as the hub's own `markdown` does ("(photo 3)", in the app's language).
+    static func photoMention(_ n: Int) -> String { String(localized: "(photo \(n))") }
+
     /// What Copy and Share send: Markdown, headed by the title (the recording's name without one), then when and where.
     func text(title fallback: String) -> String {
         var out = ["# " + ((title?.isEmpty == false ? title : nil) ?? fallback)]
@@ -150,6 +160,7 @@ nonisolated struct RecordingMinutes: Codable, Hashable, Sendable {
                 var row = "- " + item.text
                 if let byline = Self.byline(item) { row += " (" + byline + ")" }
                 if let at = item.at { row += " [" + RecordingFormat.clock(at) + "]" }
+                if let photo = item.photo { row += " " + Self.photoMention(photo) }
                 out.append(row)
             }
         }
@@ -158,5 +169,131 @@ nonisolated struct RecordingMinutes: Codable, Hashable, Sendable {
         section(String(localized: "Action Items"), actions)
         section(String(localized: "Open Questions"), openQuestions)
         return out.joined(separator: "\n")
+    }
+}
+
+/// The Summary of a recording's minutes on iPhone (#5026, docs/apple/recording.md「Minutes」): which view the page shows,
+/// which cards the Summary has and in what order, its header's lines, and the transcript lines each item opens to. Worked
+/// out once per change of the minutes or the transcript, so the page's `body` only arranges them
+/// (docs/apple/performance.md, P4). Pure, so it is tested without a page.
+nonisolated enum RecordingMinutesCards {
+    /// The recording page's switch: Summary | Transcript.
+    nonisolated enum Pane: Hashable, Sendable {
+        case summary, transcript
+    }
+
+    /// What the recording's page shows: nothing to switch (nil) until the minutes are ready, then what was picked on the
+    /// page, else the Summary. A meeting's page is opened for what was decided; the transcript is one tap away.
+    static func pane(picked: Pane?, ready: Bool) -> Pane? {
+        ready ? picked ?? .summary : nil
+    }
+
+    /// A card's group, in the order the Summary shows them: what was discussed and decided, then what is still open, and
+    /// last who does what, so the page ends on what happens next.
+    nonisolated enum Kind: String, CaseIterable, Hashable, Sendable {
+        case points, decisions, open, actions
+
+        var title: String {
+            switch self {
+            case .points: String(localized: "Key Points")
+            case .decisions: String(localized: "Decisions")
+            case .open: String(localized: "Open Questions")
+            case .actions: String(localized: "Action Items")
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .points: Theme.Icon.keyPoint
+            case .decisions: Theme.Icon.decision
+            case .open: Theme.Icon.openQuestion
+            case .actions: Theme.Icon.todo
+            }
+        }
+
+        func items(_ minutes: RecordingMinutes) -> [RecordingMinutes.Item] {
+            switch self {
+            case .points: minutes.points
+            case .decisions: minutes.decisions
+            case .open: minutes.openQuestions
+            case .actions: minutes.actions
+            }
+        }
+    }
+
+    /// A transcript line under an opened item; `said` is the one its time picks (`RecordingMinutes.sentenceIndex`).
+    nonisolated struct Line: Identifiable, Hashable, Sendable {
+        /// Its place in the transcript.
+        var id: Int
+        var start: Double
+        var text: String
+        var said: Bool
+    }
+
+    nonisolated struct Item: Identifiable, Hashable, Sendable {
+        /// Its group and its place in the hub's list: the hub's items carry no ids, and rewritten minutes replace them all.
+        var id: String
+        var text: String
+        var at: Double?
+        /// Who and by when, as the minutes say them (an action item; a point's speaker).
+        var byline: String?
+        /// The transcript lines around `at`: empty without a time or a transcript, and then the item opens to nothing.
+        var context: [Line]
+        /// The meeting photo it cites (#3862 phase 3): its number at the hub; the card shows its thumbnail, or Photo removed.
+        var photo: Int? = nil
+        /// An action item's name in this version of the minutes, when the hub gives one: what Add to To-Dos sends (#4062).
+        var action: String? = nil
+        /// An action item already a to-do (Added).
+        var added = false
+    }
+
+    nonisolated struct Card: Identifiable, Hashable, Sendable {
+        var kind: Kind
+        var items: [Item]
+        var id: Kind { kind }
+    }
+
+    nonisolated struct Summary: Hashable, Sendable {
+        /// The minutes' own title (the page shows it only when it differs from the recording's).
+        var title: String?
+        /// When (in the app's date style, `RecordingMinutes.whenLine`) · where.
+        var facts: String?
+        var attendees: String?
+        /// Only the groups with something in them.
+        var cards: [Card]
+        /// The hub numbers these minutes (`version`), so their action items can become to-dos (#4062).
+        var offered = false
+
+        /// The action items shown that can still become to-dos: what Add All sends.
+        var addable: [String] {
+            guard offered else { return [] }
+            return cards.first { $0.kind == .actions }?.items.compactMap { $0.added ? nil : $0.action } ?? []
+        }
+    }
+
+    static func summary(_ minutes: RecordingMinutes, sentences: [RecordingSentence],
+                        before: Int = Theme.Recording.contextBefore, after: Int = Theme.Recording.contextAfter) -> Summary {
+        let facts = [minutes.whenLine, minutes.place].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
+        let cards: [Card] = Kind.allCases.compactMap { kind in
+            // An item with no words would be an empty row: left out, so a group of only those has no card either.
+            let items = kind.items(minutes).enumerated()
+                .filter { !$0.element.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .map { index, item in
+                    Item(id: "\(kind.rawValue)-\(index)", text: item.text, at: item.at, byline: RecordingMinutes.byline(item),
+                         context: context(at: item.at, in: sentences, before: before, after: after), photo: item.photo,
+                         action: kind == .actions ? item.id.flatMap { $0.isEmpty ? nil : $0 } : nil, added: kind == .actions && item.added)
+                }
+            return items.isEmpty ? nil : Card(kind: kind, items: items)
+        }
+        return Summary(title: minutes.title?.isEmpty == false ? minutes.title : nil, facts: facts.isEmpty ? nil : facts,
+                       attendees: minutes.attendees.isEmpty ? nil : ListFormatter.localizedString(byJoining: minutes.attendees),
+                       cards: cards, offered: minutes.version != nil)
+    }
+
+    /// The line said at `seconds` with `before` lines before it and `after` after it, as far as the transcript goes.
+    static func context(at seconds: Double?, in sentences: [RecordingSentence], before: Int, after: Int) -> [Line] {
+        guard let seconds, let said = RecordingMinutes.sentenceIndex(at: seconds, in: sentences) else { return [] }
+        let first = max(0, said - max(0, before)), last = min(sentences.count - 1, said + max(0, after))
+        return (first...last).map { Line(id: $0, start: sentences[$0].start, text: sentences[$0].text, said: $0 == said) }
     }
 }

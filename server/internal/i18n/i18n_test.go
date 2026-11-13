@@ -28,6 +28,18 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+// Match is Resolve without its fallback: a tag no catalog matches is "", like an empty one.
+func TestMatch(t *testing.T) {
+	for tag, want := range map[string]Lang{
+		"zh-CN": ZhHans, "zh_TW": ZhHans, " ja-JP ": Ja, "EN-us": En, "en": En,
+		"ko-KR": "", "fr": "", "yue-CN": "", "-": "", "": "",
+	} {
+		if got := Match(tag); got != want {
+			t.Errorf("Match(%q) = %q, want %q", tag, got, want)
+		}
+	}
+}
+
 func TestAcceptLanguage(t *testing.T) {
 	for h, want := range map[string]Lang{
 		"ja":                         Ja,

@@ -26,17 +26,24 @@ nonisolated struct HubManager: Codable, Hashable, Identifiable, Sendable {
     var lastSeen: Date?
     /// Not installed yet: when its install code runs out.
     var installing: Date?
+    /// The open items of its inbox under Needs You, as the hub's roster tells them (`inbox_needs_you`,
+    /// docs/protocol/protocol.md): nil when the hub can't tell (offline, still installing, an older hub or manager),
+    /// which counts as none. It moves with every change of that inbox, so the app keeps it apart from its rosters
+    /// (`AppModel.inboxNeedsYou`, `ManagerRoster.countless`): a roster that changed with it would draw every page that
+    /// reads one again.
+    var inboxNeedsYou: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, name, online, builtin, host, os, arch, deploy, version, since, installing
-        case isDefault = "default", lastSeen = "last_seen"
+        case isDefault = "default", lastSeen = "last_seen", inboxNeedsYou = "inbox_needs_you"
     }
 
     init(id: String, name: String, online: Bool, isDefault: Bool = false, builtin: Bool = false, host: String? = nil, os: String? = nil,
-         arch: String? = nil, deploy: String? = nil, version: String? = nil, since: Date? = nil, lastSeen: Date? = nil, installing: Date? = nil) {
+         arch: String? = nil, deploy: String? = nil, version: String? = nil, since: Date? = nil, lastSeen: Date? = nil, installing: Date? = nil,
+         inboxNeedsYou: Int? = nil) {
         (self.id, self.name, self.online, self.isDefault, self.builtin) = (id, name, online, isDefault, builtin)
         (self.host, self.os, self.arch, self.deploy, self.version) = (host, os, arch, deploy, version)
-        (self.since, self.lastSeen, self.installing) = (since, lastSeen, installing)
+        (self.since, self.lastSeen, self.installing, self.inboxNeedsYou) = (since, lastSeen, installing, inboxNeedsYou)
     }
 
     init(from decoder: Decoder) throws {
@@ -54,6 +61,7 @@ nonisolated struct HubManager: Codable, Hashable, Identifiable, Sendable {
         since = try c.decodeIfPresent(Date.self, forKey: .since)
         lastSeen = try c.decodeIfPresent(Date.self, forKey: .lastSeen)
         installing = try c.decodeIfPresent(Date.self, forKey: .installing)
+        inboxNeedsYou = try c.decodeIfPresent(Int.self, forKey: .inboxNeedsYou)
     }
 }
 

@@ -13,6 +13,8 @@ final class RecordingTranscription {
     @ObservationIgnored private let transcribe: @Sendable (URL, Locale) async throws -> [RecordingSentence]
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var queued: [UUID] = []
+    /// `whenIdle` callers waiting for the worker to end, each resumed once: then, or when its own task is cancelled.
+    @ObservationIgnored private var idleWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     init(library: RecordingLibrary = .shared,
          transcribe: @escaping @Sendable (URL, Locale) async throws -> [RecordingSentence] = RecordingTranscription.onDevice) {
@@ -27,7 +29,8 @@ final class RecordingTranscription {
     }
 
     func enqueue(_ id: UUID) {
-        guard library.entry(id) != nil else { return }
+        // An all-day recording's chunks live in its day store and have their own lane (`RecordingDayTranscriber`).
+        guard let entry = library.entry(id), !entry.isDay else { return }
         errors[id] = nil
         if !queued.contains(id) { queued.append(id) }
         kick()
@@ -44,8 +47,9 @@ final class RecordingTranscription {
     }
 
     func resumePending() {
-        // Rolling recordings only transcribe after an explicit pull.
-        for entry in library.entries where !entry.active && !entry.isRolling && entry.segments.contains(where: { $0.sentences == nil }) {
+        // Rolling recordings only transcribe after an explicit pull; all-day recordings have their own lane.
+        for entry in library.entries where !entry.active && !entry.isRolling && !entry.isDay
+            && entry.segments.contains(where: { $0.sentences == nil }) {
             enqueue(entry.id)
         }
     }
@@ -56,6 +60,10 @@ final class RecordingTranscription {
     }
 
     func setLocale(_ id: UUID, _ locale: String) {
+        if library.entry(id)?.isDay == true {
+            RecordingDayTranscriber.shared.setLocale(id, locale)
+            return
+        }
         guard current != id else { return }
         library.change(id) { entry in
             entry.locale = locale
@@ -76,13 +84,46 @@ final class RecordingTranscription {
             }
             self.worker = nil
             self.kickIfNeeded()
+            if self.worker == nil { self.resumeIdleWaiters() }
         }
     }
 
     private func kickIfNeeded() { if !queued.isEmpty { kick() } }
 
-    /// A rolling recording only transcribes the segments of its pulled range.
+    /// Returns once nothing is being transcribed or queued: all-day recording's lane runs only then, so a recording the
+    /// user is waiting for never waits behind a day's backlog. Also returns as soon as the caller's task is cancelled,
+    /// clips still being transcribed (awaiting the worker itself would not): the catch-up task whose time ran out stops
+    /// at once, whatever a clip's transcription or model download still takes.
+    func whenIdle() async {
+        while worker != nil, !Task.isCancelled {
+            let key = UUID()
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    if worker == nil || Task.isCancelled {
+                        continuation.resume()
+                    } else {
+                        idleWaiters[key] = continuation
+                    }
+                }
+            } onCancel: { @Sendable in
+                Task { @MainActor in self.resumeIdleWaiter(key) }
+            }
+        }
+    }
+
+    private func resumeIdleWaiter(_ key: UUID) {
+        idleWaiters.removeValue(forKey: key)?.resume()
+    }
+
+    private func resumeIdleWaiters() {
+        let waiting = idleWaiters
+        idleWaiters = [:]
+        for continuation in waiting.values { continuation.resume() }
+    }
+
+    /// A rolling recording only transcribes the segments of its pulled range; an all-day recording none (its own lane).
     private func nextSegment(_ entry: RecordingEntry) -> RecordingSegment? {
+        guard !entry.isDay else { return nil }
         guard entry.isRolling else { return entry.segments.first(where: { $0.sentences == nil }) }
         guard let range = pulls[entry.id] else { return nil }
         return entry.segments(from: range.lowerBound, to: range.upperBound).first(where: { $0.sentences == nil })

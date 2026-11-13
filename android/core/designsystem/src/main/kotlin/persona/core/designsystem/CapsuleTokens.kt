@@ -21,8 +21,8 @@ object CapsuleTokens {
     val cardWidth = 340.dp
     val cardMaxHeight = 420.dp
     val edge = 12.dp
-    val padding = 12.dp
-    val gap = 8.dp
+    val padding = 12.dp.dense
+    val gap = 8.dp.dense
     val smallGap = 4.dp
     val border = 1.dp
     val elevation = 6.dp

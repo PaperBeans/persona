@@ -9,12 +9,19 @@ type Launcher struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url"`
 	Model   string `json:"model"`
-	// Source: "zshrc" (a function in the machine's ~/.zshrc), "path" (a wrapper script on its PATH, node/pathlaunchers.go) or "persona" (managed in Settings › Models, the manager's assistant/models_launchers.go). Empty
+	// Source: "zshrc" (a function in the machine's ~/.zshrc), "path" (a wrapper script on its PATH, node/pathlaunchers.go), "persona" (managed in Settings › Models, the manager's assistant/models_launchers.go) "claude_desktop" (claude-desktop, a new session in Claude's desktop app, node/claudedesktop_new.go) or "codex_app" (codex-app, a new chat in the Codex App, node/codexapp_new.go). Empty
 	// from an older node: zshrc.
 	Source string `json:"source,omitempty"`
 	// Agent is what it starts when not Claude Code: "codex" (plain codex, or an alias running it; docs/integrations/codex.md
-	// "Starting from the phone"). A Codex start needs its first message with it.
+	// "Starting from the phone").
 	Agent string `json:"agent,omitempty"`
+	// PromptOptional: a Codex launcher this node starts with no first message too (docs/integrations/codex.md
+	// "Starting without a first message"). Older nodes leave it out: their Codex starts need the first message.
+	PromptOptional bool `json:"prompt_optional,omitempty"`
+	// RunHere: a Codex launcher this node starts in a shell pane the user picked (Run Agent Here) and never closes or
+	// queues that pane for cleanup when the start fails (#5504; docs/integrations/terminal.md, section 21). Older
+	// nodes leave it out: Run Agent Here offers them Claude Code only.
+	RunHere bool `json:"run_here,omitempty"`
 	// Assistant: a runtime's launcher that may run the Persona assistant (docs/integrations/runtimes.md "Assistant"), whatever its agent.
 	Assistant bool `json:"assistant,omitempty"`
 }
@@ -91,6 +98,16 @@ type LauncherModels struct {
 	Locked string `json:"locked,omitempty"`
 }
 
+// ModelPrice is the catalog's reference price in USD per one million tokens. It is display metadata, not a gateway quote.
+type ModelPrice struct {
+	Input     float64  `json:"input"`
+	Output    float64  `json:"output"`
+	CacheRead *float64 `json:"cache_read,omitempty"`
+	// CacheWrite: a 5-minute cache write; CacheWrite1h a 1-hour one (absent: CacheWrite's price, as cindy prices it).
+	CacheWrite   *float64 `json:"cache_write,omitempty"`
+	CacheWrite1h *float64 `json:"cache_write_1h,omitempty"`
+}
+
 // AgentModel is one model of the list: Claude Code's initialize, Codex's model/list.
 type AgentModel struct {
 	ID          string `json:"id"` // what --model takes (Claude's aliases too: opus, sonnet…)
@@ -107,6 +124,8 @@ type AgentModel struct {
 	// and launcher after it ran (#1644, assistant/models_custom.go); listed after the agent's own, most recent first.
 	// Its efforts are not known, so none are given.
 	Custom bool `json:"custom,omitempty"`
+	// Price is the built-in catalog's exact-entry reference price; nil when unknown or inherited from another model.
+	Price *ModelPrice `json:"price,omitempty"`
 }
 
 type LauncherEnv struct {
@@ -237,6 +256,8 @@ type ProviderModel struct {
 	// InheritedFrom is the catalog id an unlisted newer generation took a missing context window or thinking
 	// level from. Empty for an exact catalog entry, and when the gateway already reported every one of those.
 	InheritedFrom string `json:"inherited_from,omitempty"`
+	// Price is the exact catalog entry's reference price. It is never inherited from an earlier generation.
+	Price *ModelPrice `json:"price,omitempty"`
 }
 
 // The assistant's runtimes for a Claude launcher (model_config.assistant's "runtime", the assistant.send / .start /

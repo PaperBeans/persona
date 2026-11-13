@@ -45,21 +45,26 @@ nonisolated struct AutoConversationSource: Hashable, Identifiable, Sendable {
         id == Self.extensionSource.id ? String(localized: "From an extension") : String(localized: "From \(name)")
     }
 
+    /// What a row's mark says to VoiceOver (#5195): where an external conversation came from (`from`), else the
+    /// source's name, as its All Chats filter says it.
+    var markLabel: String { Self.external(id) != nil ? from : name }
+
     /// The hub's feature for `origin` (docs/protocol/protocol.md「Origin of assistant chats」).
     static let feature = "conversation_origin"
 }
 
-/// The sidebar's conversations split into the user's own (Recent) and the ones Persona opened by itself (Auto Chats,
-/// #3264), counted by source and by state so a closed Auto Chats still says one waits or works.
+/// All Chats' conversations split into the user's own (its Mine filter) and the ones Persona opened by itself (#3264),
+/// by source (a filter for each) and counted by state. The sidebar's Recent lists both (#5195), each of the latter with
+/// its source's mark (`source(of:tasks:)`, the rule the filters use).
 ///
 /// With a hub that says who opened its conversations (`conversation_origin`, or an `origin` on any of them), the
-/// others are in Auto Chats; a scheduled task's conversation the hub calls the user's is still known the way the sidebar
-/// knew it before (`AssistantTaskChats`, #2838). A hub that never says lists them as before: Recent has all but the
-/// scheduled tasks' ones, and there is no Auto Chats.
+/// others are Persona's; a scheduled task's conversation the hub calls the user's is still known the way the sidebar
+/// knew it before (`AssistantTaskChats`, #2838). A hub that never says has no source filters: Mine has all but the
+/// scheduled tasks' ones.
 nonisolated struct AutoConversations: Equatable, Sendable {
-    /// Recent: the user's own, and the open one whatever opened it (it keeps its row).
+    /// Mine: the user's own, and the open one whatever opened it (it keeps its row).
     var mine: [Session] = []
-    /// Auto Chats, in the order they came.
+    /// The ones Persona opened, in the order they came.
     var auto: [Session] = []
     /// Whether the hub says who opened its conversations.
     var supported = false

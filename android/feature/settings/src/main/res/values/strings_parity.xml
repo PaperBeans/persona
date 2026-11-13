@@ -8,6 +8,8 @@
     <string name="settings_ext_themes_extension">Extension themes</string>
     <string name="settings_scheme">Appearance</string>
     <string name="settings_scheme_note">Only on this phone. Match system follows the system\'s dark mode.</string>
+    <string name="settings_density">Layout density</string>
+    <string name="settings_density_note">Only on this phone. Compact tightens margins and gaps so more fits on screen; text and icons keep their size.</string>
     <string name="settings_providers_title">Model providers</string>
     <string name="settings_row_providers_subtitle">Gateways, keys and the claude functions in ~/.zshrc</string>
     <string name="settings_providers_demo">The demo has no hub providers. Pair with a hub to see them.</string>

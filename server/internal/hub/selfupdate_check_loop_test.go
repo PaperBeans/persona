@@ -58,6 +58,9 @@ func TestUpdateCheckLoopPreservesInstall(t *testing.T) {
 					}
 					checks := make(chan time.Time, 4)
 					u.client = &http.Client{Transport: updateLoopTransport(func(r *http.Request) (*http.Response, error) {
+						if r.URL.Path == "/dl/android.json" { // each check first looks for the release's Android app: none here
+							return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+						}
 						checks <- time.Now()
 						if r.URL.Path != "/dl/latest.json" {
 							t.Errorf("check started another install: %s", r.URL.Path)

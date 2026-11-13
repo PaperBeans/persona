@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 // The meeting conversation on a recording's detail (#3862): only on a hub that lists meeting_conversation, the private
 // switch, a room meeting's one thread (read-only while it runs), the meeting_live event's newer parts, and the follow-up's
-// first message.
+// first message, which any recording with text or minutes offers once it has ended (phase 6).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initI18n } from "../../i18n";
 import { setToken } from "../../lib/api";
-import type { KBDetailResponse, RecordingAsk, RecordingLive } from "../../lib/kb";
+import type { KBDetailResponse, KBSegment, RecordingAsk, RecordingLive, RecordingMinutes } from "../../lib/kb";
 import { setRosterDefault } from "../../lib/manager-choice";
 import { getState } from "../../lib/store";
 import type { Item } from "../../lib/types";
@@ -41,11 +41,12 @@ const recent = () => new Date(Date.now() - 60_000).toISOString();
 const ready = { state: "ready", machine_id: "server", session_id: room };
 const ended = { state: "ended", machine_id: "server", session_id: room };
 
-const fixture = (meta: Record<string, unknown> = {}): KBDetailResponse => ({ detail: {
+const fixture = ({ segments = [{ start: 0, end: 4, text: "Let's keep the cap for this release." }], minutes, ...meta }: Record<string, unknown> = {}): KBDetailResponse => ({ detail: {
   kind: "recordings", id, path: `recordings/${id}`,
   meta: { title: "Design review", started_at: new Date(2026, 10, 10, 14).toISOString(), complete: false, kind: "meeting", revision: 2,
     minutes_state: "pending", attendance: "participant", updated: recent(), room: ready, ...meta },
-  segments: [{ start: 0, end: 4, text: "Let's keep the cap for this release." }],
+  segments: segments as KBSegment[] | undefined,
+  ...(minutes ? { minutes: minutes as RecordingMinutes } : {}),
 } });
 const ask = (over: Partial<RecordingAsk> = {}): RecordingAsk => ({
   id: askID, question: "What did we decide about the export cap last time?", question_source: "typed", at: 75, state: "answered",
@@ -253,10 +254,17 @@ describe("a recorded meeting's conversation", () => {
     await reply(pending(path)[1], { error: "read only", code: "kb_read_only" }, 403);
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     expect(box.querySelector("[role=alert]")!.textContent).toContain("Couldn’t change it");
-    // Not a meeting: no mark to set, nothing read.
+    // Not a meeting: no mark to set; its follow-up is read, and nothing to talk about while it still records.
     fresh();
     await load(fixture({ room: undefined, attendance: undefined, kind: "note" }));
     expect(privacy()).toBeNull();
+    expect(pending(livePath).map((r) => r.url)).toEqual([livePath]);
+    await reply(pending(livePath)[0], { attendance: "off", next: 0, fed: 0, asks: [], revs: { asks: 0 } });
+    expect(section()).toBeNull();
+    // Nothing of it to talk about: nothing read.
+    fresh();
+    await load(fixture({ room: undefined, attendance: undefined, kind: "note", complete: true, ended_at: recent(), segments: [] }));
+    expect(section()).toBeNull();
     expect(pending(livePath)).toHaveLength(0);
   });
 
@@ -305,6 +313,90 @@ describe("a recorded meeting's conversation", () => {
     expect(s.querySelector("textarea")).toBeNull();
   });
 
+  it("offers Talk about this meeting on any recording once it has ended, and a follow-up made elsewhere joins the thread", async () => {
+    const note = { room: undefined, attendance: undefined, kind: "note", complete: true, ended_at: recent() };
+    await load(fixture(note));
+    await reply(pending(livePath)[0], { attendance: "off", next: 0, fed: 0, asks: [], revs: { asks: 0 } });
+    expect(privacy()).toBeNull();
+    const s = section()!;
+    expect(s.querySelector("h2")!.textContent).toBe("Conversation");
+    expect(s.querySelector("[role=status]")).toBeNull();
+    expect(s.querySelector("[role=separator]")).toBeNull();
+    expect(s.querySelector("label")!.textContent).toBe("Talk about this meeting");
+    expect(requests.some((r) => r.url.includes("/sessions/"))).toBe(false);
+    // The follow-up made on the phone meanwhile: the event names it, and the thread shows it instead of the composer.
+    const followup = { machine_id: "server", session_id: follow };
+    fire({ type: "meeting_live", recording_id: id, changed: ["followup"], revs: { followup: 1 } });
+    await reply(pending(`${livePath}?parts=followup`)[0], { followup, revs: { followup: 1 } });
+    await reply(pending(itemsPath(follow))[0], { items: followItems() });
+    expect(kinds()).toEqual(["material", "question", "answer"]);
+    expect(section()!.textContent).toContain("After the meeting");
+    expect(section()!.querySelector("textarea")).toBeNull();
+    expect([...section()!.querySelectorAll("a")].find((a) => a.textContent === "Continue in the conversation")!.getAttribute("href")).toBe(`/persona/${follow}`);
+
+    // Its first words start the follow-up through POST …/followup and open it.
+    fresh();
+    await load(fixture({ ...note, segments: [], chars: 0, minutes: { version: 1, revision: 1, generated_at: recent(), title: "Design review", when: "", markdown: "# Design review" } }));
+    await reply(pending(livePath)[0], { attendance: "off", next: 0, fed: 0, asks: [], revs: { asks: 0 } });
+    typeInto(section()!.querySelector("textarea")!, "What did we decide?");
+    await submit();
+    const path = `/api/v1/recordings/${id}/followup`;
+    const body = JSON.parse(String(pending(path)[0].init.body));
+    expect(body).toEqual({ id: expect.stringMatching(/^[0-9a-f-]{36}$/), text: "What did we decide?" });
+    await reply(pending(path)[0], { followup, created: true, client_msg_id: `followup-${body.id}` });
+    expect(location.pathname).toBe(`/persona/${follow}`);
+  });
+
+  it("offers the talk only once …/live has answered for the recording, and none where it is gone", async () => {
+    const note = { room: undefined, attendance: undefined, kind: "note", complete: true, ended_at: recent() };
+    await load(fixture(note));
+    // Not before that read: hello's meeting_conversation is the default manager's, and a recording of another, older
+    // manager's knowledge base has no …/followup.
+    expect(pending(livePath)).toHaveLength(1);
+    expect(section()).toBeNull();
+    await reply(pending(livePath)[0], { error: "404 page not found" }, 404);
+    expect(section()).toBeNull();
+    expect(requests.some((r) => r.url.endsWith("/followup"))).toBe(false);
+    fresh();
+    await load(fixture(note));
+    expect(section()).toBeNull();
+    await reply(pending(livePath)[0], { attendance: "off", next: 0, fed: 0, asks: [], revs: { asks: 0 } });
+    expect(section()!.querySelector("textarea")).not.toBeNull();
+  });
+
+  it("offers no talk about an all-day recording, whose page is its day recap, and shows a follow-up made for one", async () => {
+    const day = { room: undefined, attendance: undefined, minutes_state: undefined, kind: "day", day: "2026-11-10", part: 1, complete: true,
+      ended_at: recent() };
+    await load(fixture(day));
+    expect(pending(livePath)).toHaveLength(0);
+    expect(section()).toBeNull();
+    // One made before, or by another app: its thread, as any recording's.
+    fresh();
+    const followup = { machine_id: "server", session_id: follow };
+    await load(fixture({ ...day, followup }));
+    await reply(pending(livePath)[0], { attendance: "off", next: 0, fed: 0, asks: [], followup, revs: { asks: 0, followup: 1 } });
+    await reply(pending(itemsPath(follow))[0], { items: followItems() });
+    expect(kinds()).toEqual(["material", "question", "answer"]);
+    expect(section()!.querySelector("textarea")).toBeNull();
+  });
+
+  it("talks about a #2981 meeting too, its questions staying under Questions in the meeting", async () => {
+    const followup = { machine_id: "server", session_id: follow };
+    await load(fixture({ room: undefined, attending_session: { machine_id: "server", session_id: "conv-2" }, complete: true, ended_at: recent() }));
+    for (const r of pending(livePath)) await reply(r, live({ room: undefined }));
+    expect(section()!.querySelector("textarea")).not.toBeNull();
+    expect(section()!.querySelectorAll("li[data-ask]")).toHaveLength(0);
+    expect(host.querySelectorAll("[data-recording-asks] li[data-ask]")).toHaveLength(1);
+    // With its follow-up: the thread, and the questions still once, where they were.
+    fresh();
+    await load(fixture({ room: undefined, attending_session: { machine_id: "server", session_id: "conv-2" }, complete: true, ended_at: recent(), followup }));
+    for (const r of pending(livePath)) await reply(r, live({ room: undefined, followup, revs: { asks: 1, followup: 1 } }));
+    await reply(pending(itemsPath(follow))[0], { items: followItems() });
+    expect(kinds()).toEqual(["material", "question", "answer"]);
+    expect(section()!.querySelectorAll("li[data-ask]")).toHaveLength(0);
+    expect(host.querySelectorAll("[data-recording-asks] li[data-ask]")).toHaveLength(1);
+  });
+
   it("shows the asks of a room that never came up, and starts at the follow-up once the room is deleted", async () => {
     const down = { state: "unavailable", problem: "machine_offline" };
     await load(fixture({ room: down }));
@@ -323,5 +415,160 @@ describe("a recorded meeting's conversation", () => {
     expect(s.querySelector("[role=separator]")).toBeNull();
     expect(s.textContent).toContain("After the meeting");
     expect(kinds()).toEqual(["material", "question", "answer"]);
+  });
+});
+
+describe("a recorded meeting's live view (phase 2)", () => {
+  const withLive = () => Object.assign(getState(), { features: ["meeting_attendance", "meeting_conversation", "meeting_live_view"] });
+  const line = (n: number, text = `Line ${n}.`) => ({ n, start: 10 * n, end: 10 * n + 4, text });
+  const topics = [
+    { title: "Export cap", state: "done", at: 0 },
+    { title: "Pricing", state: "current", at: 300, note: "Two options on the table" },
+    { title: "Hiring", state: "open" },
+  ];
+  const topicsBox = () => host.querySelector<HTMLElement>("[data-live-topics]");
+  const linesBox = () => host.querySelector<HTMLElement>("[data-live-lines]");
+  const shownLines = () => [...host.querySelectorAll("[data-live-line]")].map((li) => li.lastElementChild!.textContent);
+  const reads = () => requests.filter((r) => r.url.startsWith(livePath)).map((r) => r.url.slice(livePath.length));
+
+  it("shows nothing of it on a hub without meeting_live_view, and reads no lines", async () => {
+    await load();
+    await reply(pending(livePath)[0], live({ revs: { asks: 1, room: 2, lines: 3, topics: 1 }, topics }));
+    fire({ type: "meeting_live", recording_id: id, changed: ["lines", "topics"], revs: { lines: 5, topics: 2 } });
+    expect(topicsBox()).toBeNull();
+    expect(linesBox()).toBeNull();
+    expect(reads()).toEqual([""]);
+  });
+
+  it("shows a running room meeting's topics in order and its newest lines, and reads only what an event says is newer", async () => {
+    withLive();
+    await load();
+    expect(reads()).toEqual([""]);
+    await reply(pending(livePath)[0], live({ revs: { asks: 1, room: 2, lines: 3, topics: 1 }, topics, topics_at: "2026-11-10T06:05:00Z" }));
+    const chips = [...topicsBox()!.querySelectorAll("li")];
+    expect(topicsBox()!.querySelector("h2")!.textContent).toBe("Topics");
+    expect(chips.map((li) => li.getAttribute("data-topic"))).toEqual(["done", "current", "open"]);
+    // Each state in words; the other topics' start for screen readers, the current one's start and note shown under the chips.
+    expect(chips.map((li) => li.textContent)).toEqual([expect.stringMatching(/^DoneExport cap, From \d\d:\d\d:\d\d$/), "NowPricing", "Still to comeHiring"]);
+    expect(chips[0].lastElementChild!.className).toContain("sr-only");
+    expect(chips[1].getAttribute("title")).toMatch(/^Now · Pricing · From \d\d:\d\d:\d\d · Two options on the table$/);
+    expect(topicsBox()!.querySelector("[data-live-topic-now]")!.textContent).toMatch(/^From \d\d:\d\d:\d\d · Two options on the table$/);
+    // The lines once the live log's length is known, from the start of this short one.
+    expect(reads()).toEqual(["", "?parts=lines&from=0"]);
+    await reply(pending(`${livePath}?parts=lines&from=0`)[0], { lines: [line(0), line(1), line(2)], revs: { lines: 3 } });
+    expect(linesBox()!.querySelector("h2")!.textContent).toBe("Live");
+    expect(shownLines()).toEqual(["Line 0.", "Line 1.", "Line 2."]);
+    // The log is the scroller the keyboard reaches, named by its heading, with a plain list inside; nothing was cut.
+    const log = linesBox()!.querySelector<HTMLElement>("[role=log]")!;
+    expect([log.tagName, log.tabIndex, log.getAttribute("aria-labelledby")]).toEqual(["DIV", 0, linesBox()!.querySelector("h2 span")!.id]);
+    expect(log.className).toContain("focus-visible:outline-accent");
+    expect(log.querySelector("ol")!.hasAttribute("role")).toBe(false);
+    expect(linesBox()!.querySelector("[data-live-line]")!.parentElement!.tagName).toBe("OL");
+    expect(linesBox()!.querySelector("[data-live-earlier]")).toBeNull();
+    // Nothing newer: nothing read. Newer lines and topics: from this page's own next position.
+    fire({ type: "meeting_live", recording_id: id, changed: ["lines", "topics"], revs: { lines: 3, topics: 1 } });
+    expect(reads()).toHaveLength(2);
+    fire({ type: "meeting_live", recording_id: id, changed: ["lines", "topics"], revs: { lines: 5, topics: 2 } });
+    expect(reads().at(-1)).toBe("?parts=lines,topics&from=3");
+    await reply(pending(`${livePath}?parts=lines,topics&from=3`)[0], {
+      lines: [line(3), line(4, "Ada: we keep the vendor.")], topics: [{ ...topics[0] }, { ...topics[1], state: "done" }, { ...topics[2], state: "current" }], revs: { lines: 5, topics: 2 },
+    });
+    expect(shownLines()).toEqual(["Line 0.", "Line 1.", "Line 2.", "Line 3.", "Ada: we keep the vendor."]);
+    expect([...topicsBox()!.querySelectorAll("li")].map((li) => li.getAttribute("data-topic"))).toEqual(["done", "done", "current"]);
+    fire({ type: "meeting_live", recording_id: id, changed: ["lines"], revs: { lines: 5 } });
+    expect(reads()).toHaveLength(3);
+  });
+
+  it("starts a long meeting near its newest lines and reads on while there are more", async () => {
+    withLive();
+    await load();
+    await reply(pending(livePath)[0], live({ revs: { asks: 1, room: 2, lines: 1000, topics: 0 }, topics: [] }));
+    expect(topicsBox()).toBeNull(); // no Topics before the room set any
+    expect(linesBox()!.querySelector("[role=log]")).toBeNull();
+    expect(reads().at(-1)).toBe("?parts=lines&from=800");
+    await reply(pending(`${livePath}?parts=lines&from=800`)[0], { lines: [800, 801, 802].map((n) => line(n)), more: true, revs: { lines: 1000 } });
+    expect(reads().at(-1)).toBe("?parts=lines&from=803");
+    await reply(pending(`${livePath}?parts=lines&from=803`)[0], { lines: Array.from({ length: 197 }, (_, i) => line(803 + i)), revs: { lines: 1000 } });
+    expect(reads()).toHaveLength(3);
+    expect(shownLines()).toHaveLength(200);
+    // The first read skipped the 800 before: the note says the transcript has them.
+    expect(linesBox()!.querySelector("[data-live-earlier]")!.textContent).toBe("Earlier lines are in the transcript.");
+  });
+
+  it("says earlier lines are in the transcript only once some were skipped or let go, not for a blank first position", async () => {
+    withLive();
+    await load();
+    await reply(pending(livePath)[0], live({ revs: { asks: 1, room: 2, lines: 150, topics: 0 }, topics: [] }));
+    await reply(pending(`${livePath}?parts=lines&from=0`)[0], { lines: [{ n: 0, start: 0, end: 1, text: "" }, ...Array.from({ length: 149 }, (_, i) => line(i + 1))], revs: { lines: 150 } });
+    expect(shownLines()[0]).toBe("Line 1.");
+    expect(linesBox()!.querySelector("[data-live-earlier]")).toBeNull();
+    // More than LIVE_KEEP read: the oldest are let go.
+    fire({ type: "meeting_live", recording_id: id, changed: ["lines"], revs: { lines: 250 } });
+    await reply(pending(`${livePath}?parts=lines&from=150`)[0], { lines: Array.from({ length: 100 }, (_, i) => line(150 + i)), revs: { lines: 250 } });
+    expect(shownLines()).toHaveLength(200);
+    expect(shownLines()[0]).toBe("Line 50.");
+    expect(linesBox()!.querySelector("[data-live-earlier]")).not.toBeNull();
+  });
+
+  it("shows nothing of it for a meeting Persona doesn't attend, and comes up with the room", async () => {
+    withLive();
+    const none = { state: "none" };
+    await load(fixture({ room: none, attendance: "off" }));
+    await reply(pending(livePath)[0], live({ room: none, attendance: "off", asks: [], revs: { asks: 0, room: 1, lines: 2, topics: 0 }, topics: [] }));
+    fire({ type: "meeting_live", recording_id: id, changed: ["lines"], revs: { lines: 4 } });
+    expect(topicsBox()).toBeNull();
+    expect(linesBox()).toBeNull();
+    expect(reads()).toEqual([""]);
+    // Persona turned on: once the room's part says it attends, its topics and lines are read at once.
+    fire({ type: "meeting_live", recording_id: id, changed: ["room"], revs: { room: 2 } });
+    await reply(pending(`${livePath}?parts=room`)[0], { room: { state: "starting" }, revs: { room: 2 } });
+    expect(reads().at(-1)).toBe("?parts=topics,lines&from=0");
+    await reply(pending(`${livePath}?parts=topics,lines&from=0`)[0], { topics, lines: [line(0), line(1), line(2), line(3)], revs: { topics: 1, lines: 4 } });
+    expect(topicsBox()).not.toBeNull();
+    expect(shownLines()).toEqual(["Line 0.", "Line 1.", "Line 2.", "Line 3."]);
+  });
+
+  it("is gone once the room says the meeting ended, before the detail is read again", async () => {
+    withLive();
+    await load();
+    await reply(pending(livePath)[0], live({ revs: { asks: 1, room: 2, lines: 1, topics: 1 }, topics }));
+    await reply(pending(`${livePath}?parts=lines&from=0`)[0], { lines: [line(0)], revs: { lines: 1 } });
+    expect(topicsBox()!.querySelector("[data-topic=current]")).not.toBeNull();
+    expect(shownLines()).toEqual(["Line 0."]);
+    fire({ type: "meeting_live", recording_id: id, changed: ["room"], revs: { room: 3 } });
+    await reply(pending(`${livePath}?parts=room`)[0], { room: ended, revs: { room: 3 } });
+    expect(topicsBox()).toBeNull();
+    expect(linesBox()).toBeNull();
+    fire({ type: "meeting_live", recording_id: id, changed: ["lines", "topics"], revs: { lines: 2, topics: 2 } });
+    expect(reads().filter((u) => u.includes("lines") || u.includes("topics"))).toEqual(["?parts=lines&from=0"]);
+  });
+
+  it("polls with its own next position while the meeting records, and is gone once the recording is complete", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    withLive();
+    await load();
+    await reply(pending(livePath)[0], live({ revs: { asks: 1, room: 2, lines: 0, topics: 0 }, topics: [] }));
+    expect(linesBox()!.textContent).toContain("Lines show here as the meeting is heard.");
+    act(() => vi.advanceTimersByTime(5000));
+    expect(reads()).toEqual(["", ""]);
+    await reply(pending(livePath)[1], live({ revs: { asks: 1, room: 2, lines: 2, topics: 0 }, topics: [] }));
+    expect(reads().at(-1)).toBe("?parts=lines&from=0");
+    await reply(pending(`${livePath}?parts=lines&from=0`)[0], { lines: [line(0), line(1)], revs: { lines: 2 } });
+    act(() => vi.advanceTimersByTime(5000));
+    expect(reads().at(-1)).toBe("?from=2");
+    await reply(pending(`${livePath}?from=2`)[0], live({ lines: [line(2)], revs: { asks: 1, room: 2, lines: 3, topics: 0 }, topics: [] }));
+    expect(shownLines()).toEqual(["Line 0.", "Line 1.", "Line 2."]);
+    // Complete, or a #2981 meeting: no live view, no lines read.
+    fresh();
+    await load(fixture({ complete: true, ended_at: recent(), room: ended }));
+    await reply(pending(livePath)[0], live({ room: ended, revs: { asks: 1, room: 3, lines: 3, topics: 0 }, topics: [] }));
+    expect(linesBox()).toBeNull();
+    expect(topicsBox()).toBeNull();
+    fresh();
+    await load(fixture({ room: undefined, attending_session: { machine_id: "server", session_id: "conv-2" } }));
+    for (const r of pending(livePath)) await reply(r, live({ room: undefined, revs: { asks: 1, lines: 3 } }));
+    expect(linesBox()).toBeNull();
+    expect(reads().every((u) => !u.includes("from="))).toBe(true);
   });
 });

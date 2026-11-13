@@ -1,0 +1,825 @@
+{
+  "encode": [
+    {
+      "name": "Claude Code gateway, no key: default model first, ids alone as strings",
+      "provider": {
+        "name": "example-gw",
+        "display_name": "Example Gateway",
+        "source": "persona",
+        "kind": "launcher",
+        "agent": "claude",
+        "api": "messages",
+        "base_url": "https://gateway.example.invalid",
+        "model": "example-sonnet",
+        "models": [
+          {
+            "id": "example-opus",
+            "name": "Example Opus",
+            "context_window": 200000,
+            "efforts": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_effort": "medium"
+          },
+          {
+            "id": "example-sonnet"
+          }
+        ]
+      },
+      "payload": {
+        "kind": "custom",
+        "name": "Example Gateway",
+        "endpoints": [
+          {
+            "protocol": "anthropic-messages",
+            "baseUrl": "https://gateway.example.invalid",
+            "models": [
+              "example-sonnet",
+              {
+                "id": "example-opus",
+                "name": "Example Opus",
+                "contextWindow": 200000,
+                "reasoning": true,
+                "reasoningEfforts": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "reasoningDefaultEffort": "medium"
+              }
+            ]
+          }
+        ]
+      },
+      "fragment": "import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgR2F0ZXdheSIsImVuZHBvaW50cyI6W3sicHJvdG9jb2wiOiJhbnRocm9waWMtbWVzc2FnZXMiLCJiYXNlVXJsIjoiaHR0cHM6Ly9nYXRld2F5LmV4YW1wbGUuaW52YWxpZCIsIm1vZGVscyI6WyJleGFtcGxlLXNvbm5ldCIseyJpZCI6ImV4YW1wbGUtb3B1cyIsIm5hbWUiOiJFeGFtcGxlIE9wdXMiLCJjb250ZXh0V2luZG93IjoyMDAwMDAsInJlYXNvbmluZyI6dHJ1ZSwicmVhc29uaW5nRWZmb3J0cyI6WyJsb3ciLCJtZWRpdW0iLCJoaWdoIl0sInJlYXNvbmluZ0RlZmF1bHRFZmZvcnQiOiJtZWRpdW0ifV19XX0"
+    },
+    {
+      "name": "direct Chat Completions API with a pasted key",
+      "provider": {
+        "name": "example-chat",
+        "display_name": "Example Chat",
+        "source": "persona",
+        "kind": "api",
+        "api": "chat",
+        "base_url": "https://api.example.invalid/v1",
+        "model": "example-chat"
+      },
+      "key": "FAKE-EXAMPLE-KEY",
+      "payload": {
+        "kind": "custom",
+        "name": "Example Chat",
+        "auth": {
+          "method": "apiKey",
+          "apiKey": "FAKE-EXAMPLE-KEY"
+        },
+        "endpoints": [
+          {
+            "protocol": "openai-chat",
+            "baseUrl": "https://api.example.invalid/v1",
+            "models": [
+              "example-chat"
+            ]
+          }
+        ]
+      },
+      "fragment": "import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQ2hhdCIsImF1dGgiOnsibWV0aG9kIjoiYXBpS2V5IiwiYXBpS2V5IjoiRkFLRS1FWEFNUExFLUtFWSJ9LCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9hcGkuZXhhbXBsZS5pbnZhbGlkL3YxIiwibW9kZWxzIjpbImV4YW1wbGUtY2hhdCJdfV19"
+    },
+    {
+      "name": "direct Responses API without models, non-ASCII name",
+      "provider": {
+        "name": "example-resp",
+        "display_name": "示例 Responses",
+        "source": "persona",
+        "kind": "api",
+        "api": "responses",
+        "base_url": "https://api.example.invalid/v1"
+      },
+      "payload": {
+        "kind": "custom",
+        "name": "示例 Responses",
+        "endpoints": [
+          {
+            "protocol": "openai-responses",
+            "baseUrl": "https://api.example.invalid/v1"
+          }
+        ]
+      },
+      "fragment": "import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IuekuuS-iyBSZXNwb25zZXMiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLXJlc3BvbnNlcyIsImJhc2VVcmwiOiJodHRwczovL2FwaS5leGFtcGxlLmludmFsaWQvdjEifV19"
+    },
+    {
+      "name": "a Codex launcher has no cindy endpoint Persona reads back",
+      "provider": {
+        "name": "example-codex",
+        "source": "persona",
+        "kind": "launcher",
+        "agent": "codex",
+        "base_url": "https://api.example.invalid/v1"
+      },
+      "payload": null
+    },
+    {
+      "name": "an rc-file alias is not Persona's to share",
+      "provider": {
+        "name": "example-alias",
+        "source": "zshrc",
+        "kind": "launcher",
+        "agent": "claude",
+        "base_url": "https://gateway.example.invalid"
+      },
+      "payload": null
+    },
+    {
+      "name": "a direct Messages API would come back as a Claude Code gateway, so it gets no link",
+      "provider": {
+        "name": "example-messages",
+        "display_name": "Example Messages",
+        "source": "persona",
+        "kind": "api",
+        "api": "messages",
+        "base_url": "https://api.example.invalid",
+        "model": "example-model"
+      },
+      "payload": null
+    }
+  ],
+  "links": [
+    {
+      "name": "Persona web link of the gateway (round trip)",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgR2F0ZXdheSIsImVuZHBvaW50cyI6W3sicHJvdG9jb2wiOiJhbnRocm9waWMtbWVzc2FnZXMiLCJiYXNlVXJsIjoiaHR0cHM6Ly9nYXRld2F5LmV4YW1wbGUuaW52YWxpZCIsIm1vZGVscyI6WyJleGFtcGxlLXNvbm5ldCIseyJpZCI6ImV4YW1wbGUtb3B1cyIsIm5hbWUiOiJFeGFtcGxlIE9wdXMiLCJjb250ZXh0V2luZG93IjoyMDAwMDAsInJlYXNvbmluZyI6dHJ1ZSwicmVhc29uaW5nRWZmb3J0cyI6WyJsb3ciLCJtZWRpdW0iLCJoaWdoIl0sInJlYXNvbmluZ0RlZmF1bHRFZmZvcnQiOiJtZWRpdW0ifV19XX0",
+      "drafts": [
+        {
+          "kind": "launcher",
+          "api": "messages",
+          "base_url": "https://gateway.example.invalid",
+          "display_name": "Example Gateway",
+          "auth": "",
+          "api_key": "",
+          "model": "example-sonnet",
+          "models": [
+            "example-sonnet",
+            "example-opus"
+          ]
+        }
+      ],
+      "notes": [],
+      "format": "link"
+    },
+    {
+      "name": "Persona web link of the chat API with its key (round trip)",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQ2hhdCIsImF1dGgiOnsibWV0aG9kIjoiYXBpS2V5IiwiYXBpS2V5IjoiRkFLRS1FWEFNUExFLUtFWSJ9LCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9hcGkuZXhhbXBsZS5pbnZhbGlkL3YxIiwibW9kZWxzIjpbImV4YW1wbGUtY2hhdCJdfV19",
+      "drafts": [
+        {
+          "kind": "api",
+          "api": "chat",
+          "base_url": "https://api.example.invalid/v1",
+          "display_name": "Example Chat",
+          "auth": "bearer",
+          "api_key": "FAKE-EXAMPLE-KEY",
+          "model": "example-chat",
+          "models": [
+            "example-chat"
+          ]
+        }
+      ],
+      "notes": [],
+      "format": "link"
+    },
+    {
+      "name": "web link with v=1 after import",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IuekuuS-iyBSZXNwb25zZXMiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLXJlc3BvbnNlcyIsImJhc2VVcmwiOiJodHRwczovL2FwaS5leGFtcGxlLmludmFsaWQvdjEifV19&v=1",
+      "drafts": [
+        {
+          "kind": "api",
+          "api": "responses",
+          "base_url": "https://api.example.invalid/v1",
+          "display_name": "示例 Responses",
+          "auth": "bearer",
+          "api_key": "",
+          "model": "",
+          "models": []
+        }
+      ],
+      "notes": [],
+      "format": "link"
+    },
+    {
+      "name": "cindy link from cindy's docs",
+      "text": "cindy://provider/import?v=1&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [
+        {
+          "kind": "api",
+          "api": "chat",
+          "base_url": "https://example.invalid/v1",
+          "display_name": "Example AI",
+          "auth": "bearer",
+          "api_key": "FAKE-EXAMPLE-KEY",
+          "model": "",
+          "models": []
+        }
+      ],
+      "notes": [],
+      "format": "link"
+    },
+    {
+      "name": "cindy link with surrounding blanks",
+      "text": "  cindy://provider/import?data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ&v=1\n",
+      "drafts": [
+        {
+          "kind": "api",
+          "api": "chat",
+          "base_url": "https://example.invalid/v1",
+          "display_name": "Example AI",
+          "auth": "bearer",
+          "api_key": "FAKE-EXAMPLE-KEY",
+          "model": "",
+          "models": []
+        }
+      ],
+      "notes": [],
+      "format": "link"
+    },
+    {
+      "name": "cindy link of another version",
+      "text": "cindy://provider/import?v=2&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_version",
+          "name": "2"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "web link of another version",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ&v=3",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_version",
+          "name": "3"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "a version that is no number is not named",
+      "text": "cindy://provider/import?v=one&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_version"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "cindy link without v",
+      "text": "cindy://provider/import?data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "cindy link with data twice",
+      "text": "cindy://provider/import?v=1&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "cindy link with another parameter",
+      "text": "cindy://provider/import?v=1&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ&ref=x",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "cindy link to another path",
+      "text": "cindy://provider/export?v=1&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "cindy link with a fragment",
+      "text": "cindy://provider/import?v=1&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ#x",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "web link with another fragment parameter",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ&ref=x",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "web link with import twice",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ&import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "web link with empty data",
+      "text": "https://persona.example.invalid/settings?tab=models#import=",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "padded base64 is not canonical base64url",
+      "text": "cindy://provider/import?v=1&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ==",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "standard base64 alphabet is refused",
+      "text": "cindy://provider/import?v=1&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6Ij8/PyIsImVuZHBvaW50cyI6W119",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "non-canonical trailing bits",
+      "text": "cindy://provider/import?v=1&data=e31",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "data that is no UTF-8",
+      "text": "cindy://provider/import?v=1&data=eyJuYW1lIjoi_yJ9",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "data that is no JSON object",
+      "text": "cindy://provider/import?v=1&data=W3sia2luZCI6ImN1c3RvbSIsIm5hbWUiOiJFeGFtcGxlIEFJIiwiYXV0aCI6eyJtZXRob2QiOiJhcGlLZXkiLCJhcGlLZXkiOiJGQUtFLUVYQU1QTEUtS0VZIn0sImVuZHBvaW50cyI6W3sicHJvdG9jb2wiOiJvcGVuYWktY2hhdCIsImJhc2VVcmwiOiJodHRwczovL2V4YW1wbGUuaW52YWxpZC92MSJ9XX1d",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "a batch is a file's, not a link's",
+      "text": "cindy://provider/import?v=1&data=eyJwcm92aWRlcnMiOlt7ImtpbmQiOiJjdXN0b20iLCJuYW1lIjoiRXhhbXBsZSBBSSIsImF1dGgiOnsibWV0aG9kIjoiYXBpS2V5IiwiYXBpS2V5IjoiRkFLRS1FWEFNUExFLUtFWSJ9LCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEifV19XX0",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_field",
+          "name": "providers"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "unknown top-level field",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEifV0sImV4dHJhIjoxfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_field",
+          "name": "extra"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "unknown endpoint field",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEiLCJwcm94eSI6Imh0dHA6Ly9wcm94eS5leGFtcGxlLmludmFsaWQifV19",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_field",
+          "name": "endpoints[0].proxy"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "unknown model field",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEiLCJtb2RlbHMiOlt7ImlkIjoibSIsInByaWNlIjoxfV19XX0",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_field",
+          "name": "endpoints[0].models[0].price"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "an unknown field whose name is no plain word is not named",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEifV0sIkZBS0UgS0VZIDEyMy89IjoxfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_field"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "unknown kind",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoib3RoZXIiLCJuYW1lIjoiRXhhbXBsZSIsImVuZHBvaW50cyI6W3sicHJvdG9jb2wiOiJvcGVuYWktY2hhdCIsImJhc2VVcmwiOiJodHRwczovL2V4YW1wbGUuaW52YWxpZC92MSJ9XX0",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "kind"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "name too long",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6Inh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEifV19",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "name"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "no endpoints",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOltdfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "nine endpoints",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEiLCJ0YXJnZXRzIjpbInBpIl19LHsicHJvdG9jb2wiOiJvcGVuYWktY2hhdCIsImJhc2VVcmwiOiJodHRwczovL2V4YW1wbGUuaW52YWxpZC92MSIsInRhcmdldHMiOlsicGkiXX0seyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIiwidGFyZ2V0cyI6WyJwaSJdfSx7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEiLCJ0YXJnZXRzIjpbInBpIl19LHsicHJvdG9jb2wiOiJvcGVuYWktY2hhdCIsImJhc2VVcmwiOiJodHRwczovL2V4YW1wbGUuaW52YWxpZC92MSIsInRhcmdldHMiOlsicGkiXX0seyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIiwidGFyZ2V0cyI6WyJwaSJdfSx7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEiLCJ0YXJnZXRzIjpbInBpIl19LHsicHJvdG9jb2wiOiJvcGVuYWktY2hhdCIsImJhc2VVcmwiOiJodHRwczovL2V4YW1wbGUuaW52YWxpZC92MSIsInRhcmdldHMiOlsicGkiXX0seyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIiwidGFyZ2V0cyI6WyJwaSJdfV19",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "unknown protocol",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoiZ3JwYyIsImJhc2VVcmwiOiJodHRwczovL2V4YW1wbGUuaW52YWxpZC92MSJ9XX0",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints[0].protocol"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "base URL with a query",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjE_a2V5PXgifV19",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints[0].baseUrl"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "base URL with a user",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly91c2VyOnBhc3NAZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints[0].baseUrl"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "base URL that is not http(s)",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiZnRwOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints[0].baseUrl"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "models URL on another origin",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEiLCJtb2RlbHNVcmwiOiJodHRwczovL290aGVyLmV4YW1wbGUuaW52YWxpZC9tb2RlbHMifV19",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints[0].modelsUrl"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "request path that names another host",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEiLCJyZXF1ZXN0UGF0aCI6Ii8vb3RoZXIuZXhhbXBsZS5pbnZhbGlkL3gifV19",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints[0].requestPath"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "unknown target",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEiLCJ0YXJnZXRzIjpbImNsYXVkZS1jb2RlIiwiZ2VtaW5pIl19XX0",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints[0].targets"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "duplicate model ids",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEiLCJtb2RlbHMiOlsibSIseyJpZCI6Im0ifV19XX0",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints[0].models"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "efforts without reasoning",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEiLCJtb2RlbHMiOlt7ImlkIjoibSIsInJlYXNvbmluZ0VmZm9ydHMiOlsibG93Il19XX1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints[0].models[0].reasoningEfforts"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "a key with a line break",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEifV0sImF1dGgiOnsibWV0aG9kIjoiYXBpS2V5IiwiYXBpS2V5IjoiRkFLRVxuS0VZIn19",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "auth.apiKey"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "headers without an API key method",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cDovLzEyNy4wLjAuMTo0MDAwL3YxIiwiaGVhZGVycyI6eyJYLVRlbmFudCI6ImV4YW1wbGUifX1dLCJhdXRoIjp7Im1ldGhvZCI6Im5vbmUifX0",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints[0].headers"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "no sign-in on a remote address",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEifV0sImF1dGgiOnsibWV0aG9kIjoibm9uZSJ9fQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "auth"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "no sign-in on this computer",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cDovLzEyNy4wLjAuMTo0MDAwL3YxIn1dLCJhdXRoIjp7Im1ldGhvZCI6Im5vbmUifX0",
+      "drafts": [
+        {
+          "kind": "api",
+          "api": "chat",
+          "base_url": "http://127.0.0.1:4000/v1",
+          "display_name": "Example",
+          "auth": "",
+          "api_key": "",
+          "model": "",
+          "models": [],
+          "notes": [
+            {
+              "code": "cindy_auth",
+              "name": "none"
+            }
+          ]
+        }
+      ],
+      "notes": [],
+      "format": "link"
+    },
+    {
+      "name": "two endpoints compete for the same agents",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9hLmV4YW1wbGUuaW52YWxpZC92MSJ9LHsicHJvdG9jb2wiOiJvcGVuYWktY2hhdCIsImJhc2VVcmwiOiJodHRwczovL2IuZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "targets settle the competition",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoiYW50aHJvcGljLW1lc3NhZ2VzIiwiYmFzZVVybCI6Imh0dHBzOi8vYS5leGFtcGxlLmludmFsaWQiLCJ0YXJnZXRzIjpbImNsYXVkZS1jb2RlIl19LHsicHJvdG9jb2wiOiJvcGVuYWktcmVzcG9uc2VzIiwiYmFzZVVybCI6Imh0dHBzOi8vYi5leGFtcGxlLmludmFsaWQvdjEiLCJ0YXJnZXRzIjpbImNvZGV4IiwicGkiXX1dfQ",
+      "drafts": [
+        {
+          "kind": "launcher",
+          "api": "messages",
+          "base_url": "https://a.example.invalid",
+          "display_name": "Example",
+          "auth": "",
+          "api_key": "",
+          "model": "",
+          "models": [],
+          "notes": [
+            {
+              "code": "cindy_endpoint",
+              "name": "openai-responses"
+            }
+          ]
+        }
+      ],
+      "notes": [],
+      "format": "link"
+    },
+    {
+      "name": "a preset link is valid but names cindy's catalog",
+      "text": "cindy://provider/import?v=1&data=eyJraW5kIjoicHJlc2V0IiwicHJlc2V0Ijoib3BlbnJvdXRlciIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "cindy_kind",
+          "name": "preset"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "an OAuth link is valid but signs in another way",
+      "text": "cindy://provider/import?v=1&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEifV0sImF1dGgiOnsibWV0aG9kIjoib2F1dGgiLCJmbG93IjoiZGV2aWNlLWNvZGUiLCJkZXZpY2VBdXRob3JpemF0aW9uVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvZGV2aWNlIiwidG9rZW5VcmwiOiJodHRwczovL2V4YW1wbGUuaW52YWxpZC90b2tlbiIsImNsaWVudElkIjoiZXhhbXBsZSIsInNjb3BlcyI6IiJ9fQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "cindy_auth",
+          "name": "oauth"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "an http link without import is not a link",
+      "text": "https://persona.example.invalid/settings?tab=models#settings-providers",
+      "format": "",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "unrecognized"
+        }
+      ]
+    },
+    {
+      "name": "a request path of its own is noted, never named",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvdjEiLCJyZXF1ZXN0UGF0aCI6Ii9jdXN0b20vY2hhdCJ9XX0",
+      "drafts": [
+        {
+          "kind": "api",
+          "api": "chat",
+          "base_url": "https://example.invalid/v1",
+          "display_name": "Example",
+          "auth": "bearer",
+          "api_key": "",
+          "model": "",
+          "models": [],
+          "notes": [
+            {
+              "code": "cindy_request_path"
+            }
+          ]
+        }
+      ],
+      "notes": [],
+      "format": "link"
+    },
+    {
+      "name": "a cindy link broken by a line break",
+      "text": "cindy://provider/import?v=1&data=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7\nIm1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "a web link broken by a space",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUgQUkiLCJhdXRoIjp7 Im1ldGhvZCI6ImFwaUtleSIsImFwaUtleSI6IkZBS0UtRVhBTVBMRS1LRVkifSwiZW5kcG9pbnRzIjpbeyJwcm90b2NvbCI6Im9wZW5haS1jaGF0IiwiYmFzZVVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL3YxIn1dfQ",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid"
+        }
+      ],
+      "format": "link"
+    },
+    {
+      "name": "base URL with a port past 65535",
+      "text": "https://persona.example.invalid/settings?tab=models#import=eyJraW5kIjoiY3VzdG9tIiwibmFtZSI6IkV4YW1wbGUiLCJlbmRwb2ludHMiOlt7InByb3RvY29sIjoib3BlbmFpLWNoYXQiLCJiYXNlVXJsIjoiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQ6OTk5OTkvdjEifV19",
+      "drafts": [],
+      "notes": [
+        {
+          "code": "link_invalid",
+          "name": "endpoints[0].baseUrl"
+        }
+      ],
+      "format": "link"
+    }
+  ]
+}

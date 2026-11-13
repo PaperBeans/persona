@@ -51,6 +51,9 @@ class HttpChatActions internal constructor(
                 }
                 is ChatAction.Rename -> buildJsonObject { put("title", action.title.trim()) }
                 is ChatAction.Modes -> buildJsonObject {
+                    action.launcher?.let { put("launcher", it) }
+                    action.from?.let { put("from", it) }
+                    action.model?.let { put("model", it) }
                     action.permissionMode?.let { put("permission_mode", it) }
                     action.effort?.let { put("effort", it) }
                     action.ultracode?.let { put("ultracode", it) }
@@ -83,14 +86,23 @@ class HttpChatActions internal constructor(
         }
     }
 
-    override suspend fun editQueue(session: Session, keep: List<Int>): List<String> {
+    override suspend fun editQueue(session: Session, keep: List<Int>): QueueEdit {
         // An empty keep list is meaningful (delete the only queued message), so the body is written out explicitly.
         val body = buildJsonObject { put("keep", JsonArray(keep.map(::JsonPrimitive))) }
         return request(api("sessions", session.machineId, session.sessionId, "queue"), "POST",
             body.toString().toRequestBody("application/json; charset=utf-8".toMediaType())).use {
             if (!it.isSuccessful) throw HubFailure.from(it)
-            (JsonCodec.parseToJsonElement(it.body!!.string()).jsonObject["queue"] as? JsonArray).orEmpty()
-                .mapNotNull { item -> (item as? JsonPrimitive)?.takeIf { value -> value.isString }?.content }
+            val answer = JsonCodec.parseToJsonElement(it.body!!.string()).jsonObject
+            // A queue entry that is not text drops alone; the photos (a Persona conversation's, base64) ride beside it.
+            val queue = (answer["queue"] as? JsonArray).orEmpty().filter { item -> item is JsonPrimitive && item.isString }
+            JsonCodec.decodeFromJsonElement<QueueEdit>(JsonObject(answer + ("queue" to JsonArray(queue))))
+        }
+    }
+
+    override suspend fun sendQueuedNow(session: Session) {
+        // The node presses the keys and waits for the queue to leave the screen (iOS gives it 30 s): the slow client's timeout covers it.
+        slow(api("sessions", session.machineId, session.sessionId, "queue", "send-now"), "POST", ByteArray(0).toRequestBody()).use {
+            if (!it.isSuccessful) throw HubFailure.from(it)
         }
     }
 
@@ -144,6 +156,31 @@ class HttpChatActions internal constructor(
             JsonCodec.decodeFromString<SessionInfo>(it.body!!.string())
         }
 
+    override suspend fun completeRow(session: Session): Session? {
+        val url = HttpUrl.Builder().scheme("https").host("example.com").addPathSegments("api/v1/sessions")
+            .addQueryParameter("summary", "0").addQueryParameter("limit", "1")
+            .addQueryParameter("machine_id", session.machineId).addQueryParameter("session_id", session.sessionId).build()
+        return request(url.encodedPath + "?" + url.encodedQuery, "GET", null).use {
+            if (!it.isSuccessful) throw HubFailure.from(it)
+            JsonCodec.decodeFromString<SessionsResponse>(it.body!!.string()).sessions
+                .firstOrNull { row -> row.sessionId == session.sessionId }?.copy(machineId = session.machineId)
+        }
+    }
+
+    override suspend fun interactionHistory(session: Session): List<InteractionRecord> {
+        val url = HttpUrl.Builder().scheme("https").host("example.com").addPathSegments("api/v1/interactions/history")
+            .addQueryParameter("machine_id", session.machineId).addQueryParameter("session_id", session.sessionId)
+            .addQueryParameter("limit", HISTORY_LIMIT.toString())
+            .apply { session.manager?.takeIf(String::isNotEmpty)?.let { addQueryParameter("manager", it) } }.build()
+        return request(url.encodedPath + "?" + url.encodedQuery, "GET", null).use { response ->
+            if (response.code == 403 || response.code == 404) return emptyList()
+            if (!response.isSuccessful) throw HubFailure.from(response)
+            // One row the app can't read leaves the others (iOS decodes each lossily).
+            val rows = (JsonCodec.parseToJsonElement(response.body!!.string()) as? JsonObject)?.get("interactions") as? JsonArray
+            rows.orEmpty().mapNotNull { row -> runCatching { JsonCodec.decodeFromJsonElement<InteractionRecord>(row) }.getOrNull() }
+        }
+    }
+
     override suspend fun verify(session: Session, action: ChatAction): ChatActionResult = lock.withLock {
         verifyLocked(session, uncertain[session.key to kind(action)] ?: action)
     }
@@ -158,12 +195,7 @@ class HttpChatActions internal constructor(
                 val current = all.firstOrNull { it.key == session.key }
                 when (action) {
                     is ChatAction.Rename -> current?.title == action.title.trim()
-                    is ChatAction.Modes -> current != null &&
-                        (action.permissionMode == null || current.permissionMode == action.permissionMode) &&
-                        (action.effort == null || current.effort == action.effort) &&
-                        // a queued switch went through too: the node applies it after the turn
-                        (action.ultracode == null || current.ultracode == action.ultracode || current.ultracodePending) &&
-                        (action.dismissUltracodeLost == null || current.ultracodeLostAt == null)
+                    is ChatAction.Modes -> current != null && modesApplied(current, action)
                     ChatAction.Close -> current == null || !current.isLive
                     ChatAction.Interrupt -> current != null && current.status in listOf("idle", "done", "offline")
                     ChatAction.Attach -> current?.attached == true
@@ -200,3 +232,23 @@ class HttpChatActions internal constructor(
 }
 
 private const val REWIND_READ_TIMEOUT_SECONDS = 110L
+/** As many of a session's cards as the hub gives (iOS `Delegated.historyLimit`): its limit counts permissions too. */
+private const val HISTORY_LIMIT = 500
+
+/**
+ * Whether [current] shows [action] went through. A switch to another launcher (`launcher_switch`) waits on the row as its
+ * `pending_switch` (or was carried out by now), its model and effort being the switch's; the session's own launcher
+ * drops the one that waited, and the rest then apply to the session as without it.
+ */
+internal fun modesApplied(current: Session, action: ChatAction.Modes): Boolean {
+    val own = current.launcher?.takeIf(String::isNotEmpty) ?: "claude"
+    if (action.launcher != null && action.launcher != own)
+        return current.pendingSwitch?.launcher == action.launcher || current.launcher == action.launcher
+    return (action.launcher == null || current.pendingSwitch == null) &&
+        (action.model == null || current.model.equals(action.model, ignoreCase = true)) &&
+        (action.permissionMode == null || current.permissionMode == action.permissionMode) &&
+        (action.effort == null || current.effort == action.effort) &&
+        // a queued switch went through too: the node applies it after the turn
+        (action.ultracode == null || current.ultracode == action.ultracode || current.ultracodePending) &&
+        (action.dismissUltracodeLost == null || current.ultracodeLostAt == null)
+}

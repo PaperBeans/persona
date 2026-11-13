@@ -3,6 +3,8 @@ package hub
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -24,35 +26,42 @@ func TestAssistantCardActionsDenyExtensionTokens(t *testing.T) {
 	}
 }
 
-// assistant.html_views defaults on, means nothing without persona_view, and reaches the assistant and hello.features.
-func TestAssistantHTMLViewsSwitches(t *testing.T) {
-	on, off := true, false
+// The assistant's cards are always on (#5509): hello.features lists both card interfaces, and the assistant's hello
+// still says both switches on for a manager from before, whatever a hub.json that still has the retired keys says.
+func TestAssistantCardsAlwaysOn(t *testing.T) {
+	h := newTestHub(t)
+	hello, err := assistantLink{h}.Hello(context.Background())
+	if err != nil || !hello.PersonaView || !hello.HTMLViews {
+		t.Fatalf("hello %+v %v", hello, err)
+	}
+	features := h.features()
+	if !slices.Contains(features, "assistant_views") || !slices.Contains(features, "assistant_html_bridge") {
+		t.Fatalf("features %v", features)
+	}
+}
+
+// A hub.json that still has the retired keys parses, and they are named for the start-up log.
+func TestRetiredAssistantKeys(t *testing.T) {
 	for _, tc := range []struct {
-		persona  bool
-		override *bool
-		html     *bool
-		views    bool
-		bridge   bool
+		file string
+		want []string
 	}{
-		{false, nil, nil, false, false},
-		{true, nil, nil, true, true},
-		{true, nil, &off, true, false},
-		{false, &on, nil, true, true},
-		{true, &off, nil, false, false},
-		{false, &on, &off, true, false},
+		{`{"assistant":{"persona_view":false,"html_views":false,"external":true}}`, []string{"assistant.persona_view", "assistant.html_views"}},
+		{`{"assistant":{"persona_view":true}}`, []string{"assistant.persona_view"}},
+		{`{"assistant":{"external":true}}`, nil},
+		{`{"persona_view":true}`, nil},
+		{`{"assistant":"not an object"}`, nil},
+		{`not json`, nil},
 	} {
-		h := newTestHub(t)
-		h.cfg.Assistant.PersonaView, h.cfg.Assistant.HTMLViews = tc.persona, tc.html
-		h.admin.mu.Lock()
-		h.admin.personaView = tc.override
-		h.admin.mu.Unlock()
-		hello, err := assistantLink{h}.Hello(context.Background())
-		if err != nil || hello.PersonaView != tc.views || hello.HTMLViews != tc.bridge {
-			t.Fatalf("%+v: hello %+v %v", tc, hello, err)
+		if got := retiredKeysIn([]byte(tc.file)); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: %v, want %v", tc.file, got, tc.want)
 		}
-		features := h.features()
-		if slices.Contains(features, "assistant_views") != tc.views || slices.Contains(features, "assistant_html_bridge") != tc.bridge {
-			t.Fatalf("%+v: features %v", tc, features)
-		}
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "hub.json"), []byte(`{"token":"example","assistant":{"persona_view":false,"html_views":false}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readConfigFile(dir); err != nil {
+		t.Fatalf("hub.json with the retired keys: %v", err)
 	}
 }

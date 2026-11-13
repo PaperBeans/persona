@@ -2,6 +2,7 @@
 import copy
 import datetime as dt
 import json
+from pathlib import Path
 import subprocess
 import sys
 import unittest
@@ -13,6 +14,23 @@ with patch.dict(sys.modules, {'paramiko': Mock()}):
 
 
 class ModuleClosureTests(unittest.TestCase):
+    def test_remote_program_runs_under_the_configured_python(self):
+        for extra, expected in (({}, 'python3 -'), ({'remote_python': '/opt/python3.13/bin/python3'},
+                                                     '/opt/python3.13/bin/python3 -')):
+            with self.subTest(extra=extra):
+                client = Mock()
+                stdout, stderr = Mock(), Mock()
+                stdout.read.return_value = json.dumps({'manager_id': 'assistant', 'run_id': 'run-1',
+                                                       'source': 'a' * 40, 'phase': 'checked'}).encode()
+                stdout.channel.recv_exit_status.return_value = 0
+                stderr.read.return_value = b''
+                client.exec_command.return_value = Mock(), stdout, stderr
+                cfg = {'target': {'manager_id': 'assistant'}, 'remote_root': '/example', **extra}
+                with patch.object(publisher, 'manager_manifest', return_value={'commit': 'a' * 40, 'files': {}}), \
+                        patch.object(publisher, 'connect_publisher', return_value=(client, None)):
+                    publisher.publish(cfg, Path('/example/artifacts'), 'assistant', 'run-1')
+                self.assertEqual(client.exec_command.call_args.args[0], expected)
+
     def test_remote_program_loads_without_repository_import_path(self):
         program = publisher.remote_program({}).rsplit('module.promote(', 1)[0]
         result = subprocess.run([sys.executable, '-I', '-c', program],

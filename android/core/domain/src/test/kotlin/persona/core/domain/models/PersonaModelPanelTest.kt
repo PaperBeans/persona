@@ -1,0 +1,104 @@
+package persona.core.domain.models
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import persona.core.contracts.ModelPick
+import persona.core.contracts.Session
+import persona.core.contracts.api.AgentLauncher
+import persona.core.contracts.api.AgentModel
+import persona.core.contracts.api.AssistantLaunchers
+import persona.core.contracts.api.LauncherDefault
+import persona.core.contracts.api.LauncherModels
+import persona.core.contracts.api.UnavailableLauncher
+
+/**
+ * A Persona chat's stored pick and its panel (the web's `lib/assistant-panel.test.ts` and `AssistantModelPill.test.tsx`,
+ * #5055): the pick read from `model_pick`, where the setup comes from, the providers with the ones that can't run there,
+ * and what a pick keeps.
+ */
+class PersonaModelPanelTest {
+    private val chat = Session(machineId = "mac", sessionId = "c2", assistant = true, agent = "claude", launcher = "claude",
+        model = "claude-opus-5-5", effort = "high", status = "idle", state = "idle")
+    private val info = AssistantLaunchers(
+        launchers = listOf(AgentLauncher("claude"), AgentLauncher("team", displayName = "Team API", model = "sonnet"), AgentLauncher("cx", agentType = "codex")),
+        default = LauncherDefault("claude", "opus", "high"),
+        unavailable = listOf(UnavailableLauncher("resp", displayName = "Responses API", kind = "api", code = "api_protocol", reason = "Speaks Responses")),
+    )
+    private val lists = mapOf(
+        "claude" to LauncherModels("claude", listOf(AgentModel("default", "Default", resolved = "claude-opus-5-5", isDefault = true),
+            AgentModel("opus", "Opus 5.5", resolved = "claude-opus-5-5"), AgentModel("sonnet", "Sonnet 4.5"))),
+        "team" to LauncherModels("claude", emptyList()),
+    )
+    private fun read(name: String) = ModelList(read = true, list = lists[name])
+    private fun of(session: Session?, main: Boolean = false, kept: Boolean = true, page: ModelPick? = null) =
+        PersonaModelPanel.Chat(session, isMain = main, kept = kept, config = "claude", pagePick = page)
+
+    @Test fun thePickIsReadFromModelPickWhereTheHubKeepsIt() {
+        val picked = chat.copy(modelPick = ModelPick("team", "sonnet", "low"))
+        assertEquals(ModelPick("team", "sonnet", "low"), PersonaModelPanel.pick(of(picked)))
+        assertEquals(PersonaModelPanel.Setup("team", "sonnet", "low", PersonaModelPanel.Source.Pick), PersonaModelPanel.setup(of(picked), info))
+        // an older hub: the page's own pick, never a stale model_pick
+        assertNull(PersonaModelPanel.pick(of(picked, kept = false)))
+        assertEquals(ModelPick("team"), PersonaModelPanel.pick(of(picked, kept = false, page = ModelPick("team"))))
+        // a pick without an effort runs on the chat's
+        assertEquals("high", PersonaModelPanel.setup(of(chat.copy(modelPick = ModelPick("team"))), info).effort)
+    }
+
+    @Test fun withoutAPickTheMainChatFollowsTheDefaultAndAnotherKeepsItsOwn() {
+        assertEquals(PersonaModelPanel.Setup("claude", "opus", "high", PersonaModelPanel.Source.Default), PersonaModelPanel.setup(of(chat, main = true), info))
+        assertEquals(PersonaModelPanel.Setup("claude", "claude-opus-5-5", "high", PersonaModelPanel.Source.Own), PersonaModelPanel.setup(of(chat), info))
+        // the new-chat page: the default
+        assertEquals(PersonaModelPanel.Source.Default, PersonaModelPanel.setup(of(null), info).source)
+        // a launcher the list no longer offers: the assistant's
+        val gone = chat.copy(launcher = "old", model = "x")
+        assertEquals(PersonaModelPanel.Setup("claude", null, "high", PersonaModelPanel.Source.Own), PersonaModelPanel.setup(of(gone), info))
+    }
+
+    @Test fun theProvidersEndWithWhatCantRunThere() {
+        val setup = PersonaModelPanel.setup(of(chat), info)
+        val panel = PersonaModelPanel.panel(setup, info, ::read, typed = true, running = true)
+        assertEquals(listOf("claude", "team", "cx", "resp"), panel.providers.map { it.id })
+        assertEquals("Team API", panel.providers[1].name)
+        // no list to read: the model it is set up with
+        assertEquals(listOf("sonnet"), panel.providers[1].models?.map { it.id })
+        assertEquals(PanelReason.OtherEngine("claude", "codex"), panel.providers[2].unavailable)
+        assertEquals(PanelReason.Hub("Speaks Responses"), panel.providers[3].unavailable)
+        assertEquals("Responses API", panel.providers[3].name)
+        assertEquals(PanelConfig("claude", "opus", "high"), panel.state.current)
+        assertEquals(listOf("claude"), panel.state.recommended)
+        assertTrue(panel.providers[0].typable)
+        // the new-chat page runs nothing yet: every kind is offered
+        assertNull(PersonaModelPanel.panel(setup, info, ::read, typed = true, running = false).providers[2].unavailable)
+        // without typed ids on the hub, no "Use …"
+        assertTrue(PersonaModelPanel.panel(setup, info, ::read, typed = false).providers.none { it.typable })
+    }
+
+    @Test fun aPickThatIsGoneStaysShownOff() {
+        val setup = PersonaModelPanel.Setup("old", "x", null, PersonaModelPanel.Source.Pick)
+        val first = PersonaModelPanel.panel(setup, info, ::read, typed = false).providers.first()
+        assertEquals("old", first.id)
+        assertEquals(PanelReason.ProviderGone, first.unavailable)
+    }
+
+    @Test fun whatAPickKeeps() {
+        val current = PanelConfig("claude", "opus", "high")
+        assertEquals(ModelPick("team", "sonnet"), PersonaModelPanel.pickOf(PanelConfig("team", "sonnet"), lists["team"], current))
+        // a launcher's default entry keeps no model
+        assertEquals(ModelPick("claude", null, "low"), PersonaModelPanel.pickOf(PanelConfig("claude", "default", "low"), lists["claude"], current))
+        // the setup the chat runs now keeps nothing new; an id the hub would refuse neither
+        assertNull(PersonaModelPanel.pickOf(current, lists["claude"], current))
+        assertNull(PersonaModelPanel.pickOf(PanelConfig("team", "two words"), lists["team"], current))
+    }
+
+    @Test fun thePillSaysWhatTheNextMessageRunsOn() {
+        val picked = chat.copy(modelPick = ModelPick("team"))
+        val setup = PersonaModelPanel.setup(of(picked), info)
+        val pill = PersonaModelPanel.pill(of(picked), setup, info, read("team"))
+        // no list names it: the model it is set up with, said briefly
+        assertEquals(PillSetup("claude", "Team API", "sonnet", "high"), pill.setup)
+        val main = PersonaModelPanel.pill(of(chat, main = true), PersonaModelPanel.setup(of(chat, main = true), info), info, read("claude"))
+        assertEquals(PillSetup("claude", "claude", "Opus 5.5", "high"), main.setup)
+    }
+}

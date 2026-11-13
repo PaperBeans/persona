@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -397,6 +398,47 @@ func TestReadinessProbe(t *testing.T) {
 	}
 }
 
+// A client that stops waiting for its probe (its own time ran out, the page closed) does not cut the check off: the
+// result is kept, and the next try within the reuse window answers it instead of starting the check again (#1892).
+func TestReadinessProbeOutlivesTheClient(t *testing.T) {
+	f, s, _ := readyMachine(t)
+	started, release := make(chan struct{}, 1), make(chan struct{})
+	var asked atomic.Int32 // the checks the node was asked for, the one cut off too
+	f.mu.Lock()
+	f.checkWait = func(ctx context.Context) error {
+		asked.Add(1)
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+			return ctx.Err() // a check cut off with the client fails, however the select woke
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	f.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = serveHTTP(ctx, s, assistantwire.HTTPRequest{Method: "GET", Path: "/api/v1/assistant/readiness", Query: "probe=1"}, s.lang)
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the check never started")
+	}
+	cancel() // the client hangs up while the check runs
+	close(release)
+	<-done
+	r := getReadiness(t, s, "probe=1", "")
+	if r.Probe == nil || !r.Probe.OK || asked.Load() != 1 {
+		t.Fatalf("the try after: %+v, checks asked for %d (want the first one's result, 1)", r.Probe, asked.Load())
+	}
+}
+
 // "Later" is kept in the settings (assistant.readiness), with the last result.
 func TestReadinessDismiss(t *testing.T) {
 	f, s, st := readyMachine(t)
@@ -556,6 +598,86 @@ func TestReadinessKeyStatusUnverified(t *testing.T) {
 	f2.auth = map[string]proto.ClaudeAuthStatus{"server/claude": {State: proto.ClaudeAuthUnknown, Reason: proto.ClaudeAuthOld}}
 	if m := readinessStep(t, getReadiness(t, s2, "", ""), StepModel); m.State != StepUnknown || m.Detail != "发一句试试，确认模型能回答。" {
 		t.Fatalf("unknown status: %+v", m)
+	}
+}
+
+// A problem's occurrence identifies this failure across reads, and advances for a later failure with the same words.
+func TestReadinessFailureOccurrence(t *testing.T) {
+	firstAt := time.Now().Add(-time.Hour).UTC()
+	f, s, _ := readyMachine(t, proto.Session{SessionID: "m1", State: proto.StateIdle, TurnError: "API Error: 429 Too Many Requests", UpdatedAt: firstAt})
+	occurrence := func(r Readiness) string {
+		t.Helper()
+		raw, err := json.Marshal(readinessStep(t, r, StepModel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := fields["occurrence"].(string)
+		return got
+	}
+	first := getReadiness(t, s, "", "")
+	if got, want := occurrence(first), firstAt.Format(time.RFC3339Nano); got != want {
+		t.Fatalf("first occurrence = %q, want %q", got, want)
+	}
+	if got := occurrence(getReadiness(t, s, "", "")); got != firstAt.Format(time.RFC3339Nano) {
+		t.Fatalf("an ordinary read changed the failure occurrence: %q", got)
+	}
+	f.setSessions("server", proto.Session{SessionID: "m1", State: proto.StateIdle, TurnError: "API Error: 429 Too Many Requests", UpdatedAt: firstAt.Add(time.Second)})
+	if got, want := occurrence(getReadiness(t, s, "", "")), firstAt.Add(time.Second).Format(time.RFC3339Nano); got != want {
+		t.Fatalf("a later failure kept the old occurrence: %q, want %q", got, want)
+	}
+
+	// Rechecking one subscription window advances checked_at, not the occurrence. A new reset window is a new failure.
+	reset := time.Now().Add(time.Hour).UTC()
+	_, healthService, _ := readyMachine(t)
+	record := LauncherHealth{Machine: "server", Launcher: "claude", State: healthFailing, Kind: errKindUsageLimit,
+		Error: "API Error: 429", CheckedAt: time.Now().Add(-time.Minute), ResetsAt: &reset}
+	healthService.health.loaded = true
+	healthService.health.recs = map[string]*LauncherHealth{healthKey("server", "claude"): &record}
+	if got, want := occurrence(getReadiness(t, healthService, "", "")), reset.Format(time.RFC3339Nano); got != want {
+		t.Fatalf("health occurrence = %q, want reset window %q", got, want)
+	}
+	record.CheckedAt = time.Now()
+	if got := occurrence(getReadiness(t, healthService, "", "")); got != reset.Format(time.RFC3339Nano) {
+		t.Fatalf("a repeated health check revived the same reset window: %q", got)
+	}
+	laterReset := reset.Add(time.Hour)
+	record.ResetsAt = &laterReset
+	if got := occurrence(getReadiness(t, healthService, "", "")); got != laterReset.Format(time.RFC3339Nano) {
+		t.Fatalf("a new reset window kept the old occurrence: %q", got)
+	}
+
+	// The settled health record comes from the same main turn. Its reset must not give that turn a second occurrence.
+	turnReset := time.Now().Add(2 * time.Hour).UTC()
+	turn := proto.Session{SessionID: "m1", State: proto.StateIdle, TurnError: limitText, TurnErrorKind: proto.TurnErrorUsageLimit,
+		TurnErrorResetsAt: &turnReset, UpdatedAt: firstAt}
+	turnHub, turnService, _ := readyMachine(t, turn)
+	beforeHealth := occurrence(getReadiness(t, turnService, "", ""))
+	settled := LauncherHealth{Machine: "server", Launcher: "claude", State: healthFailing, Kind: errKindUsageLimit,
+		Error: limitText, CheckedAt: firstAt.Add(time.Minute), ResetsAt: &turnReset}
+	turnService.health.loaded = true
+	turnService.health.recs = map[string]*LauncherHealth{healthKey("server", "claude"): &settled}
+	if got := occurrence(getReadiness(t, turnService, "", "")); got != beforeHealth {
+		t.Fatalf("settling the same turn changed its occurrence from %q to %q", beforeHealth, got)
+	}
+	if beforeHealth != firstAt.Format(time.RFC3339Nano) {
+		t.Fatalf("main turn occurrence = %q, want turn time %q", beforeHealth, firstAt.Format(time.RFC3339Nano))
+	}
+	laterTurnReset := turnReset.Add(time.Hour)
+	turn.TurnErrorResetsAt, turn.UpdatedAt = &laterTurnReset, firstAt.Add(time.Minute)
+	turnHub.setSessions("server", turn)
+	turnService.health.recs = nil
+	if got, want := occurrence(getReadiness(t, turnService, "", "")), firstAt.Add(time.Minute).Format(time.RFC3339Nano); got != want {
+		t.Fatalf("a later turn occurrence = %q, want %q", got, want)
+	}
+	previousTurn := occurrence(getReadiness(t, turnService, "", ""))
+	turn.UpdatedAt = firstAt.Add(2 * time.Minute) // a genuine second turn within the same reset window
+	turnHub.setSessions("server", turn)
+	if got := occurrence(getReadiness(t, turnService, "", "")); got == previousTurn {
+		t.Fatalf("a later turn in the same reset window kept the dismissed occurrence %q", got)
 	}
 }
 

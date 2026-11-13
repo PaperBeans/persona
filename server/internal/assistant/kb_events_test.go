@@ -57,7 +57,7 @@ func TestKBEventsFollowSuccessfulWritesAndForget(t *testing.T) {
 	f := &kbEventTestHub{fakeHub: newFakeHub()}
 	f.hello.KB = &KBSettings{}
 	s := New(Options{Hub: f, KB: &KBOptions{Dir: t.TempDir()}, Logf: testLogf(t)})
-	t.Cleanup(s.kbClose)
+	t.Cleanup(s.kbEnd)
 	setSettings(t, s, func(v *Settings) { v.Timezone = "UTC" })
 	e := kbEng(t, s)
 	if err := e.Store.PutChat(&kb.Chat{ID: "example-chat", Source: "example", Name: "示例会话"}); err != nil {
@@ -100,7 +100,7 @@ func TestKBForgottenWaitsForIndexCleanup(t *testing.T) {
 	f.hello.KB = &KBSettings{}
 	st := &failingKBIndex{newKBStore()}
 	s := New(Options{Hub: f, Store: func() Store { return st }, KB: &KBOptions{Dir: t.TempDir()}, Logf: testLogf(t)})
-	t.Cleanup(s.kbClose)
+	t.Cleanup(s.kbEnd)
 	setSettings(t, s, func(v *Settings) { v.Timezone = "UTC" })
 	_ = kbEng(t, s)
 	if _, err := s.kbForget(context.Background(), "example"); err == nil {

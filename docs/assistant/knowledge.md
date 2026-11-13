@@ -37,7 +37,7 @@ As part of moving hub business logic into managers (`docs/assistant/assistant.md
   the user's timezone can be read (archives are placed in that timezone first, avoiding writes in another timezone), and the data directory lock (`data/.lock`, only one manager process writes at a time).
   Before opening: `kb_*` tools say "Not ready yet; try again later"; app APIs return `503 kb_unavailable`; plugin posts get the same error (resubmit next round); source deletion gets 503;
   Agent-finished entries wait in the manager (latest per Agent, at most 200) and are written once open. On disconnect from the hub, the manager closes the knowledge base and releases the lock,
-  preventing a process the hub no longer recognizes (token replaced) from writing alongside its replacement; it reopens on reconnect. Changed hub `kb` settings (handshake after hub restart) trigger reopening with the new settings.
+  preventing a process the hub no longer recognizes (token replaced) from writing alongside its replacement; it reopens on reconnect. When the manager stops (its connection to the hub is no longer served), it closes for good: a call that comes later, such as a debounced timer firing while the process winds down, finds it not open, so it neither takes the lock back from the manager taking over nor writes into the directory (#5510). Changed hub `kb` settings (handshake after hub restart) trigger reopening with the new settings.
 - **When the manager is disconnected** (restart, crash, newly started hub):
   - Archiving waits; **nothing is lost**: connectors redeliver by cursor (on return the manager reads from the last written position, reading every due connector in its first round); plugin post calls
     wait up to 30 seconds for the manager (plugins start with the hub, before the manager; manager restarts), then return `assistant_offline` if still absent; the plugin stops this round there and rereads next round;
@@ -80,7 +80,7 @@ Transcribed text from phone recordings (and watch recordings relayed through the
 - Detail, segment, reconciliation, search and summarization readers wait for active replacements and use a coherent accepted snapshot while a journal remains. Writable open restores pending snapshots before returning a store; a recovery error prevents opening or further recording metadata edits. Read-only open refuses an archive requiring recovery. Legacy directories need no migration, and the existing file paths and transcript links stay valid.
 - Recovery assumes one writable store owns the archive directory. Individual file contents are synced before replacement and directory syncing is best effort where supported; subprocess interruption and replacement failures are tested, not arbitrary hardware or filesystem corruption. External filesystem readers must wait for writable recovery if a journal remains: raw files can contain unfinished replacements after interruption or failed restoration. The journal covers upload content, not a transaction with generated summaries, project links or the database index; that index remains rebuildable from files.
 - For completed transcripts (`complete: true`) whose current revision has not been summarized, each manager round makes at most 3 model calls for them, newest first, failed ones included (same purpose as chat compression, `kb.compress`, prompt `prompts/kb/recording.md`). A recording whose summary failed waits 10 minutes, doubled with each failure in a row up to 6 hours, and the next one goes on; a new revision of it is tried at once (#4246; before, the first failure stopped the round and that recording was sent again every round). A paused model connection, or no model set up, stops the round without counting:
-  produces a summary, one-line description, title (used if the user has not named it), tags and mentioned projects; projects are linked normally (a "Recording · Title" project timeline entry). At most 24k characters go to the model (keeping the beginning and end).
+  produces a summary, one-line description, title (used if the user has not named it), tags and mentioned projects, written in the recording's language (else the owner's; [meeting-minutes.md](meeting-minutes.md) "How the hub generates them"); projects are linked normally (a "Recording · Title" project timeline entry). At most 24k characters go to the model (keeping the beginning and end).
 - Retention follows assistant setting `recording_days` (default 14 days, independent of `text_days`): each round deletes directories and index rows whose start time predates retention; tombstones are retained equally long.
   A recording with minutes is **trimmed** instead (#3780): past `recording_days` its directory keeps only `meta.json` (with `trimmed_at`), `minutes.json`, `minutes.md`, a meeting's `meeting.json` (its private mark and its room, which the manager deletes then; never searched, [meeting-minutes.md](meeting-minutes.md) "Upload fields") and the photos the minutes cite (their files in `attachments/`, their entries in `photos.json` and `photos.md`; [meeting-minutes.md](meeting-minutes.md) "Phase 3: photos"), and everything else (`segments.json`, `transcript.md`, `summary.md`, `live.json`, the other photos, a pending undo journal, which is restored first) is deleted; its index row stays. It is deleted like any other once it started before assistant setting `minutes_days` (forever by default: unset or `0`; otherwise 1–3650 days, never below `recording_days`). With forever, retention never deletes these minutes; the user can still delete the recording and its minutes together. A trimmed recording is still listed, read and searched by its minutes; it takes no upload (`expired`), gets no summary and no new minutes, and its attendance is off. Tombstones keep the `recording_days` window: an upload of anything older is expired anyway (`server/internal/kb/recordings.go`, `PruneRecordings`).
 - `kb_list` / `kb_get` / `kb_search` and the app's Knowledge page gain the `recordings` category; `kb_get` includes summary, bookmarks and any transcription still retained (up to 12k characters). Recording content cannot be edited via `kb_update` (the phone is authoritative); only tags can change.
@@ -111,7 +111,7 @@ and tells it to read their AGENTS.md / CLAUDE.md before reading or writing. Pers
     summary.md              # Compressed context (AI-maintained, rolling updates)
     .receipts.json          # Live-ingestion source/chat message IDs and original times (bookkeeping, not searched)
     retention.json          # Retention ledger: the selection rule of each line another rule than the chat's usual one decided (not searched)
-    .ingest.json            # Pending live-ingestion recovery intent, removed after completion
+    .ingest.json            # Pending live-ingestion recovery intent, removed after completion (not searched)
   people/<person id>/       # One directory per person: Lark lark-<userId>, mail mail-<address>
     meta.json               # Name, chats, linked projects, tags
     summary.md              # Who they are, relationship to me, recent conversations with me
@@ -618,7 +618,7 @@ Archive dates and times (daily files, each line's "- 15:04", timeline "- 2006-01
 
 Files record clock times, not timezones, so each file declares its timezone and all data moves once on a timezone change (`kb/zone.go`):
 
-- **Chats:** `messages/.zone` records the timezone name. Without this file, the data predates timezone tracking and was written in the hub's timezone.
+- **Chats:** `messages/.zone` records the timezone name. It is bookkeeping: search never reads it as a day. Without this file, the data predates timezone tracking and was written in the hub's timezone.
   - `Store.Rezone` converts each line to an instant using the old timezone, then regroups by day and rewrites clock times in the new one.
   - Write first to `messages.rezone/`, then swap with `messages/`, so each chat is entirely new or entirely old.
   - Interrupted work resumes next time: before the swap, original files remain untouched; after it, only `messages.old/` needs deletion. The same data is never converted twice.
@@ -836,6 +836,55 @@ Now every locked field has a holder, and writes follow **the user > an extension
 - The answer carries `before`: each written field's previous value (`summary` the old text), so the extension can keep its own undo log; undo is another `kb.update` with those values, plus `unlock` when the field was free before.
 - **Without extensions nothing changes**: no write adds `provenance`; the user's writes only remove entries that exist. The legacy `hub_api` HTTP `PUT` from an extension token still counts as the user.
 
+### Fields each kind takes
+
+Every write path (`kb.update`, HTTP `PUT`, the assistant's `kb_update`) takes only the fields the entry's kind uses (`kb/fields.go`). Everything else is taken out of the update before it applies, so it is neither written, nor locked, nor attributed. The answer names it in `ignored: [{field, reason}]` (the assistant's tool says "Not saved: …"); fields used are written as before. Any kind takes `importance`, `relevance`, `tags`, `pinned` and `lock`, and in addition:
+
+| Kind | Also takes |
+| --- | --- |
+| projects | `name`, `project_kind`, `status`, `goal`, `my_role`, `note`, `summary`, `log` (with `source`), `aliases` / `remove_aliases`, `chats` / `remove_chats`, `people` / `remove_people`, `dirs`, `merge_into` |
+| chats | `name`, `summary`, `projects` / `remove_projects`, `remove_people` |
+| people | `note`, `status`, `profile`, `projects` / `remove_projects`, `remove_chats` |
+| docs, meetings, events | `note`, `projects` / `remove_projects` |
+| topics | `name`, `note`, `aliases` / `remove_aliases` (`summary` is refused: it is written from the points) |
+| recordings | `projects` / `remove_projects` |
+
+A person's `summary` and `log` used to be dropped without a word (and `summary` was even locked, for nothing): summary.md is written from what is known of the person. What an extension knows of them goes in its `profile`.
+
+### Person profiles
+
+A person's summary.md (`WritePersonSummary`) is written from what is known: the user's confirmed facts (`pinned`), the note, the projects and chats, the direct chat's summary. What a writer has learned about the person (an extension that keeps track of the people the user deals with, or the user) goes in a **profile** of its own, in four parts kept apart (`kb/profile.go`):
+
+| Part | What | Each item |
+| --- | --- | --- |
+| `facts` | Their role, what they are in charge of, how they relate to the user | `text`, `sources` |
+| `views` | What the user said of them, in the user's own words | `text` (quoted), `sources` |
+| `inferences` | What the writer infers and nobody stated; only a hint | `text`, `basis` (required), `sources` |
+| `commitments` | Promises and to-dos between them, either way | `text`, `owes` (`user`: the user to them; `them`: they to the user), `due?` (YYYY-MM-DD), `done?`, `sources` |
+
+- **Sources** are required on every item (1 to 5): a knowledge-base path (`chats/<id>/messages/<day>.md`, `recordings/<id>`), a URL, or `user` for the user's own word.
+- **Bounds**: at most 30 items a part, 500 characters a text, 300 a basis, and 8000 bytes for one profile as summary.md shows it. A profile that breaks a rule is refused whole (`invalid_params` over RPC, 400 over HTTP) and nothing of the update is written; nothing is cut to fit.
+- **Whose**: each writer has its own (`ext:<id>` for an extension, `user` for the user's writes). A write of `profile` replaces only the writer's own as a whole; one with no items removes it. Nobody else's profile, nor the person's `pinned` and `note`, is touched, so a profile never conflicts with another holder and adds nothing to `locked_fields` or `provenance`. The answer's `before.profile` is the writer's profile before (or `null`).
+- **Stored** in `people/<id>/profiles.json`, outside meta.json and outside search.
+- **Shown** in summary.md after the pinned facts and the note. There is one section per writer (the user's first, then the extensions' by id), headed with who wrote it, when, and that it is the user's private knowledge, for reference only and never to be passed on to the person or written into anything sent to others. Each part has its own subheading, and every line carries its part (`[事实]`, `[用户原话]`, `[推断·仅供参考]` with its basis, `[承诺·…]`), so a line a search returns still says whether it is a fact or a guess. All profiles together are at most 16000 bytes; a profile that would go past that is named but not shown.
+- **Read**: `kb_get` and `kb.get` show it in `summary`, and `kb.get` also gives `profiles` by writer as written, for an extension to read its own back. `kb_search` and `kb.search` find its lines in summary.md, labelled. An ignored person (`status: ignored`) has no summary.md, so its profiles are kept but not shown.
+
+#### Who reads the private parts
+
+`views` and `inferences` are the user's private view of someone. A conversation that writes to other people on the user's behalf never reads them; the hub enforces this by the conversation's origin, without relying on the heading's instruction (`assistant/outward_reader.go`):
+
+| Conversation | Origin | Reads |
+| --- | --- | --- |
+| The inbox's AI twin (drafts and sends replies) | `inbox` | Facts and commitments only |
+| Lark `/agent` (answers in chats other people read) | `lark_agent` | Facts and commitments only |
+| Any conversation an extension opens (its answers go to the extension, which may send them on) | `extension`, or any origin with `opened_by` | Facts and commitments only |
+| The main conversation, the user's other conversations, a channel's (the owner's private chat) | `user`, `channel`, … | Everything |
+| An extension with `kb.read` (`kb.get`, `kb.search`) | — | Everything, as before |
+
+- **How**: for such a conversation the hub drops every line of a private part, and the parts' subheadings, from whatever any of its tools returns: `kb_get`'s summary.md, `kb_search`'s hits (passed over during the search, so they do not use up its limit), and quotes in `conversation_read`, `agent_read` or any other tool's text. summary.md writes every line of these parts on one line with its label (`[用户原话]`, `[推断·仅供参考]`), even for a profiles.json edited by hand, so a line is recognized wherever it turns up (`kb.PrivateProfileLine`).
+- **When unsure, less**: while the origins cannot be read, every conversation is treated as one of these; so is a conversation not noted yet while a start on its machine is under way (its first tool calls can come before its origin is noted).
+- **Not covered**: the conversation's own file and shell tools (Read, Bash) on a computer that also holds the knowledge base can open `people/<id>/summary.md` or `profiles.json` directly, and an extension's own MCP tools answer it without passing through the hub. A paraphrase, rather than a quote, of a private line in another conversation is not recognized either.
+
 ### Built-in organization and extensions side by side (#6100)
 
 An extension that curates (a daily and weekly pass: triage, sourced summaries, deterministic checks, proposals for review, merges and splits) runs **on top of** the built-in pipeline, not instead of it:
@@ -881,6 +930,7 @@ and a disabled knowledge base (`kb.enabled: false`) returns 503 as before.
 | `POST /api/v1/kb-trash/{id}/restore` | Put a deleted project and its links back; returns the entry; 404 if there is no such entry, 409 if a project with its slug exists again |
 | `GET /api/v1/kb-search?q=&messages=0` | Full-text search (by line, for older apps; assistant `kb_search` does the same search through bus `kb.search`) |
 | `GET /api/v1/kb-search?q=&results=1` | App search: grouped and sorted by entry (`results`: `entry`, `count`, first 3 `hits` lines, `in_name`), see "Search" below |
+| `GET /api/v1/kb-search?q=&kind=` | Either search within one kind (`projects` … `topics`, as `kb_search`'s `kind`; with `results=1`, the ranked entries of that kind); another kind is a 400. The voice `search_knowledge` passes it, `recordings` for past meetings (#3862 phase 6) |
 | `GET /api/v1/kb/{kind}/{id}?q=` | Open from search: adds `matches` (every hit in this entry; messages include `day` and two neighboring messages each in `before` / `after`), up to 40 |
 | `GET /api/v1/kb/moments/{id}` | One archived Moments post (`post`, `markdown`: body + all comments), opened from a project's Related Moments |
 | `GET /api/v1/kb/chats/{id}/context` | What the knowledge base knows about a chat (`chat_id`, `chat_name`, `kind`, `summary`, first three projects as `projects: [{name, summary}]`), same context the hub puts in prompts; read-only, used by plugin /agent (#1484) |

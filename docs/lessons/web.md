@@ -1,5 +1,150 @@
 # Lessons: web UI and interactions
 
+## Removing a client-only prompt includes its hooks and fixture documentation (#6570)
+
+The star toast was browser-local, but readiness refresh and successful Agent creation loaded its rule lazily.
+Remove those producers as well as the rendered prompt and all language namespaces; do not reset real setup or
+conversation state to retire an unused local-storage value. Keep shared fixtures while another client consumes
+them, and update their README's test paths. A readiness regression should wait for dynamic imports to settle:
+a synchronous negative assertion can miss the delayed toast that caused the report.
+
+## Pending cards need exact session metadata outside the loaded page (#6432)
+
+A task row can render from `taskRows` even when `getSession` has no row for its Agent. On a paging hub, hydrate every
+pending card's missing session, not only `folded_under` children, before checking approval capabilities. Keep missing
+and explicitly read-only sessions disabled. Test a root Agent outside the list window, and type without submitting.
+An expanded Needs you title opens the asking Agent; keep folding on its separate chevron, never on that title.
+
+## A grey text selection over sidebar rows reads as a stuck highlight (#6458)
+
+The theme paints `::selection` with `--accent-tint`, a neutral grey in the default theme close to the hover fill. A
+press-and-drag that started on a group's always-shown explanation (trying to drag an Agent onto a to-do) selected the
+group titles, state words and explanations below it, line by line, and pressing the fold buttons afterwards kept it
+(a press on a button does not move the selection), so the owner reported it as a highlight style leaking. Rows that
+fold or group (`Section`'s heading, `TreeBranch`) are `select-none`; a drag test in `web/e2e/todo-grouping.mjs` keeps
+it so. Before calling a stray grey block a style bug, check `String(getSelection())`.
+
+## Live acceptance must distinguish a lookup POST from a mutation (#5753)
+
+The live composer driver rejected the app's normal `POST /api/v1/launchers/catalog`, although the handler is a
+built-in metadata lookup that fetches and stores nothing. Permit that exact route, not every POST, while blocking
+main-chat records and mutations. Save a private test-session record and reuse it after a slow start; check the
+synthetic prompt and side-conversation URL before typing. Capture an expanded editor only after its finite
+animations finish: a half-transparent opening frame can look like text overlaps the chat behind it.
+
+## The live screen's later words go in a lazy component, not in a startup namespace (#5685)
+
+`main.tsx` imports `screen/ScreenView` without waiting for the rest of the catalog, so the build counts every namespace
+ScreenView names as first-screen code, and a namespace in `src/i18n/startup-namespaces.json` ships in every page's first
+screen: the live screen and the App share that catalog. Four Displays-menu strings in `screen-screenview` took the ja first
+screen 49 B over its budget. Words the live screen needs only once it is connected go in a component ScreenView imports
+dynamically (`screen/DisplayMenu.tsx`, namespace `screen-displays`): the build makes that import wait for the rest of the
+catalog, so the first screen does not grow and nothing has to wait for it at run time. Gating ScreenView's own rendering
+on `i18nRest()` does not pass the build: the check reads which namespaces a chunk names, not when it reads them.
+
+## A mouse event sent again comes out on whole pixels (#5729)
+
+Keeping a drag inside a clipping box meant stopping a move outside it and dispatching a new `MouseEvent` at the nearest
+point inside. A centered box rarely has whole-pixel edges, and Chrome hands a constructed event's `clientX` / `clientY`
+back as whole pixels: kept at 81.5, the event read 81, outside again, and was sent again without end. The release never
+reached noVNC, so the Mac's button stayed down. Keep such a point on a whole pixel inside the edges (`ceil` the near edge,
+`floor` the far one), and guard the handler against the event it sends itself. Unit tests with whole-pixel boxes passed;
+`web/e2e/screen-displays.mjs` sizes its window so the edge is fractional.
+
+## Check the keyboard-sized viewport before declaring that a composer grows (#5645)
+
+A 390 × 844 phone showed seven draft lines, but the same phone with 500px visible above the keyboard stopped at
+four: its growth cap used 22% of the visible height, not a six-line limit. Desktop instead stopped at 240px, cutting
+through a twelfth line. Measure the real textarea's line height and padding at both widths and with the keyboard's
+remaining height; cap at six whole lines while retaining the dock's short-viewport safety share. A manual scroll
+was stable at both widths before the fix (idle, hub update and viewport resize), so leave the native scrolling alone
+and pin that behavior with browser tests rather than adding a caret-follow timer for a bug that was not reproduced.
+The follow-up #5682 keeps the six-line limit in `COMPOSER_LINES` and leaves exceptionally short-viewport safety to
+CSS, removing the redundant viewport React state/subscription and keeping the original startup budget unchanged.
+
+## A lazy page importing a first-screen module can split it into a chunk of its own (#3962)
+
+Step 4c's settings pages imported `referenceState` from `lib/extensions.ts`, which the first screen already loaded inside
+another chunk. Rollup puts each module in the chunk shared by everything that imports it, so the new lazy importers moved
+`lib/extensions.ts` into a chunk of its own, still on the first screen, and the first screen grew 1.5 kB in every
+language (the same delta everywhere is the sign) although no first-screen code changed: a separate file compresses worse
+and adds its import and export lists. Put what a lazy page needs from such a module in a small module of its own
+(`lib/secret-reference.ts`). To find the file that moved, build main and the branch with the budget at 1 (the build then
+prints every language's count), and compare the first-screen files' brotli sizes with hashes blanked out.
+
+## Feedback cache eviction must not cancel a send (#5258)
+
+A bounded UI cache owns only the progress projection, not the request's lifetime. Using its entry identity as an
+`isAuthContextCurrent` fence rejects still-authorized queued messages when the first overlay is evicted. Keep credential,
+manager and explicit attempt retirement separate from cache membership; process the durable HTTP result even if the
+projection is gone. Test a queue longer than the cache limit, not only one send and one retry. For visible timing,
+inspect ancestor display/opacity and the viewport, then wait for frames: a DOM mutation can precede a delayed fade and
+an image labelled Sending can still be blank. Keep these browser estimates distinct from physical GPU timing.
+
+Completed-ID observations belong to the same credential/manager generation as the flight. Apply that scope check
+at every cache read, including transcript-driven completion: after a manager switch, an empty items snapshot must
+not finish a new same-ID message using the previous manager's completed record. Test switching to another manager
+and switching back; neither the manager name alone nor a current flight proves ownership of an old observation.
+
+## A deferred dialog's caller labels must stay cold-ready (#5258)
+
+Making ChatSearch lazy does not reduce its translations while `chat-chatsearch` stays in the startup catalog.
+Keep menu, jump, return and load-result labels in the already-startup `chat-chatview` namespace, copying their
+three-language values unchanged; leave the dialog-only namespace deferred. Test both the built startup/rest
+catalogs and the actual menu, search hit and return flow. A primary page must not read a deferred key before
+`i18nRest` finishes; the existing lazy-import guard waits for that resource before running the dialog.
+
+## A size budget over built files must not count their content hashes (#5164)
+
+The first-screen budget added up the brotli copies of files that import and preload each other by content-hashed name.
+A change to a lazy chunk, or to strings off the first screen, renames those chunks, and every first-screen file that
+names them gets eight new near-random characters per reference, which brotli cannot shrink: #5145, a strings-only
+change, measured 34 B more for ja (19 B over the budget) while the first screen's code was unchanged. Count a fixed
+string in place of each built file's hash (`firstScreenBytes` in `web/src/startup-preload.ts`), so only a change to what
+the code does moves the number. Any other compressed-size check over Vite's output needs the same.
+
+## A lazy chunk's new import renames a first-screen chunk's exports (#5331)
+
+Rollup gives each export of a shared chunk a minified alias in the chunk's own order (`a`, `b`, …, `eu`, `ev`) and sorts
+the chunk's `export{…}` list by alias. When a lazy page imports a name from a first-screen chunk that the chunk did not
+export yet (#5310's lazy workflow board took `CATALOG_POLL_MS` and `isResumed` from `App`), the chunk gains one export,
+every later alias moves on by one, the list reorders and every first-screen import of those names is renamed: `App`
+grew 9 B, but the ja count grew 255 B and `main` failed the build, with no first-screen code changed. `firstScreenBytes`
+now counts imported names as one fixed string and export lists as empty ones. To check a surprising move, compare the
+number of entries in each first-screen chunk's `export{…}` between the two builds.
+
+## A change's first-screen cost depends on the main it is measured on (#6348)
+
+The paged Agents list's groups measured +1,402 B for ja on one `main`, then +1,510 B, +1,396 B and +1,501 B on the
+next three, within two hours and with the change's own code untouched: brotli counts a change against everything around it,
+and each merge moved what it compresses against. For the same reason a lazy split saves far less than the module weighs
+alone: the sections' view is about 1.5 KB minified and compressed on its own, and moving it to its own chunk took 407 B
+off. Measure the branch and `main` at the same commit, after the last merge, and write that pair beside
+`FIRST_SCREEN_BUDGET`; never carry a delta over from an earlier base, and never estimate a split from a module's own
+size. A build under its budget prints no numbers: build a scratch checkout with the constant set to 1 B, and the error
+names every language's count. While the PR waits, `main` may raise the budget for its own changes: merge it, keep its
+note, and append yours with a new pair.
+
+## An idle-contracted chunk's growth raises the idle budget, it cannot move to on-intent (#5386)
+
+`code-views-lazy.test` asserts that `ExtensionChart` loads with `{ idle: true }`, so adding the single-category share
+bar to that chunk grew the idle tier 183 gzip bytes and failed `IDLE_TIER_BUDGET` (the headroom was 58 B). Moving the
+renderer to its own on-intent chunk was not an option: the test pins the loading mode on purpose, and splitting the
+module just moves the same bytes into another file the idle tier still pulls. Measure the real baseline before touching
+the constant — a clean main build measured 43,782 B against the 43,840 B limit — then raise `IDLE_TIER_BUDGET` to the
+new measured value and record both numbers and the reason in the comment above it, as the constant's own convention
+requires ("raise it on purpose, in the change that needs it"). A build whose only failure is the startup-preload budget
+still exits non-zero even when the last log lines look like warnings; always check the plugin error text.
+
+## A new list of sessions folds child sessions too (#5120)
+
+Child sessions (`folded_under`) are left out of lists and counts in one place, `foldRows` (`lib/folded-rows.ts`), which
+`useAgentSessions` / `useFullAgentSessions` apply. A view that reads the store's `sessions[mid]` or `sessionSummaries`
+itself (a space's page, a computer's page, the chat header's same-space menu, Forward's list) bypasses it and lists every
+child as an Agent of its own: pass the rows through `foldRows` in its selector (it keeps row identities, so memos hold).
+A count of cards goes by the card's home (`requestHome`, `homeKey`), not its `session_id`. The paged list folds on the
+hub: send `roots=1` on every page and count read while hello lists `sessions_hierarchy`.
+
 ## A menu opened from a layer above the menus' own goes inside that layer (#4991)
 
 - `Menu` portals to `document.body` at `z-50`. The image editor is a full-screen `z-[60]` layer, so a menu opened from it
@@ -7,6 +152,15 @@
   look (the editor's `dark`).
 - A layer that closes on Esc from a capture-phase `keydown` on the window runs before an open menu's handler (also capture,
   registered later). It has to leave Esc alone while its menu is open, or Esc closes the editor instead of the menu.
+
+## Review dismissal must not be bypassed by an old runtime error (#5311)
+
+A task can have both a current `needs_user` review and an idle Agent with a transient `turn_error`. The latter makes its
+status `interrupted`; guarding dismissal and Later with `!waits` therefore leaves the decision visible even after a
+successful persisted dismissal. Protect actual Agent input (`asks` or `needs_you`), not every attention status. Hide the
+review round optimistically in the existing local deferral store, replace that mask with the confirmed receipt, and
+remove the mask on failure. Finish loading in `finally`; unmounting is not a completion signal. Regress both note-only
+and structured reviews with a runtime error, delayed writes, stale list reads, failure recovery, Undo and new rounds.
 
 ## Review state is not an answerable decision (#4808)
 
@@ -87,17 +241,37 @@ that UI. Pass existing task helpers into the editor instead of importing the who
 chunk. Static-render tests exercise the extracted editor directly; mounted tray tests wait for the lazy card and still
 exercise its actions. Leave Send/Dismiss admission, owner capture and revision fences in the synchronous feed layer.
 
-## Gate identity chrome by installed assistants, not by roster availability (#3967)
+## Gate identity chrome by displayable identity, not installed-assistant count (#3967, #3978)
 
-A roster with one assistant does not need assistant identity or switching UI. Reuse the installed-assistant cardinality
-rule used by conversation titles and list grouping; offline installed assistants count and pending installs do not.
-Restore the earlier product header and its existing controls rather than hiding the whole header, which would also
-remove appearance, Settings and Disconnect. Keep product branding and the user's chosen Persona look separate from
-roster name/monogram attribution. Regress one → two → one on a mounted view, along with one installed plus a pending
-install, and assert the rendered labels, avatars and menu rows rather than only the count helper. A phone's menu and
-drawer own separate history entries: wait for each closing entry to pop before the next full-page navigation, or a
-late Back can replace the requested Inbox page with the previous main conversation. Prefer the built web preview for
-broad E2E runs on a busy machine; thousands of Vite development modules can exhaust Chromium's renderer resources.
+The #3978 simplification hid assistant identity again with one installed assistant; that is not the rule. With a
+displayable current assistant, even one installed assistant shows its name, first-character avatar with a status dot,
+and status line at the desktop sidebar's and phone drawer's head, and opens the roster. A single-assistant roster has
+one row with no Default tag and still includes New assistant and Manage assistants…, so creation is not confined to
+Settings. On an older hub whose roster route is unsupported, restore the earlier product header and its existing
+controls rather than hiding the whole header, which would also remove appearance, Settings and Disconnect: keep
+AppMark, Persona, connection/computer status and the original menu. Keep product branding and the user's chosen Persona
+look separate from roster name/monogram attribution.
+
+Remember the last header id and name per hub for display only, including the default assistant's, whose pick is not
+otherwise stored. A reload or transient roster-read failure must not flash the product header; the cached identity does
+not choose an assistant or enable manager behavior. Only an unsupported-roster 404 clears it. An empty roster or no
+displayable current identity must make the product header, 220 px menu and Appearance heading agree, rather than
+pairing an assistant header with the product menu or vice versa.
+
+The behavior gate remains `multiManager`: with one installed assistant or no roster, filtering, badges, extra requests,
+`X-Persona-Manager`, `?manager=` and `needs_you` reads stay off. Conversation titles and message identity also remain
+under `multiManager`, so one assistant keeps the Persona title and existing message identity. Do not reuse roster
+availability for those behaviors, or the installed-assistant count for identity chrome.
+
+Regress no roster → one → two → one on a mounted view, along with one installed plus a pending install, cached default
+and non-default identities across reloads and transient failures, unsupported 404 clearing, and an empty roster or no
+current identity. Assert the rendered labels, avatars, status, Default tag, New assistant / Manage assistants… rows and
+264 / 220 px menu widths, not only the count helper. The header button's `aria-describedby` must reference its visible
+status line so a screen reader hears the same connection or assistant state. Also assert that single-assistant
+filtering and manager-routing requests stay off, and that its offline header does not disable the composer. A phone's
+menu and drawer own separate history entries: wait for each closing entry to pop before the next full-page navigation,
+or a late Back can replace the requested Inbox page with the previous main conversation. Prefer the built web preview
+for broad E2E runs on a busy machine; thousands of Vite development modules can exhaust Chromium's renderer resources.
 
 ## Retention mode changes must not save an intermediate window (#3780, #3862)
 
@@ -561,6 +735,11 @@ Six parallel lanes (chat rendering, message actions, Agents list / Machines, Ter
 
 ### Terminal (xterm.js)
 
+- A Linux Fontconfig preference can substitute a missing desktop family such as Menlo with a proportional face
+  (#5768). Check W and i widths through the entire computed stack. Add explicit Linux monospace faces before
+  platform fallbacks. Put the unicode-range-limited CJK face first so substituted named fonts cannot shadow its
+  size adjustment. Verify the actual xterm row spacing after asynchronous CJK loading in both terminal surfaces.
+
 - DOM-renderer Chinese gaps come from `DomRendererRowFactory`: `spacing = width * cellWidth - measured glyph width`, written as `letter-spacing`. Make Chinese glyphs measure exactly two cells to eliminate gaps. `FontFace` `size-adjust`
   scales only this fallback font; restrict `unicode-range` to CJK, leaving English cell width unchanged.
 - xterm 6 public API has no cursor-hidden state (DECTCEM). When drawing the screen ourselves, read `_core.coreService.isCursorHidden`; if unavailable, draw no cursor.
@@ -991,3 +1170,26 @@ recovery that publishes fewer rows than are on screen moves the reader.
 - **CSP doesn't stop a `<meta http-equiv="refresh">` in a sandboxed `allow-scripts` frame**: the frame navigates itself (one request). Only never drawing a `meta` (or any HTML from the card) stops it. Chromium also opens a connection, without a request, for an `<iframe src>` its CSP refuses. A check of the frame by itself shows both (`web/e2e/html-runtime-security.mjs`, raw mode).
 - **A sync bridge needs its "asking" slot taken synchronously**: a card that calls `persona.reply` 200 times in one turn gets all 200 through a check on React state set in the same tick. Take the slot in the call, not in the render.
 
+## Connector context is not a conversation (#856)
+
+A collected context string loses message boundaries, individual timestamps and
+direction. Do not recover them by splitting on sender names or colons: descriptions
+can contain both. Use `Threads` for structured pages and retain a literal fallback
+for old items. Parse a textual card envelope only inside one source message, and
+keep incomplete or unknown card shapes readable. Capability errors need their own
+code; a 409 without `Threads` is different from a temporary failure or lost access.
+A failed page refresh must not erase a loaded page or its pending reply draft.
+
+## A conversation link is not an answer to a task decision (#5929)
+
+Carry the task and its original decision round when offering Answer in chat. An ordinary chat message, an Agent
+question's answer in the task's ledger, and a pending needs-user closeout are distinct: a decision record alone
+does not settle that closeout. Reuse explicit task routing, show what the next message will answer, reject stale
+rounds, and refresh the pending card only after delivery and recording. A parked review likewise takes precedence
+over stopped/seen turn signals: seeing a turn cannot complete the task.
+
+Keep completed session ownership separate from active task membership. Filling active `session.todo` with a closed
+task would make older consumers treat history as current work. The optional `completed_todo` display reference keeps
+the Web menu useful without changing active links, supervision, counts or quiet rules.
+Put its completion marker before the variable-length title: end truncation can hide a suffix even when a DOM-text
+test finds it. Regress the order in every translation and inspect the actual long-title menu.

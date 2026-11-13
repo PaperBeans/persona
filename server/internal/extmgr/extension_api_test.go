@@ -213,7 +213,7 @@ func TestExtensionAPI(t *testing.T) {
 		t.Fatalf("an event of a type it did not declare went out: %v", b)
 	}
 
-	if md := h.extensions.extensionInstructions(); !strings.Contains(md, "The example feed is read with its skill.") {
+	if md := h.extensions.extensionInstructions(context.Background(), ""); !strings.Contains(md, "The example feed is read with its skill.") {
 		t.Fatalf("instructions: %q", md)
 	}
 	first := h.extensions.extensionSkillsFor("mac")

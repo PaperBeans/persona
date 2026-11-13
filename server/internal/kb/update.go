@@ -222,10 +222,14 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 		return nil, fmt.Errorf("unknown kind %q", kind)
 	}
 	var recording map[string][]byte
+	var meeting *Meeting
+	var hub HubTranscript
 	var raw []byte
 	var err error
 	if kind == KindRecording {
-		recording, err = e.Store.recordingSnapshot(id)
+		// Its files with its meeting.json and the hub's transcript, read together: detail.segments is the transcript of
+		// record, detail.meta has the transcription.
+		recording, meeting, hub, err = e.Store.recordSnapshot(id)
 		raw = recording["meta.json"]
 		if err == nil && raw == nil {
 			err = ErrNotFound
@@ -238,10 +242,7 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 	}
 	d.Meta = raw
 	if kind == KindRecording {
-		e.Store.recFilesMu.RLock()
-		m, _ := e.Store.readMeeting(id)
-		e.Store.recFilesMu.RUnlock()
-		d.Meta = metaWithMeeting(raw, m)
+		d.Meta = metaWithMeeting(raw, meeting)
 	}
 	if kind == KindProject {
 		d.Log = e.Store.Log(id, 30)
@@ -255,9 +256,7 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 		}
 	}
 	if kind == KindRecording {
-		var segs []RecordingSegment
-		_ = json.Unmarshal(recording["segments.json"], &segs)
-		d.Segments = nonNilSegments(segs)
+		d.Segments = nonNilSegments(recordOf(recording, meeting, hub))
 		if raw, err := os.ReadFile(e.Store.path(kind, id, "minutes.json")); err == nil && json.Valid(raw) {
 			var r Recording
 			if json.Unmarshal(recording["meta.json"], &r) == nil {
@@ -285,6 +284,11 @@ func (e *Engine) Get(kind, id string, recentChars int) (*Detail, error) {
 	}
 	if kind == KindTopic {
 		d.Points = e.Store.TopicPoints(id)
+	}
+	if kind == KindPerson {
+		if all := e.Store.profiles(SafeID(id)); len(all) > 0 {
+			d.Profiles = all
+		}
 	}
 	var refs struct {
 		Projects []string `json:"projects"`
@@ -367,19 +371,67 @@ func tagUpdate(u Update, t *Tagging) {
 	}
 }
 
+// projectUpdate keeps fields that the project branch can apply, for locking and attribution too.
+func (e *Engine) projectUpdate(u Update) Update {
+	if u.Kind != "short" && u.Kind != "long" {
+		u.Kind = ""
+	}
+	if u.Status != "active" && u.Status != "paused" && u.Status != "done" && u.Status != "ignored" {
+		u.Status = ""
+	}
+	if !importanceRe.MatchString(u.Importance) {
+		u.Importance = ""
+	}
+	if u.Relevance != nil && (*u.Relevance < 0 || *u.Relevance > 100) {
+		u.Relevance = nil
+	}
+	u.Projects, u.RemoveProjects = nil, nil
+	var chats []string
+	for _, id := range u.Chats {
+		if _, ok := e.Store.Chat(id); ok {
+			chats = append(chats, id)
+		}
+	}
+	u.Chats = chats
+	return u
+}
+
 // Apply changes one entity as the user (the app, the assistant); for projects it creates the project when it does
 // not exist (id = name or slug). Locked fields it touches become the user's: an extension's provenance on them goes.
 func (e *Engine) Apply(kind, id string, u Update) (string, error) {
 	if e.Store.ReadOnly() {
 		return "", ErrReadOnly
 	}
+	u = stripUnsupported(kind, u) // what the kind does not use is neither applied nor locked (Unsupported says it)
+	if err := checkProfile(u.Profile); err != nil {
+		return "", err
+	}
+	profile := u.Profile
+	u.Profile = nil
 	e.Store.applyMu.Lock()
 	defer e.Store.applyMu.Unlock()
+	if kind == KindProject {
+		u = e.projectUpdate(u)
+	}
 	out, err := e.apply(kind, id, u)
 	if err == nil && u.MergeInto == "" {
 		err = e.claim(kind, out, u, "", nil, nil)
 	}
+	if err == nil && profile != nil {
+		_, err = e.putProfile(out, UserWriter, profile)
+	}
 	return out, err
+}
+
+// putProfile replaces writer's profile of person pid and writes the person's summary.md again; it answers the profile
+// it replaced (nil for none).
+func (e *Engine) putProfile(pid, writer string, p *PersonProfile) (*PersonProfile, error) {
+	before, err := e.Store.putProfile(pid, writer, p, time.Now())
+	if err != nil {
+		return before, err
+	}
+	e.WritePersonSummary(pid)
+	return before, nil
 }
 
 func (e *Engine) apply(kind, id string, u Update) (string, error) {
@@ -431,6 +483,9 @@ func (e *Engine) apply(kind, id string, u Update) (string, error) {
 		}
 		if u.MyRole != "" {
 			p.MyRole = oneLine(u.MyRole)
+		}
+		if u.Note != "" {
+			p.Note = oneLine(u.Note)
 		}
 		tagUpdate(u, &p.Tagging)
 		protectUpdate(u, &p.Tagging)

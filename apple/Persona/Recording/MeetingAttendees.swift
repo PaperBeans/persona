@@ -48,8 +48,11 @@ import Foundation
         let features = model.hubFeatures
         guard !features.isEmpty else { return UserDefaults.standard.bool(forKey: MeetingAttendanceDefaults.conversationKey) }
         let conversation = features.contains(MeetingAttendanceDefaults.conversationFeature)
+        let liveView = conversation && features.contains(MeetingAttendanceDefaults.liveViewFeature)
         MeetingAttendanceDefaults.remember(conversation: conversation,
-                                           photos: conversation && features.contains(MeetingAttendanceDefaults.photosFeature))
+                                           photos: conversation && features.contains(MeetingAttendanceDefaults.photosFeature),
+                                           liveView: liveView,
+                                           highlights: liveView && features.contains(MeetingAttendanceDefaults.highlightsFeature))
         return conversation
     }
 
@@ -59,6 +62,22 @@ import Foundation
         let features = model.hubFeatures
         guard !features.isEmpty else { return UserDefaults.standard.bool(forKey: MeetingAttendanceDefaults.photosKey) }
         return features.contains(MeetingAttendanceDefaults.photosFeature)
+    }
+
+    /// …and the live view (phase 2: topics, the latest line, 15-second segments), which comes only with the conversation.
+    static func liveView(_ model: AppModel) -> Bool {
+        guard conversation(model) else { return false }
+        let features = model.hubFeatures
+        guard !features.isEmpty else { return UserDefaults.standard.bool(forKey: MeetingAttendanceDefaults.liveViewKey) }
+        return features.contains(MeetingAttendanceDefaults.liveViewFeature)
+    }
+
+    /// …and the highlights (phase 2b: the page's top card), which come only with the live view.
+    static func highlights(_ model: AppModel) -> Bool {
+        guard liveView(model) else { return false }
+        let features = model.hubFeatures
+        guard !features.isEmpty else { return UserDefaults.standard.bool(forKey: MeetingAttendanceDefaults.highlightsKey) }
+        return features.contains(MeetingAttendanceDefaults.highlightsFeature)
     }
 
     // MARK: Sessions
@@ -163,7 +182,26 @@ import Foundation
     /// conversation a room meeting in the default role, not private (the one-tap rule, #3862); else `defaultAttendance`.
     static func startAttendance(_ model: AppModel) -> RecordingAttendance {
         guard conversation(model) else { return defaultAttendance(model) }
-        return .room(defaultRole(model), private: false, photos: photos(model))
+        return .room(defaultRole(model), private: false, photos: photos(model), liveView: liveView(model),
+                     highlights: highlights(model))
+    }
+
+    /// A recording's attendance once it becomes a meeting again mid-recording, at `at` on its clock (a note turned into a
+    /// meeting, #5243): `start`'s role and attendee from then on. One it had as a meeting before keeps what came with it:
+    /// the live log the hub already has, the stretches Persona spoke in, and a room meeting its room (a meeting never
+    /// moves from its room). Nothing said before `at` is attended.
+    static func resumed(_ attendance: RecordingAttendance?, start: RecordingAttendance, at: Double) -> RecordingAttendance {
+        var a: RecordingAttendance
+        if var kept = attendance {
+            if !kept.room { kept.session = start.session; kept.sessionTitle = start.sessionTitle; kept.mainPicked = start.mainPicked }
+            a = kept
+        } else {
+            a = start
+            a.role = .off
+            a.periods = []
+        }
+        a.set(start.role, at: at)
+        return a
     }
 
     /// Remembers the session picked (nil: the main chat, which the next meeting reads as no pick), for the next meeting.

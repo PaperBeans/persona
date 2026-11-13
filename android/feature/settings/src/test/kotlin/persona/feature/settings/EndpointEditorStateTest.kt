@@ -549,9 +549,9 @@ class EndpointTextTest {
         // Built at runtime: the privacy check rejects private dotted quads in the repository.
         val lan = "http://" + listOf(10, 0, 0, 2).joinToString(".") + ":18660"
         assertEquals("内网，手动添加", EndpointEntry(lan, "lan", EndpointSource.Manual).origin(res))
-        assertEquals("公网 IPv6，来自 hub", EndpointEntry(url, "ipv6", EndpointSource.Hub).origin(res))
+        assertEquals("公网 IPv6，来自 Hub", EndpointEntry(url, "ipv6", EndpointSource.Hub).origin(res))
         assertEquals("域名，配对时添加", EndpointEntry("https://hub.example.com:18662", "name", EndpointSource.Pairing).origin(res))
-        assertEquals("公网 IPv4，来自 hub", EndpointEntry("https://192.0.2.10:18662", "ipv4", EndpointSource.Hub).origin(res))
+        assertEquals("公网 IPv4，来自 Hub", EndpointEntry("https://192.0.2.10:18662", "ipv4", EndpointSource.Hub).origin(res))
         assertEquals("未知类型，手动添加", EndpointEntry("https://hub.example.com:18662", "unknown", EndpointSource.Manual).origin(res))
     }
 

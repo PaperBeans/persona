@@ -98,6 +98,23 @@ class ChatDeliveryStateTest {
         assertTrue(actions.busyIds.isEmpty())
     }
 
+    /** Retry now (iOS, a waiting message's menu): one still on its way goes to the sender's retry; nothing else takes it. */
+    @Test fun retryNowIsForAMessageStillOnItsWay() = runTest {
+        val sender = FakeSender()
+        val actions = ChatDeliveryActions(sender)
+        val composer = ChatComposerState(ChatComposerDraft("草稿"))
+        for (state in listOf(DeliveryState.WaitingForNetwork, DeliveryState.Queued)) {
+            sender.outbox.value = listOf(sender.message.copy(state = state))
+            assertTrue("$state", actions.perform("message", DeliveryAction.RetryNow, composer::restoreMessage))
+        }
+        assertEquals(listOf("retry:message", "retry:message"), sender.calls)
+        DeliveryState.entries.filter { it != DeliveryState.WaitingForNetwork && it != DeliveryState.Queued }.forEach { state ->
+            sender.outbox.value = listOf(sender.message.copy(state = state))
+            assertFalse("$state", actions.perform("message", DeliveryAction.RetryNow, composer::restoreMessage))
+        }
+        assertEquals("草稿", composer.value.text)
+    }
+
     @Test fun cancelAndDeleteHandBackTheMessageAsItWasForUndo() = runTest {
         val sender = FakeSender()
         val actions = ChatDeliveryActions(sender)

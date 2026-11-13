@@ -22,6 +22,20 @@ func availEvents(s *Service, kind string) []map[string]any {
 	return out
 }
 
+// availWaitTimes is the timestamps of the wait for conv on mac.
+func availWaitTimes(s *Service) (at, ended time.Time) {
+	s.avail.mu.Lock()
+	defer s.avail.mu.Unlock()
+	w := s.avail.waits[[2]string{"mac", "conv"}]
+	return w.at, w.ended
+}
+
+// availAfter waits until after until, as the old fixed sleep did, without assuming how long scheduling takes.
+func availAfter(t *testing.T, until time.Time) {
+	t.Helper()
+	waitUntil(t, func() bool { return time.Now().After(until) })
+}
+
 // The owner's message to an idle conversation: the wait runs to the first change of the conversation's last text,
 // and the round it started is the owner's. A supervision round after it is a background round; a message that comes
 // during it is counted as having come on a background round, and is answered by the text that follows once nothing
@@ -112,7 +126,8 @@ func TestAvailabilityReplyWaitFallbacks(t *testing.T) {
 	s.UserSpoke(t.Context(), ref)
 	conv.Status = proto.StatusWorking
 	ft.sessions("mac", conv) // the turn started
-	time.Sleep(time.Millisecond)
+	at, _ := availWaitTimes(s)
+	availAfter(t, at.Add(replyWaitMax))
 	ft.sessions("mac", conv) // and wrote nothing
 	waits := availEvents(s, replyWaitEvent)
 	if len(waits) != 2 || waits[1]["unanswered"] != true || waits[1]["wait"] != 0.0 {
@@ -128,7 +143,8 @@ func TestAvailabilityReplyWaitFallbacks(t *testing.T) {
 	ft.sessions("mac", conv)
 	waitUntil(t, func() bool { return len(availEvents(s, roundEvent)) == 2 })
 	s.UserSpoke(t.Context(), ref)
-	time.Sleep(time.Millisecond)
+	at, _ = availWaitTimes(s)
+	availAfter(t, at.Add(availInputFor))
 	ft.sessions("mac", conv)
 	if got := availEvents(s, replyWaitEvent); len(got) != 2 || s.avail.waiting.Load() != 0 {
 		t.Fatalf("an undelivered message counted as a wait: %v, %d waiting", got, s.avail.waiting.Load())
@@ -219,7 +235,8 @@ func TestAvailabilityReplyWaitWithoutQueue(t *testing.T) {
 	t.Cleanup(func() { availInputFor = oldFor })
 	superviseRound(t, ft, list, "earlier")
 	s.UserSpoke(t.Context(), ref)
-	time.Sleep(5 * time.Millisecond)
+	at, _ := availWaitTimes(s)
+	availAfter(t, at.Add(5*time.Millisecond))
 	list(proto.StatusWorking, "Checking the PR.")
 	list(proto.StatusWorking, "Merged it.")
 	if got := availEvents(s, replyWaitEvent); len(got) != 0 {
@@ -252,7 +269,8 @@ func TestAvailabilityReplyWaitWithoutQueue(t *testing.T) {
 		defer s.avail.mu.Unlock()
 		return !s.avail.waits[[2]string{"mac", "conv"}].ended.IsZero()
 	})
-	time.Sleep(time.Millisecond)
+	_, ended := availWaitTimes(s)
+	availAfter(t, ended.Add(availQueuedGrace))
 	list(proto.StatusDone, "Both done.")
 	waits = availEvents(s, replyWaitEvent)
 	if len(waits) != 2 || waits[1]["state"] != waitBackground || waits[1]["by"] != "turn_end" {
@@ -307,7 +325,8 @@ func TestAvailabilityReplayAndGone(t *testing.T) {
 	old := replyWaitMax
 	replyWaitMax = 0
 	t.Cleanup(func() { replyWaitMax = old })
-	time.Sleep(time.Millisecond)
+	at, _ := availWaitTimes(s)
+	availAfter(t, at.Add(replyWaitMax))
 	ft.sessions("mac")
 	waits := availEvents(s, replyWaitEvent)
 	if len(waits) != 2 || waits[1]["unanswered"] != true || s.avail.waiting.Load() != 0 {
@@ -482,7 +501,7 @@ func TestSummarizeAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `{"hours":24,"reply_wait":{"all":{},"main":{},"main_days":[]},"background_share":[],"queue_wait":{"by_kind":{},"main_by_kind":{},"queued_now":[]},"ask_outcome":{}}`; string(empty) != want {
+	if want := `{"hours":24,"reply_wait":{"all":{},"main":{},"main_days":[]},"background_share":[],"queue_wait":{"by_kind":{},"main_by_kind":{},"queued_now":[]},"ask_outcome":{},"supervision":{"by_model":[],"days":[]}}`; string(empty) != want {
 		t.Fatalf("no events:\n%s\nwant\n%s", empty, want)
 	}
 }

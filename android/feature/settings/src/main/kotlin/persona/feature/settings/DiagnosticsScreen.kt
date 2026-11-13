@@ -12,6 +12,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -27,7 +28,8 @@ import android.content.res.Resources
 import androidx.compose.ui.res.stringResource
 
 @Composable
-internal fun DiagnosticsScreen(services: SettingsServices, onBack: (() -> Unit)? = null, footer: @Composable () -> Unit = {}) {
+internal fun DiagnosticsScreen(services: SettingsServices, onBack: (() -> Unit)? = null, onPairing: (() -> Unit)? = null,
+    footer: @Composable () -> Unit = {}) {
     val context = LocalContext.current
     val resources = context.resources
     val scope = rememberCoroutineScope()
@@ -43,6 +45,7 @@ internal fun DiagnosticsScreen(services: SettingsServices, onBack: (() -> Unit)?
     val message by controller.message.collectAsStateWithLifecycle()
     val summary by controller.summary.collectAsStateWithLifecycle()
     val state by services.connection.state.collectAsStateWithLifecycle()
+    val paired by services.pairing.isPaired.collectAsStateWithLifecycle()
     var network by remember { mutableStateOf(PhoneReadiness.network(context)) }
     var fingerprintExpanded by rememberSaveable { mutableStateOf(false) }
     val list = rememberLazyListState()
@@ -55,8 +58,22 @@ internal fun DiagnosticsScreen(services: SettingsServices, onBack: (() -> Unit)?
         scope.launch { controller.refreshSummary() }
     }
         val summaryText = summary?.let { disconnectSummaryText(it) }
-    JListPage(title = stringResource(R.string.settings_diag_title), onBack = onBack, state = list) {
-        item { ConnectionStatus(state) }
+    JListPage(title = stringResource(R.string.settings_home_connection), onBack = onBack, state = list) {
+        item { ConnectionStatus(state, paired) }
+        if (paired) item { JGroupItem(GroupPosition.Single) {
+            JRow {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
+                    Text(stringResource(R.string.settings_hub_address), style = PersonaTheme.type.body, color = PersonaTheme.palette.ink)
+                    SelectionContainer(Modifier.testTag("settings-hub-address-selection")) {
+                        Text(services.hubAddress ?: stringResource(R.string.settings_not_provided), Modifier.fillMaxWidth(),
+                            style = PersonaTheme.type.callout, color = PersonaTheme.palette.ink2)
+                    }
+                }
+            }
+        } }
+        onPairing?.let { open -> item { JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.m)) {
+            JRow(stringResource(R.string.settings_row_pairing), onClick = open)
+        } } }
         // A failed pairing comes first: before a pairing works there is no connection to show anything about.
         pairing?.takeIf { it.failed }?.let { pairingAttempt(it, resources) }
         if (endpoints != null) editableCurrentConnection(endpoints, data, state)

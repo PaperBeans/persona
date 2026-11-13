@@ -117,6 +117,15 @@ class PagedSessionsMockTests(unittest.TestCase):
         self.assertEqual((status, body["code"]), (409, "revision_expired"))
         self.assertLessEqual(len(hub.LIST_JOURNAL), hub.LIST_JOURNAL_SIZE)
 
+    def test_strict_summary_rows_drop_chat_arrays_like_the_hub(self):
+        run = {"task_id": "w", "name": "audit", "running": True, "phases": ["A", "B"], "phase_index": 2, "agents": [{"id": "a"}]}
+        row = hub.summary_row({"session_id": "s", "workflows": [run], "background": [{"id": "w", "kind": "workflow"},
+                                                                               {"id": "b", "kind": "shell"}]})
+        self.assertFalse({"workflows", "background", "subagents"} & set(row))
+        self.assertEqual((row["running_workflows"], row["background_count"], row["background_tasks_count"]), (1, 2, 1))
+        self.assertEqual(row["workflow_progress"], {"task_id": "w", "name": "audit", "running": True, "phase_index": 2, "phase_count": 2})
+        self.assertTrue(row["waiting"])
+
 
 if __name__ == "__main__":
     unittest.main()

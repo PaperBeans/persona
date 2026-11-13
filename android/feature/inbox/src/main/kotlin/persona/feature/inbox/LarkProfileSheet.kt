@@ -339,7 +339,7 @@ private fun LarkProfileCardContent(
                                     modifier = Modifier.weight(1f)
                                 )
                                 if (field.leaderId != null) {
-                                    JIcon(PhIcons.CaretRight, modifier = Modifier.size(Tokens.Space.l), tint = palette.accent)
+                                    JIcon(PhIcons.CaretRight, modifier = Modifier.size(Tokens.Space.Standard.l), tint = palette.accent)
                                 }
                             }
                         }

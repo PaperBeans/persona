@@ -166,6 +166,13 @@ struct SyncEventTests {
         attached.attachable = false
         #expect(attached != external)
         #expect(external == external)
+        // A runtime's session renames and closes where its node says so (#6294): the menu redraws when that changes.
+        var runtime = external
+        runtime.renamable = false
+        #expect(runtime != external)
+        runtime = external
+        runtime.closable = false
+        #expect(runtime != external)
     }
 
     @Test func lazyImagesLearnTheirRef() {

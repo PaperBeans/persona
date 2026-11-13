@@ -31,3 +31,4 @@
 - [ ] 4 Consistency first: components, patterns and count definitions reused are named; anything new has its reason in the docs.
 - [ ] 5 Model and product separate: names which of speed, model, persona and features it touches; the others are unaffected.
 - [ ] 6 Checkable: the issue's acceptance criteria are met, with evidence for each item above.
+- [ ] 7 Fast, local-first and stateful: immediate local feedback, hub-confirmed Processing, recoverable failure; isolated before/after feedback and execution timings, with light/dark screenshots.

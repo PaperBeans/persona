@@ -28,10 +28,13 @@ import SwiftUI
     @ObservationIgnored private var reloadGeneration = 0
     @ObservationIgnored private let deps: ExtensionViewModel.Deps
     @ObservationIgnored private let features: () -> Set<String>
+    let manager: String?
 
-    init(deps: ExtensionViewModel.Deps = .live, features: @escaping () -> Set<String> = { AppModel.shared.hubFeatures }) {
+    init(deps: ExtensionViewModel.Deps = .live, features: @escaping () -> Set<String> = { AppModel.shared.hubFeatures },
+         manager: String? = nil) {
         self.deps = deps
         self.features = features
+        self.manager = manager
     }
 
     /// The hub has the slots (and so the context, charts and badges).
@@ -48,7 +51,7 @@ import SwiftUI
             cards = []
             cardModels = [:]
         }
-        guard available, let api = deps.api() else {
+        guard available, let api = deps.api()?.manager(manager) else {
             pages = []
             cards = []
             cardModels = [:]
@@ -66,7 +69,7 @@ import SwiftUI
             if next != cards { cards = next }
             var models = cardModels.filter { k, _ in next.contains { Self.key($0) == k } }
             for c in next where models[Self.key(c)] == nil {
-                models[Self.key(c)] = ExtensionViewModel(plugin: c.owner, ui: c.id, context: .here(size: "compact"), deps: deps)
+                models[Self.key(c)] = ExtensionViewModel(plugin: c.owner, ui: c.id, context: .here(size: "compact"), deps: deps, manager: manager)
             }
             cardModels = models
         }
@@ -81,7 +84,7 @@ import SwiftUI
     /// A card's model, kept while the card is listed (a card drawn again keeps its state).
     func model(for card: ExtensionUIPlace) -> ExtensionViewModel {
         cardModels[Self.key(card)]
-            ?? ExtensionViewModel(plugin: card.owner, ui: card.id, context: .here(size: "compact"), deps: deps)
+            ?? ExtensionViewModel(plugin: card.owner, ui: card.id, context: .here(size: "compact"), deps: deps, manager: manager)
     }
 
     /// The cards' models, for the page that pushes what they ask for.
@@ -99,6 +102,13 @@ import SwiftUI
         let badges = pages.compactMap(\.badge)
         let count = badges.compactMap { Int($0.text) }.filter { $0 > 0 }.reduce(0, +)
         return (count, count == 0 && badges.contains { Int($0.text) == nil })
+    }
+
+    /// `total` as the ways to Settings show it (its tab, the drawer's button), for one that is read naming none (the
+    /// default assistant's, as `shared` is): only while the default is current. Settings shows the current assistant's
+    /// entries (Extensions), so with another one current these would point at nothing there.
+    func settingsTotal(_ model: AppModel) -> (count: Int, dot: Bool) {
+        model.assistantManagerID == nil ? total : (0, false)
     }
 
     static func key(_ p: ExtensionUIPlace) -> String { p.owner + "/" + p.id }
@@ -153,7 +163,7 @@ struct ExtensionBadgeView: View {
         if let n = Int(badge.text), n > 0 {
             CountBadge(count: n, look: .solid(badge.tone == nil || badge.tone == "neutral" ? Theme.countBadge : ExtensionUIStyle.tone(badge.tone)))
         } else {
-            Chip(text: badge.text, look: badge.tone == nil || badge.tone == "neutral" ? .neutral : .tint(ExtensionUIStyle.tone(badge.tone)))
+            Chip(text: badge.text, look: ExtensionUIStyle.badge(badge))
                 .lineLimit(1)
         }
     }
@@ -162,8 +172,10 @@ struct ExtensionBadgeView: View {
 /// What the plugins' entries' badges add up to, on a way to Settings that is not its tab (the shell drawer's Settings button):
 /// the sum as a count badge, only words a dot, nothing without badges.
 struct ExtensionSettingsBadge: View {
+    @Environment(AppModel.self) private var model
+
     var body: some View {
-        let total = ExtensionSlots.shared.total
+        let total = ExtensionSlots.shared.settingsTotal(model)
         if total.count > 0 {
             CountBadge(count: total.count, look: .neutral)
                 .offset(x: Theme.Space.xs, y: -Theme.Space.xs)
@@ -181,19 +193,19 @@ struct ExtensionSlotsSettingsSection: View {
     @Environment(AppModel.self) private var model
     /// Where the cards' links open: the page's (`pluginLinks` on the page, not on a section of its list).
     @Binding var link: LinkTarget?
-    private var slots: ExtensionSlots { .shared }
+    var slots: ExtensionSlots = .shared
 
     var body: some View {
         if slots.available {
-            ExtensionCardsSection(link: $link)
+            ExtensionCardsSection(link: $link, slots: slots)
             if !slots.pages.isEmpty {
                 Section {
                     Group {
                         ForEach(slots.pages) { page in
-                            NavigationLink(value: SettingsPage.pluginPage(plugin: page.owner, ui: page.id, title: page.title)) {
+                            NavigationLink(value: SettingsPage.pluginPage(plugin: page.owner, ui: page.id, title: page.title, manager: slots.manager)) {
                                 ExtensionNavRow(place: page)
                             }
-                            .settingsListRow(SettingsPage.pluginPage(plugin: page.owner, ui: page.id, title: page.title))
+                            .settingsListRow(SettingsPage.pluginPage(plugin: page.owner, ui: page.id, title: page.title, manager: slots.manager))
                             .accessibilityIdentifier("plugin-nav-\(page.owner)-\(page.id)")
                         }
                     }
@@ -235,14 +247,14 @@ struct ExtensionCardsSection: View {
     /// Where the cards' links open: the page's. On a Mac the link panel lays the page out beside it, which a list's
     /// section cannot hold (the card came out as its title alone).
     @Binding var link: LinkTarget?
-    private var slots: ExtensionSlots { .shared }
+    var slots: ExtensionSlots = .shared
 
     var body: some View {
         ForEach(slots.cards) { card in
             Section {
                 ExtensionCard(card: card, model: slots.model(for: card), link: $link) {
                     if let (ui, title) = slots.opened(by: card) {
-                        model.settingsPath.append(SettingsPage.pluginPage(plugin: card.owner, ui: ui, title: title))
+                        model.settingsPath.append(SettingsPage.pluginPage(plugin: card.owner, ui: ui, title: title, manager: slots.manager))
                     }
                 }
                 .accessibilityIdentifier("plugin-card-\(card.owner)-\(card.id)")

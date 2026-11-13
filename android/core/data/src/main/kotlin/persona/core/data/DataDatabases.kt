@@ -35,6 +35,10 @@ data class OutboxRow(
     @ColumnInfo(defaultValue = "0") val main_target: Boolean = false,
     /** Null: the next attempt goes under client_msg_id. */
     val op_id: String? = null,
+    val launcher: String? = null,
+    val model: String? = null,
+    /** The message carries out the session's waiting launcher switch (`apply_switch`, #5035). */
+    @ColumnInfo(defaultValue = "0") val apply_switch: Boolean = false,
 )
 
 @Entity(tableName = "drafts", primaryKeys = ["scope", "machine", "session"])
@@ -110,8 +114,9 @@ interface PersistentDao {
     suspend fun adoptMessage(row: OutboxRow): Long
 }
 
-@Database(entities = [OutboxRow::class, DraftRow::class, MainConversationRow::class], version = 4,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
+@Database(entities = [OutboxRow::class, DraftRow::class, MainConversationRow::class], version = 6,
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
+        AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6)],
     exportSchema = true)
 abstract class PersistentDatabase : RoomDatabase() {
     abstract fun records(): PersistentDao
@@ -121,7 +126,8 @@ class RoomOutboxStore(private val database: PersistentDatabase, private val scop
     private val dao = database.records()
     override val entries = dao.observeOutbox(scope.path).map { rows -> rows.map { row ->
         OutboxEntry(row.client_msg_id, SessionKey(row.machine, row.session), row.text, row.clear_draft,
-            OutboxState.entries.single { it.wire == row.state }, row.error, row.created_at, row.main_target, row.op_id)
+            OutboxState.entries.single { it.wire == row.state }, row.error, row.created_at, row.main_target, row.op_id,
+            row.launcher, row.model, applySwitch = row.apply_switch)
     } }
 
     override suspend fun enqueue(entry: OutboxEntry) = enqueueDraft(entry, null)
@@ -132,7 +138,8 @@ class RoomOutboxStore(private val database: PersistentDatabase, private val scop
         if (existing != null) {
             require(existing.main_target == entry.mainTarget &&
                 (entry.mainTarget || (existing.machine == entry.session.machineId && existing.session == entry.session.sessionId)) &&
-                existing.text == entry.text && existing.clear_draft == entry.clearDraft) { "Operation id reused with different parameters" }
+                existing.text == entry.text && existing.clear_draft == entry.clearDraft &&
+                existing.launcher == entry.launcher && existing.model == entry.model) { "Operation id reused with different parameters" }
         } else {
             if (draft != null) {
                 val key = draft.key.storageKey()
@@ -145,7 +152,8 @@ class RoomOutboxStore(private val database: PersistentDatabase, private val scop
             dao.insertMessage(OutboxRow(scope = scope.path, machine = target.machineId,
                 session = target.sessionId, client_msg_id = entry.clientMessageId, text = entry.text,
                 clear_draft = entry.clearDraft, state = OutboxState.Queued.wire, error = null,
-                created_at = entry.createdAt, main_target = entry.mainTarget))
+                created_at = entry.createdAt, main_target = entry.mainTarget, op_id = entry.opId,
+                launcher = entry.launcher, model = entry.model, apply_switch = entry.applySwitch))
         }
     }
 
@@ -237,7 +245,7 @@ interface ItemsDao {
     suspend fun insert(items: List<ItemRow>)
 }
 
-@Database(entities = [ItemRow::class, SessionCursorRow::class], version = 4,
+@Database(entities = [ItemRow::class, SessionCursorRow::class], version = 5,
     autoMigrations = [AutoMigration(from = 2, to = 3)], exportSchema = true)
 abstract class ItemsDatabase : RoomDatabase() {
     abstract fun items(): ItemsDao
@@ -257,6 +265,14 @@ abstract class ItemsDatabase : RoomDatabase() {
          * the chats load again from the hub.
          */
         val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DELETE FROM `items`")
+                db.execSQL("DELETE FROM `cursors`")
+            }
+        }
+
+        /** Codex commentary cached as thinking must be read again as assistant text; these are only cache rows. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DELETE FROM `items`")
                 db.execSQL("DELETE FROM `cursors`")

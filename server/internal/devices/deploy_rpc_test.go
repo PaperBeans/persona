@@ -36,6 +36,8 @@ type updatingNode struct {
 	busySession bool
 	sessionErr  error
 	background  bool
+	sessions    []proto.Session // when set, what sessions.list answers
+	updateBusy  *bool           // with sessions: the node's update_busy (nil leaves it out)
 	installErr  error
 	stayOld     bool
 	target      string // the build it confirms ("" the fixture hub's, new-build)
@@ -49,6 +51,12 @@ func (n *updatingNode) handle(_ context.Context, method string, params json.RawM
 	case "sessions.list":
 		if n.sessionErr != nil {
 			return nil, n.sessionErr
+		}
+		if n.sessions != nil {
+			if n.updateBusy != nil {
+				return map[string]any{"sessions": n.sessions, "update_busy": *n.updateBusy}, nil
+			}
+			return map[string]any{"sessions": n.sessions}, nil
 		}
 		if n.background {
 			return map[string]any{"sessions": []proto.Session{{SessionID: "background", Status: proto.StatusIdle, Background: []proto.BackgroundTask{{ID: "task", Kind: "shell"}}}}}, nil
@@ -469,5 +477,48 @@ func TestLinkedDeployDoesNotRepeatRolledBackInstall(t *testing.T) {
 	defer n.mu.Unlock()
 	if n.begin != 0 {
 		t.Fatal("automatically installed a possibly rolled-back build again")
+	}
+}
+
+// A node with node_update_idle is updated while terminal Agents work in the background, since its restart leaves them
+// running, and waited for while it reports update_busy: only it knows a conversation it runs headless is busy, its rows
+// do not say so (#6364). One that leaves update_busy out is waited for on the old rule.
+func TestLinkedDeployWaitsOnlyForWhatTheRestartCuts(t *testing.T) {
+	terminal := proto.Session{SessionID: "terminal", Status: proto.StatusWorking, State: proto.StateWorking, Host: proto.EngineHerdr,
+		Background: []proto.BackgroundTask{{ID: "workflow", Kind: "workflow"}}, Subagents: []proto.Subagent{{Running: true}}}
+	headless := proto.Session{SessionID: "chat", Status: proto.StatusIdle, State: proto.StateIdle} // as a node lists it: no Assistant flag
+	busy, idle := true, false
+	for _, tc := range []struct {
+		name       string
+		updateBusy *bool
+		update     bool
+	}{
+		{"terminal agents at work", &idle, true},
+		{"headless conversation answering", &busy, false},
+		{"no update_busy", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, m, n, bin := linkedDeployFixture(t, kindLink)
+			m.info.Protocol = nodeproto.Version
+			m.info.Capabilities = []string{nodeproto.Sessions, nodeproto.NodeUpdate, nodeproto.NodeUpdateIdle}
+			n.sessions, n.updateBusy = []proto.Session{terminal, headless}, tc.updateBusy
+			record := nodeDeployRecord{Target: "new-build", State: "queued"}
+			// The refusals wait for this deadline to expire; the update returns when it is done, so it gets a long one.
+			wait := 200 * time.Millisecond
+			if tc.update {
+				wait = 30 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), wait)
+			defer cancel()
+			err := m.performRPCDeployment(ctx, bin, &record)
+			n.mu.Lock()
+			defer n.mu.Unlock()
+			if tc.update && (err != nil || n.confirms != 1) {
+				t.Fatalf("not updated: err=%v confirms=%d", err, n.confirms)
+			}
+			if !tc.update && (!errors.Is(err, context.DeadlineExceeded) || n.begin != 0) {
+				t.Fatalf("updated while busy: err=%v begin=%d", err, n.begin)
+			}
+		})
 	}
 }

@@ -34,10 +34,89 @@ class Conversation(Hub):
     def items(self, sid):
         return self.call("GET", f"/api/v1/sessions/server/{sid}/items")[1]["items"]
 
+    def last_text(self, sid):
+        """A conversation's latest text item: with live view the room's meeting_topics_set call follows a batch."""
+        return [x for x in self.items(sid) if x["kind"] == "text"][-1]
+
     def ready_room(self, rid, role="participant", **fields):
         status, out = self.upload(rid, room={"attendance": role}, **fields)
         self.assertEqual((status, out["attendance"], out["room"]["state"]), (200, role, "none"))
         return self.wait(lambda: (r := self.live(rid).get("room")) and r["state"] == "ready" and r, "the room")
+
+
+def websocket(self, path="/api/v1/ws", headers=None, status=101):
+    """An app's socket: a function giving its next frame of `type` (None when none comes within `wait` seconds)."""
+    port = int(self.base.rsplit(":", 1)[1])
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    self.addCleanup(sock.close)
+    key = base64.b64encode(os.urandom(16)).decode()
+    sock.sendall((f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\n"
+                  f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
+                  + "".join(f"{k}: {v}\r\n" for k, v in (headers or {}).items()) + "\r\n").encode())
+    buf = bytearray()
+
+    def fill(n, end):
+        while len(buf) < n:
+            left = end - time.monotonic()
+            if left <= 0:
+                return False
+            sock.settimeout(left)
+            try:
+                chunk = sock.recv(65536)
+            except (socket.timeout, TimeoutError):
+                return False
+            if not chunk:
+                return False
+            buf.extend(chunk)
+        return True
+    end = time.monotonic() + 5
+    while b"\r\n\r\n" not in buf:
+        self.assertTrue(fill(len(buf) + 1, end), "no upgrade")
+    head, _, rest = bytes(buf).partition(b"\r\n\r\n")
+    self.assertIn(f" {status} ".encode(), head)
+    if status != 101: return head
+    buf[:] = rest
+
+    def frame(end):
+        if not fill(2, end):
+            return None
+        n, off = buf[1] & 0x7F, 2
+        if n == 126:
+            if not fill(4, end):
+                return None
+            n, off = int.from_bytes(buf[2:4], "big"), 4
+        elif n == 127:
+            if not fill(10, end):
+                return None
+            n, off = int.from_bytes(buf[2:10], "big"), 10
+        if not fill(off + n, end):
+            return None
+        op = buf[0] & 15
+        payload = bytes(buf[off:off + n])
+        del buf[:off + n]
+        if op == 8: return {"type": "close", "code": int.from_bytes(payload[:2], "big")}
+        if op == 10: return {"type": "pong"}
+        return json.loads(payload)
+
+    def next_of(kind, wait=3.0, where=lambda f: True):
+        end = time.monotonic() + wait
+        while True:
+            f = frame(end)
+            if f is None:
+                return None
+            if f.get("type") == kind and where(f):
+                return f
+    def send(value, op=None, claim=None):
+        """Sends value as one frame; claim: the length its header says instead (a frame over a limit, unsent)."""
+        payload = value if isinstance(value, bytes) else json.dumps(value).encode()
+        op = op if op is not None else 2 if isinstance(value, bytes) else 1
+        n = len(payload) if claim is None else claim
+        mask = os.urandom(4)
+        head = bytes([0x80 | op]) + (bytes([0x80 | n]) if n < 126 else b"\xfe" + n.to_bytes(2, "big") if n < 65536 else b"\xff" + n.to_bytes(8, "big"))
+        sock.sendall(head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+    next_of.send = send
+    next_of.close = sock.close
+    return next_of
 
 
 class MeetingConversationMockTests(Conversation, unittest.TestCase):
@@ -51,63 +130,7 @@ class MeetingConversationMockTests(Conversation, unittest.TestCase):
         self.call("POST", "/mock/meeting_conversation", {"room": "ok", "end_seconds": 180, "room_seconds": 2})
 
     def websocket(self):
-        """An app's socket: a function giving its next frame of `type` (None when none comes within `wait` seconds)."""
-        port = int(self.base.rsplit(":", 1)[1])
-        sock = socket.create_connection(("127.0.0.1", port), timeout=5)
-        self.addCleanup(sock.close)
-        key = base64.b64encode(os.urandom(16)).decode()
-        sock.sendall((f"GET /api/v1/ws HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\n"
-                      f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n").encode())
-        buf = bytearray()
-
-        def fill(n, end):
-            while len(buf) < n:
-                left = end - time.monotonic()
-                if left <= 0:
-                    return False
-                sock.settimeout(left)
-                try:
-                    chunk = sock.recv(65536)
-                except (socket.timeout, TimeoutError):
-                    return False
-                if not chunk:
-                    return False
-                buf.extend(chunk)
-            return True
-        end = time.monotonic() + 5
-        while b"\r\n\r\n" not in buf:
-            self.assertTrue(fill(len(buf) + 1, end), "no upgrade")
-        head, _, rest = bytes(buf).partition(b"\r\n\r\n")
-        self.assertIn(b" 101 ", head)
-        buf[:] = rest
-
-        def frame(end):
-            if not fill(2, end):
-                return None
-            n, off = buf[1] & 0x7F, 2
-            if n == 126:
-                if not fill(4, end):
-                    return None
-                n, off = int.from_bytes(buf[2:4], "big"), 4
-            elif n == 127:
-                if not fill(10, end):
-                    return None
-                n, off = int.from_bytes(buf[2:10], "big"), 10
-            if not fill(off + n, end):
-                return None
-            payload = bytes(buf[off:off + n])
-            del buf[:off + n]
-            return json.loads(payload)
-
-        def next_of(kind, wait=3.0, where=lambda f: True):
-            end = time.monotonic() + wait
-            while True:
-                f = frame(end)
-                if f is None:
-                    return None
-                if f.get("type") == kind and where(f):
-                    return f
-        return next_of
+        return websocket(self)
 
     def test_feature_and_the_uploads_room(self):
         self.assertIn("meeting_conversation", self.call("GET", "/api/v1/health")[1]["features"])
@@ -147,7 +170,9 @@ class MeetingConversationMockTests(Conversation, unittest.TestCase):
         self.assertNotIn("revs", out)
         self.assertNotIn("attending_session", out)
         live = self.live(rid)
-        self.assertEqual(set(live["revs"]), {"asks", "room", "private"})
+        # lines and topics: live view; highlights: phase 2b, unless the manager has none (MOCK_NO_MEETING_HIGHLIGHTS=1)
+        highlights = set() if os.environ.get("MOCK_NO_MEETING_HIGHLIGHTS") == "1" else {"highlights"}
+        self.assertEqual(set(live["revs"]), {"asks", "room", "private", "lines", "topics"} | highlights)
         self.assertEqual(live["revs"]["asks"], 0)
         only = self.live(rid, "?parts=room,asks,photos")
         self.assertEqual(set(only), {"room", "asks", "revs"})
@@ -157,8 +182,10 @@ class MeetingConversationMockTests(Conversation, unittest.TestCase):
         items = self.items(live["room"]["session_id"])
         self.assertEqual(items[0]["client_msg_id"], f"meeting-{rid}")
         self.assertIn('"kind": "meeting"', items[0]["text"])
-        self.assertIn("[0:05] Ada: Today we look at the export flow.", items[-1]["text"])
-        self.assertEqual(items[-1]["source"]["kind"], "meeting")
+        batch = self.last_text(live["room"]["session_id"])
+        # Each line at its clock time, as the hub's batches write it: started_at plus its start, in the assistant's zone.
+        self.assertIn("[14:00] Ada: Today we look at the export flow.", batch["text"])
+        self.assertEqual(batch["source"]["kind"], "meeting")
         row = next(s for s in self.call("GET", "/api/v1/sessions")[1]["sessions"] if s["session_id"] == live["room"]["session_id"])
         self.assertEqual((row["origin"], row["origin_ref"]), ("meeting", rid))
         self.assertRegex(row["title"], r"^\d{4} \| .+ \| Design review$")
@@ -183,7 +210,7 @@ class MeetingConversationMockTests(Conversation, unittest.TestCase):
         self.assertEqual(sent[f"ask-{typed}-1"]["text"], "What did we decide last time?")
         self.assertIn("What was just said (30:10)", sent[f"ask-{heard_id}-1"]["text"])
         self.assertIn("[30:00] Bo: Who owns the regression test?", sent[f"ask-{heard_id}-1"]["text"])
-        self.assertEqual(sum(1 for x in items if x["role"] == "assistant"), 3)
+        self.assertEqual(sum(1 for x in items if x["role"] == "assistant" and x["kind"] == "text"), 3)
         self.assertEqual(self.live(rid)["revs"]["asks"], 3)
 
     def test_a_room_that_cannot_start_answers_from_the_material(self):
@@ -227,12 +254,12 @@ class MeetingConversationMockTests(Conversation, unittest.TestCase):
         self.call("POST", "/mock/meeting_conversation", {"room": "ok"})
         self.upload(rid, room={"attendance": "listener"}, segments=LINES[:1])
         room = self.wait(lambda: (r := self.live(rid).get("room")) and r["state"] == "ready" and r, "the room")
-        so_far = self.items(room["session_id"])[-1]["text"]
-        self.assertIn("[0:05] Ada: Today we look at the export flow.", so_far)
+        so_far = self.last_text(room["session_id"])["text"]
+        self.assertIn("[14:00] Ada: Today we look at the export flow.", so_far)
         self.assertIn("Q: Who owns the test?", so_far)
         # Told once: the next batch has only its new lines.
         self.call("POST", f"/api/v1/recordings/{rid}/live", {"from": 1, "segments": LINES[1:]})
-        latest = self.items(room["session_id"])[-1]["text"]
+        latest = self.last_text(room["session_id"])["text"]
         self.assertIn("Bo: Who owns the regression test?", latest)
         self.assertNotIn("Q: Who owns the test?", latest)
 
@@ -335,6 +362,54 @@ class MeetingConversationMockTests(Conversation, unittest.TestCase):
         self.upload(empty, complete=True, ended_at="2026-11-10T15:00:00+08:00", segments=LINES, revision=int(time.time() * 1000) + 5)
         self.assertEqual(self.call("POST", f"/api/v1/recordings/{empty}/followup", {"id": bad_id, "text": "x"})[1]["code"], "no_material")
         self.assertEqual(self.call("POST", f"/api/v1/recordings/{empty}/followup", {"id": str(uuid.uuid4()), "text": "x"})[1]["created"], True)
+
+    def test_followup_from_any_recording(self):
+        """Talk about this meeting (#3862 phase 6): a note, and a meeting that never had a room (uploaded while the
+        manager had no meeting conversation), get their follow-up once ended; without ended_at they wait as any does."""
+        ended = "2026-11-10T15:00:00+08:00"
+        note, bare = str(uuid.uuid4()), str(uuid.uuid4())
+        self.upload(note, kind="note", title="Voice memo", segments=LINES, complete=True)
+        self.assertEqual(self.call("POST", f"/api/v1/recordings/{note}/followup", {"id": str(uuid.uuid4()), "text": "x"})[1]["code"], "meeting_running")
+        self.call("POST", "/mock/meeting_conversation", {"on": False})
+        try:
+            self.upload(bare, segments=LINES, complete=True, ended_at=ended)
+        finally:
+            self.call("POST", "/mock/meeting_conversation", {"on": True})
+        self.upload(note, kind="note", title="Voice memo", segments=LINES, complete=True, ended_at=ended, revision=int(time.time() * 1000) + 5)
+        for rid in (note, bare):
+            call = str(uuid.uuid4())
+            status, made = self.call("POST", f"/api/v1/recordings/{rid}/followup", {"id": call, "text": "What did we decide?"})
+            self.assertEqual((status, made["created"], made["client_msg_id"]), (200, True, f"followup-{call}"), rid)
+            first = self.items(made["followup"]["session_id"])[0]["text"]
+            self.assertIn("Bo: Who owns the regression test?", first)
+            self.assertTrue(first.endswith("\n\nWhat did we decide?"))
+            self.assertEqual(self.meta(rid)["followup"], made["followup"])
+            self.assertNotIn("room", self.meta(rid))  # no room was made for it
+
+    def test_a_trimmed_recording_without_minutes_has_nothing_to_talk_about(self):
+        """A trimmed recording's material is its minutes alone (the hub's meta.json keeps `chars`): an all-day recording
+        past recording_days keeps its recap and has no minutes."""
+        day = str(uuid.uuid4())
+        status, _ = self.upload(day, kind="day", day="2026-11-10", tz="UTC", part=1, started_at="2026-11-10T08:00:00Z", device="watch",
+                                duration=0, coverage={"to": 10000, "gaps": []}, segments=LINES, complete=True)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.call("POST", "/mock/recording_trim", {"id": day})[0], 200)
+        self.assertNotIn("minutes", self.call("GET", f"/api/v1/kb/recordings/{day}")[1]["detail"])
+        self.assertEqual(self.call("POST", f"/api/v1/recordings/{day}/followup", {"id": str(uuid.uuid4()), "text": "x"})[1]["code"], "no_material")
+
+    def test_kb_search_takes_a_kind(self):
+        """GET /api/v1/kb-search?kind= searches one kind as kb_search does (#3862 phase 6); an unknown kind is a 400."""
+        rid = str(uuid.uuid4())
+        self.upload(rid, title="App review", segments=LINES, complete=True)
+        kinds = lambda hits: {h["path"].split("/", 1)[0] for h in hits}
+        self.assertLessEqual({"projects", "recordings"}, kinds(self.call("GET", "/api/v1/kb-search?q=app")[1]["hits"]))
+        status, only = self.call("GET", "/api/v1/kb-search?q=app&kind=recordings")
+        self.assertEqual((status, kinds(only["hits"])), (200, {"recordings"}))
+        self.assertTrue(any(rid in h["path"] for h in only["hits"]))
+        self.assertNotIn("recordings", kinds(self.call("GET", "/api/v1/kb-search?q=app&kind=projects")[1]["hits"]))
+        results = self.call("GET", "/api/v1/kb-search?q=app&kind=recordings&results=1")[1]["results"]
+        self.assertTrue(results and {r["entry"]["kind"] for r in results} == {"recordings"})
+        self.assertEqual(self.call("GET", "/api/v1/kb-search?q=app&kind=nope")[0], 400)
 
     def test_just_me_goes_to_the_main_chat(self):
         rid = str(uuid.uuid4())

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, attentionReason, externalLink, failureReason, failureText, sessionPreview } from "./format";
+import { ago, attentionReason, baseName, externalLink, failureReason, failureText, sessionPreview } from "./format";
 import { formatRelative } from "../i18n";
 import type { Session } from "./types";
 
@@ -75,5 +75,27 @@ describe("ago", () => {
   it("keeps minutes and hours as they were", () => {
     expect(ago(iso(at(5, 1)), at(5, 3))).toBe(formatRelative(-2, "hour"));
     expect(ago(iso(at(4, 23)), at(5, 1))).toBe(formatRelative(-2, "hour"));
+  });
+});
+
+describe("baseName", () => {
+  it("names the last folder of a path, without a trailing separator", () => {
+    expect(baseName("/home/me/code/app")).toBe("app");
+    expect(baseName("/home/me/code/app/")).toBe("app");
+    expect(baseName("app")).toBe("app");
+    expect(baseName("")).toBe("");
+    expect(baseName(undefined)).toBe("");
+  });
+
+  it("reads a Windows computer's path by its own separator", () => {
+    expect(baseName("C:\\Users\\me\\code\\app")).toBe("app");
+    expect(baseName("C:\\Users\\me\\code\\app\\")).toBe("app");
+    expect(baseName("d:/code/app")).toBe("app");
+    expect(baseName("C:\\code/mixed\\app")).toBe("app");
+    expect(baseName("\\\\server\\share\\app")).toBe("app");
+  });
+
+  it("keeps a backslash that is part of a name anywhere else", () => {
+    expect(baseName("/home/me/odd\\name")).toBe("odd\\name");
   });
 });

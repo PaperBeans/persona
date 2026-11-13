@@ -62,13 +62,14 @@ class NotificationGroupShotsTest {
         val style = mutableStateOf(AppStyle.Glass)
         val dark = mutableStateOf(false)
         val opened = mutableListOf<SettingsPage>()
+        val initialPage = mutableStateOf("settings")
         rule.setContent {
             val context = LocalContext.current
             val store = remember { AppStyleStore(context) }
             PersonaTheme(darkTheme = dark.value, reduceMotion = true, style = style.value) {
                 CompositionLocalProvider(LocalLanguageHost provides rule.activity, LocalAppStyleStore provides store) {
                     Box(Modifier.testTag("shot").width(400.dp).height(1700.dp).background(PersonaTheme.palette.background)) {
-                        SettingsScreen(services.value, onOpen = { opened.add(it) })
+                        SettingsScreen(services.value, initialPage = initialPage.value, onOpen = { opened.add(it) })
                     }
                 }
             }
@@ -79,15 +80,19 @@ class NotificationGroupShotsTest {
             for (appStyle in styles) {
                 val captures = mutableListOf<Bitmap>()
                 for (isDark in listOf(false, true)) {
-                    rule.runOnIdle { services.value = service; style.value = appStyle; dark.value = isDark }
+                    rule.runOnIdle { services.value = service; style.value = appStyle; dark.value = isDark; initialPage.value = "settings" }
                     rule.mainClock.advanceTimeBy(2_000)
+                    rule.waitForIdle()
+                    opened.clear()
+                    rule.onNodeWithText(rule.activity.getString(R.string.settings_notification_background_title)).performClick()
+                    assertEquals(listOf(SettingsPage.NotificationBackground), opened)
+                    rule.runOnIdle { initialPage.value = "notification-background" }
                     rule.waitForIdle()
                     val destinations = buildList {
                         if (service.capsule != null) add(R.string.settings_capsule_title to SettingsPage.Capsule)
-                        add(R.string.settings_ready_notifications to SettingsPage.Notifications)
-                        add(R.string.settings_row_background to SettingsPage.Readiness)
                         if (service.desktops != null) add(R.string.settings_desktops_banner to SettingsPage.Desktops)
                     }
+                    if (service.capsule == null) rule.onNodeWithText(rule.activity.getString(R.string.settings_capsule_title)).assertDoesNotExist()
                     opened.clear()
                     for ((label, _) in destinations) rule.onNodeWithText(rule.activity.getString(label)).performClick()
                     assertEquals(destinations.map { it.second }, opened)

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  agentsOverride, chooseProvider, draftFor, modelConfiguration, modelPatch, modelPurpose, modelSummary, providersFor, runtimeChoices, runtimeFallbackText, saveModelPurpose,
+  modelPurpose, modelSummary, runtimeFallbackText,
   type ModelProvider, type ModelPurpose,
 } from "./model-config";
-import { executionForm, purposeGroups } from "./model-config-execution";
+import { agentsOverride, catalogLists, chooseProvider, draftFor, executionForm, modelConfiguration, modelPatch, providersFor, purposeDescription, purposeGroups, runtimeChoices, saveModelPurpose, withPurposeAfter } from "./model-config-execution";
 
 const purpose: ModelPurpose = {
   id: "lark.agent", name: "飞书 /agent", group: "对话", kind: "launcher", revision: 3,
@@ -91,6 +91,11 @@ describe("执行形态", () => {
       expect(executionForm(direct, [{ id: "direct", name: "Direct", kind: "api", api: protocol }]))
         .toEqual({ label: "直接 API", backend });
     }
+    // A launcher picked for an API purpose runs claude -p, unless it is a managed one speaking Messages (#5823).
+    const kb: ModelPurpose = { ...chat, id: "kb", kind: "api", launch: undefined, effective: { provider: "launcher.x" } };
+    expect(executionForm(kb, [{ id: "launcher.x", name: "Claude Code", kind: "launcher", agent: "claude" }]).backend).toBe("claude -p");
+    expect(executionForm(kb, [{ id: "launcher.x", name: "Gateway", kind: "launcher", has_key: true }]).backend).toBe("Messages");
+    expect(executionForm(kb, [{ id: "launcher.x", name: "Other", kind: "launcher", api: "chat", has_key: true }]).backend).toBe("claude -p");
   });
 });
 
@@ -148,6 +153,62 @@ describe("统一 API 契约", () => {
     await expect(saveModelPurpose(purpose, draft)).rejects.toMatchObject({ status: 409 });
     expect(draft).toEqual({ provider: "strong", model: "main", effort: "high", runtime: "" });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("后台督办的用途 (#5082)", () => {
+  const main: ModelPurpose = { ...purpose, id: "assistant", name: "主对话", launch: "headless" };
+  const agents: ModelPurpose = { ...purpose, id: "agent.new", name: "Agents", launch: "engine" };
+  const supervise: ModelPurpose = { ...purpose, id: "assistant.supervise", name: "后台督办", parent: "assistant", category_id: "assistant", launch: "headless", override: {}, inherited_from: "主对话" };
+
+  const ids = (catalog: { purposes: ModelPurpose[] }) => catalog.purposes.map((p) => p.id);
+
+  it("a hub before #5806 answers it by its id: it goes right after Main chat, once, and only when the hub has both", () => {
+    const catalog = { purposes: [main, agents], providers };
+    expect(catalogLists(catalog, "assistant.supervise")).toBe(false);
+    expect(ids(withPurposeAfter(catalog, "assistant.supervise", "assistant", supervise))).toEqual(["assistant", "assistant.supervise", "agent.new"]);
+    expect(catalog.purposes).toHaveLength(2); // the hub's answer is left as it was
+    expect(withPurposeAfter(catalog, "assistant.supervise", "assistant", undefined)).toBe(catalog);
+    const noMain = { purposes: [agents], providers };
+    expect(withPurposeAfter(noMain, "assistant.supervise", "assistant", supervise)).toBe(noMain);
+    // an answer for another purpose is not put in under this id
+    expect(withPurposeAfter(catalog, "assistant.supervise", "assistant", agents)).toBe(catalog);
+  });
+
+  it("a hub since #5806 lists it last among its own: it is moved up to right after Main chat, once (#5806)", () => {
+    const twin: ModelPurpose = { ...purpose, id: "inbox.agent", name: "AI 分身执行", parent: "agent.new" };
+    const listed = { purposes: [main, agents, twin, supervise], providers };
+    expect(catalogLists(listed, "assistant.supervise")).toBe(true);
+    const placed = withPurposeAfter(listed, "assistant.supervise", "assistant");
+    expect(ids(placed)).toEqual(["assistant", "assistant.supervise", "agent.new", "inbox.agent"]);
+    expect(placed.purposes[1]).toBe(supervise); // the hub's row, as sent
+    expect(ids(listed)).toEqual(["assistant", "agent.new", "inbox.agent", "assistant.supervise"]); // the answer is left as it was
+    // the listed row wins over one read apart, and nothing is listed twice
+    expect(ids(withPurposeAfter(listed, "assistant.supervise", "assistant", { ...supervise, name: "stale" }))).toEqual(ids(placed));
+    expect(withPurposeAfter(listed, "assistant.supervise", "assistant", { ...supervise, name: "stale" }).purposes[1].name).toBe("后台督办");
+    // already in place (a hub that lists it after its parent): the answer itself
+    expect(withPurposeAfter(placed, "assistant.supervise", "assistant")).toBe(placed);
+    // listed before its parent: still right after it
+    expect(ids(withPurposeAfter({ purposes: [supervise, main, agents], providers }, "assistant.supervise", "assistant"))).toEqual(["assistant", "assistant.supervise", "agent.new"]);
+    // no Main chat row: left where the hub put it
+    const noMain = { purposes: [agents, supervise], providers };
+    expect(withPurposeAfter(noMain, "assistant.supervise", "assistant")).toBe(noMain);
+  });
+
+  it("is in Main chat's group", () => {
+    const groups = purposeGroups(withPurposeAfter({ purposes: [main, agents], providers }, "assistant.supervise", "assistant", supervise).purposes, "");
+    expect(groups[0][1].map((p) => p.id)).toEqual(["assistant", "assistant.supervise"]);
+    // an older hub's shape (no launch): still with Main chat, by its parent
+    expect(purposeGroups([main, { ...supervise, launch: undefined }, agents], "")[0][1].map((p) => p.id)).toEqual(["assistant", "assistant.supervise"]);
+  });
+
+  it("each purpose says what it is for in the hub's sentence; the background supervisor has this page's on a hub that sends none (#5806)", () => {
+    expect(purposeDescription({ ...main, description: "和你对话，把事情拆成任务派出去。" })).toBe("和你对话，把事情拆成任务派出去。");
+    expect(purposeDescription({ ...supervise, description: "  hub 的说法  " })).toBe("hub 的说法");
+    // a hub before #5086 sends none: nothing for Main chat, this page's own sentence for the background supervisor
+    expect(purposeDescription(main)).toBe("");
+    expect(purposeDescription({ ...main, description: "   " })).toBe("");
+    expect(purposeDescription(supervise)).toContain("跟进并验收");
   });
 });
 

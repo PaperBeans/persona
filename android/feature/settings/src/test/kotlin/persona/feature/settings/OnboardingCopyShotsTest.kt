@@ -95,7 +95,7 @@ class OnboardingCopyShotsTest {
             capture("pairing-details-${s.name.lowercase()}-$mode")
             rule.onNode(hasText("确认配对") and hasClickAction()).performClick()
             rule.waitForIdle()
-            rule.onNodeWithText("连不上 hub", substring = true).assertExists()
+            rule.onNodeWithText("连不上 Hub", substring = true).assertExists()
             capture("pairing-timeout-${s.name.lowercase()}-$mode")
         }
     }

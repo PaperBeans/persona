@@ -819,7 +819,7 @@
     },
     {
       "name": "fold_range_uses_numeric_block_bounds",
-      "description": "折叠按行号和数字块序号判范围，同时保留范围内的正文。",
+      "description": "折叠按行号和数字块序号判范围，范围内的 narration 被替换，范围外的工作和正文保留。",
       "source": [
         "ios/Shared/ChatStore.swift: Item.part, Item.folds, Item.isWork, dropFolded"
       ],
@@ -843,7 +843,7 @@
               "seq": 2,
               "role": "assistant",
               "kind": "text",
-              "text": "保留正文"
+              "text": "折叠叙述"
             },
             {
               "id": "2#10",
@@ -856,6 +856,13 @@
               "seq": 2,
               "role": "assistant",
               "kind": "thinking"
+            },
+            {
+              "id": "2#12",
+              "seq": 2,
+              "role": "assistant",
+              "kind": "text",
+              "text": "保留正文"
             }
           ],
           "covered": 2,
@@ -875,7 +882,7 @@
                 "fold": {
                   "items": 3,
                   "tools": 0,
-                  "thoughts": 3,
+                  "thoughts": 2,
                   "until": "2026-01-01T00:00:00Z",
                   "through_seq": 2,
                   "through_id": "2#10"
@@ -905,31 +912,31 @@
               "fold": {
                 "items": 3,
                 "tools": 0,
-                "thoughts": 3,
+                "thoughts": 2,
                 "until": "2026-01-01T00:00:00Z",
                 "through_seq": 2,
                 "through_id": "2#10"
               }
             },
             {
-              "id": "2#3",
-              "seq": 2,
-              "role": "assistant",
-              "kind": "text",
-              "text": "保留正文"
-            },
-            {
               "id": "2#11",
               "seq": 2,
               "role": "assistant",
               "kind": "thinking"
+            },
+            {
+              "id": "2#12",
+              "seq": 2,
+              "role": "assistant",
+              "kind": "text",
+              "text": "保留正文"
             }
           ],
           "item_ids": [
             "2#1",
             "fold:2#2",
-            "2#3",
-            "2#11"
+            "2#11",
+            "2#12"
           ],
           "covered": 2,
           "history": "h",

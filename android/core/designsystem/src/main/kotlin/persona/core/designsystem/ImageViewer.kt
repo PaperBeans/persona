@@ -299,7 +299,7 @@ private fun ViewerBody(
                     if (images.size > 1) Text(
                         "${page + 1} / ${images.size}",
                         style = PersonaTheme.type.labelSmall.copy(fontFeatureSettings = TabularFigures), color = palette.ink, maxLines = 1,
-                        modifier = Modifier.floatingSurface(CircleShape).padding(horizontal = 14.dp, vertical = Tokens.Space.s),
+                        modifier = Modifier.floatingSurface(CircleShape).padding(horizontal = 14.dp.dense, vertical = Tokens.Space.s),
                     )
                 }
             }

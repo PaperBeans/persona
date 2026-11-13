@@ -57,11 +57,11 @@ struct ChannelsEntryRow: View {
             } footer: {
                 Text("Where you can talk to Persona: its own apps, WeChat, the Lark bot…")
             }
-            .task(id: model.settingsPath.count) { // again when a channel's page closes
-                if let l = try? await model.api?.channels() {
-                    channels = l
-                    ChannelDirectory.shared.update(l)
-                }
+            .task(id: "\(model.assistantManagerID ?? "")|\(model.settingsPath.count)|\(model.config?.url.absoluteString ?? "")") {
+                channels = nil
+                guard let api = model.api?.currentAssistantSettings(), let l = try? await api.channels(),
+                      !Task.isCancelled, api.sameSettingsScope(as: model.api) else { return }
+                channels = l
             }
         }
     }
@@ -69,6 +69,7 @@ struct ChannelsEntryRow: View {
 
 /// Settings › Channels: every way of talking to Persona, in three sections (the apps, the installed, a market's).
 struct ChannelsView: View {
+    @Environment(AppModel.self) private var app
     @State private var page = ChannelsModel()
 
     var body: some View {
@@ -83,7 +84,7 @@ struct ChannelsView: View {
                 Section {
                     Group {
                         ForEach(section.channels) { c in
-                            NavigationLink(value: Self.destination(c)) { ChannelRowLabel(channel: c) }
+                            NavigationLink(value: Self.destination(c, manager: app.assistantManagerID)) { ChannelRowLabel(channel: c) }
                                 .accessibilityIdentifier("channel-\(c.id)")
                         }
                     }
@@ -102,17 +103,17 @@ struct ChannelsView: View {
         .overlay { if page.channels == nil && page.loading { ProgressView() } }
         .detailTitle(String(localized: "Channels"))
         .navigationBarTitleDisplayMode(.inline)
-        .task { await page.load() }
+        .task(id: "\(app.assistantManagerID ?? "")|\(app.config?.url.absoluteString ?? "")") { await page.load() }
         .refreshable { await page.load() }
     }
 
     /// A market's opens its page in the plugin market; the rest their own.
-    static func destination(_ c: HubChannel) -> SettingsPage {
+    static func destination(_ c: HubChannel, manager: String? = nil) -> SettingsPage {
         if c.isMarket {
             if let market = c.market, let plugin = c.plugin { return .marketExtension(market: market, id: plugin) }
             return .pluginMarket
         }
-        return .channel(c.id)
+        return .channel(c.id, manager: manager)
     }
 }
 
@@ -161,10 +162,11 @@ struct ChannelDetailView: View {
     @State private var binding: ConnectorSignInModel
     @State private var confirmUnbind = false
 
-    init(id: String) {
-        let page = ChannelModel(id: id)
+    init(id: String, manager: String? = nil) {
+        let manager = manager ?? AppModel.shared.assistantManagerID
+        let page = ChannelModel(id: id, manager: manager)
         _page = State(initialValue: page)
-        _binding = State(initialValue: ConnectorSignInModel(id: id, deps: ChannelModel.bindingDeps(.live, report: { AppModel.shared.show($0) })))
+        _binding = State(initialValue: ConnectorSignInModel(id: id, manager: manager, deps: ChannelModel.bindingDeps(.live, report: { AppModel.shared.show($0) })))
     }
 
     var body: some View {
@@ -262,7 +264,7 @@ struct ChannelDetailView: View {
 
     private func market(_ c: HubChannel) -> some View {
         Section {
-            NavigationLink(value: ChannelsView.destination(c)) {
+            NavigationLink(value: ChannelsView.destination(c, manager: page.manager)) {
                 Label { Text("Install from Extension Market").lineLimit(1) } icon: { ThemedIcon(Theme.Icon.pluginMarket) }
             }
             .accessibilityIdentifier("channel-install")
@@ -340,11 +342,10 @@ struct ChannelDetailView: View {
         var id: String { tag }
     }
 
-    /// The assistant's recent conversations (the main one is Main Chat), with the current one if it is not among them:
-    /// the default manager's, whose channels these are, whichever manager the Persona page shows.
+    /// Conversations offered by this channel's captured assistant, never another assistant's.
     private func choices(_ c: HubChannel) -> [Choice] {
-        let main = model.defaultAssistantMain
-        var out = model.defaultAssistantConversations.filter { $0.key != main }.prefix(15).map { s in
+        let all = model.sameManager(page.manager, model.assistantManagerID) ? model.assistantConversations : []
+        var out = all.filter { $0.key != model.assistantMain }.prefix(15).map { s in
             Choice(tag: "c:" + s.machineID + "/" + s.sessionID, title: s.title.isEmpty ? String(localized: "New Chat [Quick Actions ea4b29]") : s.title)
         }
         if let t = c.target, t.kind == "conversation", case let tag = Self.tag(t), !out.contains(where: { $0.tag == tag }) {
@@ -456,7 +457,7 @@ struct ChannelDetailView: View {
     }
 
     @ViewBuilder private func more(_ c: HubChannel) -> some View {
-        if let dest = ChannelText.page(page.detail?.settingsURL) {
+        if let dest = ChannelText.page(page.detail?.settingsURL, manager: page.manager) {
             Section {
                 if dest == .sent {
                     Button { model.openSentRecords() } label: {
@@ -486,11 +487,12 @@ struct ChannelDetailView: View {
 struct ChannelLinkSection: View {
     @Environment(AppModel.self) private var model
     var channelID: String
+    var manager: String? = nil
 
     var body: some View {
         if model.hubFeatures.contains("channels") {
             Section {
-                NavigationLink(value: SettingsPage.channel(channelID)) {
+                NavigationLink(value: SettingsPage.channel(channelID, manager: manager)) {
                     Label {
                         VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                             Text("This is a chat channel").lineLimit(1)
@@ -540,26 +542,27 @@ private struct ChannelDirectoryLoader: ViewModifier {
     }
 }
 
-/// The mark beside a conversation's title: the extension that opened it (#3758, `AutoConversationSource.external`), else
-/// the channel its latest message came in from. One mark: an extension's conversation has no channel of its own.
+/// The mark beside a conversation's title: what opened one Persona opened by itself (`source`, from
+/// `AutoConversations.source`: the Inbox, a scheduled task, Lark /agent, an extension…, #3758, #5195), else the channel
+/// its latest message came in from. One mark: such a conversation has no channel of its own.
 struct ConversationSourceMark: View {
-    var origin: String?
+    var source: AutoConversationSource?
     var channels: [String]?
 
     var body: some View {
-        if let source = AutoConversationSource.external(origin) {
-            ExternalSourceMark(source: source)
+        if let source {
+            AutoSourceMark(source: source)
                 .accessibilityElement()
-                .accessibilityLabel(source.from)
+                .accessibilityLabel(source.markLabel)
         } else {
             ConversationChannelMark(ids: channels)
         }
     }
 }
 
-/// Where an external conversation came from, as a mark of `side` points: Lark's brand for Lark /agent, the extensions
-/// symbol for another extension (#3758).
-struct ExternalSourceMark: View {
+/// What opened a conversation Persona opened by itself, as a mark of `side` points: the source's brand where it has one
+/// (Lark's for Lark /agent, #3758), else its symbol, the one All Chats' filter for it shows (#5195).
+struct AutoSourceMark: View {
     var source: AutoConversationSource
     var side: CGFloat = Theme.Size.markS
 
@@ -581,7 +584,7 @@ struct ExternalSourceLine: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
-            ExternalSourceMark(source: source)
+            AutoSourceMark(source: source)
             Text(source.from).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
         }
         .accessibilityElement(children: .combine)

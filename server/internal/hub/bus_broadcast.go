@@ -57,7 +57,7 @@ var hubMessageTypes = map[string]bool{
 	"hello": true, "client_hello_ack": true, "pong": true, "notify": true, "lock_test": true, "error": true,
 	"interaction": true, "interaction_resolved": true,
 	"machines": true, "sessions": true, "sessions_delta": true, "sessions_list": true, "items": true, "revs": true,
-	"delta": true, "live": true,
+	"delta": true, "live": true, proto.FeatureMessageSendState: true,
 	"screen": true, "tool_call": true, "hook_event": true, "fs_changed": true, "desktops": true, "endpoints": true,
 	"terminal": true, "terminal_control": true, "herdr_state": true, "herdr_focus": true, "herdr_end": true, "herdr_data": true,
 	"fleet": true, "liveactivity": true, "look": true, "personas": true, "managers": true, "hub_update": true,

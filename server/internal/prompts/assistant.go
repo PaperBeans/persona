@@ -6,6 +6,14 @@ import (
 	"unicode/utf8"
 )
 
+type AssistantSelectedSkill struct {
+	Name, Path, Ref string
+}
+
+func RenderAssistantSelectedSkills(skills []AssistantSelectedSkill) string {
+	return render("assistant/selected_skills", skills)
+}
+
 // AssistantMachine is one computer in the assistant's CLAUDE.md, as seen from where the assistant runs.
 type AssistantMachine struct {
 	Name, ID string
@@ -27,11 +35,11 @@ type AssistantClaudeMD struct {
 	OnHub        bool
 	// LarkCLI: hub.json configures lark-cli (docs/plans/plan-lark-cli.md), on the assistant's PATH.
 	LarkCLI bool
-	// PersonaView: every app draws ```persona-view (hub.json assistant.persona_view); else the assistant writes
-	// ```persona-card, which they all draw.
-	PersonaView bool
 	// Language is the language the user reads, by its own name ("English", or Japanese written in Japanese); "" is Chinese, as before i18n.
 	Language string
+	// BackgroundSupervisor: the background supervisor follows up the tasks no leader supervises (#4927), so the main
+	// conversation is told it no longer reviews them itself. False keeps the text as it was.
+	BackgroundSupervisor bool
 }
 
 func RenderAssistantClaudeMD(d AssistantClaudeMD) string { return render("assistant/claude_md", d) }
@@ -77,7 +85,7 @@ type SnapshotMachine struct {
 
 // SnapshotApp is the Persona app on one kind of device as it last said its version (assistant/snapshot_app). No
 // time: the node sends only the snapshot's changed lines, and a reconnect must not make this one change.
-// Platform: ios | ipados | watchos | macos | visionos | android.
+// Platform: ios | ipados | watchos | macos | visionos | android | harmony.
 type SnapshotApp struct {
 	Platform, Version, Build, OS string // Build, OS: "" when not said
 	Simulator                    bool
@@ -138,6 +146,7 @@ type SnapshotFollowup struct {
 // SnapshotPlan is a plan card in the main conversation still waiting for the user's "Start" (#4453): nothing of it has
 // started, and it shows nowhere else.
 type SnapshotPlan struct {
+	ID     string    // the plan's id, for task_plan_withdraw (#6739)
 	At     time.Time // when it was put up, in the user's zone
 	Titles []string  // its tasks' titles (at most three)
 	Tasks  int       // how many tasks it has
@@ -344,7 +353,18 @@ type AssistantContext struct {
 	// LeaderName: for a leader, its direction's name.
 	Directions []ContextDirection
 	LeaderName string
+	// Background: this is the background supervisor (#4927), which follows up the tasks no leader supervises.
+	// BackgroundStarted: for the main conversation, once: the background supervisor's id, the first message after it
+	// began to follow up the main conversation's tasks.
+	Background        bool
+	BackgroundStarted string
 }
+
+// SupervisorStart is the message the background supervisor's conversation starts with (assistant/supervisor_start):
+// what it is for, before its first supervision message.
+type SupervisorStart struct{ Owner string }
+
+func RenderSupervisorStart(d SupervisorStart) string { return render("assistant/supervisor_start", d) }
 
 // ContextDirection is one current leader as the main conversation is told of it: its conversation id and name.
 type ContextDirection struct{ ID, Name string }
@@ -368,6 +388,9 @@ type TaskRun struct {
 	Continued bool
 	// PushAsked: the task pushes only what the run sends with notify_user (its push "asked", #2396).
 	PushAsked bool
+	// InboxWorthy, InboxEvery: the task's inbox setting (#6430): a run puts a row in the Inbox only when it finds something
+	// worth a look (inbox_post), or the manager puts one after every run.
+	InboxWorthy, InboxEvery bool
 	// Facts: the run's facts Persona worked out (RenderBriefFacts), above the task's prompt; "" for a task without them.
 	Facts string
 }
@@ -398,6 +421,8 @@ type BriefFacts struct {
 	Briefs, BriefsDone []BriefTask
 	// Day: the evening routine's today's all-day recording (#4741), for the model only; nil leaves the section out.
 	Day *BriefDay
+	// Setup: the lines of the weekly recommended-setup block (#5085), ready to read; none leaves the section out.
+	Setup []string
 }
 
 // BriefDay is today's all-day recording in the evening routine's facts (#4741), the day's parts merged by time; the
@@ -633,6 +658,12 @@ type Supervise struct {
 	// Leader: it goes to a leader conversation, for the tasks it handed out (#3133); Escalated: an entry is a leader's
 	// needs_user, told the main conversation.
 	Leader, Escalated bool
+	// Background: with Leader, it goes to the background supervisor (#4927): the leader's message, for tasks other
+	// conversations handed out, whose cards go from it to the user.
+	Background bool
+	// BackgroundEscalated: with Escalated, one of those entries is the background supervisor's needs_user (#4927): no
+	// leader is named for it.
+	BackgroundEscalated bool
 	// Side: it goes to an ordinary side conversation, for the tasks that conversation handed out itself.
 	Side bool
 	// LeaderStuck: an entry is a leader's task stuck over a day (sigLeaderStuck), told the main conversation (#3609).
@@ -661,6 +692,7 @@ type SuperviseEntry struct {
 	Ask             string             // needs_you: what it asks
 	Recommend       string             // escalated: the option the leader recommends
 	LeaderGone      bool               // decide: its task leader agent cannot be reached, so the supervisor takes the task over
+	Background      bool               // escalated: by the background supervisor, not a leader conversation (#4927)
 	DoneWhen        []string           // what done means
 	Round           int                // reworks so far
 	Machine         string             // where its agent runs (a name)

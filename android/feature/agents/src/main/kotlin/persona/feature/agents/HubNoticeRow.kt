@@ -52,7 +52,7 @@ internal fun HubNoticeRow(
         ) {
             if (notice is HubNotice.Updating) {
                 JSpinner(
-                    modifier = Modifier.size(Tokens.Space.l),
+                    modifier = Modifier.size(Tokens.Space.Standard.l),
                     color = accentColor,
                 )
             } else {

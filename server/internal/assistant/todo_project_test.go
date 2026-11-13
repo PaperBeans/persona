@@ -142,7 +142,7 @@ func taskPlanProject(t *testing.T) {
 	f.hello.KB = &KBSettings{}
 	// no database (plans live in memory), a knowledge base of its own
 	s := withSettings(t, f, New(Options{Hub: f, Logf: testLogf(t), KB: &KBOptions{Dir: t.TempDir()}}))
-	t.Cleanup(s.kbClose)
+	t.Cleanup(s.kbEnd)
 	if _, err := kbEng(t, s).Apply(kb.KindProject, "诊断能力", kb.Update{Name: "诊断能力", Kind: "long"}); err != nil {
 		t.Fatal(err)
 	}

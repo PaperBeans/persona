@@ -70,6 +70,7 @@
   "scope_notify": "给你的设备发通知",
   "scope_assistant_ask": "给 Persona 开对话、读对话动态",
   "scope_assistant_read": "读你和 Persona 的对话（你的消息和它的回复）",
+  "scope_assistant_memory_read": "读 Persona 记住的关于你的内容（只读，不含健康空间）",
   "scope_todos_read": "看待办",
   "scope_todos_write": "新建和修改待办、把对话挂到待办上（不能删待办）",
   "scope_leaders_read": "查看主管对话（方向）和它们的上报",
@@ -100,5 +101,7 @@
   "network_config_unset": "未填",
   "secret_provider_title": "提供密钥的值",
   "secret_provider_more_title": "提供密钥的值（新增）",
-  "secret_provider_detail": "你的设置里填了 {schemes} 引用，或你在手机上批准把某个引用交给 Agent 时，Persona 向它要值。它会知道用的是哪个引用、用在哪里，看不到你别的密钥"
+  "secret_provider_detail": "你的设置里填了 {schemes} 引用，或你在手机上批准把某个引用交给 Agent 时，Persona 向它要值。它会知道用的是哪个引用、用在哪里，看不到你别的密钥",
+  "assistant_data_title": "往助手读的内容里加它写的东西",
+  "assistant_data_detail": "它的程序写的文字可以进助手的说明和技能、Agent 的项目背景，或收件箱的分拣和起草，各有大小上限。每一项都能在它的详情里单独关掉"
 }

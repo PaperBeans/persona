@@ -7,9 +7,13 @@ import (
 )
 
 // KBOwner is the knowledge base models' system prompts: compressing a chat (kb/compress), rewriting a project
-// (kb/project), tagging documents, meetings and events (kb/items).
+// (kb/project), tagging documents, meetings and events (kb/items). Language is what text written from a recording for
+// the user to read is written in, by the language's own name ("English", "日本語"; "" is Chinese), whatever languages
+// the transcript mixes (kb/write_language): only a recording's summary (kb/recording), minutes (kb/minutes,
+// kb/minutes_merge) and day recap (kb/day_recap, kb/day_recap_merge) read it.
 type KBOwner struct {
-	Owner string
+	Owner    string
+	Language string
 }
 
 func RenderKBCompress(o KBOwner) string { return render("kb/compress", o) }

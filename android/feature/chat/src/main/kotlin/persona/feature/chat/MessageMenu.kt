@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -24,9 +25,11 @@ import persona.core.contracts.api.DeliveryState
 import persona.core.contracts.api.RewindRestore
 import persona.core.domain.rewind.Rewind
 import persona.core.domain.sort.canSend
+import persona.core.designsystem.AppStyle
 import persona.core.designsystem.JAction
 import persona.core.designsystem.JActionSheet
 import persona.core.designsystem.JDialog
+import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.swipeToReply
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
@@ -38,11 +41,12 @@ import persona.core.designsystem.stableAlpha
 /**
  * A message the long-press menu is open for: [text] is what it says ("Copy" / "Select" / "Quote" / "Share" / "Hand to Persona" / "Use as context"
  * take it), [editText] what "Edit" puts back in the composer (its photos as attachments again), [user] for your own. [pending]: a
- * message only in the outbox (its id the client message id), in that delivery state.
+ * message only in the outbox (its id the client message id), in that delivery state. [time]: when it was said (the item's
+ * `ts`), which its picture shows.
  */
 @Immutable
 internal data class MessageTarget(val id: String, val text: String, val user: Boolean, val editText: String = text,
-    val pending: DeliveryState? = null)
+    val pending: DeliveryState? = null, val time: String? = null)
 
 /** Which message the long-press menu is open for (iOS `MessageMenu`); the page shows the menu, rows open it. */
 @Stable
@@ -53,6 +57,19 @@ internal class MessageMenuState {
     /** What a swipe to the left quotes with (iOS #1058); null where messages cannot be quoted (read-only). */
     var quote by mutableStateOf<((MessageTarget) -> Unit)?>(null)
 
+    /** What "Quote" does with the words picked in a selected message (iOS Select Text › Quote): the message and the words; null where messages cannot be quoted. */
+    var quoteWords by mutableStateOf<((MessageTarget, String) -> Unit)?>(null)
+
+    /**
+     * The message whose words are selected where it is ("Select", iOS `LiftSelection.swift`, [SelectableWords]); at most one.
+     * While it is, that message takes no long press, swipe or tap of its own: they would end the selection.
+     */
+    var selecting by mutableStateOf<MessageTarget?>(null)
+        private set
+
+    /** Where the selecting message is on the screen, for [endSelectionOnTapOutside]; written as it is laid out, not observed. */
+    var selectingBounds: Rect = Rect.Zero
+
     fun open(target: MessageTarget) {
         this.target = target
     }
@@ -60,17 +77,29 @@ internal class MessageMenuState {
     fun close() {
         target = null
     }
+
+    /** "Select": the menu goes and the message's words are selected where they are. */
+    fun select(target: MessageTarget) {
+        this.target = null
+        selecting = target
+    }
+
+    /** The selection is over; [id] guards a message that has gone from ending the selection of the one that followed it. */
+    fun endSelection(id: String? = null) {
+        if (id == null || selecting?.id == id) selecting = null
+    }
 }
 
 /**
  * The pressable part of a message: a long press (or a right click, docs/android/android-design.md 3.1, or the
  * "More actions" long-click action accessibility services get) opens the menu, and the message dims while it is
- * open. Taps on links and buttons inside go to them, not here.
+ * open. Taps on links and buttons inside go to them, not here. While its words are selected in place ("Select",
+ * [SelectableWords]) it has none of this: the long press, the swipe to quote and the dimming would fight the selection.
  */
 @Composable
 internal fun Modifier.messageMenu(target: MessageTarget?): Modifier {
     val menu = LocalChatRowActions.current?.menu
-    if (menu == null || target == null || target.text.isBlank()) return this
+    if (menu == null || target == null || target.text.isBlank() || rememberSelecting(menu, target.id)) return this
     val haptics = LocalHapticFeedback.current
     val open = remember(menu, target) {
         {
@@ -89,14 +118,15 @@ internal fun Modifier.messageMenu(target: MessageTarget?): Modifier {
 
 /**
  * "Rewind to here" on your messages (#2436): [block] is why the session cannot right now (shown on the disabled row), null
- * when it can; [run] asks the node to go back to before the message.
+ * when it can; [code] offers "Code and conversation" too (false where the node puts no files back, `Rewind.restoresCode`);
+ * [run] asks the node to go back to before the message.
  */
 @Immutable
-internal data class RewindMenu(val block: String?, val run: (MessageTarget, RewindRestore) -> Unit)
+internal data class RewindMenu(val block: String?, val code: Boolean = true, val run: (MessageTarget, RewindRestore) -> Unit)
 
 /**
- * The long-press menu as an action sheet (docs/android/android-design.md 2.3 rule 7): "Copy", "Select" (the message as text to
- * select from), "Quote", "Share", "Hand to Persona", "Use as context", and "Edit" on your own messages. [writes] false (a read-only
+ * The long-press menu as an action sheet (docs/android/android-design.md 2.3 rule 7): "Copy", "Select" (the message's words
+ * selected where it is, [SelectableWords]), "Quote", "Share", "Hand to Persona", "Use as context", and "Edit" on your own messages. [writes] false (a read-only
  * conversation) leaves out what would change the composer: "Quote", "Use as context", "Edit". A message not sent yet has "Copy",
  * "Select", "Share" and, with [onDelete], "Delete" ("Cancel send" while it waits) last (#4645, as iOS and the web in #4626).
  */
@@ -114,21 +144,28 @@ internal fun MessageMenuSheet(
     rewind: RewindMenu? = null,
     /** "Delete" / "Cancel send" on a message only on this phone ([MessageTarget.pending]). */
     onDelete: ((MessageTarget) -> Unit)? = null,
+    /** Who answers here and where: on Glass "Share" opens the message's picture (iOS `MessageShareSheet`); without, it shares the text. */
+    share: ShareCardSource? = null,
 ) {
-    var selecting by remember { mutableStateOf<String?>(null) }
+    var sharing by remember { mutableStateOf<MessagePicture?>(null) }
+    val pictures = share?.takeIf { PersonaTheme.style == AppStyle.Glass }
     var rewinding by remember { mutableStateOf<MessageTarget?>(null) }
     var confirmCode by remember { mutableStateOf<MessageTarget?>(null) }
     val context = LocalContext.current
     val copy = rememberCopy()
     val target = menu.target
     val resources = LocalResources.current
-    val extras = MessageExtras(fork = onFork != null, rewind = rewind != null, rewindBlock = rewind?.block, delete = onDelete != null)
+    val extras = MessageExtras(fork = onFork != null, rewind = rewind != null, rewindBlock = rewind?.block, delete = onDelete != null,
+        dontSend = PersonaTheme.style == AppStyle.Glass)
     if (target != null) JActionSheet(messageMenuActions(target, writes, onHandToPersona != null, resources, extras) { action ->
         when (action) {
             MessageAction.Copy -> { copy(target.text, null) }
-            MessageAction.Select -> { selecting = target.text }
+            MessageAction.Select -> menu.select(target)
             MessageAction.Quote -> onQuote(target)
-            MessageAction.Share -> { if (!shareText(context, target.text)) onNotice(resources.getString(R.string.chat_menu_no_share)) }
+            MessageAction.Share -> {
+                if (pictures != null) { sharing = messagePicture(target, pictures) }
+                else if (!shareText(context, target.text)) { onNotice(resources.getString(R.string.chat_menu_no_share)) }
+            }
             MessageAction.HandToPersona -> onHandToPersona?.invoke(target.text)
             MessageAction.Context -> onContext(target.text)
             MessageAction.Edit -> onEdit(target.editText)
@@ -137,11 +174,13 @@ internal fun MessageMenuSheet(
             MessageAction.Delete -> onDelete?.invoke(target)
         }
     }, onDismiss = menu::close)
-    // "Rewind chat only" / "Rewind code and chat" (web's submenu); the second asks again: it puts files back too.
+    // "Rewind chat only" / "Rewind code and chat" (web's submenu); the second asks again: it puts files back too. Where the
+    // node says it puts no files back (`rewind_code` false: a runtime's session, a Codex thread) only the first.
     rewinding?.let { at ->
-        JActionSheet(listOf(
+        JActionSheet(listOfNotNull(
             JAction(stringResource(R.string.chat_rewind_conversation), PhIcons.ArrowUUpLeft) { rewind?.run?.invoke(at, RewindRestore.Conversation) },
-            JAction(stringResource(R.string.chat_rewind_code_and_conversation), PhIcons.ArrowUUpLeft, destructive = true) { confirmCode = at },
+            JAction(stringResource(R.string.chat_rewind_code_and_conversation), PhIcons.ArrowUUpLeft, destructive = true) { confirmCode = at }
+                .takeIf { rewind?.code != false },
         ), onDismiss = { rewinding = null }, title = stringResource(R.string.chat_rewind_title))
     }
     confirmCode?.let { at ->
@@ -152,8 +191,12 @@ internal fun MessageMenuSheet(
                 rewind?.run?.invoke(at, RewindRestore.CodeAndConversation)
             }, destructive = true)
     }
-    selecting?.let { FullTextReader(it, onDismiss = { selecting = null }, title = stringResource(R.string.chat_menu_select_title), plain = true) }
+    sharing?.let { MessageSharePage(it, onDismiss = { sharing = null }) }
 }
+
+/** The message [target] as its picture says it, from [source]'s conversation. */
+internal fun messagePicture(target: MessageTarget, source: ShareCardSource): MessagePicture =
+    MessagePicture(target.text, target.user, source.source, persona.core.contracts.parseTime(target.time), source.agent, source.mark)
 
 /** What the menu offers, in order. */
 internal enum class MessageAction(@StringRes val label: Int) {
@@ -167,7 +210,9 @@ internal enum class MessageAction(@StringRes val label: Int) {
  * is offered (blocked for [rewindBlock] while it cannot).
  */
 internal data class MessageExtras(val fork: Boolean = false, val rewind: Boolean = false, val rewindBlock: String? = null,
-    val delete: Boolean = false)
+    val delete: Boolean = false,
+    /** Deleting one still waiting reads "Don't send", the word of its mark's menu on Glass ([OutboxBubble], iOS); else "Cancel send". */
+    val dontSend: Boolean = false)
 
 /** The menu's actions for [target]: [writes] for the composer ones, [handOff] when "Hand to Persona" is offered. */
 internal fun messageActions(target: MessageTarget, writes: Boolean, handOff: Boolean,
@@ -189,13 +234,14 @@ internal fun messageActions(target: MessageTarget, writes: Boolean, handOff: Boo
     if (extras.rewind && writes && target.user) add(MessageAction.Rewind)
 }
 
-private fun messageMenuActions(target: MessageTarget, writes: Boolean, handOff: Boolean, resources: Resources,
+internal fun messageMenuActions(target: MessageTarget, writes: Boolean, handOff: Boolean, resources: Resources,
     extras: MessageExtras, run: (MessageAction) -> Unit): List<JAction> =
     messageActions(target, writes, handOff, extras).mapIndexed { index, action ->
         val label = if (action == MessageAction.Rewind && extras.rewindBlock != null)
             resources.getString(R.string.chat_menu_rewind_blocked, extras.rewindBlock)
         // Still waiting to go: the words of its own action in the status panel.
-        else if (action == MessageAction.Delete && target.pending?.allows(DeliveryAction.Cancel) == true) resources.getString(R.string.chat_delivery_cancel)
+        else if (action == MessageAction.Delete && target.pending?.allows(DeliveryAction.Cancel) == true)
+            resources.getString(if (extras.dontSend) R.string.chat_outbox_dont_send else R.string.chat_delivery_cancel)
         else resources.getString(action.label)
         JAction(label, when (action) {
             MessageAction.Copy -> PhIcons.Copy

@@ -19,6 +19,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.awaitCancellation
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -738,6 +739,39 @@ class OutboxMessageSenderTest {
         }
     }
 
+    /**
+     * Retry now on a message still on its way (iOS's Retry Now on a waiting one): the queue looks again at once rather than at
+     * its next wake; with the link down it stays waiting. The outbox says when each was written, for where a failed one sits.
+     */
+    @Test fun retryNowOnAWaitingMessageTriesAtOnce() = runTest {
+        val restarting = MessageTransportResult.HubError("assistant_offline", "none", retryable = true)
+        val store = MemoryOutboxStore()
+        val transport = FakeTransport(online = true)
+        val sender = OutboxMessageSender(scope, store, transport, backgroundScope) { 1_700_000_000_000L }
+        runCurrent()
+        transport.answers += listOf(restarting, MessageTransportResult.Accepted)
+        sender.send(session, "written while the assistant restarts", "restart")
+        runCurrent()
+        assertEquals(OutboxState.WaitingForNetwork, store.state("restart"))
+        assertEquals(1_700_000_000_000L, sender.outbox.value.single().createdAt)
+        assertTrue(sender.retry("restart"))
+        runCurrent()
+        assertEquals(OutboxState.Sent, store.state("restart"))
+        assertEquals(2, transport.requests.size)
+
+        transport.readyToSend.value = false
+        sender.send(session, "written offline", "offline")
+        runCurrent()
+        assertTrue(sender.retry("offline"))
+        runCurrent()
+        assertEquals(OutboxState.WaitingForNetwork, store.state("offline"))
+        assertEquals(2, transport.requests.size)
+        // One already delivered is past retrying.
+        assertFalse(sender.retry("restart"))
+        assertEquals(OutboxState.Sent, store.state("restart"))
+        sender.close()
+    }
+
     /** A main conversation that cannot start gets a minute on a link that is up; the link dropping starts it again. */
     @Test fun aMainConversationThatCannotStartIsRefusedWithTheHubsReason() = runTest {
         val store = MemoryOutboxStore()
@@ -778,6 +812,31 @@ class OutboxMessageSenderTest {
         assertEquals(OutboxState.Sent, store.state("draft"))
         // Still the same message under its first id for the pages.
         assertEquals("draft", sender.outbox.value.single().clientMessageId)
+        sender.close()
+    }
+
+    @Test fun launcherAndModelStayOnEverySendAndRetry() = runTest {
+        val store = MemoryOutboxStore()
+        val hub = ReplayingHub()
+        val sender = OutboxMessageSender(scope, store, hub, backgroundScope)
+        hub.answers += MessageTransportResult.Accepted
+        hub.answers += MessageTransportResult.Accepted
+        sender.send(session, "first", "first", null, "runtime", "model-id")
+        sender.send(session, "second", "second", null, "runtime", "model-id")
+        runCurrent()
+        assertEquals(listOf("first", "second"), hub.requests.map { it.clientMessageId })
+        assertTrue(hub.requests.all { it.launcher == "runtime" && it.model == "model-id" })
+
+        hub.answers += MessageTransportResult.HubError("input_draft", "none", retryable = false)
+        sender.send(session, "retry", "retry", null, "runtime", "model-id")
+        runCurrent()
+        assertEquals(OutboxState.Refused, store.state("retry"))
+        hub.answers += MessageTransportResult.Accepted
+        assertTrue(sender.retry("retry"))
+        runCurrent()
+        assertEquals("runtime", hub.requests.last().launcher)
+        assertEquals("model-id", hub.requests.last().model)
+        assertTrue(hub.requests.last().opId != "retry")
         sender.close()
     }
 

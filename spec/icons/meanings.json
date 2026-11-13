@@ -45,6 +45,10 @@
       "sf": "chevron.left",
       "phosphor": "caret-left"
     },
+    "backgroundTask": {
+      "sf": "gearshape.2",
+      "phosphor": "gear-six"
+    },
     "backgroundWaiting": {
       "sf": "clock.fill",
       "phosphor": "clock"
@@ -85,6 +89,10 @@
       "sf": "arrow.up.right.and.arrow.down.left",
       "phosphor": "arrows-in-simple"
     },
+    "compactContext": {
+      "sf": "arrow.down.and.line.horizontal.and.arrow.up",
+      "phosphor": "arrows-in-line-vertical"
+    },
     "compose": {
       "sf": "square.and.pencil",
       "phosphor": "note-pencil"
@@ -117,6 +125,10 @@
       "sf": "trash",
       "phosphor": "trash"
     },
+    "diagnostics": {
+      "sf": "stethoscope",
+      "phosphor": "gauge"
+    },
     "dictate": {
       "sf": "mic",
       "phosphor": "microphone"
@@ -140,6 +152,10 @@
     "down": {
       "sf": "arrow.down",
       "phosphor": "arrow-down"
+    },
+    "draftReply": {
+      "sf": "pencil.and.scribble",
+      "phosphor": "note-pencil"
     },
     "edit": {
       "sf": "pencil",
@@ -225,6 +241,10 @@
       "sf": "arrow.triangle.branch",
       "phosphor": "git-branch"
     },
+    "gitHubStar": {
+      "sf": "star",
+      "phosphor": "star"
+    },
     "gitUpstream": {
       "sf": "cloud",
       "phosphor": "cloud"
@@ -233,9 +253,17 @@
       "sf": "target",
       "phosphor": "target"
     },
+    "groupChat": {
+      "sf": "rectangle.3.group.bubble",
+      "phosphor": "chats-circle"
+    },
     "handToAI": {
       "sf": "paperplane",
       "phosphor": "paper-plane-tilt"
+    },
+    "handledElsewhere": {
+      "sf": "checkmark.bubble",
+      "phosphor": "checks"
     },
     "health": {
       "sf": "heart",
@@ -305,6 +333,10 @@
       "sf": "keyboard",
       "phosphor": "keyboard"
     },
+    "knowledge": {
+      "sf": "books.vertical",
+      "phosphor": "book-open"
+    },
     "laptop": {
       "sf": "laptopcomputer",
       "phosphor": "laptop"
@@ -372,6 +404,10 @@
     "music": {
       "sf": "music.note",
       "phosphor": "music-note"
+    },
+    "newConversation": {
+      "sf": "plus.bubble",
+      "phosphor": "chat-circle-dots"
     },
     "notChecked": {
       "sf": "minus",
@@ -461,6 +497,10 @@
       "sf": "shield",
       "phosphor": "shield"
     },
+    "pullRequest": {
+      "sf": "arrow.triangle.pull",
+      "phosphor": "git-diff"
+    },
     "queueDown": {
       "sf": "arrowshape.down",
       "phosphor": "arrow-down"
@@ -493,6 +533,10 @@
       "sf": "arrowshape.turn.up.left",
       "phosphor": "arrow-bend-up-left"
     },
+    "reported": {
+      "sf": "arrow.up.message",
+      "phosphor": "chat-circle"
+    },
     "retry": {
       "sf": "arrow.clockwise",
       "phosphor": "arrow-clockwise"
@@ -501,6 +545,10 @@
       "sf": "play.fill",
       "phosphor": "play"
     },
+    "safari": {
+      "sf": "safari",
+      "phosphor": "globe-simple"
+    },
     "screen": {
       "sf": "display",
       "phosphor": "monitor"
@@ -508,6 +556,10 @@
     "search": {
       "sf": "magnifyingglass",
       "phosphor": "magnifying-glass"
+    },
+    "schedule": {
+      "sf": "alarm",
+      "phosphor": "clock"
     },
     "send": {
       "sf": "arrow.up",
@@ -573,6 +625,10 @@
       "sf": "checkmark.circle.fill",
       "phosphor": "check-circle"
     },
+    "taskPlan": {
+      "sf": "list.clipboard",
+      "phosphor": "list-checks"
+    },
     "terminal": {
       "sf": "terminal",
       "phosphor": "terminal-window"
@@ -601,6 +657,10 @@
       "sf": "translate",
       "phosphor": "translate"
     },
+    "unarchive": {
+      "sf": "tray.and.arrow.up",
+      "phosphor": "arrow-u-up-left"
+    },
     "undo": {
       "sf": "arrow.uturn.backward",
       "phosphor": "arrow-u-up-left"
@@ -620,6 +680,10 @@
     "view": {
       "sf": "eye",
       "phosphor": "eye"
+    },
+    "voiceChannel": {
+      "sf": "waveform.and.mic",
+      "phosphor": "waveform"
     },
     "voiceConnecting": {
       "sf": "antenna.radiowaves.left.and.right",

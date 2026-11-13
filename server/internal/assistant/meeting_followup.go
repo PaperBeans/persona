@@ -62,7 +62,9 @@ func (s *Service) followupRoute(w http.ResponseWriter, r *http.Request) {
 	case meetingRunning(rec, m, time.Now()):
 		apierr.WriteCode(w, http.StatusConflict, codeMeetingRunning, i18n.Err("assistant-meeting.meeting_running"))
 		return
-	case rec.Chars == 0 && !e.Store.HasMinutes(rec.ID):
+	// A trimmed recording keeps chars in meta.json with its transcript gone, so its only material is its minutes (an
+	// all-day one past recording_days keeps its recap and no minutes: nothing to seed a follow-up with).
+	case (rec.Chars == 0 || rec.Trimmed()) && !e.Store.HasMinutes(rec.ID):
 		apierr.WriteCode(w, http.StatusConflict, codeNoMaterial, i18n.Err("assistant-meeting.no_material"))
 		return
 	}
@@ -164,9 +166,10 @@ func (s *Service) followupSend(ctx context.Context, e *kb.Engine, id string, msg
 	return kb.ConvView{MachineID: sess.MachineID, SessionID: sess.SessionID}, true, nil
 }
 
-// meetingProfile is the Claude profile (config_dir) a meeting's conversations, its room and its follow-up, start in: the
-// one the assistant's conversations had before each new one got a private profile, a config directory with no login
-// in it (docs/assistant/meeting-minutes.md "The room conversation").
+// meetingProfile is the Claude profile (config_dir) a meeting's conversations, its room and its follow-up, start in, and
+// the conversations the hub starts by itself (startConversation): the one the assistant's conversations had before each
+// new one got a private profile, a config directory with no login in it (docs/assistant/meeting-minutes.md "The room
+// conversation", #6015).
 const meetingProfile = "legacy"
 
 // startSignedIn starts p in meetingProfile, or as it is on a node too old to be told a profile, whose conversations
@@ -245,6 +248,10 @@ func (s *Service) followupSeed(ctx context.Context, e *kb.Engine, rec kb.Recordi
 		}
 	}
 	if l, _, err := e.LiveRead(rec.ID); err == nil {
+		d.Topics = meetingTopics(l.Topics)
+		for _, h := range l.Highlights { // at their place in the transcript below
+			d.Highlights = append(d.Highlights, prompts.MeetingHighlight{At: meetingClock(h.At), Text: oneLine(h.Text)})
+		}
 		for _, a := range l.Asks {
 			if a.State == askAnswered {
 				q := a.Question
@@ -256,7 +263,7 @@ func (s *Service) followupSeed(ctx context.Context, e *kb.Engine, rec kb.Recordi
 		}
 	}
 	var lines []string
-	for _, sg := range e.Store.RecordingSegments(rec.ID) {
+	for _, sg := range kb.MeetingLines(e.Store.RecordingSegments(rec.ID)) { // Persona's echo is not the meeting's (#5905)
 		lines = append(lines, "["+meetingClock(sg.Start)+"] "+oneLine(sg.Text))
 	}
 	d.Transcript, d.Cut = cutMiddle(strings.Join(lines, "\n"), followupTranscriptRunes)

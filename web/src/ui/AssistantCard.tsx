@@ -18,9 +18,9 @@ import { fieldValues, numberProblem, readView, type UIAction, type UIItem, type 
 import { openLink } from "../lib/links";
 import { useLinkManager } from "../lib/manager-choice";
 import { openPanel } from "../lib/panel";
+import { openTask } from "../lib/handoff";
 import { navigate } from "../lib/router";
 import { hubHas, useStore } from "../lib/store";
-import { mediaMatches, NARROW } from "../lib/viewport";
 import { INERT, ViewSections } from "../views/extensions/view-sections-lazy";
 import { t } from "../i18n";
 import { Button, cx, Dialog, toast } from "./atoms";
@@ -40,13 +40,13 @@ export const CardItem = createContext<{ id: string; text: string } | null>(null)
 /** How deep push goes (docs/assistant/assistant-views.md "Actions and multiple pages"). */
 const STACK_MOST = 4;
 
-/** Whether html components run here: WEB_HTML_RUNTIME_VERIFIED, which dev pages may turn on for themselves. */
+/** Whether html components run here: WEB_HTML_RUNTIME_VERIFIED (dev pages and tests may set it for themselves). */
 export const HtmlRuntime = createContext<boolean>(WEB_HTML_RUNTIME_VERIFIED);
 
 const HtmlCard = lazy(() => import("./HtmlCard"));
 
-/** A card's html components run when the runtime may, the hub has the bridge (persona_view and html_views on), and the
- *  card is one the hub keeps (a conversation and a key). Otherwise the whole card is its fallback. */
+/** A card's html components run when the runtime may, the hub has the bridge (assistant_html_bridge), and the card is
+ *  one the hub keeps (a conversation and a key). Otherwise the whole card is its fallback. */
 function useHtmlRuns(keyed: boolean): boolean {
   const verified = useContext(HtmlRuntime);
   const hubAllows = useStore((s) => hubHas(s.features, HTML_BRIDGE_FEATURE));
@@ -388,8 +388,7 @@ export function openTargetOf(target: string, manager?: string) {
       navigate({ name: "session", mid: to.mid, sid: to.sid });
       return;
     case "task":
-      if (mediaMatches(NARROW)) navigate({ name: "todos", id: to.id });
-      else openPanel({ kind: "task", todo: to.id });
+      openTask(to.id);
       return;
     case "kb":
       navigate({ name: "kb", kind: to.path[0], id: to.path.slice(1).join("/") || undefined });

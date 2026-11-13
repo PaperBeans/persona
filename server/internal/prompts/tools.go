@@ -16,6 +16,18 @@ func RenderTranslateMailInput(subject, text string) string {
 	return render("tools/translate_mail_input", struct{ Subject, Text string }{subject, text})
 }
 
+// LauncherRunTurn is one turn of a conversation an API purpose sends to a launcher's CLI (tools/launcher_run_input).
+type LauncherRunTurn struct {
+	Assistant bool // the model's own earlier answer; else the user's
+	Text      string
+}
+
+// RenderLauncherRunInput is a conversation of several turns as one prompt, for a CLI run that takes a single message
+// (assistant/models_run.go).
+func RenderLauncherRunInput(turns []LauncherRunTurn) string {
+	return render("tools/launcher_run_input", turns)
+}
+
 // RenderLauncherCheck is the one-word prompt Settings › Models' "Test" runs a launcher with (tools/launcher_check).
 func RenderLauncherCheck() string { return render("tools/launcher_check", nil) }
 
@@ -46,3 +58,17 @@ func RenderJSONSchema(in JSONSchema) string { return render("tools/json_schema",
 // RenderJSONSchemaRetry is the turn asking once more after a reply that did not match the schema: problem says
 // what was wrong (tools/json_schema_retry).
 func RenderJSONSchemaRetry(problem string) string { return render("tools/json_schema_retry", problem) }
+
+// NextMessage is the system prompt suggesting the user's next message after a turn (tools/next_message, assistant/suggest_next.go):
+// Language is the user's language by name when it is not Chinese ("" otherwise).
+type NextMessage struct{ Language string }
+
+func RenderNextMessage(n NextMessage) string { return render("tools/next_message", n) }
+
+// NextMessageTurn is one visible message the suggestion model reads: Role "user" or "assistant".
+type NextMessageTurn struct{ Role, Text string }
+
+// RenderNextMessageInput is the chat's last visible messages as the suggestion model reads them (tools/next_message_input).
+func RenderNextMessageInput(turns []NextMessageTurn) string {
+	return render("tools/next_message_input", turns)
+}

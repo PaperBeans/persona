@@ -978,22 +978,30 @@ func TestParseDoctor(t *testing.T) {
 func TestAdminAccessCommand(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "hub.json"), []byte(`{"token":"","listen":"127.0.0.1:1","other":true}`), 0o600)
+	t.Setenv("PERSONA_LANG", "en") // the terminal's language (#5520)
 	var out, errOut strings.Builder
 	ctx := context.Background()
 	if err := adminAccessCommand(ctx, dir, []string{"--get"}, &out, &errOut); err != nil || strings.TrimSpace(out.String()) != "" {
 		t.Fatalf("get unset: %v %q", err, out.String())
 	}
-	if err := adminAccessCommand(ctx, dir, []string{"cidrs"}, &out, &errOut); err == nil {
-		t.Fatal("cidrs without --cidrs")
+	if err := adminAccessCommand(ctx, dir, []string{"cidrs"}, &out, &errOut); err == nil || !strings.HasPrefix(err.Error(), "cidrs needs at least one network") {
+		t.Fatalf("cidrs without --cidrs: %v", err)
 	}
-	if err := adminAccessCommand(ctx, dir, []string{"everyone"}, &out, &errOut); err == nil {
-		t.Fatal("bad scope")
+	if err := adminAccessCommand(ctx, dir, []string{"everyone"}, &out, &errOut); err == nil ||
+		err.Error() != `The scope must be loopback, lan, cidrs or any, not "everyone"` {
+		t.Fatalf("bad scope: %v", err)
+	}
+	out.Reset()
+	if err := adminAccessCommand(ctx, dir, nil, &out, &errOut); err != nil || !strings.Contains(out.String(), "admin.access in hub.json: lan (not set in hub.json, so the default)") ||
+		!strings.Contains(out.String(), "  loopback Only the hub machine itself") {
+		t.Fatalf("show: %v %q", err, out.String())
 	}
 	out.Reset()
 	if err := adminAccessCommand(ctx, dir, []string{"cidrs", "--cidrs", "192.0.2.7, 198.51.100.0/24"}, &out, &errOut); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "hub 没在运行") {
+	if !strings.Contains(out.String(), "The admin page’s access is now cidrs: This machine and the networks you list") ||
+		!strings.Contains(out.String(), "The hub isn’t running. The scope applies when it next starts.") {
 		t.Fatalf("out %q", out.String())
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, "hub.json"))

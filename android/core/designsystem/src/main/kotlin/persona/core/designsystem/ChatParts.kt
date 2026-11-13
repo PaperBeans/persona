@@ -63,11 +63,11 @@ fun ChatPictureFrame(
         ) {
             content()
             if (failed) Column(
-                Modifier.align(Alignment.Center).padding(12.dp),
+                Modifier.align(Alignment.Center).padding(12.dp.dense),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 JIcon(PhIcons.ArrowClockwise, null, size = 20.dp, tint = palette.ink2)
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(4.dp.dense))
                 Text(stringResource(R.string.designsystem_load_failed_tap), style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 2,
                     textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
             }
@@ -109,7 +109,7 @@ fun PhotoThumbnail(
             failed -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 JIcon(PhIcons.ArrowClockwise, null, size = 18.dp, tint = palette.ink2)
                 if (single) {
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(4.dp.dense))
                     Text(stringResource(R.string.designsystem_load_failed), style = PersonaTheme.type.micro, color = palette.ink2, maxLines = 1)
                 }
             }
@@ -127,8 +127,8 @@ fun PhotoThumbnail(
 fun PhotoRow(modifier: Modifier = Modifier, alignEnd: Boolean = true, content: @Composable () -> Unit) {
     FlowRow(
         modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp, if (alignEnd) Alignment.End else Alignment.Start),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp.dense, if (alignEnd) Alignment.End else Alignment.Start),
+        verticalArrangement = Arrangement.spacedBy(8.dp.dense),
     ) { content() }
 }
 
@@ -162,23 +162,23 @@ fun ErrorCard(
         AppStyle.Brief -> Modifier.clip(shape).background(palette.statusSurface)
         AppStyle.Board -> Modifier.clip(shape).background(palette.surface).holder(palette.danger.dot, Tokens.Space.xxs).border(1.dp, palette.line, shape)
     }
-    val inner = if (style == AppStyle.Board) PaddingValues(start = 20.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
-        else PaddingValues(horizontal = 16.dp, vertical = 14.dp)
+    val inner = if (style == AppStyle.Board) PaddingValues(start = 20.dp.dense, end = 14.dp.dense, top = 12.dp.dense, bottom = 12.dp.dense)
+        else PaddingValues(horizontal = 16.dp.dense, vertical = 14.dp.dense)
     val spoken = stringResource(R.string.designsystem_api_error, reason)
-    Column(modifier.fillMaxWidth().padding(vertical = 6.dp).then(frame).padding(inner), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(modifier.fillMaxWidth().padding(vertical = 6.dp.dense).then(frame).padding(inner), verticalArrangement = Arrangement.spacedBy(10.dp.dense)) {
         Column(
             Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = stringResource(if (expanded) R.string.designsystem_details_collapse else R.string.designsystem_details_expand), onClick = onToggle)
                 .semantics { contentDescription = spoken },
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp.dense),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 JIcon(PhIcons.WarningCircle, null, size = 20.dp, tint = palette.danger.dot, selected = true)
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(10.dp.dense))
                 Text(reason, Modifier.weight(1f), style = PersonaTheme.type.bodyStrong, color = palette.ink)
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(6.dp.dense))
                 JIcon(if (expanded) PhIcons.CaretUp else PhIcons.CaretDown, null, size = 14.dp, tint = palette.ink3)
             }
-            if (tags.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { tags.forEach { ErrorTagLabel(it) } }
+            if (tags.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp.dense)) { tags.forEach { ErrorTagLabel(it) } }
         }
         if (expanded) details()
         action?.invoke()
@@ -193,10 +193,10 @@ private fun ErrorTagLabel(tag: ErrorTag) {
         ErrorTagTone.Danger -> palette.danger.text to palette.statusSurface
         ErrorTagTone.Caution -> palette.cautionText to palette.statusSurface
     }
-    val shape = androidx.compose.foundation.shape.RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 4.dp else 6.dp)
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 4.dp else 6.dp.corner)
     Text(
         tag.text, style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.SemiBold), color = ink, maxLines = 1,
-        modifier = Modifier.clip(shape).background(fill).padding(horizontal = 6.dp, vertical = 2.dp),
+        modifier = Modifier.clip(shape).background(fill).padding(horizontal = 6.dp.dense, vertical = 2.dp.dense),
     )
 }
 
@@ -216,19 +216,19 @@ fun DetailField(name: String, value: String, modifier: Modifier = Modifier, mono
 @Composable
 fun ChatNoteChip(text: String, icon: PhIcon, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val palette = PersonaTheme.palette
-    val shape = androidx.compose.foundation.shape.RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 8.dp else 50.dp)
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(if (PersonaTheme.style == AppStyle.Board) 8.dp.corner else 50.dp)
     Row(
-        modifier.padding(vertical = 4.dp).heightIn(min = 36.dp).clip(shape)
+        modifier.padding(vertical = 4.dp.dense).heightIn(min = 36.dp.row).clip(shape)
             .background(if (PersonaTheme.style == AppStyle.Board) palette.surface else palette.surfaceStrong)
             .then(if (PersonaTheme.style == AppStyle.Board) Modifier.border(1.dp, palette.line, shape) else Modifier)
-            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 12.dp),
+            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 12.dp.dense),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         JIcon(icon, null, size = 16.dp, tint = palette.accent)
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(6.dp.dense))
         Text(text, style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false))
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(4.dp.dense))
         JIcon(PhIcons.CaretRight, null, size = 14.dp, tint = palette.ink3)
     }
 }
@@ -243,22 +243,22 @@ fun ChatHint(text: String, icon: PhIcon, tint: androidx.compose.ui.graphics.Colo
              modifier: Modifier = Modifier, onClickLabel: String? = null) {
     val palette = PersonaTheme.palette
     val board = PersonaTheme.style == AppStyle.Board
-    val shape = androidx.compose.foundation.shape.RoundedCornerShape(if (board) 8.dp else 50.dp)
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(if (board) 8.dp.corner else 50.dp)
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Row(
-            Modifier.padding(vertical = 4.dp).heightIn(min = 36.dp).clip(shape)
+            Modifier.padding(vertical = 4.dp.dense).heightIn(min = 36.dp.row).clip(shape)
                 .background(if (board) palette.surface else palette.surfaceStrong)
                 .then(if (board) Modifier.border(1.dp, palette.line, shape) else Modifier)
                 .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClickLabel = onClickLabel, onClick = onClick) else Modifier)
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = 12.dp.dense),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             JIcon(icon, null, size = 16.dp, tint = tint)
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(6.dp.dense))
             Text(text, style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false))
             if (onClick != null) {
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(4.dp.dense))
                 JIcon(PhIcons.CaretRight, null, size = 14.dp, tint = palette.ink3)
             }
         }
@@ -275,14 +275,14 @@ fun PathChip(text: String, icon: PhIcon, onClick: () -> Unit, modifier: Modifier
     val style = PersonaTheme.style
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(PersonaTheme.shapes.chip)
     Row(
-        modifier.heightIn(min = 32.dp).clip(shape)
+        modifier.heightIn(min = 32.dp.row).clip(shape)
             .background(if (style == AppStyle.Board) palette.surface else palette.statusSurface)
             .then(if (style == AppStyle.Board) Modifier.border(1.dp, palette.line, shape) else Modifier)
-            .clickable(role = Role.Button, onClickLabel = onClickLabel, onClick = onClick).padding(horizontal = 10.dp),
+            .clickable(role = Role.Button, onClickLabel = onClickLabel, onClick = onClick).padding(horizontal = 10.dp.dense),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         JIcon(icon, null, size = 14.dp, tint = palette.accent)
-        Spacer(Modifier.width(5.dp))
+        Spacer(Modifier.width(5.dp.dense))
         Text(text, style = PersonaTheme.type.labelSmall, color = if (style == AppStyle.Brief) palette.ink else palette.accent,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
@@ -307,7 +307,7 @@ fun JActivityBar(
     val board = PersonaTheme.style == AppStyle.Board
     val shape = PersonaTheme.shapes.chipShape
     Row(
-        modifier.fillMaxWidth().heightIn(min = 36.dp).clip(shape)
+        modifier.fillMaxWidth().heightIn(min = 36.dp.row).clip(shape)
             .background(if (board) palette.surface else palette.statusSurface)
             .then(if (board) Modifier.border(1.dp, palette.line, shape) else Modifier)
             .clickable(role = Role.Button, onClickLabel = onClickLabel, onClick = onClick)

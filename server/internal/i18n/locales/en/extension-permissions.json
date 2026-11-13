@@ -70,6 +70,7 @@
   "scope_notify": "Send notifications to your devices",
   "scope_assistant_ask": "Start Persona chats and read chat activity",
   "scope_assistant_read": "Read your Persona chats (your messages and its replies)",
+  "scope_assistant_memory_read": "Read what Persona remembers about you (read-only, never the health space)",
   "scope_todos_read": "View to-dos",
   "scope_todos_write": "Create and edit to-dos and link chats to them (no deletion)",
   "scope_leaders_read": "View leader conversations (directions) and what they report",
@@ -100,5 +101,7 @@
   "network_config_unset": "not set",
   "secret_provider_title": "Supply secret values",
   "secret_provider_more_title": "Supply secret values (new)",
-  "secret_provider_detail": "When one of your settings holds a {schemes} reference, or you approve handing one to an Agent on the phone, Persona asks it for the value. It learns which reference is used and what for, never your other secrets"
+  "secret_provider_detail": "When one of your settings holds a {schemes} reference, or you approve handing one to an Agent on the phone, Persona asks it for the value. It learns which reference is used and what for, never your other secrets",
+  "assistant_data_title": "Add what it writes to what your assistant reads",
+  "assistant_data_detail": "Text its program writes can go into the assistant's instructions and skills, an Agent's project background or Inbox triage and drafts, within size limits. You can switch each part off in its details"
 }

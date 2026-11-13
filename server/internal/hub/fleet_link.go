@@ -376,16 +376,30 @@ func (h *Hub) fleetLiveOf() (FleetState, FleetStats, string) {
 	return live.State, live.Stats, from
 }
 
+// cardAnswerGrace is how much longer than a card's expiry the hub waits for the manager's answer about it. The manager
+// ends an expired card itself and records how it ended; its answer should not lose to the hub's deadline over a slow
+// write or two clocks a little apart.
+const cardAnswerGrace = 30 * time.Second
+
 // waitInteraction asks the user on the phone for one of the hub's own features (a mail send, Cua's apps, ego's
 // scripts, persona_settings): the manager shows the card and waits for its answer (fleet.ask). Without the manager
 // nothing can be asked: a dismiss.
+//
+// The hub waits as long as the card lives, not callBus's two minutes, which withdrew a card good for fifteen (#5907):
+// until its expiry and cardAnswerGrace more, or, with no expiry given, for the manager's own wait for a card (its
+// manager.json hook_timeout_minutes). When the hub stops first (its caller went away, the grace ran out), the manager
+// withdraws the card (serveBus's Cancels).
 func (h *Hub) waitInteraction(ctx context.Context, ix proto.Interaction) (proto.Resolution, error) {
-	// No expiry given: the manager's own wait for a card (its manager.json hook_timeout_minutes) applies.
 	if h.askVia != nil { // tests play the manager
 		return h.askVia(ctx, ix)
 	}
+	if !ix.ExpiresAt.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, ix.ExpiresAt.Add(cardAnswerGrace))
+		defer cancel()
+	}
 	var r proto.Resolution
-	if err := h.asstOf(h.machineOwner(ix.MachineID)).call(ctx, assistantwire.MethodFleetAsk, map[string]any{"interaction": ix}, &r); err != nil {
+	if err := h.asstOf(h.machineOwner(ix.MachineID)).callAsIs(ctx, assistantwire.MethodFleetAsk, map[string]any{"interaction": ix}, &r); err != nil {
 		h.logf("[%s] ask %s: %v", ix.MachineID, ix.ToolName, err)
 		return proto.Resolution{Dismiss: true}, nil
 	}
@@ -642,6 +656,16 @@ func (h *Hub) fleetAppCall(ctx context.Context, p assistantwire.AppCall) (json.R
 
 // ---- the pushes the manager decided on ----
 
+// pushRecordingID is the recording id a manager's push names (assistantwire.Notification.RecordingID), lowercased, or
+// "" when it is not a recording id (a UUID): the push carries it as it is and an app opens it.
+func pushRecordingID(id string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if !clientOpUUID.MatchString(id) {
+		return ""
+	}
+	return id
+}
+
 // deliverPush is deliverPushFrom the assistant the hub starts.
 func (h *Hub) deliverPush(n assistantwire.Notification) error {
 	return h.deliverPushFrom(assistantwire.AssistantID, n)
@@ -672,7 +696,8 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) error {
 	}
 	switch n.Kind {
 	case assistantwire.NotifyPush: // one with an id shows once, sent again however late (a day recap's push)
-		h.notifyDoneUnder(from, "assistant", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, pushWants{}, managerPushCollapseID(from, n.ID))
+		h.notifyDoneUnder(from, "assistant", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, pushWants{}, managerPushCollapseID(from, n.ID),
+			pushRecordingID(n.RecordingID))
 	case assistantwire.NotifyDone:
 		h.notifyDone(from, "done", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body,
 			pushWants{Kind: "done", Took: time.Duration(n.TookMS) * time.Millisecond, Long: time.Duration(n.LongMS) * time.Millisecond})

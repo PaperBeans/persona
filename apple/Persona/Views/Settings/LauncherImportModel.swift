@@ -6,7 +6,11 @@ import Observation
 @Observable final class LauncherImportModel {
     struct Deps {
         var api: () -> APIClient?
-        static var live: Deps { .init(api: { AppModel.shared.api }) }
+        static var live: Deps {
+            let app = AppModel.shared
+            let scope = AssistantSettingsRequestScope(app)
+            return .init(api: { scope.api(app) })
+        }
     }
 
     enum Phase: Equatable {

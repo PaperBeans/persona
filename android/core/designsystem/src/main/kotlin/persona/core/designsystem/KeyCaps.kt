@@ -66,15 +66,15 @@ fun JKeyCap(
     // Held keys sink a little while the finger is on them, as on iOS. The layer always stays (see stableAlpha).
     val scale by animateFloatAsState(if (state == KeyCapState.Held && !PersonaTheme.reduceMotion) 0.94f else 1f, tween(150), label = "key")
     Box(
-        modifier.heightIn(min = 48.dp)
+        modifier.heightIn(min = 48.dp.row)
             .then(if (onClick != null) Modifier.clip(shape).clickable(enabled = enabled, role = Role.Button, onClick = onClick) else Modifier)
             .semantics { if (contentDescription != null) this.contentDescription = contentDescription }
             .stableAlpha(if (enabled) 1f else 0.4f),
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.heightIn(min = 36.dp).widthIn(min = 44.dp).clip(shape).background(fill).then(frame)
-                .padding(horizontal = 10.dp),
+            Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.heightIn(min = 36.dp.row).widthIn(min = 44.dp).clip(shape).background(fill).then(frame)
+                .padding(horizontal = 10.dp.dense),
             contentAlignment = Alignment.Center,
         ) {
             if (icon != null) JIcon(icon, null, size = 18.dp, tint = ink)
@@ -83,7 +83,7 @@ fun JKeyCap(
                 maxLines = 1, softWrap = false, overflow = TextOverflow.Clip,
             )
             if (state == KeyCapState.Locked) Box(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp).size(14.dp, 2.dp).clip(CircleShape).background(ink),
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp.dense).size(14.dp, 2.dp).clip(CircleShape).background(ink),
             )
         }
     }

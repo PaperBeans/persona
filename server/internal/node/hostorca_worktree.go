@@ -124,6 +124,9 @@ func (h *orcaHost) createWorktree(ctx context.Context, space, branch, path, pare
 	}
 	c := &host.Created{SpaceID: wt.ID, Path: wt.Path, Branch: got}
 	if t := h.terminalIn(ctx, wt.ID); t != nil {
+		h.mu.Lock()
+		h.track(*t) // found by its handle if Orca re-keys it (#5547)
+		h.mu.Unlock()
 		c.SlotID, c.Pane = t.TabID, host.PaneRef{Kind: host.Orca, ID: t.PaneKey()}
 	}
 	return c, nil

@@ -3,5 +3,6 @@
   "dialog_open": "电脑上开着一个对话框，先处理它再发",
   "delivery_unknown": "不确定送到没有：先看一眼对话再决定要不要重发",
   "not_confirmed": "页面关闭前没确认送达，重试不会发两遍",
-  "not_confirmed_images": "页面关闭前没确认送达，图片也没留下"
+  "not_confirmed_images": "页面关闭前没确认送达，图片也没留下",
+  "waits_on_computer": "已发送。电脑上的那个问题答完后，Agent 才会读到这条消息"
 }

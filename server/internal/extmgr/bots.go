@@ -95,6 +95,10 @@ type BotFeatures struct {
 	// agent said, interrupted, closed — as it did before #3218. Off by default, and for settings saved before it: then
 	// only goal-level changes go out (reached, needs your decision, stuck).
 	ReportSteps bool `json:"report_steps"`
+	// AnswerNewCard: a finished run's answer is posted as a new card at the bottom of the chat (Lark notifies on it) and
+	// the progress card is folded, instead of the answer being written into the progress card (#5396). Off by default,
+	// and for settings saved before it: they have no such key.
+	AnswerNewCard bool `json:"answer_new_card"`
 }
 
 var defaultBotFeatures = BotFeatures{Main: true, Cards: true, Reports: true}

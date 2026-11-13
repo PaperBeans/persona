@@ -27,7 +27,6 @@
   "filter_by_market": "Filter by market",
   "not_found": "Nothing found for \"{query}\"",
   "catalog_empty": "No extensions here yet",
-  "cannot_install": "Can't install: {problem}",
   "manage_above": "Installed from this market; manage it in the list above.",
   "upgrade": "Upgrade",
   "install": "Install",

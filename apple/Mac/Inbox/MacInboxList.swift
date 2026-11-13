@@ -59,33 +59,23 @@ struct MacInboxList: View {
             if let error = store.error, store.items.isEmpty {
                 Label(error, systemImage: Theme.Icon.error).font(Theme.Font.caption).foregroundStyle(Theme.danger)
             }
-            // Under each manager's name when the hub has several (#1850); one group with no name otherwise.
-            ForEach(sections.groups) { g in
-                let manager = g.manager?.id
-                if let m = g.manager {
-                    ManagerHeading(manager: m, count: g.openCount)
-                        .font(Theme.Font.heading)
-                        .padding(.top, Theme.Space.m)
-                        .listRowSeparator(.hidden)
-                        .selectionDisabled()
-                }
-                ForEach(g.tiers, id: \.tier) { t in
-                    Section {
-                        if state.folds.isOpen(t.tier.rawValue, manager: manager) {
-                            ForEach(t.agents) { agentRow($0) }
-                            ForEach(t.items, id: \.key) { row($0) }
-                        }
-                    } header: {
-                        header(t.tier.title, count: t.items.count + t.agents.count, key: t.tier.rawValue, manager: manager,
-                               clear: InboxPage.clearTitle(t.tier).map { ($0, { store.setDone(t.items, true) }) })
+            // The current assistant's alone where the hub has several: no manager headings.
+            ForEach(sections.tiers, id: \.tier) { t in
+                Section {
+                    if state.folds.isOpen(t.tier.rawValue) {
+                        ForEach(t.agents) { agentRow($0) }
+                        ForEach(t.items, id: \.key) { row($0) }
                     }
+                } header: {
+                    header(t.tier.title, count: t.items.count + t.agents.count, key: t.tier.rawValue,
+                           clear: InboxPage.clearTitle(t.tier).map { ($0, { store.setDone(t.items, true) }) })
                 }
-                if !g.done.isEmpty {
-                    Section {
-                        if state.folds.isOpen("done", manager: manager) { ForEach(g.done, id: \.key) { row($0) } }
-                    } header: {
-                        header(String(localized: "Done [Inbox View 59f6c8]"), count: g.done.count, key: "done", manager: manager, clear: nil)
-                    }
+            }
+            if !sections.done.isEmpty {
+                Section {
+                    if state.folds.isOpen("done") { ForEach(sections.done, id: \.key) { row($0) } }
+                } header: {
+                    header(String(localized: "Done [Inbox View 59f6c8]"), count: sections.done.count, key: "done", clear: nil)
                 }
             }
         }
@@ -93,7 +83,10 @@ struct MacInboxList: View {
         .alternatingRowBackgrounds(.disabled)
         .scrollContentBackground(.hidden) // the page's color (MacInboxPage)
         .overlay {
-            if sections.isEmpty && !store.loading {
+            // A merged list has nothing of an assistant that is offline: said so, not shown as an empty inbox.
+            if sections.isEmpty, let offline = model.assistantManagerOffline {
+                AssistantOfflineNotice(manager: offline)
+            } else if sections.isEmpty && !store.loading {
                 EmptyStateView(symbol: Theme.Icon.success, title: state.query.isEmpty ? String(localized: "All Caught Up") : String(localized: "No Matches"),
                                message: state.query.isEmpty ? String(localized: "New Lark messages and emails show up here.") : String(localized: "Try a different search."))
             } else if store.loading && store.items.isEmpty {
@@ -121,12 +114,21 @@ struct MacInboxList: View {
         .onChange(of: model.pendingInteractions) { _, interactions in
             state.pruneStale(items: store.items, interactions: interactions)
         }
+        // Another assistant is current: what was selected is the one before's, no longer in the list, and a source
+        // picked there (a mailbox, a connector) would leave this one's list empty.
+        .onChange(of: model.assistantSwitches) {
+            state.selection = []
+            state.source = ""
+            // A mail being written stays, with the assistant and the accounts it was started with.
+            state.accounts = InboxMailAccounts.cached(model.assistantManagerID)
+            Task { await state.loadAccounts(model) }
+        }
         .pageSearchable(text: $state.query, placement: .toolbar, prompt: String(localized: "Search Titles, Senders, and Content"))
         .pageToolbar { toolbar }
         .sheet(isPresented: $state.showAccounts, onDismiss: { Task { await state.loadAccounts(model) } }) {
             MailAccountsView().macSheet()
         }
-        .sheet(item: $state.composing) { d in ComposeView(draft: d, accounts: state.accounts).macSheet() }
+        .sheet(item: $state.composing) { d in ComposeView(draft: d, accounts: d.accounts ?? state.accounts).macSheet() }
         .confirmationDialog(InboxBulk.confirmTitle, isPresented: $state.confirming) {
             Button(InboxBulk.confirmButton(count: state.openInView.count)) { state.clean(confirmed: true) }
                 .accessibilityIdentifier("mac.inbox.cleanConfirm")
@@ -184,7 +186,7 @@ struct MacInboxList: View {
             .disabled(state.openInView.isEmpty)
             .help(String(localized: "Clean up all: \(state.cleanUpScope) (⇧⌘E)"))
             .accessibilityIdentifier("mac.inbox.cleanUpAll")
-            Button { state.composing = ComposeDraft(accountID: state.accounts.first?.id ?? "") } label: {
+            Button { state.composing = ComposeDraft(accountID: state.accounts.first?.id ?? "", manager: model.assistantManagerID, accounts: state.accounts) } label: {
                 Label("New Email", systemImage: Theme.Icon.compose)
             }
             .disabled(state.accounts.isEmpty)
@@ -199,7 +201,7 @@ struct MacInboxList: View {
     }
 
     /// A section title that opens / closes the section, with its count, and an optional action on the right.
-    private func header(_ title: String, count: Int, key: String, manager: String?, clear: (String, () -> Void)?) -> some View {
+    private func header(_ title: String, count: Int, key: String, clear: (String, () -> Void)?) -> some View {
         HStack(spacing: Theme.Space.sm) {
             if InboxItem.Tier(rawValue: key)?.folds == false {
                 // In Progress: always open, a plain title (inbox phase 1).
@@ -212,11 +214,11 @@ struct MacInboxList: View {
                 .lineLimit(1)
             } else {
             Button {
-                withAnimation(Theme.Motion.standard) { state.toggle(key, manager: manager) }
+                withAnimation(Theme.Motion.standard) { state.toggle(key) }
             } label: {
                 HStack(spacing: Theme.Space.xs) {
                     Image(systemName: Theme.Icon.disclosure).font(Theme.Font.labelHeavy).foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(state.folds.isOpen(key, manager: manager) ? 90 : 0))
+                        .rotationEffect(.degrees(state.folds.isOpen(key) ? 90 : 0))
                     Text(title).foregroundStyle(key == "action" ? Color.primary : .secondary)
                     Text("\(count)").foregroundStyle(.secondary).monospacedDigit()
                     Spacer(minLength: 0)
@@ -226,7 +228,7 @@ struct MacInboxList: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help(state.folds.isOpen(key, manager: manager) ? String(localized: "Collapse") : String(localized: "Expand"))
+            .help(state.folds.isOpen(key) ? String(localized: "Collapse") : String(localized: "Expand"))
             }
             if let clear {
                 Button(clear.0) { withAnimation(Theme.Motion.standard) { clear.1() } }

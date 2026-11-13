@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addFavorite,
+  ALL_GROUP_MAX,
   alignedScrollTop,
   contextSize,
   copySetup,
@@ -13,6 +14,8 @@ import {
   matchesQuery,
   overrideKey,
   panelSections,
+  priceAmount,
+  priceTier,
   pushRecent,
   RECENT_MAX,
   removeFavorite,
@@ -124,6 +127,31 @@ describe("the sections of a view", () => {
   });
 });
 
+describe("a long list in the All view", () => {
+  const many = (n: number, prefix: string): PanelModel[] => Array.from({ length: n }, (_, i) => ({ id: `${prefix}-${i}`, name: `${prefix} ${i}`, efforts: [] }));
+  const big = (over: Partial<PanelProvider> = {}) => gateway({ models: many(20, "gw"), ...over });
+
+  it("each provider group shows its first rows and how many it has, while several providers are listed", () => {
+    const groupOf = (o: Partial<SectionsInput>) => panelSections(input(o)).find((s) => s.provider?.id === "gw")!;
+    const g = groupOf({ providers: [claude(), big(), codex()] });
+    expect(g.rows.map((r) => r.model.id)).toEqual(many(ALL_GROUP_MAX, "gw").map((m) => m.id));
+    expect(g.total).toBe(20);
+    // a short group is whole and has no total
+    expect(panelSections(input({ providers: [claude(), big(), codex()] })).find((s) => s.provider?.id === "codex")!.total).toBeUndefined();
+  });
+
+  it("the model that runs now stays in its cut group; a provider's view, a search and a single provider show everything", () => {
+    const running = state({ current: { provider: "gw", model: "gw-15" }, recommended: [], starting: true });
+    const cut = panelSections(input({ providers: [claude(), big(), codex()], state: running })).find((s) => s.provider?.id === "gw")!;
+    expect(cut.rows.map((r) => `${r.model.id}${r.current ? "*" : ""}`)).toEqual([...many(ALL_GROUP_MAX, "gw").map((m) => m.id), "gw-15*"]);
+    expect(cut.total).toBe(20);
+    const whole = (o: Partial<SectionsInput>) => panelSections(input({ providers: [claude(), big(), codex()], ...o })).find((s) => s.provider?.id === "gw");
+    expect(whole({ view: { kind: "provider", provider: "gw" } })?.rows).toHaveLength(20);
+    expect(whole({ query: "gw" })?.rows).toHaveLength(20);
+    expect(panelSections(input({ providers: [big()], state: state({ current: null, recommended: [] }) }))[0].rows).toHaveLength(20);
+  });
+});
+
 describe("the search", () => {
   it("matches every word against the name, id, concrete model, description and provider", () => {
     const p = claude();
@@ -140,12 +168,15 @@ describe("the search", () => {
     expect(shape({ view: { kind: "favorites" }, query: "gpt" })).toEqual(["provider:claude [typed:gpt]", "provider:codex [gpt-5.5]"]);
   });
 
-  it("offers a typed model ID as “Use …” in each recommended provider that takes typed IDs", () => {
+  it("offers a typed model ID as “Use …” in each provider that takes typed IDs and a pick here", () => {
     expect(shape({ query: "vendor/new-model" })).toEqual(["provider:claude [typed:vendor/new-model]"]);
-    // not a valid ID, already listed, or a provider that isn't recommended: nothing to offer
+    // not a valid ID, already listed, or a provider that can't take a pick here: nothing to offer
     expect(shape({ query: "two words" })).toEqual([]);
     expect(shape({ query: "vendor/model-x" })).toEqual(["recommended [vendor/model-x]"]);
-    expect(shape({ query: "vendor/new-model", state: state({ recommended: [] }) })).toEqual([]);
+    expect(shape({ query: "vendor/new-model", providers: [claude({ unavailable: "another engine" })] })).toEqual([]);
+    expect(shape({ query: "vendor/new-model", providers: [claude({ locked: "--model" })] })).toEqual([]);
+    // a provider that isn't recommended (an Agent's other launcher, switched to with the next message) offers it too
+    expect(shape({ query: "vendor/new-model", state: state({ recommended: [] }) })).toEqual(["provider:claude [typed:vendor/new-model]"]);
     const [s] = panelSections(input({ query: "vendor/new-model" }));
     expect(s.rows[0].setup).toEqual({ provider: "claude", model: "vendor/new-model" });
     // a word that names a listed model is a search: no "Use" row beside its match
@@ -240,6 +271,16 @@ describe("what can be picked and customized", () => {
     expect(rowBlock(claude({ loading: true }), {})).toBeUndefined();
   });
 
+  it("the model that runs now can be picked back while a switch waits (it drops the switch), unless the chat is busy", () => {
+    const fixed = codex({ unavailable: "Codex can't change the model" });
+    const waiting = { pending: { provider: "claude", model: "opus" } };
+    expect(rowBlock(fixed, waiting, true)).toBeUndefined();
+    // its other rows stay off, and so does it with no switch waiting
+    expect(rowBlock(fixed, waiting)).toEqual({ reason: "Codex can't change the model" });
+    expect(rowBlock(fixed, {}, true)).toEqual({ reason: "Codex can't change the model" });
+    expect(rowBlock(fixed, { ...waiting, busy: "Working" }, true)).toEqual({ reason: "Working" });
+  });
+
   it("the model that runs now keeps its flyout when edits apply live, even when picks are off", () => {
     const sections = panelSections(input({ providers: [codex({ unavailable: "Codex can't change the model" })], state: state({ current: { provider: "codex", model: "gpt-5.5" }, recommended: [] }) }));
     const row = sections[0].rows[0];
@@ -282,6 +323,19 @@ describe("geometry and colors", () => {
     expect(effortColor("someday")).toBe("var(--effort-medium)");
     expect(effortColorAt(["low", "medium", "high"], 1)).toBe("var(--effort-medium)");
     expect(effortColorAt(["low", "medium", "high"], 1.25)).toBe("color-mix(in srgb, var(--effort-high) 25%, var(--effort-medium))");
+  });
+
+  it("maps known output prices to tiers and writes small prices without losing them", () => {
+    expect(priceTier({ input: 1, output: 3 })).toBe(1);
+    expect(priceTier({ input: 2, output: 10 })).toBe(2);
+    expect(priceTier({ input: 4, output: 20 })).toBe(3);
+    expect(priceTier({ input: 4, output: Number.NaN })).toBeUndefined();
+    expect(priceTier({ input: -1, output: 20 })).toBeUndefined();
+    expect(priceTier({ input: 4, output: 20, cache_read: -0.1 })).toBeUndefined();
+    expect(priceAmount(20)).toBe("20");
+    expect(priceAmount(0.2)).toBe("0.2");
+    expect(priceAmount(0.0036)).toBe("0.0036");
+    expect(priceAmount(1.23456)).toBe("1.23");
   });
 
   it("writes context windows short", () => {

@@ -70,6 +70,7 @@
   "scope_notify": "デバイスに通知を送信",
   "scope_assistant_ask": "Persona の会話を開始して会話の動きを読み取り",
   "scope_assistant_read": "Persona との会話を読み取り（あなたのメッセージとその返信）",
+  "scope_assistant_memory_read": "Persona があなたについて記憶している内容を読み取り（読み取り専用、ヘルス空間は除く）",
   "scope_todos_read": "To-do を表示",
   "scope_todos_write": "To-do の作成と編集、会話の関連付け（削除不可）",
   "scope_leaders_read": "リーダー会話（方向）とその報告の表示",
@@ -100,5 +101,7 @@
   "network_config_unset": "未入力",
   "secret_provider_title": "シークレットの値を提供",
   "secret_provider_more_title": "シークレットの値を提供（新規）",
-  "secret_provider_detail": "設定に {schemes} 参照が入っているとき、またはスマートフォンで参照を Agent に渡すことを承認したとき、Persona はこの拡張機能に値を求めます。どの参照が何に使われるかは伝わりますが、ほかのシークレットは見えません"
+  "secret_provider_detail": "設定に {schemes} 参照が入っているとき、またはスマートフォンで参照を Agent に渡すことを承認したとき、Persona はこの拡張機能に値を求めます。どの参照が何に使われるかは伝わりますが、ほかのシークレットは見えません",
+  "assistant_data_title": "拡張機能が書いた内容をアシスタントが読む内容に加える",
+  "assistant_data_detail": "プログラムが書いたテキストを、アシスタントの指示とスキル、Agent のプロジェクト背景、受信箱の仕分けと下書きに、サイズ上限の範囲で加えられます。各項目は詳細画面で個別にオフにできます"
 }

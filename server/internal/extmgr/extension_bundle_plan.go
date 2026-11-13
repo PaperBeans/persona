@@ -213,6 +213,9 @@ func (h *Manager) findBundleChoice(id string, requirements []bundleRequirement, 
 	var last error
 	for _, mid := range order {
 		rec, entry, err := h.marketEntry(mid, id)
+		if err == nil {
+			err = h.cantRunHere(entry.Parsed)
+		}
 		if err != nil {
 			last = err
 			continue

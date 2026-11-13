@@ -109,6 +109,7 @@ function agentsByUpdate(agents: readonly TreeAgent[]): TreeAgent[] {
 export function todoTreeByUpdate(tree: TodoTree): TodoTree {
   return {
     projects: tree.projects.map((p) => ({ ...p, todos: p.todos.map((td) => ({ ...td, agents: agentsByUpdate(td.agents) })) })),
-    loose: tree.loose.map((g) => ({ ...g, projects: g.projects.map((td) => ({ ...td, agents: agentsByUpdate(td.agents) })) })),
+    todos: tree.todos.map((td) => ({ ...td, agents: agentsByUpdate(td.agents) })),
+    loose: tree.loose.map((g) => ({ ...g, agents: agentsByUpdate(g.agents) })),
   };
 }

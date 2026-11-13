@@ -259,29 +259,32 @@ func (s *Service) runHealthRecheck(ctx context.Context, machine, launcher string
 	}
 }
 
+// launcherUnusableNow is launcherUnusable after one on-the-spot probe of a failing record, for a start about to
+// move or be refused because of it: the record can lag behind a fix, so a pass clears it and the start stays on the
+// asked machine (#2018). Two records cannot be settled by a probe: a subscription usage limit (the request would be
+// refused too) and a launcher the terminal's shell cannot run (the probe's login shell runs it fine); only a real
+// start clears those.
+func (s *Service) launcherUnusableNow(ctx context.Context, machine, launcher string) (LauncherHealth, bool) {
+	r, bad := s.launcherUnusable(ctx, machine, launcher)
+	if !bad || r.Kind == errKindUsageLimit || r.Kind == errKindNotInTerminal {
+		return r, bad
+	}
+	if res, got, checked := s.recheckLauncherNow(ctx, machine, launcher); checked && got && res.ok {
+		return LauncherHealth{}, false
+	}
+	// The shared follow-up may have finished between the first read and the throttled claim. Decide from its
+	// published result, not the stale failure that led us here.
+	return s.launcherUnusable(ctx, machine, launcher)
+}
+
 // healthDetour is where a start with launcher on machine m goes instead: another machine when its last check failed
 // there and another has it healthy (moved), with a line saying so for whoever started it; no other: m, and the line
 // says it may fail. A usage limit with a known reset says when that is, and a saturated account pool (capacity.go)
 // adds the fleet-wide "no schedulable account" fact and its nearest recovery when the data is fresh.
 func (s *Service) healthDetour(ctx context.Context, m Device, launcher string, suitable ...func(Device) bool) (Device, string, bool) {
-	r, bad := s.launcherUnusable(ctx, m.ID, launcher)
+	r, bad := s.launcherUnusableNow(ctx, m.ID, launcher)
 	if !bad {
 		return m, "", false
-	}
-	// The record can lag behind a fix: probe the machine once on the spot before moving the start elsewhere. A pass
-	// clears the record and the start stays on the asked machine (#2018). Two records cannot be settled by a probe:
-	// a subscription usage limit (the request would be refused too) and a launcher the terminal's shell cannot run
-	// (the probe's login shell runs it fine); only a real start clears those.
-	if r.Kind != errKindUsageLimit && r.Kind != errKindNotInTerminal {
-		if res, got, checked := s.recheckLauncherNow(ctx, m.ID, launcher); checked && got && res.ok {
-			return m, "", false
-		}
-		// The shared follow-up may have finished between the first read and the throttled claim. Route from its
-		// published result, not the stale failure that led us here.
-		r, bad = s.launcherUnusable(ctx, m.ID, launcher)
-		if !bad {
-			return m, "", false
-		}
 	}
 	alt, moved := s.healthyMachine(ctx, launcher, m.ID, suitable...)
 	// The pool is provider-level: resolve it once from the failed machine. Missing or stale data gives no note, and

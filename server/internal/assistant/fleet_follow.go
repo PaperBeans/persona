@@ -12,8 +12,8 @@ import (
 // What a conversation writes, for the channels that follow its turn (docs/extensions/channels.md): the manager follows it
 // itself (the node sends it the items and the text as they are made, devices.Follow) and hands them to the channels in
 // the order the node's events came, with the turns' starts and ends among them — what the hub did when the nodes'
-// events were its (assistant_channels.go there). With hub.json's assistant.persona_view on, the assistant's
-// conversations' answers that carry a view (```persona-view) are handed over too, followed or not.
+// events were its (assistant_channels.go there). The assistant's conversations' answers that carry a view
+// (```persona-view) are handed over too, followed or not.
 
 // fleetQueue runs what the nodes' events start for the assistant one at a time, in the order they came.
 type fleetQueue struct {
@@ -78,8 +78,8 @@ func (s *Service) followed(machine, session string) bool {
 	return f.follows[[2]string{machine, session}]
 }
 
-// followedItems: new items of a session; to the channels when it is followed (or, persona_view on, an assistant
-// conversation's answers with a view).
+// followedItems: new items of a session; to the channels when it is followed (or an assistant conversation's answers
+// with a view).
 func (s *Service) followedItems(machine string, params json.RawMessage) {
 	var p struct {
 		SessionID string       `json:"session_id"`
@@ -90,9 +90,6 @@ func (s *Service) followedItems(machine string, params json.RawMessage) {
 	}
 	items := p.Items
 	if !s.followed(machine, p.SessionID) {
-		if !s.hello(context.Background()).PersonaView {
-			return
-		}
 		m, ok := s.fleetMachine(machine)
 		if !ok {
 			return

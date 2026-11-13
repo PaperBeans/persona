@@ -4,8 +4,8 @@ import Testing
 
 /// The inbox with several managers (#1850): two managers' items with one id are two items (`InboxItem.key`), a bulk
 /// filing where one manager fails keeps the others' filed and puts back only the failed one's (the toast says how many
-/// and why), the list groups under each manager's name, its sections folding apart, and a request about one item names
-/// its manager unless that is the default. Made-up values.
+/// and why), and a request about one item names its manager unless that is the default. What the list shows of them
+/// (the current assistant's alone) is in `AssistantScopeTests`. Made-up values.
 @MainActor
 struct InboxManagersTests {
     private func item(_ id: String, _ manager: String?, tier: String = "action", done: Bool = false) throws -> InboxItem {
@@ -117,38 +117,5 @@ struct InboxManagersTests {
             bulk: { _, _ in InboxBulkReply(action: "dismiss", changed: [], unchanged: [], undo: .init(action: "reopen", ids: ["x"])) },
             legacy: { _ in .none })
         #expect(undo == .bulk(.init(action: "reopen", ids: ["x"]), manager: "m-2"))
-    }
-
-    @Test func theInboxGroupsUnderEachManager() throws {
-        let mine = try item("a", "assistant"), bare = try item("b", nil, tier: "fyi"), home = try item("c", "m-2", tier: "fyi")
-        let workDone = try item("d", "m-1", done: true), gone = try item("e", "gone")
-        var waiting = try JSON.decoder.decode(Interaction.self, from: Data(#"{"id":"ix","machine_id":"m","session_id":"s","kind":"permission"}"#.utf8))
-        waiting.manager = "m-2"
-        let byTier = Dictionary(grouping: [mine, bare, home, gone], by: \.triage)
-        let shares = InboxShare.make(byTier: byTier, done: [workDone], agents: [waiting], roster: Self.roster)
-        #expect(shares.map(\.id) == ["assistant", "m-1", "m-2"], "the default first, then the roster's order")
-        #expect(shares[0].byTier[.action]?.map(\.id) == ["a", "e"] && shares[0].byTier[.fyi]?.map(\.id) == ["b"],
-                "no stamp, or one the roster lacks: the default's")
-        #expect(shares[1].openCount == 0 && shares[1].done.map(\.id) == ["d"], "a group with only done items still shows")
-        #expect(shares[2].agents.map(\.id) == ["ix"] && shares[2].openCount == 2)
-        #expect(shares[2].mine([workDone, home], Self.roster).map(\.id) == ["c"])
-
-        let one = ManagerRoster(managers: [Self.roster.managers[0]], defaultID: "assistant")
-        let flat = InboxShare.make(byTier: byTier, done: [workDone], agents: [waiting], roster: one)
-        #expect(flat.count == 1 && flat[0].manager == nil && flat[0].openCount == 5, "one manager: the page as before")
-        #expect(InboxShare.make(byTier: [:], done: [], agents: [], roster: nil).count == 1)
-    }
-
-    @Test func eachGroupFoldsApart() {
-        var folds = InboxFolds()
-        #expect(folds.isOpen("action") && folds.isOpen("fyi") && !folds.isOpen("noise") && !folds.isOpen("done"))
-        folds.toggle("fyi", manager: "m-1")
-        #expect(!folds.isOpen("fyi", manager: "m-1") && folds.isOpen("fyi", manager: "m-2") && folds.isOpen("fyi"))
-        folds.toggle("done", manager: "m-2")
-        #expect(folds.isOpen("done", manager: "m-2") && !folds.isOpen("done"))
-        folds.toggle("working")
-        #expect(folds.isOpen("working"), "In Progress stays open")
-        folds.toggle("fyi", manager: "m-1")
-        #expect(folds.isOpen("fyi", manager: "m-1"))
     }
 }

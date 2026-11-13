@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	"github.com/nwverse/persona/server/internal/ai"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
@@ -41,7 +42,10 @@ type Minutes struct {
 	Actions     []MinutesAction `json:"actions,omitempty"`
 	Open        []MinutesItem   `json:"open,omitempty"`
 	Partial     bool            `json:"partial,omitempty"` // the transcript's end was not read
-	Markdown    string          `json:"markdown"`
+	// Language is what they are written in, their Markdown's headings too (language.go): an i18n code (zh-Hans, en,
+	// ja); minutes written before it was kept have none, and are Chinese.
+	Language string `json:"language,omitempty"`
+	Markdown string `json:"markdown"`
 	// Start and End are the recording's span When says, in the user's zone (#4713). Clients format them with their own
 	// localized dates and show When only without them (minutes from an older hub).
 	Start time.Time `json:"start,omitzero"`
@@ -279,14 +283,16 @@ func (e *Engine) WriteMinutes(ctx context.Context, max int) int {
 	if e.Store.ReadOnly() {
 		return 0
 	}
-	now := time.Now()
+	now := e.now()
 	e.matchRecordings(now)
 	if e.Model == nil && e.ModelFor == nil {
 		return 0
 	}
 	var todo []*Recording
 	for _, r := range e.Store.Recordings() {
-		if r.Complete && r.Chars > 0 && r.MinutesState == MinutesPending && !r.minutesWaiting(now) && !r.Trimmed() {
+		// In hub mode they wait for the final transcript, at most minutesHubWait after the complete upload.
+		if r.Complete && r.Chars > 0 && r.MinutesState == MinutesPending && !r.minutesWaiting(now) && !r.Trimmed() &&
+			!r.transcriptionHolds(now) {
 			todo = append(todo, r)
 		}
 	}
@@ -326,19 +332,34 @@ func unusableAnswer(err error) bool {
 		errors.Is(err, ai.ErrRefused) || errors.As(err, &syntax) || errors.As(err, &typ)
 }
 
-// minutesFailed counts an unusable answer for revision rev of recording id.
+// minutesFailed counts an unusable answer for revision rev of recording id. Minutes that end failed from a final
+// transcript take the hub's audio with them.
 func (e *Engine) minutesFailed(id string, rev int64) {
 	st := e.Store
 	st.recMu.Lock()
-	defer st.recMu.Unlock()
 	r, ok := st.Recording(id)
 	if !ok || r.Revision != rev {
+		st.recMu.Unlock()
 		return
 	}
 	r.minutesFailuresFor(rev)
 	r.MinutesFails++
 	r.planMinutes()
+	drop := r.MinutesState == MinutesFailed && r.transcriptionDone()
 	_ = st.putEntity(KindRecording, r.ID, r, &r.Tagging, false)
+	st.recMu.Unlock()
+	e.dropAudioAfterMinutes(id, drop)
+}
+
+// dropAudioAfterMinutes deletes recording id's hub-mode audio when drop (the minutes from its final transcript are
+// written, or ended failed). The caller holds none of the store's locks.
+func (e *Engine) dropAudioAfterMinutes(id string, drop bool) {
+	if !drop {
+		return
+	}
+	if err := e.dropAudio(id, ErrTranscriptionFinal); err != nil {
+		e.logf("recording %s: audio after the minutes: %v", id, err)
+	}
 }
 
 // matchRecordings links each complete recording not matched at its current revision to the calendar item it overlaps;
@@ -495,9 +516,10 @@ func modelNumber(data []byte, cut string) int {
 	return 0
 }
 
-// writeMinutes makes and stores the minutes of recording id from what is committed now.
+// writeMinutes makes and stores the minutes of recording id from what is committed now: its transcript of record
+// (in hub mode the hub's sentences, waiting for the final ones as long as transcriptionHolds).
 func (e *Engine) writeMinutes(ctx context.Context, id string) error {
-	files, err := e.Store.recordingSnapshot(id)
+	files, meeting, hub, err := e.Store.recordSnapshot(id)
 	if err != nil {
 		return err
 	}
@@ -508,16 +530,23 @@ func (e *Engine) writeMinutes(ctx context.Context, id string) error {
 	if err := json.Unmarshal(files["meta.json"], &r); err != nil {
 		return err
 	}
-	if !r.Complete || r.Chars == 0 || r.MinutesState != MinutesPending || r.Trimmed() {
+	r.Conv = meeting
+	if !r.Complete || r.Chars == 0 || r.MinutesState != MinutesPending || r.Trimmed() || r.transcriptionHolds(e.now()) {
 		return nil
 	}
-	var segs []RecordingSegment
-	if err := json.Unmarshal(files["segments.json"], &segs); err != nil {
+	var device []RecordingSegment
+	if err := json.Unmarshal(files["segments.json"], &device); err != nil {
 		return err
 	}
+	segs := TranscriptOfRecord(hubMode(meeting), device, hub.Segments)
+	// Minutes made from the final transcript take the hub's audio with them once written (storeMinutes).
+	final := r.transcriptionDone()
 	zone := e.Store.Zone()
 	lines := make([]minutesLine, 0, len(segs))
 	for i, sg := range segs {
+		if sg.Echo {
+			continue // Persona's own answer, heard by the microphone: not the meeting's (N still counts it: citations index segs)
+		}
 		if t := strings.Join(strings.Fields(sg.Text), " "); t != "" {
 			lines = append(lines, minutesLine{N: i + 1, At: sg.Start, Text: clip(t, minutesLineRunes)})
 		}
@@ -543,7 +572,9 @@ func (e *Engine) writeMinutes(ctx context.Context, id string) error {
 		defer cancel()
 		return model.JSONMax(cctx, system, user, 6000, out)
 	}
-	system := prompts.RenderKBMinutes(prompts.KBOwner{Owner: e.ownerName()})
+	lang := e.outputLang(&r)
+	owner := e.writingOwner(lang)
+	system := prompts.RenderKBMinutes(owner)
 	var read []minutesLine
 	var ans minutesAnswer
 	if len(chunks) == 1 {
@@ -564,18 +595,18 @@ func (e *Engine) writeMinutes(ctx context.Context, id string) error {
 			merge.Parts = append(merge.Parts, notesForMerge(i+1, notes, c, r.StartedAt, zone, max(2, minutesMergeItems/len(chunks))))
 		}
 		merge.Meeting.Transcript = ""
-		err := call(prompts.RenderKBMinutesMerge(prompts.KBOwner{Owner: e.ownerName()}), prompts.RenderKBMinutesMergeInput(merge), &ans)
+		err := call(prompts.RenderKBMinutesMerge(owner), prompts.RenderKBMinutesMergeInput(merge), &ans)
 		if err != nil {
 			return fmt.Errorf("merging %d parts: %w", len(chunks), err)
 		}
 		read = notedLines(read, merge.Parts) // the merging call saw the notes, not the transcript
 	}
-	m, err := e.buildMinutes(&r, ans, read, zone)
+	m, err := e.buildMinutes(&r, ans, read, zone, lang)
 	if err != nil {
 		return err
 	}
 	m.Partial = partial
-	return e.storeMinutes(ctx, &r, m)
+	return e.storeMinutes(ctx, &r, m, final)
 }
 
 // minutesInput is what the model is told about recording r besides its transcript.
@@ -593,6 +624,19 @@ func (e *Engine) minutesInput(r *Recording, zone *time.Location) prompts.KBMinut
 }
 
 var weekdayZH = [...]string{"周日", "周一", "周二", "周三", "周四", "周五", "周六"}
+
+// untitledMinutes is the title of r's minutes in lang when neither the user, the calendar nor the model gives one: r's
+// summary's title, else when it started, said in lang (kb-minutes.untitled). Chinese minutes take r's name in lists,
+// which says the same (Store.recordingName).
+func untitledMinutes(r *Recording, zone *time.Location, lang i18n.Lang) string {
+	switch {
+	case lang == i18n.ZhHans:
+		return r.Name
+	case r.AITitle != "":
+		return r.AITitle
+	}
+	return i18n.T(lang, "kb-minutes.untitled", i18n.Args{"when": r.StartedAt.In(zone).Format("2006-01-02 15:04")})
+}
 
 // calendarTitle is the phone calendar's title of r, else the matched calendar item's ("" without either).
 func calendarTitle(r *Recording) string {
@@ -751,8 +795,8 @@ func clipRunes(s string, n int) string { return clip(strings.Join(strings.Fields
 
 // buildMinutes checks the model's answer against the lines it read: every item must cite one of them (a transcript
 // line, or a photo: its time then), a person must be named in them or in the calendar, a due date must be a real day
-// from the meeting on (within a year). A photo's words count as said.
-func (e *Engine) buildMinutes(r *Recording, a minutesAnswer, read []minutesLine, zone *time.Location) (*Minutes, error) {
+// from the meeting on (within a year). A photo's words count as said. The minutes are in lang.
+func (e *Engine) buildMinutes(r *Recording, a minutesAnswer, read []minutesLine, zone *time.Location, lang i18n.Lang) (*Minutes, error) {
 	at, photoSec := map[int]float64{}, map[int]float64{}
 	var saidB strings.Builder
 	for _, l := range read {
@@ -800,7 +844,8 @@ func (e *Engine) buildMinutes(r *Recording, a minutesAnswer, read []minutesLine,
 		}
 		return sec, 0, ok
 	}
-	m := &Minutes{Title: cmp.Or(r.Title, calendarTitle(r), oneLine(a.Title), r.Name), When: minutesWhen(r, zone)}
+	m := &Minutes{Title: cmp.Or(r.Title, calendarTitle(r), oneLine(a.Title), untitledMinutes(r, zone, lang)),
+		When: minutesWhen(r, zone), Language: string(lang)}
 	m.Start, m.End = minutesSpan(r, zone)
 	if r.Calendar != nil && r.Calendar.Location != "" {
 		m.Where = r.Calendar.Location
@@ -990,29 +1035,31 @@ func keepTodos(m, old *Minutes) {
 func MinutesTaskKey(a MinutesAction) string { return a.Who + "\x00" + a.What }
 
 // renderMinutes is minutes.md: the minutes with clock times, sections without anything left out; an item citing a
-// photo ends with its number.
+// photo ends with its number. Its headings and fixed words are in the minutes' language (kb-minutes.json).
 func renderMinutes(m *Minutes, start time.Time, zone *time.Location) string {
+	l := storedLang(m.Language)
 	at := func(sec float64) string { return "[" + clockAt(start, sec, zone) + "] " }
 	var b strings.Builder
 	end := func(photo int) {
 		if photo > 0 {
-			b.WriteString("（照片 " + strconv.Itoa(photo) + "）")
+			b.WriteString(i18n.T(l, "kb-minutes.photo", i18n.Args{"n": photo}))
 		}
 		b.WriteByte('\n')
 	}
-	fmt.Fprintf(&b, "# %s\n\n- 时间：%s\n", m.Title, m.When)
+	b.WriteString("# " + m.Title + "\n\n- " + i18n.T(l, "kb-minutes.when", i18n.Args{"when": m.When}) + "\n")
 	if m.Where != "" {
-		fmt.Fprintf(&b, "- 地点：%s\n", m.Where)
+		b.WriteString("- " + i18n.T(l, "kb-minutes.where", i18n.Args{"where": m.Where}) + "\n")
 	}
 	if len(m.Attendees) > 0 {
-		fmt.Fprintf(&b, "- 参会：%s\n", strings.Join(m.Attendees, "、"))
+		names := strings.Join(m.Attendees, i18n.T(l, "kb-minutes.list_sep"))
+		b.WriteString("- " + i18n.T(l, "kb-minutes.attendees", i18n.Args{"names": names}) + "\n")
 	}
 	if len(m.Points) > 0 {
-		b.WriteString("\n## 讨论要点\n\n")
+		b.WriteString("\n## " + i18n.T(l, "kb-minutes.points") + "\n\n")
 		for _, p := range m.Points {
 			b.WriteString("- " + at(p.At) + p.Text)
 			if p.Who != "" {
-				b.WriteString("（" + p.Who + "）")
+				b.WriteString(i18n.T(l, "kb-minutes.who", i18n.Args{"who": p.Who}))
 			}
 			end(p.Photo)
 		}
@@ -1027,33 +1074,34 @@ func renderMinutes(m *Minutes, start time.Time, zone *time.Location) string {
 			end(x.Photo)
 		}
 	}
-	section("结论与决定", m.Decisions)
+	section(i18n.T(l, "kb-minutes.decisions"), m.Decisions)
 	if len(m.Actions) > 0 {
-		b.WriteString("\n## 待办\n\n")
+		b.WriteString("\n## " + i18n.T(l, "kb-minutes.actions") + "\n\n")
 		for _, a := range m.Actions {
 			b.WriteString("- " + at(a.At))
 			if a.Who != "" {
-				b.WriteString(a.Who + "：")
+				b.WriteString(i18n.T(l, "kb-minutes.owner", i18n.Args{"who": a.Who}))
 			}
 			b.WriteString(a.What)
 			if by := cmp.Or(a.By, a.DueDate); by != "" {
-				b.WriteString("（" + by + "）")
+				b.WriteString(i18n.T(l, "kb-minutes.by", i18n.Args{"by": by}))
 			}
 			end(a.Photo)
 		}
 	}
-	section("未决问题", m.Open)
+	section(i18n.T(l, "kb-minutes.open"), m.Open)
 	if m.Partial {
-		b.WriteString("\n> 转写太长，结尾部分没有整理进纪要。\n")
+		b.WriteString("\n> " + i18n.T(l, "kb-minutes.partial") + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
 // storeMinutes writes m for snapshot r (the revision read) unless the recording was deleted or trimmed meanwhile, then
-// tells MinutesWritten once they are the current revision's, unless they were made again only for a photo
-// (quietMinutes). Items citing a photo no longer listed are left out; when the photos the minutes cite changed, so does
-// PartPhotos, before the minutes are written.
-func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes) error {
+// tells MinutesWritten once they are the current revision's, unless they were made again only for a photo or the final
+// transcript (quietMinutes). Items citing a photo no longer listed are left out; when the photos the minutes cite
+// changed, so does PartPhotos, before the minutes are written. final: they were made from a hub-mode recording's final
+// transcript, so its audio goes once they are stored and nothing asked for them again meanwhile (quiet or not).
+func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes, final bool) error {
 	st := e.Store
 	st.recMu.Lock()
 	cur, ok := st.Recording(r.ID)
@@ -1071,7 +1119,7 @@ func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes) err
 	dropUnlistedPhotos(m, book)
 	// The version after both meta's and the file's: a write of minutes.json that meta.json never caught up with (a
 	// crash between the two) must not give different actions the version an app may still confirm.
-	m.Version, m.Revision, m.GeneratedAt = cur.MinutesVersion+1, r.Revision, time.Now().UTC()
+	m.Version, m.Revision, m.GeneratedAt = cur.MinutesVersion+1, r.Revision, e.now().UTC()
 	var before map[int]bool
 	if old, err := st.ReadMinutes(cur.ID); err == nil {
 		m.Version = max(m.Version, old.Version+1)
@@ -1103,6 +1151,7 @@ func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes) err
 	if ready {
 		cur.MinutesQuiet = 0 // settled: minutes of a later revision or request are pushed again
 	}
+	drop := final && cur.MinutesAsks == r.MinutesAsks
 	err = st.putEntity(KindRecording, cur.ID, cur, &cur.Tagging, false)
 	st.notify(KindRecording, cur.ID, "summary")
 	snap := *cur
@@ -1113,6 +1162,7 @@ func (e *Engine) storeMinutes(ctx context.Context, r *Recording, m *Minutes) err
 	if err != nil {
 		return err
 	}
+	e.dropAudioAfterMinutes(cur.ID, drop)
 	if ready && !quiet && e.MinutesWritten != nil {
 		e.MinutesWritten(ctx, snap, *m)
 	}

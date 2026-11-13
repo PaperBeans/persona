@@ -104,7 +104,8 @@ class AssistantArchiveNavigationTest {
         }
     }
 
-    @Test fun archivingTheActiveConversationClearsItsSelectionWithoutClosingTheList() {
+    // There is no home page (#4339 C11): the main conversation takes the archived one's place.
+    @Test fun archivingTheActiveConversationOpensTheMainOneWithoutClosingTheList() {
         val hub = show(first)
         archiveFirst()
         rule.onAllNodesWithText(first.title!!).assertCountEquals(0)
@@ -112,6 +113,7 @@ class AssistantArchiveNavigationTest {
         assertEquals(listOf(first.key, second.key), hub.archived)
         rule.runOnIdle { rule.activity.onBackPressedDispatcher.onBackPressed() }
         rule.onAllNodesWithText("chat:a").assertCountEquals(0)
+        rule.onNodeWithText("chat:main").assertExists()
         assertTrue(navigations.isEmpty())
     }
 

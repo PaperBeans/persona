@@ -24,7 +24,7 @@
     <string name="chat_tray_waiting">Waiting</string>
     <string name="chat_tray_background_tasks_running">Background tasks running: %1$d</string>
     <string name="chat_tray_subagents_running">Subagents running: %1$d</string>
-    <string name="chat_tray_background_running">Background work is running</string>
+    <string name="chat_tray_background_running">Working (Background)</string>
     <string name="chat_tray_background_workflow">Background workflow</string>
     <string name="chat_tray_workflow_more">%1$d more</string>
     <string name="chat_tray_expanded">Expanded</string>
@@ -54,4 +54,9 @@
     <string name="chat_tasks_dismiss_draft">Don\'t handle</string>
     <string name="chat_tasks_draft_dismissed">Draft dismissed; nothing was sent</string>
     <string name="chat_tasks_undo_draft">Undo</string>
+    <!-- Over a task's card above Persona's composer: how many more its tasks ask (iOS TaskQuestions). -->
+    <plurals name="chat_stack_more">
+        <item quantity="one">%1$d more</item>
+        <item quantity="other">%1$d more</item>
+    </plurals>
 </resources>

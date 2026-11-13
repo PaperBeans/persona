@@ -85,13 +85,20 @@ func matcher(query string) func(string) bool {
 // distill mark (.topics.json, topics.go). A meeting's live log (live.json, live.go) is never
 // searched: other people's words said while Persona attended, and the questions asked of it. Nor is photos.json
 // (recording_photos.go: digests, deletions; photos.md has the photos' words), and the photos themselves are in
-// attachments/, which the walk never enters.
+// attachments/, which the walk never enters (nor a hub-mode meeting's audio, attachments/audio/). Nor is
+// hub_segments.json (hub_segments.go): transcript.md, rendered from the transcript of record, is the searched text.
+// Nor is live ingestion's bookkeeping in a chat (ingest.go): the receipts
+// (.receipts.json: the source, every message's id and time, one long line), the intent of a write in progress
+// (.ingest.json) and the zone the days are in (messages/.zone, zone.go). Profile files are read before any day, so a
+// query of digits, a date or the source's name matched every chat's receipts and filled the limit (#5991).
 func searchable(rel string) bool {
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	switch {
 	case parts[0] == "cursors" || parts[0] == "history" || parts[0] == selectDir || parts[0] == trashDirName:
 		return false
-	case len(parts) == 3 && parts[0] == KindChat && parts[2] == retentionFile:
+	case len(parts) == 3 && parts[0] == KindChat && (parts[2] == retentionFile || parts[2] == ingestReceipts || parts[2] == ingestJournal):
+		return false
+	case len(parts) == 4 && parts[0] == KindChat && parts[2] == "messages" && parts[3] == zoneFile:
 		return false
 	case len(parts) == 3 && parts[0] == KindRecording && (parts[2] == recordingJournal || parts[2] == "minutes.json"):
 		return false // minutes.md has the minutes' text
@@ -103,8 +110,12 @@ func searchable(rel string) bool {
 		return false // meeting.json (meeting.go): the manager's bookkeeping of the room and the mark
 	case len(parts) >= 3 && parts[0] == KindRecording && strings.HasPrefix(parts[2], photosFile):
 		return false // photos.json (recording_photos.go): digests and deletions; photos.md has the photos' words
+	case len(parts) >= 3 && parts[0] == KindRecording && strings.HasPrefix(parts[2], hubSegmentsFile):
+		return false // hub_segments.json and its temporary file: transcript.md has the transcript of record
 	case len(parts) == 3 && parts[0] == KindPerson && parts[2] == "handles.json":
 		return false
+	case len(parts) == 3 && parts[0] == KindPerson && parts[2] == profilesFile:
+		return false // summary.md shows the profiles, each line labelled with its part (profile.go)
 	case len(parts) == 3 && parts[0] == KindProject && parts[2] == "moments-judged.json":
 		return false
 	case len(parts) == 3 && parts[0] == KindTopic && parts[2] == topicPointsFile:

@@ -24,6 +24,10 @@ class HubSessionsRepository(
     override val machines = mutableMachines.asStateFlow()
     private val mutableSessions = MutableStateFlow<List<Session>>(emptyList())
     override val sessions = mutableSessions.asStateFlow()
+    private val mutableAdoptedSessions = MutableStateFlow<List<Session>>(emptyList())
+    override val adoptedSessions = mutableAdoptedSessions.asStateFlow()
+    private val mutableStartedThreads = MutableStateFlow(emptyMap<SessionKey, Session>())
+    override val startedThreads = mutableStartedThreads.asStateFlow()
     private val mutableListStatus = MutableStateFlow(SessionListStatus())
     override val listStatus = mutableListStatus.asStateFlow()
     internal val verifiedLists = MutableStateFlow(VerifiedSessionLists())
@@ -273,25 +277,34 @@ class HubSessionsRepository(
     }
 
     override suspend fun setListFilter(filter: SessionListFilter) {
-        val changed = lock.withLock {
-            if (mutableListStatus.value.filter == filter) return
+        val filterGeneration = lock.withLock {
+            val status = mutableListStatus.value
+            if (status.filter == filter) return
             // The complete collection is the same for every filter (the view projects it locally): keep the baseline.
-            if (mode == Mode.Complete && filter.requiresCompleteMembership &&
-                mutableListStatus.value.filter.requiresCompleteMembership) {
-                mutableListStatus.update { it.copy(filter = filter) }
+            if (mode == Mode.Complete && filter.requiresCompleteMembership && status.filter.requiresCompleteMembership) {
+                mutableListStatus.value = status.copy(filter = filter)
                 return
             }
+            // The first complete view can project the restored rows locally while its authoritative list loads.
+            val keepFirstPaint = mode == Mode.Unknown && !status.loaded && status.filter == SessionListFilter() &&
+                filter.requiresCompleteMembership
             // A view policy is not a server capability failure. Reprobe pagination when leaving that view.
-            if (mutableListStatus.value.filter.requiresCompleteMembership != filter.requiresCompleteMembership) mode = Mode.Unknown
+            if (status.filter.requiresCompleteMembership != filter.requiresCompleteMembership) mode = Mode.Unknown
             generation++
             activeRequest?.cancel()
             resetPages()
-            if (mode != Mode.Legacy) mutableSessions.value = emptyList()
+            if (mode != Mode.Legacy && !keepFirstPaint) mutableSessions.value = emptyList()
             verifiedLists.value = VerifiedSessionLists()
             mutableListStatus.value = SessionListStatus(paged = mode == Mode.Paged, filter = filter)
-            true
+            generation
         }
-        if (changed) refresh()
+        try {
+            refresh()
+        } catch (cancelled: CancellationException) {
+            // A replacement request in this repository must not cancel the caller's work on other Hubs.
+            currentCoroutineContext().ensureActive()
+            if (lock.withLock { generation == filterGeneration }) throw cancelled
+        }
     }
 
     override suspend fun loadMore() = loadPage(previous = false)
@@ -531,7 +544,7 @@ class HubSessionsRepository(
 
     /** A partial filtered window is NEVER evidence that a machine's other sessions were removed. */
     private fun verifyHeld() {
-        if (connection.state.value != ConnectionState.Online) return
+        if (connection.state.value != ConnectionState.Online || !mutableListStatus.value.loaded) return
         if (mode == Mode.Paged) {
             verifiedLists.value = VerifiedSessionLists(machines = mutableMachines.value)
             return
@@ -547,12 +560,27 @@ class HubSessionsRepository(
         if (session.machineId.isBlank() || session.sessionId.isBlank()) return
         restored.await()
         lock.withLock {
+            mutableAdoptedSessions.value = (mutableAdoptedSessions.value.filterNot { it.key == session.key } + session).takeLast(WINDOW_SIZE)
             if (mutableSessions.value.any { it.key == session.key }) return@withLock
             // A single start response isn't authoritative filtered membership. Reconcile the bounded list instead.
             if (mode == Mode.Paged) { invalidations.trySend(""); return@withLock }
             sessionChanges[session.machineId] = ++revision
             mutableSessions.value = (mutableSessions.value + session).let { if (mode.holdsAll) it else it.take(WINDOW_SIZE) }
             persist()
+        }
+    }
+
+    override suspend fun adoptThread(previous: SessionKey, session: Session) {
+        if (previous.machineId != session.machineId || previous == session.key) return
+        restored.await()
+        val waiting = lock.withLock {
+            (mutableAdoptedSessions.value.lastOrNull { it.key == previous }
+                ?: mutableSessions.value.firstOrNull { it.key == previous })?.awaitingFirstMessage == true
+        }
+        if (!waiting) return
+        adopt(session)
+        lock.withLock {
+            mutableStartedThreads.value = (mutableStartedThreads.value + (previous to session)).toList().takeLast(WINDOW_SIZE).toMap()
         }
     }
 

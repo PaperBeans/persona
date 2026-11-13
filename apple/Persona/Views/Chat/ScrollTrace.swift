@@ -57,13 +57,13 @@ final class ScrollTrace: NSObject {
         #endif
     }
 
-    /// The traces of the launches before this one stay beside it, `.1` the one just before, up to 8: a UI test run
+    /// The traces of the launches before this one stay beside it, `.1` the one just before, up to 16: a UI test run
     /// launches the app once per test, and only the last test's was left to read.
     private static func keepEarlier(_ url: URL) {
         let fm = FileManager.default, ext = url.pathExtension
         func earlier(_ n: Int) -> URL { url.deletingPathExtension().appendingPathExtension("\(n)").appendingPathExtension(ext) }
-        try? fm.removeItem(at: earlier(8))
-        for n in stride(from: 7, through: 1, by: -1) { try? fm.moveItem(at: earlier(n), to: earlier(n + 1)) }
+        try? fm.removeItem(at: earlier(16))
+        for n in stride(from: 15, through: 1, by: -1) { try? fm.moveItem(at: earlier(n), to: earlier(n + 1)) }
         try? fm.moveItem(at: url, to: earlier(1))
     }
 

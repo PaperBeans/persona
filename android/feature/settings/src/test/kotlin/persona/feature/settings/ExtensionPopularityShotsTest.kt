@@ -99,21 +99,33 @@ class ExtensionPopularityShotsTest {
         pictures.shutdown()
     }
 
+    private val bundled = System.getenv("PERSONA_BUNDLED_LOGOS") == "1"
+    private val iconRequests = CopyOnWriteArrayList<String>()
     private val timestamp = "2026-11-11T08:00:00Z"
     private val entries = listOf(
         CatalogExtension("official", id = "popular", name = "GitHub", version = "1.0.0", description = "Repository activity",
-            iconUrl = "https://extensions.example.com/notes.png", downloads = 20, downloadsUpdatedAt = timestamp),
+            iconUrl = if (bundled) "/api/v1/extensions/-/catalog/official/popular/icon?sha256=" + "a".repeat(64) else "https://extensions.example.com/notes.png", downloads = 20, downloadsUpdatedAt = timestamp),
         CatalogExtension("official", id = "lower", name = "Alpha tools", version = "1.0.0", description = "A logo that cannot load",
-            iconUrl = "https://extensions.example.com/missing.png", downloads = 10),
+            iconUrl = if (bundled) "/api/v1/extensions/-/catalog/official/lower/icon?sha256=" + "b".repeat(64) else "https://extensions.example.com/missing.png", downloads = 10),
         CatalogExtension("official", id = "zero", name = "Beta zero", version = "1.0.0", description = "A supplied count of zero",
             iconUrl = "http://extensions.example.com/invalid.png", downloads = 0),
         CatalogExtension("official", id = "older", name = "Older extension", version = "1.0.0", description = "No logo or count on an older hub"),
     )
     private val installed = entries.map {
         HubExtension(it.id, it.name, "ui", "running", source = "installed", enabled = true, version = it.version,
-            iconUrl = it.iconUrl, downloads = it.downloads, downloadsUpdatedAt = it.downloadsUpdatedAt)
+            iconUrl = if (bundled && it.id in listOf("popular", "lower")) "/api/v1/extensions/${it.id}/-/icon?v=${it.version}" else it.iconUrl,
+            downloads = it.downloads, downloadsUpdatedAt = it.downloadsUpdatedAt)
     }
     private val api = object : ExtensionApiStub() {
+        override suspend fun icon(path: String): ByteArray {
+            assertTrue(persona.core.contracts.api.ExtensionIconPath.matches(path))
+            iconRequests += path
+            if (path.contains("/lower/")) error("Synthetic icon failure")
+            return java.io.ByteArrayOutputStream().use { output ->
+                ShowcasePictures.bitmap("notes").compress(Bitmap.CompressFormat.PNG, 100, output)
+                output.toByteArray()
+            }
+        }
         override suspend fun listing() = ExtensionListing(installed, canInstall = true, markets = true)
         override suspend fun extensions() = installed
         override suspend fun extension(id: String) = ExtensionDetail(installed.first { it.id == id }, origin = "market:official/$id")
@@ -154,7 +166,7 @@ class ExtensionPopularityShotsTest {
         val pixels = IntArray(image.width * image.height)
         image.getPixels(pixels, 0, image.width, 0, 0, image.width, image.height)
         assertTrue("The real page rendered visible content", pixels.distinct().size > 100)
-        val output = File("build/extension-popularity-shots").also { it.mkdirs() }
+        val output = File(if (bundled) "build/extension-bundled-icon-shots" else "build/extension-popularity-shots").also { it.mkdirs() }
         File(output, "$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         return pixels
     }

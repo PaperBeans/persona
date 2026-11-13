@@ -43,7 +43,6 @@ func newCardFixture(t *testing.T) *cardFixture {
 	}
 	t.Cleanup(database.Close)
 	f := newFakeHub().withMachine()
-	f.hello.PersonaView, f.hello.HTMLViews = true, true
 	c := &cardFixture{t: t, s: newServiceOn(t, f, database), f: f, database: database, conversation: "versions-" + randomHex(8), id: "view_" + randomHex(8)}
 	at := time.Now().UTC()
 	v := db.AssistantViewRow{ID: c.id, Conversation: c.conversation, MachineID: "server", Version: 1, CreatedAt: at, UpdatedAt: at, View: json.RawMessage(versionCard)}
@@ -262,7 +261,8 @@ func TestViewRepliesRaceAcrossRoutes(t *testing.T) {
 	}
 }
 
-func TestHTMLBridgeSwitchesAndRole(t *testing.T) {
+// The bridge takes a full device only, and no switch: an older hub's persona_view / html_views false is not read (#5509).
+func TestHTMLBridgeRoleAndNoSwitch(t *testing.T) {
 	c := newCardFixture(t)
 	body := `{"kind":"open","component_key":"chart","expected_version":1,"url":"https://example.com","client_msg_id":"o","confirmed":true}`
 	r := httptest.NewRequest("POST", "/api/v1/assistant/conversations/"+c.conversation+"/views/"+c.id+"/html-actions", strings.NewReader(body))
@@ -273,19 +273,12 @@ func TestHTMLBridgeSwitchesAndRole(t *testing.T) {
 		t.Fatalf("read-only: %d %s", w.Code, w.Body.String())
 	}
 	c.f.mu.Lock()
-	c.f.hello.HTMLViews = false
+	c.f.hello.PersonaView, c.f.hello.HTMLViews = false, false
 	c.f.mu.Unlock()
-	if status, _ := c.post("html-actions", body); status != http.StatusForbidden {
-		t.Fatalf("html_views off: %d", status)
+	if status, out := c.post("html-actions", body); status != 200 {
+		t.Fatalf("html open with an older hub's switches off: %d %v", status, out)
 	}
-	// The declarative route does not depend on html_views.
-	if status, _ := c.post("actions", `{"action":"later","client_msg_id":"a"}`); status != 200 {
-		t.Fatalf("declared with html off: %d", status)
-	}
-	c.f.mu.Lock()
-	c.f.hello.PersonaView, c.f.hello.HTMLViews = false, true
-	c.f.mu.Unlock()
-	if status, _ := c.post("html-actions", body); status != http.StatusForbidden {
-		t.Fatalf("persona_view off: %d", status)
+	if status, out := c.post("actions", `{"action":"later","client_msg_id":"a"}`); status != 200 {
+		t.Fatalf("declared with an older hub's switches off: %d %v", status, out)
 	}
 }

@@ -417,7 +417,12 @@ func listToolsOnce(ctx context.Context) ([]map[string]any, error) {
 		if t.Name == clipboardSetTool && !isGuest() { // its file argument is read here (clipboard_file.go)
 			schema, description = withClipboardFile(schema, description)
 		}
-		tools = append(tools, map[string]any{"name": t.Name, "description": description, "inputSchema": schema})
+		tool := map[string]any{"name": t.Name, "description": description, "inputSchema": schema}
+		if isAssistant() {
+			// Claude Code keeps these loaded up front while other MCP servers stay behind ToolSearch (#5838).
+			tool["_meta"] = map[string]any{"anthropic/alwaysLoad": true}
+		}
+		tools = append(tools, tool)
 	}
 	return tools, nil
 }

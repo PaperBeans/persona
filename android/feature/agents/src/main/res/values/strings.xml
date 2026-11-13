@@ -66,6 +66,11 @@
     <string name="agents_count_pair">%1$s, %2$s</string>
     <string name="agents_flag_space_pinned">Space pinned</string>
     <string name="agents_flag_space_muted">Space muted</string>
+    <string name="agents_kind_todo">To-do</string>
+    <plurals name="agents_count_todos">
+        <item quantity="one">1 to-do</item>
+        <item quantity="other">%1$d to-dos</item>
+    </plurals>
     <string name="agents_kind_space">Space</string>
     <string name="agents_view_todo">View to-do</string>
     <string name="agents_history_unknown_folder">Unknown folder</string>
@@ -81,8 +86,10 @@
     <string name="agents_grouping_state">By status</string>
     <string name="agents_grouping_todo">By to-do</string>
     <string name="agents_grouping_project">By project</string>
+    <string name="agents_grouping_direction">By pinned</string>
     <string name="agents_menu_compact">Compact list</string>
     <string name="agents_menu_detailed">Detailed list</string>
+    <string name="agents_menu_display">Display</string>
     <string name="agents_menu_collapse_all">Collapse all</string>
     <string name="agents_menu_expand_all">Expand all</string>
     <string name="agents_menu_machines">Machine monitor</string>
@@ -154,6 +161,9 @@
     <string name="agents_repo_repository">Repository</string>
     <string name="agents_repo_main_checkout">Main worktree</string>
     <string name="agents_repo_worktree">Worktree</string>
+    <string name="agents_repo_actions">Repository actions</string>
+    <!-- A computer's repositories with nothing going on, one row each (iOS "Idle Repositories", #4338 A8) -->
+    <string name="agents_idle_repositories">Idle repositories</string>
     <string name="agents_card_question">Claude has a question</string>
     <string name="agents_card_question_by">%1$s has a question</string>
     <string name="agents_card_permission">Waiting for your approval</string>
@@ -271,6 +281,7 @@
     <string name="agents_directory">Directory</string>
     <string name="agents_space_tab">Tab %1$d</string>
     <string name="agents_space_new_tab">New tab here</string>
+    <string name="agents_space_new_tab_card">Open a new tab in this space</string>
     <string name="agents_new_choose_directory">Choose directory</string>
     <string name="agents_new_back">Back</string>
     <string name="agents_new_parent">Up one level</string>
@@ -530,6 +541,9 @@
     <string name="agents_todos_filter_button">Filter and sort</string>
     <string name="agents_todos_filter_show">Show</string>
     <string name="agents_todos_sort_by">Sort by</string>
+    <string name="agents_todos_group_by">Group by</string>
+    <string name="agents_todos_group_status">Status</string>
+    <string name="agents_todos_group_direction">Pinned</string>
     <string name="agents_todos_filter_all">All</string>
     <string name="agents_todos_filter_no_due">No due date</string>
     <string name="agents_todos_filter_today">Today</string>
@@ -551,7 +565,12 @@
         <item quantity="other">%d to-dos</item>
     </plurals>
     <string name="agents_todo_restore">Restore</string>
+    <string name="agents_todo_seen">Got it</string>
+    <string name="agents_todo_seen_moved">Moved to Done</string>
+    <string name="agents_todo_seen_undo">Undo</string>
+    <string name="agents_todo_seen_failed">Something went wrong: %1$s</string>
     <string name="agents_todo_pr_moved">%1$s · moved %2$s</string>
+    <string name="agents_todo_for_briefing">Decision comes with the next briefing</string>
     <string name="agents_todo_pr">PR</string>
     <string name="agents_todo_state_accepted">Accepted</string>
     <plurals name="agents_todos_related">
@@ -579,6 +598,21 @@
     <string name="agents_todo_calendar_change_due_of">Change Due Date: %1$s…</string>
     <string name="agents_todo_calendar_date">Date</string>
     <string name="agents_todo_calendar_time">Time</string>
+    <string name="agents_todo_calendar_mode_day">Day</string>
+    <string name="agents_todo_calendar_mode_week">Week</string>
+    <string name="agents_todo_calendar_mode_month">Month</string>
+    <string name="agents_todo_calendar_previous_day">Previous day</string>
+    <string name="agents_todo_calendar_next_day">Next day</string>
+    <string name="agents_todo_calendar_previous_week">Previous week</string>
+    <string name="agents_todo_calendar_next_week">Next week</string>
+    <string name="agents_todo_calendar_show_day">Show Day</string>
+    <string name="agents_todo_calendar_due">Due</string>
+    <string name="agents_todo_calendar_add">Add</string>
+    <string name="agents_todo_calendar_add_hint">Set a reminder, the priority and notes on the to-do\'s page.</string>
+    <plurals name="agents_todo_calendar_open">
+        <item quantity="one">1 to-do</item>
+        <item quantity="other">%1$d to-dos</item>
+    </plurals>
     <plurals name="agents_todo_calendar_undated">
         <item quantity="one">1 without a due date</item>
         <item quantity="other">%1$d without a due date</item>

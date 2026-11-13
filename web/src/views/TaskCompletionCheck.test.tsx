@@ -92,6 +92,22 @@ describe("task detail completion check with the real REST client", () => {
     expect(result()?.textContent).toContain("Tests remain.");
   });
 
+  it("asks the hub to apply the result and says what it applied (#4867)", async () => {
+    await render(); await click();
+    expect(checks[0].init.body).toBe('{"apply":true}');
+    await answer({ ...completed, applied: true });
+    expect(result()?.textContent).toContain("Applied: the task is marked complete.");
+    expect(result()?.textContent).not.toContain("has not marked the task complete");
+    expect(traffic.filter(({ init }) => init.method && init.method !== "GET")).toHaveLength(1); // the hub applies it, not the page
+    await click(); await answer({ ...completed, verdict: "not_done", would_close: false, applied: true });
+    expect(result()?.textContent).toContain("Applied: this verdict is kept on the task, which stays open.");
+    await click(); await answer({ ...completed, applied: "yes" }); // anything but true applied nothing
+    expect(result()?.textContent).toContain("has not marked the task complete");
+    await render(todo({ supervision: { supervisor: "conversation-example", state: "", done_when: ["Synthetic criterion"] } }));
+    await click(); await answer({ ...completed, applied: true });
+    expect(result()?.textContent).toContain("Applied: the task now waits for its supervisor's review.");
+  });
+
   it.each([
     ["done", "Work appears complete"], ["not_done", "Work is unfinished"], ["waiting", "Waiting on something"],
     ["needs_user", "Your decision is needed"], ["unsure", "Not enough evidence"], ["undelivered", "Work has not been delivered"],
@@ -142,7 +158,7 @@ describe("task detail completion check with the real REST client", () => {
     const stage = [...host.querySelectorAll('[data-stage]')].map(x => [x.getAttribute('data-stage'), x.getAttribute('data-state')]);
     expect(stage).toHaveLength(6);
     await click(); await answer(completed);
-    expect(section().textContent).toContain("normal supervision and review");
+    expect(section().textContent).toContain("waits for its supervisor's review");
     expect(host.querySelector('[data-testid="review-checklist"]')?.textContent).toBe(before);
     expect([...host.querySelectorAll('[data-stage]')].map(x => [x.getAttribute('data-stage'), x.getAttribute('data-state')])).toEqual(stage);
     expect(host.textContent).toContain("Hand to agent");

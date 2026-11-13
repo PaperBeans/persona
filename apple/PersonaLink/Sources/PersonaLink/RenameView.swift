@@ -26,12 +26,12 @@ struct RenameView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("在 hub 上的名字").font(.headline)
+            Text(linkText("Name on the hub")).font(.headline)
             TextField(model.status?.machine ?? "", text: $name)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { save() }
                 .disabled(busy)
-            Text("手机 App、网页和管理界面里显示这个名字；留空就用 id（\(model.status?.machine ?? "")），id 不变。")
+            Text(linkText("The phone app, the web app and the admin page show this name; leave it empty to use the ID (\(model.status?.machine ?? "")). The ID does not change."))
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let result {
@@ -43,12 +43,12 @@ struct RenameView: View {
             }
             HStack {
                 Spacer()
-                Button("取消") { dismissWindow(id: "rename") }
+                Button(linkText("Cancel")) { dismissWindow(id: "rename") }
                     .keyboardShortcut(.cancelAction)
                 Button {
                     save()
                 } label: {
-                    Text(busy ? "正在保存…" : "保存").lineLimit(1)
+                    Text(busy ? linkText("Saving…") : linkText("Save")).lineLimit(1)
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(busy || unchanged || model.status?.renamable != true)

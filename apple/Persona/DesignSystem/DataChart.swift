@@ -2,12 +2,12 @@ import Charts
 import SwiftUI
 
 /// A chart of values over categories (a plugin's `chart` item, docs/extensions/extensions.md「UI slots」): bars (side by side or
-/// stacked) or lines, one to a few series, in the design system's colors. A series without a color of its own takes
+/// stacked), lines or areas (UI version 6: overlapping, each with its line, or stacked), one to a few series, in the design system's colors. A series without a color of its own takes
 /// the data hues in order (the first is the accent). Holding (iPhone) or hovering (Mac) a category shows its label and
 /// every series' value above the plot. Compact (a card): no axis text, only the marks and the first and last labels.
 /// Nothing here knows about plugins: the caller maps its data onto `DataChart.Series`.
 struct DataChart: View {
-    enum Kind: Sendable { case bar, line }
+    enum Kind: Sendable { case bar, line, area }
 
     struct Series: Identifiable, Sendable {
         var name: String
@@ -49,6 +49,16 @@ struct DataChart: View {
     static let hues: [Color] = [Theme.accent, Theme.Hue.orange, Theme.Hue.green, Theme.Hue.purple]
 
     private func color(_ i: Int) -> Color { series[i].color ?? Self.hues[i % Self.hues.count] }
+
+    /// Whether the chart is one category's shares — a stacked bar whose every series has exactly one point, all
+    /// non-negative and adding above zero. Such a chart draws as a horizontal segmented bar (`SegmentedShareBar`),
+    /// not a lone vertical column; two or more categories keep the columns. The same rule on every app
+    /// (docs/extensions/extensions.md「New items」chart; issue #5386).
+    static func isSingleCategoryShare(kind: Kind, stacked: Bool, series: [Series]) -> Bool {
+        guard kind == .bar, stacked, !series.isEmpty, series.allSatisfy({ $0.values.count == 1 }) else { return false }
+        let values = series.map(\.values[0])
+        return values.allSatisfy { $0.isFinite && $0 >= 0 } && values.reduce(0, +) > 0
+    }
 
     private var points: [Point] {
         series.flatMap { s in
@@ -99,6 +109,23 @@ struct DataChart: View {
                     if picked == p.label {
                         PointMark(x: .value(String(localized: "Category"), p.label), y: .value(String(localized: "Value [Data Chart cda1d5]"), p.value))
                             .foregroundStyle(by: .value(String(localized: "Series"), p.series))
+                    }
+                case .area:
+                    // Stacked: each on the one under it; else overlapping, see-through, each with its line on top.
+                    AreaMark(x: .value(String(localized: "Category"), p.label), y: .value(String(localized: "Value [Data Chart cda1d5]"), p.value),
+                             stacking: stacked ? .standard : .unstacked)
+                        .foregroundStyle(by: .value(String(localized: "Series"), p.series))
+                        .opacity(stacked ? 0.85 : 0.25)
+                        .interpolationMethod(.monotone)
+                    if !stacked {
+                        LineMark(x: .value(String(localized: "Category"), p.label), y: .value(String(localized: "Value [Data Chart cda1d5]"), p.value), series: .value(String(localized: "Series"), p.series))
+                            .foregroundStyle(by: .value(String(localized: "Series"), p.series))
+                            .interpolationMethod(.monotone)
+                            .lineStyle(StrokeStyle(lineWidth: Theme.Size.rule))
+                        if picked == p.label {
+                            PointMark(x: .value(String(localized: "Category"), p.label), y: .value(String(localized: "Value [Data Chart cda1d5]"), p.value))
+                                .foregroundStyle(by: .value(String(localized: "Series"), p.series))
+                        }
                     }
                 }
             }
@@ -186,5 +213,40 @@ struct DataChart: View {
         if a >= 1e3 { return trim(v / 1e3, 1) + "k" }
         if v == v.rounded() { return String(Int(v)) }
         return trim(v, a < 1 ? 2 : 1)
+    }
+}
+
+/// A horizontal capsule split into one category's shares (a single day's stacked parts): each share takes its part of
+/// the width in its color, a rule-width gap between touching segments. It carries no text — the card's rows (or the
+/// legend above it) name each part and its value. Vertical columns stay for charts with several categories to compare.
+struct SegmentedShareBar: View {
+    /// One segment: its fill and its share of the total (0…1, the shares add up to 1).
+    struct Share: Identifiable, Sendable {
+        let id: Int
+        let color: Color
+        let ratio: Double
+    }
+
+    var shares: [Share]
+
+    /// Zero shares draw no segment (the same rule as the web and Android bars); ids keep the series index, so the
+    /// legend above still lines up with the colors.
+    private var visible: [Share] { shares.filter { $0.ratio > 0 } }
+
+    var body: some View {
+        GeometryReader { g in
+            let gap = Theme.Size.rule
+            let gaps = gap * CGFloat(max(visible.count - 1, 0))
+            HStack(spacing: gap) {
+                ForEach(visible) { share in
+                    Rectangle()
+                        .fill(share.color)
+                        .frame(width: max(g.size.width - gaps, 0) * share.ratio)
+                }
+            }
+        }
+        .scaledFrame(height: Theme.Size.meter)
+        .clipShape(.capsule)
+        .accessibilityHidden(true) // the rows below say what each share is
     }
 }

@@ -125,6 +125,10 @@ var goTypes = map[string]any{
 	"AssistantConversationsResult": assistantwire.AssistantConversationsResult{},
 	"AssistantMessagesParams":      assistantwire.AssistantMessagesParams{},
 	"AssistantMessagesResult":      assistantwire.AssistantMessagesResult{},
+	"AssistantMemoryParams":        assistantwire.AssistantMemoryParams{},
+	"AssistantMemoryResult":        assistantwire.AssistantMemoryResult{},
+	"AssistantDataStatusParams":    assistantwire.AssistantDataStatusParams{},
+	"AssistantDataStatusResult":    assistantwire.AssistantDataStatusResult{},
 
 	"ModelCompleteParams": assistantwire.ModelCompleteParams{},
 	"ModelCompleteResult": assistantwire.ModelCompleteResult{},
@@ -193,8 +197,11 @@ var kbCalls = []string{assistantwire.MethodKBList, assistantwire.MethodKBGet, as
 // The model call the hub forwards for extensions granted models (models.schema.json).
 var modelCalls = []string{assistantwire.MethodModelComplete}
 
-// The assistant's conversations the hub forwards for extensions granted assistant.read (assistant.schema.json).
-var assistantCalls = []string{assistantwire.MethodAssistantConversations, assistantwire.MethodAssistantMessages}
+// The assistant's conversations the hub forwards for extensions granted assistant.read, its memory for those granted
+// assistant.memory.read (assistant.schema.json), and what it reads back of an extension's data contributions
+// (assistant_data.schema.json).
+var assistantCalls = []string{assistantwire.MethodAssistantConversations, assistantwire.MethodAssistantMessages,
+	assistantwire.MethodAssistantMemory, assistantwire.MethodAssistantDataStatus}
 
 // The to-do events the hub tells the extensions granted todos.read (todos.schema.json).
 var todoCalls = []string{"event." + assistantwire.EventTodoChanged, "event." + assistantwire.EventTodoDecision}

@@ -1,5 +1,6 @@
 #if os(iOS)
 import BeautifulUI
+import PhotosUI
 import SwiftUI
 
 /// The meeting page's bottom bar (#3862, docs/assistant/meeting-minutes.md「The meeting card」), pinned under the thumb:
@@ -10,9 +11,24 @@ import SwiftUI
 /// (`…/followup`, then the conversation's messages). While the field has the keyboard, Pause, Bookmark and Stop step
 /// aside so the thread stays in view.
 ///
+/// [+] also takes photos (phase 3) while a meeting that started with them records and Just Me is off: they are the
+/// meeting's material, never private. Take Photo opens the camera, Choose Photos the library; both are presented from
+/// the bar (a picker inside a menu never presents), and each picture goes to `MeetingPhotos` with the meeting's time
+/// when it was taken or picked; a picked one's row shows at once, before Photos hands its bytes over. Adding one plays
+/// no haptic: its row is the feedback, and the microphone is open.
+///
 /// At accessibility sizes the bar is at most two rows, the field and one row of icons: Pause or Continue, Stop, a More
-/// menu (Bookmark, Just Me, What Was Just Said) and send. Why the field takes no words then shows among what the page
-/// scrolls (`notice`), and with the field as its spoken hint.
+/// menu (Bookmark, Just Me, the photos, What Was Just Said) and send. Why the field takes no words then shows among what
+/// the page scrolls (`notice`), and with the field as its spoken hint; so do picked photos that couldn't be read
+/// (`photoNotice`).
+///
+/// **Talk** (#3862 phase 4) takes send's place while the field is empty and Persona can be asked (any role that attends):
+/// held while the owner speaks, to the meeting call when it is live, else asked without it. Not with Just Me on (Talk is
+/// the room's: turning it on ends a hold), and not after the meeting. While it is held the caption over the controls says
+/// Persona hears; where the call sends the span to the voice service, the line under it says so (the contract's
+/// Wording) until a span went while it showed, whatever word the caption has meanwhile. Until the owner has seen it
+/// there, a span stays on the phone (`MeetingCallRule.toCall`).
+/// A typed question goes as the call's `text` frame while the call is live, else through `…/ask`.
 ///
 /// Stop asks first, as the live sheet's bar does: a stopped recording cannot be continued.
 struct MeetingPageBar: View {
@@ -24,6 +40,22 @@ struct MeetingPageBar: View {
     var focus: FocusState<Bool>.Binding
     /// At accessibility sizes, why the field takes no words now, for the page to show (nil at other sizes: the bar says it).
     @Binding var notice: String?
+    /// At accessibility sizes, that some picked photos couldn't be read, for the page to show (nil at other sizes).
+    @Binding var photoNotice: String?
+    /// After the meeting, a voice call bound to the follow-up (#3862 phase 6): set where one can start now; nil, no button.
+    var voice: (() -> Void)?
+
+    init(entry: RecordingEntry, mode: MeetingPage.Mode, paused: Bool = false, justMe: Binding<Bool>, focus: FocusState<Bool>.Binding,
+         notice: Binding<String?>, photoNotice: Binding<String?> = .constant(nil), voice: (() -> Void)? = nil) {
+        self.entry = entry
+        self.mode = mode
+        self.paused = paused
+        _justMe = justMe
+        self.focus = focus
+        _notice = notice
+        _photoNotice = photoNotice
+        self.voice = voice
+    }
 
     @Environment(\.dynamicTypeSize) private var size
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -32,8 +64,16 @@ struct MeetingPageBar: View {
     @State private var ask = MeetingAsk.shared
     @State private var conversation = MeetingConversation.shared
     @State private var sync = RecordingSync.shared
+    /// The meeting call and Talk (#3862 phase 4).
+    @State private var call = MeetingCall.shared
+    /// Read for one thing only: how many of the last pick couldn't be read.
+    @State private var photos = MeetingPhotos.shared
     @State private var draft = ""
     @State private var confirmingStop = false
+    /// The camera and the library, presented from the bar for the [+] menu's items.
+    @State private var takingPhoto = false
+    @State private var choosingPhotos = false
+    @State private var picks: [PhotosPickerItem] = []
 
     private enum Target { case room, justMe, followup }
 
@@ -63,8 +103,9 @@ struct MeetingPageBar: View {
     private var canSend: Bool {
         guard MeetingAsk.hasWords(draft), !overLong else { return false }
         switch target {
-        // One question at a time, deliberately stricter than the hub's two: an answer sits next to its question.
-        case .room: return MeetingAsk.canAsk(entry, roomMissing: roomMissing) && !ask.busy
+        // One question at a time, deliberately stricter than the hub's two: an answer sits next to its question. The
+        // meeting call takes a question whenever it is live (the fast layer hands it to the room).
+        case .room: return MeetingAsk.canAsk(entry, roomMissing: roomMissing) && (call.isLive(entry.id) || !ask.busy)
         // Just Me needs only a meeting that records; it never waits on the room's question.
         case .justMe: return entry.active
         case .followup: return hold == nil
@@ -75,15 +116,26 @@ struct MeetingPageBar: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if mode == .live, !size.isAccessibilitySize { justMeRow }
             MeetingQuestionField(text: $draft, focus: focus, placeholder: placeholder, sendLabel: String(localized: "Send"),
-                                 canSend: canSend, disabled: fieldDisabled, largeTypeHint: blocked ?? "", send: send) {
+                                 canSend: canSend, disabled: fieldDisabled, largeTypeHint: blocked ?? "", showsInstead: showsTalk,
+                                 send: send) {
                 plus
+                voiceButton
             } under: {
                 if mode == .live, !writing { largeControls }
+                voiceButton
+            } instead: {
+                talkButton
             }
             if let caption {
                 Text(caption).font(Theme.Font.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("meeting-ask-caption")
+            }
+            if showsPrivacy { privacyLine }
+            if let photoProblem, !size.isAccessibilitySize {
+                Text(photoProblem).font(Theme.Font.caption).foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("meeting-photo-problem")
             }
             if mode == .live, !writing, !size.isAccessibilitySize { controls }
         }
@@ -98,10 +150,27 @@ struct MeetingPageBar: View {
         .onChange(of: size.isAccessibilitySize ? blocked : nil, initial: true) { _, now in
             if notice != now { notice = now }
         }
+        // At accessibility sizes the line would wrap the bar past its two rows: the page shows it among what scrolls.
+        .onChange(of: size.isAccessibilitySize ? photoProblem : nil, initial: true) { _, now in
+            if photoNotice != now { photoNotice = now }
+        }
+        .onChange(of: photoProblem) { _, now in
+            if let now { AccessibilityNotification.Announcement(now).post() }
+        }
+        // Talk is the room's: Just Me ends a hold (its button goes too, which ends it as well).
+        .onChange(of: justMe) { _, on in
+            if on { call.endHold(entry.id) }
+        }
         .confirmationDialog("Stop Recording?", isPresented: $confirmingStop, titleVisibility: .visible) {
             Button("Stop Recording", role: .destructive) { MeetingRecorder.shared.stop(recordingID: entry.id.uuidString) }
         } message: {
             Text("The audio is saved on this device and its text goes to Knowledge. A stopped recording can't be continued.")
+        }
+        .photosPicker(isPresented: $choosingPhotos, selection: $picks, maxSelectionCount: Theme.Recording.photoPickLimit,
+                      matching: .images)
+        .onChange(of: picks) { _, items in addPicked(items) }
+        .fullScreenCover(isPresented: $takingPhoto) {
+            CameraPicker { image in addTaken(image) }.ignoresSafeArea()
         }
     }
 
@@ -147,21 +216,92 @@ struct MeetingPageBar: View {
         }
     }
 
-    /// The caption under the field: why it takes no words (at accessibility sizes the page shows that), or that the words
-    /// are too many to send.
+    /// The caption under the field: why it takes no words (at accessibility sizes the page shows that), that the words
+    /// are too many to send, or Talk's (#3862 phase 4): Persona hears while it is held, or a word after a span. Where a
+    /// span goes to the voice service, the Wording is a line of its own under it (`privacyLine`).
     private var caption: String? {
         if !size.isAccessibilitySize, let blocked { return blocked }
-        guard overLong else { return nil }
-        return String(localized: "Too long to send. Shorten it to \(MeetingConversation.maxText.formatted()) characters.")
+        if overLong { return String(localized: "Too long to send. Shorten it to \(MeetingConversation.maxText.formatted()) characters.") }
+        return talkCaption
     }
 
-    /// [+]: what else the composer can send. Phase 1 has one item, the question about what was just said, asked of the
-    /// room; with nothing to offer (Just Me, after the meeting, Persona off or not reachable) the button is not there. At
-    /// accessibility sizes its items are in More.
+    // MARK: Talk
+
+    /// Talk stands in send's place: live, asking the room, Persona can be asked now, nothing typed.
+    private var showsTalk: Bool { mode == .live && target == .room && call.canTalk(entry) && !MeetingAsk.hasWords(draft) }
+
+    /// A span from this page is open.
+    private var talking: Bool { call.talk?.recording == entry.id }
+
+    /// The span goes to the voice service (the meeting call is live) rather than staying on the phone.
+    private var talkSendsAudio: Bool { call.isLive(entry.id) }
+
+    /// The Wording shows under Talk: a span would go to the voice service and the owner hasn't seen one go with it yet.
+    /// Beside a note after a span (hold longer, heard nothing), never replaced by it: the next span goes to the call only
+    /// if this was on screen as it opened. Not while a span is held (the caption says Persona hears).
+    private var showsPrivacy: Bool { showsTalk && talkSendsAudio && !call.privacySeen && !talking }
+
+    /// The contract's Wording as its own line, which tells `MeetingCall` when it is actually on screen: a span opened
+    /// under it may go to the call and marks it seen (`MeetingCall.showingPrivacy`, `MeetingTalkPrivacy.shown`).
+    private var privacyLine: some View {
+        let recording = entry.id
+        return Text(Self.talkPrivacy).font(Theme.Font.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("meeting-talk-privacy")
+            .onAppear { call.showingPrivacy(true, recording: recording) }
+            .onDisappear { call.showingPrivacy(false, recording: recording) }
+    }
+
+    private var talkButton: some View {
+        MeetingTalkButton(held: talking, hint: talkSendsAudio ? Self.talkPrivacy : String(localized: "Hold while you speak. Persona answers when you let go."),
+                          press: { startTalk() }, release: { call.endTalk() }, window: { openTalkWindow() },
+                          gone: { call.endHold(entry.id) })
+    }
+
+    /// What the caption says about Talk now, if anything.
+    private var talkCaption: String? {
+        guard mode == .live, target == .room else { return nil }
+        if let talk = call.talk, talk.recording == entry.id {
+            // A window (the Lock Screen's tap, or VoiceOver) ends on a tap; a hold when the finger lifts.
+            return talk.window ? String(localized: "Listening to you… Tap Talk when you’re done.")
+                : String(localized: "Listening to you… Let go when you’re done.")
+        }
+        switch call.note {
+        case .nothingHeard?: return String(localized: "Persona didn’t hear anything. Hold Talk while you speak.")
+        case .holdLonger?: return String(localized: "Hold Talk while you speak, then let go.")
+        case nil: return nil
+        }
+    }
+
+    /// The contract's Wording for privacy mode (#3862 phase 4), where Talk sends its spans to the voice service.
+    static var talkPrivacy: String {
+        String(localized: "Audio stays on this iPhone, except while you hold Talk: what is said then goes to the voice service.")
+    }
+
+    private func startTalk() {
+        focus.wrappedValue = false
+        // Whether the Wording was on screen as the finger went down is `MeetingCall`'s to know (`privacyLine`).
+        guard call.beginTalk(entry.id, from: .hold) else { return }
+        Haptics.tap()
+        AccessibilityNotification.Announcement(String(localized: "Listening to you…")).post()
+    }
+
+    /// VoiceOver's double tap (it can't hold): a talk window. Its hint says where the words go, but not every way in speaks
+    /// it (hints off, Voice Control, Switch Control, a keyboard): it goes to the call under the Wording on screen, as a
+    /// hold does.
+    private func openTalkWindow() {
+        guard call.beginTalk(entry.id, from: .pageWindow) else { return }
+        AccessibilityNotification.Announcement(String(localized: "Listening to you…")).post()
+    }
+
+    /// [+]: what else the composer can send: photos for the meeting's material (a meeting that takes them), and the
+    /// question about what was just said, asked of the room; with nothing to offer (Just Me, after the meeting, Persona
+    /// off or not reachable, no photos) the button is not there. At accessibility sizes its items are in More.
     @ViewBuilder private var plus: some View {
-        if canAskHeard {
+        if canAskHeard || canAddPhotos {
             Menu {
-                heardButton
+                if canAddPhotos { photoButtons }
+                if canAskHeard { heardButton }
             } label: {
                 plusFace
             }
@@ -173,7 +313,42 @@ struct MeetingPageBar: View {
         }
     }
 
+    /// Voice Chat after the meeting (#3862 phase 6): the composer's voice button, before the field where the live page has
+    /// [+] (the bar has no [+] after the meeting). The call is bound to the follow-up; the page shows its bar in place of
+    /// this one while it runs.
+    @ViewBuilder private var voiceButton: some View {
+        if mode == .after, let voice {
+            ComposerVoiceButton(round: false, id: "meeting-voice") {
+                focus.wrappedValue = false
+                voice()
+            }
+        }
+    }
+
     private var canAskHeard: Bool { mode == .live && target == .room && MeetingAsk.canAsk(entry, roomMissing: roomMissing) }
+
+    /// Some photos of the last pick couldn't be read (still in iCloud): said until the next pick, while photos can be
+    /// added.
+    private var photoProblem: String? {
+        guard canAddPhotos, photos.unreadPicks(entry.id) > 0 else { return nil }
+        return String(localized: "Couldn't read some photos (they may still be downloading from iCloud)")
+    }
+
+    /// Photos go to a room meeting that started with them while it records, whatever Persona's role (with Persona off the
+    /// hub stores them without showing the room); never with Just Me, which is private, and not after the meeting.
+    private var canAddPhotos: Bool {
+        mode == .live && target == .room && entry.active && entry.roomMeeting && entry.attendance?.photos == true
+    }
+
+    /// Take Photo (where there is a camera) and Choose Photos; each opens from the bar, after the menu has closed.
+    @ViewBuilder private var photoButtons: some View {
+        if CameraPicker.isAvailable {
+            Button { takingPhoto = true } label: { Label("Take Photo", systemImage: Theme.Icon.camera) }
+                .accessibilityIdentifier("meeting-photo-camera")
+        }
+        Button { choosingPhotos = true } label: { Label("Choose Photos", systemImage: Theme.Icon.photos) }
+            .accessibilityIdentifier("meeting-photo-library")
+    }
 
     private var heardButton: some View {
         Button { askHeard() } label: { Label("What Was Just Said", systemImage: Theme.Icon.question) }
@@ -222,6 +397,7 @@ struct MeetingPageBar: View {
             }
             .disabled(!entry.active)
             .accessibilityIdentifier("meeting-just-me")
+            if canAddPhotos { photoButtons }
             if canAskHeard { heardButton }
         } label: {
             ThemedIcon(Theme.Icon.moreMenu).font(Theme.Font.heading)
@@ -266,7 +442,8 @@ struct MeetingPageBar: View {
         let text = draft
         let sent: Bool
         switch target {
-        case .room: sent = ask.ask(entry, text: text) != nil
+        // While the meeting call is live the question is its `text` frame (#3862 phase 4); else an ask.
+        case .room: sent = call.say(text, recording: entry.id) || ask.ask(entry, text: text) != nil
         case .justMe: sent = conversation.sendJustMe(entry, text: text) != nil
         case .followup: sent = conversation.sendFollowup(entry.id, text: text) != nil
         }
@@ -300,5 +477,32 @@ struct MeetingPageBar: View {
         MeetingRecorder.shared.addMark(recordingID: entry.id.uuidString)
         AccessibilityNotification.Announcement(String(localized: "Bookmark added")).post()
     }
+
+    /// The library's picks: each goes as the meeting's material at the time they were picked, its row in the thread at
+    /// once ("Preparing…"). Their bytes come from Photos when each one's turn to be prepared comes (a HEIC as it is: the
+    /// pipeline reads it off the main actor); one Photos can't hand over (still in iCloud) is said under the field.
+    private func addPicked(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        picks = []
+        let loads = items.map { item in { @Sendable () async -> Data? in try? await item.loadTransferable(type: Data.self) } }
+        MeetingPhotos.shared.pick(loads, to: entry, at: capture.timeline)
+    }
+
+    /// The camera's picture: encoded as JPEG off the main actor (a full-size frame takes a while), then prepared and sent
+    /// as any photo is. Its time is when it was taken, not when the encoding is done.
+    private func addTaken(_ image: UIImage) {
+        let at = capture.timeline
+        let recording = entry.id
+        let quality = Self.cameraQuality
+        Task {
+            let data = await Task.detached(priority: .userInitiated) { image.jpegData(compressionQuality: quality) }.value
+            guard let data, let current = RecordingLibrary.shared.entry(recording) else { return }
+            MeetingPhotos.shared.add(.camera(data), to: current, at: at)
+        }
+    }
+
+    /// The camera's frame as it is handed over (the pipeline downscales it to 1600 px and encodes it again): close to
+    /// what the camera saw, so the text read in it is the text on the board.
+    private static let cameraQuality: CGFloat = 0.9
 }
 #endif

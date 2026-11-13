@@ -151,6 +151,24 @@ test('each control request calls its Query method and is answered like claude -p
   await b.end()
 })
 
+test('the background tasks: unknown before a turn ended, then the last list the CLI sent (#5234)', async () => {
+  const b = bridge()
+  b.send(start(), ctl('t0', { subtype: 'persona_background_tasks' }))
+  const before = (await b.until((m) => m.type === 'control_response' && m.response.request_id === 't0')).response
+  assert.deepEqual(before, { subtype: 'success', request_id: 't0', response: { tasks: null } })
+  b.send(user('hi'))
+  await b.until((m) => m.type === 'result')
+  b.send(ctl('t1', { subtype: 'persona_background_tasks' }))
+  const idle = (await b.until((m) => m.type === 'control_response' && m.response.request_id === 't1')).response
+  assert.deepEqual(idle.response, { tasks: [] })
+  b.send(user('start a background task'))
+  await b.until((m) => m.type === 'result' && b.msgs.filter((x) => x.type === 'result').length === 2)
+  b.send(ctl('t2', { subtype: 'persona_background_tasks' }))
+  const busy = (await b.until((m) => m.type === 'control_response' && m.response.request_id === 't2')).response
+  assert.deepEqual(busy.response.tasks.map((t) => t.task_id), ['b1'])
+  await b.end()
+})
+
 test('resume: what the transcript had, and a result before anything streamed, are dropped', async () => {
   const home = mkdtempSync(join(tmpdir(), 'agent-sdk-test-'))
   const cwd = join(home, 'work dir')

@@ -8,7 +8,7 @@ import uuid
 
 from hub_release_paths import prepare_remote_staging, release_directory, validate_remote_upload
 from pinned_node_release import validated_artifact, validate_target, validate_candidate
-from publish_hub_release import connect_publisher
+from publish_hub_release import connect_publisher, remote_python
 from publisher_io import collect_output
 
 
@@ -34,6 +34,7 @@ def main():
     root = cfg['remote_root']
     namespace = cfg.get('release_namespace', 'hub')
     staged = str(release_directory(root, namespace) / f'.upload-node-{uuid.uuid4().hex}')
+    interpreter = remote_python(cfg)
     client, sock = connect_publisher(cfg)
     try:
         with client.open_sftp() as sftp:
@@ -51,7 +52,7 @@ def main():
             script += f'module = types.ModuleType({name!r}); sys.modules[{name!r}] = module\n'
             script += f'exec({source!r}, module.__dict__)\n'
         script += f'print(json.dumps(module.promote({payload!r})))\n'
-        stdin, stdout, stderr = client.exec_command('python3 -', timeout=cfg.get('timeout', 900) + 120)
+        stdin, stdout, stderr = client.exec_command(interpreter, timeout=cfg.get('timeout', 900) + 120)
         stdin.write(script)
         stdin.flush()
         stdin.channel.shutdown_write()

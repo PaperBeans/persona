@@ -1,7 +1,35 @@
 // node --test site/worker.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import worker from "./worker.mjs";
+import { FRESH_MS } from "./extensions.mjs";
+
+test("legal pages link to the existing product support footer without placeholder contacts", async () => {
+  const home = await readFile(new URL("./public/index.html", import.meta.url), "utf8");
+  assert.match(home, /<footer id="contact">/);
+  assert.match(home, /href="mailto:[^"@]+@[^"@]+"/);
+  assert.match(home, /href="https:\/\/github\.com\/nwverse\/persona\/issues\/new\/choose"/);
+  for (const page of ["privacy", "terms"]) {
+    const html = await readFile(new URL(`./public/${page}/index.html`, import.meta.url), "utf8");
+    assert.match(html, /<h2>联系<\/h2>\s*<p><a href="\/#contact">/);
+    assert.doesNotMatch(html, /mailto:|person@example\.com/);
+    assert.match(html, /自托管的个人 AI 助手/);
+    assert.match(html, /不提供托管账号/);
+    assert.match(html, /虚构数据演示/);
+  }
+});
+
+test("privacy policy discloses relay identifiers and technical diagnostics without claiming no collection", async () => {
+  const html = await readFile(new URL("./public/privacy/index.html", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /Persona 不收集、不出售、不与任何第三方共享用户数据/);
+  assert.match(html, /短哈希、推送类型、响应状态、耗时和大小/);
+  assert.match(html, /连接错误日志可能包含带推送标识的请求地址/);
+  assert.match(html, /日志不记录通知正文/);
+  assert.match(html, /不用于广告或跨 App 追踪/);
+  assert.match(html, /中继不保存设备列表/);
+  assert.match(html, /无法加密，所以经中继时中继能看到/);
+});
 
 const assets = { fetch: async (req) => new Response("asset " + new URL(req.url).pathname) };
 
@@ -291,6 +319,46 @@ test("the catalog is fetched once while fresh, and a stale copy outlives GitHub"
   assert.equal(d.stale, true);
   assert.deepEqual(d.extensions.map((e) => e.id), ["github"]);
   assert.equal(calls.length, 2);
+});
+
+test("catalog replacements and icons refresh after expiry without a site deployment", async () => {
+  const store = edge();
+  let current = index([
+    entry("lark-bridge", "Lark Bridge", { icon_url: "https://icons.example/bridge.png" }),
+  ]);
+  const calls = upstream((url) => url.endsWith("persona-extensions.json")
+    ? Response.json(current)
+    : new Response("PNGDATA", { headers: { "content-type": "image/png" } }));
+  const ids = (data) => data.extensions.map((e) => e.id);
+  assert.deepEqual(ids(await (await catalog()).json()), ["lark-bridge"]);
+
+  current = index([
+    entry("larkx", "LarkAgentX", { icon_url: "https://icons.example/larkx.png" }, { version: "0.2.0" }),
+  ], { generation: { repository: "nwverse/persona-extensions", source_commit: "replacement" } });
+  assert.deepEqual(ids(await (await catalog()).json()), ["lark-bridge"], "still cached before expiry");
+  assert.equal(calls.length, 1);
+
+  // Expire the cached response without a real-time wait or a Worker restart.
+  const [key, response] = [...store.entries()][0];
+  const old = await response.json();
+  store.set(key, Response.json({ ...old, fetched_at: new Date(Date.now() - FRESH_MS - 1000).toISOString() }));
+  const refreshed = await (await catalog()).json();
+  assert.deepEqual(ids(refreshed), ["larkx"], "the removed entry is replaced, not appended to");
+  assert.equal(refreshed.source_commit, "replacement");
+  assert.equal(refreshed.stale, undefined);
+  assert.equal(refreshed.extensions[0].version, "0.2.0");
+  assert.equal(refreshed.extensions[0].icon, "/extensions/icons/larkx?v=0.2.0");
+  assert.ok(Date.now() - Date.parse(refreshed.fetched_at) < FRESH_MS, "the replacement has a fresh timestamp");
+  assert.equal(calls.length, 2, "the same Worker fetches the changed upstream catalog");
+  assert.deepEqual(ids(await (await catalog()).json()), ["larkx"]);
+  assert.equal(calls.length, 2, "the replacement is cached too");
+
+  const icon = (id) => worker.fetch(new Request(`https://site.example/extensions/icons/${id}?v=0.2.0`), { ASSETS: assets }, { waitUntil() {} });
+  assert.equal((await icon("lark-bridge")).status, 404);
+  const image = await icon("larkx");
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get("content-type"), "image/png");
+  assert.equal(calls.at(-1), "https://icons.example/larkx.png", "the new catalog's logo is served");
 });
 
 test("with no copy and GitHub down the catalog is 503; writes are refused", async () => {

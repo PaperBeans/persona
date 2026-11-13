@@ -23,7 +23,7 @@ func (h *orcaHost) PaneProcesses(ctx context.Context, pane host.PaneRef) ([]int,
 		return nil, err
 	}
 	var pids []int
-	for _, p := range procs[pane.ID] {
+	for _, p := range h.procsIn(procs, pane.ID) {
 		pids = append(pids, p.pid)
 	}
 	return pids, nil

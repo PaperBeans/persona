@@ -361,7 +361,11 @@ On `GET /api/v1/kb/recordings/{id}`, `detail.meta` of a day recording adds `kind
 sorted by `start`. The short summary the hub writes for other recordings is not made for a day recording (it would
 read the whole day); `detail.summary` is the recap's `summary` once there is one, so a client that knows only
 summaries still shows something useful, and the recording's name is "Day · <date>" in the owner's language unless the
-user titled it.
+user titled it. The recap is written in the recording's `language` (the app's language, which the day recording's
+upload says), else the owner's, else Chinese, whatever languages the day mixes: its summary, entries, points and
+to-dos, and its Markdown's headings and fixed words (`kb-day-recap.json`); names and terms stay as said. `recap.json`
+keeps it as `language`, so an erase that writes the Markdown again keeps it too; a recap from before it was kept has
+none and is Chinese ([meeting-minutes.md](meeting-minutes.md) "How the hub generates them", #5906).
 
 The recap is `detail.recap`, present once one was written:
 
@@ -395,7 +399,8 @@ The recap is `detail.recap`, present once one was written:
   ],
   "gaps": [{"from": 3120.0, "to": 3410.5, "reason": "interrupted"}],   // coverage's gaps inside covers
   "partial": false,                   // true when the day was too long and some of it was not read
-  "markdown": "# 2026-11-11\n…"        // the same recap as Markdown with clock times: recap.md on disk
+  "language": "en",                   // what it is written in, the Markdown's headings too: zh-Hans, en or ja
+  "markdown": "# Day recap · 2026-11-11\n…"  // the same recap as Markdown with clock times: recap.md on disk
 }
 ```
 

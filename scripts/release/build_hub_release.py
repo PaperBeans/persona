@@ -16,6 +16,17 @@ def run(args, cwd, env=None):
     subprocess.run(args, cwd=cwd, env=env, check=True)
 
 
+def run_together(commands, cwd, env=None):
+    """Start every command at once and wait for all of them; fail with the first that failed."""
+    for args in commands:
+        print('+', ' '.join(map(str, args)), flush=True)
+    processes = [(args, subprocess.Popen(args, cwd=cwd, env=env)) for args in commands]
+    failed = [(args, process.wait()) for args, process in processes]
+    for args, status in failed:
+        if status:
+            raise subprocess.CalledProcessError(status, args)
+
+
 def package_release(binary, bin_dir, out, platforms, version, build, sha, root):
     # A retry may leave old content-addressed files in out; only this build's
     # canonical platform names belong in the manifest generator input.
@@ -72,7 +83,16 @@ def main():
     test_env.update(caches)
     with tempfile.TemporaryDirectory(prefix='hub-release-tests-') as home:
         test_env.update(HOME=home, ZDOTDIR=home)
-        run(['go', 'test', '-count=1', './...'], root / 'server', test_env)
+        # internal/node's serial run outgrew Go's ten-minute -timeout: it runs in partitions beside the other
+        # packages, split exactly as CI's node shard splits it (scripts/test/go_partitions.py).
+        import go_partitions
+        node = go_partitions.list_patterns(root / 'server', test_env)
+        others = [package for package in subprocess.check_output(['go', 'list', './...'], cwd=root / 'server',
+                                                                 env=test_env, text=True).split()
+                  if not go_partitions.is_partitioned(package)]
+        run_together([['go', 'test', '-count=1', *others]] +
+                     [['go', 'test', '-count=1', '-run', pattern, go_partitions.PACKAGE] for pattern in node],
+                     root / 'server', test_env)
         run(['go', 'test', '-race', '-count=1', './internal/hubedge', './internal/update',
              './internal/devices'], root / 'server', test_env)
     for suite in sorted((root / 'scripts').rglob('test_*.py')):

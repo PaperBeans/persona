@@ -11,6 +11,8 @@ export const RUNTIME = 'paseo'
 export const SESSION_LABEL = 'persona.session'
 /** The label Paseo puts on an agent another agent created (its create_agent tool): the creating agent's id. */
 export const PARENT_LABEL = 'paseo.parent-agent-id'
+/** The label on the agent a launcher check runs (bridge.js check): never a session, deleted once it answered. */
+export const CHECK_LABEL = 'persona.check'
 /** Persona's effort levels, weakest first (proto.EffortLevels). */
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 /** Persona's permission modes (proto.PermissionModes): Claude Code's, which Paseo's Claude providers take as they are. */
@@ -177,17 +179,43 @@ export function parentAgentId(agent) {
 }
 
 /**
- * Whether an agent archived in Paseo stays a row of its own, not running (#4771): one of the user's own that ran Claude
- * Code, whose session id is not its transcript's: one Persona started (paseo-<agent id>) or took over, which keeps
+ * Whether an agent archived in Paseo stays a row of its own, not running (#4771, #5129): one of the user's own that ran
+ * Claude Code or Codex, whose session id is not its transcript's or thread's: one Persona started (paseo-<agent id>) or took over, which keeps
  * its id on the persona.session label. Named to the node as a transcript (unlisted_transcripts) it would come back
  * under the transcript's id, and what Persona keeps under the session's own (a to-do's link, a pin, an archive mark)
- * would be left behind. An agent whose id is its transcript's (one started in Paseo itself) is named as before.
+ * would be left behind. Codex requires Persona's valid label: agents started in Paseo itself keep their archive behavior.
  */
 export function archivedUnderOwnId(agent, roots = {}) {
   if (!agent?.archivedAt || parentAgentId(agent)) return false
   const transcript = transcriptOf(agent, roots)
   const id = sessionIdOf(agent, roots)
-  return Boolean(transcript && id && id !== transcript)
+  if (transcript) return Boolean(id && id !== transcript)
+  const label = agent?.labels?.[SESSION_LABEL]
+  const thread = codexThreadOf(agent, roots)
+  return Boolean(thread && typeof label === 'string' && SESSION_ID.test(label) && label !== thread)
+}
+
+/**
+ * How Paseo can rewind an agent's conversation (agent.rewind.request), by what its provider says it supports:
+ * conversation: back to before a message of the user's; code: the files too in the same step (Paseo's "both").
+ * Claude Code does both; Codex, pi and omp the conversation only; OpenCode only both at once, which is no conversation
+ * rewind of Persona's. A Paseo too old to say does neither.
+ */
+export function rewindOf(agent) {
+  const c = agent?.capabilities ?? {}
+  const conversation = c.supportsRewindConversation === true
+  return { conversation, code: conversation && c.supportsRewindBoth === true }
+}
+
+/**
+ * A user message as a rewind compares it (bridge.js rewind): Persona's context blocks left out (the chat shows them as
+ * rows of their own), white space ignored. Empty for what the user did not type (a command's echo, an interruption).
+ */
+export function promptKey(text) {
+  if (typeof text !== 'string') return ''
+  const t = text.replace(/<persona-context\b[^>]*>[\s\S]*?<\/persona-context>/g, '').trim()
+  if (/^<(command-name|command-message|local-command-[a-z]+)>/.test(t) || /^\[Request interrupted/.test(t)) return ''
+  return t.replace(/\s+/g, '')
 }
 
 /**
@@ -334,6 +362,9 @@ export function agentRow(agent, o = {}) {
     agent: appAgent(root),
     launcher: agent.provider,
   }
+  // When it was created: a delegated agent's card in its creator's chat counts its running time from it (#5120).
+  const created = Date.parse(agent.createdAt)
+  if (created) row.started_at = new Date(created).toISOString()
   // Its Paseo workspace (a worktree, or one of the tasks in a folder) names where in the project it is. It is no slot:
   // a slot is one tab, and the apps draw the agents sharing one as that tab's panes (one row for them all, each named
   // by its agent; one that stopped running "replaced" by another there). A workspace's agents are conversations of
@@ -351,6 +382,9 @@ export function agentRow(agent, o = {}) {
   if (mode) row.permission_mode = mode
   const effort = agent.effectiveThinkingOptionId ?? agent.thinkingOptionId
   if (EFFORTS.includes(effort)) row.effort = effort
+  // How far a rewind goes here: the node offers it, and the files with it, only where Paseo's provider can.
+  const rewind = rewindOf(agent)
+  row.capabilities = { rewind: rewind.conversation, rewind_code: rewind.code }
   const t = transcriptOf(agent, roots)
   if (t) row.transcript = t
   const thread = codexThreadOf(agent, roots)

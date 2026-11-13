@@ -59,7 +59,7 @@ function CompletionCheck({ todo, manager, owner }: { todo: Todo; manager: string
       {todo.supervision && <p className="mt-2 text-[12.5px] leading-[1.6] text-ink-2">{t("todos.check_supervised")}</p>}
       {busy && <div className="mt-3"><Loading label={t("todos.check_wait")} /></div>}
       {error && <p role="alert" className="mt-3 text-[13px] leading-[1.6] text-red">{error}</p>}
-      {result && <CompletionCheckResult check={result.check} at={result.at} />}
+      {result && <CompletionCheckResult check={result.check} at={result.at} supervised={!!todo.supervision} />}
     </section>
   );
 }
@@ -81,7 +81,12 @@ const unblockKeys: Record<string, string> = {
 
 const labelKey = (keys: Record<string, string>, code: string, fallback: string) => Object.hasOwn(keys, code) ? keys[code] : fallback;
 
-export function CompletionCheckResult({ check, at }: { check: TaskDoneCheck; at: Date }) {
+/** What applying the check did (#4867): a done verdict closes an unsupervised task and puts a supervised one up for
+ *  review; any other verdict is only kept on the task. */
+const appliedKey = (check: TaskDoneCheck, supervised: boolean) =>
+  check.verdict !== "done" ? "todos.check_applied_kept" : supervised ? "todos.check_applied_review" : "todos.check_applied_closed";
+
+export function CompletionCheckResult({ check, at, supervised = false }: { check: TaskDoneCheck; at: Date; supervised?: boolean }) {
   const delivery = check.delivery;
   return (
     <div role="status" className="mt-3 min-w-0 space-y-2 text-[13px] leading-[1.6] text-ink-2 break-words" data-testid="completion-check-result">
@@ -92,6 +97,7 @@ export function CompletionCheckResult({ check, at }: { check: TaskDoneCheck; at:
       <p className="whitespace-pre-wrap select-text">{check.reason || t("todos.check_no_reason")}</p>
       <p className="text-[12.5px] text-ink-3">{check.skip
         ? t(labelKey(skipKeys, check.skip, "todos.check_skip_unknown"))
+        : check.applied ? t(appliedKey(check, supervised))
         : t(check.verdict === "done" && check.would_close ? "todos.check_would_close" : "todos.check_would_not_close")}</p>
       {delivery && <div className="space-y-1">
         {/* Who can clear it reads as the list row does ("Stopped at a PR · needs your OK"); an unknown owner is a sentence of its own. */}

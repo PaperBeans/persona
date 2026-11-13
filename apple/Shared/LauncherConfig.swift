@@ -63,8 +63,15 @@ nonisolated struct LauncherView: Codable, Identifiable, Hashable, Sendable {
     var ownService: String?
     /// The computers with a key of their own (the keys are never sent back).
     var keyMachines: [String]?
+    /// The stored key is this secret provider's reference (docs/extensions/secret-providers.md "Launcher keys"); nil for a
+    /// key, and from a hub without `launcher_secret_references`.
+    var keyReference: SecretReference?
+    /// The computers whose own key is a reference, by computer.
+    var machineKeyReferences: [String: SecretReference]?
     /// Saved before scopes existed: all (work computers too) + push + use, until a scope field is saved.
     var legacyScope: Bool?
+    /// A direct API connection's Send Through: the computer whose node sends its requests; nil the hub itself.
+    var viaMachine: String?
     var id: String { name }
     /// What a person reads: the display name, else the name.
     var title: String { displayName.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? name }
@@ -81,6 +88,8 @@ nonisolated struct LauncherView: Codable, Identifiable, Hashable, Sendable {
         case stale, versions, agent, share, delivery
         case rcFiles = "rc_files"
         case scopeMachines = "scope_machines", ownService = "own_service", keyMachines = "key_machines", legacyScope = "legacy_scope"
+        case keyReference = "key_reference", machineKeyReferences = "machine_key_references"
+        case viaMachine = "via_machine"
         case baseURL = "base_url", smallModel = "small_model", hasKey = "has_key"
         case subagentModel = "subagent_model", customModel = "custom_model"
         case customModelName = "custom_model_name", customModelDescription = "custom_model_description"
@@ -232,6 +241,9 @@ nonisolated struct LauncherInput: Encodable, Sendable {
     var apiKey: String?
     var kind: String? = nil
     var api: String? = nil
+    /// A secret provider's reference in place of `apiKey` (docs/extensions/secret-providers.md "Launcher keys", a hub with
+    /// `launcher_secret_references`): the save checks it resolves.
+    var apiKeyReference: String? = nil
     /// A plugin's provider it is added from (`<plugin>/<provider>`): the hub fills in what is left empty.
     var preset: String? = nil
     var auth: String? = nil
@@ -265,9 +277,14 @@ nonisolated struct LauncherInput: Encodable, Sendable {
     var delivery: String? = nil
     var ownService: String? = nil
     var machineKeys: [String: String]? = nil
+    /// References for single computers' own keys, in place of a key in `machineKeys`.
+    var machineKeyReferences: [String: String]? = nil
+    /// Send Through (kind api): a computer's id, "" the hub itself; nil keeps what the hub has.
+    var viaMachine: String? = nil
     enum CodingKeys: String, CodingKey {
         case name, model, args, kind, api, preset, auth, models, headers, env, proxy, effort, assign, share, delivery
-        case scopeMachines = "scope_machines", ownService = "own_service", machineKeys = "machine_keys"
+        case scopeMachines = "scope_machines", ownService = "own_service", machineKeys = "machine_keys", viaMachine = "via_machine"
+        case apiKeyReference = "api_key_reference", machineKeyReferences = "machine_key_references"
         case displayName = "display_name"
         case baseURL = "base_url", smallModel = "small_model", apiKey = "api_key"
         case subagentModel = "subagent_model", customModel = "custom_model"
@@ -289,9 +306,11 @@ nonisolated struct LauncherProbe: Encodable, Hashable, Sendable {
     var model: String?
     /// A preset's id: the hub fills in the address and, with no `model`, the preset's default model.
     var preset: String? = nil
+    /// Send Through as chosen (kind api): tested from where it will be sent; nil the stored one.
+    var viaMachine: String? = nil
     enum CodingKeys: String, CodingKey {
         case name, auth, headers, model, preset
-        case baseURL = "base_url", apiKey = "api_key"
+        case baseURL = "base_url", apiKey = "api_key", viaMachine = "via_machine"
     }
 }
 
@@ -555,10 +574,15 @@ nonisolated struct LauncherQuota: Decodable, Hashable, Sendable {
 
     nonisolated struct Usage: Decodable, Hashable, Sendable {
         var label: String
+        /// What `label` covers: `day`, `week` or `month`; nil when the extension does not say (shown by the label alone,
+        /// never added up).
+        var period: String?
         var requests: Int64
         var tokens: Int64
         var costUSD: Double?
-        enum CodingKeys: String, CodingKey { case label, requests, tokens; case costUSD = "cost_usd" }
+        enum CodingKeys: String, CodingKey { case label, period, requests, tokens; case costUSD = "cost_usd" }
+
+        static let day = "day"
     }
 
     nonisolated struct Pool: Decodable, Hashable, Sendable {

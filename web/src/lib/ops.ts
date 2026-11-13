@@ -76,6 +76,7 @@ export async function untilDelivered<T>(run: () => Promise<T>, clock: RetryClock
 export function apiOp<T>(path: string, init: Parameters<typeof api>[1] & { opId?: string } = {}, clock?: RetryClock): Promise<T> {
   const { opId = uuid(), ...rest } = init;
   return untilDelivered(() => {
+    if (rest.isAuthContextCurrent && !rest.isAuthContextCurrent()) throw new DOMException("Retired operation", "AbortError");
     const headers = new Headers(rest.headers);
     // an id made before #1651 (a message still in the outbox) is no UUID: the hub would refuse it; client_msg_id
     // still keeps a message from going twice

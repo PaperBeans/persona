@@ -15,7 +15,16 @@
       "role": "assistant",
       "kind": "thinking",
       "text": "Run the checks first.",
-      "model": "claude-opus-5-5"
+      "model": "claude-opus-5-5",
+      "usage": [
+        {
+          "model": "claude-opus-5-5",
+          "in": 6,
+          "out": 80,
+          "cache_read": 30000,
+          "cache_write": 1200
+        }
+      ]
     },
     {
       "id": "00000000-0000-4000-8000-000000000003#0",
@@ -161,7 +170,16 @@
       "role": "assistant",
       "kind": "thinking",
       "text": "Look at the check output.",
-      "model": "claude-opus-5-5"
+      "model": "claude-opus-5-5",
+      "usage": [
+        {
+          "model": "claude-opus-5-5",
+          "in": 6,
+          "out": 80,
+          "cache_read": 30000,
+          "cache_write": 1200
+        }
+      ]
     },
     {
       "id": "00000000-0000-4000-8000-000000000019#0",
@@ -200,7 +218,16 @@
       "role": "assistant",
       "kind": "text",
       "text": "The checks pass now.",
-      "model": "claude-opus-5-5"
+      "model": "claude-opus-5-5",
+      "usage": [
+        {
+          "model": "claude-opus-5-5",
+          "in": 6,
+          "out": 80,
+          "cache_read": 30000,
+          "cache_write": 1200
+        }
+      ]
     },
     {
       "id": "00000000-0000-4000-8000-000000000022#0",

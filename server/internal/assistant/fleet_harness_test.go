@@ -36,6 +36,8 @@ type fleetDevs struct {
 	// Notification Center (confirm; LinkRang).
 	linkDesktop bool
 	confirmed   map[string]bool
+	// watched: the sessions an app has open (Watched), by machine and session.
+	watched map[[2]string]bool
 }
 
 type fleetNode struct {
@@ -341,6 +343,40 @@ func (m *fleetMem) Interactions(_ context.Context, machine, session string, _ in
 	return out, nil
 }
 
+// InteractionsPage is db.InteractionsPage over the kept records, by their interaction's CreatedAt.
+func (m *fleetMem) InteractionsPage(_ context.Context, q db.InteractionQuery) (db.InteractionPage, error) {
+	m.fmu.Lock()
+	defer m.fmu.Unlock()
+	if q.Limit <= 0 || q.Limit > 500 {
+		q.Limit = 100
+	}
+	var all []db.InteractionRecord
+	for _, r := range m.recs {
+		ix := r.Interaction
+		if q.Machine != "" && ix.MachineID != q.Machine || q.Session != "" && ix.SessionID != q.Session || q.Kind != "" && ix.Kind != q.Kind ||
+			!q.Since.IsZero() && ix.CreatedAt.Before(q.Since) {
+			continue
+		}
+		if !q.Before.IsZero() && !(ix.CreatedAt.Before(q.Before) || q.BeforeID != "" && ix.CreatedAt.Equal(q.Before) && ix.ID < q.BeforeID) {
+			continue
+		}
+		all = append(all, r)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		a, b := all[i].Interaction, all[j].Interaction
+		if a.CreatedAt.Equal(b.CreatedAt) {
+			return a.ID > b.ID
+		}
+		return a.CreatedAt.After(b.CreatedAt)
+	})
+	page := db.InteractionPage{Records: all[:min(len(all), q.Limit)]}
+	if len(all) >= q.Limit {
+		last := all[q.Limit-1].Interaction
+		page.NextBefore, page.NextBeforeID = &last.CreatedAt, last.ID
+	}
+	return page, nil
+}
+
 func (m *fleetMem) AllowAlways(_ context.Context, session, _ string, keys []string) error {
 	m.fmu.Lock()
 	defer m.fmu.Unlock()
@@ -501,3 +537,19 @@ var errNode = errors.New("the node refused")
 func init() { _ = apierr.ErrOffline }
 
 func (d *fleetDevs) Follow(context.Context, string, string, bool) error { return nil }
+
+func (d *fleetDevs) Watched(id, session string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.watched[[2]string{id, session}]
+}
+
+// watch has an app open machine id's session (on) or close it.
+func (d *fleetDevs) watch(id, session string, on bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.watched == nil {
+		d.watched = map[[2]string]bool{}
+	}
+	d.watched[[2]string{id, session}] = on
+}

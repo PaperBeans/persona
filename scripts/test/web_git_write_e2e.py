@@ -44,7 +44,7 @@ def fresh(browser, token, viewport, scheme="light"):
 def open_git(page, base, phone=False):
     page.goto(f"{base}/s/{MID}/{SID}")
     if phone:
-        page.locator("main header").get_by_role("button", name="更多", exact=True).click()
+        page.locator("main header").get_by_role("button", name="更多操作", exact=True).click()
         page.get_by_role("menuitem", name="文件").or_(page.get_by_role("menuitemcheckbox", name="文件")).click()
     else:
         page.get_by_role("button", name="文件", exact=True).click()

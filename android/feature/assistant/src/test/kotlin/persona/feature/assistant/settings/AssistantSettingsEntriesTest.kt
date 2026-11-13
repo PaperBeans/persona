@@ -93,7 +93,7 @@ class AssistantSettingsEntriesTest {
                         key(scenario) {
                             if (inPlace) AssistantScreen(navigator, conversations, conversations,
                                 startConversation = { error("No conversation starts in settings") }, management = management,
-                                composerService = null, draftRepository = null, assistantChatContent = null)
+                                composerService = null, draftRepository = null, assistantChatContent = null, mentionFiles = null)
                             else entryProvider<NavKey> { assistantEntries(navigator) }(AssistantSettingsRoute).Content()
                         }
                     }

@@ -279,8 +279,10 @@ func (h *Hub) serveBus(w http.ResponseWriter, r *http.Request) {
 	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ") // the one busCaller took
 	c := &busConn{ident: ident, proofKey: extwire.ProofKey(tok), ws: ws, peer: rpc.New("h", conn), helloed: make(chan struct{})}
 	// A card the hub's own feature asks (fleet.ask) is withdrawn when that feature stops waiting (a tool call whose
-	// caller went away, #2597).
-	c.peer.Cancels = map[string]bool{assistantwire.MethodFleetAsk: true}
+	// caller went away, #2597). So is what the manager does for one of the hub's features (extensions.hub_call): a
+	// persona_settings change of one of its own settings is a card it holds and a change it makes, and untold it kept
+	// the card up and made the change on a later approval, after the assistant had heard the call failed (#5907).
+	c.peer.Cancels = map[string]bool{assistantwire.MethodFleetAsk: true, extwire.MethodHubCall: true}
 	c.peer.OnRequest = func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 		return h.busRequest(ctx, c, method, params)
 	}

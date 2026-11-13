@@ -4,6 +4,7 @@ import persona.core.contracts.Interaction
 import persona.core.contracts.Question
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
+import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.inbox.InboxItem
 import persona.core.domain.sort.AgentPreferences
 import org.junit.Assert.assertEquals
@@ -87,6 +88,16 @@ class NeedsYouTest {
         assertEquals("先迁移 哪一篇？", needs.lines[0].what)
         assertEquals("计划等你审批", needs.lines[1].what)
         assertEquals("要你 回复", needs.lines[3].what)
+    }
+
+    @Test fun permissionTextUsesTheHubTitleWithoutChangingTheToolType() {
+        val request = request("r", "s", kind = "permission").copy(
+            toolName = "Bash", toolTitle = "Run a safe command", summary = "ls",
+        )
+        val line = needsYou(listOf(request), emptyList(), AgentPreferences(), emptyList()).lines.single()
+        assertEquals("请求使用 Run a safe command：ls", line.what)
+        assertEquals("Bash", (line as NeedsYouLine.Agent).toolName)
+        assertEquals(PhIcons.Terminal, needsYouIcon(line))
     }
 
     @Test fun nothingNeedsTheUser() {

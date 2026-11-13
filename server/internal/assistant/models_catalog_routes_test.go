@@ -35,7 +35,8 @@ func catalogIDs(ids ...string) string {
 }
 
 var opus55 = proto.ProviderModel{Name: "Opus 5.5", ContextWindow: 1000000,
-	Efforts: []string{"low", "medium", "high", "xhigh", "max"}, DefaultEffort: "medium"}
+	Efforts: []string{"low", "medium", "high", "xhigh", "max"}, DefaultEffort: "medium",
+	Price: &proto.ModelPrice{Input: 4, Output: 20, CacheRead: ptr(0.2), CacheWrite: ptr(5.0), CacheWrite1h: ptr(8.0)}}
 
 // A typed id gets the catalog row discovery would give it, under the id exactly as typed (trimmed): any case, a
 // vendor prefix, the [1m] marker or a date suffix.
@@ -55,6 +56,25 @@ func TestCatalogLookupForms(t *testing.T) {
 		if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
 			t.Errorf("%s: %+v, want %+v", id, got, want)
 		}
+	}
+}
+
+// The lookup answers an exact entry's cache-write prices with the rest of its price (#5426); an inherited generation
+// gets no price at all.
+func TestCatalogLookupCacheWritePrices(t *testing.T) {
+	_, mux := launcherTestService(t)
+	_, raw := launcherCall(t, mux, "POST", catalogPath, catalogIDs("claude-opus-5-5", "claude-opus-5-6"))
+	var out struct {
+		Models []json.RawMessage `json:"models"`
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil || len(out.Models) != 2 {
+		t.Fatalf("%s: %v", raw, err)
+	}
+	if want := `"price":{"input":4,"output":20,"cache_read":0.2,"cache_write":5,"cache_write_1h":8}`; !strings.Contains(string(out.Models[0]), want) {
+		t.Fatalf("exact entry %s, want %s", out.Models[0], want)
+	}
+	if strings.Contains(string(out.Models[1]), `"price"`) || !strings.Contains(string(out.Models[1]), `"inherited_from":"claude-opus-5-5"`) {
+		t.Fatalf("an inherited generation got a price: %s", out.Models[1])
 	}
 }
 

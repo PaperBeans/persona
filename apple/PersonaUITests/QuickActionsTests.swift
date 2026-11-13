@@ -1,7 +1,7 @@
 import XCTest
 
 /// The home screen icon's long-press menu (#3199, `QuickAction`): each item opens its page; the chat opened last is on it
-/// (#2191), above Record a Meeting, New Chat and Inbox, and Agents no longer is. Record a Meeting is never tapped (it
+/// (#2191), above Record, New Chat and Inbox, and Agents no longer is. Record is never tapped (it
 /// records).
 final class QuickActionsTests: XCTestCase {
     private var app: XCUIApplication!
@@ -10,8 +10,8 @@ final class QuickActionsTests: XCTestCase {
     private static let review = "macbook/a1f3c2d4-0000-4000-8000-000000000006"
     private static let reviewTitle = "检查 PR #42 的改动"
     private static let reviewMessage = "看一下 PR #42"
-    /// The menu's Record a Meeting (#2949).
-    private static let recordTitle = "会议录音"
+    /// The menu's Record (#2949; Record a Meeting until #5243).
+    private static let recordTitle = "录音"
     /// Another demo Agent's chat, its title and the start of its first message.
     private static let widget = "macbook/a1f3c2d4-0000-4000-8000-000000000001"
     private static let widgetTitle = "给天气 App 加主屏幕小组件"
@@ -75,7 +75,7 @@ final class QuickActionsTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["shell-composer-field"].firstMatch.waitForExistence(timeout: 5), "no composer")
     }
 
-    /// Only the chat opened last, above Record a Meeting, New Chat and Inbox (#2191; the system shows four): two chats
+    /// Only the chat opened last, above Record, New Chat and Inbox (#2191; the system shows four): two chats
     /// opened in turn, then the menu (its screenshot is attached, "menu order").
     @MainActor func testMenuListsTheLastOpened() {
         launch(opening: Self.widget)

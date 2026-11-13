@@ -31,6 +31,9 @@ const (
 	// ScopeAssistantRead: reading the assistant's own-space conversations, the user's and the assistant's words
 	// (assistant.conversations, assistant.messages; #1288). assistant.ask does not include it.
 	ScopeAssistantRead = "assistant.read"
+	// ScopeAssistantMemoryRead: listing the assistant's own-space memory entries (assistant.memory), read-only; the
+	// health space's memory is never included and writing it stays with full credentials.
+	ScopeAssistantMemoryRead = "assistant.memory.read"
 	// ScopeCallPrefix and an extension's id: calling that extension's own HTTP (/api/v1/extensions/<id>/…).
 	ScopeCallPrefix = "extensions.call:"
 )

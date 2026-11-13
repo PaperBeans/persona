@@ -475,20 +475,21 @@ func TestAssignOnlyChangesCategoriesStillAtTheirDefault(t *testing.T) {
 
 func TestProviderTestWithAPresetUsesItsDefaultModel(t *testing.T) {
 	s, f, _ := modelService(t)
-	var model, auth string
+	var model, key, auth string
 	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Model string `json:"model"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		model, auth = body.Model, r.Header.Get("Authorization")
+		model, key, auth = body.Model, r.Header.Get("x-api-key"), r.Header.Get("Authorization")
 		_, _ = w.Write([]byte(`{"type":"message","content":[]}`))
 	}))
 	defer gw.Close()
 	f.presets = []LauncherPreset{{ID: "team/gw", Extension: "team", Name: "GW", Kind: "launcher", BaseURL: gw.URL,
 		Models: []extension.ProviderModel{{ID: "gw-large"}, {ID: "gw-small"}}}}
 	out := probeResult(t, s, "/api/v1/launchers/test", `{"preset":"team/gw","api_key":"`+fakeKey+`"}`)
-	if out["ok"] != true || out["model"] != "gw-large" || model != "gw-large" || auth != "Bearer "+fakeKey {
+	// The preset names no auth, so a provider saved from it launches with x-api-key, and the probe sends that alone.
+	if out["ok"] != true || out["model"] != "gw-large" || model != "gw-large" || key != fakeKey || auth != "" {
 		t.Fatalf("the preset's address and default model: %v (sent %q)", out, model)
 	}
 	out = probeResult(t, s, "/api/v1/launchers/test", `{"preset":"team/gw","api_key":"`+fakeKey+`","model":"gw-small"}`)

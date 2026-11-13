@@ -43,6 +43,15 @@ var ErrLocked = errBusy
 // LockFile takes the exclusive lock of the file at path (made when missing), waiting for it when wait is true; ErrLocked
 // when another process holds it and wait is false. release gives it back; the process ending does too, however it ends.
 func LockFile(path string, wait bool) (release func(), err error) {
+	f, err := LockFileHandle(path, wait)
+	if err != nil {
+		return nil, err
+	}
+	return func() { f.Close() }, nil
+}
+
+// LockFileHandle holds the lock until the caller closes f. A duplicated descriptor retains the same lock during exec.
+func LockFileHandle(path string, wait bool) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
@@ -51,7 +60,7 @@ func LockFile(path string, wait bool) (release func(), err error) {
 		f.Close()
 		return nil, err
 	}
-	return func() { f.Close() }, nil
+	return f, nil
 }
 
 // Running says whether a persona-link is running with the link.json at path: whether its run lock is held. It takes the

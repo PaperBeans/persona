@@ -8,7 +8,7 @@ struct InboxDeltaTests {
     private func item(_ id: String, manager: String? = "assistant", at: TimeInterval, title: String? = nil) -> InboxItem {
         let m = manager.map { #","manager":"\#($0)""# } ?? ""
         let json = """
-        {"id":"\(id)","source":"mail","kind":"mail","title":"\(title ?? id)","preview":"","count":1,
+        {"id":"\(id)","source":"mail","kind":"mail","account":"a","account_name":"A","title":"\(title ?? id)","preview":"","count":1,
          "updated_at":"\(ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: at)))"\(m)}
         """
         do { return try JSON.decoder.decode(InboxItem.self, from: Data(json.utf8)) }
@@ -50,6 +50,16 @@ struct InboxDeltaTests {
         #expect(delta.applied(to: [item("c", at: 100)]).map(\.id) == ["a", "b", "c"])
     }
 
+    /// A done item listed with its newest entry alone says how many it has; one listed whole does not (#4742).
+    @Test func aCutChainSaysSo() throws {
+        let entry = #"{"id":"c3","kind":"sent","text":"x","at":"2026-11-11T00:00:00Z"}"#
+        let cut = try listing(#"{"items":[{"id":"a","source":"mail","kind":"mail","account":"a","account_name":"A","title":"a","preview":"","count":1,"updated_at":"2026-11-11T00:00:00Z","done_at":"2026-11-11T00:00:00Z","chain":["# + entry + #"],"chain_count":3}]}"#)
+        let whole = try listing(#"{"items":[{"id":"a","source":"mail","kind":"mail","account":"a","account_name":"A","title":"a","preview":"","count":1,"updated_at":"2026-11-11T00:00:00Z","chain":["# + entry + #"]}]}"#)
+        #expect(cut.items.first?.chainCut == true && cut.items.first?.chainCount == 3)
+        #expect(whole.items.first?.chainCut == false && whole.items.first?.chainCount == nil)
+        #expect(cut.items.first?.isEvent == true) // still opens as an event
+    }
+
     @Test func theRequestCarriesSinceAndTheAnswerItsCursor() async throws {
         let hub = FakeHub()
         hub.on("GET", "/api/v1/inbox", json: #"{"items":[],"cursor":"m1.abc","as_of":"2026-11-11T00:00:00Z"}"#)
@@ -57,6 +67,7 @@ struct InboxDeltaTests {
         #expect(whole.cursor == "m1.abc" && whole.delta == nil)
         let sent = try #require(hub.sent("GET", "/api/v1/inbox").last)
         #expect(sent.query["since"] == "0" && sent.query["sources"] == "all")
+        #expect(sent.query["chain"] == "last") // done items' chains come when they open (#4742)
 
         hub.on("GET", "/api/v1/inbox", json: #"{"items":[]}"#) // a hub without deltas
         let old = try await hub.client.inboxListing(connectors: true, since: "m1.abc")

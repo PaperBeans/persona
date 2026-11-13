@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { intercepted, probeEdge, reloadForSignIn, RELOAD_GUARD_MS } from "./edge-auth";
+import { dropImportLink, holdImportLink } from "./import-link";
 
 const res = (status: number, type = "basic", ct = "application/json", redirected = false) => ({ status, type, redirected, headers: new Headers({ "Content-Type": ct }) }) as unknown as Response;
 const store = () => {
@@ -31,6 +33,24 @@ describe("reloading for the sign-in", () => {
     expect(reloadForSignIn(1_000_000 + 5_000, s, reload)).toBe(false);
     expect(reloadForSignIn(1_000_000 + RELOAD_GUARD_MS + 1, s, reload)).toBe(true);
     expect(reload).toHaveBeenCalledTimes(2);
+  });
+  it("puts a provider import link not opened yet back in the address bar first, so the reloaded page opens it (#5420)", () => {
+    history.replaceState(null, "", "/settings?tab=models");
+    const link = `${location.origin}/settings?tab=models#import=eyJr`;
+    holdImportLink(link);
+    const at: string[] = [];
+    const reload = vi.fn(() => void at.push(location.href));
+    // inside the guard window nothing reloads, and the address bar stays clean
+    const s = store();
+    s.setItem("persona.edge-reload", String(1_000_000));
+    expect(reloadForSignIn(1_000_000 + 5_000, s, reload)).toBe(false);
+    expect(location.hash).toBe("");
+    expect(reloadForSignIn(1_000_000 + RELOAD_GUARD_MS + 1, s, reload)).toBe(true);
+    expect(at).toEqual([link]);
+    dropImportLink();
+    history.replaceState(null, "", "/settings?tab=models");
+    expect(reloadForSignIn(1_000_000 + 3 * RELOAD_GUARD_MS, s, reload)).toBe(true);
+    expect(at[1]).toBe(`${location.origin}/settings?tab=models`);
   });
   it("never reloads when the guard cannot be kept", () => {
     const reload = vi.fn();

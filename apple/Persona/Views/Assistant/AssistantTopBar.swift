@@ -386,7 +386,7 @@ struct AssistantTopBar: View {
     /// Appearance), the persona's with one; another assistant's conversation opened from elsewhere names its own.
     private var ownName: String {
         if let key, let other = model.otherAssistant(of: key) { return other.name }
-        return model.assistantManager?.name ?? model.persona.name
+        return model.assistantShownName
     }
 
     /// The conversation's launcher (the next message uses it) or, on the new-conversation page, the default one.

@@ -45,6 +45,11 @@ function controller() {
       return s ? { asOfSeq: s.events.at(-1)?.seq ?? -1, values: s.values ?? {} } : null
     },
     pages: [],
+    selectedModels: [],
+    async selectModel(req) {
+      c.selectedModels.push({ ...req, at: Date.now() })
+      return { ok: true }
+    },
     async page({ address, throughSeq, beforeSeq, maxMessages }) {
       c.pages.push(address)
       // DSH pages a subagent only through its parent's address, and refuses its plain one.
@@ -98,6 +103,7 @@ async function setup(t, opts = {}) {
     agents: opts.agents,
     permissionPresets: opts.permissionPresets,
     jobs: opts.jobs,
+    models: opts.models,
   }, { socketPath: n.path, pushDelayMs: 5, retryMs: 20, interactions: opts.interactions, maxSessions: opts.maxSessions,
     runtime: opts.runtime, name: opts.name, launcher: opts.launcher, assistant: opts.assistant, presets: opts.presets })
   t.after(() => rt.stop())
@@ -189,6 +195,73 @@ test('starts a session from the phone and lists it before its first prompt', asy
   assert.equal(res.session.session_id, 'session-new')
   assert.equal(ctl.prompts[0].sessionId, 'session-new')
   await until('listed', () => n.last('runtime.sessions')?.sessions.some((s) => s.session_id === 'session-new'))
+})
+
+// The real controller derives cwd from a workspaceId; retain that behavior while recording its public request.
+function recordCreations(ctl, workspacePath) {
+  const requests = [], create = ctl.create
+  ctl.create = async (request) => {
+    requests.push(request)
+    return create({ cwd: request.cwd ?? workspacePath })
+  }
+  return requests
+}
+
+for (const selected of ['/w/project', '/w/project-alias']) test(`a new DSH session joins the workspace resolved for ${selected} (#5485)`, async (t) => {
+  const matched = { id: 'workspace-project', path: '/w/project' }
+  const ws = { ...workspace(), async resolveByPath(path) {
+    return ['/w/project', '/w/project-alias'].includes(path) ? matched : undefined
+  } }
+  const { n, ctl, rt } = await setup(t, { workspace: ws })
+  const requests = recordCreations(ctl, matched.path)
+  rt.start()
+  await n.ready
+  const { session } = await n.peer.call('session.start', { cwd: selected, prompt: 'Check the synthetic project' })
+  assert.deepEqual(requests, [{ workspaceId: matched.id }], 'DSH receives workspaceId alone so it attaches the new session')
+  assert.equal(session.session_id, 'session-new')
+  assert.equal(ctl.prompts[0].sessionId, session.session_id)
+  assert.equal(ctl.sessions.get(session.session_id).summary.cwd, matched.path)
+})
+
+test('a directory without an exact DSH workspace keeps cwd-only creation (#5485)', async (t) => {
+  const ws = { ...workspace(), async resolveByPath() { return undefined } }
+  const { n, ctl, rt } = await setup(t, { workspace: ws })
+  const requests = recordCreations(ctl)
+  rt.start()
+  await n.ready
+  await n.peer.call('session.start', { cwd: '/w/unmatched' })
+  assert.deepEqual(requests, [{ cwd: '/w/unmatched' }])
+})
+
+for (const [name, ws] of [['absent', undefined], ['archive-only', workspace()]]) test(`an ${name} workspace service preserves cwd-only creation (#5485)`, async (t) => {
+  const { n, ctl, rt } = await setup(t, { workspace: ws })
+  const requests = recordCreations(ctl)
+  rt.start()
+  await n.ready
+  await n.peer.call('session.start', { cwd: '/w/new' })
+  assert.deepEqual(requests, [{ cwd: '/w/new' }])
+})
+
+test('a new directory keeps the DSH controller creation path (#5485)', async (t) => {
+  const ws = { ...workspace(), async resolveByPath() { throw Object.assign(new Error('directory does not exist'), { code: 'ENOENT' }) } }
+  const { n, ctl, rt } = await setup(t, { workspace: ws })
+  const requests = recordCreations(ctl)
+  rt.start()
+  await n.ready
+  await n.peer.call('session.start', { cwd: '/w/new-directory' })
+  assert.deepEqual(requests, [{ cwd: '/w/new-directory' }], 'the controller creates directories that do not exist yet')
+})
+
+test('a failed DSH workspace lookup creates no ungrouped session (#5485)', async (t) => {
+  const ws = { ...workspace(), async resolveByPath() { throw new Error('workspace lookup unavailable') } }
+  const { n, ctl, rt } = await setup(t, { workspace: ws })
+  const requests = recordCreations(ctl)
+  rt.start()
+  await n.ready
+  await assert.rejects(n.peer.call('session.start', { cwd: '/w/project', prompt: 'Do not create on failed lookup' }), /workspace lookup unavailable/)
+  assert.deepEqual(requests, [])
+  assert.equal(ctl.sessions.size, 0)
+  assert.deepEqual(ctl.prompts, [])
 })
 
 test('a watched session gets its new events as continuous items and the live text as deltas', async (t) => {
@@ -511,6 +584,147 @@ test('the assistant\'s own tools are only for its conversations, called as the a
   assert.equal(n.toolCalls.at(-1).assistant, undefined)
 })
 
+test('advertises DSH configured models as launchers in hello and launchers.models (#5572)', async (t) => {
+  const dshModels = [
+    {
+      provider: 'deepseek',
+      name: 'DeepSeek',
+      models: [
+        { id: 'deepseek-chat', name: 'DeepSeek V3', default: true },
+        { id: 'deepseek-reasoner', name: 'DeepSeek R1' },
+      ],
+    },
+    {
+      provider: 'anthropic',
+      name: 'Anthropic',
+      models: [
+        { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
+      ],
+    },
+  ]
+  const { n, rt } = await setup(t, { models: dshModels })
+  rt.start()
+  await n.ready
+  assert.equal(n.hello.caps.models, true)
+  assert.ok(Array.isArray(n.hello.launchers))
+  const dshLauncher = n.hello.launchers.find((l) => l.name === 'dsh')
+  assert.ok(dshLauncher, 'main dsh launcher is advertised')
+  assert.equal(dshLauncher.model, 'DeepSeek V3')
+  assert.equal(dshLauncher.models.length, 3)
+
+  const anthropicLauncher = n.hello.launchers.find((l) => l.name === 'anthropic')
+  assert.ok(anthropicLauncher, 'provider group launcher is advertised')
+  assert.equal(anthropicLauncher.models.length, 1)
+
+  const res = await n.peer.call('launchers.models', {})
+  assert.equal(res.agent, 'dsh')
+  assert.ok(res.models.some((m) => m.id === 'deepseek-chat'))
+})
+
+test('reads models from the session controller modelCatalog when nothing else provides them (#6451)', async (t) => {
+  const { n, ctl, rt } = await setup(t)
+  assert.equal(ctl.listModels, undefined)
+  assert.equal(ctl.models, undefined)
+  ctl.modelCatalog = async () => ({
+    groups: [
+      { id: 'deepseek', name: 'DeepSeek', models: [{ id: 'deepseek-chat', name: 'DeepSeek V3' }, { id: 'deepseek-reasoner', name: 'DeepSeek R1' }] },
+      { id: 'anthropic', name: 'Anthropic', models: [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5' }] },
+    ],
+  })
+  rt.start()
+  await n.ready
+  const res = await n.peer.call('launchers.models', {})
+  assert.deepEqual(res.models.map((m) => m.id).sort(), ['claude-opus-5-5', 'deepseek-chat', 'deepseek-reasoner'])
+  const names = (await n.peer.call('launchers.models', {})).models.map((m) => m.name)
+  assert.ok(names.includes('DeepSeek V3'))
+})
+
+test('keeps reading models from controller.listModels when modelCatalog is absent (#6451)', async (t) => {
+  const { n, ctl, rt } = await setup(t)
+  ctl.listModels = async () => [{ provider: 'deepseek', name: 'DeepSeek', models: [{ id: 'deepseek-chat', name: 'DeepSeek V3' }] }]
+  rt.start()
+  await n.ready
+  const res = await n.peer.call('launchers.models', {})
+  assert.deepEqual(res.models.map((m) => m.id), ['deepseek-chat'])
+})
+
+test('selects model before sending the first prompt when model is specified (#5572)', async (t) => {
+  const dshModels = [
+    {
+      provider: 'deepseek',
+      models: [{ id: 'deepseek-chat', name: 'DeepSeek V3', default: true }],
+    },
+    {
+      provider: 'anthropic',
+      models: [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5' }],
+    },
+  ]
+  const { n, ctl, rt } = await setup(t, { models: dshModels })
+  rt.start()
+  await n.ready
+
+  const { session } = await n.peer.call('session.start', {
+    cwd: '/w/new',
+    model: 'claude-opus-5-5',
+    prompt: 'hello model',
+  })
+  assert.equal(session.session_id, 'session-new')
+  assert.equal(ctl.selectedModels.length, 1)
+  assert.deepEqual(ctl.selectedModels[0], {
+    sessionId: 'session-new',
+    provider: 'anthropic',
+    model: 'claude-opus-5-5',
+    at: ctl.selectedModels[0].at,
+  })
+  assert.equal(ctl.prompts.length, 1)
+  assert.equal(ctl.prompts[0].sessionId, 'session-new')
+
+  // Supports provider/model notation
+  await n.peer.call('session.start', {
+    cwd: '/w/new2',
+    model: 'anthropic/claude-opus-5-5',
+  })
+  assert.equal(ctl.selectedModels.length, 2)
+  assert.equal(ctl.selectedModels[1].provider, 'anthropic')
+  assert.equal(ctl.selectedModels[1].model, 'claude-opus-5-5')
+
+  // Supports provider group launcher
+  await n.peer.call('session.start', {
+    cwd: '/w/new3',
+    launcher: 'anthropic',
+    model: 'claude-opus-5-5',
+  })
+  assert.equal(ctl.selectedModels.length, 3)
+  assert.equal(ctl.selectedModels[2].provider, 'anthropic')
+  assert.equal(ctl.selectedModels[2].model, 'claude-opus-5-5')
+})
+
+test('refuses session start with a clear error when model is unknown (#5572)', async (t) => {
+  const dshModels = [
+    {
+      provider: 'deepseek',
+      models: [{ id: 'deepseek-chat', name: 'DeepSeek V3', default: true }],
+    },
+  ]
+  const { n, ctl, rt } = await setup(t, { models: dshModels })
+  rt.start()
+  await n.ready
+
+  await assert.rejects(
+    n.peer.call('session.start', {
+      cwd: '/w/new',
+      model: 'nonexistent-model',
+      prompt: 'hello',
+    }),
+    (err) => {
+      assert.match(err.message, /nonexistent-model/)
+      return true
+    }
+  )
+  assert.equal(ctl.selectedModels.length, 0)
+  assert.equal(ctl.prompts.length, 0)
+})
+
 // ---- subagents and background work (docs/integrations/dsh.md "Subagents and background tasks") ----
 
 const ev2 = (seq, type, data) => ({ type, seq, time: 1_700_000_000_000 + seq, data })
@@ -647,3 +861,68 @@ test('an approval card offers 本会话总是同意; always still answers DSH wi
   n.resolve = () => ({ allow: false, always: true })
   assert.equal(await ev.waterfall('approval/request', { agent, toolName: 'bash', callId: 'call_b' }, browser), 'rejected')
 })
+
+test('a session with no open turn and running background commands reports background and done status (#5981)', async (t) => {
+  const { n, ctl, rt } = await setup(t)
+  ctl.add('session-bg', {
+    cwd: '/w/app',
+    running: true, // DSH controller reports running: true because of the background task
+    projections: {
+      kind: 'cached',
+      asOfSeq: 10,
+      values: {
+        title: 'Background job session',
+        turnBoundary: { openTurnStartSeq: null, lastStepBoundary: { kind: 'end' }, lastTurn: 2 },
+        approvalState: { turnOpen: false },
+        contextTimeline: {
+          commands: [
+            { id: 'cmd-bg-1', background: true, status: 'running', command: 'sleep 300', startedAt: 1_700_000_000_000 },
+          ],
+        },
+      },
+    },
+  })
+  rt.start()
+  await n.ready
+  await until('session-bg is listed', () => rowOf(n, 'session-bg'))
+  const row = rowOf(n, 'session-bg')
+  assert.equal(row.status, 'done', 'foreground status should be done when no turn is open')
+  assert.deepEqual(row.background, [{
+    id: 'cmd-bg-1',
+    kind: 'shell',
+    description: 'sleep 300',
+    command: 'sleep 300',
+    started_at: new Date(1_700_000_000_000).toISOString(),
+  }])
+})
+
+test('a session waiting on a DSH Web dialog reports blocked with attention reason (#5980)', async (t) => {
+  const { n, ctl, ev, rt } = await setup(t) // default: liveClient = true, interactions = auto
+  ctl.add('session-dialog', { cwd: '/w/app', running: true })
+  rt.start()
+  await n.ready
+  await until('session-dialog is listed', () => rowOf(n, 'session-dialog'))
+  assert.equal(rowOf(n, 'session-dialog')?.status, 'working')
+
+  // When an approval is handed to Web GUI and still pending
+  let resolveBrowser
+  const browserPromise = new Promise((resolve) => { resolveBrowser = resolve })
+  const agent = { session: { id: 'session-dialog' } }
+
+  const waterfallPromise = ev.waterfall('approval/request', { agent, toolName: 'bash', callId: 'call_dialog' }, () => browserPromise)
+
+  await until('session-dialog is marked blocked', () => rowOf(n, 'session-dialog')?.status === 'blocked')
+  const blockedRow = rowOf(n, 'session-dialog')
+  assert.equal(blockedRow.status, 'blocked')
+  assert.equal(blockedRow.attention_reason, 'waiting for an answer in DSH Web')
+
+  // When Web GUI settles the request
+  resolveBrowser('allowed-once')
+  assert.equal(await waterfallPromise, 'allowed-once')
+
+  await until('session-dialog clears blocked state', () => rowOf(n, 'session-dialog')?.status !== 'blocked')
+  const settledRow = rowOf(n, 'session-dialog')
+  assert.equal(settledRow.attention_reason, undefined)
+})
+
+

@@ -55,6 +55,23 @@ describe("FailureNote", () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
+  it("is the same error notice as the model error banner (#5313): a neutral card, the red mark only", () => {
+    act(() => root.render(<FailureNote session={{ ...failed, external_url: "https://example.com/chat" }} onRetry={() => {}} />));
+    const note = host.querySelector<HTMLElement>('[data-testid="chat-failure"]')!;
+    expect(note.hasAttribute("data-error-notice")).toBe(true);
+    expect(note.getAttribute("role")).toBe("status");
+    expect(note.className).toContain("border border-line bg-surface");
+    expect(note.className).not.toContain("bg-red-tint");
+    // its actions are the notice's 28 px buttons with a finger-sized target, on one line each
+    for (const id of ["chat-failure-retry", "chat-failure-lark"]) {
+      const b = host.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
+      const classes = b.className.split(/\s+/);
+      expect(classes).toEqual(expect.arrayContaining(["touch-hit", "h-7", "whitespace-nowrap"]));
+      expect(classes).not.toContain("h-8");
+    }
+    expect(host.querySelector('[data-testid="chat-failure-lark"]')!.getAttribute("target")).toBe("_blank");
+  });
+
   it("links to Lark only for an https place", () => {
     act(() => root.render(<FailureNote session={{ ...failed, external_url: "https://example.com/chat" }} onRetry={() => {}} />));
     expect(host.querySelector<HTMLAnchorElement>('[data-testid="chat-failure-lark"]')!.href).toBe("https://example.com/chat");

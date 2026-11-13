@@ -5,6 +5,8 @@
 /api/
 /api/v1/admin/
 /api/v1/admin/cli/
+/api/v1/admin/plugins # legacy admin relay to the manager (before #1844)
+/api/v1/admin/plugins/ # legacy admin relay to the manager (before #1844)
 DELETE /api/v1/admin/devices/{id}
 DELETE /api/v1/admin/machines/{id}
 DELETE /api/v1/admin/peers/{hub_id}
@@ -12,7 +14,6 @@ DELETE /api/v1/auth/tokens/{id}
 DELETE /api/v1/looks/uploads/{id} # the hub keeps the looks: personas/ is its own directory (look_uploads.go)
 DELETE /api/v1/managers/{id}
 DELETE /api/v1/sessions/{mid}/{sid}
-GET /api/v1/admin/assistant
 GET /api/v1/admin/devices
 GET /api/v1/admin/owner-subjects # trusted authentication subject enrollment
 POST /api/v1/admin/owner-subjects # trusted authentication subject enrollment
@@ -25,6 +26,7 @@ GET /api/v1/admin/network
 GET /api/v1/admin/overview
 GET /api/v1/admin/peers
 GET /api/v1/admin/routes
+GET /api/v1/admin/sessions/{mid}/{sid}/ownership-inspection
 GET /api/v1/admin/state
 GET /api/v1/app/android/apk
 GET /api/v1/app/android/latest
@@ -67,6 +69,7 @@ GET /api/v1/machines/{mid}/ports/{port}
 GET /api/v1/machines/{mid}/ports/{port}/connect
 GET /api/v1/machines/{mid}/preview/connect
 GET /api/v1/machines/{mid}/preview/servers
+GET /api/v1/machines/{mid}/screen/video/connect
 GET /api/v1/machines/{mid}/stat
 GET /api/v1/managers
 GET /api/v1/mutes
@@ -105,6 +108,7 @@ POST /api/v1/admin/peers/{hub_id}/center
 POST /api/v1/admin/peers/probe
 POST /api/v1/admin/reload
 POST /api/v1/admin/restart
+POST /api/v1/admin/sessions/{mid}/{sid}/owner
 POST /api/v1/admin/setup
 POST /api/v1/admin/setup-code
 POST /api/v1/auth/pair-codes
@@ -123,10 +127,15 @@ POST /api/v1/machines/{id}/confirm
 POST /api/v1/machines/{id}/reject
 POST /api/v1/machines/{mid}/doctor/fix
 POST /api/v1/machines/{mid}/files
+POST /api/v1/machines/{mid}/files/chmod
+POST /api/v1/machines/{mid}/files/copy
+POST /api/v1/machines/{mid}/files/mkdir
 POST /api/v1/machines/{mid}/files/move
 POST /api/v1/machines/{mid}/files/rename
 POST /api/v1/machines/{mid}/files/restore
 POST /api/v1/machines/{mid}/files/trash
+POST /api/v1/machines/{mid}/files/write
+POST /api/v1/machines/{mid}/files/zip
 POST /api/v1/machines/{mid}/git/commit
 POST /api/v1/machines/{mid}/git/pr
 POST /api/v1/machines/{mid}/git/pr/merge
@@ -179,7 +188,6 @@ POST /api/v1/sessions/{mid}/{sid}/screen/before
 POST /api/v1/sessions/{mid}/{sid}/seen
 POST {bus.JoinPath}
 POST {peerPairPath}
-PUT /api/v1/admin/assistant
 PUT /api/v1/admin/hub
 PUT /api/v1/admin/machines/{id}
 PUT /api/v1/admin/network/access

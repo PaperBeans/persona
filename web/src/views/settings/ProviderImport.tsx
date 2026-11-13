@@ -1,7 +1,8 @@
 // Settings › Model providers › Import (#2455, #5024): pick a computer, preview the providers its claude aliases add up to
 // (~/.zshrc, ~/.bashrc, ~/.bash_aliases; GET /api/v1/launchers/import), tick some, choose for a group whose aliases differ in more than the
 // model whether each alias becomes a provider of its own, and import them (POST), optionally hiding the imported aliases in
-// Persona. The keys never come to the browser: the hub reads them again from that computer and keeps them sealed.
+// Persona. The keys never come to the browser: the hub reads them again from that computer and keeps them sealed. Opened
+// for one alias the wizard found (#5193), it starts on that alias's computer and reads only that alias (`alias` on both).
 import { useEffect, useId, useState } from "react";
 import { api } from "../../lib/api";
 import {
@@ -25,10 +26,18 @@ import { useStore } from "../../lib/store";
 import { Button, cx, Dialog, Loading, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { Pill } from "./SettingsParts";
-import { CheckMark, INPUT, Labelled } from "./ProviderFields";
+import { CheckMark, ChoiceRows, INPUT, Labelled } from "./ProviderFields";
 import { formatList, t } from "../../i18n";
 
-export function ProviderImport({ open, onClose, onImported }: { open: boolean; onClose: () => void; onImported: () => void }) {
+export function ProviderImport({ open, onClose, onImported, machine: start, alias }: {
+  open: boolean;
+  onClose: () => void;
+  onImported: () => void;
+  /** The computer to start on (else the first online one). */
+  machine?: string;
+  /** Only this alias is read and imported. */
+  alias?: string;
+}) {
   const machines = useStore((s) => s.machines);
   const [machine, setMachine] = useState("");
   const [list, setList] = useState<ImportedProvider[] | null>(null);
@@ -44,13 +53,17 @@ export function ProviderImport({ open, onClose, onImported }: { open: boolean; o
     if (!open) return;
     setMachine((m) => m || machines.find((x) => x.online)?.id || machines[0]?.id || "");
   }, [open, machines]);
+  // apart from the default: the list of computers changing must not take the user's pick back
+  useEffect(() => {
+    if (open && start) setMachine(start);
+  }, [open, start]);
 
   useEffect(() => {
     if (!open || !machine) return;
     let live = true;
     setList(null);
     setError("");
-    api<{ providers?: ImportedProvider[] }>(`/launchers/import?machine=${encodeURIComponent(machine)}`)
+    api<{ providers?: ImportedProvider[] }>(`/launchers/import?machine=${encodeURIComponent(machine)}${alias ? `&alias=${encodeURIComponent(alias)}` : ""}`)
       .then((r) => {
         if (!live) return;
         const ps = r.providers ?? [];
@@ -61,7 +74,7 @@ export function ProviderImport({ open, onClose, onImported }: { open: boolean; o
       })
       .catch((e) => live && (setError(importErrorText(e)), setList([])));
     return () => void (live = false);
-  }, [open, machine]);
+  }, [open, machine, alias]);
 
   const flip = (set: (f: (s: Set<string>) => Set<string>) => void, name: string, on?: boolean) =>
     set((s) => {
@@ -92,6 +105,7 @@ export function ProviderImport({ open, onClose, onImported }: { open: boolean; o
           providers: chosen.map((p) => p.name),
           split: chosen.filter((p) => split.has(p.name) && importCanSplit(p)).map((p) => p.name),
           hide_aliases: sources.length > 0 && hide,
+          ...(alias ? { alias } : {}),
         },
       });
       toast(importSummary(r), "ok");
@@ -254,33 +268,10 @@ function ImportItem({ p, on, split, onToggle, onSplit }: { p: ImportedProvider; 
 
 /** "A provider for each alias" / "One provider": a radio group, arrow keys move between the two. */
 function SplitChoice({ name, first, split, onSplit }: { name: string; first: string; split: boolean; onSplit: (on: boolean) => void }) {
-  const options = [
-    { on: true, label: t("settings-providerimport.split"), hint: t("settings-providerimport.split_hint") },
-    { on: false, label: t("settings-providerimport.merge"), hint: t("settings-providerimport.merge_hint", { alias: first }) },
-  ];
-  const key = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
-    e.preventDefault();
-    onSplit(!split);
-    const next = e.currentTarget.querySelector<HTMLButtonElement>(`[data-split="${!split}"]`);
-    next?.focus();
-  };
   return (
-    <div role="radiogroup" aria-label={t("settings-providerimport.choice_label", { name })} onKeyDown={key}
-      className="divide-y divide-line overflow-hidden rounded-card bg-inset shadow-hairline">
-      {options.map((o) => {
-        const checked = o.on === split;
-        return (
-          <button key={String(o.on)} type="button" role="radio" aria-checked={checked} tabIndex={checked ? 0 : -1} data-split={String(o.on)}
-            onClick={() => onSplit(o.on)} className="touch-hit flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-hover">
-            <CheckMark on={checked} round className="mt-0.5" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12.5px] font-medium text-ink">{o.label}</span>
-              <span className="block text-[11.5px] text-ink-3">{o.hint}</span>
-            </span>
-          </button>
-        );
-      })}
-    </div>
+    <ChoiceRows label={t("settings-providerimport.choice_label", { name })} at={split ? 0 : 1} onPick={(i) => onSplit(i === 0)} options={[
+      { label: t("settings-providerimport.split"), hint: t("settings-providerimport.split_hint") },
+      { label: t("settings-providerimport.merge"), hint: t("settings-providerimport.merge_hint", { alias: first }) },
+    ]} />
   );
 }

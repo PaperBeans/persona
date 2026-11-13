@@ -1,0 +1,4 @@
+{
+  "handoff_title": "Handoff — the context summary sent to the new engine at switch time (not part of the chat transcript; shown only here)",
+  "earlier_failed": "Couldn't load the earlier part of this conversation: {error}"
+}

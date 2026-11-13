@@ -20,6 +20,7 @@ import (
 // personad plugin on the hub's machine: install (showing what it may do), list, configure, a secret from stdin,
 // uninstall; all over loopback with hub.json's token.
 func TestExtensionCommand(t *testing.T) {
+	t.Setenv("PERSONA_LANG", "zh-Hans") // the hub's permission lines are checked in the language the command asks for
 	h, store := extensionTestHub(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -80,6 +81,7 @@ func TestExtensionCommand(t *testing.T) {
 
 // personad extension market token <id>: the token from stdin, the market read again with it; --clear takes it away.
 func TestExtensionMarketTokenCommand(t *testing.T) {
+	t.Setenv("PERSONA_LANG", "zh-Hans")
 	h, _, _ := marketHub(t)
 	gh := &fakeGitHub{files: map[string][]byte{extension.IndexFile: marketIndex(t, "Private")}}
 	srv := httptest.NewTLSServer(gh)
@@ -272,7 +274,7 @@ func TestExtensionCommandUninstallWarnings(t *testing.T) {
 			response:   `{"ok":true,"warnings":["data directory cleanup failed","package directory cleanup failed"]}`,
 			flags:      []string{"--keep-data", "--cascade", "--members"},
 			query:      "cascade=1&keep_data=1&members=1",
-			wantStderr: "警告：data directory cleanup failed\n警告：package directory cleanup failed\n",
+			wantStderr: "Warning: data directory cleanup failed\nWarning: package directory cleanup failed\n",
 		},
 		{name: "legacy response", response: `{"ok":true}`},
 		{name: "null warnings", response: `{"ok":true,"warnings":null}`},
@@ -281,10 +283,11 @@ func TestExtensionCommandUninstallWarnings(t *testing.T) {
 			name:      "API error remains an error",
 			response:  `{"error":"extension is required","warnings":["not a successful uninstall"]}`,
 			status:    http.StatusConflict,
-			wantError: "extension is required（HTTP 409）",
+			wantError: "extension is required (HTTP 409)",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PERSONA_LANG", "en")
 			const token = "extension-cli-test-token"
 			var requests atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +331,7 @@ func TestExtensionCommandUninstallWarnings(t *testing.T) {
 				if err != nil {
 					t.Fatalf("successful uninstall returned an error: %v", err)
 				}
-				if got, want := stdout.String(), "卸载了 example-extension\n"; got != want {
+				if got, want := stdout.String(), "Uninstalled example-extension\n"; got != want {
 					t.Errorf("stdout = %q, want %q", got, want)
 				}
 			}

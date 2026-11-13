@@ -10,7 +10,7 @@ import uuid
 
 from hub_release_paths import prepare_remote_staging, release_directory, validate_remote_upload
 from manager_artifacts import manager_manifest
-from publish_hub_release import connect_publisher
+from publish_hub_release import connect_publisher, remote_python
 
 MODULES = ('hub_release_paths', 'node_artifacts', 'manager_artifacts', 'node_package_mirror', 'promote_hub_release',
            'manager_idle', 'promote_manager_release')
@@ -39,6 +39,7 @@ def publish(cfg, artifact_dir, manager_id, run_id, apply=False):
     payload = dict(root=cfg['remote_root'], target=target, run_id=run_id, apply=apply,
                    source=manifest['commit'], release_namespace=cfg.get('release_namespace', 'hub'),
                    target_source=Path(__file__).with_name('manager_target.py').read_text())
+    interpreter = remote_python(cfg)
     client, sock = connect_publisher(cfg)
     try:
         if apply:
@@ -52,7 +53,7 @@ def publish(cfg, artifact_dir, manager_id, run_id, apply=False):
                 for name in dict.fromkeys(names):
                     destination = validate_remote_upload(sftp, cfg['remote_root'], payload['release_namespace'], staged, name)
                     sftp.put(str(artifact_dir / name), destination)
-        stdin, stdout, stderr = client.exec_command('python3 -', timeout=600)
+        stdin, stdout, stderr = client.exec_command(interpreter, timeout=600)
         stdin.write(remote_program(payload))
         stdin.flush()
         stdin.channel.shutdown_write()

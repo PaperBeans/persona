@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """End-to-end check of Settings › Model providers (#2455, docs/integrations/launchers.md): the add wizard's custom compatible
 gateway (pick → connect → models, "Advanced" folded), named by a display name in any language with the startup ID under
-"More options" or left to the hub (#5029), the Connect step checking the address and key by itself (#4881) and "Test"
+"More options" or left to the hub (#5029), the Connect step checking the address and key by itself (#4881), finding the
+sign-in method with the choice under "More options" (#5329), and "Test"
 failing by hand, the Claude Code tiers and the advanced fields coming back when a provider is reopened, a rename and a PUT
 that leaves out what was not touched, and the import from a computer's aliases (#5024: the header button, the preview with the file
 each alias came from, variables carried over and left out, a group's "A provider for each alias" / "One provider" choice by mouse
@@ -76,8 +77,9 @@ def wizard(r):
     d = add_custom(r)
     ok("选择供应商 lists the hub's providers with 自定义兼容网关")
 
-    # Connect: a display name first (normal text), Bearer by default, the key a secret, the startup ID folded away
-    expect(d.get_by_role("radio", name="Bearer")).to_have_attribute("aria-checked", "true")
+    # Connect: a display name first (normal text), the key a secret; the sign-in method (found by the check, #5329) and the
+    # startup ID folded away
+    expect(d.get_by_role("radiogroup", name="鉴权方式")).to_have_count(0)
     display = d.get_by_label("显示名", exact=True)
     expect(display).to_have_attribute("placeholder", "比如 团队中转")
     expect(d.get_by_label("启动 ID", exact=True)).to_have_count(0)
@@ -103,12 +105,15 @@ def wizard(r):
     url.press("Tab")
     expect(d.get_by_text("找到 3 个模型")).to_be_visible()
     expect(d.get_by_text("连接成功（412 ms）")).to_be_visible()
+    expect(d.get_by_text("这个网关用 Bearer 鉴权。")).to_be_visible()
     test = r.log()["test"][-1]
     assert test["api_key"] == "<set>" and test["base_url"] == "https://relay.example.com/v1" and test["model"] == "example-opus", test
-    ok("leaving the address checks it by itself: 3 models found, the first one tested in 412 ms")
+    assert test["auth"] == "auto", test
+    ok("leaving the address checks it by itself: 3 models found, the first one tested in 412 ms, Bearer found")
 
     display.fill("E2E 中转")
     more.click()
+    expect(d.get_by_role("radiogroup", name="鉴权方式").get_by_role("radio", name="自动")).to_have_attribute("aria-checked", "true")
     sid = d.get_by_label("启动 ID", exact=True)
     expect(sid).to_have_attribute("placeholder", "留空自动生成")
     expect(d.get_by_text("启动 ID 只能用")).to_have_count(0)
@@ -117,7 +122,7 @@ def wizard(r):
     sid.fill("e2e_gw")
     expect(d.get_by_text("启动 ID 只能用")).to_have_count(0)
     r.shot("wizard-connect")
-    ok("显示名 takes any language; 更多选项 › 启动 ID is optional and says what's wrong only once typed")
+    ok("显示名 takes any language; 更多选项 holds 鉴权方式 (自动) and 启动 ID, optional and saying what's wrong only once typed")
 
     # Choose models: pick, set the default, edit a context window, add one by hand, the tiers, fill "Advanced"
     d.get_by_role("button", name="下一步").click()

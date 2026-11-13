@@ -3,6 +3,8 @@
 // it as a card. Types, constants and trivial pure helpers only.
 package dialogwire
 
+import "time"
+
 // Dialog is a choice a terminal agent waits on (AskUserQuestion without the hook, a permission prompt, a picker),
 // read off its screen: header chip, question, options, and Rev, a hash of what it asks. The node checks Rev again
 // right before pressing keys, so an answer never lands in a dialog that changed after the card was made.
@@ -13,9 +15,23 @@ type Dialog struct {
 	// Warning is what the agent adds in a box above the question about why it asks (Claude Code's "Dangerous rm
 	// operation on possibly-empty variable…"); Deadline its "⚠ … will automatically block this request in 1:59",
 	// whose countdown moves every second. Neither is in Rev: a card stays answerable while the clock runs.
-	Warning  string   `json:"warning,omitempty"`
-	Deadline string   `json:"deadline,omitempty"`
-	Options  []Option `json:"options"`
+	Warning  string `json:"warning,omitempty"`
+	Deadline string `json:"deadline,omitempty"`
+	// A permission prompt for a shell command ("Bash command", a description, the command between dashed rules):
+	// Command is the command, its wrapped rows joined back as well as the screen tells (line breaks it can tell from
+	// wrapping stay); Description the agent's own words for it. Both are in Detail too, as before, and the command is
+	// in Rev.
+	Command     string `json:"command,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Risk is what the Warning is about, for the apps to say in plain words: RiskDelete, or "" for a warning they show
+	// as it is.
+	Risk string `json:"risk,omitempty"`
+	// DeadlineAction is what the countdown does when it runs out: DeadlineDeny or DeadlineAllow; DeadlineIn how long
+	// it had left when the screen was read. The hub dates it: DeadlineAt, by its clock.
+	DeadlineAction string    `json:"deadline_action,omitempty"`
+	DeadlineIn     int       `json:"-"` // seconds
+	DeadlineAt     time.Time `json:"deadline_at,omitzero"`
+	Options        []Option  `json:"options"`
 	// Multi: a multi-select question (AskUserQuestion's multiSelect, Claude Code 2.1.316): its options are check
 	// boxes ("[ ]" / "[✔]") that enter or their number toggles, and the row under them sends what is checked —
 	// Submit, which opens the review tab, or Next when another question follows.
@@ -44,6 +60,16 @@ type Step struct {
 
 // CursorSubmit is Dialog.Cursor on a multi-select question's Submit / Next row.
 const CursorSubmit = "submit"
+
+// Dialog.Risk: the warning says Claude cannot rule out that the command deletes files ("Dangerous rm operation …").
+const RiskDelete = "delete"
+
+// Dialog.DeadlineAction: the request is refused when the countdown runs out ("will automatically block", "deny"), or
+// let through ("allow", "approve").
+const (
+	DeadlineDeny  = "deny"
+	DeadlineAllow = "allow"
+)
 
 // Option kinds besides a plain choice.
 const (

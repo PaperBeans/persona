@@ -401,6 +401,11 @@ func ExplainWith(l i18n.Lang, m *Manifest, config json.RawMessage) []PermissionL
 		out = append(out, PermissionLine{Key: "recalls_sent", Title: permissionText(l, "recalls_sent_title"),
 			Detail: permissionText(l, "recalls_sent_detail", i18n.Args{"names": strings.Join(names, permissionText(l, "list_separator"))})})
 	}
+	// What its program writes for the assistant to read is shown, like recalls not agreed to: package instructions and
+	// skills are not either, and the user sees and switches each contribution in the extension's details.
+	if m.HasDataContent() {
+		out = append(out, permissionLine(l, "assistant_data"))
+	}
 	if topics := m.Topics(); len(topics) > 0 {
 		var what []string
 		for _, t := range topics {

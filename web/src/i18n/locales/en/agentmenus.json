@@ -30,5 +30,6 @@
   "archive_close": "Archive and close…",
   "archive_busy": "Busy now: archive it once it's done",
   "archive_close_busy": "Busy now: it can't be closed while it works, waits, loops or runs a server",
-  "archived_agents": "Archived agents"
+  "archived_agents": "Archived agents",
+  "worktree_source_unavailable": "Open this repository in a terminal workspace that supports worktrees."
 }

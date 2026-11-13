@@ -35,6 +35,7 @@ type fakeHub struct {
 	inboxHook     func(ctx context.Context) // runs first in InboxChanged, no lock held (#4924)
 	readHooks     receiptHooks              // around session.items reads and on receipt broadcasts, no lock held
 	itemReads     int                       // session.items reads since the hooks were set
+	onDevicesList func()                    // runs once, then clears, before the next devices.list; no lock held
 	hello         Hello
 	settings      *Settings
 	launcherList  []proto.Launcher                   // the nodes' launchers.list (nil: the list fails, so it can't be told)
@@ -141,18 +142,25 @@ type fakeHub struct {
 	failAssistant  error               // assistant.send fails with it (a launcher that cannot start)
 	// refuseConfigDir: assistant.send with a config_dir fails as the hub refuses it for a node too old for one
 	refuseConfigDir bool
+	// elsewhere: the conversations in another profile than meetingProfile, by id: a resume that asks for a config_dir
+	// fails, as the node refuses to move a conversation to another profile
+	elsewhere map[string]bool
 
 	// The launchers' health (launcher_health.go): launchers.check's answers by "machine/launcher" (none: it works),
 	// the checks and repairs asked for, launchers.repair's answer (nil: the node has no such method) and what a repair
 	// does to the checks.
-	checks    map[string]proto.LauncherCheck
-	checked   []string
-	onCheck   func(f *fakeHub) // runs (under the fake's lock) inside each launchers.check
+	checks  map[string]proto.LauncherCheck
+	checked []string
+	onCheck func(f *fakeHub) // runs (under the fake's lock) inside each launchers.check
+	// checkWait, when set, runs before each launchers.check is answered, outside the fake's lock, with the call's
+	// context: a check that takes its time; its error is the call's.
+	checkWait func(ctx context.Context) error
 	repairs   []map[string]any
 	repairRes *proto.LauncherRepair
 	onRepair  func(f *fakeHub)
 	onSend    func(f *fakeHub, p map[string]any) // runs (under the fake's lock) after each session.send
 	onStart   func(f *fakeHub, p map[string]any) // runs (under the fake's lock) when session.start arrives, before slowStart blocks
+	onList    func(f *fakeHub, machine string)   // runs (under the fake's lock) before a sessions.list is answered, which then sends the list as it left it
 	// onAssistantSend runs (under the fake's lock) when assistant.send arrives, before it is answered
 	onAssistantSend func(f *fakeHub, p map[string]any)
 	// doctor is each machine's node.doctor claude-version detail (none: the report has no such check).
@@ -194,6 +202,15 @@ func (f *fakeHub) Hello(context.Context) (Hello, error) {
 }
 
 func (f *fakeHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, error) {
+	if p.Device == DeviceAll && p.Method == DeviceDevicesList {
+		f.mu.Lock()
+		hook := f.onDevicesList
+		f.onDevicesList = nil
+		f.mu.Unlock()
+		if hook != nil {
+			hook() // what happens while a card is being made: its "where" reads the machines
+		}
+	}
 	if p.Method != DeviceSessionItems {
 		return f.deviceCall(ctx, p)
 	}
@@ -212,6 +229,16 @@ func (f *fakeHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 }
 
 func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, error) {
+	if p.Method == assistantwire.DeviceLaunchersCheck {
+		f.mu.Lock()
+		wait := f.checkWait
+		f.mu.Unlock()
+		if wait != nil {
+			if err := wait(ctx); err != nil {
+				return nil, err
+			}
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, p)
@@ -261,6 +288,10 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		if f.sessionsFail[p.Device] > 0 { // a node that answers offline for a few tries, then recovers
 			f.sessionsFail[p.Device]--
 			return nil, fmt.Errorf("%s: %w", p.Device, apierr.ErrOffline)
+		}
+		if f.onList != nil {
+			f.onList(f, p.Device)
+			list = f.sessions[p.Device]
 		}
 		return json.Marshal(map[string]any{"sessions": slices.Clone(list), "muted": f.muted[p.Device]})
 	case DeviceSessionGet:
@@ -492,6 +523,12 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		}
 		if _, set := a["config_dir"]; set && f.refuseConfigDir {
 			return nil, &rpc.Error{Code: proto.CodeNodeOutdated, Message: "update Persona on this computer"}
+		}
+		if l, _ := a["launcher"].(string); a["config_dir"] != nil && launcherAgent(l) != "claude" { // node/assistant.go's preflight
+			return nil, errors.New("config_dir is only supported for Claude assistant conversations")
+		}
+		if sid, _ := a["session_id"].(string); a["config_dir"] != nil && f.elsewhere[sid] {
+			return nil, errors.New("config_dir cannot move an existing conversation; start a new conversation instead")
 		}
 		f.sends = append(f.sends, a)
 		id, _ := a["session_id"].(string)
@@ -900,7 +937,7 @@ func newKBService(t *testing.T, f *fakeHub) *Service {
 	}
 	f.mu.Unlock()
 	s := withSettings(t, f, New(Options{Hub: f, Store: func() Store { return st }, Logf: testLogf(t), KB: &KBOptions{Dir: t.TempDir()}}))
-	t.Cleanup(s.kbClose)
+	t.Cleanup(s.kbEnd)
 	return s
 }
 
@@ -913,7 +950,7 @@ func newKBServiceOn(t *testing.T, f *fakeHub, st Store) *Service {
 	}
 	f.mu.Unlock()
 	s := withSettings(t, f, New(Options{Hub: f, Store: func() Store { return st }, Logf: testLogf(t), KB: &KBOptions{Dir: t.TempDir()}}))
-	t.Cleanup(s.kbClose)
+	t.Cleanup(s.kbEnd)
 	return s
 }
 
@@ -946,6 +983,9 @@ func withSettings(t *testing.T, f *fakeHub, s *Service) *Service {
 	// These tests are about what a plan does once it exists; what task_plan requires of a brief is task_brief_test.go's,
 	// which turns this off.
 	s.briefsOptional = true
+	// And about what a supervisor does with its tasks, told to the main conversation: the background supervisor that
+	// takes them by default is supervise_background_test.go's, which turns this off.
+	s.noBackground = true
 	if f.settings != nil {
 		setSettings(t, s, func(v *Settings) { *v = *f.settings })
 	}

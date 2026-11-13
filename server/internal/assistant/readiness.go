@@ -109,6 +109,7 @@ type ReadinessStep struct {
 	Version    string            `json:"version,omitempty"` // Claude Code's, when known
 	Title      string            `json:"title,omitempty"`
 	Detail     string            `json:"detail,omitempty"`
+	Occurrence string            `json:"occurrence,omitempty"` // rate_limited: main turn time, health-only reset window, or newest evidence time
 	Action     *ReadinessAction  `json:"action,omitempty"`
 	AltActions []ReadinessAction `json:"alt_actions,omitempty"`
 }
@@ -308,10 +309,11 @@ func (s *Service) readinessRoutes() {
 // readinessEvidence is what something said of the model lately: it answered (ok), or failed with text (or, said
 // outright, code).
 type readinessEvidence struct {
-	at   time.Time
-	ok   bool
-	text string
-	code string
+	at         time.Time
+	ok         bool
+	text       string
+	code       string
+	occurrence string
 }
 
 // readiness works out the main conversation's readiness; probe runs the one-word check first (or reuses one made in
@@ -430,8 +432,8 @@ func readinessBlocks(st ReadinessStep) bool {
 	return false
 }
 
-// readinessKeep saves the result when it differs from the last one (the time aside), so that a client opening the
-// Persona tab does not write the database each time.
+// readinessKeep saves the result when it differs from the last one (the request time aside), so that a client opening the
+// Persona tab does not write the database each time. Evidence timestamps are retained: a later failure is a real change.
 func (s *Service) readinessKeep(ctx context.Context, r Readiness, last *Readiness) {
 	r.Suggestions, r.Probe = nil, nil
 	if last != nil {
@@ -508,7 +510,11 @@ func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, 
 		case h.Kind == errKindUsageLimit:
 			// The subscription's limit, used up: it recovers on its own, and says nothing once it reset.
 			if h.unusable() {
-				ev = append(ev, readinessEvidence{at: h.CheckedAt, code: proto.TurnErrorRateLimited})
+				occurrence := h.CheckedAt.UTC().Format(time.RFC3339Nano)
+				if reset, ok := h.limitReset(); ok {
+					occurrence = reset.UTC().Format(time.RFC3339Nano) // repeated checks of one reset window are one occurrence
+				}
+				ev = append(ev, readinessEvidence{at: h.CheckedAt, code: proto.TurnErrorRateLimited, occurrence: occurrence})
 			}
 		case time.Since(h.CheckedAt) >= healthStale:
 		case h.State == healthOK:
@@ -565,6 +571,19 @@ func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, 
 				action = "" // recovery is a new conversation or the TUI's /model, neither is a model-settings action
 			}
 			st := s.readinessStep(lang, StepModel, StepProblem, code, d.Name, launcher, action)
+			if code == proto.TurnErrorRateLimited {
+				st.Occurrence = newest.occurrence
+				if st.Occurrence == "" {
+					st.Occurrence = newest.at.UTC().Format(time.RFC3339Nano)
+				}
+				if hasMain && (main.Launcher == "" || main.Launcher == launcher) && !main.UpdatedAt.IsZero() {
+					if reset, ok := usageLimitReset(main); ok && st.Occurrence == reset.UTC().Format(time.RFC3339Nano) {
+						// A newer health record can be this same turn settled. Keep the turn's identity so another turn
+						// within one reset window is still a new failure; health-only evidence keeps the reset identity.
+						st.Occurrence = main.UpdatedAt.UTC().Format(time.RFC3339Nano)
+					}
+				}
+			}
 			st.Machine = d.ID
 			if alt != "" {
 				st.AltActions = []ReadinessAction{{ID: alt}}
@@ -746,6 +765,9 @@ func (s *Service) readinessProbe(ctx context.Context, machine, launcher string) 
 		b.probing = nil
 		b.mu.Unlock()
 	}()
+	// The check goes on when the client stops waiting (its own time ran out, the page closed): its result is kept, and
+	// a try within readinessProbeReuse gets it instead of starting another check that is cut off at the same point (#1892).
+	ctx = context.WithoutCancel(ctx)
 	cctx, cancel := context.WithTimeout(ctx, healthCheckTimeout)
 	defer cancel()
 	var res proto.LauncherCheck
@@ -753,7 +775,11 @@ func (s *Service) readinessProbe(ctx context.Context, machine, launcher string) 
 		// Not the model's answer (the machine could not be asked): said, not kept.
 		return &proto.LauncherCheck{Error: i18n.Localize(err, s.requestCtxLang(ctx))}
 	}
-	if err := s.readinessUpdate(ctx, func(r *readinessRecord) {
+	// Detached from the client, the save needs its own deadline: one the database does not answer would hold the
+	// readiness lock, and every readiness request behind it, for good.
+	wctx, wcancel := context.WithTimeout(ctx, historyTimeout)
+	defer wcancel()
+	if err := s.readinessUpdate(wctx, func(r *readinessRecord) {
 		now := time.Now().UTC()
 		r.Probe = &readinessProbe{Machine: machine, Launcher: launcher, At: now, Check: res}
 		if res.OK && r.AnsweredAt == nil {

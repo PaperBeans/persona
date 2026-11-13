@@ -20,8 +20,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,6 +27,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.AgentLauncher
+import persona.core.contracts.api.launcherModel
 import persona.core.designsystem.*
 import persona.feature.chat.ChatComposer
 import persona.feature.chat.rememberChatComposerState
@@ -44,13 +43,10 @@ class StarterLauncherShotsTest {
     private val launchers = listOf(AgentLauncher("ccc", model = "claude-opus-5-5"), AgentLauncher("sol", model = "gateway/gpt-6.1-sol"),
         AgentLauncher("cx", agentType = "codex"))
 
-    @Test fun onlyClaudeAndCodexLaunchersRunTheAssistant() {
-        assertTrue(runsAssistant(AgentLauncher("a")))
-        assertTrue(runsAssistant(AgentLauncher("b", agentType = "codex")))
-        assertFalse(runsAssistant(AgentLauncher("c", agentType = "traex")))
-        assertFalse(runsAssistant(AgentLauncher("d", baseUrl = "(traex)")))
+    @Test fun launcherModelsAreShortAndOldDefaultPlaceholdersAreAbsent() {
         assertEquals("gpt-6.1-sol", launcherModel(launchers[1]))
         assertEquals(null, launcherModel(launchers[2]))
+        assertEquals(null, launcherModel(AgentLauncher("old", model = "默认")))
     }
 
     @Test fun theChipInEveryStyleAndAppearance() {

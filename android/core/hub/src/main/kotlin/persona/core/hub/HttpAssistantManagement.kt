@@ -1,6 +1,7 @@
 package persona.core.hub
 
 import persona.core.contracts.JsonCodec
+import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.*
 import kotlinx.coroutines.CancellationException
@@ -90,6 +91,18 @@ class HttpAssistantManagement private constructor(
         require(machineId.isNotBlank())
         return request("GET", listOf("api", "v1", "machines", machineId, "launchers")).list("launchers")
     }
+    override suspend fun assistantLaunchers(machineId: String): List<AgentLauncher> {
+        require(machineId.isNotBlank())
+        return request("GET", listOf("api", "v1", "machines", machineId, "launchers"),
+            query = mapOf("purpose" to "assistant")).list("launchers")
+    }
+    override suspend fun launcherModels(machineId: String, launcher: String): LauncherModels? = try {
+        require(machineId.isNotBlank() && launcher.isNotBlank())
+        JsonCodec.decodeFromJsonElement(request("GET",
+            listOf("api", "v1", "machines", machineId, "launchers", launcher, "models")))
+    } catch (failure: HubFailure) {
+        if (failure.status == 404) null else throw failure
+    }
     override suspend fun endConversation(session: SessionKey) {
         request("POST", listOf("api", "v1", "sessions", session.machineId, session.sessionId, "close"), buildJsonObject { })
     }
@@ -101,9 +114,44 @@ class HttpAssistantManagement private constructor(
             }, compactHttp)
         }
     }
+    override suspend fun assistantLauncherList(machineId: String): AssistantLaunchers {
+        require(machineId.isNotBlank())
+        return JsonCodec.decodeFromJsonElement(request("GET", listOf("api", "v1", "machines", machineId, "launchers"),
+            query = mapOf("purpose" to "assistant")))
+    }
+    override suspend fun setModelPick(session: SessionKey, pick: persona.core.contracts.ModelPick): persona.core.contracts.ModelPick {
+        require(session.sessionId.isNotBlank() && pick.launcher.isNotBlank())
+        val answer = assistant("PUT", "conversations", session.sessionId, "model", body = buildJsonObject {
+            put("launcher", pick.launcher)
+            pick.model?.takeIf(String::isNotBlank)?.let { put("model", it) }
+            pick.effort?.takeIf(String::isNotBlank)?.let { put("effort", it) }
+            if (session.machineId.isNotBlank()) put("machine_id", session.machineId)
+        })
+        return (answer["model_pick"] as? JsonObject)?.let { JsonCodec.decodeFromJsonElement<persona.core.contracts.ModelPick>(it) } ?: pick
+    }
+    override suspend fun clearModelPick(session: SessionKey) {
+        require(session.sessionId.isNotBlank())
+        assistant("DELETE", "conversations", session.sessionId, "model")
+    }
     override suspend fun archiveConversation(session: SessionKey) {
         require(session.sessionId.isNotBlank())
         assistant("POST", "conversations", session.sessionId, "archive", body = buildJsonObject { })
+    }
+    override suspend fun unarchiveConversation(session: SessionKey) {
+        require(session.sessionId.isNotBlank())
+        assistant("POST", "conversations", session.sessionId, "unarchive", body = buildJsonObject { })
+    }
+    override suspend fun archivedConversations(): List<Session> {
+        val out = request("GET", listOf("api", "v1", "assistant"), query = mapOf("archived" to "1"))
+        val machine = (out["machine_id"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        return out.list<Session>("conversations").filter { it.archived && it.space.isNullOrBlank() }
+            .map { it.copy(machineId = it.machineId.ifEmpty { machine }) }
+            .sortedByDescending { it.updated }
+    }
+    override suspend fun renameConversation(session: SessionKey, title: String) {
+        require(session.machineId.isNotBlank() && session.sessionId.isNotBlank() && title.isNotBlank())
+        request("POST", listOf("api", "v1", "sessions", session.machineId, session.sessionId, "rename"),
+            buildJsonObject { put("title", title) })
     }
     override suspend fun makeDirection(session: SessionKey) {
         require(session.sessionId.isNotBlank())
@@ -121,6 +169,11 @@ class HttpAssistantManagement private constructor(
         val out = refusals { request("POST", listOf("api", "v1", "assistant", "main", "new"), body, compactHttp) }
         return NewMainResult((out["archived"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
             (out["carried"] as? JsonPrimitive)?.booleanOrNull == true)
+    }
+    override suspend fun clearMainConversation(expect: String?): String {
+        val body = buildJsonObject { expect?.takeIf(String::isNotBlank)?.let { put("expect", it) } }
+        val out = refusals { request("POST", listOf("api", "v1", "assistant", "main", "clear"), body, compactHttp) }
+        return (out["archived"] as? JsonPrimitive)?.contentOrNull.orEmpty()
     }
     /** A 409 with a code is the hub refusing the action for a reason it words itself ("Answering", "Main chat already changed"…). */
     private inline fun <T> refusals(block: () -> T): T = try { block() } catch (failure: HubFailure) {

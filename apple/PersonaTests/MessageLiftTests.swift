@@ -11,8 +11,9 @@ struct MessageLiftTests {
     private let bounds = CGRect(x: 0, y: 60, width: 390, height: 700)
     private let bar = CGSize(width: 302, height: 62)
 
-    private func place(_ message: CGRect, press: CGFloat = 10, trailing: Bool = false) -> LiftLayout.Placement {
-        LiftLayout.place(message: message, press: press, bar: bar, bounds: bounds, margin: 8, gap: 8, trailing: trailing)
+    private func place(_ message: CGRect, press: CGFloat = 10, trailing: Bool = false, part: CGFloat? = nil) -> LiftLayout.Placement {
+        LiftLayout.place(message: message, press: press, bar: bar, bounds: bounds, margin: 8, gap: 8, trailing: trailing, part: part,
+                         pressInSight: 44)
     }
 
     @Test func aShortMessageStaysWhereItIsWithTheBarUnderIt() {
@@ -54,6 +55,45 @@ struct MessageLiftTests {
         #expect(end.offset + end.preview.height == 2400)
     }
 
+    /// A long answer drawn in parts (#4970), pressed in one of them (#5221): all of it is lifted. Taller than the room
+    /// beside the bar, it shows from the pressed part's start to the screen's edge (here the room is 614 tall, from 68
+    /// with the bar under it, or from 138 with the bar above).
+    @Test func aMessageInPartsShowsFromThePressedPart() {
+        // 3000 tall, its top far above the screen; the pressed part starts 1000 into it, on screen at 360.
+        let message = CGRect(x: 16, y: -640, width: 358, height: 3000)
+        let p = place(message, press: 1200, part: 1000)
+        #expect(p.preview.height == 614)
+        #expect(p.offset == 1000, "it opens at the pressed part")
+        #expect(p.preview.minY == 138 && !p.below && p.bar.maxY == 130, "moved up just enough for the bar above it")
+    }
+
+    @Test func aMessageInPartsPressedInAPartThatStartsAboveTheScreenStaysWhereItIs() {
+        let message = CGRect(x: 16, y: -640, width: 358, height: 3000)
+        // The part starts at 200, above the screen; the press is at 360 on screen.
+        let p = place(message, press: 1000, part: 200)
+        #expect(p.offset == 708 && p.preview.minY == 68, "what was at the screen's top stays there")
+        #expect(p.below)
+        #expect(p.preview.minY + 1000 - p.offset == 360, "the pressed line has not moved")
+        // Pressed low, where the bar goes: the copy moves up for the press to stay in sight, 44 above the edge.
+        let low = place(message, press: 1380, part: 200)
+        #expect(low.preview.minY + 1380 - low.offset == low.preview.maxY - 44)
+    }
+
+    @Test func aMessageInPartsThatFitsIsLiftedWhole() {
+        // 500 tall, starting above the screen: all of it, from its first line, moved down onto the screen.
+        let p = place(CGRect(x: 16, y: -200, width: 358, height: 500), press: 350, part: 300)
+        #expect(p.offset == 0 && p.preview.height == 500)
+        #expect(p.preview.minY == 68 && p.below)
+    }
+
+    @Test func aMessageInPartsPressedInItsLastPartShowsItsEnd() {
+        // Its last part starts 2800 into it, on screen at 500: the last 614 points show, that part's start nearly in place.
+        let message = CGRect(x: 16, y: -2300, width: 358, height: 3000)
+        let p = place(message, press: 2900, part: 2800)
+        #expect(p.offset + p.preview.height == 3000)
+        #expect(p.preview.minY == 68 && p.below)
+    }
+
     @Test func theBarStaysInsideTheScreenSideways() {
         let p = place(CGRect(x: 300, y: 300, width: 80, height: 40))
         #expect(p.bar.maxX <= bounds.maxX - 8)
@@ -75,6 +115,32 @@ struct MessageLiftTests {
         #expect(speed(30, 90) == 0)
         #expect(speed(0, 90) == -900)
         #expect(speed(10, 0) == 0, "nothing shown, nothing to scroll")
+    }
+
+    /// A finger that goes down on a selection's handle drags that end (#5982): since iOS 27 the selection changes only
+    /// once the finger lifts, so the handle is told by where the finger went down, the nearer knob within reach.
+    @Test func aFingerOnAHandleDragsThatEnd() {
+        let start = CGRect(x: 40, y: 100, width: 300, height: 22), end = CGRect(x: 0, y: 400, width: 120, height: 22)
+        func handle(_ x: CGFloat, _ y: CGFloat) -> LiftLayout.End? {
+            LiftLayout.handle(at: CGPoint(x: x, y: y), start: start, end: end, reach: 44)
+        }
+        #expect(handle(119, 426) == .end, "under the end's last word")
+        #expect(handle(40, 96) == .start, "over the start's first word")
+        #expect(handle(200, 250) == nil, "on the words between: no handle")
+        #expect(handle(120, 470) == nil, "past reach")
+        // The two knobs close together (a short selection): the nearer.
+        let near = CGRect(x: 60, y: 100, width: 40, height: 22)
+        #expect(LiftLayout.handle(at: CGPoint(x: 64, y: 104), start: near, end: near, reach: 44) == .start)
+        #expect(LiftLayout.handle(at: CGPoint(x: 98, y: 120), start: near, end: near, reach: 44) == .end)
+        #expect(LiftLayout.handle(at: CGPoint(x: 64, y: 104), start: nil, end: nil, reach: 44) == nil, "no selection")
+    }
+
+    /// A handle touched at an edge scrolls only once it has moved: touching it is no drag (#5982).
+    @Test func aHandleScrollsOnlyOnceItMoved() {
+        let down = CGPoint(x: 100, y: 700)
+        #expect(!LiftLayout.moved(down, from: down))
+        #expect(!LiftLayout.moved(CGPoint(x: 103, y: 704), from: down), "a finger's jitter")
+        #expect(LiftLayout.moved(CGPoint(x: 100, y: 690), from: down))
     }
 
     /// The text view over selected words puts its lines on the chat's (#3188): each on the nearest row ahead, a line
@@ -146,5 +212,44 @@ struct MessageLiftTests {
         let out = LiftLayout.follow([WordBreaks(length: 9, at: [4])], paragraphs: [NSRange(location: 0, length: 10)])
         #expect(out.held.isEmpty)
         #expect(out.at.isEmpty)
+    }
+}
+
+/// A lifted long answer drawn in parts, its words selected (#5291): the parts laid out are found by their boxes, and
+/// the text view's lines in each start on that part's first row, wherever the parts before it left them.
+@MainActor
+struct LiftSegmentsTests {
+    private func line(_ y: CGFloat, glyphs: Int = 10) -> WordLine { WordLine(glyphs: glyphs, origin: CGPoint(x: 0, y: y - 15), minX: 0, baseline: y, maxX: 100) }
+
+    @Test func eachPartLaidOutIsASegmentOfWhatIsInItsBox() {
+        var w = ShownWords()
+        w.lines = [line(20), line(44), line(1_020), line(1_044), line(1_068)]
+        w.texts = [WordBreaks(length: 30, top: 5), WordBreaks(length: 50, top: 1_005)]
+        w.tables = [CGRect(x: 0, y: 1_100, width: 300, height: 90)]
+        w.parts = [7: CGRect(x: 0, y: 1_000, width: 360, height: 300), 2: CGRect(x: 0, y: 0, width: 360, height: 60)]
+        let s = w.segments
+        #expect(s.map(\.part) == [2, 7])
+        #expect(s[0].rows == [20, 44] && s[1].rows == [1_020, 1_044, 1_068])
+        #expect(s[0].texts.map(\.length) == [30] && s[1].texts.map(\.length) == [50])
+        #expect(s[0].tables.isEmpty && s[1].tables == [CGSize(width: 300, height: 90)])
+        #expect(s[1].box == 1_000...1_300)
+    }
+
+    @Test func wordsAllLaidOutAreOneSegment() {
+        var w = ShownWords()
+        w.lines = [line(20), line(44)]
+        w.tables = [CGRect(x: 0, y: 60, width: 200, height: 40)]
+        let s = w.segments
+        #expect(s.count == 1 && s[0].part == nil && s[0].box == nil)
+        #expect(s[0].rows == [20, 44] && s[0].tables == [CGSize(width: 200, height: 40)])
+    }
+
+    @Test func aPartsLinesStartOnItsFirstRowFromWhereverTheyWere() {
+        // The text view laid the parts before this one out shorter than the chat's lazy stack holds them: its lines are
+        // 900 points above their rows, far past the reach of the nearest row.
+        let lines = [LiftLayout.SnapLine(baseline: 120), LiftLayout.SnapLine(baseline: 144), LiftLayout.SnapLine(baseline: 168)]
+        let rows: [CGFloat] = [1_020, 1_044, 1_070]
+        #expect(LiftLayout.snap(lines, to: rows, reach: 10).map(\.at) == [120, 144, 168], "unmoved, they find no rows")
+        #expect(LiftLayout.snap(lines, to: rows, reach: 10, moved: 900).map(\.at) == rows)
     }
 }

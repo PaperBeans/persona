@@ -55,6 +55,7 @@ type inboxBook struct {
 	builtin    map[string]bool
 	kinds      map[string]string // "<connector>/<kind>" → words
 	names      map[string]string
+	vias       map[string]inboxVia // a subscription's, by its id (#6222)
 
 	// admitting is one triage of a round's new plugin items at a time (admitInbox): a round meanwhile does not start
 	// them again.
@@ -67,6 +68,9 @@ type inboxBook struct {
 	readErrs     map[string]string
 	mailReadErrs map[string]assistantwire.InboxMailFailed
 	grouping     inboxGrouping // the batches being related to events (inbox_group.go)
+	// mailAsked: when the mail of an open mail item off its account's page was last looked up (inbox_mail_off_page.go),
+	// by item id, under mu: the lookups take the longest unasked first. Memory only.
+	mailAsked map[string]time.Time
 
 	cfgMu sync.Mutex
 	cfg   assistantwire.InboxConfig // the hub's (InboxConfigMethod), as last read
@@ -77,10 +81,19 @@ type inboxBook struct {
 	listMemo inboxListMemo // each listed item's JSON for GET /api/v1/inbox, under mu (inbox_list_memo.go)
 }
 
+// inboxVia is what the last round said a subscription reads (the connector's id and the source's name), for the AI
+// twin, and the knowledge-base chat of each of its rows' threads while its knowledge base is on (#6222). Memory only:
+// every round says it again before any item of it is handled.
+type inboxVia struct {
+	connector, source string
+	chats             map[string]string
+}
+
 func (b *inboxBook) init() {
 	b.once.Do(func() {
 		b.items = map[string]*InboxItem{}
 		b.extensions, b.builtin, b.kinds, b.names = map[string]bool{}, map[string]bool{}, map[string]string{}, map[string]string{}
+		b.vias = map[string]inboxVia{}
 	})
 }
 

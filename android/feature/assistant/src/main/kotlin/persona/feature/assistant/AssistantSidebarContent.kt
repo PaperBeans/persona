@@ -41,6 +41,9 @@ fun AssistantSidebarContent(
     pages: List<NavItem>,
     onPage: (String) -> Unit,
     onRetired: (SessionKey) -> Unit,
+    /** A to-do's card / an Agent's session, from the Directions tree (#4352); null: those rows only fold. */
+    onOpenTodo: ((String) -> Unit)? = null,
+    onOpenAgent: ((SessionKey) -> Unit)? = null,
     switcher: AssistantSwitcherSlot? = null,
 ) {
     val choice by AssistantManagerChoice.current.collectAsStateWithLifecycle()
@@ -57,9 +60,14 @@ fun AssistantSidebarContent(
     var query by rememberSaveable(choice.hubId, choice.shown) { mutableStateOf("") }
     var ended by remember(management) { mutableStateOf(emptySet<SessionKey>()) }
     var archived by remember(management) { mutableStateOf(emptySet<SessionKey>()) }
+    // Rename… and Archived (N) (iOS `AssistantSidebar`): titles given here and the archived conversations.
+    val history = rememberConversationHistory(management?.takeUnless { demo }, repository)
+    val openKeys = remember(received.conversations) { openKeys(received.conversations) }
     var ending by remember { mutableStateOf<Pair<Session, AssistantManagement>?>(null) }
     var busy by remember { mutableStateOf(false) }
     var leaderBusy by remember { mutableStateOf(false) }
+    // The 设为常驻 / 取消常驻 menu asks before the hub call (#6214).
+    var leaderConfirm by remember { mutableStateOf<Session?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     fun failed(error: Exception) {
         failure = operationFeedback(error).text.resolve(resources)
@@ -80,10 +88,10 @@ fun AssistantSidebarContent(
             finally { leaderBusy = false }
         }
     }
-    val groups = remember(received, query, ended, archived, words) {
-        conversationGroups(received.copy(conversations = received.conversations.filter { it.key !in archived }.map {
+    val groups = remember(received, query, ended, archived, words, history.titles) {
+        conversationGroups(received.copy(conversations = history.titled(received.conversations.filter { it.key !in archived }.map {
             if (it.key in ended) it.copy(status = "offline", state = "offline") else it
-        }), query, words)
+        })), query, words)
     }
     Column(Modifier.fillMaxHeight()) {
         failure?.let { JNotice(it, status = Status.NeedsYou) }
@@ -99,7 +107,6 @@ fun AssistantSidebarContent(
                     AssistantInfo.Launcher, AssistantInfo.Settings -> onAction(AssistantSidebarAction.Launcher)
                 } },
                 onNew = { onAction(AssistantSidebarAction.NewConversation) },
-                onHome = { onAction(AssistantSidebarAction.Home) },
                 // The health space (docs/assistant/health.md): the Assistant page opens its newest chat or its new-chat page.
                 onHealth = if (demo) null else ({ onAction(AssistantSidebarAction.Health) }),
                 onSettings = onSettings,
@@ -120,12 +127,20 @@ fun AssistantSidebarContent(
                         catch (error: Exception) { archived = archived - session.key; failed(error) }
                     }
                 } },
-                onLeader = if (management != null && !demo) ({ session: Session -> setLeader(session) }) else null,
+                onLeader = if (management != null && !demo) ({ session: Session ->
+                    // Open the confirmation first; setLeader runs only on the second choice.
+                    leaderConfirm = session
+                }) else null,
+                onRename = if (management != null && !demo) ({ session: Session -> history.renaming = session }) else null,
+                onDiagnostics = { copy(conversationDiagnostics(it), resources.getString(R.string.assistant_diagnostics_copied)) },
+                archivedCount = history.shownArchived(openKeys).size, onArchived = { history.archivedOpen = true },
                 onTodos = onTodos, todoCount = todoCount, showTodos = showTodos,
                 settingsCount = settingsCount, settingsDot = settingsDot, settingsBadge = settingsBadge,
-                pages = pages, onPage = onPage, switcher = switcher)
+                pages = pages, onPage = onPage, onOpenTodo = onOpenTodo, onOpenAgent = onOpenAgent, switcher = switcher)
         }
     }
+    ConversationHistoryDialogs(history, received.conversations, operationScope, onOpen = onOpen,
+        notice = { feedback?.notice(it, persona.core.designsystem.FeedbackStyle.Success) }, failure = ::failed)
     ending?.let { (session, target) ->
         JDialog(onDismiss = { if (!busy) ending = null }, title = stringResource(R.string.assistant_end_title),
             text = stringResource(R.string.assistant_end_text, session.conversationTitle(words)),
@@ -144,5 +159,20 @@ fun AssistantSidebarContent(
                     finally { busy = false }
                 }
             }, dismiss = stringResource(R.string.assistant_cancel) to { if (!busy) ending = null })
+    }
+    leaderConfirm?.let { session ->
+        val leader = session.sessionId in received.leaders
+        val title = session.conversationTitle(words)
+        JDialog(onDismiss = { if (!leaderBusy) leaderConfirm = null },
+            title = stringResource(if (leader) R.string.assistant_end_leader_title else R.string.assistant_make_leader_title),
+            text = if (leader) stringResource(R.string.assistant_end_leader_text, title)
+                   else stringResource(R.string.assistant_make_leader_text),
+            // Reversible (pin again any time), so the confirm is the ordinary primary button, not a destructive one.
+            confirmEnabled = !leaderBusy,
+            confirm = stringResource(if (leader) R.string.assistant_end_leader else R.string.assistant_make_leader) to {
+                // setLeader owns the busy flag, the hub call and the failure notice.
+                setLeader(session)
+                leaderConfirm = null
+            }, dismiss = stringResource(R.string.assistant_cancel) to { if (!leaderBusy) leaderConfirm = null })
     }
 }

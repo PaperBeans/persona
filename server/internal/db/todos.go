@@ -47,6 +47,9 @@ type TodoRow struct {
 	Project string `json:"project"`
 	// Kind is "" for a to-do or a task, or KindConcern (#3561). Set when it is made, never changed.
 	Kind string `json:"kind"`
+	// SeenAt is when the owner last looked at it in Just finished (#5707): Got it, or opening it; nil when never, or
+	// after an Undo. Only SeeTodo writes it.
+	SeenAt *time.Time `json:"seen_at"`
 }
 
 // KindConcern is a todo for something the owner raised in the main conversation and wants an answer to (#3561,
@@ -100,12 +103,13 @@ type TodoAgentRow struct {
 }
 
 const todoColumns = `id, title, notes, done_at, created_at, updated_at, origin, plan_id, start_error, done_by, done_reason, reopened_at, quiet,
-	due_at, due_date, remind_at, reminded_at, priority, project, kind`
+	due_at, due_date, remind_at, reminded_at, priority, project, kind, seen_at`
 
 // todoDest is where a row of todoColumns is scanned to.
 func todoDest(r *TodoRow) []any {
 	return []any{&r.ID, &r.Title, &r.Notes, &r.DoneAt, &r.CreatedAt, &r.UpdatedAt, &r.Origin, &r.PlanID, &r.StartError, &r.DoneBy,
-		&r.DoneReason, &r.ReopenedAt, &r.Quiet, &r.DueAt, &r.DueDate, &r.RemindAt, &r.RemindedAt, &r.Priority, &r.Project, &r.Kind}
+		&r.DoneReason, &r.ReopenedAt, &r.Quiet, &r.DueAt, &r.DueDate, &r.RemindAt, &r.RemindedAt, &r.Priority, &r.Project, &r.Kind,
+		&r.SeenAt}
 }
 
 // ListTodos returns all todos ordered by created_at DESC.
@@ -297,6 +301,21 @@ func (d *DB) EditTodo(ctx context.Context, id string, e TodoEdit, updatedAt time
 		return nil, err
 	}
 	return &updated, nil
+}
+
+// SeeTodo sets when the owner looked at todo id (#5707, docs/assistant/todo-status-sop.md "Seen"); nil clears it (Undo).
+// It is not an edit: updated_at stays, so being seen never counts as activity.
+func (d *DB) SeeTodo(ctx context.Context, id string, at *time.Time) (*TodoRow, error) {
+	var r TodoRow
+	err := d.pool.QueryRow(ctx, `UPDATE todos SET seen_at = $2 WHERE id = $1 RETURNING `+todoColumns, id, at).
+		Scan(todoDest(&r)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrTodoNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
 }
 
 // ClaimTodoReminder marks todo id reminded at now, but only while its reminder is still the one at remindAt, not yet
@@ -784,6 +803,30 @@ func (d *DB) linkTodoAgentWithSource(ctx context.Context, todoID, machineID, ses
 		return nil, err
 	}
 	return releasedTodoIDs, nil
+}
+
+// ReleaseTodoAgent lets go of an agent still linked to a todo (released_at only: it stays in the todo's history, unlike
+// UnlinkTodoAgent's dismissal). A link already let go is left as it is. A new agent taking over the todo after this one
+// stopped does it (#6427).
+func (d *DB) ReleaseTodoAgent(ctx context.Context, todoID, machineID, sessionID string, at time.Time) error {
+	conn, err := d.pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if _, err := lockTodoAgentMembership(ctx, tx, todoID, machineID, sessionID); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE todo_agents SET released_at = $4
+			WHERE todo_id = $1 AND machine_id = $2 AND session_id = $3 AND released_at IS NULL`,
+			todoID, machineID, sessionID, at.UTC())
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE todos SET updated_at = $2 WHERE id = $1`, todoID, at.UTC())
+		return err
+	})
 }
 
 // UnlinkTodoAgent marks the agent as released and dismissed on a todo (soft unlink, #762).

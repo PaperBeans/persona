@@ -399,6 +399,14 @@ describe("recordingView", () => {
     expect(v.duration).toBe(durationLabel(3733));
     expect(v.device).not.toBe(recordingView("recordings", { device: "phone" }, [])!.device);
   });
+  it("hides Persona's echo, as the phone does (#5905)", () => {
+    const v = recordingView("recordings", { complete: true }, [
+      { start: 2, end: 9, text: "Who owns the regression test?" },
+      { start: 10, end: 17, text: "You kept the cap.", echo: true },
+      { start: 10.5, end: 17.8, text: "Bo owns the regression test." },
+    ])!;
+    expect(v.lines.map((l) => l.text)).toEqual(["Who owns the regression test?", "Bo owns the regression test."]);
+  });
   it("falls back to offsets without a start", () => {
     expect(recordingView("recordings", { complete: true }, [{ start: 3723, end: 3730, text: "x" }])!.lines[0].clock).toBe("1:02:03");
   });

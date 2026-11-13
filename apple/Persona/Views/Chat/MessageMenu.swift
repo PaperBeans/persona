@@ -46,6 +46,8 @@ final class MessageMenu {
     /// session never offers it, else why it is off now ("" when on).
     @ObservationIgnored var rewind: ((String, String, Rewind.Restore) -> Void)?
     @ObservationIgnored var rewindBlock: () -> String? = { nil }
+    /// What the chat's session offers once it is tapped (#6294, `Rewind.offer`): its own lines, the files too.
+    @ObservationIgnored var rewindOffer: () -> Rewind.Offer = { .init() }
     /// The message of yours whose Rewind was tapped: the chat asks what to restore (a dialog of the page, like `more`).
     var rewinding: RewindAsk?
     /// The reply whose ⋯ was tapped: the chat shows its menu (a dialog of the page, not of the bar, which the list's
@@ -100,7 +102,9 @@ final class MessageMenu {
         }
     }
 
-    /// Selects the lifted message's words where they are: the word at `point` (in the window), or all of them.
+    /// Selects the lifted message's words where they are: the word at `point` (in the window), or all of them. A
+    /// message drawn in parts stays as it is, its parts near the screen laid out (#5291): the text view over them holds
+    /// all of its words.
     func selectInPlace(at point: CGPoint?) {
         guard lift != nil else { return }
         Haptics.tap()
@@ -259,8 +263,13 @@ struct LongPressAt: UIGestureRecognizerRepresentable {
 extension View {
     /// The pressable part of a message (the bubble / the text). preview: the same part again, lifted over the dimmed chat
     /// when pressed; card: it is words on the page with nothing around them (an answer), lifted on a card of its own.
-    func messageLongPress<P: View>(id: String, card: Bool = false, @ViewBuilder preview: @escaping () -> P) -> some View {
-        modifier(MessageLongPress(id: id, card: card, preview: preview))
+    /// part: this is that row of the rows a message is drawn in (a long answer, #4970), and preview draws all of the
+    /// message, this part marked with `liftPressedPart` and identified by this number (`MessageLift.part`).
+    /// opens: the press opens what it pressed instead (your own long message folded, #5676), when it says so; nothing
+    /// is lifted then. Asked as the press begins.
+    func messageLongPress<P: View>(id: String, card: Bool = false, part: Int? = nil, opens: (() -> Bool)? = nil,
+                                   @ViewBuilder preview: @escaping () -> P) -> some View {
+        modifier(MessageLongPress(id: id, card: card, part: part, opens: opens, preview: preview))
     }
     /// The whole row of a message: hosts the action bar above the press point and lifts the row above its neighbours.
     /// pending: your message not in the transcript yet (`PendingBubble`, #6427): Copy, Select Text and Share only, no
@@ -295,6 +304,8 @@ private struct MessageLongPress<P: View>: ViewModifier {
     @Environment(\.messageBar) private var bar
     let id: String
     let card: Bool
+    let part: Int?
+    let opens: (() -> Bool)?
     let preview: () -> P
     /// Where the part is, kept without drawing anything again (it changes on every scrolled frame).
     @State private var place = LiftPlace()
@@ -311,6 +322,7 @@ private struct MessageLongPress<P: View>: ViewModifier {
                     LiftPlace.Frames(global: g.frame(in: .global), row: g.frame(in: .named(MessageMenu.row)))
                 } action: { place.frames = $0 }
                 .gesture(LongPressAt(changed: menu.pressChanged) { p in
+                    if let opens, opens() { return } // it opened (with its own tap of the haptics), no bar
                     Haptics.tap()
                     menu.anchor = p
                     capturing = true
@@ -345,10 +357,12 @@ private struct MessageLongPress<P: View>: ViewModifier {
         LiftLines.shared.lift = ""
         LiftLines.shared.select = ""
         #endif
+        // All of a message drawn in parts is as tall as it takes, at the part's width.
+        let offer = part != nil ? place.offer.map { ProposedViewSize(width: $0.width, height: nil) } : place.offer
         withAnimation(Theme.Motion.state) {
             menu.selected = id
             menu.lift = MessageLift(bar: bar, frame: f.global, press: press, preview: AnyView(shown), card: card,
-                                    offer: place.offer, environment: place.environment)
+                                    offer: offer, environment: place.environment, part: part)
         }
     }
 }
@@ -470,9 +484,19 @@ struct MessageActionBar: View {
     /// Only on this phone (`messageActionBar(delete:)`): Delete last, in the danger color.
     var delete: MessageBarDelete?
     var itemWidth: CGFloat = Self.item
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     static let height: CGFloat = 62
     static let item: CGFloat = 58
+    /// The bar's items stay at the default text size, as the system's tab bars and toolbars do, so every word that fits
+    /// there fits at every size up to the accessibility ones; a long press shows an item's name large (Large Content
+    /// Viewer, #5019).
+    static let barTypeSize: DynamicTypeSize = .large
+    /// At the accessibility sizes the actions are a list instead, one a row with its icon and whole name
+    /// (DESIGN_SYSTEM.md 1.2 rule 3), whose words grow up to this.
+    static let listTypeSize: DynamicTypeSize = .xxxLarge
+    /// The actions as a list (`listTypeSize`) rather than a bar; the page places it by its measured size.
+    static func stacks(_ size: DynamicTypeSize) -> Bool { size.isAccessibilitySize }
     static func width(isUser: Bool, more: Bool = false) -> CGFloat { width(count: (isUser ? 5 : 4) + (more ? 1 : 0)) }
     static func width(count: Int) -> CGFloat { item * CGFloat(count) + 12 }
     /// Each action's width when the bar is `width` wide.
@@ -483,9 +507,10 @@ struct MessageActionBar: View {
         return (isUser ? 5 : 4) + (forks(id: id, isUser: isUser, menu: menu) ? 1 : 0) + (rewinds(id: id, isUser: isUser, menu: menu) ? 1 : 0)
     }
     /// Your own message ends in Rewind when the chat's session is a Claude agent's and the message is a transcript line
-    /// of its own (`<uuid>#<n>`); while the session cannot, the dialog says why.
+    /// of its own (`<uuid>#<n>`), or the session's node declares rewind and the message is a line of its own (#6294);
+    /// while the session cannot, the dialog says why.
     static func rewinds(id: String, isUser: Bool, menu: MessageMenu) -> Bool {
-        isUser && menu.rewind != nil && menu.rewindBlock() != nil && Rewind.entry(of: id) != nil
+        isUser && menu.rewind != nil && menu.rewindBlock() != nil && Rewind.entry(of: id, anyLine: menu.rewindOffer().declared) != nil
     }
     /// Forward in Share's place (#3807): on iPhone and iPad, for a message in the transcript of a chat that forwards.
     static func forwards(menu: MessageMenu, pending: Bool) -> Bool {
@@ -503,75 +528,117 @@ struct MessageActionBar: View {
         return UUID(uuidString: String(line)) != nil
     }
 
+    /// One action: its word, its icon, and whether the bar closes after it. tint: the danger color for Delete; nil, the
+    /// primary ink.
+    private struct Item: Identifiable {
+        var title: String
+        var symbol: String
+        var closes = true
+        var tint: Color? = nil
+        var perform: () -> Void
+        var id: String { title }
+    }
+
+    private var items: [Item] {
+        var all = [Item(title: String(localized: "Copy [Message Menu 63d90d]"), symbol: Theme.Icon.copy) {
+            UIPasteboard.general.string = text
+            Haptics.success()
+        }]
+        // "Select Text", not "Select": next to Copy a bare Select reads as picking messages (WeChat's multi-select); the
+        // Japanese name keeps "text" too (#5019). On iOS it selects all of the lifted message's words where they are
+        // (#603); the Mac opens its window.
+        #if os(macOS)
+        all.append(Item(title: String(localized: "Select Text [Message Menu 4d8efc]"), symbol: Theme.Icon.select) {
+            menu.selecting = SelectableText(text: text, plain: isUser, msg: id, quotable: !pending)
+        })
+        #else
+        all.append(Item(title: String(localized: "Select Text [Message Menu 4d8efc]"), symbol: Theme.Icon.select, closes: false) {
+            menu.selectInPlace(at: nil)
+        })
+        #endif
+        if !pending {
+            all.append(Item(title: String(localized: "Quote"), symbol: "quote.opening") { menu.quote?(text, id, isUser, nil) })
+        }
+        if Self.forwards(menu: menu, pending: pending) {
+            all.append(Item(title: String(localized: "Forward [Message Menu]"), symbol: Theme.Icon.forwardMessage) {
+                menu.forward?(MessageBarInfo(id: id, text: text, isUser: isUser, date: date, pending: pending, from: from))
+            })
+        } else {
+            all.append(Item(title: String(localized: "Share"), symbol: Theme.Icon.share) {
+                menu.sharing = ShareMessage(text: text, isUser: isUser, source: menu.source(), date: date, agent: menu.agent())
+            })
+        }
+        if isUser && !pending {
+            all.append(Item(title: String(localized: "Edit [Message Menu 051836]"), symbol: Theme.Icon.edit) { menu.edit?(text) })
+        }
+        if Self.rewinds(id: id, isUser: isUser, menu: menu) {
+            all.append(Item(title: String(localized: "Rewind"), symbol: Theme.Icon.rewindChat) { menu.rewinding = RewindAsk(id: id, text: text) })
+        }
+        if Self.forks(id: id, isUser: isUser, menu: menu) {
+            all.append(Item(title: String(localized: "More"), symbol: Theme.Icon.more) { menu.more = id })
+        }
+        if let delete { // last, as a menu's destructive item is
+            all.append(Item(title: delete.title, symbol: Theme.Icon.delete, tint: Theme.danger, perform: delete.run))
+        }
+        return all
+    }
+
     var body: some View {
-        HStack(spacing: 0) {
-            action(String(localized: "Copy [Message Menu 63d90d]"), Theme.Icon.copy) {
-                UIPasteboard.general.string = text
-                Haptics.success()
-            }
-            // "Select Text", not "Select": next to Copy a bare Select reads as picking messages (WeChat's multi-select).
-            // On iOS it selects all of the lifted message's words where they are (#603); the Mac opens its window.
-            #if os(macOS)
-            action(String(localized: "Select Text [Message Menu 4d8efc]"), Theme.Icon.select) {
-                menu.selecting = SelectableText(text: text, plain: isUser, msg: id, quotable: !pending)
-            }
-            #else
-            action(String(localized: "Select Text [Message Menu 4d8efc]"), Theme.Icon.select, closes: false) {
-                menu.selectInPlace(at: nil)
-            }
-            #endif
-            if !pending {
-                action(String(localized: "Quote"), "quote.opening") { menu.quote?(text, id, isUser, nil) }
-            }
-            if Self.forwards(menu: menu, pending: pending) {
-                action(String(localized: "Forward [Message Menu]"), Theme.Icon.forwardMessage) {
-                    menu.forward?(MessageBarInfo(id: id, text: text, isUser: isUser, date: date, pending: pending, from: from))
+        Group {
+            if Self.stacks(typeSize) {
+                // As wide as its longest row, every row that wide.
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
+                        if i > 0 { Divider() }
+                        action(item)
+                    }
                 }
+                .fixedSize()
+                .dynamicTypeSize(...Self.listTypeSize)
             } else {
-                action(String(localized: "Share"), Theme.Icon.share) {
-                    menu.sharing = ShareMessage(text: text, isUser: isUser, source: menu.source(), date: date, agent: menu.agent())
-                }
-            }
-            if isUser && !pending {
-                action(String(localized: "Edit [Message Menu 051836]"), "pencil") { menu.edit?(text) }
-            }
-            if Self.rewinds(id: id, isUser: isUser, menu: menu) {
-                action(String(localized: "Rewind"), Theme.Icon.rewindChat) { menu.rewinding = RewindAsk(id: id, text: text) }
-            }
-            if Self.forks(id: id, isUser: isUser, menu: menu) {
-                action(String(localized: "More"), Theme.Icon.more) { menu.more = id }
-            }
-            if let delete { // last, as a menu's destructive item is
-                action(delete.title, Theme.Icon.delete, tint: Theme.danger, perform: delete.run)
+                HStack(spacing: 0) { ForEach(items) { action($0) } }
+                    .padding(.horizontal, Theme.Space.sm)
+                    .frame(height: Self.height)
+                    .dynamicTypeSize(...Self.barTypeSize)
             }
         }
-        .padding(.horizontal, Theme.Space.sm)
-        .frame(height: Self.height)
         .background(Theme.Lift.bar, in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
         // Its edge over the dimmed chat.
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).stroke(Theme.cardStroke, lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
     }
 
-    /// tint: the danger color for Delete; nil, the primary ink.
-    private func action(_ title: String, _ symbol: String, closes: Bool = true, tint: Color? = nil,
-                        perform: @escaping () -> Void) -> some View {
+    private func action(_ item: Item) -> some View {
         Button {
-            perform()
-            if closes { menu.close() }
-        } label: { label(title, symbol, tint: tint) }
+            item.perform()
+            if item.closes { menu.close() }
+        } label: { label(item) }
         .buttonStyle(.plain)
-        .accessibilityLabel(title) // its word only, not the symbol's own name too
+        .accessibilityLabel(item.title) // its word only, not the symbol's own name too
+        .accessibilityShowsLargeContentViewer { ThemedIcon(item.symbol); Text(item.title) }
     }
 
-    private func label(_ title: String, _ symbol: String, tint: Color?) -> some View {
-        VStack(spacing: Theme.Space.xs) {
-            // Symbols differ in height: a fixed box keeps every label on one line.
-            ThemedIcon(symbol).font(Theme.Font.heading).dynamicTypeSize(...DynamicTypeSize.xxLarge).scaledFrame(height: Theme.Size.iconS)
-            Text(title).font(Theme.Font.label).lineLimit(1).minimumScaleFactor(0.8) // Select Text on a narrow bar
+    @ViewBuilder private func label(_ item: Item) -> some View {
+        Group {
+            if Self.stacks(typeSize) {
+                // A row: the icon in a fixed box, so the names line up, then the whole name.
+                HStack(spacing: Theme.Space.m) {
+                    ThemedIcon(item.symbol).font(Theme.Font.heading).scaledFrame(width: Theme.Size.iconS, height: Theme.Size.iconS)
+                    Text(item.title).font(Theme.Font.body).lineLimit(1)
+                }
+                .padding(.horizontal, Theme.Space.l)
+                .scaledFrame(minHeight: Theme.Size.tapTarget)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: Theme.Space.xs) {
+                    // Symbols differ in height: a fixed box keeps every label on one line.
+                    ThemedIcon(item.symbol).font(Theme.Font.heading).scaledFrame(height: Theme.Size.iconS)
+                    Text(item.title).font(Theme.Font.label).lineLimit(1).minimumScaleFactor(0.8) // Select Text on a narrow bar
+                }
+                .frame(width: itemWidth, height: Self.height)
+            }
         }
-        .foregroundStyle(tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(HierarchicalShapeStyle.primary))
-        .frame(width: itemWidth, height: Self.height)
+        .foregroundStyle(item.tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(HierarchicalShapeStyle.primary))
         .contentShape(.rect)
     }
 }

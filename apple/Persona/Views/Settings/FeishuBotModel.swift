@@ -210,8 +210,14 @@ extension APIClient {
     var appSecret = ""
     var domain = "feishu"
     @ObservationIgnored private let deps: Deps
+    @ObservationIgnored private var capturedAPI: APIClient?
 
     init(deps: Deps = .live) { self.deps = deps }
+
+    private func scopedAPI() -> APIClient? {
+        if capturedAPI == nil { capturedAPI = deps.api()?.currentAssistantSettings() }
+        return capturedAPI
+    }
 
     var features: FeishuBotStatus.Features {
         status?.features ?? .init(main: true, cards: true, allCards: false, pushes: false, sync: false, agents: false)
@@ -254,7 +260,7 @@ extension APIClient {
     }
 
     func load() async {
-        guard let api = deps.api() else { return }
+        guard let api = scopedAPI() else { return }
         loading = true
         defer { loading = false }
         do {
@@ -277,7 +283,7 @@ extension APIClient {
 
     @discardableResult
     private func run(_ what: String, _ call: (APIClient) async throws -> FeishuBotStatus) async -> Bool {
-        guard let api = deps.api() else { return false }
+        guard let api = scopedAPI() else { return false }
         saving = true
         defer { saving = false }
         do {
@@ -332,7 +338,7 @@ extension APIClient {
     }
 
     func test() async {
-        guard let api = deps.api() else { return }
+        guard let api = scopedAPI() else { return }
         saving = true
         defer { saving = false }
         do {

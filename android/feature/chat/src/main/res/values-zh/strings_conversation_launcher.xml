@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_conversation_launcher_title">后续消息使用</string>
+    <string name="chat_conversation_launcher_default">使用默认设置</string>
+    <string name="chat_conversation_launcher_default_named">默认：%1$s</string>
+    <string name="chat_conversation_launcher_section">启动器</string>
+    <string name="chat_conversation_launchers_loading">正在读取启动器…</string>
+    <string name="chat_conversation_launchers_failed">读不到启动器</string>
+    <string name="chat_conversation_launchers_none">这台电脑上没有能运行 Persona 的启动器</string>
+    <string name="chat_conversation_model_section">模型</string>
+    <string name="chat_conversation_model_default">默认模型</string>
+    <string name="chat_conversation_model_selected">已选模型</string>
+    <string name="chat_conversation_models_loading">正在读取模型…</string>
+    <string name="chat_conversation_models_failed">读不到模型</string>
+    <string name="chat_conversation_models_unavailable">这个 Hub 没有模型列表</string>
+    <string name="chat_conversation_launcher_note">选择从下一次发送起生效，直到你更改。助手设置不变。</string>
+</resources>
