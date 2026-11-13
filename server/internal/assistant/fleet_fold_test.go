@@ -1,6 +1,10 @@
 package assistant
 
 import (
+	"fmt"
+	"math/rand/v2"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/proto"
@@ -416,5 +420,109 @@ func TestPublishedListFoldsTabTeam(t *testing.T) {
 	})
 	if l.FoldedState() != proto.StateWorking {
 		t.Fatalf("the lead shows %s", l.FoldedState())
+	}
+}
+
+// foldSessions skips its walk for a list where no row can fold (mayFold) and says what the walk says of it: nothing.
+// An orphan child (its parent is not listed) makes the walk run and folds nothing, so the fold of every list, with the
+// orphan or without, is the same, whether a list is walked or not.
+func TestFoldSessionsWithoutWalk(t *testing.T) {
+	orphan := foldRow("orphan", proto.StateWorking, func(s *proto.Session) { s.ParentSessionID = "not-listed" })
+	same := func(t *testing.T, name string, list []proto.Session, hidden map[string]bool) sessionFold {
+		t.Helper()
+		got := foldSessions(list, hidden)
+		if walked := foldSessions(append(slices.Clone(list), orphan), hidden); !reflect.DeepEqual(got, walked) {
+			t.Fatalf("%s: folded\n%+v\nwalked\n%+v", name, got, walked)
+		}
+		return got
+	}
+	for _, c := range []struct {
+		name   string
+		list   []proto.Session
+		hidden map[string]bool
+		may    bool
+		folds  bool
+	}{
+		{name: "no tabs, no children", list: []proto.Session{foldRow("a", proto.StateWorking, nil), foldRow("b", proto.StateIdle, nil)}},
+		{name: "one pane a tab", list: []proto.Session{
+			foldRow("a", proto.StateWorking, inTab("w1", "t1", 0)),
+			foldRow("b", proto.StateIdle, inTab("w1", "t2", 0)),
+			foldRow("c", proto.StateIdle, inTab("w2", "t1", 0)),
+		}},
+		{name: "a lead and a worker in other tabs", may: true, list: []proto.Session{
+			foldRow("a", proto.StateWorking, inTab("w1", "t1", 0)),
+			foldRow("b", proto.StateIdle, inTab("w1", "t2", 1)),
+		}},
+		{name: "a squad", may: true, folds: true, list: []proto.Session{
+			foldRow("lead", proto.StateIdle, inTab("w1", "t1", 0)),
+			foldRow("worker", proto.StateWorking, inTab("w1", "t1", 1)),
+		}},
+		{name: "a squad without a pane index", list: []proto.Session{
+			foldRow("a", proto.StateIdle, inTab("w1", "t1", -1)),
+			foldRow("b", proto.StateWorking, inTab("w1", "t1", -1)),
+		}},
+		{name: "a squad whose lead is offline", list: []proto.Session{
+			foldRow("lead", proto.StateOffline, inTab("w1", "t1", 0)),
+			foldRow("worker", proto.StateWorking, inTab("w1", "t1", 1)),
+		}},
+		{name: "a squad whose lead is hidden", hidden: map[string]bool{"lead": true}, list: []proto.Session{
+			foldRow("lead", proto.StateIdle, inTab("w1", "t1", 0)),
+			foldRow("worker", proto.StateWorking, inTab("w1", "t1", 1)),
+		}},
+		{name: "a child", may: true, folds: true, list: []proto.Session{
+			foldRow("parent", proto.StateIdle, nil),
+			foldRow("kid", proto.StateWorking, func(s *proto.Session) { s.ParentSessionID = "parent" }),
+		}},
+		{name: "an archived child", list: []proto.Session{
+			foldRow("parent", proto.StateIdle, nil),
+			foldRow("kid", proto.StateWorking, func(s *proto.Session) { s.ParentSessionID, s.Archived = "parent", true }),
+		}},
+	} {
+		listed := func(s *proto.Session) bool { return (!s.Archived || s.Assistant) && !c.hidden[s.SessionID] }
+		if may := mayFold(c.list, listed); may != c.may {
+			t.Errorf("%s: mayFold %v, want %v", c.name, may, c.may)
+		}
+		if f := same(t, c.name, c.list, c.hidden); (f.under != nil) != c.folds {
+			t.Errorf("%s: folded %+v", c.name, f)
+		}
+	}
+
+	// Lists of every shape: ids listed twice, tabs, panes, children, archived, offline, the assistant's, hidden rows.
+	r := rand.New(rand.NewPCG(5180, 5120))
+	ids := []string{"a", "b", "c", "d", "e", "f"}
+	states := []string{proto.StateWorking, proto.StateIdle, proto.StateNeedsYou, proto.StateOffline}
+	pick := func(of []string) string { return of[r.IntN(len(of))] }
+	var walks, skips int
+	for n := range 4000 {
+		list := make([]proto.Session, r.IntN(7))
+		for i := range list {
+			s := proto.Session{SessionID: pick(ids), State: pick(states), Archived: r.IntN(8) == 0, Assistant: r.IntN(10) == 0}
+			if r.IntN(3) > 0 {
+				s.SpaceKind, s.SpaceID, s.SlotID = "herdr", pick([]string{"w1", "w2"}), pick([]string{"t1", "t2"})
+				if p := r.IntN(4) - 1; p >= 0 {
+					s.PaneIndex = &p
+				}
+			}
+			switch r.IntN(6) {
+			case 0:
+				s.ParentSessionID = pick(append(ids, "gone"))
+			case 1:
+				s.IsSubagent, s.RootSessionID = true, pick(ids)
+			}
+			list[i] = s
+		}
+		var hidden map[string]bool
+		if r.IntN(4) == 0 {
+			hidden = map[string]bool{pick(ids): true}
+		}
+		if mayFold(list, func(s *proto.Session) bool { return (!s.Archived || s.Assistant) && !hidden[s.SessionID] }) {
+			walks++
+		} else {
+			skips++
+		}
+		same(t, fmt.Sprintf("list %d %+v hidden %v", n, list, hidden), list, hidden)
+	}
+	if walks < 500 || skips < 500 {
+		t.Fatalf("%d lists walked, %d not: the lists do not try both ways", walks, skips)
 	}
 }

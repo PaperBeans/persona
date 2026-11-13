@@ -266,3 +266,41 @@ func TestLiveRoundKeepsItsLists(t *testing.T) {
 		t.Errorf("a round over new copies allocated %d bytes, want more than %d: the limit no longer tells the two apart", per, liveRoundLimit)
 	}
 }
+
+// A round over the kept lists folds children under their parents as a round over new copies does (decorated folds
+// the machine's whole list, foldInventory): the rows carry the same folded_under and children, the live counts leave
+// the children out the same way, and the fold kept for rows decorated on their own is the machine's.
+func TestLiveRoundsOverKeptListsFoldChildren(t *testing.T) {
+	d := newFleetDevs()
+	d.add("mac", "Mac")
+	rows := liveRows("mac", 4, proto.StatusWorking)
+	rows[2].ParentSessionID = rows[0].SessionID
+	rows[3].ParentSessionID = rows[0].SessionID
+	d.setSessions("mac", rows)
+	s := New(Options{Hub: newFakeHub(), Logf: func(string, ...any) {}, Devices: d})
+	kept := map[string][]proto.Session{}
+	for i := range 2 { // the second round decorates into the array the first one kept
+		s.fleet.foldMu.Lock()
+		s.fleet.folds = nil
+		s.fleet.foldMu.Unlock()
+		agents, ixs, told := s.fleetInputsInto(kept)
+		got := roundOf(t, agents, ixs, told)
+		s.fleet.foldMu.Lock()
+		keptFold := s.fleet.folds["mac"]
+		s.fleet.foldMu.Unlock()
+		fresh, fixs, ftold := s.fleetInputs()
+		want := roundOf(t, fresh, fixs, ftold)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("round %d: over the kept list\n%+v\nover new copies\n%+v", i, got, want)
+		}
+		if kept["mac"][2].FoldedUnder() != rows[0].SessionID || kept["mac"][0].Children().Total != 2 {
+			t.Fatalf("round %d: the kept list is not folded: %+v", i, kept["mac"])
+		}
+		s.fleet.foldMu.Lock()
+		freshFold := s.fleet.folds["mac"]
+		s.fleet.foldMu.Unlock()
+		if !reflect.DeepEqual(keptFold, freshFold) {
+			t.Fatalf("round %d: the fold kept for the machine\n%+v\nwant\n%+v", i, keptFold, freshFold)
+		}
+	}
+}

@@ -31,6 +31,9 @@ type tabKey struct{ kind, space, slot string }
 // fold under counts them all, whatever their depth, by their own states, and how many of them are its workers.
 func foldSessions(list []proto.Session, hidden map[string]bool) sessionFold {
 	listed := func(s *proto.Session) bool { return (!s.Archived || s.Assistant) && !hidden[s.SessionID] }
+	if !mayFold(list, listed) {
+		return sessionFold{} // what the walk below finds for such a list, without the index it builds
+	}
 	at := make(map[string]int, len(list))
 	for i := range list {
 		if _, dup := at[list[i].SessionID]; !dup && listed(&list[i]) {
@@ -108,6 +111,38 @@ func foldSessions(list []proto.Session, hidden map[string]bool) sessionFold {
 	return f
 }
 
+// mayFold: a row of list may fold, so foldSessions has to walk it: a listed row is a child, or listed rows that can be
+// of a tab's team (tabSeat) sit in a first pane (a lead) and in another pane (a worker; a second row in its tab's first
+// pane would leave it without a lead). Neither, and no row has a parent, so nothing folds. Rows listed twice count each
+// time: that can only say a fold is possible where foldSessions finds none.
+func mayFold(list []proto.Session, listed func(*proto.Session) bool) bool {
+	var first, other bool
+	for i := range list {
+		s := &list[i]
+		switch {
+		case !listed(s):
+		case s.IsChild():
+			return true
+		case tabSeat(s):
+			if p := s.PaneIndex; p != nil && *p == 0 {
+				first = true
+			} else {
+				other = true
+			}
+			if first && other {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// tabSeat: s can be of a tab's team as far as the row alone tells (tabLeads): a session, not the assistant's, in a
+// named space and slot, no child and not offline.
+func tabSeat(s *proto.Session) bool {
+	return !s.Assistant && s.SessionID != "" && s.SpaceID != "" && s.SlotID != "" && !s.IsChild() && s.State != proto.StateOffline
+}
+
 // tabLeads finds the tab teams of a machine's list (#5180): for each worker, by its index, its lead's index. A tab is
 // the rows of one space kind, space and slot, both named; a row of the assistant's is in none. Its lead is the one row
 // counted (the listed rows, each id once) in its first pane (pane_index 0) that is no child and not offline; a tab with
@@ -116,8 +151,7 @@ func foldSessions(list []proto.Session, hidden map[string]bool) sessionFold {
 func tabLeads(list []proto.Session, counted func(int) bool) map[int]int {
 	member := func(i int) (tabKey, bool) {
 		s := &list[i]
-		if s.Assistant || s.SessionID == "" || s.SpaceID == "" || s.SlotID == "" || !counted(i) || s.IsChild() ||
-			s.State == proto.StateOffline {
+		if !tabSeat(s) || !counted(i) {
 			return tabKey{}, false
 		}
 		return tabKey{s.SpaceKind, s.SpaceID, s.SlotID}, true
