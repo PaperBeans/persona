@@ -287,6 +287,9 @@ func applyRun(cur *Subscription, c RunCommit, withState bool) {
 	cur.SnapshotHash, cur.Runs = out.SnapshotHash, out.Runs
 	if SameRecipe(cur.Recipe, out.Recipe) {
 		cur.SinceAt, cur.Continuation = out.SinceAt, cloneContinuation(out.Continuation)
+		if !on(*cur) && cur.Continuation != nil && !cur.Continuation.Manual {
+			cur.Continuation = nil // turned off while this page ran: the position went with it (#6310)
+		}
 	}
 	cur.LastRunAt, cur.LastOKAt, cur.LastNewCount = out.LastRunAt, out.LastOKAt, out.LastNewCount
 	cur.WeakDedup, cur.Shape, cur.NextRunAt = out.WeakDedup, out.Shape, out.NextRunAt

@@ -871,6 +871,9 @@ func (s *Service) Update(ctx context.Context, id string, p Patch, by Actor) (Sub
 	switch {
 	case !on(next):
 		next.NextRunAt = nil
+		if wasOn {
+			next.Continuation = nil // off and on again starts a fresh pull, also out of a page that keeps failing (#6310)
+		}
 	case !wasOn || p.Recipe != nil || turnedOn: // a new recipe or destination runs soon, also after needs_recipe stopped it
 		next.NextRunAt = &now
 	case schedule:

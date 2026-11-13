@@ -1,5 +1,16 @@
 # Lessons: hub / node and networking
 
+## A saved position that fails must be able to expire (2026-11-13, #6310)
+
+Paginated source subscriptions (#5990) commit the next page's cursor with each page, and a failed run kept it, so every
+retry asked for the same page. A page token that expired between pages (a manager restart, a connector outage, a long
+backoff) is refused every time: the subscription failed for days while a call without the cursor answered fine, and
+only editing the recipe got it out. Before pagination a failed run simply pulled again. Any resumable position (a
+cursor, an offset, an upload id) needs a way back to a fresh start that does not depend on the user: here a page
+that fails in two runs in a row is dropped and the pull starts again from the window's start, the dedup keys holding
+back what was delivered, while one transient failure still resumes. Test a position that goes bad between runs, not
+only one that stays good across a restart.
+
 ## A name taken from a counter of attempts is not a free name (2026-11-13, #6024)
 
 The hub edge named each new slot by alternating on a counter of slots started (`'a' + slots%2`), assuming every
