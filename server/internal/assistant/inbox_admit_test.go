@@ -212,6 +212,15 @@ func sevenThings() []connector.InboxThing {
 	return things
 }
 
+// pauseOver waits until the pause on client's connection has run out (it stays held until a request finds out).
+func pauseOver(t *testing.T, client *ai.Client) {
+	t.Helper()
+	waitFor(t, "the end of the pause", func() bool {
+		p := ai.Held(client.Config())
+		return p != nil && !time.Now().Before(p.Until)
+	})
+}
+
 // A short outage of the triage model's upstream (#6698): it answers 503, the connection is held, and once the pause
 // is over it answers 404 for a while, then works again. The round after it is healthy sorts every item that
 // waited: nothing is left reported as "the model is at its concurrency limit" with nothing in flight. Before, only
@@ -233,7 +242,7 @@ func TestInboxTriageRecoversInTheRoundAfterAnOutage(t *testing.T) {
 
 	// The pause is over and the upstream answers 404: every item is asked about (one finds out after the other), and
 	// the status says the model failed, not that it is busy.
-	time.Sleep(100 * time.Millisecond)
+	pauseOver(t, client)
 	model.mode.Store("gone")
 	before := len(model.asked())
 	collectAndAdmit(h)
@@ -278,7 +287,7 @@ func TestInboxTriageIsBusyWhileTheModelIs(t *testing.T) {
 	if err := client.JSON(context.Background(), "替用户分拣", "示例", &out); !ai.IsPaused(err) {
 		t.Fatalf("the busy answer: %v", err)
 	}
-	time.Sleep(100 * time.Millisecond) // the pause is over
+	pauseOver(t, client)
 
 	// A slow request goes out (it finds out); the upstream takes its time to answer it.
 	model.mode.Store("slow")
@@ -287,11 +296,7 @@ func TestInboxTriageIsBusyWhileTheModelIs(t *testing.T) {
 		var out struct{ Tier string }
 		slow <- client.JSON(context.Background(), "替用户分拣", "示例：一个慢请求", &out)
 	}()
-	for start := time.Now(); len(model.asked()) < 2; time.Sleep(5 * time.Millisecond) {
-		if time.Since(start) > 10*time.Second {
-			t.Fatal("the slow request never reached the upstream")
-		}
-	}
+	waitFor(t, "the slow request at the upstream", func() bool { return len(model.asked()) >= 2 })
 	before := len(model.asked())
 	collectAndAdmit(h)
 	if _, status := inboxTriageOf(t, h); status.State != triagePaused || status.Reason != "模型并发已满" || status.Waiting != len(things) {

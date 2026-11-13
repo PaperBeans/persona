@@ -23,6 +23,25 @@ func heldGate(t *testing.T, clk *clock, c *Client) {
 	clk.add(busyFirst + time.Second)
 }
 
+// gateUntil waits until ok holds of g (read under its lock), woken by the gate's changes.
+func gateUntil(t *testing.T, g *gate, what string, ok func() bool) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		g.mu.Lock()
+		done, wake := ok(), g.wake
+		g.mu.Unlock()
+		if done {
+			return
+		}
+		select {
+		case <-wake:
+		case <-deadline:
+			t.Fatalf("%s: not within 10s", what)
+		}
+	}
+}
+
 // The gate opens when the upstream says 200 to the request finding out, not when that request's answer has been read
 // to the end: every call streams, so a long answer (a knowledge base call takes minutes) kept every other request on
 // the connection (Inbox triage, a draft, a title) put off as "busy" for as long as it lasted, though the upstream
@@ -35,6 +54,10 @@ func TestTheGateOpensAtTheProbesAnswer(t *testing.T) {
 	var once sync.Once
 	end := func() { once.Do(func() { close(finish) }) }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost { // a port probe from elsewhere on the machine, not this test's client
+			http.NotFound(w, r)
+			return
+		}
 		switch n.Add(1) {
 		case 1: // one busy answer
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -74,11 +97,7 @@ func TestTheGateOpensAtTheProbesAnswer(t *testing.T) {
 	}
 
 	// The upstream answered the probe 200 and is generating. Requests someone waits for come now.
-	for start := time.Now(); Held(c.Config()) != nil; time.Sleep(time.Millisecond) {
-		if time.Since(start) > 10*time.Second {
-			t.Fatalf("held after the probe's 200: %+v", Held(c.Config()))
-		}
-	}
+	gateUntil(t, g, "the gate let go at the probe's 200", func() bool { return !g.held })
 	for i := range 5 {
 		clk.add(30 * time.Second)
 		if err := call(c); err != nil {
@@ -114,11 +133,15 @@ type probeUpstream struct {
 func newProbeUpstream(t *testing.T) *probeUpstream {
 	u := &probeUpstream{arrived: make(chan struct{}, 64), answers: make(chan func(w http.ResponseWriter), 64)}
 	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost { // a port probe from elsewhere on the machine, not this test's client
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.Copy(io.Discard, r.Body) // read, so the request's context ends only when its caller gives up
 		if u.sent.Add(1) == 1 {
 			answer(503, busyBody)(w)
 			return
 		}
-		_, _ = io.Copy(io.Discard, r.Body) // read, so the request's context ends only when its caller gives up
 		u.arrived <- struct{}{}
 		select {
 		case reply := <-u.answers:
@@ -200,7 +223,11 @@ func TestRequestsWaitingForTheProbeArePutOffWhenItIsTurnedAway(t *testing.T) {
 		go func() { results <- call(c) }()
 	}
 	u.wait(t)
-	time.Sleep(100 * time.Millisecond) // the other three are waiting
+	select { // the other three wait for it
+	case err := <-results:
+		t.Fatalf("a request ended while the probe was out: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
 	u.answers <- answer(503, busyBody)
 	for i := range 4 {
 		select {
@@ -322,6 +349,10 @@ func TestEveryExitGivesItsSlotBack(t *testing.T) {
 	clk := fakeClock(t)
 	var healthy atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost { // a port probe from elsewhere on the machine, not this test's client
+			http.NotFound(w, r)
+			return
+		}
 		_, _ = io.Copy(io.Discard, r.Body)
 		if healthy.Load() {
 			ok(w)
