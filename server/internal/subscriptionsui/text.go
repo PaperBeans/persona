@@ -246,9 +246,12 @@ func toolTitle(src *subscriptions.CatalogSource, name string) string {
 func (p *pages) plain(s subscriptions.Subscription, src *subscriptions.CatalogSource) string {
 	args := i18n.Args{"source": s.Label, "tool": toolTitle(src, s.Recipe.Tool), "noun": p.noun(s.Recipe.Kind), "every": p.schedule(s)}
 	var out string
-	if s.Recipe.Mode == wire.ConnectorSubscriptionModeSnapshot {
+	switch s.Recipe.Mode {
+	case wire.ConnectorSubscriptionModeSnapshot:
 		out = p.t("plain.snapshot", args)
-	} else {
+	case wire.ConnectorSubscriptionModeThings: // the rows come ready-made (#6296)
+		out = p.t("plain.things", args)
+	default:
 		out = p.t("plain.items", args)
 	}
 	if s.WeakDedup {

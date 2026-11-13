@@ -494,6 +494,31 @@ func TestSetupKeepsTheRecipesSenderAndChatIDs(t *testing.T) {
 	}
 }
 
+// A things subscription (#6296): its source page has no knowledge-base switch (its rows are the Inbox's only), and its
+// recipe page says the rows are provided by the connector, with no setup form (it maps no fields).
+func TestAThingsSubscriptionsPages(t *testing.T) {
+	f := newFake()
+	sub := f.subs["sub_outlook"]
+	sub.Recipe = subscriptions.Recipe{Mode: wire.ConnectorSubscriptionModeThings, Tool: "search_messages", Kind: "sub_mail", GroupBy: "thread"}
+	sub.ToKB = false
+	f.subs["sub_outlook"] = sub
+	v := draw(t, f, env(i18n.En, true), state{P: pageSource, ID: "sub_outlook"})
+	if item(v, "d.to_inbox") == nil || item(v, "d.to_kb") != nil {
+		t.Error("the destinations of a things subscription")
+	}
+	v = draw(t, f, env(i18n.En, true), state{P: pageRecipe, ID: "sub_outlook"})
+	if plain := item(v, "plain"); plain == nil || !strings.Contains(plain.Text, "provided by the connector") {
+		t.Errorf("what the recipe does: %+v", plain)
+	}
+	if item(v, "x.tool") != nil || item(v, "x.raw") == nil || section(v, "map") != nil {
+		t.Error("a things recipe offers the setup form, or maps fields")
+	}
+	v = draw(t, newFake(), env(i18n.En, true), state{P: pageRecipe, ID: "sub_outlook"})
+	if item(v, "x.tool") == nil || section(v, "map") == nil {
+		t.Error("an items recipe lost its setup form or fields")
+	}
+}
+
 // Runs: newest first, failures marked, nothing but counts.
 func TestRuns(t *testing.T) {
 	v := draw(t, newFake(), env(i18n.En, true), state{P: pageRuns, ID: "sub_github"})

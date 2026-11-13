@@ -81,7 +81,7 @@ import { waitingOnSubagents } from "../../lib/background-work";
 import { doneSubagentLink, useSubagentLink } from "../../lib/subagent-link";
 import { childCall, childCardKey, childOfCall, childPlaces, exchangeStarts, placeChildren, type ChildPlace } from "../../lib/child-cards";
 import { useChildSessions } from "../../lib/use-child-sessions";
-import { openExpanded } from "./expanded";
+import { openExpanded, openFoldRange } from "./expanded";
 import { seekCall } from "./jump";
 import { navRailTicks, type NavRailSource, type NavRailTick } from "../../lib/nav-rail";
 import { containsInput, indexedNavTicks, userInputRevision, windowUserInputs, USER_INPUT_PAGE_SIZE } from "../../lib/user-input-index";
@@ -91,6 +91,7 @@ import { useChatScrollbar } from "./useChatScrollbar";
 import { ChatLineView, closedRecap, closeRecap, dismissedError, dismissError, ErrorBanner, errorKey, OpenRecapLine } from "./Lines";
 import { useTranscript } from "./useTranscript";
 import { useEarlierStretches } from "./useEarlierStretches";
+import { useFoldSearch } from "./useFoldSearch";
 import { ArchiveCloseDialog, CloseAgentDialog, DeleteSessionDialog, RenameDialog, RenameSpaceDialog, renameTitle, SessionInfoDialog } from "./SessionDialogs";
 import { PermissionPicker, usePlanMode } from "./PermissionPicker";
 import { archiveItems } from "../AgentMenus";
@@ -105,7 +106,7 @@ import { forgetReveals, revealItem, undoReveals, clearReveal } from "./search-re
 import { forwardDraftOf, openForward, peekJump, takeJump, type ForwardChat, type ForwardPick } from "../../lib/forward";
 import { pickParts } from "./picking-parts";
 import type { MessagePick } from "../../lib/message-pick";
-import { lineOfItem, loadEarlierForSearch, untilStill, type ChatSearchHit, type SearchLoadOutcome } from "../../lib/chat-search";
+import { foldHolding, lineOfItem, loadEarlierForSearch, untilStill, type ChatSearchHit, type SearchLoadOutcome } from "../../lib/chat-search";
 import { chatFiles } from "../../lib/mentions";
 import { sameMessage } from "../../lib/queue";
 import { OutboxBubbles } from "./OutboxBubbles";
@@ -1455,11 +1456,22 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
       lit.current = { el, timer: window.setTimeout(unlight, HIT_MS) };
     });
   }, [ctx.scope, follow, unlight, land]);
+  // the work the hub folded, fetched for the search while it is open (useFoldSearch, #6281): a hit in it opens its fold
+  // into the chat first, as "Jump to the step" does (jump.ts seekCall)
+  const folds = useFoldSearch(mid, sid, tr.history, earlier.liveItems, search.open);
+  const searchItems = useMemo(() => (folds.items.length ? [...earlier.liveItems, ...folds.items] : earlier.liveItems), [earlier.liveItems, folds.items]);
   const goTo = useCallback((hit: ChatSearchHit) => {
     setSearch((x) => ({ ...x, open: false }));
     setPicked(true);
-    seekItem(hit.itemId);
-  }, [seekItem]);
+    const fold = earlier.liveItems.some((i) => i.id === hit.itemId) ? undefined : foldHolding(folds.fetched, hit.itemId);
+    if (!fold?.fold) return seekItem(hit.itemId);
+    openFoldRange(ctx.scope, fold.seq, fold.fold.through_seq); // its steps land in open groups
+    tr.expandFold(fold).then(
+      () => requestAnimationFrame(() => seekItem(hit.itemId)),
+      () => toast(t("chat-chatview.search_not_found")),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tr.expandFold follows the chat, as seekItem does
+  }, [seekItem, earlier.liveItems, folds.fetched, ctx.scope]);
   // a forward's card opened this chat at its original (#3899, lib/forward.ts jumpWhenOpen): brought into view once the
   // transcript is in and holds it; one further back stays where the chat opens, as iOS does
   useEffect(() => {
@@ -2022,7 +2034,9 @@ export function ChatView({ mid, sid, assistant, starting: launching, onToggleSid
         open={search.open}
         query={search.query}
         onQuery={(query) => setSearch((x) => ({ ...x, query }))}
-        items={earlier.liveItems}
+        items={searchItems}
+        foldsLoading={folds.loading}
+        foldsPartial={folds.partial}
         rounds={rounds}
         hasMore={earlier.liveHasMore}
         onLoadEarlier={loadForSearch}

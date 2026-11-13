@@ -9,7 +9,7 @@ type Launcher struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url"`
 	Model   string `json:"model"`
-	// Source: "zshrc" (a function in the machine's ~/.zshrc), "path" (a wrapper script on its PATH, node/pathlaunchers.go) or "persona" (managed in Settings › Models, the manager's assistant/models_launchers.go). Empty
+	// Source: "zshrc" (a function in the machine's ~/.zshrc), "path" (a wrapper script on its PATH, node/pathlaunchers.go), "persona" (managed in Settings › Models, the manager's assistant/models_launchers.go) or "claude_desktop" (claude-desktop, a new session in Claude's desktop app, node/claudedesktop_new.go). Empty
 	// from an older node: zshrc.
 	Source string `json:"source,omitempty"`
 	// Agent is what it starts when not Claude Code: "codex" (plain codex, or an alias running it; docs/integrations/codex.md

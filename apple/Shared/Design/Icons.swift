@@ -403,6 +403,8 @@ extension Theme {
         static let pathSeparator = "chevron.compact.right"
         /// A folder that is a git repository (the new chat's directory browser).
         static let gitRepository = "folder.badge.gearshape"
+        /// A temporary session: one in Claude's desktop app's scratch folder (New Agent, #5480).
+        static let temporarySession = "tray"
         static let photo = "photo"
         static let photos = "photo.on.rectangle"
         static let camera = "camera"

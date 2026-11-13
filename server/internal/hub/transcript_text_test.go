@@ -148,3 +148,16 @@ func TestLocalizedTeammateAndLinks(t *testing.T) {
 		t.Fatal("the node's items were written to")
 	}
 }
+
+// The phone's Stop of a session outside Persona's terminals (transcript.StoppedFromPhone) reads in the app's language;
+// the user's own words from Persona stay as they are.
+func TestStoppedFromPhoneLocalized(t *testing.T) {
+	stop := proto.Item{Role: "user", Kind: proto.KindText, From: transcript.PersonaPeer, Text: transcript.StoppedFromPhone}
+	words := proto.Item{Role: "user", Kind: proto.KindText, From: transcript.PersonaPeer, Text: transcript.StoppedFromPhone + "?"}
+	for l, want := range map[i18n.Lang]string{i18n.En: "Stopped from the phone", i18n.Ja: "スマホから停止しました", i18n.ZhHans: transcript.StoppedFromPhone} {
+		got := localizedItems(l, []proto.Item{stop, words})
+		if got[0].Text != want || got[0].From != transcript.PersonaPeer || got[1].Text != words.Text {
+			t.Errorf("%s: %+v", l, got)
+		}
+	}
+}

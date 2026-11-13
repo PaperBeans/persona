@@ -12093,8 +12093,8 @@ def auto_named(b):
 
 def machine_launchers(mid=""):
     """GET /api/v1/machines/{mid}/launchers's launchers: claude, sonnetcc and codex ("Create from the phone"; not on the
-    Mac Studio under MOCK_NEW_AGENT_PANEL), and under MOCK_PROVIDERS the managed providers Agents can start, each with its
-    display name."""
+    Mac Studio under MOCK_NEW_AGENT_PANEL), under MOCK_PROVIDERS the managed providers Agents can start, each with its
+    display name, and under MOCK_DESKTOP_APPS the MacBook's claude-desktop."""
     out = [{"name": "claude", "model": "opus"}, {"name": "sonnetcc", "model": "sonnet"}, codex_launcher()]
     if os.environ.get("MOCK_MODEL_PANEL_USAGE"):
         out += [{"name": "cc_main", "model": "opus"}, {"name": "cc_team", "model": "example-pro"}]
@@ -12107,6 +12107,10 @@ def machine_launchers(mid=""):
     if MOCK_PROVIDERS:
         out += [{k: l[k] for k in ("name", "display_name", "base_url", "model", "source") if l.get(k)}
                 for l in LAUNCHERS if l["source"] == "persona" and l.get("kind") != "api"]
+    if os.environ.get("MOCK_DESKTOP_APPS") and mid == "macbook":
+        # The MacBook's Claude desktop app keeps Claude Code sessions: its launcher starts one there (#5480,
+        # docs/integrations/claude-integration.md "New sessions in the desktop app").
+        out.append({"name": "claude-desktop", "model": "", "source": "claude_desktop", "agent": "claude", "agent_type": "claude"})
     return launcher_health_list(out)
 
 
@@ -16726,6 +16730,43 @@ def case_route(h, method, p, q, body):
 # first subscribe hold the last 2 whole turns, an older page `turns` more; otherwise the whole history comes at once.
 # ChatFollowTests' cold start at a saved place far up needs it (#597). /mock/reset turns it off.
 PAGING = {"on": False}
+
+
+# MOCK_CHAT_SEARCH=1 (#6281, docs/design/proposals/assistant-search.md): the long Persona conversation (ASK4) is one whose
+# marker words each sit in one place only: the title, the user's words, a reply that is not the last, the last reply, a
+# thought, a tool output left unfolded and one in a folded run, early history beyond the first pages, a quoted context, a
+# card's answer (and an HTML card's) and a message Persona injected. History is paged (turns) so the early words need "Load earlier". Made up.
+def mock_chat_search():
+    rows = [it("user", "text", 300, text="冰川邮局 GlacierPost 几点开门？"), it("assistant", "text", 299.5, text="EarlyReply 早年回复：九点开门。")]
+    for n in range(2, 7):
+        rows += [it("user", "text", 300 - n * 10, text=f"第 {n} 个问题：明天天气怎么样？"), it("assistant", "text", 300 - n * 10 - 0.5, text=f"第 {n} 个回答：晴。")]
+    rows += [it("user", "text", 200, text="InjectedRaw 注入原文：检查示例任务的结果。\n<persona-supervision level=\"triage\" />",
+                injected={"kind": "system", "state": "supervise", "level": "triage", "line": "示例任务验收"}),
+             it("assistant", "text", 199.5, text="已检查，结果正常。")]
+    rows += [it("user", "text", 150, text="选 B：步行\n<persona-action view=\"msg-a/0\" action=\"choose-b\">{\"values\":{\"code\":\"ActionSecret\"}}</persona-action>"),
+             it("assistant", "text", 149.5, text="好的，按步行规划。")]
+    rows += [it("user", "text", 120, text="Open the map\n<persona-action view=\"msg-b/0\" action=\"map\">{\"html\":true,\"values\":{}}</persona-action>"),
+             it("assistant", "text", 119.5, text="地图打开了。")]
+    rows += [it("user", "text", 100, text="帮我看看路线\n<persona-context kind=\"selection\" title=\"摘录\">HiddenCtx 隐藏摘录</persona-context>"),
+             it("assistant", "thinking", 99.8, text="ThinkWord 思考词：先读一下路线文件。"),
+             it("assistant", "text", 99.6, text="WisteriaTea 紫藤茶馆 在巷口，先去那里。")]
+    rows += tool("Read", {"file_path": "/home/me/notes/route.md"}, "SilverKey 银钥匙 在第二个抽屉。", 99.4)
+    rows += [it("assistant", "text", 99.2, text="路线整理好了。"), it("user", "text", 50, text="我想去青石巷 BlueLane 看看")]
+    rows += tool("Bash", {"command": "ls ~/notes", "description": "List notes"}, "route.md\nkeys.md", 49.8)
+    rows += tool("Read", {"file_path": "/home/me/notes/keys.md"}, "CopperKey 铜钥匙 挂在门后。", 49.6)
+    rows += tool("WebFetch", {"url": "https://example.com/map"}, "地图已打开。", 49.4)
+    last = "LastReplyWord 末句词：路线已发你。"
+    rows += [it("assistant", "text", 49.2, text=last)]
+    for seq, row in enumerate(rows, 1):
+        row["seq"] = seq
+    ITEMS[ASK4] = rows
+    session = next(s for s in ASSISTANT if s["session_id"] == ASK4)
+    session.update(title="琥珀灯塔 AmberTitle 周末出行", last_text=last, updated_at=ago(minutes=1), seen_at=ago(minutes=0), rev=3000, total_items=len(rows))
+    PAGING["on"] = True
+
+
+if os.environ.get("MOCK_CHAT_SEARCH") == "1":
+    mock_chat_search()
 SOCKETS = set()
 
 
@@ -21726,7 +21767,7 @@ class H(BaseHTTPRequestHandler):
             HERDR_STOPPED.clear(); HERDR_STOPPED.update(herdr_env()); HERDR_STARTS.clear()  # the herdr row (#1916)
             HERDR_MODE["start"] = os.environ.get("MOCK_HERDR_START", ""); HERDR_MODE["gen"] += 1
             # A test that died before putting them back: the start-up delay (MOCK_DELAY), no paging.
-            NET["delay"], PAGING["on"] = float(os.environ.get("MOCK_DELAY", "0")), False
+            NET["delay"], PAGING["on"] = float(os.environ.get("MOCK_DELAY", "0")), os.environ.get("MOCK_CHAT_SEARCH") == "1"
             HISTORY_NOW["token"] = HISTORY
             # ExtensionMarketTests' update installed (#2988): example-gateway at 1.0.0 again, its newer version waiting.
             PLUGINS.pop("example-gateway-next", None); _UPGRADE_WHILE_ON.pop("example-gateway", None)

@@ -36,8 +36,9 @@ const codexDesktopTimeout = 60 * time.Second
 var codexDesktopLoadWait = 30 * time.Second
 
 var codexDesktopVersions = map[string]int{
-	"thread-owner-discovery":     1,
-	"thread-follower-start-turn": 2,
+	"thread-owner-discovery":         1,
+	"thread-follower-start-turn":     2,
+	"thread-follower-interrupt-turn": 4,
 }
 
 var errCodexDesktopNotLoaded = errors.New("Codex App 没能打开这个对话：在电脑的 Codex App 里打开它一次再发")
@@ -179,6 +180,29 @@ func (n *Node) sendCodexDesktop(ctx context.Context, src codexSource, text strin
 	if _, err := c.request("thread-follower-start-turn", turn, owner.HandledByClient); err != nil {
 		// The owner took the request: whether the turn started is not known.
 		return uncertain(err)
+	}
+	n.notifyCodex()
+	return nil
+}
+
+// interruptCodexDesktop stops the turn running in a thread the Codex App owns, as the App's own stop button does
+// (thread-follower-interrupt-turn, mode "user-stop": the turn and the subagents it started). A thread no App window has
+// loaded runs no turn there, and it is not opened to be stopped.
+func (n *Node) interruptCodexDesktop(ctx context.Context, src codexSource) error {
+	ctx, cancel := context.WithTimeout(ctx, codexDesktopTimeout)
+	defer cancel()
+	c, err := dialCodexDesktop(ctx, src.home)
+	if err != nil {
+		return refusal("codex_read_only", "连不上电脑上的 Codex App："+err.Error(), nil)
+	}
+	defer c.close()
+	owner, err := c.owner(src.thread)
+	if err != nil {
+		return refusal("codex_read_only", "没有可停止的已观察轮次", nil)
+	}
+	stop := map[string]any{"conversationId": src.thread, "mode": "user-stop"}
+	if _, err := c.request("thread-follower-interrupt-turn", stop, owner.HandledByClient); err != nil {
+		return err
 	}
 	n.notifyCodex()
 	return nil
@@ -399,6 +423,10 @@ func (n *Node) placeCodexDesktop(s *proto.Session, src codexSource, group string
 	s.Status = n.codexDesktopTurn(src.path)
 	if s.Status == proto.StatusDone && (subagent || app == nil || !app.unread[src.thread]) {
 		s.Status = proto.StatusIdle // looked at in the App
+	}
+	if s.Status == proto.StatusWorking && !subagent && s.Capabilities != nil {
+		// Stopped from the phone as with the App's stop button (interruptCodexDesktop); a subagent stops with its chat.
+		s.Capabilities.Interrupt = true
 	}
 }
 

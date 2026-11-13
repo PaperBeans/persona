@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -179,6 +180,9 @@ func (n *Node) claudeSessions(procs []claudeProc, seen map[string]bool) []proto.
 		}
 		if status == proto.StatusBlocked {
 			s.AttentionReason = proto.AttentionClaudeComputer
+			if s.Capabilities != nil && s.Capabilities.Send && s.PaneID == "" && asking(c, m) {
+				s.AttentionReason = proto.AttentionClaudeAnswer // a message answers it (sendOutside)
+			}
 		}
 		if s.Cwd == "" {
 			s.Cwd = m.cwd
@@ -218,7 +222,9 @@ func outsideCapabilities(c claudeProc) (*proto.SessionCapabilities, string) {
 	p, has := peerOf(c)
 	switch {
 	case has && peerReachable(p):
-		return &proto.SessionCapabilities{Read: true, Send: true, Modes: proto.CanModes(false)}, ""
+		// A turn it runs, or a question it waits on, stops at a message of priority now (interruptOutside).
+		stoppable := c.Status == "busy" || c.Status == "waiting"
+		return &proto.SessionCapabilities{Read: true, Send: true, Interrupt: stoppable, Modes: proto.CanModes(false)}, ""
 	case c.Kind == "bg":
 		return &proto.SessionCapabilities{Read: true, Modes: proto.CanModes(false)}, claudeBgReadOnly
 	case !has:
@@ -288,23 +294,34 @@ func (n *Node) sendOutside(ctx context.Context, id, text string, images []proto.
 		}
 		text = attachImages(text, paths)
 	}
+	// A session waiting on a question it asked takes the message as its answer: at priority now it ends that wait (the
+	// question's call ends unanswered) and runs the message; queued, it would wait behind the question until someone
+	// answered it on the computer. One waiting on a permission prompt or another dialog gets it queued as before: at
+	// now it would decline the prompt, which is the computer's to approve.
 	var offset int64
-	if st, err := os.Stat(n.transcriptPath(id)); err == nil {
-		offset = st.Size()
+	priority := peerNext
+	if path := n.transcriptPath(id); path != "" {
+		if st, err := os.Stat(path); err == nil {
+			offset = st.Size()
+			if asking(c, n.metaNow(path, st)) {
+				priority = peerNow
+			}
+		}
 	}
-	err = peerSend(ctx, p, id, text)
+	err = peerSendAt(ctx, p, id, text, priority)
 	var pe *errPeer
 	if asPeer(err, &pe) {
 		log.Printf("send %s: claude %d's inbox refused: %v", id, c.pid, err)
 		return true, refusal(pe.code, pe.msg, map[string]any{"pid": c.pid})
 	}
 	if peerTaken(ctx, func() string { return n.transcriptPath(id) }, offset, text, peerConfirmWait) {
-		log.Printf("send %s: claude %d (%s) took it through its inbox", id, c.pid, c.Entrypoint)
-		// Taken into its queue while a question or permission prompt holds it: Claude reads the message only once that
-		// is answered at the computer, which the answer says (waits_on_computer). The status is read once, after the
-		// take: a prompt that opened just after a busy session queued the message marks it too, and rightly, since it
-		// still waits on the computer.
-		if now, ok := n.outsideClaude(id); ok && claudeBgStatus[now.Status] == proto.StatusBlocked {
+		log.Printf("send %s: claude %d (%s) took it through its inbox (%s)", id, c.pid, c.Entrypoint, priority)
+		// Taken into its queue while a permission prompt or another dialog holds it: Claude reads the message only once
+		// that is answered at the computer, which the answer says (waits_on_computer). The status is read once, after
+		// the take: a prompt that opened just after a busy session queued the message marks it too, and rightly, since
+		// it still waits on the computer. A message at priority now waits on nothing: it ended the question it answers
+		// (the status file may say waiting a moment longer).
+		if now, ok := n.outsideClaude(id); ok && priority == peerNext && claudeBgStatus[now.Status] == proto.StatusBlocked {
 			if w, ok := ctx.Value(computerWaitKey{}).(*bool); ok {
 				*w = true
 			}
@@ -327,6 +344,50 @@ type computerWaitKey struct{}
 func withComputerWait(ctx context.Context) (context.Context, *bool) {
 	w := new(bool)
 	return context.WithValue(ctx, computerWaitKey{}, w), w
+}
+
+// askTool is Claude Code's question tool.
+const askTool = "AskUserQuestion"
+
+// asking: claude c waits on a question it asked (its status file says waiting, and its transcript's latest call, m,
+// is the question), not on a permission prompt, a plan to approve or another dialog only the computer answers.
+func asking(c claudeProc, m quickMeta) bool {
+	return c.Status == "waiting" && m.tool == askTool
+}
+
+// interruptOutside stops the turn a claude outside Persona's panes runs, through its inbox: a message at priority now
+// cuts the turn (or ends a question or permission prompt it waits on) and asks it to stop (prompts.PeerStop). handled false for any other
+// session, and one a tmux pane runs (its Esc goes to the pane). A session at rest has nothing to stop: done, nothing sent.
+func (n *Node) interruptOutside(ctx context.Context, id string) (handled bool, err error) {
+	c, ok := n.outsideClaude(id)
+	if !ok || outsidePane(c) != "" {
+		return false, nil
+	}
+	p, has := peerOf(c)
+	if !has {
+		return true, refusal(peerUnsupported, peerNoInboxMsg, nil)
+	}
+	if c.Status != "busy" && c.Status != "waiting" {
+		return true, nil // at rest already (a Stop from a list a moment old): nothing to stop, nothing sent
+	}
+	var offset int64
+	if st, err := os.Stat(n.transcriptPath(id)); err == nil {
+		offset = st.Size()
+	}
+	stop := prompts.PeerStop()
+	err = peerSendAt(ctx, p, id, stop, peerNow)
+	var pe *errPeer
+	if asPeer(err, &pe) {
+		return true, refusal(pe.code, pe.msg, map[string]any{"pid": c.pid})
+	}
+	if peerTaken(ctx, func() string { return n.transcriptPath(id) }, offset, stop, peerConfirmWait) {
+		log.Printf("interrupt %s: claude %d took the stop through its inbox", id, c.pid)
+		return true, nil
+	}
+	if err != nil {
+		return true, uncertain(err)
+	}
+	return true, unconfirmed()
 }
 
 // unconfirmed is the outcome of a message the inbox read but the session has not taken: delivery unknown.

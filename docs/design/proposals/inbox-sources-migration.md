@@ -80,6 +80,13 @@ the read tool's JSON like the existing fields:
 
 Recipes without the new fields behave as today. The SDK's wire types and `schema/` change with them.
 
+For a built-in whose rows carry more than a recipe can map (iMessage: one row per conversation, done when the owner
+replied, Needs you for a direct message, an `sms:` link, the last messages as context), a recipe in `things` mode
+reads a tool that answers the rows ready-made (the owner's choice on 2026-11-13; #6296). The connector computes them
+with the code its `Collect` uses, and the subscription only schedules, keeps, switches and delivers them, so the rows
+before and after the switch are the same by construction. Each such source proves it with a test that compares its
+`Collect` and its tool's rows field by field on the same fixtures.
+
 ### 3c. Reply goes to the subscription's connector
 
 For an item from a subscription with `reply_to`, the assistant sends `inbox.reply {source, reply, send_id}` as today.
@@ -144,7 +151,7 @@ Smallest gap first, so each step proves part of the design before the harder sou
 | P3 | The twin's source info and knowledge-base chat for subscription items (#6222) | 3d |
 | P4 | P4a `changed` starts runs (#6247); P4b extension-owned push sources | 3e |
 | P5 | P5a the default subscription's fixed id and `migrated` mark, delivery under the built-in's id, catch-up as rows, rollback (#6265); P5b the switch on the Inbox Sources pages, with M1 | 3a, 3g |
-| M1 | **iMessage**: no reply to carry over; needs `seen`, `sender_id`, `chat` and the `changed` kick | P1, P4, P5 |
+| M1 | **iMessage**: a `things` recipe over its `inbox_things` tool (#6296), the `changed` kick, the switch on the pages (P5b) | P4a, P5, things |
 | M2 | **GitHub**: comments as replies, inferred read, repo mutes. Its read tools first need a notifications tool | P1–P5 |
 | M3 | **Lark**: JSON read tools for `larkcli` first, then its events through a push source, replies | P1–P5 |
 | M4 | **Mail**, one subscription per account: replies with threading, seen flags and off-page settling, read errors per account, translations | P1–P5 |

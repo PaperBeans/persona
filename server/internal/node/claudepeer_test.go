@@ -34,7 +34,8 @@ func TestOutsideClaudeListedLive(t *testing.T) {
 			s.LastText != "on it" || s.ReadOnlyReason != "" {
 			t.Errorf("%s: %+v", c.entrypoint, s)
 		}
-		if cp := s.Capabilities; cp == nil || !cp.Read || !cp.Send || cp.Interrupt || cp.Approve || cp.Terminal || cp.Attach ||
+		// Busy: the phone's Stop cuts its turn through the inbox (interruptOutside).
+		if cp := s.Capabilities; cp == nil || !cp.Read || !cp.Send || !cp.Interrupt || cp.Approve || cp.Terminal || cp.Attach ||
 			cp.Modes == nil || *cp.Modes {
 			t.Errorf("%s capabilities = %+v", c.entrypoint, cp)
 		}
@@ -185,8 +186,9 @@ func TestOutsideClaudeSendNotTaken(t *testing.T) {
 	}
 }
 
-// A session waiting on a question or permission prompt takes the message into its queue, but reads it only once that
-// is answered at the computer: the send succeeds and says so (waits_on_computer); one that is working or idle does not.
+// A session waiting on a permission prompt or another dialog takes the message into its queue, but reads it only once
+// that is answered at the computer: the send succeeds and says so (waits_on_computer); one that is working or idle
+// does not. (One waiting on its own question takes the message as the answer: claudepeer_stop_test.go.)
 func TestOutsideClaudeSendBehindDialog(t *testing.T) {
 	n, f, home := herdrNode(t)
 	noPaneEnv(t)

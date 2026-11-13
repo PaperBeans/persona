@@ -104,7 +104,11 @@ func (p *pages) source() wire.View {
 	case subscriptions.StateFailing, subscriptions.StateNeedsRecipe, subscriptions.StateRateLimited, subscriptions.StateNotConnected:
 		v.Sections = append(v.Sections, p.trouble(s))
 	}
-	v.Sections = append(v.Sections, p.switches(s.ID, s.Label, s.Recipe.Kind, p.schedule(s), s.ToInbox, s.ToKB, true, false))
+	dest := p.switches(s.ID, s.Label, s.Recipe.Kind, p.schedule(s), s.ToInbox, s.ToKB, true, false)
+	if s.Recipe.Mode == wire.ConnectorSubscriptionModeThings {
+		dest.Items = dest.Items[:1] // its rows are the Inbox's only: the knowledge base reads the source itself (#6296)
+	}
+	v.Sections = append(v.Sections, dest)
 	freq := row("f.interval", p.t("source.interval"))
 	freq.Value = p.schedule(s)
 	freq.Action = open(state{P: pageInterval, ID: s.ID}, p.t("source.interval"))
@@ -307,8 +311,12 @@ func (p *pages) recipe(dry *subscriptions.DryRun, dryErr error) wire.View {
 	other.Action = open(state{P: pageTools, ID: s.ID, C: s.Connector, S: s.Source}, p.t("title.tools"))
 	raw := row("x.raw", p.t("recipe.raw"))
 	raw.Action = open(state{P: pageRaw, ID: s.ID}, p.t("recipe.raw"))
+	edits := []wire.Component{edit, other, raw}
+	if s.Recipe.Mode == wire.ConnectorSubscriptionModeThings {
+		edits = []wire.Component{other, raw} // the setup form maps fields, which a things recipe has none of (#6296)
+	}
 	v.Sections = append(v.Sections, wire.Section{Key: "edit", Footer: p.origin(s) + " " + p.t("recipe.no_model"),
-		Items: append(append([]wire.Component{try}, p.askRows("ask.line_recipe")...), edit, other, raw)})
+		Items: append(append([]wire.Component{try}, p.askRows("ask.line_recipe")...), edits...)})
 	return v
 }
 

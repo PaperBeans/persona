@@ -63,7 +63,7 @@ func TestARowWithReplyToCanBeRepliedToThroughItsConnector(t *testing.T) {
 	if len(rows) != 1 || !rows[0].CanReply || rows[0].ReplyTo != "Comment on example-org/example-repo#12 (anyone who can see the repo)" || rows[0].Last != "c2" {
 		t.Fatalf("rows: %+v", rows)
 	}
-	in, thread, ok := e.svc.ReplyTarget(e.ctx, sub.ID, rows[0].Last)
+	in, thread, ok := e.svc.ReplyTarget(e.ctx, sub.ID, rows[0].Thread, rows[0].Last)
 	if !ok || thread != "example-org/example-repo#12" {
 		t.Fatalf("target: %v %q", ok, thread)
 	}
@@ -71,16 +71,16 @@ func TestARowWithReplyToCanBeRepliedToThroughItsConnector(t *testing.T) {
 		t.Fatalf("reply: %v %+v", err, rc.replies)
 	}
 	for _, last := range []string{"", "gone", "h:abc"} {
-		if _, _, ok := e.svc.ReplyTarget(e.ctx, sub.ID, last); ok {
+		if _, _, ok := e.svc.ReplyTarget(e.ctx, sub.ID, "", last); ok {
 			t.Errorf("a target for %q", last)
 		}
 	}
-	if _, _, ok := e.svc.ReplyTarget(e.ctx, "sub_gone", "c2"); ok {
+	if _, _, ok := e.svc.ReplyTarget(e.ctx, "sub_gone", "", "c2"); ok {
 		t.Error("a target of a subscription that is gone")
 	}
 	// The connector can't be called now: a reply is not routed; the row stops offering one once a run found it so.
 	e.conns.infos["example"].Status = connector.StateNotSignedIn
-	if _, _, ok := e.svc.ReplyTarget(e.ctx, sub.ID, "c2"); ok {
+	if _, _, ok := e.svc.ReplyTarget(e.ctx, sub.ID, "", "c2"); ok {
 		t.Error("routed a reply while the connector can't be called")
 	}
 	cur, _ := e.store.GetSubscription(e.ctx, sub.ID)

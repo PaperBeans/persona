@@ -187,8 +187,10 @@
       "type": "string",
       "enum": [
         "items",
-        "snapshot"
-      ]
+        "snapshot",
+        "things"
+      ],
+      "description": "items: new items, each kept once; snapshot: the answer as one state, kept when it changes; things: the answer lists Inbox rows ready-made (ConnectorInboxThing), kept and handed to the Inbox as they are."
     },
     "ConnectorSubscriptionGroup": {
       "type": "string",
@@ -318,7 +320,7 @@
         "kind",
         "group_by"
       ],
-      "description": "A pull recipe, not a schedule. args is an object (default {}); strings may contain {{since}} or {{since_date}}. cursor_arg and next_cursor_path opt into cursor pagination; page_arg and optional next_page_path opt into page pagination (without next_page_path, a full requested page continues). items_path defaults to $; fields are relative to one item. Text results require snapshot mode. Runtime argument/schema and mapped-value validation belongs to the subscription runner."
+      "description": "A pull recipe, not a schedule. In things mode the rows bring their own threads and kinds: group_by is thread, kind is a row's when it has none, and fields and pagination are not used. args is an object (default {}); strings may contain {{since}} or {{since_date}}. cursor_arg and next_cursor_path opt into cursor pagination; page_arg and optional next_page_path opt into page pagination (without next_page_path, a full requested page continues). items_path defaults to $; fields are relative to one item. Text results require snapshot mode. Runtime argument/schema and mapped-value validation belongs to the subscription runner."
     },
     "ConnectorErrorCode": {
       "description": "error.code a program answers or gets besides the base ErrorCode: rate_limited (tools.call / actions.do, and the hub's answer to too many sent.record; data {retry_after} in seconds, fractional allowed), why credentials.gh_token has no token, and what recall answers: not_recallable (nothing was sent: the program cannot take that message back) and recall_unknown (the request may have taken effect). not_signed_in, offline and rate_limited also say that recall could not act now. not_read_only refuses a catalog.call outside the current read-only catalog.",

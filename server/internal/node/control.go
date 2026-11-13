@@ -43,6 +43,11 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	if err := execution.check(kind); err != nil {
 		return nil, err
 	}
+	runs, refused := terminalLauncher(launcher, resume) // the desktop app's launcher runs in no terminal (claudedesktop_new.go)
+	if refused != nil {
+		return nil, refused
+	}
+	launcher = runs
 	if execution.SecretTicket != "" && resume != "" { // a hand-off goes only to a new start (secretenv.go)
 		return nil, refusal(secretEnvAgentCode, secretEnvAgentText, nil)
 	}

@@ -259,8 +259,9 @@ nonisolated enum NodeMenu {
     /// Claude Code, and a launcher the computer says it starts in a pane the user picked, keeping that pane when the
     /// start fails (`runHere`: its Codex launchers, #5504), as the web's `launchableHere`. An older computer's failed
     /// Codex start closes its pane, here the user's own shell (#5275): there Codex starts from New Session in a tab of its own.
+    /// Not the one that starts the session in Claude's desktop app (#5480): it never runs in this terminal.
     static func launchableHere(_ l: Launcher) -> Bool {
-        l.runHere == true || (l.agent ?? "").isEmpty || l.agent == "claude"
+        !l.startsInDesktopApp && (l.runHere == true || (l.agent ?? "").isEmpty || l.agent == "claude")
     }
 
     /// Run Agent Here's footer: the agent starts in the picked shell; where the computer has a Codex launcher it doesn't

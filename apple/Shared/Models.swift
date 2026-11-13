@@ -473,17 +473,23 @@ nonisolated struct Launcher: Codable, Identifiable, Hashable, Sendable {
     /// A Codex launcher the computer also starts with no first message (docs/integrations/codex.md「Starting without a
     /// first message」); nil from an older computer, whose Codex starts need one.
     var promptOptional: Bool? = nil
+    /// Where the computer has it: zshrc, path, persona, a runtime's id, or `claude_desktop` (`claudeDesktopSource`).
+    var source: String? = nil
     /// A Codex launcher the computer starts in a shell pane the user picked (Run Agent Here) and keeps that pane when the
     /// start fails (#5504); nil from an older computer, where Run Agent Here offers Claude Code only.
     var runHere: Bool? = nil
     var id: String { name }
+    /// The launcher that starts the session in Claude's desktop app (docs/integrations/claude-integration.md「New sessions
+    /// in the desktop app」): with no folder it runs in the app's scratch folder, and a new folder is made for it.
+    var startsInDesktopApp: Bool { source == Self.claudeDesktopSource }
+    static let claudeDesktopSource = "claude_desktop"
     /// A Codex start sends its first message with it and waits for the thread Codex makes.
     var isCodex: Bool { agent == "codex" }
     /// Starting it needs a first message: a Codex on a computer that cannot open it without one.
     var needsFirstMessage: Bool { isCodex && promptOptional != true }
 
     enum CodingKeys: String, CodingKey {
-        case name, model, agent, assistant, health
+        case name, model, agent, assistant, health, source
         case baseURL = "base_url"
         case promptOptional = "prompt_optional"
         case runHere = "run_here"
@@ -501,6 +507,7 @@ nonisolated extension Launcher {
         assistant = try c.decodeIfPresent(Bool.self, forKey: .assistant)
         health = (try? c.decodeIfPresent(LauncherHealth.self, forKey: .health)) ?? nil
         promptOptional = try c.decodeIfPresent(Bool.self, forKey: .promptOptional)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
         runHere = try c.decodeIfPresent(Bool.self, forKey: .runHere)
     }
 }

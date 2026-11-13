@@ -28,6 +28,7 @@ spec/
     star-prompt/      when the GitHub star prompts show (empty Agents pill, milestone card, onboarding toast)
     meeting-echo/     Persona's echo in a meeting: a line is one only when its time and its words match, checked by the hub and iOS
     tool-names/       tool names, subjects and arguments in words, checked by Android (iOS later)
+    chat-search/      what search in chat and the assistant's chat index find of each item, checked by web (Go and Android later)
     tokens/           设计 token 的校验夹具（如该领域提供）
   tokens/             设计 token 的来源文件，见 D7
 ```

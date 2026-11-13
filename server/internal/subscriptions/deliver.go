@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strconv"
@@ -114,17 +115,22 @@ func (s *Service) replying(ctx context.Context) map[string]bool {
 }
 
 // ReplyTarget is where a reply to a row of subscription id goes (#6198): its connector, and the thread the connector
-// knows the row's newest item by (the recipe's thread, else the item's id). last is the row's newest item (the thing's
-// Last, the item's id in the source). ok is false when the subscription, the item or its reply_to is gone, the item has
-// no id of the source's, or the connector cannot reply now: the reply is refused as for a row that cannot be replied to.
-func (s *Service) ReplyTarget(ctx context.Context, id, last string) (conn connector.Inbox, thread string, ok bool) {
+// knows the row's newest item by (the recipe's thread, else the item's id). row is the row's thread and last its newest
+// item (the thing's Last, the item's id in the source). A things recipe's row is the connector's own (#6296): its thread
+// as it is. ok is false when the subscription, the item or its reply_to is gone, the item has no id of the source's, or
+// the connector cannot reply now: the reply is refused as for a row that cannot be replied to.
+func (s *Service) ReplyTarget(ctx context.Context, id, row, last string) (conn connector.Inbox, thread string, ok bool) {
 	sub, err := s.o.Store.GetSubscription(ctx, id)
 	if err != nil || sub == nil || last == "" || strings.HasPrefix(last, weakPrefix) || s.o.Connectors == nil {
 		return nil, "", false
 	}
-	h, err := s.o.Store.HeldItem(ctx, id, last)
-	if err != nil || h == nil || h.ReplyTo == "" {
-		return nil, "", false
+	thread = row
+	if sub.Recipe.Mode != wire.ConnectorSubscriptionModeThings {
+		h, err := s.o.Store.HeldItem(ctx, id, last)
+		if err != nil || h == nil || h.ReplyTo == "" {
+			return nil, "", false
+		}
+		thread = cmpOr(h.Thread, h.UID)
 	}
 	info, found := s.o.Connectors.Find(ctx, sub.Connector)
 	if !found || !info.ready() {
@@ -134,7 +140,7 @@ func (s *Service) ReplyTarget(ctx context.Context, id, last string) (conn connec
 	if !ok {
 		return nil, "", false
 	}
-	return in, cmpOr(h.Thread, h.UID), true
+	return in, thread, true
 }
 
 // readErrorOf is how a subscription in state says it is behind, as a built-in's failed read does (#6189): its last run
@@ -175,7 +181,7 @@ func inboxFrom(sub Subscription) *time.Time {
 // kbFrom is when sub's knowledge base was turned on; nil while it is off.
 func kbFrom(sub Subscription) *time.Time {
 	switch {
-	case !sub.ToKB:
+	case !sub.ToKB, sub.Recipe.Mode == wire.ConnectorSubscriptionModeThings: // a things one's rows are the Inbox's only
 		return nil
 	case sub.KBFrom != nil:
 		return sub.KBFrom
@@ -262,6 +268,9 @@ func heldAt(h Held) time.Time {
 // or one for the whole subscription when its recipe groups by source (#5671), of the items stored since the rows'
 // grouping started (rowsFrom).
 func (d deliverer) inboxThings(catchup, live []Held) []connector.InboxThing {
+	if d.sub.Recipe.Mode == wire.ConnectorSubscriptionModeThings {
+		return thingRows(append(slices.Clone(catchup), live...))
+	}
 	var snaps, rows []Held
 	var digest []Held
 	for _, h := range catchup {
@@ -317,6 +326,27 @@ func (d deliverer) inboxThings(catchup, live []Held) []connector.InboxThing {
 		out = append(out, t)
 	}
 	return out
+}
+
+// thingRows are a things recipe's rows (#6296): each thread's newest kept row, exactly as the connector made it (no
+// prefix, tag, tier or count added, no digest), in the order they were kept.
+func thingRows(held []Held) []connector.InboxThing {
+	slices.SortStableFunc(held, func(a, b Held) int { return int(a.Seq - b.Seq) })
+	newest := map[string]int{}
+	var rows []connector.InboxThing
+	for _, h := range held {
+		var t connector.InboxThing
+		if len(h.Thing) == 0 || json.Unmarshal(h.Thing, &t) != nil {
+			continue // kept by another recipe, or a row this build cannot read
+		}
+		if i, ok := newest[t.Thread]; ok {
+			rows[i] = t
+			continue
+		}
+		newest[t.Thread] = len(rows)
+		rows = append(rows, t)
+	}
+	return rows
 }
 
 // rowAll is the key of a subscription's one row when its recipe groups by source, as its knowledge-base chat is "all".
@@ -613,7 +643,7 @@ func (s *Service) Archives(ctx context.Context) ([]string, error) {
 	}
 	out := []string{}
 	for _, sub := range all {
-		if sub.ToKB {
+		if kbFrom(sub) != nil {
 			out = append(out, sub.ID)
 		}
 	}

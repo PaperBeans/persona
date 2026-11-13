@@ -3230,8 +3230,12 @@ export interface ConnectorCatalogCallParams {
   args?: unknown;
 }
 
-export type ConnectorSubscriptionMode = "items" | "snapshot" | (string & {});
-export const CONNECTOR_SUBSCRIPTION_MODES = ["items", "snapshot"] as const;
+/**
+ * items: new items, each kept once; snapshot: the answer as one state, kept when it changes; things: the answer lists
+ * Inbox rows ready-made (ConnectorInboxThing), kept and handed to the Inbox as they are.
+ */
+export type ConnectorSubscriptionMode = "items" | "snapshot" | "things" | (string & {});
+export const CONNECTOR_SUBSCRIPTION_MODES = ["items", "snapshot", "things"] as const;
 
 export type ConnectorSubscriptionGroup = "source" | "thread" | (string & {});
 export const CONNECTOR_SUBSCRIPTION_GROUPS = ["source", "thread"] as const;
@@ -3272,11 +3276,12 @@ export interface ConnectorSubscriptionFields {
 }
 
 /**
- * A pull recipe, not a schedule. args is an object (default {}); strings may contain {{since}} or {{since_date}}.
- * cursor_arg and next_cursor_path opt into cursor pagination; page_arg and optional next_page_path opt into page
- * pagination (without next_page_path, a full requested page continues). items_path defaults to $; fields are relative
- * to one item. Text results require snapshot mode. Runtime argument/schema and mapped-value validation belongs to the
- * subscription runner.
+ * A pull recipe, not a schedule. In things mode the rows bring their own threads and kinds: group_by is thread, kind
+ * is a row's when it has none, and fields and pagination are not used. args is an object (default {}); strings may
+ * contain {{since}} or {{since_date}}. cursor_arg and next_cursor_path opt into cursor pagination; page_arg and
+ * optional next_page_path opt into page pagination (without next_page_path, a full requested page continues).
+ * items_path defaults to $; fields are relative to one item. Text results require snapshot mode. Runtime
+ * argument/schema and mapped-value validation belongs to the subscription runner.
  */
 export interface ConnectorSubscriptionRecipe {
   mode: ConnectorSubscriptionMode;

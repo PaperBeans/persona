@@ -138,7 +138,7 @@ func (h *Manager) inboxAppCall(ctx context.Context, p assistantwire.AppCall) (js
 			if !ok && h.subs != nil {
 				// A subscription's row (#6198): its connector answers, by the thread it knows the row's item by.
 				var thread string
-				if in, thread, ok = h.subs.ReplyTarget(ctx, a.Source, a.Reply.Last); ok {
+				if in, thread, ok = h.subs.ReplyTarget(ctx, a.Source, a.Reply.Thread, a.Reply.Last); ok {
 					a.Reply.Thread = thread
 				}
 			}

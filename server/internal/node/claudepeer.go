@@ -129,6 +129,21 @@ const (
 // (peerTaken). Refusals come back as *errPeer (nothing sent); any other error came after the line was written (the
 // inbox may have it): the caller looks at the transcript before calling it unknown.
 func peerSend(ctx context.Context, p claudePeer, sessionID, text string) error {
+	return peerSendAt(ctx, p, sessionID, text, peerNext)
+}
+
+// The priorities a message to the inbox goes at. peerNext queues it behind a running turn, or runs it when the session
+// rests. peerNow cuts the running turn — and a question or permission prompt the session waits on (their tool call
+// ends "Tool permission request aborted") — and runs it at once: Claude Code's own "send now", its queue aborting the
+// turn for a command of priority now (measured with Claude Code 2.1.311 in the desktop app, 2026-11-12: a reply cut
+// at its 481st character, the new message answered 2 s later).
+const (
+	peerNext = "next"
+	peerNow  = "now"
+)
+
+// peerSendAt is peerSend at priority (peerNext, peerNow).
+func peerSendAt(ctx context.Context, p claudePeer, sessionID, text, priority string) error {
 	if p.socket == "" {
 		return &errPeer{code: peerUnsupported, msg: peerNoInboxMsg}
 	}
@@ -145,7 +160,7 @@ func peerSend(ctx context.Context, p claudePeer, sessionID, text string) error {
 		}
 		token = "" // auth is optional on this platform: an inbox whose key file is missing takes the line without it
 	}
-	msg, err := peerMessage(sessionID, text)
+	msg, err := peerMessageAt(sessionID, text, priority)
 	if err != nil {
 		return &errPeer{code: peerUnsupported, msg: peerNoInboxMsg, cause: err}
 	}
@@ -182,13 +197,18 @@ func peerSend(ctx context.Context, p claudePeer, sessionID, text string) error {
 // peerSender, for sessionID; msgV 1, a fresh msg_id, priority next (queued behind a running turn, or run when the
 // session rests).
 func peerMessage(sessionID, text string) ([]byte, error) {
+	return peerMessageAt(sessionID, text, peerNext)
+}
+
+// peerMessageAt is peerMessage at priority.
+func peerMessageAt(sessionID, text, priority string) ([]byte, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, errors.New("empty message")
 	}
 	return marshalNoEscape(map[string]any{
 		"type":       "user",
 		"message":    map[string]string{"role": "user", "content": peerEnvelope(prompts.RenderPeerMessage(prompts.PeerMessage{Text: text}))},
-		"priority":   "next",
+		"priority":   priority,
 		"msgV":       1,
 		"msg_id":     peerMsgID(),
 		"session_id": sessionID,

@@ -551,7 +551,7 @@ func (s *Service) check(ctx context.Context, c ConnectorInfo, sourceID string, r
 	}
 	if pl.problem != nil {
 		switch pl.problem.Code {
-		case CodeNoList, CodeTextNeedsSnap, CodePagination:
+		case CodeNoList, CodeTextNeedsSnap, CodePagination, CodeBadThing:
 			dr.Checks[2].Error = pl.problem
 		case CodeBadArgs:
 			dr.Checks[1].OK, dr.Checks[1].Error = false, pl.problem
@@ -867,6 +867,10 @@ func (s *Service) Update(ctx context.Context, id string, p Patch, by Actor) (Sub
 	}
 	if p.Recipe != nil {
 		next = rebased(next, *cur, p.Existing, now)
+	}
+	if next.ToKB && next.Recipe.Mode == wire.ConnectorSubscriptionModeThings {
+		// Its rows are the Inbox's; the knowledge base reads the source itself (#6296).
+		return Subscription{}, errorf(http.StatusBadRequest, CodeBadRequest, "a things subscription's rows go to the Inbox only")
 	}
 	switch {
 	case !on(next):

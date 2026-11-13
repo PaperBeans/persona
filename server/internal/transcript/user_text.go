@@ -13,6 +13,9 @@ func (m *Meta) applyQueue(op, content string) {
 	// Queued text keeps the <pasted_content> wrapper of long / voice input; show what the user wrote.
 	content = strings.TrimSpace(dropTagged(pastedRe, "pasted_content", content))
 	if from, body, ok := CrossSession(content); ok {
+		if from == PersonaPeer {
+			body = personaWords(body) // the user's own words from the phone, as the chat shows them (peerItem)
+		}
 		content = "【来自 " + from + "】" + body
 	}
 	removeOne := func() bool {

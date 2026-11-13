@@ -42,6 +42,12 @@ struct NewChatView: View {
 
     @AppStorage("newChat.machine") private var machineID = ""
     @State private var cwd = ""
+    /// The folder was picked on this sheet (a row, the browser, a card, a workspace), not filled in from the last start: a
+    /// start in Claude's desktop app with none goes to the app's scratch folder (`desktopScratch`, #5480).
+    @State private var cwdPicked = false
+    /// Where browsing starts for a start in the desktop app: the folder holding the app's projects on this computer
+    /// (`DesktopStart.projectsFolder`), worked out when the computer or the launcher changes, not as the sheet draws.
+    @State private var desktopProjects = ""
     @State private var launcher = ""
     @State private var unifiedModels = false
     @State private var defaultLauncher = ""
@@ -130,6 +136,10 @@ struct NewChatView: View {
     /// A Codex this computer opens only with its first message (an older computer); a newer one opens it waiting for
     /// one, sent later here or typed in its terminal (docs/integrations/codex.md「Starting without a first message」).
     private var codexNeedsFirst: Bool { launchers.first(where: { $0.name == runLauncher })?.needsFirstMessage == true }
+    /// The launcher that will run starts the session in Claude's desktop app (#5480).
+    private var desktopStart: Bool { launchers.first(where: { $0.name == runLauncher })?.startsInDesktopApp == true }
+    /// That start goes to the app's scratch folder: no folder picked here (nor a space's).
+    private var desktopScratch: Bool { desktopStart && !cwdPicked && targetPreset == nil }
 
     /// The list for `runLauncher`; nil: none to pick (not loaded, an older hub).
     private var models: LauncherModels? { modelList.list }
@@ -179,7 +189,7 @@ struct NewChatView: View {
 
     /// Nothing missing for Start Chat, and the machine's own launchers and directories are in.
     private var ready: Bool {
-        machine?.online == true && defaultsFor == machineID && !cwd.isEmpty && (!launcher.isEmpty || unifiedModels)
+        machine?.online == true && defaultsFor == machineID && (!cwd.isEmpty || desktopScratch) && (!launcher.isEmpty || unifiedModels)
             && !codexNeedsMessage && attachmentsHold == nil
     }
 
@@ -206,7 +216,7 @@ struct NewChatView: View {
         }
         // Until this machine's launchers and directories are in, cwd and launcher are not its own yet.
         guard defaultsFor == machineID else { return nil }
-        if cwd.isEmpty { return String(localized: "Choose a directory first") }
+        if cwd.isEmpty && !desktopScratch { return String(localized: "Choose a directory first") }
         if launcher.isEmpty && !unifiedModels { return launchers.isEmpty ? String(localized: "This computer has no launchers") : String(localized: "Choose a launcher first") }
         if codexNeedsMessage { return String(localized: "Codex needs a first message") }
         return attachmentsHold
@@ -268,7 +278,7 @@ struct NewChatView: View {
                         NavigationLink {
                             WorkspacePicker(workspaces: workspaceChoices, selectedID: pickedWorkspace?.sourceID, allowDirectory: true) { picked in
                                 pickedWorkspace = picked
-                                if let picked { cwd = picked.cwd }
+                                if let picked { cwd = picked.cwd; cwdPicked = true }
                             }
                         } label: {
                             LabeledContent(String(localized: "workspace.target", defaultValue: "Worktree"),
@@ -286,28 +296,44 @@ struct NewChatView: View {
                 if pickedWorkspace == nil {
                 Section {
                     NavigationLink {
-                        DirectoryBrowser(ref: ref, start: cwd.isEmpty ? "" : cwd) { picked in cwd = picked }
+                        DirectoryBrowser(ref: ref, start: desktopScratch ? desktopProjects : cwd, newFolder: desktopStart) { picked in
+                            cwd = picked
+                            cwdPicked = true
+                        }
                     } label: {
                         HStack {
                             ThemedIcon(Theme.Icon.folderFilled).foregroundStyle(Theme.accent)
                             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                                Text(cwd.isEmpty ? String(localized: "Choose Directory") : (cwd as NSString).lastPathComponent).font(Theme.Font.heading)
-                                if !cwd.isEmpty {
-                                    Text(Fmt.path(cwd, home: machine?.home)).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                                if desktopScratch {
+                                    Text("Temporary Session").font(Theme.Font.heading)
+                                    Text("Grouped together in the Claude app's sidebar").font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
+                                } else {
+                                    Text(cwd.isEmpty ? String(localized: "Choose Directory") : (cwd as NSString).lastPathComponent).font(Theme.Font.heading)
+                                    if !cwd.isEmpty {
+                                        Text(Fmt.path(cwd, home: machine?.home)).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                                    }
                                 }
                             }
                         }
                     }
                     .accessibilityIdentifier("newChat.directory")
+                    if desktopStart, !desktopScratch, targetPreset == nil {
+                        Button {
+                            cwdPicked = false
+                            Haptics.tap()
+                        } label: { Label("Use a Temporary Session", systemImage: Theme.Icon.temporarySession) }
+                        .accessibilityIdentifier("newChat.temporarySession")
+                    }
                     if !recent.isEmpty {
                         ForEach(recent.prefix(6)) { r in
                             Button {
                                 cwd = r.path
+                                cwdPicked = true
                                 Haptics.tap()
                             } label: {
                                 HStack {
-                                    ThemedIcon(cwd == r.path ? Theme.Icon.successFilled : Theme.Icon.recent)
-                                        .foregroundStyle(cwd == r.path ? Theme.accent : .secondary)
+                                    ThemedIcon(cwd == r.path && !desktopScratch ? Theme.Icon.successFilled : Theme.Icon.recent)
+                                        .foregroundStyle(cwd == r.path && !desktopScratch ? Theme.accent : .secondary)
                                     VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                                         Text(r.name).foregroundStyle(Color.primary)
                                         Text(Fmt.path((r.path as NSString).deletingLastPathComponent, home: machine?.home))
@@ -319,8 +345,10 @@ struct NewChatView: View {
                             }
                         }
                     }
-                } header: { Text("Folder [Task Views 52daa7]") }
-                if let repo, !repo.path.isEmpty {
+                } header: { Text("Folder [Task Views 52daa7]") } footer: {
+                    if desktopStart { Text("Starts in Claude's desktop app. With no folder it goes to one temporary folder beside the app's projects; a new folder is made when it starts.") }
+                }
+                if let repo, !repo.path.isEmpty, !desktopScratch {
                     NewAgentWorktreeSection(repo: repo, on: $inWorktree, branch: $worktreeBranch,
                                             suggested: AgentWorktree.branch(nameHint: worktreeNameHint), home: machine?.home)
                 }
@@ -482,6 +510,9 @@ struct NewChatView: View {
                 .padding(.bottom, Theme.Space.s)
             }
             .task(id: machineID) { await loadMachine() }
+            .task(id: "\(machineID)|\(desktopStart)") {
+                desktopProjects = desktopStart ? DesktopStart.projectsFolder(model.sessionsByMachine[ref] ?? []) ?? "" : ""
+            }
             .task(id: machineID) { await workspaceCatalog.refresh([ref.group]) { model.api($0) } }
             // A provider added from a grayed-out launcher's help (Add Provider): this computer's list again.
             .onChange(of: model.launchersRevision) { _, _ in Task { await loadMachine() } }
@@ -572,6 +603,7 @@ struct NewChatView: View {
                 pickedWorkspace = HostWorkspace(machineID: source.machineID, source: source.source, sourceID: made.workspaceID,
                                                 title: made.branch, cwd: made.path, parentSourceID: made.parentWorkspaceID, group: source.group)
                 cwd = made.path
+                cwdPicked = true
                 childSource = nil
             }
         }
@@ -637,6 +669,7 @@ struct NewChatView: View {
         pendingFill = nil
         pickedWorkspace = nil
         cwd = fill.cwd
+        cwdPicked = !fill.cwd.isEmpty
         launcher = fill.launcher
         if let m = fill.mode { mode = m }
         if let e = fill.effort { effort = e }
@@ -668,7 +701,7 @@ struct NewChatView: View {
     /// The setup a start records (#2134): the fields as they are, the model the start sends ("" for the default).
     private func recentSetup(agent: String) -> RecentSetup {
         let claude = agent == "claude"
-        return RecentSetup(machine: machineID, cwd: cwd, launcher: launcher, model: sentModel ?? "", agentType: agent,
+        return RecentSetup(machine: machineID, cwd: desktopScratch ? "" : cwd, launcher: launcher, model: sentModel ?? "", agentType: agent,
                            mode: claude ? mode : "", effort: claude ? effort : "", at: "")
     }
 
@@ -811,6 +844,7 @@ struct NewChatView: View {
         loading = false
         error = nil
         if preset == nil { cwd = "" }
+        cwdPicked = false
         if purposeGroup != ref.group {
             unifiedModels = false
             defaultLauncher = ""
@@ -936,8 +970,8 @@ struct NewChatView: View {
         defer { starting = false }
         let setup = recentSetup(agent: codex ? "codex" : startAgent)
         // In a worktree of its own (#6115): made first; a failure says why, and nothing starts.
-        var dir = cwd
-        if inWorktree, targetPreset == nil, repo?.path.isEmpty == false {
+        var dir = desktopScratch ? "" : cwd // the desktop app's scratch folder, which the computer picks (#5480)
+        if inWorktree, !desktopScratch, targetPreset == nil, repo?.path.isEmpty == false {
             do {
                 dir = try await api.addAgentWorktree(machine: ref.id, cwd: cwd, nameHint: worktreeNameHint, branch: worktreeBranch).path
             } catch {
@@ -1159,7 +1193,11 @@ struct DirectoryBrowser: View {
     @Environment(\.dismiss) private var dismiss
     var ref: MachineRef
     var start: String
+    /// New Folder… names a folder the computer makes when the session starts (a start in Claude's desktop app, #5480).
+    var newFolder = false
     var onPick: (String) -> Void
+    @State private var naming = false
+    @State private var newName = ""
     @State private var list: DirList?
     @State private var path = ""
     @State private var draft = ""
@@ -1196,6 +1234,13 @@ struct DirectoryBrowser: View {
                         Label("Use “\((list.path as NSString).lastPathComponent)”", systemImage: Theme.Icon.successFilled)
                             .font(Theme.Font.heading)
                             .lineLimit(1)
+                    }
+                    if newFolder {
+                        Button {
+                            newName = ""
+                            naming = true
+                        } label: { Label("New Folder…", systemImage: Theme.Icon.newFolder) }
+                        .accessibilityIdentifier("dirBrowser.newFolder")
                     }
                 } footer: { Text("Edit the path above and press Return to go there; ~ is your home folder") }
 
@@ -1239,6 +1284,21 @@ struct DirectoryBrowser: View {
         .navigationTitle((path as NSString).lastPathComponent.isEmpty ? String(localized: "Folder [Task Views 52daa7]") : (path as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load(start) }
+        .alert("New Folder", isPresented: $naming) {
+            TextField("Folder Name", text: $newName)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Use") {
+                if let list, let made = DesktopStart.newFolder(newName, in: list.path) {
+                    onPick(made)
+                    dismiss()
+                }
+            }
+            .disabled(list.flatMap { DesktopStart.newFolder(newName, in: $0.path) } == nil)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Made in “\(((list?.path ?? "") as NSString).lastPathComponent)” when the session starts.")
+        }
     }
 
     private func go() {

@@ -3054,14 +3054,17 @@ type ConnectorCatalogCallParams struct {
 	Args         json.RawMessage `json:"args,omitempty"`
 }
 
-// Values of ConnectorSubscriptionMode.
+// ConnectorSubscriptionMode: items: new items, each kept once; snapshot: the answer as one state, kept when it
+// changes; things: the answer lists Inbox rows ready-made (ConnectorInboxThing), kept and handed to the Inbox as they
+// are.
 const (
 	ConnectorSubscriptionModeItems    = "items"
 	ConnectorSubscriptionModeSnapshot = "snapshot"
+	ConnectorSubscriptionModeThings   = "things"
 )
 
 // ConnectorSubscriptionModes are the values of ConnectorSubscriptionMode, in order.
-var ConnectorSubscriptionModes = []string{"items", "snapshot"}
+var ConnectorSubscriptionModes = []string{"items", "snapshot", "things"}
 
 // Values of ConnectorSubscriptionGroup.
 const (
@@ -3113,11 +3116,12 @@ type ConnectorSubscriptionFields struct {
 	ReplyTo string `json:"reply_to,omitempty"`
 }
 
-// ConnectorSubscriptionRecipe: A pull recipe, not a schedule. args is an object (default {}); strings may contain
-// {{since}} or {{since_date}}. cursor_arg and next_cursor_path opt into cursor pagination; page_arg and optional
-// next_page_path opt into page pagination (without next_page_path, a full requested page continues). items_path
-// defaults to $; fields are relative to one item. Text results require snapshot mode. Runtime argument/schema and
-// mapped-value validation belongs to the subscription runner.
+// ConnectorSubscriptionRecipe: A pull recipe, not a schedule. In things mode the rows bring their own threads and
+// kinds: group_by is thread, kind is a row's when it has none, and fields and pagination are not used. args is an
+// object (default {}); strings may contain {{since}} or {{since_date}}. cursor_arg and next_cursor_path opt into
+// cursor pagination; page_arg and optional next_page_path opt into page pagination (without next_page_path, a full
+// requested page continues). items_path defaults to $; fields are relative to one item. Text results require snapshot
+// mode. Runtime argument/schema and mapped-value validation belongs to the subscription runner.
 type ConnectorSubscriptionRecipe struct {
 	Mode           string                       `json:"mode"`
 	Tool           string                       `json:"tool"`

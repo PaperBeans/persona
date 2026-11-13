@@ -55,7 +55,8 @@ type quickMeta struct {
 	// doing / doingAt: what the agent's latest tool call does, when no text came after it (transcript.Activity).
 	doing       string
 	doingAt     time.Time
-	wake        bool // the latest turn was a background task waking the agent
+	tool        string // the name of that call (transcript.Meta.LastTool)
+	wake        bool   // the latest turn was a background task waking the agent
 	readAt      time.Time
 	mode        string
 	modeAt      time.Time
@@ -131,6 +132,18 @@ const quickTail = 384 * 1024
 
 // metaMinInterval: how stale a growing transcript's title / last text / background tasks may get in the list.
 const metaMinInterval = 3 * time.Second
+
+// metaNow is meta with what was written since the last read, however recent that read: for a decision a list's read
+// of a few seconds ago must not make (metaMinInterval).
+func (n *Node) metaNow(path string, st os.FileInfo) quickMeta {
+	n.mu.Lock()
+	if prev, ok := n.metas[path]; ok {
+		prev.readAt = time.Time{}
+		n.metas[path] = prev
+	}
+	n.mu.Unlock()
+	return n.meta(path, st)
+}
 
 func (n *Node) meta(path string, st os.FileInfo) quickMeta {
 	n.mu.Lock()
@@ -324,7 +337,7 @@ func readQuickMetaSince(path string, st os.FileInfo, prev quickMeta) quickMeta {
 		m.asks = closeout.AskOf(m.lastText)
 	}
 	if t := tm.LastTool; t != nil {
-		m.doing, m.doingAt = transcript.Activity(t.Name, t.Input), t.At
+		m.doing, m.doingAt, m.tool = transcript.Activity(t.Name, t.Input), t.At, t.Name
 	}
 	m.turnOpen = tm.Codex && (tm.TurnOpen || off > 0 && !tm.TurnClosed)
 	m.claudeTurn = !tm.Codex && tm.TurnOpen
