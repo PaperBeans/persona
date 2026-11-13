@@ -496,8 +496,9 @@ two sources (`server/internal/assistant/suggest_next.go`):
 
 Rules for the hub-made one:
 
-- **Switch**: `next_suggestions` in the assistant's settings (`GET/PUT /api/v1/assistant`, Settings › Persona on the web), **off by
-  default**. Default in one sentence: no chat gets a model-made suggestion until you turn it on. Claude Code's own suggestion
+- **Switch**: `next_suggestions` in the assistant's settings (`GET/PUT /api/v1/assistant`, Settings › Persona on the web and Settings ›
+  Assistant on iOS/iPadOS), **off by default**. A native client keeps the value nil and hides the row when an older hub omits the field.
+  Default in one sentence: no chat gets a model-made suggestion until you turn it on. Claude Code's own suggestion
   (`promptSuggestionEnabled`) is untouched by it.
 - **When**: once per turn, when a turn ends well (working to done or idle in the node's list) and an app has the chat open at that moment
   (the hub watches the session for it: `Devices.Watched`). Every app with the chat open shows the same one. A new turn or a message going
@@ -510,8 +511,11 @@ Rules for the hub-made one:
 - **Risky suggestions** (either source): one that names a command, a path, a link, a secret-looking string or one of the risky actions
   of the Agents' safety boundary (`riskyWords`: delete, push, deploy, send…) carries `suggestion_risky: true`. The apps fill it in but
   show no one-tap send.
-- **Clients**: the web shows the strip in every chat, assistant conversations included, and drops the arrow for a risky one. iOS and
-  Android still show the strip only where they did, and do not read `suggestion_risky` yet (follow-up issue).
+- **Clients**: the web and iOS/iPadOS show the strip in Agent and assistant conversations, the main Persona conversation included,
+  through their existing shared composer. A risky one has no one-tap send: iOS/iPadOS retains tap / Fill In and the preview but omits
+  Send Now, the VoiceOver direct-send action and its long-press-send hint; filling never sends, and the ordinary composer Send remains
+  available after review. Non-risky actions are unchanged. Android still shows the strip only where it did and does not read
+  `suggestion_risky` yet (follow-up issue).
 
 ## Main chat, knowledge base, and context flow
 
@@ -635,12 +639,12 @@ No native client feature or build is part of this Web-only change.
 
 ## Workspace mentions (2026-11-06, #5594)
 
-In the assistant's composer (web), `@` also lists **workspaces**: the discovered workspaces of `GET /api/v1/workspaces` (host spaces, current session folders and folders bound on the workspace board, on every computer; see [workspace-board.md](../web/workspace-board.md), "Workspaces and status"). The list is read each time the menu opens, works whether or not the board is turned on, shows one row per computer and folder, and leaves out host spaces without a folder. Agents' composers don't offer it: an Agent already works in one folder.
+In the assistant's composer (web, and the iPhone/iPad shell composer's `ComposerMentionMenu` on #2599), `@` also lists **workspaces**: the discovered workspaces of `GET /api/v1/workspaces` (host spaces, current session folders and folders bound on the workspace board, on every computer; see [workspace-board.md](../web/workspace-board.md), "Workspaces and status"). The list is read each time the menu opens, works whether or not the board is turned on, shows one row per computer and folder, and leaves out host spaces without a folder. Agents' composers don't offer it: an Agent already works in one folder. On iOS the rows follow the folder's entries and precede sessions, match by title, folder, computer or branch, put title prefixes first and available before unavailable, and cap at eight; Health, visionOS and the frozen native Mac don't offer them. A failed workspace read (including an old hub's 404 or a manager's 503) leaves the other rows unchanged.
 
 - **Picking one** adds a "Workspace" chip. On send it goes in front of the message like a session quote, as `<persona-context kind="workspace" title="…" url="" machine="<machine id>" cwd="<folder>" branch="…">` with a short human-readable body.
 - **The manager fills it in** (`assistant/workspace_mention.go`): in `SendParams` for messages to the assistant's conversations and in `POST /api/v1/assistant/conversations` for a new one's first message (guest conversations excepted), each workspace block among the context blocks at the start of the message is replaced by `prompts/assistant/workspace_mention.md`. That block says to use that machine / cwd for `task_plan` and `agent_start` and when answering unless the message says otherwise, and lists the computer (and whether it is offline), folder, branch, the knowledge-base projects for the folder (`ProjectsForWork`) and the latest 5 Agents working in it or below (`sessions.list`, waited on for at most 3 s; the assistant's own conversations left out).
 - Blocks further into the message (inside quoted text) are never taken for mentions, and a block naming a computer the hub doesn't know stays as the client wrote it. The transcript keeps the filled-in block, so the chat's context row shows what the assistant was given.
-- **Not yet**: iOS / Mac (`PromptComposer.swift`) and Android composers. They only need to list the same endpoint and write the same tag; the manager side already handles their messages.
+- **Not yet**: the native Mac, Android, and BeautifulUI's separate legacy iOS `PromptComposer` menu. They only need to list the same endpoint and write the same tag; the manager side already handles their messages.
 
 ## Pitfalls
 
@@ -1510,7 +1514,9 @@ DSH details (permission preset mapping, persistent `dsh web`): `docs/integration
 ## Profile and avatar
 
 - Persona tab top-right avatar opens `AssistantProfileView`: identity / machine, Online / Working, three "Up Next" items,
-  proactive work (scheduled tasks, run history), knowing you (About Me, memory), settings (Skills, Run on, Working directory; model in Settings › Model Configuration › Main chat, #1291), accessible data. Settings › Assistant opens the same page.
+  proactive work (scheduled tasks, run history), knowing you (About Me, memory), settings (Skills, Run on, Working directory;
+  next-message suggestions on a supporting hub, off by default and hidden when the field is absent; model in Settings › Model
+  Configuration › Main chat, #1291), accessible data. Settings › Assistant opens the same page.
 - Scheduled tasks: "Up Next" timeline (large times on the left, like Reminders), "Scheduled tasks" (daily / interval, natural rules "Every weekday at 9:00 AM", "Every 30 minutes"),
   "One-time follow-ups"; rows show icon, next run, nondefault execution ("claude-fast · Auto · Low effort", Allow Everything red), last result, switch; swipe delete, long-press Run now,
   recent runs. Shared editor: repeat (Once / Daily / Interval), prompt, execution (model, permission, effort), Continue original chat (toggle off for new chats each run),

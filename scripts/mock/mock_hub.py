@@ -343,6 +343,15 @@ def mock_workspaces():
                     result.append({"id": "catalog-" + wid, "machine_id": mid, "source": "orca", "source_id": wid,
                                    "title": branch, "cwd": path, "index": 20, "parent_source_id": WORKSPACE_LINEAGE[mid, wid],
                                    "online": True, "available": True})
+    if os.environ.get("MOCK_PASEO"):
+        for wid, title, path, branch in [(w, t, PASEO_ROOT if tree is None else PASEO_TREES + tree, b)
+                                         for w, t, tree, b in PASEO_WORKSPACES] + PASEO_MADE:
+            # every worktree here is one Paseo made (owned): the ones Delete worktree is offered for (#6297)
+            result.append({"id": "catalog-" + wid, "machine_id": "server", "source": "paseo", "source_id": wid, "title": title,
+                           "cwd": path, "branch": branch, "workspace_kind": "git", "is_main": path == PASEO_ROOT,
+                           **({} if path == PASEO_ROOT else {"owned": True}),
+                           "project_id": PASEO_PROJECT["id"], "project_name": PASEO_PROJECT["name"], "project_path": PASEO_ROOT,
+                           "online": True, "available": True, "last_seen": ago()})
     return list({(w["machine_id"], w["source"], w["source_id"]): w for w in result}.values())
 
 
@@ -1162,12 +1171,21 @@ if os.environ.get("MOCK_ROW_EDGES"):
 PASEO_LEAD = "9a5e0000-0000-4000-8000-000000000002"
 PASEO_ASKS = "paseo-9a5e0000-0000-4000-8000-000000000003"
 PASEO_CODEX = "paseo-9a5e0000-0000-4000-8000-000000000004"
+# Paseo's workspaces (#6295), as the node lists them in the catalog: the main checkout, the two worktrees its agents work
+# in and one it made with no agent yet: (workspace id, title, folder under its worktrees root or None, branch).
+PASEO_ROOT, PASEO_TREES = "/home/me/code/app", "/home/me/.paseo/worktrees/1a2b3c4d/"
+PASEO_WORKSPACES = [("wks_5a1e000000000001", "Triage", None, "main"),
+                    ("wks_5a1e000000000002", "Fix the login flow", "brave-fox", "fix/login"),
+                    ("wks_5a1e000000000003", "Speed up the importer", "calm-owl", "perf/importer"),
+                    ("wks_5a1e000000000004", "Try the new parser", "quiet-elk", "spike/parser")]
 if os.environ.get("MOCK_PASEO"):
-    _paseo_root = "/home/me/code/app"
+    _paseo_root = PASEO_ROOT
     def _paseo(sid, title, workspace, tree, branch, status, state, minutes, last, agent="claude", **kw):
-        cwd = _paseo_root if tree is None else "/home/me/.paseo/worktrees/1a2b3c4d/" + tree
+        cwd = _paseo_root if tree is None else PASEO_TREES + tree
+        # each agent names its workspace (workspace_id, #6295); a Paseo workspace is still no terminal slot (slot_name only)
+        wid = next((w for w, t, _, _ in PASEO_WORKSPACES if t == workspace), None)
         row = dict(space_kind="paseo", space_id="prj_app", space_name="app", space_index=None, slot_id=None, slot_name=workspace,
-                   slot_index=None, pane_id=None, tab_id=None, workspace_id=None, host="paseo",
+                   slot_index=None, pane_id=None, tab_id=None, workspace_id=wid, host="paseo",
                    source_kind="runtime", source_instance_id="paseo", repo_root=_paseo_root, worktree=cwd, workspace_cwd=cwd,
                    branch=branch, launcher="claude" if agent == "claude" else "codex", started_by_persona=False,
                    # Paseo declares rename and close: the node lists both, rename not on an agent another one started (#6294),
@@ -9651,10 +9669,20 @@ def mock_panes(mid):
     return {"hosts": [{"kind": "herdr", "stream": True, "control": True, "new_tab": True, "worktree": True, "workspaces": ws, "tabs": tabs, "panes": panes}]}
 
 
+PASEO_MADE = []  # worktrees made on Paseo's workspaces from the web (#6295), in the catalog after PASEO_WORKSPACES
+
+
 def worktree_route(h, p, body):
     """POST /api/v1/machines/{mid}/worktree/{prepare,create} (#2431)."""
     mid, verb = p.split("/")[4], p.split("/")[6]
     NODE_ACTIONS.append({"machine": mid, "route": "worktree/" + verb, **body})
+    if body.get("kind") == "paseo":  # Paseo makes it, in its own worktrees folder of the repository (#6295)
+        if verb == "prepare":
+            return h.send_json({"root": PASEO_ROOT, "repoName": "app", "branch": "main", "path": PASEO_TREES.rstrip("/"), "automatic_name": True})
+        branch, path = str(body.get("branch", "")), str(body.get("path", ""))
+        wid = "wks_5a1e00000000%04d" % (100 + len(PASEO_MADE))
+        PASEO_MADE.append((wid, branch, path, branch))
+        return h.send_json({"workspace_id": wid, "path": path, "branch": branch})
     if verb == "prepare":
         return h.send_json({"root": "/home/me/persona", "repoName": "persona", "branch": "main", "path": "/home/me/.herdr/worktrees/persona",
                             "choose_parent": body.get("kind") == "orca"})
@@ -9668,6 +9696,80 @@ def worktree_route(h, p, body):
     parent = body.get("parent_workspace_id") or body.get("workspace_id", "")
     if body.get("kind") == "orca": WORKSPACE_LINEAGE[mid, wid] = parent
     return h.send_json({"workspace_id": wid, "parent_workspace_id": parent, "tab_id": wid + ":t1", "pane": wid + ":p1", "terminal": "pane:" + wid + ":p1", "path": path, "branch": branch})
+
+
+# MOCK_PASEO=1 (#6297): Rename and Delete worktree on Paseo's rows, and Rename space on its project, answered as the node
+# answers them (node/runtimeworkspaces_manage.go): a title, the project's name (its agents' space_name, the catalog's
+# project_name), and a deletion previewed, then confirmed with the preview's token, only of a worktree Paseo made (the
+# main checkout is refused); the login flow's worktree has two uncommitted changes, which the dialog asks to confirm.
+# Recorded at GET /mock/node_actions.
+PASEO_PROJECT = {"id": "prj_app", "name": "app"}
+PASEO_PREVIEWS, PASEO_DIRTY = {}, {"wks_5a1e000000000002": 2}
+
+
+def _paseo_path(row):
+    """A Paseo workspace row's folder: PASEO_WORKSPACES name a folder under its worktrees root (None: the main checkout),
+    PASEO_MADE the whole path."""
+    return row[2] if row in PASEO_MADE else PASEO_ROOT if row[2] is None else PASEO_TREES + row[2]
+
+
+def _paseo_failed(h, detail):
+    """A node's refusal as the hub writes it (docs/protocol/protocol.md "Error body"): the node's words in detail."""
+    return h.send_json({"error": "The request could not be completed. Open details for the diagnostic.", "code": "internal", "detail": detail}, 502)
+
+
+def paseo_worktree_route(h, p, body):
+    """POST /api/v1/machines/{mid}/worktree/{rename,delete} of a Paseo row (#6297)."""
+    mid, verb = p.split("/")[4], p.split("/")[6]
+    NODE_ACTIONS.append({"machine": mid, "route": "worktree/" + verb, **body})
+    wid = str(body.get("workspace_id", ""))
+    found = next(((rows, i) for rows in (PASEO_WORKSPACES, PASEO_MADE) for i, row in enumerate(rows) if row[0] == wid), None)
+    if verb == "rename":
+        if not found:
+            return _paseo_failed(h, "Paseo no longer lists this workspace; refresh and try again")
+        rows, i = found
+        rows[i] = (wid, str(body.get("name", "")).strip()) + tuple(rows[i][2:])
+        return h.send_json({"ok": True})
+    token = str(body.get("preview_token", ""))
+    if body.get("preview"):
+        if not found:
+            return _paseo_failed(h, "The workspace or its changes differ from the preview; review a new preview")
+        rows, i = found
+        path = _paseo_path(rows[i])
+        if path == PASEO_ROOT:
+            return _paseo_failed(h, "The repository's main checkout cannot be deleted")
+        token = "paseo-preview-%d" % (len(PASEO_PREVIEWS) + 1)
+        PASEO_PREVIEWS[token] = wid
+        return h.send_json({"workspace_id": wid, "kind": "paseo", "host_id": "local", "instance_id": "paseo-mock", "path": path,
+                            "branch": rows[i][3], "dirty": PASEO_DIRTY.get(wid, 0), "folder": False, "preview_token": token})
+    if PASEO_PREVIEWS.get(token) != wid:
+        return _paseo_failed(h, "Preview this exact workspace again before deleting it")
+    if body.get("reconcile"):
+        return h.send_json({"workspace_id": wid, "removed": not found, "state": "present" if found else "removed"})
+    if not found:
+        return _paseo_failed(h, "Deletion was already sent; reconcile its status before any further action")
+    if PASEO_DIRTY.get(wid) and not body.get("force"):
+        return _paseo_failed(h, "The worktree has uncommitted changes")
+    rows, i = found
+    del rows[i]
+    SESSIONS[:] = [s for s in SESSIONS if not (s.get("space_kind") == "paseo" and s.get("workspace_id") == wid)]  # archived with it
+    return h.send_json({"workspace_id": wid, "removed": True, "state": "removed", **({"branch_deleted": True} if body.get("delete_branch") else {})})
+
+
+def paseo_space_route(h, p, body):
+    """POST /api/v1/machines/{mid}/spaces/{id}/rename of Paseo's project, by its id or one of its workspaces' (#6297): its
+    agents and the catalog show the new name; the hub answers it as pins.go does. False when the id is no Paseo one."""
+    sid = p.split("/")[6]
+    if sid != PASEO_PROJECT["id"] and not any(row[0] == sid for row in PASEO_WORKSPACES + PASEO_MADE):
+        return False
+    NODE_ACTIONS.append({"machine": p.split("/")[4], "route": "spaces/rename", "workspace_id": sid, **body})
+    name = str(body.get("name", "")).strip()
+    PASEO_PROJECT["name"] = name
+    for s in SESSIONS:
+        if s.get("space_kind") == "paseo" and s.get("space_id") == PASEO_PROJECT["id"]:
+            s["space_name"] = name
+    h.send_json({"ok": True, "name": name})
+    return True
 
 
 # MOCK_AGENT_WORKTREE=1 (#6115): a new agent in a worktree of its own. worktree/status says a folder under
@@ -12627,6 +12729,31 @@ def fs_find(mid):
 
 def fs_get(h, p, q):
     """GET /api/v1/lark/… and /mock/lark with MOCK_LARK (True when handled; the rest falls through)."""
+    # The unread switch must cross a whole read-only page, not filter just the first screen (#6553).
+    if os.environ.get("MOCK_LARK_UNREAD") and p in ("/api/v1/lark/conversations", "/api/v1/lark/pinned"):
+        pages = max(1, min(16, int(os.environ.get("MOCK_LARK_UNREAD_PAGES", "1"))))
+        rows = [dict(id="read-%03d" % n, name="Project archive %02d" % n, is_group=True, unread=0,
+                     at_me=False, muted=False, preview="Notes are up to date.", is_mine=False,
+                     updated_at="2026-01-02T12:00:00Z", pinned=n == 1) for n in range(1, pages * 60 + 1)]
+        rows += [dict(id=feed, name=name, is_group=True, unread=count, marked_unread=marked,
+                      at_me=False, muted=False, preview="A new update is waiting.", is_mine=False,
+                      updated_at="2026-01-01T12:00:00Z", pinned=feed == "f1")
+                 for feed, name, count, marked in [("f3", "Design review", 3, False),
+                                                  ("f2", "Weekend plans", 0, True),
+                                                  ("f1", "Release notes", 1, False)]]
+        if p.endswith("pinned"):
+            rows = [row for row in rows if row.get("pinned")]
+        elif q.get("scope", ["chats"])[0] == "unread":
+            rows = [row for row in rows if row["unread"] or row.get("marked_unread")]
+        cursor, limit = int(q.get("cursor", ["0"])[0] or "0"), int(q.get("limit", ["60"])[0])
+        if cursor:
+            delay = max(0, min(3, float(os.environ.get("MOCK_LARK_UNREAD_PAGE_DELAY", "0"))))
+            if delay:
+                print(f"lark-unread-page-start cursor={cursor}", flush=True)
+                time.sleep(delay)
+        h.send_json({"conversations": rows[cursor:cursor + limit], "account_id": LARK_ACCOUNT_ID,
+                     "next_cursor": str(cursor + limit) if cursor + limit < len(rows) else ""})
+        return True
     if p == "/mock/lark":
         h.send_json(FS_LOG); return True
     if p.startswith("/api/v1/lark/media/"):
@@ -12648,6 +12775,14 @@ def fs_get(h, p, q):
         h.end_headers(); h.wfile.write(data)
         return True
     if p == "/api/v1/lark/conversations":
+        # Optimized before/after list-scroll measurements use the same paginated synthetic workload (#6553).
+        if os.environ.get("MOCK_LARK_LIST"):
+            rows = FS_CONVS + [dict(FS_CONVS[-1], id="list-%03d" % n, name="Archive %03d" % n)
+                               for n in range(min(2000, int(os.environ["MOCK_LARK_LIST"])))]
+            cursor, limit = int(q.get("cursor", ["0"])[0] or "0"), int(q.get("limit", ["60"])[0])
+            h.send_json({"conversations": rows[cursor:cursor + limit], "account_id": LARK_ACCOUNT_ID,
+                         "next_cursor": str(cursor + limit) if cursor + limit < len(rows) else ""})
+            return True
         h.send_json({"conversations": FS_CONVS, "next_cursor": ""}); return True
     if p.startswith("/api/v1/lark/conversations/") and p.endswith("/messages"):
         h.send_json(fs_page(p.split("/")[5], q)); return True
@@ -15503,15 +15638,33 @@ ITEMS["hlth0004-0000-4000-8000-000000000004"] = (
 )
 # Assistant screenshots with the shared renderer: a read-only persona-view and a legacy persona-card, leaving other mock modes unchanged.
 if os.environ.get("MOCK_EXTENSION_CARDS") == "1":
-    _view = {"sections": [{"title": "本周概览", "items": [
+    # A card needs its `fallback` (the words a client that can't draw it shows): without one it is drawn as text.
+    _view = {"fallback": "本周概览：会议记录已整理。", "sections": [{"title": "本周概览", "items": [
         {"type": "markdown", "text": "**会议记录已整理**，可以查看摘要。"},
         {"type": "row", "title": "周会摘要", "icon": "doc", "action": {"id": "must-not-run"}},
         {"type": "button", "title": "不应运行", "action": {"id": "must-not-run"}},
         {"type": "link", "title": "查看说明", "url": "https://example.com/guide"}]}]}
     _legacy = {"type": "stat", "title": "今天步数", "value": 8432, "unit": "步", "note": "这是演示数据"}
     _fence = lambda language, data: "```" + language + "\n" + json.dumps(data, ensure_ascii=False) + "\n```"
-    ITEMS[ASK1] = [it("user", "text", 2, text="把今天的概览放到卡片里"),
-                   it("assistant", "text", 1, text=_fence("persona-view", _view) + "\n\n" + _fence("persona-card", _legacy))]
+    # UI version 4's code-hosting components in a card (#827): drawn read-only by ExtensionCodeSummary, now that cards
+    # report UI version 6 and the hub sends them as they are.
+    _code = {"fallback": "合并请求 #42：登录页支持“记住我”，3 个文件。", "sections": [{"title": "合并请求 #42", "items": [
+        {"type": "header", "title": "登录页支持“记住我”", "subtitle": "remember-me → main · 3 个提交"},
+        {"type": "breadcrumb", "crumbs": [{"title": "app"}, {"title": "web"}, {"title": "login.tsx"}]},
+        {"type": "file_tree", "entries": [
+            {"path": "web/login.tsx", "kind": "file", "status": "modified", "additions": 24, "deletions": 6},
+            {"path": "web/session.ts", "kind": "file", "status": "added", "additions": 41, "deletions": 0},
+            {"path": "web/old-login.css", "kind": "file", "status": "deleted", "additions": 0, "deletions": 18}]},
+        {"type": "code", "path": "web/session.ts", "language": "ts",
+         "text": "export function remember(days: number) {\n  const until = Date.now() + days * 86_400_000\n  return { until }\n}"},
+        {"type": "comment_thread", "comments": [
+            {"author": "评审人", "at": "2026-11-12T09:30:00Z", "body": "“记住我”默认关着比较稳妥。"},
+            {"author": "作者", "at": "2026-11-12T10:05:00Z", "body": "好，已经改成默认关。"}]},
+        {"type": "composer", "name": "reply", "placeholder": "回复", "buttons": [{"title": "发送", "action": {"id": "must-not-run"}}]}]}]}
+    ITEMS[ASK1] = [it("user", "text", 4, text="把今天的概览放到卡片里"),
+                   it("assistant", "text", 3, text=_fence("persona-view", _view) + "\n\n" + _fence("persona-card", _legacy)),
+                   it("user", "text", 2, text="合并请求 #42 现在怎么样了"),
+                   it("assistant", "text", 1, text=_fence("persona-view", _code))]
 
 if os.environ.get("MOCK_SPLIT_TABS"):
     ITEMS.update(split_tabs_items())
@@ -20758,6 +20911,12 @@ if ENGINE_SETS:
     for _s in SESSIONS:
         if _s.get("session_id") == WIDGET:
             _s["host"], _s["also_open_in"] = "herdr", ["herdr-core"]
+if os.environ.get("MOCK_PASEO"):  # the server enables Paseo beside herdr: its workspaces are the catalog's (#6295)
+    for _m in MACHINES:
+        if _m["id"] == "server" and _m.get("online"):
+            _m["engines"] = [e for e in _m["engines"] if e["id"] != "paseo"] + [{"id": "paseo", "name": "Paseo", "available": True, "version": "0.14"}]
+            _m["engine_hosts"], _m["engine_default"] = ["herdr", "paseo"], "herdr"
+            _m["engine"] = legacy_engine(_m["engine_hosts"], _m["engine_default"])
 if RESUME_TERMINAL:  # the Mac mini enables no terminal engine: the empty set (#3302), herdr still named for older clients
     for _m in MACHINES:
         if _m["id"] == "mini":
@@ -22366,7 +22525,7 @@ MOCK_HELP = [
     "MOCK_MANUAL_HERDR=1  没挂待办的 herdr Agent 算手动开的（started_by_persona 为假），Agents「按待办」里出「手动开的」一段（#2917）",
     "MOCK_ORCA_CHILDREN=1  MacBook 上一个 Orca 工作区带三个子工作区（其中一个还有子项，parent_space_id，#2073）",
     "MOCK_CHILD_SESSIONS=1  The Paseo computer (MOCK_PASEO) with its agent's four created agents (one waiting for you, one working with a Codex subagent of its own, one done, one failed) and an agent whose creator is not listed: the hub folds them (folded_under / children) and the lead's chat draws a card for each (#5120)",
-    "MOCK_PASEO=1  A computer whose engine is Paseo: a project with its main checkout and two titled worktree workspaces, an agent with the two agents it created (one waiting for you), and a Codex agent whose thread has a subagent",
+    "MOCK_PASEO=1  A computer that enables Paseo beside herdr: a project with its main checkout, two titled worktree workspaces and one with no agent, all in the workspace catalog (New worktree… makes one in Paseo's folder, #6295; Rename, Delete worktree and Rename space as the node answers them, the login flow's worktree with two uncommitted changes, #6297), an agent with the two agents it created (one waiting for you), and a Codex agent whose thread has a subagent",
     "MOCK_LIVE_STEP=bash|command|reads|parallel|thinking|thinking-folded  The widget chat a minute into a turn whose newest step is still going: the running work line names it (#2987)",
     "MOCK_TOOL_OUTCOMES=1  A turn whose tool results carry outcomes: a failed test run (exit code, the cut output's end), a denied edit, a refused write, an interrupted and a timed-out command; only the failure is red (#4303)",
     "MOCK_PERMISSION_DIFF=1  Two chats wait on a Claude Code permission card for an Edit (longer than the card's preview) and a Write; the card shows the change (#4621)",
@@ -23894,8 +24053,14 @@ class H(BaseHTTPRequestHandler):
         if plugins_route(self, p, self.last_body): return
         if os.environ.get("MOCK_TERMINAL_PANES") and re.fullmatch(r"/api/v1/machines/[^/]+/(panes/(close|close_finished|split|agent|git)|tabs/(close|rename))", p):
             return node_action(self, p, json.loads(self.last_body or b"{}"))
-        if os.environ.get("MOCK_TERMINAL_PANES") and re.fullmatch(r"/api/v1/machines/[^/]+/worktree/(prepare|create)", p):
+        if (os.environ.get("MOCK_TERMINAL_PANES") or os.environ.get("MOCK_PASEO")) and re.fullmatch(r"/api/v1/machines/[^/]+/worktree/(prepare|create)", p):
             return worktree_route(self, p, json.loads(self.last_body or b"{}"))
+        if os.environ.get("MOCK_PASEO") and re.fullmatch(r"/api/v1/machines/[^/]+/worktree/(rename|delete)", p) \
+                and json.loads(self.last_body or b"{}").get("kind") == "paseo":
+            return paseo_worktree_route(self, p, json.loads(self.last_body or b"{}"))
+        if os.environ.get("MOCK_PASEO") and re.fullmatch(r"/api/v1/machines/[^/]+/spaces/[^/]+/rename", p) \
+                and paseo_space_route(self, p, json.loads(self.last_body or b"{}")):
+            return
         if AGENT_WORKTREE and re.fullmatch(r"/api/v1/machines/[^/]+/worktree/(status|add|remove)", p):
             return agent_worktree_route(self, p, json.loads(self.last_body or b"{}"))
         if os.environ.get("MOCK_TERMINAL_PANES") and re.fullmatch(r"/api/v1/machines/[^/]+/spaces/[^/]+/rename", p):

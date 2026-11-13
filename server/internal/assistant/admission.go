@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // The execution-agent admission gate. The hub machine once ran 40+ claude processes at load 160 and timed out, so an
@@ -19,9 +20,10 @@ import (
 // execution Agent the hub checks the target's reported resources and how many Agents the task's direction already has
 // running. The assistant's own conversations (main, leaders, scheduled) start through assistant.send and never pass
 // this gate. Thresholds live in the assistant.admission setting; code defaults mirror the guard script the operators
-// ran by hand. Fail-closed applies to a machine the resource layer DOES retain whose metrics are missing, stale or
-// lack a load reading; a computer it does not retain, or a hub without a devices manager, is skipped (nothing to read),
-// and a direction that cannot be resolved skips only the direction line.
+// ran by hand. Fail-closed applies to a machine the resource layer DOES retain whose metrics are missing or stale;
+// a computer it does not retain, or a hub without a devices manager, is skipped (nothing to read),
+// and a direction that cannot be resolved skips only the direction line. A fresh sample missing one optional reading
+// (a load average on Windows, a claude process count on an older node) skips just that condition, not the machine.
 
 // admissionMessage builds an *i18n.Message; i18n.Err always returns one, so the gate can keep its typed reasons and
 // render them in the request's language without re-looking the key up.
@@ -62,7 +64,8 @@ type AdmissionSettings struct {
 	DirectionCap            *int           `json:"direction_cap,omitempty"`
 	DirectionCapByDirection map[string]int `json:"direction_cap_by_direction,omitempty"`
 	DirectionCapByProject   map[string]int `json:"direction_cap_by_project,omitempty"`
-	// Generic machine lines.
+	// Generic machine lines. MaxClaudeProcs bounds sessions working a turn at once on one computer (the fleet's working
+	// count); only a computer without a fleet snapshot falls back to its OS claude process count.
 	MinMemoryBytes *int64 `json:"min_memory_bytes,omitempty"`
 	MaxClaudeProcs *int   `json:"max_claude_procs,omitempty"`
 	// HubMachine* override the generic lines for the hub's own computer.
@@ -201,15 +204,19 @@ func (s *Service) directionDisplayName(ctx context.Context, id string) (string, 
 
 // admissionMachineFacts is the resource view the gate uses for one machine.
 type admissionMachineFacts struct {
-	cores       int
-	load1       float64
-	available   int64
-	claudeProcs *int // nil: the node did not report a count, so the process condition is skipped
+	cores     int
+	load1     *float64 // nil: the node did not report a load average (e.g. Windows), so the load condition is skipped
+	available int64
+	// claudeProcs nil: the node did not report a count, so the process condition is skipped; replaced by the fleet's
+	// working-session count when a snapshot exists
+	claudeProcs *int
 }
 
 // machineFacts is what the gate reads for one machine. managed=false means the resource layer does not retain this
 // computer at all (no fleet bus, or a machine outside it): the caller skips machine-level checks rather than inventing
-// a reason. A managed computer whose metrics are missing or stale returns a message: unknown load denies.
+// a reason. A managed computer whose metrics are missing or stale returns a message: it denies. A fresh sample that
+// simply lacks a load average (Windows has none) is not a reason to deny: the load condition is skipped for it, the
+// same way a missing claude process count skips the process condition.
 func (s *Service) machineFacts(machineID string) (facts admissionMachineFacts, managed bool, why *i18n.Message) {
 	if s.devs == nil {
 		return admissionMachineFacts{}, false, nil // no fleet manager: the caller treats this as inert
@@ -224,9 +231,6 @@ func (s *Service) machineFacts(machineID string) (facts admissionMachineFacts, m
 	if time.Since(time.Unix(sample.T, 0)) > admissionSampleFresh {
 		return admissionMachineFacts{}, true, admissionMessage("assistant-tasks.admission_stale")
 	}
-	if sample.Load == nil {
-		return admissionMachineFacts{}, true, admissionMessage("assistant-tasks.admission_no_load")
-	}
 	if m.System == nil || m.System.Cores <= 0 {
 		return admissionMachineFacts{}, true, admissionMessage("assistant-tasks.admission_no_cores")
 	}
@@ -235,10 +239,33 @@ func (s *Service) machineFacts(machineID string) (facts admissionMachineFacts, m
 	}
 	return admissionMachineFacts{
 		cores:       m.System.Cores,
-		load1:       *sample.Load,
+		load1:       sample.Load, // nil on nodes without a load average, such as Windows: the load check skips it
 		available:   sample.MemTotal - sample.MemUsed,
 		claudeProcs: sample.ClaudeProcs,
 	}, true, nil
+}
+
+// workingSessions counts a machine's sessions the fleet last saw working a turn. ok is false only when the fleet has no
+// snapshot for the machine at all (the fleet bus is off, or it never reported a list): a reporting machine with an
+// empty or all-idle list is ok with the true count, including zero. It reads the same snapshot setSessions keeps for
+// the session lists, so it costs one short lock and no node RPC.
+func (s *Service) workingSessions(machineID string) (count int, ok bool) {
+	if s.devs == nil {
+		return 0, false
+	}
+	machineID = s.devs.Canonical(machineID)
+	s.fleet.mu.Lock()
+	prev, has := s.fleet.prev[machineID]
+	s.fleet.mu.Unlock()
+	if !has {
+		return 0, false
+	}
+	for _, p := range prev {
+		if p.Status == proto.StatusWorking {
+			count++
+		}
+	}
+	return count, true
 }
 
 // machineViolation checks the machine-level lines for machineID against the claims held right now, WITHOUT taking a
@@ -267,13 +294,22 @@ func (s *Service) machineViolationWith(machineID string, lim admissionLimits, cl
 		return admissionMessage("assistant-tasks.admission_memory", i18n.Args{
 			"available": humanBytes(facts.available), "limit": humanBytes(lim.minMemory)})
 	}
+	if facts.claudeProcs != nil {
+		// The line bounds agents actually working a turn, not OS processes: a session that finished, parks or stays
+		// idle keeps its claude process alive for hours, and counting those fills the machine while nothing runs. The
+		// fleet's last session snapshot says how many sessions are working; only when it has no snapshot for this
+		// machine (the fleet bus is off or the machine never reported a list) does the node's process count stand in.
+		if working, has := s.workingSessions(machineID); has {
+			facts.claudeProcs = &working
+		}
+	}
 	if facts.claudeProcs != nil && *facts.claudeProcs+claims >= lim.maxProcs {
 		return admissionMessage("assistant-tasks.admission_procs", i18n.Args{
 			"count": *facts.claudeProcs + claims, "limit": lim.maxProcs})
 	}
-	if facts.load1 > float64(facts.cores)*lim.loadPerCore {
+	if facts.load1 != nil && *facts.load1 > float64(facts.cores)*lim.loadPerCore {
 		return admissionMessage("assistant-tasks.admission_load", i18n.Args{
-			"load": fmt.Sprintf("%.1f", facts.load1), "cores": facts.cores, "multiplier": lim.loadPerCore})
+			"load": fmt.Sprintf("%.1f", *facts.load1), "cores": facts.cores, "multiplier": lim.loadPerCore})
 	}
 	return nil
 }
@@ -305,7 +341,13 @@ func (s *Service) recommendMachine(ctx context.Context, except string, suitable 
 		if s.machineViolation(ctx, d.ID, s.limitsFor(ctx, d.ID, "", "", cfg)) != nil {
 			continue
 		}
-		candidates = append(candidates, candidate{d: d, loadRate: facts.load1 / float64(facts.cores), free: facts.available})
+		// A machine without a load average cannot show measured pressure: rank it at a zero rate so it stays eligible
+		// for a reroute, and let the free-memory tiebreak order it against machines that do report a load.
+		loadRate := 0.0
+		if facts.load1 != nil {
+			loadRate = *facts.load1 / float64(facts.cores)
+		}
+		candidates = append(candidates, candidate{d: d, loadRate: loadRate, free: facts.available})
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].loadRate != candidates[j].loadRate {
@@ -333,11 +375,11 @@ func (s *Service) admitTaskStart(ctx context.Context, t *PlanTask) (func(), erro
 	lim := s.limitsFor(ctx, t.Machine, direction, t.Project, cfg)
 	if violation := s.machineViolation(ctx, t.Machine, lim); violation != nil {
 		if t.MachinePolicy != machineFlexible {
-			return nil, s.admissionRefused(ctx, t.Machine, violation)
+			return nil, s.admissionRefused(ctx, t.Machine, direction, violation)
 		}
 		alt, ok := s.rerouteTarget(ctx, t)
 		if !ok {
-			return nil, s.admissionRefused(ctx, t.Machine, violation)
+			return nil, s.admissionRefused(ctx, t.Machine, direction, violation)
 		}
 		from, _ := s.machineByName(ctx, t.Machine)
 		s.reroutePlanTask(ctx, t, from, alt, violation.Text(s.lang(ctx)))
@@ -347,7 +389,7 @@ func (s *Service) admitTaskStart(ctx context.Context, t *PlanTask) (func(), erro
 	// concurrent starts cannot both observe room and both take the last slot.
 	release, violation := s.claimIfAllowed(ctx, t.Machine, direction, lim)
 	if violation != nil {
-		return nil, s.admissionRefused(ctx, t.Machine, violation)
+		return nil, s.admissionRefused(ctx, t.Machine, direction, violation)
 	}
 	return release, nil
 }
@@ -385,8 +427,18 @@ func (s *Service) reroutePlanTask(ctx context.Context, t *PlanTask, from, alt De
 	t.noteWhy(note)
 }
 
-// admissionRefused words a fixed-policy denial, naming the least-loaded alternative when one exists.
-func (s *Service) admissionRefused(ctx context.Context, machineID string, reason *i18n.Message) error {
+// admissionRefused words a fixed-policy denial, naming the least-loaded alternative when one exists, and records one
+// structured log line so a blocked dispatch is visible in the hub log without reading the todo ledger. The line carries
+// only the machine id, the direction id (empty for an agent_start check), the reason's stable i18n key and its numeric
+// args; the user-facing sentence stays in the returned error.
+func (s *Service) admissionRefused(ctx context.Context, machineID, direction string, reason *i18n.Message) error {
+	if reason != nil {
+		if direction != "" {
+			s.logf("admission: refused: machine=%s direction=%s reason=%s args=%v", machineID, direction, reason.Key, reason.Args)
+		} else {
+			s.logf("admission: refused: machine=%s reason=%s args=%v", machineID, reason.Key, reason.Args)
+		}
+	}
 	machine := machineID
 	if d, ok := s.device(ctx, machineID); ok {
 		machine = firstNonEmpty(d.Name, machineID)
@@ -408,7 +460,7 @@ func (s *Service) checkAgentStart(ctx context.Context, machineID string) error {
 	}
 	cfg := s.admissionSettings(ctx)
 	if violation := s.machineViolation(ctx, machineID, s.limitsFor(ctx, machineID, "", "", cfg)); violation != nil {
-		return s.admissionRefused(ctx, machineID, violation)
+		return s.admissionRefused(ctx, machineID, "", violation)
 	}
 	return nil
 }
@@ -424,7 +476,7 @@ func (s *Service) admitAgentStart(ctx context.Context, machineID string) (func()
 	lim := s.limitsFor(ctx, machineID, "", "", cfg)
 	release, violation := s.claimIfAllowed(ctx, machineID, "", lim)
 	if violation != nil {
-		return nil, s.admissionRefused(ctx, machineID, violation)
+		return nil, s.admissionRefused(ctx, machineID, "", violation)
 	}
 	return release, nil
 }

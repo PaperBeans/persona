@@ -2,6 +2,28 @@
 
 Pitfalls, odd behavior and the decisions made at the time (formerly "Lessons" in `CLAUDE.md`; index in `docs/lessons/README.md`). Add new lessons to the relevant section, or create one if none fits.
 
+## A Debug build on an iPhone has a 1 MB main-thread stack (#6735)
+
+A Debug build installed on an iPhone crashed every time it opened on Agents: `EXC_BAD_ACCESS` in the main thread's stack
+guard, with Swift runtime metadata frames on top (`swift_getTypeByMangledName`, `_swift_getKeyPath`) under
+`View.listSectionSpacing` in `AgentsList.styledAgentList`. Those were only the last ~26 frames; the stack had gone to the
+page's own frames. Unoptimized, a function reserves a stack slot on entry for every opaque (`some View`) intermediate of a
+modifier chain, and each intermediate holds everything before it, so the slots add up like a triangle: `observedAgentList`
+reserved 422 KB on entry for its ~45 modifiers. The device's main thread has 1008 KB (the crash report's
+`vmRegionInfo`); the simulator's has 8 MB, and Release specializes and reuses the storage, so neither the simulator, CI
+nor TestFlight showed it. Measured with `AgentsListStackTests` in the simulator: the page's first render reached 941 KB
+before the fix and 448 KB after.
+
+- Erase a long chain in a few places (`AnyView(...)` at the stage boundaries): each segment then starts small. An erased
+  type is the same on every update, so identity and state stay. The same tool as the Mac's cold-start split
+  (`docs/lessons/macos.md`). Erasing only the big view at the bottom of the chain helped little (941 → 747 KB): the
+  modifiers' own storage (bindings, closures, ids) made most of the triangle.
+- A crash in the stack guard with runtime frames on top: count the frames before reading it as recursion. Few frames
+  mean big frames; look for the app's functions underneath, and measure where the stack goes (record the stack address
+  at a few points) rather than guessing.
+- `StackPeak.measure` (in `AgentsListStackTests`) paints the unused stack, runs the render, and finds the lowest word
+  overwritten. Keep a page under half the device's stack (512 KB).
+
 ## An edit menu needs the selection's rect, not just a point (#6005)
 
 - If `UIEditMenuInteraction.presentEditMenu(with:)` gets only a `sourcePoint` and its delegate has no
@@ -2314,6 +2336,20 @@ a Mac (macOS 14, region China): Tiananmen Gate searched by name came back at (39
 a snapshot, the same point shifted to GCJ-02 (39.91059, 116.40371) landed in an alley 550 m east, and a walking route
 drawn from MapKit's own points followed the streets. Check on a phone in the mainland before adding any conversion.
 
+## MapKit walking steps describe the maneuver at the end of each step's line (2026-11-14, #6936)
+
+`MKRoute.Step.instructions` is what to do where that step's `polyline` ends, not where it starts. A walking route Apple
+Maps gave for two points in central Shanghai (979 m, 12 steps, asked from a Mac with the language set to Chinese) read:
+a first step "路线导航开始" ("start the route") with no length and a one-point line, then "右转" over 24 m whose line, at its
+end, turns right into the next step's line, "左转" over 268 m that turns left at its end, and so on, to a last step
+"到达目的地" ("arrive at the destination") whose line ends at the destination. All five turns agreed with the angle
+between one step's last segment and the next step's first. Taking the instruction for the step's start shows every
+arrow and says every "in 40 m, turn left" one step early, the arrow pointing the opposite way of the words at the
+corners. So: the next maneuver is the instruction of the step being walked, its distance is to that step's end, its
+arrow is the turn from that step's last segment into the next step's first, and the last step is arriving. Steps carry
+no maneuver type; read the turn off the lines. The instructions are terse in the mainland ("右转" without a street name
+is common). Check a route from another region before relying on the same reading there (#6672 has the code that used it).
+
 ## A sidebar place has more than one way in (2026-11-13, #6599)
 
 The drawer's places (Inbox, Machines, Knowledge…) keep their stacks through `AssistantView.show` (`ShellPlaces`,
@@ -2347,3 +2383,27 @@ synchronously flushes `RootView`'s dirtied SwiftUI graph (`ChatView`, `ChatTrans
   Reading and mutating the same `@Observable` property there (such as `&+= 1` via `_modify`) subscribes the representable to
   its own write and causes an endless `updateUIView` loop; compare against `@ObservationIgnored` shadow fields and write via
   pure setter assignment.
+
+## What `nonisolated` covers where MainActor is the default, and what it does not (2026-11-13, #4262)
+
+Twenty blocking calls carried `// perf-ok:` because their author believed they ran off the main thread. The isolation
+lint (`docs/apple/performance.md`, "Isolation lint") confirmed ten. The rest rested on one of these, each checked against
+the compiler by running the shape and reading `Thread.isMainThread`:
+
+- `nonisolated` on a type covers its members and nested types, not a plain `extension` of it: in an app target that
+  extension's members are MainActor again. Write `nonisolated extension`.
+- A `nonisolated async` function awaited from the main actor runs on the main actor (`NonisolatedNonsendingByDefault`,
+  on in the app targets). `@concurrent` is what leaves it.
+- A member that meets a requirement of a protocol declared in an app target is on the main actor even inside a
+  `nonisolated` struct, because the protocol is MainActor by default. Mark the member `nonisolated`.
+- `queue.sync { … }` runs the block on a background queue while the caller waits: from the main actor it blocks the
+  main thread for the whole read. "It runs on the store's queue" was true and beside the point.
+- `Task { }` in code that is not isolated starts on the global executor; `Task { @Sendable in }` in main-actor code still
+  starts on the main actor. Only an explicit `@Sendable` on a closure that is kept and called elsewhere moves it.
+
+Building the lint taught two things about SwiftPM. `swift build -c release` and `swift test -c release` compile with
+different flags (testable imports), so each rebuilds swift-syntax from scratch after the other, two minutes a time;
+`--disable-testable-imports` lets them share one build. And a package whose folder moved is rebuilt from scratch
+(Xcode 27.2), which is why `scripts/ci/apple.sh` builds the lint from a fixed copy beside its build output. An editor
+that opens the package (`scripts/test/isolation-lint`) leaves a `.build` folder inside it; git ignores that folder, but
+`scripts/test/test_script_layout.py` walks ignored files too and fails on the git hook samples in it, so delete it.

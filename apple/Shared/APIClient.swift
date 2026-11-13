@@ -1286,6 +1286,9 @@ nonisolated struct APIClient: Sendable {
         /// value in effect. Off (the default) means the built-in background supervisor follows up the tasks no leader
         /// supervises; nil from a hub without the background supervisor, which hides the switch.
         var mainSupervisesOwnTasks: Bool?
+        /// Suggest the next message after replies in open chats (#4696). Off by default; nil from a hub without the
+        /// setting, which hides the switch.
+        var nextSuggestions: Bool?
         /// The background supervisor's session id once the hub has made it (read-only); nil until then and from an
         /// older hub.
         var backgroundSupervisor: String?
@@ -1295,6 +1298,7 @@ nonisolated struct APIClient: Sendable {
             case mainBackgroundFolded = "main_background_folded"
             case meetingAttendanceDefault = "meeting_attendance_default", timezonePicked = "timezone_picked"
             case mainSupervisesOwnTasks = "main_supervises_own_tasks", backgroundSupervisor = "background_supervisor"
+            case nextSuggestions = "next_suggestions"
         }
 
         /// Whether conversation `id` is the built-in background supervisor (#5083): listed with the scheduled tasks'
@@ -1379,19 +1383,22 @@ nonisolated struct APIClient: Sendable {
         var mainBackgroundFolded: Bool?
         var meetingAttendanceDefault: String?
         var mainSupervisesOwnTasks: Bool?
+        var nextSuggestions: Bool?
         enum CodingKeys: String, CodingKey {
             case launcher, timezone, notes
             case machineID = "machine_id", mainTasksQuiet = "main_tasks_quiet", meetingAttendanceDefault = "meeting_attendance_default"
             case mainBackgroundFolded = "main_background_folded", mainSupervisesOwnTasks = "main_supervises_own_tasks"
+            case nextSuggestions = "next_suggestions"
         }
     }
     func setAssistant(machine: String? = nil, launcher: String? = nil, timezone: String? = nil, notes: String? = nil,
                       mainTasksQuiet: Bool? = nil, mainBackgroundFolded: Bool? = nil,
-                      meetingAttendanceDefault: String? = nil, mainSupervisesOwnTasks: Bool? = nil) async throws -> AssistantState {
+                      meetingAttendanceDefault: String? = nil, mainSupervisesOwnTasks: Bool? = nil,
+                      nextSuggestions: Bool? = nil) async throws -> AssistantState {
         owned(try JSON.decoder.decode(AssistantState.self, from: try await request("PUT", "/api/v1/assistant",
             body: AssistantConfigBody(machineID: machine, launcher: launcher, timezone: timezone, notes: notes, mainTasksQuiet: mainTasksQuiet,
                                       mainBackgroundFolded: mainBackgroundFolded, meetingAttendanceDefault: meetingAttendanceDefault,
-                                      mainSupervisesOwnTasks: mainSupervisesOwnTasks))))
+                                      mainSupervisesOwnTasks: mainSupervisesOwnTasks, nextSuggestions: nextSuggestions))))
     }
     /// The Chat tab is open: the hub gets a claude process ready so the first message starts at once. With no launcher
     /// chosen the field is omitted and the hub warms its own default (#4200: the client never sends a made-up name).
@@ -1452,6 +1459,10 @@ nonisolated struct APIClient: Sendable {
         /// "asked" only what a run sends with notify_user. Such a task always runs in its own conversation. Sent only when
         /// set: a hub keeps it when left out, and an older hub never gets it.
         var push: String?
+        /// When Done, Put It in the Inbox (hubs with the task_inbox feature, docs/assistant/assistant.md「Put it in the Inbox when done」): nil or ""
+        /// nothing, "worthy" a row only when a run finds something worth a look, "every" a row after every run. Independent of `push`.
+        /// Sent only when set: a hub keeps it when left out, and an older hub never gets it.
+        var inbox: String?
         var createdBy: String?    // "assistant": Persona set it up from a conversation
         var lastRun: Date?        // read-only, set by the hub
         var lastSessionID: String?
@@ -1459,7 +1470,7 @@ nonisolated struct APIClient: Sendable {
         var lastError: String?
         var nextRun: Date?
         enum CodingKeys: String, CodingKey {
-            case id, title, prompt, at, time, weekdays, enabled, launcher, effort, push
+            case id, title, prompt, at, time, weekdays, enabled, launcher, effort, push, inbox
             case repeats = "repeat", everyMinutes = "every_minutes", machineID = "machine_id", sessionID = "session_id"
             case permissionMode = "permission_mode", createdBy = "created_by"
             case lastRun = "last_run", lastSessionID = "last_session_id", nextRun = "next_run"
@@ -1472,6 +1483,9 @@ nonisolated struct APIClient: Sendable {
         static let pushAsked = "asked"
         /// The hub feature that says it takes `push`; without it the editor leaves the setting out.
         static let pushFeature = "task_push"
+        /// The hub feature that says it takes `inbox`; without it the editor leaves the setting out.
+        static let inboxFeature = "task_inbox"
+        static let inboxWorthy = "worthy", inboxEvery = "every"
         /// Where the next run goes when the task isn't continuing the conversation it came from.
         var ownConversation: SessionKey? {
             guard let m = runMachineID, let s = runSessionID else { return nil }
@@ -1502,6 +1516,7 @@ nonisolated struct APIClient: Sendable {
             launcher = text(.launcher); permissionMode = text(.permissionMode); effort = text(.effort)
             createdBy = text(.createdBy)
             push = text(.push)
+            inbox = text(.inbox)
             lastRun = date(.lastRun); lastSessionID = text(.lastSessionID); lastStatus = text(.lastStatus); lastError = text(.lastError)
             nextRun = date(.nextRun)
             runMachineID = text(.runMachineID); runSessionID = text(.runSessionID)
@@ -1515,6 +1530,7 @@ nonisolated struct APIClient: Sendable {
             try c.encode(enabled, forKey: .enabled); try c.encode(sessionID ?? "", forKey: .sessionID)
             try c.encode(permissionMode ?? "", forKey: .permissionMode)
             try c.encodeIfPresent(push, forKey: .push)
+            try c.encodeIfPresent(inbox, forKey: .inbox)
             if includesModelSettings {
                 try c.encode(launcher ?? "", forKey: .launcher)
                 try c.encode(effort ?? "", forKey: .effort)

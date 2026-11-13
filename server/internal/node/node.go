@@ -1540,6 +1540,7 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			Force        bool   `json:"force"`
 		}
 		_ = json.Unmarshal(params, &a)
+		ctx = worktreeComposerContext(ctx, params) // its refusals in the request's language (the hub sends it)
 		switch method {
 		case "worktree.add":
 			return n.worktreeAdd(ctx, p.Kind, p.Cwd, p.Branch, a.NameHint)
@@ -1787,8 +1788,8 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 			return nil, err
 		}
 		return map[string]any{"ok": true, "name": name}, nil
-	case "worktree.rename":
-		return ok(n.renameWorktree(ctx, p.Kind, p.WorkspaceID, p.Name))
+	case "worktree.rename": // its refusals in the request's language (the hub sends it)
+		return ok(n.renameWorktree(worktreeComposerContext(ctx, params), p.Kind, p.WorkspaceID, p.Name))
 	case "session.rename":
 		return ok(n.renameSession(ctx, p.SessionID, p.TabName, p.Title))
 	case "todo.sync_session_tokens":
